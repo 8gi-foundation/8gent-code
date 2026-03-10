@@ -1,0 +1,33 @@
+{
+  "name": "8gent-code",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Terminal-first development environment for structured agentic software creation",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run apps/tui/src/index.ts",
+    "build": "bun build apps/tui/src/index.ts --outdir dist",
+    "test": "bun test",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0",
+    "@biomejs/biome": "^1.5.0"
+  },
+  "dependencies": {
+    "tree-sitter": "^0.21.0",
+    "tree-sitter-typescript": "^0.21.0",
+    "tree-sitter-javascript": "^0.21.0",
+    "tree-sitter-python": "^0.21.0",
+    "tree-sitter-rust": "^0.21.0",
+    "tree-sitter-go": "^0.21.0"
+  },
+  "author": "James Spalding",
+  "license": "MIT"
+}

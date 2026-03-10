@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@8gent/types": ["packages/types/index.ts"],
+      "@8gent/ast-index": ["packages/ast-index/index.ts"],
+      "@8gent/toolshed": ["packages/toolshed/index.ts"],
+      "@8gent/planner": ["packages/planner/index.ts"],
+      "@8gent/workflow": ["packages/workflow/index.ts"],
+      "@8gent/registry": ["packages/registry/index.ts"]
+    }
+  },
+  "include": ["apps/**/*", "packages/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
