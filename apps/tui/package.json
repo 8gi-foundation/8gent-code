@@ -1,0 +1,23 @@
+{
+  "name": "@8gent/tui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.tsx",
+  "scripts": {
+    "dev": "bun run src/index.tsx",
+    "build": "bun build src/index.tsx --outdir dist"
+  },
+  "dependencies": {
+    "ink": "^4.4.1",
+    "ink-text-input": "^5.0.1",
+    "ink-select-input": "^5.0.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.2.0",
+    "better-sqlite3": "^9.4.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/better-sqlite3": "^7.6.0"
+  }
+}
