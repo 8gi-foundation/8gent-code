@@ -491,9 +491,14 @@ export class Agent {
         console.log(`\n🔧 ${toolCall.name}(${JSON.stringify(toolCall.arguments).slice(0, 50)}...)`);
         const result = await this.executor.execute(toolCall.name, toolCall.arguments);
 
-        // Add assistant message and tool result
+        // Add assistant message with tool call
         this.messages.push({ role: "assistant", content });
-        this.messages.push({ role: "tool", content: result, toolCallId: toolCall.id });
+
+        // Add tool result as a user message (Ollama understands user/assistant, not tool)
+        this.messages.push({
+          role: "user",
+          content: `[Tool Result for ${toolCall.name}]:\n${result}\n\nNow respond to the user based on this result. Do NOT call the same tool again.`,
+        });
 
         // Continue loop to process tool result
         continue;
