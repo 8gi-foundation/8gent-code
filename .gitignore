@@ -43,6 +43,12 @@ coverage/
 research-results.tsv
 research.log
 
+# Benchmark results (regenerate with `8gent benchmark`)
+benchmark-results.json
+
+# 8gent local config
+.8gent/
+
 # Lock files (bun.lockb is binary, keep it)
 package-lock.json
 yarn.lock

@@ -1,15 +1,21 @@
 {
   "name": "8gent-code",
-  "version": "0.0.1",
-  "private": true,
-  "description": "Terminal-first development environment for structured agentic software creation",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Terminal-first agentic coding with 40%+ token savings. Never hit usage caps again.",
   "type": "module",
+  "bin": {
+    "8gent": "./bin/8gent.ts"
+  },
   "scripts": {
+    "start": "bun run bin/8gent.ts",
     "dev": "bun run apps/tui/src/index.ts",
     "build": "bun build apps/tui/src/index.ts --outdir dist",
     "test": "bun test",
     "lint": "biome check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "benchmark": "bun run scripts/benchmark.ts",
+    "demo": "bun run scripts/demo-savings.ts"
   },
   "workspaces": [
     "apps/*",
