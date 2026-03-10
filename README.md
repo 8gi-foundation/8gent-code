@@ -1,10 +1,74 @@
 # 8gent Code
 
-A terminal-first development environment designed for structured agentic software creation.
+**Never hit usage caps again™**
 
-Instead of relying on brute-force repository search, 8gent operates through **structured retrieval**, **composable primitives**, and an **extensible toolshed architecture**.
+> Terminal-first agentic coding with 40%+ token savings through AST-first exploration.
 
-The goal is simple: **build more software with less context and less guesswork.**
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f9f1e1?logo=bun&logoColor=000)](https://bun.sh)
+[![Token Savings](https://img.shields.io/badge/Token%20Savings-40%25+-brightgreen)](https://github.com/8gent/8gent-code#benchmarks)
+
+---
+
+## The Problem
+
+AI coding tools are hitting usage limits because they read entire files when they only need specific functions. This wastes tokens and money.
+
+```
+❌ Traditional: search → read entire file → guess → patch
+✅ 8gent:       plan → retrieve symbol → compose → verify
+```
+
+## The Solution
+
+**8gent** extracts symbols from your codebase using AST parsing, so the AI only sees what it needs.
+
+```bash
+# Instead of reading a 2,119 token file...
+8gent outline src/parser.ts
+
+# ...get just the 61 tokens you need:
+8gent symbol src/parser.ts::buildSymbolId
+```
+
+**Result:** 97% less tokens, 97% less cost.
+
+---
+
+## Benchmarks
+
+Real results from 8gent's own codebase:
+
+| Metric | Traditional | AST-First | Savings |
+|--------|-------------|-----------|---------|
+| Average file read | 1,027 tokens | 546 tokens | **46.8%** |
+| Symbol retrieval | 2,119 tokens | 61 tokens | **97.1%** |
+| 10K operations (Claude Opus) | $3,084 | $1,640 | **$1,444 saved** |
+
+Run `8gent benchmark` to see results on your codebase.
+
+---
+
+## Quick Start
+
+```bash
+# Install
+bun add -g 8gent-code
+
+# Or clone and run locally
+git clone https://github.com/8gent/8gent-code.git
+cd 8gent-code
+bun install
+
+# Get file outline (symbols, functions, classes)
+bun run bin/8gent.ts outline src/index.ts
+
+# Get specific symbol source
+bun run bin/8gent.ts symbol src/utils.ts::parseDate
+
+# Search across codebase
+bun run bin/8gent.ts search "handleError" --kinds=function
+```
 
 ---
 
@@ -15,7 +79,7 @@ The goal is simple: **build more software with less context and less guesswork.*
 - **8** → infinity (∞ rotated)
 - **gent** → gentleman / agent
 
-The result is an **infinite agent**: a disciplined system capable of continuously expanding its capabilities.
+An **infinite agent**: a disciplined system that grows without increasing prompt size.
 
 ---
 
@@ -37,106 +101,52 @@ plan → retrieve → compose → verify
 
 ---
 
-## Core Ideas
-
-8gent Code is built around four principles:
-
-### 1. Structured Planning
-
-Tasks are executed through deterministic workflows inspired by modern AI development frameworks.
-
-### 2. AST-first Code Navigation
-
-Instead of scanning files, the system retrieves symbols directly and edits them precisely.
-
-### 3. Primitive Composition
-
-Software is assembled from reusable primitives:
-
-- UI components
-- Animation primitives
-- Workflow templates
-- Mini-app schemas
-
-### 4. Toolshed Architecture
-
-Capabilities live outside the model in a centralized tool registry.
-
-This allows the system to grow indefinitely **without increasing prompt size**.
-
----
-
-## Toolshed
-
-The toolshed is the capability layer of 8gent.
-
-```
-agent
-  ↓
-toolshed
-  ↓
-tools
-```
-
-Instead of loading tools into the prompt, the agent **discovers them dynamically**.
-
-Capabilities include:
-
-- Code tools (AST query, symbol edit, patch)
-- Design primitives (components, animations)
-- Workflow engines
-- Repo tools (dependency graphs)
-- GitHub intelligence (symbol search across open source)
-- Execution environments (sandboxed runners)
-
-New capabilities are added by registering new tools.
-
----
-
-## Retrieval Strategy
-
-8gent uses a strict hierarchy:
-
-1. **Registry lookup** - Check if primitive exists
-2. **AST symbol retrieval** - Get exact symbol by path
-3. **Semantic verification** - LSP for type checking
-4. **Fallback search** - grep/glob only when necessary
-
-This keeps context small and edits precise.
-
----
-
 ## Architecture
 
 ```
 User Intent
     ↓
-8gent TUI
+8gent CLI / TUI
     ↓
-Planner
+Planner (task decomposition)
     ↓
-Workflow Engine
+Toolshed (capability discovery)
     ↓
-Toolshed
+AST Index (symbol extraction)
     ↓
-Execution Sandbox
-    ↓
-Codebase / Internet
+Codebase
 ```
+
+### Core Packages
+
+| Package | Purpose |
+|---------|---------|
+| `ast-index` | TypeScript Compiler API for native TS/JS parsing |
+| `planner` | Task planning with dependency tracking |
+| `toolshed` | Dynamic tool registration and discovery |
+| `types` | Shared TypeScript definitions |
 
 ---
 
-## GitHub Intelligence
+## Toolshed
 
-8gent can query indexed open source repositories.
+The Toolshed is the capability layer. Tools register themselves and are discovered dynamically.
 
-Instead of scraping GitHub like a website, the system treats it as a **structured code database**:
+```typescript
+registerTool({
+  name: "get_outline",
+  description: "Get all symbols in a file without loading full content",
+  capabilities: ["code", "code.symbol"],
+  permissions: ["read:code"],
+}, async (input, context) => {
+  // AST-first implementation
+});
+```
 
-- Symbol search across repos
-- Dependency graphs
-- Usage patterns
-
-This allows the agent to integrate modern libraries with minimal prompting.
+Available tools:
+- `get_outline` - File symbol extraction
+- `get_symbol` - Single symbol retrieval
+- `search_symbols` - Cross-file symbol search
 
 ---
 
@@ -144,17 +154,32 @@ This allows the agent to integrate modern libraries with minimal prompting.
 
 ```
 📂 8gent-code
-├── README.md
+├── bin/
+│   └── 8gent.ts           # CLI entry point
 ├── apps/
-│   └── tui/              # Terminal UI application
+│   └── tui/               # Terminal UI (Ink/React)
 ├── packages/
-│   ├── planner/          # Task planning engine
-│   ├── workflow/         # Workflow execution
-│   ├── registry/         # Primitive registry
-│   ├── ast-index/        # AST parsing and indexing
-│   ├── toolshed/         # Tool discovery and execution
-│   └── types/            # Shared TypeScript types
-└── docs/                 # Architecture documentation
+│   ├── ast-index/         # AST parsing (TS Compiler API)
+│   ├── planner/           # Task planning engine
+│   ├── toolshed/          # Tool registry and discovery
+│   ├── types/             # Shared TypeScript types
+│   └── workflow/          # Workflow execution
+└── scripts/
+    ├── benchmark.ts       # Full benchmark suite
+    └── demo-savings.ts    # Token savings demo
+```
+
+---
+
+## Commands
+
+```bash
+8gent init              # Initialize in current directory
+8gent outline <file>    # Get symbol outline
+8gent symbol <id>       # Get symbol source code
+8gent search <query>    # Search for symbols
+8gent benchmark         # Run efficiency benchmarks
+8gent demo              # Show token savings demo
 ```
 
 ---
@@ -165,12 +190,24 @@ The AST-first approach was influenced by [jcodemunch](https://github.com/jgravel
 
 ---
 
-## Status
+## Contributing
 
-Early architecture. Actively evolving.
+1. Fork the repo
+2. Create your feature branch (`git checkout -b feature/amazing`)
+3. Run benchmarks to verify savings (`bun run benchmark`)
+4. Commit your changes
+5. Push to the branch
+6. Open a Pull Request
 
 ---
 
 ## License
 
-MIT
+MIT © James Spalding
+
+---
+
+<p align="center">
+  <strong>Stop paying for tokens you don't need.</strong><br>
+  <a href="https://github.com/8gent/8gent-code">⭐ Star us on GitHub</a>
+</p>
