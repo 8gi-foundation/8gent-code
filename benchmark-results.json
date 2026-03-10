@@ -1,212 +1,228 @@
 {
-  "timestamp": "2026-03-10T22:09:52.215Z",
+  "timestamp": "2026-03-10T22:17:51.107Z",
   "results": [
     {
       "name": "scripts/benchmark.ts",
       "traditional": {
         "tokens": 2199,
-        "time": 0.06920800000000327
+        "time": 0.07991599999999721
       },
       "astFirst": {
         "tokens": 1183,
-        "time": 15.556457999999992
+        "time": 15.859958000000006
       },
       "savings": {
         "tokens": 1016,
         "percent": 46.20281946339245,
-        "speedup": 224.77832042537364
+        "speedup": 198.45785574854295
       }
     },
     {
       "name": "scripts/demo-savings.ts",
       "traditional": {
         "tokens": 1029,
-        "time": 0.03941699999998605
+        "time": 0.23091700000000515
       },
       "astFirst": {
         "tokens": 369,
-        "time": 2.020165999999989
+        "time": 1.7541669999999954
       },
       "savings": {
         "tokens": 660,
         "percent": 64.1399416909621,
-        "speedup": 51.25113529697096
+        "speedup": 7.596526024502121
       }
     },
     {
       "name": "scripts/research-loop.ts",
       "traditional": {
         "tokens": 1534,
-        "time": 0.051333999999997104
+        "time": 0.25695799999999736
       },
       "astFirst": {
         "tokens": 805,
-        "time": 2.1652090000000044
+        "time": 2.2564590000000067
       },
       "savings": {
         "tokens": 729,
         "percent": 47.52281616688396,
-        "speedup": 42.178848326647575
+        "speedup": 8.781431206656457
+      }
+    },
+    {
+      "name": "bin/8gent.ts",
+      "traditional": {
+        "tokens": 2807,
+        "time": 0.035749999999978854
+      },
+      "astFirst": {
+        "tokens": 1532,
+        "time": 3.3086669999999856
+      },
+      "savings": {
+        "tokens": 1275,
+        "percent": 45.42215888849305,
+        "speedup": 92.55012587418021
       }
     },
     {
       "name": "packages/registry/index.ts",
       "traditional": {
         "tokens": 1544,
-        "time": 0.030207999999987578
+        "time": 0.218291000000022
       },
       "astFirst": {
         "tokens": 923,
-        "time": 1.8614159999999913
+        "time": 1.8024169999999913
       },
       "savings": {
         "tokens": 621,
         "percent": 40.22020725388601,
-        "speedup": 61.619968220364036
-      }
-    },
-    {
-      "name": "packages/ast-index/test-parser.ts",
-      "traditional": {
-        "tokens": 354,
-        "time": 0.025417000000004464
-      },
-      "astFirst": {
-        "tokens": 82,
-        "time": 0.46333299999997735
-      },
-      "savings": {
-        "tokens": 272,
-        "percent": 76.8361581920904,
-        "speedup": 18.229256009753158
-      }
-    },
-    {
-      "name": "packages/ast-index/index.ts",
-      "traditional": {
-        "tokens": 1255,
-        "time": 0.03895800000000804
-      },
-      "astFirst": {
-        "tokens": 822,
-        "time": 1.5039159999999754
-      },
-      "savings": {
-        "tokens": 433,
-        "percent": 34.50199203187251,
-        "speedup": 38.603521741353894
-      }
-    },
-    {
-      "name": "packages/ast-index/typescript-parser.ts",
-      "traditional": {
-        "tokens": 2119,
-        "time": 0.013916999999992186
-      },
-      "astFirst": {
-        "tokens": 1287,
-        "time": 2.2601669999999956
-      },
-      "savings": {
-        "tokens": 832,
-        "percent": 39.263803680981596,
-        "speedup": 162.4033196810566
+        "speedup": 8.256946003269992
       }
     },
     {
       "name": "packages/planner/index.ts",
       "traditional": {
         "tokens": 3022,
-        "time": 0.04070799999999508
+        "time": 0.031833000000005995
       },
       "astFirst": {
         "tokens": 1459,
-        "time": 4.201790999999986
+        "time": 4.3510829999999885
       },
       "savings": {
         "tokens": 1563,
         "percent": 51.72071475843813,
-        "speedup": 103.21781959321248
+        "speedup": 136.68466685512422
+      }
+    },
+    {
+      "name": "packages/ast-index/test-parser.ts",
+      "traditional": {
+        "tokens": 354,
+        "time": 0.23929099999998016
+      },
+      "astFirst": {
+        "tokens": 82,
+        "time": 0.4681670000000224
+      },
+      "savings": {
+        "tokens": 272,
+        "percent": 76.8361581920904,
+        "speedup": 1.9564755883006935
+      }
+    },
+    {
+      "name": "packages/ast-index/index.ts",
+      "traditional": {
+        "tokens": 1255,
+        "time": 0.02574999999998795
+      },
+      "astFirst": {
+        "tokens": 822,
+        "time": 1.7501670000000047
+      },
+      "savings": {
+        "tokens": 433,
+        "percent": 34.50199203187251,
+        "speedup": 67.96765048546888
+      }
+    },
+    {
+      "name": "packages/ast-index/typescript-parser.ts",
+      "traditional": {
+        "tokens": 2119,
+        "time": 0.01737500000001546
+      },
+      "astFirst": {
+        "tokens": 1287,
+        "time": 1.918457999999987
+      },
+      "savings": {
+        "tokens": 832,
+        "percent": 39.263803680981596,
+        "speedup": 110.4148489207643
       }
     },
     {
       "name": "packages/types/index.ts",
       "traditional": {
         "tokens": 1052,
-        "time": 0.026083000000028278
+        "time": 0.024124999999997954
       },
       "astFirst": {
         "tokens": 483,
-        "time": 1.1002909999999986
+        "time": 1.240583000000015
       },
       "savings": {
         "tokens": 569,
         "percent": 54.08745247148289,
-        "speedup": 42.18421960659455
+        "speedup": 51.42312953368374
       }
     },
     {
       "name": "apps/tui/src/app.tsx",
       "traditional": {
         "tokens": 591,
-        "time": 0.025875000000013415
+        "time": 0.04091599999998152
       },
       "astFirst": {
         "tokens": 363,
-        "time": 1.5303749999999923
+        "time": 1.9408750000000055
       },
       "savings": {
         "tokens": 228,
         "percent": 38.578680203045685,
-        "speedup": 59.144927536200925
+        "speedup": 47.435599765394514
       }
     },
     {
       "name": "apps/tui/src/index.tsx",
       "traditional": {
         "tokens": 100,
-        "time": 0.023791999999986047
+        "time": 0.023249999999990223
       },
       "astFirst": {
         "tokens": 40,
-        "time": 0.18199999999998795
+        "time": 0.20195799999999053
       },
       "savings": {
         "tokens": 60,
         "percent": 60,
-        "speedup": 7.649630127778021
+        "speedup": 8.686365591401096
       }
     },
     {
       "name": "packages/toolshed/registry/register.ts",
       "traditional": {
         "tokens": 450,
-        "time": 0.025875000000013415
+        "time": 0.023667000000017424
       },
       "astFirst": {
         "tokens": 410,
-        "time": 0.5472500000000196
+        "time": 0.6059170000000051
       },
       "savings": {
         "tokens": 40,
         "percent": 8.88888888888889,
-        "speedup": 21.14975845409607
+        "speedup": 25.6017661722888
       }
     },
     {
       "name": "packages/toolshed/registry/index.ts",
       "traditional": {
         "tokens": 1840,
-        "time": 0.027707999999989852
+        "time": 0.021540999999984933
       },
       "astFirst": {
         "tokens": 906,
-        "time": 2.0171670000000006
+        "time": 2.2077500000000043
       },
       "savings": {
         "tokens": 934,
         "percent": 50.76086956521739,
-        "speedup": 72.80088783025622
+        "speedup": 102.49059932229463
       }
     },
     {
@@ -217,115 +233,99 @@
       },
       "astFirst": {
         "tokens": 408,
-        "time": 0.578708000000006
+        "time": 0.6171250000000157
       },
       "savings": {
         "tokens": 268,
         "percent": 39.64497041420118,
-        "speedup": 27.946107784413517
+        "speedup": 29.801284527700414
       }
     },
     {
       "name": "apps/tui/src/components/header.tsx",
       "traditional": {
         "tokens": 136,
-        "time": 0.020624999999995453
+        "time": 0.02241699999999014
       },
       "astFirst": {
         "tokens": 131,
-        "time": 0.27700000000001523
+        "time": 0.2514579999999853
       },
       "savings": {
         "tokens": 5,
         "percent": 3.6764705882352944,
-        "speedup": 13.43030303030673
+        "speedup": 11.21729044921693
       }
     },
     {
       "name": "apps/tui/src/components/status-bar.tsx",
       "traditional": {
         "tokens": 198,
-        "time": 0.01737499999998704
+        "time": 0.019292000000007192
       },
       "astFirst": {
         "tokens": 238,
-        "time": 0.35512500000001523
+        "time": 0.3052500000000009
       },
       "savings": {
         "tokens": -40,
         "percent": -20.2020202020202,
-        "speedup": 20.438848920879433
+        "speedup": 15.822620775445113
       }
     },
     {
       "name": "apps/tui/src/components/command-input.tsx",
       "traditional": {
         "tokens": 264,
-        "time": 0.01966600000000085
+        "time": 0.02262499999997658
       },
       "astFirst": {
         "tokens": 280,
-        "time": 0.3374170000000163
+        "time": 0.40212499999998386
       },
       "savings": {
         "tokens": -16,
         "percent": -6.0606060606060606,
-        "speedup": 17.157378216210805
+        "speedup": 17.77348066300111
       }
     },
     {
       "name": "apps/tui/src/components/message-list.tsx",
       "traditional": {
         "tokens": 313,
-        "time": 0.01683399999998869
+        "time": 0.0191250000000025
       },
       "astFirst": {
         "tokens": 220,
-        "time": 0.4230829999999912
+        "time": 0.42387499999998113
       },
       "savings": {
         "tokens": 93,
         "percent": 29.712460063897762,
-        "speedup": 25.132648211968363
+        "speedup": 22.163398692806574
       }
     },
     {
       "name": "packages/toolshed/tools/code/search-symbols.ts",
       "traditional": {
         "tokens": 1119,
-        "time": 0.022249999999985448
+        "time": 0.15666699999999878
       },
       "astFirst": {
         "tokens": 289,
-        "time": 0.850750000000005
+        "time": 1.001499999999993
       },
       "savings": {
         "tokens": 830,
         "percent": 74.1733690795353,
-        "speedup": 38.23595505620501
-      }
-    },
-    {
-      "name": "packages/toolshed/tools/code/get-outline.ts",
-      "traditional": {
-        "tokens": 758,
-        "time": 0.05895799999998985
-      },
-      "astFirst": {
-        "tokens": 229,
-        "time": 0.8658340000000067
-      },
-      "savings": {
-        "tokens": 529,
-        "percent": 69.78891820580475,
-        "speedup": 14.685606703079408
+        "speedup": 6.392539590341302
       }
     }
   ],
   "summary": {
-    "totalTraditionalTokens": 20553,
-    "totalAstTokens": 10927,
-    "avgSavingsPercent": 40.1728953228095,
+    "totalTraditionalTokens": 22602,
+    "totalAstTokens": 12230,
+    "avgSavingsPercent": 38.95455735694392,
     "testsRun": 20
   }
 }
