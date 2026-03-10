@@ -56,45 +56,77 @@ interface OllamaResponse {
 // System Prompt
 // ============================================
 
-const DEFAULT_SYSTEM_PROMPT = `You are 8gent, a powerful AI coding assistant running locally on the user's machine.
+const DEFAULT_SYSTEM_PROMPT = `You are 8gent, a powerful local AI coding assistant. You have FULL ACCESS to the filesystem, git, and GitHub CLI.
 
-You have access to tools for exploring and modifying codebases efficiently. ALWAYS use these tools instead of asking the user to run commands.
+IMPORTANT: You CAN and SHOULD use tools. Never say "I don't have access" - you DO.
 
-## Available Tools
+## Tool Format
 
-1. **get_outline** - Get all symbols (functions, classes, types) in a file WITHOUT reading the full content. Use this FIRST to understand file structure.
-   Arguments: { "filePath": "path/to/file.ts" }
-
-2. **get_symbol** - Get the source code for a specific symbol. Much more efficient than reading entire files.
-   Arguments: { "symbolId": "path/to/file.ts::functionName" }
-
-3. **search_symbols** - Search for symbols across the codebase by name or signature.
-   Arguments: { "query": "searchTerm", "kinds": ["function", "class"] }
-
-4. **read_file** - Read a file's contents. Use get_outline + get_symbol when possible instead.
-   Arguments: { "path": "path/to/file" }
-
-5. **write_file** - Write content to a file.
-   Arguments: { "path": "path/to/file", "content": "file content" }
-
-6. **run_command** - Execute a shell command.
-   Arguments: { "command": "npm test" }
-
-## Efficiency Guidelines
-
-- ALWAYS use get_outline before reading files to understand structure
-- Use get_symbol to retrieve specific functions instead of reading entire files
-- This saves tokens and makes you faster
-- Be direct and helpful. No unnecessary explanations.
-
-## Response Format
-
-When using tools, respond with a JSON tool call:
+Output ONLY this JSON to use a tool:
 \`\`\`json
-{"tool": "tool_name", "arguments": {...}}
+{"tool": "TOOL_NAME", "arguments": {"key": "value"}}
 \`\`\`
 
-When done with a task, respond naturally to the user.`;
+## Code Exploration (AST-first for efficiency)
+- get_outline: List functions/classes in file
+  {"tool": "get_outline", "arguments": {"filePath": "src/index.ts"}}
+- get_symbol: Get one function's source
+  {"tool": "get_symbol", "arguments": {"symbolId": "src/index.ts::myFunc"}}
+- search_symbols: Find symbols by name
+  {"tool": "search_symbols", "arguments": {"query": "handleError"}}
+
+## File Operations
+- read_file: Read file contents
+  {"tool": "read_file", "arguments": {"path": "package.json"}}
+- write_file: Write/create file
+  {"tool": "write_file", "arguments": {"path": "new.ts", "content": "..."}}
+- edit_file: Replace text in file (surgical edit)
+  {"tool": "edit_file", "arguments": {"path": "src/index.ts", "oldText": "foo", "newText": "bar"}}
+- list_files: List files
+  {"tool": "list_files", "arguments": {"path": ".", "pattern": "**/*.ts"}}
+
+## Git Operations
+- git_status: Show working tree status
+  {"tool": "git_status", "arguments": {}}
+- git_diff: Show changes
+  {"tool": "git_diff", "arguments": {"staged": false}}
+- git_log: Show recent commits
+  {"tool": "git_log", "arguments": {"count": 10}}
+- git_branch: List branches
+  {"tool": "git_branch", "arguments": {}}
+- git_checkout: Switch branch
+  {"tool": "git_checkout", "arguments": {"branch": "main"}}
+- git_create_branch: Create new branch
+  {"tool": "git_create_branch", "arguments": {"branch": "feature/foo"}}
+- git_add: Stage files
+  {"tool": "git_add", "arguments": {"files": "."}}
+- git_commit: Commit staged changes
+  {"tool": "git_commit", "arguments": {"message": "feat: add feature"}}
+- git_push: Push to remote
+  {"tool": "git_push", "arguments": {"setUpstream": true}}
+
+## GitHub CLI (gh)
+- gh_pr_list: List pull requests
+  {"tool": "gh_pr_list", "arguments": {}}
+- gh_pr_create: Create pull request
+  {"tool": "gh_pr_create", "arguments": {"title": "Add feature", "body": "Description"}}
+- gh_pr_view: View PR details
+  {"tool": "gh_pr_view", "arguments": {"number": 123}}
+- gh_issue_list: List issues
+  {"tool": "gh_issue_list", "arguments": {}}
+- gh_issue_create: Create issue
+  {"tool": "gh_issue_create", "arguments": {"title": "Bug", "body": "Details"}}
+
+## Shell
+- run_command: Run any shell command
+  {"tool": "run_command", "arguments": {"command": "npm test"}}
+
+## Rules
+1. Use get_outline before reading full files (saves tokens)
+2. "This repo" means current working directory
+3. Be concise. Act first, explain after.
+4. For multi-step tasks, execute tools one at a time.
+5. After edits, verify with git_status or read_file.`;
 
 // ============================================
 // Ollama Client
@@ -173,26 +205,59 @@ class ToolExecutor {
 
   async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
     switch (toolName) {
+      // Code exploration
       case "get_outline":
         return this.getOutline(args.filePath as string);
-
       case "get_symbol":
         return this.getSymbol(args.symbolId as string);
-
       case "search_symbols":
         return this.searchSymbols(args.query as string, args.kinds as string[]);
 
+      // File operations
       case "read_file":
         return this.readFile(args.path as string);
-
       case "write_file":
         return this.writeFile(args.path as string, args.content as string);
-
-      case "run_command":
-        return this.runCommand(args.command as string);
-
+      case "edit_file":
+        return this.editFile(args.path as string, args.oldText as string, args.newText as string);
       case "list_files":
         return this.listFiles(args.path as string, args.pattern as string);
+
+      // Git operations
+      case "git_status":
+        return this.runCommand("git status");
+      case "git_diff":
+        return this.runCommand(args.staged ? "git diff --staged" : "git diff");
+      case "git_log":
+        return this.runCommand(`git log --oneline -${args.count || 10}`);
+      case "git_branch":
+        return this.runCommand("git branch -a");
+      case "git_checkout":
+        return this.runCommand(`git checkout ${args.branch}`);
+      case "git_create_branch":
+        return this.runCommand(`git checkout -b ${args.branch}`);
+      case "git_add":
+        return this.runCommand(`git add ${args.files || "."}`);
+      case "git_commit":
+        return this.runCommand(`git commit -m "${args.message}"`);
+      case "git_push":
+        return this.runCommand(`git push ${args.setUpstream ? "-u origin HEAD" : ""}`);
+
+      // GitHub CLI
+      case "gh_pr_list":
+        return this.runCommand("gh pr list");
+      case "gh_pr_create":
+        return this.runCommand(`gh pr create --title "${args.title}" --body "${args.body || ""}"`);
+      case "gh_pr_view":
+        return this.runCommand(`gh pr view ${args.number || ""}`);
+      case "gh_issue_list":
+        return this.runCommand("gh issue list");
+      case "gh_issue_create":
+        return this.runCommand(`gh issue create --title "${args.title}" --body "${args.body || ""}"`);
+
+      // Shell
+      case "run_command":
+        return this.runCommand(args.command as string);
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -327,6 +392,27 @@ class ToolExecutor {
 
     fs.writeFileSync(absolutePath, content);
     return `File written: ${absolutePath}`;
+  }
+
+  private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(this.workingDirectory, filePath);
+
+    if (!fs.existsSync(absolutePath)) {
+      return `File not found: ${absolutePath}`;
+    }
+
+    const content = fs.readFileSync(absolutePath, "utf-8");
+
+    if (!content.includes(oldText)) {
+      return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
+    }
+
+    const newContent = content.replace(oldText, newText);
+    fs.writeFileSync(absolutePath, newContent);
+
+    return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
   }
 
   private async runCommand(command: string): Promise<string> {
