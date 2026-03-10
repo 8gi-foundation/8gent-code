@@ -8,7 +8,9 @@
     "8gent": "./bin/8gent.ts"
   },
   "scripts": {
-    "start": "bun run bin/8gent.ts",
+    "start": "bun run packages/agent/index.ts",
+    "install-wizard": "bun run apps/installer/src/index.tsx",
+    "cli": "bun run bin/8gent.ts",
     "dev": "bun run apps/tui/src/index.ts",
     "build": "bun build apps/tui/src/index.ts --outdir dist",
     "test": "bun test",
@@ -27,7 +29,13 @@
     "@biomejs/biome": "^1.5.0"
   },
   "dependencies": {
+    "@types/react": "^19.2.14",
     "glob": "^13.0.6",
+    "ink": "^6.8.0",
+    "ink-big-text": "^2.0.0",
+    "ink-gradient": "^4.0.0",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
     "tree-sitter": "^0.21.0",
     "tree-sitter-go": "^0.21.0",
     "tree-sitter-javascript": "^0.21.0",
