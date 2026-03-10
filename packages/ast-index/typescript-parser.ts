@@ -155,7 +155,8 @@ function extractSymbol(
     const parent = node.parent;
     if (ts.isVariableDeclarationList(parent)) {
       const isConst = (parent.flags & ts.NodeFlags.Const) !== 0;
-      if (isConst && !ts.isArrowFunction(node.initializer!) && !ts.isFunctionExpression(node.initializer!)) {
+      const initializer = node.initializer;
+      if (isConst && initializer && !ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) {
         return {
           id: buildSymbolId(sourceFile.fileName, node.name.text, parentPath),
           name: node.name.text,
