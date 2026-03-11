@@ -39,19 +39,27 @@ COMMANDS:
   search        Search for symbols across files
   benchmark     Run efficiency benchmarks
   demo          Show token savings demo
-  tui           Launch interactive TUI (coming soon)
+  tui           Launch interactive TUI
+  infinite      Run task in autonomous infinite mode
 
 OPTIONS:
   -h, --help     Show this help message
   -v, --version  Show version
   --json         Output as JSON
   --stats        Show efficiency statistics
+  --infinite     Enable infinite mode (autonomous until done)
 
 EXAMPLES:
   8gent outline src/index.ts
   8gent symbol src/utils.ts::parseDate
   8gent search "handleError" --kinds function,method
   8gent benchmark --quick src/
+  8gent infinite "Build a Next.js landing page with dark theme"
+
+INFINITE MODE:
+  Autonomous execution until success criteria met.
+  No questions, no crashes stop it, self-healing errors.
+  Like --dangerously-skip-permissions but smarter.
 
 PHILOSOPHY:
   plan → retrieve → compose → verify
@@ -104,6 +112,10 @@ async function main() {
 
     case "tui":
       await tuiCommand(restArgs);
+      break;
+
+    case "infinite":
+      await infiniteCommand(restArgs);
       break;
 
     default:
@@ -355,6 +367,64 @@ async function tuiCommand(args: string[]) {
   });
 
   proc.on("exit", (code) => process.exit(code || 0));
+}
+
+async function infiniteCommand(args: string[]) {
+  console.log(BANNER);
+  console.log("🔄 INFINITE MODE - Autonomous execution until done\n");
+
+  if (args.length === 0) {
+    console.error("Usage: 8gent infinite <task description>");
+    console.log('\nExample: 8gent infinite "Build a Next.js landing page with dark theme"');
+    process.exit(1);
+  }
+
+  const task = args.join(" ");
+  const maxIterations = parseInt(args.find(a => a.startsWith("--max="))?.split("=")[1] || "100");
+  const maxTimeMin = parseInt(args.find(a => a.startsWith("--time="))?.split("=")[1] || "30");
+
+  console.log(`Task: ${task}`);
+  console.log(`Max iterations: ${maxIterations}`);
+  console.log(`Max time: ${maxTimeMin} minutes`);
+  console.log("─".repeat(60));
+  console.log("");
+
+  try {
+    const { runInfinite, formatInfiniteState } = await import("../packages/infinite");
+
+    const state = await runInfinite(task, {
+      maxIterations,
+      maxTimeMs: maxTimeMin * 60 * 1000,
+      workingDirectory: process.cwd(),
+      onIteration: (s) => {
+        process.stdout.write(`\r${formatInfiniteState(s)}`);
+      },
+      onErrorRecovered: (err, s) => {
+        console.log(`\n⚠️  Error recovered: ${err.message.slice(0, 50)}...`);
+      },
+    });
+
+    console.log("\n");
+    console.log("─".repeat(60));
+
+    if (state.phase === "complete") {
+      console.log("✅ TASK COMPLETED SUCCESSFULLY");
+      console.log(`   Iterations: ${state.iteration}`);
+      console.log(`   Time: ${(state.elapsedMs / 1000).toFixed(1)}s`);
+      console.log(`   Files changed: ${state.filesChanged.length}`);
+      console.log(`   Errors recovered: ${state.recoveredErrors.length}`);
+    } else {
+      console.log("❌ TASK FAILED OR TIMED OUT");
+      console.log(`   Phase: ${state.phase}`);
+      console.log(`   Iterations: ${state.iteration}`);
+      if (state.recoveredErrors.length > 0) {
+        console.log(`   Last error: ${state.recoveredErrors.slice(-1)[0]?.error.message}`);
+      }
+    }
+  } catch (err) {
+    console.error("Failed to run infinite mode:", err);
+    process.exit(1);
+  }
 }
 
 function getSymbolIcon(kind: string): string {
