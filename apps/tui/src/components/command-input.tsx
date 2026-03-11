@@ -51,7 +51,8 @@ export type SlashCommand =
   | "model"
   | "provider"
   | "voice"
-  | "language";
+  | "language"
+  | "infinite";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -131,6 +132,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["lang", "l"],
     description: "Set response language",
     usage: "/language [code]",
+  },
+  {
+    name: "infinite",
+    aliases: ["inf", "∞"],
+    description: "Enable infinite mode (autonomous until done)",
+    usage: "/infinite [task]",
   },
 ];
 
