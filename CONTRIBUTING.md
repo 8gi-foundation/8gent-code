@@ -180,7 +180,7 @@ When adding features, update relevant docs:
 
 ## Questions?
 
-Open an issue or reach out on X: [[REDACTED]](https://x.com/8gi-foundation)
+Open an issue or reach out on X: [[REDACTED]]([REDACTED])
 
 ---
 
