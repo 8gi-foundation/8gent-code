@@ -26,6 +26,7 @@ import {
   PredictedSteps,
   MiniKanban,
 } from "./components/plan-kanban.js";
+import { AnimatedStatusVerb } from "./components/status-verb.js";
 import {
   SelectInput,
   ModelSelector,
@@ -43,6 +44,9 @@ import {
 
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/agent/index.js";
+
+// Import onboarding system
+import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
 
 // ============================================
 // Types
@@ -62,7 +66,7 @@ export interface Message {
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
-type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select";
+type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -146,6 +150,13 @@ export function App({ initialCommand, args }: AppProps) {
   const [lastResponseTime, setLastResponseTime] = useState<number | undefined>();
   const [contextSize, setContextSize] = useState<number | undefined>();
 
+  // Context window tracking
+  const [contextUsed, setContextUsed] = useState(0);
+  const [contextMax] = useState(128000); // Default max context window
+
+  // Expanded view state (Ctrl+O)
+  const [expandedView, setExpandedView] = useState(false);
+
   // Git state (would be populated from actual git commands)
   const [isGitRepo] = useState(true);
   const [currentBranch] = useState<string | null>("main");
@@ -192,6 +203,11 @@ export function App({ initialCommand, args }: AppProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
 
+  // Onboarding system
+  const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<string | null>(null);
+
   // Handle keyboard shortcuts
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -227,6 +243,21 @@ export function App({ initialCommand, args }: AppProps) {
     // Toggle predict with Ctrl+P
     if (key.ctrl && input === "p") {
       setViewMode((prev) => (prev === "predict" ? "chat" : "predict"));
+    }
+
+    // Toggle expanded view with Ctrl+O (like Claude Code)
+    if (key.ctrl && input === "o") {
+      setExpandedView((prev) => !prev);
+    }
+
+    // Cycle through modes with Shift+Tab
+    if (key.shift && key.tab) {
+      const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict"];
+      setViewMode((prev) => {
+        const currentIndex = modes.indexOf(prev);
+        if (currentIndex === -1) return "chat";
+        return modes[(currentIndex + 1) % modes.length];
+      });
     }
 
     // Escape to return to chat
@@ -276,6 +307,35 @@ export function App({ initialCommand, args }: AppProps) {
     };
     initAgent();
   }, [currentModel, currentProvider]);
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      // Detect available integrations
+      await onboardingManager.detectIntegrations();
+
+      if (onboardingManager.needsOnboarding()) {
+        setShowOnboarding(true);
+        setViewMode("onboarding");
+        const question = onboardingManager.getNextQuestion();
+        if (question) {
+          setCurrentOnboardingQuestion(question.question);
+          addSystemMessage(
+            "∞ Welcome to 8gent, The Infinite Gentleman.\n\n" +
+            "Before we begin, I'd like to learn about you.\n" +
+            "(Type /skip to skip any question, /skip all to skip onboarding)\n\n" +
+            question.question
+          );
+        }
+      } else if (onboardingManager.shouldAskClarification()) {
+        const clarification = onboardingManager.getClarificationQuestion();
+        if (clarification) {
+          addSystemMessage(`Quick question: ${clarification}`);
+        }
+      }
+    };
+    checkOnboarding();
+  }, []);
 
   // Handle slash commands
   const handleSlashCommand = useCallback(
@@ -372,6 +432,63 @@ export function App({ initialCommand, args }: AppProps) {
           }
           break;
 
+        case "onboarding":
+          // Start or restart onboarding
+          onboardingManager.reset();
+          setShowOnboarding(true);
+          setViewMode("onboarding");
+          const onboardQuestion = onboardingManager.getNextQuestion();
+          if (onboardQuestion) {
+            setCurrentOnboardingQuestion(onboardQuestion.question);
+            addSystemMessage(
+              "∞ Let's get to know each other.\n\n" + onboardQuestion.question
+            );
+          }
+          break;
+
+        case "preferences":
+          // Show current preferences
+          const user = onboardingManager.getUser();
+          addSystemMessage(
+            "∞ Your Preferences:\n\n" +
+            `Name: ${user.identity.name || "Not set"}\n` +
+            `Role: ${user.identity.role || "Not set"}\n` +
+            `Style: ${user.identity.communicationStyle || "Not set"}\n` +
+            `Language: ${user.identity.language}\n` +
+            `Model: ${user.preferences.model.default || currentModel}\n` +
+            `Provider: ${user.preferences.model.provider || currentProvider}\n` +
+            `Voice: ${user.preferences.voice.enabled ? "Enabled" : "Disabled"}\n` +
+            `Auto-commit: ${user.preferences.git.autoCommit ? "Yes" : "No"}\n` +
+            `Understanding: ${Math.round(user.understanding.confidenceScore * 100)}%\n\n` +
+            "Use /onboarding to reconfigure."
+          );
+          break;
+
+        case "skip":
+          // Skip onboarding question
+          if (showOnboarding) {
+            if (args[0] === "all") {
+              onboardingManager.skipAll();
+              setShowOnboarding(false);
+              setViewMode("chat");
+              addSystemMessage(
+                "Understood. I'll ask again later.\n" +
+                "(The more I know, the better I serve.)"
+              );
+            } else {
+              const nextQ = onboardingManager.skipQuestion();
+              if (nextQ) {
+                setCurrentOnboardingQuestion(nextQ.question);
+                addSystemMessage(nextQ.question);
+              } else {
+                setShowOnboarding(false);
+                setViewMode("chat");
+                addSystemMessage("Onboarding complete. Let's begin.");
+              }
+            }
+          }
+          break;
+
         // Model selection - check if args provided
         default:
           // Handle /model command
@@ -421,6 +538,11 @@ export function App({ initialCommand, args }: AppProps) {
       exit,
       availableModels,
       availableProviders,
+      infiniteModeActive,
+      onboardingManager,
+      showOnboarding,
+      currentModel,
+      currentProvider,
     ]
   );
 
@@ -577,6 +699,38 @@ export function App({ initialCommand, args }: AppProps) {
   const handleSubmit = async (input: string) => {
     if (!input.trim()) return;
 
+    // Handle onboarding answers first
+    if (showOnboarding && !input.startsWith("/")) {
+      const result = onboardingManager.processAnswer(input);
+      if (result.success) {
+        if (result.nextQuestion) {
+          setCurrentOnboardingQuestion(result.nextQuestion.question);
+          addSystemMessage(result.nextQuestion.question);
+        } else {
+          // Onboarding complete
+          setShowOnboarding(false);
+          setViewMode("chat");
+          const user = onboardingManager.getUser();
+          addSystemMessage(
+            `∞ Splendid, ${user.identity.name || "friend"}.\n\n` +
+            `I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\n` +
+            "Let's build something magnificent."
+          );
+
+          // Apply user preferences to current session
+          if (user.preferences.model.provider) {
+            setCurrentProvider(user.preferences.model.provider);
+          }
+          if (user.preferences.model.default) {
+            setCurrentModel(user.preferences.model.default);
+          }
+        }
+      } else {
+        addSystemMessage("I didn't quite catch that. Please try again.");
+      }
+      return;
+    }
+
     const cmdStartTime = Date.now();
 
     // Track command history
@@ -635,6 +789,11 @@ export function App({ initialCommand, args }: AppProps) {
         setTokensSaved((prev) => prev + saved);
         setContextSize(response.length);
 
+        // Track context usage (rough estimate: ~4 chars per token)
+        const responseTokens = Math.ceil(response.length / 4);
+        const inputTokens = Math.ceil(input.length / 4);
+        setContextUsed((prev) => prev + responseTokens + inputTokens);
+
         if (soundEnabled) {
           playSound("success");
         }
@@ -675,6 +834,9 @@ export function App({ initialCommand, args }: AppProps) {
         const saved = Math.floor(Math.random() * 1500) + 500;
         setTokensSaved((prev) => prev + saved);
         setContextSize(Math.floor(Math.random() * 8000) + 2000);
+
+        // Track context usage (mock)
+        setContextUsed((prev) => prev + Math.floor(Math.random() * 2000) + 500);
 
         if (soundEnabled) {
           playSound("success");
@@ -760,6 +922,23 @@ export function App({ initialCommand, args }: AppProps) {
           />
         );
 
+      case "onboarding":
+        // Onboarding uses the same message list but with a different header indicator
+        return (
+          <Box flexDirection="column">
+            <Box marginBottom={1}>
+              <Text color="cyan" bold>∞ Onboarding</Text>
+              <Text color="gray"> - </Text>
+              <Text color="yellow">Getting to know you</Text>
+            </Box>
+            <MessageList
+              messages={messages}
+              animateTyping={showAnimations}
+              soundEnabled={soundEnabled}
+            />
+          </Box>
+        );
+
       case "chat":
       default:
         return (
@@ -793,18 +972,85 @@ export function App({ initialCommand, args }: AppProps) {
         </Box>
       )}
 
-      {/* Command input with ghost suggestions */}
-      <CommandInput
-        onSubmit={handleSubmit}
-        isProcessing={isProcessing}
-        processingStage={processingStage}
-        showAnimations={showAnimations}
-        isGitRepo={isGitRepo}
-        currentBranch={currentBranch}
-        planNextStep={planNextStep}
-        recentCommands={recentCommands}
-        onSlashCommand={handleSlashCommand}
-      />
+      {/* Status verb at top of input section */}
+      {isProcessing && (
+        <Box paddingX={1} marginBottom={1}>
+          <AnimatedStatusVerb
+            type={processingStage === "planning" ? "planning" : "executing"}
+            showIcon={true}
+            active={true}
+          />
+        </Box>
+      )}
+
+      {/* Top separator line */}
+      <Box paddingX={1}>
+        <Text color="gray">{"─".repeat(60)}</Text>
+      </Box>
+
+      {/* Input section with context window display */}
+      <Box paddingX={1} justifyContent="space-between" alignItems="center">
+        {/* Left: Context used */}
+        <Box width={12}>
+          <Text color="gray" dimColor>
+            {formatContextSize(contextUsed)}
+          </Text>
+        </Box>
+
+        {/* Center: Command input */}
+        <Box flexGrow={1}>
+          <CommandInput
+            onSubmit={handleSubmit}
+            isProcessing={isProcessing}
+            processingStage={processingStage}
+            showAnimations={showAnimations}
+            isGitRepo={isGitRepo}
+            currentBranch={currentBranch}
+            planNextStep={planNextStep}
+            recentCommands={recentCommands}
+            onSlashCommand={handleSlashCommand}
+          />
+        </Box>
+
+        {/* Right: Context max */}
+        <Box width={12} justifyContent="flex-end">
+          <Text color="gray" dimColor>
+            /{formatContextSize(contextMax)}
+          </Text>
+        </Box>
+      </Box>
+
+      {/* Bottom separator line */}
+      <Box paddingX={1}>
+        <Text color="gray">{"─".repeat(60)}</Text>
+      </Box>
+
+      {/* Expanded view panel (Ctrl+O) */}
+      {expandedView && (
+        <Box
+          flexDirection="column"
+          paddingX={1}
+          borderStyle="single"
+          borderColor="cyan"
+          marginX={1}
+          marginTop={1}
+        >
+          <Text color="cyan" bold>∞ Extended Info</Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text color="gray">Context: <Text color="cyan">{formatContextSize(contextUsed)}</Text> / <Text color="white">{formatContextSize(contextMax)}</Text> ({Math.round((contextUsed / contextMax) * 100)}%)</Text>
+            <Text color="gray">Response time: <Text color="yellow">{lastResponseTime ?? 0}ms</Text></Text>
+            <Text color="gray">Tokens saved: <Text color="green">{tokensSaved.toLocaleString()}</Text></Text>
+            <Text color="gray">Model: <Text color="cyan">{currentModel}</Text> via <Text color="magenta">{currentProvider}</Text></Text>
+            <Text color="gray">Agent ready: <Text color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</Text></Text>
+            {currentBranch && <Text color="gray">Branch: <Text color="yellow">{currentBranch}</Text></Text>}
+            <Text color="gray">Mode: <Text color="cyan">{viewMode}</Text></Text>
+            <Text color="gray">Infinite: <Text color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</Text></Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text color="gray" dimColor>Press Ctrl+O to close</Text>
+          </Box>
+        </Box>
+      )}
 
       {/* Status bar */}
       {showEnhancedStatus ? (
@@ -847,12 +1093,23 @@ export function App({ initialCommand, args }: AppProps) {
       {showAnimations && (
         <Box paddingX={1} marginTop={1}>
           <Text color="gray" dimColor>
-            ^A animations | ^S sound | ^H header | ^K kanban | ^P predict | /help | ^C exit
+            ^O expand | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | /help | ^C exit
           </Text>
         </Box>
       )}
     </Box>
   );
+}
+
+// Format context size in human readable format (e.g., "12.5K", "128K")
+function formatContextSize(tokens: number): string {
+  if (tokens >= 1000000) {
+    return (tokens / 1000000).toFixed(1) + "M";
+  }
+  if (tokens >= 1000) {
+    return (tokens / 1000).toFixed(1) + "K";
+  }
+  return tokens.toString();
 }
 
 // Personality completion phrases

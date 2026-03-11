@@ -35,7 +35,7 @@ export interface EnhancedStatusBarProps {
   totalAgents?: number;
 
   // Permissions
-  permissionMode?: "full" | "ask" | "restricted" | "sandbox";
+  permissionMode?: "full" | "ask" | "restricted" | "sandbox" | "infinite";
 
   // Token efficiency
   tokensSaved?: number;
@@ -223,6 +223,7 @@ function PermissionStatusItem({ mode }: { mode: EnhancedStatusBarProps["permissi
     ask: { color: "yellow" as const, icon: "\u2753", label: "Ask Mode" },
     restricted: { color: "green" as const, icon: "\u2713", label: "Restricted" },
     sandbox: { color: "blue" as const, icon: "\u25A3", label: "Sandbox" },
+    infinite: { color: "magenta" as const, icon: "\u221E", label: "Infinite" },
   };
 
   const config = configs[mode || "ask"];
@@ -332,6 +333,7 @@ function ClaudeStyleCompactBar({
     ask: { color: "yellow" as const, icon: "?" },
     restricted: { color: "green" as const, icon: "\u2713" },
     sandbox: { color: "blue" as const, icon: "\u25A3" },
+    infinite: { color: "magenta" as const, icon: "\u221E" },
   };
 
   const permConfig = permissionIcons[permissionMode || "ask"];
