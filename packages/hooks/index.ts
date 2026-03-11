@@ -611,3 +611,25 @@ export function registerFunctionHook(
     ...options,
   });
 }
+
+/**
+ * Register a hook directly
+ */
+export function registerHook(hookConfig: Omit<Hook, "id">): Hook {
+  return getHookManager().registerHook(hookConfig);
+}
+
+// ============================================
+// Voice Hook Exports
+// ============================================
+
+export {
+  configureVoice,
+  getVoiceConfig,
+  extractCompletionMessage,
+  speak,
+  voiceCompletionHook,
+  generateCompletionVoice,
+  setupVoiceHook,
+  testVoice,
+} from "./voice.js";

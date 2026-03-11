@@ -100,3 +100,23 @@ export {
   StepPanel,
   ValidationReportPanel,
 } from "./evidence-panel.js";
+
+// Claude Code style input (with lines above/below)
+export {
+  ClaudeInput,
+  ClaudeInputMinimal,
+} from "./claude-input.js";
+
+// Ghost text suggestions
+export {
+  GhostInput,
+  GhostText,
+  GhostCommandInput,
+  SuggestionPreview,
+  SourceIcon,
+} from "./ghost-suggestion.js";
+
+// Enhanced status bar
+export {
+  EnhancedStatusBar,
+} from "./status-bar.js";
