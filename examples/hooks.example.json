@@ -1,0 +1,70 @@
+{
+  "hooks": [
+    {
+      "id": "example_voice",
+      "type": "onComplete",
+      "name": "Voice Notification",
+      "description": "Speaks completion message using macOS TTS",
+      "mode": "shell",
+      "command": "say -v Ava 'Task completed'",
+      "enabled": false,
+      "async": true,
+      "continueOnError": true
+    },
+    {
+      "id": "example_notification",
+      "type": "onComplete",
+      "name": "macOS Notification",
+      "description": "Shows a macOS notification when task completes",
+      "mode": "shell",
+      "command": "osascript -e 'display notification \"Task completed\" with title \"8gent Code\"'",
+      "enabled": false,
+      "async": true,
+      "continueOnError": true
+    },
+    {
+      "id": "example_tool_log",
+      "type": "afterTool",
+      "name": "Tool Logger",
+      "description": "Logs all tool executions",
+      "mode": "shell",
+      "command": "echo \"[$(date -Iseconds)] Tool: {tool}\" >> ~/.8gent/logs/tools.log",
+      "enabled": false,
+      "async": true,
+      "continueOnError": true
+    },
+    {
+      "id": "example_error_log",
+      "type": "onError",
+      "name": "Error Logger",
+      "description": "Logs errors to file",
+      "mode": "shell",
+      "command": "echo \"[$(date -Iseconds)] Error: {error}\" >> ~/.8gent/logs/errors.log",
+      "enabled": false,
+      "continueOnError": true
+    },
+    {
+      "id": "example_timing",
+      "type": "afterTool",
+      "name": "Timing Logger",
+      "description": "Logs execution timing",
+      "mode": "function",
+      "functionBody": "console.log(`[TIMING] ${context.tool}: ${context.duration}ms`); return { tool: context.tool, duration: context.duration };",
+      "enabled": false,
+      "continueOnError": true
+    },
+    {
+      "id": "example_git_add",
+      "type": "afterTool",
+      "name": "Auto Git Add",
+      "description": "Automatically stages file changes after write_file",
+      "mode": "function",
+      "functionBody": "if (context.tool === 'write_file' && context.toolInput?.path) { require('child_process').execSync(`git add \"${context.toolInput.path}\"`, { cwd: context.workingDirectory }); return 'staged'; } return null;",
+      "enabled": false,
+      "continueOnError": true
+    }
+  ],
+  "globalTimeout": 30000,
+  "logPath": null,
+  "enabled": true
+}

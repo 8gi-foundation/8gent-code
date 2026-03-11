@@ -52,3 +52,4 @@ benchmark-results.json
 # Lock files (bun.lockb is binary, keep it)
 package-lock.json
 yarn.lock
+.next/

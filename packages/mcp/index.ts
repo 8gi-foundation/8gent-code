@@ -269,7 +269,7 @@ export class MCPClient {
       });
 
       try {
-        server.process!.stdin.write(JSON.stringify(request) + "\n");
+        server.process!.stdin!.write(JSON.stringify(request) + "\n");
       } catch (err) {
         server.pendingRequests.delete(id);
         clearTimeout(timeout);
@@ -295,7 +295,7 @@ export class MCPClient {
 
     // Send initialized notification
     const server = this.servers.get(serverName);
-    if (server?.process) {
+    if (server?.process?.stdin) {
       server.process.stdin.write(JSON.stringify({
         jsonrpc: "2.0",
         method: "notifications/initialized",

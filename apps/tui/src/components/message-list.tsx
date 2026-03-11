@@ -1,52 +1,235 @@
 /**
- * 8gent Code - Message List Component
+ * 8gent Code - Animated Message List Component
+ *
+ * Features:
+ * - Fade in animation for new messages
+ * - Typing animation for assistant responses
+ * - Smooth transitions between messages
  */
 
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { Message } from "../app.js";
+import { TypingText, WordByWord } from "./typing-text.js";
+import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
+import { useCompletionSound } from "./sound-effects.js";
 
 interface MessageListProps {
   messages: Message[];
+  animateTyping?: boolean;
+  soundEnabled?: boolean;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({
+  messages,
+  animateTyping = true,
+  soundEnabled = false,
+}: MessageListProps) {
+  const prevCountRef = useRef(messages.length);
+  const [newMessageId, setNewMessageId] = useState<string | null>(null);
+
+  // Track new messages for animation
+  useEffect(() => {
+    if (messages.length > prevCountRef.current) {
+      const newMessage = messages[messages.length - 1];
+      setNewMessageId(newMessage.id);
+    }
+    prevCountRef.current = messages.length;
+  }, [messages]);
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {messages.map((message) => (
-        <MessageItem key={message.id} message={message} />
+      {messages.map((message, index) => (
+        <MessageItem
+          key={message.id}
+          message={message}
+          isNew={message.id === newMessageId}
+          animate={animateTyping}
+          soundEnabled={soundEnabled}
+          index={index}
+        />
       ))}
     </Box>
   );
 }
 
-function MessageItem({ message }: { message: Message }) {
-  const roleColors = {
-    user: "yellow",
-    assistant: "cyan",
-    system: "gray",
-  } as const;
+interface MessageItemProps {
+  message: Message;
+  isNew: boolean;
+  animate: boolean;
+  soundEnabled: boolean;
+  index: number;
+}
 
-  const roleLabels = {
-    user: "You",
-    assistant: "8gent",
-    system: "System",
+function MessageItem({
+  message,
+  isNew,
+  animate,
+  soundEnabled,
+  index,
+}: MessageItemProps) {
+  const [showContent, setShowContent] = useState(!isNew);
+  const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
+
+  // Play sound on completion for assistant messages
+  useCompletionSound(
+    typingComplete && message.role === "assistant" && isNew,
+    soundEnabled
+  );
+
+  // Fade in the message header
+  useEffect(() => {
+    if (isNew) {
+      const timeout = setTimeout(() => setShowContent(true), 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [isNew]);
+
+  const roleConfig = {
+    user: {
+      color: "yellow" as const,
+      label: "You",
+      icon: "▸",
+      labelColor: "#FFD700",
+    },
+    assistant: {
+      color: "cyan" as const,
+      label: "8gent",
+      icon: "◆",
+      labelColor: "#00FFFF",
+    },
+    system: {
+      color: "gray" as const,
+      label: "System",
+      icon: "●",
+      labelColor: "#888888",
+    },
   };
 
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color={roleColors[message.role]} bold>
-          {roleLabels[message.role]}
-        </Text>
+  const config = roleConfig[message.role];
+
+  if (!showContent) {
+    return (
+      <Box marginBottom={1}>
         <Text color="gray" dimColor>
-          {" "}
-          {formatTime(message.timestamp)}
+          ...
         </Text>
       </Box>
-      <Box paddingLeft={2}>
-        <Text wrap="wrap">{message.content}</Text>
+    );
+  }
+
+  return (
+    <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
+      <Box flexDirection="column" marginBottom={1}>
+        {/* Message header */}
+        <Box>
+          <PopIn delay={isNew ? 50 : 0}>
+            <Text color={config.color}>{config.icon} </Text>
+          </PopIn>
+          <Text color={config.color} bold>
+            {config.label}
+          </Text>
+          <Text color="gray" dimColor>
+            {" "}
+            {formatTime(message.timestamp)}
+          </Text>
+        </Box>
+
+        {/* Message content */}
+        <Box paddingLeft={2}>
+          <MessageContent
+            content={message.content}
+            role={message.role}
+            isNew={isNew}
+            animate={animate}
+            onTypingComplete={() => setTypingComplete(true)}
+          />
+        </Box>
       </Box>
+    </FadeIn>
+  );
+}
+
+interface MessageContentProps {
+  content: string;
+  role: "user" | "assistant" | "system";
+  isNew: boolean;
+  animate: boolean;
+  onTypingComplete: () => void;
+}
+
+function MessageContent({
+  content,
+  role,
+  isNew,
+  animate,
+  onTypingComplete,
+}: MessageContentProps) {
+  // Only animate typing for new assistant messages
+  const shouldAnimate = isNew && animate && role === "assistant";
+
+  if (shouldAnimate) {
+    // Use word-by-word for longer content, character for shorter
+    if (content.length > 200) {
+      return (
+        <WordByWord text={content} speed={30} onComplete={onTypingComplete} />
+      );
+    }
+    return (
+      <TypingText
+        text={content}
+        speed={12}
+        onComplete={onTypingComplete}
+        cursor={true}
+      />
+    );
+  }
+
+  // Check for code blocks and format accordingly
+  if (content.includes("```")) {
+    return <FormattedContent content={content} />;
+  }
+
+  return <Text wrap="wrap">{content}</Text>;
+}
+
+// Format content with code blocks
+function FormattedContent({ content }: { content: string }) {
+  const parts = content.split(/(```[\s\S]*?```)/);
+
+  return (
+    <Box flexDirection="column">
+      {parts.map((part, index) => {
+        if (part.startsWith("```")) {
+          // Extract language and code
+          const match = part.match(/```(\w+)?\n?([\s\S]*?)```/);
+          if (match) {
+            const [, language, code] = match;
+            return (
+              <Box
+                key={index}
+                flexDirection="column"
+                borderStyle="round"
+                borderColor="gray"
+                paddingX={1}
+                marginY={1}
+              >
+                {language && (
+                  <Text color="gray" dimColor>
+                    {language}
+                  </Text>
+                )}
+                <Text color="green">{code.trim()}</Text>
+              </Box>
+            );
+          }
+        }
+        return (
+          <Text key={index} wrap="wrap">
+            {part}
+          </Text>
+        );
+      })}
     </Box>
   );
 }
@@ -56,4 +239,61 @@ function formatTime(date: Date): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// Compact message item for dense view
+export function CompactMessageItem({ message }: { message: Message }) {
+  const roleIcons = {
+    user: "→",
+    assistant: "←",
+    system: "•",
+  };
+
+  const roleColors = {
+    user: "yellow",
+    assistant: "cyan",
+    system: "gray",
+  } as const;
+
+  return (
+    <Box>
+      <Text color={roleColors[message.role]}>{roleIcons[message.role]} </Text>
+      <Text wrap="wrap">{message.content}</Text>
+    </Box>
+  );
+}
+
+// Streaming message for real-time responses
+interface StreamingMessageProps {
+  chunks: string[];
+  isComplete: boolean;
+}
+
+export function StreamingMessage({ chunks, isComplete }: StreamingMessageProps) {
+  const [displayedChunks, setDisplayedChunks] = useState(0);
+
+  useEffect(() => {
+    if (displayedChunks < chunks.length) {
+      const timeout = setTimeout(() => {
+        setDisplayedChunks((prev) => prev + 1);
+      }, 30);
+      return () => clearTimeout(timeout);
+    }
+  }, [chunks.length, displayedChunks]);
+
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box>
+        <Text color="cyan" bold>
+          ◆ 8gent
+        </Text>
+        {!isComplete && (
+          <Text color="cyan"> ▌</Text>
+        )}
+      </Box>
+      <Box paddingLeft={2}>
+        <Text wrap="wrap">{chunks.slice(0, displayedChunks).join("")}</Text>
+      </Box>
+    </Box>
+  );
 }

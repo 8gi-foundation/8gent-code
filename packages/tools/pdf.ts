@@ -2,12 +2,12 @@
  * 8gent Code - PDF Tools
  *
  * PDF reading and text extraction capabilities.
- * Uses pdf-parse for text extraction.
+ * Uses pdf-parse v2 for text extraction.
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import pdfParse from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 
 // ============================================
 // Types
@@ -18,7 +18,6 @@ export interface PdfInfo {
   text: string;
   pageCount: number;
   metadata: PdfMetadata;
-  info: PdfDocInfo;
 }
 
 export interface PdfMetadata {
@@ -30,15 +29,6 @@ export interface PdfMetadata {
   producer?: string;
   creationDate?: string;
   modificationDate?: string;
-}
-
-export interface PdfDocInfo {
-  PDFFormatVersion?: string;
-  IsAcroFormPresent?: boolean;
-  IsXFAPresent?: boolean;
-  IsCollectionPresent?: boolean;
-  IsLinearized?: boolean;
-  IsSignaturesPresent?: boolean;
 }
 
 export interface PdfPageContent {
@@ -70,38 +60,36 @@ export async function readPdf(pdfPath: string): Promise<PdfInfo> {
   }
 
   const buffer = await fs.promises.readFile(absolutePath);
-  const data = await pdfParse(buffer);
+  const pdf = new PDFParse({ data: buffer });
+
+  // Get text from all pages
+  const textResult = await pdf.getText();
+
+  // Get metadata
+  const infoResult = await pdf.getInfo();
+
+  // Clean up
+  await pdf.destroy();
 
   return {
     path: absolutePath,
-    text: data.text,
-    pageCount: data.numpages,
+    text: textResult.text,
+    pageCount: textResult.total,
     metadata: {
-      title: data.info?.Title,
-      author: data.info?.Author,
-      subject: data.info?.Subject,
-      keywords: data.info?.Keywords,
-      creator: data.info?.Creator,
-      producer: data.info?.Producer,
-      creationDate: data.info?.CreationDate,
-      modificationDate: data.info?.ModDate,
-    },
-    info: {
-      PDFFormatVersion: data.info?.PDFFormatVersion,
-      IsAcroFormPresent: data.info?.IsAcroFormPresent,
-      IsXFAPresent: data.info?.IsXFAPresent,
-      IsCollectionPresent: data.info?.IsCollectionPresent,
-      IsLinearized: data.info?.IsLinearized,
-      IsSignaturesPresent: data.info?.IsSignaturesPresent,
+      title: infoResult.info?.Title as string | undefined,
+      author: infoResult.info?.Author as string | undefined,
+      subject: infoResult.info?.Subject as string | undefined,
+      keywords: infoResult.info?.Keywords as string | undefined,
+      creator: infoResult.info?.Creator as string | undefined,
+      producer: infoResult.info?.Producer as string | undefined,
+      creationDate: infoResult.info?.CreationDate?.toString(),
+      modificationDate: infoResult.info?.ModDate?.toString(),
     },
   };
 }
 
 /**
  * Read a specific page from a PDF file
- *
- * Note: pdf-parse extracts all text at once, so we need to split by page markers.
- * This is an approximation as PDF text extraction doesn't always have clear page boundaries.
  */
 export async function readPdfPage(
   pdfPath: string,
@@ -116,47 +104,30 @@ export async function readPdfPage(
   }
 
   const buffer = await fs.promises.readFile(absolutePath);
+  const pdf = new PDFParse({ data: buffer });
 
-  // Custom page render function to extract specific page
-  let pageTexts: string[] = [];
-  let currentPage = 0;
+  // Get text with page info
+  const textResult = await pdf.getText({ partial: [pageNum] });
+  const totalPages = textResult.total;
 
-  const options = {
-    pagerender: function (pageData: {
-      pageIndex: number;
-      getTextContent: () => Promise<{
-        items: Array<{ str: string }>;
-      }>;
-    }) {
-      return pageData.getTextContent().then(function (textContent) {
-        let text = "";
-        for (const item of textContent.items) {
-          text += item.str + " ";
-        }
-        pageTexts.push(text.trim());
-        currentPage++;
-        return text;
-      });
-    },
-  };
-
-  const data = await pdfParse(buffer, options);
+  // Clean up
+  await pdf.destroy();
 
   // Validate page number
-  if (pageNum < 1 || pageNum > data.numpages) {
+  if (pageNum < 1 || pageNum > totalPages) {
     throw new Error(
-      `Invalid page number: ${pageNum}. PDF has ${data.numpages} pages.`
+      `Invalid page number: ${pageNum}. PDF has ${totalPages} pages.`
     );
   }
 
-  // Get the specific page text (1-indexed)
-  const pageText = pageTexts[pageNum - 1] || "";
+  const pageText = textResult.pages.length > 0 ?
+    textResult.pages[0].text : "";
 
   return {
     path: absolutePath,
     pageNumber: pageNum,
     text: pageText,
-    totalPages: data.numpages,
+    totalPages,
   };
 }
 
@@ -179,26 +150,24 @@ export async function getPdfMetadata(pdfPath: string): Promise<{
 
   const stats = fs.statSync(absolutePath);
   const buffer = await fs.promises.readFile(absolutePath);
+  const pdf = new PDFParse({ data: buffer });
 
-  // Use a minimal render to just get metadata
-  const options = {
-    max: 0, // Don't extract any pages for text
-  };
+  const infoResult = await pdf.getInfo();
 
-  const data = await pdfParse(buffer, options);
+  await pdf.destroy();
 
   return {
     path: absolutePath,
-    pageCount: data.numpages,
+    pageCount: infoResult.total,
     metadata: {
-      title: data.info?.Title,
-      author: data.info?.Author,
-      subject: data.info?.Subject,
-      keywords: data.info?.Keywords,
-      creator: data.info?.Creator,
-      producer: data.info?.Producer,
-      creationDate: data.info?.CreationDate,
-      modificationDate: data.info?.ModDate,
+      title: infoResult.info?.Title as string | undefined,
+      author: infoResult.info?.Author as string | undefined,
+      subject: infoResult.info?.Subject as string | undefined,
+      keywords: infoResult.info?.Keywords as string | undefined,
+      creator: infoResult.info?.Creator as string | undefined,
+      producer: infoResult.info?.Producer as string | undefined,
+      creationDate: infoResult.info?.CreationDate?.toString(),
+      modificationDate: infoResult.info?.ModDate?.toString(),
     },
     size: stats.size,
   };
@@ -281,44 +250,36 @@ export async function readPdfPageRange(
   }
 
   const buffer = await fs.promises.readFile(absolutePath);
+  const pdf = new PDFParse({ data: buffer });
 
-  let pageTexts: string[] = [];
+  // Generate page range array
+  const pageRange: number[] = [];
+  for (let i = startPage; i <= endPage; i++) {
+    pageRange.push(i);
+  }
 
-  const options = {
-    pagerender: function (pageData: {
-      pageIndex: number;
-      getTextContent: () => Promise<{
-        items: Array<{ str: string }>;
-      }>;
-    }) {
-      return pageData.getTextContent().then(function (textContent) {
-        let text = "";
-        for (const item of textContent.items) {
-          text += item.str + " ";
-        }
-        pageTexts.push(text.trim());
-        return text;
-      });
-    },
-  };
+  const textResult = await pdf.getText({ partial: pageRange });
+  const totalPages = textResult.total;
 
-  const data = await pdfParse(buffer, options);
+  await pdf.destroy();
 
   // Validate page range
   if (startPage < 1) startPage = 1;
-  if (endPage > data.numpages) endPage = data.numpages;
+  if (endPage > totalPages) endPage = totalPages;
   if (startPage > endPage) {
     throw new Error(`Invalid page range: ${startPage}-${endPage}`);
   }
 
-  // Get text from the specified range (1-indexed)
-  const rangeText = pageTexts.slice(startPage - 1, endPage).join("\n\n--- Page Break ---\n\n");
+  // Join text from all pages
+  const fullText = textResult.pages
+    .map(p => p.text)
+    .join("\n\n--- Page Break ---\n\n");
 
   return {
     path: absolutePath,
     startPage,
     endPage,
-    text: rangeText,
-    totalPages: data.numpages,
+    text: fullText,
+    totalPages,
   };
 }
