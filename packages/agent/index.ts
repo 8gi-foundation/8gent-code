@@ -2787,7 +2787,18 @@ Type your request, or:
 // Run REPL if executed directly
 if (import.meta.main) {
   // Check for CLI argument for non-interactive mode
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
+
+  // Check for infinite mode flag (--infinite, -infinite, -i)
+  const hasInfiniteFlag = args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
+  if (hasInfiniteFlag) {
+    // Enable infinite mode
+    const permManager = getPermissionManager();
+    permManager.enableInfiniteMode();
+    // Remove flags from args
+    args = args.filter(a => a !== "--infinite" && a !== "-infinite" && a !== "-i");
+  }
+
   if (args.length > 0 && args[0] !== "--interactive") {
     // Non-interactive mode: run single prompt and exit
     const promptText = args.join(" ");
@@ -2796,12 +2807,15 @@ if (import.meta.main) {
         model: process.env.EIGHGENT_MODEL || "glm-4.7-flash:latest",
         runtime: "ollama",
         workingDirectory: process.cwd(),
-        maxTurns: 30,
+        maxTurns: hasInfiniteFlag ? 100 : 30, // More turns for infinite mode
       };
       const agent = new Agent(config);
       if (!(await agent.isReady())) {
         console.error("Ollama is not running");
         process.exit(1);
+      }
+      if (hasInfiniteFlag) {
+        console.log(`\n∞ INFINITE MODE - Autonomous until done`);
       }
       console.log(`\n🎯 Task: ${promptText}\n`);
       try {
@@ -2812,6 +2826,10 @@ if (import.meta.main) {
       }
       process.exit(0);
     })();
+  } else if (args.length === 0 && hasInfiniteFlag) {
+    // Just --infinite with no task, start REPL in infinite mode
+    console.log(`\n∞ INFINITE MODE - All permissions bypassed\n`);
+    startREPL();
   } else {
     startREPL();
   }
