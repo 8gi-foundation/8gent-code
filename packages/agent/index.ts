@@ -556,6 +556,226 @@ class ToolExecutor {
     this.hookManager.setWorkingDirectory(workingDirectory);
   }
 
+  /**
+   * Get tool definitions for the LLM
+   * This is what tells the LLM what tools are available
+   */
+  getToolDefinitions(): object[] {
+    return [
+      // Code exploration
+      {
+        type: "function",
+        function: {
+          name: "get_outline",
+          description: "Get the outline (functions, classes, etc.) of a source file. Use this FIRST before reading full files to understand structure.",
+          parameters: {
+            type: "object",
+            properties: {
+              filePath: { type: "string", description: "Path to the file to analyze" }
+            },
+            required: ["filePath"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_symbol",
+          description: "Get the full source code of a specific symbol (function, class, etc.)",
+          parameters: {
+            type: "object",
+            properties: {
+              symbolId: { type: "string", description: "Symbol ID in format 'path/to/file.ts::symbolName'" }
+            },
+            required: ["symbolId"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_symbols",
+          description: "Search for symbols (functions, classes, etc.) across the codebase",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query" },
+              kinds: { type: "array", items: { type: "string" }, description: "Filter by kinds: function, class, method, variable" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      // File operations
+      {
+        type: "function",
+        function: {
+          name: "read_file",
+          description: "Read the contents of a file",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the file to read" }
+            },
+            required: ["path"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "write_file",
+          description: "Write content to a file (creates or overwrites)",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the file" },
+              content: { type: "string", description: "Content to write" }
+            },
+            required: ["path", "content"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "edit_file",
+          description: "Edit a file by replacing text",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the file" },
+              oldText: { type: "string", description: "Text to find and replace" },
+              newText: { type: "string", description: "Replacement text" }
+            },
+            required: ["path", "oldText", "newText"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_files",
+          description: "List files in a directory",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Directory path (default: current directory)" },
+              pattern: { type: "string", description: "Glob pattern to filter files" }
+            }
+          }
+        }
+      },
+      // Git operations
+      {
+        type: "function",
+        function: {
+          name: "git_status",
+          description: "Get git status",
+          parameters: { type: "object", properties: {} }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "git_diff",
+          description: "Show git diff",
+          parameters: {
+            type: "object",
+            properties: {
+              staged: { type: "boolean", description: "Show staged changes only" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "git_log",
+          description: "Show git commit log",
+          parameters: {
+            type: "object",
+            properties: {
+              count: { type: "number", description: "Number of commits to show (default: 10)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "git_add",
+          description: "Stage files for commit",
+          parameters: {
+            type: "object",
+            properties: {
+              files: { type: "string", description: "Files to add (default: all)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "git_commit",
+          description: "Create a git commit",
+          parameters: {
+            type: "object",
+            properties: {
+              message: { type: "string", description: "Commit message" }
+            },
+            required: ["message"]
+          }
+        }
+      },
+      // Shell
+      {
+        type: "function",
+        function: {
+          name: "run_command",
+          description: "Run a shell command",
+          parameters: {
+            type: "object",
+            properties: {
+              command: { type: "string", description: "Command to run" }
+            },
+            required: ["command"]
+          }
+        }
+      },
+      // Web tools
+      {
+        type: "function",
+        function: {
+          name: "web_search",
+          description: "Search the web",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query" },
+              maxResults: { type: "number", description: "Max results (default: 5)" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "web_fetch",
+          description: "Fetch content from a URL",
+          parameters: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "URL to fetch" }
+            },
+            required: ["url"]
+          }
+        }
+      }
+    ];
+  }
+
   async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
     switch (toolName) {
       // Code exploration
@@ -1336,11 +1556,14 @@ export class Agent {
     const maxTurns = this.config.maxTurns || 20; // Increased for complex scaffolding tasks
     const chatStartTime = Date.now();
 
+    // Get tool definitions to pass to LLM
+    const tools = this.executor.getToolDefinitions();
+
     while (turns < maxTurns) {
       turns++;
 
-      // Get response from model
-      const response = await this.client.chat(this.messages);
+      // Get response from model with tool definitions
+      const response = await this.client.chat(this.messages, tools);
       const content = response.message.content;
 
       // Check for tool calls in the response (supports multiple parallel calls)
