@@ -314,16 +314,14 @@ export function CommandInput({
 
           {/* Ghost suggestion text */}
           {isVisible && suggestion && (
-            <Text color="gray" dimColor>
-              {suggestion.metadata?.emptyState ? (
-                <Text>
-                  <Text color="cyan">try: </Text>
-                  {suggestion.text}
-                </Text>
-              ) : (
-                suggestion.text
-              )}
-            </Text>
+            suggestion.metadata?.emptyState ? (
+              <Text>
+                <Text color="cyan">try: </Text>
+                <Text color="gray" dimColor>{suggestion.text}</Text>
+              </Text>
+            ) : (
+              <Text color="gray" dimColor>{suggestion.text}</Text>
+            )
           )}
         </Box>
       </Box>
@@ -331,11 +329,9 @@ export function CommandInput({
       {/* Ghost suggestion hint */}
       {isVisible && suggestion && (
         <Box paddingLeft={2}>
+          <Text color="blue">[Tab]</Text>
           <Text color="gray" dimColor>
-            <Text color="blue">[Tab]</Text> to accept{" "}
-            <Text color="gray">
-              ({suggestion.metadata?.emptyState ? "suggestion" : getSuggestionSourceLabel(suggestion.source)})
-            </Text>
+            {" "}to accept ({suggestion.metadata?.emptyState ? "suggestion" : getSuggestionSourceLabel(suggestion.source)})
           </Text>
         </Box>
       )}
