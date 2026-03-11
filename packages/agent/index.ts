@@ -1166,10 +1166,12 @@ export class Agent {
     // Set working directory for hooks
     this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
 
-    // Initialize with system prompt
+    // Initialize with system prompt (including language instruction)
+    const basePrompt = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    const languageInstruction = this.getLanguageInstruction();
     this.messages.push({
       role: "system",
-      content: config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+      content: basePrompt + languageInstruction,
     });
 
     // Execute onStart hooks
@@ -1509,6 +1511,16 @@ export class Agent {
     return this.enableReporting;
   }
 
+  private getLanguageInstruction(): string {
+    try {
+      // Dynamic import would be better but for sync constructor we use require-style
+      const { getLanguageManager } = require("../i18n/index.js");
+      return getLanguageManager().getLanguageInstruction();
+    } catch {
+      return "";
+    }
+  }
+
   getLastReport() {
     if (this.reportingContext) {
       const reporter = getCompletionReporter();
@@ -1679,6 +1691,11 @@ Type your request, or:
   /voice <name>       - Set voice (Daniel, Alex, Tom, Oliver, etc.)
   /voice rate <wpm>   - Set speech rate (100-300)
   /voice voices       - List available voices
+
+\x1b[33mLanguage:\x1b[0m
+  /language           - Show current language
+  /language <code>    - Set language (en, es, fr, de, ja, zh, pt-br, etc.)
+  /languages          - List all supported languages
 
 \x1b[33mTips:\x1b[0m
   - Ask to explore code: "What functions are in src/index.ts?"
@@ -2067,6 +2084,55 @@ Type your request, or:
           const { configureVoice } = await import("../hooks/voice.js");
           configureVoice({ voice: voiceName });
           console.log(`Voice set to: \x1b[36m${voiceName}\x1b[0m`);
+        }
+        prompt();
+        return;
+      }
+
+      // ============================================
+      // Language Commands
+      // ============================================
+
+      if (trimmed === "/language") {
+        const { getLanguageManager } = await import("../i18n/index.js");
+        const lm = getLanguageManager();
+        const lang = lm.getActiveLanguage();
+        console.log(`\n\x1b[36mCurrent Language:\x1b[0m ${lang.name} (${lang.nativeName})`);
+        console.log(`  Code: ${lang.code}`);
+        console.log(`\n  Use \x1b[36m/language <code>\x1b[0m to change`);
+        console.log(`  Use \x1b[36m/languages\x1b[0m to see all options\n`);
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/languages") {
+        const { getLanguageManager } = await import("../i18n/index.js");
+        const lm = getLanguageManager();
+        const current = lm.getLanguageCode();
+        const languages = lm.listLanguages();
+
+        console.log(`\n\x1b[36mSupported Languages:\x1b[0m\n`);
+        for (const lang of languages) {
+          const marker = lang.code === current ? " \x1b[32m← current\x1b[0m" : "";
+          console.log(`  ${lang.code.padEnd(6)} ${lang.name.padEnd(25)} ${lang.nativeName}${marker}`);
+        }
+        console.log(`\n  Use \x1b[36m/language <code>\x1b[0m to switch\n`);
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/language ")) {
+        const code = trimmed.slice(10).trim().toLowerCase();
+        const { getLanguageManager } = await import("../i18n/index.js");
+        const lm = getLanguageManager();
+
+        if (lm.setLanguage(code)) {
+          const lang = lm.getActiveLanguage();
+          console.log(`\x1b[32mLanguage set to: ${lang.name} (${lang.nativeName})\x1b[0m`);
+          console.log(`  8gent will now respond in ${lang.name}.`);
+        } else {
+          console.log(`\x1b[31mUnknown language code: ${code}\x1b[0m`);
+          console.log(`  Use \x1b[36m/languages\x1b[0m to see available options.`);
         }
         prompt();
         return;
