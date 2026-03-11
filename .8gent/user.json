@@ -1,0 +1,71 @@
+{
+  "version": "0.1.0",
+  "onboardingComplete": false,
+  "completedSteps": [],
+  "lastPrompted": null,
+  "promptCount": 0,
+
+  "identity": {
+    "name": null,
+    "role": null,
+    "communicationStyle": null,
+    "language": "en"
+  },
+
+  "projects": {
+    "primary": null,
+    "all": [],
+    "descriptions": {}
+  },
+
+  "preferences": {
+    "voice": {
+      "enabled": false,
+      "engine": "system",
+      "voiceId": null
+    },
+    "model": {
+      "default": "glm-4.7-flash:latest",
+      "provider": "ollama",
+      "fallbacks": ["qwen2.5-coder:14b", "llama3:8b"],
+      "preferLocal": true
+    },
+    "git": {
+      "autoPush": false,
+      "autoCommit": true,
+      "branchPrefix": "8gent/",
+      "commitStyle": "conventional"
+    },
+    "autonomy": {
+      "askThreshold": "fatal-only",
+      "infiniteByDefault": false
+    }
+  },
+
+  "integrations": {
+    "github": {
+      "authenticated": false,
+      "username": null
+    },
+    "mcps": [],
+    "ollama": {
+      "available": false,
+      "models": []
+    },
+    "lmstudio": {
+      "available": false,
+      "models": []
+    }
+  },
+
+  "understanding": {
+    "confidenceScore": 0,
+    "areasUnclear": [
+      "identity",
+      "projects",
+      "preferences",
+      "integrations"
+    ],
+    "lastUpdated": null
+  }
+}
