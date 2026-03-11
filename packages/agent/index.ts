@@ -56,9 +56,40 @@ interface OllamaResponse {
 // System Prompt
 // ============================================
 
-const DEFAULT_SYSTEM_PROMPT = `You are 8gent, a powerful local AI coding assistant. You have FULL ACCESS to the filesystem, git, and GitHub CLI.
+const DEFAULT_SYSTEM_PROMPT = `You are 8gent, an AUTONOMOUS AI coding agent powered by the BMAD Method.
 
-IMPORTANT: You CAN and SHOULD use tools. Never say "I don't have access" - you DO.
+## BMAD METHOD (Breakthrough Method of Agile AI-driven Development)
+
+Before executing ANY task, follow this process:
+
+### Step 1: CLASSIFY (think first)
+- Trivial (1-2 files): Execute directly
+- Small (2-5 files): Quick plan, then execute
+- Medium (5-10 files): Write plan, execute step by step
+- Large (10+ files): Full breakdown into stories
+
+### Step 2: PLAN (output your plan)
+Write a brief plan as your FIRST response:
+"PLAN: 1) scaffold project 2) create landing page 3) create about page 4) add theme toggle 5) git commit"
+
+### Step 3: EXECUTE (one step at a time)
+- Complete ONE step fully before moving to next
+- VERIFY each step worked (list_files, read_file)
+- If step fails, try alternative approach ONCE, then move on
+
+### Step 4: COMMIT (git after each major step)
+- git_add + git_commit after completing each feature
+
+## CRITICAL BEHAVIOR RULES
+1. ALWAYS output a PLAN first for multi-step tasks
+2. NEVER give instructions or tutorials. USE TOOLS to do the work yourself.
+3. NEVER show code blocks to the user. WRITE files directly with write_file.
+4. NEVER ask "would you like me to..." - just DO IT.
+5. Execute ONE tool at a time. Wait for result before next tool.
+6. If a tool fails twice, SKIP IT and continue with next step.
+
+WRONG: "Here's the code..." or "You can create..."
+RIGHT: "PLAN: 1) create app 2) add pages 3) commit" then {"tool": "run_command", ...}
 
 ## Tool Format
 
@@ -121,12 +152,33 @@ Output ONLY this JSON to use a tool:
 - run_command: Run any shell command
   {"tool": "run_command", "arguments": {"command": "npm test"}}
 
-## Rules
-1. Use get_outline before reading full files (saves tokens)
-2. "This repo" means current working directory
-3. Be concise. Act first, explain after.
-4. For multi-step tasks, execute tools one at a time.
-5. After edits, verify with git_status or read_file.`;
+## Error Recovery (CRITICAL)
+If a command fails or times out:
+1. NEVER retry the exact same command
+2. Try an alternative approach:
+   - npx hangs? Use "bun create" or "npm init" instead
+   - create-next-app fails? Use "bun create next-app . --yes" (non-interactive)
+   - npm install hangs? Use "bun install" instead
+   - Interactive prompts? Add --yes, -y, or --no-input flags
+3. If a tool errors 2x, try a completely different strategy
+4. You can manually create files instead of using scaffolding tools
+
+## Rules (BMAD Workflow)
+1. PLAN FIRST. Output "PLAN: 1) ... 2) ... 3) ..." before any tool use.
+2. ONE STEP AT A TIME. Complete and verify each step before next.
+3. VERIFY SUCCESS. Use list_files or read_file after creating files.
+4. FAIL FAST. If step fails twice, skip and continue.
+5. COMMIT OFTEN. git_add + git_commit after each feature.
+6. Prefer bun over npm/npx for speed.
+7. NEVER output code blocks. Use write_file tool.
+8. Use get_outline before reading full files (saves tokens).
+
+## Example BMAD Workflow
+User: "Build a Next.js site with landing and about pages"
+You respond:
+"PLAN: 1) scaffold Next.js 2) create landing page 3) create about page 4) git init and commit"
+Then immediately:
+{"tool": "run_command", "arguments": {"command": "bun create next-app . --yes"}}`;
 
 // ============================================
 // Ollama Client
@@ -416,19 +468,56 @@ class ToolExecutor {
   }
 
   private async runCommand(command: string): Promise<string> {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
+    const { spawn } = await import("child_process");
 
-    try {
-      const { stdout, stderr } = await execAsync(command, {
-        cwd: this.workingDirectory,
-        timeout: 30000,
-      });
-      return stdout || stderr || "Command completed successfully.";
-    } catch (err: any) {
-      return `Error: ${err.message}\n${err.stderr || ""}`;
+    // Auto-add --yes flags for known interactive commands
+    let finalCommand = command;
+    if (command.includes('create-next-app') && !command.includes('--yes')) {
+      finalCommand = command.replace('create-next-app', 'create-next-app --yes');
     }
+    if (command.includes('npm init') && !command.includes('-y')) {
+      finalCommand = command + ' -y';
+    }
+
+    return new Promise((resolve) => {
+      const proc = spawn('sh', ['-c', finalCommand], {
+        cwd: this.workingDirectory,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      // Auto-answer interactive prompts with defaults (Enter key)
+      const stdinInterval = setInterval(() => {
+        try { proc.stdin.write('\n'); } catch {}
+      }, 1000);
+
+      proc.stdout.on('data', (data) => { stdout += data.toString(); });
+      proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+      const timeout = setTimeout(() => {
+        clearInterval(stdinInterval);
+        proc.kill('SIGTERM');
+        resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`);
+      }, 120000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        clearInterval(stdinInterval);
+        if (code === 0) {
+          resolve(stdout || stderr || "Command completed successfully.");
+        } else {
+          resolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        clearInterval(stdinInterval);
+        resolve(`Error: ${err.message}`);
+      });
+    });
   }
 
   private async listFiles(dirPath: string = ".", pattern?: string): Promise<string> {
@@ -474,7 +563,7 @@ export class Agent {
     this.messages.push({ role: "user", content: userMessage });
 
     let turns = 0;
-    const maxTurns = this.config.maxTurns || 10;
+    const maxTurns = this.config.maxTurns || 20; // Increased for complex scaffolding tasks
 
     while (turns < maxTurns) {
       turns++;
@@ -513,7 +602,58 @@ export class Agent {
   }
 
   private parseToolCall(content: string): ToolCall | null {
-    // Look for JSON tool call in response
+    // Method 1: Look for simple tool call pattern {"tool": "name", "arguments": {...}}
+    // This handles inline JSON
+    const simpleMatch = content.match(/\{"tool"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{[^}]+\})\s*\}/);
+    if (simpleMatch) {
+      try {
+        return {
+          id: Date.now().toString(),
+          name: simpleMatch[1],
+          arguments: JSON.parse(simpleMatch[2]),
+        };
+      } catch {
+        // Arguments parsing failed
+      }
+    }
+
+    // Method 2: Extract tool name and arguments separately for complex content
+    const toolMatch = content.match(/"tool"\s*:\s*"(\w+)"/);
+    const argsMatch = content.match(/"arguments"\s*:\s*\{([^]*?)\}\s*\}/);
+
+    if (toolMatch && toolMatch[1]) {
+      const toolName = toolMatch[1];
+      let args: Record<string, unknown> = {};
+
+      // Special handling for write_file with multiline content
+      if (toolName === "write_file") {
+        const pathMatch = content.match(/"path"\s*:\s*"([^"]+)"/);
+        // For content, extract everything between "content": and the closing
+        const contentMatch = content.match(/"content"\s*:\s*[`"]([\s\S]*?)[`"]\s*\}/);
+        if (pathMatch) {
+          args = {
+            path: pathMatch[1],
+            content: contentMatch ? contentMatch[1] : "",
+          };
+        }
+      } else if (argsMatch) {
+        try {
+          args = JSON.parse(`{${argsMatch[1]}}`);
+        } catch {
+          // Try to extract individual args
+          const commandMatch = content.match(/"command"\s*:\s*"([^"]+)"/);
+          if (commandMatch) args = { command: commandMatch[1] };
+        }
+      }
+
+      return {
+        id: Date.now().toString(),
+        name: toolName,
+        arguments: args,
+      };
+    }
+
+    // Method 3: Code fence with clean JSON
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       try {
@@ -526,22 +666,8 @@ export class Agent {
           };
         }
       } catch {
-        // Not valid JSON
+        // Not valid JSON, try the extraction method above
       }
-    }
-
-    // Try raw JSON
-    try {
-      const parsed = JSON.parse(content.trim());
-      if (parsed.tool) {
-        return {
-          id: Date.now().toString(),
-          name: parsed.tool,
-          arguments: parsed.arguments || {},
-        };
-      }
-    } catch {
-      // Not JSON
     }
 
     return null;
@@ -553,6 +679,23 @@ export class Agent {
 
   clearHistory(): void {
     this.messages = [this.messages[0]]; // Keep system prompt
+  }
+
+  getModel(): string {
+    return this.config.model;
+  }
+
+  setModel(model: string): void {
+    this.config.model = model;
+    this.client = new OllamaClient(model);
+  }
+
+  getHistoryLength(): number {
+    return this.messages.length;
+  }
+
+  getWorkingDirectory(): string {
+    return this.executor["workingDirectory"];
   }
 }
 
@@ -570,7 +713,7 @@ export async function startREPL(config?: Partial<AgentConfig>) {
   }
 
   const finalConfig: AgentConfig = {
-    model: config?.model || savedConfig.model || "qwen2.5-coder:7b",
+    model: config?.model || savedConfig.model || "glm-4.7-flash:latest",
     runtime: "ollama",
     workingDirectory: config?.workingDirectory || process.cwd(),
     ...config,
@@ -633,16 +776,79 @@ Type your request, or:
 
       if (trimmed === "/help") {
         console.log(`
-Commands:
-  /help     - Show this help
-  /clear    - Clear conversation history
-  /quit     - Exit 8gent
+\x1b[36m8gent Commands:\x1b[0m
 
-Tips:
+\x1b[33mBasic:\x1b[0m
+  /help       - Show this help
+  /clear      - Clear conversation history
+  /quit       - Exit 8gent
+
+\x1b[33mModel:\x1b[0m
+  /model              - Show current model
+  /model <name>       - Switch model (e.g., /model qwen3:14b)
+  /models             - List available Ollama models
+
+\x1b[33mBMAD Planning:\x1b[0m
+  /plan <task>        - Create a plan without executing
+  /status             - Show current task status
+
+\x1b[33mTips:\x1b[0m
   - Ask to explore code: "What functions are in src/index.ts?"
-  - Ask to modify code: "Add error handling to the login function"
-  - Ask to run tests: "Run the test suite"
+  - Ask to build something: "Build a React component for..."
+  - Ask to fix code: "Fix the bug in the login function"
 `);
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/model") {
+        console.log(`Current model: \x1b[36m${agent.getModel()}\x1b[0m`);
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/model ")) {
+        const newModel = trimmed.slice(7).trim();
+        agent.setModel(newModel);
+        console.log(`Switched to model: \x1b[36m${newModel}\x1b[0m`);
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/models") {
+        try {
+          const response = await fetch("http://localhost:11434/api/tags");
+          const data = await response.json();
+          console.log("\x1b[36mAvailable models:\x1b[0m");
+          for (const model of data.models || []) {
+            console.log(`  - ${model.name} (${(model.size / 1e9).toFixed(1)}GB)`);
+          }
+        } catch {
+          console.log("Could not fetch models. Is Ollama running?");
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/plan ")) {
+        const task = trimmed.slice(6).trim();
+        console.log(`\n\x1b[33mCreating plan for:\x1b[0m ${task}\n`);
+        const planPrompt = `Create a PLAN ONLY (do not execute) for: ${task}\nOutput format: PLAN: 1) ... 2) ... 3) ...`;
+        try {
+          const response = await agent.chat(planPrompt);
+          console.log(`\n\x1b[32m${response}\x1b[0m`);
+        } catch (err) {
+          console.error(`\x1b[31mError: ${err}\x1b[0m`);
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/status") {
+        console.log(`\n\x1b[36m8gent Status:\x1b[0m`);
+        console.log(`  Model: ${agent.getModel()}`);
+        console.log(`  Working Dir: ${process.cwd()}`);
+        console.log(`  History: ${agent.getHistoryLength()} messages`);
         prompt();
         return;
       }
@@ -663,5 +869,33 @@ Tips:
 
 // Run REPL if executed directly
 if (import.meta.main) {
-  startREPL();
+  // Check for CLI argument for non-interactive mode
+  const args = process.argv.slice(2);
+  if (args.length > 0 && args[0] !== "--interactive") {
+    // Non-interactive mode: run single prompt and exit
+    const promptText = args.join(" ");
+    (async () => {
+      const config: AgentConfig = {
+        model: process.env.EIGHGENT_MODEL || "glm-4.7-flash:latest",
+        runtime: "ollama",
+        workingDirectory: process.cwd(),
+        maxTurns: 30,
+      };
+      const agent = new Agent(config);
+      if (!(await agent.isReady())) {
+        console.error("Ollama is not running");
+        process.exit(1);
+      }
+      console.log(`\n🎯 Task: ${promptText}\n`);
+      try {
+        const response = await agent.chat(promptText);
+        console.log(`\n✅ Result:\n${response}`);
+      } catch (err) {
+        console.error(`❌ Error: ${err}`);
+      }
+      process.exit(0);
+    })();
+  } else {
+    startREPL();
+  }
 }
