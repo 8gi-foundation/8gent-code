@@ -146,6 +146,15 @@ interface OllamaResponse {
     }[];
   };
   done: boolean;
+  // Token usage (from Ollama or OpenAI-compatible APIs)
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    // Ollama-specific fields
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
 }
 
 // ============================================
@@ -420,7 +429,21 @@ class OllamaClient {
       throw new Error(`Ollama error: ${response.statusText}`);
     }
 
-    return response.json();
+    const data = await response.json();
+
+    // Ollama returns prompt_eval_count and eval_count for token usage
+    // Normalize to our usage format
+    return {
+      ...data,
+      usage: {
+        prompt_tokens: data.prompt_eval_count,
+        completion_tokens: data.eval_count,
+        total_tokens: (data.prompt_eval_count || 0) + (data.eval_count || 0),
+        // Keep original fields too
+        prompt_eval_count: data.prompt_eval_count,
+        eval_count: data.eval_count,
+      },
+    };
   }
 
   async generate(prompt: string): Promise<string> {
@@ -506,6 +529,12 @@ class LMStudioClient {
         })),
       },
       done: true,
+      // Extract usage from OpenAI response
+      usage: data.usage ? {
+        prompt_tokens: data.usage.prompt_tokens,
+        completion_tokens: data.usage.completion_tokens,
+        total_tokens: data.usage.total_tokens,
+      } : undefined,
     };
   }
 
@@ -1560,33 +1589,25 @@ export class Agent {
     });
 
     // Auto-register voice completion hook (voice is ON by default)
-    this.setupDefaultHooks();
-  }
-
-  /**
-   * Setup default hooks including voice
-   */
-  private async setupDefaultHooks(): Promise<void> {
-    try {
-      const { setupVoiceHook, voiceCompletionHook } = await import("../hooks/voice.js");
-
-      // Register the voice hook for onComplete events
-      this.hookManager.registerHook({
-        type: "onComplete",
-        name: "Voice Completion",
-        description: "Speaks task completion summary using TTS (enabled by default)",
-        mode: "function",
-        functionBody: `
-          const { voiceCompletionHook } = await import("../hooks/voice.js");
-          await voiceCompletionHook(context);
-        `,
-        enabled: true,
-        async: true,
-        continueOnError: true,
-      });
-    } catch (err) {
-      // Voice is optional - silently fail
-    }
+    // Uses shell mode with macOS `say` command - works synchronously at registration
+    this.hookManager.registerHook({
+      type: "onComplete",
+      name: "Voice Completion",
+      description: "Speaks task completion summary using TTS (enabled by default)",
+      mode: "shell",
+      // Extract completion message and speak it via macOS say
+      // The {result} variable contains the agent's final output
+      command: `
+        MSG=$(echo "{result}" | grep -o '🎯 COMPLETED:.*' | head -1 | sed 's/🎯 COMPLETED: *//' | cut -c1-300)
+        if [ -z "$MSG" ]; then
+          MSG="Task complete. The Infinite Gentleman has delivered."
+        fi
+        say -v Daniel -r 200 "$MSG" &
+      `,
+      enabled: true,
+      async: true,
+      continueOnError: true,
+    });
   }
 
   async chat(userMessage: string): Promise<string> {
@@ -1605,6 +1626,9 @@ export class Agent {
     const maxTurns = this.config.maxTurns || 20; // Increased for complex scaffolding tasks
     const chatStartTime = Date.now();
 
+    // Track cumulative token usage
+    let totalTokensUsed = 0;
+
     // Get tool definitions to pass to LLM
     const tools = this.executor.getToolDefinitions();
 
@@ -1614,6 +1638,11 @@ export class Agent {
       // Get response from model with tool definitions
       const response = await this.client.chat(this.messages, tools);
       const content = response.message.content;
+
+      // Track token usage
+      if (response.usage?.total_tokens) {
+        totalTokensUsed += response.usage.total_tokens;
+      }
 
       // Check for tool calls in the response (supports multiple parallel calls)
       const toolCalls = this.parseToolCalls(content);
@@ -1722,6 +1751,10 @@ export class Agent {
         // Generate completion report
         let finalContent = content;
         if (this.reportingContext && this.enableReporting) {
+          // Set actual token usage before completing report
+          if (totalTokensUsed > 0) {
+            this.reportingContext.setTokensUsed(totalTokensUsed);
+          }
           this.reportingContext.setResult(content);
           const report = this.reportingContext.complete({ display: true, save: true });
 
@@ -1735,7 +1768,7 @@ export class Agent {
           sessionId: this.sessionId,
           result: finalContent,
           duration: Date.now() - chatStartTime,
-          tokenCount: content.length, // Approximate
+          tokenCount: totalTokensUsed || content.length, // Use actual tokens if available
           workingDirectory: this.config.workingDirectory || process.cwd(),
         });
 
