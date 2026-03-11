@@ -28,7 +28,6 @@ export function FadeIn({
   delay = 0,
   onComplete,
 }: FadeInProps) {
-  const [level, setLevel] = useState(0);
   const [started, setStarted] = useState(false);
 
   // Handle delay
@@ -39,30 +38,20 @@ export function FadeIn({
     return () => clearTimeout(timeout);
   }, [delay]);
 
-  // Fade in animation
+  // Trigger onComplete after duration
   useEffect(() => {
     if (!started) return;
 
-    if (level < FADE_LEVELS.length - 1) {
-      const stepDuration = duration / FADE_LEVELS.length;
-      const timeout = setTimeout(() => {
-        setLevel((prev) => prev + 1);
-      }, stepDuration);
-      return () => clearTimeout(timeout);
-    } else {
+    const timeout = setTimeout(() => {
       onComplete?.();
-    }
-  }, [level, started, duration, onComplete]);
+    }, duration);
+    return () => clearTimeout(timeout);
+  }, [started, duration, onComplete]);
 
   if (!started) return null;
 
-  const style = FADE_LEVELS[level];
-
-  return (
-    <Text dimColor={style.dimColor} color={style.color}>
-      {children}
-    </Text>
-  );
+  // Use Box wrapper to support any children type (Box, Text, etc.)
+  return <Box>{children}</Box>;
 }
 
 // Fade out component
@@ -79,33 +68,22 @@ export function FadeOut({
   trigger = false,
   onComplete,
 }: FadeOutProps) {
-  const [level, setLevel] = useState(FADE_LEVELS.length - 1);
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
     if (!trigger) return;
 
-    if (level > 0) {
-      const stepDuration = duration / FADE_LEVELS.length;
-      const timeout = setTimeout(() => {
-        setLevel((prev) => prev - 1);
-      }, stepDuration);
-      return () => clearTimeout(timeout);
-    } else {
+    const timeout = setTimeout(() => {
       setVisible(false);
       onComplete?.();
-    }
-  }, [level, trigger, duration, onComplete]);
+    }, duration);
+    return () => clearTimeout(timeout);
+  }, [trigger, duration, onComplete]);
 
   if (!visible) return null;
 
-  const style = FADE_LEVELS[level];
-
-  return (
-    <Text dimColor={style.dimColor} color={style.color}>
-      {children}
-    </Text>
-  );
+  // Use Box wrapper to support any children type (Box, Text, etc.)
+  return <Box>{children}</Box>;
 }
 
 // Slide in from left effect
@@ -154,7 +132,6 @@ interface PopInProps {
 }
 
 export function PopIn({ children, delay = 0 }: PopInProps) {
-  const [phase, setPhase] = useState(0);
   const [started, setStarted] = useState(false);
 
   useEffect(() => {
@@ -164,35 +141,10 @@ export function PopIn({ children, delay = 0 }: PopInProps) {
     return () => clearTimeout(timeout);
   }, [delay]);
 
-  useEffect(() => {
-    if (!started) return;
-
-    if (phase < 2) {
-      const timeout = setTimeout(() => {
-        setPhase((prev) => prev + 1);
-      }, 50);
-      return () => clearTimeout(timeout);
-    }
-  }, [phase, started]);
-
   if (!started) return null;
 
-  // Simulate pop by using bold/dimColor
-  if (phase === 0) {
-    return (
-      <Text dimColor color="gray">
-        {children}
-      </Text>
-    );
-  }
-  if (phase === 1) {
-    return (
-      <Text bold color="white">
-        {children}
-      </Text>
-    );
-  }
-  return <Text>{children}</Text>;
+  // Use Box wrapper to support any children type (Box, Text, etc.)
+  return <Box>{children}</Box>;
 }
 
 // Blink effect
@@ -223,11 +175,11 @@ export function Blink({
     return () => clearInterval(interval);
   }, [speed, times, count]);
 
-  return (
-    <Text color={visible ? color : "gray"} dimColor={!visible}>
-      {children}
-    </Text>
-  );
+  // Use Box wrapper to support any children type (Box, Text, etc.)
+  // Visibility is controlled by showing/hiding content
+  if (!visible) return null;
+
+  return <Box>{children}</Box>;
 }
 
 // Cascading fade for list items
