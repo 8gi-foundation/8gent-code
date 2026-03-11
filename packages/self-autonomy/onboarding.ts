@@ -7,9 +7,12 @@
  * A proper gentleman knows his employer.
  */
 
-import { execSync } from "child_process";
+import { exec } from "child_process";
+import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+
+const execAsync = promisify(exec);
 
 // ============================================
 // Types
@@ -437,45 +440,46 @@ export class OnboardingManager {
   }
 
   /**
-   * Detect available integrations
+   * Detect available integrations (non-blocking)
    */
   async detectIntegrations(): Promise<void> {
-    // Check Ollama
-    try {
-      const ollamaResult = execSync("ollama list 2>/dev/null", { encoding: "utf-8" });
-      const models = ollamaResult
-        .split("\n")
-        .slice(1)
-        .map((line) => line.split(/\s+/)[0])
-        .filter(Boolean);
-      this.user.integrations.ollama = { available: true, models };
-    } catch {
-      this.user.integrations.ollama = { available: false, models: [] };
-    }
+    // Run all checks in parallel, non-blocking
+    const checks = await Promise.allSettled([
+      // Check Ollama
+      execAsync("ollama list 2>/dev/null").then(({ stdout }) => {
+        const models = stdout
+          .split("\n")
+          .slice(1)
+          .map((line) => line.split(/\s+/)[0])
+          .filter(Boolean);
+        this.user.integrations.ollama = { available: true, models };
+      }).catch(() => {
+        this.user.integrations.ollama = { available: false, models: [] };
+      }),
 
-    // Check LM Studio
-    try {
-      const response = await fetch("http://localhost:1234/v1/models");
-      if (response.ok) {
-        const data = await response.json();
-        const models = data.data?.map((m: any) => m.id) || [];
-        this.user.integrations.lmstudio = { available: true, models };
-      }
-    } catch {
-      this.user.integrations.lmstudio = { available: false, models: [] };
-    }
+      // Check LM Studio
+      fetch("http://localhost:1234/v1/models", { signal: AbortSignal.timeout(2000) })
+        .then(async (response) => {
+          if (response.ok) {
+            const data = await response.json();
+            const models = data.data?.map((m: any) => m.id) || [];
+            this.user.integrations.lmstudio = { available: true, models };
+          }
+        }).catch(() => {
+          this.user.integrations.lmstudio = { available: false, models: [] };
+        }),
 
-    // Check GitHub
-    try {
-      const ghResult = execSync("gh auth status 2>&1", { encoding: "utf-8" });
-      const usernameMatch = ghResult.match(/Logged in to github.com account (\S+)/);
-      this.user.integrations.github = {
-        authenticated: true,
-        username: usernameMatch?.[1] || null,
-      };
-    } catch {
-      this.user.integrations.github = { authenticated: false, username: null };
-    }
+      // Check GitHub
+      execAsync("gh auth status 2>&1").then(({ stdout }) => {
+        const usernameMatch = stdout.match(/Logged in to github.com account (\S+)/);
+        this.user.integrations.github = {
+          authenticated: true,
+          username: usernameMatch?.[1] || null,
+        };
+      }).catch(() => {
+        this.user.integrations.github = { authenticated: false, username: null };
+      }),
+    ]);
 
     this.saveUserConfig();
   }

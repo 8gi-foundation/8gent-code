@@ -4,20 +4,17 @@
   "completedSteps": [],
   "lastPrompted": null,
   "promptCount": 0,
-
   "identity": {
     "name": null,
     "role": null,
     "communicationStyle": null,
     "language": "en"
   },
-
   "projects": {
     "primary": null,
     "all": [],
     "descriptions": {}
   },
-
   "preferences": {
     "voice": {
       "enabled": false,
@@ -27,7 +24,10 @@
     "model": {
       "default": "glm-4.7-flash:latest",
       "provider": "ollama",
-      "fallbacks": ["qwen2.5-coder:14b", "llama3:8b"],
+      "fallbacks": [
+        "qwen2.5-coder:14b",
+        "llama3:8b"
+      ],
       "preferLocal": true
     },
     "git": {
@@ -41,7 +41,6 @@
       "infiniteByDefault": false
     }
   },
-
   "integrations": {
     "github": {
       "authenticated": false,
@@ -49,15 +48,19 @@
     },
     "mcps": [],
     "ollama": {
-      "available": false,
-      "models": []
+      "available": true,
+      "models": [
+        "glm-4.7-flash:latest",
+        "qwen2.5-coder:14b-instruct-q4_K_M",
+        "qwen3:14b",
+        "nomic-embed-text:latest"
+      ]
     },
     "lmstudio": {
       "available": false,
       "models": []
     }
   },
-
   "understanding": {
     "confidenceScore": 0,
     "areasUnclear": [
