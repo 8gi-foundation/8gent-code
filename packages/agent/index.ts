@@ -1667,11 +1667,12 @@ Type your request, or:
   /reporting          - Toggle completion reports on/off
 
 \x1b[33mVoice:\x1b[0m
-  /voice              - Show voice status
-  /voice on           - Enable voice TTS
-  /voice off          - Disable voice TTS
+  /voice              - Show all voice settings
+  /voice on/off       - Enable/disable voice TTS
   /voice test         - Test voice output
-  /voice <name>       - Set voice (e.g., /voice Ava, /voice Samantha)
+  /voice <name>       - Set voice (Daniel, Alex, Tom, Oliver, etc.)
+  /voice rate <wpm>   - Set speech rate (100-300)
+  /voice voices       - List available voices
 
 \x1b[33mTips:\x1b[0m
   - Ask to explore code: "What functions are in src/index.ts?"
@@ -1828,11 +1829,22 @@ Type your request, or:
         const { getVoiceConfig } = await import("../hooks/voice.js");
         const config = getVoiceConfig();
         console.log(`
-\x1b[36mVoice Status:\x1b[0m
-  Enabled: ${config.enabled ? "\x1b[32mYes\x1b[0m" : "\x1b[33mNo\x1b[0m"}
-  Voice: ${config.voice}
-  Rate: ${config.rate} wpm
-  Max Length: ${config.maxLength} chars
+\x1b[36mVoice Settings:\x1b[0m
+  Enabled:   ${config.enabled ? "\x1b[32mYes\x1b[0m" : "\x1b[33mNo\x1b[0m"}
+  Voice:     \x1b[36m${config.voice}\x1b[0m
+  Rate:      ${config.rate} wpm
+  Max Chars: ${config.maxLength}
+  Fallback:  "${config.fallbackMessage.slice(0, 50)}${config.fallbackMessage.length > 50 ? '...' : ''}"
+
+\x1b[33mCommands:\x1b[0m
+  /voice on              Enable voice
+  /voice off             Disable voice
+  /voice test            Test voice output
+  /voice <name>          Set voice (Ava, Samantha, Alex, Daniel, Karen)
+  /voice rate <wpm>      Set speech rate (100-300, default 200)
+  /voice maxlength <n>   Set max chars to speak (default 350)
+  /voice fallback <msg>  Set fallback message
+  /voice voices          List available macOS voices
 `);
         prompt();
         return;
@@ -1867,9 +1879,72 @@ Type your request, or:
         return;
       }
 
+      if (trimmed === "/voice voices") {
+        console.log("\x1b[36mListing available voices...\x1b[0m");
+        try {
+          const { execSync } = await import("child_process");
+          const voices = execSync("say -v '?'", { encoding: "utf-8" });
+          const lines = voices.split("\n").filter(l => l.includes("en_")).slice(0, 20);
+          console.log("\x1b[33mEnglish voices:\x1b[0m");
+          for (const line of lines) {
+            const match = line.match(/^(\S+)\s+(\S+)/);
+            if (match) {
+              console.log(`  ${match[1]} (${match[2]})`);
+            }
+          }
+          console.log("\n  Run \x1b[36msay -v '?'\x1b[0m for full list");
+        } catch {
+          console.log("Could not list voices. macOS only.");
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/voice rate ")) {
+        const rateStr = trimmed.slice(12).trim();
+        const rate = parseInt(rateStr, 10);
+        if (isNaN(rate) || rate < 50 || rate > 400) {
+          console.log("\x1b[31mRate must be between 50-400 wpm\x1b[0m");
+        } else {
+          const { configureVoice } = await import("../hooks/voice.js");
+          configureVoice({ rate });
+          console.log(`Voice rate set to: \x1b[36m${rate} wpm\x1b[0m`);
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/voice maxlength ")) {
+        const lenStr = trimmed.slice(17).trim();
+        const maxLength = parseInt(lenStr, 10);
+        if (isNaN(maxLength) || maxLength < 50 || maxLength > 1000) {
+          console.log("\x1b[31mMax length must be between 50-1000 chars\x1b[0m");
+        } else {
+          const { configureVoice } = await import("../hooks/voice.js");
+          configureVoice({ maxLength });
+          console.log(`Max length set to: \x1b[36m${maxLength} chars\x1b[0m`);
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/voice fallback ")) {
+        const fallbackMessage = trimmed.slice(16).trim();
+        if (fallbackMessage.length < 5) {
+          console.log("\x1b[31mFallback message too short\x1b[0m");
+        } else {
+          const { configureVoice } = await import("../hooks/voice.js");
+          configureVoice({ fallbackMessage });
+          console.log(`Fallback message set to: \x1b[36m"${fallbackMessage}"\x1b[0m`);
+        }
+        prompt();
+        return;
+      }
+
       if (trimmed.startsWith("/voice ")) {
         const voiceName = trimmed.slice(7).trim();
-        if (voiceName && voiceName !== "on" && voiceName !== "off" && voiceName !== "test") {
+        const reserved = ["on", "off", "test", "voices", "rate", "maxlength", "fallback"];
+        if (voiceName && !reserved.some(r => voiceName.startsWith(r))) {
           const { configureVoice } = await import("../hooks/voice.js");
           configureVoice({ voice: voiceName });
           console.log(`Voice set to: \x1b[36m${voiceName}\x1b[0m`);
