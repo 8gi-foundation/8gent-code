@@ -82,6 +82,23 @@ async function main() {
     return;
   }
 
+  // Check for --infinite flag (can be used with any command)
+  const hasInfiniteFlag = args.includes("--infinite") || args.includes("-i");
+  if (hasInfiniteFlag) {
+    // Import and enable infinite mode globally
+    const { enableInfiniteMode } = await import("../packages/permissions");
+    enableInfiniteMode();
+    // Remove the flag from args
+    const filteredArgs = args.filter(a => a !== "--infinite" && a !== "-i");
+    args.length = 0;
+    args.push(...filteredArgs);
+  }
+
+  // If just --infinite with no command, launch TUI in infinite mode
+  if (args.length === 0 && hasInfiniteFlag) {
+    args.push("tui");
+  }
+
   const command = args[0];
   const restArgs = args.slice(1);
 

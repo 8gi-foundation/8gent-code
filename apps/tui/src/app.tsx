@@ -34,6 +34,13 @@ import {
   type ProviderOption,
 } from "./components/select-input.js";
 
+// Import permission system for infinite mode
+import {
+  enableInfiniteMode,
+  disableInfiniteMode,
+  isInfiniteMode,
+} from "../../../packages/permissions/index.js";
+
 // ============================================
 // Types
 // ============================================
@@ -153,6 +160,9 @@ export function App({ initialCommand, args }: AppProps) {
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>("chat");
+
+  // Infinite mode state
+  const [infiniteModeActive, setInfiniteModeActive] = useState(false);
 
   // Model/Provider state
   const [currentModel, setCurrentModel] = useState("glm-4.7-flash:latest");
@@ -302,6 +312,27 @@ export function App({ initialCommand, args }: AppProps) {
 
         case "quit":
           exit();
+          break;
+
+        case "infinite":
+          // Toggle infinite mode - bypasses ALL permission checks
+          if (infiniteModeActive) {
+            disableInfiniteMode();
+            setInfiniteModeActive(false);
+            addSystemMessage(
+              "∞ INFINITE MODE DISABLED\n" +
+              "Permission checks will resume."
+            );
+          } else {
+            enableInfiniteMode();
+            setInfiniteModeActive(true);
+            addSystemMessage(
+              "∞ INFINITE MODE ENABLED\n" +
+              "All permissions bypassed. Autonomous execution until done.\n" +
+              "No questions, no crashes stop me, self-healing errors.\n\n" +
+              "Use /infinite again to disable."
+            );
+          }
           break;
 
         // Model selection - check if args provided
@@ -701,7 +732,7 @@ export function App({ initialCommand, args }: AppProps) {
           modelName={currentModel}
           runningAgents={isProcessing ? 1 : 0}
           totalAgents={1}
-          permissionMode="ask"
+          permissionMode={infiniteModeActive ? "infinite" : "ask"}
           tokensSaved={tokensSaved}
           currentBranch={currentBranch}
           startTime={startTime}
