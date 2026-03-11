@@ -28,11 +28,15 @@ export interface VoiceConfig {
 
 const DEFAULT_CONFIG: VoiceConfig = {
   enabled: true,
-  voice: "Ava", // macOS voice
+  voice: "Daniel", // macOS British male voice - fitting for The Infinite Gentleman
   rate: 200,
   maxLength: 350,
   fallbackMessage: "Task complete. The Infinite Gentleman has delivered.",
 };
+
+// Good voice options:
+// Male: Daniel (British), Alex (US), Tom (US), Oliver (British), Fred
+// Female: Ava, Samantha, Karen, Victoria, Fiona (Scottish)
 
 // ============================================
 // Voice Hook Manager
