@@ -53,3 +53,4 @@ benchmark-results.json
 package-lock.json
 yarn.lock
 .next/
+.history/
