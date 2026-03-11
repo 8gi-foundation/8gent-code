@@ -44,9 +44,7 @@ export function AnimatedSpinner({
 }: AnimatedSpinnerProps) {
   return (
     <Box>
-      <Text color={color}>
-        <Spinner type={type} />
-      </Text>
+      <Text color={color}><Spinner type={type} /></Text>
       <Text color="gray"> {label}</Text>
       {showDots && <ThinkingDots />}
     </Box>
@@ -106,11 +104,7 @@ export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
         return (
           <Box key={step}>
             {isComplete && <Text color="green">✓</Text>}
-            {isCurrent && (
-              <Text color="cyan">
-                <Spinner type="dots" />
-              </Text>
-            )}
+            {isCurrent && <Text color="cyan"><Spinner type="dots" /></Text>}
             {isPending && <Text color="gray">○</Text>}
             <Text color={isCurrent ? "white" : "gray"}> {step}</Text>
             {index < steps.length - 1 && <Text color="gray"> → </Text>}

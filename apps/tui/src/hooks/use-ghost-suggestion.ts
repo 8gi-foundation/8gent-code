@@ -73,15 +73,13 @@ export function useGhostSuggestion(
 
   // Generate suggestion based on current input
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      // Show empty-state suggestions when input is empty
-      if (!currentInput.trim()) {
-        const emptySuggestion = getEmptyStateSuggestion(planNextStep, isGitRepo);
-        setSuggestion(emptySuggestion);
-        setIsVisible(!!emptySuggestion);
-        return;
-      }
+    if (!currentInput.trim()) {
+      setSuggestion(null);
+      setIsVisible(false);
+      return;
+    }
 
+    const timeoutId = setTimeout(() => {
       const newSuggestion = findBestSuggestion(
         currentInput,
         planNextStep,
@@ -94,7 +92,7 @@ export function useGhostSuggestion(
     }, debounceMs);
 
     return () => clearTimeout(timeoutId);
-  }, [currentInput, planNextStep, historyPatterns, contextSuggestions, debounceMs, isGitRepo]);
+  }, [currentInput, planNextStep, historyPatterns, contextSuggestions, debounceMs]);
 
   // Accept the current suggestion
   const accept = useCallback((): string => {
