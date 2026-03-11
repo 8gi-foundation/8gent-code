@@ -180,6 +180,7 @@ export function App({ initialCommand, args }: AppProps) {
   ]);
   const [availableProviders] = useState<ProviderOption[]>([
     { name: "ollama", displayName: "Ollama (Local)", hasApiKey: true, enabled: true },
+    { name: "lmstudio", displayName: "LM Studio (Local)", hasApiKey: true, enabled: true },
     { name: "openrouter", displayName: "OpenRouter", hasApiKey: false, enabled: true },
     { name: "groq", displayName: "Groq", hasApiKey: false, enabled: true },
     { name: "openai", displayName: "OpenAI", hasApiKey: false, enabled: true },
@@ -247,17 +248,20 @@ export function App({ initialCommand, args }: AppProps) {
     ]);
   }, []);
 
-  // Initialize agent on mount and when model changes
+  // Initialize agent on mount and when model/provider changes
   useEffect(() => {
     const initAgent = async () => {
       try {
+        // Map provider to runtime
+        const runtime = currentProvider === "lmstudio" ? "lmstudio" : "ollama";
+
         const newAgent = new Agent({
           model: currentModel,
-          runtime: "ollama",
+          runtime: runtime as "ollama" | "lmstudio",
           workingDirectory: process.cwd(),
           maxTurns: 50,
         });
-        // Check if Ollama is available
+        // Check if provider is available
         const ready = await newAgent.isReady();
         if (ready) {
           setAgent(newAgent);
@@ -271,7 +275,7 @@ export function App({ initialCommand, args }: AppProps) {
       }
     };
     initAgent();
-  }, [currentModel]);
+  }, [currentModel, currentProvider]);
 
   // Handle slash commands
   const handleSlashCommand = useCallback(

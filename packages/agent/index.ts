@@ -127,7 +127,7 @@ interface ToolCall {
 
 interface AgentConfig {
   model: string;
-  runtime: "ollama";
+  runtime: "ollama" | "lmstudio";
   systemPrompt?: string;
   maxTurns?: number;
   workingDirectory?: string;
@@ -428,6 +428,114 @@ class OllamaClient {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+}
+
+// ============================================
+// LM Studio Client (OpenAI-compatible)
+// ============================================
+
+class LMStudioClient {
+  private baseUrl: string;
+  private model: string;
+  private apiKey: string;
+
+  constructor(model: string, baseUrl: string = "http://localhost:1234", apiKey: string = "lm-studio") {
+    this.model = model;
+    this.baseUrl = baseUrl;
+    this.apiKey = apiKey;
+  }
+
+  async chat(messages: Message[], tools?: object[]): Promise<OllamaResponse> {
+    const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+        tools,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LM Studio error: ${response.statusText} - ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    // Convert OpenAI response format to Ollama format for compatibility
+    return {
+      model: data.model || this.model,
+      message: {
+        role: data.choices?.[0]?.message?.role || "assistant",
+        content: data.choices?.[0]?.message?.content || "",
+        tool_calls: data.choices?.[0]?.message?.tool_calls?.map((tc: any) => ({
+          function: {
+            name: tc.function?.name,
+            arguments: tc.function?.arguments,
+          },
+        })),
+      },
+      done: true,
+    };
+  }
+
+  async generate(prompt: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/v1/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        prompt,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`LM Studio error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.text || "";
+  }
+
+  async isAvailable(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/models`, {
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+        },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async listModels(): Promise<string[]> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/models`, {
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+        },
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.data?.map((m: any) => m.id) || [];
+    } catch {
+      return [];
     }
   }
 }
@@ -1171,7 +1279,7 @@ class ToolExecutor {
 // ============================================
 
 export class Agent {
-  private client: OllamaClient;
+  private client: OllamaClient | LMStudioClient;
   private executor: ToolExecutor;
   private messages: Message[] = [];
   private config: AgentConfig;
@@ -1183,7 +1291,12 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config;
-    this.client = new OllamaClient(config.model);
+    // Create appropriate client based on runtime
+    if (config.runtime === "lmstudio") {
+      this.client = new LMStudioClient(config.model);
+    } else {
+      this.client = new OllamaClient(config.model);
+    }
     this.executor = new ToolExecutor(config.workingDirectory || process.cwd());
     this.hookManager = getHookManager();
     this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
