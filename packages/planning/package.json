@@ -1,0 +1,28 @@
+{
+  "name": "@8gent/planning",
+  "version": "0.1.0",
+  "description": "Proactive planning engine and avenue tracking for 8gent Code",
+  "main": "index.ts",
+  "types": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./index.ts",
+      "types": "./index.ts"
+    },
+    "./proactive-planner": {
+      "import": "./proactive-planner.ts",
+      "types": "./proactive-planner.ts"
+    },
+    "./avenue-tracker": {
+      "import": "./avenue-tracker.ts",
+      "types": "./avenue-tracker.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}
