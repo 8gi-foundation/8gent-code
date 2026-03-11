@@ -34,6 +34,12 @@ import {
   type SelectOption,
   type ProviderOption,
 } from "./components/select-input.js";
+import {
+  AnimationShowcase,
+  AnimationList,
+  isValidAnimation,
+  type AnimationType,
+} from "./components/animation-showcase.js";
 
 // Import permission system for infinite mode
 import {
@@ -66,7 +72,7 @@ export interface Message {
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
-type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding";
+type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -207,6 +213,9 @@ export function App({ initialCommand, args }: AppProps) {
   const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<string | null>(null);
+
+  // Animation showcase
+  const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
 
   // Handle keyboard shortcuts
   useInput((input, key) => {
@@ -501,6 +510,26 @@ export function App({ initialCommand, args }: AppProps) {
                 addSystemMessage("Onboarding complete. Let's begin.");
               }
             }
+          }
+          break;
+
+        case "animations":
+          // Show animation showcase
+          if (args.length > 0) {
+            const animName = args[0].toLowerCase();
+            if (isValidAnimation(animName)) {
+              setCurrentAnimation(animName);
+              setViewMode("animations");
+            } else {
+              addSystemMessage(
+                `Unknown animation: "${args[0]}"\n\n` +
+                "Available: matrix, fire, dna, stars, dots, glitch, confetti, wave, cube, gradient, all"
+              );
+            }
+          } else {
+            // Show animation list
+            setCurrentAnimation("all");
+            setViewMode("animations");
           }
           break;
 
@@ -952,6 +981,15 @@ export function App({ initialCommand, args }: AppProps) {
               soundEnabled={soundEnabled}
             />
           </Box>
+        );
+
+      case "animations":
+        // Animation showcase/gallery
+        return (
+          <AnimationShowcase
+            animation={currentAnimation}
+            onClose={() => setViewMode("chat")}
+          />
         );
 
       case "chat":
