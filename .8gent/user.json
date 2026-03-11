@@ -1,23 +1,34 @@
 {
   "version": "0.1.0",
-  "onboardingComplete": false,
-  "completedSteps": [],
-  "lastPrompted": null,
-  "promptCount": 0,
+  "onboardingComplete": true,
+  "completedSteps": [
+    "identity",
+    "role",
+    "projects",
+    "communication",
+    "language",
+    "model",
+    "voice",
+    "confirmation"
+  ],
+  "lastPrompted": "2026-03-11T22:39:14.058Z",
+  "promptCount": 8,
   "identity": {
-    "name": null,
-    "role": null,
-    "communicationStyle": null,
+    "name": "James",
+    "role": "creative technology",
+    "communicationStyle": "detailed",
     "language": "en"
   },
   "projects": {
-    "primary": null,
-    "all": [],
+    "primary": "Foodstackai myrseumeporftolio which then became 8gent-code 8gent.app 8gent jr ad 8gent world",
+    "all": [
+      "Foodstackai myrseumeporftolio which then became 8gent-code 8gent.app 8gent jr ad 8gent world"
+    ],
     "descriptions": {}
   },
   "preferences": {
     "voice": {
-      "enabled": false,
+      "enabled": true,
       "engine": "system",
       "voiceId": null
     },
@@ -62,13 +73,8 @@
     }
   },
   "understanding": {
-    "confidenceScore": 0,
-    "areasUnclear": [
-      "identity",
-      "projects",
-      "preferences",
-      "integrations"
-    ],
-    "lastUpdated": null
+    "confidenceScore": 0.7280000000000001,
+    "areasUnclear": [],
+    "lastUpdated": "2026-03-11T22:39:14.058Z"
   }
 }
