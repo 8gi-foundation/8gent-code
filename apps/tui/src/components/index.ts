@@ -120,3 +120,22 @@ export {
 export {
   EnhancedStatusBar,
 } from "./status-bar.js";
+
+// Selection inputs and dialogs
+export {
+  SelectInput,
+  ConfirmDialog,
+  QuickMenu,
+  ModelSelector,
+  ProviderSelector,
+} from "./select-input.js";
+export type {
+  SelectOption,
+  SelectInputProps,
+  ConfirmDialogProps,
+  QuickAction,
+  QuickMenuProps,
+  ModelSelectorProps,
+  ProviderOption,
+  ProviderSelectorProps,
+} from "./select-input.js";
