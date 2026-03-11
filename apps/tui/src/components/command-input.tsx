@@ -52,7 +52,10 @@ export type SlashCommand =
   | "provider"
   | "voice"
   | "language"
-  | "infinite";
+  | "infinite"
+  | "onboarding"
+  | "preferences"
+  | "skip";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -138,6 +141,24 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["inf", "∞"],
     description: "Enable infinite mode (autonomous until done)",
     usage: "/infinite [task]",
+  },
+  {
+    name: "onboarding",
+    aliases: ["onboard", "setup", "intro"],
+    description: "Start or restart personalization setup",
+    usage: "/onboarding",
+  },
+  {
+    name: "preferences",
+    aliases: ["prefs", "settings"],
+    description: "View or edit your preferences",
+    usage: "/preferences [category]",
+  },
+  {
+    name: "skip",
+    aliases: ["later"],
+    description: "Skip current onboarding question",
+    usage: "/skip [all]",
   },
 ];
 

@@ -659,6 +659,9 @@ export function createSelfAutonomy(workingDirectory?: string): SelfAutonomy {
   return new SelfAutonomy({ workingDirectory });
 }
 
+// Re-export onboarding
+export { OnboardingManager, type UserConfig, type OnboardingStep } from "./onboarding.js";
+
 export default {
   SelfAutonomy,
   AutoGit,
