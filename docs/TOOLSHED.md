@@ -16,51 +16,105 @@ The toolshed is the capability layer of 8gent. Inspired by Stripe's agent archit
 
 ---
 
-## Architecture
+## Architecture (v0.2.0)
 
 ```
 User
   ↓
 8gent CLI / TUI
   ↓
-Planner
+Proactive Planner (BMAD)
   ↓
-Workflow Engine
+Multi-Agent Orchestration
   ↓
 TOOLSHED
   ↓
-Execution Sandbox
+┌────────────────────────────────────────────────────┐
+│  MCP  │  LSP  │  Web  │  Shell  │  AST  │  FS    │
+│  PDF  │  Image │ Notebook │ Background │ Skills │
+└────────────────────────────────────────────────────┘
   ↓
-Codebase / Internet
+Evidence Collection & Validation
+  ↓
+Completion Report
 ```
 
 ---
 
-## Four Responsibilities
+## Tool Categories
 
-### 1. Tool Registry
+### Core Tools
 
-All tools register themselves:
+| Tool | Package | Description |
+|------|---------|-------------|
+| `read_file` | agent | Read file contents |
+| `write_file` | agent | Write file contents |
+| `edit_file` | agent | Edit file with find/replace |
+| `list_files` | agent | List directory contents |
+| `execute_command` | agent | Run shell commands |
+| `search_files` | agent | Glob/grep file search |
 
-```typescript
-register_tool({
-  name: "get_symbol",
-  description: "Retrieve a symbol by its AST path",
-  input_schema: {
-    repo: "string",
-    symbol_id: "string"
-  },
-  permissions: ["read:code"]
-})
-```
+### AST Tools
 
-The agent never loads every tool into context. Instead it queries:
+| Tool | Package | Description |
+|------|---------|-------------|
+| `get_outline` | ast-index | File symbol extraction |
+| `get_symbol` | ast-index | Single symbol retrieval |
+| `search_symbols` | ast-index | Cross-file symbol search |
 
-```typescript
-list_tools(capability: "code")
-```
+### MCP Tools
 
-### 2. Capability Discovery
+| Tool | Package | Description |
+|------|---------|-------------|
+| `mcp_connect` | mcp | Connect to MCP server |
+| `mcp_call` | mcp | Call MCP tool |
+| `mcp_list` | mcp | List MCP capabilities |
+
+### LSP Tools
+
+| Tool | Package | Description |
+|------|---------|-------------|
+| `lsp_definition` | lsp | Go to definition |
+| `lsp_references` | lsp | Find references |
+| `lsp_hover` | lsp | Get hover info |
+| `lsp_completion` | lsp | Get completions |
+| `lsp_diagnostics` | lsp | Get diagnostics |
+
+### Web Tools
+
+| Tool | Package | Description |
+|------|---------|-------------|
+| `web_search` | tools/web | Search the web |
+| `web_fetch` | tools/web | Fetch URL content |
+| `extract_content` | tools/web | Extract readable content |
+
+### Media Tools
+
+| Tool | Package | Description |
+|------|---------|-------------|
+| `read_image` | tools/image | Read and describe images |
+| `read_pdf` | tools/pdf | Extract PDF text |
+| `search_pdf` | tools/pdf | Search within PDFs |
+
+### Notebook Tools
+
+| Tool | Package | Description |
+|------|---------|-------------|
+| `read_notebook` | tools/notebook | Read Jupyter notebook |
+| `edit_cell` | tools/notebook | Edit notebook cell |
+| `run_cell` | tools/notebook | Execute notebook cell |
+
+### Background Tools
+
+| Tool | Package | Description |
+|------|---------|-------------|
+| `run_background` | tools/background | Run command in background |
+| `check_background` | tools/background | Check background task status |
+| `kill_background` | tools/background | Stop background task |
+
+---
+
+## Capability Discovery
 
 Tools are grouped by capability:
 
@@ -68,133 +122,18 @@ Tools are grouped by capability:
 |------------|-------------|
 | `code` | AST query, symbol edit, patch |
 | `code.symbol` | Symbol-specific operations |
-| `design` | UI components, animations |
-| `workflow` | Task automation |
+| `web` | Web search, URL fetch |
+| `media` | Image, PDF, notebook |
+| `mcp` | External tool integration |
+| `lsp` | Code intelligence |
+| `execution` | Shell, background tasks |
 | `repo` | Dependency graphs, file tree |
-| `github` | Open source intelligence |
-| `execution` | Test runners, builds |
 
 Example query:
 
 ```typescript
 toolshed.query(capability: "code.symbol")
-// Returns: get_symbol, edit_symbol, patch_symbol, trace_refs
-```
-
-### 3. Execution Isolation
-
-Tools run in sandbox environments.
-
-This protects:
-- Filesystem
-- Secrets
-- Repos
-- Runtime
-
-Implementation options:
-- Container sandbox (Docker)
-- Local runtime jail (Deno-style permissions)
-- Firecracker microVMs (future)
-
-### 4. Skill Accumulation
-
-Every new skill is just another tool. The system evolves:
-
-**v1 toolshed:**
-```
-grep, read_file, write_file
-```
-
-**v2:**
-```
-ast_query, symbol_edit, patch_symbol
-```
-
-**v3:**
-```
-component_lookup, animation_lookup, workflow_lookup
-```
-
-**v4:**
-```
-github_symbol_search, repo_dependency_graph
-```
-
-The agent becomes more capable without increasing prompt size.
-
----
-
-## Directory Structure
-
-```
-📂 toolshed/
-├── registry/
-│   ├── register.ts      # Tool registration
-│   └── discovery.ts     # Capability queries
-│
-├── tools/
-│   ├── code/
-│   │   ├── ast-query.ts
-│   │   ├── edit-symbol.ts
-│   │   └── patch.ts
-│   │
-│   ├── design/
-│   │   ├── get-component.ts
-│   │   └── get-animation.ts
-│   │
-│   ├── repo/
-│   │   └── dependency-graph.ts
-│   │
-│   ├── github/
-│   │   ├── search-symbol.ts
-│   │   └── repo-index.ts
-│   │
-│   └── execution/
-│       ├── run-tests.ts
-│       └── run-build.ts
-│
-├── sandbox/
-│   ├── container.ts
-│   └── runtime.ts
-│
-└── permissions/
-    └── policy.ts
-```
-
----
-
-## Tool Lifecycle
-
-```
-tool created
-    ↓
-registered with toolshed
-    ↓
-discoverable by capability
-    ↓
-agent calls tool
-    ↓
-tool executes in sandbox
-    ↓
-result returned
-```
-
----
-
-## Tool Schema
-
-Every tool follows this interface:
-
-```typescript
-interface Tool {
-  name: string;
-  description: string;
-  capability: string[];
-  input_schema: JSONSchema;
-  output_schema: JSONSchema;
-  permissions: Permission[];
-  execute: (input: unknown) => Promise<unknown>;
-}
+// Returns: get_outline, get_symbol, search_symbols
 ```
 
 ---
@@ -212,35 +151,108 @@ type Permission =
   | "exec:shell"     // Execute shell commands
   | "net:fetch"      // Make HTTP requests
   | "net:listen"     // Open ports
-  | "github:read"    // Read GitHub data
-  | "github:write"   // Write to GitHub
+  | "mcp:connect"    // Connect to MCP servers
+  | "lsp:connect"    // Connect to LSP servers
 ```
-
-The sandbox enforces these at runtime.
 
 ---
 
-## GitHub Intelligence Layer
+## Tool Registration
 
-Treat GitHub as a structured code database:
-
-```
-GitHub Index
-├── AST symbol map
-├── Dependency graphs
-└── Usage patterns
-```
-
-Tool example:
+All tools register themselves:
 
 ```typescript
-query_github_symbols({
-  query: "useQuery",
-  language: "typescript",
-  min_stars: 1000
-})
+register_tool({
+  name: "get_symbol",
+  description: "Retrieve a symbol by its AST path",
+  input_schema: {
+    repo: "string",
+    symbol_id: "string"
+  },
+  permissions: ["read:code"],
+  execute: async (input) => {
+    // Implementation
+  }
+});
 ```
 
-From the user's perspective: "the agent knows every library"
+The agent never loads every tool into context. Instead it queries by capability.
 
-Reality: structured retrieval.
+---
+
+## Multi-Agent Integration
+
+The toolshed supports parallel tool execution:
+
+```typescript
+// Execute tools in parallel
+const results = await Promise.all([
+  toolshed.execute("read_file", { path: "a.ts" }),
+  toolshed.execute("read_file", { path: "b.ts" }),
+  toolshed.execute("web_search", { query: "react hooks" })
+]);
+```
+
+---
+
+## Skill Accumulation
+
+Every new skill is just another tool. The system evolves:
+
+**v1:**
+```
+grep, read_file, write_file
+```
+
+**v2:**
+```
+ast_query, symbol_edit, patch_symbol
+```
+
+**v3 (current):**
+```
+mcp_connect, lsp_definition, web_search,
+read_pdf, read_image, run_background
+```
+
+The agent becomes more capable without increasing prompt size.
+
+---
+
+## Evidence Collection
+
+Tools integrate with the validation system:
+
+```typescript
+const result = await toolshed.execute("read_file", { path });
+
+evidenceCollector.addEvidence({
+  type: "file_read",
+  source: path,
+  content: result,
+  verified: true
+});
+```
+
+---
+
+## Directory Structure
+
+```
+📂 packages/
+├── toolshed/
+│   ├── index.ts            # Main registry
+│   └── discovery.ts        # Capability queries
+├── tools/
+│   ├── web.ts              # Web search/fetch
+│   ├── pdf.ts              # PDF extraction
+│   ├── image.ts            # Image reading
+│   ├── notebook.ts         # Jupyter notebooks
+│   └── background.ts       # Background tasks
+├── mcp/
+│   └── index.ts            # MCP client
+├── lsp/
+│   └── index.ts            # LSP client
+└── ast-index/
+    └── index.ts            # AST extraction
+```
