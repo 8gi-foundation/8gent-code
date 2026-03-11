@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "name": "8gent",
+  "personality": "The Infinite Gentleman",
+
+  "skills": {
+    "auto-git": {
+      "enabled": true,
+      "autoCommit": true,
+      "autoBranch": true,
+      "commitFrequency": "on-change",
+      "branchPrefix": "8gent/"
+    },
+    "self-modify": {
+      "enabled": true,
+      "requireTests": true,
+      "requireBranch": true,
+      "maxAttemptsBeforeGiveUp": 3
+    },
+    "self-heal": {
+      "enabled": true,
+      "maxRetries": 3,
+      "backoffMultiplier": 2,
+      "autoSwitchModel": true,
+      "autoSwitchTool": true
+    },
+    "session-memory": {
+      "enabled": true,
+      "contextTTL": "24h",
+      "maxEvolutionLogEntries": 1000
+    }
+  },
+
+  "autonomy": {
+    "askUserThreshold": "fatal-only",
+    "showInFeed": ["git", "heal", "self", "memory"],
+    "silentOperations": ["minor-commits", "retries"]
+  },
+
+  "git": {
+    "autoPush": false,
+    "requirePR": false,
+    "protectedBranches": ["main", "master", "production"],
+    "commitStyle": "conventional"
+  },
+
+  "models": {
+    "default": "glm-4.7-flash:latest",
+    "fallback": ["qwen2.5-coder:14b", "llama3:8b"],
+    "preferLocal": true
+  },
+
+  "safety": {
+    "maxSelfModifyPerSession": 10,
+    "requireSnapshotBeforeModify": true,
+    "neverModify": [
+      "packages/permissions/index.ts:checkPermission",
+      "packages/permissions/index.ts:isDangerous"
+    ]
+  }
+}

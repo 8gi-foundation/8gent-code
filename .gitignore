@@ -46,8 +46,13 @@ research.log
 # Benchmark results (regenerate with `8gent benchmark`)
 benchmark-results.json
 
-# 8gent local config
-.8gent/
+# 8gent local data (session-specific, not versioned)
+.8gent/context/
+.8gent/evolution.log
+
+# But DO include skills and config:
+# .8gent/skills/*.md
+# .8gent/config.json
 
 # Lock files (bun.lockb is binary, keep it)
 package-lock.json
