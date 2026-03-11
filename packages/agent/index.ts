@@ -1558,6 +1558,35 @@ export class Agent {
       sessionId: this.sessionId,
       workingDirectory: config.workingDirectory || process.cwd(),
     });
+
+    // Auto-register voice completion hook (voice is ON by default)
+    this.setupDefaultHooks();
+  }
+
+  /**
+   * Setup default hooks including voice
+   */
+  private async setupDefaultHooks(): Promise<void> {
+    try {
+      const { setupVoiceHook, voiceCompletionHook } = await import("../hooks/voice.js");
+
+      // Register the voice hook for onComplete events
+      this.hookManager.registerHook({
+        type: "onComplete",
+        name: "Voice Completion",
+        description: "Speaks task completion summary using TTS (enabled by default)",
+        mode: "function",
+        functionBody: `
+          const { voiceCompletionHook } = await import("../hooks/voice.js");
+          await voiceCompletionHook(context);
+        `,
+        enabled: true,
+        async: true,
+        continueOnError: true,
+      });
+    } catch (err) {
+      // Voice is optional - silently fail
+    }
   }
 
   async chat(userMessage: string): Promise<string> {
