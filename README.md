@@ -97,7 +97,9 @@ Enable faster reading by bolding the first half of each word:
 
 ```
 Normal:   The quick brown fox jumps over the lazy dog
-Bionic:   The qui**ck** bro**wn** fox jum**ps** ov**er** the la**zy** dog
+Bionic:   Th·e qui·ck bro·wn fox jum·ps ov·er the la·zy dog
+          ↑↑  ↑↑↑    ↑↑↑     ↑↑↑   ↑↑    ↑↑
+         (bold portions shown before the dot)
 ```
 
 Toggle with `/adhd` or `/adhd on|off`. Your brain will thank you.
@@ -146,6 +148,40 @@ User: Build a Next.js site with auth and dark mode
 │ 5. Add tests and verify                 │
 └─────────────────────────────────────────┘
 ```
+
+### 🔮 Foresight & Avenues
+
+8gent doesn't just execute—it *thinks ahead*. The gentleman anticipates.
+
+**Prediction System:**
+- Analyzes your current task to predict the next 3-5 logical steps
+- Shows upcoming work via `/predict` or `/next`
+- Ghost suggestions draw from predicted steps
+
+**Avenues Exploration:**
+- Before diving deep, 8gent briefly explores multiple approaches
+- Weighs trade-offs: performance vs complexity, speed vs maintainability
+- Presents options with gentlemanly candor via `/avenues`
+
+**Proactive Warnings:**
+```
+⚠️ Pardon the interruption, but I notice we're heading toward
+   a pattern that may accumulate technical debt:
+
+   → Adding a 4th boolean prop to <Button> suggests
+     it may be time for a variant-based API instead.
+
+   Shall I propose a refactor, or continue as planned?
+```
+
+**What 8gent watches for:**
+- 🐰 **Rabbit holes** — Scope creep without explicit planning
+- 💳 **Tech debt** — Quick fixes that compound over time
+- 🔄 **Circular dependencies** — Architecture smells
+- 📦 **Over-engineering** — Building for hypotheticals
+- ⚡ **Performance traps** — N+1 queries, unbounded loops
+
+The gentleman speaks plainly, but always with respect.
 
 ### 🎯 AST-First Code Navigation
 
