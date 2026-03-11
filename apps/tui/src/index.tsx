@@ -19,7 +19,7 @@ const command = args[0] || "repl";
 const hasInfiniteFlag = args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
 if (hasInfiniteFlag) {
   enableInfiniteMode();
-  console.log("\x1b[33m[∞ INFINITE MODE] All permissions bypassed\x1b[0m\n");
+  console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m\n");
 }
 
 // Filter out the flag from args passed to app
