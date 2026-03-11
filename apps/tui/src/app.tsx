@@ -320,22 +320,37 @@ export function App({ initialCommand, args }: AppProps) {
         const question = onboardingManager.getNextQuestion();
         if (question) {
           setCurrentOnboardingQuestion(question.question);
-          addSystemMessage(
-            "∞ Welcome to 8gent, The Infinite Gentleman.\n\n" +
-            "Before we begin, I'd like to learn about you.\n" +
-            "(Type /skip to skip any question, /skip all to skip onboarding)\n\n" +
-            question.question
-          );
+          // Use setMessages directly to avoid stale closure issue
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `onboard-${Date.now()}`,
+              role: "system" as const,
+              content: "∞ Welcome to 8gent, The Infinite Gentleman.\n\n" +
+                "Before we begin, I'd like to learn about you.\n" +
+                "(Type /skip to skip any question, /skip all to skip onboarding)\n\n" +
+                question.question,
+              timestamp: new Date(),
+            },
+          ]);
         }
       } else if (onboardingManager.shouldAskClarification()) {
         const clarification = onboardingManager.getClarificationQuestion();
         if (clarification) {
-          addSystemMessage(`Quick question: ${clarification}`);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `clarify-${Date.now()}`,
+              role: "system" as const,
+              content: `Quick question: ${clarification}`,
+              timestamp: new Date(),
+            },
+          ]);
         }
       }
     };
     checkOnboarding();
-  }, []);
+  }, [onboardingManager]);
 
   // Handle slash commands
   const handleSlashCommand = useCallback(
@@ -972,16 +987,20 @@ export function App({ initialCommand, args }: AppProps) {
         </Box>
       )}
 
-      {/* Status verb at top of input section */}
-      {isProcessing && (
-        <Box paddingX={1} marginBottom={1}>
+      {/* Status verb - always visible */}
+      <Box paddingX={1} marginBottom={1}>
+        {isProcessing ? (
           <AnimatedStatusVerb
             type={processingStage === "planning" ? "planning" : "executing"}
             showIcon={true}
             active={true}
           />
-        </Box>
-      )}
+        ) : (
+          <Text color="gray" dimColor>
+            <Text color="cyan">✦</Text> Awaiting your command...
+          </Text>
+        )}
+      </Box>
 
       {/* Top separator line */}
       <Box paddingX={1}>
