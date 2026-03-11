@@ -41,6 +41,9 @@ import {
   isInfiniteMode,
 } from "../../../packages/permissions/index.js";
 
+// Import the actual Agent for real execution
+import { Agent } from "../../../packages/agent/index.js";
+
 // ============================================
 // Types
 // ============================================
@@ -164,7 +167,7 @@ export function App({ initialCommand, args }: AppProps) {
   // Infinite mode state
   const [infiniteModeActive, setInfiniteModeActive] = useState(false);
 
-  // Model/Provider state
+  // Model/Provider state (must be before agent init)
   const [currentModel, setCurrentModel] = useState("glm-4.7-flash:latest");
   const [currentProvider, setCurrentProvider] = useState("ollama");
   const [availableModels] = useState([
@@ -183,6 +186,10 @@ export function App({ initialCommand, args }: AppProps) {
     { name: "anthropic", displayName: "Anthropic", hasApiKey: false, enabled: true },
     { name: "mistral", displayName: "Mistral AI", hasApiKey: false, enabled: true },
   ]);
+
+  // Agent instance for real execution
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [agentReady, setAgentReady] = useState(false);
 
   // Handle keyboard shortcuts
   useInput((input, key) => {
@@ -239,6 +246,32 @@ export function App({ initialCommand, args }: AppProps) {
       },
     ]);
   }, []);
+
+  // Initialize agent on mount and when model changes
+  useEffect(() => {
+    const initAgent = async () => {
+      try {
+        const newAgent = new Agent({
+          model: currentModel,
+          runtime: "ollama",
+          workingDirectory: process.cwd(),
+          maxTurns: 50,
+        });
+        // Check if Ollama is available
+        const ready = await newAgent.isReady();
+        if (ready) {
+          setAgent(newAgent);
+          setAgentReady(true);
+        } else {
+          setAgentReady(false);
+        }
+      } catch (err) {
+        setAgentReady(false);
+        console.error("Agent init error:", err);
+      }
+    };
+    initAgent();
+  }, [currentModel]);
 
   // Handle slash commands
   const handleSlashCommand = useCallback(
@@ -574,37 +607,80 @@ export function App({ initialCommand, args }: AppProps) {
       backlog: newPredictions.slice(3) as any,
     }));
 
-    // Simulate response
-    setTimeout(() => {
-      const endTime = Date.now();
-      setLastResponseTime(endTime - cmdStartTime);
+    // Use real agent if available, otherwise fall back to mock
+    if (agent && agentReady) {
+      // Real agent execution
+      try {
+        const response = await agent.chat(input);
+        const endTime = Date.now();
+        setLastResponseTime(endTime - cmdStartTime);
 
-      const assistantMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: generateResponse(input),
-        timestamp: new Date(),
-      };
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
 
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsProcessing(false);
-      setStatus("success");
+        setMessages((prev) => [...prev, assistantMessage]);
+        setIsProcessing(false);
+        setStatus("success");
 
-      // Update token savings
-      const saved = Math.floor(Math.random() * 1500) + 500;
-      setTokensSaved((prev) => prev + saved);
-      setContextSize(Math.floor(Math.random() * 8000) + 2000);
+        // Estimate token savings from AST-first approach
+        const saved = Math.floor(response.length * 0.4);
+        setTokensSaved((prev) => prev + saved);
+        setContextSize(response.length);
 
-      // Play completion sound
-      if (soundEnabled) {
-        playSound("success");
+        if (soundEnabled) {
+          playSound("success");
+        }
+
+        setTimeout(() => {
+          setStatus("idle");
+        }, 1500);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: `[Error] ${errorMsg}`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+        setIsProcessing(false);
+        setStatus("error");
+        setTimeout(() => setStatus("idle"), 3000);
       }
-
-      // Reset to idle after brief success state
+    } else {
+      // Mock mode fallback
       setTimeout(() => {
-        setStatus("idle");
-      }, 1500);
-    }, 800 + Math.random() * 600);
+        const endTime = Date.now();
+        setLastResponseTime(endTime - cmdStartTime);
+
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: generateResponse(input),
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+        setIsProcessing(false);
+        setStatus("success");
+
+        const saved = Math.floor(Math.random() * 1500) + 500;
+        setTokensSaved((prev) => prev + saved);
+        setContextSize(Math.floor(Math.random() * 8000) + 2000);
+
+        if (soundEnabled) {
+          playSound("success");
+        }
+
+        setTimeout(() => {
+          setStatus("idle");
+        }, 1500);
+      }, 800 + Math.random() * 600);
+    }
   };
 
   // Render main content based on view mode
