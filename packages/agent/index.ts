@@ -2815,7 +2815,7 @@ if (import.meta.main) {
         process.exit(1);
       }
       if (hasInfiniteFlag) {
-        console.log(`\n∞ INFINITE MODE - Autonomous until done`);
+        console.log(`\n∞ Infinite Loop mode enabled - Autonomous until done`);
       }
       console.log(`\n🎯 Task: ${promptText}\n`);
       try {
@@ -2828,7 +2828,7 @@ if (import.meta.main) {
     })();
   } else if (args.length === 0 && hasInfiniteFlag) {
     // Just --infinite with no task, start REPL in infinite mode
-    console.log(`\n∞ INFINITE MODE - All permissions bypassed\n`);
+    console.log(`\n∞ Infinite Loop mode enabled - All permissions bypassed\n`);
     startREPL();
   } else {
     startREPL();
