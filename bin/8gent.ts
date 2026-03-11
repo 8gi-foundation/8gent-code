@@ -83,13 +83,14 @@ async function main() {
   }
 
   // Check for --infinite flag (can be used with any command)
-  const hasInfiniteFlag = args.includes("--infinite") || args.includes("-i");
+  // Supports: --infinite, -infinite, -i
+  const hasInfiniteFlag = args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
   if (hasInfiniteFlag) {
     // Import and enable infinite mode globally
     const { enableInfiniteMode } = await import("../packages/permissions");
     enableInfiniteMode();
     // Remove the flag from args
-    const filteredArgs = args.filter(a => a !== "--infinite" && a !== "-i");
+    const filteredArgs = args.filter(a => a !== "--infinite" && a !== "-infinite" && a !== "-i");
     args.length = 0;
     args.push(...filteredArgs);
   }
