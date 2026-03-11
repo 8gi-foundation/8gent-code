@@ -309,13 +309,20 @@ export function CommandInput({
             value={value}
             onChange={setValue}
             onSubmit={handleSubmit}
-            placeholder={isVisible ? "" : "Type a command or ask a question..."}
+            placeholder={isVisible && suggestion?.metadata?.emptyState ? "" : "Type a command or ask a question..."}
           />
 
           {/* Ghost suggestion text */}
           {isVisible && suggestion && (
             <Text color="gray" dimColor>
-              {suggestion.text}
+              {suggestion.metadata?.emptyState ? (
+                <Text>
+                  <Text color="cyan">try: </Text>
+                  {suggestion.text}
+                </Text>
+              ) : (
+                suggestion.text
+              )}
             </Text>
           )}
         </Box>
@@ -326,7 +333,9 @@ export function CommandInput({
         <Box paddingLeft={2}>
           <Text color="gray" dimColor>
             <Text color="blue">[Tab]</Text> to accept{" "}
-            <Text color="gray">({getSuggestionSourceLabel(suggestion.source)})</Text>
+            <Text color="gray">
+              ({suggestion.metadata?.emptyState ? "suggestion" : getSuggestionSourceLabel(suggestion.source)})
+            </Text>
           </Text>
         </Box>
       )}

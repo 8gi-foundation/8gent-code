@@ -73,13 +73,15 @@ export function useGhostSuggestion(
 
   // Generate suggestion based on current input
   useEffect(() => {
-    if (!currentInput.trim()) {
-      setSuggestion(null);
-      setIsVisible(false);
-      return;
-    }
-
     const timeoutId = setTimeout(() => {
+      // Show empty-state suggestions when input is empty
+      if (!currentInput.trim()) {
+        const emptySuggestion = getEmptyStateSuggestion(planNextStep, isGitRepo);
+        setSuggestion(emptySuggestion);
+        setIsVisible(!!emptySuggestion);
+        return;
+      }
+
       const newSuggestion = findBestSuggestion(
         currentInput,
         planNextStep,
@@ -92,7 +94,7 @@ export function useGhostSuggestion(
     }, debounceMs);
 
     return () => clearTimeout(timeoutId);
-  }, [currentInput, planNextStep, historyPatterns, contextSuggestions, debounceMs]);
+  }, [currentInput, planNextStep, historyPatterns, contextSuggestions, debounceMs, isGitRepo]);
 
   // Accept the current suggestion
   const accept = useCallback((): string => {
@@ -237,6 +239,61 @@ function buildContextSuggestions(
   );
 
   return suggestions;
+}
+
+// Empty state suggestions when no input
+const EMPTY_STATE_SUGGESTIONS = [
+  "build a landing page",
+  "fix the bug in...",
+  "add a new feature to...",
+  "refactor the authentication",
+  "create a REST API",
+  "help me understand this codebase",
+  "add tests for...",
+  "what can you do?",
+  "/help",
+  "scaffold a new project",
+];
+
+function getEmptyStateSuggestion(
+  planNextStep: string | null,
+  isGitRepo: boolean
+): GhostSuggestion | null {
+  // If there's a plan step, suggest that first
+  if (planNextStep) {
+    return {
+      text: planNextStep,
+      source: "plan",
+      confidence: 0.9,
+      metadata: { emptyState: true },
+    };
+  }
+
+  // Git-specific suggestions
+  if (isGitRepo) {
+    const gitSuggestions = [
+      "git status",
+      "show me recent changes",
+      "commit my changes",
+      "create a new branch",
+    ];
+    const suggestion = gitSuggestions[Math.floor(Math.random() * gitSuggestions.length)];
+    return {
+      text: suggestion,
+      source: "context",
+      confidence: 0.5,
+      metadata: { emptyState: true },
+    };
+  }
+
+  // Random general suggestion
+  const suggestion = EMPTY_STATE_SUGGESTIONS[Math.floor(Math.random() * EMPTY_STATE_SUGGESTIONS.length)];
+  return {
+    text: suggestion,
+    source: "context",
+    confidence: 0.4,
+    metadata: { emptyState: true },
+  };
 }
 
 function findBestSuggestion(
