@@ -13,6 +13,7 @@ import type { Message } from "../app.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
 import { useCompletionSound } from "./sound-effects.js";
+import { useADHDMode, BionicText } from "./bionic-text.js";
 
 interface MessageListProps {
   messages: Message[];
@@ -165,6 +166,8 @@ function MessageContent({
   animate,
   onTypingComplete,
 }: MessageContentProps) {
+  const { enabled: adhdMode } = useADHDMode();
+
   // Only animate typing for new assistant messages
   const shouldAnimate = isNew && animate && role === "assistant";
 
@@ -187,14 +190,19 @@ function MessageContent({
 
   // Check for code blocks and format accordingly
   if (content.includes("```")) {
-    return <FormattedContent content={content} />;
+    return <FormattedContent content={content} adhdMode={adhdMode} />;
+  }
+
+  // Apply bionic reading if ADHD mode is enabled
+  if (adhdMode) {
+    return <BionicText>{content}</BionicText>;
   }
 
   return <Text wrap="wrap">{content}</Text>;
 }
 
 // Format content with code blocks
-function FormattedContent({ content }: { content: string }) {
+function FormattedContent({ content, adhdMode = false }: { content: string; adhdMode?: boolean }) {
   const parts = content.split(/(```[\s\S]*?```)/);
 
   return (
@@ -223,6 +231,10 @@ function FormattedContent({ content }: { content: string }) {
               </Box>
             );
           }
+        }
+        // Apply bionic reading to non-code parts if ADHD mode is enabled
+        if (adhdMode) {
+          return <BionicText key={index}>{part}</BionicText>;
         }
         return (
           <Text key={index} wrap="wrap">

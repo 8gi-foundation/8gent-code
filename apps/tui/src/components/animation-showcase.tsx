@@ -16,7 +16,6 @@ import {
   GlitchText,
   Confetti,
   Waveform,
-  RubiksCube,
   GradientWave,
 } from "./advanced-animations.js";
 
@@ -33,7 +32,6 @@ export type AnimationType =
   | "glitch"
   | "confetti"
   | "wave"
-  | "cube"
   | "gradient"
   | "all";
 
@@ -101,12 +99,6 @@ const ANIMATIONS: AnimationInfo[] = [
     name: "Audio Waveform",
     description: "Voice mode visualizer",
     component: <Waveform width={40} active />,
-  },
-  {
-    id: "cube",
-    name: "Rubik's Cube",
-    description: "3D rotating cube with colored faces",
-    component: <RubiksCube speed={150} />,
   },
   {
     id: "gradient",
