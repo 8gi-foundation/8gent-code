@@ -225,7 +225,7 @@ export class PermissionManager {
    */
   enableInfiniteMode(): void {
     this.infiniteMode = true;
-    console.log("\x1b[33m[∞ INFINITE MODE] All permissions bypassed\x1b[0m");
+    console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m");
   }
 
   /**
