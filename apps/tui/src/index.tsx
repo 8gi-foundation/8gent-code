@@ -15,15 +15,15 @@ import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 const args = process.argv.slice(2);
 const command = args[0] || "repl";
 
-// Check for --infinite flag
-const hasInfiniteFlag = args.includes("--infinite") || args.includes("-i");
+// Check for --infinite flag (supports --infinite, -infinite, -i)
+const hasInfiniteFlag = args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
 if (hasInfiniteFlag) {
   enableInfiniteMode();
   console.log("\x1b[33m[∞ INFINITE MODE] All permissions bypassed\x1b[0m\n");
 }
 
 // Filter out the flag from args passed to app
-const filteredArgs = args.filter(a => a !== "--infinite" && a !== "-i");
+const filteredArgs = args.filter(a => a !== "--infinite" && a !== "-infinite" && a !== "-i");
 
 // Render the TUI
 render(<App initialCommand={command} args={filteredArgs.slice(1)} />);
