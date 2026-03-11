@@ -1666,6 +1666,13 @@ Type your request, or:
   /report <id>        - View a specific report
   /reporting          - Toggle completion reports on/off
 
+\x1b[33mVoice:\x1b[0m
+  /voice              - Show voice status
+  /voice on           - Enable voice TTS
+  /voice off          - Disable voice TTS
+  /voice test         - Test voice output
+  /voice <name>       - Set voice (e.g., /voice Ava, /voice Samantha)
+
 \x1b[33mTips:\x1b[0m
   - Ask to explore code: "What functions are in src/index.ts?"
   - Ask to build something: "Build a React component for..."
@@ -1809,6 +1816,64 @@ Type your request, or:
         const current = agent.isReportingEnabled();
         agent.setReportingEnabled(!current);
         console.log(`Completion reports: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`);
+        prompt();
+        return;
+      }
+
+      // ============================================
+      // Voice Commands
+      // ============================================
+
+      if (trimmed === "/voice") {
+        const { getVoiceConfig } = await import("../hooks/voice.js");
+        const config = getVoiceConfig();
+        console.log(`
+\x1b[36mVoice Status:\x1b[0m
+  Enabled: ${config.enabled ? "\x1b[32mYes\x1b[0m" : "\x1b[33mNo\x1b[0m"}
+  Voice: ${config.voice}
+  Rate: ${config.rate} wpm
+  Max Length: ${config.maxLength} chars
+`);
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/voice on") {
+        const { configureVoice } = await import("../hooks/voice.js");
+        configureVoice({ enabled: true });
+        console.log("\x1b[32mVoice enabled.\x1b[0m The Infinite Gentleman will speak.");
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/voice off") {
+        const { configureVoice } = await import("../hooks/voice.js");
+        configureVoice({ enabled: false });
+        console.log("\x1b[33mVoice disabled.\x1b[0m");
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/voice test") {
+        const { testVoice } = await import("../hooks/voice.js");
+        console.log("Testing voice...");
+        try {
+          await testVoice();
+          console.log("\x1b[32mVoice test complete.\x1b[0m");
+        } catch (err) {
+          console.log(`\x1b[31mVoice test failed: ${err}\x1b[0m`);
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/voice ")) {
+        const voiceName = trimmed.slice(7).trim();
+        if (voiceName && voiceName !== "on" && voiceName !== "off" && voiceName !== "test") {
+          const { configureVoice } = await import("../hooks/voice.js");
+          configureVoice({ voice: voiceName });
+          console.log(`Voice set to: \x1b[36m${voiceName}\x1b[0m`);
+        }
         prompt();
         return;
       }
