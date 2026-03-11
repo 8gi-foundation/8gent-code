@@ -43,7 +43,7 @@
 1. **Install Ollama:** https://ollama.ai
 2. **Pull a model:**
    ```bash
-   ollama pull glm4:latest  # or qwen2.5, llama3, mistral, etc.
+   ollama pull glm-4.7-flash:latest  # or qwen2.5, llama3, mistral, etc.
    ```
 
 ### Install

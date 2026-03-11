@@ -107,8 +107,8 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     displayName: "Ollama (Local)",
     baseUrl: "http://localhost:11434",
     apiKeyEnv: "", // No API key needed
-    defaultModel: "glm4:latest",
-    models: ["glm4:latest", "qwen2.5:14b", "llama3:8b", "mistral:7b", "codellama:13b"],
+    defaultModel: "glm-4.7-flash:latest",
+    models: ["glm-4.7-flash:latest", "qwen2.5:14b", "llama3:8b", "mistral:7b", "codellama:13b"],
     enabled: true,
     supportsTools: true,
     supportsStreaming: true,
@@ -271,7 +271,7 @@ export class ProviderManager {
         const saved = JSON.parse(data) as Partial<ProviderSettings>;
         return {
           activeProvider: saved.activeProvider || "ollama",
-          activeModel: saved.activeModel || "glm4:latest",
+          activeModel: saved.activeModel || "glm-4.7-flash:latest",
           providers: { ...this.getDefaultProviders(), ...saved.providers },
         };
       }
@@ -280,7 +280,7 @@ export class ProviderManager {
     }
     return {
       activeProvider: "ollama",
-      activeModel: "glm4:latest",
+      activeModel: "glm-4.7-flash:latest",
       providers: this.getDefaultProviders(),
     };
   }
