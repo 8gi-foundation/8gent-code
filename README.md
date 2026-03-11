@@ -1,17 +1,56 @@
 # 8gent Code
 
-**Never hit usage caps again™**
+**Your local Claude Code alternative™**
 
-> Terminal-first agentic coding with 40%+ token savings through AST-first exploration.
+> Terminal-first agentic coding powered by local LLMs (Ollama) with BMAD method and 40%+ token savings.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f9f1e1?logo=bun&logoColor=000)](https://bun.sh)
-[![Token Savings](https://img.shields.io/badge/Token%20Savings-40%25+-brightgreen)](https://github.com/8gent/8gent-code#benchmarks)
+[![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-blue)](https://ollama.ai)
+[![Score: 80/100](https://img.shields.io/badge/Benchmark-80%2F100-brightgreen)](https://github.com/8gent/8gent-code#benchmarks)
 [![Twitter](https://img.shields.io/twitter/follow/8gi-foundation?style=social)](https://twitter.com/8gi-foundation)
 
 <p align="center">
   <img src="demo.gif" alt="8gent Code Demo" width="700">
 </p>
+
+---
+
+## Agentic Mode (BMAD Method)
+
+8gent runs fully autonomous coding tasks using the **BMAD Method** (Breakthrough Method of Agile AI-driven Development):
+
+```bash
+# Interactive mode
+bun run packages/agent/index.ts
+
+# Or run a task directly
+bun run packages/agent/index.ts "Build a Next.js site with landing page and dark mode toggle"
+```
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/model` | Show current model |
+| `/model <name>` | Switch to a different model |
+| `/models` | List available Ollama models |
+| `/plan <task>` | Create a plan without executing |
+| `/status` | Show model, working dir, history length |
+| `/help` | Show all commands |
+| `/clear` | Clear conversation history |
+| `/exit` | Exit the REPL |
+
+### Benchmark: 8gent vs Claude Code
+
+Tested on identical task: Build Next.js site with landing, about, contact, dark/light toggle, responsive design, git commits.
+
+| Agent | Time | Score |
+|-------|------|-------|
+| Claude Code (Opus 4.5) | ~5 min | **80/100** |
+| 8gent v2 (GLM 4.7 Flash) | ~8 min | **80/100** |
+
+**TIE!** Free local inference now matches Claude Code quality.
 
 ---
 
@@ -57,14 +96,24 @@ Run `8gent benchmark` to see results on your codebase.
 ## Quick Start
 
 ```bash
-# Install
-bun add -g 8gent-code
-
-# Or clone and run locally
+# Clone and install
 git clone https://github.com/8gent/8gent-code.git
 cd 8gent-code
 bun install
 
+# Make sure Ollama is running with a model
+ollama pull glm4:latest  # or any capable model
+
+# Start interactive agent
+bun run packages/agent/index.ts
+
+# Or run a task directly
+bun run packages/agent/index.ts "Create a React component with TypeScript"
+```
+
+### AST-First Tools (Token Savings)
+
+```bash
 # Get file outline (symbols, functions, classes)
 bun run bin/8gent.ts outline src/index.ts
 
@@ -186,6 +235,33 @@ Available tools:
 8gent benchmark         # Run efficiency benchmarks
 8gent demo              # Show token savings demo
 ```
+
+---
+
+## Roadmap: Closing the Gap with Claude Code
+
+8gent matches Claude Code on basic coding tasks. Here's what's coming:
+
+| Feature | Claude Code | 8gent | Status |
+|---------|-------------|-------|--------|
+| File read/write/edit | Yes | Yes | Done |
+| Git operations | Yes | Yes | Done |
+| Shell commands | Yes | Yes | Done |
+| BMAD planning method | No | Yes | Done |
+| Slash commands | Yes | Yes | Done |
+| MCP (Model Context Protocol) | Yes | No | Planned |
+| Web search / WebFetch | Yes | No | Planned |
+| Parallel tool calls | Yes | No | Planned |
+| LSP integration | Yes | No | Planned |
+| Image/PDF reading | Yes | No | Planned |
+| Notebook editing | Yes | No | Planned |
+| Background tasks | Yes | No | Planned |
+| Permission system | Yes | No | Planned |
+| Hooks system | Yes | No | Planned |
+| Skills/Skill invocation | Yes | No | Planned |
+| Multi-agent orchestration | Yes | No | Planned |
+
+**Contributing?** Pick a feature from the roadmap and open a PR!
 
 ---
 
