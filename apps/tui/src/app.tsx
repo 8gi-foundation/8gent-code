@@ -40,6 +40,12 @@ import {
   isValidAnimation,
   type AnimationType,
 } from "./components/animation-showcase.js";
+import {
+  ADHDModeContext,
+  ADHD_MODE_SUGGESTION,
+  ADHD_MODE_ENABLED_MSG,
+  ADHD_MODE_DISABLED_MSG,
+} from "./components/bionic-text.js";
 
 // Import permission system for infinite mode
 import {
@@ -216,6 +222,10 @@ export function App({ initialCommand, args }: AppProps) {
 
   // Animation showcase
   const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
+
+  // ADHD/Bionic reading mode
+  const [adhdMode, setAdhdMode] = useState(false);
+  const [adhdSuggested, setAdhdSuggested] = useState(false);
 
   // Handle keyboard shortcuts
   useInput((input, key) => {
@@ -523,13 +533,34 @@ export function App({ initialCommand, args }: AppProps) {
             } else {
               addSystemMessage(
                 `Unknown animation: "${args[0]}"\n\n` +
-                "Available: matrix, fire, dna, stars, dots, glitch, confetti, wave, cube, gradient, all"
+                "Available: matrix, fire, dna, stars, dots, glitch, confetti, wave, gradient, all"
               );
             }
           } else {
             // Show animation list
             setCurrentAnimation("all");
             setViewMode("animations");
+          }
+          break;
+
+        case "adhd":
+          // Toggle ADHD/bionic reading mode
+          if (args.length > 0) {
+            const setting = args[0].toLowerCase();
+            if (setting === "on" || setting === "enable" || setting === "true") {
+              setAdhdMode(true);
+              addSystemMessage(ADHD_MODE_ENABLED_MSG);
+            } else if (setting === "off" || setting === "disable" || setting === "false") {
+              setAdhdMode(false);
+              addSystemMessage(ADHD_MODE_DISABLED_MSG);
+            } else {
+              addSystemMessage(`Usage: /adhd [on|off]\nCurrent: ${adhdMode ? "enabled" : "disabled"}`);
+            }
+          } else {
+            // Toggle
+            const newMode = !adhdMode;
+            setAdhdMode(newMode);
+            addSystemMessage(newMode ? ADHD_MODE_ENABLED_MSG : ADHD_MODE_DISABLED_MSG);
           }
           break;
 
@@ -842,6 +873,19 @@ export function App({ initialCommand, args }: AppProps) {
           playSound("success");
         }
 
+        // Suggest ADHD mode after 3rd response if not already enabled or suggested
+        if (!adhdMode && !adhdSuggested && messages.length >= 4) {
+          setAdhdSuggested(true);
+          setTimeout(() => {
+            addSystemMessage(
+              "💡 **Tip:** Try /adhd for faster reading!\n\n" +
+              "ADHD mode **bo**lds the **fi**rst half of **ea**ch word, " +
+              "helping your **br**ain process **te**xt faster.\n\n" +
+              "Perfect for **co**de reviews. Type /adhd to try it."
+            );
+          }, 2000);
+        }
+
         setTimeout(() => {
           setStatus("idle");
         }, 1500);
@@ -1005,6 +1049,7 @@ export function App({ initialCommand, args }: AppProps) {
   };
 
   return (
+    <ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
     <Box flexDirection="column" height="100%">
       {/* Header */}
       {fancyHeader ? (
@@ -1136,6 +1181,7 @@ export function App({ initialCommand, args }: AppProps) {
             kanbanBoard.done.length
           }
           showAnimations={showAnimations}
+          adhdMode={adhdMode}
         />
       ) : (
         <StatusBar
@@ -1155,6 +1201,7 @@ export function App({ initialCommand, args }: AppProps) {
         </Box>
       )}
     </Box>
+    </ADHDModeContext.Provider>
   );
 }
 

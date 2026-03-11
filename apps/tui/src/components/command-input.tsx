@@ -56,7 +56,8 @@ export type SlashCommand =
   | "onboarding"
   | "preferences"
   | "skip"
-  | "animations";
+  | "animations"
+  | "adhd";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -165,7 +166,13 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     name: "animations",
     aliases: ["anim", "fx"],
     description: "Preview ASCII animations",
-    usage: "/animations [matrix|fire|dna|stars|dots|glitch|confetti|wave|cube|all]",
+    usage: "/animations [matrix|fire|dna|stars|dots|glitch|confetti|wave|all]",
+  },
+  {
+    name: "adhd",
+    aliases: ["bionic", "focus"],
+    description: "Toggle ADHD/bionic reading mode (faster reading)",
+    usage: "/adhd [on|off]",
   },
 ];
 

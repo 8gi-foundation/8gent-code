@@ -58,6 +58,9 @@ export interface EnhancedStatusBarProps {
   compact?: boolean;
   showBorder?: boolean;
   showAnimations?: boolean;
+
+  // ADHD mode
+  adhdMode?: boolean;
 }
 
 // Legacy interface for backward compatibility
@@ -90,6 +93,7 @@ export function EnhancedStatusBar({
   compact = false,
   showBorder = true,
   showAnimations = true,
+  adhdMode = false,
 }: EnhancedStatusBarProps) {
   const [elapsed, setElapsed] = useState("0:00");
 
@@ -163,6 +167,12 @@ export function EnhancedStatusBar({
           </>
         )}
         <PermissionStatusItem mode={permissionMode} />
+        {adhdMode && (
+          <>
+            <Separator />
+            <Text color="magenta" bold>⚡ ADHD</Text>
+          </>
+        )}
       </Box>
 
       {/* Right section: Tokens, Branch, Time */}
