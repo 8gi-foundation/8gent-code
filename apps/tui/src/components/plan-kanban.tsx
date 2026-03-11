@@ -149,7 +149,8 @@ export function PlanKanban({
 
   if (!visible) return null;
 
-  const columnWidth = compact ? 20 : 28;
+  // Min 16 chars for title + count, accounting for borders/padding
+  const columnWidth = compact ? 16 : 24;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
@@ -232,19 +233,24 @@ interface ColumnHeaderProps {
 }
 
 function ColumnHeader({ title, count, width, color }: ColumnHeaderProps) {
-  const padding = width - title.length - String(count).length - 3;
+  // Calculate available space for title (width - borders - padding - count display)
+  const countStr = `(${count})`;
+  const availableForTitle = width - 4 - countStr.length - 1; // borders(2) + paddingX(2) + space(1)
+  const displayTitle = title.length > availableForTitle
+    ? title.slice(0, availableForTitle)
+    : title;
+  const padding = Math.max(0, availableForTitle - displayTitle.length);
 
   return (
-    <Box width={width} borderStyle="single" borderColor={color as any} paddingX={1}>
-      <Text color={color as any} bold>
-        {title}
-      </Text>
-      <Text color="gray">
-        {" ".repeat(Math.max(0, padding))}
-      </Text>
-      <Text color={color as any}>
-        ({count})
-      </Text>
+    <Box width={width} minWidth={width} flexShrink={0} borderStyle="single" borderColor={color as any} paddingX={1}>
+      <Box flexGrow={1} justifyContent="space-between">
+        <Text color={color as any} bold>
+          {displayTitle}
+        </Text>
+        <Text color={color as any}>
+          {countStr}
+        </Text>
+      </Box>
     </Box>
   );
 }
