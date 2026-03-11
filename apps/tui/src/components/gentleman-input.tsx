@@ -1,6 +1,7 @@
 /**
- * 8gent Code - Claude Code Style Input Component
+ * 8gent Code - Gentleman Input Component
  *
+ * The Infinite Gentleman's input interface.
  * Features:
  * - Horizontal line above input
  * - Horizontal line below with status indicators
@@ -22,7 +23,7 @@ import {
 // Types
 // ============================================
 
-export interface ClaudeInputProps {
+export interface GentlemanInputProps {
   onSubmit: (input: string) => void;
   isProcessing: boolean;
   processingStatus?: string;
@@ -44,7 +45,7 @@ export interface ClaudeInputProps {
 // Main Component
 // ============================================
 
-export function ClaudeInput({
+export function GentlemanInput({
   onSubmit,
   isProcessing,
   processingStatus = "Processing...",
@@ -57,7 +58,7 @@ export function ClaudeInput({
   elapsed = "0:00",
   permissionMode = "ask",
   width = 80,
-}: ClaudeInputProps) {
+}: GentlemanInputProps) {
   const [value, setValue] = useState("");
 
   // Ghost suggestion
@@ -307,7 +308,7 @@ function formatTokens(n: number): string {
 // Minimal Version
 // ============================================
 
-export function ClaudeInputMinimal({
+export function GentlemanInputMinimal({
   onSubmit,
   isProcessing,
 }: {

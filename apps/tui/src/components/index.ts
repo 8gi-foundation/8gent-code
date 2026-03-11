@@ -101,11 +101,11 @@ export {
   ValidationReportPanel,
 } from "./evidence-panel.js";
 
-// Claude Code style input (with lines above/below)
+// Gentleman input (with lines above/below)
 export {
-  ClaudeInput,
-  ClaudeInputMinimal,
-} from "./claude-input.js";
+  GentlemanInput,
+  GentlemanInputMinimal,
+} from "./gentleman-input.js";
 
 // Ghost text suggestions
 export {
