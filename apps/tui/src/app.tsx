@@ -26,6 +26,13 @@ import {
   PredictedSteps,
   MiniKanban,
 } from "./components/plan-kanban.js";
+import {
+  SelectInput,
+  ModelSelector,
+  ProviderSelector,
+  type SelectOption,
+  type ProviderOption,
+} from "./components/select-input.js";
 
 // ============================================
 // Types
@@ -45,7 +52,7 @@ export interface Message {
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
-type ViewMode = "chat" | "kanban" | "avenues" | "predict";
+type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -146,6 +153,26 @@ export function App({ initialCommand, args }: AppProps) {
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>("chat");
+
+  // Model/Provider state
+  const [currentModel, setCurrentModel] = useState("glm-4.7-flash:latest");
+  const [currentProvider, setCurrentProvider] = useState("ollama");
+  const [availableModels] = useState([
+    "glm-4.7-flash:latest",
+    "qwen2.5-coder:14b",
+    "llama3:8b",
+    "mistral:7b",
+    "codellama:13b",
+    "deepseek-coder:6.7b",
+  ]);
+  const [availableProviders] = useState<ProviderOption[]>([
+    { name: "ollama", displayName: "Ollama (Local)", hasApiKey: true, enabled: true },
+    { name: "openrouter", displayName: "OpenRouter", hasApiKey: false, enabled: true },
+    { name: "groq", displayName: "Groq", hasApiKey: false, enabled: true },
+    { name: "openai", displayName: "OpenAI", hasApiKey: false, enabled: true },
+    { name: "anthropic", displayName: "Anthropic", hasApiKey: false, enabled: true },
+    { name: "mistral", displayName: "Mistral AI", hasApiKey: false, enabled: true },
+  ]);
 
   // Handle keyboard shortcuts
   useInput((input, key) => {
@@ -276,6 +303,42 @@ export function App({ initialCommand, args }: AppProps) {
         case "quit":
           exit();
           break;
+
+        // Model selection - check if args provided
+        default:
+          // Handle /model command
+          if (command === "model" as any) {
+            if (args.length > 0) {
+              // Direct model set: /model qwen2.5:14b
+              const newModel = args.join(" ");
+              if (availableModels.includes(newModel) || newModel.includes(":")) {
+                setCurrentModel(newModel);
+                addSystemMessage(`Model switched to: ${newModel}`);
+              } else {
+                addSystemMessage(`Unknown model: ${newModel}\nUse /model to see available options.`);
+              }
+            } else {
+              // Show model selector
+              setViewMode("model-select");
+            }
+          }
+          // Handle /provider command
+          else if (command === "provider" as any) {
+            if (args.length > 0) {
+              const newProvider = args[0].toLowerCase();
+              const provider = availableProviders.find(p => p.name === newProvider);
+              if (provider) {
+                setCurrentProvider(newProvider);
+                addSystemMessage(`Provider switched to: ${provider.displayName}`);
+              } else {
+                addSystemMessage(`Unknown provider: ${newProvider}\nUse /provider to see available options.`);
+              }
+            } else {
+              // Show provider selector
+              setViewMode("provider-select");
+            }
+          }
+          break;
       }
     },
     [
@@ -288,6 +351,8 @@ export function App({ initialCommand, args }: AppProps) {
       showAnimations,
       soundEnabled,
       exit,
+      availableModels,
+      availableProviders,
     ]
   );
 
@@ -554,6 +619,36 @@ export function App({ initialCommand, args }: AppProps) {
           />
         );
 
+      case "model-select":
+        return (
+          <ModelSelector
+            models={availableModels}
+            currentModel={currentModel}
+            onSelect={(model) => {
+              setCurrentModel(model);
+              addSystemMessage(`Model switched to: ${model}`);
+              setViewMode("chat");
+            }}
+            onCancel={() => setViewMode("chat")}
+            provider={currentProvider}
+          />
+        );
+
+      case "provider-select":
+        return (
+          <ProviderSelector
+            providers={availableProviders}
+            currentProvider={currentProvider}
+            onSelect={(provider) => {
+              setCurrentProvider(provider);
+              const p = availableProviders.find(pr => pr.name === provider);
+              addSystemMessage(`Provider switched to: ${p?.displayName || provider}`);
+              setViewMode("chat");
+            }}
+            onCancel={() => setViewMode("chat")}
+          />
+        );
+
       case "chat":
       default:
         return (
@@ -603,7 +698,7 @@ export function App({ initialCommand, args }: AppProps) {
       {/* Status bar */}
       {showEnhancedStatus ? (
         <EnhancedStatusBar
-          modelName="8gent"
+          modelName={currentModel}
           runningAgents={isProcessing ? 1 : 0}
           totalAgents={1}
           permissionMode="ask"

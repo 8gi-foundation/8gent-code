@@ -47,7 +47,11 @@ export type SlashCommand =
   | "clear"
   | "quit"
   | "plan"
-  | "status";
+  | "status"
+  | "model"
+  | "provider"
+  | "voice"
+  | "language";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -103,6 +107,30 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     name: "quit",
     aliases: ["q", "exit"],
     description: "Exit 8gent Code",
+  },
+  {
+    name: "model",
+    aliases: ["m"],
+    description: "Select LLM model (↑↓ to scroll)",
+    usage: "/model [name]",
+  },
+  {
+    name: "provider",
+    aliases: ["pr"],
+    description: "Select LLM provider (↑↓ to scroll)",
+    usage: "/provider [name]",
+  },
+  {
+    name: "voice",
+    aliases: ["v"],
+    description: "Voice TTS settings",
+    usage: "/voice [on|off|test]",
+  },
+  {
+    name: "language",
+    aliases: ["lang", "l"],
+    description: "Set response language",
+    usage: "/language [code]",
   },
 ];
 
