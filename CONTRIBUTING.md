@@ -23,7 +23,7 @@ cd 8gent-code
 bun install
 
 # Make sure Ollama is running
-ollama pull glm4:latest
+ollama pull glm-4.7-flash:latest
 
 # Run the agent
 bun run packages/agent/index.ts

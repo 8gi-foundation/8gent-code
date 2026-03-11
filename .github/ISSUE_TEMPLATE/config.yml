@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/8gi-foundation/8gent-code/discussions
+    about: Ask questions and share ideas
+  - name: X / Twitter
+    url: [REDACTED]
+    about: Follow for updates
