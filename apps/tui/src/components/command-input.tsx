@@ -55,7 +55,8 @@ export type SlashCommand =
   | "infinite"
   | "onboarding"
   | "preferences"
-  | "skip";
+  | "skip"
+  | "animations";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -159,6 +160,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["later"],
     description: "Skip current onboarding question",
     usage: "/skip [all]",
+  },
+  {
+    name: "animations",
+    aliases: ["anim", "fx"],
+    description: "Preview ASCII animations",
+    usage: "/animations [matrix|fire|dna|stars|dots|glitch|confetti|wave|cube|all]",
   },
 ];
 
