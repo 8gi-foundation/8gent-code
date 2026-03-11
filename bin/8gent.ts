@@ -343,11 +343,18 @@ async function demoCommand(args: string[]) {
 
 async function tuiCommand(args: string[]) {
   console.log(BANNER);
-  console.log("Interactive TUI coming soon!\n");
-  console.log("For now, use the CLI commands:");
-  console.log("  8gent outline <file>");
-  console.log("  8gent symbol <file>::<name>");
-  console.log("  8gent search <query>\n");
+  console.log("Launching TUI...\n");
+
+  // Dynamic import to launch TUI
+  const { spawn } = await import("child_process");
+  const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
+
+  const proc = spawn("bun", ["run", tuiPath, ...args], {
+    stdio: "inherit",
+    cwd: path.join(__dirname, ".."),
+  });
+
+  proc.on("exit", (code) => process.exit(code || 0));
 }
 
 function getSymbolIcon(kind: string): string {

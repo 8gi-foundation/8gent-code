@@ -139,3 +139,17 @@ export type {
   ProviderOption,
   ProviderSelectorProps,
 } from "./select-input.js";
+
+// Image input and attachment
+export {
+  ImageInput,
+  ImageBadge,
+  ImageIndicator,
+  useImageInput,
+  isImagePath,
+  extractImagePaths,
+  readImageFile,
+  generateIterm2Image,
+  supportsIterm2Images,
+} from "./image-input.js";
+export type { ImageAttachment, ImageInputProps } from "./image-input.js";
