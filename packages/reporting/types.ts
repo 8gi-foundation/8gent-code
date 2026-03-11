@@ -44,6 +44,7 @@ export interface CompletionReport {
   toolsUsed: number;
   tokensUsed?: number;
   tokensSaved?: number;
+  contextMax?: number;  // Max context window
   duration: string; // formatted like "2m 34s"
   durationMs: number;
 
@@ -133,6 +134,7 @@ export interface TaskContext {
   // Token usage
   tokensUsed?: number;
   tokensSaved?: number;
+  contextMax?: number;  // Max context window size
 
   // Final result
   result?: string;

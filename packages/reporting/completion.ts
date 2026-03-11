@@ -125,6 +125,7 @@ export class CompletionReporter {
       toolsUsed: context.tools.length,
       tokensUsed: context.tokensUsed,
       tokensSaved: context.tokensSaved,
+      contextMax: context.contextMax || 128000, // Default to 128k
       duration: formatDuration(durationMs),
       durationMs,
       steps,
@@ -333,10 +334,14 @@ export class CompletionReporter {
     lines.push(`  ${statusLine("Tools used", String(report.toolsUsed), "info")}`);
     lines.push(`  ${statusLine("Duration", report.duration, "warning")}`);
     lines.push(`  ${statusLine("Confidence", `${report.confidence}%`, report.confidence >= 80 ? "success" : report.confidence >= 50 ? "warning" : "error")}`);
-    if (report.tokensUsed) {
-      lines.push(`  ${statusLine("Tokens used", formatNumber(report.tokensUsed), "muted")}`);
-    }
-    if (report.tokensSaved) {
+
+    // Always show token usage (estimate if not tracked)
+    const tokensUsed = report.tokensUsed || 0;
+    const contextMax = report.contextMax || 128000; // Default 128k context
+    const contextPercent = contextMax > 0 ? Math.round((tokensUsed / contextMax) * 100) : 0;
+    lines.push(`  ${statusLine("Tokens", `${formatNumber(tokensUsed)} / ${formatNumber(contextMax)} (${contextPercent}%)`, contextPercent > 80 ? "error" : contextPercent > 50 ? "warning" : "info")}`);
+
+    if (report.tokensSaved && report.tokensSaved > 0) {
       lines.push(`  ${statusLine("Tokens saved", formatNumber(report.tokensSaved), "success")}`);
     }
     if (report.gitBranch) {
