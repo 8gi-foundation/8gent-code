@@ -23,7 +23,7 @@
     "build": "bun build packages/agent/index.ts --outfile dist/cli.js --target node && chmod +x dist/cli.js",
     "build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
     "prepublishOnly": "npm run build",
-    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull glm4\\n')\"",
+    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull glm-4.7-flash\\n')\"",
     "test": "bun test",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
