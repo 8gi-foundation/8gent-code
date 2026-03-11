@@ -196,6 +196,37 @@ cat src/parser.ts
 8gent symbol src/parser.ts::buildSymbolId
 ```
 
+### 🔒 Skill Quarantine System
+
+Safely acquire external skills with full security scanning:
+
+```
+External Repo → Quarantine → Security Scan → Abstract → Toolshed
+                    ↓
+         ~/.8gent/quarantine/pending/
+```
+
+**Flow:**
+1. **Quarantine** — Clone external skill to sandbox
+2. **Scan** — Check for dangerous patterns (command injection, data exfiltration, credentials)
+3. **Abstract** — Convert to 8gent conventions with minimal token footprint
+4. **Release** — Register in toolshed, available to agent
+
+**Security Checks:**
+- 🚨 Command injection (`eval`, `exec`, backticks)
+- 🔐 Credential access (`.env`, API keys, private keys)
+- 📡 Data exfiltration (curl POST, wget)
+- 💀 System modification (`rm -rf`, `sudo`, `chmod`)
+- 🎭 Code obfuscation (base64, hex encoding)
+
+**Commands:**
+```bash
+/quarantine add https://github.com/user/skill  # Clone to sandbox
+/quarantine scan skill-123-abc                  # Run security scan
+/quarantine release skill-123-abc               # Release to toolshed
+/quarantine list pending                        # View quarantined skills
+```
+
 ### 🔌 Integrations
 
 | Feature | Description |
@@ -207,6 +238,7 @@ cat src/parser.ts
 | **Multi-Agent** | Orchestrate subagents for complex tasks |
 | **Hooks** | Custom automation triggers |
 | **Permissions** | Fine-grained command control |
+| **Quarantine** | Secure skill acquisition with security scanning |
 
 ---
 
@@ -248,6 +280,14 @@ cat src/parser.ts
 | `/preferences` | `/prefs`, `/settings` | View/edit preferences |
 | `/voice` | `/v` | Voice TTS settings |
 | `/language` | `/lang`, `/l` | Set response language |
+
+### Skill Management
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/quarantine` | `/quar`, `/sandbox` | Manage skill quarantine |
+| `/toolshed` | `/shed`, `/tools` | Query available tools |
+| `/skills` | `/sk` | List and manage skills |
 
 ---
 
@@ -300,6 +340,8 @@ Completion Report + Voice Output
 | `packages/lsp` | LSP client for code intelligence |
 | `packages/orchestration` | Multi-agent coordination |
 | `packages/planning` | Proactive planning engine |
+| `packages/quarantine` | Skill security sandbox and abstraction |
+| `packages/toolshed` | Capability discovery and skill registry |
 | `packages/validation` | Evidence collection |
 | `packages/reporting` | Completion reports |
 | `packages/permissions` | Command permission system |

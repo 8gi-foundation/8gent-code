@@ -57,7 +57,10 @@ export type SlashCommand =
   | "preferences"
   | "skip"
   | "animations"
-  | "adhd";
+  | "adhd"
+  | "quarantine"
+  | "toolshed"
+  | "skills";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -173,6 +176,24 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["bionic", "focus"],
     description: "Toggle ADHD/bionic reading mode (faster reading)",
     usage: "/adhd [on|off]",
+  },
+  {
+    name: "quarantine",
+    aliases: ["quar", "sandbox"],
+    description: "Manage skill quarantine (add, scan, release, reject)",
+    usage: "/quarantine [add|scan|list|release|reject] [args]",
+  },
+  {
+    name: "toolshed",
+    aliases: ["shed", "tools"],
+    description: "Query available tools and capabilities",
+    usage: "/toolshed [list|search|stats]",
+  },
+  {
+    name: "skills",
+    aliases: ["sk"],
+    description: "List and manage skills",
+    usage: "/skills [list|search|info] [name]",
   },
 ];
 

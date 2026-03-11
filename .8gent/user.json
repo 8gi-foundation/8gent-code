@@ -11,34 +11,31 @@
     "voice",
     "confirmation"
   ],
-  "lastPrompted": "2026-03-11T22:39:14.058Z",
+  "lastPrompted": "2026-03-11T23:21:00.742Z",
   "promptCount": 8,
   "identity": {
     "name": "James",
-    "role": "creative technology",
+    "role": "founder",
     "communicationStyle": "detailed",
     "language": "en"
   },
   "projects": {
-    "primary": "Foodstackai myrseumeporftolio which then became 8gent-code 8gent.app 8gent jr ad 8gent world",
+    "primary": "i already did today",
     "all": [
-      "Foodstackai myrseumeporftolio which then became 8gent-code 8gent.app 8gent jr ad 8gent world"
+      "i already did today"
     ],
     "descriptions": {}
   },
   "preferences": {
     "voice": {
       "enabled": true,
-      "engine": "system",
+      "engine": null,
       "voiceId": null
     },
     "model": {
-      "default": "glm-4.7-flash:latest",
+      "default": null,
       "provider": "ollama",
-      "fallbacks": [
-        "qwen2.5-coder:14b",
-        "llama3:8b"
-      ],
+      "fallbacks": [],
       "preferLocal": true
     },
     "git": {
@@ -59,13 +56,8 @@
     },
     "mcps": [],
     "ollama": {
-      "available": true,
-      "models": [
-        "glm-4.7-flash:latest",
-        "qwen2.5-coder:14b-instruct-q4_K_M",
-        "qwen3:14b",
-        "nomic-embed-text:latest"
-      ]
+      "available": false,
+      "models": []
     },
     "lmstudio": {
       "available": false,
@@ -73,8 +65,8 @@
     }
   },
   "understanding": {
-    "confidenceScore": 0.7280000000000001,
+    "confidenceScore": 0.5780000000000001,
     "areasUnclear": [],
-    "lastUpdated": "2026-03-11T22:39:14.058Z"
+    "lastUpdated": "2026-03-11T23:21:00.742Z"
   }
 }
