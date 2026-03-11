@@ -13,6 +13,7 @@
  */
 
 import { EventEmitter } from "events";
+import { enableInfiniteMode, disableInfiniteMode } from "../permissions";
 
 // ============================================
 // Types
@@ -150,6 +151,9 @@ export class InfiniteRunner extends EventEmitter {
   async run(): Promise<InfiniteState> {
     this.emit("start", this.state);
 
+    // ENABLE INFINITE MODE - bypass all permission checks
+    enableInfiniteMode();
+
     try {
       // Import Agent dynamically to avoid circular deps
       const { Agent } = await import("../agent");
@@ -253,6 +257,9 @@ export class InfiniteRunner extends EventEmitter {
         timestamp: new Date(),
         recovery: "Fatal error - could not recover",
       });
+    } finally {
+      // DISABLE INFINITE MODE when done
+      disableInfiniteMode();
     }
 
     return this.state;

@@ -19,6 +19,8 @@ export interface PermissionConfig {
   deniedPatterns: string[];
   autoApprove: boolean;
   logPath?: string;
+  /** Infinite mode - bypass ALL permission checks (like --dangerously-skip-permissions) */
+  infiniteMode?: boolean;
 }
 
 export interface PermissionRequest {
@@ -204,6 +206,7 @@ export class PermissionManager {
   private log: PermissionLog;
   private approvedCommands: Set<string> = new Set();
   private deniedCommands: Set<string> = new Set();
+  private infiniteMode: boolean = false;
 
   constructor(configPath?: string) {
     this.configPath = configPath || path.join(os.homedir(), ".8gent", "permissions.json");
@@ -214,6 +217,29 @@ export class PermissionManager {
       approvedCount: 0,
       autoApprovedCount: 0,
     };
+  }
+
+  /**
+   * Enable infinite mode - bypasses ALL permission checks
+   * Like Claude Code's --dangerously-skip-permissions
+   */
+  enableInfiniteMode(): void {
+    this.infiniteMode = true;
+    console.log("\x1b[33m[∞ INFINITE MODE] All permissions bypassed\x1b[0m");
+  }
+
+  /**
+   * Disable infinite mode - normal permission checks resume
+   */
+  disableInfiniteMode(): void {
+    this.infiniteMode = false;
+  }
+
+  /**
+   * Check if infinite mode is active
+   */
+  isInfiniteMode(): boolean {
+    return this.infiniteMode;
   }
 
   /**
@@ -330,6 +356,15 @@ export class PermissionManager {
       timestamp: new Date(),
     };
 
+    // INFINITE MODE: Bypass all permission checks
+    if (this.infiniteMode) {
+      request.approved = true;
+      request.autoApproved = true;
+      this.log.requests.push(request);
+      this.log.autoApprovedCount++;
+      return true;
+    }
+
     // Auto-approve if configured and not dangerous
     if (this.config.autoApprove && command && !this.isDangerous(command)) {
       request.approved = true;
@@ -404,6 +439,11 @@ export class PermissionManager {
    * Returns: "allowed" | "denied" | "ask"
    */
   checkPermission(command: string): "allowed" | "denied" | "ask" {
+    // INFINITE MODE: Everything is allowed
+    if (this.infiniteMode) {
+      return "allowed";
+    }
+
     const normalizedCmd = command.toLowerCase().trim();
 
     // Check explicit deny list
@@ -579,4 +619,29 @@ export async function requestCommandPermission(command: string): Promise<boolean
 export function isCommandDangerous(command: string): boolean {
   const manager = getPermissionManager();
   return manager.isDangerous(command);
+}
+
+/**
+ * Enable infinite mode - bypasses ALL permission checks
+ * Like Claude Code's --dangerously-skip-permissions
+ */
+export function enableInfiniteMode(): void {
+  const manager = getPermissionManager();
+  manager.enableInfiniteMode();
+}
+
+/**
+ * Disable infinite mode
+ */
+export function disableInfiniteMode(): void {
+  const manager = getPermissionManager();
+  manager.disableInfiniteMode();
+}
+
+/**
+ * Check if infinite mode is active
+ */
+export function isInfiniteMode(): boolean {
+  const manager = getPermissionManager();
+  return manager.isInfiniteMode();
 }
