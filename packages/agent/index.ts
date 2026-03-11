@@ -1612,9 +1612,15 @@ Type your request, or:
   /quit       - Exit 8gent
 
 \x1b[33mModel:\x1b[0m
-  /model              - Show current model
+  /model              - Show current model and provider
   /model <name>       - Switch model (e.g., /model qwen3:14b)
-  /models             - List available Ollama models
+  /models             - List available models
+
+\x1b[33mProviders:\x1b[0m
+  /providers          - List all providers and status
+  /provider <name>    - Switch to provider (ollama, openrouter, groq, etc.)
+  /provider key <key> - Set API key for current provider
+  /provider models    - List models for current provider
 
 \x1b[33mBMAD Planning:\x1b[0m
   /plan <task>        - Create a plan without executing
@@ -1685,13 +1691,20 @@ Type your request, or:
       }
 
       if (trimmed === "/model") {
-        console.log(`Current model: \x1b[36m${agent.getModel()}\x1b[0m`);
+        const { getProviderManager } = await import("../providers/index.js");
+        const pm = getProviderManager();
+        const p = pm.getActiveProvider();
+        console.log(`Provider: \x1b[33m${p.displayName}\x1b[0m`);
+        console.log(`Model:    \x1b[36m${pm.getActiveModel()}\x1b[0m`);
         prompt();
         return;
       }
 
       if (trimmed.startsWith("/model ")) {
         const newModel = trimmed.slice(7).trim();
+        const { getProviderManager } = await import("../providers/index.js");
+        const pm = getProviderManager();
+        pm.setActiveModel(newModel);
         agent.setModel(newModel);
         console.log(`Switched to model: \x1b[36m${newModel}\x1b[0m`);
         prompt();
@@ -1699,15 +1712,121 @@ Type your request, or:
       }
 
       if (trimmed === "/models") {
-        try {
-          const response = await fetch("http://localhost:11434/api/tags");
-          const data = await response.json();
-          console.log("\x1b[36mAvailable models:\x1b[0m");
-          for (const model of data.models || []) {
-            console.log(`  - ${model.name} (${(model.size / 1e9).toFixed(1)}GB)`);
+        const { getProviderManager } = await import("../providers/index.js");
+        const pm = getProviderManager();
+        const provider = pm.getActiveProvider();
+
+        console.log(`\x1b[36mModels for ${provider.displayName}:\x1b[0m`);
+
+        if (provider.name === "ollama") {
+          try {
+            const response = await fetch("http://localhost:11434/api/tags");
+            const data = await response.json();
+            for (const model of data.models || []) {
+              const current = model.name === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
+              console.log(`  - ${model.name} (${(model.size / 1e9).toFixed(1)}GB)${current}`);
+            }
+          } catch {
+            console.log("  Could not fetch Ollama models. Is Ollama running?");
           }
-        } catch {
-          console.log("Could not fetch models. Is Ollama running?");
+        } else {
+          for (const model of provider.models) {
+            const current = model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
+            console.log(`  - ${model}${current}`);
+          }
+        }
+        prompt();
+        return;
+      }
+
+      // ============================================
+      // Provider Commands
+      // ============================================
+
+      if (trimmed === "/providers") {
+        const { getProviderManager, PROVIDER_NAMES } = await import("../providers/index.js");
+        const pm = getProviderManager();
+        const active = pm.getActiveProvider();
+
+        console.log(`\n\x1b[36mLLM Providers:\x1b[0m\n`);
+        for (const name of PROVIDER_NAMES) {
+          const p = pm.getProvider(name);
+          const hasKey = pm.getApiKey(name) ? "\x1b[32m✓ key\x1b[0m" : "\x1b[33m○ no key\x1b[0m";
+          const isActive = p.name === active.name ? " \x1b[36m← active\x1b[0m" : "";
+          const keyInfo = p.name === "ollama" ? "\x1b[32m✓ local\x1b[0m" : hasKey;
+          console.log(`  ${p.displayName.padEnd(20)} ${keyInfo}${isActive}`);
+        }
+        console.log(`\n  Use \x1b[36m/provider <name>\x1b[0m to switch`);
+        console.log(`  Use \x1b[36m/provider key <api-key>\x1b[0m to set key for current provider\n`);
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/provider") {
+        const { getProviderManager } = await import("../providers/index.js");
+        const pm = getProviderManager();
+        const p = pm.getActiveProvider();
+        const hasKey = pm.getApiKey(p.name);
+        console.log(`\n\x1b[36mCurrent Provider:\x1b[0m ${p.displayName}`);
+        console.log(`  Model: ${pm.getActiveModel()}`);
+        console.log(`  API Key: ${p.name === "ollama" ? "not needed (local)" : hasKey ? "✓ set" : "✗ not set"}`);
+        console.log(`  Tools: ${p.supportsTools ? "✓" : "✗"}  Streaming: ${p.supportsStreaming ? "✓" : "✗"}  Vision: ${p.supportsVision ? "✓" : "✗"}`);
+        prompt();
+        return;
+      }
+
+      if (trimmed === "/provider models") {
+        const { getProviderManager } = await import("../providers/index.js");
+        const pm = getProviderManager();
+        const p = pm.getActiveProvider();
+        console.log(`\x1b[36mModels for ${p.displayName}:\x1b[0m`);
+        for (const model of p.models) {
+          const current = model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
+          console.log(`  - ${model}${current}`);
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/provider key ")) {
+        const apiKey = trimmed.slice(14).trim();
+        if (!apiKey) {
+          console.log("\x1b[31mUsage: /provider key <your-api-key>\x1b[0m");
+        } else {
+          const { getProviderManager } = await import("../providers/index.js");
+          const pm = getProviderManager();
+          const p = pm.getActiveProvider();
+          if (p.name === "ollama") {
+            console.log("\x1b[33mOllama doesn't need an API key (it's local)\x1b[0m");
+          } else {
+            pm.setApiKey(p.name, apiKey);
+            console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
+            console.log(`  Stored in ~/.8gent/providers.json`);
+          }
+        }
+        prompt();
+        return;
+      }
+
+      if (trimmed.startsWith("/provider ")) {
+        const providerName = trimmed.slice(10).trim().toLowerCase();
+        const { getProviderManager, PROVIDER_NAMES } = await import("../providers/index.js");
+
+        if (!PROVIDER_NAMES.includes(providerName as any)) {
+          console.log(`\x1b[31mUnknown provider: ${providerName}\x1b[0m`);
+          console.log(`Available: ${PROVIDER_NAMES.join(", ")}`);
+        } else {
+          const pm = getProviderManager();
+          pm.setActiveProvider(providerName as any);
+          const p = pm.getActiveProvider();
+          console.log(`\x1b[32mSwitched to ${p.displayName}\x1b[0m`);
+          console.log(`  Model: ${pm.getActiveModel()}`);
+
+          if (p.name !== "ollama" && !pm.getApiKey(p.name)) {
+            console.log(`\n  \x1b[33m⚠ No API key set.\x1b[0m`);
+            console.log(`  Set with: /provider key <your-${p.name}-api-key>`);
+            console.log(`  Or set env: export ${p.apiKeyEnv}=<key>`);
+          }
         }
         prompt();
         return;
