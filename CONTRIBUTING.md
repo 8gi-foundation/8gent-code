@@ -180,7 +180,7 @@ When adding features, update relevant docs:
 
 ## Questions?
 
-Open an issue or reach out on X: [@jamesspalding](https://x.com/jamesspalding)
+Open an issue or reach out on X: [@james__spalding](https://x.com/james__spalding)
 
 ---
 

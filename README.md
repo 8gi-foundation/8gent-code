@@ -8,7 +8,7 @@
 [![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f9f1e1?logo=bun&logoColor=000)](https://bun.sh)
 [![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-blue)](https://ollama.ai)
 [![Version](https://img.shields.io/badge/version-0.2.0-brightgreen)](https://github.com/PodJamz/8gent-code)
-[![Twitter](https://img.shields.io/twitter/follow/jamesspalding?style=social)](https://twitter.com/jamesspalding)
+[![Twitter](https://img.shields.io/twitter/follow/james__spalding?style=social)](https://twitter.com/james__spalding)
 
 <p align="center">
   <img src="demo.gif" alt="8gent Code Demo" width="700">
