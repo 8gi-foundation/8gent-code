@@ -32,6 +32,11 @@ import { featureImplementationBenchmarks } from "./categories/feature-implementa
 import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
 import { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
 import { documentationBenchmarks } from "./categories/documentation/benchmarks";
+// New expanded categories
+import { threejsBenchmarks } from "./categories/threejs/benchmarks";
+import { reactNativeBenchmarks } from "./categories/react-native/benchmarks";
+import { nextjsBenchmarks } from "./categories/nextjs/benchmarks";
+import { creativeBenchmarks } from "./categories/creative/benchmarks";
 
 // All benchmarks combined
 const ALL_BENCHMARKS: BenchmarkDefinition[] = [
@@ -42,6 +47,11 @@ const ALL_BENCHMARKS: BenchmarkDefinition[] = [
   ...codeReviewBenchmarks,
   ...testGenerationBenchmarks,
   ...documentationBenchmarks,
+  // Expanded categories
+  ...threejsBenchmarks,
+  ...reactNativeBenchmarks,
+  ...nextjsBenchmarks,
+  ...creativeBenchmarks,
 ];
 
 // Colors for terminal output
