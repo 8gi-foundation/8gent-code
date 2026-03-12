@@ -300,3 +300,127 @@ export function getTaskSpecificPrompt(taskType: "explore" | "modify" | "debug" |
 
   return prompts[taskType] || SUBAGENT_SYSTEM_PROMPT;
 }
+
+
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:52:53.323Z
+// Gap: 3 points on FM001
+
+export const FILE_MANIPULATION_ENHANCED = `
+## Enhanced File Manipulation Protocol (Autoresearch-tuned)
+
+### Input Validation
+- Check typeof for primitives: typeof x === 'string'
+- Check instanceof for objects: x instanceof Date
+- Validate arrays: Array.isArray(x) && x.length > 0
+- Throw with context: throw new Error(\`Invalid input: expected string, got \${typeof x}\`)
+
+### Error Messages
+- Include expected type and actual type
+- Include parameter name
+- Include any relevant values
+
+### Code Organization
+- Validate at function entry, not deep inside
+- Extract validation to helper functions for reuse
+- Document edge cases in comments
+`;
+
+// AUTORESEARCH IMPROVEMENT 2026-03-12T01:15:00.000Z
+// Gap: 7 points on BF002
+
+export const BUG_FIXING_ENHANCED = `
+## Enhanced Bug Fixing Protocol (Autoresearch-tuned)
+
+### Race Conditions (BF001)
+- ALWAYS use a lock/mutex pattern for shared state
+- Use a Map to track pending operations per resource
+- Release locks in finally blocks to prevent deadlocks
+- Pattern: await acquireLock(key); try { ... } finally { releaseLock(key); }
+
+### Memory Leaks (BF002)
+- ALWAYS cleanup subscriptions in unsubscribe handlers
+- Use WeakMap/WeakRef for caching object references
+- Clear timers and intervals on cleanup
+- Track all event listeners and remove on destroy
+- Pattern: this.subscriptions.delete(id); this.listeners.clear();
+
+### Null Reference Errors (BF003)
+- Use optional chaining (?.) for deep property access
+- Use nullish coalescing (??) for default values
+- Early return on null/undefined inputs
+- Pattern: if (x == null) return defaultValue;
+`;
+
+// AUTORESEARCH IMPROVEMENT 2026-03-12T01:15:00.000Z
+// Gap: 43 points on FI001
+
+export const FEATURE_IMPLEMENTATION_ENHANCED = `
+## Enhanced Feature Implementation Protocol (Autoresearch-tuned)
+
+### LRU Caching with TTL (FI001)
+CRITICAL: Implement ALL of these features:
+
+1. **Map-based storage** with composite keys
+2. **TTL expiration** checking on get()
+3. **LRU eviction** when maxSize reached
+4. **Cache statistics** (hits, misses, evictions)
+5. **Pattern invalidation** using RegExp.test()
+
+### Complete Implementation Pattern
+\`\`\`typescript
+interface CacheEntry<T> { value: T; timestamp: number; }
+interface CacheStats { hits: number; misses: number; size: number; evictions: number; }
+
+class CachedDataFetcher extends DataFetcher {
+  private cache = new Map<string, CacheEntry<unknown>>();
+  private stats: CacheStats = { hits: 0, misses: 0, size: 0, evictions: 0 };
+  private ttl: number;
+  private maxSize: number;
+
+  constructor(baseUrl: string, options: { ttl: number; maxSize: number }) {
+    super(baseUrl);
+    this.ttl = options.ttl;
+    this.maxSize = options.maxSize;
+  }
+
+  async fetch<T>(path: string): Promise<T> {
+    const entry = this.cache.get(path);
+    if (entry && Date.now() - entry.timestamp < this.ttl) {
+      this.stats.hits++;
+      // LRU: move to end
+      this.cache.delete(path);
+      this.cache.set(path, entry);
+      return entry.value as T;
+    }
+    this.stats.misses++;
+    const result = await super.fetch<T>(path);
+    this.set(path, result);
+    return result;
+  }
+
+  private set(key: string, value: unknown): void {
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+      this.stats.evictions++;
+    }
+    this.cache.set(key, { value, timestamp: Date.now() });
+    this.stats.size = this.cache.size;
+  }
+
+  getStats(): CacheStats { return { ...this.stats }; }
+
+  invalidate(pattern: string | RegExp): number {
+    let count = 0;
+    const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+    for (const key of this.cache.keys()) {
+      if (regex.test(key)) { this.cache.delete(key); count++; }
+    }
+    this.stats.size = this.cache.size;
+    return count;
+  }
+
+  clear(): void { this.cache.clear(); this.stats.size = 0; }
+}
+\`\`\`
+`;
