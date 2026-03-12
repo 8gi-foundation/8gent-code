@@ -60,7 +60,8 @@ export type SlashCommand =
   | "adhd"
   | "quarantine"
   | "toolshed"
-  | "skills";
+  | "skills"
+  | "design";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -194,6 +195,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["sk"],
     description: "List and manage skills",
     usage: "/skills [list|search|info] [name]",
+  },
+  {
+    name: "design",
+    aliases: ["d", "ui", "style"],
+    description: "Suggest design systems for current task",
+    usage: "/design [task description]",
   },
 ];
 

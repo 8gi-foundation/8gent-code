@@ -1,0 +1,99 @@
+{
+  "suiteId": "suite_1773274056138",
+  "timestamp": "2026-03-12T00:07:36.138Z",
+  "model": "unknown",
+  "provider": "unknown",
+  "overallScore": 50,
+  "categoryScores": {
+    "bug-fixing": 50
+  },
+  "difficultyScores": {
+    "easy": 50
+  },
+  "totalTokensUsed": 172,
+  "totalTokensExpected": 800,
+  "overallTokenEfficiency": 4.651162790697675,
+  "results": [
+    {
+      "benchmarkId": "BF003",
+      "timestamp": "2026-03-12T00:07:36.137Z",
+      "model": "unknown",
+      "provider": "unknown",
+      "scores": {
+        "correctness": 30,
+        "codeQuality": 87,
+        "efficiency": 90,
+        "bestPractices": 0,
+        "overall": 50
+      },
+      "tokens": {
+        "actual": 172,
+        "expected": 800,
+        "efficiency": 4.651162790697675
+      },
+      "timing": {
+        "startTime": 1773274056037,
+        "endTime": 1773274056137,
+        "duration": 100,
+        "withinLimit": true
+      },
+      "output": "\n// Mock implementation for BF003\n// This would be replaced by actual agent output\n\n// File: fixtures/bug-fixing/BF003-null-check.ts\n/**\n * Fixture: BF003 - Missing Null Checks\n *\n * Bug: Multiple places where null/undefined values cause runtime errors\n * Task: Add proper null checks and handle edge cases\n */\n\ninterface Address {\n  street: string;\n  city: string;\n  country: string;\n  zipCode?: string;\n}\n\ninterface Company {\n  name: string;\n  address?: Address;\n}\n\ninterface Person {\n  name: string;\n  email?: string;\n  company?: Company;\n  tags?: string[];\n}\n\n// BUG: Crashes if p...\n\n// Agent would complete the implementation here\nexport function solution() {\n  // Implementation\n}\n",
+      "errors": [
+        "Correctness: uses-optional-chaining failed - Found 0 matches (expected 3-Infinity)",
+        "Correctness: handles-all-cases failed - Found 0 matches (expected 1-Infinity)"
+      ],
+      "warnings": [],
+      "checkResults": [
+        {
+          "checkName": "uses-optional-chaining",
+          "passed": false,
+          "score": 0,
+          "maxScore": 15,
+          "details": "Found 0 matches (expected 3-Infinity)"
+        },
+        {
+          "checkName": "uses-nullish-coalescing",
+          "passed": true,
+          "score": 15,
+          "maxScore": 15,
+          "details": "Found 5 matches (expected 2-Infinity)"
+        },
+        {
+          "checkName": "handles-all-cases",
+          "passed": false,
+          "score": 0,
+          "maxScore": 20,
+          "details": "Found 0 matches (expected 1-Infinity)"
+        },
+        {
+          "checkName": "consistent-style",
+          "passed": true,
+          "score": 13,
+          "maxScore": 15,
+          "details": "Heuristic score: 85/100"
+        },
+        {
+          "checkName": "no-excessive-checks",
+          "passed": true,
+          "score": 9,
+          "maxScore": 10,
+          "details": "Heuristic score: 85/100"
+        },
+        {
+          "checkName": "type-narrowing",
+          "passed": false,
+          "score": 0,
+          "maxScore": 10,
+          "details": "Found 0 matches (expected 1-Infinity)"
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "avgScore": 50,
+    "avgTokenEfficiency": 4.651162790697675
+  }
+}

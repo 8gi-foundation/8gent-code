@@ -442,25 +442,39 @@ export class SubAgentManager extends EventEmitter {
       maxTurns: 5,
     });
 
-    // Generate a plan
-    const planPrompt = `Create a detailed execution plan for this task. Output ONLY a JSON array of steps.
+    // Enhanced planning prompt with BMAD method
+    const planPrompt = `<planning_context>
+You are creating an execution plan using the BMAD method (Breakthrough Method of Agile AI-driven Development).
 
-Task: ${agent.task}
+## Task
+${agent.task}
 
-Format each step as:
+## Planning Rules
+1. Each step must be independently verifiable
+2. Include evidence collection for each action
+3. Order steps by dependencies
+4. Include validation steps after modifications
+5. Plan for error recovery
+
+## Step Format
 {
-  "id": "step_1",
-  "action": "Description of what to do",
-  "expected": "Expected outcome/result"
+  "id": "step_N",
+  "action": "Imperative description (e.g., 'Create file X')",
+  "expected": "Specific success criteria (e.g., 'File X exists with function Y')",
+  "tool": "Primary tool to use (optional)",
+  "evidence_type": "file_exists | file_content | command_output | test_result"
 }
 
-Example:
+## Example Plan
 [
-  {"id": "step_1", "action": "Create package.json with project config", "expected": "package.json exists with name and dependencies"},
-  {"id": "step_2", "action": "Create src/index.ts entry point", "expected": "src/index.ts exists with main function"}
+  {"id": "step_1", "action": "Search for existing related code", "expected": "List of relevant symbols found", "tool": "search_symbols", "evidence_type": "command_output"},
+  {"id": "step_2", "action": "Create implementation file", "expected": "src/feature.ts exists with exported function", "tool": "write_file", "evidence_type": "file_exists"},
+  {"id": "step_3", "action": "Verify TypeScript compiles", "expected": "No compilation errors", "tool": "run_command", "evidence_type": "command_output"},
+  {"id": "step_4", "action": "Commit changes", "expected": "Commit created with feat: prefix", "tool": "git_commit", "evidence_type": "command_output"}
 ]
+</planning_context>
 
-Output ONLY the JSON array, no other text:`;
+Output ONLY the JSON array of steps:`;
 
     try {
       if (!(await plannerAgent.isReady())) {

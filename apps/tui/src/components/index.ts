@@ -153,3 +153,18 @@ export {
   supportsIterm2Images,
 } from "./image-input.js";
 export type { ImageAttachment, ImageInputProps } from "./image-input.js";
+
+// Design selector
+export {
+  DesignSelector,
+  DesignSuggestionPanel,
+  DesignBadge,
+  InlineDesignPrompt,
+} from "./design-selector.js";
+export type {
+  DesignOption,
+  DesignSelectorProps,
+  DesignSuggestionPanelProps,
+  DesignBadgeProps,
+  InlineDesignPromptProps,
+} from "./design-selector.js";
