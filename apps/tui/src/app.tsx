@@ -210,10 +210,11 @@ export function App({ initialCommand, args }: AppProps) {
     "deepseek-coder:6.7b",
   ]);
   const [availableProviders] = useState<ProviderOption[]>([
-    { name: "ollama", displayName: "Ollama (Local)", hasApiKey: true, enabled: true },
-    { name: "lmstudio", displayName: "LM Studio (Local)", hasApiKey: true, enabled: true },
-    { name: "openrouter", displayName: "OpenRouter", hasApiKey: false, enabled: true },
-    { name: "groq", displayName: "Groq", hasApiKey: false, enabled: true },
+    { name: "ollama", displayName: "Ollama (Local) - Free", hasApiKey: true, enabled: true },
+    { name: "lmstudio", displayName: "LM Studio (Local) - Free", hasApiKey: true, enabled: true },
+    { name: "openrouter-free", displayName: "OpenRouter (Free Models) 🆓", hasApiKey: true, enabled: true },
+    { name: "openrouter", displayName: "OpenRouter (Paid Models)", hasApiKey: false, enabled: true },
+    { name: "groq", displayName: "Groq (Free Tier)", hasApiKey: false, enabled: true },
     { name: "openai", displayName: "OpenAI", hasApiKey: false, enabled: true },
     { name: "anthropic", displayName: "Anthropic", hasApiKey: false, enabled: true },
     { name: "mistral", displayName: "Mistral AI", hasApiKey: false, enabled: true },
