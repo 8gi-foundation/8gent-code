@@ -37,6 +37,7 @@ import { threejsBenchmarks } from "./categories/threejs/benchmarks";
 import { reactNativeBenchmarks } from "./categories/react-native/benchmarks";
 import { nextjsBenchmarks } from "./categories/nextjs/benchmarks";
 import { creativeBenchmarks } from "./categories/creative/benchmarks";
+import { humanSkillsBenchmarks } from "./categories/human-skills/benchmarks";
 
 // All benchmarks combined
 const ALL_BENCHMARKS: BenchmarkDefinition[] = [
@@ -52,6 +53,7 @@ const ALL_BENCHMARKS: BenchmarkDefinition[] = [
   ...reactNativeBenchmarks,
   ...nextjsBenchmarks,
   ...creativeBenchmarks,
+  ...humanSkillsBenchmarks,
 ];
 
 // Colors for terminal output
