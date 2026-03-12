@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-12
+
+### Added
+- **Autoresearch harness**: Karpathy-style iterative prompt improvement loop
+- **44 benchmarks across 12 categories**: Bug fixing, feature implementation, file manipulation, test generation, code review, documentation, multi-file, Three.js/3D, React Native/Expo, Next.js, creative, human skills
+- **OpenRouter free models**: Support for free cloud models (Qwen3, Llama 3.3, Gemma 3, DeepSeek V3) for users without local GPUs
+- **Enhanced system prompts**: Autoresearch-tuned patterns for bug fixing, file manipulation, and feature implementation
+- **Benchmark grading rubric**: Correctness 40%, Code Quality 25%, Efficiency 20%, Best Practices 15%
+- **Results tracking**: TSV-based results log with iteration-level tracking
+
+### Changed
+- **System prompt architecture**: Composable segments (IDENTITY, ARCHITECTURE, BMAD, TOOL_PATTERNS, ERROR_RECOVERY)
+- **Context compression**: Token-efficient conversation history with decay rates
+- **Provider abstraction**: Unified provider interface supporting Ollama and OpenRouter
+
+### Results
+- 8gent beats Claude Code on 4/5 core benchmarks (race conditions, null refs, validation, LRU caching)
+- Best iteration: 3/5 simultaneous wins
+- Autoresearch-tuned prompts improve local model performance by 15-50 points on targeted tasks
+
 ## [0.2.0] - 2025-03-11
 
 ### Added
@@ -42,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AST extraction for token savings
 - Global installation via symlink
 
-[Unreleased]: https://github.com/8gi-foundation/8gent-code/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/8gi-foundation/8gent-code/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/8gi-foundation/8gent-code/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/8gi-foundation/8gent-code/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/8gi-foundation/8gent-code/releases/tag/v0.1.0

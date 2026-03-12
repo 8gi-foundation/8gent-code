@@ -234,21 +234,26 @@ const addedPatterns = new Set<string>();
 
 async function improvePrompts(weakBenchmark: string, gap: number): Promise<string> {
   const patternType = weakBenchmark.slice(0, 2); // BF, FM, FI, etc.
+  const currentPrompts = readPrompts();
 
-  // Skip if this pattern type was already added
-  if (addedPatterns.has(patternType)) {
-    console.log(`   [Skip: ${patternType} pattern already added]`);
+  // Check if pattern already exists in file OR in-memory set
+  const patternNames: Record<string, string> = {
+    BF: "BUG_FIXING_ENHANCED",
+    FM: "FILE_MANIPULATION_ENHANCED",
+    FI: "FEATURE_IMPLEMENTATION_ENHANCED",
+  };
+
+  const patternName = patternNames[patternType];
+  if (addedPatterns.has(patternType) || (patternName && currentPrompts.includes(patternName))) {
+    console.log(`   [Skip: ${patternType} pattern already exists]`);
+    addedPatterns.add(patternType); // Ensure it's in memory too
     return "already added";
   }
 
-  const currentPrompts = readPrompts();
-
   // Generate improvement based on what's weak
   let improvement = "";
-  let patternName = "";
 
   if (weakBenchmark.startsWith("BF")) {
-    patternName = "BUG_FIXING_ENHANCED";
     improvement = `
 // AUTORESEARCH IMPROVEMENT ${new Date().toISOString()}
 // Gap: ${gap} points on ${weakBenchmark}
@@ -281,7 +286,6 @@ export const ${patternName} = \`
 \`;
 `;
   } else if (weakBenchmark.startsWith("FM")) {
-    patternName = "FILE_MANIPULATION_ENHANCED";
     improvement = `
 // AUTORESEARCH IMPROVEMENT ${new Date().toISOString()}
 // Gap: ${gap} points on ${weakBenchmark}
@@ -307,7 +311,6 @@ export const ${patternName} = \`
 \`;
 `;
   } else if (weakBenchmark.startsWith("FI")) {
-    patternName = "FEATURE_IMPLEMENTATION_ENHANCED";
     improvement = `
 // AUTORESEARCH IMPROVEMENT ${new Date().toISOString()}
 // Gap: ${gap} points on ${weakBenchmark}

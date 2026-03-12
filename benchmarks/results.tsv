@@ -56,3 +56,465 @@ iteration	benchmark	claude_score	8gent_score	gap	status	changes
 2	BF001	95	50	45	regressed	already added
 2	BF002	92	50	42	regressed	already added
 2	BF003	90	100	-10	improved	none
+2	FM001	88	85	3	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:52:53.3...
+2	FI001	93	50	43	regressed	already added
+3	BF001	95	100	-5	improved	none
+3	BF002	92	50	42	regressed	already added
+3	BF003	90	50	40	regressed	already added
+3	FM001	88	85	3	regressed	already added
+3	FI001	93	50	43	regressed	already added
+4	BF001	95	50	45	regressed	already added
+4	BF002	92	50	42	regressed	already added
+4	BF003	90	100	-10	improved	none
+1	BF001	95	50	45	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T01:01:27.1...
+1	BF002	92	50	42	regressed	already added
+1	BF003	90	100	-10	improved	none
+1	FM001	88	85	3	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T01:03:38.1...
+1	FI001	93	50	43	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T01:04:31.0...
+2	BF001	95	50	45	regressed	already added
+1	BF001	95	100	-5	improved	none
+1	BF002	92	65	27	regressed	already added
+1	BF001	95	50	45	regressed	already added
+1	BF002	92	85	7	regressed	already added
+1	BF003	90	100	-10	improved	none
+1	FM001	88	85	3	regressed	already added
+1	FI001	93	50	43	regressed	already added
+2	BF001	95	50	45	regressed	already added
+2	BF002	92	65	27	regressed	already added
+2	BF003	90	100	-10	improved	none
+2	FM001	88	85	3	regressed	already added
+2	FI001	93	50	43	regressed	already added
+3	BF001	95	50	45	regressed	already added
+3	BF002	92	65	27	regressed	already added
+3	BF003	90	50	40	regressed	already added
+3	FM001	88	85	3	regressed	already added
+3	FI001	93	100	-7	improved	none
+4	BF001	95	50	45	regressed	already added
+4	BF002	92	50	42	regressed	already added
+4	BF003	90	100	-10	improved	none
+4	FM001	88	85	3	regressed	already added
+4	FI001	93	100	-7	improved	none
+5	BF001	95	50	45	regressed	already added
+5	BF002	92	85	7	regressed	already added
+5	BF003	90	100	-10	improved	none
+5	FM001	88	85	3	regressed	already added
+5	FI001	93	50	43	regressed	already added
+6	BF001	95	50	45	regressed	already added
+6	BF002	92	65	27	regressed	already added
+6	BF003	90	100	-10	improved	none
+6	FM001	88	85	3	regressed	already added
+6	FI001	93	50	43	regressed	already added
+7	BF001	95	50	45	regressed	already added
+7	BF002	92	50	42	regressed	already added
+7	BF003	90	65	25	regressed	already added
+7	FM001	88	100	-12	improved	none
+7	FI001	93	100	-7	improved	none
+8	BF001	95	100	-5	improved	none
+8	BF002	92	50	42	regressed	already added
+8	BF003	90	100	-10	improved	none
+8	FM001	88	85	3	regressed	already added
+8	FI001	93	50	43	regressed	already added
+9	BF001	95	90	5	regressed	already added
+9	BF002	92	50	42	regressed	already added
+9	BF003	90	100	-10	improved	none
+9	FM001	88	85	3	regressed	already added
+9	FI001	93	100	-7	improved	none
+10	BF001	95	80	15	regressed	already added
+10	BF002	92	85	7	regressed	already added
+10	BF003	90	100	-10	improved	none
+10	FM001	88	85	3	regressed	already added
+10	FI001	93	50	43	regressed	already added
+11	BF001	95	100	-5	improved	none
+11	BF002	92	65	27	regressed	already added
+11	BF003	90	100	-10	improved	none
+11	FM001	88	100	-12	improved	none
+11	FI001	93	50	43	regressed	already added
+12	BF001	95	50	45	regressed	already added
+12	BF002	92	85	7	regressed	already added
+12	BF003	90	100	-10	improved	none
+12	FM001	88	85	3	regressed	already added
+12	FI001	93	100	-7	improved	none
+13	BF001	95	50	45	regressed	already added
+13	BF002	92	50	42	regressed	already added
+13	BF003	90	50	40	regressed	already added
+13	FM001	88	50	38	regressed	already added
+13	FI001	93	100	-7	improved	none
+14	BF001	95	50	45	regressed	already added
+14	BF002	92	50	42	regressed	already added
+14	BF003	90	100	-10	improved	none
+14	FM001	88	85	3	regressed	already added
+14	FI001	93	50	43	regressed	already added
+15	BF001	95	50	45	regressed	already added
+15	BF002	92	85	7	regressed	already added
+15	BF003	90	50	40	regressed	already added
+15	FM001	88	100	-12	improved	none
+15	FI001	93	50	43	regressed	already added
+16	BF001	95	80	15	regressed	already added
+16	BF002	92	65	27	regressed	already added
+16	BF003	90	50	40	regressed	already added
+16	FM001	88	85	3	regressed	already added
+16	FI001	93	100	-7	improved	none
+17	BF001	95	50	45	regressed	already added
+17	BF002	92	85	7	regressed	already added
+17	BF003	90	100	-10	improved	none
+17	FM001	88	85	3	regressed	already added
+17	FI001	93	50	43	regressed	already added
+18	BF001	95	50	45	regressed	already added
+18	BF002	92	85	7	regressed	already added
+18	BF003	90	100	-10	improved	none
+18	FM001	88	85	3	regressed	already added
+18	FI001	93	50	43	regressed	already added
+19	BF001	95	70	25	regressed	already added
+19	BF002	92	65	27	regressed	already added
+19	BF003	90	100	-10	improved	none
+19	FM001	88	85	3	regressed	already added
+19	FI001	93	50	43	regressed	already added
+20	BF001	95	50	45	regressed	already added
+20	BF002	92	85	7	regressed	already added
+20	BF003	90	50	40	regressed	already added
+20	FM001	88	85	3	regressed	already added
+20	FI001	93	50	43	regressed	already added
+21	BF001	95	50	45	regressed	already added
+21	BF002	92	65	27	regressed	already added
+21	BF003	90	100	-10	improved	none
+21	FM001	88	85	3	regressed	already added
+21	FI001	93	50	43	regressed	already added
+22	BF001	95	50	45	regressed	already added
+22	BF002	92	85	7	regressed	already added
+22	BF003	90	100	-10	improved	none
+22	FM001	88	85	3	regressed	already added
+22	FI001	93	100	-7	improved	none
+23	BF001	95	100	-5	improved	none
+23	BF002	92	85	7	regressed	already added
+23	BF003	90	100	-10	improved	none
+23	FM001	88	85	3	regressed	already added
+23	FI001	93	50	43	regressed	already added
+24	BF001	95	50	45	regressed	already added
+24	BF002	92	50	42	regressed	already added
+24	BF003	90	50	40	regressed	already added
+24	FM001	88	85	3	regressed	already added
+24	FI001	93	50	43	regressed	already added
+25	BF001	95	50	45	regressed	already added
+25	BF002	92	50	42	regressed	already added
+25	BF003	90	100	-10	improved	none
+25	FM001	88	85	3	regressed	already added
+25	FI001	93	50	43	regressed	already added
+26	BF001	95	100	-5	improved	none
+26	BF002	92	50	42	regressed	already added
+26	BF003	90	100	-10	improved	none
+26	FM001	88	85	3	regressed	already added
+26	FI001	93	100	-7	improved	none
+27	BF001	95	50	45	regressed	already added
+27	BF002	92	50	42	regressed	already added
+27	BF003	90	50	40	regressed	already added
+27	FM001	88	85	3	regressed	already added
+27	FI001	93	100	-7	improved	none
+28	BF001	95	50	45	regressed	already added
+28	BF002	92	65	27	regressed	already added
+28	BF003	90	100	-10	improved	none
+28	FM001	88	85	3	regressed	already added
+28	FI001	93	100	-7	improved	none
+29	BF001	95	50	45	regressed	already added
+29	BF002	92	85	7	regressed	already added
+29	BF003	90	100	-10	improved	none
+29	FM001	88	100	-12	improved	none
+29	FI001	93	100	-7	improved	none
+30	BF001	95	50	45	regressed	already added
+30	BF002	92	85	7	regressed	already added
+30	BF003	90	100	-10	improved	none
+30	FM001	88	85	3	regressed	already added
+30	FI001	93	100	-7	improved	none
+31	BF001	95	50	45	regressed	already added
+31	BF002	92	50	42	regressed	already added
+31	BF003	90	100	-10	improved	none
+31	FM001	88	85	3	regressed	already added
+31	FI001	93	50	43	regressed	already added
+32	BF001	95	100	-5	improved	none
+32	BF002	92	65	27	regressed	already added
+32	BF003	90	100	-10	improved	none
+32	FM001	88	85	3	regressed	already added
+32	FI001	93	100	-7	improved	none
+33	BF001	95	50	45	regressed	already added
+33	BF002	92	85	7	regressed	already added
+33	BF003	90	50	40	regressed	already added
+33	FM001	88	85	3	regressed	already added
+33	FI001	93	50	43	regressed	already added
+34	BF001	95	50	45	regressed	already added
+34	BF002	92	85	7	regressed	already added
+34	BF003	90	100	-10	improved	none
+34	FM001	88	85	3	regressed	already added
+34	FI001	93	50	43	regressed	already added
+35	BF001	95	50	45	regressed	already added
+35	BF002	92	50	42	regressed	already added
+35	BF003	90	100	-10	improved	none
+35	FM001	88	85	3	regressed	already added
+35	FI001	93	50	43	regressed	already added
+36	BF001	95	50	45	regressed	already added
+36	BF002	92	65	27	regressed	already added
+36	BF003	90	50	40	regressed	already added
+36	FM001	88	85	3	regressed	already added
+36	FI001	93	50	43	regressed	already added
+37	BF001	95	50	45	regressed	already added
+37	BF002	92	85	7	regressed	already added
+37	BF003	90	65	25	regressed	already added
+37	FM001	88	50	38	regressed	already added
+37	FI001	93	50	43	regressed	already added
+38	BF001	95	50	45	regressed	already added
+38	BF002	92	65	27	regressed	already added
+38	BF003	90	50	40	regressed	already added
+38	FM001	88	85	3	regressed	already added
+38	FI001	93	100	-7	improved	none
+39	BF001	95	50	45	regressed	already added
+39	BF002	92	65	27	regressed	already added
+39	BF003	90	100	-10	improved	none
+39	FM001	88	85	3	regressed	already added
+39	FI001	93	50	43	regressed	already added
+40	BF001	95	50	45	regressed	already added
+40	BF002	92	85	7	regressed	already added
+40	BF003	90	100	-10	improved	none
+40	FM001	88	85	3	regressed	already added
+40	FI001	93	50	43	regressed	already added
+41	BF001	95	50	45	regressed	already added
+41	BF002	92	65	27	regressed	already added
+41	BF003	90	100	-10	improved	none
+41	FM001	88	85	3	regressed	already added
+41	FI001	93	50	43	regressed	already added
+42	BF001	95	70	25	regressed	already added
+42	BF002	92	50	42	regressed	already added
+42	BF003	90	100	-10	improved	none
+42	FM001	88	85	3	regressed	already added
+42	FI001	93	50	43	regressed	already added
+43	BF001	95	50	45	regressed	already added
+43	BF002	92	85	7	regressed	already added
+43	BF003	90	50	40	regressed	already added
+43	FM001	88	85	3	regressed	already added
+43	FI001	93	100	-7	improved	none
+44	BF001	95	50	45	regressed	already added
+44	BF002	92	85	7	regressed	already added
+44	BF003	90	100	-10	improved	none
+44	FM001	88	85	3	regressed	already added
+44	FI001	93	50	43	regressed	already added
+45	BF001	95	50	45	regressed	already added
+45	BF002	92	85	7	regressed	already added
+45	BF003	90	100	-10	improved	none
+45	FM001	88	85	3	regressed	already added
+45	FI001	93	100	-7	improved	none
+46	BF001	95	50	45	regressed	already added
+46	BF002	92	65	27	regressed	already added
+46	BF003	90	100	-10	improved	none
+46	FM001	88	85	3	regressed	already added
+46	FI001	93	50	43	regressed	already added
+47	BF001	95	60	35	regressed	already added
+47	BF002	92	65	27	regressed	already added
+47	BF003	90	100	-10	improved	none
+47	FM001	88	85	3	regressed	already added
+47	FI001	93	100	-7	improved	none
+48	BF001	95	100	-5	improved	none
+48	BF002	92	85	7	regressed	already added
+48	BF003	90	100	-10	improved	none
+48	FM001	88	50	38	regressed	already added
+48	FI001	93	100	-7	improved	none
+49	BF001	95	50	45	regressed	already added
+49	BF002	92	85	7	regressed	already added
+49	BF003	90	100	-10	improved	none
+49	FM001	88	85	3	regressed	already added
+49	FI001	93	50	43	regressed	already added
+50	BF001	95	50	45	regressed	already added
+50	BF002	92	85	7	regressed	already added
+50	BF003	90	65	25	regressed	already added
+50	FM001	88	85	3	regressed	already added
+50	FI001	93	100	-7	improved	none
+51	BF001	95	70	25	regressed	already added
+51	BF002	92	85	7	regressed	already added
+51	BF003	90	65	25	regressed	already added
+51	FM001	88	85	3	regressed	already added
+51	FI001	93	100	-7	improved	none
+52	BF001	95	100	-5	improved	none
+52	BF002	92	85	7	regressed	already added
+52	BF003	90	50	40	regressed	already added
+52	FM001	88	85	3	regressed	already added
+52	FI001	93	100	-7	improved	none
+53	BF001	95	50	45	regressed	already added
+53	BF002	92	50	42	regressed	already added
+53	BF003	90	100	-10	improved	none
+53	FM001	88	85	3	regressed	already added
+53	FI001	93	100	-7	improved	none
+54	BF001	95	50	45	regressed	already added
+54	BF002	92	85	7	regressed	already added
+54	BF003	90	100	-10	improved	none
+54	FM001	88	85	3	regressed	already added
+54	FI001	93	100	-7	improved	none
+55	BF001	95	90	5	regressed	already added
+55	BF002	92	85	7	regressed	already added
+55	BF003	90	100	-10	improved	none
+55	FM001	88	100	-12	improved	none
+55	FI001	93	85	8	regressed	already added
+56	BF001	95	50	45	regressed	already added
+56	BF002	92	85	7	regressed	already added
+56	BF003	90	100	-10	improved	none
+56	FM001	88	85	3	regressed	already added
+56	FI001	93	100	-7	improved	none
+57	BF001	95	50	45	regressed	already added
+57	BF002	92	65	27	regressed	already added
+57	BF003	90	100	-10	improved	none
+57	FM001	88	85	3	regressed	already added
+57	FI001	93	50	43	regressed	already added
+58	BF001	95	70	25	regressed	already added
+58	BF002	92	50	42	regressed	already added
+58	BF003	90	100	-10	improved	none
+58	FM001	88	85	3	regressed	already added
+58	FI001	93	100	-7	improved	none
+59	BF001	95	50	45	regressed	already added
+59	BF002	92	85	7	regressed	already added
+59	BF003	90	100	-10	improved	none
+59	FM001	88	85	3	regressed	already added
+59	FI001	93	50	43	regressed	already added
+60	BF001	95	50	45	regressed	already added
+60	BF002	92	50	42	regressed	already added
+60	BF003	90	50	40	regressed	already added
+60	FM001	88	85	3	regressed	already added
+60	FI001	93	50	43	regressed	already added
+61	BF001	95	100	-5	improved	none
+61	BF002	92	85	7	regressed	already added
+61	BF003	90	100	-10	improved	none
+61	FM001	88	85	3	regressed	already added
+61	FI001	93	50	43	regressed	already added
+62	BF001	95	50	45	regressed	already added
+62	BF002	92	65	27	regressed	already added
+62	BF003	90	85	5	regressed	already added
+62	FM001	88	100	-12	improved	none
+62	FI001	93	50	43	regressed	already added
+63	BF001	95	100	-5	improved	none
+63	BF002	92	85	7	regressed	already added
+63	BF003	90	100	-10	improved	none
+63	FM001	88	100	-12	improved	none
+63	FI001	93	50	43	regressed	already added
+64	BF001	95	90	5	regressed	already added
+64	BF002	92	50	42	regressed	already added
+64	BF003	90	100	-10	improved	none
+64	FM001	88	85	3	regressed	already added
+64	FI001	93	100	-7	improved	none
+65	BF001	95	100	-5	improved	none
+65	BF002	92	85	7	regressed	already added
+65	BF003	90	100	-10	improved	none
+65	FM001	88	85	3	regressed	already added
+65	FI001	93	50	43	regressed	already added
+66	BF001	95	50	45	regressed	already added
+66	BF002	92	85	7	regressed	already added
+66	BF003	90	100	-10	improved	none
+66	FM001	88	85	3	regressed	already added
+66	FI001	93	50	43	regressed	already added
+67	BF001	95	90	5	regressed	already added
+67	BF002	92	65	27	regressed	already added
+67	BF003	90	100	-10	improved	none
+67	FM001	88	85	3	regressed	already added
+67	FI001	93	50	43	regressed	already added
+68	BF001	95	50	45	regressed	already added
+68	BF002	92	50	42	regressed	already added
+68	BF003	90	100	-10	improved	none
+68	FM001	88	85	3	regressed	already added
+68	FI001	93	50	43	regressed	already added
+69	BF001	95	50	45	regressed	already added
+69	BF002	92	50	42	regressed	already added
+69	BF003	90	100	-10	improved	none
+69	FM001	88	100	-12	improved	none
+69	FI001	93	85	8	regressed	already added
+70	BF001	95	50	45	regressed	already added
+70	BF002	92	85	7	regressed	already added
+70	BF003	90	100	-10	improved	none
+70	FM001	88	85	3	regressed	already added
+70	FI001	93	100	-7	improved	none
+71	BF001	95	70	25	regressed	already added
+71	BF002	92	50	42	regressed	already added
+71	BF003	90	100	-10	improved	none
+71	FM001	88	85	3	regressed	already added
+71	FI001	93	50	43	regressed	already added
+72	BF001	95	50	45	regressed	already added
+72	BF002	92	50	42	regressed	already added
+72	BF003	90	50	40	regressed	already added
+72	FM001	88	50	38	regressed	already added
+72	FI001	93	50	43	regressed	already added
+73	BF001	95	50	45	regressed	already added
+73	BF002	92	85	7	regressed	already added
+73	BF003	90	50	40	regressed	already added
+73	FM001	88	85	3	regressed	already added
+73	FI001	93	50	43	regressed	already added
+74	BF001	95	60	35	regressed	already added
+74	BF002	92	65	27	regressed	already added
+74	BF003	90	100	-10	improved	none
+74	FM001	88	85	3	regressed	already added
+74	FI001	93	100	-7	improved	none
+75	BF001	95	50	45	regressed	already added
+75	BF002	92	85	7	regressed	already added
+75	BF003	90	100	-10	improved	none
+75	FM001	88	85	3	regressed	already added
+75	FI001	93	100	-7	improved	none
+76	BF001	95	50	45	regressed	already added
+76	BF002	92	85	7	regressed	already added
+76	BF003	90	100	-10	improved	none
+76	FM001	88	85	3	regressed	already added
+76	FI001	93	100	-7	improved	none
+77	BF001	95	100	-5	improved	none
+77	BF002	92	85	7	regressed	already added
+77	BF003	90	100	-10	improved	none
+77	FM001	88	85	3	regressed	already added
+77	FI001	93	50	43	regressed	already added
+78	BF001	95	50	45	regressed	already added
+78	BF002	92	50	42	regressed	already added
+78	BF003	90	100	-10	improved	none
+78	FM001	88	85	3	regressed	already added
+78	FI001	93	50	43	regressed	already added
+79	BF001	95	50	45	regressed	already added
+79	BF002	92	50	42	regressed	already added
+79	BF003	90	50	40	regressed	already added
+79	FM001	88	85	3	regressed	already added
+79	FI001	93	50	43	regressed	already added
+80	BF001	95	50	45	regressed	already added
+80	BF002	92	85	7	regressed	already added
+80	BF003	90	85	5	regressed	already added
+80	FM001	88	85	3	regressed	already added
+80	FI001	93	50	43	regressed	already added
+81	BF001	95	100	-5	improved	none
+81	BF002	92	85	7	regressed	already added
+81	BF003	90	100	-10	improved	none
+81	FM001	88	100	-12	improved	none
+81	FI001	93	100	-7	improved	none
+82	BF001	95	50	45	regressed	already added
+82	BF002	92	50	42	regressed	already added
+82	BF003	90	100	-10	improved	none
+82	FM001	88	100	-12	improved	none
+82	FI001	93	100	-7	improved	none
+83	BF001	95	50	45	regressed	already added
+83	BF002	92	50	42	regressed	already added
+83	BF003	90	100	-10	improved	none
+83	FM001	88	85	3	regressed	already added
+83	FI001	93	100	-7	improved	none
+84	BF001	95	50	45	regressed	already added
+84	BF002	92	65	27	regressed	already added
+84	BF003	90	100	-10	improved	none
+84	FM001	88	85	3	regressed	already added
+84	FI001	93	50	43	regressed	already added
+85	BF001	95	100	-5	improved	none
+85	BF002	92	85	7	regressed	already added
+85	BF003	90	100	-10	improved	none
+85	FM001	88	100	-12	improved	none
+85	FI001	93	50	43	regressed	already added
+86	BF001	95	50	45	regressed	already added
+86	BF002	92	50	42	regressed	already added
+86	BF003	90	100	-10	improved	none
+86	FM001	88	50	38	regressed	already added
+86	FI001	93	50	43	regressed	already added
+87	BF001	95	50	45	regressed	already added
+87	BF002	92	85	7	regressed	already added
+87	BF003	90	100	-10	improved	none
+87	FM001	88	85	3	regressed	already added
+87	FI001	93	50	43	regressed	already added
+88	BF001	95	100	-5	improved	none
+88	BF002	92	85	7	regressed	already added
+88	BF003	90	50	40	regressed	already added
+88	FM001	88	85	3	regressed	already added
+88	FI001	93	50	43	regressed	already added
