@@ -749,3 +749,17 @@ export {
   type SubAgentMessage,
   type SubAgentEvent,
 } from "./subagent";
+
+// Enhanced Delegation System
+export {
+  DelegationManager,
+  getDelegationManager,
+  resetDelegationManager,
+  generateDelegationPrompt,
+  generateHandoffPrompt,
+  generateDecompositionPrompt,
+  type DelegationRequest,
+  type DelegationContext,
+  type DelegationConstraints,
+  type DelegationResult,
+} from "./delegation";

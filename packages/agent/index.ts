@@ -1643,25 +1643,33 @@ export class Agent {
     });
 
     // Auto-register voice completion hook (voice is ON by default)
-    // Uses shell mode with macOS `say` command - works synchronously at registration
-    this.hookManager.registerHook({
-      type: "onComplete",
-      name: "Voice Completion",
-      description: "Speaks task completion summary using TTS (enabled by default)",
-      mode: "shell",
-      // Extract completion message and speak it via macOS say
-      // The {result} variable contains the agent's final output
-      command: `
+    // Only register if no voice hook exists yet (prevents duplicates/echo)
+    const existingHooks = this.hookManager.getAllHooks();
+    const hasVoiceHook = existingHooks.some(
+      (h) => h.name === "Voice Completion" && h.type === "onComplete"
+    );
+
+    if (!hasVoiceHook) {
+      // Uses shell mode with macOS `say` command - works synchronously at registration
+      this.hookManager.registerHook({
+        type: "onComplete",
+        name: "Voice Completion",
+        description: "Speaks task completion summary using TTS (enabled by default)",
+        mode: "shell",
+        // Extract completion message and speak it via macOS say
+        // The {result} variable contains the agent's final output
+        command: `
         MSG=$(echo "{result}" | grep -o '🎯 COMPLETED:.*' | head -1 | sed 's/🎯 COMPLETED: *//' | cut -c1-300)
         if [ -z "$MSG" ]; then
           MSG="Task complete. The Infinite Gentleman has delivered."
         fi
         say -v Daniel -r 200 "$MSG" &
       `,
-      enabled: true,
-      async: true,
-      continueOnError: true,
-    });
+        enabled: true,
+        async: true,
+        continueOnError: true,
+      });
+    }
   }
 
   async chat(userMessage: string): Promise<string> {
