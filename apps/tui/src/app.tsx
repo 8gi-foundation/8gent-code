@@ -60,6 +60,14 @@ import { Agent } from "../../../packages/agent/index.js";
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
 
+// Import design agent
+import {
+  DesignAgent,
+  createDesignAgent,
+  type DesignSuggestion,
+} from "../../../packages/design-agent/index.js";
+import { DesignSuggestionPanel } from "./components/design-selector.js";
+
 // ============================================
 // Types
 // ============================================
@@ -78,7 +86,7 @@ export interface Message {
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
-type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations";
+type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -226,6 +234,12 @@ export function App({ initialCommand, args }: AppProps) {
   // ADHD/Bionic reading mode
   const [adhdMode, setAdhdMode] = useState(false);
   const [adhdSuggested, setAdhdSuggested] = useState(false);
+
+  // Design agent state
+  const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
+  const [designSuggestions, setDesignSuggestions] = useState<DesignSuggestion[]>([]);
+  const [designIntro, setDesignIntro] = useState<string>("");
+  const [selectedDesign, setSelectedDesign] = useState<DesignSuggestion | null>(null);
 
   // Handle keyboard shortcuts
   useInput((input, key) => {
@@ -381,6 +395,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /kanban (Ctrl+K) - Toggle kanban board\n" +
               "  /predict (Ctrl+P) - Show predicted next steps\n" +
               "  /avenues - Show planned avenues\n" +
+              "  /design [task] - Get design system suggestions\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
               "  /clear - Clear messages\n" +
@@ -564,6 +579,20 @@ export function App({ initialCommand, args }: AppProps) {
           }
           break;
 
+        case "design":
+          // Trigger design agent manually
+          const designTask = args.length > 0 ? args.join(" ") : "create a new UI component";
+          designAgent.process(designTask).then((result) => {
+            if (result.needsIntervention && result.suggestions) {
+              setDesignIntro(result.message.split("\n")[0] || "Pick a design direction:");
+              setDesignSuggestions(result.suggestions);
+              setViewMode("design");
+            } else {
+              addSystemMessage("No design decisions needed for this task.\nTry: /design create a landing page");
+            }
+          });
+          break;
+
         // Model selection - check if args provided
         default:
           // Handle /model command
@@ -618,6 +647,7 @@ export function App({ initialCommand, args }: AppProps) {
       showOnboarding,
       currentModel,
       currentProvider,
+      designAgent,
     ]
   );
 
@@ -1033,6 +1063,45 @@ export function App({ initialCommand, args }: AppProps) {
           <AnimationShowcase
             animation={currentAnimation}
             onClose={() => setViewMode("chat")}
+          />
+        );
+
+      case "design":
+        // Design system selector
+        return (
+          <DesignSuggestionPanel
+            intro={designIntro}
+            suggestions={designSuggestions.map(s => ({
+              id: s.id,
+              name: s.name,
+              description: s.description,
+              reasoning: s.reasoning,
+              score: s.score,
+              stack: s.stack,
+              preview: s.preview,
+            }))}
+            followUp="Which direction speaks to you? (1, 2, or 3)"
+            onSelect={(option) => {
+              designAgent.selectDesign(option.id).then((result) => {
+                if (result.success && result.selectedDesign) {
+                  setSelectedDesign(result.selectedDesign);
+                  addSystemMessage(
+                    `\u2713 Design selected: **${result.selectedDesign.name}**\n\n` +
+                    `Stack: ${result.selectedDesign.stack.join(", ")}\n\n` +
+                    (result.commands.length > 0
+                      ? `Setup commands:\n${result.commands.map(c => `  $ ${c}`).join("\n")}\n\n`
+                      : "") +
+                    "I'll use this design system for the implementation."
+                  );
+                }
+                setViewMode("chat");
+              });
+            }}
+            onSkip={() => {
+              addSystemMessage("Skipping design selection. I'll pick something sensible.");
+              setViewMode("chat");
+            }}
+            visible={true}
           />
         );
 

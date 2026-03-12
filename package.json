@@ -28,6 +28,9 @@
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "benchmark": "bun run scripts/benchmark.ts",
+    "benchmark:suite": "bun run benchmarks/runner.ts",
+    "benchmark:category": "bun run benchmarks/runner.ts --category",
+    "benchmark:single": "bun run benchmarks/runner.ts --bench",
     "demo": "bun run scripts/demo-savings.ts"
   },
   "workspaces": [
