@@ -109,12 +109,31 @@ async function callOllama(prompt: string): Promise<string> {
 
 async function get8gentSystemPrompt(): Promise<string> {
   const content = fs.readFileSync(PROMPTS_FILE, "utf-8");
-  // Extract FULL_SYSTEM_PROMPT
-  const match = content.match(/export const FULL_SYSTEM_PROMPT = \[([\s\S]*?)\].join/);
-  if (match) {
-    return match[1];
+
+  // Extract all exported segments and patterns
+  let prompt = "";
+
+  // Get FULL_SYSTEM_PROMPT segments
+  const fullMatch = content.match(/export const FULL_SYSTEM_PROMPT = \[([\s\S]*?)\].join/);
+  if (fullMatch) {
+    prompt += fullMatch[1] + "\n\n";
   }
-  return content;
+
+  // Get any enhanced patterns (BUG_FIXING_ENHANCED, etc.)
+  const enhancedPatterns = [
+    /export const BUG_FIXING_ENHANCED = `([\s\S]*?)`;/,
+    /export const FILE_MANIPULATION_ENHANCED = `([\s\S]*?)`;/,
+    /export const FEATURE_IMPLEMENTATION_ENHANCED = `([\s\S]*?)`;/,
+  ];
+
+  for (const pattern of enhancedPatterns) {
+    const match = content.match(pattern);
+    if (match) {
+      prompt += match[1] + "\n\n";
+    }
+  }
+
+  return prompt || content;
 }
 
 async function runBenchmarkOn8gent(task: BenchmarkTask): Promise<{ code: string; score: number }> {

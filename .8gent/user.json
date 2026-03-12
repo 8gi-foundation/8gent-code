@@ -56,8 +56,13 @@
     },
     "mcps": [],
     "ollama": {
-      "available": false,
-      "models": []
+      "available": true,
+      "models": [
+        "glm-4.7-flash:latest",
+        "qwen2.5-coder:14b-instruct-q4_K_M",
+        "qwen3:14b",
+        "nomic-embed-text:latest"
+      ]
     },
     "lmstudio": {
       "available": false,

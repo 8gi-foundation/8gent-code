@@ -1,0 +1,58 @@
+iteration	benchmark	claude_score	8gent_score	gap	status	changes
+1	BF001	95	50	45	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:16:55.9...
+1	BF001	95	50	45	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:17:42.4...
+1	BF002	92	65	27	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:18:30.8...
+1	BF002	92	65	27	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:19:17.0...
+1	BF003	90	100	-10	improved	none
+1	BF003	90	65	25	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:21:05.8...
+1	FM001	88	85	3	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:21:39.1...
+1	FM001	88	85	3	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:22:05.1...
+1	BF001	95	50	45	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:23:40.8...
+1	BF002	92	65	27	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:24:26.7...
+1	BF001	95	50	45	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:25:43.8...
+1	BF002	92	85	7	regressed	already added
+1	BF003	90	85	5	regressed	already added
+1	FM001	88	85	3	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:27:44.7...
+1	FI001	93	50	43	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:28:35.1...
+2	BF001	95	100	-5	improved	none
+2	BF002	92	65	27	regressed	already added
+2	BF003	90	100	-10	improved	none
+2	FM001	88	85	3	regressed	already added
+2	FI001	93	50	43	regressed	already added
+3	BF001	95	50	45	regressed	already added
+3	BF002	92	50	42	regressed	already added
+3	BF003	90	85	5	regressed	already added
+3	FM001	88	85	3	regressed	already added
+3	FI001	93	50	43	regressed	already added
+4	BF001	95	50	45	regressed	already added
+4	BF002	92	50	42	regressed	already added
+4	BF003	90	65	25	regressed	already added
+4	FM001	88	85	3	regressed	already added
+4	FI001	93	50	43	regressed	already added
+5	BF001	95	50	45	regressed	already added
+5	BF002	92	65	27	regressed	already added
+5	BF003	90	85	5	regressed	already added
+5	FM001	88	85	3	regressed	already added
+5	FI001	93	50	43	regressed	already added
+1	BF001	95	50	45	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:45:56.2...
+1	BF002	92	85	7	regressed	already added
+1	BF003	90	100	-10	improved	none
+1	FM001	88	100	-12	improved	none
+1	FI001	93	50	43	regressed	
+// AUTORESEARCH IMPROVEMENT 2026-03-12T00:49:23.9...
+2	BF001	95	50	45	regressed	already added
+2	BF002	92	50	42	regressed	already added
+2	BF003	90	100	-10	improved	none
