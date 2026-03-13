@@ -1733,7 +1733,7 @@ export class Agent {
       workingDirectory: config.workingDirectory || process.cwd(),
     });
 
-    // Auto-register voice completion hook (voice is ON by default)
+    // Voice completion hook (OFF by default — enable with /voice on)
     // Only register if no voice hook exists yet (prevents duplicates/echo)
     const existingHooks = this.hookManager.getAllHooks();
     const hasVoiceHook = existingHooks.some(
@@ -1741,14 +1741,12 @@ export class Agent {
     );
 
     if (!hasVoiceHook) {
-      // Uses shell mode with macOS `say` command - works synchronously at registration
+      // Uses shell mode with macOS `say` command
       this.hookManager.registerHook({
         type: "onComplete",
         name: "Voice Completion",
-        description: "Speaks task completion summary using TTS (enabled by default)",
+        description: "Speaks task completion summary using TTS (enable with /voice on)",
         mode: "shell",
-        // Extract completion message and speak it via macOS say
-        // The {result} variable contains the agent's final output
         command: `
         MSG=$(echo "{result}" | grep -o '🎯 COMPLETED:.*' | head -1 | sed 's/🎯 COMPLETED: *//' | cut -c1-300)
         if [ -z "$MSG" ]; then
@@ -1756,7 +1754,7 @@ export class Agent {
         fi
         say -v Daniel -r 200 "$MSG" &
       `,
-        enabled: true,
+        enabled: false,
         async: true,
         continueOnError: true,
       });
