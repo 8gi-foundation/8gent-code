@@ -201,7 +201,7 @@ export class PlanValidateLoop extends EventEmitter {
     toolCalls: ToolCallRecord[];
   }> {
     // Import Agent dynamically
-    const { Agent } = await import("../agent");
+    const { Agent } = await import("../eight");
 
     const agent = new Agent({
       model: "glm-4.7-flash:latest",
