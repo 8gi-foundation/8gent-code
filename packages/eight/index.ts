@@ -7,10 +7,13 @@
  * Architecture:
  *   types.ts     — Shared types (Message, ToolCall, AgentConfig, LLMResponse, LLMClient)
  *   prompt.ts    — Default system prompt
- *   clients/     — LLM client implementations (Ollama, LM Studio, OpenRouter)
- *   tools.ts     — ToolExecutor (tool definitions + execution)
- *   agent.ts     — Agent class (the agentic loop)
+ *   clients/     — LLM client implementations (used for isAvailable() checks)
+ *   tools.ts     — ToolExecutor (legacy tool execution, kept for REPL compatibility)
+ *   agent.ts     — Agent class (powered by AI SDK via packages/ai)
  *   repl.ts      — CLI REPL with slash commands
+ *
+ * The agentic loop is now handled by the Vercel AI SDK's ToolLoopAgent.
+ * See packages/ai/ for the AI SDK integration layer.
  */
 
 // Types
