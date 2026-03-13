@@ -40,6 +40,36 @@ const TASK_PRESETS: Record<string, { prompt: string; validate: string }> = {
       "Build a Next.js project in the current directory. Steps: 1) Create package.json with next, react, react-dom dependencies 2) Create app/layout.tsx with basic HTML layout 3) Create app/page.tsx that displays a heading saying Hello World 4) Create next.config.js 5) Create tsconfig.json 6) Run bun install to install dependencies 7) Run npx next build to verify it compiles",
     validate: "package.json",
   },
+  api: {
+    prompt:
+      "Build a REST API with integration tests using Hono and Bun. Steps: 1) Create package.json with hono as a dependency 2) Run bun install 3) Create server.ts with a Hono app that has CRUD routes for todos: GET /todos, POST /todos, PUT /todos/:id, DELETE /todos/:id. Store todos in-memory. Each todo has id (number), title (string), completed (boolean). The server must listen on port 3456. 4) Create api.test.ts using bun:test that tests all 4 endpoints. The test file should start the server as a subprocess, wait for it to be ready, run fetch requests against http://localhost:3456, then kill the server. Tests: create a todo, list and verify it exists, update it, delete it, verify deletion. 5) Run bun test. If tests fail, read the error, fix the code, and re-run until ALL tests pass. Do NOT keep retrying the same approach — if something fails 3 times, try a completely different strategy.",
+    validate: "server.ts",
+  },
+  fullstack: {
+    prompt: `Build a full-stack task management app with Bun. This has 6 files that must all work together:
+
+1) db.ts — An in-memory database class with methods: addTask(title) returns {id, title, done, createdAt}, getAll() returns Task[], getById(id), updateTask(id, updates), deleteTask(id), getStats() returns {total, done, pending}. Use a Map internally. Auto-increment IDs starting at 1.
+
+2) validation.ts — Export functions: validateTitle(title) throws if empty/over 100 chars, validateId(id) throws if not a positive integer, validateUpdates(updates) throws if unknown fields. Each throws a ValidationError class you define with a code property.
+
+3) server.ts — Hono REST API on port 4567 that uses db.ts and validation.ts:
+   GET /tasks — list all tasks
+   GET /tasks/:id — get one task (404 if missing)
+   POST /tasks — create task (validates title, returns 201)
+   PATCH /tasks/:id — update task (validates updates, 404 if missing)
+   DELETE /tasks/:id — delete task (404 if missing)
+   GET /stats — return db.getStats()
+   All errors return proper JSON {error, code} with correct HTTP status codes.
+
+4) db.test.ts — 10 tests for the database class covering add, get, update, delete, getStats, and edge cases like getting a non-existent ID.
+
+5) validation.test.ts — 8 tests for all validation functions covering valid inputs, empty strings, too-long strings, invalid IDs, unknown fields.
+
+6) api.test.ts — 12 integration tests that start the server as a subprocess and test the full HTTP API including error responses (404, 400), correct status codes, and the stats endpoint.
+
+Steps: Create all 6 files. Run bun test. If ANY test fails, read the error carefully, fix the specific issue, and re-run. ALL 30 tests must pass. Do not retry the same fix — if something fails 3 times, try a different approach entirely.`,
+    validate: "server.ts",
+  },
 };
 
 function parseArgs(args: string[]): RunOptions {
