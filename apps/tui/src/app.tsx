@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, useInput, useApp } from "ink";
 import { Header, FancyHeader } from "./components/header.js";
 import { StatusBar, DetailedStatusBar, EnhancedStatusBar } from "./components/status-bar.js";
 import { CommandInput, SlashCommand } from "./components/command-input.js";
@@ -46,6 +46,8 @@ import {
   ADHD_MODE_ENABLED_MSG,
   ADHD_MODE_DISABLED_MSG,
 } from "./components/bionic-text.js";
+import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
+import { formatTokens } from "./lib/index.js";
 
 // Import permission system for infinite mode
 import {
@@ -1097,18 +1099,18 @@ export function App({ initialCommand, args }: AppProps) {
       case "onboarding":
         // Onboarding uses the same message list but with a different header indicator
         return (
-          <Box flexDirection="column">
+          <Stack>
             <Box marginBottom={1}>
-              <Text color="cyan" bold>∞ Onboarding</Text>
-              <Text dimColor> - </Text>
-              <Text color="yellow">Getting to know you</Text>
+              <Heading>∞ Onboarding</Heading>
+              <MutedText> - </MutedText>
+              <AppText color="yellow">Getting to know you</AppText>
             </Box>
             <MessageList
               messages={messages}
               animateTyping={showAnimations}
               soundEnabled={soundEnabled}
             />
-          </Box>
+          </Stack>
         );
 
       case "animations":
@@ -1202,24 +1204,24 @@ export function App({ initialCommand, args }: AppProps) {
             active={true}
           />
         ) : (
-          <Text dimColor>
-            <Text color="cyan">✦</Text> Awaiting your command...
-          </Text>
+          <MutedText>
+            <AppText color="cyan">✦</AppText> Awaiting your command...
+          </MutedText>
         )}
       </Box>
 
       {/* Top separator line */}
       <Box paddingX={1}>
-        <Text dimColor>{"─".repeat(60)}</Text>
+        <Divider />
       </Box>
 
       {/* Input section with context window display */}
       <Box paddingX={1} justifyContent="space-between" alignItems="center">
         {/* Left: Context used */}
         <Box width={12}>
-          <Text dimColor>
-            {formatContextSize(contextUsed)}
-          </Text>
+          <MutedText>
+            {formatTokens(contextUsed)}
+          </MutedText>
         </Box>
 
         {/* Center: Command input */}
@@ -1239,15 +1241,15 @@ export function App({ initialCommand, args }: AppProps) {
 
         {/* Right: Context max */}
         <Box width={12} justifyContent="flex-end">
-          <Text dimColor>
-            /{formatContextSize(contextMax)}
-          </Text>
+          <MutedText>
+            /{formatTokens(contextMax)}
+          </MutedText>
         </Box>
       </Box>
 
       {/* Bottom separator line */}
       <Box paddingX={1}>
-        <Text dimColor>{"─".repeat(60)}</Text>
+        <Divider />
       </Box>
 
       {/* Expanded view panel (Ctrl+O) */}
@@ -1260,19 +1262,19 @@ export function App({ initialCommand, args }: AppProps) {
           marginX={1}
           marginTop={1}
         >
-          <Text color="cyan" bold>∞ Extended Info</Text>
+          <Heading>∞ Extended Info</Heading>
           <Box marginTop={1} flexDirection="column">
-            <Text dimColor>Context: <Text color="cyan">{formatContextSize(contextUsed)}</Text> / <Text bold>{formatContextSize(contextMax)}</Text> ({Math.round((contextUsed / contextMax) * 100)}%)</Text>
-            <Text dimColor>Response time: <Text color="yellow">{lastResponseTime ?? 0}ms</Text></Text>
-            <Text dimColor>Tokens saved: <Text color="green">{tokensSaved.toLocaleString()}</Text></Text>
-            <Text dimColor>Model: <Text color="cyan">{currentModel}</Text> via <Text color="magenta">{currentProvider}</Text></Text>
-            <Text dimColor>Agent ready: <Text color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</Text></Text>
-            {currentBranch && <Text dimColor>Branch: <Text color="yellow">{currentBranch}</Text></Text>}
-            <Text dimColor>Mode: <Text color="cyan">{viewMode}</Text></Text>
-            <Text dimColor>Infinite: <Text color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</Text></Text>
+            <MutedText>Context: <AppText color="cyan">{formatTokens(contextUsed)}</AppText> / <AppText bold>{formatTokens(contextMax)}</AppText> ({Math.round((contextUsed / contextMax) * 100)}%)</MutedText>
+            <MutedText>Response time: <AppText color="yellow">{lastResponseTime ?? 0}ms</AppText></MutedText>
+            <MutedText>Tokens saved: <AppText color="green">{tokensSaved.toLocaleString()}</AppText></MutedText>
+            <MutedText>Model: <AppText color="cyan">{currentModel}</AppText> via <AppText color="magenta">{currentProvider}</AppText></MutedText>
+            <MutedText>Agent ready: <AppText color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</AppText></MutedText>
+            {currentBranch && <MutedText>Branch: <AppText color="yellow">{currentBranch}</AppText></MutedText>}
+            <MutedText>Mode: <AppText color="cyan">{viewMode}</AppText></MutedText>
+            <MutedText>Infinite: <AppText color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</AppText></MutedText>
           </Box>
           <Box marginTop={1}>
-            <Text dimColor>Press Ctrl+O to close</Text>
+            <MutedText>Press Ctrl+O to close</MutedText>
           </Box>
         </Box>
       )}
@@ -1318,25 +1320,14 @@ export function App({ initialCommand, args }: AppProps) {
       {/* Hidden keyboard shortcuts hint */}
       {showAnimations && (
         <Box paddingX={1} marginTop={1}>
-          <Text dimColor>
+          <MutedText>
             ^O expand | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | /help | ^C exit
-          </Text>
+          </MutedText>
         </Box>
       )}
     </Box>
     </ADHDModeContext.Provider>
   );
-}
-
-// Format context size in human readable format (e.g., "12.5K", "128K")
-function formatContextSize(tokens: number): string {
-  if (tokens >= 1000000) {
-    return (tokens / 1000000).toFixed(1) + "M";
-  }
-  if (tokens >= 1000) {
-    return (tokens / 1000).toFixed(1) + "K";
-  }
-  return tokens.toString();
 }
 
 // Personality completion phrases

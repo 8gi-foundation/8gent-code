@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import { AppText, MutedText, Label, ShortcutHint, Inline, Stack, Divider } from './primitives/index.js';
 import {
   MatrixRain,
   FireEffect,
@@ -144,18 +145,18 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
   // Single animation view
   if (targetAnimation) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
+      <Stack borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
         <Box marginBottom={1}>
           <GradientWave text={`✦ ${targetAnimation.name} ✦`} speed={120} />
         </Box>
-        <Text dimColor>{targetAnimation.description}</Text>
+        <MutedText>{targetAnimation.description}</MutedText>
         <Box marginY={1}>
           {targetAnimation.component}
         </Box>
         <Box marginTop={1}>
-          <Text dimColor>[ESC] close</Text>
+          <ShortcutHint keys="[ESC]" description="close" />
         </Box>
-      </Box>
+      </Stack>
     );
   }
 
@@ -163,26 +164,26 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
   const current = ANIMATIONS[currentIndex];
 
   return (
-    <Box flexDirection="column" borderStyle="double" borderColor="magenta" paddingX={2} paddingY={1}>
+    <Stack borderStyle="double" borderColor="magenta" paddingX={2} paddingY={1}>
       {/* Header */}
       <Box marginBottom={1} justifyContent="center">
         <GradientWave text="✦ 8GENT ANIMATION GALLERY ✦" speed={80} />
       </Box>
 
       {/* Navigation dots */}
-      <Box justifyContent="center" marginBottom={1}>
+      <Inline justifyContent="center" marginBottom={1} gap={0}>
         {ANIMATIONS.map((_, i) => (
-          <Text key={i} color={i === currentIndex ? "cyan" : undefined} dimColor={i !== currentIndex}>
+          <AppText key={i} color={i === currentIndex ? "cyan" : undefined} dimColor={i !== currentIndex}>
             {i === currentIndex ? "●" : "○"}{" "}
-          </Text>
+          </AppText>
         ))}
-      </Box>
+      </Inline>
 
       {/* Current animation info */}
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        <Text color="cyan" bold>{current.name}</Text>
-        <Text dimColor>{current.description}</Text>
-      </Box>
+      <Stack alignItems="center" marginBottom={1}>
+        <Label color="cyan">{current.name}</Label>
+        <MutedText>{current.description}</MutedText>
+      </Stack>
 
       {/* Animation display */}
       <Box
@@ -197,18 +198,14 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
       </Box>
 
       {/* Controls */}
-      <Box marginTop={1} justifyContent="center" gap={2}>
-        <Text dimColor>
-          <Text color="yellow">←/→</Text> navigate
-        </Text>
-        <Text dimColor>
-          <Text color="yellow">[ESC]</Text> close
-        </Text>
-        <Text dimColor>
+      <Inline marginTop={1} justifyContent="center" gap={2}>
+        <ShortcutHint keys="←/→" description="navigate" />
+        <ShortcutHint keys="[ESC]" description="close" />
+        <MutedText>
           {currentIndex + 1}/{ANIMATIONS.length}
-        </Text>
-      </Box>
-    </Box>
+        </MutedText>
+      </Inline>
+    </Stack>
   );
 }
 
@@ -238,20 +235,20 @@ export function MiniAnimation({ type, width = 20 }: MiniAnimationProps) {
 
 export function AnimationList() {
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Text color="cyan" bold>Available Animations:</Text>
+    <Stack paddingX={1}>
+      <Label color="cyan">Available Animations:</Label>
       {ANIMATIONS.map(anim => (
-        <Box key={anim.id}>
-          <Text color="yellow">{anim.id.padEnd(10)}</Text>
-          <Text dimColor>{anim.description}</Text>
-        </Box>
+        <Inline key={anim.id} gap={0}>
+          <AppText color="yellow">{anim.id.padEnd(10)}</AppText>
+          <MutedText>{anim.description}</MutedText>
+        </Inline>
       ))}
       <Box marginTop={1}>
-        <Text dimColor>
+        <MutedText>
           Usage: /animations [name] or /animations all
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Stack>
   );
 }
 

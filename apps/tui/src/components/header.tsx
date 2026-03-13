@@ -12,6 +12,7 @@ import { Box, Text } from "ink";
 import Gradient from "ink-gradient";
 import { PulseLogo, AnimatedWordmark } from "./pulse-logo.js";
 import { RainbowBorder, AnimatedSeparator } from "./rainbow-border.js";
+import { AppText, MutedText, Inline } from './primitives/index.js';
 
 interface HeaderProps {
   isProcessing?: boolean;
@@ -30,9 +31,9 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
   if (!mounted && showAnimations) {
     return (
       <Box paddingX={1} marginBottom={1}>
-        <Text dimColor>
+        <MutedText>
           Loading...
-        </Text>
+        </MutedText>
       </Box>
     );
   }
@@ -44,23 +45,23 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
       speed={200}
       borderStyle="round"
     >
-      <Box flexDirection="row" gap={1}>
+      <Inline gap={1}>
         {/* Animated 8gent logo */}
         <Box>
           <PulseLogo isIdle={!isProcessing} isProcessing={isProcessing} />
           <Gradient name="rainbow">
-            <Text bold>gent</Text>
+            <AppText bold>gent</AppText>
           </Gradient>
         </Box>
 
         {/* Separator */}
-        <Text dimColor> Code</Text>
+        <MutedText> Code</MutedText>
 
-        <Text dimColor>│</Text>
+        <MutedText>│</MutedText>
 
         {/* Tagline with subtle animation */}
         <TaglineText animate={showAnimations} />
-      </Box>
+      </Inline>
     </RainbowBorder>
   );
 }
@@ -93,9 +94,9 @@ function TaglineText({ animate = true }: TaglineTextProps) {
 
   if (!animate) {
     return (
-      <Text dimColor>
+      <MutedText>
         {text}
-      </Text>
+      </MutedText>
     );
   }
 
@@ -129,7 +130,7 @@ export function CompactHeader({ isProcessing = false }: HeaderProps) {
   return (
     <Box paddingX={1} marginBottom={1} borderStyle="single" borderColor="cyan">
       <AnimatedWordmark isProcessing={isProcessing} />
-      <Text dimColor> Code</Text>
+      <MutedText> Code</MutedText>
     </Box>
   );
 }
@@ -202,9 +203,9 @@ export function FancyHeader({ isProcessing = false }: HeaderProps) {
               ╚═══════════════════════════════════════╝
             </Text>
           </Gradient>
-          <Text dimColor>
+          <MutedText>
             {BRAND_TAGLINE} | {BRAND_DESCRIPTION}
-          </Text>
+          </MutedText>
         </Box>
       </RainbowBorder>
     </Box>

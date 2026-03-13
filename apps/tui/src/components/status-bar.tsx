@@ -16,7 +16,9 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { AppText, MutedText, Label, Badge, StatusDot, ShortcutHint, Inline, Spacer } from './primitives/index.js';
+import { formatTokens, formatDuration } from '../lib/index.js';
 import { TokenSavingsBar, Sparkline } from "./progress-bar.js";
 import { StatusIndicator } from "./animated-spinner.js";
 import { RainbowBorder, AnimatedSeparator } from "./rainbow-border.js";
@@ -102,10 +104,8 @@ export function EnhancedStatusBar({
     if (!startTime) return;
 
     const updateElapsed = () => {
-      const diff = Math.floor((Date.now() - startTime.getTime()) / 1000);
-      const mins = Math.floor(diff / 60);
-      const secs = diff % 60;
-      setElapsed(`${mins}:${secs.toString().padStart(2, "0")}`);
+      const diffMs = Date.now() - startTime.getTime();
+      setElapsed(formatDuration(diffMs));
     };
 
     updateElapsed();
@@ -140,15 +140,15 @@ export function EnhancedStatusBar({
       flexWrap="wrap"
     >
       {/* Left section: Model & Agents */}
-      <Box gap={1}>
+      <Inline gap={1}>
         <ActiveIndicator active={true} />
         <ModelStatusItem name={modelName} />
         <Separator />
         <AgentStatusItem running={runningAgents} total={totalAgents} />
-      </Box>
+      </Inline>
 
       {/* Center section: Plan status with animated verb & Permissions */}
-      <Box gap={1}>
+      <Inline gap={1}>
         {planStatus !== "idle" && (
           <>
             <PlanStatusItem
@@ -159,9 +159,9 @@ export function EnhancedStatusBar({
             />
             {/* Show elapsed and tokens inline when processing */}
             {(planStatus === "planning" || planStatus === "executing") && (
-              <Text dimColor>
-                ({elapsed} {"\u00B7"} {formatNumber(tokensSaved)} tokens)
-              </Text>
+              <MutedText>
+                ({elapsed} {"\u00B7"} {formatTokens(tokensSaved)} tokens)
+              </MutedText>
             )}
             <Separator />
           </>
@@ -170,13 +170,13 @@ export function EnhancedStatusBar({
         {adhdMode && (
           <>
             <Separator />
-            <Text color="magenta" bold>⚡ ADHD</Text>
+            <Label color="magenta">⚡ ADHD</Label>
           </>
         )}
-      </Box>
+      </Inline>
 
       {/* Right section: Tokens, Branch, Time */}
-      <Box gap={1}>
+      <Inline gap={1}>
         <TokenSavingsItem saved={tokensSaved} percentage={savings} />
         {currentBranch && (
           <>
@@ -186,7 +186,7 @@ export function EnhancedStatusBar({
         )}
         <Separator />
         <ElapsedTimeItem time={elapsed} />
-      </Box>
+      </Inline>
     </Box>
   );
 }
@@ -197,33 +197,32 @@ export function EnhancedStatusBar({
 
 function ActiveIndicator({ active }: { active: boolean }) {
   return (
-    <Text color={active ? "green" : "gray"}>
+    <AppText color={active ? "green" : "gray"}>
       {"\u25B8\u25B8"}
-    </Text>
+    </AppText>
   );
 }
 
 function Separator() {
   return (
-    <Text dimColor>
+    <MutedText>
       {" \u00B7 "}
-    </Text>
+    </MutedText>
   );
 }
 
 function ModelStatusItem({ name }: { name: string }) {
-  return <Text color="cyan">{name}</Text>;
+  return <AppText color="cyan">{name}</AppText>;
 }
 
 function AgentStatusItem({ running, total }: { running: number; total: number }) {
-  const color = running > 0 ? "magenta" : "gray";
   return (
-    <Box>
-      <Text color={color}>{running > 0 ? "\u25CF" : "\u25CB"} </Text>
-      <Text color={color}>
-        {running}/{total} agents
-      </Text>
-    </Box>
+    <Inline gap={0}>
+      <StatusDot status={running > 0 ? "info" : "idle"} />
+      <AppText color={running > 0 ? "magenta" : "gray"}>
+        {" "}{running}/{total} agents
+      </AppText>
+    </Inline>
   );
 }
 
@@ -239,45 +238,40 @@ function PermissionStatusItem({ mode }: { mode: EnhancedStatusBarProps["permissi
   const config = configs[mode || "ask"];
 
   return (
-    <Box>
-      <Text color={config.color}>{config.icon} </Text>
-      <Text color={config.color}>{config.label}</Text>
-    </Box>
+    <Badge label={`${config.icon} ${config.label}`} color={config.color} variant="outline" />
   );
 }
 
 function TokenSavingsItem({ saved, percentage }: { saved: number; percentage: number }) {
-  const formattedTokens = formatNumber(saved);
   const savingsColor = percentage > 50 ? "green" : percentage > 20 ? "yellow" : "gray";
 
   return (
-    <Box>
-      <Text color="green">{"\u2193"} </Text>
-      <Text color={savingsColor} bold>
+    <Inline gap={0}>
+      <AppText color="green">{"\u2193"} </AppText>
+      <Label color={savingsColor}>
         {percentage}%
-      </Text>
-      <Text dimColor>
-        {" "}({formattedTokens} tokens)
-      </Text>
-    </Box>
+      </Label>
+      <MutedText>
+        {" "}({formatTokens(saved)} tokens)
+      </MutedText>
+    </Inline>
   );
 }
 
 function GitBranchItem({ branch, hasChanges }: { branch: string; hasChanges: boolean }) {
   return (
-    <Box>
-      <Text color="yellow">{"\uE0A0"} </Text>
-      <Text color="yellow">{branch}</Text>
-      {hasChanges && <Text color="red">*</Text>}
-    </Box>
+    <Inline gap={0}>
+      <AppText color="yellow">{"\uE0A0"} {branch}</AppText>
+      {hasChanges && <AppText color="red">*</AppText>}
+    </Inline>
   );
 }
 
 function ElapsedTimeItem({ time }: { time: string }) {
   return (
-    <Text dimColor>
+    <MutedText>
       {"\u23F1"} {time}
-    </Text>
+    </MutedText>
   );
 }
 
@@ -314,10 +308,7 @@ function PlanStatusItem({
       )}
       {/* Show static status when not showing verb or when idle/completed */}
       {(!isActive || !showAnimatedVerb) && (
-        <Box>
-          <Text color={config.color}>{config.icon} </Text>
-          <Text color={config.color}>{config.label}</Text>
-        </Box>
+        <Badge label={`${config.icon} ${config.label}`} color={config.color} variant="outline" />
       )}
     </Box>
   );
@@ -349,33 +340,31 @@ function ClaudeStyleCompactBar({
   const permConfig = permissionIcons[permissionMode || "ask"];
 
   return (
-    <Box paddingX={1} marginTop={1}>
-      <Text dimColor>[</Text>
-      <Text color="cyan">{modelName}</Text>
-      <Text dimColor>] </Text>
+    <Inline paddingX={1} marginTop={1} gap={0}>
+      <MutedText>[</MutedText>
+      <AppText color="cyan">{modelName}</AppText>
+      <MutedText>] </MutedText>
 
-      <Text color={runningAgents > 0 ? "magenta" : "gray"}>
-        {runningAgents > 0 ? "\u25CF" : "\u25CB"}
-      </Text>
+      <StatusDot status={runningAgents > 0 ? "info" : "idle"} />
 
-      <Text dimColor> </Text>
-      <Text color={permConfig.color}>{permConfig.icon}</Text>
+      <MutedText> </MutedText>
+      <AppText color={permConfig.color}>{permConfig.icon}</AppText>
 
-      <Text dimColor> </Text>
-      <Text color="green">{savings}%</Text>
+      <MutedText> </MutedText>
+      <AppText color="green">{savings}%</AppText>
 
       {currentBranch && (
         <>
-          <Text dimColor> </Text>
-          <Text color="yellow">{currentBranch}</Text>
+          <MutedText> </MutedText>
+          <AppText color="yellow">{currentBranch}</AppText>
         </>
       )}
 
-      <Text dimColor> </Text>
-      <Text dimColor>
+      <MutedText> </MutedText>
+      <MutedText>
         {elapsed}
-      </Text>
-    </Box>
+      </MutedText>
+    </Inline>
   );
 }
 
@@ -434,9 +423,9 @@ export function StatusBar({
           {/* Left: Mode indicator */}
           <Box gap={1}>
             <StatusIndicator status={status} />
-            <Text color={currentMode.color}>
+            <AppText color={currentMode.color}>
               {currentMode.icon} {currentMode.label}
-            </Text>
+            </AppText>
           </Box>
 
           {/* Center: Token savings with sparkline */}
@@ -495,11 +484,11 @@ function TokenCounter({ value, animate = true }: TokenCounterProps) {
 
   return (
     <Box>
-      <Text dimColor>Tokens saved: </Text>
-      <Text color="green" bold>
+      <MutedText>Tokens saved: </MutedText>
+      <Label color="green">
         {formattedValue}
-      </Text>
-      {isIncreasing && <Text color="green"> {"\u2191"}</Text>}
+      </Label>
+      {isIncreasing && <AppText color="green"> {"\u2191"}</AppText>}
     </Box>
   );
 }
@@ -532,9 +521,9 @@ function HelpText({ animate = true, tick = 0 }: HelpTextProps) {
   }, [animate]);
 
   return (
-    <Text dimColor>
+    <MutedText>
       {hints[currentHint]}
-    </Text>
+    </MutedText>
   );
 }
 
@@ -548,11 +537,14 @@ export function CompactStatusBar({ tokensSaved }: StatusBarProps) {
       marginTop={1}
       justifyContent="space-between"
     >
-      <Text color="green">{"\u25CF"} AST</Text>
-      <Text color="green" bold>
-        {tokensSaved.toLocaleString()} saved
-      </Text>
-      <Text dimColor>^C exit</Text>
+      <Inline gap={1}>
+        <StatusDot status="success" />
+        <AppText color="green">AST</AppText>
+      </Inline>
+      <Label color="green">
+        {formatTokens(tokensSaved)} saved
+      </Label>
+      <ShortcutHint keys="^C" description="exit" />
     </Box>
   );
 }
@@ -590,14 +582,14 @@ export function DetailedStatusBar({
 
           <Box gap={2}>
             {responseTime !== undefined && (
-              <Text dimColor>
-                Response: <Text color="yellow">{responseTime}ms</Text>
-              </Text>
+              <MutedText>
+                Response: <AppText color="yellow">{responseTime}ms</AppText>
+              </MutedText>
             )}
             {contextSize !== undefined && (
-              <Text dimColor>
-                Context: <Text color="cyan">{contextSize}</Text>
-              </Text>
+              <MutedText>
+                Context: <AppText color="cyan">{contextSize}</AppText>
+              </MutedText>
             )}
           </Box>
         </Box>
@@ -624,28 +616,19 @@ function SavingsPercentage({
   const savingsPercent = Math.round((tokensSaved / estimatedWithoutAST) * 100);
 
   return (
-    <Box gap={1}>
-      <Text dimColor>AST savings:</Text>
-      <Text color="green" bold>
+    <Inline gap={1}>
+      <MutedText>AST savings:</MutedText>
+      <Label color="green">
         ~{savingsPercent}%
-      </Text>
-      <Text dimColor>
-        ({tokensSaved.toLocaleString()} vs ~{estimatedWithoutAST.toLocaleString()} raw)
-      </Text>
-    </Box>
+      </Label>
+      <MutedText>
+        ({formatTokens(tokensSaved)} vs ~{formatTokens(estimatedWithoutAST)} raw)
+      </MutedText>
+    </Inline>
   );
 }
 
 // ============================================
 // Utility Functions
 // ============================================
-
-function formatNumber(num: number): string {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + "M";
-  }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(1) + "K";
-  }
-  return num.toLocaleString();
-}
+// formatTokens and formatDuration are now imported from '../lib/index.js'
