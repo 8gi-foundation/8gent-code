@@ -644,6 +644,88 @@ class LMStudioClient {
 }
 
 // ============================================
+// Security Helpers
+// ============================================
+
+/**
+ * Resolve a user-supplied path relative to the working directory and verify
+ * the result stays within bounds. Prevents path traversal attacks where an
+ * LLM-generated path like "../../.ssh/id_rsa" could escape the workspace.
+ *
+ * @throws {Error} If the resolved path escapes the working directory.
+ */
+function safePath(userPath: string, workingDirectory: string): string {
+  const absolutePath = path.isAbsolute(userPath)
+    ? path.resolve(userPath)
+    : path.resolve(workingDirectory, userPath);
+
+  // Normalize both paths and ensure the resolved path is inside workingDirectory.
+  // The trailing separator prevents prefix false-positives
+  // (e.g. /home/user2 matching /home/user).
+  const normalizedBase = path.resolve(workingDirectory) + path.sep;
+  const normalizedTarget = path.resolve(absolutePath);
+
+  if (
+    normalizedTarget !== path.resolve(workingDirectory) &&
+    !normalizedTarget.startsWith(normalizedBase)
+  ) {
+    throw new Error(
+      `Path traversal blocked: "${userPath}" resolves to "${normalizedTarget}" which is outside the working directory "${workingDirectory}".`
+    );
+  }
+
+  return absolutePath;
+}
+
+/**
+ * Execute a command with an explicit argument array, avoiding shell
+ * interpretation entirely. Use this for git/gh commands where arguments come
+ * from LLM tool calls and could contain shell metacharacters.
+ *
+ * Unlike `sh -c "..."`, this spawns the binary directly so quotes, semicolons,
+ * backticks, and other shell syntax in arguments are harmless.
+ */
+function safeExec(
+  command: string,
+  args: string[],
+  cwd: string,
+): Promise<string> {
+  const { spawn } = require("child_process") as typeof import("child_process");
+
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+    proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+    const timeout = setTimeout(() => {
+      proc.kill("SIGTERM");
+      resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}`);
+    }, 120_000);
+
+    proc.on("close", (code: number | null) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve(stdout || stderr || "Command completed successfully.");
+      } else {
+        resolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
+      }
+    });
+
+    proc.on("error", (err: Error) => {
+      clearTimeout(timeout);
+      resolve(`Error: ${err.message}`);
+    });
+  });
+}
+
+// ============================================
 // Tool Executor
 // ============================================
 
@@ -924,37 +1006,39 @@ class ToolExecutor {
       case "list_files":
         return this.listFiles(args.path as string, args.pattern as string);
 
-      // Git operations
+      // Git operations — use safeExec() with argument arrays to prevent
+      // shell injection from LLM-generated arguments (e.g. branch names,
+      // commit messages containing shell metacharacters).
       case "git_status":
-        return this.runCommand("git status");
+        return safeExec("git", ["status"], this.workingDirectory);
       case "git_diff":
-        return this.runCommand(args.staged ? "git diff --staged" : "git diff");
+        return safeExec("git", args.staged ? ["diff", "--staged"] : ["diff"], this.workingDirectory);
       case "git_log":
-        return this.runCommand(`git log --oneline -${args.count || 10}`);
+        return safeExec("git", ["log", "--oneline", `-${Number(args.count) || 10}`], this.workingDirectory);
       case "git_branch":
-        return this.runCommand("git branch -a");
+        return safeExec("git", ["branch", "-a"], this.workingDirectory);
       case "git_checkout":
-        return this.runCommand(`git checkout ${args.branch}`);
+        return safeExec("git", ["checkout", String(args.branch)], this.workingDirectory);
       case "git_create_branch":
-        return this.runCommand(`git checkout -b ${args.branch}`);
+        return safeExec("git", ["checkout", "-b", String(args.branch)], this.workingDirectory);
       case "git_add":
-        return this.runCommand(`git add ${args.files || "."}`);
+        return safeExec("git", ["add", String(args.files || ".")], this.workingDirectory);
       case "git_commit":
-        return this.runCommand(`git commit -m "${args.message}"`);
+        return safeExec("git", ["commit", "-m", String(args.message)], this.workingDirectory);
       case "git_push":
-        return this.runCommand(`git push ${args.setUpstream ? "-u origin HEAD" : ""}`);
+        return safeExec("git", args.setUpstream ? ["push", "-u", "origin", "HEAD"] : ["push"], this.workingDirectory);
 
-      // GitHub CLI
+      // GitHub CLI — same treatment: argument arrays, no shell interpolation.
       case "gh_pr_list":
-        return this.runCommand("gh pr list");
+        return safeExec("gh", ["pr", "list"], this.workingDirectory);
       case "gh_pr_create":
-        return this.runCommand(`gh pr create --title "${args.title}" --body "${args.body || ""}"`);
+        return safeExec("gh", ["pr", "create", "--title", String(args.title), "--body", String(args.body || "")], this.workingDirectory);
       case "gh_pr_view":
-        return this.runCommand(`gh pr view ${args.number || ""}`);
+        return safeExec("gh", ["pr", "view", ...(args.number ? [String(args.number)] : [])], this.workingDirectory);
       case "gh_issue_list":
-        return this.runCommand("gh issue list");
+        return safeExec("gh", ["issue", "list"], this.workingDirectory);
       case "gh_issue_create":
-        return this.runCommand(`gh issue create --title "${args.title}" --body "${args.body || ""}"`);
+        return safeExec("gh", ["issue", "create", "--title", String(args.title), "--body", String(args.body || "")], this.workingDirectory);
 
       // Shell
       case "run_command":
@@ -1021,9 +1105,7 @@ class ToolExecutor {
   }
 
   private async getOutline(filePath: string): Promise<string> {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(this.workingDirectory, filePath);
+    const absolutePath = safePath(filePath, this.workingDirectory);
 
     if (!fs.existsSync(absolutePath)) {
       return `File not found: ${absolutePath}`;
@@ -1058,9 +1140,7 @@ class ToolExecutor {
     const filePath = symbolId.slice(0, separatorIndex);
     const symbolName = symbolId.slice(separatorIndex + 2);
 
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(this.workingDirectory, filePath);
+    const absolutePath = safePath(filePath, this.workingDirectory);
 
     if (!fs.existsSync(absolutePath)) {
       return `File not found: ${absolutePath}`;
@@ -1118,9 +1198,7 @@ class ToolExecutor {
   }
 
   private async readFile(filePath: string): Promise<string> {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(this.workingDirectory, filePath);
+    const absolutePath = safePath(filePath, this.workingDirectory);
 
     if (!fs.existsSync(absolutePath)) {
       return `File not found: ${absolutePath}`;
@@ -1137,9 +1215,7 @@ class ToolExecutor {
   }
 
   private async writeFile(filePath: string, content: string): Promise<string> {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(this.workingDirectory, filePath);
+    const absolutePath = safePath(filePath, this.workingDirectory);
 
     const dir = path.dirname(absolutePath);
     if (!fs.existsSync(dir)) {
@@ -1151,9 +1227,7 @@ class ToolExecutor {
   }
 
   private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(this.workingDirectory, filePath);
+    const absolutePath = safePath(filePath, this.workingDirectory);
 
     if (!fs.existsSync(absolutePath)) {
       return `File not found: ${absolutePath}`;
@@ -1221,16 +1295,10 @@ class ToolExecutor {
       let stdout = '';
       let stderr = '';
 
-      // Auto-answer interactive prompts with defaults (Enter key)
-      const stdinInterval = setInterval(() => {
-        try { proc.stdin.write('\n'); } catch {}
-      }, 1000);
-
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
       const timeout = setTimeout(() => {
-        clearInterval(stdinInterval);
         proc.kill('SIGTERM');
 
         // Execute afterCommand hooks with timeout info
@@ -1248,7 +1316,6 @@ class ToolExecutor {
 
       proc.on('close', (code) => {
         clearTimeout(timeout);
-        clearInterval(stdinInterval);
 
         // Execute afterCommand hooks
         this.hookManager.executeHooks("afterCommand", {
@@ -1269,7 +1336,6 @@ class ToolExecutor {
 
       proc.on('error', (err) => {
         clearTimeout(timeout);
-        clearInterval(stdinInterval);
 
         // Execute onError hooks
         this.hookManager.executeHooks("onError", {
@@ -1286,9 +1352,7 @@ class ToolExecutor {
   private async listFiles(dirPath: string = ".", pattern?: string): Promise<string> {
     const { glob } = await import("glob");
 
-    const absolutePath = path.isAbsolute(dirPath)
-      ? dirPath
-      : path.join(this.workingDirectory, dirPath);
+    const absolutePath = safePath(dirPath, this.workingDirectory);
 
     const files = await glob(pattern || "**/*", {
       cwd: absolutePath,
@@ -1304,9 +1368,7 @@ class ToolExecutor {
   // ============================================
 
   private async handleReadImage(imagePath: string): Promise<string> {
-    const absolutePath = path.isAbsolute(imagePath)
-      ? imagePath
-      : path.join(this.workingDirectory, imagePath);
+    const absolutePath = safePath(imagePath, this.workingDirectory);
 
     try {
       const imageInfo = await readImage(absolutePath);
@@ -1327,9 +1389,7 @@ class ToolExecutor {
   }
 
   private async handleDescribeImage(imagePath: string, prompt?: string): Promise<string> {
-    const absolutePath = path.isAbsolute(imagePath)
-      ? imagePath
-      : path.join(this.workingDirectory, imagePath);
+    const absolutePath = safePath(imagePath, this.workingDirectory);
 
     try {
       const description = await describeImage(
@@ -1355,9 +1415,7 @@ class ToolExecutor {
   // ============================================
 
   private async handleReadPdf(pdfPath: string): Promise<string> {
-    const absolutePath = path.isAbsolute(pdfPath)
-      ? pdfPath
-      : path.join(this.workingDirectory, pdfPath);
+    const absolutePath = safePath(pdfPath, this.workingDirectory);
 
     try {
       const pdfInfo = await readPdf(absolutePath);
@@ -1379,9 +1437,7 @@ class ToolExecutor {
   }
 
   private async handleReadPdfPage(pdfPath: string, pageNum: number): Promise<string> {
-    const absolutePath = path.isAbsolute(pdfPath)
-      ? pdfPath
-      : path.join(this.workingDirectory, pdfPath);
+    const absolutePath = safePath(pdfPath, this.workingDirectory);
 
     try {
       const pageContent = await readPdfPage(absolutePath, pageNum);
@@ -1401,9 +1457,7 @@ class ToolExecutor {
   // ============================================
 
   private async handleReadNotebook(notebookPath: string): Promise<string> {
-    const absolutePath = path.isAbsolute(notebookPath)
-      ? notebookPath
-      : path.join(this.workingDirectory, notebookPath);
+    const absolutePath = safePath(notebookPath, this.workingDirectory);
 
     try {
       const notebook = await readNotebook(absolutePath);
@@ -1439,9 +1493,7 @@ class ToolExecutor {
     cellIndex: number,
     newSource: string
   ): Promise<string> {
-    const absolutePath = path.isAbsolute(notebookPath)
-      ? notebookPath
-      : path.join(this.workingDirectory, notebookPath);
+    const absolutePath = safePath(notebookPath, this.workingDirectory);
 
     try {
       const result = await editCell(absolutePath, cellIndex, newSource);
@@ -1457,9 +1509,7 @@ class ToolExecutor {
     cellType: "code" | "markdown",
     source: string
   ): Promise<string> {
-    const absolutePath = path.isAbsolute(notebookPath)
-      ? notebookPath
-      : path.join(this.workingDirectory, notebookPath);
+    const absolutePath = safePath(notebookPath, this.workingDirectory);
 
     try {
       const result = await insertCell(absolutePath, afterIndex, cellType, source);
@@ -1473,9 +1523,7 @@ class ToolExecutor {
     notebookPath: string,
     cellIndex: number
   ): Promise<string> {
-    const absolutePath = path.isAbsolute(notebookPath)
-      ? notebookPath
-      : path.join(this.workingDirectory, notebookPath);
+    const absolutePath = safePath(notebookPath, this.workingDirectory);
 
     try {
       const result = await deleteCell(absolutePath, cellIndex);
