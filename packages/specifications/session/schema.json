@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://8gent.dev/schemas/session/v1",
+  "$id": "https://8gent.dev/schemas/session/v2",
   "title": "8gent Session",
-  "description": "A complete record of an 8gent coding agent session — the full conversation between a user and the agent, including all messages, tool invocations, token usage, and metadata. Sessions are stored as JSONL files where each line is a SessionEntry.",
+  "description": "A complete record of an 8gent coding agent session. v2 aligns with the Vercel AI SDK data model: steps replace turns, typed content parts, detailed token usage, per-step model info and finish reasons. Sessions are stored as JSONL files where each line is a SessionEntry.",
 
   "$defs": {
     "SessionMeta": {
@@ -16,8 +16,8 @@
         },
         "version": {
           "type": "integer",
-          "const": 1,
-          "description": "Schema version for forward compatibility."
+          "enum": [1, 2],
+          "description": "Schema version. 1 = legacy turns, 2 = AI SDK steps."
         },
         "startedAt": {
           "type": "string",
@@ -49,11 +49,15 @@
         },
         "maxTurns": {
           "type": "integer",
-          "description": "Maximum agentic loop iterations before the agent stops."
+          "description": "v1: Maximum agentic loop iterations."
+        },
+        "maxSteps": {
+          "type": "integer",
+          "description": "v2: Maximum steps (maps to AI SDK stopWhen)."
         },
         "systemPromptHash": {
           "type": "string",
-          "description": "SHA-256 hash of the system prompt (privacy-safe reference without storing the full prompt)."
+          "description": "SHA-256 hash of the system prompt."
         }
       },
       "required": ["model", "runtime"]
@@ -67,131 +71,210 @@
           "type": "string",
           "description": "Absolute path of the project root."
         },
-        "gitBranch": {
-          "type": ["string", "null"],
-          "description": "Current git branch at session start."
-        },
-        "gitCommit": {
-          "type": ["string", "null"],
-          "description": "HEAD commit SHA at session start."
-        },
+        "gitBranch": { "type": ["string", "null"] },
+        "gitCommit": { "type": ["string", "null"] },
         "platform": {
           "type": "string",
-          "enum": ["darwin", "linux", "win32"],
-          "description": "OS platform."
+          "enum": ["darwin", "linux", "win32"]
         },
-        "nodeVersion": {
-          "type": "string",
-          "description": "Node/Bun runtime version."
-        }
+        "nodeVersion": { "type": "string" }
       },
       "required": ["workingDirectory"]
     },
 
     "Message": {
       "type": "object",
-      "description": "A single message in the conversation.",
       "properties": {
         "role": {
           "type": "string",
-          "enum": ["system", "user", "assistant"],
-          "description": "Who produced this message."
+          "enum": ["system", "user", "assistant"]
         },
-        "content": {
-          "type": "string",
-          "description": "The text content of the message."
-        }
+        "content": { "type": "string" }
       },
       "required": ["role", "content"]
     },
 
-    "ToolCall": {
-      "type": "object",
-      "description": "A single tool invocation by the agent.",
-      "properties": {
-        "toolCallId": {
-          "type": "string",
-          "description": "Unique ID for this tool call within the session."
-        },
-        "name": {
-          "type": "string",
-          "description": "Tool name. e.g. 'readFile', 'shellExec', 'writeFile'"
-        },
-        "arguments": {
-          "type": "object",
-          "description": "The arguments passed to the tool.",
-          "additionalProperties": true
-        },
-        "result": {
-          "type": "string",
-          "description": "The tool's output, truncated if necessary."
-        },
-        "success": {
-          "type": "boolean",
-          "description": "Whether the tool executed without error."
-        },
-        "error": {
-          "type": ["string", "null"],
-          "description": "Error message if the tool failed."
-        },
-        "durationMs": {
-          "type": "integer",
-          "description": "Wall-clock execution time in milliseconds."
-        },
-        "startedAt": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "completedAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "required": ["toolCallId", "name", "arguments", "success", "durationMs"]
+    "FinishReason": {
+      "type": "string",
+      "enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"],
+      "description": "Why a step finished. Maps directly to the AI SDK's FinishReason."
     },
 
-    "TokenUsage": {
+    "ModelInfo": {
       "type": "object",
-      "description": "Token consumption for a single LLM call.",
+      "description": "Model used for a specific step (can change between steps via prepareStep).",
       "properties": {
-        "promptTokens": {
-          "type": "integer",
-          "description": "Tokens in the prompt (input)."
+        "provider": { "type": "string", "description": "Provider name. e.g. 'ollama', 'openrouter'" },
+        "modelId": { "type": "string", "description": "Model ID. e.g. 'qwen2.5-coder:7b'" }
+      },
+      "required": ["provider", "modelId"]
+    },
+
+    "DetailedTokenUsage": {
+      "type": "object",
+      "description": "Detailed token usage with cache and reasoning breakdowns.",
+      "properties": {
+        "promptTokens": { "type": "integer" },
+        "completionTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" },
+        "inputTokenDetails": {
+          "type": "object",
+          "properties": {
+            "noCacheTokens": { "type": "integer" },
+            "cacheReadTokens": { "type": "integer" },
+            "cacheWriteTokens": { "type": "integer" }
+          }
         },
-        "completionTokens": {
-          "type": "integer",
-          "description": "Tokens in the completion (output)."
+        "outputTokenDetails": {
+          "type": "object",
+          "properties": {
+            "textTokens": { "type": "integer" },
+            "reasoningTokens": { "type": "integer" }
+          }
         },
-        "totalTokens": {
-          "type": "integer",
-          "description": "Sum of prompt + completion tokens."
+        "raw": {
+          "type": "object",
+          "description": "Raw usage data from provider.",
+          "additionalProperties": true
         }
       },
       "required": ["totalTokens"]
     },
 
+    "TokenUsage": {
+      "type": "object",
+      "description": "Simple token usage (v1 backward compat).",
+      "properties": {
+        "promptTokens": { "type": "integer" },
+        "completionTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" }
+      },
+      "required": ["totalTokens"]
+    },
+
+    "ResponseMeta": {
+      "type": "object",
+      "description": "Provider response metadata for a step.",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "modelId": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+
+    "ContentPart": {
+      "type": "object",
+      "description": "A typed content part in assistant output.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["text", "reasoning", "source", "file", "tool-call", "tool-result", "tool-error"]
+        }
+      },
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "properties": { "text": { "type": "string" } }, "required": ["text"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "reasoning" } } },
+          "then": {
+            "properties": {
+              "text": { "type": "string" },
+              "signature": { "type": "string" }
+            },
+            "required": ["text"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "source" } } },
+          "then": {
+            "properties": {
+              "sourceType": { "type": "string" },
+              "id": { "type": "string" },
+              "url": { "type": "string" },
+              "title": { "type": "string" },
+              "providerMetadata": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["sourceType", "id"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "file" } } },
+          "then": {
+            "properties": {
+              "mediaType": { "type": "string" },
+              "data": { "type": "string", "description": "Base64-encoded file data." }
+            },
+            "required": ["mediaType", "data"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool-call" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "args": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["toolCallId", "toolName", "args"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool-result" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "result": {}
+            },
+            "required": ["toolCallId", "toolName"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool-error" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "error": { "type": "string" }
+            },
+            "required": ["toolCallId", "toolName", "error"]
+          }
+        }
+      ]
+    },
+
+    "ToolCall": {
+      "type": "object",
+      "description": "A tool invocation by the agent.",
+      "properties": {
+        "toolCallId": { "type": "string" },
+        "name": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": true },
+        "result": { "type": "string" },
+        "success": { "type": "boolean" },
+        "error": { "type": ["string", "null"] },
+        "durationMs": { "type": "integer" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["toolCallId", "name", "arguments", "success", "durationMs"]
+    },
+
     "HookExecution": {
       "type": "object",
-      "description": "Record of a hook firing during the session.",
       "properties": {
-        "hookName": {
-          "type": "string",
-          "description": "Name of the hook that executed."
-        },
+        "hookName": { "type": "string" },
         "hookType": {
           "type": "string",
-          "enum": ["onStart", "onComplete", "onError", "beforeTool", "afterTool"],
-          "description": "The event type that triggered the hook."
+          "enum": ["onStart", "onComplete", "onError", "beforeTool", "afterTool"]
         },
-        "durationMs": {
-          "type": "integer"
-        },
-        "success": {
-          "type": "boolean"
-        },
-        "error": {
-          "type": ["string", "null"]
-        }
+        "durationMs": { "type": "integer" },
+        "success": { "type": "boolean" },
+        "error": { "type": ["string", "null"] }
       },
       "required": ["hookName", "hookType", "success"]
     },
@@ -206,46 +289,32 @@
             "session_start",
             "user_message",
             "assistant_message",
+            "assistant_content",
             "tool_call",
             "tool_result",
+            "tool_error",
             "turn_start",
             "turn_end",
+            "step_start",
+            "step_end",
             "hook",
             "error",
             "session_end"
-          ],
-          "description": "Entry type — determines which payload fields are present."
+          ]
         },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When this entry was recorded."
-        },
-        "sequenceNumber": {
-          "type": "integer",
-          "description": "Monotonically increasing counter for ordering within the session. Starts at 0."
-        }
+        "timestamp": { "type": "string", "format": "date-time" },
+        "sequenceNumber": { "type": "integer" }
       },
       "required": ["type", "timestamp", "sequenceNumber"],
 
       "allOf": [
         {
           "if": { "properties": { "type": { "const": "session_start" } } },
-          "then": {
-            "properties": {
-              "meta": { "$ref": "#/$defs/SessionMeta" }
-            },
-            "required": ["meta"]
-          }
+          "then": { "properties": { "meta": { "$ref": "#/$defs/SessionMeta" } }, "required": ["meta"] }
         },
         {
           "if": { "properties": { "type": { "const": "user_message" } } },
-          "then": {
-            "properties": {
-              "message": { "$ref": "#/$defs/Message" }
-            },
-            "required": ["message"]
-          }
+          "then": { "properties": { "message": { "$ref": "#/$defs/Message" } }, "required": ["message"] }
         },
         {
           "if": { "properties": { "type": { "const": "assistant_message" } } },
@@ -253,16 +322,21 @@
             "properties": {
               "message": { "$ref": "#/$defs/Message" },
               "usage": { "$ref": "#/$defs/TokenUsage" },
-              "turnIndex": {
-                "type": "integer",
-                "description": "Which agentic turn produced this message (0-indexed within the current chat call)."
-              },
-              "containsToolCalls": {
-                "type": "boolean",
-                "description": "Whether this response triggered tool calls (i.e. the loop continues)."
-              }
+              "turnIndex": { "type": "integer" },
+              "containsToolCalls": { "type": "boolean" }
             },
             "required": ["message"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "assistant_content" } } },
+          "then": {
+            "properties": {
+              "stepNumber": { "type": "integer", "description": "Step number (0-based) this content belongs to." },
+              "parts": { "type": "array", "items": { "$ref": "#/$defs/ContentPart" } },
+              "usage": { "$ref": "#/$defs/DetailedTokenUsage" }
+            },
+            "required": ["stepNumber", "parts"]
           }
         },
         {
@@ -270,7 +344,8 @@
           "then": {
             "properties": {
               "toolCall": { "$ref": "#/$defs/ToolCall" },
-              "turnIndex": { "type": "integer" }
+              "turnIndex": { "type": "integer" },
+              "stepNumber": { "type": "integer" }
             },
             "required": ["toolCall"]
           }
@@ -279,15 +354,26 @@
           "if": { "properties": { "type": { "const": "tool_result" } } },
           "then": {
             "properties": {
-              "toolCallId": {
-                "type": "string",
-                "description": "References the ToolCall this is a result for."
-              },
+              "toolCallId": { "type": "string" },
               "result": { "type": "string" },
               "success": { "type": "boolean" },
-              "durationMs": { "type": "integer" }
+              "durationMs": { "type": "integer" },
+              "toolName": { "type": "string" },
+              "stepNumber": { "type": "integer" }
             },
             "required": ["toolCallId", "success"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool_error" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "error": { "type": "string" },
+              "stepNumber": { "type": "integer" }
+            },
+            "required": ["toolCallId", "toolName", "error"]
           }
         },
         {
@@ -295,10 +381,7 @@
           "then": {
             "properties": {
               "turnIndex": { "type": "integer" },
-              "messageCount": {
-                "type": "integer",
-                "description": "Number of messages in context at the start of this turn."
-              }
+              "messageCount": { "type": "integer" }
             },
             "required": ["turnIndex"]
           }
@@ -308,24 +391,39 @@
           "then": {
             "properties": {
               "turnIndex": { "type": "integer" },
-              "reason": {
-                "type": "string",
-                "enum": ["natural_stop", "tool_calls", "max_turns", "error"],
-                "description": "Why the turn ended."
-              },
+              "reason": { "type": "string", "enum": ["natural_stop", "tool_calls", "max_turns", "error"] },
               "usage": { "$ref": "#/$defs/TokenUsage" }
             },
             "required": ["turnIndex", "reason"]
           }
         },
         {
-          "if": { "properties": { "type": { "const": "hook" } } },
+          "if": { "properties": { "type": { "const": "step_start" } } },
           "then": {
             "properties": {
-              "hook": { "$ref": "#/$defs/HookExecution" }
+              "stepNumber": { "type": "integer" },
+              "model": { "$ref": "#/$defs/ModelInfo" },
+              "messageCount": { "type": "integer" }
             },
-            "required": ["hook"]
+            "required": ["stepNumber"]
           }
+        },
+        {
+          "if": { "properties": { "type": { "const": "step_end" } } },
+          "then": {
+            "properties": {
+              "stepNumber": { "type": "integer" },
+              "finishReason": { "$ref": "#/$defs/FinishReason" },
+              "usage": { "$ref": "#/$defs/DetailedTokenUsage" },
+              "response": { "$ref": "#/$defs/ResponseMeta" },
+              "providerMetadata": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["stepNumber", "finishReason"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "hook" } } },
+          "then": { "properties": { "hook": { "$ref": "#/$defs/HookExecution" } }, "required": ["hook"] }
         },
         {
           "if": { "properties": { "type": { "const": "error" } } },
@@ -337,10 +435,7 @@
                   "message": { "type": "string" },
                   "code": { "type": ["string", "null"] },
                   "stack": { "type": ["string", "null"] },
-                  "recoverable": {
-                    "type": "boolean",
-                    "description": "Whether the session continued after this error."
-                  }
+                  "recoverable": { "type": "boolean" }
                 },
                 "required": ["message", "recoverable"]
               }
@@ -354,26 +449,23 @@
             "properties": {
               "summary": {
                 "type": "object",
-                "description": "Aggregated stats for the entire session.",
                 "properties": {
                   "endedAt": { "type": "string", "format": "date-time" },
                   "durationMs": { "type": "integer" },
-                  "totalTurns": { "type": "integer" },
+                  "totalTurns": { "type": "integer", "description": "v1 compat: same as totalSteps." },
+                  "totalSteps": { "type": "integer", "description": "v2: number of steps completed." },
                   "totalToolCalls": { "type": "integer" },
-                  "totalTokens": { "type": "integer" },
+                  "totalTokens": { "type": "integer", "description": "v1 compat: flat total." },
+                  "totalUsage": { "$ref": "#/$defs/DetailedTokenUsage", "description": "v2: aggregated detailed usage." },
                   "filesCreated": { "type": "array", "items": { "type": "string" } },
                   "filesModified": { "type": "array", "items": { "type": "string" } },
                   "filesDeleted": { "type": "array", "items": { "type": "string" } },
                   "gitCommits": { "type": "array", "items": { "type": "string" } },
                   "exitReason": {
                     "type": "string",
-                    "enum": ["user_exit", "max_turns", "error", "idle_timeout", "completed"],
-                    "description": "Why the session ended."
+                    "enum": ["user_exit", "max_turns", "max_steps", "error", "idle_timeout", "completed"]
                   },
-                  "reportId": {
-                    "type": ["string", "null"],
-                    "description": "Link to the CompletionReport if one was generated."
-                  }
+                  "reportId": { "type": ["string", "null"] }
                 },
                 "required": ["endedAt", "durationMs", "exitReason"]
               }

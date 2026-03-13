@@ -4,6 +4,9 @@
  * Wraps the Vercel AI SDK ToolLoopAgent to provide the 8gent agent experience.
  * Replaces the manual agentic loop in packages/eight/agent.ts with the SDK's
  * built-in tool loop via generateText + stopWhen.
+ *
+ * v2: Events now carry full AI SDK data (finishReason, reasoning, sources,
+ * files, response metadata, provider metadata, detailed token usage).
  */
 
 import { ToolLoopAgent, stepCountIs } from "ai";
@@ -33,49 +36,88 @@ export interface EightAgentConfig {
 }
 
 export interface StepFinishEvent {
+  /** Step number (0-based) */
+  stepNumber: number;
+  /** Step type: "initial" or "tool-result" */
   stepType: string;
+  /** Text generated in this step */
   text: string;
-  toolCalls: Array<{ toolName: string; args: Record<string, unknown> }>;
-  toolResults: Array<{ toolName: string; result: unknown }>;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
-  stepIndex: number;
+  /** Why this step finished (maps to AI SDK FinishReason) */
+  finishReason: string;
+  /** Raw finish reason from provider */
+  rawFinishReason?: string;
+  /** Reasoning/thinking content if model supports it */
+  reasoning?: Array<{ type: string; text: string; signature?: string }>;
+  /** Reasoning as flat text */
+  reasoningText?: string;
+  /** Sources/references used */
+  sources?: Array<{ type: string; id: string; url?: string; title?: string }>;
+  /** Generated files */
+  files?: Array<{ mediaType: string; data: string }>;
+  /** Tool calls made in this step */
+  toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>;
+  /** Tool results from this step */
+  toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>;
+  /** Detailed token usage */
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    inputTokenDetails?: {
+      noCacheTokens?: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    };
+    outputTokenDetails?: {
+      textTokens?: number;
+      reasoningTokens?: number;
+    };
+    raw?: Record<string, unknown>;
+  };
+  /** Model info for this step */
+  model?: { provider: string; modelId: string };
+  /** Response metadata from provider */
+  response?: {
+    id?: string;
+    timestamp?: string;
+    modelId?: string;
+    headers?: Record<string, string>;
+  };
+  /** Provider-specific pass-through metadata */
+  providerMetadata?: Record<string, unknown>;
 }
 
 export interface ToolCallStartEvent {
+  toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+  stepNumber?: number;
 }
 
 export interface ToolCallFinishEvent {
+  toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
-  result: unknown;
+  success: boolean;
+  result?: unknown;
+  error?: unknown;
+  durationMs: number;
+  stepNumber?: number;
 }
 
 export interface FinishEvent {
   text: string;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  finishReason: string;
+  usage: StepFinishEvent["usage"];
+  totalUsage: StepFinishEvent["usage"];
   steps: StepFinishEvent[];
+  response?: StepFinishEvent["response"];
 }
 
 /**
  * Create an 8gent AI agent powered by the Vercel AI SDK.
- *
- * Usage:
- * ```ts
- * const agent = createEightAgent({
- *   provider: { name: "ollama", model: "qwen2.5-coder:7b" },
- *   instructions: "You are a coding assistant.",
- *   maxSteps: 30,
- *   workingDirectory: "/path/to/project",
- * });
- *
- * const result = await agent.generate({ prompt: "Fix the bug in main.ts" });
- * console.log(result.text);
- * ```
  */
 export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never, AgentTools> {
-  // Set the working directory for tool execution
   const workingDir = config.workingDirectory || process.cwd();
   setToolContext({ workingDirectory: workingDir });
 
@@ -91,18 +133,58 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
     onStepFinish: config.onStepFinish
       ? (event: any) => {
           const stepEvent: StepFinishEvent = {
+            stepNumber: event.stepNumber ?? 0,
             stepType: event.stepType ?? "unknown",
             text: event.text ?? "",
+            finishReason: event.finishReason ?? "other",
+            rawFinishReason: event.rawFinishReason,
+            reasoning: event.reasoning?.length
+              ? event.reasoning.map((r: any) => ({
+                  type: r.type ?? "reasoning",
+                  text: r.text ?? "",
+                  signature: r.signature,
+                }))
+              : undefined,
+            reasoningText: event.reasoningText || undefined,
+            sources: event.sources?.length
+              ? event.sources.map((s: any) => ({
+                  type: s.sourceType ?? s.type ?? "unknown",
+                  id: s.id ?? "",
+                  url: s.url,
+                  title: s.title,
+                }))
+              : undefined,
+            files: event.files?.length
+              ? event.files.map((f: any) => ({
+                  mediaType: f.mediaType ?? "application/octet-stream",
+                  data: typeof f.base64 === "string" ? f.base64 : "",
+                }))
+              : undefined,
             toolCalls: (event.toolCalls ?? []).map((tc: any) => ({
-              toolName: tc.toolName,
-              args: tc.args,
+              toolCallId: tc.toolCallId ?? "",
+              toolName: tc.toolName ?? "",
+              args: tc.args ?? tc.input ?? {},
             })),
             toolResults: (event.toolResults ?? []).map((tr: any) => ({
-              toolName: tr.toolName,
-              result: tr.result,
+              toolCallId: tr.toolCallId ?? "",
+              toolName: tr.toolName ?? "",
+              result: tr.result ?? tr.output,
             })),
-            usage: event.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-            stepIndex: event.stepIndex ?? 0,
+            usage: mapUsage(event.usage),
+            model: event.model
+              ? { provider: event.model.provider, modelId: event.model.modelId }
+              : undefined,
+            response: event.response
+              ? {
+                  id: event.response.id,
+                  timestamp: event.response.timestamp
+                    ? new Date(event.response.timestamp).toISOString()
+                    : undefined,
+                  modelId: event.response.modelId,
+                  headers: event.response.headers,
+                }
+              : undefined,
+            providerMetadata: event.providerMetadata || undefined,
           };
           return config.onStepFinish!(stepEvent);
         }
@@ -111,8 +193,10 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
     experimental_onToolCallStart: config.onToolCallStart
       ? (event: any) => {
           return config.onToolCallStart!({
-            toolName: event.toolName ?? event.toolCall?.toolName,
-            args: event.args ?? event.toolCall?.args ?? {},
+            toolCallId: event.toolCall?.toolCallId ?? "",
+            toolName: event.toolCall?.toolName ?? "",
+            args: event.toolCall?.args ?? event.toolCall?.input ?? {},
+            stepNumber: event.stepNumber,
           });
         }
       : undefined,
@@ -120,9 +204,14 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
     experimental_onToolCallFinish: config.onToolCallFinish
       ? (event: any) => {
           return config.onToolCallFinish!({
-            toolName: event.toolName ?? event.toolCall?.toolName,
-            args: event.args ?? event.toolCall?.args ?? {},
-            result: event.result ?? event.toolResult?.result,
+            toolCallId: event.toolCall?.toolCallId ?? "",
+            toolName: event.toolCall?.toolName ?? "",
+            args: event.toolCall?.args ?? event.toolCall?.input ?? {},
+            success: event.success ?? true,
+            result: event.output,
+            error: event.error,
+            durationMs: event.durationMs ?? 0,
+            stepNumber: event.stepNumber,
           });
         }
       : undefined,
@@ -131,21 +220,59 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
       ? (event: any) => {
           return config.onFinish!({
             text: event.text ?? "",
-            usage: event.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            finishReason: event.finishReason ?? "other",
+            usage: mapUsage(event.usage),
+            totalUsage: mapUsage(event.totalUsage ?? event.usage),
             steps: (event.steps ?? []).map((s: any, i: number) => ({
+              stepNumber: s.stepNumber ?? i,
               stepType: s.stepType ?? "unknown",
               text: s.text ?? "",
+              finishReason: s.finishReason ?? "other",
               toolCalls: s.toolCalls ?? [],
               toolResults: s.toolResults ?? [],
-              usage: s.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-              stepIndex: i,
+              usage: mapUsage(s.usage),
             })),
+            response: event.response
+              ? {
+                  id: event.response.id,
+                  timestamp: event.response.timestamp
+                    ? new Date(event.response.timestamp).toISOString()
+                    : undefined,
+                  modelId: event.response.modelId,
+                }
+              : undefined,
           });
         }
       : undefined,
   });
 
   return agent;
+}
+
+/** Map AI SDK usage to our normalized format */
+function mapUsage(usage: any): StepFinishEvent["usage"] {
+  if (!usage) {
+    return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  }
+  return {
+    promptTokens: usage.inputTokens ?? usage.promptTokens ?? 0,
+    completionTokens: usage.outputTokens ?? usage.completionTokens ?? 0,
+    totalTokens: usage.totalTokens ?? 0,
+    inputTokenDetails: usage.inputTokenDetails
+      ? {
+          noCacheTokens: usage.inputTokenDetails.noCacheTokens,
+          cacheReadTokens: usage.inputTokenDetails.cacheReadTokens,
+          cacheWriteTokens: usage.inputTokenDetails.cacheWriteTokens,
+        }
+      : undefined,
+    outputTokenDetails: usage.outputTokenDetails
+      ? {
+          textTokens: usage.outputTokenDetails.textTokens,
+          reasoningTokens: usage.outputTokenDetails.reasoningTokens,
+        }
+      : undefined,
+    raw: usage.raw,
+  };
 }
 
 /**
