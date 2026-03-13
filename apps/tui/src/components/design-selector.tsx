@@ -141,7 +141,7 @@ export function DesignSelector({
 
       {/* Intro */}
       <Box marginBottom={1}>
-        <Text color="white">{intro}</Text>
+        <Text bold>{intro}</Text>
       </Box>
 
       {/* Options */}
@@ -157,11 +157,11 @@ export function DesignSelector({
       {/* Help */}
       {showHelp && (
         <Box marginTop={1} flexDirection="column">
-          <Text color="gray" dimColor>
+          <Text dimColor>
             Press [1-{options.length}] to select, or use \u2191\u2193 and Enter
           </Text>
           {onCancel && (
-            <Text color="gray" dimColor>
+            <Text dimColor>
               Press [ESC] to skip design selection
             </Text>
           )}
@@ -182,7 +182,7 @@ interface DesignOptionCardProps {
 }
 
 function DesignOptionCard({ option, index, isSelected }: DesignOptionCardProps) {
-  const borderColor = isSelected ? "cyan" : "gray";
+  const borderColor = isSelected ? "cyan" : "blue";
   const borderStyle = isSelected ? "double" : "single";
 
   return (
@@ -199,18 +199,18 @@ function DesignOptionCard({ option, index, isSelected }: DesignOptionCardProps) 
           <Text color="yellow" bold>
             [{index}]
           </Text>
-          <Text color={isSelected ? "cyan" : "white"} bold>
+          <Text color={isSelected ? "cyan" : undefined} bold>
             {" "}
             {option.name}
           </Text>
         </Box>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {Math.round(option.score)}% match
         </Text>
       </Box>
 
       {/* Description */}
-      <Text color="white">{option.description}</Text>
+      <Text bold>{option.description}</Text>
 
       {/* Reasoning */}
       <Box marginTop={0}>
@@ -221,14 +221,14 @@ function DesignOptionCard({ option, index, isSelected }: DesignOptionCardProps) 
 
       {/* Stack */}
       <Box marginTop={0}>
-        <Text color="gray">Stack: </Text>
+        <Text dimColor>Stack: </Text>
         <Text color="cyan">{option.stack.join(" \u2022 ")}</Text>
       </Box>
 
       {/* ASCII Preview */}
       {option.preview && (
         <Box marginTop={1}>
-          <Text color="gray">{option.preview.content}</Text>
+          <Text dimColor>{option.preview.content}</Text>
         </Box>
       )}
     </Box>
@@ -327,17 +327,17 @@ function DesignConfirmation({ option, onConfirm, onBack }: DesignConfirmationPro
         </Text>
       </Box>
 
-      <Text color="white">
+      <Text bold>
         You selected: <Text color="cyan" bold>{option.name}</Text>
       </Text>
 
       <Box marginTop={1}>
-        <Text color="gray">This will set up: </Text>
+        <Text dimColor>This will set up: </Text>
         <Text color="yellow">{option.stack.join(", ")}</Text>
       </Box>
 
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Press [Enter/Y] to confirm, [ESC/N] to go back
         </Text>
       </Box>
@@ -362,8 +362,8 @@ export function DesignBadge({ designName, isActive = false }: DesignBadgeProps) 
       <Text color="magenta">
         {isActive ? "\u25CF" : "\u25CB"}
       </Text>
-      <Text color="gray"> Design: </Text>
-      <Text color={isActive ? "cyan" : "gray"}>
+      <Text dimColor> Design: </Text>
+      <Text color={isActive ? "cyan" : undefined} dimColor={!isActive}>
         {designName || "Selecting..."}
       </Text>
     </Box>
@@ -386,7 +386,7 @@ export function InlineDesignPrompt({ message, compact = false }: InlineDesignPro
     return (
       <Box>
         <Text color="magenta">{paintbrushIcon} </Text>
-        <Text color="white">{message.slice(0, 60)}...</Text>
+        <Text bold>{message.slice(0, 60)}...</Text>
       </Box>
     );
   }
@@ -399,7 +399,7 @@ export function InlineDesignPrompt({ message, compact = false }: InlineDesignPro
         </Text>
       </Box>
       <Box paddingLeft={2}>
-        <Text color="white">{message}</Text>
+        <Text bold>{message}</Text>
       </Box>
     </Box>
   );

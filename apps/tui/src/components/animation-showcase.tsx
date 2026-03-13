@@ -148,12 +148,12 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
         <Box marginBottom={1}>
           <GradientWave text={`✦ ${targetAnimation.name} ✦`} speed={120} />
         </Box>
-        <Text color="gray" dimColor>{targetAnimation.description}</Text>
+        <Text dimColor>{targetAnimation.description}</Text>
         <Box marginY={1}>
           {targetAnimation.component}
         </Box>
         <Box marginTop={1}>
-          <Text color="gray" dimColor>[ESC] close</Text>
+          <Text dimColor>[ESC] close</Text>
         </Box>
       </Box>
     );
@@ -172,7 +172,7 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
       {/* Navigation dots */}
       <Box justifyContent="center" marginBottom={1}>
         {ANIMATIONS.map((_, i) => (
-          <Text key={i} color={i === currentIndex ? "cyan" : "gray"}>
+          <Text key={i} color={i === currentIndex ? "cyan" : undefined} dimColor={i !== currentIndex}>
             {i === currentIndex ? "●" : "○"}{" "}
           </Text>
         ))}
@@ -181,13 +181,13 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
       {/* Current animation info */}
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
         <Text color="cyan" bold>{current.name}</Text>
-        <Text color="gray" dimColor>{current.description}</Text>
+        <Text dimColor>{current.description}</Text>
       </Box>
 
       {/* Animation display */}
       <Box
         borderStyle="round"
-        borderColor="gray"
+        borderColor="blue"
         paddingX={1}
         paddingY={1}
         justifyContent="center"
@@ -198,13 +198,13 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
 
       {/* Controls */}
       <Box marginTop={1} justifyContent="center" gap={2}>
-        <Text color="gray">
+        <Text dimColor>
           <Text color="yellow">←/→</Text> navigate
         </Text>
-        <Text color="gray">
+        <Text dimColor>
           <Text color="yellow">[ESC]</Text> close
         </Text>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {currentIndex + 1}/{ANIMATIONS.length}
         </Text>
       </Box>
@@ -243,11 +243,11 @@ export function AnimationList() {
       {ANIMATIONS.map(anim => (
         <Box key={anim.id}>
           <Text color="yellow">{anim.id.padEnd(10)}</Text>
-          <Text color="gray">{anim.description}</Text>
+          <Text dimColor>{anim.description}</Text>
         </Box>
       ))}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Usage: /animations [name] or /animations all
         </Text>
       </Box>

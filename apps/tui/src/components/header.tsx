@@ -30,7 +30,7 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
   if (!mounted && showAnimations) {
     return (
       <Box paddingX={1} marginBottom={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Loading...
         </Text>
       </Box>
@@ -54,9 +54,9 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
         </Box>
 
         {/* Separator */}
-        <Text color="gray"> Code</Text>
+        <Text dimColor> Code</Text>
 
-        <Text color="gray">│</Text>
+        <Text dimColor>│</Text>
 
         {/* Tagline with subtle animation */}
         <TaglineText animate={showAnimations} />
@@ -93,7 +93,7 @@ function TaglineText({ animate = true }: TaglineTextProps) {
 
   if (!animate) {
     return (
-      <Text color="gray" dimColor>
+      <Text dimColor>
         {text}
       </Text>
     );
@@ -105,16 +105,17 @@ function TaglineText({ animate = true }: TaglineTextProps) {
         const distance = Math.abs(index - glowIndex);
         const color =
           distance === 0
-            ? "white"
+            ? undefined
             : distance <= 1
             ? "cyan"
             : distance <= 3
             ? "blue"
-            : "gray";
+            : undefined;
         const dimColor = distance > 3;
+        const bold = distance === 0;
 
         return (
-          <Text key={index} color={color} dimColor={dimColor}>
+          <Text key={index} color={color} dimColor={dimColor} bold={bold}>
             {char}
           </Text>
         );
@@ -128,7 +129,7 @@ export function CompactHeader({ isProcessing = false }: HeaderProps) {
   return (
     <Box paddingX={1} marginBottom={1} borderStyle="single" borderColor="cyan">
       <AnimatedWordmark isProcessing={isProcessing} />
-      <Text color="gray"> Code</Text>
+      <Text dimColor> Code</Text>
     </Box>
   );
 }
@@ -201,7 +202,7 @@ export function FancyHeader({ isProcessing = false }: HeaderProps) {
               ╚═══════════════════════════════════════╝
             </Text>
           </Gradient>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {BRAND_TAGLINE} | {BRAND_DESCRIPTION}
           </Text>
         </Box>

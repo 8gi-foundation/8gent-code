@@ -1100,7 +1100,7 @@ export function App({ initialCommand, args }: AppProps) {
           <Box flexDirection="column">
             <Box marginBottom={1}>
               <Text color="cyan" bold>∞ Onboarding</Text>
-              <Text color="gray"> - </Text>
+              <Text dimColor> - </Text>
               <Text color="yellow">Getting to know you</Text>
             </Box>
             <MessageList
@@ -1202,7 +1202,7 @@ export function App({ initialCommand, args }: AppProps) {
             active={true}
           />
         ) : (
-          <Text color="gray" dimColor>
+          <Text dimColor>
             <Text color="cyan">✦</Text> Awaiting your command...
           </Text>
         )}
@@ -1210,14 +1210,14 @@ export function App({ initialCommand, args }: AppProps) {
 
       {/* Top separator line */}
       <Box paddingX={1}>
-        <Text color="gray">{"─".repeat(60)}</Text>
+        <Text dimColor>{"─".repeat(60)}</Text>
       </Box>
 
       {/* Input section with context window display */}
       <Box paddingX={1} justifyContent="space-between" alignItems="center">
         {/* Left: Context used */}
         <Box width={12}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {formatContextSize(contextUsed)}
           </Text>
         </Box>
@@ -1239,7 +1239,7 @@ export function App({ initialCommand, args }: AppProps) {
 
         {/* Right: Context max */}
         <Box width={12} justifyContent="flex-end">
-          <Text color="gray" dimColor>
+          <Text dimColor>
             /{formatContextSize(contextMax)}
           </Text>
         </Box>
@@ -1247,7 +1247,7 @@ export function App({ initialCommand, args }: AppProps) {
 
       {/* Bottom separator line */}
       <Box paddingX={1}>
-        <Text color="gray">{"─".repeat(60)}</Text>
+        <Text dimColor>{"─".repeat(60)}</Text>
       </Box>
 
       {/* Expanded view panel (Ctrl+O) */}
@@ -1262,17 +1262,17 @@ export function App({ initialCommand, args }: AppProps) {
         >
           <Text color="cyan" bold>∞ Extended Info</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text color="gray">Context: <Text color="cyan">{formatContextSize(contextUsed)}</Text> / <Text color="white">{formatContextSize(contextMax)}</Text> ({Math.round((contextUsed / contextMax) * 100)}%)</Text>
-            <Text color="gray">Response time: <Text color="yellow">{lastResponseTime ?? 0}ms</Text></Text>
-            <Text color="gray">Tokens saved: <Text color="green">{tokensSaved.toLocaleString()}</Text></Text>
-            <Text color="gray">Model: <Text color="cyan">{currentModel}</Text> via <Text color="magenta">{currentProvider}</Text></Text>
-            <Text color="gray">Agent ready: <Text color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</Text></Text>
-            {currentBranch && <Text color="gray">Branch: <Text color="yellow">{currentBranch}</Text></Text>}
-            <Text color="gray">Mode: <Text color="cyan">{viewMode}</Text></Text>
-            <Text color="gray">Infinite: <Text color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</Text></Text>
+            <Text dimColor>Context: <Text color="cyan">{formatContextSize(contextUsed)}</Text> / <Text bold>{formatContextSize(contextMax)}</Text> ({Math.round((contextUsed / contextMax) * 100)}%)</Text>
+            <Text dimColor>Response time: <Text color="yellow">{lastResponseTime ?? 0}ms</Text></Text>
+            <Text dimColor>Tokens saved: <Text color="green">{tokensSaved.toLocaleString()}</Text></Text>
+            <Text dimColor>Model: <Text color="cyan">{currentModel}</Text> via <Text color="magenta">{currentProvider}</Text></Text>
+            <Text dimColor>Agent ready: <Text color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</Text></Text>
+            {currentBranch && <Text dimColor>Branch: <Text color="yellow">{currentBranch}</Text></Text>}
+            <Text dimColor>Mode: <Text color="cyan">{viewMode}</Text></Text>
+            <Text dimColor>Infinite: <Text color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</Text></Text>
           </Box>
           <Box marginTop={1}>
-            <Text color="gray" dimColor>Press Ctrl+O to close</Text>
+            <Text dimColor>Press Ctrl+O to close</Text>
           </Box>
         </Box>
       )}
@@ -1318,7 +1318,7 @@ export function App({ initialCommand, args }: AppProps) {
       {/* Hidden keyboard shortcuts hint */}
       {showAnimations && (
         <Box paddingX={1} marginTop={1}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             ^O expand | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | /help | ^C exit
           </Text>
         </Box>
