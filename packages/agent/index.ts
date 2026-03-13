@@ -127,10 +127,11 @@ interface ToolCall {
 
 interface AgentConfig {
   model: string;
-  runtime: "ollama" | "lmstudio";
+  runtime: "ollama" | "lmstudio" | "openrouter";
   systemPrompt?: string;
   maxTurns?: number;
   workingDirectory?: string;
+  apiKey?: string;
 }
 
 interface OllamaResponse {
@@ -639,6 +640,93 @@ class LMStudioClient {
       return data.data?.map((m: any) => m.id) || [];
     } catch {
       return [];
+    }
+  }
+}
+
+// ============================================
+// OpenRouter Client (OpenAI-compatible)
+// ============================================
+
+class OpenRouterClient {
+  private baseUrl: string;
+  private model: string;
+  private apiKey: string;
+
+  constructor(model: string, apiKey: string, baseUrl: string = "https://openrouter.ai/api/v1") {
+    this.model = model;
+    this.baseUrl = baseUrl;
+    this.apiKey = apiKey;
+  }
+
+  async chat(messages: Message[], tools?: object[]): Promise<OllamaResponse> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      })),
+      stream: false,
+    };
+    if (tools && tools.length > 0) {
+      body.tools = tools;
+    }
+
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`,
+        "HTTP-Referer": "https://8gent.app",
+        "X-Title": "8gent Code",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenRouter error: ${response.statusText} - ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    // Convert OpenAI response format to Ollama format for compatibility
+    return {
+      model: data.model || this.model,
+      message: {
+        role: data.choices?.[0]?.message?.role || "assistant",
+        content: data.choices?.[0]?.message?.content || "",
+        tool_calls: data.choices?.[0]?.message?.tool_calls?.map((tc: any) => ({
+          function: {
+            name: tc.function?.name,
+            arguments: tc.function?.arguments,
+          },
+        })),
+      },
+      done: true,
+      usage: data.usage ? {
+        prompt_tokens: data.usage.prompt_tokens,
+        completion_tokens: data.usage.completion_tokens,
+        total_tokens: data.usage.total_tokens,
+      } : undefined,
+    };
+  }
+
+  async generate(prompt: string): Promise<string> {
+    const response = await this.chat([{ role: "user", content: prompt }]);
+    return response.message.content;
+  }
+
+  async isAvailable(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/models`, {
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+        },
+      });
+      return response.ok;
+    } catch {
+      return false;
     }
   }
 }
@@ -1602,7 +1690,7 @@ class ToolExecutor {
 // ============================================
 
 export class Agent {
-  private client: OllamaClient | LMStudioClient;
+  private client: OllamaClient | LMStudioClient | OpenRouterClient;
   private executor: ToolExecutor;
   private messages: Message[] = [];
   private config: AgentConfig;
@@ -1615,7 +1703,10 @@ export class Agent {
   constructor(config: AgentConfig) {
     this.config = config;
     // Create appropriate client based on runtime
-    if (config.runtime === "lmstudio") {
+    if (config.runtime === "openrouter") {
+      const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
+      this.client = new OpenRouterClient(config.model, apiKey);
+    } else if (config.runtime === "lmstudio") {
       this.client = new LMStudioClient(config.model);
     } else {
       this.client = new OllamaClient(config.model);
