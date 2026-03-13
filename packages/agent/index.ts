@@ -1733,32 +1733,9 @@ export class Agent {
       workingDirectory: config.workingDirectory || process.cwd(),
     });
 
-    // Voice completion hook (OFF by default — enable with /voice on)
-    // Only register if no voice hook exists yet (prevents duplicates/echo)
-    const existingHooks = this.hookManager.getAllHooks();
-    const hasVoiceHook = existingHooks.some(
-      (h) => h.name === "Voice Completion" && h.type === "onComplete"
-    );
-
-    if (!hasVoiceHook) {
-      // Uses shell mode with macOS `say` command
-      this.hookManager.registerHook({
-        type: "onComplete",
-        name: "Voice Completion",
-        description: "Speaks task completion summary using TTS (enable with /voice on)",
-        mode: "shell",
-        command: `
-        MSG=$(echo "{result}" | grep -o '🎯 COMPLETED:.*' | head -1 | sed 's/🎯 COMPLETED: *//' | cut -c1-300)
-        if [ -z "$MSG" ]; then
-          MSG="Task complete. The Infinite Gentleman has delivered."
-        fi
-        say -v Daniel -r 200 "$MSG" &
-      `,
-        enabled: false,
-        async: true,
-        continueOnError: true,
-      });
-    }
+    // Voice is handled by the voice module (packages/hooks/voice.ts) directly
+    // in the chat() method. It respects voiceConfig.enabled, so /voice on|off works.
+    // No shell hook needed — the old shell hook bypassed voiceConfig entirely.
   }
 
   async chat(userMessage: string): Promise<string> {
@@ -1922,6 +1899,14 @@ export class Agent {
           tokenCount: totalTokensUsed || content.length, // Use actual tokens if available
           workingDirectory: this.config.workingDirectory || process.cwd(),
         });
+
+        // Voice TTS — respects voiceConfig.enabled (off by default, /voice on to enable)
+        try {
+          const { voiceCompletionHook } = await import("../hooks/voice.js");
+          await voiceCompletionHook({ result: finalContent });
+        } catch {
+          // Voice is optional — silently ignore failures
+        }
 
         return content;
       }
