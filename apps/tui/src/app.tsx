@@ -57,7 +57,7 @@ import {
 } from "../../../packages/permissions/index.js";
 
 // Import the actual Agent for real execution
-import { Agent } from "../../../packages/agent/index.js";
+import { Agent } from "../../../packages/eight/index.js";
 
 // Load .env file if present
 import * as fs from "fs";

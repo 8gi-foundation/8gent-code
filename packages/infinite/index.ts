@@ -156,7 +156,7 @@ export class InfiniteRunner extends EventEmitter {
 
     try {
       // Import Agent dynamically to avoid circular deps
-      const { Agent } = await import("../agent");
+      const { Agent } = await import("../eight");
 
       this.agent = new Agent({
         model: this.config.model,

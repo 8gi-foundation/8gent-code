@@ -403,7 +403,7 @@ Completion Report + Voice Output
 | Package | Purpose |
 |---------|---------|
 | `apps/tui` | Terminal UI with animations, ADHD mode, kanban |
-| `packages/agent` | Main agent loop, REPL, and providers (Ollama, OpenRouter) |
+| `packages/eight` | Main agent loop, REPL, and providers (Ollama, OpenRouter) |
 | `packages/ast-index` | TypeScript AST parsing |
 | `packages/mcp` | MCP client implementation |
 | `packages/lsp` | LSP client for code intelligence |

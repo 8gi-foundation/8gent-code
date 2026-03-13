@@ -156,7 +156,7 @@ export class AgentPool extends EventEmitter {
 
     try {
       // Import the Agent class dynamically to avoid circular deps
-      const { Agent } = await import("../agent");
+      const { Agent } = await import("../eight");
 
       const agent = new Agent({
         model: spawnedAgent.config.model,

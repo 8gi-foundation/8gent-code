@@ -23,7 +23,7 @@
 
 Located at `benchmarks/autoresearch/harness.ts`, the harness:
 
-1. **Extracts the system prompt** from `packages/agent/prompts/system-prompt.ts`
+1. **Extracts the system prompt** from `packages/eight/prompts/system-prompt.ts`
 2. **Sends benchmark tasks** to the local Ollama model with the system prompt
 3. **Grades responses** using keyword-based scoring aligned to the rubric
 4. **Compares to Claude baselines** established by running the same tasks through Claude Code

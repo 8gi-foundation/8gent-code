@@ -26,7 +26,7 @@ bun install
 ollama pull glm-4.7-flash:latest
 
 # Run the agent
-bun run packages/agent/index.ts
+bun run packages/eight/index.ts
 ```
 
 ## Project Structure
