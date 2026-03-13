@@ -368,6 +368,14 @@ export class SessionWriter {
     return this.sessionId;
   }
 
+  getFilesCreated(): Set<string> {
+    return this.filesCreated;
+  }
+
+  getFilesModified(): Set<string> {
+    return this.filesModified;
+  }
+
   // ============================================
   // Internal helpers
   // ============================================
