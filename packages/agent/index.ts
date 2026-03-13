@@ -1735,7 +1735,13 @@ export class Agent {
 
     // Voice is handled by the voice module (packages/hooks/voice.ts) directly
     // in the chat() method. It respects voiceConfig.enabled, so /voice on|off works.
-    // No shell hook needed — the old shell hook bypassed voiceConfig entirely.
+    // Remove any persisted shell-based voice hooks — they bypass voiceConfig.
+    const allHooks = this.hookManager.getAllHooks();
+    for (const hook of allHooks) {
+      if (hook.name === "Voice Completion" && hook.mode === "shell") {
+        this.hookManager.unregisterHook(hook.id!);
+      }
+    }
   }
 
   async chat(userMessage: string): Promise<string> {
