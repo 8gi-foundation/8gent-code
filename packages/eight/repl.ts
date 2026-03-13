@@ -37,7 +37,7 @@ import {
   formatTaskStatus,
   formatTaskOutput,
 } from "../tools/background";
-import { handleReportCommands } from "../reporting";
+import { readRuns, type RunLogEntry } from "../reporting/runlog";
 
 export async function startREPL(config?: Partial<AgentConfig>) {
   // Load config from file
@@ -490,22 +490,27 @@ function handleLSPCommands(trimmed: string): boolean {
 }
 
 function handleReportSlashCommands(trimmed: string, agent: Agent): boolean {
-  if (trimmed === "/reports" || trimmed.startsWith("/reports ")) {
-    const result = handleReportCommands(trimmed);
-    if (result) console.log(result);
-    return true;
-  }
-
-  if (trimmed.startsWith("/report ")) {
-    const result = handleReportCommands(trimmed);
-    if (result) console.log(result);
+  if (trimmed === "/runs" || trimmed === "/reports") {
+    const runs = readRuns(15);
+    if (runs.length === 0) {
+      console.log("\x1b[90mNo runs yet.\x1b[0m");
+      return true;
+    }
+    for (const r of runs) {
+      const st = r.status === "ok" ? "\x1b[32m ok\x1b[0m" : "\x1b[31mfail\x1b[0m";
+      const cost = r.cost != null ? `$${r.cost.toFixed(4)}` : "—";
+      const files = [...r.created, ...r.modified].length;
+      console.log(
+        `${st}  ${r.dur}s  ${r.tokens.toLocaleString()}tok  ${cost}  ${files}f  ${r.model}  ${r.prompt.slice(0, 50)}`
+      );
+    }
     return true;
   }
 
   if (trimmed === "/reporting") {
     const current = agent.isReportingEnabled();
     agent.setReportingEnabled(!current);
-    console.log(`Completion reports: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`);
+    console.log(`Run logging: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`);
     return true;
   }
 
