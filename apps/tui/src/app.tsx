@@ -57,6 +57,53 @@ import {
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/agent/index.js";
 
+// Load .env file if present
+import * as fs from "fs";
+import * as pathMod from "path";
+
+function loadEnvFile() {
+  try {
+    const envPath = pathMod.join(process.cwd(), ".env");
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#")) {
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx > 0) {
+            const key = trimmed.slice(0, eqIdx).trim();
+            const val = trimmed.slice(eqIdx + 1).trim();
+            if (!process.env[key]) {
+              process.env[key] = val;
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+}
+
+function loadProviderSettings(): { provider: string; model: string } {
+  try {
+    const settingsPath = pathMod.join(
+      process.env.HOME || process.env.USERPROFILE || "",
+      ".8gent",
+      "providers.json"
+    );
+    if (fs.existsSync(settingsPath)) {
+      const data = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+      return {
+        provider: data.activeProvider || "ollama",
+        model: data.activeModel || "glm-4.7-flash:latest",
+      };
+    }
+  } catch {}
+  return { provider: "ollama", model: "glm-4.7-flash:latest" };
+}
+
+loadEnvFile();
+const _savedProviderSettings = loadProviderSettings();
+
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
 
@@ -199,8 +246,8 @@ export function App({ initialCommand, args }: AppProps) {
   const [infiniteModeActive, setInfiniteModeActive] = useState(false);
 
   // Model/Provider state (must be before agent init)
-  const [currentModel, setCurrentModel] = useState("glm-4.7-flash:latest");
-  const [currentProvider, setCurrentProvider] = useState("ollama");
+  const [currentModel, setCurrentModel] = useState(_savedProviderSettings.model);
+  const [currentProvider, setCurrentProvider] = useState(_savedProviderSettings.provider);
   const [availableModels] = useState([
     "glm-4.7-flash:latest",
     "qwen2.5-coder:14b",
@@ -318,13 +365,19 @@ export function App({ initialCommand, args }: AppProps) {
     const initAgent = async () => {
       try {
         // Map provider to runtime
-        const runtime = currentProvider === "lmstudio" ? "lmstudio" : "ollama";
+        let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
+        if (currentProvider === "lmstudio") {
+          runtime = "lmstudio";
+        } else if (currentProvider === "openrouter" || currentProvider === "openrouter-free") {
+          runtime = "openrouter";
+        }
 
         const newAgent = new Agent({
           model: currentModel,
-          runtime: runtime as "ollama" | "lmstudio",
+          runtime,
           workingDirectory: process.cwd(),
           maxTurns: 50,
+          apiKey: process.env.OPENROUTER_API_KEY,
         });
         // Check if provider is available
         const ready = await newAgent.isReady();
