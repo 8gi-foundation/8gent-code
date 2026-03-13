@@ -5,149 +5,138 @@ Run 8gent (our Claude Code alternative) with progressively harder test tasks, mo
 
 ## Test Tasks (Progressive Difficulty)
 
-### Level 1: Fibonacci (warm-up)
-- **Task**: Create fib.js that prints first 20 Fibonacci numbers
-- **Validates**: write_file + run_command
-- **Pass**: file exists, output contains "4181"
+### Level 1: Fibonacci (warm-up) — PASSES
+```bash
+bun run harness run --task fib
+```
+Validates: write_file + run_command. Always passes. ~7s.
 
-### Level 2: Next.js Hello World (the real test)
-- **Task**: Scaffold a Next.js project and make it display "Hello World"
-- **Validates**: multi-step scaffolding, npm/bun commands, file creation, directory awareness, package.json creation, dev server
-- **Pass**: `package.json` exists with `next` dependency, `app/page.tsx` (or `pages/index.tsx`) exists, page contains "Hello World", `bun install` succeeds, `next build` succeeds
-- **This is the hard one.** It requires the agent to:
-  1. Run `bun create next-app . --yes` OR manually scaffold files
-  2. Modify the default page to say "Hello World"
-  3. Install dependencies
-  4. Verify the build works
+### Level 2: Next.js Hello World — PASSES
+```bash
+bun run harness run --task nextjs
+```
+Validates: multi-file scaffolding, bun install, next build. Passes. ~100s.
 
-### Level 3: (stretch) Add a route
-- Add an `/about` page that says "About Page"
+### Level 3: REST API with Integration Tests — FAILS
+```bash
+bun run harness run --task api
+```
+This is the one 8gent **cannot do yet**. It requires:
+1. Create a Hono REST API server with CRUD routes
+2. Create integration tests that hit the running server via fetch
+3. Start the server in the background
+4. Run tests against it
+5. Debug failures and iterate until tests pass
 
-## Prerequisites
-- OpenRouter API key set (OPENROUTER_API_KEY) or Ollama running
-- Run `bun run harness:doctor` first to verify
+**Why it fails**: 8gent doesn't know the correct Hono `serve()` API. It tries
+`app.fire()`, `app.listen()`, `app.fire({ port: 3456 })` — none work. It burns
+all 30 steps trying different server start methods and never gets the tests to pass.
+270K tokens wasted in a debug loop that goes nowhere.
+
+**Root causes to fix in 8gent**:
+1. System prompt has no knowledge of Hono, Express, or web framework APIs
+2. Agent has no web_search/web_fetch instinct — it guesses instead of looking up docs
+3. No loop detection — agent doesn't realize it's tried the same fix 5 times
+4. No "give up and try a different approach" heuristic
 
 ## The Feedback Loop
 
-### Phase 1: Health Check
+### Step 1: Run the failing task
 ```bash
-bun run harness:doctor
+bun run harness run --task api
 ```
 
-### Phase 2: Clean Test Directory
+### Step 2: Inspect what went wrong
 ```bash
-rm -rf /tmp/8gent-test-nextjs && mkdir -p /tmp/8gent-test-nextjs
+bun run harness inspect <session-id>
+bun run harness inspect <session-id> --summary
 ```
 
-### Phase 3: Run 8gent
-```bash
-bun run harness:run \
-  "Build a Next.js project in the current directory. Steps: 1) Create package.json with next, react, react-dom dependencies 2) Create app/layout.tsx with basic HTML layout 3) Create app/page.tsx that displays a heading saying Hello World 4) Create next.config.js 5) Create tsconfig.json 6) Run bun install to install dependencies 7) Run npx next build to verify it compiles" \
-  --workdir /tmp/8gent-test-nextjs \
-  --runtime openrouter \
-  --model openai/gpt-4.1-mini \
-  --max-steps 30 \
-  --timeout 300000 \
-  --json
+Look at:
+- Which step did it get stuck on?
+- What tool_result errors appeared?
+- Did it loop on the same edit_file call?
+- Did the server ever actually start?
+- Did tests ever run? What was the failure output?
+
+### Step 3: Diagnose the root cause
+
+Read the session entries. The failure pattern will be one of:
+
+| Pattern | Root cause | Fix location |
+|---------|-----------|--------------|
+| Loops editing same file with wrong API | Missing framework knowledge | `packages/eight/prompt.ts` — add Hono/Express serve patterns |
+| Never uses web_search to look up docs | No instinct to search | `packages/eight/prompt.ts` — add "if unsure about an API, use web_search" |
+| Tries same fix 5+ times | No loop detection | `packages/eight/agent.ts` or `packages/ai/agent.ts` — detect repeated tool calls |
+| Server starts but tests can't connect | Wrong port/host in test | Check the test file the agent wrote |
+| background_start doesn't work | Tool implementation bug | `packages/ai/tools.ts` — background_start tool |
+| Tests pass but agent doesn't notice | Output parsing issue | Check how agent reads run_command output |
+| Agent says "COMPLETED" but tests failed | Success criteria too loose | `packages/eight/prompt.ts` — tighten completion rules |
+
+### Step 4: Fix 8gent code
+
+**Most likely fixes needed (in order of impact):**
+
+#### Fix 1: Add framework knowledge to system prompt
+Edit `packages/eight/prompt.ts` to include:
+```
+## Common Framework Patterns
+When creating web servers:
+- Hono: import { Hono } from 'hono'; import { serve } from '@hono/node-server';
+  const app = new Hono(); serve({ fetch: app.fetch, port: 3000 });
+  OR for Bun: export default { fetch: app.fetch, port: 3000 };
+- Express: app.listen(3000);
 ```
 
-### Phase 4: Inspect
-```bash
-bun run harness:inspect <sessionId>
+#### Fix 2: Add "search before guessing" rule
+Add to system prompt:
 ```
-Look for:
-- Did it create files? Check tool_call entries for write_file
-- Did it run commands? Check for run_command calls
-- Did commands succeed? Check tool_result entries
-- What errors occurred? Check tool_error and error entries
-- Did it hit max steps? Check session_end exitReason
-
-### Phase 5: Validate
-```bash
-# Check key files exist
-bun run harness -- validate <sessionId> \
-  --expect-file /tmp/8gent-test-nextjs/package.json \
-  --json
-
-# Manually verify
-ls /tmp/8gent-test-nextjs/
-cat /tmp/8gent-test-nextjs/app/page.tsx 2>/dev/null || cat /tmp/8gent-test-nextjs/pages/index.tsx 2>/dev/null
-cat /tmp/8gent-test-nextjs/package.json
+## CRITICAL: When you don't know an API
+If you are unsure about the correct API for a library, framework, or tool:
+1. FIRST use web_search to look up the official documentation
+2. NEVER guess function signatures — look them up
+3. If web_search fails, try the most common/standard approach first
 ```
 
-Then try building:
+#### Fix 3: Add loop detection
+In `packages/eight/agent.ts` or `packages/ai/agent.ts`, detect when the agent
+makes the same edit_file call 3+ times and inject a message like:
+"You have tried this approach 3 times without success. Try a completely different strategy."
+
+### Step 5: Re-run and verify
 ```bash
-cd /tmp/8gent-test-nextjs && bun install && npx next build
+bun run harness run --task api
 ```
+Compare the new session to the old one. Did it get further? Did it fix the server start? Did tests pass?
 
-### Phase 6: Diagnose & Fix 8gent Code
-
-**Read the session carefully.** Common Next.js task failures and what to fix:
-
-#### Problem: Agent doesn't know about Next.js app router structure
-**Fix**: Update system prompt in `packages/eight/prompt.ts` to include Next.js scaffolding knowledge
-
-#### Problem: `bun create next-app` hangs (interactive prompts)
-**Fix**: Ensure system prompt tells agent to use `--yes` / `--no-input` flags, or to manually create files instead of using scaffolding CLIs
-
-#### Problem: Agent creates files in wrong paths
-**Fix**: The `write_file` tool in `packages/ai/tools.ts` — check how it resolves relative paths against `workingDirectory`
-
-#### Problem: Agent calls tools with wrong argument names
-**Fix**: The Zod schemas in `packages/ai/tools.ts` — the parameter names must match what the model expects from the system prompt tool docs
-
-#### Problem: `run_command` fails with permission error
-**Fix**: The harness already enables infinite mode. If still failing, check `packages/ai/tools.ts` run_command implementation
-
-#### Problem: Agent tries tools that don't exist
-**Fix**: The model is hallucinating tool names. The system prompt tool docs in `packages/eight/prompt.ts` must exactly match the tool names in `packages/ai/tools.ts`
-
-#### Problem: Agent uses too many steps without progress
-**Fix**: Improve system prompt to be more directive. Add "prefer manual file creation over CLI scaffolding" guidance
-
-#### Problem: npm/bun install fails (network, missing packages)
-**Fix**: Not an 8gent bug — environment issue. Verify manually first
-
-### Phase 7: Apply Fix and Re-run
-After making code changes, go back to Phase 2 (clean dir) and Phase 3 (re-run).
+### Step 6: Iterate
+Keep going until `--task api` passes. Then make the task even harder.
 
 ## Key Files to Modify
 
 | File | What to fix |
 |------|-------------|
-| `packages/eight/prompt.ts` | System prompt — tool docs, scaffolding guidance, error recovery rules |
-| `packages/ai/tools.ts` | Tool implementations — Zod schemas, argument handling, path resolution |
-| `packages/ai/agent.ts` | Agent wrapper — maxSteps, callbacks, error handling |
-| `packages/eight/agent.ts` | Agent class — session tracking, tool call wiring |
-| `packages/ai/providers.ts` | Provider config — model parameters, API compatibility |
-| `packages/permissions/index.ts` | Permission system — safe command patterns |
-| `packages/harness-cli/commands/run.ts` | Harness runner — how the headless session is executed |
-
-## Iteration Strategy
-
-1. **Always start with a clean directory** — `rm -rf /tmp/8gent-test-nextjs && mkdir -p /tmp/8gent-test-nextjs`
-2. **Read the full session after every run** — the JSONL is the source of truth
-3. **Fix one thing at a time** — don't make 5 changes at once
-4. **Re-run immediately after each fix** — verify before moving on
-5. **Compare sessions** — use `bun run harness:sessions` to track progress across runs
-6. **If the model is the bottleneck**, try `--model openai/gpt-4.1` (full size) or `--model anthropic/claude-sonnet-4`
-7. **If the same error repeats 3 times**, the fix isn't working — try a different approach
+| `packages/eight/prompt.ts` | System prompt — add framework knowledge, search-before-guess rule |
+| `packages/ai/tools.ts` | Tool implementations — background_start, run_command |
+| `packages/ai/agent.ts` | Agent wrapper — loop detection, step callbacks |
+| `packages/eight/agent.ts` | Agent class — conversation history, error handling |
+| `packages/permissions/index.ts` | Safe command patterns |
+| `packages/harness-cli/commands/run.ts` | Task presets and validation |
 
 ## Success Criteria
 
-The Next.js test passes when ALL of these are true:
-1. `/tmp/8gent-test-nextjs/package.json` exists and contains `"next"` as a dependency
-2. `/tmp/8gent-test-nextjs/app/page.tsx` (or `pages/index.tsx`) exists and contains "Hello World"
-3. `/tmp/8gent-test-nextjs/app/layout.tsx` exists (for app router)
-4. `bun install` in the test dir succeeds
-5. `npx next build` in the test dir succeeds
-6. The session completed without fatal errors
-7. The session used fewer than 20 steps
+Level 3 (api) passes when:
+1. server.ts exists with working Hono CRUD routes
+2. api.test.ts exists with tests for all 4 endpoints
+3. The server starts successfully in the background
+4. `bun test` runs and ALL tests pass
+5. The session uses fewer than 20 steps (efficiency)
+6. Token usage under 100K (no debug loops)
 
 ## Escalation
 
-If stuck after 5+ iterations:
-- Read the raw JSONL: `cat ~/.8gent/sessions/<id>.jsonl | jq -r '.type'` to see the entry flow
-- Try a stronger model: `--model anthropic/claude-sonnet-4`
-- Simplify: break the task into "just create package.json" first, verify, then add complexity
-- Check if tools are even being called: `bun run harness:inspect <id> --entries tool_call,tool_result,tool_error`
+If stuck after 5+ iterations on the same root cause:
+- Try a stronger model: `--model anthropic/claude-sonnet-4` or `--model openai/gpt-4.1`
+- Check if the tool implementation is the bottleneck vs. the model's knowledge
+- Simplify: break the API task into sub-tasks (just "start a Hono server on port 3456")
+- Read the raw JSONL to see exactly what the model outputs between tool calls
