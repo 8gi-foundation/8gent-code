@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://8gent.dev/schemas/session/v1",
+  "title": "8gent Session",
+  "description": "A complete record of an 8gent coding agent session — the full conversation between a user and the agent, including all messages, tool invocations, token usage, and metadata. Sessions are stored as JSONL files where each line is a SessionEntry.",
+
+  "$defs": {
+    "SessionMeta": {
+      "type": "object",
+      "description": "Session-level metadata, written as the first entry in the JSONL file.",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Unique session identifier. Format: session_{timestamp}_{random}",
+          "pattern": "^session_\\d+_[a-z0-9]+$"
+        },
+        "version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Schema version for forward compatibility."
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp when the session began."
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentInfo"
+        },
+        "environment": {
+          "$ref": "#/$defs/Environment"
+        }
+      },
+      "required": ["sessionId", "version", "startedAt", "agent", "environment"]
+    },
+
+    "AgentInfo": {
+      "type": "object",
+      "description": "The agent configuration active for this session.",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Model identifier. e.g. 'openai/gpt-4.1-mini', 'glm-4.7-flash:latest'"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["ollama", "lmstudio", "openrouter"],
+          "description": "Which LLM backend served the model."
+        },
+        "maxTurns": {
+          "type": "integer",
+          "description": "Maximum agentic loop iterations before the agent stops."
+        },
+        "systemPromptHash": {
+          "type": "string",
+          "description": "SHA-256 hash of the system prompt (privacy-safe reference without storing the full prompt)."
+        }
+      },
+      "required": ["model", "runtime"]
+    },
+
+    "Environment": {
+      "type": "object",
+      "description": "Snapshot of the execution environment at session start.",
+      "properties": {
+        "workingDirectory": {
+          "type": "string",
+          "description": "Absolute path of the project root."
+        },
+        "gitBranch": {
+          "type": ["string", "null"],
+          "description": "Current git branch at session start."
+        },
+        "gitCommit": {
+          "type": ["string", "null"],
+          "description": "HEAD commit SHA at session start."
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["darwin", "linux", "win32"],
+          "description": "OS platform."
+        },
+        "nodeVersion": {
+          "type": "string",
+          "description": "Node/Bun runtime version."
+        }
+      },
+      "required": ["workingDirectory"]
+    },
+
+    "Message": {
+      "type": "object",
+      "description": "A single message in the conversation.",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["system", "user", "assistant"],
+          "description": "Who produced this message."
+        },
+        "content": {
+          "type": "string",
+          "description": "The text content of the message."
+        }
+      },
+      "required": ["role", "content"]
+    },
+
+    "ToolCall": {
+      "type": "object",
+      "description": "A single tool invocation by the agent.",
+      "properties": {
+        "toolCallId": {
+          "type": "string",
+          "description": "Unique ID for this tool call within the session."
+        },
+        "name": {
+          "type": "string",
+          "description": "Tool name. e.g. 'readFile', 'shellExec', 'writeFile'"
+        },
+        "arguments": {
+          "type": "object",
+          "description": "The arguments passed to the tool.",
+          "additionalProperties": true
+        },
+        "result": {
+          "type": "string",
+          "description": "The tool's output, truncated if necessary."
+        },
+        "success": {
+          "type": "boolean",
+          "description": "Whether the tool executed without error."
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Error message if the tool failed."
+        },
+        "durationMs": {
+          "type": "integer",
+          "description": "Wall-clock execution time in milliseconds."
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["toolCallId", "name", "arguments", "success", "durationMs"]
+    },
+
+    "TokenUsage": {
+      "type": "object",
+      "description": "Token consumption for a single LLM call.",
+      "properties": {
+        "promptTokens": {
+          "type": "integer",
+          "description": "Tokens in the prompt (input)."
+        },
+        "completionTokens": {
+          "type": "integer",
+          "description": "Tokens in the completion (output)."
+        },
+        "totalTokens": {
+          "type": "integer",
+          "description": "Sum of prompt + completion tokens."
+        }
+      },
+      "required": ["totalTokens"]
+    },
+
+    "HookExecution": {
+      "type": "object",
+      "description": "Record of a hook firing during the session.",
+      "properties": {
+        "hookName": {
+          "type": "string",
+          "description": "Name of the hook that executed."
+        },
+        "hookType": {
+          "type": "string",
+          "enum": ["onStart", "onComplete", "onError", "beforeTool", "afterTool"],
+          "description": "The event type that triggered the hook."
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["hookName", "hookType", "success"]
+    },
+
+    "SessionEntry": {
+      "type": "object",
+      "description": "A single line in the JSONL session file. Discriminated union on the 'type' field.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "session_start",
+            "user_message",
+            "assistant_message",
+            "tool_call",
+            "tool_result",
+            "turn_start",
+            "turn_end",
+            "hook",
+            "error",
+            "session_end"
+          ],
+          "description": "Entry type — determines which payload fields are present."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this entry was recorded."
+        },
+        "sequenceNumber": {
+          "type": "integer",
+          "description": "Monotonically increasing counter for ordering within the session. Starts at 0."
+        }
+      },
+      "required": ["type", "timestamp", "sequenceNumber"],
+
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "session_start" } } },
+          "then": {
+            "properties": {
+              "meta": { "$ref": "#/$defs/SessionMeta" }
+            },
+            "required": ["meta"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "user_message" } } },
+          "then": {
+            "properties": {
+              "message": { "$ref": "#/$defs/Message" }
+            },
+            "required": ["message"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "assistant_message" } } },
+          "then": {
+            "properties": {
+              "message": { "$ref": "#/$defs/Message" },
+              "usage": { "$ref": "#/$defs/TokenUsage" },
+              "turnIndex": {
+                "type": "integer",
+                "description": "Which agentic turn produced this message (0-indexed within the current chat call)."
+              },
+              "containsToolCalls": {
+                "type": "boolean",
+                "description": "Whether this response triggered tool calls (i.e. the loop continues)."
+              }
+            },
+            "required": ["message"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool_call" } } },
+          "then": {
+            "properties": {
+              "toolCall": { "$ref": "#/$defs/ToolCall" },
+              "turnIndex": { "type": "integer" }
+            },
+            "required": ["toolCall"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool_result" } } },
+          "then": {
+            "properties": {
+              "toolCallId": {
+                "type": "string",
+                "description": "References the ToolCall this is a result for."
+              },
+              "result": { "type": "string" },
+              "success": { "type": "boolean" },
+              "durationMs": { "type": "integer" }
+            },
+            "required": ["toolCallId", "success"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "turn_start" } } },
+          "then": {
+            "properties": {
+              "turnIndex": { "type": "integer" },
+              "messageCount": {
+                "type": "integer",
+                "description": "Number of messages in context at the start of this turn."
+              }
+            },
+            "required": ["turnIndex"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "turn_end" } } },
+          "then": {
+            "properties": {
+              "turnIndex": { "type": "integer" },
+              "reason": {
+                "type": "string",
+                "enum": ["natural_stop", "tool_calls", "max_turns", "error"],
+                "description": "Why the turn ended."
+              },
+              "usage": { "$ref": "#/$defs/TokenUsage" }
+            },
+            "required": ["turnIndex", "reason"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "hook" } } },
+          "then": {
+            "properties": {
+              "hook": { "$ref": "#/$defs/HookExecution" }
+            },
+            "required": ["hook"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "error" } } },
+          "then": {
+            "properties": {
+              "error": {
+                "type": "object",
+                "properties": {
+                  "message": { "type": "string" },
+                  "code": { "type": ["string", "null"] },
+                  "stack": { "type": ["string", "null"] },
+                  "recoverable": {
+                    "type": "boolean",
+                    "description": "Whether the session continued after this error."
+                  }
+                },
+                "required": ["message", "recoverable"]
+              }
+            },
+            "required": ["error"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "session_end" } } },
+          "then": {
+            "properties": {
+              "summary": {
+                "type": "object",
+                "description": "Aggregated stats for the entire session.",
+                "properties": {
+                  "endedAt": { "type": "string", "format": "date-time" },
+                  "durationMs": { "type": "integer" },
+                  "totalTurns": { "type": "integer" },
+                  "totalToolCalls": { "type": "integer" },
+                  "totalTokens": { "type": "integer" },
+                  "filesCreated": { "type": "array", "items": { "type": "string" } },
+                  "filesModified": { "type": "array", "items": { "type": "string" } },
+                  "filesDeleted": { "type": "array", "items": { "type": "string" } },
+                  "gitCommits": { "type": "array", "items": { "type": "string" } },
+                  "exitReason": {
+                    "type": "string",
+                    "enum": ["user_exit", "max_turns", "error", "idle_timeout", "completed"],
+                    "description": "Why the session ended."
+                  },
+                  "reportId": {
+                    "type": ["string", "null"],
+                    "description": "Link to the CompletionReport if one was generated."
+                  }
+                },
+                "required": ["endedAt", "durationMs", "exitReason"]
+              }
+            },
+            "required": ["summary"]
+          }
+        }
+      ]
+    }
+  },
+
+  "description": "The top-level schema describes a single SessionEntry. A session JSONL file contains one SessionEntry per line. The first entry MUST be type 'session_start'. The last entry SHOULD be type 'session_end'.",
+  "$ref": "#/$defs/SessionEntry"
+}

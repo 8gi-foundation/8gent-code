@@ -295,6 +295,8 @@ export function App({ initialCommand, args }: AppProps) {
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       if (soundEnabled) playSound("notification");
+      // Finalize session before exiting
+      if (agent) agent.cleanup().catch(() => {});
       exit();
     }
 
@@ -513,6 +515,7 @@ export function App({ initialCommand, args }: AppProps) {
           break;
 
         case "quit":
+          if (agent) agent.cleanup().catch(() => {});
           exit();
           break;
 
