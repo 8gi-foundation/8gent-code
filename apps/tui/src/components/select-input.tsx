@@ -144,7 +144,7 @@ export function SelectInput<T = string>({
   const canScrollDown = scrollOffset + maxVisible < filteredOptions.length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1}>
       {/* Title */}
       {title && (
         <Box marginBottom={1}>
@@ -157,16 +157,16 @@ export function SelectInput<T = string>({
       {/* Search input (if searchable and has search) */}
       {searchable && search && (
         <Box marginBottom={1}>
-          <Text color="gray">Search: </Text>
+          <Text dimColor>Search: </Text>
           <Text color="yellow">{search}</Text>
-          <Text color="gray" dimColor> (Backspace to clear)</Text>
+          <Text dimColor> (Backspace to clear)</Text>
         </Box>
       )}
 
       {/* Scroll up indicator */}
       {hasMore && canScrollUp && (
         <Box>
-          <Text color="gray" dimColor>  ▲ {scrollOffset} more above</Text>
+          <Text dimColor>  ▲ {scrollOffset} more above</Text>
         </Box>
       )}
 
@@ -186,15 +186,15 @@ export function SelectInput<T = string>({
 
               {/* Icon if present */}
               {option.icon && (
-                <Text color={isDisabled ? "gray" : "white"}>
+                <Text dimColor={isDisabled} bold={!isDisabled}>
                   {option.icon}{" "}
                 </Text>
               )}
 
               {/* Label */}
               <Text
-                color={isDisabled ? "gray" : isSelected ? highlightColor as any : "white"}
-                bold={isSelected}
+                color={isSelected ? highlightColor as any : undefined}
+                bold={isSelected || !isDisabled}
                 dimColor={isDisabled}
               >
                 {option.label}
@@ -202,14 +202,14 @@ export function SelectInput<T = string>({
 
               {/* Disabled indicator */}
               {isDisabled && (
-                <Text color="gray" dimColor> (unavailable)</Text>
+                <Text dimColor> (unavailable)</Text>
               )}
             </Box>
 
             {/* Description (only for selected item) */}
             {showDescription && isSelected && option.description && (
               <Box paddingLeft={4}>
-                <Text color="gray" dimColor>
+                <Text dimColor>
                   {option.description}
                 </Text>
               </Box>
@@ -221,7 +221,7 @@ export function SelectInput<T = string>({
       {/* Scroll down indicator */}
       {hasMore && canScrollDown && (
         <Box>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {"  "}▼ {filteredOptions.length - scrollOffset - maxVisible} more below
           </Text>
         </Box>
@@ -230,13 +230,13 @@ export function SelectInput<T = string>({
       {/* Empty state */}
       {filteredOptions.length === 0 && (
         <Box>
-          <Text color="gray" dimColor>No options match "{search}"</Text>
+          <Text dimColor>No options match "{search}"</Text>
         </Box>
       )}
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           [↑↓] Navigate  [Enter] Select  [Esc] Cancel
         </Text>
       </Box>
@@ -322,7 +322,7 @@ export function ConfirmDialog({
         </Box>
       </Box>
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           [Y/N] or [←→] to select, [Enter] to confirm
         </Text>
       </Box>
@@ -391,15 +391,15 @@ export function QuickMenu<T = string>({
         {actions.map((action, index) => (
           <Box key={String(action.value)}>
             <Text
-              color={index === selectedIndex ? "cyan" : "white"}
-              bold={index === selectedIndex}
+              color={index === selectedIndex ? "cyan" : undefined}
+              bold
             >
               {index === selectedIndex ? "❯ " : "  "}
               {action.icon && `${action.icon} `}
               {action.label}
             </Text>
             {action.shortcut && (
-              <Text color="gray" dimColor> [{action.shortcut}]</Text>
+              <Text dimColor> [{action.shortcut}]</Text>
             )}
           </Box>
         ))}

@@ -87,7 +87,7 @@ export function AnimatedProgressBar({
     for (let i = 0; i < filledWidth; i++) {
       const isShimmer = i === shimmerIndex || i === shimmerIndex - 1;
       filled.push(
-        <Text key={`f${i}`} color={isShimmer ? "white" : barColor}>
+        <Text key={`f${i}`} color={isShimmer ? undefined : barColor} bold={isShimmer}>
           █
         </Text>
       );
@@ -107,14 +107,14 @@ export function AnimatedProgressBar({
   return (
     <Box flexDirection="column">
       {label && (
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {label}
         </Text>
       )}
       <Box>
-        <Text color="gray">[</Text>
+        <Text dimColor>[</Text>
         {buildBar()}
-        <Text color="gray">]</Text>
+        <Text dimColor>]</Text>
         {showPercentage && (
           <Text color={barColor}> {Math.round(displayValue)}%</Text>
         )}
@@ -157,7 +157,7 @@ export function TokenSavingsBar({
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color="gray">Tokens saved:</Text>
+      <Text dimColor>Tokens saved:</Text>
       <Text color="green" bold>
         {formattedTokens}
       </Text>
@@ -234,9 +234,9 @@ export function WaveProgress({ width = 30, speed = 100 }: WaveProgressProps) {
 
   return (
     <Box>
-      <Text color="gray">[</Text>
+      <Text dimColor>[</Text>
       {wave}
-      <Text color="gray">]</Text>
+      <Text dimColor>]</Text>
     </Box>
   );
 }

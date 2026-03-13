@@ -245,7 +245,7 @@ export function StatusLine({
         {verb}
       </Text>
       {(elapsed || tokens || showLabel) && (
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {" ("}
           {elapsed && <Text>{elapsed}</Text>}
           {elapsed && (tokens || showLabel) && <Text> {"\u00B7"} </Text>}
@@ -324,7 +324,7 @@ export function InlineStatus({
   }, [type, active]);
 
   if (!active) {
-    return <Text color="gray">Idle</Text>;
+    return <Text dimColor>Idle</Text>;
   }
 
   return (

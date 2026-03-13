@@ -101,7 +101,7 @@ export function GentlemanInput({
     <Box flexDirection="column" paddingX={1}>
       {/* ═══════ TOP LINE ═══════ */}
       <Box>
-        <Text color="gray">{lineChar.repeat(lineWidth)}</Text>
+        <Text dimColor>{lineChar.repeat(lineWidth)}</Text>
       </Box>
 
       {/* ═══════ INPUT AREA ═══════ */}
@@ -122,17 +122,17 @@ export function GentlemanInput({
       {/* ═══════ GHOST HINT (below input) ═══════ */}
       {!isProcessing && isVisible && suggestion && (
         <Box paddingLeft={3} marginBottom={1}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             <Text color="blue">Tab</Text> to accept
-            <Text color="gray"> · </Text>
-            <Text color="gray">{getSuggestionSourceLabel(suggestion.source)}</Text>
+            <Text dimColor> · </Text>
+            <Text dimColor>{getSuggestionSourceLabel(suggestion.source)}</Text>
           </Text>
         </Box>
       )}
 
       {/* ═══════ BOTTOM LINE WITH STATUS ═══════ */}
       <Box>
-        <Text color="gray">{lineChar.repeat(lineWidth)}</Text>
+        <Text dimColor>{lineChar.repeat(lineWidth)}</Text>
       </Box>
 
       {/* ═══════ STATUS INDICATORS ═══════ */}
@@ -196,14 +196,14 @@ function InputWithGhost({
 
         {/* Ghost text (after cursor) */}
         {isVisible && suggestion && (
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {suggestion.text}
           </Text>
         )}
 
         {/* Placeholder when empty */}
         {!value && !isVisible && (
-          <Text color="gray" dimColor>
+          <Text dimColor>
             What would you like to build?
           </Text>
         )}
@@ -260,35 +260,35 @@ function StatusLine({
     <Box paddingTop={1} gap={1}>
       {/* Model */}
       <Text color="cyan">{modelName}</Text>
-      <Text color="gray">·</Text>
+      <Text dimColor>·</Text>
 
       {/* Tokens saved */}
       <Text color="green">↓{formatTokens(tokensSaved)}</Text>
-      <Text color="gray">·</Text>
+      <Text dimColor>·</Text>
 
       {/* Permission mode */}
       <Text color={permColors[permissionMode]}>
         {permIcons[permissionMode]}
       </Text>
-      <Text color="gray">·</Text>
+      <Text dimColor>·</Text>
 
       {/* Git branch */}
       {currentBranch && (
         <>
           <Text color="yellow">{currentBranch}</Text>
-          <Text color="gray">·</Text>
+          <Text dimColor>·</Text>
         </>
       )}
 
       {/* Elapsed */}
-      <Text color="gray" dimColor>
+      <Text dimColor>
         {elapsed}
       </Text>
 
       {/* Processing indicator */}
       {isProcessing && (
         <>
-          <Text color="gray">·</Text>
+          <Text dimColor>·</Text>
           <Text color="cyan">
             <Spinner type="dots" />
           </Text>
@@ -327,7 +327,7 @@ export function GentlemanInputMinimal({
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text color="gray">{"─".repeat(60)}</Text>
+        <Text dimColor>{"─".repeat(60)}</Text>
       </Box>
       <Box paddingY={1}>
         {isProcessing ? (
@@ -335,7 +335,7 @@ export function GentlemanInputMinimal({
             <Text color="cyan">
               <Spinner type="dots" />
             </Text>
-            <Text color="gray"> Working...</Text>
+            <Text dimColor> Working...</Text>
           </Box>
         ) : (
           <Box>
@@ -352,7 +352,7 @@ export function GentlemanInputMinimal({
         )}
       </Box>
       <Box>
-        <Text color="gray">{"─".repeat(60)}</Text>
+        <Text dimColor>{"─".repeat(60)}</Text>
       </Box>
     </Box>
   );

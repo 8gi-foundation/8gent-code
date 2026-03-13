@@ -171,13 +171,13 @@ export function CodeTyping({ code, language, speed = 8 }: CodeTypingProps) {
   return (
     <Box
       borderStyle="round"
-      borderColor="gray"
+      borderColor="blue"
       paddingX={1}
       flexDirection="column"
     >
       {language && (
         <Box marginBottom={1}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {language}
           </Text>
         </Box>

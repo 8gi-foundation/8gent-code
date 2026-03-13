@@ -29,7 +29,7 @@ function ThinkingDots() {
   }, []);
 
   return (
-    <Text color="gray">
+    <Text dimColor>
       {".".repeat(dots)}
       {" ".repeat(3 - dots)}
     </Text>
@@ -45,7 +45,7 @@ export function AnimatedSpinner({
   return (
     <Box>
       <Text color={color}><Spinner type={type} /></Text>
-      <Text color="gray"> {label}</Text>
+      <Text dimColor> {label}</Text>
       {showDots && <ThinkingDots />}
     </Box>
   );
@@ -82,7 +82,7 @@ export function StatusIndicator({ status, label }: StatusIndicatorProps) {
   return (
     <Box>
       <Text color={config.color}>{config.symbol}</Text>
-      {label && <Text color="gray"> {label}</Text>}
+      {label && <Text dimColor> {label}</Text>}
     </Box>
   );
 }
@@ -105,9 +105,9 @@ export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
           <Box key={step}>
             {isComplete && <Text color="green">✓</Text>}
             {isCurrent && <Text color="cyan"><Spinner type="dots" /></Text>}
-            {isPending && <Text color="gray">○</Text>}
-            <Text color={isCurrent ? "white" : "gray"}> {step}</Text>
-            {index < steps.length - 1 && <Text color="gray"> → </Text>}
+            {isPending && <Text dimColor>○</Text>}
+            <Text bold={isCurrent} dimColor={!isCurrent}> {step}</Text>
+            {index < steps.length - 1 && <Text dimColor> → </Text>}
           </Box>
         );
       })}

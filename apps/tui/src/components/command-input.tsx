@@ -356,7 +356,7 @@ export function CommandInput({
 
           {/* Ghost suggestion text */}
           {isVisible && suggestion && (
-            <Text color="gray" dimColor>
+            <Text dimColor>
               {suggestion.text}
             </Text>
           )}
@@ -367,7 +367,7 @@ export function CommandInput({
       {isVisible && suggestion && (
         <Box paddingLeft={2}>
           <Text color="blue">[Tab]</Text>
-          <Text color="gray" dimColor> to accept ({getSuggestionSourceLabel(suggestion.source)})</Text>
+          <Text dimColor> to accept ({getSuggestionSourceLabel(suggestion.source)})</Text>
         </Box>
       )}
 
@@ -434,17 +434,17 @@ function SlashCommandHelp({ filter }: { filter: string }) {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="gray"
+      borderColor="blue"
       paddingX={1}
       marginTop={1}
     >
-      <Text color="gray" dimColor>
+      <Text dimColor>
         Commands:
       </Text>
       {filtered.slice(0, 6).map((cmd) => (
         <Box key={cmd.name}>
           <Text color="cyan">/{cmd.name}</Text>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {" "}- {cmd.description}
           </Text>
         </Box>
@@ -476,7 +476,7 @@ export function MinimalCommandInput({
           <Text color="cyan">
             <Spinner type="dots" />
           </Text>
-          <Text color="gray"> Working...</Text>
+          <Text dimColor> Working...</Text>
         </Box>
       ) : (
         <Box>
@@ -511,12 +511,12 @@ export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) 
   // Not fully implemented - placeholder for future
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color="gray" dimColor>
+      <Text dimColor>
         Multi-line mode (Ctrl+Enter to submit)
       </Text>
       {lines.map((line, index) => (
         <Box key={index}>
-          <Text color="gray">{index === currentLine ? "\u276F" : " "} </Text>
+          <Text dimColor>{index === currentLine ? "\u276F" : " "} </Text>
           <Text>{line}</Text>
         </Box>
       ))}

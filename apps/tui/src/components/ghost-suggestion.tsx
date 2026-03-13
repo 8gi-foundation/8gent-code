@@ -85,7 +85,7 @@ export function GhostInput({
         <Text color="cyan">
           <Spinner type="dots" />
         </Text>
-        <Text color="gray"> Processing...</Text>
+        <Text dimColor> Processing...</Text>
       </Box>
     );
   }
@@ -100,12 +100,12 @@ export function GhostInput({
         <Box>
           <Text>{value}</Text>
           {isVisible && suggestion && (
-            <Text color="gray" dimColor>
+            <Text dimColor>
               {suggestion.text}
             </Text>
           )}
           {!value && !isVisible && (
-            <Text color="gray" dimColor>
+            <Text dimColor>
               {placeholder}
             </Text>
           )}
@@ -117,10 +117,10 @@ export function GhostInput({
       {/* Source hint */}
       {showSourceHint && isVisible && suggestion && (
         <Box paddingLeft={2} marginTop={0}>
-          <Text color="gray" dimColor>
-            <Text color="gray">[Tab]</Text> {getSuggestionSourceLabel(suggestion.source)}
+          <Text dimColor>
+            <Text dimColor>[Tab]</Text> {getSuggestionSourceLabel(suggestion.source)}
             {suggestion.source === "history" && suggestion.metadata?.frequency && (
-              <Text color="gray"> (used {suggestion.metadata.frequency as number}x)</Text>
+              <Text dimColor> (used {suggestion.metadata.frequency as number}x)</Text>
             )}
           </Text>
         </Box>
@@ -154,7 +154,7 @@ export function GhostText({ suggestion, animate = true }: GhostTextProps) {
   if (!suggestion) return null;
 
   return (
-    <Text color="gray" dimColor={opacity < 1}>
+    <Text dimColor={opacity < 1}>
       {suggestion.text}
     </Text>
   );
@@ -231,7 +231,7 @@ export function GhostCommandInput({
         <Text color="cyan">
           <Spinner type="dots" />
         </Text>
-        <Text color="gray"> Processing...</Text>
+        <Text dimColor> Processing...</Text>
       </Box>
     );
   }
@@ -251,7 +251,7 @@ export function GhostCommandInput({
           />
           {/* Ghost text overlay */}
           {isVisible && suggestion && (
-            <Text color="gray" dimColor>
+            <Text dimColor>
               {suggestion.text}
             </Text>
           )}
@@ -261,9 +261,9 @@ export function GhostCommandInput({
       {/* Tab hint */}
       {isVisible && suggestion && (
         <Box paddingLeft={2}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             <Text color="blue">[Tab]</Text> to accept{" "}
-            <Text color="gray">({getSuggestionSourceLabel(suggestion.source)})</Text>
+            <Text dimColor>({getSuggestionSourceLabel(suggestion.source)})</Text>
           </Text>
         </Box>
       )}
@@ -288,15 +288,15 @@ export function SuggestionPreview({
 
   return (
     <Box flexDirection="column" paddingX={1} marginTop={1}>
-      <Text color="gray" dimColor>
+      <Text dimColor>
         Suggestions:
       </Text>
       {suggestions.slice(0, maxItems).map((s, i) => (
         <Box key={i} paddingLeft={1}>
-          <Text color="gray">
+          <Text dimColor>
             {"\u2022"} {s.text}
           </Text>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {" "}
             ({getSuggestionSourceLabel(s.source)})
           </Text>

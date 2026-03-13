@@ -112,7 +112,7 @@ function MessageItem({
   if (!showContent) {
     return (
       <Box marginBottom={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           ...
         </Text>
       </Box>
@@ -130,7 +130,7 @@ function MessageItem({
           <Text color={config.color} bold>
             {config.label}
           </Text>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             {" "}
             {formatTime(message.timestamp)}
           </Text>
@@ -218,12 +218,12 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
                 key={index}
                 flexDirection="column"
                 borderStyle="round"
-                borderColor="gray"
+                borderColor="blue"
                 paddingX={1}
                 marginY={1}
               >
                 {language && (
-                  <Text color="gray" dimColor>
+                  <Text dimColor>
                     {language}
                   </Text>
                 )}
