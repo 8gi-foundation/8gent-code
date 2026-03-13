@@ -2,7 +2,7 @@
  * 8gent Session Reader
  *
  * Reads session JSONL files for the debugger and reporting tools.
- * Supports both full reads and streaming (for live tailing).
+ * Supports both v1 and v2 session formats, and streaming (for live tailing).
  */
 
 import * as fs from "fs";
@@ -14,6 +14,8 @@ import type {
   SessionStartEntry,
   SessionEndEntry,
   SessionMeta,
+  AssistantContentEntry,
+  StepEndEntry,
 } from "./index.js";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
@@ -45,6 +47,10 @@ export interface SessionListItem {
   exitReason: string | null;
   /** Session duration if completed */
   durationMs: number | null;
+  /** Schema version (1 or 2) */
+  version: number;
+  /** v2: Total steps completed */
+  totalSteps: number | null;
 }
 
 // ============================================
@@ -85,6 +91,8 @@ export async function listSessions(
       completed: meta.completed,
       exitReason: meta.exitReason,
       durationMs: meta.durationMs,
+      version: meta.version,
+      totalSteps: meta.totalSteps,
     });
   }
 
@@ -112,6 +120,8 @@ interface ExtractedMeta {
   exitReason: string | null;
   durationMs: number | null;
   lineCount: number;
+  version: number;
+  totalSteps: number | null;
 }
 
 async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
@@ -127,6 +137,8 @@ async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
       exitReason: null,
       durationMs: null,
       lineCount: 0,
+      version: 1,
+      totalSteps: null,
     };
 
     let lastLine: string | null = null;
@@ -153,6 +165,7 @@ async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
             result.gitBranch = start.meta.environment.gitBranch ?? null;
             result.workingDirectory =
               start.meta.environment.workingDirectory ?? null;
+            result.version = start.meta.version;
           }
 
           if (entry.type === "user_message" && !result.firstUserMessage) {
@@ -174,6 +187,7 @@ async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
             result.completed = true;
             result.exitReason = end.summary.exitReason;
             result.durationMs = end.summary.durationMs;
+            result.totalSteps = end.summary.totalSteps ?? end.summary.totalTurns ?? null;
           }
         } catch {
           // skip
@@ -266,5 +280,98 @@ export class SessionReader {
     }
 
     return null;
+  }
+
+  /** Get the schema version of this session */
+  async getVersion(): Promise<1 | 2> {
+    const meta = await this.getMeta();
+    return meta?.version ?? 1;
+  }
+}
+
+// ============================================
+// v2 → v1 normalization utility
+// ============================================
+
+/**
+ * Normalize a v2 session entry to its v1 equivalent.
+ * Useful for consumers that only understand v1 vocabulary.
+ *
+ * - assistant_content → assistant_message (text parts joined)
+ * - step_start → turn_start
+ * - step_end → turn_end
+ * - tool_error → error
+ *
+ * Returns the entry unchanged if it's already a v1 type.
+ */
+export function normalizeToV1(entry: SessionEntry): SessionEntry {
+  switch (entry.type) {
+    case "assistant_content": {
+      const ac = entry as AssistantContentEntry;
+      const textParts = ac.parts.filter(p => p.type === "text");
+      const content = textParts.map(p => (p as { text: string }).text).join("\n");
+      const hasToolCalls = ac.parts.some(p => p.type === "tool-call");
+      return {
+        type: "assistant_message",
+        timestamp: ac.timestamp,
+        sequenceNumber: ac.sequenceNumber,
+        message: { role: "assistant", content },
+        usage: ac.usage
+          ? {
+              promptTokens: ac.usage.promptTokens,
+              completionTokens: ac.usage.completionTokens,
+              totalTokens: ac.usage.totalTokens,
+            }
+          : undefined,
+        turnIndex: ac.stepNumber,
+        containsToolCalls: hasToolCalls,
+      };
+    }
+    case "step_start":
+      return {
+        type: "turn_start",
+        timestamp: entry.timestamp,
+        sequenceNumber: entry.sequenceNumber,
+        turnIndex: entry.stepNumber,
+        messageCount: entry.messageCount,
+      };
+    case "step_end": {
+      const se = entry as StepEndEntry;
+      // Map v2 finishReason to v1 reason
+      const reasonMap: Record<string, "natural_stop" | "tool_calls" | "max_turns" | "error"> = {
+        "stop": "natural_stop",
+        "length": "natural_stop",
+        "content-filter": "error",
+        "tool-calls": "tool_calls",
+        "error": "error",
+        "other": "natural_stop",
+      };
+      return {
+        type: "turn_end",
+        timestamp: se.timestamp,
+        sequenceNumber: se.sequenceNumber,
+        turnIndex: se.stepNumber,
+        reason: reasonMap[se.finishReason] ?? "natural_stop",
+        usage: se.usage
+          ? {
+              promptTokens: se.usage.promptTokens,
+              completionTokens: se.usage.completionTokens,
+              totalTokens: se.usage.totalTokens,
+            }
+          : undefined,
+      };
+    }
+    case "tool_error":
+      return {
+        type: "error",
+        timestamp: entry.timestamp,
+        sequenceNumber: entry.sequenceNumber,
+        error: {
+          message: `Tool ${entry.toolName} failed: ${entry.error}`,
+          recoverable: true,
+        },
+      };
+    default:
+      return entry;
   }
 }
