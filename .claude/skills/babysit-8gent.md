@@ -1,12 +1,30 @@
 # Babysit 8gent — Iterative Testing & Bug-Fixing Feedback Loop
 
 ## Purpose
-Run 8gent (our Claude Code alternative) with a test task, monitor its session output, identify failures, fix the underlying code, and repeat until 8gent successfully completes the task.
+Run 8gent (our Claude Code alternative) with progressively harder test tasks, monitor session output, identify failures, fix the underlying 8gent code (system prompt, tools, agent loop), and repeat until 8gent successfully completes each task.
 
-The default test task is: **"Create a script that computes and prints the first 20 Fibonacci numbers"** — a simple, verifiable task that exercises file creation, code writing, and shell execution.
+## Test Tasks (Progressive Difficulty)
+
+### Level 1: Fibonacci (warm-up)
+- **Task**: Create fib.js that prints first 20 Fibonacci numbers
+- **Validates**: write_file + run_command
+- **Pass**: file exists, output contains "4181"
+
+### Level 2: Next.js Hello World (the real test)
+- **Task**: Scaffold a Next.js project and make it display "Hello World"
+- **Validates**: multi-step scaffolding, npm/bun commands, file creation, directory awareness, package.json creation, dev server
+- **Pass**: `package.json` exists with `next` dependency, `app/page.tsx` (or `pages/index.tsx`) exists, page contains "Hello World", `bun install` succeeds, `next build` succeeds
+- **This is the hard one.** It requires the agent to:
+  1. Run `bun create next-app . --yes` OR manually scaffold files
+  2. Modify the default page to say "Hello World"
+  3. Install dependencies
+  4. Verify the build works
+
+### Level 3: (stretch) Add a route
+- Add an `/about` page that says "About Page"
 
 ## Prerequisites
-- A local LLM provider must be running (Ollama, LM Studio, or OpenRouter API key set)
+- OpenRouter API key set (OPENROUTER_API_KEY) or Ollama running
 - Run `bun run harness:doctor` first to verify
 
 ## The Feedback Loop
@@ -15,96 +33,121 @@ The default test task is: **"Create a script that computes and prints the first 
 ```bash
 bun run harness:doctor
 ```
-If Ollama/LM Studio aren't running, advise the user to start them. If no provider is available, abort.
 
-### Phase 2: Create a Clean Test Directory
+### Phase 2: Clean Test Directory
 ```bash
-mkdir -p /tmp/8gent-test-fibonacci && cd /tmp/8gent-test-fibonacci
+rm -rf /tmp/8gent-test-nextjs && mkdir -p /tmp/8gent-test-nextjs
 ```
-This isolates the test from the main repo.
 
-### Phase 3: Run 8gent Headlessly
+### Phase 3: Run 8gent
 ```bash
-bun run harness:run "Create a file called fib.js that computes and prints the first 20 Fibonacci numbers. Use write_file to create fib.js, then run it with 'node fib.js' to verify it works." \
-  --workdir /tmp/8gent-test-fibonacci \
-  --timeout 120000 \
+bun run harness:run \
+  "Build a Next.js project in the current directory. Steps: 1) Create package.json with next, react, react-dom dependencies 2) Create app/layout.tsx with basic HTML layout 3) Create app/page.tsx that displays a heading saying Hello World 4) Create next.config.js 5) Create tsconfig.json 6) Run bun install to install dependencies 7) Run npx next build to verify it compiles" \
+  --workdir /tmp/8gent-test-nextjs \
+  --runtime openrouter \
+  --model openai/gpt-4.1-mini \
+  --max-steps 30 \
+  --timeout 300000 \
   --json
 ```
-Capture the JSON output. Extract the `sessionId`.
 
-### Phase 4: Inspect the Session
-```bash
-bun run harness:inspect <sessionId> --summary
-```
-Then read the full session if something looks wrong:
+### Phase 4: Inspect
 ```bash
 bun run harness:inspect <sessionId>
 ```
+Look for:
+- Did it create files? Check tool_call entries for write_file
+- Did it run commands? Check for run_command calls
+- Did commands succeed? Check tool_result entries
+- What errors occurred? Check tool_error and error entries
+- Did it hit max steps? Check session_end exitReason
 
 ### Phase 5: Validate
 ```bash
-bun run harness:validate <sessionId> --expect-file /tmp/8gent-test-fibonacci/fib.js --json
+# Check key files exist
+bun run harness -- validate <sessionId> \
+  --expect-file /tmp/8gent-test-nextjs/package.json \
+  --json
+
+# Manually verify
+ls /tmp/8gent-test-nextjs/
+cat /tmp/8gent-test-nextjs/app/page.tsx 2>/dev/null || cat /tmp/8gent-test-nextjs/pages/index.tsx 2>/dev/null
+cat /tmp/8gent-test-nextjs/package.json
 ```
 
-### Phase 6: Diagnose & Fix
-Read the session output carefully. Common failure modes:
+Then try building:
+```bash
+cd /tmp/8gent-test-nextjs && bun install && npx next build
+```
 
-1. **Provider connection error** → The LLM isn't responding. Check `doctor` output.
-2. **Tool execution error** → A tool threw an error. Read the `tool_error` entries.
-   - Missing tool implementation → Fix in `packages/ai/tools.ts`
-   - Wrong arguments → Fix the tool's Zod schema in `packages/ai/tools.ts`
-   - Permission denied → Check `packages/permissions/`
-3. **Agent produced no output** → The model returned empty text.
-   - Check the system prompt in `packages/eight/prompt.ts`
-   - Check the model config in `packages/ai/providers.ts`
-4. **Agent didn't use tools** → Model isn't following tool format.
-   - The system prompt needs clearer tool instructions
-   - Or the AI SDK tool schemas aren't being passed correctly
-   - Check `packages/ai/agent.ts` — the `createEightAgent` function
-5. **Session writer crash** → Entries are malformed or missing.
-   - Check `packages/specifications/session/writer.ts`
-6. **Agent looped without progress** → Max steps hit without creating the file.
-   - Check step_end entries for repeated tool calls
-   - May need to improve the prompt or error recovery
+### Phase 6: Diagnose & Fix 8gent Code
 
-After diagnosing, make the fix in the 8gent codebase, then go back to Phase 3.
+**Read the session carefully.** Common Next.js task failures and what to fix:
 
-### Phase 7: Verify Fix
-Run the exact same test again. If it passes validation, the fix worked. If not, inspect the new session and iterate.
+#### Problem: Agent doesn't know about Next.js app router structure
+**Fix**: Update system prompt in `packages/eight/prompt.ts` to include Next.js scaffolding knowledge
 
-## Key Files to Know
+#### Problem: `bun create next-app` hangs (interactive prompts)
+**Fix**: Ensure system prompt tells agent to use `--yes` / `--no-input` flags, or to manually create files instead of using scaffolding CLIs
 
-| File | What it does |
+#### Problem: Agent creates files in wrong paths
+**Fix**: The `write_file` tool in `packages/ai/tools.ts` — check how it resolves relative paths against `workingDirectory`
+
+#### Problem: Agent calls tools with wrong argument names
+**Fix**: The Zod schemas in `packages/ai/tools.ts` — the parameter names must match what the model expects from the system prompt tool docs
+
+#### Problem: `run_command` fails with permission error
+**Fix**: The harness already enables infinite mode. If still failing, check `packages/ai/tools.ts` run_command implementation
+
+#### Problem: Agent tries tools that don't exist
+**Fix**: The model is hallucinating tool names. The system prompt tool docs in `packages/eight/prompt.ts` must exactly match the tool names in `packages/ai/tools.ts`
+
+#### Problem: Agent uses too many steps without progress
+**Fix**: Improve system prompt to be more directive. Add "prefer manual file creation over CLI scaffolding" guidance
+
+#### Problem: npm/bun install fails (network, missing packages)
+**Fix**: Not an 8gent bug — environment issue. Verify manually first
+
+### Phase 7: Apply Fix and Re-run
+After making code changes, go back to Phase 2 (clean dir) and Phase 3 (re-run).
+
+## Key Files to Modify
+
+| File | What to fix |
 |------|-------------|
-| `packages/eight/agent.ts` | Agent class — orchestrates the agentic loop |
-| `packages/eight/prompt.ts` | Default system prompt |
-| `packages/ai/agent.ts` | AI SDK wrapper — `createEightAgent()` |
-| `packages/ai/tools.ts` | All 38 tools as AI SDK `tool()` objects |
-| `packages/ai/providers.ts` | Provider factory (Ollama, LM Studio, OpenRouter) |
-| `packages/specifications/session/writer.ts` | Session JSONL writer |
-| `packages/specifications/session/reader.ts` | Session reader + `normalizeToV1()` |
-| `packages/permissions/` | Permission system |
-| `packages/hooks/` | Lifecycle hooks |
-| `packages/harness-cli/` | The harness CLI itself |
+| `packages/eight/prompt.ts` | System prompt — tool docs, scaffolding guidance, error recovery rules |
+| `packages/ai/tools.ts` | Tool implementations — Zod schemas, argument handling, path resolution |
+| `packages/ai/agent.ts` | Agent wrapper — maxSteps, callbacks, error handling |
+| `packages/eight/agent.ts` | Agent class — session tracking, tool call wiring |
+| `packages/ai/providers.ts` | Provider config — model parameters, API compatibility |
+| `packages/permissions/index.ts` | Permission system — safe command patterns |
+| `packages/harness-cli/commands/run.ts` | Harness runner — how the headless session is executed |
 
 ## Iteration Strategy
 
-1. **Start simple**: Just try to run and see what happens
-2. **Read the session**: The JSONL file is the source of truth
-3. **Fix one thing at a time**: Don't try to fix everything at once
-4. **Re-run after each fix**: Verify the fix before moving on
-5. **Track progress**: Each session has a unique ID — you can compare runs
+1. **Always start with a clean directory** — `rm -rf /tmp/8gent-test-nextjs && mkdir -p /tmp/8gent-test-nextjs`
+2. **Read the full session after every run** — the JSONL is the source of truth
+3. **Fix one thing at a time** — don't make 5 changes at once
+4. **Re-run immediately after each fix** — verify before moving on
+5. **Compare sessions** — use `bun run harness:sessions` to track progress across runs
+6. **If the model is the bottleneck**, try `--model openai/gpt-4.1` (full size) or `--model anthropic/claude-sonnet-4`
+7. **If the same error repeats 3 times**, the fix isn't working — try a different approach
 
 ## Success Criteria
-The task is "done" when:
-- 8gent creates `/tmp/8gent-test-fibonacci/fib.js`
-- The file contains valid JavaScript that prints Fibonacci numbers
-- 8gent ran `node fib.js` and the output is correct
-- The session completed without fatal errors
+
+The Next.js test passes when ALL of these are true:
+1. `/tmp/8gent-test-nextjs/package.json` exists and contains `"next"` as a dependency
+2. `/tmp/8gent-test-nextjs/app/page.tsx` (or `pages/index.tsx`) exists and contains "Hello World"
+3. `/tmp/8gent-test-nextjs/app/layout.tsx` exists (for app router)
+4. `bun install` in the test dir succeeds
+5. `npx next build` in the test dir succeeds
+6. The session completed without fatal errors
+7. The session used fewer than 20 steps
 
 ## Escalation
-If after 5 iterations the same error persists:
-- Check if the model itself is the problem (try a different model with `--model`)
-- Check if the AI SDK version has breaking changes
-- Read the raw session JSONL to see exactly what the model is outputting
-- Consider simplifying the test task to isolate the issue
+
+If stuck after 5+ iterations:
+- Read the raw JSONL: `cat ~/.8gent/sessions/<id>.jsonl | jq -r '.type'` to see the entry flow
+- Try a stronger model: `--model anthropic/claude-sonnet-4`
+- Simplify: break the task into "just create package.json" first, verify, then add complexity
+- Check if tools are even being called: `bun run harness:inspect <id> --entries tool_call,tool_result,tool_error`
