@@ -30,6 +30,7 @@ const HELP = `
 8gent Code v${VERSION}
 
 USAGE:
+  8 <command> [options]
   8gent <command> [options]
 
 COMMANDS:
@@ -138,7 +139,7 @@ async function main() {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.log(`Run '8gent --help' for usage information.`);
+      console.log(`Run '8 --help' for usage information.`);
       process.exit(1);
   }
 }

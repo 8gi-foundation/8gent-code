@@ -5,6 +5,7 @@
   "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
   "type": "module",
   "bin": {
+    "8": "./dist/cli.js",
     "8gent": "./dist/cli.js",
     "8gent-code": "./dist/cli.js"
   },
