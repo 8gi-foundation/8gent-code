@@ -6,6 +6,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import { MutedText, Label, Inline } from './primitives/index.js';
+import { formatTokens, formatPercentage } from '../lib/index.js';
 
 interface AnimatedProgressBarProps {
   value: number; // 0-100
@@ -107,18 +109,18 @@ export function AnimatedProgressBar({
   return (
     <Box flexDirection="column">
       {label && (
-        <Text dimColor>
+        <MutedText>
           {label}
-        </Text>
+        </MutedText>
       )}
-      <Box>
-        <Text dimColor>[</Text>
+      <Inline>
+        <MutedText>[</MutedText>
         {buildBar()}
-        <Text dimColor>]</Text>
+        <MutedText>]</MutedText>
         {showPercentage && (
-          <Text color={barColor}> {Math.round(displayValue)}%</Text>
+          <Text color={barColor}> {formatPercentage(displayValue)}</Text>
         )}
-      </Box>
+      </Inline>
     </Box>
   );
 }
@@ -153,21 +155,20 @@ export function TokenSavingsBar({
   }, [tokensSaved, displayTokens]);
 
   const percentage = Math.min((displayTokens / maxTokens) * 100, 100);
-  const formattedTokens = displayTokens.toLocaleString();
 
   return (
-    <Box flexDirection="row" gap={1}>
-      <Text dimColor>Tokens saved:</Text>
-      <Text color="green" bold>
-        {formattedTokens}
-      </Text>
+    <Inline gap={1}>
+      <MutedText>Tokens saved:</MutedText>
+      <Label color="green">
+        {formatTokens(displayTokens)}
+      </Label>
       <AnimatedProgressBar
         value={percentage}
         width={width}
         showPercentage={false}
         color="green"
       />
-    </Box>
+    </Inline>
   );
 }
 
@@ -233,10 +234,10 @@ export function WaveProgress({ width = 30, speed = 100 }: WaveProgressProps) {
   }
 
   return (
-    <Box>
-      <Text dimColor>[</Text>
+    <Inline>
+      <MutedText>[</MutedText>
       {wave}
-      <Text dimColor>]</Text>
-    </Box>
+      <MutedText>]</MutedText>
+    </Inline>
   );
 }

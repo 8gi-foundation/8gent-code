@@ -18,6 +18,7 @@ import {
   useGhostSuggestion,
   getSuggestionSourceLabel,
 } from "../hooks/use-ghost-suggestion.js";
+import { AppText, MutedText, Label, ShortcutHint, Inline, Stack, Divider, Badge } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -94,15 +95,12 @@ export function GentlemanInput({
     [onSubmit]
   );
 
-  const lineChar = "─";
   const lineWidth = Math.max(40, width - 4);
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Stack paddingX={1}>
       {/* ═══════ TOP LINE ═══════ */}
-      <Box>
-        <Text dimColor>{lineChar.repeat(lineWidth)}</Text>
-      </Box>
+      <Divider width={lineWidth} />
 
       {/* ═══════ INPUT AREA ═══════ */}
       <Box paddingY={1}>
@@ -122,18 +120,16 @@ export function GentlemanInput({
       {/* ═══════ GHOST HINT (below input) ═══════ */}
       {!isProcessing && isVisible && suggestion && (
         <Box paddingLeft={3} marginBottom={1}>
-          <Text dimColor>
-            <Text color="blue">Tab</Text> to accept
-            <Text dimColor> · </Text>
-            <Text dimColor>{getSuggestionSourceLabel(suggestion.source)}</Text>
-          </Text>
+          <Inline gap={0}>
+            <ShortcutHint keys="Tab" description="to accept" />
+            <MutedText> · </MutedText>
+            <MutedText>{getSuggestionSourceLabel(suggestion.source)}</MutedText>
+          </Inline>
         </Box>
       )}
 
       {/* ═══════ BOTTOM LINE WITH STATUS ═══════ */}
-      <Box>
-        <Text dimColor>{lineChar.repeat(lineWidth)}</Text>
-      </Box>
+      <Divider width={lineWidth} />
 
       {/* ═══════ STATUS INDICATORS ═══════ */}
       <StatusLine
@@ -144,7 +140,7 @@ export function GentlemanInput({
         currentBranch={currentBranch}
         isProcessing={isProcessing}
       />
-    </Box>
+    </Stack>
   );
 }
 
@@ -179,11 +175,11 @@ function InputWithGhost({
   }, []);
 
   return (
-    <Box>
+    <Inline gap={0}>
       {/* Animated prompt */}
-      <Text color={colors[promptColor]} bold>
+      <Label color={colors[promptColor] as string}>
         ❯{" "}
-      </Text>
+      </Label>
 
       {/* Input field */}
       <Box flexGrow={1}>
@@ -196,19 +192,19 @@ function InputWithGhost({
 
         {/* Ghost text (after cursor) */}
         {isVisible && suggestion && (
-          <Text dimColor>
+          <MutedText>
             {suggestion.text}
-          </Text>
+          </MutedText>
         )}
 
         {/* Placeholder when empty */}
         {!value && !isVisible && (
-          <Text dimColor>
+          <MutedText>
             What would you like to build?
-          </Text>
+          </MutedText>
         )}
       </Box>
-    </Box>
+    </Inline>
   );
 }
 
@@ -218,12 +214,12 @@ interface ProcessingIndicatorProps {
 
 function ProcessingIndicator({ status }: ProcessingIndicatorProps) {
   return (
-    <Box>
+    <Inline gap={0}>
       <Text color="cyan">
         <Spinner type="dots" />
       </Text>
-      <Text color="cyan"> {status}</Text>
-    </Box>
+      <AppText color="cyan"> {status}</AppText>
+    </Inline>
   );
 }
 
@@ -257,44 +253,44 @@ function StatusLine({
   };
 
   return (
-    <Box paddingTop={1} gap={1}>
+    <Inline paddingTop={1}>
       {/* Model */}
-      <Text color="cyan">{modelName}</Text>
-      <Text dimColor>·</Text>
+      <Badge label={modelName} color="cyan" variant="outline" />
+      <MutedText>·</MutedText>
 
       {/* Tokens saved */}
-      <Text color="green">↓{formatTokens(tokensSaved)}</Text>
-      <Text dimColor>·</Text>
+      <AppText color="green">↓{formatTokens(tokensSaved)}</AppText>
+      <MutedText>·</MutedText>
 
       {/* Permission mode */}
-      <Text color={permColors[permissionMode]}>
+      <AppText color={permColors[permissionMode]}>
         {permIcons[permissionMode]}
-      </Text>
-      <Text dimColor>·</Text>
+      </AppText>
+      <MutedText>·</MutedText>
 
       {/* Git branch */}
       {currentBranch && (
         <>
-          <Text color="yellow">{currentBranch}</Text>
-          <Text dimColor>·</Text>
+          <AppText color="yellow">{currentBranch}</AppText>
+          <MutedText>·</MutedText>
         </>
       )}
 
       {/* Elapsed */}
-      <Text dimColor>
+      <MutedText>
         {elapsed}
-      </Text>
+      </MutedText>
 
       {/* Processing indicator */}
       {isProcessing && (
         <>
-          <Text dimColor>·</Text>
+          <MutedText>·</MutedText>
           <Text color="cyan">
             <Spinner type="dots" />
           </Text>
         </>
       )}
-    </Box>
+    </Inline>
   );
 }
 
@@ -325,35 +321,31 @@ export function GentlemanInputMinimal({
   };
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box>
-        <Text dimColor>{"─".repeat(60)}</Text>
-      </Box>
+    <Stack paddingX={1}>
+      <Divider width={60} />
       <Box paddingY={1}>
         {isProcessing ? (
-          <Box>
+          <Inline gap={0}>
             <Text color="cyan">
               <Spinner type="dots" />
             </Text>
-            <Text dimColor> Working...</Text>
-          </Box>
+            <MutedText> Working...</MutedText>
+          </Inline>
         ) : (
-          <Box>
-            <Text color="cyan" bold>
+          <Inline gap={0}>
+            <Label color="cyan">
               ❯{" "}
-            </Text>
+            </Label>
             <TextInput
               value={value}
               onChange={setValue}
               onSubmit={handleSubmit}
               placeholder="What would you like to build?"
             />
-          </Box>
+          </Inline>
         )}
       </Box>
-      <Box>
-        <Text dimColor>{"─".repeat(60)}</Text>
-      </Box>
-    </Box>
+      <Divider width={60} />
+    </Stack>
   );
 }

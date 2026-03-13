@@ -21,6 +21,7 @@ import {
   SuggestionSource,
   getSuggestionSourceLabel,
 } from "../hooks/use-ghost-suggestion.js";
+import { AppText, MutedText, Label, ShortcutHint, Inline, Stack, Badge } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -81,51 +82,49 @@ export function GhostInput({
 
   if (isProcessing) {
     return (
-      <Box>
+      <Inline>
         <Text color="cyan">
           <Spinner type="dots" />
         </Text>
-        <Text dimColor> Processing...</Text>
-      </Box>
+        <MutedText> Processing...</MutedText>
+      </Inline>
     );
   }
 
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color="cyan" bold>
+    <Stack>
+      <Inline gap={0}>
+        <Label color="cyan">
           {"\u276F"}{" "}
-        </Text>
+        </Label>
         {/* Main input area with ghost text overlay */}
         <Box>
-          <Text>{value}</Text>
+          <AppText>{value}</AppText>
           {isVisible && suggestion && (
-            <Text dimColor>
+            <MutedText>
               {suggestion.text}
-            </Text>
+            </MutedText>
           )}
           {!value && !isVisible && (
-            <Text dimColor>
+            <MutedText>
               {placeholder}
-            </Text>
+            </MutedText>
           )}
           {/* Cursor indicator */}
           <Text color="cyan">{"\u2588"}</Text>
         </Box>
-      </Box>
+      </Inline>
 
       {/* Source hint */}
       {showSourceHint && isVisible && suggestion && (
-        <Box paddingLeft={2} marginTop={0}>
-          <Text dimColor>
-            <Text dimColor>[Tab]</Text> {getSuggestionSourceLabel(suggestion.source)}
-            {suggestion.source === "history" && suggestion.metadata?.frequency && (
-              <Text dimColor> (used {suggestion.metadata.frequency as number}x)</Text>
-            )}
-          </Text>
-        </Box>
+        <Inline paddingLeft={2} marginTop={0} gap={0}>
+          <ShortcutHint keys="[Tab]" description={getSuggestionSourceLabel(suggestion.source)} />
+          {suggestion.source === "history" && suggestion.metadata?.frequency ? (
+            <MutedText> (used {Number(suggestion.metadata.frequency)}x)</MutedText>
+          ) : null}
+        </Inline>
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -154,9 +153,9 @@ export function GhostText({ suggestion, animate = true }: GhostTextProps) {
   if (!suggestion) return null;
 
   return (
-    <Text dimColor={opacity < 1}>
+    <MutedText>
       {suggestion.text}
-    </Text>
+    </MutedText>
   );
 }
 
@@ -227,21 +226,21 @@ export function GhostCommandInput({
 
   if (isProcessing) {
     return (
-      <Box paddingX={1}>
+      <Inline paddingX={1}>
         <Text color="cyan">
           <Spinner type="dots" />
         </Text>
-        <Text dimColor> Processing...</Text>
-      </Box>
+        <MutedText> Processing...</MutedText>
+      </Inline>
     );
   }
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box>
-        <Text color="cyan" bold>
+    <Stack paddingX={1}>
+      <Inline gap={0}>
+        <Label color="cyan">
           {"\u276F"}{" "}
-        </Text>
+        </Label>
         <Box>
           <TextInput
             value={value}
@@ -251,23 +250,23 @@ export function GhostCommandInput({
           />
           {/* Ghost text overlay */}
           {isVisible && suggestion && (
-            <Text dimColor>
+            <MutedText>
               {suggestion.text}
-            </Text>
+            </MutedText>
           )}
         </Box>
-      </Box>
+      </Inline>
 
       {/* Tab hint */}
       {isVisible && suggestion && (
         <Box paddingLeft={2}>
-          <Text dimColor>
-            <Text color="blue">[Tab]</Text> to accept{" "}
-            <Text dimColor>({getSuggestionSourceLabel(suggestion.source)})</Text>
-          </Text>
+          <Inline gap={0}>
+            <ShortcutHint keys="[Tab]" description="to accept" />
+            <MutedText> ({getSuggestionSourceLabel(suggestion.source)})</MutedText>
+          </Inline>
         </Box>
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -287,22 +286,22 @@ export function SuggestionPreview({
   if (suggestions.length === 0) return null;
 
   return (
-    <Box flexDirection="column" paddingX={1} marginTop={1}>
-      <Text dimColor>
+    <Stack paddingX={1} marginTop={1}>
+      <MutedText>
         Suggestions:
-      </Text>
+      </MutedText>
       {suggestions.slice(0, maxItems).map((s, i) => (
-        <Box key={i} paddingLeft={1}>
-          <Text dimColor>
+        <Inline key={i} paddingLeft={1} gap={0}>
+          <MutedText>
             {"\u2022"} {s.text}
-          </Text>
-          <Text dimColor>
+          </MutedText>
+          <MutedText>
             {" "}
             ({getSuggestionSourceLabel(s.source)})
-          </Text>
-        </Box>
+          </MutedText>
+        </Inline>
       ))}
-    </Box>
+    </Stack>
   );
 }
 

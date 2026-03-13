@@ -20,6 +20,7 @@ import {
   useGhostSuggestion,
   getSuggestionSourceLabel,
 } from "../hooks/use-ghost-suggestion.js";
+import { AppText, MutedText, Label, ShortcutHint, Inline } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -356,9 +357,9 @@ export function CommandInput({
 
           {/* Ghost suggestion text */}
           {isVisible && suggestion && (
-            <Text dimColor>
+            <MutedText>
               {suggestion.text}
-            </Text>
+            </MutedText>
           )}
         </Box>
       </Box>
@@ -366,8 +367,7 @@ export function CommandInput({
       {/* Ghost suggestion hint */}
       {isVisible && suggestion && (
         <Box paddingLeft={2}>
-          <Text color="blue">[Tab]</Text>
-          <Text dimColor> to accept ({getSuggestionSourceLabel(suggestion.source)})</Text>
+          <ShortcutHint keys="[Tab]" description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`} />
         </Box>
       )}
 
@@ -438,15 +438,15 @@ function SlashCommandHelp({ filter }: { filter: string }) {
       paddingX={1}
       marginTop={1}
     >
-      <Text dimColor>
+      <MutedText>
         Commands:
-      </Text>
+      </MutedText>
       {filtered.slice(0, 6).map((cmd) => (
         <Box key={cmd.name}>
-          <Text color="cyan">/{cmd.name}</Text>
-          <Text dimColor>
+          <AppText color="cyan">/{cmd.name}</AppText>
+          <MutedText>
             {" "}- {cmd.description}
-          </Text>
+          </MutedText>
         </Box>
       ))}
     </Box>
@@ -473,16 +473,16 @@ export function MinimalCommandInput({
     <Box paddingX={1}>
       {isProcessing ? (
         <Box>
-          <Text color="cyan">
+          <AppText color="cyan">
             <Spinner type="dots" />
-          </Text>
-          <Text dimColor> Working...</Text>
+          </AppText>
+          <MutedText> Working...</MutedText>
         </Box>
       ) : (
         <Box>
-          <Text color="cyan" bold>
+          <Label color="cyan">
             ${" "}
-          </Text>
+          </Label>
           <TextInput
             value={value}
             onChange={setValue}
@@ -511,12 +511,12 @@ export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) 
   // Not fully implemented - placeholder for future
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text dimColor>
+      <MutedText>
         Multi-line mode (Ctrl+Enter to submit)
-      </Text>
+      </MutedText>
       {lines.map((line, index) => (
         <Box key={index}>
-          <Text dimColor>{index === currentLine ? "\u276F" : " "} </Text>
+          <MutedText>{index === currentLine ? "\u276F" : " "} </MutedText>
           <Text>{line}</Text>
         </Box>
       ))}
@@ -560,9 +560,9 @@ export function CommandPalette({ onSubmit, suggestions = [] }: CommandPalettePro
         flexDirection="column"
       >
         <Box>
-          <Text color="cyan" bold>
+          <Label color="cyan">
             {"\u276F"}{" "}
-          </Text>
+          </Label>
           <TextInput
             value={value}
             onChange={(v) => {

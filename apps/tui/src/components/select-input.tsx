@@ -17,6 +17,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
+import { AppText, MutedText, Heading, Label, Badge, Card, Stack, Inline, Spacer } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -144,29 +145,29 @@ export function SelectInput<T = string>({
   const canScrollDown = scrollOffset + maxVisible < filteredOptions.length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1}>
+    <Card borderColor="blue">
       {/* Title */}
       {title && (
         <Box marginBottom={1}>
-          <Text color={highlightColor as any} bold>
+          <Heading color={highlightColor as any}>
             {title}
-          </Text>
+          </Heading>
         </Box>
       )}
 
       {/* Search input (if searchable and has search) */}
       {searchable && search && (
-        <Box marginBottom={1}>
-          <Text dimColor>Search: </Text>
-          <Text color="yellow">{search}</Text>
-          <Text dimColor> (Backspace to clear)</Text>
-        </Box>
+        <Inline gap={0} marginBottom={1}>
+          <MutedText>Search: </MutedText>
+          <AppText color="yellow">{search}</AppText>
+          <MutedText> (Backspace to clear)</MutedText>
+        </Inline>
       )}
 
       {/* Scroll up indicator */}
       {hasMore && canScrollUp && (
         <Box>
-          <Text dimColor>  ▲ {scrollOffset} more above</Text>
+          <MutedText>  ▲ {scrollOffset} more above</MutedText>
         </Box>
       )}
 
@@ -177,70 +178,75 @@ export function SelectInput<T = string>({
         const isDisabled = option.disabled;
 
         return (
-          <Box key={String(option.value)} flexDirection="column">
-            <Box>
+          <Stack key={String(option.value)} gap={0}>
+            <Inline gap={0}>
               {/* Selection indicator */}
-              <Text color={isSelected ? highlightColor as any : "gray"}>
+              <AppText color={isSelected ? highlightColor as any : "gray"}>
                 {isSelected ? "❯ " : "  "}
-              </Text>
+              </AppText>
 
               {/* Icon if present */}
               {option.icon && (
-                <Text dimColor={isDisabled} bold={!isDisabled}>
+                <AppText dimColor={isDisabled} bold={!isDisabled}>
                   {option.icon}{" "}
-                </Text>
+                </AppText>
               )}
 
               {/* Label */}
-              <Text
-                color={isSelected ? highlightColor as any : undefined}
-                bold={isSelected || !isDisabled}
-                dimColor={isDisabled}
-              >
-                {option.label}
-              </Text>
+              {isDisabled ? (
+                <MutedText>
+                  {option.label}
+                </MutedText>
+              ) : (
+                <AppText
+                  color={isSelected ? highlightColor as any : undefined}
+                  bold={isSelected || !isDisabled}
+                >
+                  {option.label}
+                </AppText>
+              )}
 
               {/* Disabled indicator */}
               {isDisabled && (
-                <Text dimColor> (unavailable)</Text>
+                <MutedText> (unavailable)</MutedText>
               )}
-            </Box>
+            </Inline>
 
             {/* Description (only for selected item) */}
             {showDescription && isSelected && option.description && (
               <Box paddingLeft={4}>
-                <Text dimColor>
+                <MutedText>
                   {option.description}
-                </Text>
+                </MutedText>
               </Box>
             )}
-          </Box>
+          </Stack>
         );
       })}
 
       {/* Scroll down indicator */}
       {hasMore && canScrollDown && (
         <Box>
-          <Text dimColor>
+          <MutedText>
             {"  "}▼ {filteredOptions.length - scrollOffset - maxVisible} more below
-          </Text>
+          </MutedText>
         </Box>
       )}
 
       {/* Empty state */}
       {filteredOptions.length === 0 && (
         <Box>
-          <Text dimColor>No options match "{search}"</Text>
+          <MutedText>No options match "{search}"</MutedText>
         </Box>
       )}
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>
+        <MutedText>
           [↑↓] Navigate  [Enter] Select  [Esc] Cancel
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Card>
   );
 }
 
@@ -299,34 +305,30 @@ export function ConfirmDialog({
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} paddingY={0}>
-      <Text color="yellow">{message}</Text>
-      <Box marginTop={1} gap={2}>
-        <Box>
-          <Text
-            color={selected === 0 ? "green" : "gray"}
-            bold={selected === 0}
-          >
-            {selected === 0 ? "❯ " : "  "}
-            {yesLabel}
-          </Text>
-        </Box>
-        <Box>
-          <Text
-            color={selected === 1 ? "red" : "gray"}
-            bold={selected === 1}
-          >
-            {selected === 1 ? "❯ " : "  "}
-            {noLabel}
-          </Text>
-        </Box>
-      </Box>
+    <Card borderColor="yellow">
+      <AppText color="yellow">{message}</AppText>
+      <Inline gap={2} marginTop={1}>
+        <AppText
+          color={selected === 0 ? "green" : "gray"}
+          bold={selected === 0}
+        >
+          {selected === 0 ? "❯ " : "  "}
+          {yesLabel}
+        </AppText>
+        <AppText
+          color={selected === 1 ? "red" : "gray"}
+          bold={selected === 1}
+        >
+          {selected === 1 ? "❯ " : "  "}
+          {noLabel}
+        </AppText>
+      </Inline>
       <Box marginTop={1}>
-        <Text dimColor>
+        <MutedText>
           [Y/N] or [←→] to select, [Enter] to confirm
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Card>
   );
 }
 
@@ -385,26 +387,25 @@ export function QuickMenu<T = string>({
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text color="cyan" bold>{title}</Text>
-      <Box flexDirection="column" marginTop={1}>
+    <Card borderColor="cyan">
+      <Heading>{title}</Heading>
+      <Stack marginTop={1}>
         {actions.map((action, index) => (
-          <Box key={String(action.value)}>
-            <Text
+          <Inline gap={0} key={String(action.value)}>
+            <Label
               color={index === selectedIndex ? "cyan" : undefined}
-              bold
             >
               {index === selectedIndex ? "❯ " : "  "}
               {action.icon && `${action.icon} `}
               {action.label}
-            </Text>
+            </Label>
             {action.shortcut && (
-              <Text dimColor> [{action.shortcut}]</Text>
+              <MutedText> [{action.shortcut}]</MutedText>
             )}
-          </Box>
+          </Inline>
         ))}
-      </Box>
-    </Box>
+      </Stack>
+    </Card>
   );
 }
 
