@@ -5,13 +5,8 @@
  * Headless CLI for running, inspecting, and testing 8gent agent sessions.
  * Designed for automated testing and feedback loops — no TUI required.
  *
- * Commands:
- *   run <prompt>           Run a headless agent session, output session ID
- *   sessions               List all sessions with summaries
- *   inspect <session-id>   Show full session contents (entries, tools, errors)
- *   tail <session-id>      Live-tail a running session
- *   validate <session-id>  Check if session completed and output is correct
- *   doctor                 Health-check: provider availability, tool readiness
+ * SAFETY: The `run` command auto-creates an isolated temp directory.
+ * It will refuse to run inside a git repo to prevent overwrites.
  */
 
 import { run } from "./commands/run.js";
@@ -24,12 +19,20 @@ import { doctor } from "./commands/doctor.js";
 const HELP = `
 8gent Harness CLI — Headless agent testing & inspection
 
+QUICK START:
+  bun run harness run --task fib          Fibonacci test (fast, ~7s)
+  bun run harness run --task nextjs       Next.js hello world (hard, ~100s)
+  bun run harness run "your prompt here"  Custom task
+
+  All runs auto-create an isolated /tmp directory. Safe by default.
+
 COMMANDS:
   run <prompt> [options]     Run a headless agent session
-    --model <model>          Model to use (default: from env or glm-4.7-flash:latest)
-    --runtime <runtime>      Provider: ollama, lmstudio, openrouter (default: ollama)
+    --task <preset>          Use a preset: fib, nextjs
+    --model <model>          Model (default: openai/gpt-4.1-mini)
+    --runtime <runtime>      Provider: ollama, lmstudio, openrouter (default: openrouter)
     --max-steps <n>          Max agentic steps (default: 30)
-    --workdir <path>         Working directory (default: cwd)
+    --workdir <path>         Working directory (default: auto temp dir)
     --timeout <ms>           Abort after N ms (default: 300000 = 5min)
     --json                   Output result as JSON
 
@@ -44,20 +47,20 @@ COMMANDS:
     --summary                Show summary only
 
   tail <session-id>          Live-tail a running session
-    --follow                 Keep watching for new entries (default: true)
 
   validate <session-id>      Validate session output
     --expect <substring>     Expect output to contain substring
     --expect-file <path>     Expect file to have been created
-    --expect-exit <reason>   Expect exit reason (user_exit, max_steps, etc.)
+    --expect-exit <reason>   Expect exit reason
 
   doctor                     Health-check providers and tools
 
 EXAMPLES:
-  bun run packages/harness-cli/index.ts run "Write a fibonacci function in fib.js"
-  bun run packages/harness-cli/index.ts sessions --limit 5
-  bun run packages/harness-cli/index.ts inspect session_1710371400_abc123
-  bun run packages/harness-cli/index.ts validate session_1710371400_abc123 --expect-file fib.js
+  bun run harness run --task fib
+  bun run harness run --task nextjs --model anthropic/claude-sonnet-4
+  bun run harness run "Create a Python script that sorts a list" --runtime ollama
+  bun run harness sessions --limit 5
+  bun run harness inspect <session-id>
 `;
 
 async function main() {
