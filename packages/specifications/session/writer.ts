@@ -132,6 +132,7 @@ export class SessionWriter {
       providerMetadata?: Record<string, unknown>;
     }
   ): void {
+    this.totalSteps = Math.max(this.totalSteps, stepNumber + 1);
     if (options?.usage) {
       this.accumulateUsage(options.usage);
     }

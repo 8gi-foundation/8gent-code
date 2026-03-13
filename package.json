@@ -31,7 +31,12 @@
     "benchmark:suite": "bun run benchmarks/runner.ts",
     "benchmark:category": "bun run benchmarks/runner.ts --category",
     "benchmark:single": "bun run benchmarks/runner.ts --bench",
-    "demo": "bun run scripts/demo-savings.ts"
+    "demo": "bun run scripts/demo-savings.ts",
+    "harness": "bun run packages/harness-cli/index.ts",
+    "harness:run": "bun run packages/harness-cli/index.ts run",
+    "harness:sessions": "bun run packages/harness-cli/index.ts sessions",
+    "harness:inspect": "bun run packages/harness-cli/index.ts inspect",
+    "harness:doctor": "bun run packages/harness-cli/index.ts doctor"
   },
   "workspaces": [
     "apps/*",
