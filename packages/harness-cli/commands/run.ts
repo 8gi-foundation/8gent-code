@@ -3,8 +3,15 @@
  *
  * Runs a headless 8gent session and captures the full result.
  * Outputs session ID + summary so callers can inspect or validate.
+ *
+ * SAFETY: Always creates an isolated temp directory unless --workdir
+ * is explicitly given. Refuses to run inside a git repo to prevent
+ * accidental overwrites of real project files.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { Agent } from "../../eight/agent.js";
 import type { AgentConfig } from "../../eight/types.js";
 import { getPermissionManager } from "../../permissions/index.js";
@@ -14,22 +21,38 @@ interface RunOptions {
   model: string;
   runtime: "ollama" | "lmstudio" | "openrouter";
   maxSteps: number;
-  workdir: string;
+  workdir: string | null;
   timeout: number;
   json: boolean;
   apiKey?: string;
+  task: string;
 }
+
+/** Built-in task presets */
+const TASK_PRESETS: Record<string, { prompt: string; validate: string }> = {
+  fib: {
+    prompt:
+      "Create a file called fib.js that computes and prints the first 20 Fibonacci numbers. Use write_file to create fib.js, then run it with node fib.js to verify it works.",
+    validate: "fib.js",
+  },
+  nextjs: {
+    prompt:
+      "Build a Next.js project in the current directory. Steps: 1) Create package.json with next, react, react-dom dependencies 2) Create app/layout.tsx with basic HTML layout 3) Create app/page.tsx that displays a heading saying Hello World 4) Create next.config.js 5) Create tsconfig.json 6) Run bun install to install dependencies 7) Run npx next build to verify it compiles",
+    validate: "package.json",
+  },
+};
 
 function parseArgs(args: string[]): RunOptions {
   const opts: RunOptions = {
     prompt: "",
-    model: process.env.EIGHGENT_MODEL || "glm-4.7-flash:latest",
-    runtime: (process.env.EIGHGENT_RUNTIME as RunOptions["runtime"]) || "ollama",
+    model: process.env.EIGHGENT_MODEL || "openai/gpt-4.1-mini",
+    runtime: (process.env.EIGHGENT_RUNTIME as RunOptions["runtime"]) || "openrouter",
     maxSteps: 30,
-    workdir: process.cwd(),
+    workdir: null, // null = auto-create temp dir
     timeout: 300_000,
     json: false,
     apiKey: process.env.OPENROUTER_API_KEY,
+    task: "",
   };
 
   const promptParts: string[] = [];
@@ -58,23 +81,76 @@ function parseArgs(args: string[]): RunOptions {
       case "--api-key":
         opts.apiKey = args[++i];
         break;
+      case "--task":
+        opts.task = args[++i];
+        break;
       default:
         promptParts.push(arg);
     }
     i++;
   }
 
-  opts.prompt = promptParts.join(" ");
+  // Apply task preset if specified
+  if (opts.task && TASK_PRESETS[opts.task]) {
+    opts.prompt = TASK_PRESETS[opts.task].prompt;
+  } else if (promptParts.length > 0) {
+    opts.prompt = promptParts.join(" ");
+  }
+
   return opts;
+}
+
+/** Check if a directory is inside a git repo */
+function isInsideGitRepo(dir: string): boolean {
+  let current = path.resolve(dir);
+  while (current !== path.dirname(current)) {
+    if (fs.existsSync(path.join(current, ".git"))) return true;
+    current = path.dirname(current);
+  }
+  return false;
+}
+
+/** Create an isolated temp directory for the run */
+function createTempWorkdir(label: string): string {
+  const slug = label.replace(/[^a-z0-9]/gi, "-").slice(0, 30).toLowerCase();
+  const dir = path.join(os.tmpdir(), `8gent-test-${slug}-${Date.now()}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 export async function run(args: string[]): Promise<void> {
   const opts = parseArgs(args);
 
   if (!opts.prompt) {
-    console.error("Usage: harness-cli run <prompt> [options]");
-    console.error('Example: harness-cli run "Write fibonacci in fib.js"');
+    console.error("Usage: bun run harness run <prompt> [options]");
+    console.error("       bun run harness run --task fib");
+    console.error("       bun run harness run --task nextjs");
+    console.error("");
+    console.error("Task presets: fib, nextjs");
+    console.error("Or provide a custom prompt as positional args.");
     process.exit(1);
+  }
+
+  // Resolve working directory
+  let workdir: string;
+  let autoCreated = false;
+
+  if (opts.workdir) {
+    workdir = path.resolve(opts.workdir);
+    // Safety: refuse to run inside a git repo unless it's under /tmp
+    if (isInsideGitRepo(workdir) && !workdir.startsWith(os.tmpdir()) && !workdir.startsWith("/tmp")) {
+      console.error(`[SAFETY] Refusing to run inside a git repo: ${workdir}`);
+      console.error(`         8gent writes files — this would overwrite your project.`);
+      console.error(`         Use --workdir /tmp/something or omit --workdir for auto temp dir.`);
+      process.exit(1);
+    }
+    if (!fs.existsSync(workdir)) {
+      fs.mkdirSync(workdir, { recursive: true });
+    }
+  } else {
+    // Auto-create isolated temp dir
+    workdir = createTempWorkdir(opts.task || "run");
+    autoCreated = true;
   }
 
   // Enable infinite mode — headless runs bypass permission prompts
@@ -84,7 +160,7 @@ export async function run(args: string[]): Promise<void> {
   const config: AgentConfig = {
     model: opts.model,
     runtime: opts.runtime,
-    workingDirectory: opts.workdir,
+    workingDirectory: workdir,
     maxTurns: opts.maxSteps,
     apiKey: opts.apiKey,
   };
@@ -108,9 +184,9 @@ export async function run(args: string[]): Promise<void> {
   if (!opts.json) {
     console.log(`[harness] Session: ${sessionId}`);
     console.log(`[harness] Model: ${opts.model} (${opts.runtime})`);
-    console.log(`[harness] Working dir: ${opts.workdir}`);
+    console.log(`[harness] Working dir: ${workdir}${autoCreated ? " (auto-created)" : ""}`);
     console.log(`[harness] Max steps: ${opts.maxSteps}`);
-    console.log(`[harness] Prompt: ${opts.prompt}`);
+    console.log(`[harness] Prompt: ${opts.prompt.slice(0, 120)}${opts.prompt.length > 120 ? "..." : ""}`);
     console.log(`[harness] Session file: ${sessionPath}`);
     console.log(`[harness] ─────────────────────────────────`);
   }
@@ -151,6 +227,7 @@ export async function run(args: string[]): Promise<void> {
       success,
       sessionId,
       sessionPath,
+      workdir,
       model: opts.model,
       runtime: opts.runtime,
       prompt: opts.prompt,
@@ -169,6 +246,8 @@ export async function run(args: string[]): Promise<void> {
       console.log(`[harness] Error: ${error}`);
     }
     console.log(`\n[harness] Session ID: ${sessionId}`);
-    console.log(`[harness] Inspect: bun run packages/harness-cli/index.ts inspect ${sessionId}`);
+    console.log(`[harness] Working dir: ${workdir}`);
+    console.log(`[harness] Inspect: bun run harness inspect ${sessionId}`);
+    console.log(`[harness] Check output: ls ${workdir}`);
   }
 }
