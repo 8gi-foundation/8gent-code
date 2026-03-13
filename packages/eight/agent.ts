@@ -266,7 +266,17 @@ export class Agent {
 
     try {
       const agent = createEightAgent(agentConfig);
-      const result = await agent.generate({ prompt: userMessage });
+
+      // Build messages array from conversation history (excluding system prompt,
+      // which is already passed as `instructions` to the ToolLoopAgent)
+      const messages = this.messageHistory
+        .filter(m => m.role !== "system")
+        .map(m => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
+
+      const result = await agent.generate({ messages });
 
       const content = result.text;
       this.messageHistory.push({ role: "assistant", content });
