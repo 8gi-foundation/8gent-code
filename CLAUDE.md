@@ -16,6 +16,12 @@ bun run tui          # launch TUI
 bun run benchmarks/autoresearch/harness.ts  # run benchmarks
 ```
 
+## AI Judging Rule
+
+**NEVER use string matching** (regex, `.includes()`, substring checks) to evaluate agent output, detect completion, classify results, or make decisions about success/failure. Always use the **Vercel AI SDK (`ai` package) as a judge** — call a model with a structured prompt to evaluate the output semantically. String matching is brittle, breaks on paraphrasing, and produces false positives/negatives. An LLM judge handles ambiguity, synonyms, and edge cases correctly.
+
+This applies to: harness validation, loop detection heuristics, completion verification, test result parsing, session analysis, and any other situation where you need to interpret or classify natural-language or semi-structured output.
+
 ## TUI Color Rules
 
 Terminal users have wildly different themes (dark, light, Solarized, etc.). Follow these rules strictly:

@@ -14,14 +14,8 @@ import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { createClient } from "./clients";
 import { ToolExecutor } from "./tools";
 import { getHookManager, type HookManager } from "../hooks";
-import {
-  AgentReportingContext,
-  createReportingContext,
-  extractCommitHash,
-  extractBranchName,
-  generateCompletionMarker,
-  getCompletionReporter,
-} from "../reporting";
+import { extractCommitHash, extractBranchName } from "../reporting";
+import { appendRun, type RunLogEntry } from "../reporting/runlog";
 import { SessionWriter } from "../specifications/session/writer.js";
 import type { AgentInfo, Environment, ContentPart, DetailedTokenUsage } from "../specifications/session/index.js";
 import { getLSPManager } from "../lsp";
@@ -42,10 +36,12 @@ export class Agent {
   private hookManager: HookManager;
   private sessionId: string;
   private sessionStartTime: number;
-  private reportingContext: AgentReportingContext | null = null;
   private enableReporting: boolean = true;
+  private totalCost: number | null = null;
   private sessionWriter: SessionWriter;
   private messageHistory: Array<{ role: string; content: string }> = [];
+  private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
+  private loopWarningInjected = false;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -120,14 +116,8 @@ export class Agent {
     // Log user message to session
     this.sessionWriter.writeUserMessage(userMessage);
 
-    // Initialize reporting context
-    if (this.enableReporting) {
-      this.reportingContext = createReportingContext(
-        userMessage,
-        this.config.workingDirectory || process.cwd(),
-        this.config.model
-      );
-    }
+    // Reset cost tracking for this run
+    this.totalCost = null;
 
     const chatStartTime = Date.now();
     let totalTokensUsed = 0;
@@ -160,10 +150,6 @@ export class Agent {
 
         console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
 
-        if (this.reportingContext) {
-          this.reportingContext.recordToolStart(event.toolName, event.args);
-        }
-
         this.sessionWriter.writeToolCall({
           toolCallId: event.toolCallId,
           name: event.toolName,
@@ -178,6 +164,27 @@ export class Agent {
         const resultStr = typeof event.result === "string"
           ? event.result
           : JSON.stringify(event.result);
+
+        // Loop detection: track repeated tool calls with similar args
+        const fingerprint = `${event.toolName}:${JSON.stringify(event.args).slice(0, 200)}`;
+        const count = (this.toolCallTracker.get(fingerprint) || 0) + 1;
+        this.toolCallTracker.set(fingerprint, count);
+
+        if (count >= 3 && !event.success && !this.loopWarningInjected) {
+          this.loopWarningInjected = true;
+          console.log(`\n⚠️  [LOOP DETECTED] Tool "${event.toolName}" has been called ${count} times with similar args and keeps failing.`);
+          console.log(`   Injecting guidance to try a different approach.\n`);
+          // Inject a system-level nudge into the conversation
+          this.messageHistory.push({
+            role: "user",
+            content: `[SYSTEM WARNING — LOOP DETECTED] You have tried the same approach (${event.toolName} with similar arguments) ${count} times and it keeps failing. STOP retrying this approach. Instead:\n1. Use web_search to look up the correct API/pattern\n2. Try a COMPLETELY different strategy\n3. If you don't know how a library works, search for its documentation first\nDo NOT repeat the same fix again.`,
+          });
+        }
+
+        // Reset loop warning flag on successful calls so it can fire again for new loops
+        if (event.success) {
+          this.loopWarningInjected = false;
+        }
 
         if (event.success) {
           this.sessionWriter.writeToolResult(
@@ -214,27 +221,11 @@ export class Agent {
           }
         }
 
-        if (this.reportingContext) {
-          this.reportingContext.recordToolEnd(
-            event.toolName,
-            event.args,
-            resultStr,
-            Date.now(),
-            event.success
-          );
-
-          if (event.toolName === "git_commit" && resultStr.includes("[")) {
-            const commitHash = extractCommitHash(resultStr);
-            if (commitHash) {
-              this.reportingContext.addGitCommit(commitHash);
-              this.sessionWriter.trackGitCommit(commitHash);
-            }
-          }
-          if (event.toolName === "git_status" || event.toolName === "git_branch") {
-            const branch = extractBranchName(resultStr);
-            if (branch) {
-              this.reportingContext.setGitBranch(branch);
-            }
+        // Track git operations
+        if (event.toolName === "git_commit" && resultStr.includes("[")) {
+          const commitHash = extractCommitHash(resultStr);
+          if (commitHash) {
+            this.sessionWriter.trackGitCommit(commitHash);
           }
         }
 
@@ -251,6 +242,12 @@ export class Agent {
       onStepFinish: async (event: StepFinishEvent) => {
         stepCount++;
 
+        // Check for premature completion claims
+        if (event.text && event.text.includes("🎯 COMPLETED") && event.finishReason === "stop") {
+          // The agent is claiming completion — this is fine, but log it for tracking
+          console.log(`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`);
+        }
+
         // Map AI SDK usage to DetailedTokenUsage
         const detailedUsage: DetailedTokenUsage = {
           promptTokens: event.usage.promptTokens,
@@ -262,6 +259,12 @@ export class Agent {
         };
 
         totalTokensUsed += event.usage.totalTokens;
+
+        // Track cost from provider (OpenRouter sends it in raw)
+        const rawCost = event.usage.raw?.cost;
+        if (typeof rawCost === "number") {
+          this.totalCost = (this.totalCost ?? 0) + rawCost;
+        }
 
         const hasToolCalls = event.toolCalls && event.toolCalls.length > 0;
 
@@ -354,17 +357,25 @@ export class Agent {
       const content = result.text;
       this.messageHistory.push({ role: "assistant", content });
 
-      // Generate completion report
-      let finalContent = content;
-      if (this.reportingContext && this.enableReporting) {
-        if (totalTokensUsed > 0) {
-          this.reportingContext.setTokensUsed(totalTokensUsed);
-        }
-        this.reportingContext.setResult(content);
-        const report = this.reportingContext.complete({ display: true, save: true });
-        const completionMarker = generateCompletionMarker(report);
-        finalContent = content + completionMarker;
+      // Append to run log
+      const durationSec = Math.round((Date.now() - chatStartTime) / 1000);
+      if (this.enableReporting) {
+        appendRun({
+          ts: new Date().toISOString(),
+          status: "ok",
+          model: this.config.model,
+          dur: durationSec,
+          tokens: totalTokensUsed,
+          cost: this.totalCost,
+          tools: stepCount,
+          created: Array.from(this.sessionWriter.getFilesCreated()),
+          modified: Array.from(this.sessionWriter.getFilesModified()),
+          session: this.sessionId,
+          cwd: this.config.workingDirectory || process.cwd(),
+          prompt: userMessage.slice(0, 120),
+        });
       }
+      const finalContent = content;
 
       await this.hookManager.executeHooks("onComplete", {
         sessionId: this.sessionId,
@@ -393,9 +404,22 @@ export class Agent {
         recoverable: false,
       });
 
-      if (this.reportingContext && this.enableReporting) {
-        this.reportingContext.setError(errMsg);
-        this.reportingContext.complete({ display: true, save: true });
+      if (this.enableReporting) {
+        appendRun({
+          ts: new Date().toISOString(),
+          status: "fail",
+          model: this.config.model,
+          dur: Math.round((Date.now() - chatStartTime) / 1000),
+          tokens: totalTokensUsed,
+          cost: this.totalCost,
+          tools: stepCount,
+          created: Array.from(this.sessionWriter.getFilesCreated()),
+          modified: Array.from(this.sessionWriter.getFilesModified()),
+          session: this.sessionId,
+          cwd: this.config.workingDirectory || process.cwd(),
+          prompt: userMessage.slice(0, 120),
+          error: errMsg.slice(0, 200),
+        });
       }
 
       await this.hookManager.executeHooks("onComplete", {
@@ -456,19 +480,9 @@ export class Agent {
     }
   }
 
-  getLastReport() {
-    if (this.reportingContext) {
-      const reporter = getCompletionReporter();
-      const context = this.reportingContext.getContext();
-      return reporter.generateReport(context);
-    }
-    return null;
-  }
-
   async cleanup(): Promise<void> {
     try {
-      const lastReport = this.getLastReport();
-      this.sessionWriter.writeSessionEnd("user_exit", lastReport?.id ?? null);
+      this.sessionWriter.writeSessionEnd("user_exit", null);
     } catch {
       // Session writer may already be closed
     }
