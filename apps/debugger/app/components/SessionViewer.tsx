@@ -7,15 +7,37 @@ interface SessionEntry {
   type: string;
   timestamp?: string;
   sequenceNumber?: number;
+  // session_start
+  meta?: {
+    sessionId?: string;
+    version?: number;
+    agent?: { model?: string; runtime?: string };
+    environment?: { workingDirectory?: string; gitBranch?: string };
+  };
+  // user_message / assistant_message
   message?: {
     role?: string;
     content?: string;
   };
-  meta?: {
-    sessionId?: string;
-    agent?: { model?: string; runtime?: string };
-    environment?: { workingDirectory?: string; gitBranch?: string };
-  };
+  // v2: assistant_content
+  stepNumber?: number;
+  parts?: Array<{
+    type: string;
+    text?: string;
+    signature?: string;
+    sourceType?: string;
+    id?: string;
+    url?: string;
+    title?: string;
+    mediaType?: string;
+    data?: string;
+    toolCallId?: string;
+    toolName?: string;
+    args?: Record<string, unknown>;
+    result?: unknown;
+    error?: string;
+  }>;
+  // tool_call
   toolCall?: {
     toolCallId?: string;
     name?: string;
@@ -24,23 +46,55 @@ interface SessionEntry {
     success?: boolean;
     durationMs?: number;
   };
+  // tool_result
   toolCallId?: string;
   result?: string;
   success?: boolean;
   durationMs?: number;
+  toolName?: string;
+  // v2: tool_error
+  error?: string | { message?: string; recoverable?: boolean };
+  // v1: turn_start/turn_end
   turnIndex?: number;
-  usage?: { totalTokens?: number };
+  reason?: string;
+  // v2: step_start/step_end
+  model?: { provider?: string; modelId?: string };
+  finishReason?: string;
+  response?: { id?: string; modelId?: string };
+  providerMetadata?: Record<string, unknown>;
+  // usage
+  usage?: {
+    totalTokens?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    inputTokenDetails?: {
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+      noCacheTokens?: number;
+    };
+    outputTokenDetails?: {
+      textTokens?: number;
+      reasoningTokens?: number;
+    };
+  };
+  // hook
   hook?: { hookName?: string; hookType?: string; success?: boolean };
-  error?: { message?: string; recoverable?: boolean };
+  // session_end
   summary?: {
     totalTurns?: number;
+    totalSteps?: number;
     totalToolCalls?: number;
     totalTokens?: number;
+    totalUsage?: {
+      totalTokens?: number;
+      promptTokens?: number;
+      completionTokens?: number;
+    };
     exitReason?: string;
     durationMs?: number;
   };
-  reason?: string;
   containsToolCalls?: boolean;
+  messageCount?: number;
   [key: string]: unknown;
 }
 
@@ -49,10 +103,14 @@ function EntryBadge({ type }: { type: string }) {
     session_start: "bg-purple-500/20 text-purple-400",
     user_message: "bg-blue-500/20 text-blue-400",
     assistant_message: "bg-emerald-500/20 text-emerald-400",
+    assistant_content: "bg-emerald-500/20 text-emerald-400",
     tool_call: "bg-cyan-500/20 text-cyan-400",
     tool_result: "bg-teal-500/20 text-teal-400",
+    tool_error: "bg-red-500/20 text-red-400",
     turn_start: "bg-zinc-700/50 text-zinc-400",
     turn_end: "bg-zinc-700/50 text-zinc-400",
+    step_start: "bg-indigo-500/20 text-indigo-400",
+    step_end: "bg-indigo-500/20 text-indigo-400",
     hook: "bg-amber-500/20 text-amber-400",
     error: "bg-red-500/20 text-red-400",
     session_end: "bg-purple-500/20 text-purple-400",
@@ -69,13 +127,92 @@ function EntryBadge({ type }: { type: string }) {
   );
 }
 
+function UsageBadge({ usage }: { usage: SessionEntry["usage"] }) {
+  if (!usage?.totalTokens) return null;
+
+  const parts: string[] = [];
+  parts.push(`${usage.totalTokens} tok`);
+  if (usage.promptTokens) parts.push(`in:${usage.promptTokens}`);
+  if (usage.completionTokens) parts.push(`out:${usage.completionTokens}`);
+  if (usage.inputTokenDetails?.cacheReadTokens) {
+    parts.push(`cache:${usage.inputTokenDetails.cacheReadTokens}`);
+  }
+  if (usage.outputTokenDetails?.reasoningTokens) {
+    parts.push(`think:${usage.outputTokenDetails.reasoningTokens}`);
+  }
+
+  return (
+    <span className="text-[9px] text-zinc-600 ml-1">
+      [{parts.join(" | ")}]
+    </span>
+  );
+}
+
+function ContentParts({ parts }: { parts: NonNullable<SessionEntry["parts"]> }) {
+  return (
+    <div className="ml-7 mt-1 space-y-1">
+      {parts.map((part, i) => {
+        switch (part.type) {
+          case "text":
+            return (
+              <div key={i} className="text-xs text-zinc-400">
+                {part.text}
+              </div>
+            );
+          case "reasoning":
+            return (
+              <div key={i} className="text-xs text-amber-400/70 border-l-2 border-amber-500/30 pl-2">
+                <span className="text-[9px] text-amber-500/50 mr-1">thinking:</span>
+                {part.text}
+              </div>
+            );
+          case "source":
+            return (
+              <div key={i} className="text-[10px] text-cyan-400/60">
+                source: {part.title || part.id} {part.url && `(${part.url})`}
+              </div>
+            );
+          case "file":
+            return (
+              <div key={i} className="text-[10px] text-purple-400/60">
+                file: {part.mediaType} ({part.data ? `${Math.round(part.data.length * 0.75 / 1024)}KB` : "?"})
+              </div>
+            );
+          case "tool-call":
+            return (
+              <div key={i} className="text-[10px] text-cyan-400/60">
+                call: {part.toolName}({JSON.stringify(part.args || {}).slice(0, 60)})
+              </div>
+            );
+          case "tool-result":
+            return (
+              <div key={i} className="text-[10px] text-teal-400/60">
+                result: {part.toolName} = {JSON.stringify(part.result).slice(0, 80)}
+              </div>
+            );
+          case "tool-error":
+            return (
+              <div key={i} className="text-[10px] text-red-400/60">
+                error: {part.toolName} - {part.error}
+              </div>
+            );
+          default:
+            return null;
+        }
+      })}
+    </div>
+  );
+}
+
 function EntryContent({ entry }: { entry: SessionEntry }) {
   const [expanded, setExpanded] = useState(false);
 
   const summary = useMemo(() => {
     switch (entry.type) {
-      case "session_start":
-        return `${entry.meta?.agent?.model} via ${entry.meta?.agent?.runtime} — ${entry.meta?.environment?.workingDirectory}`;
+      case "session_start": {
+        const version = entry.meta?.version ? `v${entry.meta.version}` : "v1";
+        return `${version} ${entry.meta?.agent?.model} via ${entry.meta?.agent?.runtime} — ${entry.meta?.environment?.workingDirectory}`;
+      }
       case "user_message":
         return entry.message?.content;
       case "assistant_message": {
@@ -83,20 +220,41 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
         const prefix = entry.containsToolCalls ? "[+tools] " : "";
         return prefix + content;
       }
+      case "assistant_content": {
+        const textParts = (entry.parts || []).filter(p => p.type === "text");
+        const reasoningParts = (entry.parts || []).filter(p => p.type === "reasoning");
+        const text = textParts.map(p => p.text).join(" ").slice(0, 200);
+        const prefix = reasoningParts.length ? `[thinking] ` : "";
+        return `Step ${entry.stepNumber}: ${prefix}${text || "(tool calls only)"}`;
+      }
       case "tool_call":
         return `${entry.toolCall?.name}(${JSON.stringify(entry.toolCall?.arguments || {}).slice(0, 80)})`;
       case "tool_result":
-        return `${entry.success ? "✓" : "✗"} ${entry.toolCallId} ${entry.durationMs ? `(${entry.durationMs}ms)` : ""}`;
+        return `${entry.success ? "✓" : "✗"} ${entry.toolName || entry.toolCallId} ${entry.durationMs ? `(${entry.durationMs}ms)` : ""}`;
+      case "tool_error":
+        return `✗ ${entry.toolName} — ${typeof entry.error === "string" ? entry.error : (entry.error as any)?.message}`;
       case "turn_start":
         return `Turn ${entry.turnIndex}`;
       case "turn_end":
         return `Turn ${entry.turnIndex} → ${entry.reason}${entry.usage?.totalTokens ? ` (${entry.usage.totalTokens} tokens)` : ""}`;
+      case "step_start": {
+        const modelStr = entry.model?.modelId ? ` [${entry.model.modelId}]` : "";
+        return `Step ${entry.stepNumber}${modelStr}${entry.messageCount ? ` (${entry.messageCount} msgs)` : ""}`;
+      }
+      case "step_end":
+        return `Step ${entry.stepNumber} → ${entry.finishReason}`;
       case "hook":
         return `${entry.hook?.hookType}: ${entry.hook?.hookName} ${entry.hook?.success ? "✓" : "✗"}`;
-      case "error":
-        return `${entry.error?.recoverable ? "[recoverable]" : "[fatal]"} ${entry.error?.message}`;
-      case "session_end":
-        return `${entry.summary?.exitReason} — ${entry.summary?.totalTurns} turns, ${entry.summary?.totalToolCalls} tools, ${entry.summary?.totalTokens} tokens`;
+      case "error": {
+        const errMsg = typeof entry.error === "string" ? entry.error : (entry.error as any)?.message;
+        const recoverable = typeof entry.error === "object" && (entry.error as any)?.recoverable;
+        return `${recoverable ? "[recoverable]" : "[fatal]"} ${errMsg}`;
+      }
+      case "session_end": {
+        const steps = entry.summary?.totalSteps ?? entry.summary?.totalTurns;
+        const tokens = entry.summary?.totalUsage?.totalTokens ?? entry.summary?.totalTokens;
+        return `${entry.summary?.exitReason} — ${steps} steps, ${entry.summary?.totalToolCalls} tools, ${tokens} tokens`;
+      }
       default:
         return null;
     }
@@ -131,7 +289,15 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
         {summary && (
           <span className="text-xs text-zinc-400 truncate">{summary}</span>
         )}
+        {(entry.type === "step_end" || entry.type === "assistant_content") && (
+          <UsageBadge usage={entry.usage} />
+        )}
       </div>
+
+      {/* v2: Render content parts inline for assistant_content */}
+      {entry.type === "assistant_content" && entry.parts && !expanded && (
+        <ContentParts parts={entry.parts} />
+      )}
 
       {expanded && (
         <pre className="mt-2 ml-7 text-[11px] text-zinc-500 overflow-x-auto max-h-[600px] overflow-y-auto bg-black/30 rounded p-3 border border-zinc-800">
@@ -159,63 +325,40 @@ export default function SessionViewer({
     setInitialLoaded(false);
 
     const url = `/api/sessions/${session.sessionId}/stream`;
-    console.log(`[Debugger] Opening EventSource: ${url}`);
-
     const es = new EventSource(url);
 
     const batch: SessionEntry[] = [];
     let batchTimeout: ReturnType<typeof setTimeout> | null = null;
-    let messageCount = 0;
-
-    es.onopen = () => {
-      console.log(`[Debugger] EventSource OPEN for ${session.sessionId}`);
-    };
 
     es.onmessage = (event) => {
-      messageCount++;
-      console.log(`[Debugger] SSE message #${messageCount}, length=${event.data.length}, preview=${event.data.slice(0, 100)}`);
       try {
         const data = JSON.parse(event.data);
-        console.log(`[Debugger] Parsed entry type="${data.type}" seq=${data.sequenceNumber}`);
 
         if (data.type === "__initial_load_complete__") {
-          console.log(`[Debugger] Initial load complete, ${data.lineCount} lines from server`);
           setInitialLoaded(true);
           return;
         }
         if (data.type === "__error__") {
-          console.error("[Debugger] Stream error:", data.message);
           return;
         }
 
         batch.push(data);
-        console.log(`[Debugger] Batch size: ${batch.length}`);
 
         if (!batchTimeout) {
           batchTimeout = setTimeout(() => {
             const flushing = batch.splice(0);
-            console.log(`[Debugger] Flushing ${flushing.length} entries to state`);
-            setEntries((prev) => {
-              const next = [...prev, ...flushing];
-              console.log(`[Debugger] State updated: ${prev.length} -> ${next.length} entries`);
-              return next;
-            });
+            setEntries((prev) => [...prev, ...flushing]);
             batchTimeout = null;
           }, 50);
         }
-      } catch (err) {
-        console.error(`[Debugger] Failed to parse SSE message #${messageCount}:`, err, event.data.slice(0, 200));
+      } catch {
+        // skip
       }
     };
 
-    es.onerror = (err) => {
-      console.error(`[Debugger] EventSource ERROR for ${session.sessionId}, readyState=${es.readyState}`, err);
-    };
-
-    console.log(`[Debugger] EventSource created, readyState=${es.readyState} (0=CONNECTING, 1=OPEN, 2=CLOSED)`);
+    es.onerror = () => {};
 
     return () => {
-      console.log(`[Debugger] Closing EventSource for ${session.sessionId}, received ${messageCount} messages total`);
       es.close();
       if (batchTimeout) clearTimeout(batchTimeout);
     };

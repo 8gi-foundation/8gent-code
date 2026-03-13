@@ -1,20 +1,17 @@
 /**
  * 8gent Code - Agent Core
  *
- * The main agent orchestrator. Now powered by the Vercel AI SDK via packages/ai.
+ * The main agent orchestrator. Powered by the Vercel AI SDK via packages/ai.
  * Uses ToolLoopAgent for the agentic loop instead of a manual while loop.
  *
- * The public API surface is preserved for backward compatibility:
- *   - new Agent(config)
- *   - agent.chat(message) → Promise<string>
- *   - agent.isReady() → Promise<boolean>
- *   - agent.clearHistory(), getModel(), setModel(), etc.
+ * v2: Emits step_start/step_end/assistant_content session entries with
+ * full AI SDK data (finishReason, reasoning, detailed token usage, etc.)
  */
 
 import * as crypto from "crypto";
 import type { AgentConfig } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
-import { createClient, OllamaClient } from "./clients";
+import { createClient } from "./clients";
 import { ToolExecutor } from "./tools";
 import { getHookManager, type HookManager } from "../hooks";
 import {
@@ -26,7 +23,7 @@ import {
   getCompletionReporter,
 } from "../reporting";
 import { SessionWriter } from "../specifications/session/writer.js";
-import type { AgentInfo, Environment } from "../specifications/session/index.js";
+import type { AgentInfo, Environment, ContentPart, DetailedTokenUsage } from "../specifications/session/index.js";
 import { getLSPManager } from "../lsp";
 
 // AI SDK imports
@@ -36,6 +33,7 @@ import {
   type EightAgentConfig,
   type ProviderConfig,
   type ProviderName,
+  type StepFinishEvent,
 } from "../ai";
 
 export class Agent {
@@ -70,13 +68,14 @@ export class Agent {
       content: basePrompt + languageInstruction,
     });
 
-    // Initialize session persistence
+    // Initialize session persistence (v2)
     this.sessionWriter = new SessionWriter(this.sessionId);
     const systemPromptFull = basePrompt + languageInstruction;
     const agentInfo: AgentInfo = {
       model: config.model,
       runtime: config.runtime,
       maxTurns: config.maxTurns,
+      maxSteps: config.maxTurns || 30,
       systemPromptHash: crypto.createHash("sha256").update(systemPromptFull).digest("hex").slice(0, 16),
     };
     const env: Environment = {
@@ -86,7 +85,7 @@ export class Agent {
     };
     this.sessionWriter.writeSessionStart({
       sessionId: this.sessionId,
-      version: 1,
+      version: 2,
       startedAt: new Date(this.sessionStartTime).toISOString(),
       agent: agentInfo,
       environment: env,
@@ -144,7 +143,7 @@ export class Agent {
     // Build system instructions
     const systemPrompt = this.messageHistory.find(m => m.role === "system")?.content;
 
-    // Create the AI SDK agent with callbacks for session logging
+    // Create the AI SDK agent with v2 session callbacks
     const agentConfig: EightAgentConfig = {
       provider: providerConfig,
       instructions: systemPrompt,
@@ -166,30 +165,46 @@ export class Agent {
         }
 
         this.sessionWriter.writeToolCall({
-          toolCallId: `${Date.now()}-${stepCount}`,
+          toolCallId: event.toolCallId,
           name: event.toolName,
           arguments: event.args,
           success: true,
           durationMs: 0,
           startedAt: new Date().toISOString(),
-        }, stepCount);
+        }, undefined, event.stepNumber);
       },
 
       onToolCallFinish: async (event) => {
         const resultStr = typeof event.result === "string"
           ? event.result
           : JSON.stringify(event.result);
-        const isError = resultStr.startsWith("Error:") || resultStr.startsWith("[PERMISSION DENIED]");
 
-        this.sessionWriter.writeToolResult(
-          `${Date.now()}-${stepCount}`,
-          !isError,
-          resultStr.slice(0, 2000),
-          0
-        );
+        if (event.success) {
+          this.sessionWriter.writeToolResult(
+            event.toolCallId,
+            true,
+            resultStr.slice(0, 2000),
+            event.durationMs,
+            event.toolName,
+            event.stepNumber
+          );
+        } else {
+          // v2: emit distinct tool_error entry
+          const errorStr = typeof event.error === "string"
+            ? event.error
+            : event.error instanceof Error
+              ? event.error.message
+              : JSON.stringify(event.error);
+          this.sessionWriter.writeToolError(
+            event.toolCallId,
+            event.toolName,
+            errorStr,
+            event.stepNumber
+          );
+        }
 
         // Track file operations
-        if (!isError) {
+        if (event.success) {
           if (event.toolName === "write_file" && event.args.path) {
             this.sessionWriter.trackFileCreated(event.args.path as string);
           } else if (event.toolName === "edit_file" && event.args.path) {
@@ -205,7 +220,7 @@ export class Agent {
             event.args,
             resultStr,
             Date.now(),
-            !isError
+            event.success
           );
 
           if (event.toolName === "git_commit" && resultStr.includes("[")) {
@@ -228,39 +243,97 @@ export class Agent {
           tool: event.toolName,
           toolInput: event.args,
           toolOutput: resultStr,
-          duration: 0,
+          duration: event.durationMs,
           workingDirectory: this.config.workingDirectory || process.cwd(),
         });
       },
 
-      onStepFinish: async (event) => {
+      onStepFinish: async (event: StepFinishEvent) => {
         stepCount++;
-        const turnUsage = event.usage?.totalTokens
-          ? { totalTokens: event.usage.totalTokens }
-          : undefined;
 
-        if (event.usage?.totalTokens) {
-          totalTokensUsed += event.usage.totalTokens;
-        }
+        // Map AI SDK usage to DetailedTokenUsage
+        const detailedUsage: DetailedTokenUsage = {
+          promptTokens: event.usage.promptTokens,
+          completionTokens: event.usage.completionTokens,
+          totalTokens: event.usage.totalTokens,
+          inputTokenDetails: event.usage.inputTokenDetails,
+          outputTokenDetails: event.usage.outputTokenDetails,
+          raw: event.usage.raw,
+        };
+
+        totalTokensUsed += event.usage.totalTokens;
 
         const hasToolCalls = event.toolCalls && event.toolCalls.length > 0;
+
         if (hasToolCalls) {
-          console.log(`\n[Step ${stepCount}: executed ${event.toolCalls.length} tool(s)]`);
-          this.sessionWriter.writeTurnEnd(stepCount - 1, "tool_calls", turnUsage);
+          console.log(`\n[Step ${event.stepNumber}: executed ${event.toolCalls.length} tool(s)]`);
         }
 
-        if (event.text && !hasToolCalls) {
-          this.sessionWriter.writeAssistantMessage(event.text, {
-            usage: turnUsage,
-            turnIndex: stepCount - 1,
-            containsToolCalls: false,
-          });
-          this.sessionWriter.writeTurnEnd(stepCount - 1, "natural_stop", turnUsage);
+        // v2: Write step_end with full AI SDK data
+        this.sessionWriter.writeStepEnd(
+          event.stepNumber,
+          event.finishReason as any,
+          {
+            usage: detailedUsage,
+            response: event.response,
+            providerMetadata: event.providerMetadata,
+          }
+        );
+
+        // v2: Write rich assistant content if there's text or reasoning
+        if (event.text || event.reasoning?.length || event.sources?.length || event.files?.length) {
+          const parts: ContentPart[] = [];
+
+          // Reasoning blocks first
+          if (event.reasoning?.length) {
+            for (const r of event.reasoning) {
+              parts.push({
+                type: "reasoning",
+                text: r.text,
+                signature: r.signature,
+              });
+            }
+          }
+
+          // Text content
+          if (event.text) {
+            parts.push({ type: "text", text: event.text });
+          }
+
+          // Sources
+          if (event.sources?.length) {
+            for (const s of event.sources) {
+              parts.push({
+                type: "source",
+                sourceType: s.type,
+                id: s.id,
+                url: s.url,
+                title: s.title,
+              });
+            }
+          }
+
+          // Generated files
+          if (event.files?.length) {
+            for (const f of event.files) {
+              parts.push({
+                type: "file",
+                mediaType: f.mediaType,
+                data: f.data,
+              });
+            }
+          }
+
+          this.sessionWriter.writeAssistantContent(
+            event.stepNumber,
+            parts,
+            detailedUsage
+          );
         }
       },
 
-      onFinish: async (event) => {
-        // Session logging is handled per-step above
+      onFinish: async () => {
+        // All logging handled per-step above
       },
     };
 
@@ -337,7 +410,6 @@ export class Agent {
   }
 
   async isReady(): Promise<boolean> {
-    // Use the legacy client for availability checks since it's a simple HTTP ping
     const client = createClient(this.config);
     return client.isAvailable();
   }
@@ -393,9 +465,6 @@ export class Agent {
     return null;
   }
 
-  /**
-   * Cleanup LSP clients and finalize session on shutdown
-   */
   async cleanup(): Promise<void> {
     try {
       const lastReport = this.getLastReport();

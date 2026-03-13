@@ -22,6 +22,10 @@ export interface SessionInfo {
   completed: boolean;
   exitReason: string | null;
   durationMs: number | null;
+  /** Schema version (1 or 2) */
+  version: number;
+  /** v2: Total steps completed */
+  totalSteps: number | null;
 }
 
 const SESSIONS_DIR = join(homedir(), ".8gent", "sessions");
@@ -37,6 +41,8 @@ async function getSessionMeta(filePath: string): Promise<{
   exitReason: string | null;
   durationMs: number | null;
   lineCount: number;
+  version: number;
+  totalSteps: number | null;
 }> {
   return new Promise((resolve) => {
     const result = {
@@ -50,6 +56,8 @@ async function getSessionMeta(filePath: string): Promise<{
       exitReason: null as string | null,
       durationMs: null as number | null,
       lineCount: 0,
+      version: 1 as number,
+      totalSteps: null as number | null,
     };
 
     let lastLine: string | null = null;
@@ -74,6 +82,7 @@ async function getSessionMeta(filePath: string): Promise<{
             result.gitBranch = entry.meta.environment?.gitBranch ?? null;
             result.workingDirectory =
               entry.meta.environment?.workingDirectory ?? null;
+            result.version = entry.meta.version ?? 1;
           }
 
           if (entry.type === "user_message" && !result.firstUserMessage) {
@@ -94,6 +103,7 @@ async function getSessionMeta(filePath: string): Promise<{
             result.completed = true;
             result.exitReason = entry.summary.exitReason ?? null;
             result.durationMs = entry.summary.durationMs ?? null;
+            result.totalSteps = entry.summary.totalSteps ?? entry.summary.totalTurns ?? null;
           }
         } catch {
           // skip
@@ -143,6 +153,8 @@ export async function GET() {
         completed: meta.completed,
         exitReason: meta.exitReason,
         durationMs: meta.durationMs,
+        version: meta.version,
+        totalSteps: meta.totalSteps,
       });
     }
 
