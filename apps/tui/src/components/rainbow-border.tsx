@@ -142,7 +142,7 @@ export function PulsingBorder({
   return (
     <Box
       borderStyle="round"
-      borderColor={visible ? color : "gray"}
+      borderColor={visible ? color : "blue"}
       paddingX={1}
     >
       {children}
@@ -184,13 +184,13 @@ export function DecoratedBox({
     <Box flexDirection="column" width={width}>
       <Box justifyContent="space-between">
         <Text color={getCornerColor(0)}>╭</Text>
-        <Text color="gray">{"─".repeat((width || 40) - 2)}</Text>
+        <Text dimColor>{"─".repeat((width || 40) - 2)}</Text>
         <Text color={getCornerColor(1)}>╮</Text>
       </Box>
       <Box paddingX={1}>{children}</Box>
       <Box justifyContent="space-between">
         <Text color={getCornerColor(3)}>╰</Text>
-        <Text color="gray">{"─".repeat((width || 40) - 2)}</Text>
+        <Text dimColor>{"─".repeat((width || 40) - 2)}</Text>
         <Text color={getCornerColor(2)}>╯</Text>
       </Box>
     </Box>

@@ -180,10 +180,10 @@ export function ImageBadge({
   return (
     <Box borderStyle="round" borderColor="magenta" paddingX={1}>
       <Text color="magenta">📷 </Text>
-      <Text color="white">{image.filename}</Text>
-      <Text color="gray"> ({formatSize(image.size)})</Text>
+      <Text bold>{image.filename}</Text>
+      <Text dimColor> ({formatSize(image.size)})</Text>
       {onRemove && (
-        <Text color="gray" dimColor> [x]</Text>
+        <Text dimColor> [x]</Text>
       )}
     </Box>
   );
@@ -211,10 +211,10 @@ export function ImageIndicator({
     <Box flexDirection="column">
       <Box>
         <Text color="magenta" bold>📷 Image attached: </Text>
-        <Text color="white">{image.filename}</Text>
+        <Text bold>{image.filename}</Text>
       </Box>
       <Box paddingLeft={3}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {formatSize(image.size)} • {image.mimeType}
         </Text>
       </Box>
@@ -244,7 +244,7 @@ export function ImageInput({
   if (!currentImage) {
     return (
       <Box>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           📷 Drag image or paste path to attach
         </Text>
       </Box>
@@ -259,7 +259,7 @@ export function ImageInput({
         <ImageBadge image={currentImage} onRemove={onImageRemove} />
       )}
       <Box paddingLeft={3}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           [Ctrl+D] to remove
         </Text>
       </Box>

@@ -267,7 +267,7 @@ function EvidenceItem({
           marginLeft={4}
           paddingLeft={1}
           borderStyle="single"
-          borderColor="gray"
+          borderColor="blue"
           borderLeft
           borderRight={false}
           borderTop={false}
@@ -275,12 +275,12 @@ function EvidenceItem({
         >
           {evidence.path && (
             <Text dimColor>
-              Path: <Text color="white">{evidence.path}</Text>
+              Path: <Text bold>{evidence.path}</Text>
             </Text>
           )}
           {evidence.command && (
             <Text dimColor>
-              Command: <Text color="white">{evidence.command}</Text>
+              Command: <Text bold>{evidence.command}</Text>
             </Text>
           )}
           {evidence.exitCode !== undefined && (
@@ -293,17 +293,17 @@ function EvidenceItem({
           )}
           {evidence.size !== undefined && (
             <Text dimColor>
-              Size: <Text color="white">{formatBytes(evidence.size)}</Text>
+              Size: <Text bold>{formatBytes(evidence.size)}</Text>
             </Text>
           )}
           {evidence.duration !== undefined && (
             <Text dimColor>
-              Duration: <Text color="white">{evidence.duration}ms</Text>
+              Duration: <Text bold>{evidence.duration}ms</Text>
             </Text>
           )}
           {evidence.hash && (
             <Text dimColor>
-              Hash: <Text color="gray">{evidence.hash}</Text>
+              Hash: <Text dimColor>{evidence.hash}</Text>
             </Text>
           )}
 
@@ -334,7 +334,7 @@ function EvidenceDataPreview({
   if (typeof data === "string") {
     const preview = data.split("\n")[0].slice(0, 60);
     return (
-      <Text color="gray" wrap="truncate">
+      <Text dimColor wrap="truncate">
         "{preview}..."
       </Text>
     );
@@ -344,16 +344,16 @@ function EvidenceDataPreview({
     try {
       const preview = JSON.stringify(data).slice(0, 60);
       return (
-        <Text color="gray" wrap="truncate">
+        <Text dimColor wrap="truncate">
           {preview}...
         </Text>
       );
     } catch {
-      return <Text color="gray">[object]</Text>;
+      return <Text dimColor>[object]</Text>;
     }
   }
 
-  return <Text color="gray">-</Text>;
+  return <Text dimColor>-</Text>;
 }
 
 // ============================================

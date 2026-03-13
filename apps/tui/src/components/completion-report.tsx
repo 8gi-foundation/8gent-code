@@ -223,14 +223,14 @@ export function CompletionReport({
       {/* Divider */}
       {revealedSections >= 7 && (
         <Box marginTop={1}>
-          <Text color="gray">{boxChars.singleHorizontal.repeat(60)}</Text>
+          <Text dimColor>{boxChars.singleHorizontal.repeat(60)}</Text>
         </Box>
       )}
 
       {/* Help text */}
       {revealedSections >= 8 && (
         <Box marginTop={1}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             [1-4] toggle sections | [c] copy | [esc] close
             {copied && <Text color="green"> Copied!</Text>}
           </Text>
@@ -303,7 +303,7 @@ function CollapsibleSection({ title, children, expanded, onToggle, hotkey }: Col
     <Box flexDirection="column" marginBottom={1}>
       <Box>
         <Text color="cyan" bold>{icon} {title}</Text>
-        {hotkey && <Text color="gray" dimColor> [{hotkey}]</Text>}
+        {hotkey && <Text dimColor> [{hotkey}]</Text>}
       </Box>
       {expanded && (
         <Box marginLeft={2} flexDirection="column">
@@ -330,7 +330,7 @@ function StepItem({ step }: { step: StepSummary }) {
     <Box>
       <Text color={color}>{step.index}. {icon} </Text>
       <Text>{step.description}</Text>
-      {duration && <Text color="gray" dimColor> ({duration})</Text>}
+      {duration && <Text dimColor> ({duration})</Text>}
     </Box>
   );
 }
@@ -348,10 +348,10 @@ function EvidenceItem({ evidence, isLast }: { evidence: EvidenceSummary; isLast:
 
   return (
     <Box>
-      <Text color="gray">{connector}{boxChars.singleHorizontal}{boxChars.singleHorizontal} </Text>
+      <Text dimColor>{connector}{boxChars.singleHorizontal}{boxChars.singleHorizontal} </Text>
       <Text>{evidence.label}: </Text>
       <Text color={color}>{icon}</Text>
-      {evidence.details && <Text color="gray" dimColor> {evidence.details}</Text>}
+      {evidence.details && <Text dimColor> {evidence.details}</Text>}
       {evidence.url && <Text color="cyan"> {evidence.url}</Text>}
     </Box>
   );
@@ -384,7 +384,7 @@ function StatsGrid({ report }: { report: CompletionReportData }) {
     <Box flexDirection="column">
       {stats.map((stat, i) => (
         <Box key={i}>
-          <Text color="gray">{stat.label.padEnd(15)}</Text>
+          <Text dimColor>{stat.label.padEnd(15)}</Text>
           <Text color={stat.color}>{stat.value}</Text>
         </Box>
       ))}
@@ -465,11 +465,11 @@ export function SimpleCompletionReport({ report }: { report: CompletionReportDat
       </Section>
 
       <Box>
-        <Text color="gray">Tools: </Text>
+        <Text dimColor>Tools: </Text>
         <Text color="cyan">{report.toolsUsed}</Text>
-        <Text color="gray"> | Duration: </Text>
+        <Text dimColor> | Duration: </Text>
         <Text color="yellow">{report.duration}</Text>
-        <Text color="gray"> | Confidence: </Text>
+        <Text dimColor> | Confidence: </Text>
         <Text color={report.confidence >= 80 ? "green" : "yellow"}>{report.confidence}%</Text>
       </Box>
     </Box>

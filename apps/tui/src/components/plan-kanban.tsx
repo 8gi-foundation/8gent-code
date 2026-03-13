@@ -159,14 +159,14 @@ export function PlanKanban({
         <Text color="cyan" bold>
           {"\u2592"} Plan Kanban Board
         </Text>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           [ESC] close
         </Text>
       </Box>
 
       {/* Column Headers */}
       <Box>
-        <ColumnHeader title="Backlog" count={board.backlog.length} width={columnWidth} color="gray" />
+        <ColumnHeader title="Backlog" count={board.backlog.length} width={columnWidth} color="blue" />
         <ColumnHeader title="Ready" count={board.ready.length} width={columnWidth} color="yellow" />
         <ColumnHeader title="In Progress" count={board.inProgress.length} width={columnWidth} color="cyan" />
         <ColumnHeader title="Done" count={board.done.length} width={columnWidth} color="green" />
@@ -210,10 +210,10 @@ export function PlanKanban({
 
       {/* Footer with stats */}
       <Box marginTop={1} justifyContent="space-between">
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Total: {board.backlog.length + board.ready.length + board.inProgress.length + board.done.length} steps
         </Text>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Ready: {board.ready.length} | Active: {board.inProgress.length}
         </Text>
       </Box>
@@ -280,7 +280,7 @@ function KanbanColumn({
       flexDirection="column"
       width={width}
       borderStyle="single"
-      borderColor="gray"
+      borderColor="blue"
       minHeight={maxItems * (compact ? 2 : 3) + 2}
     >
       {displayItems.map((item) => (
@@ -296,7 +296,7 @@ function KanbanColumn({
 
       {items.length === 0 && (
         <Box paddingX={1}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             (empty)
           </Text>
         </Box>
@@ -304,7 +304,7 @@ function KanbanColumn({
 
       {hiddenCount > 0 && (
         <Box paddingX={1}>
-          <Text color="gray" dimColor>
+          <Text dimColor>
             +{hiddenCount} more...
           </Text>
         </Box>
@@ -346,7 +346,7 @@ function KanbanCard({ step, isSelected, onSelect, compact, width }: KanbanCardPr
         <Text color={categoryColor as any}>
           {getCategoryIcon(step.category)}
         </Text>
-        <Text color="white"> {truncatedDesc}</Text>
+        <Text bold> {truncatedDesc}</Text>
       </Box>
     );
   }
@@ -364,11 +364,11 @@ function KanbanCard({ step, isSelected, onSelect, compact, width }: KanbanCardPr
       </Box>
 
       {/* Description */}
-      <Text color="white">{truncatedDesc}</Text>
+      <Text bold>{truncatedDesc}</Text>
 
       {/* Confidence */}
       <Box>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {Math.round(step.confidence * 100)}% conf
         </Text>
       </Box>
@@ -409,7 +409,7 @@ export function AvenueDisplay({
         <Text color="magenta" bold>
           {"\u2263"} Possible Avenues
         </Text>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           {" "}({avenues.length} paths)
         </Text>
       </Box>
@@ -427,7 +427,7 @@ export function AvenueDisplay({
 
       {/* Help */}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Type to match avenue or use /avenue [number]
         </Text>
       </Box>
@@ -452,7 +452,7 @@ function AvenueCard({ avenue, index, isActive, onSelect }: AvenueCardProps) {
       paddingX={1}
       marginBottom={1}
       borderStyle={isActive ? "double" : "single"}
-      borderColor={isActive ? "green" : "gray"}
+      borderColor={isActive ? "green" : "blue"}
     >
       {/* Title row */}
       <Box justifyContent="space-between">
@@ -468,17 +468,17 @@ function AvenueCard({ avenue, index, isActive, onSelect }: AvenueCardProps) {
       </Box>
 
       {/* Description */}
-      <Text color="white">{avenue.description}</Text>
+      <Text bold>{avenue.description}</Text>
 
       {/* Probability bar */}
       <Box>
-        <Text color="gray">Likelihood: </Text>
+        <Text dimColor>Likelihood: </Text>
         <Text color="green">{probabilityBar}</Text>
-        <Text color="gray"> {Math.round(avenue.probability * 100)}%</Text>
+        <Text dimColor> {Math.round(avenue.probability * 100)}%</Text>
       </Box>
 
       {/* Steps count */}
-      <Text color="gray" dimColor>
+      <Text dimColor>
         {avenue.plan.steps.length} steps planned, ~{Math.round(avenue.plan.estimatedTime / 60)}min
       </Text>
     </Box>
@@ -539,14 +539,14 @@ export function PredictedSteps({
       ))}
 
       {steps.length > maxItems && (
-        <Text color="gray" dimColor>
+        <Text dimColor>
           +{steps.length - maxItems} more predictions...
         </Text>
       )}
 
       {/* Help */}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <Text dimColor>
           Press [Tab] on input to accept top prediction
         </Text>
       </Box>
@@ -570,8 +570,8 @@ function PredictedStepCard({ step, index, onAccept }: PredictedStepCardProps) {
       <Text color={categoryColor as any}>
         {" "}{getCategoryIcon(step.category)}
       </Text>
-      <Text color="white"> {step.description}</Text>
-      <Text color="gray" dimColor>
+      <Text bold> {step.description}</Text>
+      <Text dimColor>
         {" "}{confidenceBar}
       </Text>
     </Box>
@@ -593,7 +593,7 @@ export function MiniKanban({ board, width = 60 }: MiniKanbanProps) {
 
   if (total === 0) {
     return (
-      <Text color="gray" dimColor>
+      <Text dimColor>
         No planned steps
       </Text>
     );
@@ -603,15 +603,15 @@ export function MiniKanban({ board, width = 60 }: MiniKanbanProps) {
 
   return (
     <Box>
-      <Text color="gray">[</Text>
-      <MiniColumn items={board.backlog} label="B" color="gray" width={colWidth} />
-      <Text color="gray">|</Text>
+      <Text dimColor>[</Text>
+      <MiniColumn items={board.backlog} label="B" color="blue" width={colWidth} />
+      <Text dimColor>|</Text>
       <MiniColumn items={board.ready} label="R" color="yellow" width={colWidth} />
-      <Text color="gray">|</Text>
+      <Text dimColor>|</Text>
       <MiniColumn items={board.inProgress} label="P" color="cyan" width={colWidth} />
-      <Text color="gray">|</Text>
+      <Text dimColor>|</Text>
       <MiniColumn items={board.done} label="D" color="green" width={colWidth} />
-      <Text color="gray">]</Text>
+      <Text dimColor>]</Text>
     </Box>
   );
 }

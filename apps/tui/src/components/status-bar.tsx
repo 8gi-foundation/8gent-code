@@ -133,7 +133,7 @@ export function EnhancedStatusBar({
   return (
     <Box
       borderStyle={showBorder ? "single" : undefined}
-      borderColor="gray"
+      borderColor="blue"
       paddingX={1}
       marginTop={1}
       justifyContent="space-between"
@@ -159,7 +159,7 @@ export function EnhancedStatusBar({
             />
             {/* Show elapsed and tokens inline when processing */}
             {(planStatus === "planning" || planStatus === "executing") && (
-              <Text color="gray" dimColor>
+              <Text dimColor>
                 ({elapsed} {"\u00B7"} {formatNumber(tokensSaved)} tokens)
               </Text>
             )}
@@ -205,7 +205,7 @@ function ActiveIndicator({ active }: { active: boolean }) {
 
 function Separator() {
   return (
-    <Text color="gray" dimColor>
+    <Text dimColor>
       {" \u00B7 "}
     </Text>
   );
@@ -256,7 +256,7 @@ function TokenSavingsItem({ saved, percentage }: { saved: number; percentage: nu
       <Text color={savingsColor} bold>
         {percentage}%
       </Text>
-      <Text color="gray" dimColor>
+      <Text dimColor>
         {" "}({formattedTokens} tokens)
       </Text>
     </Box>
@@ -275,7 +275,7 @@ function GitBranchItem({ branch, hasChanges }: { branch: string; hasChanges: boo
 
 function ElapsedTimeItem({ time }: { time: string }) {
   return (
-    <Text color="gray" dimColor>
+    <Text dimColor>
       {"\u23F1"} {time}
     </Text>
   );
@@ -350,29 +350,29 @@ function ClaudeStyleCompactBar({
 
   return (
     <Box paddingX={1} marginTop={1}>
-      <Text color="gray">[</Text>
+      <Text dimColor>[</Text>
       <Text color="cyan">{modelName}</Text>
-      <Text color="gray">] </Text>
+      <Text dimColor>] </Text>
 
       <Text color={runningAgents > 0 ? "magenta" : "gray"}>
         {runningAgents > 0 ? "\u25CF" : "\u25CB"}
       </Text>
 
-      <Text color="gray"> </Text>
+      <Text dimColor> </Text>
       <Text color={permConfig.color}>{permConfig.icon}</Text>
 
-      <Text color="gray"> </Text>
+      <Text dimColor> </Text>
       <Text color="green">{savings}%</Text>
 
       {currentBranch && (
         <>
-          <Text color="gray"> </Text>
+          <Text dimColor> </Text>
           <Text color="yellow">{currentBranch}</Text>
         </>
       )}
 
-      <Text color="gray"> </Text>
-      <Text color="gray" dimColor>
+      <Text dimColor> </Text>
+      <Text dimColor>
         {elapsed}
       </Text>
     </Box>
@@ -495,7 +495,7 @@ function TokenCounter({ value, animate = true }: TokenCounterProps) {
 
   return (
     <Box>
-      <Text color="gray">Tokens saved: </Text>
+      <Text dimColor>Tokens saved: </Text>
       <Text color="green" bold>
         {formattedValue}
       </Text>
@@ -532,7 +532,7 @@ function HelpText({ animate = true, tick = 0 }: HelpTextProps) {
   }, [animate]);
 
   return (
-    <Text color="gray" dimColor>
+    <Text dimColor>
       {hints[currentHint]}
     </Text>
   );
@@ -543,7 +543,7 @@ export function CompactStatusBar({ tokensSaved }: StatusBarProps) {
   return (
     <Box
       borderStyle="single"
-      borderColor="gray"
+      borderColor="blue"
       paddingX={1}
       marginTop={1}
       justifyContent="space-between"
@@ -552,7 +552,7 @@ export function CompactStatusBar({ tokensSaved }: StatusBarProps) {
       <Text color="green" bold>
         {tokensSaved.toLocaleString()} saved
       </Text>
-      <Text color="gray">^C exit</Text>
+      <Text dimColor>^C exit</Text>
     </Box>
   );
 }
@@ -577,7 +577,7 @@ export function DetailedStatusBar({
 
       <Box
         borderStyle="round"
-        borderColor="gray"
+        borderColor="blue"
         paddingX={1}
         flexDirection="column"
       >
@@ -590,12 +590,12 @@ export function DetailedStatusBar({
 
           <Box gap={2}>
             {responseTime !== undefined && (
-              <Text color="gray">
+              <Text dimColor>
                 Response: <Text color="yellow">{responseTime}ms</Text>
               </Text>
             )}
             {contextSize !== undefined && (
-              <Text color="gray">
+              <Text dimColor>
                 Context: <Text color="cyan">{contextSize}</Text>
               </Text>
             )}
@@ -625,11 +625,11 @@ function SavingsPercentage({
 
   return (
     <Box gap={1}>
-      <Text color="gray">AST savings:</Text>
+      <Text dimColor>AST savings:</Text>
       <Text color="green" bold>
         ~{savingsPercent}%
       </Text>
-      <Text color="gray">
+      <Text dimColor>
         ({tokensSaved.toLocaleString()} vs ~{estimatedWithoutAST.toLocaleString()} raw)
       </Text>
     </Box>
