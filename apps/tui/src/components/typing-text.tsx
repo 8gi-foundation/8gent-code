@@ -6,6 +6,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
+import { AppText, MutedText, Stack } from './primitives/index.js';
 
 interface TypingTextProps {
   text: string;
@@ -53,12 +54,12 @@ export function TypingText({
   }, [cursor]);
 
   return (
-    <Text color={color}>
+    <AppText color={color}>
       {displayedText}
       {cursor && !isComplete && (
-        <Text color="cyan">{showCursor ? cursorChar : " "}</Text>
+        <AppText color="cyan">{showCursor ? cursorChar : " "}</AppText>
       )}
-    </Text>
+    </AppText>
   );
 }
 
@@ -96,7 +97,7 @@ export function StreamingText({
     }
   }, [chunks, currentChunkIndex, charIndex, speed]);
 
-  return <Text color={color}>{displayedText}</Text>;
+  return <AppText color={color}>{displayedText}</AppText>;
 }
 
 // Typewriter with word-by-word animation
@@ -128,10 +129,10 @@ export function WordByWord({
   }, [wordIndex, words.length, speed, onComplete]);
 
   return (
-    <Text color={color} wrap="wrap">
+    <AppText color={color} wrap="wrap">
       {words.slice(0, wordIndex).join(" ")}
-      {wordIndex < words.length && <Text color="cyan">▌</Text>}
-    </Text>
+      {wordIndex < words.length && <AppText color="cyan">▌</AppText>}
+    </AppText>
   );
 }
 
@@ -169,20 +170,19 @@ export function CodeTyping({ code, language, speed = 8 }: CodeTypingProps) {
   }, [lines, lineIndex, charIndex, speed]);
 
   return (
-    <Box
+    <Stack
       borderStyle="round"
       borderColor="blue"
       paddingX={1}
-      flexDirection="column"
     >
       {language && (
         <Box marginBottom={1}>
-          <Text dimColor>
+          <MutedText>
             {language}
-          </Text>
+          </MutedText>
         </Box>
       )}
-      <Text color="green">{displayedCode}</Text>
-    </Box>
+      <AppText color="green">{displayedCode}</AppText>
+    </Stack>
   );
 }
