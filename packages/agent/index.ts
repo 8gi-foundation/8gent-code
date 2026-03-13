@@ -108,6 +108,11 @@ import {
   getCompletionReporter,
 } from "../reporting";
 
+// Session persistence
+import { SessionWriter } from "../specifications/session/writer.js";
+import type { AgentInfo, Environment } from "../specifications/session/index.js";
+import * as crypto from "crypto";
+
 // ============================================
 // Types
 // ============================================
@@ -1699,6 +1704,7 @@ export class Agent {
   private sessionStartTime: number;
   private reportingContext: AgentReportingContext | null = null;
   private enableReporting: boolean = true;
+  private sessionWriter: SessionWriter;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -1727,6 +1733,36 @@ export class Agent {
       content: basePrompt + languageInstruction,
     });
 
+    // Initialize session persistence
+    this.sessionWriter = new SessionWriter(this.sessionId);
+    const systemPromptFull = basePrompt + languageInstruction;
+    const agentInfo: AgentInfo = {
+      model: config.model,
+      runtime: config.runtime,
+      maxTurns: config.maxTurns,
+      systemPromptHash: crypto.createHash("sha256").update(systemPromptFull).digest("hex").slice(0, 16),
+    };
+    const env: Environment = {
+      workingDirectory: config.workingDirectory || process.cwd(),
+      platform: process.platform as Environment["platform"],
+      nodeVersion: process.version,
+    };
+    // Write session_start immediately without git info (avoid sync child_process in React effect)
+    this.sessionWriter.writeSessionStart({
+      sessionId: this.sessionId,
+      version: 1,
+      startedAt: new Date(this.sessionStartTime).toISOString(),
+      agent: agentInfo,
+      environment: env,
+    });
+    // Populate git info asynchronously after constructor returns
+    const cwd = config.workingDirectory || process.cwd();
+    import("child_process").then(({ exec }) => {
+      exec("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000 }, (err, stdout) => {
+        if (!err && stdout) env.gitBranch = stdout.trim();
+      });
+    }).catch(() => {});
+
     // Execute onStart hooks
     this.hookManager.executeHooks("onStart", {
       sessionId: this.sessionId,
@@ -1746,6 +1782,9 @@ export class Agent {
 
   async chat(userMessage: string): Promise<string> {
     this.messages.push({ role: "user", content: userMessage });
+
+    // Log user message to session
+    this.sessionWriter.writeUserMessage(userMessage);
 
     // Initialize reporting context for this task
     if (this.enableReporting) {
@@ -1767,13 +1806,34 @@ export class Agent {
     const tools = this.executor.getToolDefinitions();
 
     while (turns < maxTurns) {
+      const turnIndex = turns;
       turns++;
 
+      // Log turn start
+      this.sessionWriter.writeTurnStart(turnIndex, this.messages.length);
+
       // Get response from model with tool definitions
-      const response = await this.client.chat(this.messages, tools);
+      let response;
+      try {
+        response = await this.client.chat(this.messages, tools);
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.sessionWriter.writeError({
+          message: errMsg,
+          code: null,
+          stack: err instanceof Error ? err.stack ?? null : null,
+          recoverable: false,
+        });
+        this.sessionWriter.writeTurnEnd(turnIndex, "error");
+        throw err;
+      }
+
       const content = response.message.content;
 
       // Track token usage
+      const turnUsage = response.usage?.total_tokens
+        ? { totalTokens: response.usage.total_tokens }
+        : undefined;
       if (response.usage?.total_tokens) {
         totalTokensUsed += response.usage.total_tokens;
       }
@@ -1782,6 +1842,13 @@ export class Agent {
       const toolCalls = this.parseToolCalls(content);
 
       if (toolCalls.length > 0) {
+        // Log assistant message with tool calls
+        this.sessionWriter.writeAssistantMessage(content, {
+          usage: turnUsage,
+          turnIndex,
+          containsToolCalls: true,
+        });
+
         // Execute tools in parallel
         console.log(`\n[Executing ${toolCalls.length} tool(s)${toolCalls.length > 1 ? ' in parallel' : ''}]`);
 
@@ -1805,11 +1872,28 @@ export class Agent {
               this.reportingContext.recordToolStart(toolCall.name, toolCall.arguments);
             }
 
+            // Log tool call to session
+            this.sessionWriter.writeToolCall({
+              toolCallId: toolCall.id,
+              name: toolCall.name,
+              arguments: toolCall.arguments,
+              success: true, // updated below if error
+              durationMs: 0, // updated in tool_result
+              startedAt: new Date(toolStartTime).toISOString(),
+            }, turnIndex);
+
             try {
               result = await this.executor.execute(toolCall.name, toolCall.arguments);
             } catch (err) {
               toolError = err instanceof Error ? err.message : String(err);
               result = `Error: ${toolError}`;
+
+              // Log error to session
+              this.sessionWriter.writeError({
+                message: `Tool ${toolCall.name} failed: ${toolError}`,
+                stack: err instanceof Error ? err.stack ?? null : null,
+                recoverable: true,
+              });
 
               // Execute onError hooks
               await this.hookManager.executeHooks("onError", {
@@ -1820,6 +1904,27 @@ export class Agent {
                 errorStack: err instanceof Error ? err.stack : undefined,
                 workingDirectory: this.config.workingDirectory || process.cwd(),
               });
+            }
+
+            const toolDuration = Date.now() - toolStartTime;
+
+            // Log tool result to session
+            this.sessionWriter.writeToolResult(
+              toolCall.id,
+              !toolError,
+              result.slice(0, 2000), // Truncate large results for session log
+              toolDuration
+            );
+
+            // Track file operations for session summary
+            if (!toolError) {
+              if (toolCall.name === "write_file" && toolCall.arguments.path) {
+                this.sessionWriter.trackFileCreated(toolCall.arguments.path as string);
+              } else if (toolCall.name === "edit_file" && toolCall.arguments.path) {
+                this.sessionWriter.trackFileModified(toolCall.arguments.path as string);
+              } else if (toolCall.name === "delete_file" && toolCall.arguments.path) {
+                this.sessionWriter.trackFileDeleted(toolCall.arguments.path as string);
+              }
             }
 
             // Record tool end for reporting
@@ -1837,6 +1942,7 @@ export class Agent {
                 const commitHash = extractCommitHash(result);
                 if (commitHash) {
                   this.reportingContext.addGitCommit(commitHash);
+                  this.sessionWriter.trackGitCommit(commitHash);
                 }
               }
               if (toolCall.name === "git_status" || toolCall.name === "git_branch") {
@@ -1853,7 +1959,7 @@ export class Agent {
               tool: toolCall.name,
               toolInput: toolCall.arguments,
               toolOutput: result,
-              duration: Date.now() - toolStartTime,
+              duration: toolDuration,
               error: toolError,
               workingDirectory: this.config.workingDirectory || process.cwd(),
             });
@@ -1861,6 +1967,9 @@ export class Agent {
             return { name: toolCall.name, result };
           })
         );
+
+        // Log turn end (continuing with tool results)
+        this.sessionWriter.writeTurnEnd(turnIndex, "tool_calls", turnUsage);
 
         // Add assistant message with tool calls
         this.messages.push({ role: "assistant", content });
@@ -1881,6 +1990,16 @@ export class Agent {
       } else {
         // No tool call, return the response
         this.messages.push({ role: "assistant", content });
+
+        // Log final assistant message
+        this.sessionWriter.writeAssistantMessage(content, {
+          usage: turnUsage,
+          turnIndex,
+          containsToolCalls: false,
+        });
+
+        // Log turn end (natural stop)
+        this.sessionWriter.writeTurnEnd(turnIndex, "natural_stop", turnUsage);
 
         // Generate completion report
         let finalContent = content;
@@ -1917,6 +2036,13 @@ export class Agent {
         return content;
       }
     }
+
+    // Log max turns reached
+    this.sessionWriter.writeTurnEnd(turns - 1, "max_turns");
+    this.sessionWriter.writeError({
+      message: "Max turns reached",
+      recoverable: false,
+    });
 
     // Generate completion report for max turns
     if (this.reportingContext && this.enableReporting) {
@@ -2097,6 +2223,10 @@ export class Agent {
     return this.enableReporting;
   }
 
+  getSessionFilePath(): string {
+    return this.sessionWriter.getFilePath();
+  }
+
   private getLanguageInstruction(): string {
     try {
       // Dynamic import would be better but for sync constructor we use require-style
@@ -2117,9 +2247,17 @@ export class Agent {
   }
 
   /**
-   * Cleanup LSP clients on shutdown
+   * Cleanup LSP clients and finalize session on shutdown
    */
   async cleanup(): Promise<void> {
+    // Finalize session log
+    try {
+      const lastReport = this.getLastReport();
+      this.sessionWriter.writeSessionEnd("user_exit", lastReport?.id ?? null);
+    } catch {
+      // Session writer may already be closed
+    }
+
     const manager = getLSPManager();
     await manager.stopAll();
   }
