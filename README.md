@@ -9,7 +9,7 @@
 [![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-blue)](https://ollama.ai)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-Free%20Models-purple)](https://openrouter.ai)
 [![Version](https://img.shields.io/badge/version-0.3.0-brightgreen)](https://github.com/8gi-foundation/8gent-code)
-[![Benchmarks](https://img.shields.io/badge/benchmarks-44%20tests-orange)](docs/BENCHMARKS.md)
+[![Benchmarks](https://img.shields.io/badge/benchmarks-39%20tests-orange)](docs/BENCHMARKS.md)
 [![Twitter](https://img.shields.io/twitter/follow/[REDACTED]?style=social)](https://twitter.com/[REDACTED])
 
 <p align="center">
@@ -45,7 +45,8 @@
 2. **Install Bun:** https://bun.sh
 3. **Pull a model:**
    ```bash
-   ollama pull glm-4.7-flash:latest  # or qwen2.5, llama3, mistral, etc.
+   ollama pull qwen3.5        # Best coding model (March 2026, 6.6GB)
+   ollama pull devstral        # Mistral's code specialist (14GB, optional)
    ```
 
 ### Install
@@ -297,45 +298,75 @@ External Repo → Quarantine → Security Scan → Abstract → Toolshed
 
 ---
 
-## 🏆 Benchmarks: 8gent vs Claude Code
+## 🏆 Benchmarks: 39 Execution-Graded Tests
 
-8gent uses [Karpathy's autoresearch methodology](https://github.com/karpathy/autoresearch) to iteratively improve its system prompts. The harness runs benchmarks in a loop, identifies weaknesses, and enhances prompts automatically.
+8gent uses [Karpathy's autoresearch methodology](https://github.com/karpathy/autoresearch) to iteratively improve its system prompts. The harness runs benchmarks in a loop, identifies weaknesses, mutates prompts, and re-runs — scores improve automatically.
 
-### Core Results (5 Benchmarks)
+**Not HumanEval. Not LeetCode.** Real freelance tasks worth $500-$1,500 each, across 15 professional domains. Every benchmark is execution-graded — code runs against `bun:test` suites or it doesn't.
 
-| Benchmark | Category | 8gent Best | Claude Code | Result |
-|-----------|----------|------------|-------------|--------|
-| BF001 Race Conditions | Bug Fixing | **100** | 95 | 8gent wins |
-| BF002 Memory Leaks | Bug Fixing | 85 | **92** | Claude wins |
-| BF003 Null References | Bug Fixing | **100** | 90 | 8gent wins |
-| FM001 Input Validation | File Manipulation | **100** | 88 | 8gent wins |
-| FI001 LRU Caching | Feature Impl | **100** | 93 | 8gent wins |
+### How Grading Works
 
-**Best single iteration: 3/5 wins simultaneously** (Iteration 11)
+- **Execution (70%)** — code is compiled, run against test assertions. Score = passed/total.
+- **Keyword (30%)** — checks for domain-specific patterns (JWT, topological sort, NPV, etc.)
+- **Temperature sweep** — each benchmark runs at temp 0.3, 0.5, 0.7. Best result kept.
 
-### Benchmark Categories (44 Total)
+### Battle Test Results (15 Professional Domains)
 
-| Category | Benchmarks | Focus |
-|----------|------------|-------|
-| Bug Fixing | 5 | Race conditions, memory leaks, null refs |
-| File Manipulation | 3 | Validation, refactoring, migrations |
-| Feature Implementation | 3 | Caching, auth, API design |
-| Test Generation | 3 | Unit tests, edge cases, mocking |
-| Code Review | 3 | Security, performance, patterns |
-| Documentation | 3 | API docs, README, inline comments |
-| Multi-File | 3 | Cross-file refactoring, dependency updates |
-| Three.js / 3D | 3 | Rotating cube, GLTF loading, shaders |
-| React Native / Expo | 3 | Animated lists, bottom sheets, camera |
-| Next.js | 3 | Server components, actions, middleware |
-| Creative | 3 | Lyrics, Tone.js music, p5.js art |
-| Human Skills | 10 | Autonomy, life skills, social, philosophy, ethics |
+All local inference via Ollama. **$0 cost.**
 
-Run benchmarks:
+| ID | Domain | Task | Score | Status |
+|----|--------|------|-------|--------|
+| BT001 | Software Engineering | SaaS Auth System — JWT, Roles, Rate Limiting | **94** | PASS |
+| BT002 | Software Engineering | Event-Driven Architecture — Pub/Sub, DLQ, Retry | **92** | PASS |
+| BT003 | Data Engineering | Data Pipeline — Stream Processing, Validation | **100** | PERFECT |
+| BT004 | Developer Tools | CLI Framework — Parser, Help, Flags, Subcommands | 53 | Improving |
+| BT005 | Software Engineering | State Machine — Typed Transitions, Guards, Actions | **92** | PASS |
+| BT006 | Financial Consulting | Financial Dashboard — ROI, NPV, IRR, EBITDA | 54 | Improving |
+| BT007 | Digital Marketing | SEO Audit Engine — Meta, Scoring, Core Web Vitals | **96** | PASS |
+| BT008 | Marketing Automation | Email Campaign — Templates, A/B Testing, Analytics | 54 | Improving |
+| BT009 | DevOps | CI/CD Pipeline — DSL, Dependency Graph, YAML | 33 | Improving |
+| BT010 | Design Systems | Design Tokens — Multi-Format Export, Scales | 39 | Improving |
+| BT011 | Video Production | Video Planner — Scene Graph, Timeline, FFmpeg | **100** | PERFECT |
+| BT012 | Music Technology | Music Theory — Notes, Chords, Scales, Progressions | **81** | PASS |
+| BT013 | Data Visualization | Charts, Scales, Layouts in SVG/ASCII | 30 | Improving |
+| BT014 | AI Consulting | Report Generator — Assessment, Roadmap | **95** | PASS |
+| BT015 | Cybersecurity | Security Audit — Scanner, Vuln DB, Reports | 30 | Improving |
+
+**Iteration 1:** Average 69, 8/15 passing. **Iteration 2 in progress** — BT001 already jumped 85 → 94 with mutations.
+
+### All Categories (39 Benchmarks)
+
+| Category | Count | Focus |
+|----------|-------|-------|
+| Bug Fixing | 3 | Race conditions, memory leaks, null refs |
+| File Manipulation | 1 | Input validation with structured errors |
+| Feature Implementation | 1 | LRU cache with TTL and stats |
+| Fullstack | 3 | REST API auth, task queues, state machines |
+| Agentic | 7 | Config parsing, ETL, reverse engineering, debugging |
+| UI Design | 8 | Neumorphic, glassmorphism, 3D, animations, responsive |
+| Battle Test | 15 | 15 professional domains (see table above) |
+
+### Key Findings
+
+1. **Knowledge vs Execution gap** — models score 100% on keywords but 0% on execution for complex tasks. They know every pattern but can't produce coordinated code that runs.
+2. **Temperature matters** — same model scores 43 at temp=0.3 and 92 at temp=0.7 on the same benchmark.
+3. **Mutations compound** — BT001 went 85→94 after one round of mutations. The system learns from its own failures.
+4. **Multi-model fallback** — devstral scored 100 on BT003 when qwen3.5 timed out. Different models excel at different domains.
+
+### Run Benchmarks
+
 ```bash
-bun run benchmarks/autoresearch/harness.ts
+# Single pass (all benchmarks)
+bun run benchmark:v2
+
+# Autoresearch loop (iterative improvement)
+CATEGORY=battle-test MAX_ITERATIONS=5 bun run benchmark:loop
+
+# Overnight continuous runner (all categories)
+bash benchmarks/autoresearch/overnight-runner.sh
 ```
 
-See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for full details.
+Full benchmark details: [benchmarks/README.md](benchmarks/README.md)
 
 ---
 
