@@ -48,3 +48,35 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 | Accent | `color="magenta"` |
 | Info/borders | `color="blue"` |
 | Status badges | `inverse color="green"` etc. |
+
+## TUI Design System
+
+The TUI follows a **design-system-first** architecture. Never use raw Ink `<Text>` or `<Box>` in screens — use the primitive layer.
+
+### Structure
+
+```
+apps/tui/src/
+  theme/          # tokens → semantic → ThemeProvider
+  components/
+    primitives/   # AppText, MutedText, Heading, Label, Stack, Inline, Card, Badge, etc.
+    feedback/     # Alert, SpinnerRow, ProgressBar
+    forms/        # TextField, SelectField
+    data-display/ # Table, KeyValueList
+    navigation/   # Header, Footer
+    (existing)    # All legacy components refactored to use primitives
+  hooks/          # useHotkeys, useViewport, useAsyncTask, useSelection, useGhostSuggestion
+  lib/            # text (truncate, wrapText), layout (clamp, columnWidth), format (formatTokens, formatDuration)
+  screens/        # ChatScreen, OnboardingScreen — compose components, no raw styling
+  app/            # providers.tsx (ThemeProvider + ADHDMode)
+```
+
+### Rules
+
+1. **No raw colors in app code** — use tokens/semantic or primitives (`<MutedText>`, `<ErrorText>`, etc.)
+2. **No `<Text>` or `<Box>` in screens** — compose from primitives and widgets
+3. **Formatting lives in `lib/`** — use `formatTokens()`, `formatDuration()`, `truncate()`, not inline logic
+4. **Layouts use primitives** — `<Stack>` for vertical, `<Inline>` for horizontal, `<Spacer>` for flex fill, `<Divider>` for separators
+5. **All reusable UI in `components/`** — screens only compose, never implement raw UI
+6. **Loading/error/empty are standard components** — never ad hoc
+7. **Every width-sensitive display uses `truncate()`** from lib
