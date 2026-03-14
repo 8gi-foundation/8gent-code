@@ -2,67 +2,101 @@
 
 All notable changes to 8gent Code will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+---
 
-## [0.3.0] - 2026-03-12
-
-### Added
-- **Autoresearch harness**: Karpathy-style iterative prompt improvement loop
-- **44 benchmarks across 12 categories**: Bug fixing, feature implementation, file manipulation, test generation, code review, documentation, multi-file, Three.js/3D, React Native/Expo, Next.js, creative, human skills
-- **OpenRouter free models**: Support for free cloud models (Qwen3, Llama 3.3, Gemma 3, DeepSeek V3) for users without local GPUs
-- **Enhanced system prompts**: Autoresearch-tuned patterns for bug fixing, file manipulation, and feature implementation
-- **Benchmark grading rubric**: Correctness 40%, Code Quality 25%, Efficiency 20%, Best Practices 15%
-- **Results tracking**: TSV-based results log with iteration-level tracking
-
-### Changed
-- **System prompt architecture**: Composable segments (IDENTITY, ARCHITECTURE, BMAD, TOOL_PATTERNS, ERROR_RECOVERY)
-- **Context compression**: Token-efficient conversation history with decay rates
-- **Provider abstraction**: Unified provider interface supporting Ollama and OpenRouter
-
-### Results
-- 8gent beats Claude Code on 4/5 core benchmarks (race conditions, null refs, validation, LRU caching)
-- Best iteration: 3/5 simultaneous wins
-- Autoresearch-tuned prompts improve local model performance by 15-50 points on targeted tasks
-
-## [0.2.0] - 2025-03-11
+## [0.3.0] — 2026-03-14
 
 ### Added
-- **Multi-provider support**: Ollama, OpenRouter, Groq, Grok, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate
-- **Multi-language support**: 30+ languages with `/language` commands
-- **Voice TTS system**: Task completion announcements via macOS `say` command
-- **GentlemanInput**: Claude Code-style input with ghost text suggestions
-- **Provider commands**: `/provider list`, `/provider set`, `/provider key`
-- **Voice commands**: `/voice on/off/test`, `/voice voice <name>`, `/voice settings`
-- **Language commands**: `/language`, `/language set <code>`, `/language list`
-- Animated TUI components with Ink
-- Status bar with model info and token savings
-- Evidence panel for validation reports
+- **packages/eight/** — New core agent engine (replaces packages/agent/)
+  - Non-blocking agent with always-visible input and message queue
+  - Real-time streaming of assistant reasoning into chat
+  - Ollama, LM Studio, and OpenRouter client modules
+  - Context engineering and prompt system
+  - Full REPL with tool loop
+- **packages/ai/** — Vercel AI SDK integration
+  - ToolLoopAgent with multi-turn conversation support
+  - Provider abstraction (Ollama, OpenRouter, LM Studio)
+  - Toolshed bridge for dynamic tool loading
+- **packages/harness-cli/** — Headless CLI for running and inspecting 8gent sessions
+  - `harness run` / `harness inspect` / `harness doctor` / `harness sessions`
+- **packages/specifications/** — Session spec v2 with full AI SDK data model
+  - JSON schema, reader, writer for session persistence
+- **apps/debugger/** — Next.js session debugger app
+  - Session list, viewer, streaming, copy-as-JSON
+- **benchmarks/** — Full v2 benchmark suite (39 benchmarks, 7 categories)
+  - Autoresearch harness with Ollama + OpenRouter fallback
+  - Experience-based model router (learns best model per domain)
+  - Execution grader (SWE-bench style, 70% exec + 30% keyword)
+  - 15 battle-test benchmarks across professional domains
+  - Prompt mutation system with failure analysis
+  - Overnight runner for continuous improvement
+- **packages/dreams/** — Creative scripts for video generation
+- **TUI overhaul**
+  - Design-system-first architecture with primitives layer
+  - Process sidebar (Ctrl+B) for background tasks
+  - useLayout hook for centralized panel/pane state
+  - Theme tokens and semantic color system
+  - Pinned process sidebar with overflow scroll fix
+- `8` CLI alias (short for `8gent`)
+- Background task auto-promotion for long-running commands
+- Spatial awareness and "orient first" rules in system prompt
+- Loop detection and lightweight run log
 
 ### Changed
-- Improved BMAD method implementation
-- Enhanced system prompt with personality
-- Better AST-first code navigation
-- Updated documentation for v0.2.0
+- **Breaking:** `packages/agent/` renamed to `packages/eight/`
+- Agent now uses Vercel AI SDK ToolLoopAgent instead of raw fetch
+- Session spec upgraded to v2 (incompatible with v1 sessions)
+- System prompt refined with scaffolding guidance, dev server warnings
+- All TUI components migrated from raw colors to design system primitives
 
 ### Fixed
-- Token efficiency improvements
-- Better error handling for tool execution
+- .env loading from repo root and ~/.8gent when running from another directory
+- Tool call visibility in message stream
+- Command failures now shown inline
+- list_files no longer hides directories
+- JSON tool format removed from prompt (uses native function calling)
 
-## [0.1.0] - 2025-03-01
+### Battle Test Scores (v0.3.0)
+| Benchmark | Domain | Score |
+|-----------|--------|-------|
+| BT001 | Auth System | 94 |
+| BT002 | Event Architecture | 92 |
+| BT003 | Data Pipeline | 100 |
+| BT005 | State Machine | 92 |
+| BT007 | SEO Audit | 96 |
+| BT011 | Video Production | 100 |
+| BT012 | Music Theory | 81 |
+| BT014 | AI Consulting | 95 |
+
+---
+
+## [0.2.0] — 2026-03-10
+
+### Added
+- OpenRouter provider wired into TUI and agent runtime
+- Benchmark suite v1 (bug-fixing, file-manipulation, feature-implementation)
+- Autoresearch loop (Karpathy methodology)
+- Few-shot examples per benchmark category
+- Temperature sweep (0.3, 0.5, 0.7)
+- Fullstack benchmarks (FS001-FS003, FS-MEGA-001)
+- Agentic benchmarks (TC001, DP001, RE001, SD001, AR001, CB001, MR001)
+- UI design benchmarks (UI001-UI008)
+- Reporting module with token savings calculator
+
+### Changed
+- Prompt mutation system with deduplication (exact + 70% word overlap)
+
+---
+
+## [0.1.0] — 2026-02-28
 
 ### Added
 - Initial release
-- Core agent loop with Ollama integration
-- Tool execution (file operations, terminal, git)
-- Basic TUI with message list
-- BMAD method planning
-- AST extraction for token savings
-- Global installation via symlink
-
-[Unreleased]: https://github.com/PodJamz/8gent-code/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/PodJamz/8gent-code/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/PodJamz/8gent-code/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/PodJamz/8gent-code/releases/tag/v0.1.0
+- Ink v6 TUI with chat interface
+- Ollama integration (local LLM inference)
+- Basic tool system (file read/write, shell commands)
+- System prompt with coding agent persona
+- Demo savings calculator
