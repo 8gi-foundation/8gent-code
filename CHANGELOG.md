@@ -7,6 +7,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.1] — 2026-03-14
+
+### Added
+- Agent mode cycling (Ctrl+T): Planning, Researching, Implementing, Testing, Debugging
+- Kanban auto-population from agent PLAN: output — parses numbered steps into cards
+- Kanban auto-advancement: Ready → In Progress on tool start, → Done on tool end
+- Dynamic model fetching per provider (Ollama, OpenRouter, LM Studio)
+
+### Fixed
+- ADHD mode toggle (stale closure — only toggled on, never off)
+- Scroll jumping — removed overflow:hidden, capped visible messages to 50
+- Re-planning loop — agent now plans once then executes immediately
+- Replaced "Demoing" mode with "Debugging"
+
+---
+
 ## [0.3.0] — 2026-03-14
 
 ### Added
