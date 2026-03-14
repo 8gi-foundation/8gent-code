@@ -1,6 +1,6 @@
 {
   "name": "8gent-code",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "private": false,
   "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
   "type": "module",
@@ -24,7 +24,7 @@
     "build": "bun build packages/eight/index.ts --outfile dist/cli.js --target node && chmod +x dist/cli.js",
     "build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
     "prepublishOnly": "npm run build",
-    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull qwen3.5\\n')\"",
+    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull qwen3.5\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
     "test": "bun test",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
@@ -47,6 +47,7 @@
     "@biomejs/biome": "^1.5.0",
     "@types/bun": "latest",
     "@types/jsdom": "^28.0.0",
+    "bmad-method": "^6.1.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {

@@ -7,10 +7,10 @@ Thank you for your interest in contributing to 8gent Code — The Infinite Gentl
 8gent is built on a simple principle: **structure beats brute-force**.
 
 Instead of reading entire files and searching through codebases, we use:
-- AST-first symbol retrieval (97% token savings)
-- Proactive planning via BMAD method
-- Multi-agent orchestration for complex tasks
-- Evidence-based validation
+- **AST-first symbol retrieval** — `indexFolder()` parses TS/JS files into symbol maps; `getSymbolSource()` extracts specific symbols (97% token savings)
+- **BMAD universal planning** — classifies tasks (Code, Creative, Research, Planning, Communication) and adapts approach; proactive planner tracks momentum and predicts next steps
+- **Multi-agent orchestration** — spawn background agents, kanban board, agent pool management
+- **Evidence-based validation** — EvidenceCollector fires after file writes, commands, and git commits; session-level evidence summary
 
 ## Getting Started
 

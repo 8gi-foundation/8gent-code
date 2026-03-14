@@ -8,7 +8,7 @@
 [![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f9f1e1?logo=bun&logoColor=000)](https://bun.sh)
 [![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-blue)](https://ollama.ai)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-Free%20Models-purple)](https://openrouter.ai)
-[![Version](https://img.shields.io/badge/version-0.3.1-brightgreen)](https://github.com/PodJamz/8gent-code)
+[![Version](https://img.shields.io/badge/version-0.5.0-brightgreen)](https://github.com/PodJamz/8gent-code)
 [![Benchmarks](https://img.shields.io/badge/benchmarks-39%20tests-orange)](docs/BENCHMARKS.md)
 [![Twitter](https://img.shields.io/twitter/follow/james__spalding?style=social)](https://twitter.com/james__spalding)
 

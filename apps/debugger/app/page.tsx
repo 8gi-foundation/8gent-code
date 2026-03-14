@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import SessionList from "./components/SessionList";
 import SessionViewer from "./components/SessionViewer";
+import SystemHealth from "./components/SystemHealth";
 import type { SessionInfo } from "./api/sessions/route";
 
 export default function Home() {
@@ -12,6 +13,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(360);
   const [dragging, setDragging] = useState(false);
+  const [view, setView] = useState<"sessions" | "health">("sessions");
 
   // Read session ID from URL on mount
   const getSessionIdFromURL = useCallback(() => {
@@ -91,7 +93,7 @@ export default function Home() {
         className="flex-shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col"
         style={{ width: sidebarWidth }}
       >
-        {/* Logo */}
+        {/* Logo + View Toggle */}
         <div className="px-4 py-3 border-b border-zinc-800">
           <div className="flex items-center gap-2">
             <span className="text-emerald-400 font-mono font-bold text-lg">
@@ -99,9 +101,28 @@ export default function Home() {
             </span>
             <span className="text-zinc-600 text-xs">debugger</span>
           </div>
-          <p className="text-[10px] text-zinc-600 mt-0.5">
-            {loading ? "Loading..." : `${sessions.length} sessions`}
-          </p>
+          <div className="flex items-center gap-1 mt-2">
+            <button
+              onClick={() => setView("sessions")}
+              className={`text-[10px] px-2 py-1 rounded ${
+                view === "sessions"
+                  ? "bg-emerald-500/20 text-emerald-400"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              Sessions {!loading && `(${sessions.length})`}
+            </button>
+            <button
+              onClick={() => setView("health")}
+              className={`text-[10px] px-2 py-1 rounded ${
+                view === "health"
+                  ? "bg-cyan-500/20 text-cyan-400"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              System Health
+            </button>
+          </div>
         </div>
 
         {error ? (
@@ -125,7 +146,9 @@ export default function Home() {
 
       {/* Main content */}
       <div className="flex-1 min-w-0">
-        {active ? (
+        {view === "health" ? (
+          <SystemHealth />
+        ) : active ? (
           <SessionViewer session={active} />
         ) : (
           <div className="flex items-center justify-center h-full text-zinc-700">
