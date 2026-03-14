@@ -448,6 +448,18 @@ export function App({ initialCommand, args }: AppProps) {
             onStepFinish: (event: AgentStepEvent) => {
               setStepCount((prev) => prev + 1);
               setTotalTokens((prev) => prev + event.usage.totalTokens);
+
+              // Stream assistant's intermediate reasoning into the message list
+              // so the user can see what the agent is thinking between tool calls
+              if (event.text && event.text.trim()) {
+                setMessages((prev) => [...prev, {
+                  id: `assistant-step-${event.stepNumber}-${Date.now()}`,
+                  role: "assistant" as const,
+                  content: event.text,
+                  timestamp: new Date(),
+                }]);
+              }
+
               // Determine stage from step content
               if (event.toolCalls.length > 0) {
                 setProcessingStage("executing");
@@ -996,18 +1008,12 @@ export function App({ initialCommand, args }: AppProps) {
     if (agent && agentReady) {
       // Real agent execution
       try {
-        const response = await agent.chat(input);
+        await agent.chat(input);
         const endTime = Date.now();
         setLastResponseTime(endTime - cmdStartTime);
 
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: response,
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
+        // Don't add the final response — it was already streamed via
+        // onStepFinish events into the message list in real-time.
         setIsProcessing(false);
         setActiveTool(null);
         setStatus("success");
