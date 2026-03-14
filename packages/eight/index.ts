@@ -17,7 +17,10 @@
  */
 
 // Types
-export type { Message, ToolCall, AgentConfig, LLMResponse, LLMClient } from "./types";
+export type {
+  Message, ToolCall, AgentConfig, LLMResponse, LLMClient,
+  AgentEventCallbacks, AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent,
+} from "./types";
 
 // System prompt
 export { DEFAULT_SYSTEM_PROMPT } from "./prompt";

@@ -9,7 +9,7 @@
  */
 
 import * as crypto from "crypto";
-import type { AgentConfig } from "./types";
+import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { createClient } from "./clients";
 import { ToolExecutor } from "./tools";
@@ -42,9 +42,11 @@ export class Agent {
   private messageHistory: Array<{ role: string; content: string }> = [];
   private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
   private loopWarningInjected = false;
+  private events: AgentEventCallbacks;
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.events = config.events || {};
     this.executor = new ToolExecutor(config.workingDirectory || process.cwd());
     this.hookManager = getHookManager();
     this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -150,6 +152,13 @@ export class Agent {
 
         console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
 
+        this.events.onToolStart?.({
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          args: event.args,
+          stepNumber: event.stepNumber,
+        });
+
         this.sessionWriter.writeToolCall({
           toolCallId: event.toolCallId,
           name: event.toolName,
@@ -210,6 +219,15 @@ export class Agent {
           );
         }
 
+        this.events.onToolEnd?.({
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          args: event.args,
+          success: event.success,
+          durationMs: event.durationMs,
+          stepNumber: event.stepNumber,
+        });
+
         // Track file operations
         if (event.success) {
           if (event.toolName === "write_file" && event.args.path) {
@@ -241,6 +259,21 @@ export class Agent {
 
       onStepFinish: async (event: StepFinishEvent) => {
         stepCount++;
+
+        this.events.onStepFinish?.({
+          stepNumber: event.stepNumber,
+          finishReason: event.finishReason,
+          text: event.text ?? "",
+          toolCalls: (event.toolCalls ?? []).map((tc: any) => ({
+            toolName: tc.toolName ?? "",
+            toolCallId: tc.toolCallId ?? "",
+          })),
+          usage: {
+            promptTokens: event.usage.promptTokens,
+            completionTokens: event.usage.completionTokens,
+            totalTokens: event.usage.totalTokens,
+          },
+        });
 
         // Check for premature completion claims
         if (event.text && event.text.includes("🎯 COMPLETED") && event.finishReason === "stop") {
