@@ -1414,11 +1414,22 @@ export function App({ initialCommand, args }: AppProps) {
 
       case "chat":
       default:
+        // TV Mode: show task cards when agent is using tools
+        // Fall back to message list for text-only conversation
+        if (tvTasks.length > 0) {
+          return (
+            <NarratorView
+              tasks={tvTasks}
+              narratorText={narratorText}
+              maxHeight={Math.max(viewport.height - 12, 10)}
+            />
+          );
+        }
         return (
-          <NarratorView
-            tasks={tvTasks}
-            narratorText={narratorText}
-            maxHeight={Math.max(viewport.height - 12, 10)}
+          <MessageList
+            messages={messages}
+            animateTyping={showAnimations}
+            soundEnabled={soundEnabled}
           />
         );
     }
