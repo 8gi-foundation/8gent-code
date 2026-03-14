@@ -17,9 +17,10 @@ import { AppText, MutedText, Inline } from './primitives/index.js';
 interface HeaderProps {
   isProcessing?: boolean;
   showAnimations?: boolean;
+  updateAvailable?: { latest: string; current: string } | null;
 }
 
-export function Header({ isProcessing = false, showAnimations = true }: HeaderProps) {
+export function Header({ isProcessing = false, showAnimations = true, updateAvailable }: HeaderProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -61,6 +62,15 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
 
         {/* Tagline with subtle animation */}
         <TaglineText animate={showAnimations} />
+
+        {/* Update notification */}
+        {updateAvailable && (
+          <>
+            <MutedText>│</MutedText>
+            <AppText color="yellow"> ↑ v{updateAvailable.latest} available</AppText>
+            <MutedText> git pull && bun install</MutedText>
+          </>
+        )}
       </Inline>
     </RainbowBorder>
   );

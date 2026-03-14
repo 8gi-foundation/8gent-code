@@ -56,6 +56,7 @@ import { type TaskItem } from "./components/task-card/index.js";
 import { NarratorView } from "./screens/index.js";
 import { narrateToolStart, narrateToolEnd, narratePlan, narrateStep } from "./lib/narrator.js";
 import { useViewport } from "./hooks/useViewport.js";
+import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 
 // Import permission system for infinite mode
 import {
@@ -358,6 +359,9 @@ export function App({ initialCommand, args }: AppProps) {
   // Agent instance for real execution
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
+
+  // Check for updates on launch (non-blocking)
+  const updateInfo = useUpdateCheck();
 
   // TV Mode state — task cards + narrator
   const viewport = useViewport();
@@ -1427,7 +1431,7 @@ export function App({ initialCommand, args }: AppProps) {
       {fancyHeader ? (
         <FancyHeader isProcessing={isProcessing} />
       ) : (
-        <Header isProcessing={isProcessing} showAnimations={showAnimations} />
+        <Header isProcessing={isProcessing} showAnimations={showAnimations} updateAvailable={updateInfo} />
       )}
 
       {/* Main content area with optional process sidebar on right */}
