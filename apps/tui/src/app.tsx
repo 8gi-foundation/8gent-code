@@ -1258,7 +1258,7 @@ export function App({ initialCommand, args }: AppProps) {
       case "model-select":
         return modelsLoading ? (
           <Box flexDirection="column" padding={1}>
-            <Text bold>Fetching models from {currentProvider}...</Text>
+            <AppText bold>Fetching models from {currentProvider}...</AppText>
           </Box>
         ) : (
           <ModelSelector
@@ -1561,13 +1561,11 @@ export function App({ initialCommand, args }: AppProps) {
       <Box paddingX={1} marginTop={1} gap={1}>
         {AGENT_MODES.map((mode) => (
           <Box key={mode}>
-            <Text
-              color={agentMode === mode ? "cyan" : undefined}
-              bold={agentMode === mode}
-              dimColor={agentMode !== mode}
-            >
-              {agentMode === mode ? `[${mode}]` : ` ${mode} `}
-            </Text>
+            {agentMode === mode ? (
+              <AppText color="cyan" bold>{`[${mode}]`}</AppText>
+            ) : (
+              <MutedText>{` ${mode} `}</MutedText>
+            )}
           </Box>
         ))}
         <MutedText> ^T mode</MutedText>
