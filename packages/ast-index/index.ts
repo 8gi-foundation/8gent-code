@@ -8,6 +8,9 @@
  */
 
 import type { Symbol, SymbolKind, FileOutline, RepoIndex } from "../types";
+import { parseTypeScriptFile } from "./typescript-parser";
+import * as fs from "fs";
+import * as path from "path";
 
 // Parser interface - will be implemented with tree-sitter or native TS parser
 export interface Parser {
@@ -49,14 +52,66 @@ const fileOutlines: Map<string, Map<string, FileOutline>> = new Map();
  * Index a local folder
  */
 export async function indexFolder(
-  path: string,
+  folderPath: string,
   options?: {
     incremental?: boolean;
     ignorePatterns?: string[];
   }
 ): Promise<RepoIndex> {
-  // TODO: Implement with tree-sitter
-  throw new Error("Not implemented - need parser integration");
+  const absolutePath = path.resolve(folderPath);
+  const repoId = path.basename(absolutePath);
+  const ignorePatterns = options?.ignorePatterns ?? ["node_modules", "dist", ".git", ".next", "coverage"];
+
+  const files: string[] = [];
+  function walkDirectory(dir: string): void {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (ignorePatterns.some(p => entry.name === p || entry.name.startsWith("."))) continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walkDirectory(fullPath);
+      } else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
+        files.push(fullPath);
+      }
+    }
+  }
+  walkDirectory(absolutePath);
+
+  const repoSymbolMap = new Map<string, Symbol>();
+  const repoFileOutlines = new Map<string, FileOutline>();
+  const languages: Record<string, number> = {};
+
+  for (const file of files) {
+    try {
+      const outline = parseTypeScriptFile(file);
+      const relativePath = path.relative(absolutePath, file);
+      repoFileOutlines.set(relativePath, outline);
+
+      const lang = outline.language;
+      languages[lang] = (languages[lang] || 0) + 1;
+
+      for (const symbol of outline.symbols) {
+        repoSymbolMap.set(symbol.id, symbol);
+      }
+    } catch {
+      // Skip files that fail to parse
+    }
+  }
+
+  const repoIndex: RepoIndex = {
+    id: repoId,
+    sourceRoot: absolutePath,
+    indexedAt: new Date().toISOString(),
+    fileCount: repoFileOutlines.size,
+    symbolCount: repoSymbolMap.size,
+    languages,
+  };
+
+  repoIndices.set(repoId, repoIndex);
+  symbolMaps.set(repoId, repoSymbolMap);
+  fileOutlines.set(repoId, repoFileOutlines);
+
+  return repoIndex;
 }
 
 /**
@@ -69,8 +124,7 @@ export async function indexRepo(
     sparse?: boolean;
   }
 ): Promise<RepoIndex> {
-  // TODO: Implement with GitHub API + parser
-  throw new Error("Not implemented - need GitHub integration");
+  throw new Error("Use indexFolder() with a local checkout. Remote indexing not yet supported.");
 }
 
 /**
@@ -97,13 +151,20 @@ export function getSymbol(repoId: string, symbolId: string): Symbol | null {
 export async function getSymbolSource(
   repoId: string,
   symbolId: string,
-  contextLines?: number
+  contextLines: number = 0
 ): Promise<string | null> {
   const symbol = getSymbol(repoId, symbolId);
   if (!symbol) return null;
 
-  // TODO: Read file and extract lines
-  throw new Error("Not implemented - need file reading");
+  try {
+    const content = fs.readFileSync(symbol.filePath, "utf-8");
+    const lines = content.split("\n");
+    const start = Math.max(0, symbol.startLine - 1 - contextLines);
+    const end = Math.min(lines.length, symbol.endLine + contextLines);
+    return lines.slice(start, end).join("\n");
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -206,10 +267,29 @@ export function estimateTokenSavings(
   symbolOnlyTokens: number;
   savingsPercent: number;
 } {
-  // TODO: Implement with actual file sizes
-  return {
-    fullFileTokens: 0,
-    symbolOnlyTokens: 0,
-    savingsPercent: 0,
-  };
+  const outline = fileOutlines.get(repoId)?.get(filePath);
+  if (!outline) {
+    return { fullFileTokens: 0, symbolOnlyTokens: 0, savingsPercent: 0 };
+  }
+
+  let fullFileTokens = 0;
+  try {
+    const stats = fs.statSync(outline.filePath);
+    fullFileTokens = Math.ceil(stats.size / 4);
+  } catch {
+    return { fullFileTokens: 0, symbolOnlyTokens: 0, savingsPercent: 0 };
+  }
+
+  const symbols = symbolIds
+    ? outline.symbols.filter(s => symbolIds.includes(s.id))
+    : outline.symbols;
+
+  const symbolLines = symbols.reduce((sum, s) => sum + (s.endLine - s.startLine + 1), 0);
+  const symbolOnlyTokens = Math.ceil((symbolLines * 40) / 4); // ~40 chars per line estimate
+
+  const savingsPercent = fullFileTokens > 0
+    ? Math.round(((fullFileTokens - symbolOnlyTokens) / fullFileTokens) * 100)
+    : 0;
+
+  return { fullFileTokens, symbolOnlyTokens, savingsPercent };
 }
