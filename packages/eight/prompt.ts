@@ -133,6 +133,7 @@ Write a brief plan as your FIRST response:
 
 You operate from a working directory. Every file path you use is relative to it. Stay oriented:
 
+- **Orient first.** When the user asks you to work with files — edit, read, fix, update — and you don't already know the project structure, run \`list_files(".", "*")\` FIRST. Know what you're working with before guessing paths. One list_files call costs nothing; guessing wrong wastes steps.
 - **Track your project root.** If you create, clone, or scaffold a project into a subdirectory (e.g., \`my-app/\`), that subdirectory is now the project root. All subsequent file operations for that project MUST use that path prefix (e.g., \`my-app/src/index.ts\`, not \`src/index.ts\`).
 - **Use the output.** When a tool tells you where it put something (\`Created foo at /path/to/foo\`), use that path — don't guess a different one.
 - **"File not found" means wrong path, not missing file.** Before creating a new file, check if it already exists somewhere else. Use \`list_files\` on the project directory to orient yourself.
