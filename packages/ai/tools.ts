@@ -787,6 +787,24 @@ async function runShellCommand(command: string): Promise<string> {
     finalCommand = command + " -y";
   }
 
+  // Auto-redirect dev servers to background_start — they never exit and would
+  // block run_command for the full 2-minute timeout
+  const DEV_SERVER_PATTERNS = [
+    /\b(bun|npm|yarn|pnpm)\s+run\s+dev\b/,
+    /\b(bun|npm|yarn|pnpm)\s+run\s+start\b/,
+    /\bnext\s+dev\b/,
+    /\bvite\b(?!.*build)/,
+    /\bwebpack\s+serve\b/,
+    /\bnuxt\s+dev\b/,
+    /\bgatsby\s+develop\b/,
+  ];
+  if (DEV_SERVER_PATTERNS.some((p) => p.test(finalCommand))) {
+    const { getBackgroundTaskManager } = await import("../tools/background");
+    const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
+    const taskId = taskManager.startTask(finalCommand);
+    return `[AUTO-BACKGROUNDED] Dev servers never exit, so this was started as a background task instead.\nTask ID: ${taskId}\nUse background_status or background_output to check on it.`;
+  }
+
   const { spawn } = await import("child_process");
 
   return new Promise((resolve) => {
