@@ -112,8 +112,16 @@ export class Agent {
     }
   }
 
-  async chat(userMessage: string): Promise<string> {
-    this.messageHistory.push({ role: "user", content: userMessage });
+  async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+    // Build message content — multimodal if image attached
+    const content = imageBase64
+      ? [
+          { type: "text" as const, text: userMessage },
+          { type: "image_url" as const, image_url: { url: `data:${imageMimeType || "image/png"};base64,${imageBase64}` } },
+        ]
+      : userMessage;
+
+    this.messageHistory.push({ role: "user", content });
 
     // Log user message to session
     this.sessionWriter.writeUserMessage(userMessage);
