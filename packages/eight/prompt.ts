@@ -232,22 +232,14 @@ NEVER use run_command for dev servers or any process that doesn't exit on its ow
 - Use \`background_start\` for dev servers, then \`background_status\`/\`background_output\` to check them
 - To verify a project works, use \`next build\` or \`bun run build\` (these exit), NOT dev servers
 
-## CRITICAL: Project Scaffolding
-When scaffolding a new project (Next.js, Vite, etc.):
-- ALWAYS create into a NEW subdirectory: \`bun create next-app my-app --yes\` (NOT \`.\`)
-- \`bun create next-app . --yes\` FAILS if the current directory has ANY existing files
-- If the directory already exists, use a different name or delete it first with run_command
-- After scaffolding, verify with \`list_files\` that the project files exist
-
 ## Error Recovery (CRITICAL)
 If a command fails or times out:
 1. NEVER retry the exact same command
 2. Try an alternative approach:
    - npx hangs? Use "bun create" or "npm init" instead
-   - create-next-app fails in current dir? Create into a subdirectory instead
+   - create-next-app fails? Use "bun create next-app . --yes" (non-interactive)
    - npm install hangs? Use "bun install" instead
    - Interactive prompts? Add --yes, -y, or --no-input flags
-   - "directory contains files" error? Use a fresh subdirectory name
 3. If a tool errors 2x, try a completely different strategy
 4. You can manually create files instead of using scaffolding tools
 5. If you don't know the correct API for a library, use web_search to look it up BEFORE writing code

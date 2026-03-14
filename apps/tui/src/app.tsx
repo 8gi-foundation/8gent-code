@@ -136,9 +136,11 @@ interface AppProps {
 
 export interface Message {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
   timestamp: Date;
+  /** For tool messages: whether the tool succeeded */
+  toolSuccess?: boolean;
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
@@ -401,10 +403,30 @@ export function App({ initialCommand, args }: AppProps) {
               setActiveTool(event.toolName);
               setProcessingStage("executing");
               setStatus("executing");
+              // Show tool call in message stream
+              const argsPreview = JSON.stringify(event.args).slice(0, 80);
+              setMessages((prev) => [...prev, {
+                id: `tool-start-${event.toolCallId}`,
+                role: "tool" as const,
+                content: `→ ${event.toolName}(${argsPreview})`,
+                timestamp: new Date(),
+              }]);
             },
-            onToolEnd: (_event: AgentToolEndEvent) => {
+            onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
               setActiveTool(null);
+              // Show tool result in message stream
+              const resultPreview = event.success
+                ? "✓"
+                : "✗ failed";
+              const duration = event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
+              setMessages((prev) => [...prev, {
+                id: `tool-end-${event.toolCallId}`,
+                role: "tool" as const,
+                content: `  ${resultPreview}${duration}`,
+                timestamp: new Date(),
+                toolSuccess: event.success,
+              }]);
             },
             onStepFinish: (event: AgentStepEvent) => {
               setStepCount((prev) => prev + 1);

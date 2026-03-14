@@ -87,6 +87,15 @@ function MessageItem({
     }
   }, [isNew]);
 
+  // Tool messages render as compact inline items
+  if (message.role === "tool") {
+    return (
+      <Box paddingLeft={2}>
+        <MutedText>{message.content}</MutedText>
+      </Box>
+    );
+  }
+
   const roleConfig = {
     user: {
       color: "yellow" as const,
@@ -108,7 +117,7 @@ function MessageItem({
     },
   };
 
-  const config = roleConfig[message.role];
+  const config = roleConfig[message.role as "user" | "assistant" | "system"];
 
   if (!showContent) {
     return (
@@ -154,7 +163,7 @@ function MessageItem({
 
 interface MessageContentProps {
   content: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   isNew: boolean;
   animate: boolean;
   onTypingComplete: () => void;
@@ -256,17 +265,27 @@ function formatTime(date: Date): string {
 
 // Compact message item for dense view
 export function CompactMessageItem({ message }: { message: Message }) {
-  const roleIcons = {
+  const roleIcons: Record<string, string> = {
     user: "→",
     assistant: "←",
     system: "•",
+    tool: " ",
   };
 
-  const roleColors = {
+  const roleColors: Record<string, "yellow" | "cyan" | "green" | "magenta"> = {
     user: "yellow",
     assistant: "cyan",
-    system: "gray",
-  } as const;
+    system: "cyan",
+    tool: "magenta",
+  };
+
+  if (message.role === "tool") {
+    return (
+      <Box paddingLeft={2}>
+        <MutedText>{message.content}</MutedText>
+      </Box>
+    );
+  }
 
   return (
     <Box>
