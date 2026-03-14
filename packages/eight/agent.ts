@@ -13,6 +13,7 @@ import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { createClient } from "./clients";
 import { ToolExecutor } from "./tools";
+import { findVisionModel } from "./vision-router";
 import { getHookManager, type HookManager } from "../hooks";
 import { extractCommitHash, extractBranchName } from "../reporting";
 import { appendRun, type RunLogEntry } from "../reporting/runlog";
@@ -113,6 +114,36 @@ export class Agent {
   }
 
   async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+    // If image attached, auto-discover the best vision model
+    let visionModelOverride: string | null = null;
+    let visionProviderOverride: string | null = null;
+
+    if (imageBase64) {
+      const visionResult = await findVisionModel({
+        openRouterApiKey: this.config.apiKey,
+      });
+
+      if (visionResult.found && visionResult.model) {
+        visionModelOverride = visionResult.model.model;
+        visionProviderOverride = visionResult.model.provider;
+        // Log which vision model we're using
+        this.config.events?.onStepFinish?.({
+          text: `🔍 Vision: using ${visionResult.model.displayName}${visionResult.model.free ? " (free)" : ""}`,
+          stepNumber: 0,
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          finishReason: "other",
+        } as any);
+      } else {
+        // No vision model available — send text-only with a note
+        this.config.events?.onStepFinish?.({
+          text: `⚠️ ${visionResult.error || "No vision model available — image will be described in text only."}`,
+          stepNumber: 0,
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          finishReason: "other",
+        } as any);
+      }
+    }
+
     // Build message content — multimodal if image attached
     const content = imageBase64
       ? [
@@ -133,10 +164,10 @@ export class Agent {
     let totalTokensUsed = 0;
     let stepCount = 0;
 
-    // Build provider config from AgentConfig
+    // Build provider config — override with vision model if image attached
     const providerConfig: ProviderConfig = {
-      name: this.config.runtime as ProviderName,
-      model: this.config.model,
+      name: (visionProviderOverride || this.config.runtime) as ProviderName,
+      model: visionModelOverride || this.config.model,
       apiKey: this.config.apiKey,
     };
 
