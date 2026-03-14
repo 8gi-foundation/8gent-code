@@ -1235,33 +1235,41 @@ export function App({ initialCommand, args }: AppProps) {
         <Header isProcessing={isProcessing} showAnimations={showAnimations} />
       )}
 
-      {/* Main content area — process views replace chat when active */}
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
-        {processPanel.detailTaskId && processPanel.tasks.find(t => t.id === processPanel.detailTaskId) ? (
-          <ProcessDetailView
-            task={processPanel.tasks.find(t => t.id === processPanel.detailTaskId)!}
-            output={processPanel.detailOutput}
-            onClose={processPanel.closeDetail}
-            onKill={() => {
-              const killed = processPanel.killSelected();
-              if (killed) {
-                setMessages((prev) => [...prev, {
-                  id: `system-kill-${Date.now()}`,
-                  role: "system" as const,
-                  content: `Process killed: "${killed.command.slice(0, 60)}"`,
-                  timestamp: new Date(),
-                }]);
-              }
-            }}
-            height={30}
-          />
-        ) : processPanel.sidebarOpen ? (
+      {/* Main content area with optional process sidebar on right */}
+      <Box flexDirection="row" flexGrow={1}>
+        {/* Left: main content (chat / kanban / etc.) or process detail */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1}>
+          {processPanel.detailTaskId && processPanel.tasks.find(t => t.id === processPanel.detailTaskId) ? (
+            <ProcessDetailView
+              task={processPanel.tasks.find(t => t.id === processPanel.detailTaskId)!}
+              output={processPanel.detailOutput}
+              onClose={processPanel.closeDetail}
+              onKill={() => {
+                const killed = processPanel.killSelected();
+                if (killed) {
+                  setMessages((prev) => [...prev, {
+                    id: `system-kill-${Date.now()}`,
+                    role: "system" as const,
+                    content: `Process killed: "${killed.command.slice(0, 60)}"`,
+                    timestamp: new Date(),
+                  }]);
+                }
+              }}
+              height={30}
+            />
+          ) : (
+            renderMainContent()
+          )}
+        </Box>
+
+        {/* Right: process sidebar */}
+        {processPanel.sidebarOpen && (
           <ProcessSidebar
             tasks={processPanel.tasks}
             selectedIndex={processPanel.selectedIndex}
             focused={processPanel.focusZone === "sidebar"}
             taskCounts={processPanel.taskCounts}
-            width={60}
+            width={32}
             onNext={processPanel.nextTask}
             onPrev={processPanel.prevTask}
             onOpen={processPanel.openDetail}
@@ -1278,8 +1286,6 @@ export function App({ initialCommand, args }: AppProps) {
             }}
             onUnfocus={processPanel.focusInput}
           />
-        ) : (
-          renderMainContent()
         )}
       </Box>
 
