@@ -50,6 +50,7 @@ import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, Sho
 import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
+import { useImageInput, ImageBadge } from "./components/image-input.js";
 
 // Import permission system for infinite mode
 import {
@@ -352,6 +353,9 @@ export function App({ initialCommand, args }: AppProps) {
   // Agent instance for real execution
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
+
+  // Image attachment (paste image paths or drag-drop)
+  const imageInput = useImageInput({});
 
   // Background process panel
   const processPanel = useProcessPanel();
@@ -1080,8 +1084,14 @@ export function App({ initialCommand, args }: AppProps) {
   }, []);
 
   // Handle command submission
-  const handleSubmit = async (input: string) => {
-    if (!input.trim()) return;
+  const handleSubmit = async (rawInput: string) => {
+    if (!rawInput.trim()) return;
+
+    // Check for image paths in pasted input
+    const { text: input, image } = imageInput.processInput(rawInput);
+    if (image) {
+      addSystemMessage(`📷 Image attached: ${image.filename} (${(image.size / 1024).toFixed(1)} KB)`);
+    }
 
     // Handle onboarding answers first
     if (showOnboarding && !input.startsWith("/")) {
@@ -1157,7 +1167,10 @@ export function App({ initialCommand, args }: AppProps) {
         try {
           // Inject agent mode context into the message
           const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
-          await agent.chat(modePrefix + message);
+          const img = imageInput.currentImage;
+          await agent.chat(modePrefix + message, img?.base64, img?.mimeType);
+          // Clear image after sending
+          if (img) imageInput.removeImage();
           setLastResponseTime(Date.now() - cmdStartTime);
           setStatus("success");
           if (soundEnabled) playSound("success");
@@ -1451,6 +1464,13 @@ export function App({ initialCommand, args }: AppProps) {
           </MutedText>
         )}
       </Box>
+
+      {/* Image attachment indicator */}
+      {imageInput.currentImage && (
+        <Box paddingX={1}>
+          <ImageBadge image={imageInput.currentImage} onRemove={imageInput.removeImage} />
+        </Box>
+      )}
 
       {/* Top separator line */}
       <Box paddingX={1}>
