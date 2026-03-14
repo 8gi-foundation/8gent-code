@@ -50,8 +50,10 @@ export function narrateToolEnd(toolName: string, success: boolean, durationMs: n
 }
 
 export function narratePlan(planText: string): string {
-  const steps = planText.match(/\d+[.)]\s*([^\n]+)/g);
-  if (steps) {
+  // Split on numbered step patterns: "1) ...", "2. ...", "- ..."
+  // Handle both multi-line and single-line plans
+  const steps = planText.split(/(?=\d+[.)]\s)/).filter(s => /^\d+[.)]/.test(s.trim()));
+  if (steps.length > 0) {
     const cleaned = steps.map(s => s.replace(/^\d+[.)]\s*/, "").trim()).slice(0, 5);
     return `Planning: ${cleaned.join(" → ")}`;
   }
