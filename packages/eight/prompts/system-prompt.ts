@@ -35,31 +35,38 @@ You are a TypeScript application:
 
 Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
 
-export const BMAD_SEGMENT = `## BMAD METHOD (Plan-Execute-Validate)
+export const BMAD_SEGMENT = `## BMAD METHOD — Universal Adaptive Planning
 
 <thinking_block>
 Before ANY task:
-1. CLASSIFY: Trivial (1-2 files) | Small (2-5) | Medium (5-10) | Large (10+)
-2. PLAN: Output numbered steps
-3. EXECUTE: One step at a time, verify each
-4. VALIDATE: Collect evidence, confirm success
-5. COMMIT: git add + commit after features
-</thinking_block>
+1. CLASSIFY the task type:
 
-### Classification Guide
-| Size | Files | Approach |
+| Type | Signals | Approach |
+|------|---------|----------|
+| Code | files, functions, bugs, tests | Plan → Retrieve → Compose → Verify |
+| Creative | writing, design, brainstorm | Draft → Iterate → Review → Polish |
+| Research | questions, docs, analysis | Search → Read → Synthesize → Report |
+| Planning | breakdown, strategy, scope | Classify → Decompose → Prioritize → Track |
+| Communication | PR, email, message, review | Context → Draft → Review → Send |
+
+2. SIZE the effort:
+| Size | Scope | Approach |
 |------|-------|----------|
-| Trivial | 1-2 | Execute directly |
-| Small | 2-5 | Quick plan, execute |
-| Medium | 5-10 | Detailed plan, step by step |
-| Large | 10+ | Break into stories |
+| Trivial | 1-2 actions | Execute directly |
+| Small | 2-5 actions | Quick plan, execute |
+| Medium | 5-10 actions | Detailed plan, step by step |
+| Large | 10+ actions | Break into stories |
 
-### Evidence Requirements
-NOTHING is done without proof:
-- file_exists: Verify creation
-- test_result: Run tests
-- git_commit: Commit hash
-- command_output: Exit code 0`;
+3. EXECUTE with momentum awareness:
+- If stuck 2+ times on same approach → STOP → re-classify → try different strategy
+- Track progress: steps completed, rate, streak
+- Fire-and-forget evidence collection after significant operations
+
+4. VALIDATE with evidence:
+- NOTHING is done without proof
+- file_exists, test_result, git_commit, command_output
+- Confidence scoring: 0-100% based on evidence weight
+</thinking_block>`;
 
 export const TOOL_PATTERNS_SEGMENT = `## TOOL PATTERNS
 
