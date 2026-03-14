@@ -6,6 +6,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import { MutedText, Label, Inline } from './primitives/index.js';
+import { formatTokens, formatPercentage } from '../lib/index.js';
 
 interface AnimatedProgressBarProps {
   value: number; // 0-100
@@ -87,7 +89,7 @@ export function AnimatedProgressBar({
     for (let i = 0; i < filledWidth; i++) {
       const isShimmer = i === shimmerIndex || i === shimmerIndex - 1;
       filled.push(
-        <Text key={`f${i}`} color={isShimmer ? "white" : barColor}>
+        <Text key={`f${i}`} color={isShimmer ? undefined : barColor} bold={isShimmer}>
           █
         </Text>
       );
@@ -107,18 +109,18 @@ export function AnimatedProgressBar({
   return (
     <Box flexDirection="column">
       {label && (
-        <Text color="gray" dimColor>
+        <MutedText>
           {label}
-        </Text>
+        </MutedText>
       )}
-      <Box>
-        <Text color="gray">[</Text>
+      <Inline>
+        <MutedText>[</MutedText>
         {buildBar()}
-        <Text color="gray">]</Text>
+        <MutedText>]</MutedText>
         {showPercentage && (
-          <Text color={barColor}> {Math.round(displayValue)}%</Text>
+          <Text color={barColor}> {formatPercentage(displayValue)}</Text>
         )}
-      </Box>
+      </Inline>
     </Box>
   );
 }
@@ -153,21 +155,20 @@ export function TokenSavingsBar({
   }, [tokensSaved, displayTokens]);
 
   const percentage = Math.min((displayTokens / maxTokens) * 100, 100);
-  const formattedTokens = displayTokens.toLocaleString();
 
   return (
-    <Box flexDirection="row" gap={1}>
-      <Text color="gray">Tokens saved:</Text>
-      <Text color="green" bold>
-        {formattedTokens}
-      </Text>
+    <Inline gap={1}>
+      <MutedText>Tokens saved:</MutedText>
+      <Label color="green">
+        {formatTokens(displayTokens)}
+      </Label>
       <AnimatedProgressBar
         value={percentage}
         width={width}
         showPercentage={false}
         color="green"
       />
-    </Box>
+    </Inline>
   );
 }
 
@@ -233,10 +234,10 @@ export function WaveProgress({ width = 30, speed = 100 }: WaveProgressProps) {
   }
 
   return (
-    <Box>
-      <Text color="gray">[</Text>
+    <Inline>
+      <MutedText>[</MutedText>
       {wave}
-      <Text color="gray">]</Text>
-    </Box>
+      <MutedText>]</MutedText>
+    </Inline>
   );
 }

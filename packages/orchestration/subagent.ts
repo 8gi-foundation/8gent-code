@@ -433,7 +433,7 @@ export class SubAgentManager extends EventEmitter {
 
   private async createPlan(agent: SubAgent): Promise<Step[]> {
     // Import Agent to create a planning request
-    const { Agent } = await import("../agent");
+    const { Agent } = await import("../eight");
 
     const plannerAgent = new Agent({
       model: agent.config.model || "glm-4.7-flash:latest",

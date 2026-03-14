@@ -14,6 +14,7 @@ import { TypingText, WordByWord } from "./typing-text.js";
 import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { useADHDMode, BionicText } from "./bionic-text.js";
+import { AppText, MutedText, Label, Stack } from './primitives/index.js';
 
 interface MessageListProps {
   messages: Message[];
@@ -86,6 +87,15 @@ function MessageItem({
     }
   }, [isNew]);
 
+  // Tool messages render as compact inline items
+  if (message.role === "tool") {
+    return (
+      <Box paddingLeft={2}>
+        <MutedText>{message.content}</MutedText>
+      </Box>
+    );
+  }
+
   const roleConfig = {
     user: {
       color: "yellow" as const,
@@ -107,33 +117,33 @@ function MessageItem({
     },
   };
 
-  const config = roleConfig[message.role];
+  const config = roleConfig[message.role as "user" | "assistant" | "system"];
 
   if (!showContent) {
     return (
       <Box marginBottom={1}>
-        <Text color="gray" dimColor>
+        <MutedText>
           ...
-        </Text>
+        </MutedText>
       </Box>
     );
   }
 
   return (
     <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
-      <Box flexDirection="column" marginBottom={1}>
+      <Stack marginBottom={1}>
         {/* Message header */}
         <Box>
           <PopIn delay={isNew ? 50 : 0}>
             <Text color={config.color}>{config.icon} </Text>
           </PopIn>
-          <Text color={config.color} bold>
+          <Label color={config.color}>
             {config.label}
-          </Text>
-          <Text color="gray" dimColor>
+          </Label>
+          <MutedText>
             {" "}
             {formatTime(message.timestamp)}
-          </Text>
+          </MutedText>
         </Box>
 
         {/* Message content */}
@@ -146,14 +156,14 @@ function MessageItem({
             onTypingComplete={() => setTypingComplete(true)}
           />
         </Box>
-      </Box>
+      </Stack>
     </FadeIn>
   );
 }
 
 interface MessageContentProps {
   content: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   isNew: boolean;
   animate: boolean;
   onTypingComplete: () => void;
@@ -198,7 +208,7 @@ function MessageContent({
     return <BionicText>{content}</BionicText>;
   }
 
-  return <Text wrap="wrap">{content}</Text>;
+  return <AppText wrap="wrap">{content}</AppText>;
 }
 
 // Format content with code blocks
@@ -218,14 +228,14 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
                 key={index}
                 flexDirection="column"
                 borderStyle="round"
-                borderColor="gray"
+                borderColor="blue"
                 paddingX={1}
                 marginY={1}
               >
                 {language && (
-                  <Text color="gray" dimColor>
+                  <MutedText>
                     {language}
-                  </Text>
+                  </MutedText>
                 )}
                 <Text color="green">{code.trim()}</Text>
               </Box>
@@ -237,9 +247,9 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
           return <BionicText key={index}>{part}</BionicText>;
         }
         return (
-          <Text key={index} wrap="wrap">
+          <AppText key={index} wrap="wrap">
             {part}
-          </Text>
+          </AppText>
         );
       })}
     </Box>
@@ -255,22 +265,32 @@ function formatTime(date: Date): string {
 
 // Compact message item for dense view
 export function CompactMessageItem({ message }: { message: Message }) {
-  const roleIcons = {
+  const roleIcons: Record<string, string> = {
     user: "→",
     assistant: "←",
     system: "•",
+    tool: " ",
   };
 
-  const roleColors = {
+  const roleColors: Record<string, "yellow" | "cyan" | "green" | "magenta"> = {
     user: "yellow",
     assistant: "cyan",
-    system: "gray",
-  } as const;
+    system: "cyan",
+    tool: "magenta",
+  };
+
+  if (message.role === "tool") {
+    return (
+      <Box paddingLeft={2}>
+        <MutedText>{message.content}</MutedText>
+      </Box>
+    );
+  }
 
   return (
     <Box>
       <Text color={roleColors[message.role]}>{roleIcons[message.role]} </Text>
-      <Text wrap="wrap">{message.content}</Text>
+      <AppText wrap="wrap">{message.content}</AppText>
     </Box>
   );
 }
@@ -294,18 +314,18 @@ export function StreamingMessage({ chunks, isComplete }: StreamingMessageProps) 
   }, [chunks.length, displayedChunks]);
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Stack marginBottom={1}>
       <Box>
-        <Text color="cyan" bold>
+        <Label color="cyan">
           ◆ 8gent
-        </Text>
+        </Label>
         {!isComplete && (
           <Text color="cyan"> ▌</Text>
         )}
       </Box>
       <Box paddingLeft={2}>
-        <Text wrap="wrap">{chunks.slice(0, displayedChunks).join("")}</Text>
+        <AppText wrap="wrap">{chunks.slice(0, displayedChunks).join("")}</AppText>
       </Box>
-    </Box>
+    </Stack>
   );
 }
