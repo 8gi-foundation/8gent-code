@@ -203,9 +203,19 @@ const listFiles = tool({
     const files = await glob(pattern || "**/*", {
       cwd: absolutePath,
       ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
-      nodir: true,
     });
-    return files.slice(0, 100).join("\n");
+    // Mark directories with trailing /
+    const { stat: fsStat } = await import("fs/promises");
+    const results: string[] = [];
+    for (const f of files.slice(0, 100)) {
+      try {
+        const s = await fsStat(path.join(absolutePath, f));
+        results.push(s.isDirectory() ? f + "/" : f);
+      } catch {
+        results.push(f);
+      }
+    }
+    return results.join("\n") || "(empty directory)";
   },
 });
 

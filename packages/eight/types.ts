@@ -33,6 +33,8 @@ export interface AgentToolEndEvent {
   success: boolean;
   durationMs: number;
   stepNumber?: number;
+  /** First ~200 chars of the result for display */
+  resultPreview?: string;
 }
 
 /** Event emitted when a step finishes */
