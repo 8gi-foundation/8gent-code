@@ -1,6 +1,6 @@
 {
   "name": "8gent-code",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
   "type": "module",
@@ -24,7 +24,7 @@
     "build": "bun build packages/eight/index.ts --outfile dist/cli.js --target node && chmod +x dist/cli.js",
     "build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
     "prepublishOnly": "npm run build",
-    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull glm-4.7-flash\\n')\"",
+    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull qwen3.5\\n')\"",
     "test": "bun test",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
