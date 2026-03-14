@@ -268,14 +268,74 @@ export function App({ initialCommand, args }: AppProps) {
   // Model/Provider state (must be before agent init)
   const [currentModel, setCurrentModel] = useState(_savedProviderSettings.model);
   const [currentProvider, setCurrentProvider] = useState(_savedProviderSettings.provider);
-  const [availableModels] = useState([
-    "glm-4.7-flash:latest",
-    "qwen2.5-coder:14b",
-    "llama3:8b",
-    "mistral:7b",
-    "codellama:13b",
-    "deepseek-coder:6.7b",
-  ]);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+
+  // Fetch models dynamically based on selected provider
+  useEffect(() => {
+    let cancelled = false;
+    const fetchModels = async () => {
+      setModelsLoading(true);
+      try {
+        if (currentProvider === "ollama") {
+          // Fetch locally installed Ollama models
+          const res = await fetch("http://localhost:11434/api/tags");
+          if (res.ok) {
+            const data = await res.json();
+            const models = (data.models || []).map((m: any) => m.name as string);
+            if (!cancelled) setAvailableModels(models.length > 0 ? models : ["qwen3.5:latest"]);
+          }
+        } else if (currentProvider === "lmstudio") {
+          // Fetch LM Studio models
+          const res = await fetch("http://localhost:1234/v1/models");
+          if (res.ok) {
+            const data = await res.json();
+            const models = (data.data || []).map((m: any) => m.id as string);
+            if (!cancelled) setAvailableModels(models.length > 0 ? models : []);
+          }
+        } else if (currentProvider === "openrouter-free") {
+          // Fetch free models from OpenRouter API
+          const apiKey = process.env.OPENROUTER_API_KEY || "";
+          const res = await fetch("https://openrouter.ai/api/v1/models", {
+            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const freeModels = (data.data || [])
+              .filter((m: any) => m.id?.endsWith(":free"))
+              .map((m: any) => m.id as string)
+              .sort();
+            if (!cancelled) setAvailableModels(freeModels.length > 0 ? freeModels : ["google/gemini-2.5-flash:free"]);
+          }
+        } else if (currentProvider === "openrouter") {
+          // Fetch all OpenRouter models (top 20 by context length)
+          const apiKey = process.env.OPENROUTER_API_KEY || "";
+          const res = await fetch("https://openrouter.ai/api/v1/models", {
+            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const models = (data.data || [])
+              .filter((m: any) => !m.id?.endsWith(":free"))
+              .map((m: any) => m.id as string)
+              .slice(0, 30);
+            if (!cancelled) setAvailableModels(models);
+          }
+        } else {
+          // Other providers — show placeholder
+          if (!cancelled) setAvailableModels([`${currentProvider}/default`]);
+        }
+      } catch {
+        // Provider not reachable — show fallback
+        if (!cancelled) setAvailableModels(currentProvider === "ollama"
+          ? ["qwen3.5:latest", "devstral:latest"]
+          : ["google/gemini-2.5-flash:free"]);
+      }
+      if (!cancelled) setModelsLoading(false);
+    };
+    fetchModels();
+    return () => { cancelled = true; };
+  }, [currentProvider]);
   const [availableProviders] = useState<ProviderOption[]>([
     { name: "ollama", displayName: "Ollama (Local) - Free", hasApiKey: true, enabled: true },
     { name: "lmstudio", displayName: "LM Studio (Local) - Free", hasApiKey: true, enabled: true },
@@ -799,6 +859,7 @@ export function App({ initialCommand, args }: AppProps) {
       currentModel,
       currentProvider,
       designAgent,
+      adhdMode,
     ]
   );
 
@@ -1116,7 +1177,11 @@ export function App({ initialCommand, args }: AppProps) {
         );
 
       case "model-select":
-        return (
+        return modelsLoading ? (
+          <Box flexDirection="column" padding={1}>
+            <Text bold>Fetching models from {currentProvider}...</Text>
+          </Box>
+        ) : (
           <ModelSelector
             models={availableModels}
             currentModel={currentModel}
