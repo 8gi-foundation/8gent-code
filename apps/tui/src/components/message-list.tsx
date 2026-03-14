@@ -20,12 +20,14 @@ interface MessageListProps {
   messages: Message[];
   animateTyping?: boolean;
   soundEnabled?: boolean;
+  maxVisible?: number;
 }
 
 export function MessageList({
   messages,
   animateTyping = true,
   soundEnabled = false,
+  maxVisible = 50,
 }: MessageListProps) {
   const prevCountRef = useRef(messages.length);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
@@ -39,9 +41,16 @@ export function MessageList({
     prevCountRef.current = messages.length;
   }, [messages]);
 
+  // Only render the most recent messages to prevent scroll jumping.
+  // The terminal scrollback handles upward scrolling naturally.
+  // This keeps the view pinned to the bottom (latest messages).
+  const visibleMessages = messages.length > maxVisible
+    ? messages.slice(-maxVisible)
+    : messages;
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {messages.map((message, index) => (
+      {visibleMessages.map((message, index) => (
         <MessageItem
           key={message.id}
           message={message}

@@ -1298,9 +1298,9 @@ export function App({ initialCommand, args }: AppProps) {
       )}
 
       {/* Main content area with optional process sidebar on right */}
-      <Box flexDirection="row" flexGrow={1} overflow="hidden">
-        {/* Left: main content (chat / kanban / etc.) or process detail — scrolls */}
-        <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
+      <Box flexDirection="row" flexGrow={1}>
+        {/* Left: main content (chat / kanban / etc.) or process detail */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1}>
           {processPanel.detailTaskId && processPanel.tasks.find(t => t.id === processPanel.detailTaskId) ? (
             <ProcessDetailView
               task={processPanel.tasks.find(t => t.id === processPanel.detailTaskId)!}
