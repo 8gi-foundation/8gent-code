@@ -64,25 +64,32 @@ import * as fs from "fs";
 import * as pathMod from "path";
 
 function loadEnvFile() {
-  try {
-    const envPath = pathMod.join(process.cwd(), ".env");
-    if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, "utf-8");
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith("#")) {
-          const eqIdx = trimmed.indexOf("=");
-          if (eqIdx > 0) {
-            const key = trimmed.slice(0, eqIdx).trim();
-            const val = trimmed.slice(eqIdx + 1).trim();
-            if (!process.env[key]) {
-              process.env[key] = val;
+  // Check multiple locations: cwd first, then the 8gent repo root
+  const candidates = [
+    pathMod.join(process.cwd(), ".env"),
+    pathMod.resolve(import.meta.dirname, "../../../.env"), // 8gent-code repo root
+    pathMod.join(process.env.HOME || "", ".8gent", ".env"), // ~/.8gent/.env
+  ];
+  for (const envPath of candidates) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith("#")) {
+            const eqIdx = trimmed.indexOf("=");
+            if (eqIdx > 0) {
+              const key = trimmed.slice(0, eqIdx).trim();
+              const val = trimmed.slice(eqIdx + 1).trim();
+              if (!process.env[key]) {
+                process.env[key] = val;
+              }
             }
           }
         }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 }
 
 function loadProviderSettings(): { provider: string; model: string } {
