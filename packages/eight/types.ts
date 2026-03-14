@@ -4,9 +4,17 @@
  * Shared type definitions for the agent harness.
  */
 
+export type MessageContent = string | MessageContentPart[];
+
+export interface MessageContentPart {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string };
+}
+
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: MessageContent;
   toolCalls?: ToolCall[];
   toolCallId?: string;
 }
