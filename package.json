@@ -1,6 +1,6 @@
 {
   "name": "8gent-code",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
   "type": "module",
