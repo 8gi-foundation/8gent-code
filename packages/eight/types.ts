@@ -17,6 +17,40 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/** Event emitted when a tool call starts */
+export interface AgentToolStartEvent {
+  toolName: string;
+  toolCallId: string;
+  args: Record<string, unknown>;
+  stepNumber?: number;
+}
+
+/** Event emitted when a tool call finishes */
+export interface AgentToolEndEvent {
+  toolName: string;
+  toolCallId: string;
+  args: Record<string, unknown>;
+  success: boolean;
+  durationMs: number;
+  stepNumber?: number;
+}
+
+/** Event emitted when a step finishes */
+export interface AgentStepEvent {
+  stepNumber: number;
+  finishReason: string;
+  text: string;
+  toolCalls: Array<{ toolName: string; toolCallId: string }>;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+
+/** Optional callbacks for real-time agent progress */
+export interface AgentEventCallbacks {
+  onToolStart?: (event: AgentToolStartEvent) => void;
+  onToolEnd?: (event: AgentToolEndEvent) => void;
+  onStepFinish?: (event: AgentStepEvent) => void;
+}
+
 export interface AgentConfig {
   model: string;
   runtime: "ollama" | "lmstudio" | "openrouter";
@@ -24,6 +58,8 @@ export interface AgentConfig {
   maxTurns?: number;
   workingDirectory?: string;
   apiKey?: string;
+  /** Real-time event callbacks for UI integration */
+  events?: AgentEventCallbacks;
 }
 
 export interface LLMResponse {

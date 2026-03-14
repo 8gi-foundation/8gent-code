@@ -31,6 +31,11 @@ interface CommandInputProps {
   isProcessing: boolean;
   processingStage?: "planning" | "toolshed" | "executing" | "complete";
   showAnimations?: boolean;
+  // Real-time agent progress
+  activeTool?: string | null;
+  stepCount?: number;
+  toolCount?: number;
+  totalTokens?: number;
   // Ghost suggestion options
   isGitRepo?: boolean;
   currentBranch?: string | null;
@@ -214,6 +219,10 @@ export function CommandInput({
   isProcessing,
   processingStage = "planning",
   showAnimations = true,
+  activeTool = null,
+  stepCount = 0,
+  toolCount = 0,
+  totalTokens = 0,
   isGitRepo = false,
   currentBranch = null,
   planNextStep = null,
@@ -313,16 +322,31 @@ export function CommandInput({
   };
 
   if (isProcessing) {
+    // Build a real-time label from agent events
+    const label = activeTool
+      ? `Running ${activeTool}`
+      : stepCount === 0
+        ? "Thinking"
+        : "Reasoning";
+
+    const stats = [];
+    if (stepCount > 0) stats.push(`step ${stepCount}`);
+    if (toolCount > 0) stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
+    if (totalTokens > 0) stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
+
     return (
       <Box flexDirection="column" paddingX={1}>
-        {/* Main processing indicator */}
+        {/* Main processing indicator with real tool name */}
         <Box marginBottom={1}>
           <AnimatedSpinner
             type="dots"
             color="cyan"
-            label={getProcessingLabel(processingStage)}
+            label={label}
             showDots={true}
           />
+          {stats.length > 0 && (
+            <MutedText>  ({stats.join(" · ")})</MutedText>
+          )}
         </Box>
 
         {/* Step indicator */}

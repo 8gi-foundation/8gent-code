@@ -484,7 +484,7 @@ function TokenCounter({ value, animate = true }: TokenCounterProps) {
 
   return (
     <Box>
-      <MutedText>Tokens saved: </MutedText>
+      <MutedText>Tokens: </MutedText>
       <Label color="green">
         {formattedValue}
       </Label>

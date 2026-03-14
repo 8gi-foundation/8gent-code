@@ -58,6 +58,7 @@ import {
 
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/eight/index.js";
+import type { AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent } from "../../../packages/eight/index.js";
 
 // Load .env file if present
 import * as fs from "fs";
@@ -212,7 +213,13 @@ export function App({ initialCommand, args }: AppProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState<ProcessingStage>("planning");
   const [status, setStatus] = useState<AppStatus>("idle");
-  const [tokensSaved, setTokensSaved] = useState(0);
+
+  // Real-time agent progress (replaces fake simulateProcessing)
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [stepCount, setStepCount] = useState(0);
+  const [toolCount, setToolCount] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
+  // tokensSaved removed — using real totalTokens from agent events
   const [startTime] = useState(new Date());
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
 
@@ -389,6 +396,29 @@ export function App({ initialCommand, args }: AppProps) {
           workingDirectory: process.cwd(),
           maxTurns: 50,
           apiKey: process.env.OPENROUTER_API_KEY,
+          events: {
+            onToolStart: (event: AgentToolStartEvent) => {
+              setActiveTool(event.toolName);
+              setProcessingStage("executing");
+              setStatus("executing");
+            },
+            onToolEnd: (_event: AgentToolEndEvent) => {
+              setToolCount((prev) => prev + 1);
+              setActiveTool(null);
+            },
+            onStepFinish: (event: AgentStepEvent) => {
+              setStepCount((prev) => prev + 1);
+              setTotalTokens((prev) => prev + event.usage.totalTokens);
+              // Determine stage from step content
+              if (event.toolCalls.length > 0) {
+                setProcessingStage("executing");
+                setStatus("executing");
+              } else {
+                setProcessingStage("toolshed");
+                setStatus("thinking");
+              }
+            },
+          },
         });
         // Check if provider is available
         const ready = await newAgent.isReady();
@@ -502,7 +532,7 @@ export function App({ initialCommand, args }: AppProps) {
           addSystemMessage(
             `Session Status:\n` +
               `  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n` +
-              `  Tokens saved: ${tokensSaved.toLocaleString()}\n` +
+              `  Tokens used: ${totalTokens.toLocaleString()}\n` +
               `  Commands: ${recentCommands.length}\n` +
               `  Branch: ${currentBranch || "N/A"}\n` +
               `  Animations: ${showAnimations ? "on" : "off"}\n` +
@@ -700,7 +730,7 @@ export function App({ initialCommand, args }: AppProps) {
       addSystemMessage,
       kanbanBoard,
       startTime,
-      tokensSaved,
+      totalTokens,
       recentCommands,
       currentBranch,
       showAnimations,
@@ -717,24 +747,14 @@ export function App({ initialCommand, args }: AppProps) {
     ]
   );
 
-  // Simulate processing stages
-  const simulateProcessing = useCallback(() => {
-    const stages: ProcessingStage[] = ["planning", "toolshed", "executing", "complete"];
-    let stageIndex = 0;
-
-    const advanceStage = () => {
-      if (stageIndex < stages.length) {
-        setProcessingStage(stages[stageIndex]);
-        setStatus(stageIndex < 2 ? "thinking" : "executing");
-        stageIndex++;
-
-        if (stageIndex < stages.length) {
-          setTimeout(advanceStage, 300 + Math.random() * 400);
-        }
-      }
-    };
-
-    advanceStage();
+  // Reset agent progress for a new request
+  const resetAgentProgress = useCallback(() => {
+    setActiveTool(null);
+    setStepCount(0);
+    setToolCount(0);
+    setTotalTokens(0);
+    setProcessingStage("planning");
+    setStatus("thinking");
   }, []);
 
   // Generate predictions based on input
@@ -916,10 +936,7 @@ export function App({ initialCommand, args }: AppProps) {
     };
     setMessages((prev) => [...prev, userMessage]);
     setIsProcessing(true);
-    setStatus("thinking");
-
-    // Start processing simulation
-    simulateProcessing();
+    resetAgentProgress();
 
     // Generate predictions and avenues
     const newPredictions = generatePredictions(input);
@@ -953,17 +970,8 @@ export function App({ initialCommand, args }: AppProps) {
 
         setMessages((prev) => [...prev, assistantMessage]);
         setIsProcessing(false);
+        setActiveTool(null);
         setStatus("success");
-
-        // Estimate token savings from AST-first approach
-        const saved = Math.floor(response.length * 0.4);
-        setTokensSaved((prev) => prev + saved);
-        setContextSize(response.length);
-
-        // Track context usage (rough estimate: ~4 chars per token)
-        const responseTokens = Math.ceil(response.length / 4);
-        const inputTokens = Math.ceil(input.length / 4);
-        setContextUsed((prev) => prev + responseTokens + inputTokens);
 
         if (soundEnabled) {
           playSound("success");
@@ -995,6 +1003,7 @@ export function App({ initialCommand, args }: AppProps) {
         };
         setMessages((prev) => [...prev, assistantMessage]);
         setIsProcessing(false);
+        setActiveTool(null);
         setStatus("error");
         setTimeout(() => setStatus("idle"), 3000);
       }
@@ -1013,14 +1022,8 @@ export function App({ initialCommand, args }: AppProps) {
 
         setMessages((prev) => [...prev, assistantMessage]);
         setIsProcessing(false);
+        setActiveTool(null);
         setStatus("success");
-
-        const saved = Math.floor(Math.random() * 1500) + 500;
-        setTokensSaved((prev) => prev + saved);
-        setContextSize(Math.floor(Math.random() * 8000) + 2000);
-
-        // Track context usage (mock)
-        setContextUsed((prev) => prev + Math.floor(Math.random() * 2000) + 500);
 
         if (soundEnabled) {
           playSound("success");
@@ -1230,7 +1233,7 @@ export function App({ initialCommand, args }: AppProps) {
         {/* Left: Context used */}
         <Box width={12}>
           <MutedText>
-            {formatTokens(contextUsed)}
+            {formatTokens(totalTokens)}
           </MutedText>
         </Box>
 
@@ -1241,6 +1244,10 @@ export function App({ initialCommand, args }: AppProps) {
             isProcessing={isProcessing}
             processingStage={processingStage}
             showAnimations={showAnimations}
+            activeTool={activeTool}
+            stepCount={stepCount}
+            toolCount={toolCount}
+            totalTokens={totalTokens}
             isGitRepo={isGitRepo}
             currentBranch={currentBranch}
             planNextStep={planNextStep}
@@ -1274,13 +1281,11 @@ export function App({ initialCommand, args }: AppProps) {
         >
           <Heading>∞ Extended Info</Heading>
           <Box marginTop={1} flexDirection="column">
-            <MutedText>Context: <AppText color="cyan">{formatTokens(contextUsed)}</AppText> / <AppText bold>{formatTokens(contextMax)}</AppText> ({Math.round((contextUsed / contextMax) * 100)}%)</MutedText>
-            <MutedText>Response time: <AppText color="yellow">{lastResponseTime ?? 0}ms</AppText></MutedText>
-            <MutedText>Tokens saved: <AppText color="green">{tokensSaved.toLocaleString()}</AppText></MutedText>
             <MutedText>Model: <AppText color="cyan">{currentModel}</AppText> via <AppText color="magenta">{currentProvider}</AppText></MutedText>
-            <MutedText>Agent ready: <AppText color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</AppText></MutedText>
+            <MutedText>Agent: <AppText color={agentReady ? "green" : "red"}>{agentReady ? "ready" : "not connected"}</AppText></MutedText>
+            <MutedText>Tokens: <AppText color="cyan">{totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}k` : "—"}</AppText> · Steps: <AppText color="cyan">{stepCount}</AppText> · Tools: <AppText color="cyan">{toolCount}</AppText></MutedText>
+            <MutedText>Response time: <AppText color="yellow">{lastResponseTime ? `${(lastResponseTime / 1000).toFixed(1)}s` : "—"}</AppText></MutedText>
             {currentBranch && <MutedText>Branch: <AppText color="yellow">{currentBranch}</AppText></MutedText>}
-            <MutedText>Mode: <AppText color="cyan">{viewMode}</AppText></MutedText>
             <MutedText>Infinite: <AppText color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</AppText></MutedText>
           </Box>
           <Box marginTop={1}>
@@ -1296,31 +1301,26 @@ export function App({ initialCommand, args }: AppProps) {
           runningAgents={isProcessing ? 1 : 0}
           totalAgents={1}
           permissionMode={infiniteModeActive ? "infinite" : "ask"}
-          tokensSaved={tokensSaved}
+          tokensSaved={totalTokens}
           currentBranch={currentBranch}
           startTime={startTime}
           planStatus={
             isProcessing
-              ? processingStage === "planning"
-                ? "planning"
-                : "executing"
-              : kanbanBoard.done.length > 0
+              ? activeTool
+                ? "executing"
+                : "planning"
+              : stepCount > 0
               ? "completed"
               : "idle"
           }
-          planStepsCompleted={kanbanBoard.done.length}
-          planStepsTotal={
-            kanbanBoard.backlog.length +
-            kanbanBoard.ready.length +
-            kanbanBoard.inProgress.length +
-            kanbanBoard.done.length
-          }
+          planStepsCompleted={toolCount}
+          planStepsTotal={stepCount}
           showAnimations={showAnimations}
           adhdMode={adhdMode}
         />
       ) : (
         <StatusBar
-          tokensSaved={tokensSaved}
+          tokensSaved={totalTokens}
           status={status}
           showAnimations={showAnimations}
           soundEnabled={soundEnabled}
