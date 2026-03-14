@@ -1,14 +1,14 @@
 /**
- * 8gent Code - Animated Message List Component
+ * 8gent Code - Chat Interface
  *
- * Features:
- * - Fade in animation for new messages
- * - Typing animation for assistant responses
- * - Smooth transitions between messages
+ * iMessage-style layout:
+ * - User messages: right-aligned, yellow bubble
+ * - 8gent messages: left-aligned, cyan bubble
+ * - Tool calls & system: compact collapsible cards
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
 import type { Message } from "../app.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
@@ -96,22 +96,28 @@ function MessageItem({
     }
   }, [isNew]);
 
-  // Tool messages render as compact centered items
+  // Tool messages render as compact cards (collapsible)
   if (message.role === "tool") {
+    const isSuccess = (message as any).toolSuccess !== false;
+    const icon = message.content.startsWith("  ✓") ? "✓" : message.content.startsWith("  ✗") ? "✗" : "→";
+    const color = icon === "✓" ? "green" : icon === "✗" ? "red" : "blue";
     return (
-      <Box justifyContent="center" marginBottom={0}>
-        <MutedText>{message.content}</MutedText>
+      <Box marginBottom={0} paddingLeft={1}>
+        <Text color={color} dimColor>{icon} </Text>
+        <MutedText>{message.content.replace(/^  [✓✗→] /, "").slice(0, 80)}</MutedText>
       </Box>
     );
   }
 
-  // System messages render centered, subtle
+  // System messages render as subtle centered cards
   if (message.role === "system") {
     if (!showContent) return null;
     return (
       <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
         <Box justifyContent="center" marginBottom={1}>
-          <MutedText>● {message.content}</MutedText>
+          <Text dimColor>{'─'.repeat(3)} </Text>
+          <MutedText>{message.content.slice(0, 60)}</MutedText>
+          <Text dimColor> {'─'.repeat(3)}</Text>
         </Box>
       </FadeIn>
     );
