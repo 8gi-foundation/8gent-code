@@ -11,22 +11,24 @@
     "voice",
     "confirmation"
   ],
-  "lastPrompted": "2026-03-13T11:20:33.644Z",
+  "lastPrompted": "2026-03-11T23:21:00.742Z",
   "promptCount": 8,
   "identity": {
-    "name": "ajax",
-    "role": "developer",
-    "communicationStyle": "concise",
+    "name": "James",
+    "role": "founder",
+    "communicationStyle": "detailed",
     "language": "en"
   },
   "projects": {
-    "primary": null,
-    "all": [],
+    "primary": "i already did today",
+    "all": [
+      "i already did today"
+    ],
     "descriptions": {}
   },
   "preferences": {
     "voice": {
-      "enabled": false,
+      "enabled": true,
       "engine": null,
       "voiceId": null
     },
@@ -49,13 +51,18 @@
   },
   "integrations": {
     "github": {
-      "authenticated": true,
-      "username": "thomasdavis"
+      "authenticated": false,
+      "username": null
     },
     "mcps": [],
     "ollama": {
-      "available": false,
-      "models": []
+      "available": true,
+      "models": [
+        "devstral:latest",
+        "qwen3.5:latest",
+        "qwen3:14b",
+        "nomic-embed-text:latest"
+      ]
     },
     "lmstudio": {
       "available": false,
@@ -63,8 +70,8 @@
     }
   },
   "understanding": {
-    "confidenceScore": 0.4780000000000001,
+    "confidenceScore": 0.5780000000000001,
     "areasUnclear": [],
-    "lastUpdated": "2026-03-13T11:20:33.644Z"
+    "lastUpdated": "2026-03-11T23:21:00.742Z"
   }
 }

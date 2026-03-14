@@ -55,6 +55,22 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 | Info/borders | `color="blue"` |
 | Status badges | `inverse color="green"` etc. |
 
+## Versioning & Release Rules
+
+**Every agent working on this repo MUST follow these rules:**
+
+1. **Version lives in 3 places** — keep them in sync:
+   - `package.json` → `"version"` (source of truth)
+   - `bin/8gent.ts` → `const VERSION`
+   - `README.md` → version badge
+2. **CHANGELOG.md is mandatory** — every PR or significant batch of work must add an entry under `[Unreleased]` or a new version section. Follow [Keep a Changelog](https://keepachangelog.com/) format.
+3. **SemVer strictly:**
+   - PATCH (0.3.x): bug fixes, minor tweaks
+   - MINOR (0.x.0): new features, new benchmarks, new packages
+   - MAJOR (x.0.0): breaking changes to CLI, session format, or API
+4. **Never ship without updating the changelog.** If you add a feature, fix a bug, or refactor something significant — document it in CHANGELOG.md before committing.
+5. **Tag releases** with `git tag v0.x.0` after version bumps.
+
 ## TUI Design System
 
 The TUI follows a **design-system-first** architecture. Never use raw Ink `<Text>` or `<Box>` in screens — use the primitive layer.
