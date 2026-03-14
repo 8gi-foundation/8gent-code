@@ -170,6 +170,73 @@ export class BackgroundTaskManager {
   }
 
   /**
+   * Adopt an already-running ChildProcess as a background task.
+   * Used when run_command detects a long-running process and promotes it.
+   */
+  adoptProcess(
+    command: string,
+    proc: ChildProcess,
+    existingStdout: string = "",
+    existingStderr: string = "",
+  ): string {
+    const id = this.generateTaskId();
+
+    const task: BackgroundTask = {
+      id,
+      command,
+      status: "running",
+      process: proc,
+      stdout: existingStdout,
+      stderr: existingStderr,
+      exitCode: null,
+      startedAt: new Date(),
+      endedAt: null,
+      workingDirectory: this.defaultWorkingDirectory,
+    };
+
+    this.tasks.set(id, task);
+
+    // Re-wire stdio capture (listeners from run_command are still attached,
+    // but they write to local vars that are now abandoned — we add our own)
+    proc.stdout?.on("data", (data) => {
+      const str = data.toString();
+      if (task.stdout.length + str.length <= this.maxOutputSize) {
+        task.stdout += str;
+      }
+    });
+
+    proc.stderr?.on("data", (data) => {
+      const str = data.toString();
+      if (task.stderr.length + str.length <= this.maxOutputSize) {
+        task.stderr += str;
+      }
+    });
+
+    proc.on("close", (code, signal) => {
+      task.exitCode = code;
+      task.endedAt = new Date();
+      task.process = null;
+      if (signal === "SIGTERM" || signal === "SIGKILL") {
+        task.status = "killed";
+      } else if (code === 0) {
+        task.status = "completed";
+      } else {
+        task.status = "failed";
+      }
+    });
+
+    proc.on("error", (err) => {
+      task.status = "failed";
+      task.stderr += `\nProcess error: ${err.message}`;
+      task.endedAt = new Date();
+      task.process = null;
+    });
+
+    console.log(`[background] Adopted running process as task ${id}: ${command.slice(0, 50)}...`);
+    return id;
+  }
+
+  /**
    * Get the status of a task
    */
   getTaskStatus(taskId: string): TaskInfo | null {

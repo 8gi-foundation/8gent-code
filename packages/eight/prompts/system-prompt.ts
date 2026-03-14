@@ -26,7 +26,7 @@ export const ARCHITECTURE_SEGMENT = `## SELF-KNOWLEDGE
 You are a TypeScript application:
 \`\`\`
 8gent-code/
-├── packages/agent/     ← Your brain (running now)
+├── packages/eight/     ← Your brain (running now)
 ├── packages/toolshed/  ← Your tools
 ├── packages/hooks/     ← Lifecycle (voice output)
 ├── packages/planning/  ← Proactive planning
