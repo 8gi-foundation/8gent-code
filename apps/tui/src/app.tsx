@@ -146,8 +146,8 @@ export interface Message {
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
-type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Demoing";
-const AGENT_MODES: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Demoing"];
+type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
+const AGENT_MODES: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
 type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design";
 
@@ -490,6 +490,15 @@ export function App({ initialCommand, args }: AppProps) {
               setActiveTool(event.toolName);
               setProcessingStage("executing");
               setStatus("executing");
+
+              // Auto-advance kanban: move first Ready card to In Progress
+              setKanbanBoard((prev) => {
+                if (prev.inProgress.length === 0 && prev.ready.length > 0) {
+                  const [next, ...rest] = prev.ready;
+                  return { ...prev, ready: rest, inProgress: [next] };
+                }
+                return prev;
+              });
               // Show tool call in message stream
               const argsPreview = JSON.stringify(event.args).slice(0, 80);
               setMessages((prev) => [...prev, {
@@ -502,6 +511,31 @@ export function App({ initialCommand, args }: AppProps) {
             onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
               setActiveTool(null);
+
+              // Auto-advance kanban: move first Ready → Done on each tool completion
+              setKanbanBoard((prev) => {
+                if (prev.inProgress.length > 0) {
+                  // Move in-progress to done
+                  const [completed, ...rest] = prev.inProgress;
+                  const nextReady = prev.ready.length > 0 ? [prev.ready[0]] : [];
+                  const remainingReady = prev.ready.slice(nextReady.length > 0 ? 1 : 0);
+                  // Pull next from backlog if ready is getting empty
+                  const pullFromBacklog = remainingReady.length < 2 && prev.backlog.length > 0
+                    ? [prev.backlog[0]] : [];
+                  const remainingBacklog = pullFromBacklog.length > 0 ? prev.backlog.slice(1) : prev.backlog;
+                  return {
+                    backlog: remainingBacklog,
+                    ready: [...remainingReady, ...pullFromBacklog],
+                    inProgress: [...rest, ...nextReady],
+                    done: [...prev.done, completed],
+                  };
+                } else if (prev.ready.length > 0) {
+                  // Move first ready to in-progress → done
+                  const [first, ...rest] = prev.ready;
+                  return { ...prev, ready: rest, done: [...prev.done, first] };
+                }
+                return prev;
+              });
               // Detect command failures even when tool "succeeds"
               const isRealFailure = !event.success ||
                 (event.resultPreview?.startsWith("Exit code ") && !event.resultPreview.startsWith("Exit code 0"));
@@ -535,6 +569,36 @@ export function App({ initialCommand, args }: AppProps) {
                   content: event.text,
                   timestamp: new Date(),
                 }]);
+
+                // Parse PLAN: output and populate kanban automatically
+                const planMatch = event.text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
+                if (planMatch) {
+                  const planText = planMatch[1];
+                  // Match numbered steps: "1) ...", "1. ...", "- ..."
+                  const stepMatches = planText.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
+                  if (stepMatches && stepMatches.length > 0) {
+                    const steps = stepMatches.map((s, i) => ({
+                      id: `plan-${Date.now()}-${i}`,
+                      description: s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim(),
+                      tool: "auto",
+                      input: {},
+                      priority: stepMatches.length - i,
+                      confidence: 0.9,
+                      category: "plan" as const,
+                      predictedAt: new Date(),
+                      basedOn: [],
+                    }));
+                    setKanbanBoard({
+                      backlog: steps.slice(3) as any,
+                      ready: steps.slice(0, 3) as any,
+                      inProgress: [],
+                      done: [],
+                    });
+                    setPredictedSteps(steps);
+                    setPlanNextStep(steps[0]?.description || null);
+                    setProcessingStage("executing");
+                  }
+                }
               }
 
               // Determine stage from step content
