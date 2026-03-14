@@ -146,6 +146,8 @@ export interface Message {
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
+type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Demoing";
+const AGENT_MODES: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Demoing"];
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
 type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design";
 
@@ -366,6 +368,9 @@ export function App({ initialCommand, args }: AppProps) {
   // Animation showcase
   const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
 
+  // Agent mode (Tab to cycle)
+  const [agentMode, setAgentMode] = useState<AgentMode>("Planning");
+
   // ADHD/Bionic reading mode
   const [adhdMode, setAdhdMode] = useState(false);
   const [adhdSuggested, setAdhdSuggested] = useState(false);
@@ -425,7 +430,15 @@ export function App({ initialCommand, args }: AppProps) {
       processPanel.toggleSidebar();
     }
 
-    // Cycle through modes with Shift+Tab
+    // Cycle agent mode with Ctrl+T (Planning → Researching → Implementing → Testing → Demoing)
+    if (key.ctrl && input === "t") {
+      setAgentMode((prev) => {
+        const idx = AGENT_MODES.indexOf(prev);
+        return AGENT_MODES[(idx + 1) % AGENT_MODES.length];
+      });
+    }
+
+    // Cycle through view modes with Shift+Tab
     if (key.shift && key.tab) {
       const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict"];
       setViewMode((prev) => {
@@ -1078,7 +1091,9 @@ export function App({ initialCommand, args }: AppProps) {
 
       if (agent && agentReady) {
         try {
-          await agent.chat(message);
+          // Inject agent mode context into the message
+          const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
+          await agent.chat(modePrefix + message);
           setLastResponseTime(Date.now() - cmdStartTime);
           setStatus("success");
           if (soundEnabled) playSound("success");
@@ -1478,12 +1493,28 @@ export function App({ initialCommand, args }: AppProps) {
       )}
 
       {/* Hidden keyboard shortcuts hint */}
+      {/* Agent mode bar — Ctrl+T to cycle */}
+      <Box paddingX={1} marginTop={1} gap={1}>
+        {AGENT_MODES.map((mode) => (
+          <Box key={mode}>
+            <Text
+              color={agentMode === mode ? "cyan" : undefined}
+              bold={agentMode === mode}
+              dimColor={agentMode !== mode}
+            >
+              {agentMode === mode ? `[${mode}]` : ` ${mode} `}
+            </Text>
+          </Box>
+        ))}
+        <MutedText> ^T mode</MutedText>
+        {!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
+      </Box>
+
       {showAnimations && (
-        <Box paddingX={1} marginTop={1} gap={2}>
+        <Box paddingX={1} gap={2}>
           <MutedText>
-            ^O expand | ^B processes | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | ^C exit
+            ^O expand | ^B processes | ^K kanban | ^P predict | ^A anim | ^S sound | ^C exit
           </MutedText>
-          {!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
         </Box>
       )}
     </Box>
