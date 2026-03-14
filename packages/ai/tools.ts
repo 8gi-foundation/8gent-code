@@ -787,24 +787,6 @@ async function runShellCommand(command: string): Promise<string> {
     finalCommand = command + " -y";
   }
 
-  // Auto-redirect dev servers to background_start — they never exit and would
-  // block run_command for the full 2-minute timeout
-  const DEV_SERVER_PATTERNS = [
-    /\b(bun|npm|yarn|pnpm)\s+run\s+dev\b/,
-    /\b(bun|npm|yarn|pnpm)\s+run\s+start\b/,
-    /\bnext\s+dev\b/,
-    /\bvite\b(?!.*build)/,
-    /\bwebpack\s+serve\b/,
-    /\bnuxt\s+dev\b/,
-    /\bgatsby\s+develop\b/,
-  ];
-  if (DEV_SERVER_PATTERNS.some((p) => p.test(finalCommand))) {
-    const { getBackgroundTaskManager } = await import("../tools/background");
-    const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
-    const taskId = taskManager.startTask(finalCommand);
-    return `[AUTO-BACKGROUNDED] Dev servers never exit, so this was started as a background task instead.\nTask ID: ${taskId}\nUse background_status or background_output to check on it.`;
-  }
-
   const { spawn } = await import("child_process");
 
   return new Promise((resolve) => {
@@ -815,6 +797,7 @@ async function runShellCommand(command: string): Promise<string> {
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
 
     const stdinInterval = setInterval(() => {
       try { proc.stdin.write("\n"); } catch {}
@@ -823,18 +806,59 @@ async function runShellCommand(command: string): Promise<string> {
     proc.stdout.on("data", (data) => { stdout += data.toString(); });
     proc.stderr.on("data", (data) => { stderr += data.toString(); });
 
-    const timeout = setTimeout(() => {
+    // Auto-promote to background task if still running after 10s.
+    // Any long-running process (dev servers, watchers, etc.) gets promoted
+    // so the agent isn't blocked for the full 2-minute timeout.
+    const autoPromoteTimeout = setTimeout(async () => {
+      if (settled) return;
+      settled = true;
       clearInterval(stdinInterval);
+      clearTimeout(timeout);
+
+      // Hand the running process off to the background task manager
+      try {
+        const { getBackgroundTaskManager } = await import("../tools/background");
+        const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
+        const taskId = taskManager.adoptProcess(finalCommand, proc, stdout, stderr);
+
+        hookManager.executeHooks("afterCommand", {
+          command: finalCommand, exitCode: null, stdout, stderr,
+          duration: Date.now() - startTime, workingDirectory: _ctx.workingDirectory,
+        });
+
+        const partialOutput = (stdout + stderr).trim().slice(-500);
+        resolve(
+          `[STILL RUNNING — promoted to background task]\n` +
+          `Task ID: ${taskId}\n` +
+          `The command didn't exit within 10s, so it was moved to a background task.\n` +
+          `Use background_status("${taskId}") or background_output("${taskId}") to check on it.\n` +
+          (partialOutput ? `\nPartial output so far:\n${partialOutput}` : "")
+        );
+      } catch {
+        // Fallback: just kill it
+        proc.kill("SIGTERM");
+        resolve(`TIMEOUT: Command still running after 10s. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`);
+      }
+    }, 10000);
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      clearInterval(stdinInterval);
+      clearTimeout(autoPromoteTimeout);
       proc.kill("SIGTERM");
       hookManager.executeHooks("afterCommand", {
         command: finalCommand, exitCode: -1, stdout, stderr: stderr + "\nTIMEOUT",
         duration: Date.now() - startTime, workingDirectory: _ctx.workingDirectory,
       });
-      resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`);
+      resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`);
     }, 120000);
 
     proc.on("close", (code) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
+      clearTimeout(autoPromoteTimeout);
       clearInterval(stdinInterval);
       hookManager.executeHooks("afterCommand", {
         command: finalCommand, exitCode: code ?? 0, stdout, stderr,
@@ -844,7 +868,10 @@ async function runShellCommand(command: string): Promise<string> {
     });
 
     proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
+      clearTimeout(autoPromoteTimeout);
       clearInterval(stdinInterval);
       hookManager.executeHooks("onError", {
         command: finalCommand, error: err.message, workingDirectory: _ctx.workingDirectory,
