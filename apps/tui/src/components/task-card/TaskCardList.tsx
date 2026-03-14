@@ -21,15 +21,17 @@ const COLLAPSED_LINES = 1;
 const EXPANDED_LINES = 4;
 
 export function TaskCardList({
-  tasks,
+  tasks: rawTasks,
   maxHeight,
   focusable = true,
 }: TaskCardListProps) {
+  const tasks = rawTasks || [];
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Auto-scroll to first active task when tasks change
   useEffect(() => {
+    if (tasks.length === 0) return;
     const activeIdx = tasks.findIndex((t) => t.status === "active");
     if (activeIdx !== -1) {
       setSelectedIndex(activeIdx);
@@ -42,6 +44,9 @@ export function TaskCardList({
       setSelectedIndex(tasks.length - 1);
     }
   }, [tasks.length, selectedIndex]);
+
+  // Nothing to render
+  if (tasks.length === 0) return null;
 
   useInput(
     (input, key) => {
