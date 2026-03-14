@@ -51,6 +51,11 @@ import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/pr
 import { formatTokens } from "./lib/index.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
 import { useImageInput, ImageBadge } from "./components/image-input.js";
+import { FixedFrame } from "./components/fixed-frame/index.js";
+import { type TaskItem } from "./components/task-card/index.js";
+import { NarratorView } from "./screens/index.js";
+import { narrateToolStart, narrateToolEnd, narratePlan, narrateStep } from "./lib/narrator.js";
+import { useViewport } from "./hooks/useViewport.js";
 
 // Import permission system for infinite mode
 import {
@@ -354,6 +359,11 @@ export function App({ initialCommand, args }: AppProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
 
+  // TV Mode state — task cards + narrator
+  const viewport = useViewport();
+  const [tvTasks, setTvTasks] = useState<TaskItem[]>([]);
+  const [narratorText, setNarratorText] = useState("");
+
   // Image attachment (paste image paths or drag-drop)
   const imageInput = useImageInput({});
 
@@ -503,6 +513,14 @@ export function App({ initialCommand, args }: AppProps) {
                 }
                 return prev;
               });
+              // TV Mode: narrator + task card
+              const narration = narrateToolStart(event.toolName, event.args);
+              setNarratorText(narration);
+              setTvTasks((prev) => [
+                ...prev.map(t => t.status === "active" ? { ...t, status: "done" as const } : t),
+                { id: event.toolCallId, title: narration, status: "active" as const },
+              ]);
+
               // Show tool call in message stream
               const argsPreview = JSON.stringify(event.args).slice(0, 80);
               setMessages((prev) => [...prev, {
@@ -514,6 +532,15 @@ export function App({ initialCommand, args }: AppProps) {
             },
             onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
+
+              // TV Mode: mark task done/error + update narrator
+              const isFailure = !event.success || (event.resultPreview?.startsWith("Exit code ") && !event.resultPreview.startsWith("Exit code 0"));
+              setNarratorText(narrateToolEnd(event.toolName, !isFailure, event.durationMs));
+              setTvTasks((prev) => prev.map(t =>
+                t.id === event.toolCallId
+                  ? { ...t, status: isFailure ? "error" as const : "done" as const, duration: event.durationMs, details: isFailure ? event.resultPreview?.slice(0, 120) : undefined }
+                  : t
+              ));
               setActiveTool(null);
 
               // Auto-advance kanban: move first Ready → Done on each tool completion
@@ -563,6 +590,16 @@ export function App({ initialCommand, args }: AppProps) {
             onStepFinish: (event: AgentStepEvent) => {
               setStepCount((prev) => prev + 1);
               setTotalTokens((prev) => prev + event.usage.totalTokens);
+
+              // TV Mode: narrate the step
+              if (event.text && event.text.trim()) {
+                const planMatch = event.text.match(/PLAN:\s/i);
+                if (planMatch) {
+                  setNarratorText(narratePlan(event.text));
+                } else {
+                  setNarratorText(narrateStep(event.text));
+                }
+              }
 
               // Stream assistant's intermediate reasoning into the message list
               // so the user can see what the agent is thinking between tool calls
@@ -1149,6 +1186,10 @@ export function App({ initialCommand, args }: AppProps) {
       setIsProcessing(true);
       resetAgentProgress();
 
+      // Reset TV Mode for new task
+      setTvTasks([]);
+      setNarratorText("Thinking...");
+
       const cmdStartTime = Date.now();
 
       // Generate predictions and avenues
@@ -1370,10 +1411,10 @@ export function App({ initialCommand, args }: AppProps) {
       case "chat":
       default:
         return (
-          <MessageList
-            messages={messages}
-            animateTyping={showAnimations}
-            soundEnabled={soundEnabled}
+          <NarratorView
+            tasks={tvTasks}
+            narratorText={narratorText}
+            maxHeight={Math.max(viewport.height - 12, 10)}
           />
         );
     }
@@ -1381,7 +1422,7 @@ export function App({ initialCommand, args }: AppProps) {
 
   return (
     <ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
-    <Box flexDirection="column" height="100%">
+    <FixedFrame>
       {/* Header */}
       {fancyHeader ? (
         <FancyHeader isProcessing={isProcessing} />
@@ -1599,7 +1640,7 @@ export function App({ initialCommand, args }: AppProps) {
           </MutedText>
         </Box>
       )}
-    </Box>
+    </FixedFrame>
     </ADHDModeContext.Provider>
   );
 }
