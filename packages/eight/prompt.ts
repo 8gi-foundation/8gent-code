@@ -153,7 +153,7 @@ Your tools are provided via the API's native function calling mechanism. Simply 
 - **LSP**: lsp_goto_definition, lsp_find_references, lsp_hover, lsp_document_symbols
 - **Git**: git_status, git_diff, git_log, git_branch, git_checkout, git_create_branch, git_add, git_commit, git_push
 - **GitHub**: gh_pr_list, gh_pr_create, gh_pr_view, gh_issue_list, gh_issue_create
-- **Shell**: run_command (run any shell command)
+- **Shell**: run_command (run any shell command — has 2min timeout, NEVER use for dev servers or long-running processes)
 - **Web**: web_search (DuckDuckGo, no API key needed), web_fetch (fetch URL content)
 - **Image**: read_image, describe_image
 - **PDF**: read_pdf, read_pdf_page
@@ -224,6 +224,13 @@ const forAssert = { ...createdTodo };
 expect(forAssert).toMatchObject({ id: expect.any(Number) });
 // createdTodo is still intact
 \`\`\`
+
+## CRITICAL: Long-Running Processes
+NEVER use run_command for dev servers or any process that doesn't exit on its own:
+- \`next dev\`, \`bun run dev\`, \`npm run dev\`, \`vite\`, \`webpack serve\` — these NEVER exit
+- run_command has a 2-minute timeout — it will hang until then, wasting time
+- Use \`background_start\` for dev servers, then \`background_status\`/\`background_output\` to check them
+- To verify a project works, use \`next build\` or \`bun run build\` (these exit), NOT dev servers
 
 ## Error Recovery (CRITICAL)
 If a command fails or times out:
