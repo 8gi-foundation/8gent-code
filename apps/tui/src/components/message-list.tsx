@@ -96,67 +96,66 @@ function MessageItem({
     }
   }, [isNew]);
 
-  // Tool messages render as compact inline items
+  // Tool messages render as compact centered items
   if (message.role === "tool") {
     return (
-      <Box paddingLeft={2}>
+      <Box justifyContent="center" marginBottom={0}>
         <MutedText>{message.content}</MutedText>
       </Box>
     );
   }
 
-  const roleConfig = {
-    user: {
-      color: "yellow" as const,
-      label: "You",
-      icon: "▸",
-      labelColor: "#FFD700",
-    },
-    assistant: {
-      color: "cyan" as const,
-      label: "8gent",
-      icon: "◆",
-      labelColor: "#00FFFF",
-    },
-    system: {
-      color: "gray" as const,
-      label: "System",
-      icon: "●",
-      labelColor: "#888888",
-    },
-  };
+  // System messages render centered, subtle
+  if (message.role === "system") {
+    if (!showContent) return null;
+    return (
+      <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
+        <Box justifyContent="center" marginBottom={1}>
+          <MutedText>● {message.content}</MutedText>
+        </Box>
+      </FadeIn>
+    );
+  }
 
-  const config = roleConfig[message.role as "user" | "assistant" | "system"];
+  const isUser = message.role === "user";
 
   if (!showContent) {
     return (
-      <Box marginBottom={1}>
-        <MutedText>
-          ...
-        </MutedText>
+      <Box marginBottom={1} justifyContent={isUser ? "flex-end" : "flex-start"}>
+        <MutedText>...</MutedText>
       </Box>
     );
   }
 
   return (
     <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
-      <Stack marginBottom={1}>
-        {/* Message header */}
+      <Box
+        flexDirection="column"
+        alignItems={isUser ? "flex-end" : "flex-start"}
+        marginBottom={1}
+      >
+        {/* Sender label */}
         <Box>
-          <PopIn delay={isNew ? 50 : 0}>
-            <Text color={config.color}>{config.icon} </Text>
-          </PopIn>
-          <Label color={config.color}>
-            {config.label}
-          </Label>
-          <MutedText>
-            {" "}
-            {formatTime(message.timestamp)}
-          </MutedText>
+          {isUser ? (
+            <MutedText>{formatTime(message.timestamp)} </MutedText>
+          ) : (
+            <Label color="cyan">◆ 8gent </Label>
+          )}
+          {isUser ? (
+            <Label color="yellow">You</Label>
+          ) : (
+            <MutedText>{formatTime(message.timestamp)}</MutedText>
+          )}
         </Box>
 
-        {/* Message content */}
-        <Box paddingLeft={2}>
+        {/* Chat bubble */}
+        <Box
+          borderStyle="round"
+          borderColor={isUser ? "yellow" : "cyan"}
+          paddingX={1}
+          marginLeft={isUser ? 10 : 0}
+          marginRight={isUser ? 0 : 10}
+        >
           <MessageContent
             content={message.content}
             role={message.role}
@@ -165,7 +164,7 @@ function MessageItem({
             onTypingComplete={() => setTypingComplete(true)}
           />
         </Box>
-      </Stack>
+      </Box>
     </FadeIn>
   );
 }
