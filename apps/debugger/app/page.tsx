@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import SessionList from "./components/SessionList";
 import SessionViewer from "./components/SessionViewer";
 import type { SessionInfo } from "./api/sessions/route";
@@ -13,24 +13,50 @@ export default function Home() {
   const [sidebarWidth, setSidebarWidth] = useState(360);
   const [dragging, setDragging] = useState(false);
 
+  // Read session ID from URL on mount
+  const getSessionIdFromURL = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    const url = new URL(window.location.href);
+    return url.searchParams.get("session");
+  }, []);
+
+  // Sync session selection to URL
+  const selectSession = useCallback(
+    (s: SessionInfo | null) => {
+      setActive(s);
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      if (s) {
+        url.searchParams.set("session", s.sessionId);
+      } else {
+        url.searchParams.delete("session");
+      }
+      window.history.replaceState({}, "", url.toString());
+    },
+    []
+  );
+
   useEffect(() => {
-    console.log("[Debugger:Page] Fetching sessions list...");
     fetch("/api/sessions")
-      .then((r) => {
-        console.log(`[Debugger:Page] Sessions API responded: ${r.status} ${r.statusText}`);
-        return r.json();
-      })
+      .then((r) => r.json())
       .then((data) => {
-        console.log(`[Debugger:Page] Got ${data.length} sessions:`, data.map((s: SessionInfo) => s.sessionId));
         setSessions(data);
         setLoading(false);
+
+        // Auto-select session from URL
+        const urlSessionId = getSessionIdFromURL();
+        if (urlSessionId) {
+          const match = data.find(
+            (s: SessionInfo) => s.sessionId === urlSessionId
+          );
+          if (match) setActive(match);
+        }
       })
       .catch((e) => {
-        console.error("[Debugger:Page] Failed to fetch sessions:", e);
         setError(String(e));
         setLoading(false);
       });
-  }, []);
+  }, [getSessionIdFromURL]);
 
   // Refresh session list every 10s
   useEffect(() => {
@@ -84,10 +110,7 @@ export default function Home() {
           <SessionList
             sessions={sessions}
             activeId={active?.sessionId ?? null}
-            onSelect={(s) => {
-              console.log(`[Debugger:Page] Selected session: ${s.sessionId}, lines=${s.lineCount}, completed=${s.completed}`);
-              setActive(s);
-            }}
+            onSelect={(s) => selectSession(s)}
           />
         )}
       </div>

@@ -317,6 +317,8 @@ export default function SessionViewer({
   const [isLive, setIsLive] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [copiedJson, setCopiedJson] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -417,6 +419,28 @@ export default function SessionViewer({
             )}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}?session=${session.sessionId}`;
+                navigator.clipboard.writeText(url);
+                setCopiedUrl(true);
+                setTimeout(() => setCopiedUrl(false), 2000);
+              }}
+              className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            >
+              {copiedUrl ? "✓ Copied URL" : "Copy URL"}
+            </button>
+            <button
+              onClick={() => {
+                const json = JSON.stringify(entries, null, 2);
+                navigator.clipboard.writeText(json);
+                setCopiedJson(true);
+                setTimeout(() => setCopiedJson(false), 2000);
+              }}
+              className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            >
+              {copiedJson ? "✓ Copied JSON" : "Copy as JSON"}
+            </button>
             {!initialLoaded && (
               <span className="text-[10px] text-amber-400 animate-pulse">
                 Loading...
