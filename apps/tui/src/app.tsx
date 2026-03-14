@@ -47,7 +47,9 @@ import {
   ADHD_MODE_DISABLED_MSG,
 } from "./components/bionic-text.js";
 import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
+import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
+import { useProcessPanel } from "./hooks/useProcessPanel.js";
 
 // Import permission system for infinite mode
 import {
@@ -289,6 +291,9 @@ export function App({ initialCommand, args }: AppProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
 
+  // Background process panel
+  const processPanel = useProcessPanel();
+
   // Onboarding system
   const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -349,6 +354,11 @@ export function App({ initialCommand, args }: AppProps) {
     // Toggle expanded view with Ctrl+O (like Claude Code)
     if (key.ctrl && input === "o") {
       setExpandedView((prev) => !prev);
+    }
+
+    // Toggle process panel
+    if (key.ctrl && input === "b") {
+      processPanel.toggleSidebar();
     }
 
     // Cycle through modes with Shift+Tab
@@ -1225,9 +1235,52 @@ export function App({ initialCommand, args }: AppProps) {
         <Header isProcessing={isProcessing} showAnimations={showAnimations} />
       )}
 
-      {/* Main content area */}
+      {/* Main content area — process views replace chat when active */}
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
-        {renderMainContent()}
+        {processPanel.detailTaskId && processPanel.tasks.find(t => t.id === processPanel.detailTaskId) ? (
+          <ProcessDetailView
+            task={processPanel.tasks.find(t => t.id === processPanel.detailTaskId)!}
+            output={processPanel.detailOutput}
+            onClose={processPanel.closeDetail}
+            onKill={() => {
+              const killed = processPanel.killSelected();
+              if (killed) {
+                setMessages((prev) => [...prev, {
+                  id: `system-kill-${Date.now()}`,
+                  role: "system" as const,
+                  content: `Process killed: "${killed.command.slice(0, 60)}"`,
+                  timestamp: new Date(),
+                }]);
+              }
+            }}
+            height={30}
+          />
+        ) : processPanel.sidebarOpen ? (
+          <ProcessSidebar
+            tasks={processPanel.tasks}
+            selectedIndex={processPanel.selectedIndex}
+            focused={processPanel.focusZone === "sidebar"}
+            taskCounts={processPanel.taskCounts}
+            width={60}
+            onNext={processPanel.nextTask}
+            onPrev={processPanel.prevTask}
+            onOpen={processPanel.openDetail}
+            onKill={() => {
+              const killed = processPanel.killSelected();
+              if (killed) {
+                setMessages((prev) => [...prev, {
+                  id: `system-kill-${Date.now()}`,
+                  role: "system" as const,
+                  content: `Process killed: "${killed.command.slice(0, 60)}"`,
+                  timestamp: new Date(),
+                }]);
+              }
+            }}
+            onUnfocus={processPanel.focusInput}
+          />
+        ) : (
+          renderMainContent()
+        )}
       </Box>
 
       {/* Mini kanban when in chat mode and has items */}
@@ -1358,10 +1411,11 @@ export function App({ initialCommand, args }: AppProps) {
 
       {/* Hidden keyboard shortcuts hint */}
       {showAnimations && (
-        <Box paddingX={1} marginTop={1}>
+        <Box paddingX={1} marginTop={1} gap={2}>
           <MutedText>
-            ^O expand | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | /help | ^C exit
+            ^O expand | ^B processes | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | ^C exit
           </MutedText>
+          {!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
         </Box>
       )}
     </Box>
