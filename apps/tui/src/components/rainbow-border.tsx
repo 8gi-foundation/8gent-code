@@ -6,6 +6,7 @@
 
 import React, { useState, useEffect, type ReactNode } from "react";
 import { Box, Text } from "ink";
+import { AppText, MutedText, Stack } from './primitives/index.js';
 
 // Rainbow color palette
 const RAINBOW_COLORS = [
@@ -142,7 +143,7 @@ export function PulsingBorder({
   return (
     <Box
       borderStyle="round"
-      borderColor={visible ? color : "gray"}
+      borderColor={visible ? color : "blue"}
       paddingX={1}
     >
       {children}
@@ -181,19 +182,19 @@ export function DecoratedBox({
   };
 
   return (
-    <Box flexDirection="column" width={width}>
+    <Stack width={width}>
       <Box justifyContent="space-between">
-        <Text color={getCornerColor(0)}>╭</Text>
-        <Text color="gray">{"─".repeat((width || 40) - 2)}</Text>
-        <Text color={getCornerColor(1)}>╮</Text>
+        <AppText color={getCornerColor(0)}>╭</AppText>
+        <MutedText>{"─".repeat((width || 40) - 2)}</MutedText>
+        <AppText color={getCornerColor(1)}>╮</AppText>
       </Box>
       <Box paddingX={1}>{children}</Box>
       <Box justifyContent="space-between">
-        <Text color={getCornerColor(3)}>╰</Text>
-        <Text color="gray">{"─".repeat((width || 40) - 2)}</Text>
-        <Text color={getCornerColor(2)}>╯</Text>
+        <AppText color={getCornerColor(3)}>╰</AppText>
+        <MutedText>{"─".repeat((width || 40) - 2)}</MutedText>
+        <AppText color={getCornerColor(2)}>╯</AppText>
       </Box>
-    </Box>
+    </Stack>
   );
 }
 

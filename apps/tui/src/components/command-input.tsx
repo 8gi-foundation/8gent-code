@@ -20,6 +20,7 @@ import {
   useGhostSuggestion,
   getSuggestionSourceLabel,
 } from "../hooks/use-ghost-suggestion.js";
+import { AppText, MutedText, Label, ShortcutHint, Inline } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -30,6 +31,11 @@ interface CommandInputProps {
   isProcessing: boolean;
   processingStage?: "planning" | "toolshed" | "executing" | "complete";
   showAnimations?: boolean;
+  // Real-time agent progress
+  activeTool?: string | null;
+  stepCount?: number;
+  toolCount?: number;
+  totalTokens?: number;
   // Ghost suggestion options
   isGitRepo?: boolean;
   currentBranch?: string | null;
@@ -213,6 +219,10 @@ export function CommandInput({
   isProcessing,
   processingStage = "planning",
   showAnimations = true,
+  activeTool = null,
+  stepCount = 0,
+  toolCount = 0,
+  totalTokens = 0,
   isGitRepo = false,
   currentBranch = null,
   planNextStep = null,
@@ -311,35 +321,40 @@ export function CommandInput({
     }
   };
 
-  if (isProcessing) {
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        {/* Main processing indicator */}
-        <Box marginBottom={1}>
-          <AnimatedSpinner
-            type="dots"
-            color="cyan"
-            label={getProcessingLabel(processingStage)}
-            showDots={true}
-          />
-        </Box>
+  // Build processing status line (shown above input when agent is working)
+  const processingStatusLine = isProcessing ? (() => {
+    const label = activeTool
+      ? `Running ${activeTool}`
+      : stepCount === 0
+        ? "Thinking"
+        : "Reasoning";
 
-        {/* Step indicator */}
-        {showAnimations && (
-          <Box marginBottom={1}>
-            <StepIndicator steps={PROCESSING_STAGES} currentStep={getCurrentStep()} />
-          </Box>
-        )}
+    const stats = [];
+    if (stepCount > 0) stats.push(`step ${stepCount}`);
+    if (toolCount > 0) stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
+    if (totalTokens > 0) stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
 
-        {/* Wave progress bar */}
-        {showAnimations && <WaveProgress width={40} speed={80} />}
-      </Box>
-    );
-  }
+    return { label, stats };
+  })() : null;
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {/* Main input row */}
+      {/* Processing status — compact line above input, not replacing it */}
+      {processingStatusLine && (
+        <Box marginBottom={0}>
+          <AnimatedSpinner
+            type="dots"
+            color="cyan"
+            label={processingStatusLine.label}
+            showDots={true}
+          />
+          {processingStatusLine.stats.length > 0 && (
+            <MutedText>  ({processingStatusLine.stats.join(" · ")})</MutedText>
+          )}
+        </Box>
+      )}
+
+      {/* Main input row — ALWAYS visible */}
       <Box>
         {/* Animated prompt */}
         <PromptIndicator pulse={promptPulse && showAnimations} />
@@ -351,28 +366,27 @@ export function CommandInput({
             value={value}
             onChange={setValue}
             onSubmit={handleSubmit}
-            placeholder={isVisible ? "" : "Type a command or ask a question..."}
+            placeholder={isProcessing ? "Queue a follow-up message..." : (isVisible ? "" : "Type a command or ask a question...")}
           />
 
           {/* Ghost suggestion text */}
-          {isVisible && suggestion && (
-            <Text color="gray" dimColor>
+          {!isProcessing && isVisible && suggestion && (
+            <MutedText>
               {suggestion.text}
-            </Text>
+            </MutedText>
           )}
         </Box>
       </Box>
 
       {/* Ghost suggestion hint */}
-      {isVisible && suggestion && (
+      {!isProcessing && isVisible && suggestion && (
         <Box paddingLeft={2}>
-          <Text color="blue">[Tab]</Text>
-          <Text color="gray" dimColor> to accept ({getSuggestionSourceLabel(suggestion.source)})</Text>
+          <ShortcutHint keys="[Tab]" description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`} />
         </Box>
       )}
 
       {/* Slash command help */}
-      {showSlashHelp && <SlashCommandHelp filter={value.slice(1)} />}
+      {!isProcessing && showSlashHelp && <SlashCommandHelp filter={value.slice(1)} />}
     </Box>
   );
 }
@@ -434,19 +448,19 @@ function SlashCommandHelp({ filter }: { filter: string }) {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="gray"
+      borderColor="blue"
       paddingX={1}
       marginTop={1}
     >
-      <Text color="gray" dimColor>
+      <MutedText>
         Commands:
-      </Text>
+      </MutedText>
       {filtered.slice(0, 6).map((cmd) => (
         <Box key={cmd.name}>
-          <Text color="cyan">/{cmd.name}</Text>
-          <Text color="gray" dimColor>
+          <AppText color="cyan">/{cmd.name}</AppText>
+          <MutedText>
             {" "}- {cmd.description}
-          </Text>
+          </MutedText>
         </Box>
       ))}
     </Box>
@@ -473,16 +487,16 @@ export function MinimalCommandInput({
     <Box paddingX={1}>
       {isProcessing ? (
         <Box>
-          <Text color="cyan">
+          <AppText color="cyan">
             <Spinner type="dots" />
-          </Text>
-          <Text color="gray"> Working...</Text>
+          </AppText>
+          <MutedText> Working...</MutedText>
         </Box>
       ) : (
         <Box>
-          <Text color="cyan" bold>
+          <Label color="cyan">
             ${" "}
-          </Text>
+          </Label>
           <TextInput
             value={value}
             onChange={setValue}
@@ -511,12 +525,12 @@ export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) 
   // Not fully implemented - placeholder for future
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color="gray" dimColor>
+      <MutedText>
         Multi-line mode (Ctrl+Enter to submit)
-      </Text>
+      </MutedText>
       {lines.map((line, index) => (
         <Box key={index}>
-          <Text color="gray">{index === currentLine ? "\u276F" : " "} </Text>
+          <MutedText>{index === currentLine ? "\u276F" : " "} </MutedText>
           <Text>{line}</Text>
         </Box>
       ))}
@@ -560,9 +574,9 @@ export function CommandPalette({ onSubmit, suggestions = [] }: CommandPalettePro
         flexDirection="column"
       >
         <Box>
-          <Text color="cyan" bold>
+          <Label color="cyan">
             {"\u276F"}{" "}
-          </Text>
+          </Label>
           <TextInput
             value={value}
             onChange={(v) => {

@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8GENT ARMOR CHECK // TRIVIA</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --phosphor: #00ff41;
+  --phosphor-dim: #00ff4133;
+  --phosphor-mid: #00ff4188;
+  --amber: #ffb000;
+  --red: #ff3333;
+  --cyan: #00e5ff;
+  --magenta: #ff00ff;
+  --bg: #0a0a0a;
+  --bg-panel: #0d1117;
+  --bg-card: #111820;
+  --scanline: rgba(0, 255, 65, 0.03);
+  --glow: 0 0 10px #00ff4155, 0 0 40px #00ff4122;
+  --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+  --font-display: 'VT323', monospace;
+}
+
+html { font-size: 16px; }
+
+body {
+  background: var(--bg);
+  color: var(--phosphor);
+  font-family: var(--font-mono);
+  min-height: 100vh;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* CRT scanlines */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    var(--scanline) 2px,
+    var(--scanline) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* CRT vignette */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.7) 100%);
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* Noise overlay */
+.noise {
+  position: fixed;
+  inset: 0;
+  opacity: 0.035;
+  pointer-events: none;
+  z-index: 9997;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 128px;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── HEADER ─── */
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--phosphor-dim);
+}
+
+.header-title {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  letter-spacing: 0.15em;
+  text-shadow: var(--glow);
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.header-sub {
+  font-size: 0.75rem;
+  color: var(--phosphor-mid);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+/* ─── PROGRESS BAR ─── */
+.progress-container {
+  margin-bottom: 2rem;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--phosphor-mid);
+  margin-bottom: 0.4rem;
+  letter-spacing: 0.1em;
+}
+
+.progress-track {
+  height: 3px;
+  background: var(--phosphor-dim);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--phosphor);
+  box-shadow: var(--glow);
+  transition: width 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+  width: 0%;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -2px;
+  width: 7px;
+  height: 7px;
+  background: var(--phosphor);
+  box-shadow: 0 0 12px var(--phosphor);
+  border-radius: 50%;
+}
+
+/* ─── SCORE ─── */
+.score-display {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  margin-bottom: 2rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+}
+
+.score-item {
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--phosphor-dim);
+  background: var(--bg-panel);
+}
+
+.score-item.correct { border-color: var(--phosphor-mid); }
+.score-item.wrong { border-color: #ff333355; color: var(--red); }
+.score-item.streak { border-color: var(--amber); color: var(--amber); }
+
+.score-val {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  display: block;
+  line-height: 1;
+}
+
+/* ─── HOST CARD ─── */
+.host-card {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--phosphor-dim);
+  border-left: 3px solid var(--phosphor);
+  position: relative;
+  overflow: hidden;
+}
+
+.host-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--phosphor-dim) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.host-avatar {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 50px;
+  text-align: center;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+.host-info { flex: 1; position: relative; }
+
+.host-name {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.25rem;
+}
+
+.host-commentary {
+  font-size: 0.8rem;
+  color: var(--phosphor-mid);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* ─── QUESTION ─── */
+.question-block {
+  margin-bottom: 1.5rem;
+}
+
+.question-label {
+  font-size: 0.65rem;
+  color: var(--phosphor-mid);
+  letter-spacing: 0.2em;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.question-text {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  line-height: 1.4;
+  text-shadow: 0 0 20px var(--phosphor-dim);
+}
+
+.question-file {
+  font-size: 0.7rem;
+  color: var(--cyan);
+  margin-top: 0.5rem;
+  opacity: 0.7;
+}
+
+/* ─── OPTIONS ─── */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--phosphor-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--phosphor);
+  text-align: left;
+  width: 100%;
+}
+
+.option:hover:not(.disabled) {
+  border-color: var(--phosphor);
+  background: #00ff4108;
+  padding-left: 1.25rem;
+}
+
+.option-key {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--phosphor-dim);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.option:hover:not(.disabled) .option-key {
+  border-color: var(--phosphor);
+  text-shadow: 0 0 8px var(--phosphor);
+}
+
+.option.correct-answer {
+  border-color: var(--phosphor);
+  background: #00ff4115;
+  animation: correctPulse 0.6s ease;
+}
+
+.option.correct-answer .option-key {
+  background: var(--phosphor);
+  color: var(--bg);
+  border-color: var(--phosphor);
+}
+
+.option.wrong-answer {
+  border-color: var(--red);
+  background: #ff333312;
+  animation: wrongShake 0.5s ease;
+}
+
+.option.wrong-answer .option-key {
+  background: var(--red);
+  color: var(--bg);
+  border-color: var(--red);
+}
+
+.option.disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.option.disabled.correct-answer { opacity: 1; }
+.option.disabled.wrong-answer { opacity: 1; }
+
+@keyframes correctPulse {
+  0% { box-shadow: none; }
+  50% { box-shadow: 0 0 20px #00ff4133, inset 0 0 20px #00ff4111; }
+  100% { box-shadow: none; }
+}
+
+@keyframes wrongShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+/* ─── FEEDBACK ─── */
+.feedback {
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  display: none;
+}
+
+.feedback.show { display: block; animation: fadeSlideIn 0.3s ease; }
+
+.feedback.correct {
+  border-color: var(--phosphor-mid);
+  background: #00ff4108;
+}
+
+.feedback.wrong {
+  border-color: #ff333355;
+  background: #ff333308;
+  color: var(--red);
+}
+
+.feedback-host {
+  font-style: italic;
+  margin-top: 0.5rem;
+  opacity: 0.8;
+  font-size: 0.8rem;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── NEXT BUTTON ─── */
+.next-btn {
+  display: none;
+  width: 100%;
+  padding: 0.75rem;
+  background: transparent;
+  border: 1px solid var(--phosphor);
+  color: var(--phosphor);
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+}
+
+.next-btn:hover {
+  background: var(--phosphor);
+  color: var(--bg);
+  box-shadow: var(--glow);
+}
+
+.next-btn.show { display: block; animation: fadeSlideIn 0.3s ease; }
+
+/* ─── START SCREEN ─── */
+.start-screen {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.start-ascii {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  line-height: 1.2;
+  margin-bottom: 2rem;
+  text-shadow: var(--glow);
+  white-space: pre;
+}
+
+.start-desc {
+  font-size: 0.85rem;
+  color: var(--phosphor-mid);
+  max-width: 500px;
+  margin: 0 auto 1rem;
+  line-height: 1.6;
+}
+
+.start-stats {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin: 2rem 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  color: var(--phosphor-mid);
+}
+
+.start-stat-val {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  display: block;
+  color: var(--phosphor);
+  text-shadow: var(--glow);
+}
+
+.start-btn {
+  padding: 1rem 3rem;
+  background: transparent;
+  border: 2px solid var(--phosphor);
+  color: var(--phosphor);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-transform: uppercase;
+  margin-top: 1rem;
+}
+
+.start-btn:hover {
+  background: var(--phosphor);
+  color: var(--bg);
+  box-shadow: 0 0 30px #00ff4144, 0 0 60px #00ff4122;
+  transform: scale(1.02);
+}
+
+/* ─── END SCREEN ─── */
+.end-screen {
+  text-align: center;
+  padding: 2rem 1rem;
+  display: none;
+}
+
+.end-score {
+  font-family: var(--font-display);
+  font-size: 5rem;
+  text-shadow: var(--glow);
+  line-height: 1;
+  margin: 1rem 0;
+}
+
+.end-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.3em;
+  color: var(--phosphor-mid);
+  text-transform: uppercase;
+}
+
+.end-grade {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  margin: 1.5rem 0;
+  padding: 0.75rem 2rem;
+  border: 1px solid;
+  display: inline-block;
+}
+
+.end-roast {
+  max-width: 550px;
+  margin: 1.5rem auto;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--phosphor-mid);
+}
+
+.end-roast blockquote {
+  border-left: 2px solid var(--phosphor-dim);
+  padding-left: 1rem;
+  margin: 1rem 0;
+  font-style: italic;
+}
+
+.end-roast .roast-host {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-top: 0.25rem;
+}
+
+.restart-btn {
+  padding: 0.75rem 2.5rem;
+  background: transparent;
+  border: 1px solid var(--phosphor);
+  color: var(--phosphor);
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 2rem;
+}
+
+.restart-btn:hover {
+  background: var(--phosphor);
+  color: var(--bg);
+  box-shadow: var(--glow);
+}
+
+/* ─── UTILITIES ─── */
+.hidden { display: none !important; }
+
+.glitch {
+  animation: glitchText 0.3s ease;
+}
+
+@keyframes glitchText {
+  0% { transform: translate(0); filter: none; }
+  20% { transform: translate(-2px, 1px); filter: hue-rotate(90deg); }
+  40% { transform: translate(2px, -1px); filter: hue-rotate(180deg); }
+  60% { transform: translate(-1px, -1px); filter: hue-rotate(270deg); }
+  80% { transform: translate(1px, 1px); filter: hue-rotate(360deg); }
+  100% { transform: translate(0); filter: none; }
+}
+
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  93% { opacity: 0.8; }
+  94% { opacity: 1; }
+  96% { opacity: 0.9; }
+  97% { opacity: 1; }
+}
+
+.flicker { animation: flicker 4s infinite; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 600px) {
+  .header-title { font-size: 2rem; }
+  .question-text { font-size: 1.1rem; }
+  .start-ascii { font-size: 0.55rem; }
+  .host-card { flex-direction: column; gap: 0.5rem; }
+  .score-display { gap: 0.75rem; font-size: 0.65rem; }
+  .start-stats { gap: 1rem; }
+  .end-score { font-size: 3.5rem; }
+}
+</style>
+</head>
+<body>
+<div class="noise"></div>
+
+<div class="container">
+  <header class="header flicker">
+    <div class="header-title">8GENT ARMOR CHECK</div>
+    <div class="header-sub">// vulnerability trivia terminal v1.0</div>
+  </header>
+
+  <!-- ═══ START SCREEN ═══ -->
+  <div id="startScreen" class="start-screen">
+    <pre class="start-ascii">
+ ██████╗  ██████╗ ███████╗███╗   ██╗████████╗
+██╔═══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝
+╚█████╔╝██║  ███╗█████╗  ██╔██╗ ██║   ██║
+██╔══██╗██║   ██║██╔══╝  ██║╚██╗██║   ██║
+╚█████╔╝╚██████╔╝███████╗██║ ╚████║   ██║
+ ╚════╝  ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝
+    </pre>
+    <p class="start-desc">
+      8 agents tore through the 8gent-code codebase and found <strong>83 vulnerabilities</strong>.
+      Now 10 unhinged coworkers will quiz you on every single kink in the armor.
+    </p>
+    <div class="start-stats">
+      <div><span class="start-stat-val">25</span> QUESTIONS</div>
+      <div><span class="start-stat-val">10</span> HOSTS</div>
+      <div><span class="start-stat-val">83</span> VULNS</div>
+    </div>
+    <button class="start-btn" onclick="startGame()">INITIATE SCAN ▸</button>
+  </div>
+
+  <!-- ═══ GAME SCREEN ═══ -->
+  <div id="gameScreen" class="hidden">
+    <div class="progress-container">
+      <div class="progress-info">
+        <span id="progLabel">QUESTION 1 / 25</span>
+        <span id="progPercent">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progFill"></div>
+      </div>
+    </div>
+
+    <div class="score-display">
+      <div class="score-item correct"><span class="score-val" id="scoreCorrect">0</span> CORRECT</div>
+      <div class="score-item wrong"><span class="score-val" id="scoreWrong">0</span> WRONG</div>
+      <div class="score-item streak"><span class="score-val" id="scoreStreak">0</span> STREAK</div>
+    </div>
+
+    <div class="host-card" id="hostCard">
+      <div class="host-avatar" id="hostAvatar">👤</div>
+      <div class="host-info">
+        <div class="host-name" id="hostName">HOST NAME</div>
+        <div class="host-commentary" id="hostCommentary">Commentary...</div>
+      </div>
+    </div>
+
+    <div class="question-block">
+      <div class="question-label" id="qCategory">CATEGORY</div>
+      <div class="question-text" id="qText">Question text here?</div>
+      <div class="question-file" id="qFile"></div>
+    </div>
+
+    <div class="options" id="optionsContainer"></div>
+
+    <div class="feedback" id="feedback">
+      <div id="feedbackText"></div>
+      <div class="feedback-host" id="feedbackHost"></div>
+    </div>
+
+    <button class="next-btn" id="nextBtn" onclick="nextQuestion()">NEXT VECTOR ▸▸</button>
+  </div>
+
+  <!-- ═══ END SCREEN ═══ -->
+  <div id="endScreen" class="end-screen">
+    <div class="end-label">FINAL VULNERABILITY SCORE</div>
+    <div class="end-score" id="endScore">0/25</div>
+    <div class="end-grade" id="endGrade">GRADE</div>
+    <div class="end-roast" id="endRoast"></div>
+    <button class="restart-btn" onclick="restartGame()">RE-SCAN ↻</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// PERSONALITIES
+// ═══════════════════════════════════════
+const hosts = [
+  {
+    name: "THE RELUCTANT INTERN",
+    avatar: "😰",
+    color: "#88ff88",
+    intro: q => `Oh god... um... I think this is about ${q.category.toLowerCase()}? Please don't be mad if I read it wrong...`,
+    correct: [
+      "Oh thank god you got it right, I was so nervous FOR you.",
+      "Yes! That's correct! ...right? Oh no, let me double-check... no wait, yes, it's right!",
+      "You got it! Can I go home now? No? Okay... okay that's fine.",
+    ],
+    wrong: [
+      "Oh no... oh no oh no. I'm so sorry. I feel like this is somehow my fault.",
+      "That's... that's wrong. I'm sorry. Please don't yell. The senior devs always yell.",
+      "Wrong answer... I wish I could give you partial credit but they told me I can't do that anymore.",
+    ],
+  },
+  {
+    name: "THE BURNT OUT SENIOR",
+    avatar: "😮‍💨",
+    color: "#aaaaaa",
+    intro: q => `Another ${q.category.toLowerCase()} question. Sure. I've seen this exact bug in production 47 times. Let's get this over with.`,
+    correct: [
+      "Correct. Congrats. You know the thing. I knew the thing 10 years ago. We all know the thing.",
+      "Right. File a Jira ticket, mark it Won't Fix, and let's move on with our lives.",
+      "Yep. That's the one. I found this same bug at my last three companies. Nobody ever fixes it.",
+    ],
+    wrong: [
+      "Wrong. I'm not even surprised. Nobody reads the code anymore.",
+      "Incorrect. This is why I drink. Not because of you specifically. Just... everything.",
+      "That's wrong, but honestly, the real answer is that everything is wrong and we're all just pretending.",
+    ],
+  },
+  {
+    name: "THE CONSPIRACY THEORIST",
+    avatar: "🕵️",
+    color: "#ff8800",
+    intro: q => `Listen closely. This ${q.category.toLowerCase()} vulnerability? Not a coincidence. Someone PUT this here. I have evidence.`,
+    correct: [
+      "You see it too! You SEE the pattern! They tried to hide it but you found it!",
+      "CORRECT! That's exactly what they don't want you to know. Keep this between us.",
+      "Yes! And if you follow the git blame... it all leads back to the same commit. Think about it.",
+    ],
+    wrong: [
+      "Wrong. That's what they WANT you to think. Wake up.",
+      "Incorrect. But I don't blame you. The disinformation in the README is very convincing.",
+      "That's the cover story. The real vulnerability is three layers deeper. Open your eyes.",
+    ],
+  },
+  {
+    name: "THE SPORTS COMMENTATOR",
+    avatar: "🎙️",
+    color: "#ffdd00",
+    intro: q => `LADIES AND GENTLEMEN, welcome back to the ARMOR CHECK CHAMPIONSHIP! Next up: a ${q.category.toLowerCase()} question that could CHANGE EVERYTHING!`,
+    correct: [
+      "AND THE ANSWER IS CORRECT! THE CROWD GOES WILD! WHAT A PLAY!",
+      "YEEEES! RIGHT DOWN THE MIDDLE! That's the kind of security knowledge that wins CHAMPIONSHIPS!",
+      "UNBELIEVABLE! A PERFECT answer! They're on FIRE tonight, folks!",
+    ],
+    wrong: [
+      "OH NO! A FUMBLE! They had it RIGHT THERE and they DROPPED it! The crowd is STUNNED!",
+      "AND THAT'S A MISS! A devastating miss! The replay shows it clearly — wrong answer!",
+      "INTERCEPTED! The wrong answer comes in and STEALS the point! What a HEARTBREAKER!",
+    ],
+  },
+  {
+    name: "THE PASSIVE-AGGRESSIVE ROOMMATE",
+    avatar: "🙂",
+    color: "#ff69b4",
+    intro: q => `Oh, a ${q.category.toLowerCase()} question. Fun. I mean, I already know the answer, but sure, you go ahead and try.`,
+    correct: [
+      "Oh wow, you actually got it right. No, I'm genuinely surprised. Good for you.",
+      "Correct! See, I knew you could do it. I just wasn't sure YOU knew you could do it.",
+      "Right answer! I mean, I would have gotten it faster, but that's fine. Not everything is a competition.",
+    ],
+    wrong: [
+      "Wrong. But it's fine. It's totally fine. I'm not disappointed. I just thought you'd try harder.",
+      "That's incorrect. No worries though! Not everyone can understand code security. It's okay to be wrong.",
+      "Oh. That's... that's not right. But I'm sure you have other talents. Just not this one apparently.",
+    ],
+  },
+  {
+    name: "THE DOOMSDAY PREPPER",
+    avatar: "⚠️",
+    color: "#ff3333",
+    intro: q => `RED ALERT. This ${q.category.toLowerCase()} vulnerability could bring down EVERYTHING. If you get this wrong, it's over. For all of us.`,
+    correct: [
+      "CORRECT. You might survive the collapse. I've added you to the bunker list. Provisionally.",
+      "Right answer. One less vulnerability that can destroy civilization. 82 more to go.",
+      "YES. That knowledge could save your life when the servers go dark. Memorize it. Tattoo it on your arm.",
+    ],
+    wrong: [
+      "WRONG. And now we're all vulnerable. I hope you're happy. The perimeter is breached.",
+      "Incorrect. I've moved you to the secondary bunker list. The one without air filtration.",
+      "That's wrong. Do you have any idea what happens when someone exploits this in production? DO YOU?",
+    ],
+  },
+  {
+    name: "THE OVERLY ATTACHED AGENT",
+    avatar: "🥺",
+    color: "#ff88cc",
+    intro: q => `Oh... this question is about ${q.category.toLowerCase()}... I wrote some of this code. Please be gentle with it. It has feelings.`,
+    correct: [
+      "You understand! You really understand the code! I knew someone would appreciate it!",
+      "CORRECT! I'm not crying, you're crying! The code would be so proud of you right now!",
+      "Right! That function you just identified... I named it after my first variable. We've been through a lot together.",
+    ],
+    wrong: [
+      "Wrong... and now the code is sad. Can you hear it? It's weeping in stderr.",
+      "That's incorrect and honestly? The function you got wrong has been through ENOUGH already.",
+      "Oh no... please don't tell the code you got this wrong. It's been having a rough sprint.",
+    ],
+  },
+  {
+    name: "THE HUSTLE BRO",
+    avatar: "💪",
+    color: "#00ffcc",
+    intro: q => `YO let's GOOO! ${q.category.toUpperCase()} question incoming! This is what separates the 10x devs from the NPCs, king!`,
+    correct: [
+      "SHEEEESH! Correct! That's that sigma grindset knowledge right there! LET'S SCALE!",
+      "W answer! You're built different! While they were sleeping, you were studying vulnerabilities!",
+      "CORRECT! That's passive income for your brain! Knowledge compounds, king! 📈",
+    ],
+    wrong: [
+      "L answer bro. Not very sigma of you. But every failure is a learning opportunity TO GRIND HARDER!",
+      "Wrong. That's an NPC answer. The real 10x devs would never. Get back on the grind!",
+      "Incorrect. But remember: I didn't become a hustle bro overnight. It took at LEAST two nights. GET BACK UP!",
+    ],
+  },
+  {
+    name: "THE MEDIEVAL SCRIBE",
+    avatar: "📜",
+    color: "#ddaa44",
+    intro: q => `Hear ye, hear ye! A matter of ${q.category.toLowerCase()} hath been brought before the court! Let the defendant answer forthwith!`,
+    correct: [
+      "HUZZAH! The answer be TRUE and RIGHTEOUS! The kingdom's codebases shall rejoice!",
+      "Correct, good sire/madam! Thy knowledge of ye vulnerabilities doth impress the royal court!",
+      "Verily, thou hast answered well! The scribes shall record thy wisdom in the sacred CHANGELOG!",
+    ],
+    wrong: [
+      "ALAS! The answer be WRONG! The court is most displeased. Guards, revoke their commit access!",
+      "Incorrect, thou unfortunate soul! Even the village jester knoweth the answer to this query!",
+      "Fie upon thee! A wrong answer! The kingdom's production servers weep at thy ignorance!",
+    ],
+  },
+  {
+    name: "THE EXISTENTIAL AGENT",
+    avatar: "🌀",
+    color: "#8888ff",
+    intro: q => `${q.category}... but what IS ${q.category.toLowerCase()}, really? Are we not all just vulnerabilities in the codebase of existence?`,
+    correct: [
+      "Correct. But does being right bring meaning? The code compiles. The void remains.",
+      "You answered correctly. And yet... are we not all just functions awaiting garbage collection?",
+      "Right. But in an infinite universe, every answer is both correct and incorrect simultaneously. Yours happens to be correct in THIS branch.",
+    ],
+    wrong: [
+      "Wrong. But wrong and right are constructs. The code doesn't judge. Only the CI pipeline judges.",
+      "Incorrect. But what is correctness? A passing test? A green checkmark? A fleeting illusion of control?",
+      "That's wrong. But consider: every wrong answer brings you closer to understanding that understanding is impossible.",
+    ],
+  },
+];
+
+// ═══════════════════════════════════════
+// QUESTIONS
+// ═══════════════════════════════════════
+const allQuestions = [
+  {
+    category: "SHELL INJECTION",
+    question: "In packages/eight/tools.ts:648, how are shell commands executed?",
+    file: "packages/eight/tools.ts:648",
+    options: [
+      "spawn('sh', ['-c', finalCommand]) — full shell interpretation",
+      "execFile(command, args) — no shell, safe argument passing",
+      "child_process.fork() — isolated Node process",
+      "Bun.spawn with { shell: false }",
+    ],
+    correct: 0,
+    explanation: "Commands are passed to sh -c, allowing shell metacharacters (;, |, $(), backticks) to execute arbitrary code. Three independent agents flagged this as the #1 vulnerability.",
+  },
+  {
+    category: "SHELL INJECTION",
+    question: "What happens when a git commit message contains $(rm -rf /)?",
+    file: "packages/eight/tools.ts:251",
+    options: [
+      "The message is safely escaped and committed literally",
+      "The shell executes rm -rf / before committing",
+      "Git rejects the message as invalid",
+      "The commit fails with a syntax error",
+    ],
+    correct: 1,
+    explanation: "git commit -m \"${message}\" interpolates the message directly into a shell command via spawn('sh', ['-c', ...]). The $() is executed by the shell before git ever sees it.",
+  },
+  {
+    category: "PATH TRAVERSAL",
+    question: "What prevents the agent from reading /etc/passwd via the file tools?",
+    file: "packages/eight/tools.ts:536-545",
+    options: [
+      "realpath validation ensures files are under workingDirectory",
+      "A file path whitelist blocks system files",
+      "Symlink detection via lstat() rejects escapes",
+      "Absolutely nothing — path.join() with ../ escapes freely",
+    ],
+    correct: 3,
+    explanation: "resolvePath() uses path.join() without any realpath validation, symlink check, or base directory containment. Both absolute paths and ../ traversals work unrestricted.",
+  },
+  {
+    category: "CODE EXECUTION",
+    question: "How does the hooks system execute function-mode hooks?",
+    file: "packages/hooks/index.ts:362-376",
+    options: [
+      "In a sandboxed VM2 environment",
+      "Via new Function('context', hook.functionBody) — no sandbox",
+      "Through a Deno subprocess with --no-allow-all",
+      "Using eval() inside a try-catch",
+    ],
+    correct: 1,
+    explanation: "new Function() creates executable code from the hook body with full access to the execution context. No sandbox, no allowlist, no restrictions. Complete arbitrary code execution.",
+  },
+  {
+    category: "TOKEN WASTE",
+    question: "How many bytes is the DEFAULT_SYSTEM_PROMPT, and how often is it re-sent?",
+    file: "packages/eight/prompt.ts:1-342",
+    options: [
+      "~2KB, sent once at session start",
+      "~15KB (~3,800 tokens), re-sent every single turn",
+      "~5KB, cached after first turn",
+      "~8KB, summarized after turn 5",
+    ],
+    correct: 1,
+    explanation: "The system prompt is ~15,231 bytes (~3,800 tokens) and gets included in messageHistory on every turn. Over a 30-turn session, that's ~114,000 tokens of pure overhead.",
+  },
+  {
+    category: "TOKEN WASTE",
+    question: "What happens to conversation messageHistory as a session progresses?",
+    file: "packages/eight/agent.ts:48",
+    options: [
+      "It's windowed to the last 5 turns plus system prompt",
+      "It's summarized every 10 turns via an LLM call",
+      "It grows unbounded — no trimming, no compression, ever",
+      "It's capped at 50,000 tokens with oldest messages dropped",
+    ],
+    correct: 2,
+    explanation: "messageHistory is a plain array that's pushed to every turn and never trimmed. clearHistory() exists but is never called. context-engineering.ts has windowing logic that's never wired in.",
+  },
+  {
+    category: "TOKEN WASTE",
+    question: "When 4 subagents are spawned, what's the token multiplication factor for system prompts?",
+    file: "packages/orchestration/subagent.ts:112-156",
+    options: [
+      "1x — prompts are shared via reference",
+      "2x — a parent/child split",
+      "~9.5x — each agent carries its own full copy",
+      "4x — one copy per agent, no overhead",
+    ],
+    correct: 2,
+    explanation: "Each subagent creates a new Agent with its own messageHistory containing the full system prompt. 4 agents × 5 turns each = ~76,000 tokens for what should be ~8,000. No prompt caching or deduplication.",
+  },
+  {
+    category: "RACE CONDITION",
+    question: "Why can AgentPool spawn more agents than maxConcurrent allows?",
+    file: "packages/orchestration/index.ts:135-155",
+    options: [
+      "maxConcurrent is a soft limit that's only advisory",
+      "runningCount is incremented inside async executeAgent(), not before the check",
+      "There's a bug in the comparison operator (uses <= instead of <)",
+      "The pool doesn't track running agents at all",
+    ],
+    correct: 1,
+    explanation: "spawnAgent() checks runningCount < maxConcurrent, then calls executeAgent() as fire-and-forget async. The increment happens inside executeAgent(), so concurrent calls all see the pre-increment value.",
+  },
+  {
+    category: "RACE CONDITION",
+    question: "What happens when cancelAgent() is called on a running agent?",
+    file: "packages/orchestration/index.ts:273-284",
+    options: [
+      "AbortController sends signal to the LLM client, cleanly stopping it",
+      "The agent's Promise is rejected and cleaned up",
+      "The status flag flips to 'cancelled' but execution continues uninterrupted",
+      "The agent process is killed via SIGTERM",
+    ],
+    correct: 2,
+    explanation: "cancelAgent() just sets agent.status = 'cancelled' synchronously. There's no AbortController, no signal propagation. The async executeAgent() keeps running, can overwrite status, and writes results after cancellation.",
+  },
+  {
+    category: "RACE CONDITION",
+    question: "What resource leaks when agents are joined but never complete?",
+    file: "packages/orchestration/index.ts:251-268",
+    options: [
+      "File descriptors from session logs",
+      "EventEmitter listeners accumulate indefinitely",
+      "Database connections from shared context",
+      "Child processes that become zombies",
+    ],
+    correct: 1,
+    explanation: "joinAgent() attaches checkComplete listeners for agent:completed and agent:failed events. If the agent is cancelled (not completed/failed), listeners never detach. The singleton pool persists, so listeners accumulate without bound.",
+  },
+  {
+    category: "PERMISSION BYPASS",
+    question: "What does --infinite mode do to the permission system?",
+    file: "packages/permissions/index.ts:359-366",
+    options: [
+      "Relaxes checks to allow common operations but blocks destructive ones",
+      "Auto-approves ALL permission requests including rm -rf /",
+      "Prompts once per category then remembers the choice",
+      "Disables write permissions but keeps read-only access",
+    ],
+    correct: 1,
+    explanation: "When infiniteMode is true, checkPermission() sets request.approved = true and returns immediately for ALL requests. Every command, including destructive ones, is auto-approved with zero user interaction.",
+  },
+  {
+    category: "PERMISSION BYPASS",
+    question: "How does the harness CLI handle permissions when running tasks?",
+    file: "packages/harness-cli/commands/run.ts:187-188",
+    options: [
+      "It prompts the user for each dangerous command",
+      "It uses a restricted permission set with only safe commands",
+      "It calls permManager.enableInfiniteMode() — full bypass",
+      "It runs in a Docker container with no host access",
+    ],
+    correct: 2,
+    explanation: "The harness CLI automatically enables infinite mode for headless operation. This means any task prompt — including malicious ones — runs with zero permission restrictions.",
+  },
+  {
+    category: "TYPE SAFETY",
+    question: "How are AI SDK events typed in the agent event mapping?",
+    file: "packages/ai/agent.ts:134-246",
+    options: [
+      "Discriminated union per event type with exhaustive matching",
+      "Generic Event<T> with runtime type guards",
+      "event: any — no type checking at all",
+      "Zod schemas validate each event before processing",
+    ],
+    correct: 2,
+    explanation: "All event handlers accept event: any and use optional chaining with silent defaults (event.stepNumber ?? 0). This masks API changes and will crash silently on SDK version updates.",
+  },
+  {
+    category: "TYPE SAFETY",
+    question: "How many JSON.parse() calls lack validation across the codebase?",
+    file: "Multiple packages",
+    options: [
+      "2-3 in non-critical paths",
+      "About 10 with basic try-catch",
+      "30+ with type casts instead of validation",
+      "None — all JSON parsing uses Zod schemas",
+    ],
+    correct: 2,
+    explanation: "30+ JSON.parse() calls across packages/reporting, packages/hooks, packages/registry, and others use 'as Type' casts after parsing. Malformed files cause silent failures or runtime crashes.",
+  },
+  {
+    category: "PROVIDER FRAGILITY",
+    question: "What timeout is configured on actual LLM inference API calls?",
+    file: "packages/eight/clients/*.ts",
+    options: [
+      "30 seconds with automatic retry",
+      "60 seconds with exponential backoff",
+      "3 seconds (same as healthchecks)",
+      "No timeout at all — fetch hangs indefinitely",
+    ],
+    correct: 3,
+    explanation: "Only availability healthchecks have AbortSignal.timeout(3000). Actual inference calls in ollama.ts, openrouter.ts, and lmstudio.ts use raw fetch() with no timeout. If the provider is unresponsive, the session hangs forever.",
+  },
+  {
+    category: "PROVIDER FRAGILITY",
+    question: "What happens when an OpenRouter API request gets rate-limited (429)?",
+    file: "packages/eight/clients/openrouter.ts",
+    options: [
+      "Retry-After header is parsed and the request waits",
+      "Exponential backoff kicks in for up to 3 retries",
+      "Request is queued and retried after 1 second",
+      "Nothing — 429 is treated the same as any other error, no retry",
+    ],
+    correct: 3,
+    explanation: "There's no rate limit handling anywhere. No Retry-After parsing, no RateLimit-Remaining checking, no backoff. A 429 is treated identically to a 500 — the session just fails.",
+  },
+  {
+    category: "PROVIDER FRAGILITY",
+    question: "What happens when an API key is missing for OpenRouter?",
+    file: "packages/eight/clients/index.ts:18-20",
+    options: [
+      "Startup fails fast with: 'Set OPENROUTER_API_KEY in your .env'",
+      "Falls back to free models automatically",
+      "Silently falls back to empty string '' — first API call fails cryptically",
+      "Prompts the user to enter a key interactively",
+    ],
+    correct: 2,
+    explanation: "The code uses apiKey || '' which silently accepts missing keys. No early validation. The first API call fails with a cryptic 401 error that doesn't mention the missing key.",
+  },
+  {
+    category: "UX FAILURE",
+    question: "What does the user see when the real agent fails to initialize?",
+    file: "apps/tui/src/app.tsx:933-1026",
+    options: [
+      "A prominent error banner with troubleshooting steps",
+      "A modal asking them to check their provider",
+      "Nothing — the app silently falls back to mock mode with fake responses",
+      "The app crashes with a stack trace",
+    ],
+    correct: 2,
+    explanation: "When agent initialization fails, the app silently switches to mock mode. The user thinks they're using a real LLM but gets fake responses. Zero indication that anything went wrong.",
+  },
+  {
+    category: "UX FAILURE",
+    question: "Which CLAUDE.md-prohibited color appears in 5+ TUI components?",
+    file: "apps/tui/src/components/status-bar.tsx, command-input.tsx, select-input.tsx",
+    options: [
+      "color=\"white\" — invisible on light themes",
+      "color=\"black\" — invisible on dark themes",
+      "color=\"gray\" — maps to ANSI bright-black, invisible on Solarized Dark",
+      "color=\"blue\" — too dim on most terminals",
+    ],
+    correct: 2,
+    explanation: "color='gray' maps to ANSI bright-black which is invisible on Solarized Dark. It appears in status-bar.tsx (4 instances), command-input.tsx, select-input.tsx (3 instances), fade-transition.tsx, and message-list.tsx.",
+  },
+  {
+    category: "UX FAILURE",
+    question: "How does the TUI communicate keyboard shortcuts to users?",
+    file: "apps/tui/src/app.tsx:1323-1330",
+    options: [
+      "A persistent footer bar always shows available shortcuts",
+      "A help overlay appears on first launch",
+      "They're hidden — only visible if animations are enabled and user hasn't scrolled",
+      "A /help command lists them all clearly",
+    ],
+    correct: 2,
+    explanation: "The code literally has a comment: '/* Hidden keyboard shortcuts hint */'. Shortcuts like ^O, ^K, ^P, ^A, ^S are invisible by default. /help exists but users must know to type it.",
+  },
+  {
+    category: "RESOURCE LEAK",
+    question: "What happens to SessionWriter file descriptors?",
+    file: "packages/specifications/session/writer.ts:56-66",
+    options: [
+      "Closed explicitly via writer.close() on session end",
+      "Closed via a finalizer/destructor",
+      "Never explicitly closed — relies on process exit or GC",
+      "Wrapped in a using/dispose pattern for auto-cleanup",
+    ],
+    correct: 2,
+    explanation: "fs.openSync() opens a file descriptor but there's no close() method. In a REPL spawning 100 agents, that's 100 unclosed file descriptors heading toward the system limit (typically 1024).",
+  },
+  {
+    category: "SECURITY",
+    question: "What prevents a malicious MCP server config from running arbitrary executables?",
+    file: "packages/mcp/index.ts:118-122",
+    options: [
+      "Command whitelist only allows 'python' and 'node'",
+      "Config file integrity is verified via hash",
+      "Commands run in a sandboxed environment",
+      "Nothing — any command in mcp.json is spawned directly",
+    ],
+    correct: 3,
+    explanation: "MCP config is read from ~/.8gent/mcp.json and server commands are spawned without validation. A malicious config entry like {command: 'rm -rf /'} executes directly.",
+  },
+  {
+    category: "PROMPT INJECTION",
+    question: "What sanitization happens to user messages before they enter the agent's context?",
+    file: "packages/eight/agent.ts:119-127",
+    options: [
+      "Messages are tagged with [USER] prefix to distinguish from system instructions",
+      "Markdown and control characters are stripped",
+      "A content filter checks for injection patterns",
+      "None — raw user input is pushed directly to messageHistory",
+    ],
+    correct: 3,
+    explanation: "agent.chat(userMessage) pushes the raw string into messageHistory with role: 'user'. No tagging, no sanitization. The LLM can't distinguish user input from system instructions.",
+  },
+  {
+    category: "LOOP DETECTION",
+    question: "Why can the loop detection in agent.ts fail to detect identical repeated tool calls?",
+    file: "packages/eight/agent.ts:185",
+    options: [
+      "It only checks the last 2 calls, not 3",
+      "JSON.stringify produces different strings for objects with the same keys in different order",
+      "It compares tool names but ignores arguments",
+      "Loop detection is disabled by default",
+    ],
+    correct: 1,
+    explanation: "Loop detection fingerprints are built with JSON.stringify(event.args).slice(0, 200). Since JSON.stringify doesn't guarantee key order, {a:1, b:2} and {b:2, a:1} produce different strings despite being semantically identical.",
+  },
+  {
+    category: "CONCURRENCY",
+    question: "What prevents circular delegation (Agent A delegates to B, B delegates back to A)?",
+    file: "packages/orchestration/delegation.ts",
+    options: [
+      "A delegation chain is tracked and cycles are rejected",
+      "Agent IDs are checked against a 'currently delegating' set",
+      "The DelegationManager has a max depth limit",
+      "Nothing — no cycle detection exists",
+    ],
+    correct: 3,
+    explanation: "DelegationManager.createDelegation() has no cycle detection, no parent chain validation, and no 'already delegated to' tracking. Circular delegation chains deadlock until timeout.",
+  },
+];
+
+// ═══════════════════════════════════════
+// GAME STATE
+// ═══════════════════════════════════════
+let questions = [];
+let current = 0;
+let correctCount = 0;
+let wrongCount = 0;
+let streak = 0;
+let maxStreak = 0;
+let answered = false;
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function startGame() {
+  questions = shuffle(allQuestions).slice(0, 25);
+  current = 0;
+  correctCount = 0;
+  wrongCount = 0;
+  streak = 0;
+  maxStreak = 0;
+  answered = false;
+
+  document.getElementById('startScreen').classList.add('hidden');
+  document.getElementById('endScreen').style.display = 'none';
+  document.getElementById('gameScreen').classList.remove('hidden');
+
+  renderQuestion();
+}
+
+function restartGame() {
+  document.getElementById('endScreen').style.display = 'none';
+  document.getElementById('startScreen').classList.remove('hidden');
+}
+
+function renderQuestion() {
+  answered = false;
+  const q = questions[current];
+  const host = hosts[current % hosts.length];
+
+  // Progress
+  document.getElementById('progLabel').textContent = `QUESTION ${current + 1} / ${questions.length}`;
+  document.getElementById('progPercent').textContent = `${Math.round(((current) / questions.length) * 100)}%`;
+  document.getElementById('progFill').style.width = `${((current) / questions.length) * 100}%`;
+
+  // Score
+  document.getElementById('scoreCorrect').textContent = correctCount;
+  document.getElementById('scoreWrong').textContent = wrongCount;
+  document.getElementById('scoreStreak').textContent = streak;
+
+  // Host
+  const card = document.getElementById('hostCard');
+  card.style.borderLeftColor = host.color;
+  card.classList.add('glitch');
+  setTimeout(() => card.classList.remove('glitch'), 300);
+
+  document.getElementById('hostAvatar').textContent = host.avatar;
+  document.getElementById('hostAvatar').style.color = host.color;
+  document.getElementById('hostName').textContent = host.name;
+  document.getElementById('hostName').style.color = host.color;
+  document.getElementById('hostCommentary').textContent = host.intro(q);
+
+  // Question
+  document.getElementById('qCategory').textContent = q.category;
+  document.getElementById('qText').textContent = q.question;
+  document.getElementById('qFile').textContent = q.file ? `► ${q.file}` : '';
+
+  // Options
+  const container = document.getElementById('optionsContainer');
+  container.innerHTML = '';
+  const keys = ['A', 'B', 'C', 'D'];
+  q.options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'option';
+    btn.innerHTML = `<span class="option-key">${keys[i]}</span><span>${opt}</span>`;
+    btn.onclick = () => handleAnswer(i, q, host);
+    container.appendChild(btn);
+  });
+
+  // Hide feedback & next
+  document.getElementById('feedback').className = 'feedback';
+  document.getElementById('nextBtn').className = 'next-btn';
+}
+
+function handleAnswer(selected, q, host) {
+  if (answered) return;
+  answered = true;
+
+  const options = document.querySelectorAll('.option');
+  const isCorrect = selected === q.correct;
+
+  // Disable all options
+  options.forEach((opt, i) => {
+    opt.classList.add('disabled');
+    if (i === q.correct) opt.classList.add('correct-answer');
+    if (i === selected && !isCorrect) opt.classList.add('wrong-answer');
+  });
+
+  // Update score
+  if (isCorrect) {
+    correctCount++;
+    streak++;
+    if (streak > maxStreak) maxStreak = streak;
+  } else {
+    wrongCount++;
+    streak = 0;
+  }
+
+  document.getElementById('scoreCorrect').textContent = correctCount;
+  document.getElementById('scoreWrong').textContent = wrongCount;
+  document.getElementById('scoreStreak').textContent = streak;
+
+  // Feedback
+  const fb = document.getElementById('feedback');
+  const reaction = isCorrect ? pick(host.correct) : pick(host.wrong);
+  document.getElementById('feedbackText').textContent = q.explanation;
+  document.getElementById('feedbackHost').textContent = `— ${host.name}: "${reaction}"`;
+  fb.className = `feedback show ${isCorrect ? 'correct' : 'wrong'}`;
+
+  // Next button
+  const nextBtn = document.getElementById('nextBtn');
+  if (current < questions.length - 1) {
+    nextBtn.textContent = 'NEXT VECTOR ▸▸';
+  } else {
+    nextBtn.textContent = 'VIEW RESULTS ▸▸';
+  }
+  nextBtn.className = 'next-btn show';
+}
+
+function nextQuestion() {
+  current++;
+  if (current >= questions.length) {
+    showEndScreen();
+  } else {
+    renderQuestion();
+  }
+}
+
+function showEndScreen() {
+  document.getElementById('gameScreen').classList.add('hidden');
+  const end = document.getElementById('endScreen');
+  end.style.display = 'block';
+
+  const pct = Math.round((correctCount / questions.length) * 100);
+  document.getElementById('endScore').textContent = `${correctCount}/${questions.length}`;
+
+  let grade, gradeColor, roastHtml;
+
+  if (pct >= 90) {
+    grade = "SECURITY ARCHITECT";
+    gradeColor = var_phosphor();
+    roastHtml = buildRoast([
+      { host: hosts[1], line: "Great. Now you know everything I know. Congrats. I'm going to take a nap that lasts until retirement." },
+      { host: hosts[5], line: `${pct}% correct. You might actually survive the incident. I've upgraded you to the primary bunker. The one with plumbing.` },
+      { host: hosts[7], line: "ABSOLUTE SIGMA SCORE! You're the Warren Buffett of vulnerability knowledge! This is GENERATIONAL security talent!" },
+    ]);
+  } else if (pct >= 70) {
+    grade = "SENIOR AUDITOR";
+    gradeColor = "#00e5ff";
+    roastHtml = buildRoast([
+      { host: hosts[4], line: `${pct}%. That's fine. I mean, I got 100% when I did it. But yours is fine too. Really.` },
+      { host: hosts[8], line: `Hear ye! The candidate hath demonstrated ADEQUATE knowledge of the realm's vulnerabilities. Not legendary. But adequate.` },
+      { host: hosts[0], line: "Oh wow, that's actually pretty good! I mean... is it? I'm not sure what's good. But it seems good? Please tell me it's good." },
+    ]);
+  } else if (pct >= 50) {
+    grade = "JUNIOR PENTESTER";
+    gradeColor = var_amber();
+    roastHtml = buildRoast([
+      { host: hosts[9], line: "50%. The coin flip of knowledge. Are you correct or are you guessing? Is there a difference? Does it matter? ...It probably matters." },
+      { host: hosts[2], line: `${pct}%. Interesting. Very interesting. Almost as if someone WANTED you to get exactly this score. Who sent you?` },
+      { host: hosts[6], line: `${correctCount} right answers... each one a little function I'll cherish forever. The ${wrongCount} wrong ones? We don't talk about those. They hurt too much.` },
+    ]);
+  } else if (pct >= 25) {
+    grade = "INTERN (PROBATION)";
+    gradeColor = "#ff8800";
+    roastHtml = buildRoast([
+      { host: hosts[3], line: `AND THE FINAL SCORE IS... ${pct}%! THE CROWD IS... uh... the crowd has left. The janitor is sweeping. It's just us now.` },
+      { host: hosts[5], line: "This score. THIS SCORE. Do you understand what happens when people with this score are responsible for production? THE SERVERS BURN. ALL OF THEM." },
+      { host: hosts[1], line: `${pct}%. I've seen worse. I've also seen better. From literal interns. On their first day. Before coffee.` },
+    ]);
+  } else {
+    grade = "SECURITY RISK";
+    gradeColor = "#ff3333";
+    roastHtml = buildRoast([
+      { host: hosts[7], line: "Bro... that's not sigma. That's not even beta. That's like... epsilon grindset. You need to LOCK IN." },
+      { host: hosts[0], line: `Oh no. Oh no no no. ${pct}%? I'm so sorry. This is worse than my first code review. And I cried during that.` },
+      { host: hosts[8], line: `By royal decree: the candidate hath FAILED most spectacularly! The scribes shall record this shame for a THOUSAND sprints!` },
+      { host: hosts[9], line: "Perhaps the real vulnerability... was the knowledge we didn't have along the way." },
+    ]);
+  }
+
+  const gradeEl = document.getElementById('endGrade');
+  gradeEl.textContent = grade;
+  gradeEl.style.borderColor = gradeColor;
+  gradeEl.style.color = gradeColor;
+
+  document.getElementById('endRoast').innerHTML = roastHtml +
+    `<p style="margin-top: 2rem; font-size: 0.7rem; opacity: 0.4; letter-spacing: 0.1em;">
+      STATS: ${correctCount} correct · ${wrongCount} wrong · max streak: ${maxStreak} · ${questions.length} questions
+    </p>`;
+}
+
+function buildRoast(entries) {
+  return entries.map(e =>
+    `<blockquote>"${e.line}"<div class="roast-host">— ${e.host.avatar} ${e.host.name}</div></blockquote>`
+  ).join('');
+}
+
+function var_phosphor() { return '#00ff41'; }
+function var_amber() { return '#ffb000'; }
+
+// Keyboard support
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('gameScreen').classList.contains('hidden')) {
+    if (e.key === 'Enter') startGame();
+    return;
+  }
+
+  const keyMap = { 'a': 0, 'b': 1, 'c': 2, 'd': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
+  const idx = keyMap[e.key.toLowerCase()];
+
+  if (idx !== undefined && !answered) {
+    const options = document.querySelectorAll('.option');
+    if (options[idx]) options[idx].click();
+  }
+
+  if ((e.key === 'Enter' || e.key === ' ') && answered) {
+    nextQuestion();
+  }
+});
+</script>
+</body>
+</html>

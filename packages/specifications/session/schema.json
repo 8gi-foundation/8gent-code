@@ -1,0 +1,482 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://8gent.dev/schemas/session/v2",
+  "title": "8gent Session",
+  "description": "A complete record of an 8gent coding agent session. v2 aligns with the Vercel AI SDK data model: steps replace turns, typed content parts, detailed token usage, per-step model info and finish reasons. Sessions are stored as JSONL files where each line is a SessionEntry.",
+
+  "$defs": {
+    "SessionMeta": {
+      "type": "object",
+      "description": "Session-level metadata, written as the first entry in the JSONL file.",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Unique session identifier. Format: session_{timestamp}_{random}",
+          "pattern": "^session_\\d+_[a-z0-9]+$"
+        },
+        "version": {
+          "type": "integer",
+          "enum": [1, 2],
+          "description": "Schema version. 1 = legacy turns, 2 = AI SDK steps."
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp when the session began."
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentInfo"
+        },
+        "environment": {
+          "$ref": "#/$defs/Environment"
+        }
+      },
+      "required": ["sessionId", "version", "startedAt", "agent", "environment"]
+    },
+
+    "AgentInfo": {
+      "type": "object",
+      "description": "The agent configuration active for this session.",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Model identifier. e.g. 'openai/gpt-4.1-mini', 'glm-4.7-flash:latest'"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["ollama", "lmstudio", "openrouter"],
+          "description": "Which LLM backend served the model."
+        },
+        "maxTurns": {
+          "type": "integer",
+          "description": "v1: Maximum agentic loop iterations."
+        },
+        "maxSteps": {
+          "type": "integer",
+          "description": "v2: Maximum steps (maps to AI SDK stopWhen)."
+        },
+        "systemPromptHash": {
+          "type": "string",
+          "description": "SHA-256 hash of the system prompt."
+        }
+      },
+      "required": ["model", "runtime"]
+    },
+
+    "Environment": {
+      "type": "object",
+      "description": "Snapshot of the execution environment at session start.",
+      "properties": {
+        "workingDirectory": {
+          "type": "string",
+          "description": "Absolute path of the project root."
+        },
+        "gitBranch": { "type": ["string", "null"] },
+        "gitCommit": { "type": ["string", "null"] },
+        "platform": {
+          "type": "string",
+          "enum": ["darwin", "linux", "win32"]
+        },
+        "nodeVersion": { "type": "string" }
+      },
+      "required": ["workingDirectory"]
+    },
+
+    "Message": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["system", "user", "assistant"]
+        },
+        "content": { "type": "string" }
+      },
+      "required": ["role", "content"]
+    },
+
+    "FinishReason": {
+      "type": "string",
+      "enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"],
+      "description": "Why a step finished. Maps directly to the AI SDK's FinishReason."
+    },
+
+    "ModelInfo": {
+      "type": "object",
+      "description": "Model used for a specific step (can change between steps via prepareStep).",
+      "properties": {
+        "provider": { "type": "string", "description": "Provider name. e.g. 'ollama', 'openrouter'" },
+        "modelId": { "type": "string", "description": "Model ID. e.g. 'qwen2.5-coder:7b'" }
+      },
+      "required": ["provider", "modelId"]
+    },
+
+    "DetailedTokenUsage": {
+      "type": "object",
+      "description": "Detailed token usage with cache and reasoning breakdowns.",
+      "properties": {
+        "promptTokens": { "type": "integer" },
+        "completionTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" },
+        "inputTokenDetails": {
+          "type": "object",
+          "properties": {
+            "noCacheTokens": { "type": "integer" },
+            "cacheReadTokens": { "type": "integer" },
+            "cacheWriteTokens": { "type": "integer" }
+          }
+        },
+        "outputTokenDetails": {
+          "type": "object",
+          "properties": {
+            "textTokens": { "type": "integer" },
+            "reasoningTokens": { "type": "integer" }
+          }
+        },
+        "raw": {
+          "type": "object",
+          "description": "Raw usage data from provider.",
+          "additionalProperties": true
+        }
+      },
+      "required": ["totalTokens"]
+    },
+
+    "TokenUsage": {
+      "type": "object",
+      "description": "Simple token usage (v1 backward compat).",
+      "properties": {
+        "promptTokens": { "type": "integer" },
+        "completionTokens": { "type": "integer" },
+        "totalTokens": { "type": "integer" }
+      },
+      "required": ["totalTokens"]
+    },
+
+    "ResponseMeta": {
+      "type": "object",
+      "description": "Provider response metadata for a step.",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "modelId": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+
+    "ContentPart": {
+      "type": "object",
+      "description": "A typed content part in assistant output.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["text", "reasoning", "source", "file", "tool-call", "tool-result", "tool-error"]
+        }
+      },
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "properties": { "text": { "type": "string" } }, "required": ["text"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "reasoning" } } },
+          "then": {
+            "properties": {
+              "text": { "type": "string" },
+              "signature": { "type": "string" }
+            },
+            "required": ["text"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "source" } } },
+          "then": {
+            "properties": {
+              "sourceType": { "type": "string" },
+              "id": { "type": "string" },
+              "url": { "type": "string" },
+              "title": { "type": "string" },
+              "providerMetadata": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["sourceType", "id"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "file" } } },
+          "then": {
+            "properties": {
+              "mediaType": { "type": "string" },
+              "data": { "type": "string", "description": "Base64-encoded file data." }
+            },
+            "required": ["mediaType", "data"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool-call" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "args": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["toolCallId", "toolName", "args"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool-result" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "result": {}
+            },
+            "required": ["toolCallId", "toolName"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool-error" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "error": { "type": "string" }
+            },
+            "required": ["toolCallId", "toolName", "error"]
+          }
+        }
+      ]
+    },
+
+    "ToolCall": {
+      "type": "object",
+      "description": "A tool invocation by the agent.",
+      "properties": {
+        "toolCallId": { "type": "string" },
+        "name": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": true },
+        "result": { "type": "string" },
+        "success": { "type": "boolean" },
+        "error": { "type": ["string", "null"] },
+        "durationMs": { "type": "integer" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["toolCallId", "name", "arguments", "success", "durationMs"]
+    },
+
+    "HookExecution": {
+      "type": "object",
+      "properties": {
+        "hookName": { "type": "string" },
+        "hookType": {
+          "type": "string",
+          "enum": ["onStart", "onComplete", "onError", "beforeTool", "afterTool"]
+        },
+        "durationMs": { "type": "integer" },
+        "success": { "type": "boolean" },
+        "error": { "type": ["string", "null"] }
+      },
+      "required": ["hookName", "hookType", "success"]
+    },
+
+    "SessionEntry": {
+      "type": "object",
+      "description": "A single line in the JSONL session file. Discriminated union on the 'type' field.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "session_start",
+            "user_message",
+            "assistant_message",
+            "assistant_content",
+            "tool_call",
+            "tool_result",
+            "tool_error",
+            "turn_start",
+            "turn_end",
+            "step_start",
+            "step_end",
+            "hook",
+            "error",
+            "session_end"
+          ]
+        },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "sequenceNumber": { "type": "integer" }
+      },
+      "required": ["type", "timestamp", "sequenceNumber"],
+
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "session_start" } } },
+          "then": { "properties": { "meta": { "$ref": "#/$defs/SessionMeta" } }, "required": ["meta"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "user_message" } } },
+          "then": { "properties": { "message": { "$ref": "#/$defs/Message" } }, "required": ["message"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "assistant_message" } } },
+          "then": {
+            "properties": {
+              "message": { "$ref": "#/$defs/Message" },
+              "usage": { "$ref": "#/$defs/TokenUsage" },
+              "turnIndex": { "type": "integer" },
+              "containsToolCalls": { "type": "boolean" }
+            },
+            "required": ["message"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "assistant_content" } } },
+          "then": {
+            "properties": {
+              "stepNumber": { "type": "integer", "description": "Step number (0-based) this content belongs to." },
+              "parts": { "type": "array", "items": { "$ref": "#/$defs/ContentPart" } },
+              "usage": { "$ref": "#/$defs/DetailedTokenUsage" }
+            },
+            "required": ["stepNumber", "parts"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool_call" } } },
+          "then": {
+            "properties": {
+              "toolCall": { "$ref": "#/$defs/ToolCall" },
+              "turnIndex": { "type": "integer" },
+              "stepNumber": { "type": "integer" }
+            },
+            "required": ["toolCall"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool_result" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "result": { "type": "string" },
+              "success": { "type": "boolean" },
+              "durationMs": { "type": "integer" },
+              "toolName": { "type": "string" },
+              "stepNumber": { "type": "integer" }
+            },
+            "required": ["toolCallId", "success"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tool_error" } } },
+          "then": {
+            "properties": {
+              "toolCallId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "error": { "type": "string" },
+              "stepNumber": { "type": "integer" }
+            },
+            "required": ["toolCallId", "toolName", "error"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "turn_start" } } },
+          "then": {
+            "properties": {
+              "turnIndex": { "type": "integer" },
+              "messageCount": { "type": "integer" }
+            },
+            "required": ["turnIndex"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "turn_end" } } },
+          "then": {
+            "properties": {
+              "turnIndex": { "type": "integer" },
+              "reason": { "type": "string", "enum": ["natural_stop", "tool_calls", "max_turns", "error"] },
+              "usage": { "$ref": "#/$defs/TokenUsage" }
+            },
+            "required": ["turnIndex", "reason"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "step_start" } } },
+          "then": {
+            "properties": {
+              "stepNumber": { "type": "integer" },
+              "model": { "$ref": "#/$defs/ModelInfo" },
+              "messageCount": { "type": "integer" }
+            },
+            "required": ["stepNumber"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "step_end" } } },
+          "then": {
+            "properties": {
+              "stepNumber": { "type": "integer" },
+              "finishReason": { "$ref": "#/$defs/FinishReason" },
+              "usage": { "$ref": "#/$defs/DetailedTokenUsage" },
+              "response": { "$ref": "#/$defs/ResponseMeta" },
+              "providerMetadata": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["stepNumber", "finishReason"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "hook" } } },
+          "then": { "properties": { "hook": { "$ref": "#/$defs/HookExecution" } }, "required": ["hook"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "error" } } },
+          "then": {
+            "properties": {
+              "error": {
+                "type": "object",
+                "properties": {
+                  "message": { "type": "string" },
+                  "code": { "type": ["string", "null"] },
+                  "stack": { "type": ["string", "null"] },
+                  "recoverable": { "type": "boolean" }
+                },
+                "required": ["message", "recoverable"]
+              }
+            },
+            "required": ["error"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "session_end" } } },
+          "then": {
+            "properties": {
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "endedAt": { "type": "string", "format": "date-time" },
+                  "durationMs": { "type": "integer" },
+                  "totalTurns": { "type": "integer", "description": "v1 compat: same as totalSteps." },
+                  "totalSteps": { "type": "integer", "description": "v2: number of steps completed." },
+                  "totalToolCalls": { "type": "integer" },
+                  "totalTokens": { "type": "integer", "description": "v1 compat: flat total." },
+                  "totalUsage": { "$ref": "#/$defs/DetailedTokenUsage", "description": "v2: aggregated detailed usage." },
+                  "filesCreated": { "type": "array", "items": { "type": "string" } },
+                  "filesModified": { "type": "array", "items": { "type": "string" } },
+                  "filesDeleted": { "type": "array", "items": { "type": "string" } },
+                  "gitCommits": { "type": "array", "items": { "type": "string" } },
+                  "exitReason": {
+                    "type": "string",
+                    "enum": ["user_exit", "max_turns", "max_steps", "error", "idle_timeout", "completed"]
+                  },
+                  "reportId": { "type": ["string", "null"] }
+                },
+                "required": ["endedAt", "durationMs", "exitReason"]
+              }
+            },
+            "required": ["summary"]
+          }
+        }
+      ]
+    }
+  },
+
+  "description": "The top-level schema describes a single SessionEntry. A session JSONL file contains one SessionEntry per line. The first entry MUST be type 'session_start'. The last entry SHOULD be type 'session_end'.",
+  "$ref": "#/$defs/SessionEntry"
+}

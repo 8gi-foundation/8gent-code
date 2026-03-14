@@ -27,7 +27,7 @@ export interface VoiceConfig {
 }
 
 const DEFAULT_CONFIG: VoiceConfig = {
-  enabled: true,
+  enabled: false, // OFF by default — enable with /voice on
   voice: "Daniel", // macOS British male voice - fitting for The Infinite Gentleman
   rate: 200,
   maxLength: 350,
