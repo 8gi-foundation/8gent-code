@@ -113,11 +113,11 @@ function loadProviderSettings(): { provider: string; model: string } {
       const data = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
       return {
         provider: data.activeProvider || "ollama",
-        model: data.activeModel || "glm-4.7-flash:latest",
+        model: data.activeModel || "qwen3.5:latest",
       };
     }
   } catch {}
-  return { provider: "ollama", model: "glm-4.7-flash:latest" };
+  return { provider: "ollama", model: "qwen3.5:latest" };
 }
 
 loadEnvFile();
