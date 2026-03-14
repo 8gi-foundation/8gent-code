@@ -23,7 +23,7 @@ export function NarratorView({
   narratorText,
   maxHeight,
 }: NarratorViewProps) {
-  if (tasks.length === 0) {
+  if (!tasks || tasks.length === 0) {
     return (
       <Box
         flexDirection="column"
@@ -45,7 +45,7 @@ export function NarratorView({
     <Box flexDirection="column" height={maxHeight}>
       <Box flexDirection="column" height={taskListHeight} flexShrink={0}>
         <TaskCardList
-          items={tasks}
+          tasks={tasks}
           maxHeight={taskListHeight}
           focusable={true}
         />
