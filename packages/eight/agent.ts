@@ -13,7 +13,7 @@ import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { createClient } from "./clients";
 import { ToolExecutor } from "./tools";
-import { findVisionModel } from "./vision-router";
+import { VisionInterpreter } from "./vision-interpreter";
 import { getHookManager, type HookManager } from "../hooks";
 import { extractCommitHash, extractBranchName } from "../reporting";
 import { appendRun, type RunLogEntry } from "../reporting/runlog";
@@ -114,45 +114,42 @@ export class Agent {
   }
 
   async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
-    // If image attached, auto-discover the best vision model
-    let visionModelOverride: string | null = null;
-    let visionProviderOverride: string | null = null;
+    // If image attached, fire off parallel vision interpretation (like /btw)
+    // The main agent stays on its text model — never switches.
+    // Vision result gets injected as a system message when ready.
+    let visionId: string | null = null;
 
     if (imageBase64) {
-      const visionResult = await findVisionModel({
-        openRouterApiKey: this.config.apiKey,
+      const interpreter = new VisionInterpreter({
+        apiKey: this.config.apiKey,
+        onResult: (_id, result) => {
+          // Inject vision description into conversation as system context
+          const visionContext = `[Vision Interpretation — ${result.model} (${result.durationMs}ms${result.free ? ", free" : ""})]\n${result.description}`;
+          this.messageHistory.push({ role: "system", content: visionContext });
+
+          // Notify via event so TUI can show it
+          this.config.events?.onStepFinish?.({
+            text: `🔍 Image interpreted by ${result.model}${result.free ? " (free)" : ""} in ${(result.durationMs / 1000).toFixed(1)}s:\n${result.description.slice(0, 200)}${result.description.length > 200 ? "..." : ""}`,
+            stepNumber: 0,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            finishReason: "other",
+          } as any);
+        },
       });
 
-      if (visionResult.found && visionResult.model) {
-        visionModelOverride = visionResult.model.model;
-        visionProviderOverride = visionResult.model.provider;
-        // Log which vision model we're using
-        this.config.events?.onStepFinish?.({
-          text: `🔍 Vision: using ${visionResult.model.displayName}${visionResult.model.free ? " (free)" : ""}`,
-          stepNumber: 0,
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          finishReason: "other",
-        } as any);
-      } else {
-        // No vision model available — send text-only with a note
-        this.config.events?.onStepFinish?.({
-          text: `⚠️ ${visionResult.error || "No vision model available — image will be described in text only."}`,
-          stepNumber: 0,
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          finishReason: "other",
-        } as any);
-      }
+      // Fire and forget — runs in parallel while main agent works
+      visionId = interpreter.interpret(imageBase64, imageMimeType || "image/png");
+
+      this.config.events?.onStepFinish?.({
+        text: `📷 Image attached — vision interpreter running in background...`,
+        stepNumber: 0,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        finishReason: "other",
+      } as any);
     }
 
-    // Build message content — multimodal if image attached
-    const content = imageBase64
-      ? [
-          { type: "text" as const, text: userMessage },
-          { type: "image_url" as const, image_url: { url: `data:${imageMimeType || "image/png"};base64,${imageBase64}` } },
-        ]
-      : userMessage;
-
-    this.messageHistory.push({ role: "user", content });
+    // Main agent always gets the text message — no model switching
+    this.messageHistory.push({ role: "user", content: userMessage });
 
     // Log user message to session
     this.sessionWriter.writeUserMessage(userMessage);
@@ -164,10 +161,10 @@ export class Agent {
     let totalTokensUsed = 0;
     let stepCount = 0;
 
-    // Build provider config — override with vision model if image attached
+    // Build provider config — main agent always uses its own model
     const providerConfig: ProviderConfig = {
-      name: (visionProviderOverride || this.config.runtime) as ProviderName,
-      model: visionModelOverride || this.config.model,
+      name: this.config.runtime as ProviderName,
+      model: this.config.model,
       apiKey: this.config.apiKey,
     };
 
