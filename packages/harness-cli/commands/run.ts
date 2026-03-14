@@ -70,6 +70,15 @@ const TASK_PRESETS: Record<string, { prompt: string; validate: string }> = {
 Steps: Create all 6 files. Run bun test. If ANY test fails, read the error carefully, fix the specific issue, and re-run. ALL 30 tests must pass. Do not retry the same fix — if something fails 3 times, try a different approach entirely.`,
     validate: "server.ts",
   },
+  "nextjs-e2e": {
+    prompt: `Complete these tasks in order:
+1) Create a new Next.js project using bun create next-app
+2) Start the dev server using bun run dev (from inside the project directory)
+3) Change the homepage (app/page.tsx or src/app/page.tsx) to display only: <h1>Hello James</h1>
+4) Verify the file was written correctly by reading it back
+5) Report the dev server URL and confirm the homepage was changed`,
+    validate: "page.tsx",
+  },
 };
 
 function parseArgs(args: string[]): RunOptions {
