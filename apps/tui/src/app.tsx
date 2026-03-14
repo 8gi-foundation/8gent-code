@@ -415,17 +415,24 @@ export function App({ initialCommand, args }: AppProps) {
             onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
               setActiveTool(null);
-              // Show tool result in message stream
-              const resultPreview = event.success
-                ? "✓"
-                : "✗ failed";
+              // Detect command failures even when tool "succeeds"
+              const isRealFailure = !event.success ||
+                (event.resultPreview?.startsWith("Exit code ") && !event.resultPreview.startsWith("Exit code 0"));
               const duration = event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
+              let content: string;
+              if (isRealFailure && event.resultPreview) {
+                // Show the error message so user knows what happened
+                const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
+                content = `  ✗ ${errMsg}${duration}`;
+              } else {
+                content = `  ✓${duration}`;
+              }
               setMessages((prev) => [...prev, {
                 id: `tool-end-${event.toolCallId}`,
                 role: "tool" as const,
-                content: `  ${resultPreview}${duration}`,
+                content,
                 timestamp: new Date(),
-                toolSuccess: event.success,
+                toolSuccess: !isRealFailure,
               }]);
             },
             onStepFinish: (event: AgentStepEvent) => {

@@ -226,6 +226,7 @@ export class Agent {
           success: event.success,
           durationMs: event.durationMs,
           stepNumber: event.stepNumber,
+          resultPreview: resultStr.slice(0, 200),
         });
 
         // Track file operations
