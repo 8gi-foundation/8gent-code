@@ -15,6 +15,7 @@ export interface HotkeyBindings {
   ctrlA?: () => void;
   ctrlS?: () => void;
   ctrlP?: () => void;
+  ctrlB?: () => void;
   q?: () => void;
   number?: (n: number) => void;
 }
@@ -53,6 +54,10 @@ export function useHotkeys(
         }
         if (input === "p" && bindings.ctrlP) {
           bindings.ctrlP();
+          return;
+        }
+        if (input === "b" && bindings.ctrlB) {
+          bindings.ctrlB();
           return;
         }
         return;
