@@ -122,6 +122,9 @@ Type your request, or:
       // Provider commands
       if (await handleProviderCommands(trimmed)) { prompt(); return; }
 
+      // Planner/board commands
+      if (handlePlannerCommands(trimmed)) { prompt(); return; }
+
       // Plan/status commands
       if (await handlePlanCommands(trimmed, agent)) { prompt(); return; }
 
@@ -203,6 +206,9 @@ function printHelp(): void {
 \x1b[33mBMAD Planning:\x1b[0m
   /plan <task>        - Create a plan without executing
   /status             - Show current task status
+  /board              - Show kanban board (backlog/ready/inProgress/done)
+  /predict            - Show top proactive predictions with confidence
+  /momentum           - Show steps completed, rate, streak
 
 \x1b[33mPermissions:\x1b[0m
   /permissions        - Show permission config
@@ -269,6 +275,76 @@ function printHelp(): void {
   - Ask to fix code: "Fix the bug in the login function"
   - Web search: "Search for React hooks best practices"
 `);
+}
+
+function handlePlannerCommands(trimmed: string): boolean {
+  if (trimmed === "/board") {
+    const { getProactivePlanner } = require("../planning/proactive-planner");
+    const planner = getProactivePlanner();
+    const board = planner.getBoard();
+
+    console.log(`\n\x1b[36mKanban Board:\x1b[0m\n`);
+
+    const columns = [
+      { name: "Backlog", items: board.backlog, color: "\x1b[90m" },
+      { name: "Ready", items: board.ready, color: "\x1b[33m" },
+      { name: "In Progress", items: board.inProgress, color: "\x1b[36m" },
+      { name: "Done", items: board.done.slice(-5), color: "\x1b[32m" },
+    ];
+
+    for (const col of columns) {
+      console.log(`  ${col.color}${col.name} (${col.items.length}):\x1b[0m`);
+      if (col.items.length === 0) {
+        console.log(`    (empty)`);
+      } else {
+        for (const item of col.items.slice(0, 5)) {
+          const conf = `${Math.round(item.confidence * 100)}%`;
+          console.log(`    [${item.category}] ${item.description} (${conf})`);
+        }
+      }
+    }
+    return true;
+  }
+
+  if (trimmed === "/predict") {
+    const { getProactivePlanner } = require("../planning/proactive-planner");
+    const planner = getProactivePlanner();
+    const ready = planner.getReadySteps();
+    const next = planner.getNextRecommendedStep();
+
+    console.log(`\n\x1b[36mPredictions:\x1b[0m\n`);
+
+    if (ready.length === 0 && !next) {
+      console.log("  No predictions yet. Start working to generate predictions.");
+    } else {
+      if (next) {
+        console.log(`  \x1b[33m★ Next recommended:\x1b[0m ${next.description}`);
+        console.log(`    Tool: ${next.tool} | Confidence: ${Math.round(next.confidence * 100)}% | Priority: ${next.priority}\n`);
+      }
+      if (ready.length > 0) {
+        console.log(`  \x1b[36mReady steps:\x1b[0m`);
+        for (const step of ready) {
+          const score = (step.priority * step.confidence).toFixed(1);
+          console.log(`    [${step.category}] ${step.description} (score: ${score})`);
+        }
+      }
+    }
+    return true;
+  }
+
+  if (trimmed === "/momentum") {
+    const { getProactivePlanner } = require("../planning/proactive-planner");
+    const planner = getProactivePlanner();
+    const m = planner.getMomentum();
+
+    console.log(`\n\x1b[36mMomentum:\x1b[0m`);
+    console.log(`  Steps completed: \x1b[32m${m.stepsCompleted}\x1b[0m`);
+    console.log(`  Rate: \x1b[33m${m.stepsPerMinute.toFixed(1)} steps/min\x1b[0m`);
+    console.log(`  Streak: \x1b[36m${m.streak}\x1b[0m consecutive`);
+    return true;
+  }
+
+  return false;
 }
 
 async function handleModelCommands(trimmed: string, agent: Agent): Promise<boolean> {

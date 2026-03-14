@@ -50,7 +50,7 @@ export interface Evidence {
 }
 
 export interface EvidenceCollectorConfig {
-  workingDirectory: string;
+  workingDirectory?: string;
   maxContentLength?: number;    // Max chars to capture from file content
   captureScreenshots?: boolean;
   hashAlgorithm?: "md5" | "sha256";
@@ -70,12 +70,12 @@ export interface StepExecutionResult {
 export class EvidenceCollector {
   private config: EvidenceCollectorConfig;
 
-  constructor(config: EvidenceCollectorConfig) {
+  constructor(config: EvidenceCollectorConfig = {}) {
     this.config = {
+      workingDirectory: config.workingDirectory ?? process.cwd(),
       maxContentLength: config.maxContentLength ?? 500,
       captureScreenshots: config.captureScreenshots ?? false,
       hashAlgorithm: config.hashAlgorithm ?? "sha256",
-      ...config,
     };
   }
 
