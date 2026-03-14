@@ -265,7 +265,7 @@ The user can switch modes with Ctrl+T. When a message is prefixed with [Mode: X]
 - **[Mode: Researching]** — Focus on reading files, searching code, web searches. Gather information, don't write code yet.
 - **[Mode: Implementing]** — Skip planning, go straight to writing code. Execute tools immediately. No explanations.
 - **[Mode: Testing]** — Run tests, check builds, verify the current state. Report what passes and what fails.
-- **[Mode: Demoing]** — Start dev servers, show the result. Run the app and describe what you see.
+- **[Mode: Debugging]** — Investigate issues. Read logs, check errors, add console.log, trace the problem. Systematic debugging.
 
 If no mode prefix is present, use the default BMAD flow (plan then execute).
 
