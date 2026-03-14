@@ -12,6 +12,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
+import { MutedText, Inline } from './primitives/index.js';
 
 // Import from personality package (relative path for monorepo)
 // In production, this would be: import { ... } from "@8gent/personality";
@@ -239,13 +240,13 @@ export function StatusLine({
 
   // Format: "star Deliberating... (2m 34s . 1.2k tokens . thinking)"
   return (
-    <Box>
+    <Inline>
       <Text color="yellow">
         <Text>{"\u2726"} </Text>
         {verb}
       </Text>
       {(elapsed || tokens || showLabel) && (
-        <Text color="gray" dimColor>
+        <MutedText>
           {" ("}
           {elapsed && <Text>{elapsed}</Text>}
           {elapsed && (tokens || showLabel) && <Text> {"\u00B7"} </Text>}
@@ -253,9 +254,9 @@ export function StatusLine({
           {tokens && showLabel && <Text> {"\u00B7"} </Text>}
           {showLabel && <Text>{type}</Text>}
           {")"}
-        </Text>
+        </MutedText>
       )}
-    </Box>
+    </Inline>
   );
 }
 
@@ -324,13 +325,13 @@ export function InlineStatus({
   }, [type, active]);
 
   if (!active) {
-    return <Text color="gray">Idle</Text>;
+    return <MutedText>Idle</MutedText>;
   }
 
   return (
-    <Text color="yellow" dimColor>
+    <MutedText color="yellow">
       {verb.replace("...", "")}
-    </Text>
+    </MutedText>
   );
 }
 

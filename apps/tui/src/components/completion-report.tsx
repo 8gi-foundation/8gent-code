@@ -12,6 +12,8 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import Gradient from "ink-gradient";
+import { AppText, MutedText, Heading, Label, ErrorText, SuccessText, WarningText, Badge, StatusDot, Card, Stack, Inline, Divider } from './primitives/index.js';
+import { formatDuration as formatDurationLib, formatTokens } from '../lib/index.js';
 
 // ============================================
 // Types
@@ -142,14 +144,14 @@ export function CompletionReport({
   const isExpanded = (section: string) => expandedSections.has(section);
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Stack paddingX={1}>
       {/* Status Banner */}
       {revealedSections >= 1 && <StatusBanner status={report.status} />}
 
       {/* Summary */}
       {revealedSections >= 2 && (
         <Section title="Summary">
-          <Text wrap="wrap">{report.summary}</Text>
+          <AppText wrap="wrap">{report.summary}</AppText>
         </Section>
       )}
 
@@ -162,20 +164,20 @@ export function CompletionReport({
           hotkey="1"
         >
           {report.filesCreated.length > 0 && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Text color="green" bold>Created ({report.filesCreated.length})</Text>
+            <Stack marginBottom={1}>
+              <Label color="green">Created ({report.filesCreated.length})</Label>
               {report.filesCreated.map((file, i) => (
-                <Text key={i} color="green">  {boxChars.bullet} {file}</Text>
+                <SuccessText key={i}>  {boxChars.bullet} {file}</SuccessText>
               ))}
-            </Box>
+            </Stack>
           )}
           {report.filesModified.length > 0 && (
-            <Box flexDirection="column">
-              <Text color="yellow" bold>Modified ({report.filesModified.length})</Text>
+            <Stack>
+              <Label color="yellow">Modified ({report.filesModified.length})</Label>
               {report.filesModified.map((file, i) => (
-                <Text key={i} color="yellow">  {boxChars.bullet} {file}</Text>
+                <WarningText key={i}>  {boxChars.bullet} {file}</WarningText>
               ))}
-            </Box>
+            </Stack>
           )}
         </CollapsibleSection>
       )}
@@ -223,20 +225,20 @@ export function CompletionReport({
       {/* Divider */}
       {revealedSections >= 7 && (
         <Box marginTop={1}>
-          <Text color="gray">{boxChars.singleHorizontal.repeat(60)}</Text>
+          <Divider />
         </Box>
       )}
 
       {/* Help text */}
       {revealedSections >= 8 && (
         <Box marginTop={1}>
-          <Text color="gray" dimColor>
+          <MutedText>
             [1-4] toggle sections | [c] copy | [esc] close
-            {copied && <Text color="green"> Copied!</Text>}
-          </Text>
+            {copied && <SuccessText> Copied!</SuccessText>}
+          </MutedText>
         </Box>
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -258,17 +260,17 @@ function StatusBanner({ status }: { status: CompletionReportData["status"] }) {
   const padding = Math.floor((width - innerText.length) / 2);
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Stack marginBottom={1}>
       <Text color={color}>{boxChars.doubleTopLeft}{boxChars.doubleHorizontal.repeat(width)}{boxChars.doubleTopRight}</Text>
       <Text color={color}>
         {boxChars.doubleVertical}
         {" ".repeat(padding)}
-        <Text bold>{innerText}</Text>
+        <Label>{innerText}</Label>
         {" ".repeat(width - padding - innerText.length)}
         {boxChars.doubleVertical}
       </Text>
       <Text color={color}>{boxChars.doubleBottomLeft}{boxChars.doubleHorizontal.repeat(width)}{boxChars.doubleBottomRight}</Text>
-    </Box>
+    </Stack>
   );
 }
 
@@ -279,12 +281,12 @@ interface SectionProps {
 
 function Section({ title, children }: SectionProps) {
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Text color="cyan" bold>{title}</Text>
-      <Box marginLeft={2} flexDirection="column">
+    <Stack marginBottom={1}>
+      <Heading>{title}</Heading>
+      <Stack marginLeft={2}>
         {children}
-      </Box>
-    </Box>
+      </Stack>
+    </Stack>
   );
 }
 
@@ -300,17 +302,17 @@ function CollapsibleSection({ title, children, expanded, onToggle, hotkey }: Col
   const icon = expanded ? "\u25BC" : "\u25B6";
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color="cyan" bold>{icon} {title}</Text>
-        {hotkey && <Text color="gray" dimColor> [{hotkey}]</Text>}
-      </Box>
+    <Stack marginBottom={1}>
+      <Inline gap={0}>
+        <Heading>{icon} {title}</Heading>
+        {hotkey && <MutedText> [{hotkey}]</MutedText>}
+      </Inline>
       {expanded && (
-        <Box marginLeft={2} flexDirection="column">
+        <Stack marginLeft={2}>
           {children}
-        </Box>
+        </Stack>
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -324,14 +326,14 @@ function StepItem({ step }: { step: StepSummary }) {
   };
 
   const { color, icon } = statusConfig[step.status];
-  const duration = step.duration ? formatDuration(step.duration) : "";
+  const duration = step.duration ? formatDurationLib(step.duration) : "";
 
   return (
-    <Box>
+    <Inline gap={0}>
       <Text color={color}>{step.index}. {icon} </Text>
-      <Text>{step.description}</Text>
-      {duration && <Text color="gray" dimColor> ({duration})</Text>}
-    </Box>
+      <AppText>{step.description}</AppText>
+      {duration && <MutedText> ({duration})</MutedText>}
+    </Inline>
   );
 }
 
@@ -347,13 +349,13 @@ function EvidenceItem({ evidence, isLast }: { evidence: EvidenceSummary; isLast:
   const connector = isLast ? boxChars.treeLast : boxChars.treeMiddle;
 
   return (
-    <Box>
-      <Text color="gray">{connector}{boxChars.singleHorizontal}{boxChars.singleHorizontal} </Text>
-      <Text>{evidence.label}: </Text>
+    <Inline gap={0}>
+      <MutedText>{connector}{boxChars.singleHorizontal}{boxChars.singleHorizontal} </MutedText>
+      <AppText>{evidence.label}: </AppText>
       <Text color={color}>{icon}</Text>
-      {evidence.details && <Text color="gray" dimColor> {evidence.details}</Text>}
+      {evidence.details && <MutedText> {evidence.details}</MutedText>}
       {evidence.url && <Text color="cyan"> {evidence.url}</Text>}
-    </Box>
+    </Inline>
   );
 }
 
@@ -365,11 +367,11 @@ function StatsGrid({ report }: { report: CompletionReportData }) {
   ];
 
   if (report.tokensUsed) {
-    stats.push({ label: "Tokens used", value: formatNumber(report.tokensUsed), color: "gray" as const });
+    stats.push({ label: "Tokens used", value: formatTokens(report.tokensUsed), color: "gray" as const });
   }
 
   if (report.tokensSaved) {
-    stats.push({ label: "Tokens saved", value: formatNumber(report.tokensSaved), color: "green" as const });
+    stats.push({ label: "Tokens saved", value: formatTokens(report.tokensSaved), color: "green" as const });
   }
 
   if (report.gitBranch) {
@@ -381,35 +383,20 @@ function StatsGrid({ report }: { report: CompletionReportData }) {
   }
 
   return (
-    <Box flexDirection="column">
+    <Stack>
       {stats.map((stat, i) => (
-        <Box key={i}>
-          <Text color="gray">{stat.label.padEnd(15)}</Text>
+        <Inline key={i} gap={0}>
+          <MutedText>{stat.label.padEnd(15)}</MutedText>
           <Text color={stat.color}>{stat.value}</Text>
-        </Box>
+        </Inline>
       ))}
-    </Box>
+    </Stack>
   );
 }
 
 // ============================================
 // Utility Functions
 // ============================================
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}m ${remainingSeconds}s`;
-}
-
-function formatNumber(num: number): string {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
-  if (num >= 1000) return (num / 1000).toFixed(1) + "K";
-  return num.toLocaleString();
-}
 
 function formatReportAsText(report: CompletionReportData): string {
   const lines: string[] = [];
@@ -457,22 +444,22 @@ function formatReportAsText(report: CompletionReportData): string {
 
 export function SimpleCompletionReport({ report }: { report: CompletionReportData }) {
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Stack paddingX={1}>
       <StatusBanner status={report.status} />
 
       <Section title="Summary">
-        <Text wrap="wrap">{report.summary}</Text>
+        <AppText wrap="wrap">{report.summary}</AppText>
       </Section>
 
-      <Box>
-        <Text color="gray">Tools: </Text>
+      <Inline gap={0}>
+        <MutedText>Tools: </MutedText>
         <Text color="cyan">{report.toolsUsed}</Text>
-        <Text color="gray"> | Duration: </Text>
-        <Text color="yellow">{report.duration}</Text>
-        <Text color="gray"> | Confidence: </Text>
+        <MutedText> | Duration: </MutedText>
+        <WarningText>{report.duration}</WarningText>
+        <MutedText> | Confidence: </MutedText>
         <Text color={report.confidence >= 80 ? "green" : "yellow"}>{report.confidence}%</Text>
-      </Box>
-    </Box>
+      </Inline>
+    </Stack>
   );
 }
 

@@ -12,6 +12,7 @@ import { Box, Text } from "ink";
 import Gradient from "ink-gradient";
 import { PulseLogo, AnimatedWordmark } from "./pulse-logo.js";
 import { RainbowBorder, AnimatedSeparator } from "./rainbow-border.js";
+import { AppText, MutedText, Inline } from './primitives/index.js';
 
 interface HeaderProps {
   isProcessing?: boolean;
@@ -30,9 +31,9 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
   if (!mounted && showAnimations) {
     return (
       <Box paddingX={1} marginBottom={1}>
-        <Text color="gray" dimColor>
+        <MutedText>
           Loading...
-        </Text>
+        </MutedText>
       </Box>
     );
   }
@@ -44,23 +45,23 @@ export function Header({ isProcessing = false, showAnimations = true }: HeaderPr
       speed={200}
       borderStyle="round"
     >
-      <Box flexDirection="row" gap={1}>
+      <Inline gap={1}>
         {/* Animated 8gent logo */}
         <Box>
           <PulseLogo isIdle={!isProcessing} isProcessing={isProcessing} />
           <Gradient name="rainbow">
-            <Text bold>gent</Text>
+            <AppText bold>gent</AppText>
           </Gradient>
         </Box>
 
         {/* Separator */}
-        <Text color="gray"> Code</Text>
+        <MutedText> Code</MutedText>
 
-        <Text color="gray">│</Text>
+        <MutedText>│</MutedText>
 
         {/* Tagline with subtle animation */}
         <TaglineText animate={showAnimations} />
-      </Box>
+      </Inline>
     </RainbowBorder>
   );
 }
@@ -93,9 +94,9 @@ function TaglineText({ animate = true }: TaglineTextProps) {
 
   if (!animate) {
     return (
-      <Text color="gray" dimColor>
+      <MutedText>
         {text}
-      </Text>
+      </MutedText>
     );
   }
 
@@ -105,16 +106,17 @@ function TaglineText({ animate = true }: TaglineTextProps) {
         const distance = Math.abs(index - glowIndex);
         const color =
           distance === 0
-            ? "white"
+            ? undefined
             : distance <= 1
             ? "cyan"
             : distance <= 3
             ? "blue"
-            : "gray";
+            : undefined;
         const dimColor = distance > 3;
+        const bold = distance === 0;
 
         return (
-          <Text key={index} color={color} dimColor={dimColor}>
+          <Text key={index} color={color} dimColor={dimColor} bold={bold}>
             {char}
           </Text>
         );
@@ -128,7 +130,7 @@ export function CompactHeader({ isProcessing = false }: HeaderProps) {
   return (
     <Box paddingX={1} marginBottom={1} borderStyle="single" borderColor="cyan">
       <AnimatedWordmark isProcessing={isProcessing} />
-      <Text color="gray"> Code</Text>
+      <MutedText> Code</MutedText>
     </Box>
   );
 }
@@ -201,9 +203,9 @@ export function FancyHeader({ isProcessing = false }: HeaderProps) {
               ╚═══════════════════════════════════════╝
             </Text>
           </Gradient>
-          <Text color="gray" dimColor>
+          <MutedText>
             {BRAND_TAGLINE} | {BRAND_DESCRIPTION}
-          </Text>
+          </MutedText>
         </Box>
       </RainbowBorder>
     </Box>

@@ -10,6 +10,8 @@
 
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import { AppText, MutedText, Heading, Label, Badge, StatusDot, Card, Stack, Inline, Spacer, Divider } from './primitives/index.js';
+import { truncate } from '../lib/index.js';
 
 // Inline types to avoid import issues
 export type StepCategory =
@@ -153,27 +155,27 @@ export function PlanKanban({
   const columnWidth = compact ? 16 : 24;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Card borderColor="cyan">
       {/* Header */}
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text color="cyan" bold>
+      <Inline justifyContent="space-between" marginBottom={1}>
+        <Heading>
           {"\u2592"} Plan Kanban Board
-        </Text>
-        <Text color="gray" dimColor>
+        </Heading>
+        <MutedText>
           [ESC] close
-        </Text>
-      </Box>
+        </MutedText>
+      </Inline>
 
       {/* Column Headers */}
-      <Box>
-        <ColumnHeader title="Backlog" count={board.backlog.length} width={columnWidth} color="gray" />
+      <Inline gap={0}>
+        <ColumnHeader title="Backlog" count={board.backlog.length} width={columnWidth} color="blue" />
         <ColumnHeader title="Ready" count={board.ready.length} width={columnWidth} color="yellow" />
         <ColumnHeader title="In Progress" count={board.inProgress.length} width={columnWidth} color="cyan" />
         <ColumnHeader title="Done" count={board.done.length} width={columnWidth} color="green" />
-      </Box>
+      </Inline>
 
       {/* Column Content */}
-      <Box>
+      <Inline gap={0}>
         <KanbanColumn
           items={board.backlog}
           width={columnWidth}
@@ -206,18 +208,18 @@ export function PlanKanban({
           onSelect={onStepSelect}
           compact={compact}
         />
-      </Box>
+      </Inline>
 
       {/* Footer with stats */}
-      <Box marginTop={1} justifyContent="space-between">
-        <Text color="gray" dimColor>
+      <Inline justifyContent="space-between" marginTop={1}>
+        <MutedText>
           Total: {board.backlog.length + board.ready.length + board.inProgress.length + board.done.length} steps
-        </Text>
-        <Text color="gray" dimColor>
+        </MutedText>
+        <MutedText>
           Ready: {board.ready.length} | Active: {board.inProgress.length}
-        </Text>
-      </Box>
-    </Box>
+        </MutedText>
+      </Inline>
+    </Card>
   );
 }
 
@@ -236,21 +238,16 @@ function ColumnHeader({ title, count, width, color }: ColumnHeaderProps) {
   // Calculate available space for title (width - borders - padding - count display)
   const countStr = `(${count})`;
   const availableForTitle = width - 4 - countStr.length - 1; // borders(2) + paddingX(2) + space(1)
-  const displayTitle = title.length > availableForTitle
-    ? title.slice(0, availableForTitle)
-    : title;
-  const padding = Math.max(0, availableForTitle - displayTitle.length);
+  const displayTitle = truncate(title, availableForTitle);
 
   return (
     <Box width={width} minWidth={width} flexShrink={0} borderStyle="single" borderColor={color as any} paddingX={1}>
-      <Box flexGrow={1} justifyContent="space-between">
-        <Text color={color as any} bold>
+      <Inline gap={0} justifyContent="space-between" flexGrow={1}>
+        <Label color={color as any}>
           {displayTitle}
-        </Text>
-        <Text color={color as any}>
-          {countStr}
-        </Text>
-      </Box>
+        </Label>
+        <Badge label={countStr} color={color as any} variant="outline" />
+      </Inline>
     </Box>
   );
 }
@@ -276,11 +273,10 @@ function KanbanColumn({
   const hiddenCount = items.length - maxItems;
 
   return (
-    <Box
-      flexDirection="column"
+    <Stack
       width={width}
       borderStyle="single"
-      borderColor="gray"
+      borderColor="blue"
       minHeight={maxItems * (compact ? 2 : 3) + 2}
     >
       {displayItems.map((item) => (
@@ -296,20 +292,20 @@ function KanbanColumn({
 
       {items.length === 0 && (
         <Box paddingX={1}>
-          <Text color="gray" dimColor>
+          <MutedText>
             (empty)
-          </Text>
+          </MutedText>
         </Box>
       )}
 
       {hiddenCount > 0 && (
         <Box paddingX={1}>
-          <Text color="gray" dimColor>
+          <MutedText>
             +{hiddenCount} more...
-          </Text>
+          </MutedText>
         </Box>
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -331,10 +327,7 @@ function KanbanCard({ step, isSelected, onSelect, compact, width }: KanbanCardPr
 
   // Truncate description to fit width
   const maxDescLen = width - 4;
-  const truncatedDesc =
-    step.description.length > maxDescLen
-      ? step.description.slice(0, maxDescLen - 3) + "..."
-      : step.description;
+  const truncatedDesc = truncate(step.description, maxDescLen);
 
   const cardStyle = isSelected
     ? { borderStyle: "double" as const, borderColor: "cyan" as const }
@@ -342,37 +335,33 @@ function KanbanCard({ step, isSelected, onSelect, compact, width }: KanbanCardPr
 
   if (compact) {
     return (
-      <Box paddingX={1} {...cardStyle}>
-        <Text color={categoryColor as any}>
+      <Inline gap={0} paddingX={1} {...cardStyle}>
+        <AppText color={categoryColor as any}>
           {getCategoryIcon(step.category)}
-        </Text>
-        <Text color="white"> {truncatedDesc}</Text>
-      </Box>
+        </AppText>
+        <Label> {truncatedDesc}</Label>
+      </Inline>
     );
   }
 
   return (
-    <Box flexDirection="column" paddingX={1} marginBottom={1} {...cardStyle}>
+    <Stack paddingX={1} marginBottom={1} {...cardStyle}>
       {/* Category & Priority */}
-      <Box justifyContent="space-between">
-        <Text color={categoryColor as any}>
+      <Inline gap={0} justifyContent="space-between">
+        <AppText color={categoryColor as any}>
           {getCategoryIcon(step.category)} {step.category}
-        </Text>
-        <Text color={priorityColor as any}>
-          P{step.priority}
-        </Text>
-      </Box>
+        </AppText>
+        <Badge label={`P${step.priority}`} color={priorityColor as any} variant="outline" />
+      </Inline>
 
       {/* Description */}
-      <Text color="white">{truncatedDesc}</Text>
+      <Label>{truncatedDesc}</Label>
 
       {/* Confidence */}
-      <Box>
-        <Text color="gray" dimColor>
-          {Math.round(step.confidence * 100)}% conf
-        </Text>
-      </Box>
-    </Box>
+      <MutedText>
+        {Math.round(step.confidence * 100)}% conf
+      </MutedText>
+    </Stack>
   );
 }
 
@@ -403,16 +392,16 @@ export function AvenueDisplay({
   if (!visible || avenues.length === 0) return null;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+    <Card borderColor="magenta">
       {/* Header */}
-      <Box marginBottom={1}>
-        <Text color="magenta" bold>
+      <Inline gap={0} marginBottom={1}>
+        <Heading color="magenta">
           {"\u2263"} Possible Avenues
-        </Text>
-        <Text color="gray" dimColor>
+        </Heading>
+        <MutedText>
           {" "}({avenues.length} paths)
-        </Text>
-      </Box>
+        </MutedText>
+      </Inline>
 
       {/* Avenue Cards */}
       {avenues.map((avenue, index) => (
@@ -427,11 +416,11 @@ export function AvenueDisplay({
 
       {/* Help */}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <MutedText>
           Type to match avenue or use /avenue [number]
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Card>
   );
 }
 
@@ -447,41 +436,38 @@ function AvenueCard({ avenue, index, isActive, onSelect }: AvenueCardProps) {
   const probabilityBar = generateProbabilityBar(avenue.probability, 10);
 
   return (
-    <Box
-      flexDirection="column"
+    <Stack
       paddingX={1}
       marginBottom={1}
       borderStyle={isActive ? "double" : "single"}
-      borderColor={isActive ? "green" : "gray"}
+      borderColor={isActive ? "green" : "blue"}
     >
       {/* Title row */}
-      <Box justifyContent="space-between">
-        <Box>
-          <Text color="yellow">[{index}]</Text>
-          <Text color={categoryColor as any} bold>
+      <Inline gap={0} justifyContent="space-between">
+        <Inline gap={0}>
+          <AppText color="yellow">[{index}]</AppText>
+          <Label color={categoryColor as any}>
             {" "}{avenue.name}
-          </Text>
-        </Box>
-        <Text color={categoryColor as any}>
-          {avenue.category}
-        </Text>
-      </Box>
+          </Label>
+        </Inline>
+        <Badge label={avenue.category} color={categoryColor as any} variant="outline" />
+      </Inline>
 
       {/* Description */}
-      <Text color="white">{avenue.description}</Text>
+      <Label>{avenue.description}</Label>
 
       {/* Probability bar */}
-      <Box>
-        <Text color="gray">Likelihood: </Text>
-        <Text color="green">{probabilityBar}</Text>
-        <Text color="gray"> {Math.round(avenue.probability * 100)}%</Text>
-      </Box>
+      <Inline gap={0}>
+        <MutedText>Likelihood: </MutedText>
+        <AppText color="green">{probabilityBar}</AppText>
+        <MutedText> {Math.round(avenue.probability * 100)}%</MutedText>
+      </Inline>
 
       {/* Steps count */}
-      <Text color="gray" dimColor>
+      <MutedText>
         {avenue.plan.steps.length} steps planned, ~{Math.round(avenue.plan.estimatedTime / 60)}min
-      </Text>
-    </Box>
+      </MutedText>
+    </Stack>
   );
 }
 
@@ -520,12 +506,12 @@ export function PredictedSteps({
   const displaySteps = steps.slice(0, maxItems);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
+    <Card borderColor="green">
       {/* Header */}
       <Box marginBottom={1}>
-        <Text color="green" bold>
+        <Heading color="green">
           {"\u25B6"} Predicted Next Steps
-        </Text>
+        </Heading>
       </Box>
 
       {/* Steps */}
@@ -539,18 +525,18 @@ export function PredictedSteps({
       ))}
 
       {steps.length > maxItems && (
-        <Text color="gray" dimColor>
+        <MutedText>
           +{steps.length - maxItems} more predictions...
-        </Text>
+        </MutedText>
       )}
 
       {/* Help */}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <MutedText>
           Press [Tab] on input to accept top prediction
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Card>
   );
 }
 
@@ -565,16 +551,16 @@ function PredictedStepCard({ step, index, onAccept }: PredictedStepCardProps) {
   const confidenceBar = generateProbabilityBar(step.confidence, 5);
 
   return (
-    <Box paddingX={1} marginBottom={0}>
-      <Text color="yellow">[{index}]</Text>
-      <Text color={categoryColor as any}>
+    <Inline gap={0} paddingX={1} marginBottom={0}>
+      <AppText color="yellow">[{index}]</AppText>
+      <AppText color={categoryColor as any}>
         {" "}{getCategoryIcon(step.category)}
-      </Text>
-      <Text color="white"> {step.description}</Text>
-      <Text color="gray" dimColor>
+      </AppText>
+      <Label> {step.description}</Label>
+      <MutedText>
         {" "}{confidenceBar}
-      </Text>
-    </Box>
+      </MutedText>
+    </Inline>
   );
 }
 
@@ -593,26 +579,26 @@ export function MiniKanban({ board, width = 60 }: MiniKanbanProps) {
 
   if (total === 0) {
     return (
-      <Text color="gray" dimColor>
+      <MutedText>
         No planned steps
-      </Text>
+      </MutedText>
     );
   }
 
   const colWidth = Math.floor((width - 7) / 4);
 
   return (
-    <Box>
-      <Text color="gray">[</Text>
-      <MiniColumn items={board.backlog} label="B" color="gray" width={colWidth} />
-      <Text color="gray">|</Text>
+    <Inline gap={0}>
+      <MutedText>[</MutedText>
+      <MiniColumn items={board.backlog} label="B" color="blue" width={colWidth} />
+      <MutedText>|</MutedText>
       <MiniColumn items={board.ready} label="R" color="yellow" width={colWidth} />
-      <Text color="gray">|</Text>
+      <MutedText>|</MutedText>
       <MiniColumn items={board.inProgress} label="P" color="cyan" width={colWidth} />
-      <Text color="gray">|</Text>
+      <MutedText>|</MutedText>
       <MiniColumn items={board.done} label="D" color="green" width={colWidth} />
-      <Text color="gray">]</Text>
-    </Box>
+      <MutedText>]</MutedText>
+    </Inline>
   );
 }
 
@@ -631,8 +617,8 @@ function MiniColumn({
 
   return (
     <Box width={width}>
-      <Text color={color as any}>{label}:</Text>
-      <Text color={color as any}>{dots}</Text>
+      <AppText color={color as any}>{label}:</AppText>
+      <AppText color={color as any}>{dots}</AppText>
     </Box>
   );
 }

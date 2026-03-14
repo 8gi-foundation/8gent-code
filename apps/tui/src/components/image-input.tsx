@@ -15,6 +15,7 @@ import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import * as fs from "fs";
 import * as path from "path";
+import { AppText, MutedText, Label, ShortcutHint, Inline, Stack, Badge } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -178,14 +179,14 @@ export function ImageBadge({
   onRemove?: () => void;
 }) {
   return (
-    <Box borderStyle="round" borderColor="magenta" paddingX={1}>
-      <Text color="magenta">📷 </Text>
-      <Text color="white">{image.filename}</Text>
-      <Text color="gray"> ({formatSize(image.size)})</Text>
+    <Inline gap={0} borderStyle="round" borderColor="magenta" paddingX={1}>
+      <AppText color="magenta">📷 </AppText>
+      <Label>{image.filename}</Label>
+      <MutedText> ({formatSize(image.size)})</MutedText>
       {onRemove && (
-        <Text color="gray" dimColor> [x]</Text>
+        <MutedText> [x]</MutedText>
       )}
-    </Box>
+    </Inline>
   );
 }
 
@@ -201,24 +202,24 @@ export function ImageIndicator({
 }) {
   if (compact) {
     return (
-      <Text color="magenta">
+      <AppText color="magenta">
         📷 {image.filename}
-      </Text>
+      </AppText>
     );
   }
 
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color="magenta" bold>📷 Image attached: </Text>
-        <Text color="white">{image.filename}</Text>
-      </Box>
+    <Stack>
+      <Inline gap={0}>
+        <Label color="magenta">📷 Image attached: </Label>
+        <Label>{image.filename}</Label>
+      </Inline>
       <Box paddingLeft={3}>
-        <Text color="gray" dimColor>
+        <MutedText>
           {formatSize(image.size)} • {image.mimeType}
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Stack>
   );
 }
 
@@ -244,26 +245,24 @@ export function ImageInput({
   if (!currentImage) {
     return (
       <Box>
-        <Text color="gray" dimColor>
+        <MutedText>
           📷 Drag image or paste path to attach
-        </Text>
+        </MutedText>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column">
+    <Stack>
       {showPreview ? (
         <ImageIndicator image={currentImage} />
       ) : (
         <ImageBadge image={currentImage} onRemove={onImageRemove} />
       )}
       <Box paddingLeft={3}>
-        <Text color="gray" dimColor>
-          [Ctrl+D] to remove
-        </Text>
+        <ShortcutHint keys="[Ctrl+D]" description="to remove" />
       </Box>
-    </Box>
+    </Stack>
   );
 }
 

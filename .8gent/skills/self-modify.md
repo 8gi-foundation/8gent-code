@@ -28,7 +28,7 @@ Without versioning, it's just mutation. Random. Fragile. Vibes.
 - Tool combination/composition
 
 ### Level 3: Core (High Risk)
-- `packages/agent/index.ts` - Agent logic
+- `packages/eight/index.ts` - Agent logic
 - `packages/permissions/index.ts` - Security
 - `packages/infinite/index.ts` - Loop behavior
 
@@ -110,7 +110,7 @@ Every self-modification is logged to `.8gent/evolution.log`:
   BRANCH: 8gent/self-search-timeout-1710234567
   MERGED: true
 
-[2024-03-11T09:50:00Z] MODIFY packages/agent/index.ts
+[2024-03-11T09:50:00Z] MODIFY packages/eight/index.ts
   REASON: Need to handle streaming responses
   CHANGE: Added StreamingClient class
   RESULT: FAILED - type errors in 3 files

@@ -13,6 +13,8 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
+import { AppText, MutedText, Heading, Label, ErrorText, SuccessText, WarningText, Badge, StatusDot, Card, Stack, Inline, Divider } from './primitives/index.js';
+import { truncate } from '../lib/index.js';
 
 // ============================================
 // Types
@@ -131,17 +133,17 @@ export function DesignSelector({
   const pulseChar = ["\u25CF", "\u25D0", "\u25D1", "\u25D0"][animationFrame];
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+    <Card borderColor="magenta">
       {/* Header */}
       <Box marginBottom={1}>
-        <Text color="magenta" bold>
+        <Label color="magenta">
           {pulseChar} Design Direction
-        </Text>
+        </Label>
       </Box>
 
       {/* Intro */}
       <Box marginBottom={1}>
-        <Text color="white">{intro}</Text>
+        <Label>{intro}</Label>
       </Box>
 
       {/* Options */}
@@ -156,18 +158,18 @@ export function DesignSelector({
 
       {/* Help */}
       {showHelp && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color="gray" dimColor>
+        <Stack marginTop={1}>
+          <MutedText>
             Press [1-{options.length}] to select, or use \u2191\u2193 and Enter
-          </Text>
+          </MutedText>
           {onCancel && (
-            <Text color="gray" dimColor>
+            <MutedText>
               Press [ESC] to skip design selection
-            </Text>
+            </MutedText>
           )}
-        </Box>
+        </Stack>
       )}
-    </Box>
+    </Card>
   );
 }
 
@@ -182,7 +184,7 @@ interface DesignOptionCardProps {
 }
 
 function DesignOptionCard({ option, index, isSelected }: DesignOptionCardProps) {
-  const borderColor = isSelected ? "cyan" : "gray";
+  const borderColor = isSelected ? "cyan" : "blue";
   const borderStyle = isSelected ? "double" : "single";
 
   return (
@@ -194,41 +196,39 @@ function DesignOptionCard({ option, index, isSelected }: DesignOptionCardProps) 
       marginBottom={1}
     >
       {/* Title row */}
-      <Box justifyContent="space-between">
-        <Box>
-          <Text color="yellow" bold>
-            [{index}]
-          </Text>
-          <Text color={isSelected ? "cyan" : "white"} bold>
+      <Inline justifyContent="space-between">
+        <Inline gap={0}>
+          <Badge label={`${index}`} color="yellow" variant="outline" />
+          <Label color={isSelected ? "cyan" : undefined}>
             {" "}
             {option.name}
-          </Text>
-        </Box>
-        <Text color="gray" dimColor>
+          </Label>
+        </Inline>
+        <MutedText>
           {Math.round(option.score)}% match
-        </Text>
-      </Box>
+        </MutedText>
+      </Inline>
 
       {/* Description */}
-      <Text color="white">{option.description}</Text>
+      <Label>{option.description}</Label>
 
       {/* Reasoning */}
       <Box marginTop={0}>
-        <Text color="green" italic>
+        <SuccessText italic>
           \u2192 {option.reasoning}
-        </Text>
+        </SuccessText>
       </Box>
 
       {/* Stack */}
-      <Box marginTop={0}>
-        <Text color="gray">Stack: </Text>
+      <Inline marginTop={0} gap={0}>
+        <MutedText>Stack: </MutedText>
         <Text color="cyan">{option.stack.join(" \u2022 ")}</Text>
-      </Box>
+      </Inline>
 
       {/* ASCII Preview */}
       {option.preview && (
         <Box marginTop={1}>
-          <Text color="gray">{option.preview.content}</Text>
+          <MutedText>{option.preview.content}</MutedText>
         </Box>
       )}
     </Box>
@@ -320,28 +320,28 @@ function DesignConfirmation({ option, onConfirm, onBack }: DesignConfirmationPro
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
+    <Card borderColor="green">
       <Box marginBottom={1}>
-        <Text color="green" bold>
+        <Label color="green">
           \u2713 Confirm Selection
-        </Text>
+        </Label>
       </Box>
 
-      <Text color="white">
-        You selected: <Text color="cyan" bold>{option.name}</Text>
-      </Text>
+      <Label>
+        You selected: <Heading>{option.name}</Heading>
+      </Label>
+
+      <Inline marginTop={1} gap={0}>
+        <MutedText>This will set up: </MutedText>
+        <WarningText>{option.stack.join(", ")}</WarningText>
+      </Inline>
 
       <Box marginTop={1}>
-        <Text color="gray">This will set up: </Text>
-        <Text color="yellow">{option.stack.join(", ")}</Text>
-      </Box>
-
-      <Box marginTop={1}>
-        <Text color="gray" dimColor>
+        <MutedText>
           Press [Enter/Y] to confirm, [ESC/N] to go back
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Card>
   );
 }
 
@@ -358,15 +358,13 @@ export function DesignBadge({ designName, isActive = false }: DesignBadgeProps) 
   if (!designName && !isActive) return null;
 
   return (
-    <Box>
-      <Text color="magenta">
-        {isActive ? "\u25CF" : "\u25CB"}
-      </Text>
-      <Text color="gray"> Design: </Text>
-      <Text color={isActive ? "cyan" : "gray"}>
+    <Inline gap={0}>
+      <StatusDot status={isActive ? "info" : "idle"} />
+      <MutedText> Design: </MutedText>
+      <Text color={isActive ? "cyan" : undefined} dimColor={!isActive}>
         {designName || "Selecting..."}
       </Text>
-    </Box>
+    </Inline>
   );
 }
 
@@ -384,24 +382,24 @@ export function InlineDesignPrompt({ message, compact = false }: InlineDesignPro
 
   if (compact) {
     return (
-      <Box>
+      <Inline gap={0}>
         <Text color="magenta">{paintbrushIcon} </Text>
-        <Text color="white">{message.slice(0, 60)}...</Text>
-      </Box>
+        <Label>{truncate(message, 60)}...</Label>
+      </Inline>
     );
   }
 
   return (
-    <Box flexDirection="column" marginY={1}>
-      <Box>
-        <Text color="magenta" bold>
+    <Stack marginY={1}>
+      <Inline gap={0}>
+        <Label color="magenta">
           {paintbrushIcon} Design Agent
-        </Text>
-      </Box>
+        </Label>
+      </Inline>
       <Box paddingLeft={2}>
-        <Text color="white">{message}</Text>
+        <Label>{message}</Label>
       </Box>
-    </Box>
+    </Stack>
   );
 }
 
