@@ -7,6 +7,7 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
+import { MutedText, Label, StatusDot, Inline } from './primitives/index.js';
 
 type SpinnerStyle = "dots" | "line" | "arc" | "bouncingBar" | "moon" | "runner";
 
@@ -29,10 +30,10 @@ function ThinkingDots() {
   }, []);
 
   return (
-    <Text color="gray">
+    <MutedText>
       {".".repeat(dots)}
       {" ".repeat(3 - dots)}
-    </Text>
+    </MutedText>
   );
 }
 
@@ -43,11 +44,11 @@ export function AnimatedSpinner({
   showDots = true,
 }: AnimatedSpinnerProps) {
   return (
-    <Box>
+    <Inline>
       <Text color={color}><Spinner type={type} /></Text>
-      <Text color="gray"> {label}</Text>
+      <MutedText> {label}</MutedText>
       {showDots && <ThinkingDots />}
-    </Box>
+    </Inline>
   );
 }
 
@@ -70,20 +71,20 @@ export function StatusIndicator({ status, label }: StatusIndicatorProps) {
   }, [status]);
 
   const statusConfig = {
-    idle: { symbol: "●", color: "gray" },
-    thinking: { symbol: pulse ? "◉" : "○", color: "cyan" },
-    executing: { symbol: pulse ? "▶" : "▷", color: "yellow" },
-    success: { symbol: "✓", color: "green" },
-    error: { symbol: "✗", color: "red" },
+    idle: { symbol: "●", color: "gray", dotStatus: "idle" as const },
+    thinking: { symbol: pulse ? "◉" : "○", color: "cyan", dotStatus: "info" as const },
+    executing: { symbol: pulse ? "▶" : "▷", color: "yellow", dotStatus: "warning" as const },
+    success: { symbol: "✓", color: "green", dotStatus: "success" as const },
+    error: { symbol: "✗", color: "red", dotStatus: "error" as const },
   };
 
   const config = statusConfig[status];
 
   return (
-    <Box>
-      <Text color={config.color}>{config.symbol}</Text>
-      {label && <Text color="gray"> {label}</Text>}
-    </Box>
+    <Inline>
+      <StatusDot status={config.dotStatus} />
+      {label && <MutedText> {label}</MutedText>}
+    </Inline>
   );
 }
 
@@ -95,7 +96,7 @@ interface StepIndicatorProps {
 
 export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
   return (
-    <Box flexDirection="row" gap={1}>
+    <Inline gap={1}>
       {steps.map((step, index) => {
         const isComplete = index < currentStep;
         const isCurrent = index === currentStep;
@@ -103,14 +104,18 @@ export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
 
         return (
           <Box key={step}>
-            {isComplete && <Text color="green">✓</Text>}
+            {isComplete && <StatusDot status="success" />}
             {isCurrent && <Text color="cyan"><Spinner type="dots" /></Text>}
-            {isPending && <Text color="gray">○</Text>}
-            <Text color={isCurrent ? "white" : "gray"}> {step}</Text>
-            {index < steps.length - 1 && <Text color="gray"> → </Text>}
+            {isPending && <MutedText>○</MutedText>}
+            {isCurrent ? (
+              <Label> {step}</Label>
+            ) : (
+              <MutedText> {step}</MutedText>
+            )}
+            {index < steps.length - 1 && <MutedText> → </MutedText>}
           </Box>
         );
       })}
-    </Box>
+    </Inline>
   );
 }

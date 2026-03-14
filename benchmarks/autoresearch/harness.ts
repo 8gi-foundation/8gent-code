@@ -17,7 +17,7 @@ import * as path from "path";
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 const MODEL = process.env.OLLAMA_MODEL || "glm-4.7-flash:latest";
 const RESULTS_FILE = path.join(__dirname, "../results.tsv");
-const PROMPTS_FILE = path.join(__dirname, "../../packages/agent/prompts/system-prompt.ts");
+const PROMPTS_FILE = path.join(__dirname, "../../packages/eight/prompts/system-prompt.ts");
 
 interface BenchmarkTask {
   id: string;

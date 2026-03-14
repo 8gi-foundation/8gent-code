@@ -1,0 +1,12 @@
+{
+  "name": "@8gent/harness-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Headless CLI for running, inspecting, and testing 8gent sessions",
+  "bin": {
+    "8gent-harness": "./index.ts"
+  },
+  "scripts": {
+    "start": "bun run index.ts"
+  }
+}

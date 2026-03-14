@@ -13,8 +13,8 @@
  * - Multi-avenue tracking
  */
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Box, useInput, useApp } from "ink";
 import { Header, FancyHeader } from "./components/header.js";
 import { StatusBar, DetailedStatusBar, EnhancedStatusBar } from "./components/status-bar.js";
 import { CommandInput, SlashCommand } from "./components/command-input.js";
@@ -46,6 +46,10 @@ import {
   ADHD_MODE_ENABLED_MSG,
   ADHD_MODE_DISABLED_MSG,
 } from "./components/bionic-text.js";
+import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
+import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
+import { formatTokens } from "./lib/index.js";
+import { useProcessPanel } from "./hooks/useProcessPanel.js";
 
 // Import permission system for infinite mode
 import {
@@ -55,7 +59,62 @@ import {
 } from "../../../packages/permissions/index.js";
 
 // Import the actual Agent for real execution
-import { Agent } from "../../../packages/agent/index.js";
+import { Agent } from "../../../packages/eight/index.js";
+import type { AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent } from "../../../packages/eight/index.js";
+
+// Load .env file if present
+import * as fs from "fs";
+import * as pathMod from "path";
+
+function loadEnvFile() {
+  // Check multiple locations: cwd first, then the 8gent repo root
+  const candidates = [
+    pathMod.join(process.cwd(), ".env"),
+    pathMod.resolve(import.meta.dirname, "../../../.env"), // 8gent-code repo root
+    pathMod.join(process.env.HOME || "", ".8gent", ".env"), // ~/.8gent/.env
+  ];
+  for (const envPath of candidates) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith("#")) {
+            const eqIdx = trimmed.indexOf("=");
+            if (eqIdx > 0) {
+              const key = trimmed.slice(0, eqIdx).trim();
+              const val = trimmed.slice(eqIdx + 1).trim();
+              if (!process.env[key]) {
+                process.env[key] = val;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+}
+
+function loadProviderSettings(): { provider: string; model: string } {
+  try {
+    const settingsPath = pathMod.join(
+      process.env.HOME || process.env.USERPROFILE || "",
+      ".8gent",
+      "providers.json"
+    );
+    if (fs.existsSync(settingsPath)) {
+      const data = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+      return {
+        provider: data.activeProvider || "ollama",
+        model: data.activeModel || "glm-4.7-flash:latest",
+      };
+    }
+  } catch {}
+  return { provider: "ollama", model: "glm-4.7-flash:latest" };
+}
+
+loadEnvFile();
+const _savedProviderSettings = loadProviderSettings();
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
@@ -79,9 +138,11 @@ interface AppProps {
 
 export interface Message {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
   timestamp: Date;
+  /** For tool messages: whether the tool succeeded */
+  toolSuccess?: boolean;
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
@@ -156,7 +217,13 @@ export function App({ initialCommand, args }: AppProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState<ProcessingStage>("planning");
   const [status, setStatus] = useState<AppStatus>("idle");
-  const [tokensSaved, setTokensSaved] = useState(0);
+
+  // Real-time agent progress (replaces fake simulateProcessing)
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [stepCount, setStepCount] = useState(0);
+  const [toolCount, setToolCount] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
+  // tokensSaved removed — using real totalTokens from agent events
   const [startTime] = useState(new Date());
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
 
@@ -199,8 +266,8 @@ export function App({ initialCommand, args }: AppProps) {
   const [infiniteModeActive, setInfiniteModeActive] = useState(false);
 
   // Model/Provider state (must be before agent init)
-  const [currentModel, setCurrentModel] = useState("glm-4.7-flash:latest");
-  const [currentProvider, setCurrentProvider] = useState("ollama");
+  const [currentModel, setCurrentModel] = useState(_savedProviderSettings.model);
+  const [currentProvider, setCurrentProvider] = useState(_savedProviderSettings.provider);
   const [availableModels] = useState([
     "glm-4.7-flash:latest",
     "qwen2.5-coder:14b",
@@ -224,6 +291,13 @@ export function App({ initialCommand, args }: AppProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
 
+  // Background process panel
+  const processPanel = useProcessPanel();
+
+  // Message queue — user can type while agent is working
+  const messageQueueRef = useRef<string[]>([]);
+  const agentRunningRef = useRef(false);
+
   // Onboarding system
   const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -246,6 +320,8 @@ export function App({ initialCommand, args }: AppProps) {
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       if (soundEnabled) playSound("notification");
+      // Finalize session before exiting
+      if (agent) agent.cleanup().catch(() => {});
       exit();
     }
 
@@ -284,6 +360,11 @@ export function App({ initialCommand, args }: AppProps) {
       setExpandedView((prev) => !prev);
     }
 
+    // Toggle process panel
+    if (key.ctrl && input === "b") {
+      processPanel.toggleSidebar();
+    }
+
     // Cycle through modes with Shift+Tab
     if (key.shift && key.tab) {
       const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict"];
@@ -318,13 +399,81 @@ export function App({ initialCommand, args }: AppProps) {
     const initAgent = async () => {
       try {
         // Map provider to runtime
-        const runtime = currentProvider === "lmstudio" ? "lmstudio" : "ollama";
+        let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
+        if (currentProvider === "lmstudio") {
+          runtime = "lmstudio";
+        } else if (currentProvider === "openrouter" || currentProvider === "openrouter-free") {
+          runtime = "openrouter";
+        }
 
         const newAgent = new Agent({
           model: currentModel,
-          runtime: runtime as "ollama" | "lmstudio",
+          runtime,
           workingDirectory: process.cwd(),
           maxTurns: 50,
+          apiKey: process.env.OPENROUTER_API_KEY,
+          events: {
+            onToolStart: (event: AgentToolStartEvent) => {
+              setActiveTool(event.toolName);
+              setProcessingStage("executing");
+              setStatus("executing");
+              // Show tool call in message stream
+              const argsPreview = JSON.stringify(event.args).slice(0, 80);
+              setMessages((prev) => [...prev, {
+                id: `tool-start-${event.toolCallId}`,
+                role: "tool" as const,
+                content: `→ ${event.toolName}(${argsPreview})`,
+                timestamp: new Date(),
+              }]);
+            },
+            onToolEnd: (event: AgentToolEndEvent) => {
+              setToolCount((prev) => prev + 1);
+              setActiveTool(null);
+              // Detect command failures even when tool "succeeds"
+              const isRealFailure = !event.success ||
+                (event.resultPreview?.startsWith("Exit code ") && !event.resultPreview.startsWith("Exit code 0"));
+              const duration = event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
+              let content: string;
+              if (isRealFailure && event.resultPreview) {
+                // Show the error message so user knows what happened
+                const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
+                content = `  ✗ ${errMsg}${duration}`;
+              } else {
+                content = `  ✓${duration}`;
+              }
+              setMessages((prev) => [...prev, {
+                id: `tool-end-${event.toolCallId}`,
+                role: "tool" as const,
+                content,
+                timestamp: new Date(),
+                toolSuccess: !isRealFailure,
+              }]);
+            },
+            onStepFinish: (event: AgentStepEvent) => {
+              setStepCount((prev) => prev + 1);
+              setTotalTokens((prev) => prev + event.usage.totalTokens);
+
+              // Stream assistant's intermediate reasoning into the message list
+              // so the user can see what the agent is thinking between tool calls
+              if (event.text && event.text.trim()) {
+                setMessages((prev) => [...prev, {
+                  id: `assistant-step-${event.stepNumber}-${Date.now()}`,
+                  role: "assistant" as const,
+                  content: event.text,
+                  timestamp: new Date(),
+                }]);
+              }
+
+              // Determine stage from step content
+              if (event.toolCalls.length > 0) {
+                setProcessingStage("executing");
+                setStatus("executing");
+              } else {
+                setProcessingStage("toolshed");
+                setStatus("thinking");
+              }
+            },
+          },
         });
         // Check if provider is available
         const ready = await newAgent.isReady();
@@ -438,7 +587,7 @@ export function App({ initialCommand, args }: AppProps) {
           addSystemMessage(
             `Session Status:\n` +
               `  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n` +
-              `  Tokens saved: ${tokensSaved.toLocaleString()}\n` +
+              `  Tokens used: ${totalTokens.toLocaleString()}\n` +
               `  Commands: ${recentCommands.length}\n` +
               `  Branch: ${currentBranch || "N/A"}\n` +
               `  Animations: ${showAnimations ? "on" : "off"}\n` +
@@ -458,6 +607,7 @@ export function App({ initialCommand, args }: AppProps) {
           break;
 
         case "quit":
+          if (agent) agent.cleanup().catch(() => {});
           exit();
           break;
 
@@ -635,7 +785,7 @@ export function App({ initialCommand, args }: AppProps) {
       addSystemMessage,
       kanbanBoard,
       startTime,
-      tokensSaved,
+      totalTokens,
       recentCommands,
       currentBranch,
       showAnimations,
@@ -652,24 +802,14 @@ export function App({ initialCommand, args }: AppProps) {
     ]
   );
 
-  // Simulate processing stages
-  const simulateProcessing = useCallback(() => {
-    const stages: ProcessingStage[] = ["planning", "toolshed", "executing", "complete"];
-    let stageIndex = 0;
-
-    const advanceStage = () => {
-      if (stageIndex < stages.length) {
-        setProcessingStage(stages[stageIndex]);
-        setStatus(stageIndex < 2 ? "thinking" : "executing");
-        stageIndex++;
-
-        if (stageIndex < stages.length) {
-          setTimeout(advanceStage, 300 + Math.random() * 400);
-        }
-      }
-    };
-
-    advanceStage();
+  // Reset agent progress for a new request
+  const resetAgentProgress = useCallback(() => {
+    setActiveTool(null);
+    setStepCount(0);
+    setToolCount(0);
+    setTotalTokens(0);
+    setProcessingStage("planning");
+    setStatus("thinking");
   }, []);
 
   // Generate predictions based on input
@@ -837,135 +977,99 @@ export function App({ initialCommand, args }: AppProps) {
       return;
     }
 
-    const cmdStartTime = Date.now();
-
     // Track command history
     setRecentCommands((prev) => [input, ...prev].slice(0, 20));
 
-    // Add user message
-    const userMessage: Message = {
+    // Add user message to chat immediately
+    setMessages((prev) => [...prev, {
       id: `user-${Date.now()}`,
-      role: "user",
+      role: "user" as const,
       content: input,
       timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsProcessing(true);
-    setStatus("thinking");
+    }]);
 
-    // Start processing simulation
-    simulateProcessing();
-
-    // Generate predictions and avenues
-    const newPredictions = generatePredictions(input);
-    setPredictedSteps(newPredictions);
-    setPlanNextStep(newPredictions[0]?.description || null);
-
-    const newAvenues = generateAvenues(input);
-    setAvenues(newAvenues);
-
-    // Update kanban board
-    setKanbanBoard((prev) => ({
-      ...prev,
-      ready: newPredictions.slice(0, 3) as any,
-      backlog: newPredictions.slice(3) as any,
-    }));
-
-    // Use real agent if available, otherwise fall back to mock
-    if (agent && agentReady) {
-      // Real agent execution
-      try {
-        const response = await agent.chat(input);
-        const endTime = Date.now();
-        setLastResponseTime(endTime - cmdStartTime);
-
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: response,
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsProcessing(false);
-        setStatus("success");
-
-        // Estimate token savings from AST-first approach
-        const saved = Math.floor(response.length * 0.4);
-        setTokensSaved((prev) => prev + saved);
-        setContextSize(response.length);
-
-        // Track context usage (rough estimate: ~4 chars per token)
-        const responseTokens = Math.ceil(response.length / 4);
-        const inputTokens = Math.ceil(input.length / 4);
-        setContextUsed((prev) => prev + responseTokens + inputTokens);
-
-        if (soundEnabled) {
-          playSound("success");
-        }
-
-        // Suggest ADHD mode after 3rd response if not already enabled or suggested
-        if (!adhdMode && !adhdSuggested && messages.length >= 4) {
-          setAdhdSuggested(true);
-          setTimeout(() => {
-            addSystemMessage(
-              "💡 **Tip:** Try /adhd for faster reading!\n\n" +
-              "ADHD mode **bo**lds the **fi**rst half of **ea**ch word, " +
-              "helping your **br**ain process **te**xt faster.\n\n" +
-              "Perfect for **co**de reviews. Type /adhd to try it."
-            );
-          }, 2000);
-        }
-
-        setTimeout(() => {
-          setStatus("idle");
-        }, 1500);
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: `[Error] ${errorMsg}`,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsProcessing(false);
-        setStatus("error");
-        setTimeout(() => setStatus("idle"), 3000);
-      }
-    } else {
-      // Mock mode fallback
-      setTimeout(() => {
-        const endTime = Date.now();
-        setLastResponseTime(endTime - cmdStartTime);
-
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: generateResponse(input),
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsProcessing(false);
-        setStatus("success");
-
-        const saved = Math.floor(Math.random() * 1500) + 500;
-        setTokensSaved((prev) => prev + saved);
-        setContextSize(Math.floor(Math.random() * 8000) + 2000);
-
-        // Track context usage (mock)
-        setContextUsed((prev) => prev + Math.floor(Math.random() * 2000) + 500);
-
-        if (soundEnabled) {
-          playSound("success");
-        }
-
-        setTimeout(() => {
-          setStatus("idle");
-        }, 1500);
-      }, 800 + Math.random() * 600);
+    // If agent is already running, queue this message
+    if (agentRunningRef.current) {
+      messageQueueRef.current.push(input);
+      addSystemMessage("Queued — will send after current task completes.");
+      return;
     }
+
+    // Run the agent
+    const runAgent = async (message: string) => {
+      agentRunningRef.current = true;
+      setIsProcessing(true);
+      resetAgentProgress();
+
+      const cmdStartTime = Date.now();
+
+      // Generate predictions and avenues
+      const newPredictions = generatePredictions(message);
+      setPredictedSteps(newPredictions);
+      setPlanNextStep(newPredictions[0]?.description || null);
+      const newAvenues = generateAvenues(message);
+      setAvenues(newAvenues);
+      setKanbanBoard((prev) => ({
+        ...prev,
+        ready: newPredictions.slice(0, 3) as any,
+        backlog: newPredictions.slice(3) as any,
+      }));
+
+      if (agent && agentReady) {
+        try {
+          await agent.chat(message);
+          setLastResponseTime(Date.now() - cmdStartTime);
+          setStatus("success");
+          if (soundEnabled) playSound("success");
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          setMessages((prev) => [...prev, {
+            id: `assistant-error-${Date.now()}`,
+            role: "assistant" as const,
+            content: `[Error] ${errorMsg}`,
+            timestamp: new Date(),
+          }]);
+          setStatus("error");
+          setTimeout(() => setStatus("idle"), 3000);
+        }
+      } else {
+        // Mock mode
+        setTimeout(() => {
+          setMessages((prev) => [...prev, {
+            id: `assistant-${Date.now()}`,
+            role: "assistant" as const,
+            content: generateResponse(message),
+            timestamp: new Date(),
+          }]);
+          setLastResponseTime(Date.now() - cmdStartTime);
+          setStatus("success");
+          if (soundEnabled) playSound("success");
+          setTimeout(() => setStatus("idle"), 1500);
+        }, 800 + Math.random() * 400);
+      }
+
+      setIsProcessing(false);
+      setActiveTool(null);
+      agentRunningRef.current = false;
+
+      // Process queued messages
+      if (messageQueueRef.current.length > 0) {
+        const next = messageQueueRef.current.shift()!;
+        setMessages((prev) => [...prev, {
+          id: `user-queued-${Date.now()}`,
+          role: "user" as const,
+          content: next,
+          timestamp: new Date(),
+        }]);
+        // Small delay so the UI can breathe
+        setTimeout(() => runAgent(next), 100);
+      } else {
+        setTimeout(() => setStatus("idle"), 1500);
+      }
+    };
+
+    runAgent(input);
+
   };
 
   // Render main content based on view mode
@@ -1044,18 +1148,18 @@ export function App({ initialCommand, args }: AppProps) {
       case "onboarding":
         // Onboarding uses the same message list but with a different header indicator
         return (
-          <Box flexDirection="column">
+          <Stack>
             <Box marginBottom={1}>
-              <Text color="cyan" bold>∞ Onboarding</Text>
-              <Text color="gray"> - </Text>
-              <Text color="yellow">Getting to know you</Text>
+              <Heading>∞ Onboarding</Heading>
+              <MutedText> - </MutedText>
+              <AppText color="yellow">Getting to know you</AppText>
             </Box>
             <MessageList
               messages={messages}
               animateTyping={showAnimations}
               soundEnabled={soundEnabled}
             />
-          </Box>
+          </Stack>
         );
 
       case "animations":
@@ -1128,9 +1232,58 @@ export function App({ initialCommand, args }: AppProps) {
         <Header isProcessing={isProcessing} showAnimations={showAnimations} />
       )}
 
-      {/* Main content area */}
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
-        {renderMainContent()}
+      {/* Main content area with optional process sidebar on right */}
+      <Box flexDirection="row" flexGrow={1} overflow="hidden">
+        {/* Left: main content (chat / kanban / etc.) or process detail — scrolls */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
+          {processPanel.detailTaskId && processPanel.tasks.find(t => t.id === processPanel.detailTaskId) ? (
+            <ProcessDetailView
+              task={processPanel.tasks.find(t => t.id === processPanel.detailTaskId)!}
+              output={processPanel.detailOutput}
+              onClose={processPanel.closeDetail}
+              onKill={() => {
+                const killed = processPanel.killSelected();
+                if (killed) {
+                  setMessages((prev) => [...prev, {
+                    id: `system-kill-${Date.now()}`,
+                    role: "system" as const,
+                    content: `Process killed: "${killed.command.slice(0, 60)}"`,
+                    timestamp: new Date(),
+                  }]);
+                }
+              }}
+              height={30}
+            />
+          ) : (
+            renderMainContent()
+          )}
+        </Box>
+
+        {/* Right: process sidebar */}
+        {processPanel.sidebarOpen && (
+          <ProcessSidebar
+            tasks={processPanel.tasks}
+            selectedIndex={processPanel.selectedIndex}
+            focused={processPanel.focusZone === "sidebar"}
+            taskCounts={processPanel.taskCounts}
+            width={32}
+            onNext={processPanel.nextTask}
+            onPrev={processPanel.prevTask}
+            onOpen={processPanel.openDetail}
+            onKill={() => {
+              const killed = processPanel.killSelected();
+              if (killed) {
+                setMessages((prev) => [...prev, {
+                  id: `system-kill-${Date.now()}`,
+                  role: "system" as const,
+                  content: `Process killed: "${killed.command.slice(0, 60)}"`,
+                  timestamp: new Date(),
+                }]);
+              }
+            }}
+            onUnfocus={processPanel.focusInput}
+          />
+        )}
       </Box>
 
       {/* Mini kanban when in chat mode and has items */}
@@ -1149,24 +1302,24 @@ export function App({ initialCommand, args }: AppProps) {
             active={true}
           />
         ) : (
-          <Text color="gray" dimColor>
-            <Text color="cyan">✦</Text> Awaiting your command...
-          </Text>
+          <MutedText>
+            <AppText color="cyan">✦</AppText> Awaiting your command...
+          </MutedText>
         )}
       </Box>
 
       {/* Top separator line */}
       <Box paddingX={1}>
-        <Text color="gray">{"─".repeat(60)}</Text>
+        <Divider />
       </Box>
 
       {/* Input section with context window display */}
       <Box paddingX={1} justifyContent="space-between" alignItems="center">
         {/* Left: Context used */}
         <Box width={12}>
-          <Text color="gray" dimColor>
-            {formatContextSize(contextUsed)}
-          </Text>
+          <MutedText>
+            {formatTokens(totalTokens)}
+          </MutedText>
         </Box>
 
         {/* Center: Command input */}
@@ -1176,6 +1329,10 @@ export function App({ initialCommand, args }: AppProps) {
             isProcessing={isProcessing}
             processingStage={processingStage}
             showAnimations={showAnimations}
+            activeTool={activeTool}
+            stepCount={stepCount}
+            toolCount={toolCount}
+            totalTokens={totalTokens}
             isGitRepo={isGitRepo}
             currentBranch={currentBranch}
             planNextStep={planNextStep}
@@ -1186,15 +1343,15 @@ export function App({ initialCommand, args }: AppProps) {
 
         {/* Right: Context max */}
         <Box width={12} justifyContent="flex-end">
-          <Text color="gray" dimColor>
-            /{formatContextSize(contextMax)}
-          </Text>
+          <MutedText>
+            /{formatTokens(contextMax)}
+          </MutedText>
         </Box>
       </Box>
 
       {/* Bottom separator line */}
       <Box paddingX={1}>
-        <Text color="gray">{"─".repeat(60)}</Text>
+        <Divider />
       </Box>
 
       {/* Expanded view panel (Ctrl+O) */}
@@ -1207,19 +1364,17 @@ export function App({ initialCommand, args }: AppProps) {
           marginX={1}
           marginTop={1}
         >
-          <Text color="cyan" bold>∞ Extended Info</Text>
+          <Heading>∞ Extended Info</Heading>
           <Box marginTop={1} flexDirection="column">
-            <Text color="gray">Context: <Text color="cyan">{formatContextSize(contextUsed)}</Text> / <Text color="white">{formatContextSize(contextMax)}</Text> ({Math.round((contextUsed / contextMax) * 100)}%)</Text>
-            <Text color="gray">Response time: <Text color="yellow">{lastResponseTime ?? 0}ms</Text></Text>
-            <Text color="gray">Tokens saved: <Text color="green">{tokensSaved.toLocaleString()}</Text></Text>
-            <Text color="gray">Model: <Text color="cyan">{currentModel}</Text> via <Text color="magenta">{currentProvider}</Text></Text>
-            <Text color="gray">Agent ready: <Text color={agentReady ? "green" : "red"}>{agentReady ? "yes" : "no"}</Text></Text>
-            {currentBranch && <Text color="gray">Branch: <Text color="yellow">{currentBranch}</Text></Text>}
-            <Text color="gray">Mode: <Text color="cyan">{viewMode}</Text></Text>
-            <Text color="gray">Infinite: <Text color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</Text></Text>
+            <MutedText>Model: <AppText color="cyan">{currentModel}</AppText> via <AppText color="magenta">{currentProvider}</AppText></MutedText>
+            <MutedText>Agent: <AppText color={agentReady ? "green" : "red"}>{agentReady ? "ready" : "not connected"}</AppText></MutedText>
+            <MutedText>Tokens: <AppText color="cyan">{totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}k` : "—"}</AppText> · Steps: <AppText color="cyan">{stepCount}</AppText> · Tools: <AppText color="cyan">{toolCount}</AppText></MutedText>
+            <MutedText>Response time: <AppText color="yellow">{lastResponseTime ? `${(lastResponseTime / 1000).toFixed(1)}s` : "—"}</AppText></MutedText>
+            {currentBranch && <MutedText>Branch: <AppText color="yellow">{currentBranch}</AppText></MutedText>}
+            <MutedText>Infinite: <AppText color={infiniteModeActive ? "red" : "green"}>{infiniteModeActive ? "∞ enabled" : "disabled"}</AppText></MutedText>
           </Box>
           <Box marginTop={1}>
-            <Text color="gray" dimColor>Press Ctrl+O to close</Text>
+            <MutedText>Press Ctrl+O to close</MutedText>
           </Box>
         </Box>
       )}
@@ -1231,31 +1386,26 @@ export function App({ initialCommand, args }: AppProps) {
           runningAgents={isProcessing ? 1 : 0}
           totalAgents={1}
           permissionMode={infiniteModeActive ? "infinite" : "ask"}
-          tokensSaved={tokensSaved}
+          tokensSaved={totalTokens}
           currentBranch={currentBranch}
           startTime={startTime}
           planStatus={
             isProcessing
-              ? processingStage === "planning"
-                ? "planning"
-                : "executing"
-              : kanbanBoard.done.length > 0
+              ? activeTool
+                ? "executing"
+                : "planning"
+              : stepCount > 0
               ? "completed"
               : "idle"
           }
-          planStepsCompleted={kanbanBoard.done.length}
-          planStepsTotal={
-            kanbanBoard.backlog.length +
-            kanbanBoard.ready.length +
-            kanbanBoard.inProgress.length +
-            kanbanBoard.done.length
-          }
+          planStepsCompleted={toolCount}
+          planStepsTotal={stepCount}
           showAnimations={showAnimations}
           adhdMode={adhdMode}
         />
       ) : (
         <StatusBar
-          tokensSaved={tokensSaved}
+          tokensSaved={totalTokens}
           status={status}
           showAnimations={showAnimations}
           soundEnabled={soundEnabled}
@@ -1264,26 +1414,16 @@ export function App({ initialCommand, args }: AppProps) {
 
       {/* Hidden keyboard shortcuts hint */}
       {showAnimations && (
-        <Box paddingX={1} marginTop={1}>
-          <Text color="gray" dimColor>
-            ^O expand | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | /help | ^C exit
-          </Text>
+        <Box paddingX={1} marginTop={1} gap={2}>
+          <MutedText>
+            ^O expand | ^B processes | ^K kanban | ^P predict | ⇧Tab cycle | ^A anim | ^S sound | ^C exit
+          </MutedText>
+          {!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
         </Box>
       )}
     </Box>
     </ADHDModeContext.Provider>
   );
-}
-
-// Format context size in human readable format (e.g., "12.5K", "128K")
-function formatContextSize(tokens: number): string {
-  if (tokens >= 1000000) {
-    return (tokens / 1000000).toFixed(1) + "M";
-  }
-  if (tokens >= 1000) {
-    return (tokens / 1000).toFixed(1) + "K";
-  }
-  return tokens.toString();
 }
 
 // Personality completion phrases

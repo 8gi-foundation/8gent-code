@@ -10,6 +10,8 @@
 
 import React, { useState, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
+import { AppText, MutedText, Heading, Label, ErrorText, SuccessText, WarningText, Badge, StatusDot, Card, Stack, Inline, Divider } from './primitives/index.js';
+import { formatBytes as formatBytesLib } from '../lib/index.js';
 
 // ============================================
 // Types (inline to avoid import path issues)
@@ -151,19 +153,19 @@ export function EvidencePanel({
   }, [evidence]);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Card borderColor="cyan">
       {/* Header */}
-      <Box justifyContent="space-between">
-        <Text bold color="cyan">
+      <Inline justifyContent="space-between">
+        <Heading>
           {title}
-        </Text>
-        <Text dimColor>
-          <Text color="green">{stats.verified}</Text>
-          <Text>/</Text>
-          <Text>{stats.total}</Text>
-          <Text> verified</Text>
-        </Text>
-      </Box>
+        </Heading>
+        <MutedText>
+          <SuccessText>{stats.verified}</SuccessText>
+          <AppText>/</AppText>
+          <AppText>{stats.total}</AppText>
+          <AppText> verified</AppText>
+        </MutedText>
+      </Inline>
 
       {/* Confidence meter if report provided */}
       {report && (
@@ -173,11 +175,11 @@ export function EvidencePanel({
       )}
 
       {/* Evidence list */}
-      <Box flexDirection="column" height={maxHeight}>
+      <Stack height={maxHeight}>
         {evidence.length === 0 ? (
-          <Text dimColor italic>
+          <MutedText italic>
             No evidence collected yet.
-          </Text>
+          </MutedText>
         ) : (
           evidence.map((ev, index) => (
             <EvidenceItem
@@ -188,32 +190,32 @@ export function EvidencePanel({
             />
           ))
         )}
-      </Box>
+      </Stack>
 
       {/* Summary by type */}
       {Object.keys(groupedEvidence).length > 0 && (
-        <Box marginTop={1} flexWrap="wrap">
+        <Inline marginTop={1} flexWrap="wrap">
           {Object.entries(groupedEvidence).map(([type, items]) => {
             const verified = items.filter((e) => e.verified).length;
             return (
-              <Box key={type} marginRight={2}>
-                <Text dimColor>{type}: </Text>
+              <Inline key={type} marginRight={2} gap={0}>
+                <MutedText>{type}: </MutedText>
                 <Text color={verified === items.length ? "green" : "yellow"}>
                   {verified}/{items.length}
                 </Text>
-              </Box>
+              </Inline>
             );
           })}
-        </Box>
+        </Inline>
       )}
 
       {/* Navigation hint */}
       <Box marginTop={1}>
-        <Text dimColor>
+        <MutedText>
           ↑↓ navigate • Enter to expand • q to close
-        </Text>
+        </MutedText>
       </Box>
-    </Box>
+    </Card>
   );
 }
 
@@ -227,9 +229,9 @@ function EvidenceItem({
   isExpanded,
 }: EvidenceItemProps): React.ReactElement {
   const icon = evidence.verified ? (
-    <Text color="green">✓</Text>
+    <SuccessText>✓</SuccessText>
   ) : (
-    <Text color="red">✗</Text>
+    <ErrorText>✗</ErrorText>
   );
 
   const typeColors: Record<EvidenceType, string> = {
@@ -249,16 +251,16 @@ function EvidenceItem({
   const typeColor = typeColors[evidence.type] || "white";
 
   return (
-    <Box flexDirection="column">
-      <Box>
+    <Stack>
+      <Inline gap={0}>
         {isSelected && <Text color="cyan">{"> "}</Text>}
-        {!isSelected && <Text>{"  "}</Text>}
+        {!isSelected && <AppText>{"  "}</AppText>}
         {icon}
-        <Text> </Text>
-        <Text color={typeColor as any}>[{evidence.type}]</Text>
-        <Text> </Text>
-        <Text wrap="truncate">{evidence.description}</Text>
-      </Box>
+        <AppText> </AppText>
+        <Badge label={evidence.type} color={typeColor} variant="outline" />
+        <AppText> </AppText>
+        <AppText wrap="truncate">{evidence.description}</AppText>
+      </Inline>
 
       {/* Expanded details */}
       {isExpanded && (
@@ -267,54 +269,55 @@ function EvidenceItem({
           marginLeft={4}
           paddingLeft={1}
           borderStyle="single"
-          borderColor="gray"
+          borderColor="blue"
           borderLeft
           borderRight={false}
           borderTop={false}
           borderBottom={false}
         >
           {evidence.path && (
-            <Text dimColor>
-              Path: <Text color="white">{evidence.path}</Text>
-            </Text>
+            <MutedText>
+              Path: <Label>{evidence.path}</Label>
+            </MutedText>
           )}
           {evidence.command && (
-            <Text dimColor>
-              Command: <Text color="white">{evidence.command}</Text>
-            </Text>
+            <MutedText>
+              Command: <Label>{evidence.command}</Label>
+            </MutedText>
           )}
           {evidence.exitCode !== undefined && (
-            <Text dimColor>
+            <MutedText>
               Exit code:{" "}
-              <Text color={evidence.exitCode === 0 ? "green" : "red"}>
-                {evidence.exitCode}
-              </Text>
-            </Text>
+              {evidence.exitCode === 0
+                ? <SuccessText>{evidence.exitCode}</SuccessText>
+                : <ErrorText>{evidence.exitCode}</ErrorText>
+              }
+            </MutedText>
           )}
           {evidence.size !== undefined && (
-            <Text dimColor>
-              Size: <Text color="white">{formatBytes(evidence.size)}</Text>
-            </Text>
+            <MutedText>
+              Size: <Label>{formatBytesLib(evidence.size)}</Label>
+            </MutedText>
           )}
           {evidence.duration !== undefined && (
-            <Text dimColor>
-              Duration: <Text color="white">{evidence.duration}ms</Text>
-            </Text>
+            <MutedText>
+              Duration: <Label>{evidence.duration}ms</Label>
+            </MutedText>
           )}
           {evidence.hash && (
-            <Text dimColor>
-              Hash: <Text color="gray">{evidence.hash}</Text>
-            </Text>
+            <MutedText>
+              Hash: <MutedText>{evidence.hash}</MutedText>
+            </MutedText>
           )}
 
           {/* Data preview */}
           <Box marginTop={1}>
-            <Text dimColor>Data: </Text>
+            <MutedText>Data: </MutedText>
             <EvidenceDataPreview data={evidence.data} />
           </Box>
         </Box>
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -328,15 +331,15 @@ function EvidenceDataPreview({
   data: string | object | boolean;
 }): React.ReactElement {
   if (typeof data === "boolean") {
-    return <Text color={data ? "green" : "red"}>{String(data)}</Text>;
+    return data ? <SuccessText>{String(data)}</SuccessText> : <ErrorText>{String(data)}</ErrorText>;
   }
 
   if (typeof data === "string") {
     const preview = data.split("\n")[0].slice(0, 60);
     return (
-      <Text color="gray" wrap="truncate">
+      <MutedText wrap="truncate">
         "{preview}..."
-      </Text>
+      </MutedText>
     );
   }
 
@@ -344,16 +347,16 @@ function EvidenceDataPreview({
     try {
       const preview = JSON.stringify(data).slice(0, 60);
       return (
-        <Text color="gray" wrap="truncate">
+        <MutedText wrap="truncate">
           {preview}...
-        </Text>
+        </MutedText>
       );
     } catch {
-      return <Text color="gray">[object]</Text>;
+      return <MutedText>[object]</MutedText>;
     }
   }
 
-  return <Text color="gray">-</Text>;
+  return <MutedText>-</MutedText>;
 }
 
 // ============================================
@@ -371,15 +374,15 @@ export function ConfidenceMeter({
   const color = confidence >= 80 ? "green" : confidence >= 50 ? "yellow" : "red";
 
   return (
-    <Box>
+    <Inline gap={0}>
       {showLabel && (
-        <Text dimColor>Confidence: </Text>
+        <MutedText>Confidence: </MutedText>
       )}
       <Text color={color as any}>{confidence}%</Text>
-      <Text> </Text>
+      <AppText> </AppText>
       <Text color={color as any}>{"█".repeat(filled)}</Text>
-      <Text dimColor>{"░".repeat(empty)}</Text>
-    </Box>
+      <MutedText>{"░".repeat(empty)}</MutedText>
+    </Inline>
   );
 }
 
@@ -414,57 +417,57 @@ export function StepPanel({
   }, [steps]);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1}>
+    <Card borderColor="blue">
       {/* Header */}
-      <Box justifyContent="space-between">
-        <Text bold color="blue">
+      <Inline justifyContent="space-between">
+        <Label color="blue">
           Steps
-        </Text>
-        <Box>
-          <Text color="green">{stats.passed}</Text>
-          <Text>/</Text>
-          <Text>{stats.total}</Text>
+        </Label>
+        <Inline gap={0}>
+          <SuccessText>{stats.passed}</SuccessText>
+          <AppText>/</AppText>
+          <AppText>{stats.total}</AppText>
           {stats.failed > 0 && (
             <>
-              <Text> </Text>
-              <Text color="red">({stats.failed} failed)</Text>
+              <AppText> </AppText>
+              <ErrorText>({stats.failed} failed)</ErrorText>
             </>
           )}
-        </Box>
-      </Box>
+        </Inline>
+      </Inline>
 
       {/* Step list */}
-      <Box flexDirection="column" marginTop={1}>
+      <Stack marginTop={1}>
         {steps.map((step, index) => {
           const isSelected = index === selectedIndex;
           const statusIcon =
             step.status === "passed" ? (
-              <Text color="green">●</Text>
+              <StatusDot status="success" />
             ) : step.status === "failed" ? (
-              <Text color="red">✗</Text>
+              <StatusDot status="error" />
             ) : step.status === "skipped" ? (
-              <Text dimColor>○</Text>
+              <StatusDot status="idle" />
             ) : (
-              <Text color="yellow">◐</Text>
+              <StatusDot status="warning" />
             );
 
           return (
-            <Box key={step.stepId}>
+            <Inline key={step.stepId} gap={0}>
               {isSelected && <Text color="blue">{"> "}</Text>}
-              {!isSelected && <Text>{"  "}</Text>}
+              {!isSelected && <AppText>{"  "}</AppText>}
               {statusIcon}
-              <Text> </Text>
-              <Text dimColor>[{step.stepId}]</Text>
-              <Text> </Text>
-              <Text wrap="truncate">{step.action.slice(0, 40)}</Text>
+              <AppText> </AppText>
+              <MutedText>[{step.stepId}]</MutedText>
+              <AppText> </AppText>
+              <AppText wrap="truncate">{step.action.slice(0, 40)}</AppText>
               {step.duration && (
-                <Text dimColor> ({step.duration}ms)</Text>
+                <MutedText> ({step.duration}ms)</MutedText>
               )}
-            </Box>
+            </Inline>
           );
         })}
-      </Box>
-    </Box>
+      </Stack>
+    </Card>
   );
 }
 
@@ -486,9 +489,9 @@ export function ValidationReportPanel({
   });
 
   return (
-    <Box flexDirection="column" padding={1}>
+    <Stack padding={1}>
       {/* Tabs */}
-      <Box marginBottom={1}>
+      <Inline marginBottom={1}>
         <Tab
           label="1. Summary"
           active={activeTab === "summary"}
@@ -501,7 +504,7 @@ export function ValidationReportPanel({
           label="3. Evidence"
           active={activeTab === "evidence"}
         />
-      </Box>
+      </Inline>
 
       {/* Tab content */}
       {activeTab === "summary" && (
@@ -513,7 +516,7 @@ export function ValidationReportPanel({
       {activeTab === "evidence" && (
         <EvidencePanel evidence={report.evidence} />
       )}
-    </Box>
+    </Stack>
   );
 }
 
@@ -524,15 +527,16 @@ function Tab({
   label: string;
   active: boolean;
 }): React.ReactElement {
+  if (active) {
+    return (
+      <Box marginRight={2}>
+        <Badge label={label} color="cyan" />
+      </Box>
+    );
+  }
   return (
     <Box marginRight={2}>
-      <Text
-        bold={active}
-        color={active ? "cyan" : undefined}
-        inverse={active}
-      >
-        {` ${label} `}
-      </Text>
+      <AppText>{` ${label} `}</AppText>
     </Box>
   );
 }
@@ -543,86 +547,76 @@ function SummaryTab({
   report: ValidationReport;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Card borderColor="cyan">
+      <Heading>
         Validation Summary
-      </Text>
+      </Heading>
 
       <Box marginY={1}>
         <ConfidenceMeter confidence={report.confidence} showLabel />
       </Box>
 
-      <Text>{report.summary}</Text>
+      <AppText>{report.summary}</AppText>
 
-      <Box marginTop={1}>
-        <Text dimColor>Steps: </Text>
-        <Text color="green">{report.passedSteps}</Text>
-        <Text>/</Text>
-        <Text>{report.totalSteps}</Text>
-        <Text> passed</Text>
+      <Inline marginTop={1} gap={0}>
+        <MutedText>Steps: </MutedText>
+        <SuccessText>{report.passedSteps}</SuccessText>
+        <AppText>/</AppText>
+        <AppText>{report.totalSteps}</AppText>
+        <AppText> passed</AppText>
         {report.failedSteps > 0 && (
           <>
-            <Text>, </Text>
-            <Text color="red">{report.failedSteps}</Text>
-            <Text> failed</Text>
+            <AppText>, </AppText>
+            <ErrorText>{report.failedSteps}</ErrorText>
+            <AppText> failed</AppText>
           </>
         )}
-      </Box>
+      </Inline>
 
-      <Box>
-        <Text dimColor>Evidence: </Text>
-        <Text>{report.evidence.filter((e: Evidence) => e.verified).length}</Text>
-        <Text>/</Text>
-        <Text>{report.evidence.length}</Text>
-        <Text> verified</Text>
-      </Box>
+      <Inline gap={0}>
+        <MutedText>Evidence: </MutedText>
+        <AppText>{report.evidence.filter((e: Evidence) => e.verified).length}</AppText>
+        <AppText>/</AppText>
+        <AppText>{report.evidence.length}</AppText>
+        <AppText> verified</AppText>
+      </Inline>
 
       {report.duration && (
-        <Box marginTop={1}>
-          <Text dimColor>Duration: </Text>
-          <Text>{(report.duration / 1000).toFixed(1)}s</Text>
-        </Box>
+        <Inline marginTop={1} gap={0}>
+          <MutedText>Duration: </MutedText>
+          <AppText>{(report.duration / 1000).toFixed(1)}s</AppText>
+        </Inline>
       )}
 
       {/* Warnings */}
       {report.warnings.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold color="yellow">
+        <Stack marginTop={1}>
+          <Label color="yellow">
             Warnings:
-          </Text>
+          </Label>
           {report.warnings.map((warning: string, i: number) => (
-            <Text key={i} color="yellow">
+            <WarningText key={i}>
               ⚠ {warning}
-            </Text>
+            </WarningText>
           ))}
-        </Box>
+        </Stack>
       )}
 
       {/* Suggestions */}
       {report.suggestions.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold color="cyan">
+        <Stack marginTop={1}>
+          <Heading>
             Suggestions:
-          </Text>
+          </Heading>
           {report.suggestions.map((suggestion: string, i: number) => (
-            <Text key={i} dimColor>
+            <MutedText key={i}>
               💡 {suggestion}
-            </Text>
+            </MutedText>
           ))}
-        </Box>
+        </Stack>
       )}
-    </Box>
+    </Card>
   );
-}
-
-// ============================================
-// Helper Functions
-// ============================================
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ============================================

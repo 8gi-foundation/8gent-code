@@ -238,7 +238,7 @@ export function DNAHelix({
           line.push(<Text key={x} color={baseColors[(baseIndex + 2) % 4]} bold>{bases[(baseIndex + 2) % 4]}</Text>);
         } else if (x > Math.min(x1, x2) && x < Math.max(x1, x2) && Math.abs(x1 - x2) > 2) {
           // Draw connecting line
-          line.push(<Text key={x} color="gray" dimColor>─</Text>);
+          line.push(<Text key={x} dimColor>─</Text>);
         } else {
           line.push(<Text key={x}> </Text>);
         }
@@ -494,7 +494,7 @@ export function GlitchText({
     <Box>
       {offset > 0 && <Text> </Text>}
       <Text color="red">{glitched.slice(0, 2)}</Text>
-      <Text color="white">{glitched.slice(2, -2)}</Text>
+      <Text bold>{glitched.slice(2, -2)}</Text>
       <Text color="cyan">{glitched.slice(-2)}</Text>
     </Box>
   );
@@ -636,7 +636,7 @@ export function Waveform({
     return (
       <Box>
         {Array(width).fill(0).map((_, i) => (
-          <Text key={i} color="gray" dimColor>▁</Text>
+          <Text key={i} dimColor>▁</Text>
         ))}
       </Box>
     );
@@ -781,7 +781,7 @@ export function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
             if (FACE_COLORS[char]) {
               return <Text key={j} color={FACE_COLORS[char] as any}>█</Text>;
             }
-            return <Text key={j} color="gray">{char}</Text>;
+            return <Text key={j} dimColor>{char}</Text>;
           })}
         </Box>
       ))}
