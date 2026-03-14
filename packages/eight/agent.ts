@@ -20,6 +20,8 @@ import { appendRun, type RunLogEntry } from "../reporting/runlog";
 import { SessionWriter } from "../specifications/session/writer.js";
 import type { AgentInfo, Environment, ContentPart, DetailedTokenUsage } from "../specifications/session/index.js";
 import { getLSPManager } from "../lsp";
+import { getProactivePlanner, type ProactivePlanner } from "../planning/proactive-planner";
+import { EvidenceCollector, type Evidence, summarizeEvidence } from "../validation/evidence";
 
 // AI SDK imports
 import {
@@ -44,6 +46,9 @@ export class Agent {
   private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
   private loopWarningInjected = false;
   private events: AgentEventCallbacks;
+  private planner: ProactivePlanner;
+  private evidenceCollector: EvidenceCollector;
+  private sessionEvidence: Evidence[] = [];
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -58,6 +63,12 @@ export class Agent {
 
     // Set tool context for AI SDK tools
     setToolContext({ workingDirectory: config.workingDirectory || process.cwd() });
+
+    // Initialize proactive planner and evidence collector
+    this.planner = getProactivePlanner();
+    this.evidenceCollector = new EvidenceCollector({
+      workingDirectory: config.workingDirectory || process.cwd(),
+    });
 
     // Build system prompt
     const basePrompt = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
@@ -284,6 +295,24 @@ export class Agent {
           }
         }
 
+        // Update proactive planner context
+        this.planner.updatePredictionContext({
+          recentCommands: [`${event.toolName}(${JSON.stringify(event.args).slice(0, 100)})`],
+          ...(event.toolName === "write_file" || event.toolName === "edit_file"
+            ? { modifiedFiles: [String(event.args.path)] }
+            : {}),
+          ...((!event.success && typeof event.error === "string")
+            ? { lastError: event.error }
+            : {}),
+        });
+
+        // Fire-and-forget evidence collection for significant operations
+        if (event.success && ["write_file", "edit_file", "run_command", "git_commit"].includes(event.toolName)) {
+          this.collectToolEvidence(event).then(ev => {
+            if (ev.length > 0) this.sessionEvidence.push(...ev);
+          }).catch(() => {}); // evidence is supplementary, never block
+        }
+
         await this.hookManager.executeHooks("afterTool", {
           sessionId: this.sessionId,
           tool: event.toolName,
@@ -406,7 +435,10 @@ export class Agent {
       },
 
       onFinish: async () => {
-        // All logging handled per-step above
+        if (this.sessionEvidence.length > 0) {
+          const summary = summarizeEvidence(this.sessionEvidence);
+          console.log(`\n[Evidence: ${summary.verified}/${summary.total} verified]`);
+        }
       },
     };
 
@@ -501,6 +533,22 @@ export class Agent {
 
       throw err;
     }
+  }
+
+  private async collectToolEvidence(event: { toolName: string; args: Record<string, unknown>; result: any }): Promise<Evidence[]> {
+    if ((event.toolName === "write_file" || event.toolName === "edit_file") && event.args.path) {
+      return this.evidenceCollector.collectForFileWrite(String(event.args.path));
+    }
+    if (event.toolName === "git_commit") {
+      return this.evidenceCollector.collectForGitCommit();
+    }
+    if (event.toolName === "run_command" && event.args.command) {
+      return this.evidenceCollector.collectForCommand(
+        String(event.args.command),
+        typeof event.result === "string" ? event.result : JSON.stringify(event.result)
+      );
+    }
+    return [];
   }
 
   async isReady(): Promise<boolean> {

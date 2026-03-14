@@ -49,7 +49,11 @@ export type StepCategory =
   | "test" // Testing
   | "debug" // Debugging
   | "refactor" // Code improvement
-  | "documentation"; // Docs
+  | "documentation" // Docs
+  | "creative" // Writing, design, brainstorming
+  | "research" // Web search, reading docs, synthesis
+  | "communication" // Emails, messages, PRs, reviews
+  | "planning"; // Meta-planning, task breakdown, BMAD classification
 
 export interface KanbanBoard {
   backlog: ProactiveStep[];
@@ -60,7 +64,7 @@ export interface KanbanBoard {
 
 export interface PredictionContext {
   recentCommands: string[];
-  currentPlan: ExecutionPlan | null;
+  currentPlan: { id: string; steps: Array<{ description: string; tool: string; input: Record<string, unknown>; status: string }> } | null;
   currentDirectory: string;
   isGitRepo: boolean;
   branch: string | null;
@@ -78,6 +82,12 @@ export class ProactivePlanner {
   private predictionContext: PredictionContext;
   private maxBacklog = 10;
   private maxReady = 5;
+  private momentum = {
+    stepsCompleted: 0,
+    stepsPerMinute: 0,
+    lastActivityAt: Date.now(),
+    streak: 0,
+  };
 
   constructor() {
     this.board = {
@@ -124,6 +134,14 @@ export class ProactivePlanner {
 
     // Always include exploration steps
     predictions.push(...this.predictExplorationSteps());
+
+    // Include creative and research predictions based on context
+    if (this.predictionContext.recentCommands.some(c => c.includes("write_file") || c.includes("draft"))) {
+      predictions.push(...this.predictCreativeSteps());
+    }
+    if (this.predictionContext.lastError || this.predictionContext.recentCommands.some(c => c.includes("web_search"))) {
+      predictions.push(...this.predictResearchSteps());
+    }
 
     // Sort by priority and confidence
     predictions.sort((a, b) => {
@@ -371,10 +389,33 @@ export class ProactivePlanner {
     const [step] = this.board.inProgress.splice(index, 1);
     this.board.done.push(step);
 
+    // Update momentum
+    this.momentum.stepsCompleted++;
+    this.momentum.streak++;
+    const elapsed = (Date.now() - this.momentum.lastActivityAt) / 60000; // minutes
+    if (elapsed > 0) {
+      this.momentum.stepsPerMinute = this.momentum.stepsCompleted / elapsed;
+    }
+    this.momentum.lastActivityAt = Date.now();
+
     // Trigger new predictions based on completed step
     this.updatePredictionContext({ completedStep: step });
 
     return step;
+  }
+
+  /**
+   * Mark a step as failed — resets streak
+   */
+  failStep(stepId: string): void {
+    this.momentum.streak = 0;
+  }
+
+  /**
+   * Get current momentum stats
+   */
+  getMomentum(): { stepsCompleted: number; stepsPerMinute: number; streak: number } {
+    return { ...this.momentum };
   }
 
   /**
@@ -418,6 +459,72 @@ export class ProactivePlanner {
   clearPredictions(): void {
     this.board.backlog = [];
     this.board.ready = [];
+  }
+
+  /**
+   * Predict creative steps (writing, design, brainstorming)
+   */
+  predictCreativeSteps(): ProactiveStep[] {
+    const steps: ProactiveStep[] = [];
+
+    steps.push({
+      id: this.generateId(),
+      description: "Draft initial content",
+      tool: "write_file",
+      input: { path: "draft.md" },
+      priority: 7,
+      confidence: 0.6,
+      category: "creative",
+      predictedAt: new Date(),
+      basedOn: [],
+    });
+
+    steps.push({
+      id: this.generateId(),
+      description: "Review and iterate on draft",
+      tool: "edit_file",
+      input: {},
+      priority: 6,
+      confidence: 0.5,
+      category: "creative",
+      predictedAt: new Date(),
+      basedOn: [],
+    });
+
+    return steps;
+  }
+
+  /**
+   * Predict research steps (web search, doc reading, synthesis)
+   */
+  predictResearchSteps(): ProactiveStep[] {
+    const steps: ProactiveStep[] = [];
+
+    steps.push({
+      id: this.generateId(),
+      description: "Search for relevant documentation",
+      tool: "web_search",
+      input: { query: "" },
+      priority: 8,
+      confidence: 0.7,
+      category: "research",
+      predictedAt: new Date(),
+      basedOn: [],
+    });
+
+    steps.push({
+      id: this.generateId(),
+      description: "Read and synthesize findings",
+      tool: "read_file",
+      input: {},
+      priority: 7,
+      confidence: 0.6,
+      category: "research",
+      predictedAt: new Date(),
+      basedOn: [],
+    });
+
+    return steps;
   }
 
   // ============================================

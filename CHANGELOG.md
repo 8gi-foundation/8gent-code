@@ -7,6 +7,32 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.0] — 2026-03-14
+
+### Added
+- **Universal BMAD planning** — system prompt now classifies tasks as Code, Creative, Research, Planning, or Communication with tailored approaches for each
+- **Proactive planner wired into agent loop** — updates prediction context on every tool call, tracks modified files and errors
+- **Evidence collection in agent core** — fire-and-forget evidence gathering after file writes, commands, and git commits; session summary on finish
+- **AST `indexFolder()` implementation** — recursively parses TS/JS files, populates symbol maps and file outlines
+- **AST `getSymbolSource()` implementation** — reads file and extracts lines for a specific symbol with optional context
+- **AST `estimateTokenSavings()` implementation** — calculates full-file vs symbol-only token estimates
+- **Momentum tracking** in ProactivePlanner — tracks steps completed, rate (steps/min), and streak
+- **Universal step categories** — added `creative`, `research`, `communication`, `planning` to StepCategory
+- **Creative/research prediction methods** — `predictCreativeSteps()` and `predictResearchSteps()` for non-code tasks
+- **REPL commands**: `/board` (kanban view), `/predict` (confidence-scored predictions), `/momentum` (velocity stats)
+- **bmad-method** as devDependency (v6.1.0) with auto-init on postinstall
+
+### Fixed
+- `EvidenceCollector` constructor now accepts optional config with `process.cwd()` default (was required, crashed without args)
+- `PredictionContext.currentPlan` type inlined (was referencing undefined `ExecutionPlan`)
+- `indexRepo()` now throws descriptive error instead of generic "Not implemented"
+- Removed `...config` spread in EvidenceCollector that was overwriting defaults
+
+### Changed
+- Version bump to 0.5.0 (new features: BMAD wiring, evidence, AST, momentum)
+
+---
+
 ## [0.3.1] — 2026-03-14
 
 ### Added
