@@ -13,7 +13,7 @@
  * - Multi-avenue tracking
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, useInput, useApp } from "ink";
 import { Header, FancyHeader } from "./components/header.js";
 import { StatusBar, DetailedStatusBar, EnhancedStatusBar } from "./components/status-bar.js";
@@ -293,6 +293,10 @@ export function App({ initialCommand, args }: AppProps) {
 
   // Background process panel
   const processPanel = useProcessPanel();
+
+  // Message queue — user can type while agent is working
+  const messageQueueRef = useRef<string[]>([]);
+  const agentRunningRef = useRef(false);
 
   // Onboarding system
   const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
@@ -973,112 +977,99 @@ export function App({ initialCommand, args }: AppProps) {
       return;
     }
 
-    const cmdStartTime = Date.now();
-
     // Track command history
     setRecentCommands((prev) => [input, ...prev].slice(0, 20));
 
-    // Add user message
-    const userMessage: Message = {
+    // Add user message to chat immediately
+    setMessages((prev) => [...prev, {
       id: `user-${Date.now()}`,
-      role: "user",
+      role: "user" as const,
       content: input,
       timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsProcessing(true);
-    resetAgentProgress();
+    }]);
 
-    // Generate predictions and avenues
-    const newPredictions = generatePredictions(input);
-    setPredictedSteps(newPredictions);
-    setPlanNextStep(newPredictions[0]?.description || null);
-
-    const newAvenues = generateAvenues(input);
-    setAvenues(newAvenues);
-
-    // Update kanban board
-    setKanbanBoard((prev) => ({
-      ...prev,
-      ready: newPredictions.slice(0, 3) as any,
-      backlog: newPredictions.slice(3) as any,
-    }));
-
-    // Use real agent if available, otherwise fall back to mock
-    if (agent && agentReady) {
-      // Real agent execution
-      try {
-        await agent.chat(input);
-        const endTime = Date.now();
-        setLastResponseTime(endTime - cmdStartTime);
-
-        // Don't add the final response — it was already streamed via
-        // onStepFinish events into the message list in real-time.
-        setIsProcessing(false);
-        setActiveTool(null);
-        setStatus("success");
-
-        if (soundEnabled) {
-          playSound("success");
-        }
-
-        // Suggest ADHD mode after 3rd response if not already enabled or suggested
-        if (!adhdMode && !adhdSuggested && messages.length >= 4) {
-          setAdhdSuggested(true);
-          setTimeout(() => {
-            addSystemMessage(
-              "💡 **Tip:** Try /adhd for faster reading!\n\n" +
-              "ADHD mode **bo**lds the **fi**rst half of **ea**ch word, " +
-              "helping your **br**ain process **te**xt faster.\n\n" +
-              "Perfect for **co**de reviews. Type /adhd to try it."
-            );
-          }, 2000);
-        }
-
-        setTimeout(() => {
-          setStatus("idle");
-        }, 1500);
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: `[Error] ${errorMsg}`,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsProcessing(false);
-        setActiveTool(null);
-        setStatus("error");
-        setTimeout(() => setStatus("idle"), 3000);
-      }
-    } else {
-      // Mock mode fallback
-      setTimeout(() => {
-        const endTime = Date.now();
-        setLastResponseTime(endTime - cmdStartTime);
-
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: generateResponse(input),
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsProcessing(false);
-        setActiveTool(null);
-        setStatus("success");
-
-        if (soundEnabled) {
-          playSound("success");
-        }
-
-        setTimeout(() => {
-          setStatus("idle");
-        }, 1500);
-      }, 800 + Math.random() * 600);
+    // If agent is already running, queue this message
+    if (agentRunningRef.current) {
+      messageQueueRef.current.push(input);
+      addSystemMessage("Queued — will send after current task completes.");
+      return;
     }
+
+    // Run the agent
+    const runAgent = async (message: string) => {
+      agentRunningRef.current = true;
+      setIsProcessing(true);
+      resetAgentProgress();
+
+      const cmdStartTime = Date.now();
+
+      // Generate predictions and avenues
+      const newPredictions = generatePredictions(message);
+      setPredictedSteps(newPredictions);
+      setPlanNextStep(newPredictions[0]?.description || null);
+      const newAvenues = generateAvenues(message);
+      setAvenues(newAvenues);
+      setKanbanBoard((prev) => ({
+        ...prev,
+        ready: newPredictions.slice(0, 3) as any,
+        backlog: newPredictions.slice(3) as any,
+      }));
+
+      if (agent && agentReady) {
+        try {
+          await agent.chat(message);
+          setLastResponseTime(Date.now() - cmdStartTime);
+          setStatus("success");
+          if (soundEnabled) playSound("success");
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          setMessages((prev) => [...prev, {
+            id: `assistant-error-${Date.now()}`,
+            role: "assistant" as const,
+            content: `[Error] ${errorMsg}`,
+            timestamp: new Date(),
+          }]);
+          setStatus("error");
+          setTimeout(() => setStatus("idle"), 3000);
+        }
+      } else {
+        // Mock mode
+        setTimeout(() => {
+          setMessages((prev) => [...prev, {
+            id: `assistant-${Date.now()}`,
+            role: "assistant" as const,
+            content: generateResponse(message),
+            timestamp: new Date(),
+          }]);
+          setLastResponseTime(Date.now() - cmdStartTime);
+          setStatus("success");
+          if (soundEnabled) playSound("success");
+          setTimeout(() => setStatus("idle"), 1500);
+        }, 800 + Math.random() * 400);
+      }
+
+      setIsProcessing(false);
+      setActiveTool(null);
+      agentRunningRef.current = false;
+
+      // Process queued messages
+      if (messageQueueRef.current.length > 0) {
+        const next = messageQueueRef.current.shift()!;
+        setMessages((prev) => [...prev, {
+          id: `user-queued-${Date.now()}`,
+          role: "user" as const,
+          content: next,
+          timestamp: new Date(),
+        }]);
+        // Small delay so the UI can breathe
+        setTimeout(() => runAgent(next), 100);
+      } else {
+        setTimeout(() => setStatus("idle"), 1500);
+      }
+    };
+
+    runAgent(input);
+
   };
 
   // Render main content based on view mode
