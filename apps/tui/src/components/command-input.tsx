@@ -321,8 +321,8 @@ export function CommandInput({
     }
   };
 
-  if (isProcessing) {
-    // Build a real-time label from agent events
+  // Build processing status line (shown above input when agent is working)
+  const processingStatusLine = isProcessing ? (() => {
     const label = activeTool
       ? `Running ${activeTool}`
       : stepCount === 0
@@ -334,37 +334,27 @@ export function CommandInput({
     if (toolCount > 0) stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
     if (totalTokens > 0) stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
 
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        {/* Main processing indicator with real tool name */}
-        <Box marginBottom={1}>
-          <AnimatedSpinner
-            type="dots"
-            color="cyan"
-            label={label}
-            showDots={true}
-          />
-          {stats.length > 0 && (
-            <MutedText>  ({stats.join(" · ")})</MutedText>
-          )}
-        </Box>
-
-        {/* Step indicator */}
-        {showAnimations && (
-          <Box marginBottom={1}>
-            <StepIndicator steps={PROCESSING_STAGES} currentStep={getCurrentStep()} />
-          </Box>
-        )}
-
-        {/* Wave progress bar */}
-        {showAnimations && <WaveProgress width={40} speed={80} />}
-      </Box>
-    );
-  }
+    return { label, stats };
+  })() : null;
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {/* Main input row */}
+      {/* Processing status — compact line above input, not replacing it */}
+      {processingStatusLine && (
+        <Box marginBottom={0}>
+          <AnimatedSpinner
+            type="dots"
+            color="cyan"
+            label={processingStatusLine.label}
+            showDots={true}
+          />
+          {processingStatusLine.stats.length > 0 && (
+            <MutedText>  ({processingStatusLine.stats.join(" · ")})</MutedText>
+          )}
+        </Box>
+      )}
+
+      {/* Main input row — ALWAYS visible */}
       <Box>
         {/* Animated prompt */}
         <PromptIndicator pulse={promptPulse && showAnimations} />
@@ -376,11 +366,11 @@ export function CommandInput({
             value={value}
             onChange={setValue}
             onSubmit={handleSubmit}
-            placeholder={isVisible ? "" : "Type a command or ask a question..."}
+            placeholder={isProcessing ? "Queue a follow-up message..." : (isVisible ? "" : "Type a command or ask a question...")}
           />
 
           {/* Ghost suggestion text */}
-          {isVisible && suggestion && (
+          {!isProcessing && isVisible && suggestion && (
             <MutedText>
               {suggestion.text}
             </MutedText>
@@ -389,14 +379,14 @@ export function CommandInput({
       </Box>
 
       {/* Ghost suggestion hint */}
-      {isVisible && suggestion && (
+      {!isProcessing && isVisible && suggestion && (
         <Box paddingLeft={2}>
           <ShortcutHint keys="[Tab]" description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`} />
         </Box>
       )}
 
       {/* Slash command help */}
-      {showSlashHelp && <SlashCommandHelp filter={value.slice(1)} />}
+      {!isProcessing && showSlashHelp && <SlashCommandHelp filter={value.slice(1)} />}
     </Box>
   );
 }
