@@ -104,10 +104,11 @@
 
 ### Priority fixes
 1. Fix the JWT expiry comment/code mismatch (30d vs "8 hours")
-2. Add rate limiting to the bootstrap endpoint
-3. Lock down CORS for production/tunnel mode
-4. Add CSP headers to the SPA
-5. Move WebSocket auth out of query strings
+2. **WebSocket listener leak** — Every `session_subscribe`/`session_create` pushes `onData`/`onUpdate`/`onExit` callbacks onto PTY sessions, but `ws.on('close')` only clears the subscription set, not those listeners. Repeated client reconnects to the same session cause unbounded listener array growth. Add an unregister mechanism on WebSocket close.
+3. Add rate limiting to the bootstrap endpoint
+4. Lock down CORS for production/tunnel mode
+5. Add CSP headers to the SPA
+6. Move WebSocket auth out of query strings
 
 ### Nice-to-haves
 - Unit tests for auth and config modules
