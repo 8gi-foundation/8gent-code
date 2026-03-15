@@ -50,6 +50,14 @@
     "preferLocal": true
   },
 
+  "metaclaw": {
+    "enabled": false,
+    "proxyUrl": "http://localhost:30000",
+    "autoStart": false,
+    "baseModel": "qwen2.5-coder:14b",
+    "configPath": "config/metaclaw.yaml"
+  },
+
   "safety": {
     "maxSelfModifyPerSession": 10,
     "requireSnapshotBeforeModify": true,
