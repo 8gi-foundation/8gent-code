@@ -4,13 +4,24 @@
 
 import type { Message, LLMResponse, LLMClient } from "../types";
 
+/**
+ * Resolve the Ollama base URL, checking for MetaClaw proxy override.
+ * When MetaClaw is running, requests route through its proxy for
+ * skill injection and RL training signal collection.
+ */
+function resolveBaseUrl(explicit?: string): string {
+  if (explicit) return explicit;
+  if (process.env.METACLAW_PROXY_URL) return process.env.METACLAW_PROXY_URL;
+  return "http://localhost:11434";
+}
+
 export class OllamaClient implements LLMClient {
   private baseUrl: string;
   private model: string;
 
-  constructor(model: string, baseUrl: string = "http://localhost:11434") {
+  constructor(model: string, baseUrl?: string) {
     this.model = model;
-    this.baseUrl = baseUrl;
+    this.baseUrl = resolveBaseUrl(baseUrl);
   }
 
   async chat(messages: Message[], tools?: object[]): Promise<LLMResponse> {
