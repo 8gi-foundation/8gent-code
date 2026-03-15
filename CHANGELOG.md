@@ -10,9 +10,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`@8gent/kernel` package** — full 4-phase RL fine-tuning pipeline via MetaClaw
+  - **Phase 1: Proxy manager** (`proxy.ts`) — start/stop MetaClaw, health checks, latency overhead monitoring with configurable threshold
+  - **Phase 2: Judge scoring** (`judge.ts`) — PRM wiring via Gemini Flash (free), score distribution tracking, per-model stats, daily trend analysis
+  - **Phase 3: Training orchestration** (`training.ts`) — GRPO batch collection with score filtering, checkpoint creation, benchmark validation gate, auto-rollback on regression
+  - **Phase 4: Production loop** (`loop.ts`) — MadMax scheduling (sleep/idle windows), auto-promotion of improved checkpoints into model-router, health monitoring, score trend alerts
+  - **Kernel manager** (`manager.ts`) — unified entry point, reads `.8gent/config.json`, safe no-op when disabled
 - **MetaClaw RL fine-tuning exploration** — architecture doc, proxy config, and integration plan for continuous GRPO fine-tuning of local Ollama models via MetaClaw
 - **MetaClaw proxy toggle** — `METACLAW_PROXY_URL` env var and `.8gent/config.json` metaclaw section to route Ollama calls through MetaClaw's OpenAI-compatible proxy
 - **RL checkpoint validation gate** — `benchmarks/autoresearch/validate-checkpoint.ts` runs benchmark suite against fine-tuned models and compares against baseline scores to prevent regressions
+- **Kernel Fine-Tuning section in README** — documents proxy architecture, base model recommendations, and how to enable
 
 ## [0.5.0] — 2026-03-14
 
