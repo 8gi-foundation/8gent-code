@@ -7,6 +7,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **MetaClaw RL fine-tuning exploration** — architecture doc, proxy config, and integration plan for continuous GRPO fine-tuning of local Ollama models via MetaClaw
+- **MetaClaw proxy toggle** — `METACLAW_PROXY_URL` env var and `.8gent/config.json` metaclaw section to route Ollama calls through MetaClaw's OpenAI-compatible proxy
+- **RL checkpoint validation gate** — `benchmarks/autoresearch/validate-checkpoint.ts` runs benchmark suite against fine-tuned models and compares against baseline scores to prevent regressions
+
 ## [0.5.0] — 2026-03-14
 
 ### Added
