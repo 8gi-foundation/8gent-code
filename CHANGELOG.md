@@ -17,6 +17,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Animation utilities: fade-in, scale-in, typewriter, glow pulse, counter
   - Branded design tokens matching 8gent visual identity
   - Scripts: `studio`, `render:hero`, `render:features`, `render:cost`, `render:all`
+  - **Media preview page** (`bun run demos:media`) — Vite-powered browser preview with Remotion Player
+    - Composition selector sidebar, aspect ratio toggle (9:16 / 16:9)
+    - Live playback with controls, autoplay, loop
+    - Render command reference per composition
 
 ---
 
