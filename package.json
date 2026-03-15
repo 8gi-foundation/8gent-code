@@ -37,7 +37,9 @@
     "harness:run": "bun run packages/harness-cli/index.ts run",
     "harness:sessions": "bun run packages/harness-cli/index.ts sessions",
     "harness:inspect": "bun run packages/harness-cli/index.ts inspect",
-    "harness:doctor": "bun run packages/harness-cli/index.ts doctor"
+    "harness:doctor": "bun run packages/harness-cli/index.ts doctor",
+    "demos:studio": "cd apps/demos && bun run studio",
+    "demos:render": "cd apps/demos && bun run render:all"
   },
   "workspaces": [
     "apps/*",
