@@ -15,6 +15,12 @@ import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 const args = process.argv.slice(2);
 const command = args[0] || "repl";
 
+// Log MetaClaw proxy status if active
+const metaClawUrl = process.env.METACLAW_PROXY_URL;
+if (metaClawUrl) {
+  console.log(`\x1b[36mMetaClaw proxy: active (${metaClawUrl})\x1b[0m`);
+}
+
 // Check for --infinite flag (supports --infinite, -infinite, -i)
 const hasInfiniteFlag = args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
 if (hasInfiniteFlag) {

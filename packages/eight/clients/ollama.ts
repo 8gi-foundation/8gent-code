@@ -12,6 +12,18 @@ import type { Message, LLMResponse, LLMClient } from "../types";
 function resolveBaseUrl(explicit?: string): string {
   if (explicit) return explicit;
   if (process.env.METACLAW_PROXY_URL) return process.env.METACLAW_PROXY_URL;
+
+  // Check .8gent/config.json for metaclaw.proxyUrl
+  try {
+    const configPath = `${process.cwd()}/.8gent/config.json`;
+    const config = JSON.parse(require("fs").readFileSync(configPath, "utf-8"));
+    if (config.metaclaw?.enabled && config.metaclaw?.proxyUrl) {
+      return config.metaclaw.proxyUrl;
+    }
+  } catch {
+    // Config not found or invalid — fall through
+  }
+
   return "http://localhost:11434";
 }
 
