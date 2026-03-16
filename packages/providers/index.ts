@@ -620,6 +620,97 @@ export class ProviderManager {
 }
 
 // ============================================
+// Dynamic Free Model Router
+// ============================================
+
+interface OpenRouterModel {
+  id: string;
+  name: string;
+  context_length?: number;
+  pricing?: {
+    prompt: string;
+    completion: string;
+  };
+}
+
+let cachedFreeModel: { model: string; timestamp: number } | null = null;
+const FREE_MODEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Query OpenRouter API to find the best currently-available free model.
+ * Filters for models with `:free` suffix, sorts by context length.
+ * Results are cached for 1 hour.
+ */
+export async function getBestFreeModel(): Promise<string> {
+  // Return cached result if still fresh
+  if (cachedFreeModel && Date.now() - cachedFreeModel.timestamp < FREE_MODEL_CACHE_TTL) {
+    return cachedFreeModel.model;
+  }
+
+  // Load API key from environment or .env file
+  let apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    try {
+      const envPath = path.join(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, "utf-8");
+        const match = envContent.match(/OPENROUTER_API_KEY=(\S+)/);
+        if (match) apiKey = match[1];
+      }
+    } catch {
+      // ignore .env read errors
+    }
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/models", { headers });
+    if (!response.ok) {
+      throw new Error(`OpenRouter models API error: ${response.status}`);
+    }
+
+    const data = await response.json() as { data: OpenRouterModel[] };
+    const freeModels = (data.data || [])
+      .filter((m: OpenRouterModel) => m.id.endsWith(":free"))
+      .sort((a: OpenRouterModel, b: OpenRouterModel) => (b.context_length || 0) - (a.context_length || 0));
+
+    if (freeModels.length === 0) {
+      // Fallback if no free models found
+      const fallback = "meta-llama/llama-3-8b-instruct:free";
+      cachedFreeModel = { model: fallback, timestamp: Date.now() };
+      return fallback;
+    }
+
+    // Pick the model with the largest context window (proxy for quality)
+    const best = freeModels[0].id;
+    cachedFreeModel = { model: best, timestamp: Date.now() };
+    return best;
+  } catch (err) {
+    // On network error, return a known-good fallback
+    const fallback = "meta-llama/llama-3-8b-instruct:free";
+    cachedFreeModel = { model: fallback, timestamp: Date.now() };
+    return fallback;
+  }
+}
+
+/**
+ * Resolve a model string. If "auto:free", dynamically pick the best free model.
+ */
+export async function resolveModel(model: string): Promise<{ model: string; provider?: ProviderName }> {
+  if (model === "auto:free") {
+    const best = await getBestFreeModel();
+    return { model: best, provider: "openrouter" };
+  }
+  return { model };
+}
+
+// ============================================
 // Singleton & Exports
 // ============================================
 
@@ -654,6 +745,8 @@ export const PROVIDER_NAMES: ProviderName[] = [
 export default {
   getProviderManager,
   resetProviderManager,
+  getBestFreeModel,
+  resolveModel,
   PROVIDER_NAMES,
   PROVIDER_DEFAULTS,
 };
