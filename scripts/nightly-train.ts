@@ -97,20 +97,81 @@ async function runBenchmarks(model: string): Promise<BenchmarkResult[]> {
       let score = 0;
       let passed = false;
       let sessionId: string | undefined;
+      let workdir: string | undefined;
+      let sessionPath: string | undefined;
 
       try {
-        // Try to parse JSON output
-        const jsonMatch = result.stdout.match(/\{[\s\S]*"status"[\s\S]*\}/);
+        // Parse the harness JSON output (fields: success, sessionId, sessionPath, workdir, ...)
+        const jsonMatch = result.stdout.match(/\{[\s\S]*"success"[\s\S]*\}/);
         if (jsonMatch) {
           const data = JSON.parse(jsonMatch[0]);
-          passed = data.status === "ok";
           sessionId = data.sessionId;
-          score = passed ? 100 : 0;
+          workdir = data.workdir;
+          sessionPath = data.sessionPath;
+
+          // === Multi-signal scoring (not just pass/fail) ===
+          // 1. Files created in workdir (40% weight)
+          let filesScore = 0;
+          if (workdir && fs.existsSync(workdir)) {
+            const files = fs.readdirSync(workdir).filter(f => !f.startsWith("."));
+            filesScore = files.length > 0 ? 40 : 0;
+          }
+
+          // 2. Tool calls succeeded (30% weight) — parse session JSONL
+          let toolsScore = 0;
+          if (sessionPath && fs.existsSync(sessionPath)) {
+            const sessionContent = fs.readFileSync(sessionPath, "utf-8");
+            const lines = sessionContent.split("\n").filter(Boolean);
+            let toolTotal = 0;
+            let toolSucceeded = 0;
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.type === "tool_result") {
+                  toolTotal++;
+                  if (entry.success) toolSucceeded++;
+                }
+              } catch { /* skip */ }
+            }
+            if (toolTotal > 0) {
+              toolsScore = Math.round((toolSucceeded / toolTotal) * 30);
+            }
+          }
+
+          // 3. Clean exit — no errors (30% weight) — check session_end exitReason
+          let exitScore = 0;
+          if (sessionPath && fs.existsSync(sessionPath)) {
+            const sessionContent = fs.readFileSync(sessionPath, "utf-8");
+            const lines = sessionContent.split("\n").filter(Boolean);
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.type === "session_end") {
+                  const reason = entry.summary?.exitReason;
+                  // Clean exits: "natural_stop", "completed", "stop"
+                  if (reason && !["error", "timeout", "crash"].includes(reason)) {
+                    exitScore = 30;
+                  }
+                }
+                // Also check for hard errors
+                if (entry.type === "error" && entry.error?.recoverable === false) {
+                  exitScore = 0;
+                }
+              } catch { /* skip */ }
+            }
+          }
+
+          score = filesScore + toolsScore + exitScore;
+          passed = score >= 50;
+        } else {
+          // No JSON output — fallback to exit code
+          passed = result.exitCode === 0;
+          score = passed ? 30 : 0;
         }
       } catch {
-        // Score based on whether it completed without error
+        // Parse error — fallback to exit code
         passed = result.exitCode === 0;
-        score = passed ? 50 : 0;
+        score = passed ? 30 : 0;
       }
 
       results.push({ benchmarkId: task.id, score, passed, sessionId });
