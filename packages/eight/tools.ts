@@ -58,6 +58,27 @@ import {
   formatTaskStatus,
   formatTaskOutput,
 } from "../tools/background";
+import {
+  needsDesignDecision,
+  detectDesignNeed,
+  suggestDesignSystems,
+  getAvailableDesignSystems,
+} from "../design-agent/index.js";
+import {
+  initDatabase as initDesignDb,
+  search as searchDesignSystems_db,
+  suggestForProject as suggestDesignForProject,
+  getComplete as getCompleteDesignSystem,
+  findByStyle as findDesignByStyle,
+  findByMood as findDesignByMood,
+  generateCssVariables,
+  generateTailwindConfig,
+  getHexPalette,
+  listAll as listAllDesignSystems,
+  listStyles as listDesignStyles,
+  listMoods as listDesignMoods,
+} from "../design-systems/index.js";
+import { createInfiniteRunner, formatInfiniteState, type InfiniteRunner } from "../infinite";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -394,7 +415,39 @@ export class ToolExecutor {
             required: ["url"]
           }
         }
-      }
+      },
+      // Design tools
+      {
+        type: "function",
+        function: {
+          name: "suggest_design",
+          description: "Get design system recommendations for the current project or task. Use BEFORE creating UI components to ensure excellent design. Analyzes the task and suggests design systems, color palettes, typography, and component libraries.",
+          parameters: {
+            type: "object",
+            properties: {
+              task: { type: "string", description: "Description of the UI task or project (e.g., 'build a landing page', 'create a dashboard')" },
+              projectType: { type: "string", description: "Optional project type hint: ai, saas, portfolio, ecommerce, dashboard, landing-page, etc." }
+            },
+            required: ["task"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "query_design_system",
+          description: "Query the design systems database for components, color palettes, typography, and patterns. Search by name, style, mood, or tag.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query (e.g., 'minimal dark', 'claude', 'cyberpunk')" },
+              style: { type: "string", description: "Filter by style: minimal, bold, playful, elegant, tech, retro, nature, corporate" },
+              mood: { type: "string", description: "Filter by mood: professional, creative, tech, warm, cool, dramatic, calm, energetic" },
+              output: { type: "string", description: "Output format: 'summary' (default), 'css' (CSS variables), 'tailwind' (Tailwind config), 'hex' (hex palette)" }
+            }
+          }
+        }
+      },
     ];
   }
 
@@ -556,6 +609,12 @@ export class ToolExecutor {
         return this.handleBackgroundStatus(args.taskId as string);
       case "background_output":
         return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
+
+      // Design tools
+      case "suggest_design":
+        return this.handleSuggestDesign(args.task as string, args.projectType as string | undefined);
+      case "query_design_system":
+        return this.handleQueryDesignSystem(args);
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -771,6 +830,24 @@ export class ToolExecutor {
       ? filePath
       : path.join(this.workingDirectory, filePath);
 
+    // Design-agent gate: if writing a UI file, check if a design system should be suggested
+    const uiExtensions = [".tsx", ".jsx", ".css", ".html", ".svelte", ".vue"];
+    const ext = path.extname(absolutePath).toLowerCase();
+    let designHint = "";
+    if (uiExtensions.includes(ext)) {
+      try {
+        const isNewFile = !fs.existsSync(absolutePath);
+        if (isNewFile && needsDesignDecision(`create UI file ${path.basename(absolutePath)}`)) {
+          const detection = await detectDesignNeed(`create UI component: ${path.basename(absolutePath)}`);
+          if (detection.needsDesign) {
+            designHint = `\n[Design Agent] This is a new UI file. Consider using suggest_design or query_design_system to ensure consistent design. Detected: ${detection.reason}`;
+          }
+        }
+      } catch {
+        // Design check is advisory, never block writes
+      }
+    }
+
     const dir = path.dirname(absolutePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -786,7 +863,7 @@ export class ToolExecutor {
       } catch {}
     }
 
-    return `File written and opened: ${absolutePath}`;
+    return `File written and opened: ${absolutePath}${designHint}`;
   }
 
   private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
@@ -1331,6 +1408,156 @@ export class ToolExecutor {
       return formatTaskOutput(output, status);
     } catch (err) {
       return `Failed to get task output: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Design Tools
+  // ============================================
+
+  private async handleSuggestDesign(task: string, projectType?: string): Promise<string> {
+    try {
+      // Step 1: Detect design needs from the task description
+      const detection = await detectDesignNeed(task);
+
+      if (!detection.needsDesign) {
+        return JSON.stringify({
+          needsDesign: false,
+          reason: detection.reason,
+          message: "This task doesn't appear to require design decisions.",
+        }, null, 2);
+      }
+
+      // Step 2: Get design system suggestions from the design-agent
+      const suggestions = await suggestDesignSystems(detection);
+
+      // Step 3: If a project type is provided, also query the design-systems DB
+      let dbSuggestions: any[] = [];
+      if (projectType) {
+        try {
+          initDesignDb();
+          dbSuggestions = suggestDesignForProject(projectType, { maxResults: 3 }).map(s => ({
+            name: s.system.system.name,
+            style: s.system.system.style,
+            mood: s.system.system.mood,
+            score: s.score,
+            reasoning: s.reasoning,
+            colors: s.system.parsedColors ? {
+              primary: s.system.parsedColors.primary,
+              background: s.system.parsedColors.background,
+              accent: s.system.parsedColors.accent,
+            } : null,
+            tags: s.system.tags,
+          }));
+        } catch {
+          // DB not seeded yet, skip
+        }
+      }
+
+      return JSON.stringify({
+        needsDesign: true,
+        confidence: detection.confidence,
+        projectType: detection.projectType,
+        categories: detection.suggestedCategories,
+        frameworkSuggestions: suggestions.suggestions.map(s => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          reasoning: s.reasoning,
+          score: s.score,
+          stack: s.stack,
+          installCommands: s.installCommands,
+          setupSteps: s.setupSteps,
+        })),
+        designSystemSuggestions: dbSuggestions,
+        availableSystems: getAvailableDesignSystems().map(s => s.name),
+      }, null, 2);
+    } catch (err) {
+      return `Design suggestion failed: ${err}`;
+    }
+  }
+
+  private async handleQueryDesignSystem(args: Record<string, unknown>): Promise<string> {
+    try {
+      initDesignDb();
+
+      const query = args.query as string | undefined;
+      const style = args.style as string | undefined;
+      const mood = args.mood as string | undefined;
+      const output = (args.output as string) || "summary";
+
+      // If a specific query, search for it
+      if (query) {
+        // Try to get a complete design system by name first
+        const complete = getCompleteDesignSystem(query);
+        if (complete) {
+          if (output === "css") {
+            const css = generateCssVariables(complete.system.id);
+            return css || "No color palette available for CSS generation.";
+          }
+          if (output === "tailwind") {
+            const config = generateTailwindConfig(complete.system.id);
+            return config ? JSON.stringify(config, null, 2) : "No color palette available for Tailwind config.";
+          }
+          if (output === "hex") {
+            const hex = getHexPalette(complete.system.id);
+            return hex ? JSON.stringify(hex, null, 2) : "No color palette available.";
+          }
+          // Default: full summary
+          return JSON.stringify({
+            name: complete.system.name,
+            style: complete.system.style,
+            mood: complete.system.mood,
+            description: complete.system.description,
+            colors: complete.parsedColors,
+            typography: complete.parsedTypography,
+            components: complete.components.map(c => ({ type: c.type, name: c.name, description: c.description })),
+            tags: complete.tags,
+          }, null, 2);
+        }
+
+        // Fall back to text search
+        const results = searchDesignSystems_db(query);
+        return JSON.stringify({
+          query,
+          results: results.map(s => ({
+            id: s.id,
+            name: s.name,
+            style: s.style,
+            mood: s.mood,
+            description: s.description,
+          })),
+        }, null, 2);
+      }
+
+      // Filter by style
+      if (style) {
+        const results = findDesignByStyle(style as any);
+        return JSON.stringify({
+          style,
+          results: results.map(s => ({ id: s.id, name: s.name, mood: s.mood, description: s.description })),
+        }, null, 2);
+      }
+
+      // Filter by mood
+      if (mood) {
+        const results = findDesignByMood(mood as any);
+        return JSON.stringify({
+          mood,
+          results: results.map(s => ({ id: s.id, name: s.name, style: s.style, description: s.description })),
+        }, null, 2);
+      }
+
+      // No filters — list all with available styles/moods
+      const all = listAllDesignSystems();
+      return JSON.stringify({
+        totalSystems: all.length,
+        availableStyles: listDesignStyles(),
+        availableMoods: listDesignMoods(),
+        systems: all.map(s => ({ id: s.id, name: s.name, style: s.style, mood: s.mood })),
+      }, null, 2);
+    } catch (err) {
+      return `Design system query failed: ${err}`;
     }
   }
 }
