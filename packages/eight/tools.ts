@@ -79,6 +79,7 @@ import {
   listMoods as listDesignMoods,
 } from "../design-systems/index.js";
 import { createInfiniteRunner, formatInfiniteState, type InfiniteRunner } from "../infinite";
+import { getMemoryManager } from "../memory";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -465,6 +466,37 @@ export class ToolExecutor {
           }
         }
       },
+      // Memory tools
+      {
+        type: "function",
+        function: {
+          name: "remember",
+          description: "Save a fact to memory. Use 'session' for temporary context, 'project' for facts about this codebase (persisted in .8gent/), 'global' for cross-project knowledge (persisted in ~/.8gent/).",
+          parameters: {
+            type: "object",
+            properties: {
+              fact: { type: "string", description: "The fact to remember" },
+              layer: { type: "string", enum: ["session", "project", "global"], description: "Memory layer: session (ephemeral), project (per-repo), global (cross-project)" }
+            },
+            required: ["fact", "layer"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "recall",
+          description: "Search memory for relevant facts. Searches across all layers (session, project, global) using keyword matching.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query — keywords to match against stored memories" },
+              limit: { type: "number", description: "Max results to return (default: 10)" }
+            },
+            required: ["query"]
+          }
+        }
+      },
     ];
   }
 
@@ -646,6 +678,12 @@ export class ToolExecutor {
           args.maxIterations as number | undefined,
           args.maxTimeMs as number | undefined
         );
+
+      // Memory tools
+      case "remember":
+        return this.handleRemember(args.fact as string, args.layer as "session" | "project" | "global");
+      case "recall":
+        return this.handleRecall(args.query as string, args.limit as number | undefined);
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -1641,4 +1679,50 @@ export class ToolExecutor {
       return `Failed to enable infinite mode: ${err}`;
     }
   }
+
+  // ============================================
+  // Memory Tools
+  // ============================================
+
+  private async handleRemember(fact: string, layer: "session" | "project" | "global"): Promise<string> {
+    try {
+      const memory = getMemoryManager(this.workingDirectory);
+      const id = memory.remember(fact, layer, { source: "user:remember" });
+      const stats = memory.getStats();
+      return `Remembered (${layer}): "${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}"\nID: ${id}\nMemory stats — session: ${stats.session}, project: ${stats.project}, global: ${stats.global}`;
+    } catch (err) {
+      return `Failed to remember: ${err}`;
+    }
+  }
+
+  private async handleRecall(query: string, limit?: number): Promise<string> {
+    try {
+      const memory = getMemoryManager(this.workingDirectory);
+      const results = memory.recall(query, limit ?? 10);
+
+      if (results.length === 0) {
+        return `No memories found matching "${query}".`;
+      }
+
+      const lines = results.map((r, i) => {
+        const age = timeSince(new Date(r.entry.createdAt));
+        return `${i + 1}. [${r.entry.layer}] (score: ${r.score.toFixed(2)}, ${age} ago) ${r.entry.fact}`;
+      });
+
+      return `Found ${results.length} memor${results.length === 1 ? "y" : "ies"} matching "${query}":\n${lines.join("\n")}`;
+    } catch (err) {
+      return `Failed to recall: ${err}`;
+    }
+  }
+}
+
+function timeSince(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
 }

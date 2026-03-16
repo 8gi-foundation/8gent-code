@@ -1,0 +1,20 @@
+{
+  "name": "@8gent/memory",
+  "version": "0.1.0",
+  "description": "Multi-layered memory system — session, project, and global knowledge persistence for 8gent Code",
+  "main": "index.ts",
+  "types": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./index.ts",
+      "types": "./index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}
