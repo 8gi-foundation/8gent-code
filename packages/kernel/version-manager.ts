@@ -179,6 +179,27 @@ Respond with exactly one word: PATCH, MINOR, or NONE. Then a brief reason.`;
 }
 
 // ============================================
+// Personal LoRA Compatibility
+// ============================================
+
+const PERSONAL_LORA_DIR = path.join(os.homedir(), ".8gent", "personal-lora");
+const PERSONAL_LORA_META = path.join(PERSONAL_LORA_DIR, "meta.json");
+
+/**
+ * Checks if the user's personal LoRA was trained on the current Eight version.
+ * Returns false if the LoRA needs retraining (version mismatch or missing metadata).
+ */
+export function checkPersonalLoraCompatibility(currentVersion: string): boolean {
+  try {
+    if (!fs.existsSync(PERSONAL_LORA_META)) return false;
+    const meta = JSON.parse(fs.readFileSync(PERSONAL_LORA_META, "utf-8"));
+    return meta.trainedOnVersion === currentVersion;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================
 // Version Bump Logic
 // ============================================
 
