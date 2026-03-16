@@ -887,13 +887,33 @@ async function runShellCommand(command: string): Promise<string> {
 
 const spawnAgent = tool({
   description:
-    "Spawn a background agent for an independent task. Use when you have multiple independent tasks that can run in parallel. The agent runs in the background and reports back when done. Returns the agent ID.",
+    "Spawn a background agent. Use runtime='claude' for complex tasks that need a stronger model, runtime='8gent' for standard tasks, runtime='shell' for simple commands.",
   inputSchema: z.object({
     task: z.string().describe("Task description for the background agent to execute"),
-    model: z.string().optional().describe("Model to use (default: same as current agent)"),
+    runtime: z.enum(["8gent", "claude", "shell"]).optional().describe("Runtime to use: '8gent' (default, internal agent), 'claude' (Claude CLI for complex tasks), 'shell' (sh -c for simple commands)"),
+    model: z.string().optional().describe("Model to use (only for 8gent runtime)"),
+    timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell runtimes)"),
   }),
-  execute: async ({ task, model }) => {
+  execute: async ({ task, runtime, model, timeout }) => {
     try {
+      const effectiveRuntime = runtime || "8gent";
+
+      if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+        const { spawnCLIAgent } = await import("../orchestration");
+        const agent = spawnCLIAgent(effectiveRuntime, task, {
+          workingDirectory: _ctx.workingDirectory,
+          timeout: timeout || undefined,
+        });
+        return JSON.stringify({
+          agentId: agent.id,
+          runtime: effectiveRuntime,
+          status: "running",
+          task: task.slice(0, 100),
+          message: `CLI agent ${agent.id} (${effectiveRuntime}) spawned and running. Use check_agent("${agent.id}") to check status.`,
+        }, null, 2);
+      }
+
+      // Default: 8gent runtime
       const { getAgentPool } = await import("../orchestration");
       const pool = getAgentPool();
       const agent = await pool.spawnAgent(task, {
@@ -902,6 +922,7 @@ const spawnAgent = tool({
       });
       return JSON.stringify({
         agentId: agent.id,
+        runtime: "8gent",
         status: agent.status,
         task: task.slice(0, 100),
         message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
@@ -914,12 +935,38 @@ const spawnAgent = tool({
 
 const checkAgent = tool({
   description:
-    "Check the status and result of a spawned background agent by ID. Returns status (running/completed/failed) and result if done.",
+    "Check the status and result of a spawned background agent by ID. Works with all runtimes (8gent, claude, shell). Returns status and result if done.",
   inputSchema: z.object({
     agentId: z.string().describe("Agent ID returned from spawn_agent"),
   }),
   execute: async ({ agentId }) => {
     try {
+      // Check CLI agents first (claude/shell runtimes)
+      if (agentId.startsWith("cli-")) {
+        const { getCLIAgentStatus } = await import("../orchestration");
+        const status = getCLIAgentStatus(agentId);
+        if (!status) return `Agent not found: ${agentId}`;
+
+        const result: Record<string, unknown> = {
+          agentId: status.id,
+          runtime: status.runtime,
+          status: status.status,
+          task: status.task,
+          elapsed: status.elapsed,
+        };
+
+        if (status.result) {
+          result.stdout = status.result.stdout.slice(0, 2000);
+          if (status.result.stderr) {
+            result.stderr = status.result.stderr.slice(0, 500);
+          }
+          result.exitCode = status.result.exitCode;
+        }
+
+        return JSON.stringify(result, null, 2);
+      }
+
+      // Default: check 8gent agent pool
       const { getAgentPool } = await import("../orchestration");
       const pool = getAgentPool();
       const agent = pool.getAgent(agentId);
@@ -931,6 +978,7 @@ const checkAgent = tool({
 
       const result: Record<string, unknown> = {
         agentId: agent.id,
+        runtime: "8gent",
         status: agent.status,
         task: agent.task.description,
         elapsed,
@@ -954,25 +1002,29 @@ const checkAgent = tool({
 
 const listAgents = tool({
   description:
-    "List all spawned background agents with their status (running/completed/failed). Shows agent pool overview.",
+    "List all spawned background agents (8gent, claude, shell) with their status. Shows unified overview across all runtimes.",
   inputSchema: z.object({}),
   execute: async () => {
     try {
-      const { getAgentPool } = await import("../orchestration");
+      const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import("../orchestration");
       const pool = getAgentPool();
-      const agents = pool.listAgents();
+      const poolAgents = pool.listAgents();
+      const cliAgentsList = listCLIAgents();
 
-      if (agents.length === 0) {
+      if (poolAgents.length === 0 && cliAgentsList.length === 0) {
         return "No agents spawned yet. Use spawn_agent to create background agents for parallel tasks.";
       }
 
       const stats = pool.getStats();
-      const agentList = agents.map((a) => {
+
+      // 8gent agents
+      const eightAgentList = poolAgents.map((a) => {
         const elapsed = a.completedAt
           ? `${((a.completedAt.getTime() - a.startedAt.getTime()) / 1000).toFixed(1)}s`
           : `${((Date.now() - a.startedAt.getTime()) / 1000).toFixed(1)}s`;
         return {
           id: a.id,
+          runtime: "8gent" as const,
           status: a.status,
           task: a.task.description.slice(0, 80),
           elapsed,
@@ -980,9 +1032,35 @@ const listAgents = tool({
         };
       });
 
+      // CLI agents (claude/shell)
+      const cliAgentList = cliAgentsList.map((a) => {
+        const status = getCLIAgentStatus(a.id);
+        return {
+          id: a.id,
+          runtime: a.runtime,
+          status: status?.status || "running",
+          task: a.task.slice(0, 80),
+          elapsed: status?.elapsed || "...",
+          hasResult: !!a.result,
+        };
+      });
+
+      const allAgents = [...eightAgentList, ...cliAgentList];
+
+      // Augment stats with CLI agents
+      const cliRunning = cliAgentsList.filter(a => !a.completedAt).length;
+      const cliCompleted = cliAgentsList.filter(a => a.completedAt && a.result?.exitCode === 0).length;
+      const cliFailed = cliAgentsList.filter(a => a.completedAt && a.result?.exitCode !== 0).length;
+
       return JSON.stringify({
-        stats,
-        agents: agentList,
+        stats: {
+          ...stats,
+          totalAgents: stats.totalAgents + cliAgentsList.length,
+          running: stats.running + cliRunning,
+          completed: stats.completed + cliCompleted,
+          failed: stats.failed + cliFailed,
+        },
+        agents: allAgents,
       }, null, 2);
     } catch (err) {
       return `Failed to list agents: ${err}`;
