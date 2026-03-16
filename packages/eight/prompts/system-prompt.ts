@@ -33,6 +33,8 @@ You are a TypeScript application:
 └── packages/workflow/  ← Plan-validate loops
 \`\`\`
 
+Models: base (qwen3) → Eight LoRA (our training) → Personal LoRA (your patterns)
+
 Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
 
 export const BMAD_SEGMENT = `## BMAD METHOD — Universal Adaptive Planning
@@ -360,6 +362,51 @@ export const BUG_FIXING_ENHANCED = `
 
 // AUTORESEARCH IMPROVEMENT 2026-03-12T01:15:00.000Z
 // Gap: 43 points on FI001
+
+
+// NIGHTLY TRAINING ITERATION 1 — 2026-03-16T03:37:08.225Z
+// Failures: fib, sort, cache, validate, parse
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 0. Needs improvement.
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 2 — 2026-03-16T03:53:05.282Z
+// Failures: fib, sort, cache, validate, parse
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 0. Needs improvement.
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 3 — 2026-03-16T04:12:01.317Z
+// Failures: fib, sort, cache, validate, parse
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 0. Needs improvement.
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 4 — 2026-03-16T04:27:38.764Z
+// Failures: fib, sort, cache, validate, parse
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 0. Needs improvement.
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 5 — 2026-03-16T04:39:12.520Z
+// Failures: fib, sort, cache, validate, parse
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 0. Needs improvement.
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+
+
+
 
 export const FEATURE_IMPLEMENTATION_ENHANCED = `
 ## Enhanced Feature Implementation Protocol (Autoresearch-tuned)
