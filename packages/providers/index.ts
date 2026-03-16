@@ -23,6 +23,7 @@ import * as os from "os";
 // ============================================
 
 export type ProviderName =
+  | "8gent"
   | "ollama"
   | "openrouter"
   | "groq"
@@ -102,13 +103,25 @@ export interface ProviderSettings {
 // ============================================
 
 const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
+  "8gent": {
+    name: "8gent",
+    displayName: "8gent (The Infinite Gentleman)",
+    baseUrl: "http://localhost:11434",
+    apiKeyEnv: "", // Local — no API key needed
+    defaultModel: "eight-1-q-14b",
+    models: ["eight-1-q-14b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
+    enabled: true,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+  },
   ollama: {
     name: "ollama",
     displayName: "Ollama (Local)",
     baseUrl: "http://localhost:11434",
     apiKeyEnv: "", // No API key needed
-    defaultModel: "glm-4.7-flash:latest",
-    models: ["glm-4.7-flash:latest", "qwen2.5:14b", "llama3:8b", "mistral:7b", "codellama:13b"],
+    defaultModel: "qwen3.5:latest",
+    models: ["qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1"],
     enabled: true,
     supportsTools: true,
     supportsStreaming: true,
@@ -270,8 +283,8 @@ export class ProviderManager {
         const data = fs.readFileSync(this.settingsPath, "utf-8");
         const saved = JSON.parse(data) as Partial<ProviderSettings>;
         return {
-          activeProvider: saved.activeProvider || "ollama",
-          activeModel: saved.activeModel || "glm-4.7-flash:latest",
+          activeProvider: saved.activeProvider || "8gent",
+          activeModel: saved.activeModel || "eight-1-q-14b",
           providers: { ...this.getDefaultProviders(), ...saved.providers },
         };
       }
@@ -279,8 +292,8 @@ export class ProviderManager {
       console.warn(`Could not load provider settings: ${err}`);
     }
     return {
-      activeProvider: "ollama",
-      activeModel: "glm-4.7-flash:latest",
+      activeProvider: "8gent",
+      activeModel: "eight-1-q-14b",
       providers: this.getDefaultProviders(),
     };
   }
@@ -625,6 +638,7 @@ export function resetProviderManager(): void {
 
 // Export provider names for reference
 export const PROVIDER_NAMES: ProviderName[] = [
+  "8gent",
   "ollama",
   "openrouter",
   "groq",

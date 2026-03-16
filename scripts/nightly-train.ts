@@ -334,7 +334,9 @@ SYSTEM """You are Eight — 8gent's fine-tuned model, iteration ${iteration}. Yo
     fs.writeFileSync(modelfilePath, modelfileContent);
   }
 
-  const result = await runCommand("ollama", ["create", "eight", "-f", modelfilePath], { timeout: 120000 });
+  // Naming convention: eight-{iteration}-q-14b (q = qwen lineage, 14b = params)
+  const modelName = `eight-${iteration}-q-14b`;
+  const result = await runCommand("ollama", ["create", modelName, "-f", modelfilePath], { timeout: 120000 });
 
   if (result.exitCode !== 0) {
     log(`Failed to create Ollama model: ${result.stderr.slice(-300)}`);
