@@ -51,7 +51,7 @@ export class KernelManager {
         configPath: mc.configPath ?? "config/metaclaw.yaml",
         production: {
           proxy: { port: 30000, ollamaUrl: "http://localhost:11434" },
-          training: { baseModel: mc.baseModel ?? "qwen2.5-coder:14b" },
+          training: { baseModel: mc.baseModel ?? "qwen3:14b" },
         },
       });
     } catch {
