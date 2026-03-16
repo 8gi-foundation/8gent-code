@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Fix shell command injection (critical):** Git and GitHub CLI commands now use `spawn()` with explicit argument arrays instead of `sh -c` string interpolation, preventing LLM-generated arguments from executing arbitrary shell commands.
+- **Fix path traversal (high):** All file-access methods now validate resolved paths stay within the working directory via `safePath()` helper, blocking `../../` and absolute path escapes.
+- **Remove unsafe stdin auto-answer (medium):** Removed `setInterval` hack that sent `\n` to stdin every second, which could silently confirm destructive interactive prompts.
+
+### Fixed
+- `git_add` with space-separated file lists now correctly splits into individual arguments instead of passing as a single string.
+- `git_log` count parameter now uses `Math.floor(Math.abs(...))` to reject decimal values that git would reject.
+- `safePath()` calls in `getOutline()` and `getSymbol()` now wrapped in try/catch for consistent error handling.
+- `safeExec()` uses dynamic `import()` instead of `require()` for ESM consistency.
+
 ## [0.3.0] - 2026-03-12
 
 ### Added

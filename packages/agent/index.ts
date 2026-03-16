@@ -690,7 +690,7 @@ function safeExec(
   args: string[],
   cwd: string,
 ): Promise<string> {
-  const { spawn } = require("child_process") as typeof import("child_process");
+  const { spawn } = await import("child_process");
 
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
@@ -1013,16 +1013,20 @@ class ToolExecutor {
         return safeExec("git", ["status"], this.workingDirectory);
       case "git_diff":
         return safeExec("git", args.staged ? ["diff", "--staged"] : ["diff"], this.workingDirectory);
-      case "git_log":
-        return safeExec("git", ["log", "--oneline", `-${Number(args.count) || 10}`], this.workingDirectory);
+      case "git_log": {
+        const count = Math.max(1, Math.floor(Math.abs(Number(args.count) || 10)));
+        return safeExec("git", ["log", "--oneline", `-${count}`], this.workingDirectory);
+      }
       case "git_branch":
         return safeExec("git", ["branch", "-a"], this.workingDirectory);
       case "git_checkout":
         return safeExec("git", ["checkout", String(args.branch)], this.workingDirectory);
       case "git_create_branch":
         return safeExec("git", ["checkout", "-b", String(args.branch)], this.workingDirectory);
-      case "git_add":
-        return safeExec("git", ["add", String(args.files || ".")], this.workingDirectory);
+      case "git_add": {
+        const files = args.files ? String(args.files).split(/\s+/) : ["."];
+        return safeExec("git", ["add", ...files], this.workingDirectory);
+      }
       case "git_commit":
         return safeExec("git", ["commit", "-m", String(args.message)], this.workingDirectory);
       case "git_push":
@@ -1105,13 +1109,13 @@ class ToolExecutor {
   }
 
   private async getOutline(filePath: string): Promise<string> {
-    const absolutePath = safePath(filePath, this.workingDirectory);
-
-    if (!fs.existsSync(absolutePath)) {
-      return `File not found: ${absolutePath}`;
-    }
-
     try {
+      const absolutePath = safePath(filePath, this.workingDirectory);
+
+      if (!fs.existsSync(absolutePath)) {
+        return `File not found: ${absolutePath}`;
+      }
+
       const outline = parseTypeScriptFile(absolutePath);
       const symbols = outline.symbols.map(s => ({
         name: s.name,
@@ -1140,13 +1144,13 @@ class ToolExecutor {
     const filePath = symbolId.slice(0, separatorIndex);
     const symbolName = symbolId.slice(separatorIndex + 2);
 
-    const absolutePath = safePath(filePath, this.workingDirectory);
-
-    if (!fs.existsSync(absolutePath)) {
-      return `File not found: ${absolutePath}`;
-    }
-
     try {
+      const absolutePath = safePath(filePath, this.workingDirectory);
+
+      if (!fs.existsSync(absolutePath)) {
+        return `File not found: ${absolutePath}`;
+      }
+
       const outline = parseTypeScriptFile(absolutePath);
       const symbol = outline.symbols.find(s => s.name === symbolName);
 
