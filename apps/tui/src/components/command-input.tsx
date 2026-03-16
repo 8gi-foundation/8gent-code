@@ -67,7 +67,8 @@ export type SlashCommand =
   | "quarantine"
   | "toolshed"
   | "skills"
-  | "design";
+  | "design"
+  | "evidence";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -207,6 +208,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["d", "ui", "style"],
     description: "Suggest design systems for current task",
     usage: "/design [task description]",
+  },
+  {
+    name: "evidence",
+    aliases: ["ev", "proof"],
+    description: "Show full evidence breakdown for this session",
+    usage: "/evidence",
   },
 ];
 
