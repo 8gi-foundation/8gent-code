@@ -112,6 +112,19 @@ function MessageItem({
   // System messages render as subtle centered cards
   if (message.role === "system") {
     if (!showContent) return null;
+    const isMultiLine = message.content.includes("\n");
+    if (isMultiLine) {
+      // Multi-line system messages (e.g. /evidence, /help) render as a full block
+      return (
+        <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
+          <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
+            <Text dimColor>{'─'.repeat(3)}</Text>
+            <MutedText>{message.content}</MutedText>
+            <Text dimColor>{'─'.repeat(3)}</Text>
+          </Box>
+        </FadeIn>
+      );
+    }
     return (
       <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
         <Box justifyContent="center" marginBottom={1}>
