@@ -150,7 +150,7 @@ export class MetaClawProxy {
    */
   async measureLatency(): Promise<LatencySnapshot> {
     const testPayload = JSON.stringify({
-      model: "qwen2.5-coder:14b",
+      model: "qwen3:14b",
       messages: [{ role: "user", content: "Say hi" }],
       stream: false,
     });
