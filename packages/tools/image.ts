@@ -163,16 +163,36 @@ export async function describeImage(
 }
 
 /**
- * Extract text from an image using OCR via vision model
+ * Extract text from an image using OCR via vision model.
+ *
+ * When no model is specified, auto-discovers the best available OCR model:
+ * 1. Local OCR-specialized models (dots.ocr, deepseek-ocr, glm-ocr)
+ * 2. Local general vision models with strong OCR (qwen2.5-vl, minicpm-v)
+ * 3. Falls back to llava if nothing else is available
  */
 export async function extractTextFromImage(
   imagePath: string,
-  model: string = "llava"
+  model?: string
 ): Promise<ImageDescription> {
+  let ocrModel = model || "llava";
+
+  // Auto-discover best OCR model if none specified
+  if (!model) {
+    try {
+      const { findOCRModel } = await import("@8gent/eight/vision-router");
+      const result = await findOCRModel();
+      if (result.found && result.model?.provider === "ollama") {
+        ocrModel = result.model.model;
+      }
+    } catch {
+      // Vision router not available — fall back to llava
+    }
+  }
+
   return describeImage(
     imagePath,
-    "Extract and transcribe all text visible in this image. Return only the text content, preserving formatting where possible.",
-    model
+    "Extract and transcribe all text visible in this image. Return only the text content, preserving formatting where possible. For tables, preserve the structure. For code, preserve indentation and syntax.",
+    ocrModel
   );
 }
 
