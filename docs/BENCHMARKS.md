@@ -129,6 +129,24 @@ iteration	benchmark_id	claude_baseline	8gent_score	gap	status	action
 1	BF002	92	50	42	regressed	pattern added
 ```
 
+## Checkpoint Validation (Kernel Fine-Tuning)
+
+The benchmark suite doubles as a **regression gate** for RL fine-tuning checkpoints. When the `@8gent/kernel` package trains a new LoRA checkpoint via MetaClaw, it validates the checkpoint against the benchmark suite before promotion.
+
+```bash
+# Validate a checkpoint against baseline
+bun run benchmarks/autoresearch/validate-checkpoint.ts
+```
+
+**Flow:**
+1. Fine-tuned model checkpoint is created by GRPO training
+2. Validation script runs benchmark suite through MetaClaw proxy (`:30000`)
+3. Scores are compared against baseline (pre-training snapshot)
+4. If scores meet promotion threshold (default: 80) → checkpoint promoted, recorded in model-router
+5. If regression → checkpoint rolled back automatically
+
+See `packages/kernel/training.ts` for the orchestration logic and `docs/KERNEL-FINETUNING.md` for the full architecture.
+
 ## Adding New Benchmarks
 
 1. Create a fixture in `benchmarks/fixtures/<category>/`
