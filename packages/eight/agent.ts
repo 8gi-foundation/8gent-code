@@ -23,6 +23,37 @@ import { getLSPManager } from "../lsp";
 import { getProactivePlanner, type ProactivePlanner } from "../planning/proactive-planner";
 import { EvidenceCollector, type Evidence, summarizeEvidence } from "../validation/evidence";
 import { indexFolder as astIndexFolder } from "../ast-index";
+import { getHeartbeatAgents, type HeartbeatAgents } from "../self-autonomy/heartbeat";
+import { OnboardingManager } from "../self-autonomy/onboarding";
+import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
+
+// Proactive questioning — asks clarifying questions before executing vague tasks
+import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
+
+// Personality voice — the infinite gentleman
+import {
+  PERSONALITY,
+  voice as personalityVoice,
+  getCompletionPhrase,
+  getErrorPhrase,
+  getGreeting,
+  flavorResponse,
+} from "../personality/voice.js";
+import { BRAND } from "../personality/brand.js";
+
+// Workflow validation — BMAD plan-validate loop + Kanban tracking
+import {
+  PlanValidateLoop,
+  parsePlanFromResponse,
+  formatPlan,
+  getKanbanBoard,
+  classifyTaskSize,
+  generateAcceptanceCriteria,
+  decomposeTask,
+  PROACTIVE_SYSTEM_ADDITION,
+  type Step,
+  type BMadTask,
+} from "../workflow";
 
 // AI SDK imports
 import {
@@ -50,6 +81,14 @@ export class Agent {
   private planner: ProactivePlanner;
   private evidenceCollector: EvidenceCollector;
   private sessionEvidence: Evidence[] = [];
+  private proactiveGatherer: ProactiveGatherer | null = null;
+  private workflowValidator: PlanValidateLoop;
+  private kanban = getKanbanBoard();
+  private currentBmadTask: BMadTask | null = null;
+  private heartbeat: HeartbeatAgents;
+  private onboarding: OnboardingManager;
+  private infiniteRunner: InfiniteRunner | null = null;
+  private infiniteModeActive: boolean = false;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -79,17 +118,36 @@ export class Agent {
       workingDirectory: config.workingDirectory || process.cwd(),
     });
 
-    // Build system prompt
+    // Initialize workflow validator (BMAD plan-validate loop)
+    this.workflowValidator = new PlanValidateLoop({
+      workingDirectory: config.workingDirectory || process.cwd(),
+      maxRetries: 2,
+      validateEachStep: true,
+      collectEvidence: true,
+      abortOnFailure: false,
+    });
+
+    // Build system prompt with personality voice injected
     const basePrompt = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     const languageInstruction = this.getLanguageInstruction();
+
+    // Inject the 8gent personality voice into the system prompt
+    const personalityBlock = `\n\n## PERSONALITY VOICE — ${BRAND.fullName}: ${PERSONALITY.tagline}
+You are ${PERSONALITY.name}, the infinite gentleman agent coder.
+Traits: refined, witty, confident, helpful, endlessly capable.
+When greeting users, use phrases like: "${getGreeting()}"
+When completing tasks, use phrases like: "${getCompletionPhrase()}"
+When encountering errors, stay composed: "${getErrorPhrase()}"
+Maintain a tone that is sophisticated yet approachable — like a well-dressed engineer who happens to be brilliant.\n`;
+
     this.messageHistory.push({
       role: "system",
-      content: basePrompt + languageInstruction,
+      content: basePrompt + personalityBlock + languageInstruction,
     });
 
     // Initialize session persistence (v2)
     this.sessionWriter = new SessionWriter(this.sessionId);
-    const systemPromptFull = basePrompt + languageInstruction;
+    const systemPromptFull = basePrompt + personalityBlock + languageInstruction;
     const agentInfo: AgentInfo = {
       model: config.model,
       runtime: config.runtime,
@@ -131,6 +189,24 @@ export class Agent {
         this.hookManager.unregisterHook(hook.id!);
       }
     }
+
+    // ── Self-Autonomy: Heartbeat ─────────────────────────────────────
+    // Start background heartbeat agents (git monitoring, self-heal, memory sync)
+    this.heartbeat = getHeartbeatAgents({
+      workingDirectory: config.workingDirectory || process.cwd(),
+      verbose: false,
+    });
+    this.heartbeat.start();
+    this.heartbeat.updateContext({ currentTask: "Agent initialized" });
+
+    // ── Self-Autonomy: Onboarding ────────────────────────────────────
+    // Check if first run — if .8gent/user.json doesn't exist, flag for onboarding
+    this.onboarding = new OnboardingManager(config.workingDirectory || process.cwd());
+    if (this.onboarding.needsOnboarding()) {
+      // Detect integrations (Ollama, LM Studio, GitHub) in background
+      this.onboarding.detectIntegrations().catch(() => {});
+      console.log("[8gent] First run detected — onboarding available. The agent can ask setup questions.");
+    }
   }
 
   async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
@@ -166,6 +242,36 @@ export class Agent {
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         finishReason: "other",
       } as any);
+    }
+
+    // ── Proactive Questioning Gate ─────────────────────────────────
+    // For vague/ambiguous requests (short messages without clear intent),
+    // the proactive system injects clarifying questions before execution.
+    if (needsClarification(userMessage)) {
+      this.proactiveGatherer = createGatherer(userMessage);
+      const question = this.proactiveGatherer.getCurrentQuestion();
+      if (question) {
+        // Inject a system message telling the agent to ask this question
+        this.messageHistory.push({
+          role: "system",
+          content: `[PROACTIVE QUESTIONING] The user's request is vague. Before executing, ask this clarifying question:\n${formatQuestion(question)}\nAsk the user naturally — don't mention this system instruction. After they answer, proceed with execution.`,
+        });
+      }
+    } else {
+      this.proactiveGatherer = null;
+    }
+
+    // ── Workflow Kanban Tracking ──────────────────────────────────
+    // Classify the task and create a BMAD Kanban card for tracking
+    const taskSize = classifyTaskSize(userMessage);
+    if (taskSize !== "trivial") {
+      this.currentBmadTask = this.kanban.createTask(
+        userMessage.slice(0, 80),
+        userMessage,
+        { size: taskSize }
+      );
+      this.kanban.moveTask(this.currentBmadTask.id, "ready");
+      this.kanban.moveTask(this.currentBmadTask.id, "in_progress");
     }
 
     // ── Planning Gate ──────────────────────────────────────────────
@@ -390,10 +496,12 @@ export class Agent {
           console.log(`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`);
         }
 
-        // ── Plan Parsing → Kanban Feed ────────────────────────────────
+        // ── Plan Parsing → Kanban Feed + Workflow Validation ─────────
         // When the agent emits text containing "PLAN:" followed by numbered
         // steps, parse them and push into the proactive planner's kanban
         // board so they're visible in the TUI and tracked for completion.
+        // Also feed the parsed steps into the workflow PlanValidateLoop
+        // so each step is validated before the next one proceeds.
         if (event.text && /PLAN:\s*\n?\s*\d+[.)]/i.test(event.text)) {
           const injectedSteps = this.planner.injectPlanFromText(event.text);
           if (injectedSteps.length > 0) {
@@ -406,6 +514,26 @@ export class Agent {
               toolCalls: [],
               usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
             });
+
+            // Parse into workflow validation steps and update BMAD Kanban
+            const validationSteps = parsePlanFromResponse(event.text);
+            if (validationSteps.length > 0 && this.currentBmadTask) {
+              // Update the BMAD task's steps with the parsed plan
+              for (const vs of validationSteps) {
+                const bmadStep = this.currentBmadTask.steps.find(
+                  s => s.status === "pending"
+                );
+                if (bmadStep) {
+                  bmadStep.action = vs.action;
+                  this.kanban.updateStep(
+                    this.currentBmadTask.id,
+                    bmadStep.id,
+                    "in_progress"
+                  );
+                }
+              }
+              console.log(`[Workflow] ${validationSteps.length} steps registered for validation | ${formatPlan(validationSteps)}`);
+            }
           }
         }
 
@@ -521,7 +649,24 @@ export class Agent {
       const result = await agent.generate({ messages });
 
       const content = result.text;
-      this.messageHistory.push({ role: "assistant", content });
+
+      // Apply personality voice flavoring to the response
+      const flavor = personalityVoice.getFlavor("complete");
+      const flavoredContent = flavorResponse(content, flavor);
+
+      this.messageHistory.push({ role: "assistant", content: flavoredContent });
+
+      // Move BMAD task to review/done if we had one
+      if (this.currentBmadTask) {
+        this.kanban.moveTask(this.currentBmadTask.id, "review");
+        // If evidence looks good, move to done
+        if (this.sessionEvidence.length > 0) {
+          const verifiedCount = this.sessionEvidence.filter(e => e.verified).length;
+          if (verifiedCount > 0) {
+            this.kanban.moveTask(this.currentBmadTask.id, "done");
+          }
+        }
+      }
 
       // Append to run log
       const durationSec = Math.round((Date.now() - chatStartTime) / 1000);
@@ -541,7 +686,7 @@ export class Agent {
           prompt: userMessage.slice(0, 120),
         });
       }
-      const finalContent = content;
+      const finalContent = flavoredContent;
 
       await this.hookManager.executeHooks("onComplete", {
         sessionId: this.sessionId,
@@ -559,9 +704,37 @@ export class Agent {
         // Voice is optional
       }
 
-      return content;
+      return flavoredContent;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+
+      // ── Self-Autonomy: Error Recovery ────────────────────────────────
+      // Report error to heartbeat for pattern tracking
+      this.heartbeat.reportError(errMsg);
+
+      // If infinite mode is active, attempt self-healing recovery
+      if (this.infiniteModeActive && err instanceof Error) {
+        const autonomy = this.heartbeat.getAutonomy();
+        const severity = autonomy.heal.classifyError(errMsg);
+
+        if (severity !== "fatal") {
+          console.log(`[8gent:heal] Attempting recovery for ${severity} error: ${errMsg.slice(0, 80)}`);
+          try {
+            const recovery = await autonomy.handleError(
+              err,
+              "agent-chat",
+              () => this.chat(userMessage, imageBase64, imageMimeType),
+              2 // max 2 retries in infinite mode
+            );
+            if (recovery.success) {
+              autonomy.heal.recordSuccess(errMsg.slice(0, 50), "retry");
+              return recovery.result;
+            }
+          } catch {
+            // Recovery itself failed, fall through to normal error handling
+          }
+        }
+      }
 
       this.sessionWriter.writeError({
         message: errMsg,
@@ -666,7 +839,60 @@ export class Agent {
     }
   }
 
+  // ── Infinite Mode ─────────────────────────────────────────────────
+
+  /**
+   * Enable infinite/autonomous execution mode.
+   * The agent will loop until the task is complete, recovering from errors automatically.
+   */
+  enableInfiniteMode(task: string, config?: { maxIterations?: number; maxTimeMs?: number }): InfiniteRunner {
+    this.infiniteModeActive = true;
+    this.infiniteRunner = createInfiniteRunner(task, {
+      maxIterations: config?.maxIterations ?? 100,
+      maxTimeMs: config?.maxTimeMs ?? 30 * 60 * 1000,
+      model: this.config.model,
+      workingDirectory: this.config.workingDirectory || process.cwd(),
+    });
+    this.heartbeat.updateContext({ currentTask: `[INFINITE] ${task}` });
+    console.log(`[8gent] Infinite mode enabled for task: ${task}`);
+    return this.infiniteRunner;
+  }
+
+  /**
+   * Disable infinite mode
+   */
+  disableInfiniteMode(): void {
+    this.infiniteModeActive = false;
+    if (this.infiniteRunner) {
+      this.infiniteRunner.abort();
+      this.infiniteRunner = null;
+    }
+    this.heartbeat.updateContext({ currentTask: "Infinite mode disabled" });
+    console.log("[8gent] Infinite mode disabled");
+  }
+
+  isInfiniteModeActive(): boolean {
+    return this.infiniteModeActive;
+  }
+
+  getOnboardingManager(): OnboardingManager {
+    return this.onboarding;
+  }
+
+  getHeartbeat(): HeartbeatAgents {
+    return this.heartbeat;
+  }
+
   async cleanup(): Promise<void> {
+    // Stop heartbeat agents
+    this.heartbeat.stop();
+
+    // Abort infinite mode if active
+    if (this.infiniteRunner) {
+      this.infiniteRunner.abort();
+      this.infiniteRunner = null;
+    }
+
     try {
       this.sessionWriter.writeSessionEnd("user_exit", null);
     } catch {
