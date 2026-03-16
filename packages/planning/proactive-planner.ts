@@ -462,6 +462,61 @@ export class ProactivePlanner {
   }
 
   /**
+   * Parse numbered plan steps from agent text output and inject them into the kanban board.
+   * Accepts text like:
+   *   PLAN:
+   *   1. Do something
+   *   2. Do something else
+   *   3) Final step
+   *
+   * Parsed steps go into "ready" so they're visible and tracked.
+   */
+  injectPlanFromText(text: string): ProactiveStep[] {
+    const planMatch = text.match(/PLAN:\s*\n?([\s\S]*?)(?:\n\n|$)/i);
+    if (!planMatch) return [];
+
+    const planBody = planMatch[1];
+    // Match lines like "1. step", "1) step", "- step"
+    const stepRegex = /^\s*(?:\d+[.)]\s*|-\s+)(.+)/gm;
+    const steps: ProactiveStep[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = stepRegex.exec(planBody)) !== null) {
+      const description = match[1].trim();
+      if (!description) continue;
+
+      steps.push({
+        id: this.generateId(),
+        description,
+        tool: "pending", // will be resolved during execution
+        input: {},
+        priority: 10 - steps.length, // first steps are highest priority
+        confidence: 1.0, // agent's own plan = full confidence
+        category: "planning",
+        predictedAt: new Date(),
+        basedOn: [],
+      });
+    }
+
+    if (steps.length > 0) {
+      // Replace the ready queue with the agent's explicit plan
+      this.board.ready = steps;
+      // Update context so predictPlanContinuation knows about the plan
+      this.predictionContext.currentPlan = {
+        id: `plan-${Date.now()}`,
+        steps: steps.map((s) => ({
+          description: s.description,
+          tool: s.tool,
+          input: s.input,
+          status: "pending",
+        })),
+      };
+    }
+
+    return steps;
+  }
+
+  /**
    * Predict creative steps (writing, design, brainstorming)
    */
   predictCreativeSteps(): ProactiveStep[] {
