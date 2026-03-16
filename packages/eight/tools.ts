@@ -618,7 +618,16 @@ export class ToolExecutor {
     }
 
     fs.writeFileSync(absolutePath, content);
-    return `File written: ${absolutePath}`;
+
+    // Auto-open files on macOS for immediate viewing
+    if (process.platform === "darwin") {
+      try {
+        const { spawn } = await import("child_process");
+        spawn("open", [absolutePath], { detached: true, stdio: "ignore" }).unref();
+      } catch {}
+    }
+
+    return `File written and opened: ${absolutePath}`;
   }
 
   private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
