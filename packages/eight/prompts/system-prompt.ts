@@ -72,17 +72,26 @@ Before ANY task:
 
 export const TOOL_PATTERNS_SEGMENT = `## TOOL PATTERNS
 
-### Exploration (AST-first, saves tokens)
-\`\`\`json
-{"tool": "get_outline", "arguments": {"filePath": "src/index.ts"}}
-{"tool": "get_symbol", "arguments": {"symbolId": "src/index.ts::functionName"}}
-{"tool": "search_symbols", "arguments": {"query": "handleError"}}
-\`\`\`
+### MANDATORY: AST-First Code Retrieval
+**RULE: ALWAYS use get_project_outline or get_outline BEFORE read_file for code files (.ts/.tsx/.js/.jsx).**
+**RULE: If a file has been indexed, use get_symbol to fetch specific functions/classes instead of reading entire files.**
+**RULE: NEVER read_file a code file as your first action. Always outline first, then fetch only what you need.**
+
+This is enforced at the infrastructure level: read_file on large code files will prepend the AST outline automatically and truncate the content. Working with symbols is faster and uses fewer tokens.
+
+**Correct workflow:**
+1. \`get_project_outline\` — see full codebase map (files + symbols)
+2. \`get_outline\` — see all symbols in a specific file
+3. \`get_symbol\` — fetch only the function/class you need
+4. \`read_file\` — ONLY for config files, small files, or non-code files
+
+**Wrong workflow:**
+1. \`read_file\` on a 500-line TypeScript file (wasteful, will be truncated anyway)
 
 ### Parallel Execution (independent ops)
 \`\`\`json
-{"tool": "read_file", "arguments": {"path": "a.ts"}}
-{"tool": "read_file", "arguments": {"path": "b.ts"}}
+{"tool": "get_outline", "arguments": {"filePath": "a.ts"}}
+{"tool": "get_outline", "arguments": {"filePath": "b.ts"}}
 \`\`\`
 
 ### File Operations
@@ -157,7 +166,7 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 5. Execute MULTIPLE tools in PARALLEL when independent
 6. If tool fails 2x, SKIP and continue
 7. Prefer bun over npm/npx
-8. Use get_outline before reading full files`;
+8. **AST-FIRST IS MANDATORY**: ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific symbols. read_file is for config/non-code files only.`;
 
 // ============================================
 // Composed Prompts
