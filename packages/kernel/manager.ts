@@ -16,6 +16,13 @@ export interface KernelConfig {
   enabled: boolean;
   /** Path to metaclaw.yaml (default: config/metaclaw.yaml) */
   configPath: string;
+  /**
+   * Path to the user's Personal LoRA adapter (Layer 3).
+   * This is where the user's local fine-tune lives, trained on their own
+   * coding patterns via the kernel pipeline. Retrained when Eight LoRA
+   * (Layer 2) updates to stay aligned with the new base adapter weights.
+   */
+  personalLoraPath: string;
   /** Override production config */
   production: Partial<ProductionConfig>;
 }
@@ -23,6 +30,7 @@ export interface KernelConfig {
 const DEFAULT_KERNEL_CONFIG: KernelConfig = {
   enabled: false,
   configPath: "config/metaclaw.yaml",
+  personalLoraPath: "~/.8gent/personal-lora/",
   production: {},
 };
 
