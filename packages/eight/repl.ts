@@ -143,6 +143,9 @@ Type your request, or:
       // Language commands
       if (await handleLanguageCommands(trimmed)) { prompt(); return; }
 
+      // Personal LoRA commands
+      if (handlePersonalCommands(trimmed)) { prompt(); return; }
+
       // Background task commands
       if (handleBackgroundCommands(trimmed)) { prompt(); return; }
 
@@ -209,6 +212,11 @@ function printHelp(): void {
   /board              - Show kanban board (backlog/ready/inProgress/done)
   /predict            - Show top proactive predictions with confidence
   /momentum           - Show steps completed, rate, streak
+
+\x1b[33mPersonal LoRA:\x1b[0m
+  /personal           - Show personal LoRA status
+  /personal train     - Start personal LoRA training
+  /personal reset     - Reset personal LoRA to base Eight
 
 \x1b[33mPermissions:\x1b[0m
   /permissions        - Show permission config
@@ -711,6 +719,52 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
       console.log(`Voice set to: \x1b[36m${voiceName}\x1b[0m`);
       return true;
     }
+  }
+
+  return false;
+}
+
+function handlePersonalCommands(trimmed: string): boolean {
+  if (trimmed === "/personal" || trimmed === "/personal status") {
+    const loraDir = path.join(os.homedir(), ".8gent", "personal-lora");
+    const metaPath = path.join(loraDir, "meta.json");
+
+    if (!fs.existsSync(loraDir) || !fs.existsSync(metaPath)) {
+      console.log(`\n\x1b[33mPersonal LoRA:\x1b[0m Not configured`);
+      console.log(`  No personal LoRA found at ${loraDir}`);
+      console.log(`  Run \x1b[36m/personal train\x1b[0m to start training.\n`);
+      return true;
+    }
+
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+      console.log(`\n\x1b[36mPersonal LoRA Status:\x1b[0m`);
+      console.log(`  Path:            ${loraDir}`);
+      console.log(`  Base version:    ${meta.trainedOnVersion || "unknown"}`);
+      console.log(`  Last trained:    ${meta.lastTrained || "unknown"}`);
+      console.log(`  Auto-retrain:    ${meta.autoRetrain !== false ? "enabled" : "disabled"}`);
+      console.log(``);
+    } catch {
+      console.log(`\n\x1b[31mError reading personal LoRA metadata.\x1b[0m\n`);
+    }
+    return true;
+  }
+
+  if (trimmed === "/personal train") {
+    console.log(`\n\x1b[33mPersonal LoRA training is not yet implemented.\x1b[0m`);
+    console.log(`  This will fine-tune Eight on your coding style and preferences.\n`);
+    return true;
+  }
+
+  if (trimmed === "/personal reset") {
+    const loraDir = path.join(os.homedir(), ".8gent", "personal-lora");
+    if (fs.existsSync(loraDir)) {
+      fs.rmSync(loraDir, { recursive: true, force: true });
+      console.log(`\x1b[32mPersonal LoRA reset. Reverted to base Eight.\x1b[0m`);
+    } else {
+      console.log(`No personal LoRA to reset.`);
+    }
+    return true;
   }
 
   return false;

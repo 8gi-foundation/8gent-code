@@ -662,6 +662,24 @@ export function App({ initialCommand, args }: AppProps) {
         if (ready) {
           setAgent(newAgent);
           setAgentReady(true);
+
+          // Check for personal LoRA
+          try {
+            const loraDir = require("path").join(require("os").homedir(), ".8gent", "personal-lora");
+            const configPath = require("path").join(require("os").homedir(), ".8gent", "config.json");
+            const fs = require("fs");
+            if (fs.existsSync(loraDir) && fs.existsSync(configPath)) {
+              const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+              if (cfg.personal?.autoRetrain !== false) {
+                setMessages((prev) => [...prev, {
+                  id: `personal-lora-${Date.now()}`,
+                  role: "system" as const,
+                  content: `Personal LoRA detected. Loaded on top of ${currentModel}.`,
+                  timestamp: new Date(),
+                }]);
+              }
+            }
+          } catch {}
         } else {
           setAgentReady(false);
         }
