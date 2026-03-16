@@ -448,6 +448,23 @@ export class ToolExecutor {
           }
         }
       },
+      // Infinite mode
+      {
+        type: "function",
+        function: {
+          name: "enable_infinite_mode",
+          description: "Enable infinite/autonomous execution mode. The agent will loop until the task is complete, recovering from errors automatically. Use when a task requires extended autonomous execution without user intervention.",
+          parameters: {
+            type: "object",
+            properties: {
+              task: { type: "string", description: "The task to execute in infinite mode" },
+              maxIterations: { type: "number", description: "Maximum iterations before stopping (default: 100)" },
+              maxTimeMs: { type: "number", description: "Maximum time in ms before stopping (default: 30 minutes)" }
+            },
+            required: ["task"]
+          }
+        }
+      },
     ];
   }
 
@@ -615,6 +632,14 @@ export class ToolExecutor {
         return this.handleSuggestDesign(args.task as string, args.projectType as string | undefined);
       case "query_design_system":
         return this.handleQueryDesignSystem(args);
+
+      // Infinite mode
+      case "enable_infinite_mode":
+        return this.handleEnableInfiniteMode(
+          args.task as string,
+          args.maxIterations as number | undefined,
+          args.maxTimeMs as number | undefined
+        );
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -1558,6 +1583,44 @@ export class ToolExecutor {
       }, null, 2);
     } catch (err) {
       return `Design system query failed: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Infinite Mode
+  // ============================================
+
+  private async handleEnableInfiniteMode(
+    task: string,
+    maxIterations?: number,
+    maxTimeMs?: number
+  ): Promise<string> {
+    try {
+      const runner = createInfiniteRunner(task, {
+        maxIterations: maxIterations ?? 100,
+        maxTimeMs: maxTimeMs ?? 30 * 60 * 1000,
+        workingDirectory: this.workingDirectory,
+        onIteration: (state) => {
+          console.log(`[infinite] ${formatInfiniteState(state)}`);
+        },
+        onErrorRecovered: (error, state) => {
+          console.log(`[infinite] Recovered from: ${error.message.slice(0, 80)}`);
+        },
+      });
+
+      // Run in background — don't block the tool call
+      runner.run().then((finalState) => {
+        console.log(`[infinite] Completed: ${finalState.phase} after ${finalState.iteration} iterations`);
+      }).catch((err) => {
+        console.log(`[infinite] Fatal error: ${err}`);
+      });
+
+      return `Infinite mode ENABLED for task: "${task}"\n` +
+        `Max iterations: ${maxIterations ?? 100}\n` +
+        `Max time: ${((maxTimeMs ?? 30 * 60 * 1000) / 1000 / 60).toFixed(0)} minutes\n` +
+        `The agent will now loop autonomously until the task is complete or limits are reached.`;
+    } catch (err) {
+      return `Failed to enable infinite mode: ${err}`;
     }
   }
 }
