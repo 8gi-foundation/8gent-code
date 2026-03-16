@@ -10,6 +10,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Local vision & OCR model support** — vision router now auto-discovers OCR-specialized models (dots.ocr, deepseek-ocr, glm-ocr) alongside general vision models (qwen2.5-vl, minicpm-v, internvl2)
+- **`/vision` slash command** — configure vision/OCR models from TUI: `/vision status`, `/vision model <name>`, `/vision ocr <name>`, `/vision pull` for recommendations
+- **Vision config in `.8gent/config.json`** — user-configurable `defaultModel`, `ocrModel`, fallback chains, provider preference (local/cloud), timeout
+- **OCR-specific routing** — `findOCRModel()` prefers dedicated OCR models for text extraction, falls back to general vision models with strong OCR
+- **OCR prompt in VisionInterpreter** — dedicated OCR prompt preserves formatting, tables, code indentation, and LaTeX formulas
+- **OpenRouter free vision fallback** — vision router now checks OpenRouter free models even without API key as additional fallback
 - **Eight model version manager** (`version-manager.ts`) — manages model promotion lifecycle with naming convention `eight-{major.minor.patch}-q{gen}:{params}`, Gemini Flash judge validates checkpoints before promotion
 - **8gent as default provider** — `eight-1.0-q3:14b` is now the primary recommended model across all documentation and quick-start guides
 - **Auto-open files on macOS** — files referenced in agent output are opened automatically in the default editor
