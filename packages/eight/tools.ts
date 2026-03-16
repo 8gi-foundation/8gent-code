@@ -9,6 +9,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { parseTypeScriptFile, getSymbolSource } from "../ast-index/typescript-parser";
 import {
+  indexFolder as astIndexFolder,
+  getFileOutline as astGetFileOutline,
+  getFileTree as astGetFileTree,
+  listRepos as astListRepos,
+  type RepoIndex,
+} from "../ast-index";
+import {
   getPermissionManager,
   isCommandDangerous,
   type PermissionManager,
@@ -98,12 +105,25 @@ export class ToolExecutor {
   private workingDirectory: string;
   private permissionManager: PermissionManager;
   private hookManager: HookManager;
+  private astIndexReady: boolean = false;
+  private astRepoId: string | null = null;
+  private astIndexPromise: Promise<RepoIndex> | null = null;
 
   constructor(workingDirectory: string = process.cwd()) {
     this.workingDirectory = workingDirectory;
     this.permissionManager = getPermissionManager();
     this.hookManager = getHookManager();
     this.hookManager.setWorkingDirectory(workingDirectory);
+
+    // Fire-and-forget AST indexing of the working directory
+    this.astIndexPromise = astIndexFolder(this.workingDirectory).then((index) => {
+      this.astIndexReady = true;
+      this.astRepoId = index.id;
+      return index;
+    }).catch(() => {
+      this.astIndexReady = false;
+      return null as any;
+    });
   }
 
   getWorkingDirectory(): string {
@@ -156,6 +176,17 @@ export class ToolExecutor {
               kinds: { type: "array", items: { type: "string" }, description: "Filter by kinds: function, class, method, variable" }
             },
             required: ["query"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_project_outline",
+          description: "Get a compact map of the entire project: all indexed files with their symbol counts and names. Use this FIRST to understand the codebase before diving into specific files.",
+          parameters: {
+            type: "object",
+            properties: {},
           }
         }
       },
@@ -296,6 +327,44 @@ export class ToolExecutor {
           }
         }
       },
+      // Multi-agent orchestration
+      {
+        type: "function",
+        function: {
+          name: "spawn_agent",
+          description: "Spawn a background agent for an independent task. Use when you have multiple independent tasks that can run in parallel. The agent runs in the background and reports back when done.",
+          parameters: {
+            type: "object",
+            properties: {
+              task: { type: "string", description: "Task description for the background agent to execute" },
+              model: { type: "string", description: "Model to use (optional, default: same as current agent)" }
+            },
+            required: ["task"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "check_agent",
+          description: "Check the status and result of a spawned background agent by ID. Returns status (running/completed/failed) and result if done.",
+          parameters: {
+            type: "object",
+            properties: {
+              agentId: { type: "string", description: "Agent ID returned from spawn_agent" }
+            },
+            required: ["agentId"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_agents",
+          description: "List all spawned background agents with their status (running/completed/failed). Shows agent pool overview.",
+          parameters: { type: "object", properties: {} }
+        }
+      },
       // Web tools
       {
         type: "function",
@@ -338,6 +407,8 @@ export class ToolExecutor {
         return this.getSymbol(args.symbolId as string);
       case "search_symbols":
         return this.searchSymbols(args.query as string, args.kinds as string[]);
+      case "get_project_outline":
+        return this.getProjectOutline();
 
       // LSP tools
       case "lsp_goto_definition":
@@ -422,6 +493,14 @@ export class ToolExecutor {
       // Shell
       case "run_command":
         return this.runCommand(args.command as string);
+
+      // Multi-agent orchestration
+      case "spawn_agent":
+        return this.handleSpawnAgent(args.task as string, args.model as string | undefined);
+      case "check_agent":
+        return this.handleCheckAgent(args.agentId as string);
+      case "list_agents":
+        return this.handleListAgents();
 
       // Image tools
       case "read_image":
@@ -584,6 +663,49 @@ export class ToolExecutor {
     return JSON.stringify({ query, matches }, null, 2);
   }
 
+  private async getProjectOutline(): Promise<string> {
+    // Ensure index is ready
+    if (!this.astIndexReady && this.astIndexPromise) {
+      try {
+        await this.astIndexPromise;
+      } catch {
+        return "AST index not available. Use get_outline on individual files instead.";
+      }
+    }
+
+    if (!this.astRepoId) {
+      return "Project not indexed. Use get_outline on individual files instead.";
+    }
+
+    const fileTree = astGetFileTree(this.astRepoId);
+    if (fileTree.length === 0) {
+      return "No indexed files found in project.";
+    }
+
+    const fileEntries: string[] = [];
+    let totalSymbols = 0;
+
+    for (const filePath of fileTree) {
+      const outline = astGetFileOutline(this.astRepoId, filePath);
+      if (outline) {
+        const symbolNames = outline.symbols.map(s => `${s.kind[0]}:${s.name}`).join(", ");
+        const count = outline.symbols.length;
+        totalSymbols += count;
+        fileEntries.push(`  ${filePath} (${count}) → ${symbolNames}`);
+      }
+    }
+
+    return [
+      `[PROJECT MAP] ${fileTree.length} files, ${totalSymbols} symbols indexed`,
+      `Root: ${this.workingDirectory}`,
+      "",
+      "Files (symbol count) → symbols:",
+      ...fileEntries,
+      "",
+      "TIP: Use get_symbol('path/to/file.ts::symbolName') to fetch specific code.",
+    ].join("\n");
+  }
+
   // ============================================
   // File Operations
   // ============================================
@@ -600,8 +722,45 @@ export class ToolExecutor {
     const content = fs.readFileSync(absolutePath, "utf-8");
     const lines = content.split("\n");
 
-    if (lines.length > 200) {
-      return `// File has ${lines.length} lines. Showing first 200:\n\n${lines.slice(0, 200).join("\n")}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
+    // AST-first interception: for code files > 200 lines, prepend outline
+    const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+    if (isCodeFile && lines.length > 200) {
+      let outlineHeader = "";
+
+      // Ensure index is ready (wait briefly if still indexing)
+      if (!this.astIndexReady && this.astIndexPromise) {
+        try {
+          await Promise.race([this.astIndexPromise, new Promise((_, reject) => setTimeout(() => reject("timeout"), 500))]);
+        } catch {
+          // Index not ready yet, proceed without outline
+        }
+      }
+
+      if (this.astIndexReady && this.astRepoId) {
+        const relativePath = path.relative(this.workingDirectory, absolutePath);
+        const outline = astGetFileOutline(this.astRepoId, relativePath);
+        if (outline && outline.symbols.length > 0) {
+          const symbolList = outline.symbols
+            .map(s => `  ${s.kind} ${s.name} (L${s.startLine}-${s.endLine})`)
+            .join("\n");
+          outlineHeader = `[AST: This file has ${outline.symbols.length} symbols. Use get_symbol to fetch specific ones instead of reading the full file.]\n\nSymbols:\n${symbolList}\n\n---\n\n`;
+        }
+      } else {
+        // Fallback: parse directly if index isn't ready
+        try {
+          const directOutline = parseTypeScriptFile(absolutePath);
+          if (directOutline.symbols.length > 0) {
+            const symbolList = directOutline.symbols
+              .map(s => `  ${s.kind} ${s.name} (L${s.startLine}-${s.endLine})`)
+              .join("\n");
+            outlineHeader = `[AST: This file has ${directOutline.symbols.length} symbols. Use get_symbol to fetch specific ones instead of reading the full file.]\n\nSymbols:\n${symbolList}\n\n---\n\n`;
+          }
+        } catch {
+          // Can't parse, just return truncated content
+        }
+      }
+
+      return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${lines.slice(0, 200).join("\n")}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
     }
 
     return content;
@@ -975,6 +1134,92 @@ export class ToolExecutor {
       return JSON.stringify(result, null, 2);
     } catch (err) {
       return `Error deleting notebook cell: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Multi-Agent Orchestration
+  // ============================================
+
+  private async handleSpawnAgent(task: string, model?: string): Promise<string> {
+    try {
+      const { getAgentPool } = await import("../orchestration");
+      const pool = getAgentPool();
+      const agent = await pool.spawnAgent(task, {
+        model: model || undefined,
+        workingDirectory: this.workingDirectory,
+      });
+      return JSON.stringify({
+        agentId: agent.id,
+        status: agent.status,
+        task: task.slice(0, 100),
+        message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
+      }, null, 2);
+    } catch (err) {
+      return `Failed to spawn agent: ${err}`;
+    }
+  }
+
+  private async handleCheckAgent(agentId: string): Promise<string> {
+    try {
+      const { getAgentPool } = await import("../orchestration");
+      const pool = getAgentPool();
+      const agent = pool.getAgent(agentId);
+      if (!agent) return `Agent not found: ${agentId}`;
+
+      const elapsed = agent.completedAt
+        ? `${((agent.completedAt.getTime() - agent.startedAt.getTime()) / 1000).toFixed(1)}s`
+        : `${((Date.now() - agent.startedAt.getTime()) / 1000).toFixed(1)}s (running)`;
+
+      const result: Record<string, unknown> = {
+        agentId: agent.id,
+        status: agent.status,
+        task: agent.task.description,
+        elapsed,
+      };
+
+      if (agent.status === "completed" && agent.task.result) {
+        result.result = typeof agent.task.result === "string"
+          ? agent.task.result.slice(0, 2000)
+          : JSON.stringify(agent.task.result).slice(0, 2000);
+      }
+      if (agent.status === "failed" && agent.task.error) {
+        result.error = agent.task.error;
+      }
+
+      return JSON.stringify(result, null, 2);
+    } catch (err) {
+      return `Failed to check agent: ${err}`;
+    }
+  }
+
+  private async handleListAgents(): Promise<string> {
+    try {
+      const { getAgentPool } = await import("../orchestration");
+      const pool = getAgentPool();
+      const agents = pool.listAgents();
+
+      if (agents.length === 0) {
+        return "No agents spawned yet. Use spawn_agent to create background agents for parallel tasks.";
+      }
+
+      const stats = pool.getStats();
+      const agentList = agents.map((a) => {
+        const elapsed = a.completedAt
+          ? `${((a.completedAt.getTime() - a.startedAt.getTime()) / 1000).toFixed(1)}s`
+          : `${((Date.now() - a.startedAt.getTime()) / 1000).toFixed(1)}s`;
+        return {
+          id: a.id,
+          status: a.status,
+          task: a.task.description.slice(0, 80),
+          elapsed,
+          hasResult: a.status === "completed" && !!a.task.result,
+        };
+      });
+
+      return JSON.stringify({ stats, agents: agentList }, null, 2);
+    } catch (err) {
+      return `Failed to list agents: ${err}`;
     }
   }
 
