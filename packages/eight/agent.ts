@@ -26,6 +26,7 @@ import { indexFolder as astIndexFolder } from "../ast-index";
 import { getHeartbeatAgents, type HeartbeatAgents } from "../self-autonomy/heartbeat";
 import { OnboardingManager } from "../self-autonomy/onboarding";
 import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
+import { getMemoryManager, extractAutoMemories } from "../memory";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -459,6 +460,21 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
               }
             }
           }).catch(() => {}); // evidence is supplementary, never block
+        }
+
+        // Auto-memory: extract project facts from tool results
+        if (event.success && ["read_file", "run_command"].includes(event.toolName)) {
+          try {
+            const autoFacts = extractAutoMemories(event.toolName, event.args, resultStr);
+            if (autoFacts.length > 0) {
+              const memory = getMemoryManager(this.config.workingDirectory || process.cwd());
+              for (const { fact, layer } of autoFacts) {
+                memory.remember(fact, layer, { source: `auto:${event.toolName}` });
+              }
+            }
+          } catch {
+            // Auto-memory is best-effort, never block the agent
+          }
         }
 
         await this.hookManager.executeHooks("afterTool", {
