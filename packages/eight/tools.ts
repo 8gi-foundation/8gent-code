@@ -52,6 +52,48 @@ import {
   formatTaskOutput,
 } from "../tools/background";
 
+/**
+ * Validate that a user-provided path stays within the working directory.
+ * Prevents path traversal attacks (../../etc/passwd).
+ */
+function safePath(userPath: string, workingDirectory: string): string {
+  const absolutePath = path.isAbsolute(userPath)
+    ? path.resolve(userPath)
+    : path.resolve(workingDirectory, userPath);
+
+  const normalizedBase = path.resolve(workingDirectory) + path.sep;
+  const normalizedTarget = path.resolve(absolutePath);
+
+  // Allow the working directory itself
+  if (normalizedTarget === path.resolve(workingDirectory)) return normalizedTarget;
+
+  // Must be inside the working directory
+  if (!normalizedTarget.startsWith(normalizedBase)) {
+    throw new Error(`Path traversal blocked: "${userPath}" resolves outside working directory`);
+  }
+
+  return normalizedTarget;
+}
+
+/**
+ * Execute a git command safely using spawn with argument arrays.
+ * Prevents shell injection from LLM-generated arguments.
+ */
+function spawnGit(args: string[], cwd: string): Promise<string> {
+  return new Promise(async (resolve) => {
+    const { spawn } = await import("child_process");
+    const proc = spawn("git", args, { cwd });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+    proc.on("close", (code: number | null) => {
+      resolve(code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`);
+    });
+    proc.on("error", (err: Error) => resolve(`Error: ${err.message}`));
+  });
+}
+
 export class ToolExecutor {
   private workingDirectory: string;
   private permissionManager: PermissionManager;
@@ -322,13 +364,19 @@ export class ToolExecutor {
       case "lsp_document_symbols":
         return lspDocumentSymbols(args.filePath as string, this.workingDirectory);
 
-      // File operations
-      case "read_file":
-        return this.readFile(args.path as string);
-      case "write_file":
-        return this.writeFile(args.path as string, args.content as string);
-      case "edit_file":
-        return this.editFile(args.path as string, args.oldText as string, args.newText as string);
+      // File operations (with path traversal protection)
+      case "read_file": {
+        const safe = safePath(args.path as string, this.workingDirectory);
+        return this.readFile(safe);
+      }
+      case "write_file": {
+        const safe = safePath(args.path as string, this.workingDirectory);
+        return this.writeFile(safe, args.content as string);
+      }
+      case "edit_file": {
+        const safe = safePath(args.path as string, this.workingDirectory);
+        return this.editFile(safe, args.oldText as string, args.newText as string);
+      }
       case "list_files":
         return this.listFiles(args.path as string, args.pattern as string);
 
@@ -337,32 +385,39 @@ export class ToolExecutor {
         return this.runCommand("git status");
       case "git_diff":
         return this.runCommand(args.staged ? "git diff --staged" : "git diff");
-      case "git_log":
-        return this.runCommand(`git log --oneline -${args.count || 10}`);
+      case "git_log": {
+        const count = Math.floor(Math.abs(Number(args.count) || 10));
+        return spawnGit(["log", "--oneline", `-${count}`], this.workingDirectory);
+      }
       case "git_branch":
-        return this.runCommand("git branch -a");
+        return spawnGit(["branch", "-a"], this.workingDirectory);
       case "git_checkout":
-        return this.runCommand(`git checkout ${args.branch}`);
+        return spawnGit(["checkout", String(args.branch)], this.workingDirectory);
       case "git_create_branch":
-        return this.runCommand(`git checkout -b ${args.branch}`);
-      case "git_add":
-        return this.runCommand(`git add ${args.files || "."}`);
+        return spawnGit(["checkout", "-b", String(args.branch)], this.workingDirectory);
+      case "git_add": {
+        const files = String(args.files || ".").split(/\s+/).filter(Boolean);
+        return spawnGit(["add", ...files], this.workingDirectory);
+      }
       case "git_commit":
-        return this.runCommand(`git commit -m "${args.message}"`);
-      case "git_push":
-        return this.runCommand(`git push ${args.setUpstream ? "-u origin HEAD" : ""}`);
+        return spawnGit(["commit", "-m", String(args.message)], this.workingDirectory);
+      case "git_push": {
+        const pushArgs = ["push"];
+        if (args.setUpstream) pushArgs.push("-u", "origin", "HEAD");
+        return spawnGit(pushArgs, this.workingDirectory);
+      }
 
-      // GitHub CLI
+      // GitHub CLI (spawn with arg arrays, no shell interpolation)
       case "gh_pr_list":
         return this.runCommand("gh pr list");
       case "gh_pr_create":
-        return this.runCommand(`gh pr create --title "${args.title}" --body "${args.body || ""}"`);
+        return this.runSpawn("gh", ["pr", "create", "--title", String(args.title), "--body", String(args.body || "")]);
       case "gh_pr_view":
-        return this.runCommand(`gh pr view ${args.number || ""}`);
+        return this.runSpawn("gh", ["pr", "view", String(args.number || "")]);
       case "gh_issue_list":
         return this.runCommand("gh issue list");
       case "gh_issue_create":
-        return this.runCommand(`gh issue create --title "${args.title}" --body "${args.body || ""}"`);
+        return this.runSpawn("gh", ["issue", "create", "--title", String(args.title), "--body", String(args.body || "")]);
 
       // Shell
       case "run_command":
@@ -653,15 +708,13 @@ export class ToolExecutor {
       let stdout = '';
       let stderr = '';
 
-      const stdinInterval = setInterval(() => {
-        try { proc.stdin.write('\n'); } catch {}
-      }, 1000);
+      // SECURITY: Removed stdin auto-answer hack (was sending \n every 1s,
+      // could silently confirm destructive interactive prompts)
 
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
       const timeout = setTimeout(() => {
-        clearInterval(stdinInterval);
         proc.kill('SIGTERM');
 
         this.hookManager.executeHooks("afterCommand", {
@@ -678,7 +731,7 @@ export class ToolExecutor {
 
       proc.on('close', (code) => {
         clearTimeout(timeout);
-        clearInterval(stdinInterval);
+        // stdinInterval removed (security fix)
 
         this.hookManager.executeHooks("afterCommand", {
           command: finalCommand,
@@ -698,7 +751,7 @@ export class ToolExecutor {
 
       proc.on('error', (err) => {
         clearTimeout(timeout);
-        clearInterval(stdinInterval);
+        // stdinInterval removed (security fix)
 
         this.hookManager.executeHooks("onError", {
           command: finalCommand,
@@ -708,6 +761,25 @@ export class ToolExecutor {
 
         resolve(`Error: ${err.message}`);
       });
+    });
+  }
+
+  /**
+   * Run a command with explicit argument array (no shell interpolation).
+   * Use for commands with LLM-provided arguments to prevent injection.
+   */
+  private async runSpawn(cmd: string, args: string[]): Promise<string> {
+    const { spawn } = await import("child_process");
+    return new Promise((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      const proc = spawn(cmd, args, { cwd: this.workingDirectory });
+      proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+      proc.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+      proc.on("close", (code: number | null) => {
+        resolve(code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`);
+      });
+      proc.on("error", (err: Error) => resolve(`Error: ${err.message}`));
     });
   }
 
