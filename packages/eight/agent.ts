@@ -22,6 +22,7 @@ import type { AgentInfo, Environment, ContentPart, DetailedTokenUsage } from "..
 import { getLSPManager } from "../lsp";
 import { getProactivePlanner, type ProactivePlanner } from "../planning/proactive-planner";
 import { EvidenceCollector, type Evidence, summarizeEvidence } from "../validation/evidence";
+import { indexFolder as astIndexFolder } from "../ast-index";
 
 // AI SDK imports
 import {
@@ -63,6 +64,14 @@ export class Agent {
 
     // Set tool context for AI SDK tools
     setToolContext({ workingDirectory: config.workingDirectory || process.cwd() });
+
+    // Fire-and-forget AST indexing of working directory for AST-first retrieval
+    const cwd = config.workingDirectory || process.cwd();
+    astIndexFolder(cwd).then((index) => {
+      console.log(`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`);
+    }).catch(() => {
+      // AST indexing is best-effort, don't block agent startup
+    });
 
     // Initialize proactive planner and evidence collector
     this.planner = getProactivePlanner();
@@ -331,7 +340,19 @@ export class Agent {
         // Fire-and-forget evidence collection for significant operations
         if (event.success && ["write_file", "edit_file", "run_command", "git_commit"].includes(event.toolName)) {
           this.collectToolEvidence(event).then(ev => {
-            if (ev.length > 0) this.sessionEvidence.push(...ev);
+            if (ev.length > 0) {
+              this.sessionEvidence.push(...ev);
+              // Emit each evidence item to TUI in real-time
+              for (const e of ev) {
+                this.events.onEvidence?.({
+                  type: e.type,
+                  description: e.description,
+                  verified: e.verified,
+                  path: e.path,
+                  command: e.command,
+                });
+              }
+            }
           }).catch(() => {}); // evidence is supplementary, never block
         }
 
@@ -479,6 +500,8 @@ export class Agent {
         if (this.sessionEvidence.length > 0) {
           const summary = summarizeEvidence(this.sessionEvidence);
           console.log(`\n[Evidence: ${summary.verified}/${summary.total} verified]`);
+          // Emit summary to TUI
+          this.events.onEvidenceSummary?.(summary);
         }
       },
     };
