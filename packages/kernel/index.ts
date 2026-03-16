@@ -13,3 +13,4 @@ export { JudgeScorer, type JudgeConfig, type ScoreRecord } from "./judge";
 export { TrainingOrchestrator, type TrainingConfig, type CheckpointInfo } from "./training";
 export { ProductionLoop, type ProductionConfig, type LoopStatus } from "./loop";
 export { KernelManager, type KernelConfig } from "./manager";
+export { LocalTrainer, checkTrainerDeps, type LocalTrainerConfig } from "./local-trainer";

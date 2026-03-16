@@ -54,11 +54,30 @@ export interface AgentStepEvent {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
+/** Event emitted when evidence is collected */
+export interface AgentEvidenceEvent {
+  type: string;
+  description: string;
+  verified: boolean;
+  path?: string;
+  command?: string;
+}
+
+/** Event emitted with evidence summary at end of response */
+export interface AgentEvidenceSummaryEvent {
+  total: number;
+  verified: number;
+  failed: number;
+  byType: Record<string, number>;
+}
+
 /** Optional callbacks for real-time agent progress */
 export interface AgentEventCallbacks {
   onToolStart?: (event: AgentToolStartEvent) => void;
   onToolEnd?: (event: AgentToolEndEvent) => void;
   onStepFinish?: (event: AgentStepEvent) => void;
+  onEvidence?: (event: AgentEvidenceEvent) => void;
+  onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;
 }
 
 export interface AgentConfig {
