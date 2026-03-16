@@ -9,7 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **write_file path bug** — models sometimes pass absolute-looking paths like `/8gent-code/server.ts` that resolve outside the working directory; these are now auto-stripped to relative paths instead of throwing a path-traversal error; tool description and system prompt updated to instruct models to use relative paths
+
 ### Added
+- **Dynamic free model router** — `getBestFreeModel()` in `packages/providers/index.ts` queries OpenRouter's `/api/v1/models` endpoint to find the best available free model (filtered by `:free` suffix, sorted by context length); results cached for 1 hour; `spawn_agent` now accepts `model: "auto:free"` to automatically pick the best free model
 - **Evidence collection visible in TUI** — real-time evidence badges (pass/fail) appear in the chat stream after write_file, edit_file, run_command, and git_commit; one-line summary shown at end of each response; `/evidence` command shows full session breakdown with per-type counts
 - **Three-layer model architecture** — base model (qwen3) + Eight LoRA (centralized training from benchmarks) + Personal LoRA (user's local fine-tune on their patterns); personal module retrains when a new Eight version releases
 - **Eight model version manager** (`version-manager.ts`) — manages model promotion lifecycle with naming convention `eight-{major.minor.patch}-q{gen}:{params}`, Gemini Flash judge validates checkpoints before promotion
