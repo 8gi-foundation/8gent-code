@@ -108,8 +108,8 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     displayName: "8gent (The Infinite Gentleman)",
     baseUrl: "http://localhost:11434",
     apiKeyEnv: "", // Local — no API key needed
-    defaultModel: "eight-1-q-14b",
-    models: ["eight-1-q-14b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
+    defaultModel: "eight-1.0-q3:14b",
+    models: ["eight-1.0-q3:14b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
     enabled: true,
     supportsTools: true,
     supportsStreaming: true,
@@ -284,7 +284,7 @@ export class ProviderManager {
         const saved = JSON.parse(data) as Partial<ProviderSettings>;
         return {
           activeProvider: saved.activeProvider || "8gent",
-          activeModel: saved.activeModel || "eight-1-q-14b",
+          activeModel: saved.activeModel || "eight-1.0-q3:14b",
           providers: { ...this.getDefaultProviders(), ...saved.providers },
         };
       }
@@ -293,7 +293,7 @@ export class ProviderManager {
     }
     return {
       activeProvider: "8gent",
-      activeModel: "eight-1-q-14b",
+      activeModel: "eight-1.0-q3:14b",
       providers: this.getDefaultProviders(),
     };
   }
