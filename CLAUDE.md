@@ -71,6 +71,29 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 4. **Never ship without updating the changelog.** If you add a feature, fix a bug, or refactor something significant — document it in CHANGELOG.md before committing.
 5. **Tag releases** with `git tag v0.x.0` after version bumps.
 
+## Kernel Fine-Tuning (`packages/kernel/`)
+
+The `@8gent/kernel` package handles continuous RL fine-tuning via MetaClaw. Key files:
+
+- `proxy.ts` — MetaClaw proxy lifecycle and latency monitoring
+- `judge.ts` — PRM scoring via Gemini Flash (OpenRouter)
+- `training.ts` — GRPO batch collection, checkpoint validation, auto-rollback
+- `loop.ts` — MadMax scheduling, auto-promotion into model-router
+- `manager.ts` — unified entry point (`KernelManager.fromProjectConfig()`)
+
+**Config:** `config/metaclaw.yaml` (proxy, RL, scheduler settings)
+**Docs:** `docs/KERNEL-FINETUNING.md` (full architecture and API reference)
+**Data dir:** `.8gent/kernel/` (score history, training batches, checkpoints)
+
+Agent loop integration:
+```typescript
+const kernel = KernelManager.fromProjectConfig();
+await kernel.start();
+await kernel.processTurn(sessionId, turn, model, prompt, response);
+```
+
+The pipeline is **off by default** — set `"metaclaw": { "enabled": true }` in `.8gent/config.json` to activate.
+
 ## TUI Design System
 
 The TUI follows a **design-system-first** architecture. Never use raw Ink `<Text>` or `<Box>` in screens — use the primitive layer.
