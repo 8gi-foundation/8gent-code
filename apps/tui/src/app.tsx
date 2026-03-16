@@ -1070,6 +1070,7 @@ export function App({ initialCommand, args }: AppProps) {
       currentProvider,
       designAgent,
       adhdMode,
+      agent,
     ]
   );
 
@@ -1081,6 +1082,7 @@ export function App({ initialCommand, args }: AppProps) {
     setTotalTokens(0);
     setProcessingStage("planning");
     setStatus("thinking");
+    setEvidenceSummary(null);
   }, []);
 
   // Generate predictions based on input
