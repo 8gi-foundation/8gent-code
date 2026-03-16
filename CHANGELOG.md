@@ -10,6 +10,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Eight model version manager** (`version-manager.ts`) — manages model promotion lifecycle with naming convention `eight-{major.minor.patch}-q{gen}:{params}`, Gemini Flash judge validates checkpoints before promotion
+- **8gent as default provider** — `eight-1.0-q3:14b` is now the primary recommended model across all documentation and quick-start guides
+- **Auto-open files on macOS** — files referenced in agent output are opened automatically in the default editor
+- **TUI accepts any model name** — `/model` command now accepts arbitrary model identifiers, not just predefined options
+
+### Fixed
+- **Security fixes ported to `packages/eight`** — hardened command execution, input sanitization, and permission checks carried over from agent package
+
+### Added (prior)
 - **`@8gent/kernel` package** — full 4-phase RL fine-tuning pipeline via MetaClaw
   - **Phase 1: Proxy manager** (`proxy.ts`) — start/stop MetaClaw, health checks, latency overhead monitoring with configurable threshold
   - **Phase 2: Judge scoring** (`judge.ts`) — PRM wiring via Gemini Flash (free), score distribution tracking, per-model stats, daily trend analysis
