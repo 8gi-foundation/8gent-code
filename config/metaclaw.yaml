@@ -9,7 +9,7 @@ mode: madmax  # madmax | rl | skills_only
 
 llm:
   provider: custom
-  model_id: qwen2.5-coder:14b        # Start with 14B for LoRA efficiency
+  model_id: qwen3:14b                 # Qwen3 14B — strongest coding benchmarks, fits M2 Max
   api_base: http://localhost:11434/v1  # Ollama OpenAI-compat endpoint
   api_key: ""                          # Ollama needs no key
 
@@ -27,7 +27,7 @@ skills:
 rl:
   enabled: true
   backend: mint           # Local MinT backend — no cloud dependency
-  model: qwen2.5-coder:14b
+  model: qwen3:14b
   api_key: ""
   base_url: ""            # Set to MinT endpoint when running
   # Judge model: Gemini Flash via OpenRouter (free)

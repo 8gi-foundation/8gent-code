@@ -489,7 +489,7 @@ bun run benchmarks/autoresearch/validate-checkpoint.ts
 
 | Model | Use Case |
 |-------|----------|
-| `qwen2.5-coder:14b` | Best starting point — code-native, fits LoRA on single GPU (~12GB VRAM) |
+| `qwen3:14b` | Best starting point — code-native, fits LoRA on single GPU (~12GB VRAM) |
 | `qwen3.5:latest` | Graduate to this once pipeline is validated — strongest coding benchmarks |
 
 Training runs in **MadMax mode** by default: weight updates are deferred to idle periods and sleep hours so they never interrupt active coding sessions. The autoresearch benchmark suite serves as a regression gate — bad checkpoints get rolled back automatically.

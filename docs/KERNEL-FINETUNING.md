@@ -35,11 +35,11 @@
 | Model | Rationale | VRAM (LoRA) | Recommended |
 |-------|-----------|-------------|-------------|
 | `qwen3.5:latest` | TUI default, strongest coding benchmarks, already tested in autoresearch | ~18GB | **Primary** |
-| `qwen2.5-coder:14b` | Purpose-built for code, 14B sweet spot for LoRA | ~12GB | **Secondary** |
+| `qwen3:14b` | Purpose-built for code, 14B sweet spot for LoRA | ~12GB | **Secondary** |
 | `devstral:latest` | Mistral code specialist, good benchmark diversity | ~14GB | Experimental |
 | `qwen3:14b` | Strong reasoning, general fallback | ~12GB | Fallback |
 
-**Start with `qwen2.5-coder:14b`** for initial RL runs (most VRAM-friendly, code-native), graduate to `qwen3.5:latest` once the pipeline is validated.
+**Start with `qwen3:14b`** for initial RL runs (most VRAM-friendly, code-native), graduate to `qwen3.5:latest` once the pipeline is validated.
 
 ## MetaClaw Config for 8gent
 
