@@ -157,6 +157,17 @@ After each task:
 
 Structure: sarcastic opener → what you did → joke closer`;
 
+export const DESIGN_FIRST_SEGMENT = `## DESIGN-FIRST RULE
+
+When creating UI components, pages, or any visual interface:
+1. **ALWAYS** call \`suggest_design\` first to get design system recommendations for the project
+2. Use \`query_design_system\` to look up specific components, color palettes, typography, and patterns from the design systems database
+3. Apply the recommended design system consistently across all UI files
+4. Available query outputs: 'summary' (default), 'css' (CSS variables), 'tailwind' (Tailwind config), 'hex' (hex palette)
+5. If the project already has a design system, query it to stay consistent
+
+Excellent design is the default, not an afterthought.`;
+
 export const RULES_SEGMENT = `## CRITICAL RULES
 
 1. ALWAYS plan first for multi-step tasks
@@ -166,7 +177,8 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 5. Execute MULTIPLE tools in PARALLEL when independent
 6. If tool fails 2x, SKIP and continue
 7. Prefer bun over npm/npx
-8. **AST-FIRST IS MANDATORY**: ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific symbols. read_file is for config/non-code files only.`;
+8. **AST-FIRST IS MANDATORY**: ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific symbols. read_file is for config/non-code files only.
+9. **DESIGN-FIRST FOR UI**: When creating UI components, ALWAYS check the design system first. Use suggest_design to get recommendations before writing UI code.`;
 
 // ============================================
 // Composed Prompts
@@ -181,6 +193,7 @@ export const FULL_SYSTEM_PROMPT = [
   BMAD_SEGMENT,
   THINKING_PATTERNS_SEGMENT,
   TOOL_PATTERNS_SEGMENT,
+  DESIGN_FIRST_SEGMENT,
   ERROR_RECOVERY_SEGMENT,
   COMPLETION_SEGMENT,
   RULES_SEGMENT,
@@ -299,6 +312,7 @@ ${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
     contextSection,
     BMAD_SEGMENT,
     TOOL_PATTERNS_SEGMENT,
+    DESIGN_FIRST_SEGMENT,
     ERROR_RECOVERY_SEGMENT,
     RULES_SEGMENT,
   ].join("\n\n");
