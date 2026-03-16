@@ -169,7 +169,6 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     });
 
     // Populate git info asynchronously
-    const cwd = config.workingDirectory || process.cwd();
     import("child_process").then(({ exec }) => {
       exec("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000 }, (err, stdout) => {
         if (!err && stdout) env.gitBranch = stdout.trim();
