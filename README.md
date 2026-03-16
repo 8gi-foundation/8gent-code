@@ -450,6 +450,51 @@ Completion Report + Voice Output
 | `packages/tools` | Web, PDF, image, notebook tools |
 | `packages/personality` | The Infinite Gentleman voice |
 | `benchmarks/` | 44 benchmarks across 12 categories + autoresearch harness |
+| `config/metaclaw.yaml` | MetaClaw RL fine-tuning configuration |
+
+### Kernel Fine-Tuning (Experimental)
+
+8gent can continuously improve its local models via [MetaClaw](https://github.com/aiming-lab/MetaClaw) RL fine-tuning. Every coding session becomes training data — a judge model scores responses, and GRPO evolves a LoRA adapter on top of your base model. The model gets better at *your* workflows over time.
+
+```
+8gent TUI ──> MetaClaw Proxy (:30000) ──> Ollama (:11434)
+                    │
+              Judge LLM scores responses async
+                    │
+              GRPO LoRA training during idle/sleep
+                    │
+              Hot-swap adapter ──> model improves
+```
+
+**How to enable:**
+
+```bash
+# 1. Install MetaClaw
+pip install -e ".[rl,evolve,scheduler]"
+
+# 2. Point 8gent through the proxy
+export METACLAW_PROXY_URL=http://localhost:30000
+
+# 3. Start MetaClaw (uses config/metaclaw.yaml)
+metaclaw start
+
+# 4. Run 8gent normally — sessions now generate training signal
+bun run tui
+
+# 5. Validate a checkpoint against benchmarks
+bun run benchmarks/autoresearch/validate-checkpoint.ts
+```
+
+**Recommended base models:**
+
+| Model | Use Case |
+|-------|----------|
+| `qwen2.5-coder:14b` | Best starting point — code-native, fits LoRA on single GPU (~12GB VRAM) |
+| `qwen3.5:latest` | Graduate to this once pipeline is validated — strongest coding benchmarks |
+
+Training runs in **MadMax mode** by default: weight updates are deferred to idle periods and sleep hours so they never interrupt active coding sessions. The autoresearch benchmark suite serves as a regression gate — bad checkpoints get rolled back automatically.
+
+See [docs/KERNEL-FINETUNING.md](docs/KERNEL-FINETUNING.md) for the full architecture and phase plan.
 
 ---
 
