@@ -13,7 +13,7 @@
  * The vision interpreter is a fire-and-forget sub-agent.
  */
 
-import { findVisionModel, type VisionModel } from "./vision-router";
+import { findVisionModel, findOCRModel, loadVisionConfig, type VisionModel, type VisionTaskType } from "./vision-router";
 
 interface VisionInterpretation {
   description: string;
@@ -108,6 +108,15 @@ const VISION_PROMPT = `Describe this image in detail for a coding agent. Focus o
 - If it's a design mockup: describe elements, spacing, typography, and interactions
 Be precise and technical. The coding agent needs actionable details, not artistic descriptions.`;
 
+const OCR_PROMPT = `Extract and transcribe ALL text visible in this image with high fidelity.
+- Preserve formatting, indentation, and structure exactly
+- For tables: reproduce the table structure (use markdown tables)
+- For code: preserve syntax, indentation, and line numbers if visible
+- For math/formulas: use LaTeX notation
+- For multi-column layouts: separate columns clearly
+- For handwriting: transcribe as accurately as possible, note uncertain characters with [?]
+Return ONLY the extracted text content, no descriptions or commentary.`;
+
 /**
  * VisionInterpreter — async parallel image interpretation
  *
@@ -132,27 +141,35 @@ export class VisionInterpreter {
   /**
    * Start interpreting an image asynchronously.
    * Returns an ID to check/wait for the result.
+   *
+   * @param taskType - "general" for scene/UI description, "ocr" for text extraction
    */
-  interpret(imageBase64: string, mimeType = "image/png", customPrompt?: string): string {
+  interpret(imageBase64: string, mimeType = "image/png", customPrompt?: string, taskType: VisionTaskType = "general"): string {
     const id = `vision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const startedAt = Date.now();
+    const config = loadVisionConfig();
 
     const promise = (async (): Promise<VisionInterpretation> => {
-      // Find best vision model
-      const { found, model, error } = await findVisionModel({
+      // Find best model for the task type (respects user config + fallback chain)
+      const finder = taskType === "ocr" ? findOCRModel : findVisionModel;
+      const { found, model, error } = await finder({
         openRouterApiKey: this.apiKey,
-      });
+        ...(taskType !== "ocr" ? { taskType } : {}),
+      } as any);
 
       if (!found || !model) {
         throw new Error(error || "No vision model available");
       }
+
+      // Select prompt based on task type
+      const defaultPrompt = taskType === "ocr" ? OCR_PROMPT : VISION_PROMPT;
 
       // Call the vision model
       const description = await callVisionModel(
         model,
         imageBase64,
         mimeType,
-        customPrompt || VISION_PROMPT,
+        customPrompt || defaultPrompt,
         this.apiKey,
       );
 
