@@ -128,35 +128,105 @@ This keeps training costs at zero while getting competent judging.
 4. **LoRA isolation** — base model weights never modified, only adapter layers
 5. **A/B routing** — model-router can split traffic between base and fine-tuned to measure real impact
 
+## Implementation: `packages/kernel/`
+
+All 4 phases are implemented in the `@8gent/kernel` package. The package provides a single entry point for the agent loop:
+
+```typescript
+import { KernelManager } from "@8gent/kernel";
+
+// Initialize from .8gent/config.json
+const kernel = KernelManager.fromProjectConfig();
+await kernel.start();
+
+// After each agent response:
+const score = await kernel.processTurn(sessionId, turnIndex, model, prompt, response);
+
+// Check health:
+const health = kernel.getHealth(); // { healthy, trend, message }
+
+// Get active model (base or fine-tuned):
+const model = kernel.getActiveModel();
+
+// Force training outside schedule:
+await kernel.forceTraining();
+
+// Shutdown:
+await kernel.stop();
+```
+
+### Package Structure
+
+| File | Phase | Purpose |
+|------|-------|---------|
+| `proxy.ts` | 1 | MetaClaw proxy lifecycle — start/stop, health checks, latency overhead monitoring |
+| `judge.ts` | 2 | PRM scoring via Gemini Flash — async scoring, score distributions, daily trends |
+| `training.ts` | 3 | GRPO batch collection — score filtering, checkpoint validation gate, auto-rollback |
+| `loop.ts` | 4 | Production loop — MadMax scheduling, auto-promotion, health monitoring |
+| `manager.ts` | All | Unified entry point, reads `.8gent/config.json`, safe no-op when disabled |
+| `index.ts` | — | Barrel exports |
+
+### Key APIs
+
+**MetaClawProxy** (Phase 1):
+- `start()` / `stop()` — lifecycle
+- `measureLatency()` — compare direct vs proxied request times
+- `isLatencyAcceptable()` — check overhead against threshold
+
+**JudgeScorer** (Phase 2):
+- `score(sessionId, turn, model, prompt, response)` — score a single turn
+- `scoreBatch(items)` — fire-and-forget batch scoring
+- `getScoreTrend(days)` — daily average trend
+- `getDistribution()` — per-model stats
+
+**TrainingOrchestrator** (Phase 3):
+- `addSample(scoreRecord)` — buffer a scored response, auto-triggers training when batch full
+- `train()` — manually trigger GRPO run
+- `getCheckpoints()` — all checkpoints with status (promoted/rolled_back/training)
+- `setBaseline(scores)` — save baseline for regression comparison
+
+**ProductionLoop** (Phase 4):
+- `processTurn(...)` — score + buffer + schedule (the one-liner for the agent loop)
+- `getActiveModel()` — returns fine-tuned tag if promoted, base otherwise
+- `getHealthStatus()` — improving/stable/declining trend with alert
+- `forceTraining()` — bypass MadMax schedule
+
 ## Phase Plan
 
-### Phase 1: Proxy Only (no training)
-- Install MetaClaw in `skills_only` mode
-- Route 8gent through proxy
-- Validate no latency regression
-- Collect conversation traces
+### Phase 1: Proxy Only (no training) — **IMPLEMENTED**
+- ✅ Start/stop MetaClaw proxy process
+- ✅ Health checks with configurable timeout
+- ✅ Latency overhead monitoring (direct vs proxied)
+- ✅ Configurable latency threshold with alerting
+- ✅ Conversation trace collection via proxy passthrough
 
-### Phase 2: Judge + Scoring
-- Enable PRM scoring via Gemini Flash
-- Observe score distribution across sessions
-- Tune PRM prompts for coding-agent relevance
+### Phase 2: Judge + Scoring — **IMPLEMENTED**
+- ✅ PRM scoring via Gemini Flash (free via OpenRouter)
+- ✅ 4-criteria scoring: execution success, code quality, tool efficiency, directness
+- ✅ Score distribution tracking (per-model, per-day)
+- ✅ Score trend analysis (7-day rolling window)
+- ✅ Batch scoring for async processing
+- ✅ Score history persistence (`.8gent/kernel/score-history.json`)
 
-### Phase 3: RL Training
-- Enable GRPO with MinT backend
-- Start with `qwen2.5-coder:14b` base
-- Run autoresearch validation after each training window
-- Track improvement curves
+### Phase 3: RL Training — **IMPLEMENTED**
+- ✅ GRPO batch collection with score-range filtering (skip trivial and perfect)
+- ✅ Automatic training trigger when batch is full
+- ✅ Checkpoint creation and lifecycle tracking
+- ✅ Benchmark validation gate via autoresearch suite
+- ✅ Auto-rollback on regression
+- ✅ Training state persistence (`.8gent/kernel/training/state.json`)
 
-### Phase 4: Production Loop
-- Graduate to `qwen3.5:latest` base
-- Enable MadMax scheduling
-- Wire benchmark regression gates
-- Auto-log improvements to model-router experience
+### Phase 4: Production Loop — **IMPLEMENTED**
+- ✅ MadMax scheduling (sleep window 23:00–07:00, idle threshold 30min)
+- ✅ Auto-promotion of improved checkpoints into model-router experience DB
+- ✅ Health monitoring with score trend alerts
+- ✅ Graceful degradation when components unavailable
+- ✅ `KernelManager` unified entry point with project config loading
 
 ## Open Questions
 
 - [ ] MinT backend GPU requirements — need to validate on consumer hardware (RTX 4090 target)
 - [ ] LoRA adapter format compatibility between MinT output and Ollama's expected GGUF adapters
-- [ ] Optimal PRM scoring criteria for coding agent tasks (execution success vs code quality vs tool use efficiency)
-- [ ] How to handle multi-turn conversations — score final outcome or each turn?
+- [x] Optimal PRM scoring criteria — implemented as 4-axis: execution success (40%), code quality (20%), tool efficiency (20%), directness (20%)
+- [x] Multi-turn conversations — scoring each turn independently, overall tracked per-session via score history
 - [ ] Interaction between MetaClaw's skill injection and 8gent's own system prompt mutations
