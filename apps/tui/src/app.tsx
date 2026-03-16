@@ -933,12 +933,9 @@ export function App({ initialCommand, args }: AppProps) {
             if (args.length > 0) {
               // Direct model set: /model qwen2.5:14b
               const newModel = args.join(" ");
-              if (availableModels.includes(newModel) || newModel.includes(":")) {
-                setCurrentModel(newModel);
-                addSystemMessage(`Model switched to: ${newModel}`);
-              } else {
-                addSystemMessage(`Unknown model: ${newModel}\nUse /model to see available options.`);
-              }
+              // Accept any model name — Ollama models, custom fine-tunes, OpenRouter IDs
+              setCurrentModel(newModel);
+              addSystemMessage(`Model switched to: ${newModel}`);
             } else {
               // Show model selector
               setViewMode("model-select");
