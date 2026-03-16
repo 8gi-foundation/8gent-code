@@ -734,6 +734,23 @@ export function parseSpawnCommand(input: string): { task: string; options: Parti
 }
 
 // ============================================
+// Re-export Universal CLI Spawner
+// ============================================
+
+export {
+  spawnCLIAgent,
+  getCLIAgent,
+  listCLIAgents,
+  getCLIAgentStatus,
+  clearFinishedCLIAgents,
+  resetCLIAgents,
+  type AgentRuntime,
+  type CLIAgentOptions,
+  type CLIAgentResult,
+  type RunningCLIAgent,
+} from "./universal-spawner";
+
+// ============================================
 // Re-export Subagent System
 // ============================================
 
