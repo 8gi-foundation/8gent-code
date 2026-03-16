@@ -653,6 +653,10 @@ export class Agent {
     return this.sessionWriter.getFilePath();
   }
 
+  getSessionEvidence(): Evidence[] {
+    return this.sessionEvidence;
+  }
+
   private getLanguageInstruction(): string {
     try {
       const { getLanguageManager } = require("../i18n/index.js");
