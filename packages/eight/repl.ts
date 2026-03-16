@@ -38,6 +38,7 @@ import {
   formatTaskOutput,
 } from "../tools/background";
 import { readRuns, type RunLogEntry } from "../reporting/runlog";
+import { getVault } from "../secrets";
 
 export async function startREPL(config?: Partial<AgentConfig>) {
   // Load config from file
@@ -164,6 +165,9 @@ Type your request, or:
       // Task commands
       if (handleTaskCommands(trimmed)) { prompt(); return; }
 
+      // Secrets commands
+      if (handleSecretsCommands(trimmed)) { prompt(); return; }
+
       // Skill invocation (/<skill-name>)
       if (await handleSkillInvocation(trimmed, agent)) { prompt(); return; }
 
@@ -276,6 +280,15 @@ function printHelp(): void {
   /language           - Show current language
   /language <code>    - Set language (en, es, fr, de, ja, zh, pt-br, etc.)
   /languages          - List all supported languages
+
+\x1b[33mSecrets:\x1b[0m
+  /secrets            - List stored secret keys
+  /secrets set <key>  - Store a secret (prompts for value)
+  /secrets delete <k> - Remove a secret from the vault
+  /secrets import <f> - Import secrets from a .env file
+
+\x1b[33mNightly Training:\x1b[0m
+  /nightly            - Show last nightly training run status
 
 \x1b[33mTips:\x1b[0m
   - Ask to explore code: "What functions are in src/index.ts?"
@@ -512,6 +525,52 @@ async function handlePlanCommands(trimmed: string, agent: Agent): Promise<boolea
     console.log(`  Model: ${agent.getModel()}`);
     console.log(`  Working Dir: ${process.cwd()}`);
     console.log(`  History: ${agent.getHistoryLength()} messages`);
+    return true;
+  }
+
+  if (trimmed === "/nightly") {
+    const nightlyLog = path.join(os.homedir(), ".8gent", "nightly.log");
+    const dreamsLog = path.join(os.homedir(), ".8gent", "dreams.log");
+
+    console.log(`\n\x1b[36m8gent Nightly Training Status:\x1b[0m\n`);
+
+    if (fs.existsSync(nightlyLog)) {
+      const content = fs.readFileSync(nightlyLog, "utf-8");
+      const lines = content.trim().split("\n");
+      const tail = lines.slice(-25);
+      console.log(`\x1b[33m── Last 25 lines of nightly.log ──\x1b[0m`);
+      for (const line of tail) {
+        // Color code based on content
+        if (line.includes("PASS")) {
+          console.log(`  \x1b[32m${line}\x1b[0m`);
+        } else if (line.includes("FAIL") || line.includes("ERROR") || line.includes("FATAL")) {
+          console.log(`  \x1b[31m${line}\x1b[0m`);
+        } else if (line.includes("═══") || line.includes("───")) {
+          console.log(`  \x1b[36m${line}\x1b[0m`);
+        } else {
+          console.log(`  ${line}`);
+        }
+      }
+    } else {
+      console.log(`  \x1b[33mNo nightly training log found.\x1b[0m`);
+      console.log(`  Nightly training runs at 2:00 AM PST via cron.`);
+    }
+
+    if (fs.existsSync(dreamsLog)) {
+      const content = fs.readFileSync(dreamsLog, "utf-8");
+      const lines = content.trim().split("\n");
+      const tail = lines.slice(-10);
+      console.log(`\n\x1b[33m── Last 10 lines of dreams.log ──\x1b[0m`);
+      for (const line of tail) {
+        console.log(`  ${line}`);
+      }
+    }
+
+    // Show cron schedule
+    console.log(`\n\x1b[33m── Cron Schedule ──\x1b[0m`);
+    console.log(`  Training: 2:00 AM PST daily (lockfile: /tmp/8gent-nightly.lock)`);
+    console.log(`  Dreams:   4:00 AM PST daily`);
+
     return true;
   }
 
@@ -1249,6 +1308,98 @@ function handleTaskCommands(trimmed: string): boolean {
   }
 
   return false;
+}
+
+function handleSecretsCommands(trimmed: string): boolean {
+  if (!trimmed.startsWith("/secrets")) return false;
+
+  const vault = getVault();
+
+  // /secrets — list keys
+  if (trimmed === "/secrets" || trimmed === "/secrets list") {
+    const keys = vault.list();
+    if (keys.length === 0) {
+      console.log("\n\x1b[33mVault is empty.\x1b[0m Use /secrets set <key> to add secrets.");
+    } else {
+      console.log(`\n\x1b[36mStored secrets (${keys.length}):\x1b[0m`);
+      for (const key of keys) {
+        console.log(`  \x1b[33m${key}\x1b[0m`);
+      }
+    }
+    return true;
+  }
+
+  // /secrets set <key> <value>
+  if (trimmed.startsWith("/secrets set ")) {
+    const rest = trimmed.slice("/secrets set ".length).trim();
+    const spaceIndex = rest.indexOf(" ");
+    if (spaceIndex === -1) {
+      console.log("\x1b[31mUsage: /secrets set <key> <value>\x1b[0m");
+      return true;
+    }
+    const key = rest.slice(0, spaceIndex);
+    const value = rest.slice(spaceIndex + 1).trim();
+    vault.set(key, value);
+    console.log(`\n\x1b[32mSecret stored:\x1b[0m ${key}`);
+    return true;
+  }
+
+  // /secrets delete <key>
+  if (trimmed.startsWith("/secrets delete ") || trimmed.startsWith("/secrets rm ")) {
+    const key = trimmed.replace(/^\/secrets (delete|rm) /, "").trim();
+    if (!key) {
+      console.log("\x1b[31mUsage: /secrets delete <key>\x1b[0m");
+      return true;
+    }
+    if (vault.delete(key)) {
+      console.log(`\n\x1b[32mDeleted:\x1b[0m ${key}`);
+    } else {
+      console.log(`\n\x1b[31mNot found:\x1b[0m ${key}`);
+    }
+    return true;
+  }
+
+  // /secrets import <path>
+  if (trimmed.startsWith("/secrets import ")) {
+    const envPath = trimmed.slice("/secrets import ".length).trim();
+    if (!envPath) {
+      console.log("\x1b[31mUsage: /secrets import <path-to-.env>\x1b[0m");
+      return true;
+    }
+    try {
+      const result = vault.migrateFromEnv(envPath);
+      if (result.imported.length > 0) {
+        console.log(`\n\x1b[32mImported ${result.imported.length} secrets:\x1b[0m`);
+        for (const key of result.imported) {
+          console.log(`  \x1b[33m${key}\x1b[0m`);
+        }
+      }
+      if (result.skipped.length > 0) {
+        console.log(`\n\x1b[36mSkipped ${result.skipped.length} (already exist):\x1b[0m`);
+        for (const key of result.skipped) {
+          console.log(`  ${key}`);
+        }
+      }
+      if (result.imported.length === 0 && result.skipped.length === 0) {
+        console.log("\n\x1b[33mNo secrets found in file.\x1b[0m");
+      }
+    } catch (err) {
+      console.error(`\x1b[31mImport failed: ${err}\x1b[0m`);
+    }
+    return true;
+  }
+
+  // /secrets has <key>
+  if (trimmed.startsWith("/secrets has ")) {
+    const key = trimmed.slice("/secrets has ".length).trim();
+    console.log(vault.has(key)
+      ? `\n\x1b[32mYes:\x1b[0m ${key} exists`
+      : `\n\x1b[31mNo:\x1b[0m ${key} not found`);
+    return true;
+  }
+
+  console.log("\x1b[31mUnknown secrets command.\x1b[0m Use /help to see options.");
+  return true;
 }
 
 async function handleSkillInvocation(trimmed: string, agent: Agent): Promise<boolean> {
