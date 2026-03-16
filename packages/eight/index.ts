@@ -20,6 +20,7 @@
 export type {
   Message, ToolCall, AgentConfig, LLMResponse, LLMClient,
   AgentEventCallbacks, AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent,
+  AgentEvidenceEvent, AgentEvidenceSummaryEvent,
 } from "./types";
 
 // System prompt

@@ -57,6 +57,7 @@ import { NarratorView } from "./screens/index.js";
 import { narrateToolStart, narrateToolEnd, narratePlan, narrateStep } from "./lib/narrator.js";
 import { useViewport } from "./hooks/useViewport.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
+import { ThinkingView } from "./components/ThinkingView.js";
 
 // Import permission system for infinite mode
 import {
@@ -67,7 +68,7 @@ import {
 
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/eight/index.js";
-import type { AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent } from "../../../packages/eight/index.js";
+import type { AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent, AgentEvidenceEvent, AgentEvidenceSummaryEvent } from "../../../packages/eight/index.js";
 
 // Load .env file if present
 import * as fs from "fs";
@@ -359,6 +360,9 @@ export function App({ initialCommand, args }: AppProps) {
   // Agent instance for real execution
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentReady, setAgentReady] = useState(false);
+
+  // Evidence tracking (real-time display)
+  const [evidenceSummary, setEvidenceSummary] = useState<AgentEvidenceSummaryEvent | null>(null);
 
   // Check for updates on launch (non-blocking)
   const updateInfo = useUpdateCheck();
@@ -655,6 +659,39 @@ export function App({ initialCommand, args }: AppProps) {
                 setStatus("thinking");
               }
             },
+            onEvidence: (event: AgentEvidenceEvent) => {
+              // Show evidence collection in real-time as compact tool messages
+              const icon = event.verified ? "\u2713" : "\u2717";
+              const label = event.type.replace(/_/g, " ");
+              // Shorten description: use basename for paths, truncate commands
+              let desc = event.description;
+              if (event.path) {
+                const basename = event.path.split("/").pop() || event.path;
+                desc = basename;
+              } else if (event.command) {
+                desc = event.command.slice(0, 40);
+              }
+              setMessages((prev) => [...prev, {
+                id: `evidence-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                role: "tool" as const,
+                content: `  ${icon} ${label}: ${desc}`,
+                timestamp: new Date(),
+                toolSuccess: event.verified,
+              }]);
+            },
+            onEvidenceSummary: (event: AgentEvidenceSummaryEvent) => {
+              setEvidenceSummary(event);
+              // Show one-line summary at end of response
+              if (event.total > 0) {
+                setMessages((prev) => [...prev, {
+                  id: `evidence-summary-${Date.now()}`,
+                  role: "system" as const,
+                  content: `[Evidence: ${event.verified}/${event.total} verified]`,
+                  timestamp: new Date(),
+                  toolSuccess: event.failed === 0,
+                }]);
+              }
+            },
           },
         });
         // Check if provider is available
@@ -746,6 +783,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /predict (Ctrl+P) - Show predicted next steps\n" +
               "  /avenues - Show planned avenues\n" +
               "  /design [task] - Get design system suggestions\n" +
+              "  /evidence - Show full evidence breakdown\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
               "  /clear - Clear messages\n" +
@@ -942,6 +980,41 @@ export function App({ initialCommand, args }: AppProps) {
               addSystemMessage("No design decisions needed for this task.\nTry: /design create a landing page");
             }
           });
+          break;
+
+        case "evidence":
+          // Show full evidence breakdown
+          if (!agent) {
+            addSystemMessage("No agent active — evidence requires a running session.");
+            break;
+          }
+          const evidence = agent.getSessionEvidence();
+          if (evidence.length === 0) {
+            addSystemMessage("No evidence collected yet.\nEvidence is gathered after write_file, edit_file, run_command, and git_commit.");
+            break;
+          }
+          const evSummary = evidence.reduce((acc, ev) => {
+            acc.total++;
+            if (ev.verified) acc.verified++;
+            else acc.failed++;
+            acc.byType[ev.type] = (acc.byType[ev.type] || 0) + 1;
+            return acc;
+          }, { total: 0, verified: 0, failed: 0, byType: {} as Record<string, number> });
+          const evLines = [
+            `Evidence Breakdown (${evSummary.verified}/${evSummary.total} verified):`,
+            "",
+          ];
+          for (const ev of evidence) {
+            const icon = ev.verified ? "\u2713" : "\u2717";
+            const label = `[${ev.type}]`.padEnd(18);
+            evLines.push(`  ${icon} ${label} ${ev.description}`);
+          }
+          evLines.push("");
+          evLines.push("By type:");
+          for (const [type, count] of Object.entries(evSummary.byType)) {
+            evLines.push(`  ${type}: ${count}`);
+          }
+          addSystemMessage(evLines.join("\n"));
           break;
 
         // Model selection - check if args provided
@@ -1441,11 +1514,21 @@ export function App({ initialCommand, args }: AppProps) {
           );
         }
         return (
-          <MessageList
-            messages={messages}
-            animateTyping={showAnimations}
-            soundEnabled={soundEnabled}
-          />
+          <Stack>
+            <MessageList
+              messages={messages}
+              animateTyping={showAnimations}
+              soundEnabled={soundEnabled}
+            />
+            {isProcessing && (
+              <ThinkingView
+                activeTool={activeTool}
+                stepCount={stepCount}
+                toolCount={toolCount}
+                processingStage={processingStage}
+              />
+            )}
+          </Stack>
         );
     }
   };
