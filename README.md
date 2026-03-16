@@ -508,6 +508,18 @@ The `version-manager.ts` module in `packages/eight/` manages promotions: a night
 
 Training runs in **MadMax mode** by default: weight updates are deferred to idle periods and sleep hours so they never interrupt active coding sessions. The autoresearch benchmark suite serves as a regression gate — bad checkpoints get rolled back automatically.
 
+#### Three-Layer Model Architecture
+
+8gent models are composed of three stacked layers:
+
+| Layer | What | Source |
+|-------|------|--------|
+| **Layer 1: Base Model** | Upstream weights (e.g. `qwen3:14b`) | Ollama registry |
+| **Layer 2: Eight LoRA** | Centralized fine-tune from autoresearch benchmarks | Shipped with each Eight release |
+| **Layer 3: Personal LoRA** | User's local fine-tune on their own coding patterns | `~/.8gent/personal-lora/` |
+
+Layers stack at inference time: base weights + Eight adapter + personal adapter. When a new Eight version releases (Layer 2 update), users are prompted to retrain their personal module (Layer 3) so it aligns with the updated weights.
+
 See [docs/KERNEL-FINETUNING.md](docs/KERNEL-FINETUNING.md) for the full architecture and phase plan.
 
 ---
