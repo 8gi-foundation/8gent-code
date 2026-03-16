@@ -882,6 +882,115 @@ async function runShellCommand(command: string): Promise<string> {
 }
 
 // ============================================
+// Multi-Agent Orchestration Tools
+// ============================================
+
+const spawnAgent = tool({
+  description:
+    "Spawn a background agent for an independent task. Use when you have multiple independent tasks that can run in parallel. The agent runs in the background and reports back when done. Returns the agent ID.",
+  inputSchema: z.object({
+    task: z.string().describe("Task description for the background agent to execute"),
+    model: z.string().optional().describe("Model to use (default: same as current agent)"),
+  }),
+  execute: async ({ task, model }) => {
+    try {
+      const { getAgentPool } = await import("../orchestration");
+      const pool = getAgentPool();
+      const agent = await pool.spawnAgent(task, {
+        model: model || undefined,
+        workingDirectory: _ctx.workingDirectory,
+      });
+      return JSON.stringify({
+        agentId: agent.id,
+        status: agent.status,
+        task: task.slice(0, 100),
+        message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
+      }, null, 2);
+    } catch (err) {
+      return `Failed to spawn agent: ${err}`;
+    }
+  },
+});
+
+const checkAgent = tool({
+  description:
+    "Check the status and result of a spawned background agent by ID. Returns status (running/completed/failed) and result if done.",
+  inputSchema: z.object({
+    agentId: z.string().describe("Agent ID returned from spawn_agent"),
+  }),
+  execute: async ({ agentId }) => {
+    try {
+      const { getAgentPool } = await import("../orchestration");
+      const pool = getAgentPool();
+      const agent = pool.getAgent(agentId);
+      if (!agent) return `Agent not found: ${agentId}`;
+
+      const elapsed = agent.completedAt
+        ? `${((agent.completedAt.getTime() - agent.startedAt.getTime()) / 1000).toFixed(1)}s`
+        : `${((Date.now() - agent.startedAt.getTime()) / 1000).toFixed(1)}s (running)`;
+
+      const result: Record<string, unknown> = {
+        agentId: agent.id,
+        status: agent.status,
+        task: agent.task.description,
+        elapsed,
+      };
+
+      if (agent.status === "completed" && agent.task.result) {
+        result.result = typeof agent.task.result === "string"
+          ? agent.task.result.slice(0, 2000)
+          : JSON.stringify(agent.task.result).slice(0, 2000);
+      }
+      if (agent.status === "failed" && agent.task.error) {
+        result.error = agent.task.error;
+      }
+
+      return JSON.stringify(result, null, 2);
+    } catch (err) {
+      return `Failed to check agent: ${err}`;
+    }
+  },
+});
+
+const listAgents = tool({
+  description:
+    "List all spawned background agents with their status (running/completed/failed). Shows agent pool overview.",
+  inputSchema: z.object({}),
+  execute: async () => {
+    try {
+      const { getAgentPool } = await import("../orchestration");
+      const pool = getAgentPool();
+      const agents = pool.listAgents();
+
+      if (agents.length === 0) {
+        return "No agents spawned yet. Use spawn_agent to create background agents for parallel tasks.";
+      }
+
+      const stats = pool.getStats();
+      const agentList = agents.map((a) => {
+        const elapsed = a.completedAt
+          ? `${((a.completedAt.getTime() - a.startedAt.getTime()) / 1000).toFixed(1)}s`
+          : `${((Date.now() - a.startedAt.getTime()) / 1000).toFixed(1)}s`;
+        return {
+          id: a.id,
+          status: a.status,
+          task: a.task.description.slice(0, 80),
+          elapsed,
+          hasResult: a.status === "completed" && !!a.task.result,
+        };
+      });
+
+      return JSON.stringify({
+        stats,
+        agents: agentList,
+      }, null, 2);
+    } catch (err) {
+      return `Failed to list agents: ${err}`;
+    }
+  },
+});
+
+// ============================================
 // Composed ToolSet
 // ============================================
 
@@ -954,6 +1063,11 @@ export const agentTools = {
   background_start: backgroundStart,
   background_status: backgroundStatus,
   background_output: backgroundOutput,
+
+  // Multi-agent orchestration
+  spawn_agent: spawnAgent,
+  check_agent: checkAgent,
+  list_agents: listAgents,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;
