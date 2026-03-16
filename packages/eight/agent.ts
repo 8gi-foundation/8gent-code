@@ -159,8 +159,30 @@ export class Agent {
       } as any);
     }
 
-    // Main agent always gets the text message — no model switching
-    this.messageHistory.push({ role: "user", content: userMessage });
+    // ── Planning Gate ──────────────────────────────────────────────
+    // Local models skip the BMAD planning in the system prompt and jump
+    // straight to tool calls. For multi-step tasks we inject an explicit
+    // instruction that forces the model to emit a numbered plan first.
+    const PLANNING_KEYWORDS = /\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
+    const needsPlanningGate =
+      userMessage.length > 100 || PLANNING_KEYWORDS.test(userMessage);
+
+    if (needsPlanningGate) {
+      this.messageHistory.push({
+        role: "user",
+        content: userMessage,
+      });
+      // Inject a hard planning constraint the model can't ignore because
+      // it's the last user-turn content before generation starts.
+      this.messageHistory.push({
+        role: "user",
+        content:
+          `[PLANNING REQUIRED] Before executing ANY tools, you MUST output your plan as:\nPLAN:\n1. [step]\n2. [step]\n3. [step]\nThen execute each step. Do NOT call tools until you have output the plan.`,
+      });
+    } else {
+      // Simple / short messages go through without a planning gate
+      this.messageHistory.push({ role: "user", content: userMessage });
+    }
 
     // Log user message to session
     this.sessionWriter.writeUserMessage(userMessage);
@@ -345,6 +367,25 @@ export class Agent {
         if (event.text && event.text.includes("🎯 COMPLETED") && event.finishReason === "stop") {
           // The agent is claiming completion — this is fine, but log it for tracking
           console.log(`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`);
+        }
+
+        // ── Plan Parsing → Kanban Feed ────────────────────────────────
+        // When the agent emits text containing "PLAN:" followed by numbered
+        // steps, parse them and push into the proactive planner's kanban
+        // board so they're visible in the TUI and tracked for completion.
+        if (event.text && /PLAN:\s*\n?\s*\d+[.)]/i.test(event.text)) {
+          const injectedSteps = this.planner.injectPlanFromText(event.text);
+          if (injectedSteps.length > 0) {
+            console.log(`\n[Step ${event.stepNumber}] Parsed ${injectedSteps.length} plan steps → kanban ready queue`);
+            // Emit plan steps as a system-level event so the TUI can render them
+            this.events.onStepFinish?.({
+              stepNumber: event.stepNumber,
+              finishReason: "other" as any,
+              text: `📋 Plan detected (${injectedSteps.length} steps):\n${injectedSteps.map((s, i) => `  ${i + 1}. ${s.description}`).join("\n")}`,
+              toolCalls: [],
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+            });
+          }
         }
 
         // Map AI SDK usage to DetailedTokenUsage
