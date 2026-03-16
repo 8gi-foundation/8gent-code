@@ -25,6 +25,8 @@ import { EvidenceCollector, type Evidence, summarizeEvidence } from "../validati
 import { indexFolder as astIndexFolder } from "../ast-index";
 import { getHeartbeatAgents, type HeartbeatAgents } from "../self-autonomy/heartbeat";
 import { OnboardingManager } from "../self-autonomy/onboarding";
+import { startTelegramBot, getActiveTelegramBot } from "../telegram";
+import { getVault } from "../secrets";
 import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
 import { getMemoryManager, extractAutoMemories } from "../memory";
 
@@ -206,6 +208,20 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       // Detect integrations (Ollama, LM Studio, GitHub) in background
       this.onboarding.detectIntegrations().catch(() => {});
       console.log("[8gent] First run detected — onboarding available. The agent can ask setup questions.");
+    }
+
+    // ── Telegram: Auto-start if token exists in vault ────────────────
+    const vault = getVault();
+    if (vault.has("TELEGRAM_BOT_TOKEN") && !getActiveTelegramBot()) {
+      const telegramToken = vault.get("TELEGRAM_BOT_TOKEN");
+      if (telegramToken) {
+        const chatId = vault.get("TELEGRAM_CHAT_ID");
+        startTelegramBot(telegramToken, this, {
+          allowedUsers: chatId ? [parseInt(chatId, 10)] : undefined,
+        }).catch((err) => {
+          console.log(`[8gent] Telegram auto-start failed: ${err.message}`);
+        });
+      }
     }
   }
 
@@ -901,6 +917,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
   async cleanup(): Promise<void> {
     // Stop heartbeat agents
     this.heartbeat.stop();
+
+    // Stop Telegram bot if running
+    const telegramBot = getActiveTelegramBot();
+    if (telegramBot) {
+      telegramBot.stop();
+    }
 
     // Abort infinite mode if active
     if (this.infiniteRunner) {
