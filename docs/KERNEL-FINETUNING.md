@@ -65,6 +65,29 @@ eight-{major.minor.patch}-q{gen}:{params}
 
 The `version-manager.ts` module in `packages/eight/` manages this lifecycle. The Gemini Flash judge (`google/gemini-2.5-flash:free` via OpenRouter) provides zero-cost semantic evaluation of each checkpoint.
 
+## Three-Layer Architecture
+
+8gent models are composed of three stacked layers applied at inference time:
+
+```
+┌───────────────────────────────────────────┐
+│  Layer 3: Personal LoRA                   │  ← ~/.8gent/personal-lora/
+│  User's local fine-tune on their patterns │     Retrained when Eight updates
+├───────────────────────────────────────────┤
+│  Layer 2: Eight LoRA                      │  ← Shipped with each Eight release
+│  Centralized training from benchmarks     │     Autoresearch-validated
+├───────────────────────────────────────────┤
+│  Layer 1: Base Model (qwen3:14b)          │  ← Upstream weights from Ollama
+│  Unmodified foundation weights            │     registry
+└───────────────────────────────────────────┘
+```
+
+- **Layer 1** is the upstream base model (e.g. `qwen3:14b`). Never modified locally.
+- **Layer 2** is the Eight LoRA adapter, trained centrally on the autoresearch benchmark suite and shipped with each Eight release. This is what makes `eight-1.x-q3:14b` better than raw qwen3.
+- **Layer 3** is the Personal LoRA, trained locally on the user's own coding sessions via the kernel pipeline. Stored at `~/.8gent/personal-lora/`.
+
+When a new Eight version releases (Layer 2 update), users are prompted to retrain their Personal LoRA (Layer 3) so it aligns with the updated base adapter weights.
+
 ## MetaClaw Config for 8gent
 
 See `config/metaclaw.yaml` for the ready-to-use configuration.

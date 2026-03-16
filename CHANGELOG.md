@@ -10,6 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Three-layer model architecture** — base model (qwen3) + Eight LoRA (centralized training from benchmarks) + Personal LoRA (user's local fine-tune on their patterns); personal module retrains when a new Eight version releases
 - **Eight model version manager** (`version-manager.ts`) — manages model promotion lifecycle with naming convention `eight-{major.minor.patch}-q{gen}:{params}`, Gemini Flash judge validates checkpoints before promotion
 - **8gent as default provider** — `eight-1.0-q3:14b` is now the primary recommended model across all documentation and quick-start guides
 - **Auto-open files on macOS** — files referenced in agent output are opened automatically in the default editor
