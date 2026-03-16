@@ -22,11 +22,14 @@ cd 8gent-code
 # Install dependencies (requires Bun)
 bun install
 
-# Make sure Ollama is running
-ollama pull glm-4.7-flash:latest
+# Make sure Ollama is running with the Eight model
+ollama pull eight-1.0-q3:14b
 
 # Run the agent
 bun run packages/eight/index.ts
+
+# Or test with a specific model via the TUI
+# /model eight-1.0-q3:14b
 ```
 
 ## Project Structure

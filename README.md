@@ -45,8 +45,8 @@
 2. **Install Bun:** https://bun.sh
 3. **Pull a model:**
    ```bash
-   ollama pull qwen3.5        # Best coding model (March 2026, 6.6GB)
-   ollama pull devstral        # Mistral's code specialist (14GB, optional)
+   ollama pull eight-1.0-q3:14b  # 8gent's fine-tuned model (primary)
+   ollama pull qwen3.5           # Upstream fallback (6.6GB, optional)
    ```
 
 ### Install
@@ -489,8 +489,22 @@ bun run benchmarks/autoresearch/validate-checkpoint.ts
 
 | Model | Use Case |
 |-------|----------|
-| `qwen3:14b` | Best starting point — code-native, fits LoRA on single GPU (~12GB VRAM) |
-| `qwen3.5:latest` | Graduate to this once pipeline is validated — strongest coding benchmarks |
+| `eight-1.0-q3:14b` | **Primary** — 8gent's own fine-tuned model, code-native, fits LoRA on single GPU (~12GB VRAM) |
+| `qwen3.5:latest` | Fallback — strongest upstream coding benchmarks before Eight fine-tuning |
+
+#### Model Versioning
+
+Eight models follow a strict naming convention: **`eight-{major.minor.patch}-q{gen}:{params}`**
+
+| Segment | Meaning | Example |
+|---------|---------|---------|
+| `major` | Base model change (e.g. new upstream weights) | `1` |
+| `minor` | Judge-validated improvement (Gemini Flash confirms score gain) | `0` |
+| `patch` | Nightly build / incremental training run | `0` |
+| `q{gen}` | Quantization generation | `q3` |
+| `{params}` | Parameter count | `14b` |
+
+The `version-manager.ts` module in `packages/eight/` manages promotions: a nightly checkpoint only becomes a new minor version when the Gemini Flash judge confirms it outperforms the current release on the autoresearch benchmark suite.
 
 Training runs in **MadMax mode** by default: weight updates are deferred to idle periods and sleep hours so they never interrupt active coding sessions. The autoresearch benchmark suite serves as a regression gate — bad checkpoints get rolled back automatically.
 

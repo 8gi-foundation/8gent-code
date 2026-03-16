@@ -34,12 +34,36 @@
 
 | Model | Rationale | VRAM (LoRA) | Recommended |
 |-------|-----------|-------------|-------------|
-| `qwen3.5:latest` | TUI default, strongest coding benchmarks, already tested in autoresearch | ~18GB | **Primary** |
-| `qwen3:14b` | Purpose-built for code, 14B sweet spot for LoRA | ~12GB | **Secondary** |
+| `eight-1.0-q3:14b` | 8gent's own fine-tuned model, code-native, validated by Gemini Flash judge | ~12GB | **Primary** |
+| `qwen3.5:latest` | Strongest upstream coding benchmarks, fallback before Eight fine-tuning | ~18GB | Fallback |
 | `devstral:latest` | Mistral code specialist, good benchmark diversity | ~14GB | Experimental |
-| `qwen3:14b` | Strong reasoning, general fallback | ~12GB | Fallback |
 
-**Start with `qwen3:14b`** for initial RL runs (most VRAM-friendly, code-native), graduate to `qwen3.5:latest` once the pipeline is validated.
+**Start with `eight-1.0-q3:14b`** — it is the default model for 8gent and includes RL improvements from the autoresearch pipeline.
+
+## Model Versioning
+
+Eight models follow a strict naming convention:
+
+```
+eight-{major.minor.patch}-q{gen}:{params}
+```
+
+| Segment | Meaning | Bumps when... |
+|---------|---------|---------------|
+| `major` | Base model change (new upstream weights) | Switching from e.g. Qwen 3 to Qwen 3.5 |
+| `minor` | Judge-validated improvement | Gemini Flash judge confirms score gain on autoresearch suite |
+| `patch` | Nightly build / incremental training run | Every GRPO training batch produces a new patch |
+| `q{gen}` | Quantization generation | Quantization method changes |
+| `{params}` | Parameter count | Model size changes |
+
+### Promotion flow
+
+1. **Nightly training** produces a new patch (e.g. `eight-1.0.42-q3:14b`)
+2. **Gemini Flash judge** scores the checkpoint against the autoresearch benchmark suite
+3. If the checkpoint **outperforms** the current release, `version-manager.ts` promotes it to a new minor version (e.g. `eight-1.1-q3:14b`)
+4. If it **regresses**, the checkpoint is rolled back automatically
+
+The `version-manager.ts` module in `packages/eight/` manages this lifecycle. The Gemini Flash judge (`google/gemini-2.5-flash:free` via OpenRouter) provides zero-cost semantic evaluation of each checkpoint.
 
 ## MetaClaw Config for 8gent
 
