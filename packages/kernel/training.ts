@@ -71,7 +71,7 @@ interface TrainingState {
 }
 
 const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
-  baseModel: "qwen2.5-coder:14b",
+  baseModel: "qwen3:14b",
   loraRank: 32,
   batchSize: 4,
   minScoreThreshold: 0.3,

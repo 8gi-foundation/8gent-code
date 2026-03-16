@@ -84,7 +84,7 @@ export class ProductionLoop {
 
     // Default fine-tuned model tag
     if (!this.config.fineTunedModelTag) {
-      const base = this.config.training.baseModel ?? "qwen2.5-coder:14b";
+      const base = this.config.training.baseModel ?? "qwen3:14b";
       this.config.fineTunedModelTag = `${base.replace(/:.*/, "")}-ft`;
     }
 
@@ -196,7 +196,7 @@ export class ProductionLoop {
     if (active && active.status === "promoted") {
       return this.config.fineTunedModelTag;
     }
-    return this.config.training.baseModel ?? "qwen2.5-coder:14b";
+    return this.config.training.baseModel ?? "qwen3:14b";
   }
 
   /**
