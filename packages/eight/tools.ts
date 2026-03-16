@@ -354,12 +354,14 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "spawn_agent",
-          description: "Spawn a background agent for an independent task. Use when you have multiple independent tasks that can run in parallel. The agent runs in the background and reports back when done.",
+          description: "Spawn a background agent. Use runtime='claude' for complex tasks that need a stronger model, runtime='8gent' for standard tasks, runtime='shell' for simple commands.",
           parameters: {
             type: "object",
             properties: {
               task: { type: "string", description: "Task description for the background agent to execute" },
-              model: { type: "string", description: "Model to use (optional, default: same as current agent). Use 'auto:free' to automatically pick the best free model from OpenRouter." }
+              runtime: { type: "string", enum: ["8gent", "claude", "shell"], description: "Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)" },
+              model: { type: "string", description: "Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter." },
+              timeout: { type: "number", description: "Timeout in ms (default: 5 min, only for claude/shell)" }
             },
             required: ["task"]
           }
@@ -369,7 +371,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "check_agent",
-          description: "Check the status and result of a spawned background agent by ID. Returns status (running/completed/failed) and result if done.",
+          description: "Check the status and result of a spawned background agent by ID. Works with all runtimes (8gent, claude, shell).",
           parameters: {
             type: "object",
             properties: {
@@ -383,7 +385,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "list_agents",
-          description: "List all spawned background agents with their status (running/completed/failed). Shows agent pool overview.",
+          description: "List all spawned background agents (8gent, claude, shell) with their status. Shows unified overview across all runtimes.",
           parameters: { type: "object", properties: {} }
         }
       },
@@ -604,7 +606,12 @@ export class ToolExecutor {
 
       // Multi-agent orchestration
       case "spawn_agent":
-        return this.handleSpawnAgent(args.task as string, args.model as string | undefined);
+        return this.handleSpawnAgent(
+          args.task as string,
+          (args.runtime as "8gent" | "claude" | "shell" | undefined),
+          args.model as string | undefined,
+          args.timeout as number | undefined
+        );
       case "check_agent":
         return this.handleCheckAgent(args.agentId as string);
       case "list_agents":
@@ -1287,8 +1294,32 @@ export class ToolExecutor {
   // Multi-Agent Orchestration
   // ============================================
 
-  private async handleSpawnAgent(task: string, model?: string): Promise<string> {
+  private async handleSpawnAgent(
+    task: string,
+    runtime?: "8gent" | "claude" | "shell",
+    model?: string,
+    timeout?: number
+  ): Promise<string> {
     try {
+      const effectiveRuntime = runtime || "8gent";
+
+      // CLI runtimes: claude and shell
+      if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+        const { spawnCLIAgent } = await import("../orchestration");
+        const agent = spawnCLIAgent(effectiveRuntime, task, {
+          workingDirectory: this.workingDirectory,
+          timeout: timeout || undefined,
+        });
+        return JSON.stringify({
+          agentId: agent.id,
+          runtime: effectiveRuntime,
+          status: "running",
+          task: task.slice(0, 100),
+          message: `CLI agent ${agent.id} (${effectiveRuntime}) spawned and running. Use check_agent("${agent.id}") to check status.`,
+        }, null, 2);
+      }
+
+      // Default: 8gent runtime
       // Resolve "auto:free" to the best available free model via OpenRouter
       let resolvedModel = model;
       if (model === "auto:free") {
@@ -1309,6 +1340,7 @@ export class ToolExecutor {
       });
       return JSON.stringify({
         agentId: agent.id,
+        runtime: "8gent",
         status: agent.status,
         task: task.slice(0, 100),
         message: `Agent ${agent.id} spawned and running. Use check_agent("${agent.id}") to check status.`,
@@ -1320,6 +1352,32 @@ export class ToolExecutor {
 
   private async handleCheckAgent(agentId: string): Promise<string> {
     try {
+      // Check CLI agents first (claude/shell runtimes)
+      if (agentId.startsWith("cli-")) {
+        const { getCLIAgentStatus } = await import("../orchestration");
+        const status = getCLIAgentStatus(agentId);
+        if (!status) return `Agent not found: ${agentId}`;
+
+        const result: Record<string, unknown> = {
+          agentId: status.id,
+          runtime: status.runtime,
+          status: status.status,
+          task: status.task,
+          elapsed: status.elapsed,
+        };
+
+        if (status.result) {
+          result.stdout = status.result.stdout.slice(0, 2000);
+          if (status.result.stderr) {
+            result.stderr = status.result.stderr.slice(0, 500);
+          }
+          result.exitCode = status.result.exitCode;
+        }
+
+        return JSON.stringify(result, null, 2);
+      }
+
+      // Default: check 8gent agent pool
       const { getAgentPool } = await import("../orchestration");
       const pool = getAgentPool();
       const agent = pool.getAgent(agentId);
@@ -1331,6 +1389,7 @@ export class ToolExecutor {
 
       const result: Record<string, unknown> = {
         agentId: agent.id,
+        runtime: "8gent",
         status: agent.status,
         task: agent.task.description,
         elapsed,
@@ -1353,21 +1412,25 @@ export class ToolExecutor {
 
   private async handleListAgents(): Promise<string> {
     try {
-      const { getAgentPool } = await import("../orchestration");
+      const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import("../orchestration");
       const pool = getAgentPool();
-      const agents = pool.listAgents();
+      const poolAgents = pool.listAgents();
+      const cliAgentsList = listCLIAgents();
 
-      if (agents.length === 0) {
+      if (poolAgents.length === 0 && cliAgentsList.length === 0) {
         return "No agents spawned yet. Use spawn_agent to create background agents for parallel tasks.";
       }
 
       const stats = pool.getStats();
-      const agentList = agents.map((a) => {
+
+      // 8gent agents
+      const eightAgentList = poolAgents.map((a) => {
         const elapsed = a.completedAt
           ? `${((a.completedAt.getTime() - a.startedAt.getTime()) / 1000).toFixed(1)}s`
           : `${((Date.now() - a.startedAt.getTime()) / 1000).toFixed(1)}s`;
         return {
           id: a.id,
+          runtime: "8gent" as const,
           status: a.status,
           task: a.task.description.slice(0, 80),
           elapsed,
@@ -1375,7 +1438,36 @@ export class ToolExecutor {
         };
       });
 
-      return JSON.stringify({ stats, agents: agentList }, null, 2);
+      // CLI agents (claude/shell)
+      const cliAgentList = cliAgentsList.map((a) => {
+        const status = getCLIAgentStatus(a.id);
+        return {
+          id: a.id,
+          runtime: a.runtime,
+          status: status?.status || "running",
+          task: a.task.slice(0, 80),
+          elapsed: status?.elapsed || "...",
+          hasResult: !!a.result,
+        };
+      });
+
+      const allAgents = [...eightAgentList, ...cliAgentList];
+
+      // Augment stats with CLI agents
+      const cliRunning = cliAgentsList.filter(a => !a.completedAt).length;
+      const cliCompleted = cliAgentsList.filter(a => a.completedAt && a.result?.exitCode === 0).length;
+      const cliFailed = cliAgentsList.filter(a => a.completedAt && a.result?.exitCode !== 0).length;
+
+      return JSON.stringify({
+        stats: {
+          ...stats,
+          totalAgents: stats.totalAgents + cliAgentsList.length,
+          running: stats.running + cliRunning,
+          completed: stats.completed + cliCompleted,
+          failed: stats.failed + cliFailed,
+        },
+        agents: allAgents,
+      }, null, 2);
     } catch (err) {
       return `Failed to list agents: ${err}`;
     }
