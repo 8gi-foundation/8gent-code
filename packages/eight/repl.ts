@@ -39,6 +39,8 @@ import {
 } from "../tools/background";
 import { readRuns, type RunLogEntry } from "../reporting/runlog";
 import { getVault } from "../secrets";
+import { startTelegramBot, getActiveTelegramBot } from "../telegram";
+import { runTelegramSetup } from "../self-autonomy/onboarding";
 
 export async function startREPL(config?: Partial<AgentConfig>) {
   // Load config from file
@@ -165,6 +167,9 @@ Type your request, or:
       // Task commands
       if (handleTaskCommands(trimmed)) { prompt(); return; }
 
+      // Telegram commands
+      if (await handleTelegramCommands(trimmed, agent, rl)) { prompt(); return; }
+
       // Secrets commands
       if (handleSecretsCommands(trimmed)) { prompt(); return; }
 
@@ -286,6 +291,12 @@ function printHelp(): void {
   /secrets set <key>  - Store a secret (prompts for value)
   /secrets delete <k> - Remove a secret from the vault
   /secrets import <f> - Import secrets from a .env file
+
+\x1b[33mTelegram:\x1b[0m
+  /telegram           - Show bot status (connected/disconnected)
+  /telegram setup     - Run interactive Telegram bot setup
+  /telegram start     - Start the Telegram bot
+  /telegram stop      - Stop the Telegram bot
 
 \x1b[33mNightly Training:\x1b[0m
   /nightly            - Show last nightly training run status
@@ -1308,6 +1319,78 @@ function handleTaskCommands(trimmed: string): boolean {
   }
 
   return false;
+}
+
+async function handleTelegramCommands(
+  trimmed: string,
+  agent: Agent,
+  rl: import("readline").Interface,
+): Promise<boolean> {
+  if (!trimmed.startsWith("/telegram")) return false;
+
+  const vault = getVault();
+
+  // /telegram — status
+  if (trimmed === "/telegram") {
+    const bot = getActiveTelegramBot();
+    if (bot) {
+      console.log(`\n\x1b[32mTelegram bot: connected\x1b[0m (@${bot.botUsername})`);
+    } else if (vault.has("TELEGRAM_BOT_TOKEN")) {
+      console.log("\n\x1b[33mTelegram bot: configured but not running\x1b[0m");
+      console.log("Use \x1b[36m/telegram start\x1b[0m to launch it.");
+    } else {
+      console.log("\n\x1b[31mTelegram bot: not configured\x1b[0m");
+      console.log("Use \x1b[36m/telegram setup\x1b[0m to set up your bot.");
+    }
+    return true;
+  }
+
+  // /telegram setup
+  if (trimmed === "/telegram setup") {
+    await runTelegramSetup(rl);
+    return true;
+  }
+
+  // /telegram start
+  if (trimmed === "/telegram start") {
+    const existing = getActiveTelegramBot();
+    if (existing) {
+      console.log(`\n\x1b[33mTelegram bot already running\x1b[0m (@${existing.botUsername})`);
+      return true;
+    }
+
+    const token = vault.get("TELEGRAM_BOT_TOKEN");
+    if (!token) {
+      console.log("\n\x1b[31mNo Telegram token found.\x1b[0m Run \x1b[36m/telegram setup\x1b[0m first.");
+      return true;
+    }
+
+    try {
+      const chatId = vault.get("TELEGRAM_CHAT_ID");
+      const bot = await startTelegramBot(token, agent, {
+        allowedUsers: chatId ? [parseInt(chatId, 10)] : undefined,
+      });
+      console.log(`\n\x1b[32mTelegram bot started!\x1b[0m @${bot.botUsername}`);
+    } catch (err: any) {
+      console.error(`\x1b[31mFailed to start Telegram bot: ${err.message}\x1b[0m`);
+    }
+    return true;
+  }
+
+  // /telegram stop
+  if (trimmed === "/telegram stop") {
+    const bot = getActiveTelegramBot();
+    if (bot) {
+      bot.stop();
+      console.log("\n\x1b[32mTelegram bot stopped.\x1b[0m");
+    } else {
+      console.log("\n\x1b[33mNo Telegram bot running.\x1b[0m");
+    }
+    return true;
+  }
+
+  console.log("\x1b[31mUnknown telegram command.\x1b[0m Use /help to see options.");
+  return true;
 }
 
 function handleSecretsCommands(trimmed: string): boolean {

@@ -11,6 +11,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+import { getVault } from "../secrets";
 
 const execAsync = promisify(exec);
 
@@ -93,6 +94,7 @@ export type OnboardingStep =
   | "language"
   | "model"
   | "voice"
+  | "telegram"
   | "github"
   | "mcps"
   | "confirmation";
@@ -246,6 +248,27 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
     }),
   },
   {
+    step: "telegram",
+    question:
+      "Would you like to set up Telegram for remote control? (y/n)\n\n" +
+      "This lets you control 8gent from your phone — switch models,\n" +
+      "run tasks, and chat with the agent from anywhere.",
+    options: ["yes", "no", "y", "n"],
+    processor: (answer, user) => {
+      const wantsTelegram = ["yes", "y"].includes(answer.toLowerCase());
+      if (wantsTelegram) {
+        console.log(
+          "\n\x1b[36mGreat!\x1b[0m After onboarding, run \x1b[33m/telegram setup\x1b[0m to connect your bot.\n" +
+          "\x1b[90mYou'll need: Open Telegram → @BotFather → /newbot → copy the token.\x1b[0m\n"
+        );
+      }
+      return {
+        ...user,
+        completedSteps: [...user.completedSteps, "telegram"],
+      };
+    },
+  },
+  {
     step: "confirmation",
     question:
       "Excellent. Let me confirm what I've learned:\n\n" +
@@ -255,7 +278,8 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       "- Style: {style}\n" +
       "- Language: {language}\n" +
       "- Model: {provider}\n" +
-      "- Voice: {voice}\n\n" +
+      "- Voice: {voice}\n" +
+      "- Telegram: {telegram}\n\n" +
       "Is this correct? (yes/no)",
     options: ["yes", "no", "y", "n"],
     processor: (answer, user) => {
@@ -496,6 +520,7 @@ export class OnboardingManager {
     text = text.replace("{language}", this.user.identity.language || "en");
     text = text.replace("{provider}", this.user.preferences.model.provider || "ollama");
     text = text.replace("{voice}", this.user.preferences.voice.enabled ? "enabled" : "disabled");
+    text = text.replace("{telegram}", getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up");
 
     return { ...question, question: text };
   }
@@ -599,10 +624,88 @@ function calculateConfidence(user: UserConfig): number {
 }
 
 // ============================================
+// Telegram Setup Flow (deterministic, no LLM)
+// ============================================
+
+/**
+ * Interactive Telegram setup. Reads token via stdin (not LLM).
+ * Stores the token in the encrypted SecretVault.
+ *
+ * @param rl - readline interface for stdin input
+ * @returns true if setup completed, false if cancelled
+ */
+export async function runTelegramSetup(
+  rl: import("readline").Interface,
+): Promise<boolean> {
+  const ask = (q: string): Promise<string> =>
+    new Promise((resolve) => rl.question(q, resolve));
+
+  console.log(`
+\x1b[36m╔══════════════════════════════════════════════════╗
+║          Telegram Bot Setup                      ║
+╚══════════════════════════════════════════════════╝\x1b[0m
+
+\x1b[33mStep 1:\x1b[0m Open Telegram and search for @BotFather
+\x1b[33mStep 2:\x1b[0m Send /newbot and follow the prompts
+\x1b[33mStep 3:\x1b[0m Copy the bot token (looks like 123456:ABC-DEF...)
+`);
+
+  const token = (await ask("\x1b[36mPaste your bot token:\x1b[0m ")).trim();
+  if (!token || token.length < 20) {
+    console.log("\x1b[31mInvalid token. Setup cancelled.\x1b[0m");
+    return false;
+  }
+
+  // Validate the token against Telegram API
+  console.log("\x1b[90mValidating token...\x1b[0m");
+  try {
+    const { validateToken } = await import("../telegram");
+    const result = await validateToken(token);
+    if (!result.valid) {
+      console.log(`\x1b[31mToken invalid: ${result.error}\x1b[0m`);
+      return false;
+    }
+    console.log(`\x1b[32mToken valid! Bot: @${result.username}\x1b[0m`);
+  } catch {
+    console.log("\x1b[33mCouldn't validate token (network error). Storing anyway.\x1b[0m");
+  }
+
+  // Store in vault
+  const vault = getVault();
+  vault.set("TELEGRAM_BOT_TOKEN", token);
+  console.log("\x1b[32mToken encrypted with AES-256-GCM and stored in vault.\x1b[0m");
+  console.log("\x1b[90mYour token is never exposed to the AI.\x1b[0m");
+
+  // Chat ID
+  console.log(`
+\x1b[33mChat ID (optional):\x1b[0m
+To restrict who can control your bot, you can add your Telegram user/chat ID.
+To find it: message @userinfobot on Telegram, it will reply with your ID.
+Leave blank to allow all users.
+`);
+
+  const chatId = (await ask("\x1b[36mYour Telegram chat ID (or press Enter to skip):\x1b[0m ")).trim();
+  if (chatId && /^\d+$/.test(chatId)) {
+    vault.set("TELEGRAM_CHAT_ID", chatId);
+    console.log(`\x1b[32mChat ID stored.\x1b[0m Only user ${chatId} can control the bot.`);
+  } else if (chatId) {
+    console.log("\x1b[33mInvalid chat ID (must be numeric). Skipped.\x1b[0m");
+  }
+
+  console.log(`
+\x1b[32mTelegram setup complete!\x1b[0m
+Use \x1b[36m/telegram start\x1b[0m to launch the bot, or it will auto-start next session.
+`);
+
+  return true;
+}
+
+// ============================================
 // Exports
 // ============================================
 
 export default {
   OnboardingManager,
   getDefaultUserConfig,
+  runTelegramSetup,
 };
