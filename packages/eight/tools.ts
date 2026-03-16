@@ -230,11 +230,11 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "write_file",
-          description: "Write content to a file (creates or overwrites)",
+          description: "Write content to a file (creates or overwrites). ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths like '/8gent-code/server.ts'.",
           parameters: {
             type: "object",
             properties: {
-              path: { type: "string", description: "Path to the file" },
+              path: { type: "string", description: "Relative path to the file (e.g. 'server.ts', NOT '/project/server.ts')" },
               content: { type: "string", description: "Content to write" }
             },
             required: ["path", "content"]
@@ -358,7 +358,7 @@ export class ToolExecutor {
             type: "object",
             properties: {
               task: { type: "string", description: "Task description for the background agent to execute" },
-              model: { type: "string", description: "Model to use (optional, default: same as current agent)" }
+              model: { type: "string", description: "Model to use (optional, default: same as current agent). Use 'auto:free' to automatically pick the best free model from OpenRouter." }
             },
             required: ["task"]
           }
@@ -511,7 +511,13 @@ export class ToolExecutor {
         return this.readFile(safe);
       }
       case "write_file": {
-        const safe = safePath(args.path as string, this.workingDirectory);
+        let writePath = args.path as string;
+        // Fix: models sometimes pass absolute-looking paths like "/8gent-code/server.ts"
+        // that aren't truly absolute (not inside workingDirectory). Strip to relative.
+        if (writePath.startsWith("/") && !writePath.startsWith(this.workingDirectory)) {
+          writePath = writePath.replace(/^\/+/, "");
+        }
+        const safe = safePath(writePath, this.workingDirectory);
         return this.writeFile(safe, args.content as string);
       }
       case "edit_file": {
@@ -1245,10 +1251,22 @@ export class ToolExecutor {
 
   private async handleSpawnAgent(task: string, model?: string): Promise<string> {
     try {
+      // Resolve "auto:free" to the best available free model via OpenRouter
+      let resolvedModel = model;
+      if (model === "auto:free") {
+        try {
+          const { resolveModel } = await import("../providers");
+          const resolved = await resolveModel(model);
+          resolvedModel = resolved.model;
+        } catch {
+          // Fall back to default if provider resolution fails
+          resolvedModel = undefined;
+        }
+      }
       const { getAgentPool } = await import("../orchestration");
       const pool = getAgentPool();
       const agent = await pool.spawnAgent(task, {
-        model: model || undefined,
+        model: resolvedModel || undefined,
         workingDirectory: this.workingDirectory,
       });
       return JSON.stringify({
