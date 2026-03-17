@@ -58,9 +58,14 @@
     "ollama": {
       "available": true,
       "models": [
+        "eight:latest",
+        "eight-1.0-q3:14b",
+        "eight-1-q-14b:latest",
+        "eight-1-qwen3-14b:latest",
+        "eight:0.1",
+        "qwen3:14b",
         "devstral:latest",
         "qwen3.5:latest",
-        "qwen3:14b",
         "nomic-embed-text:latest"
       ]
     },

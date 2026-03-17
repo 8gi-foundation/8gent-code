@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/*
+ * 8gent Dashboard Design Tokens
+ *
+ * Uses CSS custom properties so Tailwind classes reference semantic tokens.
+ * NEVER use raw gray/white/black — always go through these variables.
+ */
+:root {
+  --8gent-bg: #0a0a0f;
+  --8gent-bg-elevated: #12121a;
+  --8gent-bg-hover: #1a1a26;
+  --8gent-border: #2a2a3a;
+  --8gent-border-focus: #4a4a6a;
+  --8gent-text: #e4e4ef;
+  --8gent-text-secondary: #9898b0;
+  --8gent-text-muted: #5e5e78;
+  --8gent-accent: #6366f1;
+  --8gent-accent-hover: #818cf8;
+  --8gent-success: #22c55e;
+  --8gent-warning: #eab308;
+  --8gent-error: #ef4444;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--8gent-bg);
+  color: var(--8gent-text);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--8gent-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--8gent-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--8gent-border-focus);
+}

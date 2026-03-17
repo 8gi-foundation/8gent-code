@@ -188,7 +188,7 @@ const Logo = () => (
     <Gradient name="vice">
       <BigText text="8gent" font="chrome" />
     </Gradient>
-    <Text color="gray">Never hit usage caps again™</Text>
+    <Text dimColor>Never hit usage caps again™</Text>
   </Box>
 );
 
@@ -198,8 +198,8 @@ const ProgressBar = ({ progress, width = 40 }: { progress: number; width?: numbe
   return (
     <Box>
       <Text color="green">{"█".repeat(filled)}</Text>
-      <Text color="gray">{"░".repeat(empty)}</Text>
-      <Text color="white"> {Math.round(progress * 100)}%</Text>
+      <Text dimColor>{"░".repeat(empty)}</Text>
+      <Text bold> {Math.round(progress * 100)}%</Text>
     </Box>
   );
 };
@@ -215,19 +215,19 @@ const SystemCard = ({ info }: { info: SystemInfo }) => (
   >
     <Text color="cyan" bold>System Detected</Text>
     <Text>
-      <Text color="gray">Platform: </Text>
-      <Text color="white">{info.platform} ({info.arch})</Text>
+      <Text dimColor>Platform: </Text>
+      <Text bold>{info.platform} ({info.arch})</Text>
     </Text>
     <Text>
-      <Text color="gray">Memory:   </Text>
+      <Text dimColor>Memory:   </Text>
       <Text color={info.memoryGB >= 16 ? "green" : "yellow"}>{info.memoryGB}GB RAM</Text>
     </Text>
     <Text>
-      <Text color="gray">CPU:      </Text>
-      <Text color="white">{info.cpuModel}</Text>
+      <Text dimColor>CPU:      </Text>
+      <Text bold>{info.cpuModel}</Text>
     </Text>
     <Text>
-      <Text color="gray">GPU:      </Text>
+      <Text dimColor>GPU:      </Text>
       <Text color={info.gpuType !== "none" ? "green" : "yellow"}>
         {info.gpuType === "apple" ? "Apple Silicon (Metal)" :
          info.gpuType === "nvidia" ? "NVIDIA (CUDA)" :
@@ -235,7 +235,7 @@ const SystemCard = ({ info }: { info: SystemInfo }) => (
       </Text>
     </Text>
     <Text>
-      <Text color="gray">Ollama:   </Text>
+      <Text dimColor>Ollama:   </Text>
       <Text color={info.ollamaInstalled ? "green" : "yellow"}>
         {info.ollamaInstalled ? "Installed ✓" : "Not installed"}
       </Text>
@@ -246,11 +246,11 @@ const SystemCard = ({ info }: { info: SystemInfo }) => (
 const ModelCard = ({ model, recommended }: { model: ModelOption; recommended: boolean }) => (
   <Box flexDirection="column" marginLeft={2}>
     <Text>
-      <Text color="white">{model.label}</Text>
+      <Text bold>{model.label}</Text>
       {recommended && <Text color="green"> (Recommended)</Text>}
     </Text>
-    <Text color="gray">   {model.size} • Min {model.minRAM}GB RAM</Text>
-    <Text color="gray">   {model.description}</Text>
+    <Text dimColor>   {model.size} • Min {model.minRAM}GB RAM</Text>
+    <Text dimColor>   {model.description}</Text>
   </Box>
 );
 
@@ -477,7 +477,7 @@ const InstallerApp = () => {
               Welcome to <Text color="cyan" bold>8gent Code</Text> — the free, local AI coding assistant.
             </Text>
           </Box>
-          <Text color="gray" marginTop={1}>
+          <Text dimColor marginTop={1}>
             This wizard will set up everything you need:
           </Text>
           <Box flexDirection="column" marginY={1} marginLeft={2}>
@@ -506,7 +506,7 @@ const InstallerApp = () => {
         <Box flexDirection="column">
           <SystemCard info={systemInfo} />
 
-          <Text color="white" bold marginY={1}>
+          <Text bold marginY={1}>
             Select a coding model:
           </Text>
 
@@ -520,7 +520,7 @@ const InstallerApp = () => {
           />
 
           <Box marginTop={1}>
-            <Text color="gray">
+            <Text dimColor>
               {FALLBACK_MODELS.find(m => m.value === selectedModel)?.description}
             </Text>
           </Box>
@@ -548,7 +548,7 @@ const InstallerApp = () => {
               <Spinner type="dots" /> {statusMessage}
             </Text>
           </Box>
-          <Text color="gray">This may take a moment...</Text>
+          <Text dimColor>This may take a moment...</Text>
         </Box>
       )}
 
@@ -560,7 +560,7 @@ const InstallerApp = () => {
             </Text>
           </Box>
           <ProgressBar progress={downloadProgress} />
-          <Text color="gray" marginTop={1}>
+          <Text dimColor marginTop={1}>
             {downloadProgress < 1 ? "Downloading model weights..." : "Finalizing..."}
           </Text>
         </Box>
@@ -582,18 +582,18 @@ const InstallerApp = () => {
           </Text>
           <Box
             borderStyle="single"
-            borderColor="gray"
+            borderColor="cyan"
             paddingX={2}
             paddingY={1}
             marginY={1}
           >
             <Text color="cyan">npx 8gent-code</Text>
           </Box>
-          <Text color="gray" marginTop={1}>
-            Model: <Text color="white">{selectedModel}</Text>
+          <Text dimColor marginTop={1}>
+            Model: <Text bold>{selectedModel}</Text>
           </Text>
-          <Text color="gray">
-            Config: <Text color="white">~/.8gent/config.json</Text>
+          <Text dimColor>
+            Config: <Text bold>~/.8gent/config.json</Text>
           </Text>
           <Text color="yellow" marginTop={2}>
             Press <Text bold>Q</Text> to exit
@@ -613,7 +613,7 @@ const InstallerApp = () => {
             <Text color="red" bold>✗ Installation Failed</Text>
           </Box>
           <Text color="red" marginY={1}>{error}</Text>
-          <Text color="gray">
+          <Text dimColor>
             Please try again or install manually.
           </Text>
           <Text color="yellow" marginTop={2}>
