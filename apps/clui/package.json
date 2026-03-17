@@ -6,7 +6,8 @@
   "description": "8gent CLUI -- native desktop overlay for the 8gent autonomous coding agent",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "tauri": "tauri"
   },
