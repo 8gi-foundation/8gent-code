@@ -9,7 +9,7 @@
 import * as path from "path";
 import * as fs from "fs";
 
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -42,6 +42,7 @@ COMMANDS:
   demo          Show token savings demo
   tui           Launch interactive TUI
   infinite      Run task in autonomous infinite mode
+  auth          Authentication (login, logout, status, whoami)
 
 OPTIONS:
   -h, --help     Show this help message
@@ -135,6 +136,10 @@ async function main() {
 
     case "infinite":
       await infiniteCommand(restArgs);
+      break;
+
+    case "auth":
+      await authCommand(restArgs);
       break;
 
     default:
@@ -443,6 +448,104 @@ async function infiniteCommand(args: string[]) {
   } catch (err) {
     console.error("Failed to run infinite mode:", err);
     process.exit(1);
+  }
+}
+
+async function authCommand(args: string[]) {
+  const subcommand = args[0] || "help";
+
+  switch (subcommand) {
+    case "login": {
+      console.log("Authenticating with 8gent...\n");
+
+      const { login } = await import("../packages/auth");
+
+      const state = await login({
+        onDeviceCode: (code, uri) => {
+          console.log("Opening browser for authentication...\n");
+          console.log(`  If the browser doesn't open, visit:`);
+          console.log(`  ${uri}\n`);
+          console.log(`  Enter code: ${code}\n`);
+          console.log("Waiting for approval...");
+        },
+        onPollAttempt: (attempt) => {
+          process.stdout.write(`\rPolling... (attempt ${attempt})`);
+        },
+        onLoginSuccess: (user) => {
+          console.log(`\n\nLogged in as @${user.githubUsername} (${user.plan} plan)`);
+          console.log(`Email: ${user.email}`);
+        },
+        onLoginError: (error) => {
+          console.error(`\nLogin failed: ${error}`);
+        },
+      });
+
+      if (state.state !== "authenticated") {
+        process.exit(1);
+      }
+      break;
+    }
+
+    case "logout": {
+      const { logout } = await import("../packages/auth");
+      await logout();
+      console.log("Logged out successfully.");
+      break;
+    }
+
+    case "status": {
+      const { initAuth } = await import("../packages/auth");
+      const state = await initAuth();
+
+      if (state.state === "authenticated") {
+        const { user, tokenExpiresAt } = state;
+        console.log(`Logged in as @${user.githubUsername}`);
+        console.log(`  Email:   ${user.email}`);
+        console.log(`  Plan:    ${user.plan}`);
+        console.log(`  Name:    ${user.displayName}`);
+
+        const expiresIn = tokenExpiresAt - Date.now();
+        if (expiresIn > 0) {
+          const hours = Math.floor(expiresIn / (1000 * 60 * 60));
+          const minutes = Math.floor((expiresIn % (1000 * 60 * 60)) / (1000 * 60));
+          console.log(`  Token:   expires in ${hours}h ${minutes}m`);
+        } else {
+          console.log(`  Token:   expired (will refresh on next use)`);
+        }
+      } else {
+        console.log("Not logged in.");
+        console.log("Run `8gent auth login` to authenticate with GitHub.");
+      }
+      break;
+    }
+
+    case "whoami": {
+      const { initAuth } = await import("../packages/auth");
+      const state = await initAuth();
+
+      if (state.state === "authenticated") {
+        console.log(`@${state.user.githubUsername} (${state.user.plan})`);
+      } else {
+        console.log("anonymous");
+      }
+      break;
+    }
+
+    case "help":
+    default:
+      console.log(`
+8gent auth — Authentication Commands
+
+USAGE:
+  8gent auth <subcommand>
+
+SUBCOMMANDS:
+  login     Authenticate with GitHub (device code flow)
+  logout    Clear stored credentials
+  status    Show current auth state and usage
+  whoami    Quick identity check (one line)
+`);
+      break;
   }
 }
 

@@ -1,0 +1,186 @@
+/**
+ * 8gent CLUI Design Tokens
+ *
+ * Mapped from apps/tui/src/theme/tokens.ts and semantic.ts.
+ * The 6 safe ANSI colors are the foundation -- no gray, white, or black
+ * are hardcoded. Surface and text colors use theme-aware custom properties
+ * that swap between dark and light modes.
+ */
+
+@import "tailwindcss";
+
+@theme {
+  --color-surface-primary: var(--bg-primary);
+  --color-surface-secondary: var(--bg-secondary);
+  --color-surface-elevated: var(--bg-elevated);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--text-accent);
+  --color-brand: var(--text-brand);
+  --color-success: var(--text-success);
+  --color-warning: var(--text-warning);
+  --color-danger: var(--text-danger);
+  --color-info: var(--text-info);
+  --color-muted: var(--text-muted);
+  --color-8-red: var(--color-red);
+  --color-8-green: var(--color-green);
+  --color-8-yellow: var(--color-yellow);
+  --color-8-blue: var(--color-blue);
+  --color-8-magenta: var(--color-magenta);
+  --color-8-cyan: var(--color-cyan);
+  --color-border-default: var(--border-default);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-accent: var(--border-accent);
+  --color-overlay: var(--overlay-bg);
+}
+
+/* ── Raw Color Tokens ─────────────────────────────────────────── */
+
+:root {
+  --color-red: #ef4444;
+  --color-green: #22c55e;
+  --color-yellow: #eab308;
+  --color-blue: #3b82f6;
+  --color-magenta: #a855f7;
+  --color-cyan: #06b6d4;
+}
+
+/* ── Dark Theme (Default) ─────────────────────────────────────── */
+
+.dark {
+  --bg-primary: #0c0e14;
+  --bg-secondary: #141620;
+  --bg-elevated: #1a1d2e;
+
+  --text-primary: #e2e4ef;
+  --text-secondary: #8b8fa3;
+  --text-muted: #5c6078;
+
+  /* Semantic text */
+  --text-accent: var(--color-cyan);
+  --text-brand: var(--color-magenta);
+  --text-success: var(--color-green);
+  --text-warning: var(--color-yellow);
+  --text-danger: var(--color-red);
+  --text-info: var(--color-blue);
+
+  /* Borders */
+  --border-default: #2a2d3e;
+  --border-subtle: #1e2030;
+  --border-accent: var(--color-cyan);
+  --border-danger: var(--color-red);
+  --border-success: var(--color-green);
+
+  /* Overlay */
+  --overlay-bg: rgba(12, 14, 20, 0.95);
+}
+
+/* ── Light Theme ──────────────────────────────────────────────── */
+
+.light {
+  --bg-primary: #f8f9fc;
+  --bg-secondary: #eef0f5;
+  --bg-elevated: #ffffff;
+
+  --text-primary: #1a1d2e;
+  --text-secondary: #5c6078;
+  --text-muted: #8b8fa3;
+
+  --text-accent: #0891b2;
+  --text-brand: #9333ea;
+  --text-success: #16a34a;
+  --text-warning: #ca8a04;
+  --text-danger: #dc2626;
+  --text-info: #2563eb;
+
+  --border-default: #d1d5e0;
+  --border-subtle: #e5e7ee;
+  --border-accent: #0891b2;
+  --border-danger: #dc2626;
+  --border-success: #16a34a;
+
+  --overlay-bg: rgba(248, 249, 252, 0.95);
+}
+
+/* ── Base Styles ──────────────────────────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family:
+    "Berkeley Mono",
+    "JetBrains Mono",
+    "Fira Code",
+    Menlo,
+    Monaco,
+    monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar Styling ────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Selection ────────────────────────────────────────────────── */
+
+::selection {
+  background: color-mix(in srgb, var(--color-cyan) 30%, transparent);
+  color: var(--text-primary);
+}
+
+/* ── Reduced Motion ───────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Custom Title Bar Drag Region ─────────────────────────────── */
+
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+}
+
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] a {
+  -webkit-app-region: no-drag;
+}

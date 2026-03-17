@@ -9,7 +9,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-03-17
+
+### Added
+- **`apps/clui/` — Tauri 2.0 desktop overlay** — branded 8gent desktop app with Alt+Space toggle, multi-tab sessions, transparent floating overlay, Rust backend for process management, React 19 frontend with Tailwind CSS 4, real-time NDJSON streaming from agent subprocess, permission server for human-in-the-loop tool approval
+- **`packages/auth/` — Clerk authentication** — device code flow for CLI login (`8gent auth login`), macOS Keychain token storage with AES-256-GCM encrypted file fallback, JWT validation via `jose`, automatic token refresh, non-blocking anonymous mode (auth never blocks local usage)
+- **`packages/db/` — Convex database** — reactive database with users, sessions, usage, and preferences tables; real-time sync; Clerk auth integration; offline mutation queuing; ConvexClient wrapper for Bun
+- **`packages/voice/` — Speech-to-Text via Whisper** — local transcription via whisper.cpp CLI (no cloud dependency), sox-based mic recording, model manager with streaming downloads from Hugging Face (tiny/base/small), voice activity detection, OpenAI Whisper API cloud fallback, VoiceEngine with EventEmitter API
+- **`packages/control-plane/` — Multi-tenant management** — tenant provisioning with subdomain routing (username.8gent.app), usage analytics, billing plan definitions (free/pro/team), Stripe integration stubs, admin dashboard data layer
+- **`apps/dashboard/` — Admin dashboard** — Next.js 16 admin panel with Clerk auth + RBAC, user management with search/filter, session monitoring, usage charts (recharts), system health, model distribution, plan management
+- **CLUI integration components** — ThinkingView, EvidencePanel, PlanKanban, AuthGate, SettingsPanel adapted from TUI to React DOM with Framer Motion animations
+- **TUI voice components** — `useVoiceInput` hook (Ctrl+Space toggle) and `VoiceIndicator` component with recording status, audio levels, and download progress
+- **CLI auth commands** — `8gent auth login`, `8gent auth logout`, `8gent auth status`, `8gent auth whoami`
+- **20 BMAD planning documents** — project briefs, PRDs, architecture docs, and epics for all 5 phases across `docs/bmad/`
+
 ### Fixed
+- **Installer color violations** — replaced forbidden `color="gray"` and `color="white"` with `dimColor` and default text in `apps/installer/src/index.tsx`
 - **write_file path bug** — models sometimes pass absolute-looking paths like `/8gent-code/server.ts` that resolve outside the working directory; these are now auto-stripped to relative paths instead of throwing a path-traversal error; tool description and system prompt updated to instruct models to use relative paths
 
 ### Added

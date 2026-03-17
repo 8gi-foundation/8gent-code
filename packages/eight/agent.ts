@@ -171,6 +171,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       environment: env,
     });
 
+    // Fire-and-forget: Track session in Convex (if authenticated)
+    this._trackSessionStart(config.model, config.runtime);
+
     // Populate git info asynchronously
     import("child_process").then(({ exec }) => {
       exec("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000 }, (err, stdout) => {
@@ -914,7 +917,44 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     return this.heartbeat;
   }
 
+  // ── Convex Session Tracking ──────────────────────────────────────
+  private _convexSessionId: string | null = null;
+
+  private async _trackSessionStart(model: string, runtime: string): Promise<void> {
+    try {
+      const { getConvexClient } = await import("../../packages/db/client.js");
+      const client = getConvexClient();
+      // @ts-ignore — dynamic import of Convex API
+      const { api } = await import("../../packages/db/convex/_generated/api.js");
+      const result = await client.mutation(api.sessions.start, {
+        model: model || "unknown",
+        provider: runtime || "ollama",
+      });
+      if (result) this._convexSessionId = result;
+    } catch {
+      // DB not available — silent, never blocks agent
+    }
+  }
+
+  private async _trackSessionEnd(): Promise<void> {
+    if (!this._convexSessionId) return;
+    try {
+      const { getConvexClient } = await import("../../packages/db/client.js");
+      const client = getConvexClient();
+      const { api } = await import("../../packages/db/convex/_generated/api.js");
+      await client.mutation(api.sessions.end, {
+        sessionId: this._convexSessionId,
+        tokensUsed: this.totalTokensUsed || 0,
+        toolCalls: this.turnNumber || 0,
+      });
+    } catch {
+      // Silent — never blocks cleanup
+    }
+  }
+
   async cleanup(): Promise<void> {
+    // Track session end in Convex
+    await this._trackSessionEnd().catch(() => {});
     // Stop heartbeat agents
     this.heartbeat.stop();
 

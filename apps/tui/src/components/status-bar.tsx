@@ -63,6 +63,14 @@ export interface EnhancedStatusBarProps {
 
   // ADHD mode
   adhdMode?: boolean;
+
+  // Auth status
+  authStatus?: "unknown" | "anonymous" | "authenticated" | "error";
+  authUser?: { displayName: string; plan: string } | null;
+
+  // Voice status
+  voiceState?: "idle" | "recording" | "transcribing" | "downloading";
+  voiceEnabled?: boolean;
 }
 
 // Legacy interface for backward compatibility
@@ -96,6 +104,10 @@ export function EnhancedStatusBar({
   showBorder = true,
   showAnimations = true,
   adhdMode = false,
+  authStatus,
+  authUser,
+  voiceState,
+  voiceEnabled = false,
 }: EnhancedStatusBarProps) {
   const [elapsed, setElapsed] = useState("0:00");
 
@@ -175,13 +187,25 @@ export function EnhancedStatusBar({
         )}
       </Inline>
 
-      {/* Right section: Tokens, Branch, Time */}
+      {/* Right section: Tokens, Branch, Auth, Voice, Time */}
       <Inline gap={1}>
         <TokenSavingsItem saved={tokensSaved} percentage={savings} />
         {currentBranch && (
           <>
             <Separator />
             <GitBranchItem branch={currentBranch} hasChanges={hasUncommittedChanges} />
+          </>
+        )}
+        {authStatus && authStatus !== "unknown" && (
+          <>
+            <Separator />
+            <AuthStatusItem status={authStatus} user={authUser} />
+          </>
+        )}
+        {voiceEnabled && (
+          <>
+            <Separator />
+            <VoiceStatusItem state={voiceState || "idle"} />
           </>
         )}
         <Separator />
@@ -273,6 +297,25 @@ function ElapsedTimeItem({ time }: { time: string }) {
       {"\u23F1"} {time}
     </MutedText>
   );
+}
+
+function AuthStatusItem({ status, user }: { status: string; user?: { displayName: string; plan: string } | null }) {
+  if (status === "authenticated" && user) {
+    return (
+      <Badge label={`\u2713 ${user.displayName}`} color="green" variant="outline" />
+    );
+  }
+  return <MutedText>{"\u25CB"} Guest</MutedText>;
+}
+
+function VoiceStatusItem({ state }: { state: string }) {
+  if (state === "recording") {
+    return <Badge label={"\u25CF REC"} color="red" variant="outline" />;
+  }
+  if (state === "transcribing") {
+    return <Badge label={"\u2026 STT"} color="cyan" variant="outline" />;
+  }
+  return <MutedText>{"\u25CB"} Mic</MutedText>;
 }
 
 function PlanStatusItem({
