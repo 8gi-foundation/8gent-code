@@ -1,0 +1,9 @@
+{
+  "name": "@8gent/control-plane",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.ts",
+  "dependencies": {
+    "@8gent/db": "workspace:*"
+  }
+}

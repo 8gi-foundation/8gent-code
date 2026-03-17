@@ -65,5 +65,34 @@
       "packages/permissions/index.ts:checkPermission",
       "packages/permissions/index.ts:isDangerous"
     ]
+  },
+
+  "auth": {
+    "enabled": true,
+    "allowAnonymous": true,
+    "clerkPublishableKey": "",
+    "deviceAuthEndpoint": "https://8gent.app/api/auth/device",
+    "tokenEndpoint": "https://8gent.app/api/auth/token"
+  },
+
+  "db": {
+    "convexUrl": "",
+    "offlineMode": true,
+    "syncOnLogin": true
+  },
+
+  "voice": {
+    "enabled": false,
+    "mode": "local",
+    "model": "base",
+    "vadEnabled": false,
+    "silenceThresholdMs": 2000,
+    "maxRecordingMs": 30000
+  },
+
+  "controlPlane": {
+    "enabled": false,
+    "adminDashboardPort": 3001,
+    "tenantId": "default"
   }
 }
