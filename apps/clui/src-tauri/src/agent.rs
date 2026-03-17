@@ -198,7 +198,7 @@ impl AgentManager {
                                     session_id: sid.clone(),
                                     event,
                                 };
-                                let _ = app_handle.emit("agent_event", &payload);
+                                let _ = app_handle.emit_to("main", "agent_event", &payload);
                             }
                             Err(_) => {
                                 // Not valid JSON — treat as plain text output
@@ -209,7 +209,7 @@ impl AgentManager {
                                         data: serde_json::json!({"content": line}),
                                     },
                                 };
-                                let _ = app_handle.emit("agent_event", &payload);
+                                let _ = app_handle.emit_to("main", "agent_event", &payload);
                             }
                         }
                     }
@@ -222,7 +222,7 @@ impl AgentManager {
             }
 
             // Process has ended
-            let _ = app_handle.emit(
+            let _ = app_handle.emit_to("main",
                 "agent_event",
                 &SessionEvent {
                     session_id: sid.clone(),
@@ -245,7 +245,7 @@ impl AgentManager {
                         if !line.trim().is_empty() {
                             eprintln!("[session {} stderr] {}", sid_err, line);
                             // Forward stderr as system messages
-                            let _ = app_err.emit(
+                            let _ = app_err.emit_to("main",
                                 "agent_event",
                                 &SessionEvent {
                                     session_id: sid_err.clone(),
@@ -264,7 +264,7 @@ impl AgentManager {
         self.sessions.insert(session_id.clone(), session);
 
         // Notify frontend that session is ready
-        let _ = app.emit(
+        let _ = app.emit_to("main",
             "agent_event",
             &SessionEvent {
                 session_id: session_id.clone(),
