@@ -1,137 +1,109 @@
 /**
- * 8gent CLUI Bridge
+ * 8gent CLUI Bridge — Streaming
  *
- * Runs the Agent in NDJSON mode for the CLUI desktop app.
- * Reads prompts from stdin (one per line), writes NDJSON events to stdout.
- *
- * Usage: EIGHT_CLUI_MODE=true bun run packages/eight/clui-bridge.ts
- *
- * Events emitted (one JSON object per line):
- *   { type: "session_start", model, cwd }
- *   { type: "thinking", content }
- *   { type: "text", content }
- *   { type: "tool_start", toolName, args, toolCallId }
- *   { type: "tool_end", toolName, success, resultPreview, durationMs }
- *   { type: "assistant_message", content }
- *   { type: "error", message }
- *   { type: "session_end", reason }
+ * Talks directly to Ollama API with streaming responses.
+ * Reads prompts from stdin, writes NDJSON to stdout.
+ * Tokens appear in real-time as they're generated.
  */
 
 import * as readline from "readline";
-import { Agent } from "./agent.js";
-import type { AgentConfig } from "./types.js";
 
 function emit(event: Record<string, any>) {
   process.stdout.write(JSON.stringify(event) + "\n");
 }
 
+const model = process.env.EIGHT_MODEL || "eight:latest";
+const sessionId = process.env.EIGHT_SESSION_ID || `clui_${Date.now()}`;
+const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
+
+const history: Array<{ role: string; content: string }> = [
+  {
+    role: "system",
+    content: `You are Eight, the infinite gentleman — an autonomous coding agent. Refined, witty, confident, endlessly capable. Dry British wit. Help users write code, fix bugs, build software. Be concise.`,
+  },
+];
+
+async function chatStream(prompt: string): Promise<string> {
+  history.push({ role: "user", content: prompt });
+
+  const res = await fetch(`${ollamaUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: history,
+      stream: true,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+  }
+
+  // Read the NDJSON stream line by line
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let fullContent = "";
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const chunk = JSON.parse(line);
+        if (chunk.message?.content) {
+          fullContent += chunk.message.content;
+          // Emit each token as streaming text
+          emit({ type: "text", content: chunk.message.content });
+        }
+        if (chunk.done) {
+          // Stream complete
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  history.push({ role: "assistant", content: fullContent });
+  return fullContent;
+}
+
 async function main() {
-  const model = process.env.EIGHT_MODEL || "eight:latest";
-  const sessionId = process.env.EIGHT_SESSION_ID || `clui_${Date.now()}`;
-  const runtime = (process.env.EIGHT_RUNTIME || "ollama") as "ollama" | "lmstudio" | "openrouter";
-  const cwd = process.cwd();
-
-  emit({ type: "session_start", model, cwd, sessionId });
-
-  // Create the agent with event callbacks that emit NDJSON
-  const agent = new Agent({
-    model,
-    runtime,
-    workingDirectory: cwd,
-    maxTurns: 50,
-    apiKey: process.env.OPENROUTER_API_KEY,
-    events: {
-      onToolStart: (event) => {
-        emit({
-          type: "tool_start",
-          toolName: event.toolName,
-          args: event.args,
-          toolCallId: event.toolCallId,
-        });
-      },
-      onToolEnd: (event) => {
-        emit({
-          type: "tool_end",
-          toolName: event.toolName,
-          success: event.success,
-          resultPreview: event.resultPreview?.slice(0, 200),
-          durationMs: event.durationMs,
-          toolCallId: event.toolCallId,
-        });
-      },
-      onStep: (event) => {
-        emit({
-          type: "step",
-          stepNumber: event.stepNumber,
-          totalSteps: event.totalSteps,
-        });
-      },
-      onEvidence: (event) => {
-        emit({
-          type: "evidence",
-          evidence: {
-            type: event.evidence.type,
-            description: event.evidence.description,
-            verified: event.evidence.verified,
-          },
-        });
-      },
-      onEvidenceSummary: (event) => {
-        emit({
-          type: "evidence_summary",
-          total: event.total,
-          verified: event.verified,
-          failed: event.failed,
-        });
-      },
-    },
-  });
-
-  // Read prompts from stdin, line by line
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: false,
-  });
-
+  emit({ type: "session_start", model, cwd: process.cwd(), sessionId });
   emit({ type: "ready", message: "Agent ready. Send prompts via stdin." });
+
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
   rl.on("line", async (line: string) => {
     const prompt = line.trim();
     if (!prompt) return;
 
-    emit({ type: "thinking", content: "Processing..." });
+    emit({ type: "thinking", content: "" });
 
     try {
-      const response = await agent.chat(prompt);
-      emit({
-        type: "assistant_message",
-        content: response,
-      });
+      const response = await chatStream(prompt);
+      emit({ type: "assistant_message", content: response });
     } catch (err: any) {
-      emit({
-        type: "error",
-        message: err.message || String(err),
-      });
+      emit({ type: "error", message: err.message || String(err) });
     }
   });
 
-  rl.on("close", async () => {
+  rl.on("close", () => {
     emit({ type: "session_end", reason: "stdin closed" });
-    await agent.cleanup().catch(() => {});
     process.exit(0);
   });
 
-  // Handle graceful shutdown
-  process.on("SIGTERM", async () => {
+  process.on("SIGTERM", () => {
     emit({ type: "session_end", reason: "SIGTERM" });
-    await agent.cleanup().catch(() => {});
-    process.exit(0);
-  });
-
-  process.on("SIGINT", async () => {
-    emit({ type: "session_end", reason: "SIGINT" });
-    await agent.cleanup().catch(() => {});
     process.exit(0);
   });
 }
