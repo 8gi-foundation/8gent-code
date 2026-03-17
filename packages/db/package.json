@@ -1,0 +1,30 @@
+{
+  "name": "@8gent/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Convex database layer for 8gent Code — user accounts, session tracking, usage analytics, preference sync",
+  "main": "client.ts",
+  "types": "client.ts",
+  "exports": {
+    ".": {
+      "import": "./client.ts",
+      "types": "./client.ts"
+    },
+    "./types": {
+      "import": "./types.ts",
+      "types": "./types.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "npx convex dev",
+    "deploy": "npx convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}
