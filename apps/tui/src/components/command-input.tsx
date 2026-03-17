@@ -68,7 +68,8 @@ export type SlashCommand =
   | "toolshed"
   | "skills"
   | "design"
-  | "evidence";
+  | "evidence"
+  | "auth";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -214,6 +215,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["ev", "proof"],
     description: "Show full evidence breakdown for this session",
     usage: "/evidence",
+  },
+  {
+    name: "auth",
+    aliases: ["login", "account"],
+    description: "Authentication (login, logout, status)",
+    usage: "/auth [login|logout|status]",
   },
 ];
 

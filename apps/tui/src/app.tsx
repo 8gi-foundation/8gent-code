@@ -58,6 +58,34 @@ import { narrateToolStart, narrateToolEnd, narratePlan, narrateStep } from "./li
 import { useViewport } from "./hooks/useViewport.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { ThinkingView } from "./components/ThinkingView.js";
+import { VoiceIndicator } from "./components/VoiceIndicator.js";
+import { useVoiceInput } from "./hooks/useVoiceInput.js";
+
+// Import auth + DB systems (lazy, non-blocking)
+let authManager: any = null;
+let convexClient: any = null;
+
+async function initAuthSystem() {
+  try {
+    const { getAuthManager, initAuth } = await import("../../../packages/auth/index.js");
+    const state = await initAuth();
+    authManager = getAuthManager();
+
+    // If authenticated, wire up Convex
+    if (state.status === "authenticated") {
+      try {
+        const { getConvexClient } = await import("../../../packages/db/client.js");
+        convexClient = getConvexClient();
+        convexClient.setAuth(async () => authManager?.getAccessToken?.() ?? null);
+      } catch {}
+    }
+
+    return state;
+  } catch {
+    // Auth packages not available — anonymous mode
+    return { status: "anonymous" as const };
+  }
+}
 
 // Import permission system for infinite mode
 import {
@@ -236,6 +264,23 @@ export function App({ initialCommand, args }: AppProps) {
   // tokensSaved removed — using real totalTokens from agent events
   const [startTime] = useState(new Date());
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
+
+  // Auth state (non-blocking)
+  const [authStatus, setAuthStatus] = useState<"unknown" | "anonymous" | "authenticated" | "error">("unknown");
+  const [authUser, setAuthUser] = useState<{ displayName: string; plan: string } | null>(null);
+
+  // Voice input
+  const voice = useVoiceInput();
+
+  // Initialize auth on mount (fire-and-forget, never blocks)
+  useEffect(() => {
+    initAuthSystem().then((state) => {
+      setAuthStatus(state.status === "authenticated" ? "authenticated" : "anonymous");
+      if (state.status === "authenticated" && "user" in state) {
+        setAuthUser({ displayName: (state as any).user?.displayName ?? "User", plan: (state as any).user?.plan ?? "free" });
+      }
+    }).catch(() => setAuthStatus("anonymous"));
+  }, []);
 
   // Animation settings
   const [showAnimations, setShowAnimations] = useState(true);
@@ -784,6 +829,8 @@ export function App({ initialCommand, args }: AppProps) {
               "  /avenues - Show planned avenues\n" +
               "  /design [task] - Get design system suggestions\n" +
               "  /evidence - Show full evidence breakdown\n" +
+              "  /auth [login|logout|status] - Authentication\n" +
+              "  /voice record - Toggle voice input (Ctrl+Space)\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
               "  /clear - Clear messages\n" +
@@ -1017,8 +1064,61 @@ export function App({ initialCommand, args }: AppProps) {
           addSystemMessage(evLines.join("\n"));
           break;
 
+        case "voice":
+          // Enhanced voice command — toggle STT recording
+          if (args[0] === "record" || args[0] === "listen" || args[0] === "stt") {
+            voice.toggleVoice();
+            addSystemMessage(
+              voice.state === "recording"
+                ? "Voice recording stopped."
+                : "Voice recording started. Speak now... (Ctrl+Space to stop)"
+            );
+          } else if (args[0] === "status") {
+            const status = voice.isAvailable
+              ? `Voice: Available (model: ${voice.modelName || "base"})`
+              : `Voice: Not available — ${voice.error || "sox/whisper not found"}`;
+            addSystemMessage(status);
+          } else {
+            addSystemMessage(
+              "Voice commands:\n" +
+              "  /voice record  — Toggle STT recording (Ctrl+Space)\n" +
+              "  /voice status  — Check voice system status\n" +
+              "  /voice on|off  — Toggle TTS output"
+            );
+          }
+          break;
+
         // Model selection - check if args provided
         default:
+          // Handle /auth command
+          if ((command as string) === "auth") {
+            const sub = args[0] || "status";
+            if (sub === "login") {
+              addSystemMessage("Starting auth flow... Opening browser.");
+              initAuthSystem().then((state) => {
+                if (state.status === "authenticated") {
+                  setAuthStatus("authenticated");
+                  if ("user" in state) {
+                    setAuthUser({ displayName: (state as any).user?.displayName ?? "User", plan: (state as any).user?.plan ?? "free" });
+                  }
+                  addSystemMessage(`Authenticated as ${(state as any).user?.displayName || "User"}`);
+                } else {
+                  addSystemMessage("Auth failed or cancelled. Running in anonymous mode.");
+                }
+              });
+            } else if (sub === "logout") {
+              authManager?.logout?.();
+              setAuthStatus("anonymous");
+              setAuthUser(null);
+              addSystemMessage("Logged out. Running in anonymous mode.");
+            } else {
+              addSystemMessage(
+                `Auth Status: ${authStatus}\n` +
+                (authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : "") +
+                "\nCommands: /auth login, /auth logout"
+              );
+            }
+          }
           // Handle /model command
           if (command === "model" as any) {
             if (args.length > 0) {
@@ -1722,6 +1822,10 @@ export function App({ initialCommand, args }: AppProps) {
           planStepsTotal={stepCount}
           showAnimations={showAnimations}
           adhdMode={adhdMode}
+          authStatus={authStatus}
+          authUser={authUser}
+          voiceState={voice.state}
+          voiceEnabled={voice.isAvailable}
         />
       ) : (
         <StatusBar
