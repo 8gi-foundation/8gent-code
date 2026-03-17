@@ -4,34 +4,13 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
-// ── Tauri API (lazy-loaded, falls back gracefully in browser) ───
-let invoke: ((cmd: string, args?: any) => Promise<any>) | null = null;
-let listen: ((event: string, handler: (e: any) => void) => Promise<() => void>) | null = null;
-let tauriWindow: any = null;
-
-async function loadTauri() {
-  try {
-    const core = await import("@tauri-apps/api/core");
-    invoke = core.invoke;
-    const events = await import("@tauri-apps/api/event");
-    listen = events.listen;
-
-    // Test if invoke actually works by calling list_sessions
-    await invoke("list_sessions");
-    console.log("[CLUI] Tauri IPC confirmed working");
-
-    try {
-      const win = await import("@tauri-apps/api/window");
-      tauriWindow = win.getCurrentWindow();
-    } catch {}
-
-    return true;
-  } catch (err) {
-    console.log("[CLUI] Tauri IPC not available:", err);
-    return false;
-  }
-}
+// ── Tauri Detection ─────────────────────────────────────────────
+const IS_TAURI = !!(window as any).__TAURI_INTERNALS__;
+const tauriWindow = IS_TAURI ? getCurrentWindow() : null;
 
 // ── Theme System ────────────────────────────────────────────────
 const themes = {
@@ -132,10 +111,9 @@ export function App() {
     let unlisten: (() => void) | null = null;
 
     async function init() {
-      const hasTauri = await loadTauri();
-      setIsTauri(hasTauri);
+      setIsTauri(IS_TAURI);
 
-      if (hasTauri && invoke && listen) {
+      if (IS_TAURI) {
         // Listen for agent events
         unlisten = await listen("agent_event", (event: any) => {
           const payload = event.payload as { session_id: string; event: { type: string; [key: string]: any } };
@@ -206,15 +184,18 @@ export function App() {
 
         // Create initial session
         try {
+          addMsg("system", "∞ 8gent CLUI — The Infinite Gentleman");
+          addMsg("system", "Creating agent session...");
           const sid = await invoke("create_session", {
             model: currentModel,
-            cwd: null, // Uses repo root
+            cwd: null,
           });
-          setSessionId(sid);
-          addMsg("system", "∞ 8gent CLUI — The Infinite Gentleman");
-          addMsg("system", "Session created. Ask anything or use /theme to switch modes.");
+          setSessionId(sid as string);
+          addMsg("system", `Session ${sid} created. Connected to ${currentModel}.`);
         } catch (err: any) {
-          addMsg("system", `Failed to create session: ${err}`);
+          const errMsg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
+          addMsg("system", `Session creation failed: ${errMsg}`);
+          addMsg("system", "Falling back to preview mode. Check terminal for errors.");
         }
       } else {
         // Browser preview mode — mock
@@ -253,15 +234,28 @@ export function App() {
     const text = input.trim();
     setInput("");
 
+    // Handle /connect — retry session creation
+    if (text === "/connect") {
+      addMsg("system", "Attempting to create session...");
+      setInput("");
+      try {
+        const sid = await invoke("create_session", { model: currentModel, cwd: null });
+        setSessionId(sid as string);
+        setIsConnected(true);
+        addMsg("system", `Connected! Session: ${sid}`);
+      } catch (err: any) {
+        const errMsg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
+        addMsg("system", `Connection failed: ${errMsg}`);
+      }
+      return;
+    }
+
     // Handle /debug command
     if (text === "/debug") {
-      const hasTauri = !!(window as any).__TAURI_INTERNALS__;
-      const hasTauri2 = !!(window as any).__TAURI__;
       addMsg("system", [
-        `__TAURI_INTERNALS__: ${hasTauri}`,
-        `__TAURI__: ${hasTauri2}`,
-        `invoke loaded: ${!!invoke}`,
-        `listen loaded: ${!!listen}`,
+        `IS_TAURI: ${IS_TAURI}`,
+        `invoke: ${typeof invoke}`,
+        `listen: ${typeof listen}`,
         `isTauri state: ${isTauri}`,
         `sessionId: ${sessionId}`,
         `isConnected: ${isConnected}`,
@@ -287,7 +281,7 @@ export function App() {
     // Add user message
     addMsg("user", text);
 
-    if (isTauri && invoke && sessionId) {
+    if (isTauri && sessionId) {
       // Send to real agent via Tauri IPC
       setIsProcessing(true);
       setStreamingText("");

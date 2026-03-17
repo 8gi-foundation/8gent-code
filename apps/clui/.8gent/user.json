@@ -1,0 +1,78 @@
+{
+  "version": "0.1.0",
+  "onboardingComplete": false,
+  "completedSteps": [
+    "identity"
+  ],
+  "lastPrompted": "2026-03-17T09:41:12.783Z",
+  "promptCount": 1,
+  "identity": {
+    "name": "hi there",
+    "role": null,
+    "communicationStyle": null,
+    "language": "en"
+  },
+  "projects": {
+    "primary": null,
+    "all": [],
+    "descriptions": {}
+  },
+  "preferences": {
+    "voice": {
+      "enabled": false,
+      "engine": null,
+      "voiceId": null
+    },
+    "model": {
+      "default": null,
+      "provider": null,
+      "fallbacks": [],
+      "preferLocal": true
+    },
+    "git": {
+      "autoPush": false,
+      "autoCommit": true,
+      "branchPrefix": "8gent/",
+      "commitStyle": "conventional"
+    },
+    "autonomy": {
+      "askThreshold": "fatal-only",
+      "infiniteByDefault": false
+    }
+  },
+  "integrations": {
+    "github": {
+      "authenticated": false,
+      "username": null
+    },
+    "mcps": [],
+    "ollama": {
+      "available": true,
+      "models": [
+        "eight:latest",
+        "eight-1.0-q3:14b",
+        "eight-1-q-14b:latest",
+        "eight-1-qwen3-14b:latest",
+        "eight:0.1",
+        "qwen3:14b",
+        "devstral:latest",
+        "qwen3.5:latest",
+        "nomic-embed-text:latest"
+      ]
+    },
+    "lmstudio": {
+      "available": false,
+      "models": []
+    }
+  },
+  "understanding": {
+    "confidenceScore": 0,
+    "areasUnclear": [
+      "identity",
+      "projects",
+      "preferences",
+      "integrations"
+    ],
+    "lastUpdated": null
+  }
+}
