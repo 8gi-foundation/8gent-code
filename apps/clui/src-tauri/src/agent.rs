@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
@@ -56,6 +56,67 @@ impl AgentManager {
         }
     }
 
+    /// Resolve the repo root from CARGO_MANIFEST_DIR (compile-time) or env override.
+    fn resolve_repo_root() -> std::path::PathBuf {
+        // 1. Env override (set by user or build config)
+        if let Ok(root) = std::env::var("EIGHT_REPO_ROOT") {
+            let p = std::path::PathBuf::from(&root);
+            if p.join("packages/eight/clui-bridge.ts").exists() {
+                return p;
+            }
+        }
+
+        // 2. Compile-time: CARGO_MANIFEST_DIR = apps/clui/src-tauri → go up 3 levels
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let from_manifest = manifest_dir
+            .parent() // apps/clui
+            .and_then(|p| p.parent()) // apps
+            .and_then(|p| p.parent()); // repo root
+        if let Some(root) = from_manifest {
+            if root.join("packages/eight/clui-bridge.ts").exists() {
+                return root.to_path_buf();
+            }
+        }
+
+        // 3. Walk up from current_dir looking for packages/eight/clui-bridge.ts
+        if let Ok(cwd) = std::env::current_dir() {
+            let mut dir = cwd.as_path();
+            for _ in 0..10 {
+                if dir.join("packages/eight/clui-bridge.ts").exists() {
+                    return dir.to_path_buf();
+                }
+                match dir.parent() {
+                    Some(p) => dir = p,
+                    None => break,
+                }
+            }
+        }
+
+        // 4. Fallback: cwd (will likely fail, but gives a useful error)
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    }
+
+    /// Find the bun binary — Tauri may not inherit the user's shell PATH.
+    fn find_bun() -> String {
+        // Check common locations for bun
+        let candidates = [
+            // Standard install locations
+            format!("{}/.bun/bin/bun", std::env::var("HOME").unwrap_or_default()),
+            "/usr/local/bin/bun".to_string(),
+            "/opt/homebrew/bin/bun".to_string(),
+            "bun".to_string(), // fallback to PATH
+        ];
+        for candidate in &candidates {
+            if candidate == "bun" {
+                return candidate.clone(); // final fallback
+            }
+            if std::path::Path::new(candidate).exists() {
+                return candidate.clone();
+            }
+        }
+        "bun".to_string()
+    }
+
     /// Create a new agent session and spawn the Bun subprocess.
     pub fn create_session(
         &mut self,
@@ -66,18 +127,18 @@ impl AgentManager {
         self.counter += 1;
         let session_id = format!("session_{}", self.counter);
 
-        // Resolve the 8gent repo root (go up from apps/clui)
-        let repo_root = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        // Resolve the 8gent repo root reliably
+        let repo_root = Self::resolve_repo_root();
 
         // Use the CLUI bridge which outputs NDJSON
-        let agent_script = if repo_root.join("packages/eight/clui-bridge.ts").exists() {
-            repo_root.join("packages/eight/clui-bridge.ts")
-        } else if repo_root.join("packages/eight/index.ts").exists() {
-            repo_root.join("packages/eight/index.ts")
-        } else {
-            std::path::PathBuf::from("packages/eight/clui-bridge.ts")
-        };
+        let agent_script = repo_root.join("packages/eight/clui-bridge.ts");
+        if !agent_script.exists() {
+            return Err(format!(
+                "Agent bridge not found at {}. Repo root resolved to: {}",
+                agent_script.display(),
+                repo_root.display()
+            ));
+        }
 
         let work_dir = if cwd == "." {
             repo_root.to_string_lossy().to_string()
@@ -85,19 +146,22 @@ impl AgentManager {
             cwd.to_string()
         };
 
+        let bun_path = Self::find_bun();
+
         // Spawn the Bun subprocess
-        let mut child = Command::new("bun")
+        let mut child = Command::new(&bun_path)
             .args(["run", &agent_script.to_string_lossy()])
             .env("EIGHT_SESSION_ID", &session_id)
             .env("EIGHT_MODEL", model)
             .env("EIGHT_OUTPUT_FORMAT", "ndjson")
             .env("EIGHT_CLUI_MODE", "true")
+            .env("EIGHT_REPO_ROOT", repo_root.to_string_lossy().as_ref())
             .current_dir(&work_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn agent: {}", e))?;
+            .map_err(|e| format!("Failed to spawn agent (bun={}): {}", bun_path, e))?;
 
         let child_pid = child.id();
 
