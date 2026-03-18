@@ -50,6 +50,17 @@
     "preferLocal": true
   },
 
+  "vision": {
+    "enabled": true,
+    "preferLocal": true,
+    "defaultModel": "qwen2.5-vl:latest",
+    "ocrModel": "auto",
+    "fallback": ["minicpm-v:latest", "llava:latest", "moondream:latest"],
+    "ocrFallback": ["deepseek-ocr:latest", "glm-ocr:latest", "dots.ocr:latest"],
+    "provider": "ollama",
+    "timeout": 60000
+  },
+
   "metaclaw": {
     "enabled": false,
     "proxyUrl": "http://localhost:30000",
