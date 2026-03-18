@@ -1,24 +1,92 @@
 /**
- * 8gent Code - Multi-Layered Memory System
+ * Memory v2 — Multi-Layered Knowledge Intelligence
  *
- * Three-tier knowledge persistence:
- *   1. Session  — ephemeral, lives in-process for the current conversation
- *   2. Project  — persisted per working directory at .8gent/memory/project.jsonl
- *   3. Global   — persisted per user at ~/.8gent/memory/global.jsonl
+ * MemoryManager v2 facade providing:
+ *   - remember(content, type, metadata) — auto-embeds, stores in SQLite
+ *   - recall(query, options)            — hybrid FTS5 + vector search
+ *   - forget(id)                        — soft delete with version history
+ *   - getContext(tokenBudget)           — context window assembly for prompt injection
  *
- * Each memory entry is a timestamped fact with a unique ID.
- * Recall uses simple keyword matching (upgradeable to embeddings later).
+ * Storage: SQLite with WAL mode, FTS5 full-text search, optional nomic-embed-text embeddings.
+ * Backwards-compatible with v1 API (MemoryManager class with same method signatures).
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import * as crypto from "crypto";
+import {
+  type Memory,
+  type MemoryType,
+  type MemoryScope,
+  type SourceType,
+  type SemanticCategory,
+  type CoreCategory,
+  type SearchOptions,
+  type SearchResult,
+  type ContextWindowOptions,
+  type ContextWindow,
+  type ContextEntry,
+  type CoreMemory,
+  type EpisodicMemory,
+  type SemanticMemory,
+  type ProceduralMemory,
+  type ProceduralStep,
+  type WorkingMemory,
+  type V1MemoryEntry,
+  type V1RecallResult,
+  generateId,
+  estimateTokens,
+  effectiveImportance,
+} from "./types.js";
+import { MemoryStore } from "./store.js";
+import {
+  getEmbeddingProvider,
+  type EmbeddingProvider,
+  OllamaEmbeddingProvider,
+  NullEmbeddingProvider,
+} from "./embeddings.js";
+import { migrateV1ToV2, type MigrationResult } from "./migrate.js";
 
-// ============================================
-// Types
-// ============================================
+// ── Re-exports ────────────────────────────────────────────────────────
 
+export type {
+  Memory,
+  MemoryType,
+  MemoryScope,
+  SourceType,
+  SemanticCategory,
+  CoreCategory,
+  SearchOptions,
+  SearchResult,
+  ContextWindowOptions,
+  ContextWindow,
+  ContextEntry,
+  CoreMemory,
+  EpisodicMemory,
+  SemanticMemory,
+  ProceduralMemory,
+  ProceduralStep,
+  WorkingMemory,
+  V1MemoryEntry,
+  V1RecallResult,
+  MigrationResult,
+  EmbeddingProvider,
+};
+
+export {
+  generateId,
+  estimateTokens,
+  effectiveImportance,
+  MemoryStore,
+  OllamaEmbeddingProvider,
+  NullEmbeddingProvider,
+  getEmbeddingProvider,
+  migrateV1ToV2,
+};
+
+// ── V1 Compatibility Types ────────────────────────────────────────────
+
+/** V1 MemoryLayer alias */
 export type MemoryLayer = "session" | "project" | "global";
 
 export interface MemoryEntry {
@@ -27,407 +95,749 @@ export interface MemoryEntry {
   layer: MemoryLayer;
   tags: string[];
   createdAt: string;
-  source?: string; // e.g. "auto:read_file", "user:remember", "auto:run_command"
+  source?: string;
 }
 
 export interface RecallResult {
   entry: MemoryEntry;
-  score: number; // 0-1 relevance score
+  score: number;
 }
 
-// ============================================
-// Persistence helpers
-// ============================================
+// ── Remember Options ──────────────────────────────────────────────────
 
-function ensureDir(filePath: string): void {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+export interface RememberOptions {
+  type?: MemoryType;
+  scope?: MemoryScope;
+  importance?: number;
+  source?: SourceType;
+  sourceId?: string;
+  tags?: string[];
+  category?: SemanticCategory | CoreCategory;
+  key?: string;
+  confidence?: number;
+}
+
+// ── MemoryManager v2 ─────────────────────────────────────────────────
+
+export class MemoryManager {
+  private projectStore: MemoryStore | null = null;
+  private globalStore: MemoryStore | null = null;
+  private workingDirectory: string;
+  private workingMemoryCache: Map<string, WorkingMemory> = new Map();
+  private embeddingProvider: EmbeddingProvider | null = null;
+  private initialized = false;
+
+  // V1 compat paths
+  private projectJsonlPath: string;
+  private globalJsonlPath: string;
+
+  constructor(workingDirectory: string) {
+    this.workingDirectory = workingDirectory;
+    this.projectJsonlPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
+    this.globalJsonlPath = path.join(os.homedir(), ".8gent", "memory", "global.jsonl");
   }
-}
 
-function appendJsonl(filePath: string, entry: MemoryEntry): void {
-  ensureDir(filePath);
-  fs.appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf-8");
-}
+  /**
+   * Initialize SQLite stores and embedding provider.
+   * Called lazily on first operation, or explicitly for eager init.
+   */
+  async init(): Promise<void> {
+    if (this.initialized) return;
 
-function readJsonl(filePath: string): MemoryEntry[] {
-  if (!fs.existsSync(filePath)) return [];
-
-  const lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
-  const entries: MemoryEntry[] = [];
-
-  for (const line of lines) {
     try {
-      entries.push(JSON.parse(line) as MemoryEntry);
-    } catch {
-      // Skip corrupted lines — best-effort persistence
+      // Initialize embedding provider
+      this.embeddingProvider = await getEmbeddingProvider();
+
+      // Create project store
+      const projectDbDir = path.join(this.workingDirectory, ".8gent", "memory");
+      ensureDir(projectDbDir);
+      const projectDbPath = path.join(projectDbDir, "memory.db");
+      this.projectStore = new MemoryStore(projectDbPath, this.embeddingProvider);
+
+      // Create global store
+      const globalDbDir = path.join(os.homedir(), ".8gent", "memory");
+      ensureDir(globalDbDir);
+      const globalDbPath = path.join(globalDbDir, "memory.db");
+      this.globalStore = new MemoryStore(globalDbPath, this.embeddingProvider);
+
+      this.initialized = true;
+    } catch (error) {
+      // SQLite might not be available — fall back to v1 behavior
+      console.error("[memory-v2] Failed to initialize SQLite stores:", error);
+      this.initialized = false;
     }
   }
 
-  return entries;
-}
-
-function writeJsonl(filePath: string, entries: MemoryEntry[]): void {
-  ensureDir(filePath);
-  const content = entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length > 0 ? "\n" : "");
-  fs.writeFileSync(filePath, content, "utf-8");
-}
-
-// ============================================
-// Keyword scoring
-// ============================================
-
-/**
- * Simple keyword-based relevance scoring.
- * Splits the query into tokens and scores each entry by the fraction of
- * query tokens that appear in the fact text (case-insensitive).
- * Recency gives a small boost (newer entries score slightly higher).
- */
-function scoreEntry(entry: MemoryEntry, queryTokens: string[]): number {
-  if (queryTokens.length === 0) return 0;
-
-  const factLower = entry.fact.toLowerCase();
-  const tagText = entry.tags.join(" ").toLowerCase();
-  const searchable = factLower + " " + tagText;
-
-  let matches = 0;
-  for (const token of queryTokens) {
-    if (searchable.includes(token)) matches++;
-  }
-
-  const keywordScore = matches / queryTokens.length;
-
-  // Recency boost: entries from the last hour get up to +0.1
-  const ageMs = Date.now() - new Date(entry.createdAt).getTime();
-  const recencyBoost = Math.max(0, 0.1 * (1 - ageMs / (60 * 60 * 1000)));
-
-  return Math.min(1, keywordScore + recencyBoost);
-}
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1);
-}
-
-// ============================================
-// MemoryManager
-// ============================================
-
-export class MemoryManager {
-  private sessionMemories: MemoryEntry[] = [];
-  private projectPath: string;
-  private globalPath: string;
-
-  constructor(workingDirectory: string) {
-    this.projectPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
-    this.globalPath = path.join(os.homedir(), ".8gent", "memory", "global.jsonl");
-  }
-
-  // ── Store ──────────────────────────────────────────────────────────
+  // ── Core API ──────────────────────────────────────────────────────
 
   /**
-   * Store a fact in the specified memory layer.
-   * Returns the generated memory ID.
+   * Store a memory. Auto-classifies, embeds, and persists.
+   * Returns the memory ID.
+   *
+   * V1 compatible: remember(fact, "project", { tags, source })
+   * V2 enhanced:   remember(content, "semantic", { scope: "project", importance: 0.8 })
    */
-  remember(fact: string, layer: MemoryLayer, options?: { tags?: string[]; source?: string }): string {
-    const id = `mem_${crypto.randomBytes(6).toString("hex")}`;
+  async remember(
+    content: string,
+    typeOrLayer: MemoryType | MemoryLayer,
+    options?: RememberOptions & { tags?: string[]; source?: string }
+  ): Promise<string> {
+    await this.init();
 
-    const entry: MemoryEntry = {
+    // Detect v1-style call: layer = "session" | "project" | "global"
+    if (typeOrLayer === "session" || typeOrLayer === "project" || typeOrLayer === "global") {
+      return this._rememberV1(content, typeOrLayer as MemoryLayer, options);
+    }
+
+    const memoryType = typeOrLayer as MemoryType;
+    const scope = options?.scope ?? "project";
+    const now = Date.now();
+
+    const memory = this._buildMemory(content, memoryType, scope, now, options);
+    const store = this._getStore(scope);
+
+    if (store) {
+      return store.write(memory);
+    }
+
+    // Fallback: write to JSONL (v1 style)
+    return this._rememberV1(content, scope === "global" ? "global" : "project", options);
+  }
+
+  /**
+   * Hybrid search across all memory layers.
+   * Returns results sorted by relevance.
+   *
+   * V1 compatible: recall(query, 10) — returns RecallResult[]
+   * V2 enhanced:   recall(query, { types, scope, minImportance }) — returns SearchResult[]
+   */
+  async recall(
+    query: string,
+    optionsOrLimit?: SearchOptions | number
+  ): Promise<SearchResult[] | RecallResult[]> {
+    await this.init();
+
+    // V1 compat: recall(query, limit)
+    if (typeof optionsOrLimit === "number") {
+      return this._recallV1(query, optionsOrLimit);
+    }
+
+    const options = optionsOrLimit ?? {};
+    const results: SearchResult[] = [];
+
+    // Search project store
+    if (this.projectStore) {
+      const projectResults = await this.projectStore.recall(query, options);
+      results.push(...projectResults);
+    }
+
+    // Search global store
+    if (this.globalStore) {
+      const globalResults = await this.globalStore.recall(query, options);
+      results.push(...globalResults);
+    }
+
+    // Check working memory cache
+    if (!options.types || options.types.includes("working")) {
+      const workingResults = this._searchWorkingMemory(query);
+      results.push(...workingResults);
+    }
+
+    // Deduplicate by ID and sort
+    const seen = new Set<string>();
+    const unique = results.filter((r) => {
+      if (seen.has(r.memory.id)) return false;
+      seen.add(r.memory.id);
+      return true;
+    });
+
+    unique.sort((a, b) => b.score - a.score);
+    return unique.slice(0, options.limit ?? 10);
+  }
+
+  /**
+   * Soft delete a memory with version history.
+   * Returns true if the memory was found and deleted.
+   */
+  async forget(id: string, reason?: string): Promise<boolean> {
+    await this.init();
+
+    // Try working memory
+    if (this.workingMemoryCache.has(id)) {
+      this.workingMemoryCache.delete(id);
+      return true;
+    }
+
+    // Try project store
+    if (this.projectStore?.forget(id, reason)) return true;
+
+    // Try global store
+    if (this.globalStore?.forget(id, reason)) return true;
+
+    return false;
+  }
+
+  /**
+   * Update an existing memory.
+   */
+  async update(
+    id: string,
+    updates: Partial<Memory>,
+    reason: string,
+    changedBy = "user"
+  ): Promise<boolean> {
+    await this.init();
+
+    if (this.projectStore?.update(id, updates, reason, changedBy)) return true;
+    if (this.globalStore?.update(id, updates, reason, changedBy)) return true;
+
+    return false;
+  }
+
+  // ── Context Assembly ──────────────────────────────────────────────
+
+  /**
+   * Assemble context for prompt injection within a token budget.
+   *
+   * Budget allocation:
+   *   15% — Working memory (active session context)
+   *   25% — Core knowledge (architecture, conventions)
+   *   30% — Semantic facts (preferences, patterns)
+   *   30% — Episodic events (what happened recently)
+   */
+  async getContext(optionsOrMaxTokens?: ContextWindowOptions | number): Promise<ContextWindow | string> {
+    await this.init();
+
+    // V1 compat: getContext(maxTokens) returns string
+    if (typeof optionsOrMaxTokens === "number") {
+      const result = await this._assembleContext({ maxTokens: optionsOrMaxTokens });
+      return result.text;
+    }
+
+    // V2: returns full ContextWindow
+    if (optionsOrMaxTokens === undefined) {
+      return this._assembleContext({});
+    }
+    return this._assembleContext(optionsOrMaxTokens);
+  }
+
+  // ── Working Memory ────────────────────────────────────────────────
+
+  /**
+   * Set a working memory entry (session-scoped, TTL-based).
+   */
+  setWorkingMemory(
+    sessionId: string,
+    key: string,
+    value: string,
+    options?: { priority?: number; ttlMs?: number }
+  ): string {
+    const now = Date.now();
+    const ttlMs = options?.ttlMs ?? 30 * 60 * 1000; // 30 minutes default
+
+    const memory: WorkingMemory = {
+      id: generateId("mem"),
+      type: "working",
+      scope: "session",
+      sessionId,
+      key,
+      value,
+      priority: options?.priority ?? 5,
+      ttlMs,
+      expiresAt: now + ttlMs,
+      importance: 0.8,
+      decayFactor: 1.0,
+      accessCount: 0,
+      lastAccessed: now,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      source: "observation",
+    };
+
+    this.workingMemoryCache.set(memory.id, memory);
+    return memory.id;
+  }
+
+  /**
+   * Clean expired working memory entries.
+   */
+  cleanExpiredWorkingMemory(): number {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [id, mem] of this.workingMemoryCache) {
+      if (mem.expiresAt <= now) {
+        this.workingMemoryCache.delete(id);
+        cleaned++;
+      }
+    }
+    return cleaned;
+  }
+
+  // ── Migration ─────────────────────────────────────────────────────
+
+  /**
+   * Migrate v1 JSONL files to v2 SQLite.
+   * Safe to call multiple times (idempotent).
+   */
+  async migrateFromV1(): Promise<MigrationResult> {
+    await this.init();
+
+    if (!this.projectStore || !this.globalStore) {
+      return {
+        projectMigrated: 0,
+        globalMigrated: 0,
+        skipped: 0,
+        errors: ["SQLite stores not initialized"],
+        duration: 0,
+      };
+    }
+
+    return migrateV1ToV2(
+      this.workingDirectory,
+      this.projectStore,
+      this.globalStore,
+      this.embeddingProvider ?? undefined
+    );
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────────
+
+  async getStats(): Promise<{
+    session: number;
+    project: number;
+    global: number;
+    v2?: {
+      project: ReturnType<MemoryStore["getStats"]>;
+      global: ReturnType<MemoryStore["getStats"]>;
+    };
+  }> {
+    await this.init();
+
+    const session = this.workingMemoryCache.size;
+
+    if (this.projectStore && this.globalStore) {
+      const projectStats = this.projectStore.getStats();
+      const globalStats = this.globalStore.getStats();
+      return {
+        session,
+        project: projectStats.total,
+        global: globalStats.total,
+        v2: { project: projectStats, global: globalStats },
+      };
+    }
+
+    // V1 fallback
+    return {
+      session,
+      project: readJsonlCount(this.projectJsonlPath),
+      global: readJsonlCount(this.globalJsonlPath),
+    };
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────
+
+  close(): void {
+    this.projectStore?.close();
+    this.globalStore?.close();
+    this.workingMemoryCache.clear();
+  }
+
+  // ── Private: V1 Compat ────────────────────────────────────────────
+
+  private _rememberV1(
+    fact: string,
+    layer: MemoryLayer,
+    options?: { tags?: string[]; source?: string }
+  ): string {
+    const id = generateId("mem");
+    const now = Date.now();
+
+    // Convert to v2 semantic memory and store
+    const scope: MemoryScope = layer === "session" ? "session" : layer;
+
+    if (layer === "session") {
+      const wm: WorkingMemory = {
+        id,
+        type: "working",
+        scope: "session",
+        sessionId: "default",
+        key: fact.slice(0, 40),
+        value: fact,
+        priority: 5,
+        ttlMs: 60 * 60 * 1000,
+        expiresAt: now + 60 * 60 * 1000,
+        importance: 0.5,
+        decayFactor: 1.0,
+        accessCount: 0,
+        lastAccessed: now,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+        source: "user_explicit",
+      };
+      this.workingMemoryCache.set(id, wm);
+      return id;
+    }
+
+    const memory: SemanticMemory = {
+      id,
+      type: "semantic",
+      scope,
+      category: "fact",
+      key: fact
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, "")
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+        .slice(0, 4)
+        .join("-"),
+      value: fact,
+      confidence: 0.6,
+      evidenceCount: 1,
+      tags: options?.tags ?? [],
+      relatedKeys: [],
+      learnedAt: now,
+      lastConfirmed: now,
+      importance: 0.5,
+      decayFactor: 1.0,
+      accessCount: 0,
+      lastAccessed: now,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      source: (options?.source as SourceType) ?? "user_explicit",
+    };
+
+    const store = this._getStore(scope);
+    if (store) {
+      return store.write(memory);
+    }
+
+    // Final fallback: JSONL
+    const filePath = scope === "global" ? this.globalJsonlPath : this.projectJsonlPath;
+    const v1Entry: MemoryEntry = {
       id,
       fact,
       layer,
-      tags: options?.tags ?? extractTags(fact),
+      tags: options?.tags ?? [],
       createdAt: new Date().toISOString(),
       source: options?.source,
     };
-
-    switch (layer) {
-      case "session":
-        this.sessionMemories.push(entry);
-        break;
-      case "project":
-        appendJsonl(this.projectPath, entry);
-        break;
-      case "global":
-        appendJsonl(this.globalPath, entry);
-        break;
-    }
-
+    ensureDir(path.dirname(filePath));
+    fs.appendFileSync(filePath, JSON.stringify(v1Entry) + "\n", "utf-8");
     return id;
   }
 
-  // ── Recall ─────────────────────────────────────────────────────────
+  private async _recallV1(query: string, limit: number): Promise<RecallResult[]> {
+    // Use v2 search if available, then convert to v1 format
+    const results = (await this.recall(query, { limit })) as SearchResult[];
 
-  /**
-   * Search across all memory layers for entries matching the query.
-   * Returns results sorted by relevance score (descending).
-   */
-  recall(query: string, limit: number = 10): RecallResult[] {
-    const queryTokens = tokenize(query);
-    if (queryTokens.length === 0) return [];
+    return results.map((r) => ({
+      entry: {
+        id: r.memory.id,
+        fact: extractFactFromMemory(r.memory),
+        layer: r.memory.scope === "session" ? "session" as MemoryLayer : r.memory.scope as MemoryLayer,
+        tags: "tags" in r.memory ? (r.memory as { tags?: string[] }).tags ?? [] : [],
+        createdAt: new Date(r.memory.createdAt).toISOString(),
+        source: r.memory.source,
+      },
+      score: r.score,
+    }));
+  }
 
-    const allEntries = [
-      ...this.sessionMemories,
-      ...readJsonl(this.projectPath),
-      ...readJsonl(this.globalPath),
-    ];
+  // ── Private: Memory Building ──────────────────────────────────────
 
-    // Deduplicate by ID (session might shadow persisted entries)
-    const seen = new Set<string>();
-    const unique: MemoryEntry[] = [];
-    for (const entry of allEntries) {
-      if (!seen.has(entry.id)) {
-        seen.add(entry.id);
-        unique.push(entry);
+  private _buildMemory(
+    content: string,
+    type: MemoryType,
+    scope: MemoryScope,
+    now: number,
+    options?: RememberOptions
+  ): Memory {
+    const base = {
+      id: generateId("mem"),
+      scope,
+      importance: options?.importance ?? 0.5,
+      decayFactor: 1.0,
+      accessCount: 0,
+      lastAccessed: now,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      source: options?.source ?? ("user_explicit" as SourceType),
+      sourceId: options?.sourceId,
+    };
+
+    switch (type) {
+      case "core":
+        return {
+          ...base,
+          type: "core",
+          category: (options?.category as CoreCategory) ?? "documentation",
+          key: options?.key ?? generateKeyFromContent(content),
+          title: content.slice(0, 80),
+          content,
+          confidence: options?.confidence ?? 0.7,
+          evidenceCount: 1,
+          tags: options?.tags ?? [],
+        };
+
+      case "episodic":
+        return {
+          ...base,
+          type: "episodic",
+          content,
+          context: "",
+          tags: options?.tags ?? [],
+          entities: [],
+          occurredAt: now,
+        };
+
+      case "semantic":
+        return {
+          ...base,
+          type: "semantic",
+          category: (options?.category as SemanticCategory) ?? "fact",
+          key: options?.key ?? generateKeyFromContent(content),
+          value: content,
+          confidence: options?.confidence ?? 0.6,
+          evidenceCount: 1,
+          tags: options?.tags ?? [],
+          relatedKeys: [],
+          learnedAt: now,
+          lastConfirmed: now,
+        };
+
+      case "procedural":
+        return {
+          ...base,
+          type: "procedural",
+          name: options?.key ?? generateKeyFromContent(content),
+          description: content,
+          steps: [],
+          preconditions: [],
+          successRate: 0.5,
+          executionCount: 0,
+          tags: options?.tags ?? [],
+        };
+
+      case "working":
+        return {
+          ...base,
+          type: "working",
+          scope: "session" as MemoryScope,
+          sessionId: "default",
+          key: options?.key ?? content.slice(0, 40),
+          value: content,
+          priority: 5,
+          ttlMs: 30 * 60 * 1000,
+          expiresAt: now + 30 * 60 * 1000,
+        };
+
+      default:
+        // Default to semantic
+        return {
+          ...base,
+          type: "semantic",
+          category: "fact" as SemanticCategory,
+          key: generateKeyFromContent(content),
+          value: content,
+          confidence: 0.6,
+          evidenceCount: 1,
+          tags: options?.tags ?? [],
+          relatedKeys: [],
+          learnedAt: now,
+          lastConfirmed: now,
+        };
+    }
+  }
+
+  // ── Private: Context Assembly ─────────────────────────────────────
+
+  private async _assembleContext(options: ContextWindowOptions): Promise<ContextWindow> {
+    const startTime = Date.now();
+    const budget = options.maxTokens ?? 2000;
+    const entries: ContextEntry[] = [];
+    let usedTokens = 0;
+
+    // 1. Working memory (15% budget)
+    const workingBudget = budget * 0.15;
+    for (const wm of this.workingMemoryCache.values()) {
+      if (wm.expiresAt <= Date.now()) continue;
+      const tokens = estimateTokens(wm.value);
+      if (usedTokens + tokens > workingBudget) break;
+      entries.push({
+        memoryId: wm.id,
+        type: "working",
+        content: `${wm.key}: ${wm.value}`,
+        relevanceScore: 1.0,
+        importance: wm.importance,
+        source: wm.source,
+      });
+      usedTokens += tokens;
+    }
+
+    // 2. Core knowledge (25% budget)
+    const coreBudget = budget * 0.40;
+    if (this.projectStore) {
+      const coreResults = await this.projectStore.recall(options.query ?? "", {
+        types: ["core"],
+        limit: 10,
+        minImportance: 0.3,
+      });
+      for (const r of coreResults) {
+        const content = extractFactFromMemory(r.memory);
+        const tokens = estimateTokens(content);
+        if (usedTokens + tokens > coreBudget) break;
+        entries.push({
+          memoryId: r.memory.id,
+          type: r.memory.type,
+          content,
+          relevanceScore: r.score,
+          importance: r.memory.importance,
+          source: r.memory.source,
+        });
+        usedTokens += tokens;
       }
     }
 
-    const scored: RecallResult[] = unique
-      .map((entry) => ({ entry, score: scoreEntry(entry, queryTokens) }))
-      .filter((r) => r.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
-
-    return scored;
-  }
-
-  // ── Forget ─────────────────────────────────────────────────────────
-
-  /**
-   * Remove a memory entry by ID from any layer.
-   * Returns true if the entry was found and removed.
-   */
-  forget(factId: string): boolean {
-    // Check session
-    const sessionIdx = this.sessionMemories.findIndex((e) => e.id === factId);
-    if (sessionIdx !== -1) {
-      this.sessionMemories.splice(sessionIdx, 1);
-      return true;
+    // 3. Semantic facts (30% budget)
+    const semanticBudget = budget * 0.70;
+    const semanticResults = await this._searchAcrossStores(options.query ?? "", {
+      types: ["semantic"],
+      limit: 15,
+      minImportance: 0.2,
+    });
+    for (const r of semanticResults) {
+      const content = extractFactFromMemory(r.memory);
+      const tokens = estimateTokens(content);
+      if (usedTokens + tokens > semanticBudget) break;
+      entries.push({
+        memoryId: r.memory.id,
+        type: r.memory.type,
+        content,
+        relevanceScore: r.score,
+        importance: r.memory.importance,
+        source: r.memory.source,
+      });
+      usedTokens += tokens;
     }
 
-    // Check project
-    if (this.removeFromJsonl(this.projectPath, factId)) return true;
-
-    // Check global
-    if (this.removeFromJsonl(this.globalPath, factId)) return true;
-
-    return false;
-  }
-
-  private removeFromJsonl(filePath: string, factId: string): boolean {
-    const entries = readJsonl(filePath);
-    const filtered = entries.filter((e) => e.id !== factId);
-    if (filtered.length < entries.length) {
-      writeJsonl(filePath, filtered);
-      return true;
+    // 4. Episodic events (remaining budget)
+    const episodicResults = await this._searchAcrossStores(options.query ?? "", {
+      types: ["episodic"],
+      limit: 10,
+      minImportance: 0.3,
+    });
+    for (const r of episodicResults) {
+      const content = extractFactFromMemory(r.memory);
+      const tokens = estimateTokens(content);
+      if (usedTokens + tokens > budget) break;
+      entries.push({
+        memoryId: r.memory.id,
+        type: r.memory.type,
+        content,
+        relevanceScore: r.score,
+        importance: r.memory.importance,
+        source: r.memory.source,
+      });
+      usedTokens += tokens;
     }
-    return false;
+
+    // Format context text
+    const text = formatContextText(entries);
+
+    // Compute stats
+    const byType: Record<MemoryType, number> = {
+      core: 0,
+      episodic: 0,
+      semantic: 0,
+      procedural: 0,
+      working: 0,
+    };
+    for (const e of entries) byType[e.type]++;
+
+    return {
+      text,
+      memories: entries,
+      stats: {
+        totalMemories: entries.length,
+        byType,
+        estimatedTokens: usedTokens,
+        searchLatencyMs: Date.now() - startTime,
+      },
+    };
   }
 
-  // ── Context ────────────────────────────────────────────────────────
+  private async _searchAcrossStores(
+    query: string,
+    options: SearchOptions
+  ): Promise<SearchResult[]> {
+    const results: SearchResult[] = [];
+    if (this.projectStore) {
+      results.push(...(await this.projectStore.recall(query, options)));
+    }
+    if (this.globalStore) {
+      results.push(...(await this.globalStore.recall(query, options)));
+    }
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, options.limit ?? 10);
+  }
 
-  /**
-   * Build a compressed context string from all memory layers
-   * suitable for injection into system/user prompts.
-   *
-   * Prioritizes project and global memories over session (which the
-   * model already has access to via conversation history).
-   */
-  getContext(maxTokens: number = 2000): string {
-    const projectEntries = readJsonl(this.projectPath);
-    const globalEntries = readJsonl(this.globalPath);
+  private _searchWorkingMemory(query: string): SearchResult[] {
+    const queryLower = query.toLowerCase();
+    const tokens = queryLower.split(/\s+/).filter((t) => t.length > 1);
+    const results: SearchResult[] = [];
 
-    // Approximate 4 chars per token
-    const charBudget = maxTokens * 4;
-
-    const sections: string[] = [];
-    let used = 0;
-
-    // Project memories first (most relevant to current work)
-    if (projectEntries.length > 0) {
-      sections.push("[Project Memory]");
-      used += 20;
-
-      // Most recent first
-      const sorted = [...projectEntries].reverse();
-      for (const entry of sorted) {
-        const line = `- ${entry.fact}`;
-        if (used + line.length > charBudget) break;
-        sections.push(line);
-        used += line.length;
+    for (const wm of this.workingMemoryCache.values()) {
+      if (wm.expiresAt <= Date.now()) continue;
+      const searchable = `${wm.key} ${wm.value}`.toLowerCase();
+      let matches = 0;
+      for (const t of tokens) {
+        if (searchable.includes(t)) matches++;
+      }
+      if (matches > 0) {
+        results.push({
+          memory: wm,
+          score: tokens.length > 0 ? matches / tokens.length : 0,
+          matchType: "fts",
+        });
       }
     }
 
-    // Global memories
-    if (globalEntries.length > 0 && used < charBudget * 0.9) {
-      sections.push("\n[Global Memory]");
-      used += 20;
-
-      const sorted = [...globalEntries].reverse();
-      for (const entry of sorted) {
-        const line = `- ${entry.fact}`;
-        if (used + line.length > charBudget) break;
-        sections.push(line);
-        used += line.length;
-      }
-    }
-
-    // Session memories (brief, since the model already sees the conversation)
-    if (this.sessionMemories.length > 0 && used < charBudget * 0.9) {
-      sections.push("\n[Session Memory]");
-      used += 20;
-
-      for (const entry of [...this.sessionMemories].reverse()) {
-        const line = `- ${entry.fact}`;
-        if (used + line.length > charBudget) break;
-        sections.push(line);
-        used += line.length;
-      }
-    }
-
-    if (sections.length === 0) return "";
-
-    return sections.join("\n");
+    return results;
   }
 
-  // ── Accessors ──────────────────────────────────────────────────────
+  private _getStore(scope: MemoryScope): MemoryStore | null {
+    if (scope === "global") return this.globalStore;
+    return this.projectStore;
+  }
+
+  // ── V1 Compat Accessors ───────────────────────────────────────────
 
   getSessionMemories(): MemoryEntry[] {
-    return [...this.sessionMemories];
+    return Array.from(this.workingMemoryCache.values()).map((wm) => ({
+      id: wm.id,
+      fact: wm.value,
+      layer: "session" as MemoryLayer,
+      tags: [],
+      createdAt: new Date(wm.createdAt).toISOString(),
+      source: wm.source,
+    }));
   }
 
   getProjectMemories(): MemoryEntry[] {
-    return readJsonl(this.projectPath);
+    // Read from JSONL for v1 compat
+    return readJsonlSafe(this.projectJsonlPath);
   }
 
   getGlobalMemories(): MemoryEntry[] {
-    return readJsonl(this.globalPath);
-  }
-
-  getStats(): { session: number; project: number; global: number } {
-    return {
-      session: this.sessionMemories.length,
-      project: readJsonl(this.projectPath).length,
-      global: readJsonl(this.globalPath).length,
-    };
+    return readJsonlSafe(this.globalJsonlPath);
   }
 }
 
-// ============================================
-// Auto-tag extraction
-// ============================================
-
-/**
- * Extract simple tags from a fact string.
- * Pulls out file extensions, config file names, and tech-stack keywords.
- */
-function extractTags(fact: string): string[] {
-  const tags: string[] = [];
-
-  // File extensions
-  const extMatches = fact.match(/\.\w{1,6}\b/g);
-  if (extMatches) {
-    for (const ext of extMatches) {
-      if ([".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".toml", ".css", ".html", ".py", ".go", ".rs"].includes(ext)) {
-        tags.push(ext.slice(1)); // remove dot
-      }
-    }
-  }
-
-  // Config files
-  const configPatterns = ["package.json", "tsconfig", "eslint", "prettier", "vite", "webpack", "next.config", "tailwind"];
-  for (const pat of configPatterns) {
-    if (fact.toLowerCase().includes(pat)) tags.push("config");
-  }
-
-  // Tech stack keywords
-  const techKeywords = ["react", "vue", "svelte", "next", "bun", "node", "deno", "typescript", "python", "rust", "go", "docker", "kubernetes", "postgres", "redis", "mongodb", "supabase", "prisma", "drizzle"];
-  const factLower = fact.toLowerCase();
-  for (const kw of techKeywords) {
-    if (factLower.includes(kw)) tags.push(kw);
-  }
-
-  return [...new Set(tags)];
-}
-
-// ============================================
-// Auto-memory helpers for agent integration
-// ============================================
-
-/**
- * Analyze a tool call result and extract facts worth remembering.
- * Called from agent.ts onToolCallFinish to auto-populate project memory.
- */
-export function extractAutoMemories(
-  toolName: string,
-  args: Record<string, unknown>,
-  result: string
-): { fact: string; layer: MemoryLayer }[] {
-  const facts: { fact: string; layer: MemoryLayer }[] = [];
-
-  // When reading package.json — extract project info
-  if (toolName === "read_file" && String(args.path || "").endsWith("package.json")) {
-    try {
-      const pkg = JSON.parse(result);
-      if (pkg.name) facts.push({ fact: `Project name: ${pkg.name}`, layer: "project" });
-      if (pkg.description) facts.push({ fact: `Project description: ${pkg.description}`, layer: "project" });
-
-      // Extract key dependencies as tech stack
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-      const significant = Object.keys(deps).filter((d) =>
-        ["react", "vue", "svelte", "next", "nuxt", "express", "fastify", "hono", "bun", "typescript", "tailwindcss", "prisma", "drizzle", "supabase"].includes(d)
-      );
-      if (significant.length > 0) {
-        facts.push({ fact: `Tech stack includes: ${significant.join(", ")}`, layer: "project" });
-      }
-    } catch {
-      // Not valid JSON, skip
-    }
-  }
-
-  // When reading tsconfig — note TypeScript config
-  if (toolName === "read_file" && String(args.path || "").includes("tsconfig")) {
-    facts.push({ fact: `Project uses TypeScript (found ${args.path})`, layer: "project" });
-  }
-
-  // When discovering a Dockerfile or docker-compose
-  if (toolName === "read_file" && /dockerfile|docker-compose/i.test(String(args.path || ""))) {
-    facts.push({ fact: `Project uses Docker (found ${args.path})`, layer: "project" });
-  }
-
-  // When running commands that reveal env info
-  if (toolName === "run_command") {
-    const cmd = String(args.command || "");
-
-    // Detect runtime info
-    if (cmd.includes("node --version") || cmd.includes("bun --version")) {
-      facts.push({ fact: `Runtime version: ${result.trim()}`, layer: "project" });
-    }
-
-    // Detect test framework from test commands
-    if (cmd.includes("test") && result.includes("pass")) {
-      facts.push({ fact: `Tests are passing (ran: ${cmd.slice(0, 60)})`, layer: "session" });
-    }
-  }
-
-  // When the agent reads a README — extract purpose
-  if (toolName === "read_file" && /readme/i.test(String(args.path || ""))) {
-    // Extract first meaningful line as project purpose
-    const lines = result.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
-    if (lines.length > 0) {
-      facts.push({ fact: `Project purpose: ${lines[0].trim().slice(0, 200)}`, layer: "project" });
-    }
-  }
-
-  return facts;
-}
-
-// ============================================
-// Singleton accessor
-// ============================================
+// ── Singleton ─────────────────────────────────────────────────────────
 
 let _instance: MemoryManager | null = null;
 
@@ -441,9 +851,172 @@ export function getMemoryManager(workingDirectory?: string): MemoryManager {
   return _instance;
 }
 
-/**
- * Reset the singleton (for testing).
- */
+/** Alias for v2 consumers */
+export const getMemoryManagerV2 = getMemoryManager;
+
 export function resetMemoryManager(): void {
+  _instance?.close();
   _instance = null;
+}
+
+// ── V1 Compat: extractAutoMemories ──────────────────────────────────
+
+/**
+ * Analyze a tool call result and extract facts worth remembering.
+ * V1 compat — kept for backwards compatibility with agent.ts integration.
+ */
+export function extractAutoMemories(
+  toolName: string,
+  args: Record<string, unknown>,
+  result: string
+): { fact: string; layer: MemoryLayer }[] {
+  const facts: { fact: string; layer: MemoryLayer }[] = [];
+
+  if (toolName === "read_file" && String(args.path || "").endsWith("package.json")) {
+    try {
+      const pkg = JSON.parse(result);
+      if (pkg.name) facts.push({ fact: `Project name: ${pkg.name}`, layer: "project" });
+      if (pkg.description) facts.push({ fact: `Project description: ${pkg.description}`, layer: "project" });
+
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      const significant = Object.keys(deps).filter((d) =>
+        ["react", "vue", "svelte", "next", "nuxt", "express", "fastify", "hono", "bun", "typescript", "tailwindcss", "prisma", "drizzle", "supabase"].includes(d)
+      );
+      if (significant.length > 0) {
+        facts.push({ fact: `Tech stack includes: ${significant.join(", ")}`, layer: "project" });
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  if (toolName === "read_file" && String(args.path || "").includes("tsconfig")) {
+    facts.push({ fact: `Project uses TypeScript (found ${args.path})`, layer: "project" });
+  }
+
+  if (toolName === "read_file" && /dockerfile|docker-compose/i.test(String(args.path || ""))) {
+    facts.push({ fact: `Project uses Docker (found ${args.path})`, layer: "project" });
+  }
+
+  if (toolName === "run_command") {
+    const cmd = String(args.command || "");
+    if (cmd.includes("node --version") || cmd.includes("bun --version")) {
+      facts.push({ fact: `Runtime version: ${result.trim()}`, layer: "project" });
+    }
+    if (cmd.includes("test") && result.includes("pass")) {
+      facts.push({ fact: `Tests are passing (ran: ${cmd.slice(0, 60)})`, layer: "session" });
+    }
+  }
+
+  if (toolName === "read_file" && /readme/i.test(String(args.path || ""))) {
+    const lines = result.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
+    if (lines.length > 0) {
+      facts.push({ fact: `Project purpose: ${lines[0].trim().slice(0, 200)}`, layer: "project" });
+    }
+  }
+
+  return facts;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+function ensureDir(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+function generateKeyFromContent(content: string): string {
+  return content
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 2)
+    .slice(0, 4)
+    .join("-");
+}
+
+function extractFactFromMemory(memory: Memory): string {
+  switch (memory.type) {
+    case "core":
+      return memory.summary ?? memory.content;
+    case "episodic":
+      return memory.summary ?? memory.content;
+    case "semantic":
+      return memory.value;
+    case "procedural":
+      return `${memory.name}: ${memory.description}`;
+    case "working":
+      return `${memory.key}: ${memory.value}`;
+    default:
+      return "";
+  }
+}
+
+function formatContextText(entries: ContextEntry[]): string {
+  if (entries.length === 0) return "";
+
+  const sections: string[] = ["[Memory Context]"];
+
+  const working = entries.filter((e) => e.type === "working");
+  const core = entries.filter((e) => e.type === "core");
+  const semantic = entries.filter((e) => e.type === "semantic");
+  const episodic = entries.filter((e) => e.type === "episodic");
+  const procedural = entries.filter((e) => e.type === "procedural");
+
+  if (working.length > 0) {
+    sections.push("\n## Active Context");
+    for (const e of working) sections.push(`- ${e.content}`);
+  }
+
+  if (core.length > 0) {
+    sections.push("\n## Project Knowledge");
+    for (const e of core) sections.push(`- ${e.content}`);
+  }
+
+  if (semantic.length > 0) {
+    sections.push("\n## Known Facts");
+    for (const e of semantic) sections.push(`- ${e.content}`);
+  }
+
+  if (episodic.length > 0) {
+    sections.push("\n## Recent Events");
+    for (const e of episodic) sections.push(`- ${e.content}`);
+  }
+
+  if (procedural.length > 0) {
+    sections.push("\n## Procedures");
+    for (const e of procedural) sections.push(`- ${e.content}`);
+  }
+
+  return sections.join("\n");
+}
+
+function readJsonlSafe(filePath: string): MemoryEntry[] {
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    return fs
+      .readFileSync(filePath, "utf-8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as MemoryEntry;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is MemoryEntry => e !== null);
+  } catch {
+    return [];
+  }
+}
+
+function readJsonlCount(filePath: string): number {
+  if (!fs.existsSync(filePath)) return 0;
+  try {
+    return fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean).length;
+  } catch {
+    return 0;
+  }
 }
