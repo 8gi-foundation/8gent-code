@@ -1,0 +1,32 @@
+{
+  "name": "8gent-demos",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Remotion video demos for 8gent-code",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts",
+    "render:hero": "remotion render src/index.ts HeroIntro out/hero-intro.mp4",
+    "render:features": "remotion render src/index.ts FeatureShowcase out/feature-showcase.mp4",
+    "render:cost": "remotion render src/index.ts CostComparison out/cost-comparison.mp4",
+    "render:all": "bun run render:hero && bun run render:features && bun run render:cost",
+    "render:gif": "remotion render src/index.ts HeroIntro out/hero-intro.gif --image-format png",
+    "media": "vite --open media.html",
+    "media:build": "vite build --base=./"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/player": "^4.0.0",
+    "@remotion/transitions": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^6.0.0"
+  }
+}
