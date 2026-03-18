@@ -41,6 +41,7 @@ import {
 
 import {
   PLAN_DEFINITIONS,
+  STRIPE_PRICE_IDS,
   getPlan,
   checkPlanLimits,
   getUsageForBilling,
@@ -49,9 +50,13 @@ import {
   createStripeCustomer,
   createStripeSubscription,
   cancelStripeSubscription,
+  cancelStripeSubscriptionImmediately,
   handleStripeWebhook,
   getStripeBillingPortalUrl,
+  getStripeCustomer,
+  getStripeSubscription,
 } from "./billing";
+import type { WebhookResult } from "./billing";
 
 // ============================================
 // ControlPlane Class
@@ -223,7 +228,7 @@ export class ControlPlane {
     return formatCents(cents);
   }
 
-  // Stripe stubs
+  // Stripe operations — require STRIPE_SECRET_KEY env var (not needed for free tier)
   async createStripeCustomer(email: string, name: string, metadata: Record<string, string>) {
     return createStripeCustomer(email, name, metadata);
   }
@@ -236,12 +241,24 @@ export class ControlPlane {
     return cancelStripeSubscription(subscriptionId);
   }
 
-  async handleStripeWebhook(body: string, signature: string) {
+  async cancelStripeSubscriptionImmediately(subscriptionId: string) {
+    return cancelStripeSubscriptionImmediately(subscriptionId);
+  }
+
+  async handleStripeWebhook(body: string | Buffer, signature: string) {
     return handleStripeWebhook(body, signature);
   }
 
   async getStripeBillingPortalUrl(customerId: string, returnUrl: string) {
     return getStripeBillingPortalUrl(customerId, returnUrl);
+  }
+
+  async getStripeCustomer(customerId: string) {
+    return getStripeCustomer(customerId);
+  }
+
+  async getStripeSubscription(subscriptionId: string) {
+    return getStripeSubscription(subscriptionId);
   }
 }
 
@@ -252,7 +269,8 @@ export class ControlPlane {
 /** Default control plane instance. */
 export const controlPlane = new ControlPlane();
 
-export { PLAN_DEFINITIONS } from "./billing";
+export { PLAN_DEFINITIONS, STRIPE_PRICE_IDS } from "./billing";
+export type { WebhookResult } from "./billing";
 export type {
   TenantConfig,
   AdminDashboard,
