@@ -15,6 +15,10 @@ import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
 
+// Knowledge graph imports (lazy-loaded to avoid blocking startup)
+import type { KnowledgeGraph } from "./graph.js";
+import type { ExtractionResult } from "./extractor.js";
+
 // ============================================
 // Types
 // ============================================
@@ -120,10 +124,140 @@ export class MemoryManager {
   private sessionMemories: MemoryEntry[] = [];
   private projectPath: string;
   private globalPath: string;
+  private workingDirectory: string;
+
+  // Knowledge graph — lazily initialized on first use
+  private _graph: KnowledgeGraph | null = null;
+  private _graphInitPromise: Promise<KnowledgeGraph> | null = null;
 
   constructor(workingDirectory: string) {
+    this.workingDirectory = workingDirectory;
     this.projectPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
     this.globalPath = path.join(os.homedir(), ".8gent", "memory", "global.jsonl");
+  }
+
+  // ── Knowledge Graph ──────────────────────────────────────────────
+
+  /**
+   * Get the knowledge graph instance, lazily creating the SQLite DB and
+   * tables on first access. Uses the same .8gent/memory/ directory.
+   */
+  async getGraph(): Promise<KnowledgeGraph> {
+    if (this._graph) return this._graph;
+
+    // Avoid parallel initialization
+    if (this._graphInitPromise) return this._graphInitPromise;
+
+    this._graphInitPromise = this.initGraph();
+    this._graph = await this._graphInitPromise;
+    this._graphInitPromise = null;
+    return this._graph;
+  }
+
+  private async initGraph(): Promise<KnowledgeGraph> {
+    const { Database } = await import("bun:sqlite");
+    const { KnowledgeGraph: KG } = await import("./graph.js");
+
+    const dbDir = path.join(this.workingDirectory, ".8gent", "memory");
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    const dbPath = path.join(dbDir, "knowledge.db");
+    const db = new Database(dbPath);
+
+    // Performance pragmas
+    db.run("PRAGMA journal_mode = WAL");
+    db.run("PRAGMA synchronous = NORMAL");
+    db.run("PRAGMA cache_size = -8000"); // 8MB cache
+    db.run("PRAGMA foreign_keys = ON");
+
+    return new KG(db);
+  }
+
+  /**
+   * Process a tool result through the entity extractor and add discovered
+   * entities/relationships to the knowledge graph.
+   *
+   * Fire-and-forget: never blocks the agent loop. Errors are silently caught.
+   */
+  ingestToolResult(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: string
+  ): void {
+    // Fire-and-forget — do not await
+    this._ingestToolResultAsync(toolName, args, result).catch(() => {
+      // Silently swallow errors — graph ingestion must never break the agent
+    });
+  }
+
+  private async _ingestToolResultAsync(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: string
+  ): Promise<void> {
+    const { extractFromToolResult } = await import("./extractor.js");
+    const extraction = extractFromToolResult(toolName, args, result);
+    await this.applyExtraction(extraction);
+  }
+
+  /**
+   * Process a user message for preference/correction detection and add
+   * to the knowledge graph. Fire-and-forget.
+   */
+  ingestUserMessage(message: string): void {
+    this._ingestUserMessageAsync(message).catch(() => {
+      // Silently swallow
+    });
+  }
+
+  private async _ingestUserMessageAsync(message: string): Promise<void> {
+    const { extractPreferencesFromMessage } = await import("./extractor.js");
+    const extraction = extractPreferencesFromMessage(message);
+    if (extraction.entities.length > 0) {
+      await this.applyExtraction(extraction);
+    }
+  }
+
+  /**
+   * Apply an extraction result to the knowledge graph: add entities,
+   * then resolve and add relationships.
+   */
+  private async applyExtraction(extraction: ExtractionResult): Promise<void> {
+    const graph = await this.getGraph();
+
+    // Add all entities, collecting a name->id map for relationship resolution
+    const entityIdMap = new Map<string, string>();
+    for (const entity of extraction.entities) {
+      const key = `${entity.type}:${entity.name}`;
+      const id = graph.addEntity(entity.type, entity.name, {
+        description: entity.description,
+        metadata: entity.metadata,
+      });
+      entityIdMap.set(key, id);
+    }
+
+    // Add relationships, resolving names to IDs
+    for (const rel of extraction.relationships) {
+      const fromKey = `${rel.fromType}:${rel.fromName}`;
+      const toKey = `${rel.toType}:${rel.toName}`;
+
+      // Ensure both endpoints exist (addEntity is idempotent)
+      let fromId = entityIdMap.get(fromKey);
+      if (!fromId) {
+        fromId = graph.addEntity(rel.fromType, rel.fromName);
+        entityIdMap.set(fromKey, fromId);
+      }
+
+      let toId = entityIdMap.get(toKey);
+      if (!toId) {
+        toId = graph.addEntity(rel.toType, rel.toName);
+        entityIdMap.set(toKey, toId);
+      }
+
+      graph.addRelationship(fromId, toId, rel.type, rel.metadata);
+    }
   }
 
   // ── Store ──────────────────────────────────────────────────────────
@@ -447,3 +581,19 @@ export function getMemoryManager(workingDirectory?: string): MemoryManager {
 export function resetMemoryManager(): void {
   _instance = null;
 }
+
+// ============================================
+// Re-exports
+// ============================================
+
+export { KnowledgeGraph } from "./graph.js";
+export type {
+  Entity,
+  EntityType,
+  Relationship,
+  RelationshipType,
+  SubgraphResult,
+  PatternQuery,
+} from "./graph.js";
+export { extractFromToolResult, extractPreferencesFromMessage } from "./extractor.js";
+export type { ExtractedEntity, ExtractedRelationship, ExtractionResult } from "./extractor.js";
