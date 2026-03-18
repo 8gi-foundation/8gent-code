@@ -89,6 +89,44 @@ export default defineSchema({
     .index("by_userId_date", ["userId", "date"]),
 
   // ============================================
+  // Tenants — Multi-tenant configuration
+  // ============================================
+  tenants: defineTable({
+    /** Internal tenant ID (matches user's Convex _id as string). */
+    tenantId: v.string(),
+    /** Clerk user ID. */
+    clerkId: v.string(),
+    /** Subdomain slug (e.g., "james" for james.8gent.app). */
+    subdomain: v.string(),
+    /** Current billing plan. */
+    plan: v.union(
+      v.literal("free"),
+      v.literal("pro"),
+      v.literal("team"),
+    ),
+    /** Usage limits for the current plan. */
+    limits: v.object({
+      tokensPerDay: v.number(),
+      maxConcurrentSessions: v.number(),
+      maxTeamMembers: v.number(),
+      loraEnabled: v.boolean(),
+    }),
+    /** Feature flags for this tenant. */
+    features: v.object({
+      customModels: v.boolean(),
+      priorityQueue: v.boolean(),
+      benchmarks: v.boolean(),
+      apiAccess: v.boolean(),
+    }),
+    /** Tenant creation timestamp (Unix ms). */
+    createdAt: v.number(),
+  })
+    .index("by_tenantId", ["tenantId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_subdomain", ["subdomain"])
+    .index("by_plan", ["plan"]),
+
+  // ============================================
   // Preferences — Synced across machines
   // ============================================
   preferences: defineTable({
