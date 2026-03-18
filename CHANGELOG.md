@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`packages/eight/session-sync.ts` — Automatic Convex session sync** — `SessionSyncManager` syncs session tokens, tool calls, and lifecycle to Convex DB in the background. Batches deltas and flushes every 10 seconds. All fire-and-forget, never blocks agent loop. Handles offline gracefully via dynamic imports. Replaces the broken inline `_trackSessionStart`/`_trackSessionEnd` methods.
+- **`syncToConvex` config flag** — new top-level boolean in `.8gent/config.json` to enable/disable Convex session sync (default: `false`)
+
 ## [0.6.0] — 2026-03-17
 
 ### Added
