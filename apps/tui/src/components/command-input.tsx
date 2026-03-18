@@ -69,7 +69,8 @@ export type SlashCommand =
   | "skills"
   | "design"
   | "evidence"
-  | "auth";
+  | "auth"
+  | "vision";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -221,6 +222,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["login", "account"],
     description: "Authentication (login, logout, status)",
     usage: "/auth [login|logout|status]",
+  },
+  {
+    name: "vision",
+    aliases: ["vis", "ocr", "eye"],
+    description: "Vision & OCR model settings",
+    usage: "/vision [status|model|ocr|pull] [args]",
   },
 ];
 
