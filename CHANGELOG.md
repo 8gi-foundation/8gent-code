@@ -10,12 +10,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-<<<<<<< HEAD
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
 - **Real Stripe billing** — real SDK calls replacing all stubs, webhook signature verification, Hono+Express handlers, lazy init (free tier never loads Stripe)
 - **Knowledge graph** — SQLite entity/relationship store with BFS traversal, heuristic extraction from tool results, user preference detection, fire-and-forget ingestion
+- **Memory v2** — SQLite+FTS5+embeddings replacing JSONL, 5 memory types, hybrid search, knowledge graph tables, version history, v1 migration
 
 ## [0.6.0] — 2026-03-17
 
