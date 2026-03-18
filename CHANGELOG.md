@@ -9,6 +9,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Real Stripe billing integration** — replaced all stub functions in `packages/control-plane/billing.ts` with real Stripe SDK calls
+  - `createStripeCustomer()` — creates Stripe customers with email, name, and metadata
+  - `createStripeSubscription()` — creates subscriptions with `default_incomplete` payment behavior and client secret extraction
+  - `cancelStripeSubscription()` — graceful end-of-period cancellation
+  - `cancelStripeSubscriptionImmediately()` — immediate cancellation for admin use
+  - `handleStripeWebhook()` — full signature verification via `stripe.webhooks.constructEvent`, handles `customer.subscription.created/updated/deleted` and `invoice.paid/payment_failed`
+  - `getStripeBillingPortalUrl()` — real Stripe billing portal session creation
+  - `getStripeCustomer()` / `getStripeSubscription()` — retrieval helpers
+- **`packages/control-plane/stripe-webhook.ts`** — framework-agnostic webhook route handlers for Hono, Express, and raw usage with callback system for subscription changes, deletions, and payment events
+- **Stripe Price ID constants** (`STRIPE_PRICE_IDS`) with placeholder values for Pro ($29/mo) and Team ($99/mo) tiers
+- **`stripe` package** added as dependency (^17.7.0)
+
 ## [0.6.0] — 2026-03-17
 
 ### Added
