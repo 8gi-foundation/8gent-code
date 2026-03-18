@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`packages/memory/` v2 — Multi-layered memory system** — SQLite-backed (bun:sqlite, WAL mode) storage replacing JSONL, five memory types (Core, Episodic, Semantic, Procedural, Working), FTS5 full-text search with BM25 ranking, optional vector embeddings via Ollama nomic-embed-text (768-dim) with cosine similarity, Reciprocal Rank Fusion for hybrid search, knowledge graph tables (entities, relationships, entity_mentions), version history with rollback support, soft deletes, importance decay model, context window assembly with token budget allocation, v1 JSONL migration tool, full backwards compatibility with v1 MemoryManager API
+
 ## [0.6.0] — 2026-03-17
 
 ### Added
