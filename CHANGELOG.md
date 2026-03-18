@@ -56,6 +56,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **MetaClaw proxy toggle** — `METACLAW_PROXY_URL` env var and `.8gent/config.json` metaclaw section to route Ollama calls through MetaClaw's OpenAI-compatible proxy
 - **RL checkpoint validation gate** — `benchmarks/autoresearch/validate-checkpoint.ts` runs benchmark suite against fine-tuned models and compares against baseline scores to prevent regressions
 - **Kernel Fine-Tuning section in README** — documents proxy architecture, base model recommendations, and how to enable
+- **Remotion video demos** (`apps/demos/`) — React-based video generation for product reels and landing page content
+  - 3 ready-to-render compositions: HeroIntro, FeatureShowcase, CostComparison
+  - 9:16 vertical (reels) and 16:9 landscape variants for each
+  - Reusable component library: Logo, TerminalWindow, GlowCard, CodeBlock, Background
+  - Animation utilities: fade-in, scale-in, typewriter, glow pulse, counter
+  - Branded design tokens matching 8gent visual identity
+  - Scripts: `studio`, `render:hero`, `render:features`, `render:cost`, `render:all`
+  - **Media preview page** (`bun run demos:media`) — Vite-powered browser preview with Remotion Player
 
 ## [0.5.0] — 2026-03-14
 
