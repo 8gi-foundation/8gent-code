@@ -9,6 +9,14 @@
     ".": {
       "import": "./index.ts",
       "types": "./index.ts"
+    },
+    "./graph": {
+      "import": "./graph.ts",
+      "types": "./graph.ts"
+    },
+    "./extractor": {
+      "import": "./extractor.ts",
+      "types": "./extractor.ts"
     }
   },
   "scripts": {
