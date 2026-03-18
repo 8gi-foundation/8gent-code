@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations (`packages/db/convex/tenants.ts`), `ConvexTenantStore` class wrapping Convex client, `InMemoryTenantStore` as offline fallback, `TenantStore` interface and `createTenantStore()` factory, stateless `checkUsageLimits` and `isFeatureEnabled` helpers
+
 ## [0.6.0] — 2026-03-17
 
 ### Added
