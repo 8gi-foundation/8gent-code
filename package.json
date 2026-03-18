@@ -77,6 +77,7 @@
     "tree-sitter-python": "^0.21.0",
     "tree-sitter-rust": "^0.21.0",
     "tree-sitter-typescript": "^0.21.0",
+    "stripe": "^17.7.0",
     "zod": "^4.3.6"
   },
   "author": "James Spalding",
