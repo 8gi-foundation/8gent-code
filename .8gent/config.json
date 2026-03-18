@@ -92,6 +92,8 @@
     "syncOnLogin": true
   },
 
+  "syncToConvex": false,
+
   "voice": {
     "enabled": false,
     "mode": "local",
