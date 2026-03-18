@@ -29,6 +29,7 @@ import { startTelegramBot, getActiveTelegramBot } from "../telegram";
 import { getVault } from "../secrets";
 import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
 import { getMemoryManager, extractAutoMemories } from "../memory";
+import { SessionSyncManager } from "./session-sync";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -92,6 +93,7 @@ export class Agent {
   private onboarding: OnboardingManager;
   private infiniteRunner: InfiniteRunner | null = null;
   private infiniteModeActive: boolean = false;
+  private sessionSync: SessionSyncManager;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -171,8 +173,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       environment: env,
     });
 
-    // Fire-and-forget: Track session in Convex (if authenticated)
-    this._trackSessionStart(config.model, config.runtime);
+    // Initialize Convex session sync (fire-and-forget, reads syncToConvex from config)
+    const syncEnabled = this._readSyncToConvex();
+    this.sessionSync = new SessionSyncManager(syncEnabled);
+    this.sessionSync.startSession(config.model, config.runtime).catch(() => {});
 
     // Populate git info asynchronously
     import("child_process").then(({ exec }) => {
@@ -432,6 +436,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
           resultPreview: resultStr.slice(0, 200),
         });
 
+        // Record tool call for Convex session sync
+        this.sessionSync.recordToolCall();
+
         // Track file operations
         if (event.success) {
           if (event.toolName === "write_file" && event.args.path) {
@@ -582,6 +589,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
         };
 
         totalTokensUsed += event.usage.totalTokens;
+
+        // Record tokens for Convex session sync (fire-and-forget)
+        this.sessionSync.recordTokens(
+          event.usage.promptTokens,
+          event.usage.completionTokens,
+        );
 
         // Track cost from provider (OpenRouter sends it in raw)
         const rawCost = event.usage.raw?.cost;
@@ -917,44 +930,32 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     return this.heartbeat;
   }
 
-  // ── Convex Session Tracking ──────────────────────────────────────
-  private _convexSessionId: string | null = null;
+  // ── Config Helpers ──────────────────────────────────────────────
 
-  private async _trackSessionStart(model: string, runtime: string): Promise<void> {
+  /**
+   * Read the syncToConvex flag from .8gent/config.json.
+   * Returns true by default if the db section exists, false if config is missing.
+   */
+  private _readSyncToConvex(): boolean {
     try {
-      const { getConvexClient } = await import("../../packages/db/client.js");
-      const client = getConvexClient();
-      // @ts-ignore — dynamic import of Convex API
-      const { api } = await import("../../packages/db/convex/_generated/api.js");
-      const result = await client.mutation(api.sessions.start, {
-        model: model || "unknown",
-        provider: runtime || "ollama",
-      });
-      if (result) this._convexSessionId = result;
+      const fs = require("fs");
+      const path = require("path");
+      const cwd = this.config.workingDirectory || process.cwd();
+      const configPath = path.join(cwd, ".8gent", "config.json");
+      const raw = fs.readFileSync(configPath, "utf-8");
+      const config = JSON.parse(raw);
+      // Check explicit syncToConvex flag first, then fall back to db.offlineMode
+      if (typeof config.syncToConvex === "boolean") return config.syncToConvex;
+      if (config.db?.offlineMode === false) return true;
+      return false;
     } catch {
-      // DB not available — silent, never blocks agent
-    }
-  }
-
-  private async _trackSessionEnd(): Promise<void> {
-    if (!this._convexSessionId) return;
-    try {
-      const { getConvexClient } = await import("../../packages/db/client.js");
-      const client = getConvexClient();
-      const { api } = await import("../../packages/db/convex/_generated/api.js");
-      await client.mutation(api.sessions.end, {
-        sessionId: this._convexSessionId,
-        tokensUsed: this.totalTokensUsed || 0,
-        toolCalls: this.turnNumber || 0,
-      });
-    } catch {
-      // Silent — never blocks cleanup
+      return false; // No config = no sync
     }
   }
 
   async cleanup(): Promise<void> {
-    // Track session end in Convex
-    await this._trackSessionEnd().catch(() => {});
+    // Flush and end Convex session sync
+    await this.sessionSync.endSession().catch(() => {});
     // Stop heartbeat agents
     this.heartbeat.stop();
 
