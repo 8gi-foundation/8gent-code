@@ -817,6 +817,79 @@ export function App({ initialCommand, args }: AppProps) {
     checkOnboarding();
   }, [onboardingManager]);
 
+  // Handle /vision command — manage vision & OCR model settings
+  const handleVisionCommand = useCallback(async (args: string[]) => {
+    const { loadVisionConfig, saveVisionConfig, findVisionModel, findOCRModel, getRecommendedOCRModels } = await import("../../../packages/eight/vision-router.js");
+    const config = loadVisionConfig();
+
+    const sub = args[0]?.toLowerCase();
+
+    if (!sub || sub === "status") {
+      // Show current vision config and available models
+      const visionResult = await findVisionModel({ taskType: "general", config });
+      const ocrResult = await findOCRModel();
+      const available = visionResult.allAvailable;
+      const ocrAvailable = ocrResult.allAvailable.filter((m: any) => m.ocrSpecialized);
+
+      addSystemMessage(
+        `Vision Settings:\n` +
+        `  Enabled: ${config.enabled ? "yes" : "no"}\n` +
+        `  Provider: ${config.provider}\n` +
+        `  Default model: ${config.defaultModel}\n` +
+        `  OCR model: ${config.ocrModel}\n` +
+        `  Prefer local: ${config.preferLocal ? "yes" : "no"}\n` +
+        `  Timeout: ${config.timeout}ms\n\n` +
+        `Active Vision: ${visionResult.model?.displayName || "none"}\n` +
+        `Active OCR: ${ocrResult.model?.displayName || "none"}\n\n` +
+        `Available vision models (${available.length}):\n` +
+        (available.length > 0
+          ? available.map((m: any) => `  ${m.ocrSpecialized ? "[OCR]" : "[VIS]"} ${m.displayName} ${m.free ? "(free)" : ""}`).join("\n")
+          : "  None found locally. Try: ollama pull qwen2.5-vl") +
+        `\n\nCommands:\n` +
+        `  /vision model <name>   — Set default vision model\n` +
+        `  /vision ocr <name>     — Set OCR model (or "auto")\n` +
+        `  /vision on|off         — Enable/disable vision\n` +
+        `  /vision pull           — Show recommended models to pull`
+      );
+    } else if (sub === "model" && args[1]) {
+      const model = args.slice(1).join(" ");
+      saveVisionConfig({ defaultModel: model });
+      addSystemMessage(`Vision model set to: ${model}\nThis will be used for image description tasks.`);
+    } else if (sub === "ocr" && args[1]) {
+      const model = args.slice(1).join(" ");
+      saveVisionConfig({ ocrModel: model });
+      addSystemMessage(`OCR model set to: ${model}\n${model === "auto" ? "Will auto-discover the best OCR model." : "This will be used for text extraction tasks."}`);
+    } else if (sub === "on" || sub === "enable") {
+      saveVisionConfig({ enabled: true });
+      addSystemMessage("Vision enabled.");
+    } else if (sub === "off" || sub === "disable") {
+      saveVisionConfig({ enabled: false });
+      addSystemMessage("Vision disabled. Images will not be interpreted.");
+    } else if (sub === "local") {
+      saveVisionConfig({ preferLocal: true, provider: "ollama" });
+      addSystemMessage("Vision set to local-only (Ollama). Free and private.");
+    } else if (sub === "cloud" || sub === "openrouter") {
+      saveVisionConfig({ preferLocal: false, provider: "openrouter" });
+      addSystemMessage("Vision set to cloud (OpenRouter). Includes free models.");
+    } else if (sub === "pull") {
+      const recommended = getRecommendedOCRModels();
+      addSystemMessage(
+        "Recommended vision/OCR models to pull:\n\n" +
+        recommended.map((m: any) => `  ollama pull ${m.model}  — ${m.description} (${m.size})`).join("\n") +
+        "\n\nGeneral vision (default):\n" +
+        "  ollama pull qwen2.5-vl     — Best general vision + OCR (~5GB)\n" +
+        "  ollama pull minicpm-v       — Mobile-friendly (~5GB)\n" +
+        "  ollama pull llava           — Classic, widely supported (~4GB)\n" +
+        "  ollama pull moondream       — Tiny and fast (~1.7GB)"
+      );
+    } else {
+      addSystemMessage(
+        `Unknown vision subcommand: "${sub}"\n` +
+        "Usage: /vision [status|model|ocr|on|off|local|cloud|pull]"
+      );
+    }
+  }, [addSystemMessage]);
+
   // Handle slash commands
   const handleSlashCommand = useCallback(
     (command: SlashCommand, args: string[]) => {
@@ -831,6 +904,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /evidence - Show full evidence breakdown\n" +
               "  /auth [login|logout|status] - Authentication\n" +
               "  /voice record - Toggle voice input (Ctrl+Space)\n" +
+              "  /vision - Vision & OCR model settings\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
               "  /clear - Clear messages\n" +
@@ -1147,6 +1221,10 @@ export function App({ initialCommand, args }: AppProps) {
               // Show provider selector
               setViewMode("provider-select");
             }
+          }
+          // Handle /vision command
+          else if (command === "vision" as any) {
+            handleVisionCommand(args);
           }
           break;
       }
