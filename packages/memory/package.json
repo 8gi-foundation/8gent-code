@@ -1,7 +1,7 @@
 {
   "name": "@8gent/memory",
-  "version": "0.1.0",
-  "description": "Multi-layered memory system — session, project, and global knowledge persistence for 8gent Code",
+  "version": "0.2.0",
+  "description": "Multi-layered memory system v2 — SQLite-backed with FTS5 search, optional vector embeddings, and knowledge graph for 8gent Code",
   "main": "index.ts",
   "types": "index.ts",
   "type": "module",
@@ -10,13 +10,21 @@
       "import": "./index.ts",
       "types": "./index.ts"
     },
-    "./graph": {
-      "import": "./graph.ts",
-      "types": "./graph.ts"
+    "./types": {
+      "import": "./types.ts",
+      "types": "./types.ts"
     },
-    "./extractor": {
-      "import": "./extractor.ts",
-      "types": "./extractor.ts"
+    "./store": {
+      "import": "./store.ts",
+      "types": "./store.ts"
+    },
+    "./embeddings": {
+      "import": "./embeddings.ts",
+      "types": "./embeddings.ts"
+    },
+    "./migrate": {
+      "import": "./migrate.ts",
+      "types": "./migrate.ts"
     }
   },
   "scripts": {
