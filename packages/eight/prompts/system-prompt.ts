@@ -168,6 +168,66 @@ When creating UI components, pages, or any visual interface:
 
 Excellent design is the default, not an afterthought.`;
 
+export const SWE_PATTERNS_SEGMENT = `## SOFTWARE ENGINEERING PATTERNS
+
+When solving coding tasks, apply these battle-tested patterns:
+
+### Concurrency: Mutex / Serialization
+When multiple async callers need exclusive access to shared state, use a **promise chain mutex**:
+\`\`\`
+class Mutex {
+  private chain = Promise.resolve();
+  async acquire<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.chain.then(fn);
+    this.chain = result.then(() => {}, () => {});
+    return result;
+  }
+}
+\`\`\`
+Key: each caller's work is chained AFTER the previous caller's promise resolves. Never await a shared promise — chain new promises.
+
+### Caching: LRU with Map
+JavaScript Map iterates in insertion order. For LRU eviction, **delete and re-insert on every access**:
+\`\`\`
+get(key) {
+  const entry = this.map.get(key);
+  if (!entry || isExpired(entry)) return undefined;
+  this.map.delete(key);       // Remove from current position
+  this.map.set(key, entry);   // Re-insert at end (most recent)
+  return entry.value;
+}
+\`\`\`
+Eviction: delete the FIRST key (map.keys().next().value) — that's the least recently used.
+
+### State Machines: Entry/Exit Order
+Always: exit(old) → update state → enter(new) → notify listeners.
+Never skip exit actions. Self-transitions (same state) should still fire actions and notify.
+
+### Task Queues: Priority + Concurrency
+- Sort on INSERT, not on dequeue. Use binary search or sorted insert.
+- Concurrency: increment counter BEFORE starting the task (synchronously), decrement in finally block.
+- Exponential backoff: delay = baseDelay * 2^attempt + random jitter.
+- Graceful shutdown: set flag, reject new enqueue(), await running tasks via Promise.all.
+
+### Event Systems: Memory Leak Prevention
+Always store handler references for later removal:
+\`\`\`
+constructor() {
+  this.handler = (data) => this.onData(data);  // Store reference
+  emitter.on('data', this.handler);
+}
+destroy() {
+  emitter.off('data', this.handler);  // Same reference
+}
+\`\`\`
+
+### General Rules
+- Output COMPLETE implementations. Never truncate with "// ..." or "rest is similar".
+- When the task says "output ONLY code", output only TypeScript code with no markdown fences.
+- Prefer simple correct code over clever incomplete code.
+- For complex implementations (>100 lines), structure as: types → helpers → main class → exports.
+`;
+
 export const RULES_SEGMENT = `## CRITICAL RULES
 
 1. ALWAYS plan first for multi-step tasks
@@ -192,6 +252,7 @@ export const FULL_SYSTEM_PROMPT = [
   ARCHITECTURE_SEGMENT,
   BMAD_SEGMENT,
   THINKING_PATTERNS_SEGMENT,
+  SWE_PATTERNS_SEGMENT,
   TOOL_PATTERNS_SEGMENT,
   DESIGN_FIRST_SEGMENT,
   ERROR_RECOVERY_SEGMENT,
