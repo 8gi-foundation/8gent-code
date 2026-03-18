@@ -156,8 +156,8 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
       return isCloudAvailable(this.config.openaiApiKey);
     }
 
-    // Local mode: need whisper binary and a model
-    return deps.whisperBinaryPath !== null && deps.downloadedModels.length > 0;
+    // Local mode: need whisper binary (models auto-download on first use)
+    return deps.whisperBinaryPath !== null;
   }
 
   /**
