@@ -4,6 +4,7 @@
   "type": "module",
   "main": "index.ts",
   "dependencies": {
-    "@8gent/db": "workspace:*"
+    "@8gent/db": "workspace:*",
+    "stripe": "^17.7.0"
   }
 }
