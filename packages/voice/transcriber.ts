@@ -34,7 +34,7 @@ export async function findWhisperBinary(): Promise<string | null> {
   }
 
   // Check system PATH for common whisper.cpp binary names
-  const names = ["whisper-cpp", "whisper", "main"];
+  const names = ["whisper-cpp", "whisper-cli", "whisper", "main"];
   for (const name of names) {
     try {
       const proc = spawn(["which", name], { stdout: "pipe", stderr: "pipe" });
@@ -48,10 +48,11 @@ export async function findWhisperBinary(): Promise<string | null> {
     }
   }
 
-  // Check brew-installed whisper.cpp
-  const brewPath = "/opt/homebrew/bin/whisper-cpp";
-  if (existsSync(brewPath)) {
-    return brewPath;
+  // Check brew-installed whisper.cpp (may be named whisper-cli in newer versions)
+  for (const brewName of ["/opt/homebrew/bin/whisper-cpp", "/opt/homebrew/bin/whisper-cli"]) {
+    if (existsSync(brewName)) {
+      return brewName;
+    }
   }
 
   return null;
