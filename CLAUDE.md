@@ -125,3 +125,17 @@ apps/tui/src/
 5. **All reusable UI in `components/`** — screens only compose, never implement raw UI
 6. **Loading/error/empty are standard components** — never ad hoc
 7. **Every width-sensitive display uses `truncate()`** from lib
+
+## Presentation & Customer-Facing Artifact Rules
+
+**Every HTML presentation, landing page, dashboard, or visual artifact MUST be:**
+
+1. **Mobile-first responsive** — design for 375px first, scale up. Use `clamp()` for all font sizes and spacing. Never use fixed pixel values for padding/margins on any layout element.
+2. **Touch-friendly** — swipe navigation, 44px minimum touch targets, no hover-only interactions.
+3. **Animated** — staggered entrance animations, smooth transitions between states, number counters animate to value. Static = unacceptable.
+4. **Tested before delivery** — mentally verify at 375px (iPhone SE), 393px (iPhone 14), 768px (iPad), 1440px (desktop) before sending to James.
+5. **Tables on mobile** — always wrap in horizontal scroll container with `-webkit-overflow-scrolling: touch`.
+6. **Grids on mobile** — single column below 600px, 2-col at 768px, full grid at 960px+.
+7. **No fixed pixel fonts** — always `clamp(min, preferred, max)` e.g. `clamp(28px, 5vw, 56px)`.
+
+**Quality bar:** If you wouldn't show it to a $10M investor on their phone, don't ship it.
