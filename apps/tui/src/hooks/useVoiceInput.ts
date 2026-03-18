@@ -223,6 +223,14 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     };
   }, [state]);
 
+  // Check availability on mount
+  useEffect(() => {
+    engine.isAvailable().then((available) => {
+      setIsAvailable(available);
+      engine.getSetupStatus().then(setSetupStatus).catch(() => {});
+    }).catch(() => setIsAvailable(false));
+  }, [engine]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
