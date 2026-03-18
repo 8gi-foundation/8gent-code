@@ -22,6 +22,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **TUI voice components** — `useVoiceInput` hook (Ctrl+Space toggle) and `VoiceIndicator` component with recording status, audio levels, and download progress
 - **CLI auth commands** — `8gent auth login`, `8gent auth logout`, `8gent auth status`, `8gent auth whoami`
 - **20 BMAD planning documents** — project briefs, PRDs, architecture docs, and epics for all 5 phases across `docs/bmad/`
+- **Local vision & OCR model support** — vision router now auto-discovers OCR-specialized models (dots.ocr, deepseek-ocr, glm-ocr) alongside general vision models (qwen2.5-vl, minicpm-v, internvl2)
+- **`/vision` slash command** — configure vision/OCR models from TUI: `/vision status`, `/vision model <name>`, `/vision ocr <name>`, `/vision pull` for recommendations
+- **Vision config in `.8gent/config.json`** — user-configurable `defaultModel`, `ocrModel`, fallback chains, provider preference (local/cloud), timeout
+- **OCR-specific routing** — `findOCRModel()` prefers dedicated OCR models for text extraction, falls back to general vision models with strong OCR
+- **OCR prompt in VisionInterpreter** — dedicated OCR prompt preserves formatting, tables, code indentation, and LaTeX formulas
+- **OpenRouter free vision fallback** — vision router now checks OpenRouter free models even without API key as additional fallback
 
 ### Fixed
 - **Installer color violations** — replaced forbidden `color="gray"` and `color="white"` with `dimColor` and default text in `apps/installer/src/index.tsx`
