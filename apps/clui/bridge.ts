@@ -1,9 +1,10 @@
+#!/usr/bin/env bun
 /**
- * 8gent CLUI Bridge — Streaming
+ * 8gent CLUI Bridge — Standalone Streaming
  *
+ * Standalone copy that avoids monorepo workspace resolution issues.
  * Talks directly to Ollama API with streaming responses.
  * Reads prompts from stdin, writes NDJSON to stdout.
- * Tokens appear in real-time as they're generated.
  */
 
 import * as readline from "readline";
@@ -16,16 +17,26 @@ const model = process.env.EIGHT_MODEL || "eight:latest";
 const sessionId = process.env.EIGHT_SESSION_ID || `clui_${Date.now()}`;
 const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
 
+// Load system prompt from the prompt library if available
+function loadSystemPrompt(): string {
+  try {
+    const promptPath = new URL("../../packages/eight/prompts/system-prompt.ts", import.meta.url).pathname;
+    const content = require("fs").readFileSync(promptPath, "utf-8");
+    const segments: string[] = [];
+    const re = /export const \w+_SEGMENT = `([\s\S]*?)`;/g;
+    let m;
+    while ((m = re.exec(content)) !== null) segments.push(m[1]);
+    if (segments.length > 0) return segments.join("\n\n");
+  } catch {}
+  return `You are Eight, the infinite gentleman — an autonomous coding agent. Refined, witty, confident, endlessly capable. Dry British wit. Help users write code, fix bugs, build software. Be concise.`;
+}
+
 const history: Array<{ role: string; content: string }> = [
-  {
-    role: "system",
-    content: `You are Eight, the infinite gentleman — an autonomous coding agent. Refined, witty, confident, endlessly capable. Dry British wit. Help users write code, fix bugs, build software. Be concise.`,
-  },
+  { role: "system", content: loadSystemPrompt() },
 ];
 
 async function chatStream(prompt: string): Promise<string> {
   history.push({ role: "user", content: prompt });
-  process.stderr.write(`[bridge] fetching for prompt: "${prompt.substring(0, 30)}"\n`);
 
   const res = await fetch(`${ollamaUrl}/api/chat`, {
     method: "POST",
@@ -34,20 +45,15 @@ async function chatStream(prompt: string): Promise<string> {
       model,
       messages: history,
       stream: true,
-      options: {
-        num_predict: 512,
-      },
-      // Disable thinking mode for qwen/eight models (causes massive delays)
+      options: { num_predict: 512 },
       think: false,
     }),
   });
 
-  process.stderr.write(`[bridge] fetch status: ${res.status}\n`);
   if (!res.ok) {
     throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
   }
 
-  // Read the NDJSON stream line by line
   const reader = res.body?.getReader();
   if (!reader) throw new Error("No response body");
 
@@ -61,16 +67,14 @@ async function chatStream(prompt: string): Promise<string> {
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
-    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+    buffer = lines.pop() || "";
 
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const chunk = JSON.parse(line);
-        // Skip thinking tokens (qwen3/eight models emit these before real content)
         if (chunk.message?.role === "assistant" && chunk.message?.content) {
           const token = chunk.message.content;
-          // Filter out thinking markers
           if (!token.includes("<think>") && !token.includes("</think>")) {
             fullContent += token;
             emit({ type: "text", content: token });

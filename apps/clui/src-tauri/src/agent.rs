@@ -130,8 +130,8 @@ impl AgentManager {
         // Resolve the 8gent repo root reliably
         let repo_root = Self::resolve_repo_root();
 
-        // Use the CLUI bridge which outputs NDJSON
-        let agent_script = repo_root.join("packages/eight/clui-bridge.ts");
+        // Use the standalone CLUI bridge (avoids monorepo workspace fetch issues)
+        let agent_script = repo_root.join("apps/clui/bridge.ts");
         if !agent_script.exists() {
             return Err(format!(
                 "Agent bridge not found at {}. Repo root resolved to: {}",
