@@ -9,6 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`packages/memory/graph.ts` — Knowledge Graph layer** — SQLite-backed entity/relationship store with BFS subgraph traversal, pattern matching queries, and automatic deduplication by (type, name) composite key. Entity types: file, function, package, person, decision, concept, preference, tool. Relationship types: depends_on, implements, authored_by, decided, prefers, uses, contains, related_to.
+- **`packages/memory/extractor.ts` — EntityExtractor** — heuristic-based entity extraction from agent tool results. Auto-detects file operations, package.json dependencies, git commits, shell commands, code exports/imports, and user preference/correction patterns. Zero LLM cost, <1ms per extraction.
+- **Knowledge graph wired into MemoryManager** — `ingestToolResult()` and `ingestUserMessage()` methods fire-and-forget entity extraction into the graph after every tool call. Graph is lazily initialized on first use with WAL-mode SQLite.
+
 ## [0.6.0] — 2026-03-17
 
 ### Added
