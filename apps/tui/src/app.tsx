@@ -1177,17 +1177,37 @@ export function App({ initialCommand, args }: AppProps) {
           if ((command as string) === "auth") {
             const sub = args[0] || "status";
             if (sub === "login") {
-              addSystemMessage("Starting auth flow... Opening browser.");
-              initAuthSystem().then((state) => {
-                if (state.status === "authenticated") {
-                  setAuthStatus("authenticated");
-                  if ("user" in state) {
-                    setAuthUser({ displayName: (state as any).user?.displayName ?? "User", plan: (state as any).user?.plan ?? "free" });
-                  }
-                  addSystemMessage(`Authenticated as ${(state as any).user?.displayName || "User"}`);
-                } else {
-                  addSystemMessage("Auth failed or cancelled. Running in anonymous mode.");
-                }
+              addSystemMessage("Opening browser for authentication...\nPress Enter to open, or visit the URL shown.");
+              import("../../../packages/auth/cli-auth-server.js").then(({ runCLIAuthFlow }) => {
+                runCLIAuthFlow("https://8gent.world", {
+                  onServerReady: (url, port) => {
+                    addSystemMessage(`Auth server listening on port ${port}\nOpening: ${url}`);
+                  },
+                  onBrowserOpened: () => {
+                    addSystemMessage("Browser opened. Sign in to continue...");
+                  },
+                  onWaiting: () => {
+                    addSystemMessage("Waiting for authentication... (5 min timeout)");
+                  },
+                  onTokenReceived: (result) => {
+                    if (result.success) {
+                      setAuthStatus("authenticated");
+                      setAuthUser({
+                        displayName: result.displayName || "User",
+                        plan: "free",
+                      });
+                      addSystemMessage(`Authenticated as ${result.displayName || result.email || "User"}`);
+                    }
+                  },
+                  onTimeout: () => {
+                    addSystemMessage("Auth timed out. Try /auth login again.");
+                  },
+                  onError: (err) => {
+                    addSystemMessage(`Auth error: ${err}`);
+                  },
+                }).catch(() => {
+                  addSystemMessage("Auth failed. Running in anonymous mode.");
+                });
               });
             } else if (sub === "logout") {
               authManager?.logout?.();
