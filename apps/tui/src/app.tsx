@@ -269,8 +269,14 @@ export function App({ initialCommand, args }: AppProps) {
   const [authStatus, setAuthStatus] = useState<"unknown" | "anonymous" | "authenticated" | "error">("unknown");
   const [authUser, setAuthUser] = useState<{ displayName: string; plan: string } | null>(null);
 
-  // Voice input
-  const voice = useVoiceInput();
+  // Voice input — transcript goes to input field for review, NOT auto-send
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
+  const voice = useVoiceInput({
+    onTranscript: (text) => {
+      setVoiceTranscript(text);
+      addSystemMessage(`Transcribed: "${text}" — edit or press Enter to send`);
+    },
+  });
 
   // Initialize auth on mount (fire-and-forget, never blocks)
   useEffect(() => {
@@ -903,7 +909,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /design [task] - Get design system suggestions\n" +
               "  /evidence - Show full evidence breakdown\n" +
               "  /auth [login|logout|status] - Authentication\n" +
-              "  /voice record - Toggle voice input (Ctrl+Space)\n" +
+              "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
@@ -1141,21 +1147,24 @@ export function App({ initialCommand, args }: AppProps) {
         case "voice":
           // Enhanced voice command — toggle STT recording
           if (args[0] === "record" || args[0] === "listen" || args[0] === "stt") {
-            voice.toggleVoice();
+            voice.toggle().catch((err: Error) => {
+              addSystemMessage(`Voice error: ${err.message}`);
+            });
             addSystemMessage(
               voice.state === "recording"
                 ? "Voice recording stopped."
-                : "Voice recording started. Speak now... (Ctrl+Space to stop)"
+                : "Voice recording started. Speak now... (Ctrl+R to stop)"
             );
           } else if (args[0] === "status") {
+            const setupInfo = voice.setupStatus;
             const status = voice.isAvailable
-              ? `Voice: Available (model: ${voice.modelName || "base"})`
-              : `Voice: Not available — ${voice.error || "sox/whisper not found"}`;
+              ? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})`
+              : `Voice: Not available — ${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"}`;
             addSystemMessage(status);
           } else {
             addSystemMessage(
               "Voice commands:\n" +
-              "  /voice record  — Toggle STT recording (Ctrl+Space)\n" +
+              "  /voice record  — Toggle STT recording (or press Ctrl+V)\n" +
               "  /voice status  — Check voice system status\n" +
               "  /voice on|off  — Toggle TTS output"
             );
@@ -1836,6 +1845,7 @@ export function App({ initialCommand, args }: AppProps) {
             planNextStep={planNextStep}
             recentCommands={recentCommands}
             onSlashCommand={handleSlashCommand}
+            injectedText={voiceTranscript}
           />
         </Box>
 
