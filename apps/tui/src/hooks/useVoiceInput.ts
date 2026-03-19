@@ -73,7 +73,7 @@ export interface UseVoiceInputReturn {
 /**
  * React hook for voice input in the TUI.
  *
- * Provides Ctrl+Space toggle for recording, real-time state updates,
+ * Provides Ctrl+R toggle for recording, real-time state updates,
  * and transcript injection.
  *
  * Usage:
@@ -238,16 +238,18 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     };
   }, [engine]);
 
-  // Keyboard handler: Ctrl+Space to toggle recording
+  // Keyboard handler: Ctrl+R to toggle voice recording (R for Record)
+  // Always active (don't gate on isEnabled — pressing the key auto-enables)
   useInput(
     (input, key) => {
-      // Ctrl+Space — terminal sends ctrl+@ which is NUL (0x00)
-      // Some terminals send ctrl+space as a space with ctrl modifier
-      if (key.ctrl && (input === " " || input === "\0" || input === "@")) {
+      if (key.ctrl && input === "r") {
+        if (!engine.isEnabled()) {
+          engine.enable();
+        }
         toggle().catch(() => {});
       }
     },
-    { isActive: active && engine.isEnabled() },
+    { isActive: active },
   );
 
   // Actions

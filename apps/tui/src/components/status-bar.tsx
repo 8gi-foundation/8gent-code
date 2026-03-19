@@ -315,7 +315,7 @@ function VoiceStatusItem({ state }: { state: string }) {
   if (state === "transcribing") {
     return <Badge label={"\u2026 STT"} color="cyan" variant="outline" />;
   }
-  return <MutedText>{"\u25CB"} Mic</MutedText>;
+  return <MutedText>{"\u25CB"} Mic (^R)</MutedText>;
 }
 
 function PlanStatusItem({
