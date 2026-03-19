@@ -32,10 +32,10 @@ export interface VoiceConfig {
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
-  enabled: false,
+  enabled: true,
   mode: "local",
   model: "tiny",
-  keybinding: "ctrl+space",
+  keybinding: "ctrl+r",
   vadEnabled: false,
   vadSilenceMs: 1500,
   language: "en",
