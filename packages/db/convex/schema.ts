@@ -148,8 +148,47 @@ export default defineSchema({
     loraVersion: v.optional(v.string()),
     /** Custom prompt mutations the user has configured. */
     customPromptMutations: v.array(v.string()),
+    /** Preferred communication style. */
+    communicationStyle: v.optional(v.string()),
+    /** User's language. */
+    language: v.optional(v.string()),
+    /** Git branch prefix (e.g., "james/"). */
+    gitBranchPrefix: v.optional(v.string()),
+    /** Autonomy level threshold. */
+    autonomyThreshold: v.optional(v.string()),
     /** Last update timestamp (Unix ms). */
     updatedAt: v.number(),
   })
     .index("by_userId", ["userId"]),
+
+  // ============================================
+  // Conversations — Session history with checkpoints
+  // ============================================
+  conversations: defineTable({
+    /** Reference to the user. */
+    userId: v.id("users"),
+    /** Local session ID from the agent. */
+    sessionId: v.string(),
+    /** Auto-generated conversation title. */
+    title: v.string(),
+    /** AI-generated summary of the conversation. */
+    summary: v.optional(v.string()),
+    /** Number of messages in the conversation. */
+    messageCount: v.number(),
+    /** Model used (e.g., "qwen3:14b"). */
+    model: v.string(),
+    /** Working directory path. */
+    workingDirectory: v.string(),
+    /** Git branch at time of session. */
+    gitBranch: v.optional(v.string()),
+    /** Session start timestamp (Unix ms). */
+    startedAt: v.number(),
+    /** Last activity timestamp (Unix ms). */
+    lastActiveAt: v.number(),
+    /** Checkpoint data: serialized messages for resume. */
+    checkpointData: v.optional(v.string()),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_lastActiveAt", ["userId", "lastActiveAt"])
+    .index("by_sessionId", ["sessionId"]),
 });

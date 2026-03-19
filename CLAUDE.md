@@ -126,6 +126,32 @@ apps/tui/src/
 6. **Loading/error/empty are standard components** — never ad hoc
 7. **Every width-sensitive display uses `truncate()`** from lib
 
+## Personalization System
+
+8gent has a 5-layer personalization system. Key files:
+
+- `packages/self-autonomy/onboarding.ts` — Smart onboarding with `autoDetect()`, 3-question flow
+- `packages/self-autonomy/preferences-sync.ts` — Cloud sync via Convex (`syncOnLogin`, `pushToCloud`)
+- `packages/eight/prompts/system-prompt.ts` — `USER_CONTEXT_SEGMENT` for adaptive prompts
+- `packages/eight/session-sync.ts` — Checkpoint saving, conversation history, resume
+- `packages/eight/agent.ts` — `abort()` for ESC interruption, `restoreFromCheckpoint()` for resume
+- `packages/kernel/personal-collector.ts` — Training pair collection for personal LoRA
+- `packages/memory/types.ts` — `userId` on `MemoryBase` for user-scoped recall
+- `packages/db/convex/conversations.ts` — Conversation history persistence
+- `apps/tui/src/screens/HistoryScreen.tsx` — Session browser UI
+
+### New Slash Commands
+| Command | Purpose |
+|---------|---------|
+| `/history` | Browse past sessions |
+| `/continue` | Resume most recent session |
+| `/resume` | Pick from last 5 sessions |
+| `/compact` | Compress conversation history |
+
+### ESC Behavior
+- During generation: **aborts the AI SDK stream** (calls `agent.abort()`)
+- In non-chat views: returns to chat view
+
 ## Presentation & Customer-Facing Artifact Rules
 
 **Every HTML presentation, landing page, dashboard, or visual artifact MUST be:**
