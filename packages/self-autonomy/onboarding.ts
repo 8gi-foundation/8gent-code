@@ -113,6 +113,14 @@ export interface OnboardingQuestion {
   processor: (answer: string, user: UserConfig) => UserConfig;
 }
 
+export interface AutoDetected {
+  name: string | null;
+  email: string | null;
+  ollamaModels: string[];
+  githubUsername: string | null;
+  preferredProvider: "ollama" | "lmstudio" | "openrouter" | null;
+}
+
 // ============================================
 // Onboarding Questions
 // ============================================
@@ -121,36 +129,22 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
   {
     step: "identity",
     question:
-      "Good day. I'm 8gent, The Infinite Gentleman.\n\nBefore we begin, what should I call you?",
-    processor: (answer, user) => ({
-      ...user,
-      identity: { ...user.identity, name: answer.trim() },
-      completedSteps: [...user.completedSteps, "identity"],
-    }),
-  },
-  {
-    step: "role",
-    question:
-      "Splendid, {name}.\n\nWhat's your role? (developer, founder, student, designer, etc.)",
-    processor: (answer, user) => ({
-      ...user,
-      identity: { ...user.identity, role: answer.trim().toLowerCase() },
-      completedSteps: [...user.completedSteps, "role"],
-    }),
-  },
-  {
-    step: "projects",
-    question:
-      "Tell me about your main project.\nWhat are you building? (Brief description)",
-    processor: (answer, user) => ({
-      ...user,
-      projects: {
-        ...user.projects,
-        primary: answer.trim(),
-        all: [answer.trim()],
-      },
-      completedSteps: [...user.completedSteps, "projects"],
-    }),
+      "Good day. I'm 8gent, The Infinite Gentleman.\n\n" +
+      "Here's what I detected:\n" +
+      "  Name: {detected_name}\n" +
+      "  Email: {detected_email}\n" +
+      "  GitHub: {detected_github}\n" +
+      "  Provider: {detected_provider}\n" +
+      "  Models: {detected_models}\n\n" +
+      "Press Enter to accept, or type your preferred name:",
+    processor: (answer, user) => {
+      const name = answer.trim() || user.identity.name;
+      return {
+        ...user,
+        identity: { ...user.identity, name: name || user.identity.name },
+        completedSteps: [...user.completedSteps, "identity", "role", "projects", "model", "language", "voice", "telegram", "github", "mcps"],
+      };
+    },
   },
   {
     step: "communication",
@@ -181,109 +175,16 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
     },
   },
   {
-    step: "language",
-    question:
-      "What language should I respond in?\n(en, es, pt, de, fr, zh, ja, etc.)",
-    processor: (answer, user) => ({
-      ...user,
-      identity: { ...user.identity, language: answer.trim().toLowerCase() || "en" },
-      completedSteps: [...user.completedSteps, "language"],
-    }),
-  },
-  {
-    step: "model",
-    question:
-      "Let's set up your AI engine.\n\n" +
-      "Which provider would you like to use?\n" +
-      "1. Ollama (local)\n" +
-      "2. LM Studio (local)\n" +
-      "3. OpenRouter (cloud, many models)\n" +
-      "4. OpenAI (cloud)\n" +
-      "5. Anthropic (cloud)\n\n" +
-      "(I'll detect available models after selection)",
-    options: ["1", "2", "3", "4", "5", "ollama", "lmstudio", "openrouter", "openai", "anthropic"],
-    processor: (answer, user) => {
-      const providerMap: Record<string, UserConfig["preferences"]["model"]["provider"]> = {
-        "1": "ollama",
-        "2": "lmstudio",
-        "3": "openrouter",
-        "4": "openai",
-        "5": "anthropic",
-        ollama: "ollama",
-        lmstudio: "lmstudio",
-        openrouter: "openrouter",
-        openai: "openai",
-        anthropic: "anthropic",
-      };
-      const provider = providerMap[answer.toLowerCase()] || "ollama";
-      return {
-        ...user,
-        preferences: {
-          ...user.preferences,
-          model: {
-            ...user.preferences.model,
-            provider,
-            preferLocal: provider === "ollama" || provider === "lmstudio",
-          },
-        },
-        completedSteps: [...user.completedSteps, "model"],
-      };
-    },
-  },
-  {
-    step: "voice",
-    question:
-      "I can speak to you if you'd like.\nEnable voice output? (yes/no)",
-    options: ["yes", "no", "y", "n"],
-    processor: (answer, user) => ({
-      ...user,
-      preferences: {
-        ...user.preferences,
-        voice: {
-          ...user.preferences.voice,
-          enabled: ["yes", "y"].includes(answer.toLowerCase()),
-        },
-      },
-      completedSteps: [...user.completedSteps, "voice"],
-    }),
-  },
-  {
-    step: "telegram",
-    question:
-      "Would you like to set up Telegram for remote control? (y/n)\n\n" +
-      "This lets you control 8gent from your phone — switch models,\n" +
-      "run tasks, and chat with the agent from anywhere.",
-    options: ["yes", "no", "y", "n"],
-    processor: (answer, user) => {
-      const wantsTelegram = ["yes", "y"].includes(answer.toLowerCase());
-      if (wantsTelegram) {
-        console.log(
-          "\n\x1b[36mGreat!\x1b[0m After onboarding, run \x1b[33m/telegram setup\x1b[0m to connect your bot.\n" +
-          "\x1b[90mYou'll need: Open Telegram → @BotFather → /newbot → copy the token.\x1b[0m\n"
-        );
-      }
-      return {
-        ...user,
-        completedSteps: [...user.completedSteps, "telegram"],
-      };
-    },
-  },
-  {
     step: "confirmation",
     question:
-      "Excellent. Let me confirm what I've learned:\n\n" +
+      "Excellent. All set:\n\n" +
       "- Name: {name}\n" +
-      "- Role: {role}\n" +
-      "- Project: {project}\n" +
       "- Style: {style}\n" +
-      "- Language: {language}\n" +
-      "- Model: {provider}\n" +
-      "- Voice: {voice}\n" +
-      "- Telegram: {telegram}\n\n" +
-      "Is this correct? (yes/no)",
+      "- Provider: {provider}\n\n" +
+      "Ready to begin? (yes/no)",
     options: ["yes", "no", "y", "n"],
     processor: (answer, user) => {
-      if (["yes", "y"].includes(answer.toLowerCase())) {
+      if (["yes", "y", ""].includes(answer.toLowerCase())) {
         return {
           ...user,
           onboardingComplete: true,
@@ -296,7 +197,6 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
           },
         };
       }
-      // If no, reset to start over
       return getDefaultUserConfig();
     },
   },
@@ -313,6 +213,74 @@ export class OnboardingManager {
   constructor(workingDirectory: string = process.cwd()) {
     this.userConfigPath = path.join(workingDirectory, ".8gent", "user.json");
     this.user = this.loadUserConfig();
+  }
+
+  /**
+   * Auto-detect user environment: git config, ollama models, gh auth.
+   * Returns detected values so onboarding can skip questions.
+   */
+  static async autoDetect(): Promise<AutoDetected> {
+    const detected: AutoDetected = {
+      name: null,
+      email: null,
+      ollamaModels: [],
+      githubUsername: null,
+      preferredProvider: null,
+    };
+
+    const checks = await Promise.allSettled([
+      // Git config name
+      execAsync("git config --global user.name 2>/dev/null").then(({ stdout }) => {
+        detected.name = stdout.trim() || null;
+      }),
+      // Git config email
+      execAsync("git config --global user.email 2>/dev/null").then(({ stdout }) => {
+        detected.email = stdout.trim() || null;
+      }),
+      // Ollama models
+      execAsync("ollama list 2>/dev/null").then(({ stdout }) => {
+        detected.ollamaModels = stdout
+          .split("\n")
+          .slice(1)
+          .map((line) => line.split(/\s+/)[0])
+          .filter(Boolean);
+        if (detected.ollamaModels.length > 0) {
+          detected.preferredProvider = "ollama";
+        }
+      }),
+      // GitHub auth
+      execAsync("gh auth status 2>&1").then(({ stdout }) => {
+        const match = stdout.match(/Logged in to github.com account (\S+)/);
+        detected.githubUsername = match?.[1] || null;
+      }),
+    ]);
+
+    return detected;
+  }
+
+  /**
+   * Apply auto-detected values to user config.
+   * Called before onboarding starts to pre-fill detected values.
+   */
+  applyAutoDetected(detected: AutoDetected): void {
+    if (detected.name) {
+      this.user.identity.name = detected.name;
+    }
+    if (detected.preferredProvider) {
+      this.user.preferences.model.provider = detected.preferredProvider;
+      this.user.preferences.model.preferLocal = detected.preferredProvider === "ollama" || detected.preferredProvider === "lmstudio";
+    }
+    if (detected.ollamaModels.length > 0) {
+      this.user.integrations.ollama = { available: true, models: detected.ollamaModels };
+      // Set default model to first available
+      if (!this.user.preferences.model.default) {
+        this.user.preferences.model.default = detected.ollamaModels[0];
+      }
+    }
+    if (detected.githubUsername) {
+      this.user.integrations.github = { authenticated: true, username: detected.githubUsername };
+    }
+    this.saveUserConfig();
   }
 
   private loadUserConfig(): UserConfig {
@@ -521,6 +489,11 @@ export class OnboardingManager {
     text = text.replace("{provider}", this.user.preferences.model.provider || "ollama");
     text = text.replace("{voice}", this.user.preferences.voice.enabled ? "enabled" : "disabled");
     text = text.replace("{telegram}", getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up");
+    text = text.replace("{detected_name}", this.user.identity.name || "not detected");
+    text = text.replace("{detected_email}", this.user.integrations?.github?.username ? `(via git)` : "not detected");
+    text = text.replace("{detected_github}", this.user.integrations.github.username || "not detected");
+    text = text.replace("{detected_provider}", this.user.preferences.model.provider || "not detected");
+    text = text.replace("{detected_models}", this.user.integrations.ollama.models.slice(0, 3).join(", ") || "none found");
 
     return { ...question, question: text };
   }

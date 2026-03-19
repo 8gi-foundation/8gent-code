@@ -72,7 +72,11 @@ export type SlashCommand =
   | "design"
   | "evidence"
   | "auth"
-  | "vision";
+  | "vision"
+  | "resume"
+  | "history"
+  | "continue"
+  | "compact";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -230,6 +234,30 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["vis", "ocr", "eye"],
     description: "Vision & OCR model settings",
     usage: "/vision [status|model|ocr|pull] [args]",
+  },
+  {
+    name: "resume",
+    aliases: ["res"],
+    description: "Resume a recent session (pick from last 5)",
+    usage: "/resume",
+  },
+  {
+    name: "history",
+    aliases: ["hist", "sessions"],
+    description: "Browse all past sessions",
+    usage: "/history",
+  },
+  {
+    name: "continue",
+    aliases: ["cont", "last"],
+    description: "Continue most recent session automatically",
+    usage: "/continue",
+  },
+  {
+    name: "compact",
+    aliases: ["compress", "summarize"],
+    description: "Summarize and compress current conversation",
+    usage: "/compact",
   },
 ];
 
