@@ -10,6 +10,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Browser automation tools** via agent-browser CLI integration (`packages/tools/browser-tools.ts`)
+- **Web research capabilities** - search, GitHub repo analysis, documentation reading (`packages/tools/browser-research.ts`)
+- **Local dev server testing** via browser automation with screenshot capture
+- **8 browser tool definitions** for AI SDK integration (open, snapshot, click, fill, type, screenshot, scroll, close)
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
