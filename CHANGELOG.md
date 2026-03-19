@@ -17,6 +17,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Knowledge graph** — SQLite entity/relationship store with BFS traversal, heuristic extraction from tool results, user preference detection, fire-and-forget ingestion
 - **Memory v2** — SQLite+FTS5+embeddings replacing JSONL, 5 memory types, hybrid search, knowledge graph tables, version history, v1 migration
 
+## [0.8.0] — 2026-03-19
+
+### Added
+- **`@8gent/github` package** — Deep GitHub integration leveraging the full GitHub ecosystem via `gh` CLI
+  - **GitHub Client** (`client.ts`) — Type-safe `gh` CLI wrapper with REST API, GraphQL, JSON parsing, singleton pattern
+  - **Issues (8 tools)** — View, comment, close/reopen, assign, label, search, create with full options (milestones, projects)
+  - **Pull Requests (9 tools)** — View, diff, files changed, review (approve/request-changes), comment, merge (squash/rebase/merge), checks, close, mark ready
+  - **GitHub Actions (8 tools)** — List workflows, trigger workflow_dispatch, list/view/re-run/cancel runs, view logs (full or failed-only), download artifacts
+  - **Projects v2 (6 tools)** — List projects, view details, list items, add issues/PRs, edit item fields (status, priority), create projects
+  - **Gists (6 tools)** — List, view, create (from files or content), edit, delete, clone
+  - **Releases (7 tools)** — List, view, create (with auto-generated notes), edit, delete, upload assets, download assets
+  - **Branches (6 tools)** — Compare branches (ahead/behind/files), list with commit info, delete (with protection), view protection rules, merge, find stale branches
+  - **Repo & Search (10 tools)** — Repo info, contributors, labels, milestones, code search, repo search, notifications, mark-read, fork, clone
+  - **Sync & Workflows (4 tools)** — Fork sync, fetch-all with prune, repo health check, triage dashboard (PRs needing review, unlabeled issues, failed CI)
+- **AI SDK tool definitions** — 35+ new GitHub tools in Vercel AI SDK format for the agent loop
+- **Extended type system** — New capabilities (`github.issues`, `github.pulls`, `github.actions`, `github.projects`, `github.gists`, `github.releases`, `github.branches`, `github.search`, `github.sync`) and permissions (`github:actions`, `github:admin`)
+- **GitHub config section** in `.8gent/config.json` — Per-feature toggles, automation options (auto-triage, auto-label, stale branch cleanup), merge/release/gist defaults
+
 ## [0.7.0] — 2026-03-18
 
 ### Added

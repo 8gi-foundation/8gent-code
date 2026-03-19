@@ -15,7 +15,9 @@ export type Permission =
   | "net:fetch"
   | "net:listen"
   | "github:read"
-  | "github:write";
+  | "github:write"
+  | "github:actions"
+  | "github:admin";
 
 export type Capability =
   | "code"
@@ -28,6 +30,15 @@ export type Capability =
   | "repo"
   | "repo.graph"
   | "github"
+  | "github.issues"
+  | "github.pulls"
+  | "github.actions"
+  | "github.projects"
+  | "github.gists"
+  | "github.releases"
+  | "github.branches"
+  | "github.search"
+  | "github.sync"
   | "execution";
 
 export interface JSONSchema {

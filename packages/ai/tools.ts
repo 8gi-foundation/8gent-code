@@ -1199,6 +1199,400 @@ const merge_agent_work = tool({
 });
 
 // ============================================
+// GitHub Deep Integration (AI SDK wrappers)
+// ============================================
+
+const ghIssueView = tool({
+  description: "View a GitHub issue with full details: body, labels, assignees, comments, timeline",
+  inputSchema: z.object({
+    number: z.number().describe("Issue number"),
+  }),
+  execute: async ({ number }) =>
+    runShellCommand(`gh issue view ${number} --json number,title,state,body,author,labels,assignees,milestone,createdAt,updatedAt,closedAt,url,comments`),
+});
+
+const ghIssueComment = tool({
+  description: "Add a comment to a GitHub issue",
+  inputSchema: z.object({
+    number: z.number().describe("Issue number"),
+    body: z.string().describe("Comment body (markdown)"),
+  }),
+  execute: async ({ number, body }) =>
+    runShellCommand(`gh issue comment ${number} --body "${body}"`),
+});
+
+const ghIssueClose = tool({
+  description: "Close a GitHub issue. Optionally mark as completed or not-planned",
+  inputSchema: z.object({
+    number: z.number().describe("Issue number"),
+    reason: z.enum(["completed", "not_planned"]).optional().describe("Close reason"),
+    comment: z.string().optional().describe("Closing comment"),
+  }),
+  execute: async ({ number, reason, comment }) => {
+    let cmd = `gh issue close ${number}`;
+    if (reason) cmd += ` --reason ${reason}`;
+    if (comment) cmd += ` --comment "${comment}"`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghIssueSearch = tool({
+  description: "Search issues across the repo using GitHub search syntax",
+  inputSchema: z.object({
+    query: z.string().describe("Search query (GitHub search syntax)"),
+    limit: z.number().optional().describe("Max results (default: 20)"),
+  }),
+  execute: async ({ query, limit }) =>
+    runShellCommand(`gh issue list --search "${query}" --limit ${limit || 20} --json number,title,state,labels,author,createdAt,url`),
+});
+
+const ghIssueAssign = tool({
+  description: "Assign users to a GitHub issue",
+  inputSchema: z.object({
+    number: z.number().describe("Issue number"),
+    assignees: z.string().describe("Comma-separated GitHub usernames"),
+  }),
+  execute: async ({ number, assignees }) =>
+    runShellCommand(`gh issue edit ${number} --add-assignee ${assignees}`),
+});
+
+const ghIssueLabel = tool({
+  description: "Add labels to a GitHub issue",
+  inputSchema: z.object({
+    number: z.number().describe("Issue number"),
+    labels: z.string().describe("Comma-separated label names"),
+  }),
+  execute: async ({ number, labels }) =>
+    runShellCommand(`gh issue edit ${number} --add-label "${labels}"`),
+});
+
+const ghPrReview = tool({
+  description: "Submit a review on a PR: approve, request-changes, or comment",
+  inputSchema: z.object({
+    number: z.number().describe("PR number"),
+    action: z.enum(["approve", "request-changes", "comment"]).describe("Review action"),
+    body: z.string().optional().describe("Review body"),
+  }),
+  execute: async ({ number, action, body }) => {
+    let cmd = `gh pr review ${number} --${action}`;
+    if (body) cmd += ` --body "${body}"`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghPrMerge = tool({
+  description: "Merge a pull request. Supports merge, squash, or rebase",
+  inputSchema: z.object({
+    number: z.number().describe("PR number"),
+    method: z.enum(["merge", "squash", "rebase"]).optional().describe("Merge method (default: squash)"),
+    deleteBranch: z.boolean().optional().describe("Delete branch after merge (default: true)"),
+  }),
+  execute: async ({ number, method, deleteBranch }) => {
+    let cmd = `gh pr merge ${number} --${method || "squash"}`;
+    if (deleteBranch !== false) cmd += " --delete-branch";
+    return runShellCommand(cmd);
+  },
+});
+
+const ghPrDiff = tool({
+  description: "Get the full diff of a pull request for code review",
+  inputSchema: z.object({
+    number: z.number().describe("PR number"),
+  }),
+  execute: async ({ number }) => runShellCommand(`gh pr diff ${number}`),
+});
+
+const ghPrChecks = tool({
+  description: "View CI/CD check status for a PR",
+  inputSchema: z.object({
+    number: z.number().describe("PR number"),
+  }),
+  execute: async ({ number }) => runShellCommand(`gh pr checks ${number}`),
+});
+
+const ghPrComment = tool({
+  description: "Add a comment to a pull request",
+  inputSchema: z.object({
+    number: z.number().describe("PR number"),
+    body: z.string().describe("Comment body (markdown)"),
+  }),
+  execute: async ({ number, body }) =>
+    runShellCommand(`gh pr comment ${number} --body "${body}"`),
+});
+
+const ghWorkflowList = tool({
+  description: "List GitHub Actions workflows",
+  inputSchema: z.object({}),
+  execute: async () => runShellCommand("gh workflow list"),
+});
+
+const ghWorkflowRun = tool({
+  description: "Trigger a GitHub Actions workflow_dispatch event",
+  inputSchema: z.object({
+    workflow: z.string().describe("Workflow name or filename"),
+    ref: z.string().optional().describe("Branch or tag"),
+  }),
+  execute: async ({ workflow, ref }) => {
+    let cmd = `gh workflow run "${workflow}"`;
+    if (ref) cmd += ` --ref ${ref}`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghRunList = tool({
+  description: "List recent GitHub Actions workflow runs",
+  inputSchema: z.object({
+    workflow: z.string().optional().describe("Filter by workflow"),
+    status: z.string().optional().describe("Filter by status: completed, in_progress, failure, success"),
+    limit: z.number().optional().describe("Max results (default: 10)"),
+  }),
+  execute: async ({ workflow, status, limit }) => {
+    let cmd = `gh run list --limit ${limit || 10} --json databaseId,workflowName,status,conclusion,headBranch,event,createdAt,url`;
+    if (workflow) cmd += ` --workflow "${workflow}"`;
+    if (status) cmd += ` --status ${status}`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghRunView = tool({
+  description: "View a specific workflow run with job details",
+  inputSchema: z.object({
+    runId: z.number().describe("Run ID"),
+  }),
+  execute: async ({ runId }) =>
+    runShellCommand(`gh run view ${runId} --json databaseId,workflowName,status,conclusion,jobs,headBranch,event,createdAt,url`),
+});
+
+const ghRunLog = tool({
+  description: "View logs for a workflow run",
+  inputSchema: z.object({
+    runId: z.number().describe("Run ID"),
+    failed: z.boolean().optional().describe("Only show failed steps"),
+  }),
+  execute: async ({ runId, failed }) =>
+    runShellCommand(failed ? `gh run view ${runId} --log-failed` : `gh run view ${runId} --log`),
+});
+
+const ghRunRerun = tool({
+  description: "Re-run a workflow. Can re-run only failed jobs",
+  inputSchema: z.object({
+    runId: z.number().describe("Run ID"),
+    failedOnly: z.boolean().optional().describe("Only re-run failed jobs"),
+  }),
+  execute: async ({ runId, failedOnly }) =>
+    runShellCommand(failedOnly ? `gh run rerun ${runId} --failed` : `gh run rerun ${runId}`),
+});
+
+const ghGistCreate = tool({
+  description: "Create a GitHub gist from files",
+  inputSchema: z.object({
+    files: z.string().describe("Space-separated file paths"),
+    description: z.string().optional().describe("Gist description"),
+    public: z.boolean().optional().describe("Make public (default: secret)"),
+  }),
+  execute: async ({ files, description, public: isPublic }) => {
+    let cmd = `gh gist create ${files}`;
+    if (description) cmd += ` --desc "${description}"`;
+    if (isPublic) cmd += " --public";
+    return runShellCommand(cmd);
+  },
+});
+
+const ghGistList = tool({
+  description: "List your GitHub gists",
+  inputSchema: z.object({
+    limit: z.number().optional().describe("Max gists (default: 10)"),
+  }),
+  execute: async ({ limit }) => runShellCommand(`gh gist list --limit ${limit || 10}`),
+});
+
+const ghGistView = tool({
+  description: "View a gist's content",
+  inputSchema: z.object({
+    id: z.string().describe("Gist ID or URL"),
+  }),
+  execute: async ({ id }) => runShellCommand(`gh gist view ${id} --raw`),
+});
+
+const ghReleaseList = tool({
+  description: "List GitHub releases",
+  inputSchema: z.object({
+    limit: z.number().optional().describe("Max releases (default: 10)"),
+  }),
+  execute: async ({ limit }) => runShellCommand(`gh release list --limit ${limit || 10}`),
+});
+
+const ghReleaseCreate = tool({
+  description: "Create a GitHub release with tag, title, and notes",
+  inputSchema: z.object({
+    tag: z.string().describe("Release tag (e.g., v1.0.0)"),
+    title: z.string().optional().describe("Release title"),
+    notes: z.string().optional().describe("Release notes (markdown)"),
+    draft: z.boolean().optional().describe("Create as draft"),
+    prerelease: z.boolean().optional().describe("Mark as pre-release"),
+    generateNotes: z.boolean().optional().describe("Auto-generate notes from commits"),
+  }),
+  execute: async ({ tag, title, notes, draft, prerelease, generateNotes }) => {
+    let cmd = `gh release create ${tag}`;
+    if (title) cmd += ` --title "${title}"`;
+    if (notes) cmd += ` --notes "${notes}"`;
+    if (draft) cmd += " --draft";
+    if (prerelease) cmd += " --prerelease";
+    if (generateNotes) cmd += " --generate-notes";
+    return runShellCommand(cmd);
+  },
+});
+
+const ghReleaseView = tool({
+  description: "View a specific release with body, assets, and metadata",
+  inputSchema: z.object({
+    tag: z.string().describe("Release tag (e.g., v1.0.0 or 'latest')"),
+  }),
+  execute: async ({ tag }) => runShellCommand(`gh release view ${tag}`),
+});
+
+const ghProjectList = tool({
+  description: "List GitHub Projects v2",
+  inputSchema: z.object({
+    owner: z.string().optional().describe("GitHub user or org"),
+  }),
+  execute: async ({ owner }) => {
+    let cmd = "gh project list";
+    if (owner) cmd += ` --owner ${owner}`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghProjectItems = tool({
+  description: "List items in a GitHub Project with status and linked issues/PRs",
+  inputSchema: z.object({
+    number: z.number().describe("Project number"),
+    owner: z.string().optional().describe("Project owner"),
+  }),
+  execute: async ({ number, owner }) => {
+    let cmd = `gh project item-list ${number} --limit 30`;
+    if (owner) cmd += ` --owner ${owner}`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghNotifications = tool({
+  description: "View GitHub notifications: PR reviews, issue mentions, CI failures",
+  inputSchema: z.object({
+    limit: z.number().optional().describe("Max notifications (default: 20)"),
+  }),
+  execute: async ({ limit }) =>
+    runShellCommand(`gh api notifications?per_page=${limit || 20} --jq '.[] | "\\(.reason) | \\(.subject.type) | \\(.repository.full_name) | \\(.subject.title)"'`),
+});
+
+const ghRepoView = tool({
+  description: "View repo info: description, stars, forks, language, topics",
+  inputSchema: z.object({
+    repo: z.string().optional().describe("Repository (owner/name). Omit for current."),
+  }),
+  execute: async ({ repo }) =>
+    runShellCommand(`gh repo view ${repo || ""} --json name,owner,description,url,stargazerCount,forkCount,primaryLanguage,isPrivate,defaultBranchRef,repositoryTopics`),
+});
+
+const ghSearchCode = tool({
+  description: "Search code across GitHub repositories",
+  inputSchema: z.object({
+    query: z.string().describe("Search query (GitHub code search syntax)"),
+    repo: z.string().optional().describe("Limit to specific repo"),
+    language: z.string().optional().describe("Filter by language"),
+    limit: z.number().optional().describe("Max results (default: 10)"),
+  }),
+  execute: async ({ query, repo, language, limit }) => {
+    let cmd = `gh search code "${query}" --limit ${limit || 10}`;
+    if (repo) cmd += ` --repo ${repo}`;
+    if (language) cmd += ` --language ${language}`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghSearchRepos = tool({
+  description: "Search GitHub repositories by name, description, topics, stars",
+  inputSchema: z.object({
+    query: z.string().describe("Search query"),
+    language: z.string().optional().describe("Filter by language"),
+    sort: z.string().optional().describe("Sort: stars, forks, updated"),
+    limit: z.number().optional().describe("Max results (default: 10)"),
+  }),
+  execute: async ({ query, language, sort, limit }) => {
+    let cmd = `gh search repos "${query}" --limit ${limit || 10}`;
+    if (language) cmd += ` --language ${language}`;
+    if (sort) cmd += ` --sort ${sort}`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghBranchCompare = tool({
+  description: "Compare two branches: commits ahead/behind, files changed",
+  inputSchema: z.object({
+    base: z.string().describe("Base branch (e.g., main)"),
+    head: z.string().optional().describe("Head branch (default: current)"),
+  }),
+  execute: async ({ base, head }) => {
+    const ref = head || "HEAD";
+    return runShellCommand(`git log --oneline ${base}..${ref} && echo "---" && git diff --stat ${base}...${ref}`);
+  },
+});
+
+const ghRepoHealth = tool({
+  description: "Repo health check: open issues/PRs, CI status, stale branches, branch protection",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const issues = await runShellCommand("gh issue list --state open --json number --jq '. | length'");
+    const prs = await runShellCommand("gh pr list --state open --json number --jq '. | length'");
+    const ci = await runShellCommand("gh run list --limit 1 --json status,conclusion,workflowName");
+    return `Open issues: ${issues}\nOpen PRs: ${prs}\nLatest CI: ${ci}`;
+  },
+});
+
+const ghTriage = tool({
+  description: "Triage dashboard: PRs needing review, unlabeled issues, failed CI",
+  inputSchema: z.object({}),
+  execute: async () => {
+    const prs = await runShellCommand("gh pr list --state open --json number,title,author,reviewDecision,url");
+    const failedCI = await runShellCommand("gh run list --status failure --limit 5 --json databaseId,workflowName,headBranch,url");
+    return `PRs:\n${prs}\n\nFailed CI:\n${failedCI}`;
+  },
+});
+
+const ghLabelList = tool({
+  description: "List all labels in the repository",
+  inputSchema: z.object({}),
+  execute: async () => runShellCommand("gh label list --json name,description,color"),
+});
+
+const ghLabelCreate = tool({
+  description: "Create a new label",
+  inputSchema: z.object({
+    name: z.string().describe("Label name"),
+    color: z.string().optional().describe("Hex color without # (e.g., ff0000)"),
+    description: z.string().optional().describe("Label description"),
+  }),
+  execute: async ({ name, color, description }) => {
+    let cmd = `gh label create "${name}"`;
+    if (color) cmd += ` --color ${color}`;
+    if (description) cmd += ` --description "${description}"`;
+    return runShellCommand(cmd);
+  },
+});
+
+const ghSyncFork = tool({
+  description: "Sync a forked repo with its upstream",
+  inputSchema: z.object({
+    branch: z.string().optional().describe("Branch to sync"),
+  }),
+  execute: async ({ branch }) => {
+    let cmd = "gh repo sync";
+    if (branch) cmd += ` --branch ${branch}`;
+    return runShellCommand(cmd);
+  },
+});
+
+// ============================================
 // Composed ToolSet
 // ============================================
 
@@ -1229,12 +1623,63 @@ export const agentTools = {
   git_checkout: gitCheckout,
   git_create_branch: gitCreateBranch,
 
-  // GitHub CLI
+  // GitHub CLI (basic)
   gh_pr_list: ghPrList,
   gh_pr_create: ghPrCreate,
   gh_pr_view: ghPrView,
   gh_issue_list: ghIssueList,
   gh_issue_create: ghIssueCreate,
+
+  // GitHub Issues (deep)
+  gh_issue_view: ghIssueView,
+  gh_issue_comment: ghIssueComment,
+  gh_issue_close: ghIssueClose,
+  gh_issue_search: ghIssueSearch,
+  gh_issue_assign: ghIssueAssign,
+  gh_issue_label: ghIssueLabel,
+
+  // GitHub PRs (deep)
+  gh_pr_review: ghPrReview,
+  gh_pr_merge: ghPrMerge,
+  gh_pr_diff: ghPrDiff,
+  gh_pr_checks: ghPrChecks,
+  gh_pr_comment: ghPrComment,
+
+  // GitHub Actions
+  gh_workflow_list: ghWorkflowList,
+  gh_workflow_run: ghWorkflowRun,
+  gh_run_list: ghRunList,
+  gh_run_view: ghRunView,
+  gh_run_log: ghRunLog,
+  gh_run_rerun: ghRunRerun,
+
+  // GitHub Gists
+  gh_gist_create: ghGistCreate,
+  gh_gist_list: ghGistList,
+  gh_gist_view: ghGistView,
+
+  // GitHub Releases
+  gh_release_list: ghReleaseList,
+  gh_release_create: ghReleaseCreate,
+  gh_release_view: ghReleaseView,
+
+  // GitHub Projects
+  gh_project_list: ghProjectList,
+  gh_project_items: ghProjectItems,
+
+  // GitHub Repo & Search
+  gh_repo_view: ghRepoView,
+  gh_search_code: ghSearchCode,
+  gh_search_repos: ghSearchRepos,
+  gh_notifications: ghNotifications,
+  gh_label_list: ghLabelList,
+  gh_label_create: ghLabelCreate,
+
+  // GitHub Branches & Sync
+  gh_branch_compare: ghBranchCompare,
+  gh_repo_health: ghRepoHealth,
+  gh_triage: ghTriage,
+  gh_sync_fork: ghSyncFork,
 
   // Shell
   run_command: runCommand,
