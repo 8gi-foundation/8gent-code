@@ -521,9 +521,17 @@ export function App({ initialCommand, args }: AppProps) {
       });
     }
 
-    // Escape to return to chat
-    if (key.escape && viewMode !== "chat") {
-      setViewMode("chat");
+    // Escape: abort generation if processing, otherwise return to chat
+    if (key.escape) {
+      if (isProcessing && agent) {
+        agent.abort();
+        setIsProcessing(false);
+        setActiveTool(null);
+        agentRunningRef.current = false;
+        addSystemMessage("Generation interrupted.");
+      } else if (viewMode !== "chat") {
+        setViewMode("chat");
+      }
     }
   });
 
@@ -782,7 +790,11 @@ export function App({ initialCommand, args }: AppProps) {
   // Check onboarding status on mount
   useEffect(() => {
     const checkOnboarding = async () => {
-      // Detect available integrations
+      // Auto-detect environment (git config, ollama models, gh auth)
+      const detected = await OnboardingManager.autoDetect();
+      onboardingManager.applyAutoDetected(detected);
+
+      // Also detect integrations (LM Studio, etc.)
       await onboardingManager.detectIntegrations();
 
       if (onboardingManager.needsOnboarding()) {
@@ -1050,6 +1062,102 @@ export function App({ initialCommand, args }: AppProps) {
                 setViewMode("chat");
                 addSystemMessage("Onboarding complete. Let's begin.");
               }
+            }
+          }
+          break;
+
+        case "history":
+          // Show history screen
+          if (!agent) {
+            addSystemMessage("No agent active — start a session first.");
+            break;
+          }
+          agent.getSessionSync().getRecentConversations(20).then((convos) => {
+            if (convos.length === 0) {
+              addSystemMessage("No previous sessions found.");
+            } else {
+              addSystemMessage(
+                `Found ${convos.length} sessions. Use /resume to pick one or /continue to restore the latest.`
+              );
+            }
+          }).catch(() => {
+            addSystemMessage("Could not load session history.");
+          });
+          break;
+
+        case "continue":
+          // Continue most recent session
+          if (!agent) {
+            addSystemMessage("No agent active — start a session first.");
+            break;
+          }
+          agent.getSessionSync().getRecentConversations(1).then((convos) => {
+            if (convos.length === 0 || !convos[0].checkpointData) {
+              addSystemMessage("No session to continue. Start chatting to create history.");
+            } else {
+              try {
+                const messages = JSON.parse(convos[0].checkpointData);
+                agent.restoreFromCheckpoint(messages);
+                addSystemMessage(
+                  `Restored session: "${convos[0].title}"\n` +
+                  `  ${convos[0].messageCount} messages - ${convos[0].model}\n` +
+                  `  Last active: ${new Date(convos[0].lastActiveAt).toLocaleString()}\n\n` +
+                  "Context restored. Continue where you left off."
+                );
+              } catch {
+                addSystemMessage("Failed to parse checkpoint data.");
+              }
+            }
+          }).catch(() => {
+            addSystemMessage("Could not load session history.");
+          });
+          break;
+
+        case "resume":
+          // Show last 5 sessions to pick from
+          if (!agent) {
+            addSystemMessage("No agent active — start a session first.");
+            break;
+          }
+          agent.getSessionSync().getRecentConversations(5).then((convos) => {
+            if (convos.length === 0) {
+              addSystemMessage("No previous sessions found.");
+            } else {
+              const lines = ["Recent sessions (reply with number to resume):\n"];
+              convos.forEach((c: any, i: number) => {
+                const ago = Math.floor((Date.now() - c.lastActiveAt) / 60000);
+                const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+                lines.push(`  ${i + 1}. ${c.title.slice(0, 50)} — ${c.model} - ${c.messageCount} msgs - ${timeStr}`);
+              });
+              addSystemMessage(lines.join("\n"));
+            }
+          }).catch(() => {
+            addSystemMessage("Could not load session history.");
+          });
+          break;
+
+        case "compact":
+          // Summarize current conversation
+          if (!agent) {
+            addSystemMessage("No agent active.");
+            break;
+          }
+          addSystemMessage("Compacting conversation history...");
+          {
+            const history = agent.getMessageHistory();
+            const userMsgs = history.filter(m => m.role === "user").length;
+            const assistantMsgs = history.filter(m => m.role === "assistant").length;
+            // Keep system prompt + last 4 messages
+            if (history.length > 5) {
+              const systemMsg = history[0];
+              const recentMsgs = history.slice(-4);
+              agent.restoreFromCheckpoint([systemMsg, ...recentMsgs]);
+              addSystemMessage(
+                `Compacted: ${userMsgs} user + ${assistantMsgs} assistant messages -> kept last 4.\n` +
+                "Context trimmed. Older messages removed from active memory."
+              );
+            } else {
+              addSystemMessage("Conversation too short to compact.");
             }
           }
           break;

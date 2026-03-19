@@ -8,7 +8,7 @@
 [![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f9f1e1?logo=bun&logoColor=000)](https://bun.sh)
 [![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-blue)](https://ollama.ai)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-Free%20Models-purple)](https://openrouter.ai)
-[![Version](https://img.shields.io/badge/version-0.6.0-brightgreen)](https://github.com/PodJamz/8gent-code)
+[![Version](https://img.shields.io/badge/version-0.7.0-brightgreen)](https://github.com/PodJamz/8gent-code)
 [![Benchmarks](https://img.shields.io/badge/benchmarks-39%20tests-orange)](docs/BENCHMARKS.md)
 [![Twitter](https://img.shields.io/twitter/follow/james__spalding?style=social)](https://twitter.com/james__spalding)
 
@@ -34,6 +34,10 @@
 - 🔊 **Voice Output** — TTS announcements on task completion
 - 🏆 **Autoresearch** — Self-improving prompts via iterative benchmarking
 - 🌐 **OpenRouter** — Free cloud models for users without local GPUs
+- 🧠 **Smart Onboarding** — Auto-detects your environment, 3 questions max
+- ☁️ **Cloud Sync** — Preferences sync across devices after auth
+- 🔄 **Session Resume** — Pick up where you left off with `/continue`
+- 🎓 **Personal LoRA** — Your agent learns your patterns over time
 
 ---
 
@@ -288,6 +292,16 @@ External Repo → Quarantine → Security Scan → Abstract → Toolshed
 | `/voice` | `/v` | Voice TTS settings |
 | `/language` | `/lang`, `/l` | Set response language |
 
+### Session Management
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/history` | `/hist`, `/sessions` | Browse all past sessions |
+| `/continue` | `/cont`, `/last` | Continue most recent session |
+| `/resume` | `/res` | Resume from last 5 sessions |
+| `/compact` | `/compress`, `/summarize` | Compress current conversation |
+| `/auth` | — | Authentication (login/logout/status) |
+
 ### Skill Management
 
 | Command | Aliases | Description |
@@ -448,6 +462,11 @@ Completion Report + Voice Output
 | `packages/hooks` | Automation hooks |
 | `packages/skills` | Skill framework |
 | `packages/tools` | Web, PDF, image, notebook tools |
+| `packages/self-autonomy` | Smart onboarding, preferences sync, heartbeat |
+| `packages/db` | Convex database (users, sessions, preferences, conversations) |
+| `packages/memory` | Multi-layered knowledge system with user-scoped recall |
+| `packages/kernel` | LoRA fine-tuning pipeline with personal training collector |
+| `packages/auth` | Clerk authentication, device code flow, token management |
 | `packages/personality` | The Infinite Gentleman voice |
 | `benchmarks/` | 44 benchmarks across 12 categories + autoresearch harness |
 | `config/metaclaw.yaml` | MetaClaw RL fine-tuning configuration |
