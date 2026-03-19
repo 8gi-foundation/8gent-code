@@ -31,6 +31,8 @@ import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from ".
 import { getMemoryManager, extractAutoMemories } from "../memory";
 import { SessionSyncManager } from "./session-sync";
 import { KernelManager } from "../kernel/manager";
+import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orchestrator-bus";
+import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -97,6 +99,7 @@ export class Agent {
   private sessionSync: SessionSyncManager;
   private kernel: KernelManager;
   private abortController: AbortController | null = null;
+  private orchestratorBus: OrchestratorBus;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -174,14 +177,17 @@ When completing tasks, use phrases like: "${getCompletionPhrase()}"
 When encountering errors, stay composed: "${getErrorPhrase()}"
 Maintain a tone that is sophisticated yet approachable — like a well-dressed engineer who happens to be brilliant.\n`;
 
+    // Inject orchestrator awareness into system prompt
+    const orchestratorBlock = "\n\n" + ORCHESTRATOR_SEGMENT;
+
     this.messageHistory.push({
       role: "system",
-      content: basePrompt + userContextBlock + personalityBlock + languageInstruction,
+      content: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction,
     });
 
     // Initialize session persistence (v2)
     this.sessionWriter = new SessionWriter(this.sessionId);
-    const systemPromptFull = basePrompt + userContextBlock + personalityBlock + languageInstruction;
+    const systemPromptFull = basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
     const agentInfo: AgentInfo = {
       model: config.model,
       runtime: config.runtime,
@@ -210,6 +216,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Initialize kernel manager for personal LoRA training
     this.kernel = KernelManager.fromProjectConfig(config.workingDirectory || process.cwd());
     this.kernel.start().catch(() => {});
+
+    // Initialize orchestrator bus for multi-agent coordination
+    this.orchestratorBus = getOrchestratorBus();
 
     // Populate git info asynchronously
     import("child_process").then(({ exec }) => {
@@ -1043,11 +1052,20 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     return [...this.messageHistory];
   }
 
+  /**
+   * Get the orchestrator bus for multi-agent coordination.
+   */
+  getOrchestratorBus(): OrchestratorBus {
+    return this.orchestratorBus;
+  }
+
   async cleanup(): Promise<void> {
     // Flush and end Convex session sync
     await this.sessionSync.endSession().catch(() => {});
     // Stop kernel pipeline
     await this.kernel.stop().catch(() => {});
+    // Shutdown orchestrator bus and all sub-agents
+    await this.orchestratorBus.shutdown().catch(() => {});
     // Stop heartbeat agents
     this.heartbeat.stop();
 

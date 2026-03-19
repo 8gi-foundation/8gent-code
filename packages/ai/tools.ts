@@ -1068,6 +1068,136 @@ const listAgents = tool({
   },
 });
 
+// ── Multi-Agent Orchestration Tools ──────────────────────────────
+
+import { getOrchestratorBus } from "../orchestration/orchestrator-bus";
+import { getPersona, listPersonas, matchPersona } from "../orchestration/personas";
+
+const suggest_spawn = tool({
+  description: "Suggest spawning a specialist sub-agent for a specific task. The user will be asked to approve unless auto-spawn is enabled.",
+  parameters: z.object({
+    persona: z.string().describe("Persona ID: winston, larry, curly, mo, or doc"),
+    task: z.string().describe("The specific task for this agent"),
+    reason: z.string().describe("Why this specialist is needed"),
+  }),
+  execute: async ({ persona, task, reason }) => {
+    const p = getPersona(persona);
+    if (!p) {
+      const available = listPersonas().map(p => `${p.id} (${p.name} - ${p.role})`).join(", ");
+      return `Unknown persona "${persona}". Available: ${available}`;
+    }
+
+    const bus = getOrchestratorBus();
+    const request = bus.requestSpawn(persona, task, reason);
+
+    if (request.autoApproved) {
+      return `Auto-approved: Spawning ${p.name} (${p.role}) for: ${task}`;
+    }
+
+    return `Spawn request submitted for ${p.name} (${p.role}): ${task}\nReason: ${reason}\nAwaiting user approval...`;
+  },
+});
+
+const check_agents = tool({
+  description: "Check the status of all active sub-agents.",
+  parameters: z.object({}),
+  execute: async () => {
+    const bus = getOrchestratorBus();
+    const agents = bus.getAgents();
+
+    if (agents.length === 0) {
+      return "No active sub-agents. You are operating solo.";
+    }
+
+    const lines = agents.map(a =>
+      `${a.persona.icon} ${a.persona.name} (${a.persona.role}) — ${a.status}\n  Task: ${a.task}\n  Since: ${a.spawnedAt.toLocaleTimeString()}`
+    );
+
+    return `Active agents (${agents.length}):\n\n${lines.join("\n\n")}`;
+  },
+});
+
+const message_agent = tool({
+  description: "Send a message to a specific sub-agent. Used for coordination between orchestrator and specialists.",
+  parameters: z.object({
+    agentId: z.string().describe("The agent ID to message"),
+    message: z.string().describe("The message content"),
+  }),
+  execute: async ({ agentId, message }) => {
+    const bus = getOrchestratorBus();
+    const agent = bus.getAgent(agentId);
+
+    if (!agent) {
+      const available = bus.getAgents().map(a => `${a.id} (${a.persona.name})`).join(", ");
+      return `Agent "${agentId}" not found. Active agents: ${available || "none"}`;
+    }
+
+    bus.routeMessage(agentId, {
+      id: `msg-${Date.now()}`,
+      role: "system",
+      content: `[From Orchestrator] ${message}`,
+      agentId: "orchestrator",
+      timestamp: new Date(),
+    });
+
+    // If the agent has a ref, chat with it
+    if (agent.agentRef?.chat) {
+      try {
+        const response = await agent.agentRef.chat(message);
+        return `${agent.persona.name} responded: ${response.slice(0, 500)}`;
+      } catch (err) {
+        return `${agent.persona.name} encountered an error: ${err instanceof Error ? err.message : err}`;
+      }
+    }
+
+    return `Message queued for ${agent.persona.name}. Agent may not be ready yet.`;
+  },
+});
+
+const merge_agent_work = tool({
+  description: "Review and merge a sub-agent's worktree changes into the main branch. Only the orchestrator should call this.",
+  parameters: z.object({
+    agentId: z.string().describe("The agent ID whose work to merge"),
+    commitMessage: z.string().optional().describe("Custom merge commit message"),
+  }),
+  execute: async ({ agentId, commitMessage }) => {
+    const bus = getOrchestratorBus();
+    const agent = bus.getAgent(agentId);
+
+    if (!agent) {
+      return `Agent "${agentId}" not found.`;
+    }
+
+    if (!agent.worktreePath) {
+      return `Agent "${agentId}" has no worktree to merge.`;
+    }
+
+    // Import worktree manager lazily
+    const { WorktreeManager } = await import("../orchestration/worktree-manager");
+    const wm = new WorktreeManager();
+
+    // Get diff for review
+    const changes = await wm.getChanges(agentId);
+    if (!changes) {
+      bus.updateAgentStatus(agentId, "completed");
+      return `${agent.persona.name} made no changes. Marking as completed.`;
+    }
+
+    // Merge
+    const result = await wm.mergeWorktree(
+      agentId,
+      commitMessage || `merge(${agent.persona.id}): ${agent.task.slice(0, 60)}`
+    );
+
+    if (result.success) {
+      bus.updateAgentStatus(agentId, "completed");
+      return `Merged ${agent.persona.name}'s work: ${result.message}\n\nChanges:\n${changes.slice(0, 1000)}`;
+    }
+
+    return `Merge failed: ${result.message}`;
+  },
+});
+
 // ============================================
 // Composed ToolSet
 // ============================================
@@ -1146,6 +1276,12 @@ export const agentTools = {
   spawn_agent: spawnAgent,
   check_agent: checkAgent,
   list_agents: listAgents,
+
+  // Multi-agent orchestration (persona-based)
+  suggest_spawn,
+  check_agents,
+  message_agent,
+  merge_agent_work,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;

@@ -60,6 +60,10 @@ import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { ThinkingView } from "./components/ThinkingView.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
+import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
+import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
+import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
+import { SpawnRequestCard } from "./components/agent-panel/SpawnRequestCard.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -185,7 +189,7 @@ type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 const AGENT_MODES: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
-type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design";
+type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design" | "history";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -433,6 +437,9 @@ export function App({ initialCommand, args }: AppProps) {
   const messageQueueRef = useRef<string[]>([]);
   const agentRunningRef = useRef(false);
 
+  // Multi-agent orchestration
+  const orchestration = useAgentOrchestration();
+
   // Onboarding system
   const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -511,14 +518,18 @@ export function App({ initialCommand, args }: AppProps) {
       });
     }
 
-    // Cycle through view modes with Shift+Tab
+    // Shift+Tab: cycle agents when active, otherwise cycle views
     if (key.shift && key.tab) {
-      const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict"];
-      setViewMode((prev) => {
-        const currentIndex = modes.indexOf(prev);
-        if (currentIndex === -1) return "chat";
-        return modes[(currentIndex + 1) % modes.length];
-      });
+      if (orchestration.agents.length > 0) {
+        orchestration.cycleAgent();
+      } else {
+        const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict"];
+        setViewMode((prev) => {
+          const currentIndex = modes.indexOf(prev);
+          if (currentIndex === -1) return "chat";
+          return modes[(currentIndex + 1) % modes.length];
+        });
+      }
     }
 
     // Escape: abort generation if processing, otherwise return to chat
@@ -1162,6 +1173,71 @@ export function App({ initialCommand, args }: AppProps) {
           }
           break;
 
+        case "chat":
+          if (orchestration.chatMode) {
+            orchestration.exitChatMode();
+            addSystemMessage("Chat mode disabled. Returning to normal mode.");
+          } else {
+            orchestration.enterChatMode();
+            addSystemMessage(
+              "Chat mode enabled. Background work continues.\n" +
+              "Shift+Tab to cycle agents. ESC to exit chat mode.\n" +
+              `Currently addressing: ${orchestration.activeAgentName}`
+            );
+          }
+          break;
+
+        case "agent":
+          const agentSub = args[0] || "list";
+          if (agentSub === "list") {
+            if (orchestration.agents.length === 0) {
+              addSystemMessage("No active sub-agents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.");
+            } else {
+              const lines = orchestration.agents.map(a =>
+                `  ${a.icon} ${a.name} (${a.role}) — ${a.status}\n    Task: ${a.task}`
+              );
+              addSystemMessage(`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator) — running\n${lines.join("\n")}`);
+            }
+          } else if (agentSub === "spawn") {
+            const personaId = args[1];
+            const task = args.slice(2).join(" ");
+            if (!personaId) {
+              addSystemMessage("Usage: /agent spawn <persona> <task>\n\nPersonas: winston, larry, curly, mo, doc");
+            } else {
+              orchestration.spawnAgent(personaId, task || "General assistance");
+              addSystemMessage(`Spawn request submitted for ${personaId}...`);
+            }
+          } else if (agentSub === "kill") {
+            const killId = args[1];
+            if (!killId) {
+              addSystemMessage("Usage: /agent kill <agent-id>\n\nUse /agent list to see active agents.");
+            } else {
+              const found = orchestration.agents.find(a => a.id.includes(killId) || a.name.toLowerCase() === killId.toLowerCase());
+              if (found) {
+                orchestration.killAgent(found.id);
+                addSystemMessage(`Killed agent: ${found.name} (${found.role})`);
+              } else {
+                addSystemMessage(`Agent "${killId}" not found.`);
+              }
+            }
+          } else if (agentSub === "auto") {
+            orchestration.toggleAutoSpawn();
+            addSystemMessage(`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn sub-agents without asking." : "Eight will ask before spawning sub-agents."}`);
+          } else if (agentSub === "settings") {
+            addSystemMessage(
+              "Agent Settings:\n\n" +
+              `  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n` +
+              `  Active agents: ${orchestration.agents.length}\n` +
+              `  Pending spawns: ${orchestration.pendingSpawns.length}\n\n` +
+              "Commands:\n" +
+              "  /agent list       — Show active agents\n" +
+              "  /agent spawn <p>  — Spawn persona (winston/larry/curly/mo/doc)\n" +
+              "  /agent kill <id>  — Kill an agent\n" +
+              "  /agent auto       — Toggle auto-spawn"
+            );
+          }
+          break;
+
         case "animations":
           // Show animation showcase
           if (args.length > 0) {
@@ -1386,6 +1462,7 @@ export function App({ initialCommand, args }: AppProps) {
       designAgent,
       adhdMode,
       agent,
+      orchestration,
     ]
   );
 
