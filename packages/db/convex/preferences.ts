@@ -51,6 +51,27 @@ export const getCurrent = query({
   },
 });
 
+/**
+ * Get preferences by Clerk user ID (for CLI sync).
+ * Used by the TUI to pull preferences after authentication.
+ */
+export const getByClerkId = query({
+  args: { clerkId: v.string() },
+  handler: async (ctx, { clerkId }) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+      .unique();
+
+    if (!user) return null;
+
+    return await ctx.db
+      .query("preferences")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .unique();
+  },
+});
+
 // ============================================
 // Mutations
 // ============================================
@@ -117,6 +138,10 @@ export const merge = mutation({
     ),
     loraVersion: v.optional(v.string()),
     customPromptMutations: v.optional(v.array(v.string())),
+    communicationStyle: v.optional(v.string()),
+    language: v.optional(v.string()),
+    gitBranchPrefix: v.optional(v.string()),
+    autonomyThreshold: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId, ...updates } = args;
