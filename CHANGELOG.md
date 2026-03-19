@@ -10,6 +10,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GitHub Advanced Tools** — OpenViktor-inspired deep GitHub integration: auto-create issues from benchmark failures, sync benchmark dashboard, project board management, PR workflow with benchmark results, gist/artifact creation, repo stats and branch protection analysis
+- **GitHub Workflow Automation** — `GitHubWorkflow` class for auto-commit-and-push, feature branch creation, merge strategies (merge/rebase/squash), fork sync, changelog generation from git log, branch archival with tags
+- **GitHub Cron Scheduling** — create GitHub Actions cron workflows from code; templates for nightly benchmarks, weekly dependency checks, monthly stale issue cleanup; list scheduled actions with last-run info
+- **Multi-Provider LLM Engine** — unified `MultiProviderEngine` with automatic fallback chain (Ollama → OpenRouter → Anthropic → OpenAI), per-request cost limits, session cost tracking in `~/.8gent/costs.json`, cost reporting by period/provider/model
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
