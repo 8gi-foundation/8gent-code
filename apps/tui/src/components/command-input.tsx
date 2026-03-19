@@ -76,7 +76,9 @@ export type SlashCommand =
   | "resume"
   | "history"
   | "continue"
-  | "compact";
+  | "compact"
+  | "chat"
+  | "agent";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -258,6 +260,18 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["compress", "summarize"],
     description: "Summarize and compress current conversation",
     usage: "/compact",
+  },
+  {
+    name: "chat",
+    aliases: ["talk"],
+    description: "Toggle chat mode (background work continues)",
+    usage: "/chat",
+  },
+  {
+    name: "agent",
+    aliases: ["agents", "ag"],
+    description: "Manage sub-agents (list, spawn, kill, auto, settings)",
+    usage: "/agent [list|spawn|kill|auto|settings]",
   },
 ];
 
