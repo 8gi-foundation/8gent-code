@@ -52,8 +52,8 @@ function getStripe(): Stripe {
  */
 export const STRIPE_PRICE_IDS: Record<PlanTier, string> = {
   free: "", // Free tier has no Stripe price
-  pro: "price_XXX_pro_monthly",   // REPLACE WITH YOUR STRIPE PRICE ID — $29/mo
-  team: "price_XXX_team_monthly", // REPLACE WITH YOUR STRIPE PRICE ID — $99/mo
+  pro: "price_1TCVZJBKd7OmxSCYcZBt9oaO",   // $29/mo — 8gent Pro
+  team: "price_1TCVZSBKd7OmxSCYMyaUi2Ii",   // $99/mo — 8gent Team
 };
 
 // ============================================
