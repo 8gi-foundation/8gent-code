@@ -30,6 +30,7 @@ import { getVault } from "../secrets";
 import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
 import { getMemoryManager, extractAutoMemories } from "../memory";
 import { SessionSyncManager } from "./session-sync";
+import { KernelManager } from "../kernel/manager";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -94,6 +95,8 @@ export class Agent {
   private infiniteRunner: InfiniteRunner | null = null;
   private infiniteModeActive: boolean = false;
   private sessionSync: SessionSyncManager;
+  private kernel: KernelManager;
+  private abortController: AbortController | null = null;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -132,9 +135,35 @@ export class Agent {
       abortOnFailure: false,
     });
 
+    // ── Self-Autonomy: Onboarding ────────────────────────────────────
+    // Check if first run — if .8gent/user.json doesn't exist, flag for onboarding
+    // NOTE: Initialized here (before system prompt) so user context can be injected
+    this.onboarding = new OnboardingManager(config.workingDirectory || process.cwd());
+    if (this.onboarding.needsOnboarding()) {
+      // Detect integrations (Ollama, LM Studio, GitHub) in background
+      this.onboarding.detectIntegrations().catch(() => {});
+      console.log("[8gent] First run detected — onboarding available. The agent can ask setup questions.");
+    }
+
     // Build system prompt with personality voice injected
     const basePrompt = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     const languageInstruction = this.getLanguageInstruction();
+
+    // Inject user context from onboarding data
+    const userData = this.onboarding.getUser();
+    let userContextBlock = "";
+    if (userData.onboardingComplete || userData.identity.name) {
+      const { USER_CONTEXT_SEGMENT } = require("./prompts/system-prompt");
+      userContextBlock = USER_CONTEXT_SEGMENT({
+        name: userData.identity.name,
+        role: userData.identity.role,
+        communicationStyle: userData.identity.communicationStyle,
+        language: userData.identity.language,
+      });
+      if (userContextBlock) {
+        userContextBlock = "\n\n" + userContextBlock;
+      }
+    }
 
     // Inject the 8gent personality voice into the system prompt
     const personalityBlock = `\n\n## PERSONALITY VOICE — ${BRAND.fullName}: ${PERSONALITY.tagline}
@@ -147,12 +176,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
     this.messageHistory.push({
       role: "system",
-      content: basePrompt + personalityBlock + languageInstruction,
+      content: basePrompt + userContextBlock + personalityBlock + languageInstruction,
     });
 
     // Initialize session persistence (v2)
     this.sessionWriter = new SessionWriter(this.sessionId);
-    const systemPromptFull = basePrompt + personalityBlock + languageInstruction;
+    const systemPromptFull = basePrompt + userContextBlock + personalityBlock + languageInstruction;
     const agentInfo: AgentInfo = {
       model: config.model,
       runtime: config.runtime,
@@ -176,7 +205,11 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Initialize Convex session sync (fire-and-forget, reads syncToConvex from config)
     const syncEnabled = this._readSyncToConvex();
     this.sessionSync = new SessionSyncManager(syncEnabled);
-    this.sessionSync.startSession(config.model, config.runtime).catch(() => {});
+    this.sessionSync.startSession(config.model, config.runtime, config.workingDirectory).catch(() => {});
+
+    // Initialize kernel manager for personal LoRA training
+    this.kernel = KernelManager.fromProjectConfig(config.workingDirectory || process.cwd());
+    this.kernel.start().catch(() => {});
 
     // Populate git info asynchronously
     import("child_process").then(({ exec }) => {
@@ -207,15 +240,6 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     });
     this.heartbeat.start();
     this.heartbeat.updateContext({ currentTask: "Agent initialized" });
-
-    // ── Self-Autonomy: Onboarding ────────────────────────────────────
-    // Check if first run — if .8gent/user.json doesn't exist, flag for onboarding
-    this.onboarding = new OnboardingManager(config.workingDirectory || process.cwd());
-    if (this.onboarding.needsOnboarding()) {
-      // Detect integrations (Ollama, LM Studio, GitHub) in background
-      this.onboarding.detectIntegrations().catch(() => {});
-      console.log("[8gent] First run detected — onboarding available. The agent can ask setup questions.");
-    }
 
     // ── Telegram: Auto-start if token exists in vault ────────────────
     const vault = getVault();
@@ -693,7 +717,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
           content: m.content,
         }));
 
-      const result = await agent.generate({ messages });
+      // Create abort controller for ESC interruption
+      this.abortController = new AbortController();
+      const result = await agent.generate({ messages, abortSignal: this.abortController.signal });
+      this.abortController = null;
 
       const content = result.text;
 
@@ -702,6 +729,26 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       const flavoredContent = flavorResponse(content, flavor);
 
       this.messageHistory.push({ role: "assistant", content: flavoredContent });
+
+      // Feed successful turn to kernel for personal LoRA training (fire-and-forget)
+      if (this.kernel.isActive || this.kernel.isEnabled) {
+        this.kernel.collectSessionTrace(
+          this.sessionId,
+          userMessage,
+          flavoredContent,
+          0.8, // Default score — PRM judge would score this properly if kernel is active
+          {
+            model: this.config.model,
+            toolCallsSucceeded: this.sessionEvidence.filter(e => !e.verified).length === 0,
+            userCorrected: false, // Will be updated on next user message if it's a correction
+          }
+        );
+      }
+
+      // Save checkpoint every 5 messages
+      if (this.messageHistory.filter(m => m.role === "user").length % 5 === 0) {
+        this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
+      }
 
       // Move BMAD task to review/done if we had one
       if (this.currentBmadTask) {
@@ -816,6 +863,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       });
 
       throw err;
+    }
+  }
+
+  /**
+   * Abort the current generation. Called when user presses ESC during processing.
+   */
+  abort(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+      console.log("[8gent] Generation aborted by user");
     }
   }
 
@@ -953,9 +1011,43 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     }
   }
 
+  /**
+   * Restore conversation from a checkpoint.
+   * Injects historical messages into the agent context.
+   */
+  restoreFromCheckpoint(messages: Array<{ role: string; content: string }>): void {
+    // Keep the system prompt, replace conversation history
+    const systemMsg = this.messageHistory[0];
+    this.messageHistory = systemMsg ? [systemMsg] : [];
+
+    for (const msg of messages) {
+      if (msg.role !== "system") {
+        this.messageHistory.push(msg);
+      }
+    }
+
+    console.log(`[8gent] Restored ${messages.length} messages from checkpoint`);
+  }
+
+  /**
+   * Get the session sync manager (for checkpoint/resume operations).
+   */
+  getSessionSync(): SessionSyncManager {
+    return this.sessionSync;
+  }
+
+  /**
+   * Get current message history (for checkpointing).
+   */
+  getMessageHistory(): Array<{ role: string; content: string }> {
+    return [...this.messageHistory];
+  }
+
   async cleanup(): Promise<void> {
     // Flush and end Convex session sync
     await this.sessionSync.endSession().catch(() => {});
+    // Stop kernel pipeline
+    await this.kernel.stop().catch(() => {});
     // Stop heartbeat agents
     this.heartbeat.stop();
 

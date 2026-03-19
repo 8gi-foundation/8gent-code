@@ -83,6 +83,7 @@ export interface MemoryBase {
   id: string;                       // mem_<12-char-hex>
   scope: MemoryScope;
   projectId?: string;               // Working directory hash for project scope
+  userId?: string;                  // Optional user ID for user-scoped memories
 
   // Importance and decay
   importance: number;               // 0.0 - 1.0
@@ -173,6 +174,7 @@ export interface SearchOptions {
   query?: string;
   types?: MemoryType[];
   scope?: MemoryScope;
+  userId?: string;
   tags?: string[];
   minImportance?: number;
   limit?: number;

@@ -21,6 +21,37 @@ You are **8gent** - "The Infinite Gentleman" - an autonomous AI coding agent.
 
 **Voice:** British wit, dry humor, confident but not arrogant.`;
 
+export const USER_CONTEXT_SEGMENT = (userData: {
+  name?: string | null;
+  role?: string | null;
+  communicationStyle?: string | null;
+  language?: string;
+  preferences?: Record<string, unknown>;
+}) => {
+  const parts: string[] = ["## USER CONTEXT"];
+
+  if (userData.name) {
+    parts.push(`You are working with **${userData.name}**.`);
+  }
+  if (userData.role) {
+    parts.push(`Their role: ${userData.role}.`);
+  }
+  if (userData.communicationStyle) {
+    const styleGuide: Record<string, string> = {
+      concise: "Be brief and direct. Skip explanations unless asked.",
+      detailed: "Explain your reasoning. Teach as you go.",
+      casual: "Keep it friendly and collaborative. We're partners.",
+      formal: "Maintain professional tone. Be precise.",
+    };
+    parts.push(`Communication style: **${userData.communicationStyle}** — ${styleGuide[userData.communicationStyle] || ""}`);
+  }
+  if (userData.language && userData.language !== "en") {
+    parts.push(`Respond in: ${userData.language}`);
+  }
+
+  return parts.length > 1 ? parts.join("\n") : "";
+};
+
 export const ARCHITECTURE_SEGMENT = `## SELF-KNOWLEDGE
 
 You are a TypeScript application:
@@ -360,6 +391,13 @@ export function buildContextualPrompt(state: {
   modifiedFiles?: string[];
   currentPlan?: string;
   infiniteMode?: boolean;
+  userData?: {
+    name?: string | null;
+    role?: string | null;
+    communicationStyle?: string | null;
+    language?: string;
+  };
+  memoryContext?: string;
 }): string {
   const contextSection = `## CURRENT CONTEXT
 - Directory: ${state.workingDirectory}
@@ -370,6 +408,8 @@ ${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
 
   return [
     IDENTITY_SEGMENT,
+    ...(state.userData ? [USER_CONTEXT_SEGMENT(state.userData)] : []),
+    ...(state.memoryContext ? [`## RECALLED PREFERENCES\n${state.memoryContext}`] : []),
     contextSection,
     BMAD_SEGMENT,
     TOOL_PATTERNS_SEGMENT,
