@@ -30,44 +30,94 @@ const HELP = `
 8gent Code v${VERSION}
 
 USAGE:
-  8 <command> [options]
   8gent <command> [options]
 
 COMMANDS:
-  init          Initialize 8gent in current directory
-  outline       Get symbol outline of a file
-  symbol        Get source code for a specific symbol
-  search        Search for symbols across files
-  benchmark     Run efficiency benchmarks
-  demo          Show token savings demo
-  tui           Launch interactive TUI
-  infinite      Run task in autonomous infinite mode
-  auth          Authentication (login, logout, status, whoami)
+  tui                         Launch interactive TUI
+  chat <message>              Send a message (non-interactive, pipe-friendly)
+  agent <sub>                 Multi-agent orchestration
+  session <sub>               Session history & resume
+  preferences <sub>           Get/set user preferences
+  memory <sub>                Remember, recall, forget
+  onboard                     Run onboarding (auto-detect + configure)
+  status                      Show full system status
+  init                        Initialize 8gent in current directory
+  outline <file>              Get symbol outline of a file
+  symbol <file>::<name>       Get source code for a specific symbol
+  search <query>              Search for symbols across files
+  benchmark                   Run efficiency benchmarks
+  infinite <task>             Run task in autonomous infinite mode
+  auth <sub>                  Authentication (login, logout, status)
+
+AGENT COMMANDS:
+  agent list                  List active sub-agents
+  agent spawn <persona> <task>  Spawn a BMAD agent (winston/larry/curly/mo/doc)
+  agent kill <id>             Kill a sub-agent
+  agent message <id> <msg>    Send message to a sub-agent
+  agent auto [on|off]         Toggle auto-spawn permission
+  agent status                Show orchestration status
+
+SESSION COMMANDS:
+  session list [--limit=N]    List recent sessions
+  session resume <id>         Resume a session by ID
+  session checkpoint          Save current session checkpoint
+  session compact             Compress current session history
+
+PREFERENCES COMMANDS:
+  preferences get             Show all preferences
+  preferences set <key> <val> Set a preference
+  preferences sync            Sync with cloud (requires auth)
+  preferences reset           Reset to defaults
+
+MEMORY COMMANDS:
+  memory recall <query>       Search memory
+  memory remember <fact>      Store a memory
+  memory forget <id>          Delete a memory
+  memory stats                Show memory statistics
 
 OPTIONS:
   -h, --help     Show this help message
   -v, --version  Show version
-  --json         Output as JSON
-  --stats        Show efficiency statistics
+  --json         Output as JSON (machine-readable)
+  --yes          Auto-approve all prompts (non-interactive)
+  --model=<m>    Override model (e.g., --model=qwen3:14b)
+  --provider=<p> Override provider (e.g., --provider=ollama)
+  --cwd=<dir>    Override working directory
   --infinite     Enable infinite mode (autonomous until done)
 
 EXAMPLES:
-  8gent outline src/index.ts
-  8gent symbol src/utils.ts::parseDate
-  8gent search "handleError" --kinds function,method
-  8gent benchmark --quick src/
-  8gent infinite "Build a Next.js landing page with dark theme"
+  # Non-interactive chat (pipe-friendly)
+  8gent chat "Fix the auth middleware" --json
+  echo "Explain this code" | 8gent chat --stdin
 
-INFINITE MODE:
-  Autonomous execution until success criteria met.
-  No questions, no crashes stop it, self-healing errors.
-  Like --dangerously-skip-permissions but smarter.
+  # Multi-agent orchestration
+  8gent agent spawn winston "Design the multi-tenant schema"
+  8gent agent list --json
+  8gent agent message winston-1 "Focus on data isolation"
 
-PHILOSOPHY:
-  plan → retrieve → compose → verify
-  (not: search → read → guess → patch)
+  # Session management
+  8gent session list --json --limit=5
+  8gent session resume sess_abc123
 
-Learn more: https://github.com/8gent/8gent-code
+  # Preferences
+  8gent preferences get --json
+  8gent preferences set model qwen3:14b
+
+  # Memory
+  8gent memory recall "auth middleware" --json
+  8gent memory remember "Uses JWT with RS256 for auth"
+
+  # Autonomous execution
+  8gent infinite "Build a REST API for user management"
+  8gent chat "Add tests" --yes --infinite
+
+MACHINE INTEGRATION:
+  All commands support --json for structured output.
+  Use --yes for non-interactive execution (no prompts).
+  Exit codes: 0=success, 1=error, 2=auth required.
+  Designed for orchestration by Claude Code, Cursor, aider, etc.
+
+Learn more: https://github.com/PodJamz/8gent-code
 `;
 
 async function main() {
@@ -136,6 +186,34 @@ async function main() {
 
     case "infinite":
       await infiniteCommand(restArgs);
+      break;
+
+    case "chat":
+      await chatCommand(restArgs);
+      break;
+
+    case "agent":
+      await agentCommand(restArgs);
+      break;
+
+    case "session":
+      await sessionCommand(restArgs);
+      break;
+
+    case "preferences":
+      await preferencesCommand(restArgs);
+      break;
+
+    case "memory":
+      await memoryCommand(restArgs);
+      break;
+
+    case "onboard":
+      await onboardCommand(restArgs);
+      break;
+
+    case "status":
+      await statusCommand(restArgs);
       break;
 
     case "auth":
@@ -546,6 +624,656 @@ SUBCOMMANDS:
   whoami    Quick identity check (one line)
 `);
       break;
+  }
+}
+
+// ── Helper: Parse global flags ────────────────────────────────────
+
+function parseFlags(args: string[]): { flags: Record<string, string | boolean>; rest: string[] } {
+  const flags: Record<string, string | boolean> = {};
+  const rest: string[] = [];
+  for (const arg of args) {
+    if (arg.startsWith("--")) {
+      const [key, val] = arg.slice(2).split("=");
+      flags[key] = val || true;
+    } else {
+      rest.push(arg);
+    }
+  }
+  return { flags, rest };
+}
+
+function jsonOut(data: unknown): void {
+  console.log(JSON.stringify(data, null, 2));
+}
+
+// ── Chat Command (non-interactive, pipe-friendly) ─────────────────
+
+async function chatCommand(args: string[]) {
+  const { flags, rest } = parseFlags(args);
+  const isJson = !!flags.json;
+  const useStdin = !!flags.stdin;
+  const model = (flags.model as string) || undefined;
+  const provider = (flags.provider as string) || undefined;
+  const cwd = (flags.cwd as string) || process.cwd();
+
+  let message = rest.join(" ");
+
+  // Read from stdin if --stdin flag or no message provided
+  if (useStdin || (!message && !process.stdin.isTTY)) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(chunk);
+    }
+    message = Buffer.concat(chunks).toString("utf-8").trim();
+  }
+
+  if (!message) {
+    console.error("Usage: 8gent chat <message> [--json] [--model=<m>] [--stdin]");
+    process.exit(1);
+  }
+
+  try {
+    const { Agent } = await import("../packages/eight/agent");
+
+    const agent = new Agent({
+      model: model || "qwen3.5:latest",
+      runtime: provider || "ollama",
+      workingDirectory: cwd,
+      maxTurns: 30,
+    });
+
+    const response = await agent.chat(message);
+    await agent.cleanup();
+
+    if (isJson) {
+      jsonOut({
+        success: true,
+        message,
+        response,
+        model: model || "qwen3.5:latest",
+        provider: provider || "ollama",
+      });
+    } else {
+      console.log(response);
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isJson) {
+      jsonOut({ success: false, error: errMsg });
+    } else {
+      console.error(`Error: ${errMsg}`);
+    }
+    process.exit(1);
+  }
+}
+
+// ── Agent Command (multi-agent orchestration) ─────────────────────
+
+async function agentCommand(args: string[]) {
+  const { flags, rest } = parseFlags(args);
+  const isJson = !!flags.json;
+  const sub = rest[0] || "list";
+
+  const { getOrchestratorBus } = await import("../packages/orchestration/orchestrator-bus");
+  const { getPersona, listPersonas } = await import("../packages/orchestration/personas");
+  const bus = getOrchestratorBus();
+
+  switch (sub) {
+    case "list": {
+      const agents = bus.getAgents();
+      if (isJson) {
+        jsonOut({
+          count: agents.length,
+          agents: agents.map(a => ({
+            id: a.id,
+            persona: a.persona.id,
+            name: a.persona.name,
+            role: a.persona.role,
+            task: a.task,
+            status: a.status,
+            spawnedAt: a.spawnedAt.toISOString(),
+          })),
+        });
+      } else {
+        if (agents.length === 0) {
+          console.log("No active sub-agents.");
+        } else {
+          for (const a of agents) {
+            console.log(`${a.persona.icon} ${a.id} — ${a.persona.name} (${a.persona.role})`);
+            console.log(`  Task: ${a.task}`);
+            console.log(`  Status: ${a.status}`);
+          }
+        }
+      }
+      break;
+    }
+
+    case "spawn": {
+      const personaId = rest[1];
+      const task = rest.slice(2).join(" ");
+      if (!personaId) {
+        const personas = listPersonas();
+        if (isJson) {
+          jsonOut({ error: "persona required", available: personas.map(p => ({ id: p.id, name: p.name, role: p.role })) });
+        } else {
+          console.log("Usage: 8gent agent spawn <persona> <task>\n");
+          console.log("Available personas:");
+          for (const p of personas) {
+            console.log(`  ${p.icon} ${p.id.padEnd(10)} ${p.name} — ${p.role}`);
+          }
+        }
+        process.exit(1);
+      }
+
+      const persona = getPersona(personaId);
+      if (!persona) {
+        console.error(`Unknown persona: ${personaId}`);
+        process.exit(1);
+      }
+
+      const request = bus.requestSpawn(personaId, task || "General assistance", "CLI spawn");
+
+      if (isJson) {
+        jsonOut({ success: true, requestId: request.id, persona: personaId, task, status: request.status });
+      } else {
+        console.log(`Spawn request: ${persona.icon} ${persona.name} (${persona.role})`);
+        console.log(`Task: ${task || "General assistance"}`);
+        console.log(`Status: ${request.status}`);
+      }
+      break;
+    }
+
+    case "kill": {
+      const killId = rest[1];
+      if (!killId) {
+        console.error("Usage: 8gent agent kill <agent-id>");
+        process.exit(1);
+      }
+      const killed = bus.killAgent(killId);
+      if (isJson) {
+        jsonOut({ success: !!killed, agentId: killId });
+      } else {
+        console.log(killed ? `Killed: ${killed.persona.name}` : `Agent "${killId}" not found.`);
+      }
+      break;
+    }
+
+    case "message": {
+      const targetId = rest[1];
+      const msg = rest.slice(2).join(" ");
+      if (!targetId || !msg) {
+        console.error("Usage: 8gent agent message <agent-id> <message>");
+        process.exit(1);
+      }
+      bus.routeMessage(targetId, {
+        id: `cli-${Date.now()}`,
+        role: "user",
+        content: msg,
+        agentId: "cli",
+        timestamp: new Date(),
+      });
+      if (isJson) {
+        jsonOut({ success: true, agentId: targetId, message: msg });
+      } else {
+        console.log(`Message sent to ${targetId}`);
+      }
+      break;
+    }
+
+    case "auto": {
+      const setting = rest[1];
+      if (setting === "on") bus.setAutoSpawn(true);
+      else if (setting === "off") bus.setAutoSpawn(false);
+      else bus.setAutoSpawn(!bus.isAutoSpawnEnabled());
+
+      if (isJson) {
+        jsonOut({ autoSpawn: bus.isAutoSpawnEnabled() });
+      } else {
+        console.log(`Auto-spawn: ${bus.isAutoSpawnEnabled() ? "enabled" : "disabled"}`);
+      }
+      break;
+    }
+
+    case "status": {
+      const agents = bus.getAgents();
+      const pending = bus.getPendingSpawns();
+      if (isJson) {
+        jsonOut({
+          agentCount: agents.length,
+          pendingSpawns: pending.length,
+          autoSpawn: bus.isAutoSpawnEnabled(),
+          agents: agents.map(a => ({ id: a.id, persona: a.persona.id, status: a.status, task: a.task })),
+        });
+      } else {
+        console.log(`Agents: ${agents.length} active`);
+        console.log(`Pending spawns: ${pending.length}`);
+        console.log(`Auto-spawn: ${bus.isAutoSpawnEnabled() ? "on" : "off"}`);
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown agent subcommand: ${sub}`);
+      console.log("Available: list, spawn, kill, message, auto, status");
+      process.exit(1);
+  }
+}
+
+// ── Session Command ───────────────────────────────────────────────
+
+async function sessionCommand(args: string[]) {
+  const { flags, rest } = parseFlags(args);
+  const isJson = !!flags.json;
+  const sub = rest[0] || "list";
+
+  switch (sub) {
+    case "list": {
+      const limit = parseInt((flags.limit as string) || "10");
+      const { SessionSyncManager } = await import("../packages/eight/session-sync");
+      const sync = new SessionSyncManager(true);
+
+      const convos = await sync.getRecentConversations(limit);
+      if (isJson) {
+        jsonOut({ count: convos.length, sessions: convos });
+      } else {
+        if (convos.length === 0) {
+          console.log("No sessions found. Requires authentication.");
+        } else {
+          for (const c of convos as any[]) {
+            const ago = Math.floor((Date.now() - c.lastActiveAt) / 60000);
+            const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+            console.log(`${c.sessionId}  ${c.title?.slice(0, 50) || "Untitled"}  ${c.model}  ${c.messageCount} msgs  ${timeStr}`);
+          }
+        }
+      }
+      break;
+    }
+
+    case "resume": {
+      const sessionId = rest[1];
+      if (!sessionId) {
+        console.error("Usage: 8gent session resume <session-id>");
+        process.exit(1);
+      }
+      // Resume launches TUI with session context
+      const { spawn } = await import("child_process");
+      const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
+      const proc = spawn("bun", ["run", tuiPath, "--resume", sessionId], {
+        stdio: "inherit",
+        cwd: path.join(__dirname, ".."),
+      });
+      proc.on("exit", (code) => process.exit(code || 0));
+      break;
+    }
+
+    case "compact":
+    case "checkpoint": {
+      if (isJson) {
+        jsonOut({ success: true, message: `${sub} is a TUI operation — use /compact or /checkpoint in the TUI` });
+      } else {
+        console.log(`${sub} is a TUI operation. Launch the TUI and use /${sub}.`);
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown session subcommand: ${sub}`);
+      console.log("Available: list, resume, compact, checkpoint");
+      process.exit(1);
+  }
+}
+
+// ── Preferences Command ───────────────────────────────────────────
+
+async function preferencesCommand(args: string[]) {
+  const { flags, rest } = parseFlags(args);
+  const isJson = !!flags.json;
+  const sub = rest[0] || "get";
+  const cwd = (flags.cwd as string) || process.cwd();
+
+  const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
+  const mgr = new OnboardingManager(cwd);
+
+  switch (sub) {
+    case "get": {
+      const user = mgr.getUser();
+      if (isJson) {
+        jsonOut(user);
+      } else {
+        console.log(`Name: ${user.identity.name || "Not set"}`);
+        console.log(`Role: ${user.identity.role || "Not set"}`);
+        console.log(`Style: ${user.identity.communicationStyle || "Not set"}`);
+        console.log(`Language: ${user.identity.language}`);
+        console.log(`Model: ${user.preferences.model.default || "auto"}`);
+        console.log(`Provider: ${user.preferences.model.provider || "ollama"}`);
+        console.log(`Voice: ${user.preferences.voice.enabled ? "on" : "off"}`);
+        console.log(`Autonomy: ${user.preferences.autonomy.askThreshold}`);
+        console.log(`Understanding: ${Math.round(user.understanding.confidenceScore * 100)}%`);
+        console.log(`Onboarded: ${user.onboardingComplete ? "yes" : "no"}`);
+      }
+      break;
+    }
+
+    case "set": {
+      const key = rest[1];
+      const value = rest.slice(2).join(" ");
+      if (!key || !value) {
+        console.error("Usage: 8gent preferences set <key> <value>");
+        console.log("\nKeys: name, role, style, language, model, provider, voice, autonomy, branch-prefix");
+        process.exit(1);
+      }
+
+      const user = mgr.getUser();
+      switch (key) {
+        case "name": user.identity.name = value; break;
+        case "role": user.identity.role = value; break;
+        case "style": user.identity.communicationStyle = value as any; break;
+        case "language": user.identity.language = value; break;
+        case "model": user.preferences.model.default = value; break;
+        case "provider": user.preferences.model.provider = value as any; break;
+        case "voice": user.preferences.voice.enabled = value === "on" || value === "true"; break;
+        case "autonomy": user.preferences.autonomy.askThreshold = value as any; break;
+        case "branch-prefix": user.preferences.git.branchPrefix = value; break;
+        default:
+          console.error(`Unknown preference key: ${key}`);
+          process.exit(1);
+      }
+
+      // Save via updatePreferences
+      mgr.updatePreferences(user.preferences);
+      if (isJson) {
+        jsonOut({ success: true, key, value });
+      } else {
+        console.log(`Set ${key} = ${value}`);
+      }
+      break;
+    }
+
+    case "sync": {
+      const { PreferencesSyncManager } = await import("../packages/self-autonomy/preferences-sync");
+      const sync = new PreferencesSyncManager(cwd);
+      try {
+        const { initAuth } = await import("../packages/auth");
+        const authState = await initAuth();
+        if (authState.state !== "authenticated") {
+          console.error("Not authenticated. Run `8gent auth login` first.");
+          process.exit(2);
+        }
+        await sync.syncOnLogin(authState.user.clerkId);
+        if (isJson) {
+          jsonOut({ success: true, message: "Preferences synced from cloud" });
+        } else {
+          console.log("Preferences synced from cloud.");
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isJson) jsonOut({ success: false, error: msg });
+        else console.error(`Sync failed: ${msg}`);
+        process.exit(1);
+      }
+      break;
+    }
+
+    case "reset": {
+      mgr.reset();
+      if (isJson) {
+        jsonOut({ success: true, message: "Preferences reset to defaults" });
+      } else {
+        console.log("Preferences reset to defaults.");
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown preferences subcommand: ${sub}`);
+      console.log("Available: get, set, sync, reset");
+      process.exit(1);
+  }
+}
+
+// ── Memory Command ────────────────────────────────────────────────
+
+async function memoryCommand(args: string[]) {
+  const { flags, rest } = parseFlags(args);
+  const isJson = !!flags.json;
+  const sub = rest[0] || "stats";
+  const cwd = (flags.cwd as string) || process.cwd();
+
+  const { getMemoryManager } = await import("../packages/memory");
+  const memory = getMemoryManager(cwd);
+
+  switch (sub) {
+    case "recall": {
+      const query = rest.slice(1).join(" ");
+      if (!query) {
+        console.error("Usage: 8gent memory recall <query>");
+        process.exit(1);
+      }
+      const results = await memory.recall(query, 10);
+      if (isJson) {
+        jsonOut({ query, count: results.length, results });
+      } else {
+        if (results.length === 0) {
+          console.log("No memories found.");
+        } else {
+          for (const r of results as any[]) {
+            const entry = r.entry || r.memory;
+            const fact = entry?.fact || entry?.value || entry?.content || JSON.stringify(entry);
+            console.log(`[${(r.score || 0).toFixed(2)}] ${fact.slice(0, 120)}`);
+          }
+        }
+      }
+      break;
+    }
+
+    case "remember": {
+      const fact = rest.slice(1).join(" ");
+      if (!fact) {
+        console.error("Usage: 8gent memory remember <fact>");
+        process.exit(1);
+      }
+      const id = await memory.remember(fact, "project", { source: "cli" });
+      if (isJson) {
+        jsonOut({ success: true, id, fact });
+      } else {
+        console.log(`Remembered: ${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}`);
+        console.log(`ID: ${id}`);
+      }
+      break;
+    }
+
+    case "forget": {
+      const id = rest[1];
+      if (!id) {
+        console.error("Usage: 8gent memory forget <id>");
+        process.exit(1);
+      }
+      const success = await memory.forget(id);
+      if (isJson) {
+        jsonOut({ success, id });
+      } else {
+        console.log(success ? `Forgot: ${id}` : `Memory "${id}" not found.`);
+      }
+      break;
+    }
+
+    case "stats": {
+      try {
+        const ctx = await memory.getContext({ maxTokens: 1 });
+        if (isJson) {
+          jsonOut({ stats: ctx.stats });
+        } else {
+          console.log(`Total memories: ${ctx.stats.totalMemories}`);
+          console.log(`By type: ${JSON.stringify(ctx.stats.byType)}`);
+        }
+      } catch {
+        if (isJson) {
+          jsonOut({ stats: { totalMemories: 0, byType: {} } });
+        } else {
+          console.log("Memory system not initialized or empty.");
+        }
+      }
+      break;
+    }
+
+    default:
+      console.error(`Unknown memory subcommand: ${sub}`);
+      console.log("Available: recall, remember, forget, stats");
+      process.exit(1);
+  }
+}
+
+// ── Onboard Command (non-interactive auto-detect) ─────────────────
+
+async function onboardCommand(args: string[]) {
+  const { flags } = parseFlags(args);
+  const isJson = !!flags.json;
+  const cwd = (flags.cwd as string) || process.cwd();
+
+  const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
+
+  console.error("Auto-detecting environment...");
+  const detected = await OnboardingManager.autoDetect();
+
+  const mgr = new OnboardingManager(cwd);
+  mgr.applyAutoDetected(detected);
+
+  // If --yes, auto-complete onboarding with defaults
+  if (flags.yes) {
+    const user = mgr.getUser();
+    if (!user.identity.communicationStyle) {
+      user.identity.communicationStyle = "concise";
+    }
+    user.onboardingComplete = true;
+    mgr.updatePreferences(user.preferences);
+  }
+
+  if (isJson) {
+    jsonOut({
+      detected,
+      user: mgr.getUser(),
+      onboardingComplete: mgr.getUser().onboardingComplete,
+    });
+  } else {
+    console.log(`Name: ${detected.name || "not detected"}`);
+    console.log(`Email: ${detected.email || "not detected"}`);
+    console.log(`GitHub: ${detected.githubUsername || "not detected"}`);
+    console.log(`Provider: ${detected.preferredProvider || "not detected"}`);
+    console.log(`Ollama models: ${detected.ollamaModels.length > 0 ? detected.ollamaModels.join(", ") : "none"}`);
+    console.log(`\nApplied to .8gent/user.json`);
+    if (!mgr.getUser().onboardingComplete) {
+      console.log("Run with --yes to auto-complete onboarding with defaults.");
+    }
+  }
+}
+
+// ── Status Command ────────────────────────────────────────────────
+
+async function statusCommand(args: string[]) {
+  const { flags } = parseFlags(args);
+  const isJson = !!flags.json;
+  const cwd = (flags.cwd as string) || process.cwd();
+
+  const status: Record<string, unknown> = {
+    version: VERSION,
+    cwd,
+    platform: process.platform,
+    runtime: "bun",
+  };
+
+  // Check .8gent config
+  try {
+    const configPath = path.join(cwd, ".8gent", "config.json");
+    if (fs.existsSync(configPath)) {
+      status.config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    }
+  } catch {}
+
+  // Check user config
+  try {
+    const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
+    const mgr = new OnboardingManager(cwd);
+    const user = mgr.getUser();
+    status.user = {
+      name: user.identity.name,
+      onboarded: user.onboardingComplete,
+      model: user.preferences.model.default,
+      provider: user.preferences.model.provider,
+      style: user.identity.communicationStyle,
+    };
+  } catch {}
+
+  // Check auth
+  try {
+    const { initAuth } = await import("../packages/auth");
+    const authState = await initAuth();
+    status.auth = authState.state === "authenticated"
+      ? { state: "authenticated", user: authState.user.githubUsername, plan: authState.user.plan }
+      : { state: "anonymous" };
+  } catch {
+    status.auth = { state: "unknown" };
+  }
+
+  // Check Ollama
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+    const { stdout } = await execAsync("ollama list 2>/dev/null");
+    const models = stdout.split("\n").slice(1).map(l => l.split(/\s+/)[0]).filter(Boolean);
+    status.ollama = { available: true, models, count: models.length };
+  } catch {
+    status.ollama = { available: false, models: [], count: 0 };
+  }
+
+  // Check orchestration
+  try {
+    const { getOrchestratorBus } = await import("../packages/orchestration/orchestrator-bus");
+    const bus = getOrchestratorBus();
+    status.agents = { count: bus.getAgentCount(), autoSpawn: bus.isAutoSpawnEnabled() };
+  } catch {
+    status.agents = { count: 0, autoSpawn: false };
+  }
+
+  // Check kernel
+  try {
+    const { KernelManager } = await import("../packages/kernel/manager");
+    const km = KernelManager.fromProjectConfig(cwd);
+    status.kernel = { enabled: km.isEnabled, pairCount: km.getTrainingPairCount() };
+  } catch {
+    status.kernel = { enabled: false };
+  }
+
+  // Git status
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+    const { stdout: branch } = await execAsync("git rev-parse --abbrev-ref HEAD", { cwd });
+    const { stdout: hash } = await execAsync("git rev-parse --short HEAD", { cwd });
+    status.git = { branch: branch.trim(), commit: hash.trim() };
+  } catch {
+    status.git = { branch: null, commit: null };
+  }
+
+  if (isJson) {
+    jsonOut(status);
+  } else {
+    console.log(`8gent Code v${VERSION}`);
+    console.log(`─────────────────────────`);
+    for (const [key, val] of Object.entries(status)) {
+      if (key === "version") continue;
+      if (typeof val === "object" && val !== null) {
+        console.log(`${key}:`);
+        for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+          const display = Array.isArray(v) ? `[${(v as any[]).length}]` : String(v);
+          console.log(`  ${k}: ${display}`);
+        }
+      } else {
+        console.log(`${key}: ${val}`);
+      }
+    }
   }
 }
 
