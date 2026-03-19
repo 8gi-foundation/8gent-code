@@ -42,6 +42,7 @@ export { resolveAuthConfig, decodeJwt, isTokenExpired, validateToken } from "./c
 export { executeDeviceFlow, formatDeviceFlowStatus } from "./device-flow.js";
 export { getTokenStore, KeychainTokenStore, EncryptedFileTokenStore } from "./token-store.js";
 export { requireAuth, requirePlan, checkAuth, hasPlan, authenticateRequest } from "./middleware.js";
+export { runCLIAuthFlow, type CLIAuthResult, type CLIAuthCallbacks } from "./cli-auth-server.js";
 
 // ============================================
 // AuthManager — Central Auth State Machine
