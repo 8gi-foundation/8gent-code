@@ -1,0 +1,13 @@
+{
+  "name": "@8gent/policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "description": "NemoClaw-inspired policy engine with YAML rules, approval gates, and privacy-aware model routing",
+  "dependencies": {
+    "yaml": "^2.3.4",
+    "minimatch": "^9.0.3",
+    "chokidar": "^3.5.3"
+  }
+}

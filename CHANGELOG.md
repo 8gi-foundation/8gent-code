@@ -10,6 +10,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **NemoClaw-inspired policy engine** (`@8gent/policy`) — declarative YAML policy files for filesystem, command, network, and git action control; deny-by-default security model
+- **Approval gates** — interactive CLI prompts for destructive operations (force push, hard reset, `rm -rf`); full audit trail of approval history
+- **Privacy-aware model router** — automatically routes inference to local models when referenced files contain secrets, credentials, or sensitive data
+- **Default policy template** — `.8gent/policy.yaml.default` with sensible defaults; supports project-local and user-global policy files with hot-reload
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
