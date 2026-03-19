@@ -84,7 +84,7 @@ export function VoiceIndicator({
           <AudioLevelBar level={audioLevel} />
         )}
         {state === "idle" && (
-          <MutedText>[Ctrl+Space to record]</MutedText>
+          <MutedText>[Ctrl+R to record]</MutedText>
         )}
       </Inline>
 

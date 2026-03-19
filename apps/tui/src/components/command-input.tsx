@@ -9,7 +9,7 @@
  * - Slash command support (/kanban, /predict, /avenues)
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
@@ -43,6 +43,8 @@ interface CommandInputProps {
   recentCommands?: string[];
   // Slash command handlers
   onSlashCommand?: (command: string, args: string[]) => void;
+  /** Text injected from voice transcription — appended to current input for review */
+  injectedText?: string | null;
 }
 
 export type SlashCommand =
@@ -249,10 +251,20 @@ export function CommandInput({
   planNextStep = null,
   recentCommands = [],
   onSlashCommand,
+  injectedText = null,
 }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [promptPulse, setPromptPulse] = useState(true);
   const [showSlashHelp, setShowSlashHelp] = useState(false);
+
+  // Inject text from voice transcription (appends to current input)
+  const lastInjectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (injectedText && injectedText !== lastInjectedRef.current) {
+      lastInjectedRef.current = injectedText;
+      setValue((prev) => (prev ? prev + " " + injectedText : injectedText));
+    }
+  }, [injectedText]);
 
   // Ghost suggestion hook
   const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
