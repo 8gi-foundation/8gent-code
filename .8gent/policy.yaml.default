@@ -1,0 +1,110 @@
+# 8gent Policy Configuration
+# Inspired by NemoClaw (NVIDIA's security-first agent runtime)
+#
+# Copy this file to .8gent/policy.yaml and customize for your project.
+# You can also place a global policy at ~/.8gent/policy.yaml
+#
+# Priority: project-local > user-global > built-in defaults
+# Deny rules always take priority over allow rules.
+
+version: 1
+
+rules:
+  # Filesystem access control
+  filesystem:
+    allow:
+      - "~/projects/**"
+      - "/tmp/**"
+      - "./**"               # current project directory
+    deny:
+      - "~/.ssh/**"
+      - "~/.env*"
+      - "~/.gnupg/**"
+      - "~/.aws/credentials"
+      - "**/node_modules/**"
+      - "**/.git/objects/**"
+    requireApproval:
+      - "**/package.json"    # modifying dependencies
+      - "**/tsconfig.json"   # modifying build config
+      - "**/.env*"           # environment files
+
+  # Command execution control
+  commands:
+    allow:
+      - "git *"
+      - "npm *"
+      - "npx *"
+      - "bun *"
+      - "node *"
+      - "tsc *"
+      - "eslint *"
+      - "prettier *"
+      - "cat *"
+      - "ls *"
+      - "find *"
+      - "grep *"
+      - "head *"
+      - "tail *"
+      - "wc *"
+      - "echo *"
+    deny:
+      - "rm -rf /*"
+      - "rm -rf ~/*"
+      - "sudo *"
+      - "curl * | bash"
+      - "wget * | bash"
+      - "chmod 777 *"
+      - "shutdown *"
+      - "reboot *"
+      - "mkfs *"
+      - "dd *"
+    requireApproval:
+      - "git push --force*"
+      - "git push -f *"
+      - "git reset --hard*"
+      - "git clean -fd*"
+      - "rm -rf *"
+      - "npm publish*"
+
+  # Network access control (deny-by-default)
+  network:
+    allow:
+      - "api.anthropic.com"
+      - "api.openai.com"
+      - "openrouter.ai"
+      - "api.openrouter.ai"
+      - "localhost:*"
+      - "127.0.0.1:*"
+      - "registry.npmjs.org"
+      - "github.com"
+      - "api.github.com"
+    deny:
+      - "*"                  # deny-by-default for network
+
+  # Model routing: which files are safe for cloud vs local-only
+  inference:
+    localOnly:
+      - "*.env*"
+      - "*credentials*"
+      - "*secret*"
+      - "*.pem"
+      - "*.key"
+      - "*password*"
+      - "*.p12"
+      - "*token*"
+      - "~/.ssh/**"
+      - "~/.aws/**"
+      - "~/.gnupg/**"
+    cloudAllowed:
+      - "*.md"
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.css"
+      - "*.html"
+      - "*.svg"
+      - "*.txt"
