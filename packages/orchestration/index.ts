@@ -780,3 +780,15 @@ export {
   type DelegationConstraints,
   type DelegationResult,
 } from "./delegation";
+
+// Multi-agent orchestration
+export { OrchestratorBus, getOrchestratorBus } from "./orchestrator-bus";
+export type { OrchestratedAgent, SpawnRequest, ChatMessage, BusEvent } from "./orchestrator-bus";
+export { PERSONAS, matchPersona, getPersona, listPersonas } from "./personas";
+export type { BMADPersona } from "./personas";
+export { WorktreeManager } from "./worktree-manager";
+export type { WorktreeInfo } from "./worktree-manager";
+
+// Context isolation for multi-agent orchestration
+export { ContextManager, getContextManager } from "./context-manager";
+export type { ContextPolicy, ContextSlice } from "./context-manager";
