@@ -1,0 +1,9 @@
+{
+  "name": "@8gent/github",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "description": "Deep GitHub integration for 8gent Code — Issues, PRs, Actions, Projects, Gists, Releases, Branches, and more.",
+  "main": "index.ts",
+  "dependencies": {}
+}
