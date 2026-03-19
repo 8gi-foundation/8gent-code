@@ -46,6 +46,8 @@ import {
   NullEmbeddingProvider,
 } from "./embeddings.js";
 import { migrateV1ToV2, type MigrationResult } from "./migrate.js";
+import { KnowledgeGraph, type Entity, type Relationship, type SubgraphResult } from "./graph.js";
+import { extractFromToolResult, extractPreferencesFromMessage, type ExtractionResult, type ExtractedEntity, type ExtractedRelationship } from "./extractor.js";
 
 // ── Re-exports ────────────────────────────────────────────────────────
 
@@ -82,6 +84,18 @@ export {
   NullEmbeddingProvider,
   getEmbeddingProvider,
   migrateV1ToV2,
+  KnowledgeGraph,
+  extractFromToolResult,
+  extractPreferencesFromMessage,
+};
+
+export type {
+  Entity,
+  Relationship,
+  SubgraphResult,
+  ExtractionResult,
+  ExtractedEntity,
+  ExtractedRelationship,
 };
 
 // ── V1 Compatibility Types ────────────────────────────────────────────
@@ -126,6 +140,7 @@ export class MemoryManager {
   private workingMemoryCache: Map<string, WorkingMemory> = new Map();
   private embeddingProvider: EmbeddingProvider | null = null;
   private initialized = false;
+  private graph: KnowledgeGraph | null = null;
 
   // V1 compat paths
   private projectJsonlPath: string;
@@ -834,6 +849,84 @@ export class MemoryManager {
 
   getGlobalMemories(): MemoryEntry[] {
     return readJsonlSafe(this.globalJsonlPath);
+  }
+
+  // ── Knowledge Graph ──────────────────────────────────────────────────
+
+  /**
+   * Get the knowledge graph (lazy-initialized from project store).
+   */
+  async getGraph(): Promise<KnowledgeGraph> {
+    if (this.graph) return this.graph;
+    await this.init();
+    this.graph = new KnowledgeGraph(this.projectStore!);
+    return this.graph;
+  }
+
+  // ── Ingestion Pipeline ───────────────────────────────────────────────
+
+  /**
+   * Ingest a tool result — extracts entities, relationships, and stores them.
+   * Called from the agent loop after each tool execution.
+   */
+  async ingestToolResult(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown,
+  ): Promise<ExtractionResult | null> {
+    try {
+      const extraction = extractFromToolResult(toolName, args, result);
+      if (!extraction || extraction.entities.length === 0) {
+        return null;
+      }
+      await this.applyExtraction(extraction);
+      return extraction;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Ingest a user message — extracts preferences and entities.
+   * Called from the agent loop when user sends a message.
+   */
+  async ingestUserMessage(message: string): Promise<ExtractionResult | null> {
+    try {
+      const extraction = extractPreferencesFromMessage(message);
+      if (!extraction || extraction.entities.length === 0) {
+        return null;
+      }
+      await this.applyExtraction(extraction);
+      return extraction;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Apply an extraction result — add entities and relationships to graph.
+   */
+  private async applyExtraction(extraction: ExtractionResult): Promise<void> {
+    const graph = await this.getGraph();
+
+    // Add entities to knowledge graph, track name→id mapping
+    const nameToId = new Map<string, string>();
+    for (const entity of extraction.entities) {
+      const id = graph.addEntity(entity.type, entity.name, {
+        description: entity.description,
+        metadata: entity.metadata,
+      });
+      nameToId.set(entity.name, id);
+    }
+
+    // Add relationships (resolve names to entity IDs)
+    for (const rel of extraction.relationships) {
+      const fromId = nameToId.get(rel.fromName);
+      const toId = nameToId.get(rel.toName);
+      if (fromId && toId) {
+        graph.addRelationship(fromId, toId, rel.type, rel.metadata);
+      }
+    }
   }
 }
 
