@@ -10,6 +10,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Smart onboarding** — auto-detects git config, Ollama models, GitHub auth; reduces from 8 questions to 3
+- **Preferences cloud sync** — `PreferencesSyncManager` pulls/pushes preferences via Convex after auth; `updatedAt` wins merge strategy
+- **Adaptive system prompt** — `USER_CONTEXT_SEGMENT` injects user name, role, communication style into system prompt
+- **Session history & resume** — `/history`, `/continue`, `/resume`, `/compact` slash commands; checkpoints every 5 messages
+- **Conversations table** — Convex schema for cross-device session persistence with checkpoint data
+- **Personal LoRA collector** — `PersonalCollector` quality-filters session traces for fine-tuning (score >= 0.7, no corrections)
+- **ESC to interrupt** — pressing Escape during generation aborts the AI SDK stream immediately
+- **User-scoped memory** — `userId` field on `MemoryBase` and `SearchOptions` for per-user memory recall
+- **HistoryScreen** — TUI screen for browsing and resuming past sessions with keyboard navigation
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`

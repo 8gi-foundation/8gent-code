@@ -26,6 +26,11 @@ export class SessionSyncManager {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private enabled: boolean;
+  private userId: string | null = null;
+  private checkpointTimer: ReturnType<typeof setInterval> | null = null;
+  private messageCount = 0;
+  private sessionModel = "";
+  private sessionWorkingDir = "";
 
   // Lazily resolved — dynamic imports so @8gent/db is optional
   private _client: any = null;
@@ -35,6 +40,13 @@ export class SessionSyncManager {
 
   constructor(enabled: boolean = true) {
     this.enabled = enabled;
+  }
+
+  /**
+   * Set the user ID for conversation tracking.
+   */
+  setUserId(userId: string): void {
+    this.userId = userId;
   }
 
   /**
@@ -70,7 +82,7 @@ export class SessionSyncManager {
    * Start tracking a session in Convex.
    * Fire-and-forget — never blocks the agent loop.
    */
-  async startSession(model: string, provider: string): Promise<void> {
+  async startSession(model: string, provider: string, workingDirectory?: string): Promise<void> {
     if (!this.enabled) return;
 
     try {
@@ -85,6 +97,8 @@ export class SessionSyncManager {
       if (result) {
         this.convexSessionId = result;
         this.started = true;
+        this.sessionModel = model;
+        this.sessionWorkingDir = workingDirectory || process.cwd();
 
         // Start the periodic flush timer (every 10 seconds)
         this.flushTimer = setInterval(() => {
@@ -157,6 +171,78 @@ export class SessionSyncManager {
   }
 
   /**
+   * Save a conversation checkpoint to Convex.
+   * Called every 5 messages or 60 seconds during active sessions.
+   */
+  async saveCheckpoint(
+    messages: Array<{ role: string; content: string }>,
+    title?: string
+  ): Promise<void> {
+    if (!this.enabled || !this.userId) return;
+
+    this.messageCount = messages.length;
+
+    try {
+      const available = await this.resolveConvex();
+      if (!available) return;
+
+      const checkpointData = JSON.stringify(
+        messages.map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }))
+      );
+
+      await this._client.mutation(this._api.conversations.upsert, {
+        userId: this.userId,
+        sessionId: this.convexSessionId || `local_${Date.now()}`,
+        title: title || messages.find((m) => m.role === "user")?.content.slice(0, 80) || "Untitled",
+        messageCount: messages.length,
+        model: this.sessionModel || "unknown",
+        workingDirectory: this.sessionWorkingDir,
+        checkpointData,
+      });
+    } catch {
+      // Checkpoint is best-effort
+    }
+  }
+
+  /**
+   * Start periodic checkpoint saving.
+   * Saves every 60 seconds if there are new messages.
+   */
+  startCheckpointTimer(getMessages: () => Array<{ role: string; content: string }>): void {
+    if (this.checkpointTimer) return;
+
+    this.checkpointTimer = setInterval(() => {
+      const messages = getMessages();
+      if (messages.length > this.messageCount) {
+        this.saveCheckpoint(messages).catch(() => {});
+      }
+    }, 60_000);
+
+    if (this.checkpointTimer && typeof this.checkpointTimer === "object" && "unref" in this.checkpointTimer) {
+      this.checkpointTimer.unref();
+    }
+  }
+
+  /**
+   * Get recent conversations for session resume.
+   */
+  async getRecentConversations(limit = 5): Promise<any[]> {
+    if (!this.enabled || !this.userId) return [];
+
+    try {
+      const available = await this.resolveConvex();
+      if (!available) return [];
+
+      return await this._client.query(this._api.conversations.getRecent, {
+        userId: this.userId,
+        limit,
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * End the session in Convex with final totals.
    * Flushes any remaining deltas first, then marks the session as ended.
    */
@@ -167,6 +253,11 @@ export class SessionSyncManager {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
+    }
+
+    if (this.checkpointTimer) {
+      clearInterval(this.checkpointTimer);
+      this.checkpointTimer = null;
     }
 
     try {

@@ -146,10 +146,20 @@ export class MemoryManager {
   private projectJsonlPath: string;
   private globalJsonlPath: string;
 
+  private userId: string | null = null;
+
   constructor(workingDirectory: string) {
     this.workingDirectory = workingDirectory;
     this.projectJsonlPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
     this.globalJsonlPath = path.join(os.homedir(), ".8gent", "memory", "global.jsonl");
+  }
+
+  /**
+   * Set the user ID for user-scoped memory operations.
+   * User-scoped memories get a 1.5x relevance boost during recall.
+   */
+  setUserId(userId: string): void {
+    this.userId = userId;
   }
 
   /**
