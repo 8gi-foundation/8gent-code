@@ -32,6 +32,9 @@
       ],
       "@8gent/registry": [
         "packages/registry/index.ts"
+      ],
+      "@8gent/policy": [
+        "packages/policy/index.ts"
       ]
     },
     "lib": [
