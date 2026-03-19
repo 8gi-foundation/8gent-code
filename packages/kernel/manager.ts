@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import { ProductionLoop, type ProductionConfig, type LoopStatus } from "./loop";
 import type { ScoreRecord } from "./judge";
 import type { CheckpointInfo } from "./training";
+import { PersonalCollector, type TrainingPair, type CollectorStats } from "./personal-collector";
 
 export interface KernelConfig {
   /** Enable the kernel fine-tuning pipeline (default: false) */
@@ -37,9 +38,12 @@ const DEFAULT_KERNEL_CONFIG: KernelConfig = {
 export class KernelManager {
   private config: KernelConfig;
   private loop: ProductionLoop | null = null;
+  private userId: string | null = null;
+  private collector: PersonalCollector;
 
   constructor(config: Partial<KernelConfig> = {}) {
     this.config = { ...DEFAULT_KERNEL_CONFIG, ...config };
+    this.collector = new PersonalCollector();
   }
 
   /**
@@ -146,6 +150,52 @@ export class KernelManager {
   async forceTraining(): Promise<CheckpointInfo | null> {
     if (!this.loop) return null;
     return this.loop.forceTraining();
+  }
+
+  /**
+   * Set user ID for personal LoRA training.
+   */
+  setUserId(userId: string): void {
+    this.userId = userId;
+  }
+
+  /**
+   * Collect a session trace for personal LoRA training.
+   * Pairs are quality-filtered before storage.
+   */
+  collectSessionTrace(
+    sessionId: string,
+    prompt: string,
+    response: string,
+    score: number,
+    options?: { model?: string; toolCallsSucceeded?: boolean; userCorrected?: boolean }
+  ): boolean {
+    if (!this.userId) return false;
+
+    return this.collector.collect({
+      userId: this.userId,
+      sessionId,
+      prompt,
+      response,
+      score,
+      model: options?.model || "unknown",
+      toolCallsSucceeded: options?.toolCallsSucceeded ?? true,
+      userCorrected: options?.userCorrected ?? false,
+    });
+  }
+
+  /**
+   * Get training collection stats.
+   */
+  getCollectorStats(): CollectorStats {
+    return this.collector.getStats();
+  }
+
+  /**
+   * Get collected pair count for the current user.
+   */
+  getTrainingPairCount(): number {
+    return this.collector.getPairCount(this.userId || undefined);
   }
 
   /**
