@@ -10,6 +10,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`@8gent/knowledge` package** — CashClaw-inspired knowledge system with BM25+ search, temporal decay (30-day half-life), 100-entry cap, 90-day auto-pruning
+- **Feedback loop** — `FeedbackCollector` tracks task outcomes (accepted/rejected/modified/reverted), surfaces trend patterns from last 50 outcomes
+- **Study sessions** — `StudySession.runStudy()` analyzes feedback patterns, creates knowledge entries from declining trends, runs during agent idle time
+- **Activity logger** — daily markdown logs at `~/.8gent/logs/YYYY-MM-DD.md` with typed entries (task/error/tool_call/completion)
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
