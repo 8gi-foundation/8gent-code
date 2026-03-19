@@ -138,8 +138,8 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 
     try {
       this.process = spawn(["rec", ...args], {
-        stdout: "pipe",
-        stderr: "pipe",
+        stdout: "ignore",
+        stderr: "ignore",
       });
 
       this.isRecording = true;
