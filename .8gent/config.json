@@ -44,6 +44,34 @@
     "commitStyle": "conventional"
   },
 
+  "github": {
+    "enabled": true,
+    "features": {
+      "issues": true,
+      "pullRequests": true,
+      "actions": true,
+      "projects": true,
+      "gists": true,
+      "releases": true,
+      "branches": true,
+      "search": true,
+      "sync": true,
+      "notifications": true
+    },
+    "automation": {
+      "autoTriage": false,
+      "autoLabel": false,
+      "staleBranchCleanup": false,
+      "staleBranchDays": 30
+    },
+    "defaults": {
+      "prMergeMethod": "squash",
+      "prDeleteBranch": true,
+      "releaseGenerateNotes": true,
+      "gistPublic": false
+    }
+  },
+
   "models": {
     "default": "glm-4.7-flash:latest",
     "fallback": ["qwen2.5-coder:14b", "llama3:8b"],
