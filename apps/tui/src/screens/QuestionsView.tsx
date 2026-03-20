@@ -82,9 +82,11 @@ export function QuestionsView({ visible, data, onUpdateData, onClose }: Question
     if (questions.length === 0) setSelectedIndex(0);
   }, [questions.length, selectedIndex]);
 
-  useInput((input, key) => {
-    if (!visible) return;
+  useEffect(() => {
+    if (!visible) { setMode("list"); setInputBuffer(""); }
+  }, [visible]);
 
+  useInput((input, key) => {
     // --- ADD question mode ---
     if (mode === "add") {
       if (key.return) {
