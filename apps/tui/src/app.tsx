@@ -273,7 +273,8 @@ export function App({ initialCommand, args }: AppProps) {
       timestamp: new Date(),
     },
   ]);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessingRaw, setIsProcessingRaw] = useState(false);
+  const processingTabIdRef = useRef<string | null>(null);
   const [processingStage, setProcessingStage] = useState<ProcessingStage>("planning");
   const [status, setStatus] = useState<AppStatus>("idle");
 
@@ -358,6 +359,14 @@ export function App({ initialCommand, args }: AppProps) {
   const workspaceTabs = useWorkspaceTabs();
   const activeTabType = workspaceTabs.activeTab?.type || "chat";
   const activeTabId = workspaceTabs.activeTab?.id || "default";
+
+  // Only show processing state when the active tab is the one that triggered it
+  const isProcessing = isProcessingRaw && processingTabIdRef.current === activeTabId;
+  const setIsProcessing = useCallback((val: boolean) => {
+    setIsProcessingRaw(val);
+    if (val) processingTabIdRef.current = activeTabId;
+    else processingTabIdRef.current = null;
+  }, [activeTabId]);
 
   // Per-tab message sync: save current tab's messages, load new tab's messages on switch
   const prevTabIdRef = useRef(activeTabId);
@@ -613,17 +622,7 @@ export function App({ initialCommand, args }: AppProps) {
       if (orchestration.agents.length > 0) {
         orchestration.cycleAgent();
       } else {
-        // Cycle through tabs, skipping overlay types (kanban, music)
-        let attempts = 0;
-        do {
-          workspaceTabs.cycleTab(1);
-          attempts++;
-        } while (
-          workspaceTabs.activeTab &&
-          (workspaceTabs.activeTab.type === "kanban" || workspaceTabs.activeTab.type === "music") &&
-          attempts < workspaceTabs.tabs.length
-        );
-        // Always reset to chat viewMode — kanban/music are overlays, not tab destinations
+        workspaceTabs.cycleTab(1, ["kanban", "music"]);
         setViewMode("chat");
       }
     }
