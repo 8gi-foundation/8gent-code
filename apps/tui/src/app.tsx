@@ -68,6 +68,7 @@ import { narrateToolStart, narrateToolEnd, narratePlan, narrateStep } from "./li
 import { useViewport } from "./hooks/useViewport.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { ThinkingView } from "./components/ThinkingView.js";
+import { ActivityMonitor, pushActivity, completeActivity, clearActivity } from "./components/ActivityMonitor.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
@@ -637,6 +638,7 @@ export function App({ initialCommand, args }: AppProps) {
               setActiveTool(event.toolName);
               setProcessingStage("executing");
               setStatus("executing");
+              pushActivity(event.toolName, event.toolCallId, event.args);
 
               // Auto-advance kanban: move first Ready card to In Progress
               setKanbanBoard((prev) => {
@@ -665,6 +667,7 @@ export function App({ initialCommand, args }: AppProps) {
             },
             onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
+              completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
 
               // TV Mode: mark task done/error + update narrator
               const isFailure = !event.success || (event.resultPreview?.startsWith("Exit code ") && !event.resultPreview.startsWith("Exit code 0"));
@@ -1913,6 +1916,7 @@ export function App({ initialCommand, args }: AppProps) {
     setProcessingStage("planning");
     setStatus("thinking");
     setEvidenceSummary(null);
+    clearActivity();
   }, []);
 
   // Generate predictions based on input
@@ -2505,7 +2509,7 @@ export function App({ initialCommand, args }: AppProps) {
               soundEnabled={soundEnabled}
             />
             {isProcessing && (
-              <ThinkingView
+              <ActivityMonitor
                 activeTool={activeTool}
                 stepCount={stepCount}
                 toolCount={toolCount}
