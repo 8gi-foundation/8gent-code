@@ -71,13 +71,18 @@ export default function SessionList({
   return (
     <div className="flex flex-col h-full">
       {/* Search */}
-      <div className="p-3 border-b border-zinc-800">
+      <div className="p-3" style={{ borderBottom: "1px solid var(--border)" }}>
         <input
           type="text"
           placeholder="Search sessions..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/50"
+          className="w-full rounded px-3 py-1.5 text-sm focus:outline-none focus:border-emerald-500/50"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            color: "var(--foreground)",
+          }}
         />
         {/* Project filter */}
         <div className="mt-2 flex flex-wrap gap-1">
@@ -86,8 +91,9 @@ export default function SessionList({
             className={`text-[10px] px-1.5 py-0.5 rounded ${
               !projectFilter
                 ? "bg-emerald-500/20 text-emerald-400"
-                : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                : ""
             }`}
+            style={projectFilter ? { background: "var(--surface)", color: "var(--muted)" } : undefined}
           >
             All ({sessions.length})
           </button>
@@ -100,8 +106,9 @@ export default function SessionList({
               className={`text-[10px] px-1.5 py-0.5 rounded truncate max-w-[120px] ${
                 projectFilter === p
                   ? "bg-emerald-500/20 text-emerald-400"
-                  : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                  : ""
               }`}
+              style={projectFilter !== p ? { background: "var(--surface)", color: "var(--muted)" } : undefined}
             >
               {p}
             </button>
@@ -115,15 +122,32 @@ export default function SessionList({
           <button
             key={session.sessionId}
             onClick={() => onSelect(session)}
-            className={`w-full text-left px-3 py-2.5 border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors ${
+            className={`w-full text-left px-3 py-2.5 transition-colors ${
               activeId === session.sessionId
-                ? "bg-zinc-800 border-l-2 border-l-emerald-500"
+                ? "border-l-2 border-l-emerald-500"
                 : ""
             }`}
+            style={{
+              borderBottom: "1px solid var(--border)",
+              background:
+                activeId === session.sessionId
+                  ? "var(--surface)"
+                  : undefined,
+            }}
+            onMouseEnter={(e) => {
+              if (activeId !== session.sessionId) {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-hover)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeId !== session.sessionId) {
+                (e.currentTarget as HTMLButtonElement).style.background = "";
+              }
+            }}
           >
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono text-zinc-500">
+                <span className="text-[10px] font-mono" style={{ color: "var(--muted)" }}>
                   {session.sessionId.replace("session_", "").slice(0, 12)}
                 </span>
                 {session.completed ? (
@@ -134,17 +158,17 @@ export default function SessionList({
                   </span>
                 )}
               </div>
-              <span className="text-[10px] text-zinc-600">
+              <span className="text-[10px]" style={{ color: "var(--muted)" }}>
                 {timeAgo(session.modifiedAt)}
               </span>
             </div>
-            <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">
+            <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: "var(--foreground)" }}>
               {session.firstUserMessage || (
-                <span className="italic text-zinc-600">No user message</span>
+                <span className="italic" style={{ color: "var(--muted)" }}>No user message</span>
               )}
             </p>
             <div className="flex items-center gap-2 mt-1.5">
-              <span className="text-[10px] text-zinc-600 truncate">
+              <span className="text-[10px] truncate" style={{ color: "var(--muted)" }}>
                 {projectName(session.workingDirectory)}
               </span>
               {session.runtime && (
@@ -157,7 +181,7 @@ export default function SessionList({
                   {session.model}
                 </span>
               )}
-              <span className="text-[10px] text-zinc-700 ml-auto">
+              <span className="text-[10px] ml-auto" style={{ color: "var(--muted)" }}>
                 {session.durationMs
                   ? formatDuration(session.durationMs)
                   : formatSize(session.sizeBytes)}{" "}
@@ -167,7 +191,7 @@ export default function SessionList({
           </button>
         ))}
         {filtered.length === 0 && (
-          <div className="p-6 text-center text-zinc-600 text-sm">
+          <div className="p-6 text-center text-sm" style={{ color: "var(--muted)" }}>
             No sessions found
           </div>
         )}

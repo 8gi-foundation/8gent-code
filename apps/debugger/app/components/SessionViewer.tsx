@@ -107,8 +107,8 @@ function EntryBadge({ type }: { type: string }) {
     tool_call: "bg-cyan-500/20 text-cyan-400",
     tool_result: "bg-teal-500/20 text-teal-400",
     tool_error: "bg-red-500/20 text-red-400",
-    turn_start: "bg-zinc-700/50 text-zinc-400",
-    turn_end: "bg-zinc-700/50 text-zinc-400",
+    turn_start: "bg-indigo-500/10 text-indigo-400/70",
+    turn_end: "bg-indigo-500/10 text-indigo-400/70",
     step_start: "bg-indigo-500/20 text-indigo-400",
     step_end: "bg-indigo-500/20 text-indigo-400",
     hook: "bg-amber-500/20 text-amber-400",
@@ -116,7 +116,7 @@ function EntryBadge({ type }: { type: string }) {
     session_end: "bg-purple-500/20 text-purple-400",
   };
 
-  const color = colors[type] || "bg-zinc-700 text-zinc-400";
+  const color = colors[type] || "bg-cyan-500/10 text-cyan-400/60";
 
   return (
     <span
@@ -142,7 +142,7 @@ function UsageBadge({ usage }: { usage: SessionEntry["usage"] }) {
   }
 
   return (
-    <span className="text-[9px] text-zinc-600 ml-1">
+    <span className="text-[9px] ml-1" style={{ color: "var(--muted)" }}>
       [{parts.join(" | ")}]
     </span>
   );
@@ -155,7 +155,7 @@ function ContentParts({ parts }: { parts: NonNullable<SessionEntry["parts"]> }) 
         switch (part.type) {
           case "text":
             return (
-              <div key={i} className="text-xs text-zinc-400">
+              <div key={i} className="text-xs" style={{ color: "var(--foreground)" }}>
                 {part.text}
               </div>
             );
@@ -266,28 +266,40 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 
   return (
     <div
-      className={`border-b border-zinc-800/50 px-4 py-2 hover:bg-zinc-900/50 transition-colors ${
-        expanded ? "bg-zinc-900/30" : ""
-      }`}
+      className="px-4 py-2 transition-colors"
+      style={{
+        borderBottom: "1px solid var(--border)",
+        background: expanded ? "var(--surface)" : undefined,
+      }}
+      onMouseEnter={(e) => {
+        if (!expanded) {
+          (e.currentTarget as HTMLDivElement).style.background = "var(--surface-hover)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!expanded) {
+          (e.currentTarget as HTMLDivElement).style.background = "";
+        }
+      }}
     >
       <div
         className="flex items-start gap-2 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
-        <span className="text-[10px] text-zinc-600 mt-0.5 shrink-0 w-5">
+        <span className="text-[10px] mt-0.5 shrink-0 w-5" style={{ color: "var(--muted)" }}>
           {expanded ? "▼" : "▶"}
         </span>
-        <span className="text-[9px] text-zinc-700 mt-0.5 shrink-0 w-6 text-right">
+        <span className="text-[9px] mt-0.5 shrink-0 w-6 text-right" style={{ color: "var(--border)" }}>
           {entry.sequenceNumber ?? ""}
         </span>
         <EntryBadge type={entry.type} />
         {timestamp && (
-          <span className="text-[10px] text-zinc-600 shrink-0 mt-0.5">
+          <span className="text-[10px] shrink-0 mt-0.5" style={{ color: "var(--muted)" }}>
             {timestamp}
           </span>
         )}
         {summary && (
-          <span className="text-xs text-zinc-400 truncate">{summary}</span>
+          <span className="text-xs truncate" style={{ color: "var(--foreground)" }}>{summary}</span>
         )}
         {(entry.type === "step_end" || entry.type === "assistant_content") && (
           <UsageBadge usage={entry.usage} />
@@ -300,7 +312,14 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
       )}
 
       {expanded && (
-        <pre className="mt-2 ml-7 text-[11px] text-zinc-500 overflow-x-auto max-h-[600px] overflow-y-auto bg-black/30 rounded p-3 border border-zinc-800">
+        <pre
+          className="mt-2 ml-7 text-[11px] overflow-x-auto max-h-[600px] overflow-y-auto rounded p-3"
+          style={{
+            color: "var(--muted)",
+            background: "var(--background)",
+            border: "1px solid var(--border)",
+          }}
+        >
           {JSON.stringify(entry, null, 2)}
         </pre>
       )}
@@ -396,14 +415,20 @@ export default function SessionViewer({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-950/50">
+      <div
+        className="px-4 py-3"
+        style={{
+          borderBottom: "1px solid var(--border)",
+          background: "var(--surface)",
+        }}
+      >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-mono text-zinc-300">
+            <h2 className="text-sm font-mono" style={{ color: "var(--foreground)" }}>
               {session.sessionId.replace("session_", "").slice(0, 16)}
             </h2>
             {session.workingDirectory && (
-              <span className="text-xs text-zinc-600">
+              <span className="text-xs" style={{ color: "var(--muted)" }}>
                 {session.workingDirectory.split("/").slice(-2).join("/")}
               </span>
             )}
@@ -426,7 +451,14 @@ export default function SessionViewer({
                 setCopiedUrl(true);
                 setTimeout(() => setCopiedUrl(false), 2000);
               }}
-              className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+              className="text-[10px] px-2 py-0.5 rounded transition-colors"
+              style={{ background: "var(--surface-hover)", color: "var(--muted)", border: "1px solid var(--border)" }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--foreground)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--muted)";
+              }}
             >
               {copiedUrl ? "✓ Copied URL" : "Copy URL"}
             </button>
@@ -437,7 +469,14 @@ export default function SessionViewer({
                 setCopiedJson(true);
                 setTimeout(() => setCopiedJson(false), 2000);
               }}
-              className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+              className="text-[10px] px-2 py-0.5 rounded transition-colors"
+              style={{ background: "var(--surface-hover)", color: "var(--muted)", border: "1px solid var(--border)" }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--foreground)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--muted)";
+              }}
             >
               {copiedJson ? "✓ Copied JSON" : "Copy as JSON"}
             </button>
@@ -451,13 +490,14 @@ export default function SessionViewer({
                 className={`text-[10px] ${
                   !session.completed
                     ? "text-emerald-400"
-                    : "text-zinc-600"
+                    : ""
                 }`}
+                style={session.completed ? { color: "var(--muted)" } : undefined}
               >
                 {!session.completed ? "● LIVE" : `○ ${session.exitReason}`}
               </span>
             )}
-            <span className="text-[10px] text-zinc-600">
+            <span className="text-[10px]" style={{ color: "var(--muted)" }}>
               {entries.length} entries
             </span>
           </div>
@@ -470,8 +510,9 @@ export default function SessionViewer({
             className={`text-[10px] px-1.5 py-0.5 rounded ${
               !typeFilter
                 ? "bg-emerald-500/20 text-emerald-400"
-                : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                : ""
             }`}
+            style={typeFilter ? { background: "var(--surface-hover)", color: "var(--muted)" } : undefined}
           >
             All
           </button>
@@ -486,8 +527,9 @@ export default function SessionViewer({
                 className={`text-[10px] px-1.5 py-0.5 rounded ${
                   typeFilter === type
                     ? "bg-emerald-500/20 text-emerald-400"
-                    : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                    : ""
                 }`}
+                style={typeFilter !== type ? { background: "var(--surface-hover)", color: "var(--muted)" } : undefined}
               >
                 {type.replace("_", " ")} ({count})
               </button>

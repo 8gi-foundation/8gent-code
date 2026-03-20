@@ -57,10 +57,13 @@ function StatCard({ label, value, sub, color = "emerald" }: {
   const c = colorMap[color] || colorMap.emerald;
 
   return (
-    <div className={`bg-zinc-900/50 border ${c.split(" ")[1]} rounded-lg p-3 animate-fadeIn`}>
-      <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{label}</div>
+    <div
+      className={`border ${c.split(" ")[1]} rounded-lg p-3 animate-fadeIn`}
+      style={{ background: "var(--surface)" }}
+    >
+      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--muted)" }}>{label}</div>
       <div className={`text-2xl font-bold ${c.split(" ")[0]}`}>{value}</div>
-      {sub && <div className="text-[10px] text-zinc-600 mt-0.5">{sub}</div>}
+      {sub && <div className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>{sub}</div>}
     </div>
   );
 }
@@ -82,23 +85,30 @@ function KanbanColumn({ title, count, items, color }: {
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-1.5 mb-2">
         <div className={`w-2 h-2 rounded-full ${dotColors[color] || dotColors.zinc}`} />
-        <span className="text-[10px] text-zinc-400 uppercase tracking-wider">{title}</span>
-        <span className="text-[10px] text-zinc-600 ml-auto">{count}</span>
+        <span className="text-[10px] uppercase tracking-wider" style={{ color: "var(--foreground)" }}>{title}</span>
+        <span className="text-[10px] ml-auto" style={{ color: "var(--muted)" }}>{count}</span>
       </div>
       <div className="space-y-1">
         {items && items.length > 0 ? (
           items.slice(0, 3).map((item, i) => (
-            <div key={i} className="bg-zinc-800/50 rounded px-2 py-1.5 text-[10px] text-zinc-400">
+            <div
+              key={i}
+              className="rounded px-2 py-1.5 text-[10px]"
+              style={{ background: "var(--surface-hover)", color: "var(--foreground)" }}
+            >
               <div className="truncate">{item.description}</div>
               {item.confidence !== undefined && (
-                <div className="text-zinc-600 mt-0.5">
+                <div className="mt-0.5" style={{ color: "var(--muted)" }}>
                   {item.category} · {Math.round(item.confidence * 100)}%
                 </div>
               )}
             </div>
           ))
         ) : (
-          <div className="bg-zinc-800/30 rounded px-2 py-3 text-center text-[10px] text-zinc-700">
+          <div
+            className="rounded px-2 py-3 text-center text-[10px]"
+            style={{ background: "var(--surface)", color: "var(--muted)" }}
+          >
             {count === 0 ? "empty" : `${count} items`}
           </div>
         )}
@@ -117,7 +127,7 @@ function ProgressBar({ value, max, color = "emerald" }: { value: number; max: nu
   };
 
   return (
-    <div className="w-full bg-zinc-800 rounded-full h-1.5">
+    <div className="w-full rounded-full h-1.5" style={{ background: "var(--surface-hover)" }}>
       <div
         className={`h-full rounded-full transition-all duration-500 ${barColors[color] || barColors.emerald}`}
         style={{ width: `${pct}%` }}
@@ -167,7 +177,7 @@ export default function SystemHealth() {
 
   if (!data) {
     return (
-      <div className="flex items-center justify-center h-full text-zinc-600 text-sm animate-pulse">
+      <div className="flex items-center justify-center h-full text-sm animate-pulse" style={{ color: "var(--muted)" }}>
         Loading system health...
       </div>
     );
@@ -182,12 +192,12 @@ export default function SystemHealth() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="text-sm font-bold text-zinc-300">System Health</h2>
+          <h2 className="text-sm font-bold" style={{ color: "var(--foreground)" }}>System Health</h2>
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 animate-pulse">
             LIVE
           </span>
         </div>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[10px]" style={{ color: "var(--muted)" }}>
           uptime: {formatUptime(data.uptime)} · refreshed {Math.round((Date.now() - lastRefresh) / 1000)}s ago
         </span>
       </div>
@@ -204,7 +214,7 @@ export default function SystemHealth() {
 
       {/* Kanban Board */}
       <div>
-        <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Proactive Planner — Kanban Board</h3>
+        <h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>Proactive Planner — Kanban Board</h3>
         <div className="flex gap-3">
           <KanbanColumn title="Backlog" count={data.board.backlog} color="zinc" />
           <KanbanColumn title="Ready" count={data.board.ready} items={data.board.readyItems} color="amber" />
@@ -216,15 +226,18 @@ export default function SystemHealth() {
       {/* Evidence + AST side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Evidence Summary */}
-        <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/50">
-          <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Evidence Collection</h3>
+        <div
+          className="rounded-lg p-4"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
+          <h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>Evidence Collection</h3>
           <div className="flex items-center gap-4 mb-3">
             <div>
               <span className="text-3xl font-bold text-emerald-400">{data.evidence.verified}</span>
-              <span className="text-zinc-600 text-lg">/{data.evidence.total}</span>
+              <span className="text-lg" style={{ color: "var(--muted)" }}>/{data.evidence.total}</span>
             </div>
             <div className="flex-1">
-              <div className="text-[10px] text-zinc-500 mb-1">Verification rate: {evidenceRate}%</div>
+              <div className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Verification rate: {evidenceRate}%</div>
               <ProgressBar value={data.evidence.verified} max={data.evidence.total || 1} color="emerald" />
             </div>
           </div>
@@ -236,41 +249,48 @@ export default function SystemHealth() {
           {Object.keys(data.evidence.byType).length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1">
               {Object.entries(data.evidence.byType).map(([type, count]) => (
-                <span key={type} className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                <span
+                  key={type}
+                  className="text-[9px] px-1.5 py-0.5 rounded"
+                  style={{ background: "var(--surface-hover)", color: "var(--muted)" }}
+                >
                   {type}: {count}
                 </span>
               ))}
             </div>
           )}
           {data.evidence.total === 0 && (
-            <div className="text-[10px] text-zinc-700 mt-2">
+            <div className="text-[10px] mt-2" style={{ color: "var(--muted)" }}>
               No evidence collected yet. Run tasks to see verification data.
             </div>
           )}
         </div>
 
         {/* AST Index */}
-        <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/50">
-          <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">AST Index</h3>
+        <div
+          className="rounded-lg p-4"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
+          <h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>AST Index</h3>
           <div className="flex gap-4 mb-3">
             {Object.entries(data.ast.languages).map(([lang, count]) => (
               <div key={lang} className="flex items-center gap-1.5">
                 <div className={`w-2 h-2 rounded-full ${lang === "typescript" ? "bg-blue-400" : "bg-yellow-400"}`} />
-                <span className="text-[10px] text-zinc-400">{lang}</span>
-                <span className="text-[10px] text-zinc-600">{count}</span>
+                <span className="text-[10px]" style={{ color: "var(--foreground)" }}>{lang}</span>
+                <span className="text-[10px]" style={{ color: "var(--muted)" }}>{count}</span>
               </div>
             ))}
           </div>
           {data.ast.topSymbols.length > 0 && (
             <div className="space-y-1 mt-2">
-              <div className="text-[10px] text-zinc-600 mb-1">Notable symbols:</div>
+              <div className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Notable symbols:</div>
               {data.ast.topSymbols.slice(0, 6).map((sym, i) => (
                 <div key={i} className="flex items-center gap-2 text-[10px]">
                   <span className={`px-1 rounded ${sym.kind === "class" ? "bg-purple-500/20 text-purple-400" : "bg-cyan-500/20 text-cyan-400"}`}>
                     {sym.kind}
                   </span>
-                  <span className="text-zinc-300">{sym.name}</span>
-                  <span className="text-zinc-700 truncate ml-auto">{sym.file}</span>
+                  <span style={{ color: "var(--foreground)" }}>{sym.name}</span>
+                  <span className="truncate ml-auto" style={{ color: "var(--muted)" }}>{sym.file}</span>
                 </div>
               ))}
             </div>
@@ -280,15 +300,22 @@ export default function SystemHealth() {
 
       {/* Model distribution */}
       {Object.keys(data.sessions.models).length > 0 && (
-        <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/50">
-          <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Model Usage</h3>
+        <div
+          className="rounded-lg p-4"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
+          <h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>Model Usage</h3>
           <div className="flex flex-wrap gap-2">
             {Object.entries(data.sessions.models)
               .sort((a, b) => b[1] - a[1])
               .map(([model, count]) => (
-                <div key={model} className="flex items-center gap-2 bg-zinc-800/50 rounded px-2 py-1">
+                <div
+                  key={model}
+                  className="flex items-center gap-2 rounded px-2 py-1"
+                  style={{ background: "var(--surface-hover)" }}
+                >
                   <span className="text-[10px] text-amber-400">{model}</span>
-                  <span className="text-[10px] text-zinc-600">{count} session{count !== 1 ? "s" : ""}</span>
+                  <span className="text-[10px]" style={{ color: "var(--muted)" }}>{count} session{count !== 1 ? "s" : ""}</span>
                 </div>
               ))}
           </div>
@@ -296,8 +323,11 @@ export default function SystemHealth() {
       )}
 
       {/* Infrastructure status */}
-      <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/50">
-        <h3 className="text-xs text-zinc-500 uppercase tracking-wider mb-3">Infrastructure Pillars</h3>
+      <div
+        className="rounded-lg p-4"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+      >
+        <h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>Infrastructure Pillars</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { name: "AST-First Retrieval", status: data.ast.filesIndexed > 0, detail: `${data.ast.filesIndexed} files` },
@@ -308,8 +338,8 @@ export default function SystemHealth() {
             <div key={pillar.name} className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${pillar.status ? "bg-emerald-400" : "bg-red-400"}`} />
               <div>
-                <div className="text-[10px] text-zinc-300">{pillar.name}</div>
-                <div className="text-[9px] text-zinc-600">{pillar.detail}</div>
+                <div className="text-[10px]" style={{ color: "var(--foreground)" }}>{pillar.name}</div>
+                <div className="text-[9px]" style={{ color: "var(--muted)" }}>{pillar.detail}</div>
               </div>
             </div>
           ))}
