@@ -10,6 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Self-healing executor** — `packages/validation/healing.ts` implements the Hypothesis Loop pattern: checkpoint-action-verify-revert. `SelfHealer.healingLoop()` retries failing actions up to `maxRetries` (from `.8gent/config.json`), reverts via git stash on failure, and logs all failure entries to `~/.8gent/healing/failures.jsonl`. Companion modules: `checkpoint.ts` (git stash checkpoints) and `failure-log.ts` (append-only JSONL failure tracking with prior-failure lookup).
 - **Voice chat mode** — `/voice chat` starts a half-duplex voice conversation loop (listen -> transcribe -> agent -> speak -> listen). Uses VAD for auto-stop on silence. ESC interrupts agent mid-speech. Status bar shows VOICE CHAT / SPEAKING / THINKING states. `packages/voice/voice-chat.ts` orchestrator with `VoiceChatLoop` class, `useVoiceChat` TUI hook.
 - **GitHub integration** — `packages/auth/github.ts` for GitHub provider token management (Keychain/encrypted storage), `packages/auth/github-tools.ts` with REST API helpers (repos, issues, PRs, branch detection), `/github` slash command in TUI, `/auth status` now shows GitHub connection info, auto-configures `gh` CLI after login
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
