@@ -78,6 +78,7 @@ import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
 import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
 import { SpawnRequestCard } from "./components/agent-panel/SpawnRequestCard.js";
+import { initSessionLogger, logMessage, logToolStart, logToolEnd, logStep, logError, logTabSwitch, flushSession } from "./lib/session-logger.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -308,6 +309,13 @@ export function App({ initialCommand, args }: AppProps) {
     }).catch(() => setAuthStatus("anonymous"));
   }, []);
 
+  // Initialize session logger on mount
+  useEffect(() => {
+    const sessionId = `session-${Date.now()}`;
+    initSessionLogger(sessionId, currentModel, currentProvider);
+    return () => { flushSession(); };
+  }, []);
+
   // Animation settings
   const [showAnimations, setShowAnimations] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
@@ -355,6 +363,9 @@ export function App({ initialCommand, args }: AppProps) {
   const prevTabIdRef = useRef(activeTabId);
   useEffect(() => {
     if (prevTabIdRef.current !== activeTabId) {
+      // Log tab switch for session debugger
+      logTabSwitch(prevTabIdRef.current, activeTabId, workspaceTabs.activeTab?.title || "Chat");
+
       // Save outgoing tab's messages
       setMessagesRaw((currentMsgs) => {
         tabMessagesRef.current.set(prevTabIdRef.current, currentMsgs);
@@ -526,6 +537,7 @@ export function App({ initialCommand, args }: AppProps) {
     if (key.ctrl && input === "c") {
       if (soundEnabled) playSound("notification");
       // Finalize session before exiting
+      flushSession();
       if (agent) agent.cleanup().catch(() => {});
       exit();
     }
@@ -671,6 +683,9 @@ export function App({ initialCommand, args }: AppProps) {
               setProcessingStage("executing");
               setStatus("executing");
               pushActivity(event.toolName, event.toolCallId, event.args);
+              // Session logger
+              const _tab = workspaceTabs.activeTab;
+              logToolStart(_tab?.id || "default", _tab?.title || "Chat", event.toolName, event.toolCallId, event.args);
 
               // Auto-kanban: track real tool execution
               const activeTab = workspaceTabs.activeTab;
@@ -710,6 +725,8 @@ export function App({ initialCommand, args }: AppProps) {
             onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
               completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
+              // Session logger
+              logToolEnd(event.toolCallId, event.success !== false, event.durationMs || 0, event.resultPreview);
 
               // Auto-kanban: mark tool complete
               autoKanban.onTaskComplete(event.toolCallId, event.success !== false, event.durationMs || 0);
@@ -771,6 +788,8 @@ export function App({ initialCommand, args }: AppProps) {
             onStepFinish: (event: AgentStepEvent) => {
               setStepCount((prev) => prev + 1);
               setTotalTokens((prev) => prev + event.usage.totalTokens);
+              // Session logger
+              { const _tab = workspaceTabs.activeTab; logStep(_tab?.id || "default", _tab?.title || "Chat", event.stepNumber, event.usage.totalTokens, event.text); }
 
               // TV Mode: narrate the step
               if (event.text && event.text.trim()) {
@@ -1119,6 +1138,7 @@ export function App({ initialCommand, args }: AppProps) {
           break;
 
         case "quit":
+          flushSession();
           if (agent) agent.cleanup().catch(() => {});
           exit();
           break;
@@ -2317,6 +2337,8 @@ export function App({ initialCommand, args }: AppProps) {
       content: input,
       timestamp: new Date(),
     }]);
+    // Session logger: user message
+    logMessage(activeTabId, workspaceTabs.activeTab?.title || "Chat", "user", input);
 
     // Auto-kanban: create a card for this user message
     const activeTab = workspaceTabs.activeTab;
@@ -2386,6 +2408,7 @@ export function App({ initialCommand, args }: AppProps) {
           if (soundEnabled) playSound("success");
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
+          logError(activeTabId, workspaceTabs.activeTab?.title || "Chat", errorMsg);
           setMessages((prev) => [...prev, {
             id: `assistant-error-${Date.now()}`,
             role: "assistant" as const,
