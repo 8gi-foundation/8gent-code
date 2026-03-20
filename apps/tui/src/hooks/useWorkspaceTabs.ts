@@ -139,8 +139,8 @@ function sortTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
     // Pinned first
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
-    // Within same pin group, most recently accessed first
-    return new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime();
+    // Within same pin group, stable creation order
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 }
 
