@@ -48,8 +48,8 @@ log_header() {
 
 send_telegram() {
   local text="$1"
-  local token="${TELEGRAM_BOT_TOKEN:-8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U}"
-  local chat_id="${TELEGRAM_CHAT_ID:-5486040131}"
+  local token="${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN not set}"
+  local chat_id="${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID not set}"
   curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
     -H "Content-Type: application/json" \
     -d "{\"chat_id\": \"${chat_id}\", \"text\": $(echo "$text" | jq -Rs .), \"parse_mode\": \"Markdown\"}" > /dev/null 2>&1
@@ -136,8 +136,8 @@ else
 fi
 
 # Export Telegram credentials
-export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U}"
-export TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-5486040131}"
+export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN not set}"
+export TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID not set}"
 
 # ── Prerequisites Check ────────────────────────────────────────────────
 

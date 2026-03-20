@@ -8,8 +8,8 @@ source .env 2>/dev/null || true
 export OPENROUTER_API_KEY
 
 LOG="$HOME/.8gent/eight-benchmarks-$(date +%Y%m%d-%H%M).log"
-TOKEN="8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U"
-CHAT_ID="5486040131"
+TOKEN="${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN not set}"
+CHAT_ID="${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID not set}"
 
 log() { echo "[$(date '+%H:%M:%S')] $1" | tee -a "$LOG"; }
 

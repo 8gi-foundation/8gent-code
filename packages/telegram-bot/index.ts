@@ -39,8 +39,8 @@ import { LiveDashboard } from "./live-dashboard";
 
 // ── Default credentials (env overrides) ─────────────────
 
-const DEFAULT_TOKEN = "8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U";
-const DEFAULT_CHAT_ID = "5486040131";
+const DEFAULT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 
 // ── Telegram API helpers ────────────────────────────────
 

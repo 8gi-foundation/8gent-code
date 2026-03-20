@@ -3,8 +3,9 @@ import { readFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
 
-const TOKEN = "8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U";
-const CHAT_ID = "5486040131";
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+if (!TOKEN || !CHAT_ID) { console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env"); process.exit(1); }
 const AUDIO_DIR = join(import.meta.dir, "../docs/content/audio");
 
 async function send(text: string) {
