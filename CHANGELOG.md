@@ -10,6 +10,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Remote terminal monitoring** — WebSocket + xterm.js viewer for watching agent work live from phone/browser; `/watch` Telegram command with tunnel support
+- **Frequency memory promotion** — Nuggets pattern: facts recalled 3+ times across 2+ sessions auto-promote to permanent context (PERMANENT.md)
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
