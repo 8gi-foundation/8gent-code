@@ -18,7 +18,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `
+          (function() {
+            var theme = localStorage.getItem('8gent-debugger-theme');
+            if (theme === 'dark') document.documentElement.classList.add('dark');
+            else if (theme === 'light') document.documentElement.classList.remove('dark');
+            else if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
+          })();
+        `}} />
+      </head>
       <body className={`${geistMono.variable} font-mono antialiased`}>
         {children}
       </body>
