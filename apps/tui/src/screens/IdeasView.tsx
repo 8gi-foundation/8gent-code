@@ -100,9 +100,11 @@ export function IdeasView({ visible, data, onUpdateData, onClose }: IdeasViewPro
     if (filtered.length === 0) setSelectedIndex(0);
   }, [filtered.length, selectedIndex]);
 
-  useInput((input, key) => {
-    if (!visible) return;
+  useEffect(() => {
+    if (!visible) { setMode("list"); setInputBuffer(""); }
+  }, [visible]);
 
+  useInput((input, key) => {
     // --- ADD mode ---
     if (mode === "add") {
       if (key.return) {

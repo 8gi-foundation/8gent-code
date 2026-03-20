@@ -1525,6 +1525,18 @@ export function App({ initialCommand, args }: AppProps) {
           break;
         }
 
+        case "rename": {
+          // Rename current tab: /rename New Name
+          const newName = args.join(" ").trim();
+          if (!newName) {
+            addSystemMessage("Usage: /rename My New Tab Name");
+          } else if (workspaceTabs.activeTab) {
+            workspaceTabs.renameTab(workspaceTabs.activeTab.id, newName);
+            addSystemMessage(`Tab renamed to "${newName}"`);
+          }
+          break;
+        }
+
         case "music": {
           // Interactive music generation via ACE-Step
           const musicAudio = getADHDAudio();
@@ -2212,6 +2224,15 @@ export function App({ initialCommand, args }: AppProps) {
               data={workspaceTabs.activeTab?.data || {}}
               onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
               onClose={closeTabView}
+              chatTabNames={workspaceTabs.getTabsByType("chat").map(t => t.title)}
+              onSendToChat={(content) => {
+                // Switch to first chat tab and add as user message
+                const chatTabs = workspaceTabs.getTabsByType("chat");
+                if (chatTabs.length > 0) {
+                  workspaceTabs.switchTab(chatTabs[0].id);
+                  addSystemMessage(`[From Notes] ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`);
+                }
+              }}
             />
           );
         case "ideas":
