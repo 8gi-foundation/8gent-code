@@ -1470,58 +1470,21 @@ export function App({ initialCommand, args }: AppProps) {
           const musicSub = args[0]?.toLowerCase();
 
           if (!musicSub) {
-            // Show interactive menu
-            addSystemMessage(
-              "🎵 Music Generator (powered by ACE-Step)\n\n" +
-              "Quick play:\n" +
-              "  /music lofi          Lofi hip hop beats\n" +
-              "  /music rain          Rain & thunder ambience\n" +
-              "  /music white         White noise\n" +
-              "  /music ambient       Ambient synths\n" +
-              "  /music piano         Soft classical piano\n\n" +
-              "Custom generation:\n" +
-              "  /music gen <prompt>  Generate from your own description\n" +
-              "  /music gen chill jazz saxophone, late night, smoky bar\n\n" +
-              "Controls:\n" +
-              "  /music stop          Stop playback\n" +
-              "  /music config        Audio settings (duration, quality)\n" +
-              "  /music set duration 300   Set to 5 minutes\n" +
-              "  /music set bpm 90        Set tempo\n" +
-              "  /music regen         Clear cache, regenerate all\n\n" +
-              `Duration: ${musicAudio.config.duration}s · Playing: ${musicAudio.isPlaying ? musicAudio.current ?? "custom" : "nothing"}`
-            );
+            // Open the music player view instead of dumping help into chat
+            setViewMode("music");
           }
           // Quick play aliases
-          else if (musicSub === "lofi") {
+          else if (["lofi", "rain", "rainsound", "white", "whitenoise", "ambient", "piano", "classical"].includes(musicSub)) {
+            const keyMap: Record<string, string> = { rain: "rainsound", white: "whitenoise", piano: "classical" };
+            const key = keyMap[musicSub] || musicSub;
             musicAudio.onProgress = (msg) => addSystemMessage(msg);
-            addSystemMessage(`Generating lofi (${musicAudio.config.duration}s)...`);
-            musicAudio.play("lofi").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
-          }
-          else if (musicSub === "rain" || musicSub === "rainsound") {
-            musicAudio.onProgress = (msg) => addSystemMessage(msg);
-            addSystemMessage(`Generating rain sounds (${musicAudio.config.duration}s)...`);
-            musicAudio.play("rainsound").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
-          }
-          else if (musicSub === "white" || musicSub === "whitenoise") {
-            musicAudio.onProgress = (msg) => addSystemMessage(msg);
-            addSystemMessage(`Generating white noise (${musicAudio.config.duration}s)...`);
-            musicAudio.play("whitenoise").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
-          }
-          else if (musicSub === "ambient") {
-            musicAudio.onProgress = (msg) => addSystemMessage(msg);
-            addSystemMessage(`Generating ambient (${musicAudio.config.duration}s)...`);
-            musicAudio.play("ambient").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
-          }
-          else if (musicSub === "piano" || musicSub === "classical") {
-            musicAudio.onProgress = (msg) => addSystemMessage(msg);
-            addSystemMessage(`Generating piano (${musicAudio.config.duration}s)...`);
-            musicAudio.play("classical").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
+            musicAudio.play(key as any).then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
           }
           // Custom prompt generation
           else if (musicSub === "gen" && args.length >= 2) {
             const customPrompt = args.slice(1).join(" ");
             const cfg = musicAudio.config;
-            addSystemMessage(`Generating custom track (${cfg.duration}s):\n  "${customPrompt}"\n\nThis may take a moment...`);
+            addSystemMessage(`🎵 Generating "${customPrompt}" (${cfg.duration}s)...`);
 
             // Use ACE-Step API directly for custom prompts
             fetch(`${cfg.apiUrl}/release_task`, {
