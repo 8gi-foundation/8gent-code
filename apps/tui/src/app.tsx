@@ -301,18 +301,34 @@ export function App({ initialCommand, args }: AppProps) {
     },
   });
 
-  // Voice chat mode — full duplex voice conversation loop
+  // Voice chat — adds messages to screen AND calls agent directly
   const voiceChat = useVoiceChat({
     onAgentMessage: async (transcript) => {
       if (!agent || !agentReady) return "Agent not ready.";
-      // Strip model artifacts from transcript
       const clean = transcript.replace(/\[_EOT_\]/g, "").replace(/<\|.*?\|>/g, "").trim();
       if (!clean) return "";
+
+      // Show the user's voice message on screen
+      setMessages((prev) => [...prev, {
+        id: `voice-user-${Date.now()}`,
+        role: "user" as const,
+        content: `🎤 ${clean}`,
+        timestamp: new Date(),
+      }]);
+
       try {
-        // agent.chat() already adds both user and assistant messages to the chat
-        // so we don't add them here to avoid duplicates
         const response = await agent.chat(clean);
-        return response.replace(/\[_EOT_\]/g, "").replace(/<\|.*?\|>/g, "").trim();
+        const cleanResponse = (response || "").replace(/\[_EOT_\]/g, "").replace(/<\|.*?\|>/g, "").trim();
+        // Show the agent's response on screen
+        if (cleanResponse) {
+          setMessages((prev) => [...prev, {
+            id: `voice-agent-${Date.now()}`,
+            role: "assistant" as const,
+            content: cleanResponse,
+            timestamp: new Date(),
+          }]);
+        }
+        return cleanResponse || "Done.";
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return `Error: ${msg}`;
