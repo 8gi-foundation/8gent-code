@@ -27,6 +27,8 @@ export interface AuthUser {
   createdAt: number;
   /** Last activity timestamp (Unix ms). */
   lastActiveAt: number;
+  /** GitHub OAuth token — only stored locally, never in JWT. */
+  githubToken?: string;
 }
 
 export type UserPlan = "free" | "pro" | "team";
