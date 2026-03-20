@@ -2310,6 +2310,11 @@ export function App({ initialCommand, args }: AppProps) {
                 audio.onProgress = null;
               });
             }}
+            onPlayFile={(filePath) => {
+              const audio = getADHDAudio();
+              const result = audio.playFile(filePath);
+              addSystemMessage(result.message);
+            }}
             onStop={() => {
               getADHDAudio().stop();
               addSystemMessage("Music stopped.");
