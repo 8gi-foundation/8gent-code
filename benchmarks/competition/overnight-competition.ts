@@ -104,8 +104,9 @@ function log(msg: string): void {
 // ── Telegram ───────────────────────────────────────────────────────
 
 async function sendTelegram(text: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN || "8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U";
-  const chatId = process.env.TELEGRAM_CHAT_ID || "5486040131";
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) { console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env"); return; }
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
