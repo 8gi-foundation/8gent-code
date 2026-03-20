@@ -47,7 +47,7 @@ import {
   ADHD_MODE_DISABLED_MSG,
 } from "./components/bionic-text.js";
 import { getADHDAudio, type ADHDSoundscape } from "./lib/adhd-audio.js";
-import { getTaskRouter, getRouterStats, type TaskCategory } from "@8gent/ai/task-router";
+import { getTaskRouter, getRouterStats, type TaskCategory } from "../../../packages/ai/task-router.js";
 import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
 import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
