@@ -96,6 +96,7 @@ export class VoiceChatLoop {
 
   /**
    * Start the voice chat loop. Runs until stop() is called.
+   * Uses non-blocking scheduling to avoid starving the React event loop.
    */
   async start(): Promise<void> {
     if (this.running) return;
@@ -108,20 +109,34 @@ export class VoiceChatLoop {
       vadSilenceMs: this.silenceMs,
     });
 
-    while (this.running) {
+    // Non-blocking loop — yield to event loop between turns
+    const scheduleNextTurn = async () => {
+      if (!this.running) {
+        this.setState("idle");
+        this.emit("stopped");
+        return;
+      }
+
       try {
         await this.runOneTurn();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.onError?.(msg);
         this.emit("error", msg);
-        // Brief pause before retrying
         if (this.running) await sleep(1000);
       }
-    }
 
-    this.setState("idle");
-    this.emit("stopped");
+      // Yield to event loop before scheduling next turn
+      if (this.running) {
+        setTimeout(scheduleNextTurn, 50);
+      } else {
+        this.setState("idle");
+        this.emit("stopped");
+      }
+    };
+
+    // Start first turn after yielding to let React finish rendering
+    setTimeout(scheduleNextTurn, 100);
   }
 
   /**
