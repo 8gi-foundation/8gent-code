@@ -1014,6 +1014,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /questions - Open research questions tab\n" +
               "  /projects - Open project overview tab\n" +
               "  /auth [login|logout|status] - Authentication\n" +
+              "  /github [issues|pr|repos] - GitHub integration\n" +
               "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
               "  /plan - Show current plan status\n" +
@@ -1835,6 +1836,21 @@ export function App({ initialCommand, args }: AppProps) {
                         plan: "free",
                       });
                       addSystemMessage(`Authenticated as ${result.displayName || result.email || "User"}`);
+
+                      // Set up GitHub integration silently
+                      import("../../../packages/auth/github.js").then(({ getGitHubAuth }) => {
+                        const gh = getGitHubAuth();
+                        if (result.token) {
+                          // If the auth result includes a GitHub token, store it
+                          gh.storeToken(result.token);
+                          gh.configureGhCli(result.token).catch(() => {});
+                        }
+                        gh.getUser().then((user) => {
+                          if (user) {
+                            addSystemMessage(`Connected to GitHub as @${user.username}`);
+                          }
+                        }).catch(() => {});
+                      }).catch(() => {});
                     }
                   },
                   onTimeout: () => {
@@ -1852,12 +1868,167 @@ export function App({ initialCommand, args }: AppProps) {
               setAuthStatus("anonymous");
               setAuthUser(null);
               addSystemMessage("Logged out. Running in anonymous mode.");
+            } else if (sub === "github") {
+              // Show GitHub-specific info
+              import("../../../packages/auth/github.js").then(({ getGitHubAuth }) => {
+                const gh = getGitHubAuth();
+                Promise.all([
+                  gh.getUser(),
+                  gh.isGhCliAvailable(),
+                  gh.getToken(),
+                ]).then(([user, ghCliAvailable, token]) => {
+                  import("../../../packages/auth/github-tools.js").then(({ getCurrentRepoInfo }) => {
+                    getCurrentRepoInfo().then((repoInfo) => {
+                      const lines = ["GitHub Integration:"];
+                      lines.push(`  Connected: ${token ? "Yes" : "No"}`);
+                      if (user) {
+                        lines.push(`  Username: @${user.username}`);
+                        lines.push(`  Name: ${user.name}`);
+                        lines.push(`  Profile: ${user.profileUrl}`);
+                      }
+                      lines.push(`  gh CLI: ${ghCliAvailable ? "Available" : "Not found"}`);
+                      if (repoInfo) {
+                        lines.push(`  Current repo: ${repoInfo.owner}/${repoInfo.repo}`);
+                      }
+                      addSystemMessage(lines.join("\n"));
+                    });
+                  });
+                }).catch(() => {
+                  addSystemMessage("GitHub: Not connected. Run /auth login first.");
+                });
+              }).catch(() => {
+                addSystemMessage("GitHub module not available.");
+              });
             } else {
-              addSystemMessage(
-                `Auth Status: ${authStatus}\n` +
-                (authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : "") +
-                "\nCommands: /auth login, /auth logout"
-              );
+              // Show general auth status + GitHub summary
+              import("../../../packages/auth/github.js").then(({ getGitHubAuth }) => {
+                const gh = getGitHubAuth();
+                gh.getUser().then((ghUser) => {
+                  addSystemMessage(
+                    `Auth Status: ${authStatus}\n` +
+                    (authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : "") +
+                    (ghUser ? `GitHub: @${ghUser.username}\n` : "") +
+                    "\nCommands: /auth login, /auth logout, /auth github"
+                  );
+                }).catch(() => {
+                  addSystemMessage(
+                    `Auth Status: ${authStatus}\n` +
+                    (authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : "") +
+                    "\nCommands: /auth login, /auth logout, /auth github"
+                  );
+                });
+              }).catch(() => {
+                addSystemMessage(
+                  `Auth Status: ${authStatus}\n` +
+                  (authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : "") +
+                  "\nCommands: /auth login, /auth logout, /auth github"
+                );
+              });
+            }
+          }
+          // Handle /github command
+          if ((command as string) === "github") {
+            const sub = args[0] || "status";
+
+            if (authStatus !== "authenticated") {
+              addSystemMessage("GitHub: Not authenticated. Run /auth login first.");
+            } else {
+              import("../../../packages/auth/github.js").then(({ getGitHubAuth }) => {
+                const gh = getGitHubAuth();
+                gh.getToken().then((token) => {
+                  if (!token) {
+                    addSystemMessage("GitHub: No token available. Try /auth login to reconnect.");
+                    return;
+                  }
+
+                  import("../../../packages/auth/github-tools.js").then((tools) => {
+                    if (sub === "repos") {
+                      tools.listRepos(token, { perPage: 15 }).then((repos) => {
+                        if (repos.length === 0) {
+                          addSystemMessage("No repositories found.");
+                          return;
+                        }
+                        const lines = ["Your repositories:"];
+                        for (const r of repos) {
+                          const badge = r.isPrivate ? "[private]" : "[public]";
+                          lines.push(`  ${badge} ${r.fullName}`);
+                        }
+                        addSystemMessage(lines.join("\n"));
+                      }).catch((err: Error) => addSystemMessage(`GitHub error: ${err.message}`));
+
+                    } else if (sub === "issues") {
+                      tools.getCurrentRepoInfo().then((info) => {
+                        if (!info) {
+                          addSystemMessage("Not in a GitHub repository. Navigate to a repo directory first.");
+                          return;
+                        }
+                        tools.listIssues(token, info.owner, info.repo).then((issues) => {
+                          if (issues.length === 0) {
+                            addSystemMessage(`No open issues in ${info.owner}/${info.repo}.`);
+                            return;
+                          }
+                          const lines = [`Open issues in ${info.owner}/${info.repo}:`];
+                          for (const i of issues) {
+                            const labels = i.labels.length > 0 ? ` [${i.labels.join(", ")}]` : "";
+                            lines.push(`  #${i.number} ${i.title}${labels}`);
+                          }
+                          addSystemMessage(lines.join("\n"));
+                        }).catch((err: Error) => addSystemMessage(`GitHub error: ${err.message}`));
+                      });
+
+                    } else if (sub === "pr") {
+                      tools.getCurrentRepoInfo().then((info) => {
+                        if (!info) {
+                          addSystemMessage("Not in a GitHub repository.");
+                          return;
+                        }
+                        tools.getCurrentBranch().then((branch) => {
+                          if (!branch || branch === "main" || branch === "master") {
+                            addSystemMessage("Switch to a feature branch before creating a PR.");
+                            return;
+                          }
+                          tools.getDefaultBranch(token, info.owner, info.repo).then((baseBranch) => {
+                            const title = args.slice(1).join(" ") || `PR from ${branch}`;
+                            tools.createPR(token, info.owner, info.repo, {
+                              title,
+                              body: `Created via 8gent Code from branch \`${branch}\`.`,
+                              head: branch,
+                              base: baseBranch,
+                            }).then((pr) => {
+                              if (pr) {
+                                addSystemMessage(`PR #${pr.number} created: ${pr.url}`);
+                              } else {
+                                addSystemMessage("Failed to create PR. Push your branch first, or a PR may already exist.");
+                              }
+                            }).catch((err: Error) => addSystemMessage(`GitHub error: ${err.message}`));
+                          });
+                        });
+                      });
+
+                    } else {
+                      // Default: show status
+                      Promise.all([
+                        gh.getUser(),
+                        gh.isGhCliAvailable(),
+                        tools.getCurrentRepoInfo(),
+                      ]).then(([user, ghCli, repoInfo]) => {
+                        const lines = ["GitHub Status:"];
+                        if (user) {
+                          lines.push(`  User: @${user.username} (${user.name})`);
+                        } else {
+                          lines.push("  User: Not connected");
+                        }
+                        lines.push(`  gh CLI: ${ghCli ? "Available" : "Not installed"}`);
+                        if (repoInfo) {
+                          lines.push(`  Repo: ${repoInfo.owner}/${repoInfo.repo}`);
+                        }
+                        lines.push("\nCommands: /github issues, /github pr [title], /github repos");
+                        addSystemMessage(lines.join("\n"));
+                      }).catch(() => addSystemMessage("Failed to fetch GitHub status."));
+                    }
+                  });
+                }).catch(() => addSystemMessage("GitHub: Failed to get token."));
+              }).catch(() => addSystemMessage("GitHub module not available."));
             }
           }
           // Handle /model command

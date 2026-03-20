@@ -25,6 +25,7 @@ import type {
 import { resolveAuthConfig, decodeJwt, isTokenExpired, getTokenExpiry, validateToken, extractUserFromToken } from "./clerk.js";
 import { executeDeviceFlow, refreshAccessToken } from "./device-flow.js";
 import { getTokenStore } from "./token-store.js";
+import { getGitHubAuth, extractGitHubUsername, type GitHubAuth } from "./github.js";
 
 // Re-export types
 export type {
@@ -43,6 +44,9 @@ export { executeDeviceFlow, formatDeviceFlowStatus } from "./device-flow.js";
 export { getTokenStore, KeychainTokenStore, EncryptedFileTokenStore } from "./token-store.js";
 export { requireAuth, requirePlan, checkAuth, hasPlan, authenticateRequest } from "./middleware.js";
 export { runCLIAuthFlow, type CLIAuthResult, type CLIAuthCallbacks } from "./cli-auth-server.js";
+export { getGitHubAuth, createGitHubAuth, extractGitHubUsername, type GitHubAuth, type GitHubUser } from "./github.js";
+export { listRepos, getCurrentRepoInfo, createIssue, listIssues, createPR, listPRs, getCurrentBranch, getDefaultBranch } from "./github-tools.js";
+export type { GitHubRepo, GitHubIssue, GitHubPR, RepoInfo } from "./github-tools.js";
 
 // ============================================
 // AuthManager — Central Auth State Machine
@@ -124,6 +128,9 @@ export class AuthManager {
 
       // Schedule token refresh
       this.scheduleRefresh(storedToken);
+
+      // Configure GitHub integration silently
+      this.setupGitHub(storedToken.accessToken);
 
       this.initialized = true;
       return this.state;
@@ -207,6 +214,9 @@ export class AuthManager {
     // Schedule refresh
     this.scheduleRefresh(storedToken);
 
+    // Configure GitHub integration after login
+    this.setupGitHub(result.accessToken);
+
     cb.onLoginSuccess?.(user);
     return this.state;
   }
@@ -224,8 +234,9 @@ export class AuthManager {
       this.refreshTimer = null;
     }
 
-    // Clear stored token
+    // Clear stored token and GitHub token
     await this.tokenStore.clear();
+    getGitHubAuth().clearToken();
 
     // Reset state
     this.setState({ state: "anonymous" });
@@ -260,6 +271,32 @@ export class AuthManager {
     if (!stored) return null;
     if (isTokenExpired(stored.accessToken)) return null;
     return stored.accessToken;
+  }
+
+  /** Get the GitHub auth module for managing the GitHub provider token. */
+  getGitHubAuth(): GitHubAuth {
+    return getGitHubAuth();
+  }
+
+  /**
+   * Post-login: extract GitHub info from JWT and configure GitHub token.
+   * Called internally after successful login/init.
+   */
+  private async setupGitHub(accessToken: string): Promise<void> {
+    try {
+      const gh = getGitHubAuth();
+      const username = extractGitHubUsername(accessToken);
+
+      // If GitHub username is in JWT, try to configure gh CLI silently
+      if (username && gh.isAuthenticated()) {
+        const token = await gh.getToken();
+        if (token) {
+          gh.configureGhCli(token).catch(() => {}); // Fire and forget
+        }
+      }
+    } catch {
+      // GitHub setup is non-blocking — never crash on failure
+    }
   }
 
   // ---------- Token Refresh ----------
