@@ -82,6 +82,11 @@ function MessageItem({
   const [showContent, setShowContent] = useState(!isNew);
   const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
+  // Terminal width for responsive bubble sizing — must be called unconditionally (React hook rule)
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns ?? 100;
+  const bubbleIndent = Math.max(2, Math.min(12, Math.floor(termWidth * 0.1)));
+
   // Play sound on completion for assistant messages
   useCompletionSound(
     typingComplete && message.role === "assistant" && isNew,
@@ -146,26 +151,19 @@ function MessageItem({
     );
   }
 
-  // Use 80% of terminal width for bubbles, with reasonable min/max
-  const { stdout } = useStdout();
-  const termWidth = stdout?.columns ?? 100;
-  const bubbleMaxWidth = Math.max(40, Math.min(termWidth - 8, Math.floor(termWidth * 0.8)));
-  const bubbleIndent = Math.max(2, Math.floor(termWidth * 0.15));
-
   return (
     <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
       <Box
         flexDirection="column"
         alignItems={isUser ? "flex-end" : "flex-start"}
         marginBottom={1}
-        paddingX={1}
       >
         {/* Sender label */}
-        <Box marginBottom={0} paddingLeft={isUser ? 0 : 1} paddingRight={isUser ? 1 : 0}>
+        <Box>
           {isUser ? (
             <MutedText>{formatTime(message.timestamp)} </MutedText>
           ) : (
-            <Label color="cyan">{"◆"} 8gent </Label>
+            <Label color="cyan">◆ 8gent </Label>
           )}
           {isUser ? (
             <Label color="yellow">You</Label>
@@ -174,17 +172,16 @@ function MessageItem({
           )}
         </Box>
 
-        {/* Chat bubble — width-constrained, not margin-constrained */}
+        {/* Chat bubble */}
         <Box
           borderStyle="round"
           borderColor={isUser ? "yellow" : "cyan"}
           paddingX={1}
-          paddingY={0}
           marginLeft={isUser ? bubbleIndent : 0}
           marginRight={isUser ? 0 : bubbleIndent}
-          width={bubbleMaxWidth}
+          flexShrink={1}
         >
-          <Box flexDirection="column" width={bubbleMaxWidth - 4}>
+          <Box flexShrink={1} flexDirection="column">
             <MessageContent
               content={message.content}
               role={message.role}
