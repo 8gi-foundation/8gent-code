@@ -40,7 +40,8 @@
     "harness:doctor": "bun run packages/harness-cli/index.ts doctor",
     "demos:studio": "cd apps/demos && bun run studio",
     "demos:render": "cd apps/demos && bun run render:all",
-    "demos:media": "cd apps/demos && bun run media"
+    "demos:media": "cd apps/demos && bun run media",
+    "debug": "bun run bin/debug.ts"
   },
   "workspaces": [
     "apps/*",
