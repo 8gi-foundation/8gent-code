@@ -10,6 +10,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Hypothesis loop engine** — codex-autoresearch atomic commit-verify-revert pattern with escalation (REFINE 3x -> PIVOT 2x -> GIVE_UP) and cross-run lessons stored in `~/.8gent/lessons.jsonl`
+- **Built-in verifiers** — composable verification stages (typecheck, lint, tests, build) with `createVerifier()` factory
+- **Self-healing executor** — AutoResearchClaw pattern: runs code in sandbox, classifies errors (NaN, type, import, syntax, timeout), auto-fixes or delegates to LLM, retries up to 10 rounds
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
