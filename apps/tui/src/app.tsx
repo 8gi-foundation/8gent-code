@@ -547,11 +547,6 @@ export function App({ initialCommand, args }: AppProps) {
     if (key.ctrl && input === "w") {
       if (workspaceTabs.tabs.length > 1) {
         workspaceTabs.removeTab(workspaceTabs.activeTab.id);
-        // After removal, sync viewMode to new active tab
-        setTimeout(() => {
-          const newActive = workspaceTabs.tabs.find(t => t.active);
-          if (newActive) setViewMode(newActive.type === "chat" ? "chat" : newActive.type as ViewMode);
-        }, 0);
       }
     }
 
@@ -560,33 +555,25 @@ export function App({ initialCommand, args }: AppProps) {
       const idx = parseInt(input, 10) - 1;
       if (idx < workspaceTabs.tabs.length) {
         workspaceTabs.switchToIndex(idx);
+        // Only set viewMode for legacy views (kanban, music have their own)
         const tab = workspaceTabs.tabs[idx];
-        if (tab) {
-          // Map tab type back to viewMode for legacy compatibility
-          const tabTypeToView: Record<string, ViewMode> = {
-            chat: "chat", kanban: "kanban", music: "music",
-          };
-          setViewMode(tabTypeToView[tab.type] || "chat");
-        }
+        if (tab?.type === "kanban") setViewMode("kanban");
+        else if (tab?.type === "music") setViewMode("music");
+        else setViewMode("chat");
       }
     }
 
-    // Shift+Tab: cycle through open tabs (agents take priority if active)
+    // Shift+Tab: cycle through open tabs
     if (key.shift && key.tab) {
       if (orchestration.agents.length > 0) {
         orchestration.cycleAgent();
       } else {
         workspaceTabs.cycleTab(1);
-        // Sync viewMode after cycle
-        setTimeout(() => {
-          const newActive = workspaceTabs.tabs.find(t => t.active);
-          if (newActive) {
-            const tabTypeToView: Record<string, ViewMode> = {
-              chat: "chat", kanban: "kanban", music: "music",
-            };
-            setViewMode(tabTypeToView[newActive.type] || "chat");
-          }
-        }, 0);
+        // Sync viewMode for legacy views
+        const newActive = workspaceTabs.activeTab;
+        if (newActive?.type === "kanban") setViewMode("kanban");
+        else if (newActive?.type === "music") setViewMode("music");
+        else setViewMode("chat");
       }
     }
 
