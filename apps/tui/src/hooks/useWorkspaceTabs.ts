@@ -3,9 +3,16 @@
  *
  * Manages tabbed workspace state: multiple chat tabs + singleton utility tabs.
  * Persists tab state to ~/.8gent/tabs/state.json.
+ *
+ * Features:
+ * - Pinned tabs (can't be closed)
+ * - Badge counts for unread/pending indicators
+ * - Singleton enforcement for non-chat types
+ * - Max 20 tabs
+ * - Ordered: pinned first, then by lastAccessedAt
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -29,6 +36,9 @@ export interface WorkspaceTab {
   title: string;
   active: boolean;
   createdAt: string;
+  lastAccessedAt: string;
+  pinned: boolean;
+  badge?: number;
   data: Record<string, unknown>;
 }
 
@@ -69,7 +79,7 @@ const STATE_FILE = path.join(TABS_DIR, "state.json");
 // Persistence
 // ============================================
 
-function ensureDir() {
+function ensureDir(): void {
   try {
     if (!fs.existsSync(TABS_DIR)) {
       fs.mkdirSync(TABS_DIR, { recursive: true });
@@ -79,13 +89,29 @@ function ensureDir() {
   }
 }
 
+/** Migrate legacy tabs that lack new fields */
+function migrateTab(raw: Record<string, unknown>): WorkspaceTab {
+  const now = new Date().toISOString();
+  return {
+    id: (raw.id as string) || `unknown-${Date.now()}`,
+    type: (raw.type as TabType) || "chat",
+    title: (raw.title as string) || "Untitled",
+    active: Boolean(raw.active),
+    createdAt: (raw.createdAt as string) || now,
+    lastAccessedAt: (raw.lastAccessedAt as string) || (raw.createdAt as string) || now,
+    pinned: Boolean(raw.pinned),
+    badge: typeof raw.badge === "number" ? raw.badge : undefined,
+    data: (raw.data as Record<string, unknown>) || {},
+  };
+}
+
 function loadState(): WorkspaceTab[] | null {
   try {
     if (fs.existsSync(STATE_FILE)) {
       const raw = fs.readFileSync(STATE_FILE, "utf-8");
       const data = JSON.parse(raw);
       if (Array.isArray(data) && data.length > 0) {
-        return data as WorkspaceTab[];
+        return data.map((item: Record<string, unknown>) => migrateTab(item));
       }
     }
   } catch {
@@ -94,7 +120,7 @@ function loadState(): WorkspaceTab[] | null {
   return null;
 }
 
-function saveState(tabs: WorkspaceTab[]) {
+function saveState(tabs: WorkspaceTab[]): void {
   try {
     ensureDir();
     fs.writeFileSync(STATE_FILE, JSON.stringify(tabs, null, 2), "utf-8");
@@ -104,17 +130,45 @@ function saveState(tabs: WorkspaceTab[]) {
 }
 
 // ============================================
+// Ordering
+// ============================================
+
+/** Sort tabs: pinned first, then by lastAccessedAt descending */
+function sortTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
+  return [...tabs].sort((a, b) => {
+    // Pinned first
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    // Within same pin group, most recently accessed first
+    return new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime();
+  });
+}
+
+// ============================================
 // Default state
 // ============================================
 
 function makeDefaultTabs(): WorkspaceTab[] {
+  const now = new Date().toISOString();
   return [
     {
-      id: `chat-${Date.now()}`,
+      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: "chat",
-      title: "Chat",
+      title: "Chat 1",
       active: true,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      lastAccessedAt: now,
+      pinned: true,
+      data: {},
+    },
+    {
+      id: `notes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: "notes",
+      title: "Notes",
+      active: false,
+      createdAt: now,
+      lastAccessedAt: now,
+      pinned: true,
       data: {},
     },
   ];
@@ -135,10 +189,10 @@ export function useWorkspaceTabs() {
 
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounced save
+  // Debounced save — persist on every mutation
   const scheduleSave = useCallback((newTabs: WorkspaceTab[]) => {
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => saveState(newTabs), 500);
+    saveTimeout.current = setTimeout(() => saveState(newTabs), 300);
   }, []);
 
   // Save on every change
@@ -146,8 +200,28 @@ export function useWorkspaceTabs() {
     scheduleSave(tabs);
   }, [tabs, scheduleSave]);
 
-  const activeTab = tabs.find((t) => t.active) || tabs[0];
+  // Flush pending save on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeout.current) {
+        clearTimeout(saveTimeout.current);
+        saveState(tabs);
+      }
+    };
+  }, [tabs]);
 
+  // Computed: sorted tabs for display
+  const sortedTabs = useMemo(() => sortTabs(tabs), [tabs]);
+
+  // Computed: current active tab
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.active) || tabs[0],
+    [tabs]
+  );
+
+  // ----------------------------------------
+  // addTab
+  // ----------------------------------------
   const addTab = useCallback(
     (type: TabType, title?: string): WorkspaceTab | null => {
       let newTab: WorkspaceTab | null = null;
@@ -159,20 +233,32 @@ export function useWorkspaceTabs() {
         if (SINGLETON_TYPES.includes(type)) {
           const existing = prev.find((t) => t.type === type);
           if (existing) {
-            return prev.map((t) => ({ ...t, active: t.id === existing.id }));
+            const now = new Date().toISOString();
+            return prev.map((t) => ({
+              ...t,
+              active: t.id === existing.id,
+              lastAccessedAt: t.id === existing.id ? now : t.lastAccessedAt,
+            }));
           }
         }
 
         const icon = TAB_ICONS.find((i) => i.type === type);
-        const chatCount = type === "chat" ? prev.filter((t) => t.type === "chat").length + 1 : 0;
-        const defaultTitle = type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
+        const chatCount =
+          type === "chat"
+            ? prev.filter((t) => t.type === "chat").length + 1
+            : 0;
+        const defaultTitle =
+          type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
 
+        const now = new Date().toISOString();
         newTab = {
           id: generateId(type),
           type,
           title: title || defaultTitle,
           active: true,
-          createdAt: new Date().toISOString(),
+          createdAt: now,
+          lastAccessedAt: now,
+          pinned: false,
           data: {},
         };
 
@@ -184,70 +270,149 @@ export function useWorkspaceTabs() {
     []
   );
 
-  const removeTab = useCallback(
-    (tabId: string) => {
-      setTabs((prev) => {
-        // Cannot close last tab
-        if (prev.length <= 1) return prev;
+  // ----------------------------------------
+  // removeTab
+  // ----------------------------------------
+  const removeTab = useCallback((tabId: string) => {
+    setTabs((prev) => {
+      const target = prev.find((t) => t.id === tabId);
+      if (!target) return prev;
 
-        const idx = prev.findIndex((t) => t.id === tabId);
-        if (idx === -1) return prev;
+      // Cannot close pinned tabs
+      if (target.pinned) return prev;
 
-        const wasActive = prev[idx].active;
-        const next = prev.filter((t) => t.id !== tabId);
+      // Cannot close the last chat tab
+      const chatTabs = prev.filter((t) => t.type === "chat");
+      if (target.type === "chat" && chatTabs.length <= 1) return prev;
 
-        // If we removed the active tab, activate the nearest one
-        if (wasActive && next.length > 0) {
-          const newActiveIdx = Math.min(idx, next.length - 1);
-          next[newActiveIdx] = { ...next[newActiveIdx], active: true };
-        }
+      // Cannot close if it's the only tab
+      if (prev.length <= 1) return prev;
 
-        return next;
-      });
+      const idx = prev.findIndex((t) => t.id === tabId);
+      const wasActive = target.active;
+      const next = prev.filter((t) => t.id !== tabId);
+
+      // If we removed the active tab, activate the nearest one
+      if (wasActive && next.length > 0) {
+        const newActiveIdx = Math.min(idx, next.length - 1);
+        const now = new Date().toISOString();
+        next[newActiveIdx] = {
+          ...next[newActiveIdx],
+          active: true,
+          lastAccessedAt: now,
+        };
+      }
+
+      return next;
+    });
+  }, []);
+
+  // ----------------------------------------
+  // switchTab
+  // ----------------------------------------
+  const switchTab = useCallback((tabId: string) => {
+    setTabs((prev) => {
+      const target = prev.find((t) => t.id === tabId);
+      if (!target || target.active) return prev;
+
+      const now = new Date().toISOString();
+      return prev.map((t) => ({
+        ...t,
+        active: t.id === tabId,
+        lastAccessedAt: t.id === tabId ? now : t.lastAccessedAt,
+      }));
+    });
+  }, []);
+
+  // ----------------------------------------
+  // switchTabByIndex (for Ctrl+1-9)
+  // ----------------------------------------
+  const switchToIndex = useCallback((index: number) => {
+    setTabs((prev) => {
+      const sorted = sortTabs(prev);
+      if (index < 0 || index >= sorted.length) return prev;
+
+      const targetId = sorted[index].id;
+      const now = new Date().toISOString();
+      return prev.map((t) => ({
+        ...t,
+        active: t.id === targetId,
+        lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
+      }));
+    });
+  }, []);
+
+  // ----------------------------------------
+  // cycleTab (Shift+Tab)
+  // ----------------------------------------
+  const cycleTab = useCallback((direction: 1 | -1 = 1) => {
+    setTabs((prev) => {
+      const sorted = sortTabs(prev);
+      const activeIdx = sorted.findIndex((t) => t.active);
+      if (activeIdx === -1) return prev;
+
+      const newIdx = (activeIdx + direction + sorted.length) % sorted.length;
+      const targetId = sorted[newIdx].id;
+      const now = new Date().toISOString();
+
+      return prev.map((t) => ({
+        ...t,
+        active: t.id === targetId,
+        lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
+      }));
+    });
+  }, []);
+
+  // ----------------------------------------
+  // renameTab
+  // ----------------------------------------
+  const renameTab = useCallback((tabId: string, title: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, title } : t))
+    );
+  }, []);
+
+  // ----------------------------------------
+  // pinTab / unpinTab
+  // ----------------------------------------
+  const pinTab = useCallback((tabId: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, pinned: true } : t))
+    );
+  }, []);
+
+  const unpinTab = useCallback((tabId: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, pinned: false } : t))
+    );
+  }, []);
+
+  // ----------------------------------------
+  // updateBadge
+  // ----------------------------------------
+  const updateBadge = useCallback((tabId: string, count: number) => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === tabId
+          ? { ...t, badge: count > 0 ? count : undefined }
+          : t
+      )
+    );
+  }, []);
+
+  // ----------------------------------------
+  // getTabsByType
+  // ----------------------------------------
+  const getTabsByType = useCallback(
+    (type: TabType): WorkspaceTab[] => {
+      return tabs.filter((t) => t.type === type);
     },
-    []
+    [tabs]
   );
 
-  const switchTab = useCallback(
-    (tabId: string) => {
-      setTabs((prev) =>
-        prev.map((t) => ({ ...t, active: t.id === tabId }))
-      );
-    },
-    []
-  );
-
-  const switchToIndex = useCallback(
-    (index: number) => {
-      setTabs((prev) => {
-        if (index < 0 || index >= prev.length) return prev;
-        return prev.map((t, i) => ({ ...t, active: i === index }));
-      });
-    },
-    []
-  );
-
-  const cycleTab = useCallback(
-    (direction: 1 | -1 = 1) => {
-      setTabs((prev) => {
-        const activeIdx = prev.findIndex((t) => t.active);
-        if (activeIdx === -1) return prev;
-        const newIdx = (activeIdx + direction + prev.length) % prev.length;
-        return prev.map((t, i) => ({ ...t, active: i === newIdx }));
-      });
-    },
-    []
-  );
-
-  const renameTab = useCallback(
-    (tabId: string, title: string) => {
-      setTabs((prev) =>
-        prev.map((t) => (t.id === tabId ? { ...t, title } : t))
-      );
-    },
-    []
-  );
-
+  // ----------------------------------------
+  // updateTabData (backward compat with app.tsx)
+  // ----------------------------------------
   const updateTabData = useCallback(
     (tabId: string, data: Record<string, unknown>) => {
       setTabs((prev) =>
@@ -260,7 +425,7 @@ export function useWorkspaceTabs() {
   );
 
   return {
-    tabs,
+    tabs: sortedTabs,
     activeTab,
     addTab,
     removeTab,
@@ -268,6 +433,10 @@ export function useWorkspaceTabs() {
     switchToIndex,
     cycleTab,
     renameTab,
+    pinTab,
+    unpinTab,
+    updateBadge,
+    getTabsByType,
     updateTabData,
   };
 }
