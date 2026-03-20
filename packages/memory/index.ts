@@ -48,6 +48,8 @@ import {
 import { migrateV1ToV2, type MigrationResult } from "./migrate.js";
 import { KnowledgeGraph, type Entity, type Relationship, type SubgraphResult } from "./graph.js";
 import { extractFromToolResult, extractPreferencesFromMessage, type ExtractionResult, type ExtractedEntity, type ExtractedRelationship } from "./extractor.js";
+import { PromotionManager, isPromoted, daysUntilArchival, type PromotionResult } from "./promote.js";
+import { SemanticRecall, createSemanticRecall, type RecallOptions } from "./recall.js";
 
 // ── Re-exports ────────────────────────────────────────────────────────
 
@@ -87,6 +89,17 @@ export {
   KnowledgeGraph,
   extractFromToolResult,
   extractPreferencesFromMessage,
+  // Promotion and semantic recall
+  PromotionManager,
+  isPromoted,
+  daysUntilArchival,
+  SemanticRecall,
+  createSemanticRecall,
+};
+
+export type {
+  PromotionResult,
+  RecallOptions,
 };
 
 export type {
