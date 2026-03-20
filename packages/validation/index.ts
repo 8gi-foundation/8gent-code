@@ -24,3 +24,25 @@ export {
   type StepReport,
   type ReportDisplayOptions,
 } from "./report";
+
+export {
+  SelfHealer,
+  type VerifyCheck,
+  type VerifyResult,
+  type HealingResult,
+  type SelfHealerOptions,
+} from "./healing";
+
+export {
+  createCheckpoint,
+  restoreCheckpoint,
+  dropCheckpoint,
+  type Checkpoint,
+} from "./checkpoint";
+
+export {
+  logFailure,
+  readFailures,
+  findPriorFailure,
+  type FailureEntry,
+} from "./failure-log";
