@@ -345,21 +345,31 @@ export function useWorkspaceTabs() {
   // ----------------------------------------
   // cycleTab (Shift+Tab)
   // ----------------------------------------
-  const cycleTab = useCallback((direction: 1 | -1 = 1) => {
+  const cycleTab = useCallback((direction: 1 | -1 = 1, skipTypes?: string[]) => {
     setTabs((prev) => {
       const sorted = sortTabs(prev);
       const activeIdx = sorted.findIndex((t) => t.active);
       if (activeIdx === -1) return prev;
 
-      const newIdx = (activeIdx + direction + sorted.length) % sorted.length;
-      const targetId = sorted[newIdx].id;
-      const now = new Date().toISOString();
-
-      return prev.map((t) => ({
-        ...t,
-        active: t.id === targetId,
-        lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
-      }));
+      // Find next tab that isn't in skipTypes, wrapping around
+      let offset = direction;
+      let attempts = 0;
+      while (attempts < sorted.length) {
+        const candidateIdx = (activeIdx + offset + sorted.length) % sorted.length;
+        const candidate = sorted[candidateIdx];
+        if (!skipTypes || !skipTypes.includes(candidate.type)) {
+          const targetId = candidate.id;
+          const now = new Date().toISOString();
+          return prev.map((t) => ({
+            ...t,
+            active: t.id === targetId,
+            lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
+          }));
+        }
+        offset += direction;
+        attempts++;
+      }
+      return prev; // All tabs are skipped types — don't change
     });
   }, []);
 
