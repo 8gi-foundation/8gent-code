@@ -25,7 +25,10 @@ import {
   AvenueDisplay,
   PredictedSteps,
   MiniKanban,
+  AutoPlanKanban,
+  AutoMiniKanban,
 } from "./components/plan-kanban.js";
+import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import {
   SelectInput,
@@ -324,13 +327,16 @@ export function App({ initialCommand, args }: AppProps) {
   const [isGitRepo] = useState(true);
   const [currentBranch] = useState<string | null>("main");
 
-  // Planning state
+  // Planning state (legacy predicted-step board)
   const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>({
     backlog: [],
     ready: [],
     inProgress: [],
     done: [],
   });
+
+  // Auto-populating kanban from real agent events
+  const autoKanban = useAutoKanban();
   const [avenues, setAvenues] = useState<Avenue[]>([]);
   const [predictedSteps, setPredictedSteps] = useState<ProactiveStep[]>([]);
   const [planNextStep, setPlanNextStep] = useState<string | null>(null);
@@ -640,6 +646,16 @@ export function App({ initialCommand, args }: AppProps) {
               setStatus("executing");
               pushActivity(event.toolName, event.toolCallId, event.args);
 
+              // Auto-kanban: track real tool execution
+              const activeTab = workspaceTabs.activeTab;
+              autoKanban.onTaskStart(
+                activeTab?.id || "default",
+                activeTab?.title || "Chat",
+                event.toolName,
+                event.toolCallId,
+                event.args,
+              );
+
               // Auto-advance kanban: move first Ready card to In Progress
               setKanbanBoard((prev) => {
                 if (prev.inProgress.length === 0 && prev.ready.length > 0) {
@@ -668,6 +684,9 @@ export function App({ initialCommand, args }: AppProps) {
             onToolEnd: (event: AgentToolEndEvent) => {
               setToolCount((prev) => prev + 1);
               completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
+
+              // Auto-kanban: mark tool complete
+              autoKanban.onTaskComplete(event.toolCallId, event.success !== false, event.durationMs || 0);
 
               // TV Mode: mark task done/error + update narrator
               const isFailure = !event.success || (event.resultPreview?.startsWith("Exit code ") && !event.resultPreview.startsWith("Exit code 0"));
@@ -1026,13 +1045,24 @@ export function App({ initialCommand, args }: AppProps) {
           break;
 
         case "plan":
-          addSystemMessage(
-            `Current plan status:\n` +
-              `  Backlog: ${kanbanBoard.backlog.length} items\n` +
-              `  Ready: ${kanbanBoard.ready.length} items\n` +
-              `  In Progress: ${kanbanBoard.inProgress.length} items\n` +
-              `  Done: ${kanbanBoard.done.length} items`
-          );
+          if (autoKanban.stats.total > 0) {
+            addSystemMessage(
+              `Task board (auto):\n` +
+                `  Backlog: ${autoKanban.columns.backlog.length}\n` +
+                `  Ready: ${autoKanban.columns.ready.length}\n` +
+                `  In Progress: ${autoKanban.columns.inProgress.length}\n` +
+                `  Done: ${autoKanban.stats.done} | Failed: ${autoKanban.stats.failed}\n` +
+                `  Total: ${autoKanban.stats.total} tasks`
+            );
+          } else {
+            addSystemMessage(
+              `Current plan status:\n` +
+                `  Backlog: ${kanbanBoard.backlog.length} items\n` +
+                `  Ready: ${kanbanBoard.ready.length} items\n` +
+                `  In Progress: ${kanbanBoard.inProgress.length} items\n` +
+                `  Done: ${kanbanBoard.done.length} items`
+            );
+          }
           break;
 
         case "status":
@@ -2101,6 +2131,14 @@ export function App({ initialCommand, args }: AppProps) {
       timestamp: new Date(),
     }]);
 
+    // Auto-kanban: create a card for this user message
+    const activeTab = workspaceTabs.activeTab;
+    autoKanban.onUserMessage(
+      activeTab?.id || "default",
+      activeTab?.title || "Chat",
+      input,
+    );
+
     // If agent is already running, queue this message
     if (agentRunningRef.current) {
       messageQueueRef.current.push(input);
@@ -2274,7 +2312,15 @@ export function App({ initialCommand, args }: AppProps) {
             />
           );
         case "kanban":
-          return (
+          return autoKanban.stats.total > 0 ? (
+            <AutoPlanKanban
+              columns={autoKanban.columns}
+              stats={autoKanban.stats}
+              visible={true}
+              onClose={closeTabView}
+              compact={false}
+            />
+          ) : (
             <PlanKanban
               board={kanbanBoard as any}
               visible={true}
@@ -2318,7 +2364,15 @@ export function App({ initialCommand, args }: AppProps) {
 
     switch (viewMode) {
       case "kanban":
-        return (
+        return autoKanban.stats.total > 0 ? (
+          <AutoPlanKanban
+            columns={autoKanban.columns}
+            stats={autoKanban.stats}
+            visible={true}
+            onClose={() => setViewMode("chat")}
+            compact={false}
+          />
+        ) : (
           <PlanKanban
             board={kanbanBoard as any}
             visible={true}
@@ -2589,10 +2643,18 @@ export function App({ initialCommand, args }: AppProps) {
       </Box>
 
       {/* Mini kanban when in chat mode and has items */}
-      {viewMode === "chat" && activeTabType === "chat" && (kanbanBoard.ready.length > 0 || kanbanBoard.inProgress.length > 0) && (
-        <Box paddingX={1} marginBottom={1}>
-          <MiniKanban board={kanbanBoard as any} />
-        </Box>
+      {viewMode === "chat" && activeTabType === "chat" && (
+        autoKanban.stats.total > 0 ? (
+          (autoKanban.columns.ready.length > 0 || autoKanban.columns.inProgress.length > 0) && (
+            <Box paddingX={1} marginBottom={1}>
+              <AutoMiniKanban columns={autoKanban.columns} stats={autoKanban.stats} />
+            </Box>
+          )
+        ) : (kanbanBoard.ready.length > 0 || kanbanBoard.inProgress.length > 0) ? (
+          <Box paddingX={1} marginBottom={1}>
+            <MiniKanban board={kanbanBoard as any} />
+          </Box>
+        ) : null
       )}
 
       {/* Status verb - always visible */}

@@ -109,8 +109,8 @@ const categoryColors: Record<StepCategory, string> = {
   git: "magenta",
   test: "green",
   debug: "red",
-  refactor: "white",
-  documentation: "gray",
+  refactor: "cyan",
+  documentation: "blue",
 };
 
 const priorityColors: Record<number, string> = {
@@ -122,9 +122,52 @@ const priorityColors: Record<number, string> = {
   5: "cyan",
   4: "blue",
   3: "blue",
-  2: "gray",
-  1: "gray",
+  2: "blue",
+  1: "blue",
 };
+
+// ============================================
+// Auto-Kanban Types (from useAutoKanban hook)
+// ============================================
+
+export interface AutoKanbanCard {
+  id: string;
+  title: string;
+  description: string;
+  status: "backlog" | "ready" | "in-progress" | "done" | "failed";
+  assignedTo: string;
+  assignedTabName: string;
+  toolName?: string;
+  toolCallId?: string;
+  parentId?: string;
+  startedAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  icon: string;
+}
+
+export interface AutoKanbanColumns {
+  backlog: AutoKanbanCard[];
+  ready: AutoKanbanCard[];
+  inProgress: AutoKanbanCard[];
+  done: AutoKanbanCard[];
+}
+
+export interface AutoKanbanStats {
+  total: number;
+  active: number;
+  done: number;
+  failed: number;
+}
+
+export interface AutoPlanKanbanProps {
+  columns: AutoKanbanColumns;
+  stats: AutoKanbanStats;
+  visible?: boolean;
+  onClose?: () => void;
+  compact?: boolean;
+  maxItemsPerColumn?: number;
+}
 
 // ============================================
 // Main Kanban Board
@@ -322,8 +365,8 @@ interface KanbanCardProps {
 }
 
 function KanbanCard({ step, isSelected, onSelect, compact, width }: KanbanCardProps) {
-  const categoryColor = categoryColors[step.category] || "gray";
-  const priorityColor = priorityColors[step.priority] || "gray";
+  const categoryColor = categoryColors[step.category] || "blue";
+  const priorityColor = priorityColors[step.priority] || "blue";
 
   // Truncate description to fit width
   const maxDescLen = width - 4;
@@ -479,10 +522,10 @@ function getCategoryColor(category: Avenue["category"]): string {
     explore: "cyan",
     test: "blue",
     deploy: "magenta",
-    config: "white",
-    docs: "gray",
+    config: "cyan",
+    docs: "blue",
   };
-  return colors[category] || "gray";
+  return colors[category] || "blue";
 }
 
 function generateProbabilityBar(probability: number, width: number): string {
@@ -547,7 +590,7 @@ interface PredictedStepCardProps {
 }
 
 function PredictedStepCard({ step, index, onAccept }: PredictedStepCardProps) {
-  const categoryColor = categoryColors[step.category] || "gray";
+  const categoryColor = categoryColors[step.category] || "blue";
   const confidenceBar = generateProbabilityBar(step.confidence, 5);
 
   return (
@@ -565,7 +608,249 @@ function PredictedStepCard({ step, index, onAccept }: PredictedStepCardProps) {
 }
 
 // ============================================
-// Mini Kanban (Inline Version)
+// Auto-Populating Kanban Board (from real events)
+// ============================================
+
+export function AutoPlanKanban({
+  columns,
+  stats,
+  visible = true,
+  onClose,
+  compact = false,
+  maxItemsPerColumn = 5,
+}: AutoPlanKanbanProps) {
+  useInput(
+    (input, key) => {
+      if (key.escape && onClose) {
+        onClose();
+      }
+    },
+    { isActive: visible }
+  );
+
+  if (!visible) return null;
+
+  const columnWidth = compact ? 16 : 26;
+
+  return (
+    <Card borderColor="cyan">
+      {/* Header */}
+      <Inline justifyContent="space-between" marginBottom={1}>
+        <Heading>
+          {"\u2592"} Task Board
+        </Heading>
+        <MutedText>
+          [ESC] close
+        </MutedText>
+      </Inline>
+
+      {/* Column Headers */}
+      <Inline gap={0}>
+        <ColumnHeader title="Backlog" count={columns.backlog.length} width={columnWidth} color="blue" />
+        <ColumnHeader title="Ready" count={columns.ready.length} width={columnWidth} color="yellow" />
+        <ColumnHeader title="In Progress" count={columns.inProgress.length} width={columnWidth} color="cyan" />
+        <ColumnHeader title="Done" count={columns.done.length} width={columnWidth} color="green" />
+      </Inline>
+
+      {/* Column Content */}
+      <Inline gap={0}>
+        <AutoKanbanColumn items={columns.backlog} width={columnWidth} maxItems={maxItemsPerColumn} compact={compact} />
+        <AutoKanbanColumn items={columns.ready} width={columnWidth} maxItems={maxItemsPerColumn} compact={compact} />
+        <AutoKanbanColumn items={columns.inProgress} width={columnWidth} maxItems={maxItemsPerColumn} compact={compact} />
+        <AutoKanbanColumn items={columns.done} width={columnWidth} maxItems={maxItemsPerColumn} compact={compact} />
+      </Inline>
+
+      {/* Footer with stats */}
+      <Inline justifyContent="space-between" marginTop={1}>
+        <MutedText>
+          {stats.total} tasks
+        </MutedText>
+        <Inline gap={0}>
+          <AppText color="cyan">{stats.active} active</AppText>
+          <MutedText> {"\u00B7"} </MutedText>
+          <AppText color="green">{stats.done} done</AppText>
+          {stats.failed > 0 && (
+            <>
+              <MutedText> {"\u00B7"} </MutedText>
+              <AppText color="red">{stats.failed} failed</AppText>
+            </>
+          )}
+        </Inline>
+      </Inline>
+    </Card>
+  );
+}
+
+// ============================================
+// Auto-Kanban Column
+// ============================================
+
+interface AutoKanbanColumnProps {
+  items: AutoKanbanCard[];
+  width: number;
+  maxItems: number;
+  compact: boolean;
+}
+
+function AutoKanbanColumn({ items, width, maxItems, compact }: AutoKanbanColumnProps) {
+  const displayItems = items.slice(0, maxItems);
+  const hiddenCount = items.length - maxItems;
+
+  return (
+    <Stack
+      width={width}
+      borderStyle="single"
+      borderColor="blue"
+      minHeight={maxItems * (compact ? 2 : 3) + 2}
+    >
+      {displayItems.map((item) => (
+        <AutoKanbanCardView
+          key={item.id}
+          card={item}
+          compact={compact}
+          width={width - 2}
+        />
+      ))}
+
+      {items.length === 0 && (
+        <Box paddingX={1}>
+          <MutedText>
+            (empty)
+          </MutedText>
+        </Box>
+      )}
+
+      {hiddenCount > 0 && (
+        <Box paddingX={1}>
+          <MutedText>
+            +{hiddenCount} more...
+          </MutedText>
+        </Box>
+      )}
+    </Stack>
+  );
+}
+
+// ============================================
+// Auto-Kanban Card View
+// ============================================
+
+interface AutoKanbanCardViewProps {
+  card: AutoKanbanCard;
+  compact: boolean;
+  width: number;
+}
+
+function AutoKanbanCardView({ card, compact, width }: AutoKanbanCardViewProps) {
+  const statusColor = card.status === "done" ? "green"
+    : card.status === "failed" ? "red"
+    : card.status === "in-progress" ? "cyan"
+    : card.status === "ready" ? "yellow"
+    : "blue";
+
+  const maxTitleLen = width - 4;
+  const truncatedTitle = truncate(card.title, maxTitleLen);
+
+  const durationStr = card.durationMs != null
+    ? card.durationMs < 1000 ? `${card.durationMs}ms` : `${(card.durationMs / 1000).toFixed(1)}s`
+    : null;
+
+  if (compact) {
+    return (
+      <Inline gap={0} paddingX={1}>
+        <AppText color={statusColor as any}>
+          {card.icon}
+        </AppText>
+        <Label> {truncatedTitle}</Label>
+      </Inline>
+    );
+  }
+
+  return (
+    <Stack paddingX={1} marginBottom={0}>
+      {/* Icon + title */}
+      <Inline gap={0}>
+        <AppText color={statusColor as any}>
+          {card.icon}{" "}
+        </AppText>
+        <Label>{truncatedTitle}</Label>
+      </Inline>
+
+      {/* Tab assignment + duration */}
+      <Inline gap={0} justifyContent="space-between">
+        <MutedText>
+          [{truncate(card.assignedTabName, 12)}]
+        </MutedText>
+        {durationStr && (
+          <MutedText>{durationStr}</MutedText>
+        )}
+        {card.status === "failed" && (
+          <AppText color="red">{"\u2717"}</AppText>
+        )}
+      </Inline>
+    </Stack>
+  );
+}
+
+// ============================================
+// Auto Mini Kanban (Inline Version for status bar)
+// ============================================
+
+export interface AutoMiniKanbanProps {
+  columns: AutoKanbanColumns;
+  stats: AutoKanbanStats;
+  width?: number;
+}
+
+export function AutoMiniKanban({ columns, stats, width = 60 }: AutoMiniKanbanProps) {
+  if (stats.total === 0) {
+    return (
+      <MutedText>
+        No tasks
+      </MutedText>
+    );
+  }
+
+  const colWidth = Math.floor((width - 7) / 4);
+
+  return (
+    <Inline gap={0}>
+      <MutedText>[</MutedText>
+      <AutoMiniColumn items={columns.backlog} label="B" color="blue" width={colWidth} />
+      <MutedText>|</MutedText>
+      <AutoMiniColumn items={columns.ready} label="R" color="yellow" width={colWidth} />
+      <MutedText>|</MutedText>
+      <AutoMiniColumn items={columns.inProgress} label="P" color="cyan" width={colWidth} />
+      <MutedText>|</MutedText>
+      <AutoMiniColumn items={columns.done} label="D" color="green" width={colWidth} />
+      <MutedText>]</MutedText>
+    </Inline>
+  );
+}
+
+function AutoMiniColumn({
+  items,
+  label,
+  color,
+  width,
+}: {
+  items: AutoKanbanCard[];
+  label: string;
+  color: string;
+  width: number;
+}) {
+  const dots = items.length > 0 ? "\u25CF".repeat(Math.min(items.length, width - 2)) : "\u00B7";
+
+  return (
+    <Box width={width}>
+      <AppText color={color as any}>{label}:</AppText>
+      <AppText color={color as any}>{dots}</AppText>
+    </Box>
+  );
+}
+
+// ============================================
+// Mini Kanban (Inline Version) — Legacy
 // ============================================
 
 export interface MiniKanbanProps {
