@@ -119,7 +119,7 @@ function MessageItem({
         <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
           <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
             <Text dimColor>{'─'.repeat(3)}</Text>
-            <MutedText>{message.content}</MutedText>
+            <SystemMessageText content={message.content} />
             <Text dimColor>{'─'.repeat(3)}</Text>
           </Box>
         </FadeIn>
@@ -129,7 +129,7 @@ function MessageItem({
       <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
         <Box justifyContent="center" marginBottom={1}>
           <Text dimColor>{'─'.repeat(3)} </Text>
-          <MutedText>{message.content.slice(0, 60)}</MutedText>
+          <SystemMessageText content={message.content.slice(0, 60)} />
           <Text dimColor> {'─'.repeat(3)}</Text>
         </Box>
       </FadeIn>
@@ -281,6 +281,14 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
       })}
     </Box>
   );
+}
+
+function SystemMessageText({ content }: { content: string }) {
+  const { enabled: adhdMode } = useADHDMode();
+  if (adhdMode) {
+    return <BionicText dimNormal>{content}</BionicText>;
+  }
+  return <MutedText>{content}</MutedText>;
 }
 
 function formatTime(date: Date): string {

@@ -191,9 +191,15 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     name: "adhd",
-    aliases: ["bionic", "focus"],
-    description: "Toggle ADHD/bionic reading mode (faster reading)",
-    usage: "/adhd [on|off]",
+    aliases: ["focus"],
+    description: "ADHD mode — text + audio focus toolkit",
+    usage: "/adhd [on|off|lofi|rainsound|whitenoise|ambient|classical|stop]",
+  },
+  {
+    name: "router",
+    aliases: ["route", "routing"],
+    description: "Task router — assign models to task categories",
+    usage: "/router [on|off|set|test|stats|status]",
   },
   {
     name: "quarantine",
