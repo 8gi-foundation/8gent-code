@@ -2820,9 +2820,13 @@ export function App({ initialCommand, args }: AppProps) {
       {/* Workspace tab bar */}
       <TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
 
-      {/* Main content area with optional process sidebar on right */}
+      {/* Main content area with folder frame */}
       <Box flexDirection="row" flexGrow={1}>
-        {/* Left: main content (chat / kanban / etc.) or process detail */}
+        {/* Left border */}
+        <Box flexDirection="column">
+          <AppText color="cyan">│</AppText>
+        </Box>
+        {/* Main content (chat / kanban / etc.) or process detail */}
         <Box flexDirection="column" flexGrow={1} paddingX={1}>
           {processPanel.detailTaskId && processPanel.tasks.find(t => t.id === processPanel.detailTaskId) ? (
             <ProcessDetailView
@@ -2846,6 +2850,12 @@ export function App({ initialCommand, args }: AppProps) {
             renderMainContent()
           )}
         </Box>
+        {/* Right border */}
+        {!processPanel.sidebarOpen && (
+          <Box flexDirection="column">
+            <AppText color="cyan">│</AppText>
+          </Box>
+        )}
 
         {/* Right: process sidebar */}
         {processPanel.sidebarOpen && (
