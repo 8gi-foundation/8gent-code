@@ -2,7 +2,8 @@
  * @8gent/voice — Voice Chat Loop
  *
  * Half-duplex voice conversation: Listen -> Transcribe -> Agent -> Speak -> Listen.
- * Uses VAD for auto-stop on silence. Supports interrupt (kill TTS mid-speech).
+ * Uses sox's built-in silence detection to auto-stop recording when you stop talking.
+ * Supports interrupt (kill TTS mid-speech via ESC).
  *
  * Usage:
  * ```ts
@@ -14,6 +15,9 @@
 
 import { VoiceEngine } from "./index.js";
 import type { TranscriptEvent } from "./types.js";
+import { tmpdir } from "os";
+import { join } from "path";
+import { existsSync, unlinkSync } from "fs";
 
 // ============================================
 // Types
@@ -71,6 +75,7 @@ export class VoiceChatLoop {
   private state: VoiceChatState = "idle";
   private running = false;
   private ttsProcess: { kill: () => void; exited: Promise<number> } | null = null;
+  private recProcess: { kill: () => void; exited: Promise<number> } | null = null;
   private listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
 
   constructor(config: VoiceChatConfig) {
@@ -103,11 +108,8 @@ export class VoiceChatLoop {
     this.running = true;
     this.setState("listening");
 
-    // Enable VAD for auto-stop
-    this.engine.updateConfig({
-      vadEnabled: true,
-      vadSilenceMs: this.silenceMs,
-    });
+    // We use sox's built-in silence detection instead of VAD
+    // (VoiceEngine's audio levels are simulated, not real)
 
     // Non-blocking loop — yield to event loop between turns
     const scheduleNextTurn = async () => {
@@ -146,12 +148,15 @@ export class VoiceChatLoop {
     this.running = false;
     this.setState("stopping");
 
-    // Kill any in-flight TTS
+    // Kill any in-flight TTS or recording
     await this.killTTS();
+    this.killRecording();
+  }
 
-    // Stop recording if active
-    if (this.engine.isRecording()) {
-      try { await this.engine.stopRecording(); } catch {}
+  private killRecording(): void {
+    if (this.recProcess) {
+      try { this.recProcess.kill(); } catch {}
+      this.recProcess = null;
     }
   }
 
@@ -221,58 +226,122 @@ export class VoiceChatLoop {
   }
 
   /**
-   * Record audio and transcribe. Uses VAD for auto-stop.
+   * Record audio using sox with built-in silence detection, then transcribe.
+   * Sox auto-stops when it detects silence after speech.
    * Returns transcript text, or null if empty/cancelled.
    */
   private async listenForSpeech(): Promise<string | null> {
-    return new Promise<string | null>((resolve) => {
-      let resolved = false;
+    const wavPath = join(tmpdir(), `8gent-voicechat-${Date.now()}.wav`);
+    const silenceSec = (this.silenceMs / 1000).toFixed(1);
 
-      const onTranscript = (event: TranscriptEvent) => {
-        if (resolved) return;
-        resolved = true;
-        cleanup();
-        const text = event.text.trim();
-        resolve(text || null);
-      };
-
-      const onError = (err: { code: string; message: string }) => {
-        if (resolved) return;
-        resolved = true;
-        cleanup();
-        this.onError?.(`STT error: ${err.message}`);
-        resolve(null);
-      };
-
-      const cleanup = () => {
-        this.engine.removeListener("final-transcript", onTranscript);
-        this.engine.removeListener("error", onError);
-      };
-
-      this.engine.on("final-transcript", onTranscript);
-      this.engine.on("error", onError);
-
-      // Start recording — VAD will auto-stop on silence
-      this.engine.startRecording().catch((err) => {
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          resolve(null);
-        }
+    try {
+      // Use sox rec with silence detection:
+      //   silence 1 0.1 3%  → wait for speech to begin (above 3% for 0.1s)
+      //   1 <silenceSec> 3% → stop after <silenceSec> seconds of silence
+      this.recProcess = Bun.spawn([
+        "rec", "-q",
+        "-r", "16000", "-c", "1", "-b", "16",
+        "-t", "wav", wavPath,
+        "silence", "1", "0.1", "3%",
+        "1", silenceSec, "3%",
+      ], {
+        stdout: "ignore",
+        stderr: "ignore",
       });
 
-      // Safety timeout: 30 seconds max
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          if (this.engine.isRecording()) {
-            this.engine.stopRecording().catch(() => {});
+      // Wait for sox to finish (it auto-stops on silence) or timeout
+      const exitCode = await Promise.race([
+        this.recProcess.exited,
+        sleep(30_000).then(() => {
+          // Timeout — force stop
+          try { this.recProcess?.kill(); } catch {}
+          return -1;
+        }),
+      ]);
+
+      this.recProcess = null;
+
+      // Check if recording was cancelled
+      if (!this.running) {
+        cleanupFile(wavPath);
+        return null;
+      }
+
+      // Check if file exists and has content
+      if (!existsSync(wavPath)) {
+        this.onError?.("No audio recorded");
+        return null;
+      }
+
+      // Transcribe the recorded audio
+      this.setState("transcribing");
+      const result = await this.transcribeFile(wavPath);
+      cleanupFile(wavPath);
+
+      return result;
+    } catch (err) {
+      this.recProcess = null;
+      cleanupFile(wavPath);
+      const msg = err instanceof Error ? err.message : String(err);
+      this.onError?.(`Recording error: ${msg}`);
+      return null;
+    }
+  }
+
+  /**
+   * Transcribe a WAV file using the VoiceEngine's transcription pipeline.
+   * Tries local whisper.cpp first, falls back to cloud.
+   */
+  private async transcribeFile(wavPath: string): Promise<string | null> {
+    try {
+      // Import transcription functions directly
+      const { transcribeLocal, findWhisperBinary } = await import("./transcriber.js");
+      const { WhisperModelManager } = await import("./model-manager.js");
+
+      const binaryPath = await findWhisperBinary();
+      if (!binaryPath) {
+        // Try cloud fallback
+        const { transcribeCloud, isCloudAvailable } = await import("./cloud-transcriber.js");
+        if (isCloudAvailable()) {
+          const result = await transcribeCloud(wavPath, { language: "en" });
+          if (result?.text) {
+            this.engine.emit("final-transcript", result);
+            return result.text.trim() || null;
           }
-          resolve(null);
         }
-      }, 30_000);
-    });
+        this.onError?.("No whisper binary found. Install: brew install whisper-cpp");
+        return null;
+      }
+
+      // Get model path
+      const config = this.engine.getConfig();
+      const modelManager = new WhisperModelManager(config.modelsPath);
+      const modelName = config.model || "tiny";
+
+      if (!modelManager.isModelDownloaded(modelName)) {
+        this.onError?.(`Downloading whisper ${modelName} model...`);
+        await modelManager.downloadModel(modelName);
+      }
+
+      const modelPath = modelManager.getModelPath(modelName);
+      const result = await transcribeLocal(wavPath, {
+        binaryPath,
+        modelPath,
+        language: "en",
+        timeoutMs: 30000,
+      });
+
+      if (result?.text) {
+        this.engine.emit("final-transcript", result);
+        return result.text.trim() || null;
+      }
+
+      return null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.onError?.(`Transcription error: ${msg}`);
+      return null;
+    }
   }
 
   /**
@@ -335,6 +404,12 @@ export class VoiceChatLoop {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanupFile(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {}
 }
 
 /**
