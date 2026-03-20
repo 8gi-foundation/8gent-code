@@ -13,11 +13,14 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
+const PROJECT_ROOT = path.resolve(path.dirname(import.meta.dir)); // -> ~/8gent-code
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 const CHECKPOINTS_DIR = path.join(os.homedir(), ".8gent", "checkpoints");
 const TRAINING_DATA_DIR = path.join(os.homedir(), ".8gent", "training-data");
 const NIGHTLY_LOG = path.join(os.homedir(), ".8gent", "nightly.log");
-const SYSTEM_PROMPT_PATH = path.join(process.cwd(), "packages/eight/prompts/system-prompt.ts");
+const SYSTEM_PROMPT_PATH = path.join(PROJECT_ROOT, "packages/eight/prompts/system-prompt.ts");
+const BUN_PATH = path.join(os.homedir(), ".bun/bin/bun");
+const OLLAMA_PATH = "/usr/local/bin/ollama";
 
 // Parse args
 const args = process.argv.slice(2);
@@ -84,15 +87,15 @@ async function runBenchmarks(model: string): Promise<BenchmarkResult[]> {
   for (const task of tasks) {
     log(`  Benchmark: ${task.id}`);
     try {
-      const result = await runCommand("bun", [
-        "run", "packages/harness-cli/index.ts", "run",
+      const result = await runCommand(BUN_PATH, [
+        "run", path.join(PROJECT_ROOT, "packages/harness-cli/index.ts"), "run",
         task.prompt,
         "--model", model,
         "--runtime", model.includes("/") ? "openrouter" : "ollama",
         "--max-steps", "15",
         "--timeout", "120000",
         "--json",
-      ], { timeout: 180000 });
+      ], { timeout: 180000, cwd: PROJECT_ROOT });
 
       let score = 0;
       let passed = false;
@@ -352,13 +355,13 @@ async function trainLoRA(dataPath: string, iteration: number): Promise<string | 
   const outputDir = path.join(CHECKPOINTS_DIR, `eight_iter${iteration}_${Date.now()}`);
 
   const result = await runCommand("python3", [
-    path.join(process.cwd(), "packages/kernel/train_lora.py"),
+    path.join(PROJECT_ROOT, "packages/kernel/train_lora.py"),
     "--data", dataPath,
     "--base-model", "Qwen/Qwen2.5-Coder-14B", // HuggingFace model ID
     "--output", outputDir,
     "--epochs", "1",
     "--lora-rank", "16",
-  ], { timeout: 600000, cwd: process.cwd() }); // 10 min timeout for training
+  ], { timeout: 600000, cwd: PROJECT_ROOT }); // 10 min timeout for training
 
   if (result.exitCode !== 0) {
     log(`LoRA training failed: ${result.stderr.slice(-500)}`);
@@ -397,7 +400,7 @@ SYSTEM """You are Eight — 8gent's fine-tuned model, iteration ${iteration}. Yo
 
   // Naming convention: eight-{iteration}-q-14b (q = qwen lineage, 14b = params)
   const modelName = `eight-${iteration}-q-14b`;
-  const result = await runCommand("ollama", ["create", modelName, "-f", modelfilePath], { timeout: 120000 });
+  const result = await runCommand(OLLAMA_PATH, ["create", modelName, "-f", modelfilePath], { timeout: 120000 });
 
   if (result.exitCode !== 0) {
     log(`Failed to create Ollama model: ${result.stderr.slice(-300)}`);
@@ -471,7 +474,7 @@ async function main() {
   }
 
   // Check if model exists
-  const ollamaList = await runCommand("ollama", ["list"]);
+  const ollamaList = await runCommand(OLLAMA_PATH, ["list"]);
   if (ollamaList.stdout.includes("eight")) {
     log("\n✅ Model 'eight' is registered in Ollama and ready to use!");
     log("   Switch with: /model eight");

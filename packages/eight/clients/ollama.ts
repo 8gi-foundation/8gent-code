@@ -5,20 +5,20 @@
 import type { Message, LLMResponse, LLMClient } from "../types";
 
 /**
- * Resolve the Ollama base URL, checking for MetaClaw proxy override.
- * When MetaClaw is running, requests route through its proxy for
+ * Resolve the Ollama base URL, checking for training proxy override.
+ * When the training proxy is running, requests route through it for
  * skill injection and RL training signal collection.
  */
 function resolveBaseUrl(explicit?: string): string {
   if (explicit) return explicit;
-  if (process.env.METACLAW_PROXY_URL) return process.env.METACLAW_PROXY_URL;
+  if (process.env.TRAINING_PROXY_URL) return process.env.TRAINING_PROXY_URL;
 
-  // Check .8gent/config.json for metaclaw.proxyUrl
+  // Check .8gent/config.json for training_proxy.proxyUrl
   try {
     const configPath = `${process.cwd()}/.8gent/config.json`;
     const config = JSON.parse(require("fs").readFileSync(configPath, "utf-8"));
-    if (config.metaclaw?.enabled && config.metaclaw?.proxyUrl) {
-      return config.metaclaw.proxyUrl;
+    if (config.training_proxy?.enabled && config.training_proxy?.proxyUrl) {
+      return config.training_proxy.proxyUrl;
     }
   } catch {
     // Config not found or invalid — fall through

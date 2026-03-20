@@ -1,7 +1,7 @@
 /**
- * Phase 1: MetaClaw Proxy Manager
+ * Phase 1: Training Proxy Manager
  *
- * Manages the MetaClaw proxy lifecycle:
+ * Manages the RL training proxy lifecycle:
  * - Start/stop the proxy process
  * - Health checks with latency monitoring
  * - Transparent passthrough validation (no latency regression)
@@ -13,11 +13,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface ProxyConfig {
-  /** MetaClaw proxy port (default: 30000) */
+  /** Training proxy port (default: 30000) */
   port: number;
   /** Upstream Ollama URL (default: http://localhost:11434) */
   ollamaUrl: string;
-  /** Path to metaclaw.yaml config */
+  /** Path to training-proxy.yaml config */
   configPath: string;
   /** Mode: skills_only (phase 1), rl (phase 3), madmax (phase 4) */
   mode: "skills_only" | "rl" | "madmax";
@@ -44,12 +44,12 @@ interface LatencySnapshot {
 const DEFAULT_CONFIG: ProxyConfig = {
   port: 30000,
   ollamaUrl: "http://localhost:11434",
-  configPath: "config/metaclaw.yaml",
+  configPath: "config/training-proxy.yaml",
   mode: "skills_only",
   maxLatencyOverheadMs: 200,
 };
 
-export class MetaClawProxy {
+export class TrainingProxy {
   private config: ProxyConfig;
   private process: Subprocess | null = null;
   private startedAt: number = 0;
@@ -64,11 +64,11 @@ export class MetaClawProxy {
   }
 
   /**
-   * Start the MetaClaw proxy process.
+   * Start the Training proxy process.
    */
   async start(): Promise<void> {
     if (this.process) {
-      throw new Error("MetaClaw proxy is already running");
+      throw new Error("Training proxy is already running");
     }
 
     // Verify Ollama is reachable first
@@ -79,7 +79,7 @@ export class MetaClawProxy {
 
     const configPath = resolve(this.config.configPath);
     if (!existsSync(configPath)) {
-      throw new Error(`MetaClaw config not found at ${configPath}`);
+      throw new Error(`Training proxy config not found at ${configPath}`);
     }
 
     this.process = spawn({
@@ -94,12 +94,12 @@ export class MetaClawProxy {
     const healthy = await this.waitForHealth(15_000);
     if (!healthy) {
       await this.stop();
-      throw new Error("MetaClaw proxy failed to start within 15s");
+      throw new Error("Training proxy failed to start within 15s");
     }
   }
 
   /**
-   * Stop the MetaClaw proxy process.
+   * Stop the Training proxy process.
    */
   async stop(): Promise<void> {
     if (this.process) {

@@ -1,9 +1,9 @@
 /**
  * SQLite Database Operations for Design Systems
- * Uses better-sqlite3 for synchronous operations
+ * Uses bun:sqlite for synchronous operations (built-in, no native deps)
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import path from 'path';
 import fs from 'fs';
 import { SCHEMA } from './schema';
@@ -22,12 +22,12 @@ import type {
 // Default database path
 const DEFAULT_DB_PATH = path.join(process.cwd(), 'data', 'design-systems.db');
 
-let db: Database.Database | null = null;
+let db: Database | null = null;
 
 /**
  * Initialize the database connection and create tables
  */
-export function initDatabase(dbPath: string = DEFAULT_DB_PATH): Database.Database {
+export function initDatabase(dbPath: string = DEFAULT_DB_PATH): Database {
   // Ensure data directory exists
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
@@ -35,8 +35,8 @@ export function initDatabase(dbPath: string = DEFAULT_DB_PATH): Database.Databas
   }
 
   db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
 
   // Run schema
   db.exec(SCHEMA);
@@ -47,7 +47,7 @@ export function initDatabase(dbPath: string = DEFAULT_DB_PATH): Database.Databas
 /**
  * Get the current database instance
  */
-export function getDatabase(): Database.Database {
+export function getDatabase(): Database {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
@@ -126,7 +126,7 @@ export function insertColorPalette(palette: Omit<ColorPalette, 'id'>): number {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(
+  stmt.run(
     palette.system_id,
     palette.name,
     palette.primary_hsl,
@@ -145,7 +145,9 @@ export function insertColorPalette(palette: Omit<ColorPalette, 'id'>): number {
     palette.ring_hsl
   );
 
-  return result.lastInsertRowid as number;
+  // bun:sqlite doesn't expose lastInsertRowid on run result the same way
+  const result = getDatabase().prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+  return result.id;
 }
 
 export function getColorPaletteBySystemId(systemId: string): ColorPalette | undefined {
@@ -165,7 +167,7 @@ export function insertTypography(typography: Omit<Typography, 'id'>): number {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(
+  stmt.run(
     typography.system_id,
     typography.font_family,
     typography.heading_font,
@@ -176,7 +178,8 @@ export function insertTypography(typography: Omit<Typography, 'id'>): number {
     typography.letter_spacing
   );
 
-  return result.lastInsertRowid as number;
+  const result = getDatabase().prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+  return result.id;
 }
 
 export function getTypographyBySystemId(systemId: string): Typography | undefined {
@@ -195,7 +198,7 @@ export function insertComponent(component: Omit<Component, 'id'>): number {
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(
+  stmt.run(
     component.system_id,
     component.component_type,
     component.variant,
@@ -204,7 +207,8 @@ export function insertComponent(component: Omit<Component, 'id'>): number {
     component.description
   );
 
-  return result.lastInsertRowid as number;
+  const result = getDatabase().prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+  return result.id;
 }
 
 export function getComponentsBySystemId(systemId: string): Component[] {
@@ -231,8 +235,9 @@ export function insertStyleTag(systemId: string, tag: string): number {
   const stmt = getDatabase().prepare(
     'INSERT INTO style_tags (system_id, tag) VALUES (?, ?)'
   );
-  const result = stmt.run(systemId, tag);
-  return result.lastInsertRowid as number;
+  stmt.run(systemId, tag);
+  const result = getDatabase().prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+  return result.id;
 }
 
 export function getTagsBySystemId(systemId: string): string[] {

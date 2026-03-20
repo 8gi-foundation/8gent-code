@@ -21,6 +21,7 @@ import { agenticBenchmarks } from "../categories/agentic/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { battleTestBenchmarks } from "../categories/battle-test/benchmarks";
 import { battleTestProBenchmarks } from "../categories/battle-test/benchmarks-pro";
+import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { getFewShot } from "./few-shot";
 import { grade } from "./execution-grader";
 import {
@@ -42,12 +43,15 @@ const API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 
 // IMPORTANT: Only use :free models — openrouter/auto routes to PAID models
 // Format: "provider::model" — ollama models run locally, openrouter models need API key
-const MODELS = [
-  "ollama::qwen3.5:latest",                        // local — newest Qwen (March 2026), best coding benchmarks
-  "ollama::devstral:latest",                        // local — Mistral's code-specialized model
-  "ollama::qwen3:14b",                              // local — general fallback
-  "openrouter::google/gemini-2.5-flash:free",        // remote free fallback
-];
+// Override with MODELS_OVERRIDE env var (single model: "ollama::eight:latest")
+const MODELS = process.env.MODELS_OVERRIDE
+  ? process.env.MODELS_OVERRIDE.split(",")
+  : [
+      "ollama::qwen3.5:latest",                        // local — newest Qwen (March 2026), best coding benchmarks
+      "ollama::devstral:latest",                        // local — Mistral's code-specialized model
+      "ollama::qwen3:14b",                              // local — general fallback
+      "openrouter::google/gemini-2.5-flash:free",        // remote free fallback
+    ];
 
 const OLLAMA_URL = "http://localhost:11434/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -68,6 +72,7 @@ const ALL_BENCHMARKS: BenchmarkDefinition[] = [
   ...uiDesignBenchmarks,
   ...battleTestBenchmarks,
   ...battleTestProBenchmarks,
+  ...longHorizonBenchmarks,
 ];
 
 function getTargetBenchmarks(): BenchmarkDefinition[] {
@@ -161,9 +166,10 @@ async function callModel(
     headers["X-Title"] = "8gent-autoresearch";
   }
 
-  // 10 minute timeout — Ollama models need time for large outputs
+  // 5 minute timeout (reduced from 10) — prevents stuck benchmarks
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 600_000);
+  const timeoutMs = parseInt(process.env.BENCHMARK_TIMEOUT ?? "300000", 10);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   const response = await fetch(url, {
     method: "POST",

@@ -30,8 +30,8 @@ export interface TrainingConfig {
   validateCommand: string;
   /** Min benchmark score to promote checkpoint (default: 80) */
   promotionThreshold: number;
-  /** MetaClaw config path */
-  metaclawConfigPath: string;
+  /** Training proxy config path */
+  trainingProxyConfigPath: string;
 }
 
 export interface CheckpointInfo {
@@ -79,7 +79,7 @@ const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   dataDir: ".8gent/kernel/training",
   validateCommand: "bun run benchmarks/autoresearch/validate-checkpoint.ts",
   promotionThreshold: 80,
-  metaclawConfigPath: "config/metaclaw.yaml",
+  trainingProxyConfigPath: "config/training-proxy.yaml",
 };
 
 export class TrainingOrchestrator {
@@ -158,7 +158,7 @@ export class TrainingOrchestrator {
 
     this.state.checkpoints.push(checkpoint);
 
-    // Write training batch to disk for MetaClaw
+    // Write training batch to disk for the training proxy
     const batch: TrainingBatch = {
       samples: [...this.state.currentBatch],
       batchId,
@@ -173,8 +173,8 @@ export class TrainingOrchestrator {
     this.saveState();
 
     try {
-      // Trigger MetaClaw training
-      await this.triggerMetaClawTraining(batchPath);
+      // Trigger proxy training
+      await this.triggerProxyTraining(batchPath);
       checkpoint.status = "validating";
       this.saveState();
 
@@ -249,7 +249,7 @@ export class TrainingOrchestrator {
 
   // ── Private helpers ────────────────────────────────────────────────
 
-  private async triggerMetaClawTraining(batchPath: string): Promise<void> {
+  private async triggerProxyTraining(batchPath: string): Promise<void> {
     const proc = spawn({
       cmd: [
         "metaclaw", "train",
@@ -264,7 +264,7 @@ export class TrainingOrchestrator {
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
       const stderr = await new Response(proc.stderr).text();
-      throw new Error(`MetaClaw training failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
+      throw new Error(`Training proxy failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
     }
   }
 
@@ -275,7 +275,7 @@ export class TrainingOrchestrator {
       stderr: "pipe",
       env: {
         ...process.env,
-        METACLAW_PROXY_URL: "http://localhost:30000",
+        TRAINING_PROXY_URL: "http://localhost:30000",
       },
     });
 
@@ -300,7 +300,7 @@ export class TrainingOrchestrator {
   }
 
   private async rollback(_checkpointId: string): Promise<void> {
-    // Tell MetaClaw to revert to previous weights
+    // Tell the training proxy to revert to previous weights
     try {
       const proc = spawn({
         cmd: ["metaclaw", "rollback"],
@@ -309,7 +309,7 @@ export class TrainingOrchestrator {
       });
       await proc.exited;
     } catch {
-      // Best effort — MetaClaw may handle rollback internally
+      // Best effort — the training proxy may handle rollback internally
     }
   }
 

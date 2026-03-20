@@ -15,7 +15,7 @@ import { PersonalCollector, type TrainingPair, type CollectorStats } from "./per
 export interface KernelConfig {
   /** Enable the kernel fine-tuning pipeline (default: false) */
   enabled: boolean;
-  /** Path to metaclaw.yaml (default: config/metaclaw.yaml) */
+  /** Path to training-proxy.yaml (default: config/training-proxy.yaml) */
   configPath: string;
   /**
    * Path to the user's Personal LoRA adapter (Layer 3).
@@ -30,7 +30,7 @@ export interface KernelConfig {
 
 const DEFAULT_KERNEL_CONFIG: KernelConfig = {
   enabled: false,
-  configPath: "config/metaclaw.yaml",
+  configPath: "config/training-proxy.yaml",
   personalLoraPath: "~/.8gent/personal-lora/",
   production: {},
 };
@@ -47,7 +47,7 @@ export class KernelManager {
   }
 
   /**
-   * Initialize from .8gent/config.json metaclaw section.
+   * Initialize from .8gent/config.json training_proxy section.
    */
   static fromProjectConfig(projectRoot: string = process.cwd()): KernelManager {
     const configPath = resolve(projectRoot, ".8gent/config.json");
@@ -57,10 +57,10 @@ export class KernelManager {
 
     try {
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
-      const mc = config.metaclaw ?? {};
+      const mc = config.training_proxy ?? {};
       return new KernelManager({
         enabled: mc.enabled ?? false,
-        configPath: mc.configPath ?? "config/metaclaw.yaml",
+        configPath: mc.configPath ?? "config/training-proxy.yaml",
         production: {
           proxy: { port: 30000, ollamaUrl: "http://localhost:11434" },
           training: { baseModel: mc.baseModel ?? "qwen3:14b" },

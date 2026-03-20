@@ -61,12 +61,12 @@
     "timeout": 60000
   },
 
-  "metaclaw": {
+  "training_proxy": {
     "enabled": false,
     "proxyUrl": "http://localhost:30000",
     "autoStart": false,
     "baseModel": "qwen2.5-coder:14b",
-    "configPath": "config/metaclaw.yaml"
+    "configPath": "config/training-proxy.yaml"
   },
 
   "safety": {

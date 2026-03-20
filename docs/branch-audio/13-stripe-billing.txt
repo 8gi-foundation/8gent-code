@@ -1,0 +1,1 @@
+Branch report for stripe billing. Already merged into main. Replaced billing stubs with real Stripe SDK integration for Pro and Team plans. Merged at commit 59ed074. This branch can be safely deleted.

@@ -1,0 +1,2521 @@
+{
+  "byDomain": {
+    "battle-test": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 45,
+        "benchmarkId": "BT008",
+        "timestamp": 1774008756087
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 54,
+        "benchmarkId": "BT008",
+        "timestamp": 1774008897995
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 43,
+        "benchmarkId": "BT009",
+        "timestamp": 1774009012064
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT009",
+        "timestamp": 1774009158745
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 33,
+        "benchmarkId": "BT009",
+        "timestamp": 1774009266627
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 41,
+        "benchmarkId": "BT010",
+        "timestamp": 1774009426005
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1774009566345
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1774009725640
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 71,
+        "benchmarkId": "BT011",
+        "timestamp": 1774009869092
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BT011",
+        "timestamp": 1774010046714
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT012",
+        "timestamp": 1774010307898
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT012",
+        "timestamp": 1774010464897
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 73,
+        "benchmarkId": "BT012",
+        "timestamp": 1774010559261
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 92,
+        "benchmarkId": "BT013",
+        "timestamp": 1774010751377
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT013",
+        "timestamp": 1774011271891
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "BT014",
+        "timestamp": 1774011458878
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 95,
+        "benchmarkId": "BT014",
+        "timestamp": 1774011642517
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT014",
+        "timestamp": 1774011817297
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1774011976259
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1774012437646
+      }
+    ],
+    "agentic": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 23,
+        "benchmarkId": "MR001",
+        "timestamp": 1774015297034
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 28,
+        "benchmarkId": "MR001",
+        "timestamp": 1774015564865
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "MR001",
+        "timestamp": 1774015724306
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "TC001",
+        "timestamp": 1774016005642
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "TC001",
+        "timestamp": 1774016513264
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 52,
+        "benchmarkId": "DP001",
+        "timestamp": 1774016636224
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 23,
+        "benchmarkId": "DP001",
+        "timestamp": 1774016747639
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 38,
+        "benchmarkId": "DP001",
+        "timestamp": 1774016906754
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 46,
+        "benchmarkId": "RE001",
+        "timestamp": 1774016965020
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 38,
+        "benchmarkId": "RE001",
+        "timestamp": 1774017242171
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 39,
+        "benchmarkId": "SD001",
+        "timestamp": 1774017301544
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 22,
+        "benchmarkId": "SD001",
+        "timestamp": 1774017369621
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "SD001",
+        "timestamp": 1774017500857
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "AR001",
+        "timestamp": 1774017901436
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 26,
+        "benchmarkId": "CB001",
+        "timestamp": 1774018440656
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 64,
+        "benchmarkId": "CB001",
+        "timestamp": 1774018584273
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 68,
+        "benchmarkId": "CB001",
+        "timestamp": 1774018784784
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "MR001",
+        "timestamp": 1774018959156
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 28,
+        "benchmarkId": "MR001",
+        "timestamp": 1774019191113
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 14,
+        "benchmarkId": "MR001",
+        "timestamp": 1774019482929
+      }
+    ],
+    "fullstack": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS-MEGA-001",
+        "timestamp": 1774020036303
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 28,
+        "benchmarkId": "FS001",
+        "timestamp": 1774020418091
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 55,
+        "benchmarkId": "FS001",
+        "timestamp": 1774020670699
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 62,
+        "benchmarkId": "FS001",
+        "timestamp": 1774020749843
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "FS002",
+        "timestamp": 1774021011438
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "FS002",
+        "timestamp": 1774021149136
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 99,
+        "benchmarkId": "FS002",
+        "timestamp": 1774021338424
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 67,
+        "benchmarkId": "FS003",
+        "timestamp": 1774021416040
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS003",
+        "timestamp": 1774021525917
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 57,
+        "benchmarkId": "FS003",
+        "timestamp": 1774021645521
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS-MEGA-001",
+        "timestamp": 1774022181904
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 62,
+        "benchmarkId": "FS001",
+        "timestamp": 1774022557239
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS001",
+        "timestamp": 1774022620637
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 62,
+        "benchmarkId": "FS001",
+        "timestamp": 1774022694889
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 34,
+        "benchmarkId": "FS002",
+        "timestamp": 1774022830078
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 93,
+        "benchmarkId": "FS002",
+        "timestamp": 1774022941283
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "FS002",
+        "timestamp": 1774023103686
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 63,
+        "benchmarkId": "FS003",
+        "timestamp": 1774023189563
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 72,
+        "benchmarkId": "FS003",
+        "timestamp": 1774023300089
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "FS003",
+        "timestamp": 1774023392430
+      }
+    ],
+    "bug-fixing": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF001",
+        "timestamp": 1774023696195
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 90,
+        "benchmarkId": "BF001",
+        "timestamp": 1774023781483
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 96,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024061961
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024096418
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024134714
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024163802
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024192400
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024221347
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 34,
+        "benchmarkId": "BF001",
+        "timestamp": 1774024576808
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 90,
+        "benchmarkId": "BF001",
+        "timestamp": 1774024614823
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024648030
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024676963
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024707529
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024746765
+      }
+    ],
+    "ui-design": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI001",
+        "timestamp": 1774024852955
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "UI002",
+        "timestamp": 1774024939345
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "UI002",
+        "timestamp": 1774025047264
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "UI002",
+        "timestamp": 1774025140952
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 89,
+        "benchmarkId": "UI003",
+        "timestamp": 1774025331879
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 89,
+        "benchmarkId": "UI003",
+        "timestamp": 1774025478079
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI003",
+        "timestamp": 1774025631577
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI004",
+        "timestamp": 1774025854157
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 98,
+        "benchmarkId": "UI005",
+        "timestamp": 1774026032183
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI005",
+        "timestamp": 1774026246227
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 95,
+        "benchmarkId": "UI006",
+        "timestamp": 1774026414633
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 95,
+        "benchmarkId": "UI006",
+        "timestamp": 1774026611834
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI006",
+        "timestamp": 1774026758152
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 90,
+        "benchmarkId": "UI007",
+        "timestamp": 1774026859253
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 83,
+        "benchmarkId": "UI007",
+        "timestamp": 1774027113458
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "UI007",
+        "timestamp": 1774027294770
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI008",
+        "timestamp": 1774027443740
+      }
+    ],
+    "long-horizon": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "LH001",
+        "timestamp": 1774027747656
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 59,
+        "benchmarkId": "LH001",
+        "timestamp": 1774028308620
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 71,
+        "benchmarkId": "LH002",
+        "timestamp": 1774028811476
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 40,
+        "benchmarkId": "LH002",
+        "timestamp": 1774029072566
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 57,
+        "benchmarkId": "LH003",
+        "timestamp": 1774029298313
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "LH003",
+        "timestamp": 1774029524351
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 65,
+        "benchmarkId": "LH003",
+        "timestamp": 1774029783526
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 67,
+        "benchmarkId": "LH004",
+        "timestamp": 1774030012649
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 75,
+        "benchmarkId": "LH004",
+        "timestamp": 1774030272374
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 52,
+        "benchmarkId": "LH005",
+        "timestamp": 1774031429657
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 49,
+        "benchmarkId": "LH001",
+        "timestamp": 1774032246249
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 66,
+        "benchmarkId": "LH002",
+        "timestamp": 1774033071445
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "LH003",
+        "timestamp": 1774033600819
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 45,
+        "benchmarkId": "LH003",
+        "timestamp": 1774033867015
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 80,
+        "benchmarkId": "LH004",
+        "timestamp": 1774034054587
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 65,
+        "benchmarkId": "LH004",
+        "timestamp": 1774034264306
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 56,
+        "benchmarkId": "LH004",
+        "timestamp": 1774034473175
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "LH005",
+        "timestamp": 1774034736481
+      }
+    ]
+  },
+  "byBenchmark": {
+    "BT001": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 76,
+        "benchmarkId": "BT001",
+        "timestamp": 1773953913032
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 73,
+        "benchmarkId": "BT001",
+        "timestamp": 1773954027483
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 100,
+        "benchmarkId": "BT001",
+        "timestamp": 1773962617314
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 60,
+        "benchmarkId": "BT001",
+        "timestamp": 1773978541270
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 30,
+        "benchmarkId": "BT001",
+        "timestamp": 1773979037469
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 88,
+        "benchmarkId": "BT001",
+        "timestamp": 1773979500467
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 60,
+        "benchmarkId": "BT001",
+        "timestamp": 1773995822582
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 55,
+        "benchmarkId": "BT001",
+        "timestamp": 1774004732392
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 71,
+        "benchmarkId": "BT001",
+        "timestamp": 1774004874851
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 85,
+        "benchmarkId": "BT001",
+        "timestamp": 1774005051925
+      }
+    ],
+    "BT002": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 92,
+        "benchmarkId": "BT002",
+        "timestamp": 1773963311598
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 83,
+        "benchmarkId": "BT002",
+        "timestamp": 1773963756605
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 74,
+        "benchmarkId": "BT002",
+        "timestamp": 1773979972605
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 83,
+        "benchmarkId": "BT002",
+        "timestamp": 1773980152242
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 30,
+        "benchmarkId": "BT002",
+        "timestamp": 1773980634526
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 87,
+        "benchmarkId": "BT002",
+        "timestamp": 1773995963923
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 52,
+        "benchmarkId": "BT002",
+        "timestamp": 1773996184123
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT002",
+        "timestamp": 1774005206714
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT002",
+        "timestamp": 1774005346375
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 83,
+        "benchmarkId": "BT002",
+        "timestamp": 1774005498650
+      }
+    ],
+    "BT003": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT003",
+        "timestamp": 1773964226371
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 55,
+        "benchmarkId": "BT003",
+        "timestamp": 1773964455981
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT003",
+        "timestamp": 1773980863119
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 36,
+        "benchmarkId": "BT003",
+        "timestamp": 1773981094055
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 30,
+        "benchmarkId": "BT003",
+        "timestamp": 1773981597571
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 55,
+        "benchmarkId": "BT003",
+        "timestamp": 1773996967728
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT003",
+        "timestamp": 1773997205367
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 94,
+        "benchmarkId": "BT003",
+        "timestamp": 1774005692006
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 58,
+        "benchmarkId": "BT003",
+        "timestamp": 1774005952575
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 58,
+        "benchmarkId": "BT003",
+        "timestamp": 1774006186074
+      }
+    ],
+    "BT004": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 42,
+        "benchmarkId": "BT004",
+        "timestamp": 1773965031313
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 26,
+        "benchmarkId": "BT004",
+        "timestamp": 1773965282853
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 77,
+        "benchmarkId": "BT004",
+        "timestamp": 1773981769464
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 60,
+        "benchmarkId": "BT004",
+        "timestamp": 1773981968528
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 25,
+        "benchmarkId": "BT004",
+        "timestamp": 1773982182165
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 26,
+        "benchmarkId": "BT004",
+        "timestamp": 1773997403550
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "BT004",
+        "timestamp": 1773997603893
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 64,
+        "benchmarkId": "BT004",
+        "timestamp": 1774006314673
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "BT004",
+        "timestamp": 1774006530034
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 64,
+        "benchmarkId": "BT004",
+        "timestamp": 1774006686778
+      }
+    ],
+    "BT005": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 88,
+        "benchmarkId": "BT005",
+        "timestamp": 1773955720685
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT005",
+        "timestamp": 1773955890559
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 48,
+        "benchmarkId": "BT005",
+        "timestamp": 1773956074318
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 100,
+        "benchmarkId": "BT005",
+        "timestamp": 1773965693966
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 73,
+        "benchmarkId": "BT005",
+        "timestamp": 1773982618856
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 92,
+        "benchmarkId": "BT005",
+        "timestamp": 1773983057840
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 30,
+        "benchmarkId": "BT005",
+        "timestamp": 1773983513841
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 35,
+        "benchmarkId": "BT005",
+        "timestamp": 1773998745343
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "BT005",
+        "timestamp": 1774006967617
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 99,
+        "benchmarkId": "BT005",
+        "timestamp": 1774007446117
+      }
+    ],
+    "BT006": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 54,
+        "benchmarkId": "BT006",
+        "timestamp": 1773956536924
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 54,
+        "benchmarkId": "BT006",
+        "timestamp": 1773965912327
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 53,
+        "benchmarkId": "BT006",
+        "timestamp": 1773966409644
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 28,
+        "benchmarkId": "BT006",
+        "timestamp": 1773966830265
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "BT006",
+        "timestamp": 1773998938830
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 49,
+        "benchmarkId": "BT006",
+        "timestamp": 1773999132724
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "BT006",
+        "timestamp": 1773999319492
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 48,
+        "benchmarkId": "BT006",
+        "timestamp": 1774007640409
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "BT006",
+        "timestamp": 1774007762344
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 54,
+        "benchmarkId": "BT006",
+        "timestamp": 1774007952189
+      }
+    ],
+    "BT007": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 53,
+        "benchmarkId": "BT007",
+        "timestamp": 1773967094488
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 58,
+        "benchmarkId": "BT007",
+        "timestamp": 1773967572867
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 58,
+        "benchmarkId": "BT007",
+        "timestamp": 1773967810927
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 27,
+        "benchmarkId": "BT007",
+        "timestamp": 1773991902131
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 44,
+        "benchmarkId": "BT007",
+        "timestamp": 1773992117875
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 63,
+        "benchmarkId": "BT007",
+        "timestamp": 1773999584452
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 43,
+        "benchmarkId": "BT007",
+        "timestamp": 1774000088795
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 64,
+        "benchmarkId": "BT007",
+        "timestamp": 1774008154078
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "BT007",
+        "timestamp": 1774008330989
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 63,
+        "benchmarkId": "BT007",
+        "timestamp": 1774008478341
+      }
+    ],
+    "BT008": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 23,
+        "benchmarkId": "BT008",
+        "timestamp": 1773969283564
+      },
+      {
+        "model": "ollama/qwen3:14b",
+        "score": 40,
+        "benchmarkId": "BT008",
+        "timestamp": 1773992866391
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 23,
+        "benchmarkId": "BT008",
+        "timestamp": 1773993123013
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 45,
+        "benchmarkId": "BT008",
+        "timestamp": 1773993592553
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 32,
+        "benchmarkId": "BT008",
+        "timestamp": 1774000191192
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 43,
+        "benchmarkId": "BT008",
+        "timestamp": 1774000307637
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 49,
+        "benchmarkId": "BT008",
+        "timestamp": 1774000426155
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 58,
+        "benchmarkId": "BT008",
+        "timestamp": 1774008573622
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 45,
+        "benchmarkId": "BT008",
+        "timestamp": 1774008756087
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 54,
+        "benchmarkId": "BT008",
+        "timestamp": 1774008897995
+      }
+    ],
+    "BT009": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 24,
+        "benchmarkId": "BT009",
+        "timestamp": 1773969756935
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 24,
+        "benchmarkId": "BT009",
+        "timestamp": 1773970252782
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 43,
+        "benchmarkId": "BT009",
+        "timestamp": 1773970757208
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 44,
+        "benchmarkId": "BT009",
+        "timestamp": 1773994614415
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 33,
+        "benchmarkId": "BT009",
+        "timestamp": 1774000625218
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 33,
+        "benchmarkId": "BT009",
+        "timestamp": 1774000804159
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "BT009",
+        "timestamp": 1774000986740
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 43,
+        "benchmarkId": "BT009",
+        "timestamp": 1774009012064
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT009",
+        "timestamp": 1774009158745
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 33,
+        "benchmarkId": "BT009",
+        "timestamp": 1774009266627
+      }
+    ],
+    "BT010": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1773958448612
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 27,
+        "benchmarkId": "BT010",
+        "timestamp": 1773958588563
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1773970937441
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1773971408080
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1773971879840
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 41,
+        "benchmarkId": "BT010",
+        "timestamp": 1774001134191
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1774001283270
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 41,
+        "benchmarkId": "BT010",
+        "timestamp": 1774009426005
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1774009566345
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "BT010",
+        "timestamp": 1774009725640
+      }
+    ],
+    "BT011": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 92,
+        "benchmarkId": "BT011",
+        "timestamp": 1773959088171
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 31,
+        "benchmarkId": "BT011",
+        "timestamp": 1773959348125
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 92,
+        "benchmarkId": "BT011",
+        "timestamp": 1773972024676
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 96,
+        "benchmarkId": "BT011",
+        "timestamp": 1773972284648
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 92,
+        "benchmarkId": "BT011",
+        "timestamp": 1773972549706
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 96,
+        "benchmarkId": "BT011",
+        "timestamp": 1774001719080
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 87,
+        "benchmarkId": "BT011",
+        "timestamp": 1774001856419
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BT011",
+        "timestamp": 1774002002097
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 71,
+        "benchmarkId": "BT011",
+        "timestamp": 1774009869092
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BT011",
+        "timestamp": 1774010046714
+      }
+    ],
+    "BT012": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 51,
+        "benchmarkId": "BT012",
+        "timestamp": 1773959969052
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 90,
+        "benchmarkId": "BT012",
+        "timestamp": 1773973041408
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 65,
+        "benchmarkId": "BT012",
+        "timestamp": 1773973256268
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 30,
+        "benchmarkId": "BT012",
+        "timestamp": 1773973717178
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "BT012",
+        "timestamp": 1774002165416
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 87,
+        "benchmarkId": "BT012",
+        "timestamp": 1774002349107
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT012",
+        "timestamp": 1774002540630
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT012",
+        "timestamp": 1774010307898
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT012",
+        "timestamp": 1774010464897
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 73,
+        "benchmarkId": "BT012",
+        "timestamp": 1774010559261
+      }
+    ],
+    "BT013": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 88,
+        "benchmarkId": "BT013",
+        "timestamp": 1773952954939
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 27,
+        "benchmarkId": "BT013",
+        "timestamp": 1773960363720
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 73,
+        "benchmarkId": "BT013",
+        "timestamp": 1773960577116
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 85,
+        "benchmarkId": "BT013",
+        "timestamp": 1773960785909
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 77,
+        "benchmarkId": "BT013",
+        "timestamp": 1773975085421
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 74,
+        "benchmarkId": "BT013",
+        "timestamp": 1773975519143
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT013",
+        "timestamp": 1774002794961
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 22,
+        "benchmarkId": "BT013",
+        "timestamp": 1774003362809
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 92,
+        "benchmarkId": "BT013",
+        "timestamp": 1774010751377
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT013",
+        "timestamp": 1774011271891
+      }
+    ],
+    "BT014": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT014",
+        "timestamp": 1773911544939
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 100,
+        "benchmarkId": "BT014",
+        "timestamp": 1773953103381
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT014",
+        "timestamp": 1773960956092
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 100,
+        "benchmarkId": "BT014",
+        "timestamp": 1773961108634
+      },
+      {
+        "model": "ollama/qwen3:14b",
+        "score": 100,
+        "benchmarkId": "BT014",
+        "timestamp": 1773976356943
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT014",
+        "timestamp": 1774003778320
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BT014",
+        "timestamp": 1774003954574
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "BT014",
+        "timestamp": 1774011458878
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 95,
+        "benchmarkId": "BT014",
+        "timestamp": 1774011642517
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT014",
+        "timestamp": 1774011817297
+      }
+    ],
+    "BT015": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 93,
+        "benchmarkId": "BT015",
+        "timestamp": 1773953671270
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 90,
+        "benchmarkId": "BT015",
+        "timestamp": 1773961328429
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1773961507042
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1773961706197
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 89,
+        "benchmarkId": "BT015",
+        "timestamp": 1773976619754
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "BT015",
+        "timestamp": 1774004116091
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 93,
+        "benchmarkId": "BT015",
+        "timestamp": 1774004312822
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1774004573425
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1774011976259
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BT015",
+        "timestamp": 1774012437646
+      }
+    ],
+    "TC001": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 27,
+        "benchmarkId": "TC001",
+        "timestamp": 1773962822253
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 27,
+        "benchmarkId": "TC001",
+        "timestamp": 1773969559584
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 26,
+        "benchmarkId": "TC001",
+        "timestamp": 1773970048963
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 58,
+        "benchmarkId": "TC001",
+        "timestamp": 1773970569130
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 24,
+        "benchmarkId": "TC001",
+        "timestamp": 1773978846190
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 28,
+        "benchmarkId": "TC001",
+        "timestamp": 1773979308500
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 27,
+        "benchmarkId": "TC001",
+        "timestamp": 1773979774440
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 23,
+        "benchmarkId": "TC001",
+        "timestamp": 1774012739106
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "TC001",
+        "timestamp": 1774016005642
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "TC001",
+        "timestamp": 1774016513264
+      }
+    ],
+    "DP001": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 21,
+        "benchmarkId": "DP001",
+        "timestamp": 1773971562132
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 50,
+        "benchmarkId": "DP001",
+        "timestamp": 1773980033834
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 21,
+        "benchmarkId": "DP001",
+        "timestamp": 1773980429838
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 52,
+        "benchmarkId": "DP001",
+        "timestamp": 1773980698773
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 54,
+        "benchmarkId": "DP001",
+        "timestamp": 1774013451983
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "DP001",
+        "timestamp": 1774013597026
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 54,
+        "benchmarkId": "DP001",
+        "timestamp": 1774013740733
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 52,
+        "benchmarkId": "DP001",
+        "timestamp": 1774016636224
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 23,
+        "benchmarkId": "DP001",
+        "timestamp": 1774016747639
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 38,
+        "benchmarkId": "DP001",
+        "timestamp": 1774016906754
+      }
+    ],
+    "RE001": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 38,
+        "benchmarkId": "RE001",
+        "timestamp": 1773972072037
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 46,
+        "benchmarkId": "RE001",
+        "timestamp": 1773972320053
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 35,
+        "benchmarkId": "RE001",
+        "timestamp": 1773980909303
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 26,
+        "benchmarkId": "RE001",
+        "timestamp": 1773981201928
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 24,
+        "benchmarkId": "RE001",
+        "timestamp": 1773981639138
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "RE001",
+        "timestamp": 1774013866876
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 26,
+        "benchmarkId": "RE001",
+        "timestamp": 1774013975222
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 38,
+        "benchmarkId": "RE001",
+        "timestamp": 1774014023217
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 46,
+        "benchmarkId": "RE001",
+        "timestamp": 1774016965020
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 38,
+        "benchmarkId": "RE001",
+        "timestamp": 1774017242171
+      }
+    ],
+    "SD001": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 42,
+        "benchmarkId": "SD001",
+        "timestamp": 1773973315686
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 43,
+        "benchmarkId": "SD001",
+        "timestamp": 1773981824191
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 32,
+        "benchmarkId": "SD001",
+        "timestamp": 1773982031163
+      },
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 41,
+        "benchmarkId": "SD001",
+        "timestamp": 1773982268587
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "SD001",
+        "timestamp": 1774014095754
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 22,
+        "benchmarkId": "SD001",
+        "timestamp": 1774014154766
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 65,
+        "benchmarkId": "SD001",
+        "timestamp": 1774014262909
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 39,
+        "benchmarkId": "SD001",
+        "timestamp": 1774017301544
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 22,
+        "benchmarkId": "SD001",
+        "timestamp": 1774017369621
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 24,
+        "benchmarkId": "SD001",
+        "timestamp": 1774017500857
+      }
+    ],
+    "AR001": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 36,
+        "benchmarkId": "AR001",
+        "timestamp": 1773966495262
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 28,
+        "benchmarkId": "AR001",
+        "timestamp": 1773973847309
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 31,
+        "benchmarkId": "AR001",
+        "timestamp": 1773975213825
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 31,
+        "benchmarkId": "AR001",
+        "timestamp": 1773982760046
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 31,
+        "benchmarkId": "AR001",
+        "timestamp": 1773983200710
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 29,
+        "benchmarkId": "AR001",
+        "timestamp": 1773983955631
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 37,
+        "benchmarkId": "AR001",
+        "timestamp": 1774014421644
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "AR001",
+        "timestamp": 1774014574841
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "AR001",
+        "timestamp": 1774014728248
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "AR001",
+        "timestamp": 1774017901436
+      }
+    ],
+    "CB001": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 69,
+        "benchmarkId": "CB001",
+        "timestamp": 1773975631425
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 23,
+        "benchmarkId": "CB001",
+        "timestamp": 1773976904163
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 71,
+        "benchmarkId": "CB001",
+        "timestamp": 1773988947179
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 55,
+        "benchmarkId": "CB001",
+        "timestamp": 1773989955329
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 69,
+        "benchmarkId": "CB001",
+        "timestamp": 1774014840535
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 21,
+        "benchmarkId": "CB001",
+        "timestamp": 1774014954987
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 69,
+        "benchmarkId": "CB001",
+        "timestamp": 1774015099806
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 26,
+        "benchmarkId": "CB001",
+        "timestamp": 1774018440656
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 64,
+        "benchmarkId": "CB001",
+        "timestamp": 1774018584273
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 68,
+        "benchmarkId": "CB001",
+        "timestamp": 1774018784784
+      }
+    ],
+    "MR001": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 28,
+        "benchmarkId": "MR001",
+        "timestamp": 1773978412181
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 18,
+        "benchmarkId": "MR001",
+        "timestamp": 1773990804712
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 16,
+        "benchmarkId": "MR001",
+        "timestamp": 1773991210320
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 18,
+        "benchmarkId": "MR001",
+        "timestamp": 1773991736705
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 23,
+        "benchmarkId": "MR001",
+        "timestamp": 1774015297034
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 28,
+        "benchmarkId": "MR001",
+        "timestamp": 1774015564865
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "MR001",
+        "timestamp": 1774015724306
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 25,
+        "benchmarkId": "MR001",
+        "timestamp": 1774018959156
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 28,
+        "benchmarkId": "MR001",
+        "timestamp": 1774019191113
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 14,
+        "benchmarkId": "MR001",
+        "timestamp": 1774019482929
+      }
+    ],
+    "FS-MEGA-001": [
+      {
+        "model": "ollama/devstral:latest",
+        "score": 29,
+        "benchmarkId": "FS-MEGA-001",
+        "timestamp": 1773992528607
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS-MEGA-001",
+        "timestamp": 1774019771591
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS-MEGA-001",
+        "timestamp": 1774020036303
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS-MEGA-001",
+        "timestamp": 1774022181904
+      }
+    ],
+    "FS001": [
+      {
+        "model": "ollama/qwen3.5:latest",
+        "score": 28,
+        "benchmarkId": "FS001",
+        "timestamp": 1773994501059
+      },
+      {
+        "model": "ollama/devstral:latest",
+        "score": 30,
+        "benchmarkId": "FS001",
+        "timestamp": 1773994848988
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 28,
+        "benchmarkId": "FS001",
+        "timestamp": 1774020418091
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 55,
+        "benchmarkId": "FS001",
+        "timestamp": 1774020670699
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 62,
+        "benchmarkId": "FS001",
+        "timestamp": 1774020749843
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 62,
+        "benchmarkId": "FS001",
+        "timestamp": 1774022557239
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS001",
+        "timestamp": 1774022620637
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 62,
+        "benchmarkId": "FS001",
+        "timestamp": 1774022694889
+      }
+    ],
+    "FS002": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "FS002",
+        "timestamp": 1774021011438
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "FS002",
+        "timestamp": 1774021149136
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 99,
+        "benchmarkId": "FS002",
+        "timestamp": 1774021338424
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 34,
+        "benchmarkId": "FS002",
+        "timestamp": 1774022830078
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 93,
+        "benchmarkId": "FS002",
+        "timestamp": 1774022941283
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "FS002",
+        "timestamp": 1774023103686
+      }
+    ],
+    "FS003": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 67,
+        "benchmarkId": "FS003",
+        "timestamp": 1774021416040
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "FS003",
+        "timestamp": 1774021525917
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 57,
+        "benchmarkId": "FS003",
+        "timestamp": 1774021645521
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 63,
+        "benchmarkId": "FS003",
+        "timestamp": 1774023189563
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 72,
+        "benchmarkId": "FS003",
+        "timestamp": 1774023300089
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "FS003",
+        "timestamp": 1774023392430
+      }
+    ],
+    "BF001": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF001",
+        "timestamp": 1774023696195
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 90,
+        "benchmarkId": "BF001",
+        "timestamp": 1774023781483
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 34,
+        "benchmarkId": "BF001",
+        "timestamp": 1774024576808
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 90,
+        "benchmarkId": "BF001",
+        "timestamp": 1774024614823
+      }
+    ],
+    "BF002": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 96,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024061961
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024096418
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024134714
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "BF002",
+        "timestamp": 1774024648030
+      }
+    ],
+    "BF003": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024163802
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024192400
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024221347
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024676963
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 27,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024707529
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 30,
+        "benchmarkId": "BF003",
+        "timestamp": 1774024746765
+      }
+    ],
+    "UI001": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI001",
+        "timestamp": 1774024852955
+      }
+    ],
+    "UI002": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "UI002",
+        "timestamp": 1774024939345
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "UI002",
+        "timestamp": 1774025047264
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 97,
+        "benchmarkId": "UI002",
+        "timestamp": 1774025140952
+      }
+    ],
+    "UI003": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 89,
+        "benchmarkId": "UI003",
+        "timestamp": 1774025331879
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 89,
+        "benchmarkId": "UI003",
+        "timestamp": 1774025478079
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI003",
+        "timestamp": 1774025631577
+      }
+    ],
+    "UI004": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI004",
+        "timestamp": 1774025854157
+      }
+    ],
+    "UI005": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 98,
+        "benchmarkId": "UI005",
+        "timestamp": 1774026032183
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI005",
+        "timestamp": 1774026246227
+      }
+    ],
+    "UI006": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 95,
+        "benchmarkId": "UI006",
+        "timestamp": 1774026414633
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 95,
+        "benchmarkId": "UI006",
+        "timestamp": 1774026611834
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI006",
+        "timestamp": 1774026758152
+      }
+    ],
+    "UI007": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 90,
+        "benchmarkId": "UI007",
+        "timestamp": 1774026859253
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 83,
+        "benchmarkId": "UI007",
+        "timestamp": 1774027113458
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 81,
+        "benchmarkId": "UI007",
+        "timestamp": 1774027294770
+      }
+    ],
+    "UI008": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "UI008",
+        "timestamp": 1774027443740
+      }
+    ],
+    "LH001": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 36,
+        "benchmarkId": "LH001",
+        "timestamp": 1774027747656
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 59,
+        "benchmarkId": "LH001",
+        "timestamp": 1774028308620
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 49,
+        "benchmarkId": "LH001",
+        "timestamp": 1774032246249
+      }
+    ],
+    "LH002": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 71,
+        "benchmarkId": "LH002",
+        "timestamp": 1774028811476
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 40,
+        "benchmarkId": "LH002",
+        "timestamp": 1774029072566
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 66,
+        "benchmarkId": "LH002",
+        "timestamp": 1774033071445
+      }
+    ],
+    "LH003": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 57,
+        "benchmarkId": "LH003",
+        "timestamp": 1774029298313
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 53,
+        "benchmarkId": "LH003",
+        "timestamp": 1774029524351
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 65,
+        "benchmarkId": "LH003",
+        "timestamp": 1774029783526
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 29,
+        "benchmarkId": "LH003",
+        "timestamp": 1774033600819
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 45,
+        "benchmarkId": "LH003",
+        "timestamp": 1774033867015
+      }
+    ],
+    "LH004": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 67,
+        "benchmarkId": "LH004",
+        "timestamp": 1774030012649
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 75,
+        "benchmarkId": "LH004",
+        "timestamp": 1774030272374
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 80,
+        "benchmarkId": "LH004",
+        "timestamp": 1774034054587
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 65,
+        "benchmarkId": "LH004",
+        "timestamp": 1774034264306
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 56,
+        "benchmarkId": "LH004",
+        "timestamp": 1774034473175
+      }
+    ],
+    "LH005": [
+      {
+        "model": "ollama/eight:latest",
+        "score": 52,
+        "benchmarkId": "LH005",
+        "timestamp": 1774031429657
+      },
+      {
+        "model": "ollama/eight:latest",
+        "score": 100,
+        "benchmarkId": "LH005",
+        "timestamp": 1774034736481
+      }
+    ]
+  },
+  "runCounts": {
+    "ollama/qwen3.5:latest": 229,
+    "ollama/devstral:latest": 95,
+    "ollama/qwen3:14b": 3,
+    "ollama/eight:latest": 181
+  },
+  "updatedAt": "2026-03-20T19:25:36.481Z"
+}

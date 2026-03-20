@@ -1,0 +1,24 @@
+{
+  "name": "@8gent/telegram-bot",
+  "version": "0.1.0",
+  "description": "8gent Telegram bot — competition scoreboard, status dashboard, and command center",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "start": "bun run index.ts",
+    "test": "bun test"
+  },
+  "keywords": [
+    "8gent",
+    "telegram",
+    "bot",
+    "dashboard",
+    "competition"
+  ],
+  "author": "James Spalding",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

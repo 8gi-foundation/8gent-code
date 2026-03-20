@@ -250,7 +250,7 @@ export function seedDatabase(dbPath?: string): {
 }
 
 // CLI execution
-if (require.main === module) {
+if (import.meta.main || require.main === module) {
   const dbPath = process.argv[2];
 
   console.log('Seeding design systems database...');

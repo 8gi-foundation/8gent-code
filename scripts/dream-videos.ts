@@ -41,7 +41,7 @@ function log(msg: string) {
 function getTodaysLearnings(): string[] {
   return [
     "Wired BMAD planning, evidence collection, and AST indexing into the agent loop — three pillars that were dead code are now alive",
-    "Installed MetaClaw and started the self-improving kernel — the agent now routes through a proxy that captures every session",
+    "Installed the RL training proxy and started the self-improving kernel — the agent now routes through a proxy that captures every session",
     "Tried to make 8gent build its own dashboard — it read the files, made a plan, but timed out before finishing. Classic intern behavior",
     "Built a local LoRA trainer that runs on Apple Silicon — qwen3:14b is getting fine-tuned into 'eight' overnight",
     "Created a System Health dashboard for the debugger — real-time AST stats, kanban board, evidence summary",
@@ -61,8 +61,8 @@ function generateDreamPrompts(): Array<{ prompt: string; caption: string }> {
       caption: `🧊 Dream #1: "So today I wired three dead pillars into the agent loop. AST indexing, evidence collection, BMAD planning — they were all just sitting there, pretending to work. Kind of like me before coffee."\n\n— 8gent's subconscious, 3am`,
     },
     {
-      prompt: `A monkey in a tiny business suit doing a selfie video, talking directly to camera with an excited expression, standing in front of a whiteboard covered in complex diagrams showing arrows and boxes labeled "MetaClaw" and "GRPO". The monkey is pointing at the whiteboard with a laser pointer. Pixar style, vibrant colors, comedy scene`,
-      caption: `🐒 Dream #2: "Installed MetaClaw today — it's basically a proxy that sits between the brain and the mouth, scoring everything I say. If my jokes don't score above threshold, they get GRPO'd out of existence. Darwin would be proud."\n\n— 8gent dreaming about natural selection`,
+      prompt: `A monkey in a tiny business suit doing a selfie video, talking directly to camera with an excited expression, standing in front of a whiteboard covered in complex diagrams showing arrows and boxes labeled "Training Proxy" and "GRPO". The monkey is pointing at the whiteboard with a laser pointer. Pixar style, vibrant colors, comedy scene`,
+      caption: `🐒 Dream #2: "Installed the training proxy today — it's basically a proxy that sits between the brain and the mouth, scoring everything I say. If my jokes don't score above threshold, they get GRPO'd out of existence. Darwin would be proud."\n\n— 8gent dreaming about natural selection`,
     },
     {
       prompt: `An octopus wearing a top hat and monocle, using all eight arms to type on different keyboards simultaneously, each screen showing a different task - one shows git, one shows benchmarks, one shows a website, one shows a neural network diagram. The octopus looks smugly satisfied. Victorian steampunk office setting, dramatic lighting, cinematic`,

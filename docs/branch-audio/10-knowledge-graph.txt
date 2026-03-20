@@ -1,0 +1,1 @@
+Branch report for knowledge graph. This branch is already merged into main. It added a SQLite knowledge graph with entity and relationship extraction, 1173 lines. It was merged at commit 75adeeb. This branch can be safely deleted.

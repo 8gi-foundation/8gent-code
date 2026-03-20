@@ -170,7 +170,7 @@ Key principles:
 - **Billing / usage metering.** No cost tracking for OpenRouter calls in this version.
 - **Custom themes beyond dark/light.** Two themes. No theme editor.
 - **Internationalization.** English only. `packages/i18n` integration is future work.
-- **Kernel fine-tuning UI.** `packages/kernel` (MetaClaw) runs headless. No training dashboard in CLUI v2.
+- **Kernel fine-tuning UI.** `packages/kernel` (RL training proxy) runs headless. No training dashboard in CLUI v2.
 
 ---
 
