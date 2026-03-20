@@ -1,9 +1,8 @@
 /**
  * 8gent Code - Tab Bar Component
  *
- * Neumorphic-style folder tabs at the top of the app.
- * Active tab appears "raised" with box-drawing characters.
- * Inactive tabs appear "recessed" / dimmed.
+ * Folder-style tabs with box-drawing frame.
+ * Active tab is raised and connected to the content below.
  */
 
 import React from "react";
@@ -24,72 +23,35 @@ function getTabIcon(type: TabType): string {
 export function TabBar({ tabs, onSwitch }: TabBarProps) {
   if (tabs.length <= 1) return null;
 
-  // Filter out kanban/music from display (they're overlays unless explicitly opened as tabs)
   const visibleTabs = tabs.filter(t => t.type !== "kanban" || t.active);
+
+  // Build the two rows as single strings for perfect alignment
+  let topRow = "";
+  let botRow = "";
+
+  for (const tab of visibleTabs) {
+    const icon = getTabIcon(tab.type);
+    const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
+    const label = `${icon} ${tab.title}${badge}`;
+
+    if (tab.active) {
+      topRow += `┌ ${label} ┐`;
+      botRow += `┘${" ".repeat(label.length + 2)}└`;
+    } else {
+      topRow += ` ${label} `;
+      botRow += `${"─".repeat(label.length + 2)}`;
+    }
+  }
 
   return (
     <Box flexDirection="column" marginBottom={0}>
-      {/* Tab row */}
-      <Box paddingX={0}>
-        {visibleTabs.map((tab, i) => {
-          const icon = getTabIcon(tab.type);
-          const isActive = tab.active;
-          const label = `${icon} ${tab.title}`;
-          const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
-
-          if (isActive) {
-            // Active tab: raised folder tab with top border
-            return (
-              <Box key={tab.id} marginRight={0}>
-                <Text color="cyan">╭─</Text>
-                <Text bold color="cyan"> {label}{badge} </Text>
-                <Text color="cyan">─╮</Text>
-                <Text dimColor> </Text>
-              </Box>
-            );
-          }
-
-          // Inactive tab: flat, subtle
-          return (
-            <Box key={tab.id} marginRight={0}>
-              <Text dimColor> {label}{badge} </Text>
-              <Text dimColor>│</Text>
-            </Box>
-          );
-        })}
+      <Box>
+        <Text color="cyan">{topRow}</Text>
         <Box flexGrow={1} />
-        <MutedText> ^T:new ^W:close </MutedText>
+        <MutedText>^T:new ^W:close</MutedText>
       </Box>
-
-      {/* Bottom border: active tab has a gap (like a real folder tab) */}
-      <Box paddingX={0}>
-        {visibleTabs.map((tab) => {
-          const icon = getTabIcon(tab.type);
-          const labelLen = icon.length + 1 + tab.title.length + (tab.badge && tab.badge > 0 ? ` (${tab.badge})`.length : 0);
-          const isActive = tab.active;
-
-          if (isActive) {
-            // Gap in the bottom border where the active tab is
-            return (
-              <Box key={tab.id}>
-                <Text color="cyan">╯</Text>
-                <Text> {" ".repeat(labelLen)} </Text>
-                <Text color="cyan">╰</Text>
-                <Text dimColor>─</Text>
-              </Box>
-            );
-          }
-
-          // Continuous border under inactive tabs
-          return (
-            <Box key={tab.id}>
-              <Text dimColor>{"─".repeat(labelLen + 2)}┴</Text>
-            </Box>
-          );
-        })}
-        <Box flexGrow={1}>
-          <Text dimColor>{"─".repeat(40)}</Text>
-        </Box>
+      <Box>
+        <Text color="cyan">{botRow}{"─".repeat(80)}</Text>
       </Box>
     </Box>
   );
