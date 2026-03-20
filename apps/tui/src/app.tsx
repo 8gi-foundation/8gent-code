@@ -1617,6 +1617,29 @@ export function App({ initialCommand, args }: AppProps) {
           break;
         }
 
+        case "debug": {
+          // Debug CLI inside TUI — runs bin/debug.ts and shows output
+          const debugCmd = args.length > 0 ? args.join(" ") : "sessions";
+          const debugScript = require("path").join(process.cwd(), "bin", "debug.ts");
+          try {
+            const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+              cwd: process.cwd(),
+              env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
+              timeout: 10000,
+            });
+            const output = result.stdout?.toString()?.trim() || "No output";
+            const stderr = result.stderr?.toString()?.trim();
+            if (stderr && result.exitCode !== 0) {
+              addSystemMessage(`Debug error: ${stderr.slice(0, 200)}`);
+            } else {
+              addSystemMessage(output.slice(0, 2000));
+            }
+          } catch (err) {
+            addSystemMessage(`Debug failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          break;
+        }
+
         case "music": {
           // Interactive music generation via ACE-Step
           const musicAudio = getADHDAudio();
