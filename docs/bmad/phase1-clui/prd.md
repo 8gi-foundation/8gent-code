@@ -132,7 +132,7 @@
 | `packages/skills` | Skill registry available through slash commands |
 | `packages/providers` | Model/provider list for model selector dropdown |
 | `packages/memory` | Session memory loaded automatically by eight subprocess |
-| `packages/kernel` | MetaClaw pipeline runs inside eight subprocess (transparent to CLUI) |
+| `packages/kernel` | RL training pipeline runs inside eight subprocess (transparent to CLUI) |
 | `apps/tui/src/theme/` | Design tokens adapted to CSS custom properties |
 | `apps/tui/src/components/` | UI patterns adapted from Ink to React DOM (not imported, re-implemented) |
 

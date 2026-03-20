@@ -1,0 +1,1 @@
+Branch report for tenant convex persistence. Already merged into main. Added Convex DB persistence for multi-tenant management with CRUD mutations and a factory pattern for backend selection. Merged at commit c5f79da. This branch can be safely deleted.
