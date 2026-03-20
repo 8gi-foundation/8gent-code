@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import type { Message } from "../app.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
@@ -102,9 +102,9 @@ function MessageItem({
     const icon = message.content.startsWith("  ✓") ? "✓" : message.content.startsWith("  ✗") ? "✗" : "→";
     const color = icon === "✓" ? "green" : icon === "✗" ? "red" : "blue";
     return (
-      <Box marginBottom={0} paddingLeft={1}>
+      <Box marginBottom={1} paddingLeft={2}>
         <Text color={color} dimColor>{icon} </Text>
-        <MutedText>{message.content.replace(/^  [✓✗→] /, "").slice(0, 80)}</MutedText>
+        <MutedText>{message.content.replace(/^  [✓✗→] /, "").slice(0, 100)}</MutedText>
       </Box>
     );
   }
@@ -146,19 +146,26 @@ function MessageItem({
     );
   }
 
+  // Use 80% of terminal width for bubbles, with reasonable min/max
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns ?? 100;
+  const bubbleMaxWidth = Math.max(40, Math.min(termWidth - 8, Math.floor(termWidth * 0.8)));
+  const bubbleIndent = Math.max(2, Math.floor(termWidth * 0.15));
+
   return (
     <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
       <Box
         flexDirection="column"
         alignItems={isUser ? "flex-end" : "flex-start"}
         marginBottom={1}
+        paddingX={1}
       >
         {/* Sender label */}
-        <Box>
+        <Box marginBottom={0} paddingLeft={isUser ? 0 : 1} paddingRight={isUser ? 1 : 0}>
           {isUser ? (
             <MutedText>{formatTime(message.timestamp)} </MutedText>
           ) : (
-            <Label color="cyan">◆ 8gent </Label>
+            <Label color="cyan">{"◆"} 8gent </Label>
           )}
           {isUser ? (
             <Label color="yellow">You</Label>
@@ -167,16 +174,17 @@ function MessageItem({
           )}
         </Box>
 
-        {/* Chat bubble */}
+        {/* Chat bubble — width-constrained, not margin-constrained */}
         <Box
           borderStyle="round"
           borderColor={isUser ? "yellow" : "cyan"}
           paddingX={1}
-          marginLeft={isUser ? 20 : 0}
-          marginRight={isUser ? 0 : 20}
-          flexShrink={1}
+          paddingY={0}
+          marginLeft={isUser ? bubbleIndent : 0}
+          marginRight={isUser ? 0 : bubbleIndent}
+          width={bubbleMaxWidth}
         >
-          <Box flexShrink={1} flexDirection="column">
+          <Box flexDirection="column" width={bubbleMaxWidth - 4}>
             <MessageContent
               content={message.content}
               role={message.role}
