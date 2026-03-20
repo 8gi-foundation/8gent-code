@@ -550,14 +550,8 @@ export function App({ initialCommand, args }: AppProps) {
       setFancyHeader((prev) => !prev);
     }
 
-    // Toggle kanban with Ctrl+K (opens as tab)
+    // Toggle kanban with Ctrl+K (overlay, not a tab)
     if (key.ctrl && input === "k") {
-      if (activeTabType === "kanban") {
-        const chatTab = workspaceTabs.tabs.find(t => t.type === "chat");
-        if (chatTab) workspaceTabs.switchTab(chatTab.id);
-      } else {
-        workspaceTabs.addTab("kanban");
-      }
       setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
     }
 
@@ -607,12 +601,18 @@ export function App({ initialCommand, args }: AppProps) {
       if (orchestration.agents.length > 0) {
         orchestration.cycleAgent();
       } else {
-        workspaceTabs.cycleTab(1);
-        // Sync viewMode for legacy views
-        const newActive = workspaceTabs.activeTab;
-        if (newActive?.type === "kanban") setViewMode("kanban");
-        else if (newActive?.type === "music") setViewMode("music");
-        else setViewMode("chat");
+        // Cycle through tabs, skipping overlay types (kanban, music)
+        let attempts = 0;
+        do {
+          workspaceTabs.cycleTab(1);
+          attempts++;
+        } while (
+          workspaceTabs.activeTab &&
+          (workspaceTabs.activeTab.type === "kanban" || workspaceTabs.activeTab.type === "music") &&
+          attempts < workspaceTabs.tabs.length
+        );
+        // Always reset to chat viewMode — kanban/music are overlays, not tab destinations
+        setViewMode("chat");
       }
     }
 
