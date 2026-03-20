@@ -92,9 +92,11 @@ export function BTWView({ visible, data, onUpdateData, onClose }: BTWViewProps) 
     if (items.length === 0) setSelectedIndex(0);
   }, [items.length, selectedIndex]);
 
-  useInput((input, key) => {
-    if (!visible) return;
+  useEffect(() => {
+    if (!visible) { setInputMode(false); setInputBuffer(""); }
+  }, [visible]);
 
+  useInput((input, key) => {
     // --- ADD mode ---
     if (inputMode) {
       if (key.return) {

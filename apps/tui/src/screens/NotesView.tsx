@@ -52,9 +52,13 @@ interface NotesViewProps {
   data: Record<string, unknown>;
   onUpdateData: (data: Record<string, unknown>) => void;
   onClose: () => void;
+  /** Send content to a chat tab */
+  onSendToChat?: (content: string) => void;
+  /** Available chat tab names for display */
+  chatTabNames?: string[];
 }
 
-export function NotesView({ visible, data, onUpdateData, onClose }: NotesViewProps) {
+export function NotesView({ visible, data, onUpdateData, onClose, onSendToChat, chatTabNames = [] }: NotesViewProps) {
   const [notes, setNotes] = useState<NoteEntry[]>(() => {
     const fromFile = loadNotes();
     if (fromFile.length > 0) return fromFile;
@@ -80,8 +84,15 @@ export function NotesView({ visible, data, onUpdateData, onClose }: NotesViewPro
     if (notes.length === 0) setSelectedIndex(0);
   }, [notes.length, selectedIndex]);
 
+  // Reset input state when view becomes hidden
+  useEffect(() => {
+    if (!visible && mode !== "list") {
+      setMode("list");
+      setInputBuffer("");
+    }
+  }, [visible]);
+
   useInput((input, key) => {
-    if (!visible) return;
 
     // --- ADD mode: typing a new note ---
     if (mode === "add") {
@@ -187,6 +198,12 @@ export function NotesView({ visible, data, onUpdateData, onClose }: NotesViewPro
     } else if (key.ctrl && input === "d") {
       // Ctrl+D: clear all notes
       updateNotes([]);
+    } else if (input === "s" && notes.length > 0 && onSendToChat) {
+      // Send selected note content to active chat tab
+      const note = notes[selectedIndex];
+      if (note) {
+        onSendToChat(note.content);
+      }
     } else if (key.escape || input === "q") {
       onClose();
     }
@@ -295,7 +312,7 @@ export function NotesView({ visible, data, onUpdateData, onClose }: NotesViewPro
         <Divider />
       </Box>
       <MutedText>
-        a=add  d=delete  Ctrl+D=clear all  Enter=view  arrows=navigate  ESC=back
+        a=add  d=delete  s=send to chat  Enter=view  arrows=navigate  ESC=back
       </MutedText>
     </Box>
   );
