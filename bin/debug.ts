@@ -2,6 +2,8 @@
 /**
  * 8gent Debug CLI — inspect, tail, and analyze TUI sessions.
  *
+ * Supports both legacy .json format and new .jsonl format.
+ *
  * Usage:
  *   bun run bin/debug.ts sessions              # List recent sessions
  *   bun run bin/debug.ts inspect <id>          # Show session detail
@@ -53,25 +55,25 @@ const DOT_8GENT = path.join(
 );
 
 // ============================================
-// Helpers
+// Unified session representation
 // ============================================
 
-interface SessionLog {
+interface NormalizedEvent {
+  type: string;
+  timestamp: string;
+  tabId: string;
+  tabName: string;
+  data: Record<string, unknown>;
+}
+
+interface NormalizedSession {
   id: string;
   name: string;
   startedAt: string;
   lastUpdatedAt: string;
   model: string;
   provider: string;
-  tabId: string;
-  tabName: string;
-  events: Array<{
-    type: string;
-    timestamp: string;
-    tabId: string;
-    tabName: string;
-    data: Record<string, unknown>;
-  }>;
+  events: NormalizedEvent[];
   stats: {
     messageCount: number;
     toolCalls: number;
@@ -79,24 +81,269 @@ interface SessionLog {
     errors: number;
     durationMs: number;
   };
+  format: "json" | "jsonl";
 }
+
+// ============================================
+// Helpers
+// ============================================
 
 function listSessionFiles(): string[] {
   if (!fs.existsSync(SESSIONS_DIR)) return [];
   return fs
     .readdirSync(SESSIONS_DIR)
-    .filter((f) => f.endsWith(".json"))
+    .filter((f) => f.endsWith(".json") || f.endsWith(".jsonl"))
     .sort()
     .reverse();
 }
 
-function loadSession(fileOrId: string): SessionLog | null {
-  // Try exact filename first
-  let filePath = path.join(SESSIONS_DIR, fileOrId);
-  if (!filePath.endsWith(".json")) filePath += ".json";
+/**
+ * Parse a .jsonl file into a NormalizedSession.
+ */
+function parseJsonlSession(filePath: string, fileId: string): NormalizedSession {
+  const raw = fs.readFileSync(filePath, "utf-8");
+  const lines = raw.split("\n").filter(Boolean);
 
-  if (fs.existsSync(filePath)) {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  let id = fileId;
+  let name = fileId;
+  let startedAt = "";
+  let model = "";
+  let provider = "";
+  let lastTimestamp = "";
+  let messageCount = 0;
+  let toolCalls = 0;
+  let totalTokens = 0;
+  let errors = 0;
+  let durationMs = 0;
+
+  const events: NormalizedEvent[] = [];
+
+  for (const line of lines) {
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const ts = (entry.timestamp as string) || "";
+    const tabId = (entry.tabId as string) || "default";
+    const tabName = (entry.tabName as string) || "Chat";
+    if (ts) lastTimestamp = ts;
+
+    switch (entry.type) {
+      case "session_start": {
+        const meta = entry.meta as Record<string, unknown> | undefined;
+        if (meta) {
+          id = (meta.sessionId as string) || id;
+          startedAt = (meta.startedAt as string) || ts;
+          const agent = meta.agent as Record<string, unknown> | undefined;
+          model = (agent?.model as string) || "";
+          provider = (agent?.runtime as string) || "";
+        }
+        break;
+      }
+      case "user_message": {
+        messageCount++;
+        const msg = entry.message as Record<string, unknown> | undefined;
+        const content = (msg?.content as string) || "";
+        if (name === fileId && content) {
+          name = content.slice(0, 50).trim();
+        }
+        events.push({
+          type: "message",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: { role: "user", content },
+        });
+        break;
+      }
+      case "assistant_message": {
+        messageCount++;
+        const msg = entry.message as Record<string, unknown> | undefined;
+        events.push({
+          type: "message",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: { role: "assistant", content: (msg?.content as string) || "" },
+        });
+        break;
+      }
+      case "tool_call": {
+        const tc = entry.toolCall as Record<string, unknown> | undefined;
+        events.push({
+          type: "tool_start",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: {
+            toolName: (tc?.name as string) || "",
+            toolCallId: (tc?.toolCallId as string) || "",
+            args: tc?.arguments || {},
+          },
+        });
+        break;
+      }
+      case "tool_result": {
+        toolCalls++;
+        events.push({
+          type: "tool_end",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: {
+            toolCallId: (entry.toolCallId as string) || "",
+            success: entry.success as boolean,
+            durationMs: (entry.durationMs as number) || 0,
+            resultPreview: (entry.result as string) || "",
+          },
+        });
+        break;
+      }
+      case "step_finish": {
+        const tokens = (entry.totalTokens as number) || 0;
+        totalTokens += tokens;
+        events.push({
+          type: "step",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: {
+            stepNumber: entry.stepNumber,
+            totalTokens: tokens,
+            text: entry.text || "",
+          },
+        });
+        break;
+      }
+      case "error": {
+        errors++;
+        const err = entry.error as Record<string, unknown> | undefined;
+        events.push({
+          type: "error",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: { error: (err?.message as string) || "" },
+        });
+        break;
+      }
+      case "tab_switch": {
+        events.push({
+          type: "tab_switch",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: {
+            fromTabId: entry.fromTabId,
+            toTabId: entry.toTabId,
+            toTabName: entry.toTabName,
+          },
+        });
+        break;
+      }
+      case "session_end": {
+        const summary = entry.summary as Record<string, unknown> | undefined;
+        if (summary) {
+          durationMs = (summary.durationMs as number) || 0;
+        }
+        break;
+      }
+      default: {
+        events.push({
+          type: (entry.type as string) || "unknown",
+          timestamp: ts,
+          tabId,
+          tabName,
+          data: entry,
+        });
+      }
+    }
+  }
+
+  if (!durationMs && startedAt) {
+    durationMs =
+      new Date(lastTimestamp || Date.now()).getTime() -
+      new Date(startedAt).getTime();
+  }
+
+  return {
+    id,
+    name,
+    startedAt: startedAt || lastTimestamp,
+    lastUpdatedAt: lastTimestamp,
+    model,
+    provider,
+    events,
+    stats: { messageCount, toolCalls, totalTokens, errors, durationMs },
+    format: "jsonl",
+  };
+}
+
+/**
+ * Parse a legacy .json file into a NormalizedSession.
+ */
+function parseLegacyJsonSession(
+  filePath: string,
+  fileId: string
+): NormalizedSession {
+  const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  return {
+    id: raw.id || fileId,
+    name: raw.name || fileId,
+    startedAt: raw.startedAt || "",
+    lastUpdatedAt: raw.lastUpdatedAt || "",
+    model: raw.model || "",
+    provider: raw.provider || "",
+    events: (raw.events || []).map(
+      (e: Record<string, unknown>) =>
+        ({
+          type: (e.type as string) || "unknown",
+          timestamp: (e.timestamp as string) || "",
+          tabId: (e.tabId as string) || "default",
+          tabName: (e.tabName as string) || "Chat",
+          data: (e.data as Record<string, unknown>) || {},
+        }) satisfies NormalizedEvent
+    ),
+    stats: raw.stats || {
+      messageCount: 0,
+      toolCalls: 0,
+      totalTokens: 0,
+      errors: 0,
+      durationMs: 0,
+    },
+    format: "json",
+  };
+}
+
+function loadSession(fileOrId: string): NormalizedSession | null {
+  // Try exact filename first (both extensions)
+  for (const ext of [".jsonl", ".json"]) {
+    let filePath = path.join(SESSIONS_DIR, fileOrId);
+    if (!filePath.endsWith(ext) && !filePath.endsWith(".json") && !filePath.endsWith(".jsonl")) {
+      filePath += ext;
+    } else if (!filePath.endsWith(ext)) {
+      continue;
+    }
+    if (fs.existsSync(filePath)) {
+      const id = path.basename(filePath).replace(/\.(jsonl|json)$/, "");
+      return filePath.endsWith(".jsonl")
+        ? parseJsonlSession(filePath, id)
+        : parseLegacyJsonSession(filePath, id);
+    }
+  }
+
+  // Try with explicit extension appended
+  for (const ext of [".jsonl", ".json"]) {
+    const filePath = path.join(SESSIONS_DIR, fileOrId + ext);
+    if (fs.existsSync(filePath)) {
+      const id = fileOrId;
+      return ext === ".jsonl"
+        ? parseJsonlSession(filePath, id)
+        : parseLegacyJsonSession(filePath, id);
+    }
   }
 
   // Try partial match on session ID or filename
@@ -105,12 +352,43 @@ function loadSession(fileOrId: string): SessionLog | null {
     (f) => f.includes(fileOrId) || f.startsWith(fileOrId)
   );
   if (match) {
-    return JSON.parse(
-      fs.readFileSync(path.join(SESSIONS_DIR, match), "utf-8")
-    );
+    const filePath = path.join(SESSIONS_DIR, match);
+    const id = match.replace(/\.(jsonl|json)$/, "");
+    return match.endsWith(".jsonl")
+      ? parseJsonlSession(filePath, id)
+      : parseLegacyJsonSession(filePath, id);
   }
 
   return null;
+}
+
+function loadSessionQuick(
+  filePath: string
+): { name: string; model: string; stats: NormalizedSession["stats"] } | null {
+  try {
+    const id = path
+      .basename(filePath)
+      .replace(/\.(jsonl|json)$/, "");
+    if (filePath.endsWith(".jsonl")) {
+      const s = parseJsonlSession(filePath, id);
+      return { name: s.name, model: s.model, stats: s.stats };
+    } else {
+      const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      return {
+        name: raw.name || id,
+        model: raw.model || "?",
+        stats: raw.stats || {
+          messageCount: 0,
+          toolCalls: 0,
+          totalTokens: 0,
+          errors: 0,
+          durationMs: 0,
+        },
+      };
+    }
+  } catch {
+    return null;
+  }
 }
 
 function formatDuration(ms: number): string {
@@ -161,10 +439,13 @@ function cmdSessions(): void {
   const toShow = files.slice(0, 20);
   for (const file of toShow) {
     try {
-      const session = JSON.parse(
-        fs.readFileSync(path.join(SESSIONS_DIR, file), "utf-8")
-      ) as SessionLog;
-      const id = file.replace(".json", "");
+      const filePath = path.join(SESSIONS_DIR, file);
+      const session = loadSessionQuick(filePath);
+      if (!session) {
+        console.log(`${c.red}${file} — corrupt${c.reset}`);
+        continue;
+      }
+      const id = file.replace(/\.(jsonl|json)$/, "");
       const name = truncate(session.name || "untitled", 33);
       const model = truncate(session.model || "?", 18);
       const msgs = String(session.stats?.messageCount ?? 0).padEnd(6);
@@ -209,6 +490,9 @@ function cmdInspect(id: string): void {
   );
   console.log(
     `${c.dim}Messages: ${session.stats?.messageCount ?? 0} | Tools: ${session.stats?.toolCalls ?? 0} | Tokens: ${(session.stats?.totalTokens ?? 0).toLocaleString()} | Errors: ${session.stats?.errors ?? 0}${c.reset}`
+  );
+  console.log(
+    `${c.dim}Format: ${session.format}${c.reset}`
   );
   console.log();
 
@@ -307,72 +591,42 @@ function cmdTail(): void {
   }
 
   const latestFile = path.join(SESSIONS_DIR, files[0]);
+  const isJsonl = files[0].endsWith(".jsonl");
   console.log(
     `${c.boldCyan}Tailing: ${files[0]}${c.reset} ${c.dim}(Ctrl+C to stop)${c.reset}\n`
   );
 
-  let lastEventCount = 0;
+  let lastLineCount = 0;
 
-  function printNewEvents(): void {
+  function printNewLines(): void {
     try {
       const raw = fs.readFileSync(latestFile, "utf-8");
-      const session = JSON.parse(raw) as SessionLog;
-      const newEvents = session.events.slice(lastEventCount);
-      lastEventCount = session.events.length;
 
-      for (const event of newEvents) {
-        const ts = shortTimestamp(event.timestamp);
-        switch (event.type) {
-          case "message": {
-            const role = event.data.role as string;
-            const content = truncate(
-              String(event.data.content || "").replace(/\n/g, " "),
-              120
-            );
-            if (role === "user") {
-              console.log(`${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`);
-            } else if (role === "assistant") {
-              console.log(`${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`);
-            } else {
-              console.log(`${c.dim}${ts}${c.reset} ${c.yellow}[${role}] ${content}${c.reset}`);
-            }
-            break;
+      if (isJsonl) {
+        const lines = raw.split("\n").filter(Boolean);
+        const newLines = lines.slice(lastLineCount);
+        lastLineCount = lines.length;
+
+        for (const line of newLines) {
+          try {
+            const entry = JSON.parse(line);
+            const ts = entry.timestamp
+              ? shortTimestamp(entry.timestamp)
+              : "?";
+            printJsonlEvent(ts, entry);
+          } catch {
+            // skip malformed line
           }
-          case "tool_start": {
-            console.log(
-              `${c.dim}${ts}${c.reset} ${c.boldMagenta}[tool] ${event.data.toolName}${c.reset} ${c.dim}${truncate(JSON.stringify(event.data.args || {}), 60)}${c.reset}`
-            );
-            break;
-          }
-          case "tool_end": {
-            const ok = event.data.success as boolean;
-            const dur = formatDuration((event.data.durationMs as number) || 0);
-            if (ok) {
-              console.log(`${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`);
-            } else {
-              console.log(
-                `${c.dim}${ts}${c.reset} ${c.boldRed}[FAIL] ${dur} ${truncate(String(event.data.resultPreview || ""), 80)}${c.reset}`
-              );
-            }
-            break;
-          }
-          case "error": {
-            console.log(
-              `${c.dim}${ts}${c.reset} ${c.boldRed}[ERROR] ${truncate(String(event.data.error || ""), 100)}${c.reset}`
-            );
-            break;
-          }
-          case "tab_switch": {
-            console.log(
-              `${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${event.data.toTabName}${c.reset}`
-            );
-            break;
-          }
-          default: {
-            console.log(
-              `${c.dim}${ts}${c.reset} ${c.dim}[${event.type}] ${truncate(JSON.stringify(event.data), 80)}${c.reset}`
-            );
-          }
+        }
+      } else {
+        // Legacy .json format
+        const session = JSON.parse(raw);
+        const newEvents = (session.events || []).slice(lastLineCount);
+        lastLineCount = (session.events || []).length;
+
+        for (const event of newEvents) {
+          const ts = shortTimestamp(event.timestamp);
+          printLegacyEvent(ts, event);
         }
       }
     } catch {
@@ -380,12 +634,171 @@ function cmdTail(): void {
     }
   }
 
+  function printJsonlEvent(
+    ts: string,
+    entry: Record<string, unknown>
+  ): void {
+    switch (entry.type) {
+      case "user_message": {
+        const msg = entry.message as Record<string, unknown> | undefined;
+        const content = truncate(
+          String(msg?.content || "").replace(/\n/g, " "),
+          120
+        );
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`
+        );
+        break;
+      }
+      case "assistant_message": {
+        const msg = entry.message as Record<string, unknown> | undefined;
+        const content = truncate(
+          String(msg?.content || "").replace(/\n/g, " "),
+          120
+        );
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`
+        );
+        break;
+      }
+      case "tool_call": {
+        const tc = entry.toolCall as Record<string, unknown> | undefined;
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.boldMagenta}[tool] ${tc?.name || "?"}${c.reset} ${c.dim}${truncate(JSON.stringify(tc?.arguments || {}), 60)}${c.reset}`
+        );
+        break;
+      }
+      case "tool_result": {
+        const ok = entry.success as boolean;
+        const dur = formatDuration((entry.durationMs as number) || 0);
+        if (ok) {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`
+          );
+        } else {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.boldRed}[FAIL] ${dur} ${truncate(String(entry.result || ""), 80)}${c.reset}`
+          );
+        }
+        break;
+      }
+      case "error": {
+        const err = entry.error as Record<string, unknown> | undefined;
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.boldRed}[ERROR] ${truncate(String(err?.message || ""), 100)}${c.reset}`
+        );
+        break;
+      }
+      case "step_finish": {
+        const tokens = (entry.totalTokens as number) || 0;
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.dim}[step #${entry.stepNumber}] +${tokens} tokens${c.reset}`
+        );
+        break;
+      }
+      case "tab_switch": {
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${entry.toTabName}${c.reset}`
+        );
+        break;
+      }
+      case "session_start": {
+        const meta = entry.meta as Record<string, unknown> | undefined;
+        const agent = meta?.agent as Record<string, unknown> | undefined;
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.boldCyan}[session_start] model=${agent?.model || "?"}${c.reset}`
+        );
+        break;
+      }
+      case "session_end": {
+        const summary = entry.summary as Record<string, unknown> | undefined;
+        const dur = formatDuration((summary?.durationMs as number) || 0);
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.boldCyan}[session_end] ${dur} | exit=${summary?.exitReason || "?"}${c.reset}`
+        );
+        break;
+      }
+      default: {
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.dim}[${entry.type}] ${truncate(JSON.stringify(entry), 80)}${c.reset}`
+        );
+      }
+    }
+  }
+
+  function printLegacyEvent(
+    ts: string,
+    event: Record<string, unknown>
+  ): void {
+    const data = (event.data as Record<string, unknown>) || {};
+    switch (event.type) {
+      case "message": {
+        const role = data.role as string;
+        const content = truncate(
+          String(data.content || "").replace(/\n/g, " "),
+          120
+        );
+        if (role === "user") {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`
+          );
+        } else if (role === "assistant") {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`
+          );
+        } else {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.yellow}[${role}] ${content}${c.reset}`
+          );
+        }
+        break;
+      }
+      case "tool_start": {
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.boldMagenta}[tool] ${data.toolName}${c.reset} ${c.dim}${truncate(JSON.stringify(data.args || {}), 60)}${c.reset}`
+        );
+        break;
+      }
+      case "tool_end": {
+        const ok = data.success as boolean;
+        const dur = formatDuration((data.durationMs as number) || 0);
+        if (ok) {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`
+          );
+        } else {
+          console.log(
+            `${c.dim}${ts}${c.reset} ${c.boldRed}[FAIL] ${dur} ${truncate(String(data.resultPreview || ""), 80)}${c.reset}`
+          );
+        }
+        break;
+      }
+      case "error": {
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.boldRed}[ERROR] ${truncate(String(data.error || ""), 100)}${c.reset}`
+        );
+        break;
+      }
+      case "tab_switch": {
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${data.toTabName}${c.reset}`
+        );
+        break;
+      }
+      default: {
+        console.log(
+          `${c.dim}${ts}${c.reset} ${c.dim}[${event.type}] ${truncate(JSON.stringify(data), 80)}${c.reset}`
+        );
+      }
+    }
+  }
+
   // Initial read
-  printNewEvents();
+  printNewLines();
 
   // Watch for changes
   const watcher = fs.watch(latestFile, () => {
-    printNewEvents();
+    printNewLines();
   });
 
   process.on("SIGINT", () => {
@@ -446,8 +859,10 @@ async function cmdHealth(): Promise<void> {
   // 5. Sessions dir
   process.stdout.write(`  Sessions: `);
   const files = listSessionFiles();
+  const jsonlCount = files.filter((f) => f.endsWith(".jsonl")).length;
+  const jsonCount = files.filter((f) => f.endsWith(".json")).length;
   console.log(
-    `${c.green}${files.length} sessions${c.reset} ${c.dim}in ${SESSIONS_DIR}${c.reset}`
+    `${c.green}${files.length} sessions${c.reset} ${c.dim}(${jsonlCount} jsonl, ${jsonCount} json legacy) in ${SESSIONS_DIR}${c.reset}`
   );
 
   // 6. Disk usage of ~/.8gent
@@ -491,7 +906,6 @@ function cmdTools(id: string): void {
     `${c.boldCyan}Tool Timeline: ${session.name}${c.reset} ${c.dim}(${session.stats?.toolCalls ?? 0} calls)${c.reset}\n`
   );
 
-  // Build timeline of start/end pairs
   const starts = new Map<
     string,
     { toolName: string; timestamp: string; args: unknown }
@@ -529,7 +943,6 @@ function cmdTools(id: string): void {
 
 function cmdErrors(id?: string): void {
   if (id) {
-    // Errors for specific session
     const session = loadSession(id);
     if (!session) {
       console.log(`${c.red}Session not found: ${id}${c.reset}`);
@@ -561,9 +974,12 @@ function cmdErrors(id?: string): void {
 
   for (const file of files) {
     try {
-      const session = JSON.parse(
-        fs.readFileSync(path.join(SESSIONS_DIR, file), "utf-8")
-      ) as SessionLog;
+      const filePath = path.join(SESSIONS_DIR, file);
+      const id = file.replace(/\.(jsonl|json)$/, "");
+      const session = file.endsWith(".jsonl")
+        ? parseJsonlSession(filePath, id)
+        : parseLegacyJsonSession(filePath, id);
+
       const errors = session.events.filter((e) => e.type === "error");
       if (errors.length === 0) continue;
 
