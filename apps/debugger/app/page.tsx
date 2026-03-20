@@ -142,8 +142,9 @@ export default function Home() {
               className={`text-[10px] px-2 py-1 rounded ${
                 view === "sessions"
                   ? "bg-emerald-500/20 text-emerald-400"
-                  : "text-zinc-500 hover:text-zinc-300"
+                  : ""
               }`}
+              style={view !== "sessions" ? { color: "var(--muted)" } : undefined}
             >
               Sessions {!loading && `(${sessions.length})`}
             </button>
@@ -152,8 +153,9 @@ export default function Home() {
               className={`text-[10px] px-2 py-1 rounded ${
                 view === "health"
                   ? "bg-cyan-500/20 text-cyan-400"
-                  : "text-zinc-500 hover:text-zinc-300"
+                  : ""
               }`}
+              style={view !== "health" ? { color: "var(--muted)" } : undefined}
             >
               System Health
             </button>
@@ -186,11 +188,11 @@ export default function Home() {
         ) : active ? (
           <SessionViewer session={active} />
         ) : (
-          <div className="flex items-center justify-center h-full text-zinc-700">
-            <div className="text-center">
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center" style={{ color: "var(--muted)" }}>
               <p className="text-4xl mb-4 font-mono">8</p>
               <p className="text-sm">Select a session to inspect</p>
-              <p className="text-xs text-zinc-800 mt-2">
+              <p className="text-xs mt-2" style={{ color: "var(--border)" }}>
                 Sessions stream live from ~/.8gent/sessions
               </p>
             </div>
