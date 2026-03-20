@@ -262,7 +262,9 @@ export function App({ initialCommand, args }: AppProps) {
   const randomGreeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
 
   // Core state
-  const [messages, setMessages] = useState<Message[]>([
+  // Per-tab message storage (tab-aware logic wired after workspaceTabs hook below)
+  const tabMessagesRef = useRef<Map<string, Message[]>>(new Map());
+  const [messages, setMessagesRaw] = useState<Message[]>([
     {
       id: "welcome",
       role: "system",
@@ -347,6 +349,43 @@ export function App({ initialCommand, args }: AppProps) {
   // Workspace tabs
   const workspaceTabs = useWorkspaceTabs();
   const activeTabType = workspaceTabs.activeTab?.type || "chat";
+  const activeTabId = workspaceTabs.activeTab?.id || "default";
+
+  // Per-tab message sync: save current tab's messages, load new tab's messages on switch
+  const prevTabIdRef = useRef(activeTabId);
+  useEffect(() => {
+    if (prevTabIdRef.current !== activeTabId) {
+      // Save outgoing tab's messages
+      setMessagesRaw((currentMsgs) => {
+        tabMessagesRef.current.set(prevTabIdRef.current, currentMsgs);
+        return currentMsgs;
+      });
+      // Load incoming tab's messages (or create fresh welcome)
+      const incoming = tabMessagesRef.current.get(activeTabId);
+      if (incoming) {
+        setMessagesRaw(incoming);
+      } else {
+        const fresh: Message[] = [{
+          id: `welcome-${activeTabId}`,
+          role: "system",
+          content: `\u221E 8gent Code \u2014 The Infinite Gentleman\n\nNew thread. What shall we work on?`,
+          timestamp: new Date(),
+        }];
+        tabMessagesRef.current.set(activeTabId, fresh);
+        setMessagesRaw(fresh);
+      }
+      prevTabIdRef.current = activeTabId;
+    }
+  }, [activeTabId]);
+
+  // setMessages wrapper that also updates the ref map for current tab
+  const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = useCallback((action) => {
+    setMessagesRaw((prev) => {
+      const next = typeof action === "function" ? action(prev) : action;
+      tabMessagesRef.current.set(activeTabId, next);
+      return next;
+    });
+  }, [activeTabId]);
 
   // Infinite mode state
   const [infiniteModeActive, setInfiniteModeActive] = useState(false);
