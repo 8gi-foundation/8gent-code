@@ -48,6 +48,7 @@ import {
 } from "./components/bionic-text.js";
 import { getADHDAudio, type ADHDSoundscape } from "./lib/adhd-audio.js";
 import { getTaskRouter, getRouterStats, type TaskCategory } from "../../../packages/ai/task-router.js";
+import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
 import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
@@ -191,7 +192,7 @@ type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 const AGENT_MODES: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
-type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design" | "history";
+type ViewMode = "chat" | "kanban" | "avenues" | "predict" | "model-select" | "provider-select" | "onboarding" | "animations" | "design" | "history" | "music";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -525,7 +526,7 @@ export function App({ initialCommand, args }: AppProps) {
       if (orchestration.agents.length > 0) {
         orchestration.cycleAgent();
       } else {
-        const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict"];
+        const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict", "music"];
         setViewMode((prev) => {
           const currentIndex = modes.indexOf(prev);
           if (currentIndex === -1) return "chat";
@@ -1616,6 +1617,9 @@ export function App({ initialCommand, args }: AppProps) {
             musicAudio.stop();
             addSystemMessage("Music stopped.");
           }
+          else if (musicSub === "player" || musicSub === "playlist" || musicSub === "view") {
+            setViewMode("music");
+          }
           else if (musicSub === "config" || musicSub === "settings") {
             const cfg = musicAudio.config;
             addSystemMessage(
@@ -2288,6 +2292,33 @@ export function App({ initialCommand, args }: AppProps) {
               setViewMode("chat");
             }}
             visible={true}
+          />
+        );
+
+      case "music":
+        return (
+          <MusicPlayerView
+            visible={true}
+            isPlaying={getADHDAudio().isPlaying}
+            currentTrack={getADHDAudio().current}
+            duration={getADHDAudio().config.duration}
+            onPlay={(soundscape) => {
+              const audio = getADHDAudio();
+              audio.onProgress = (msg) => addSystemMessage(msg);
+              audio.play(soundscape as any).then((r) => {
+                addSystemMessage(r.message);
+                audio.onProgress = null;
+              });
+            }}
+            onStop={() => {
+              getADHDAudio().stop();
+              addSystemMessage("Music stopped.");
+            }}
+            onClose={() => setViewMode("chat")}
+            onGenerate={(prompt) => {
+              addSystemMessage(`Custom gen: "${prompt}" — use /music gen ${prompt}`);
+              setViewMode("chat");
+            }}
           />
         );
 
