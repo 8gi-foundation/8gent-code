@@ -30,5 +30,9 @@ export type {
   FinishEvent,
 } from "./agent";
 
+// Task Router
+export { TaskRouter, getTaskRouter, loadRouterConfig, saveRouterConfig, recordRouting, getRouterStats } from "./task-router";
+export type { TaskCategory, RouteDecision, ModelSlot, RouterConfig } from "./task-router";
+
 // Toolshed bridge
 export { registerToolsInToolshed } from "./toolshed-bridge";
