@@ -792,3 +792,13 @@ export type { WorktreeInfo } from "./worktree-manager";
 // Context isolation for multi-agent orchestration
 export { ContextManager, getContextManager } from "./context-manager";
 export type { ContextPolicy, ContextSlice } from "./context-manager";
+
+// Worktree agent swarm (ClawTeam pattern)
+export { WorktreeAgentManager } from "./worktree-agent";
+export type {
+  WorktreeAgentConfig,
+  AgentMessage as WorktreeAgentMessage,
+  WorktreeAgentStatus,
+} from "./worktree-agent";
+export { TaskQueue as FilesystemTaskQueue } from "./task-queue";
+export type { Task as FilesystemTask, TaskInput } from "./task-queue";

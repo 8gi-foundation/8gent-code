@@ -10,6 +10,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Worktree agent swarm** — `WorktreeAgentManager` (ClawTeam pattern) spawns sub-agents in isolated git worktrees with filesystem-based messaging, auto-timeout, merge/squash, and PR creation
+- **Filesystem task queue** — `TaskQueue` for cross-agent coordination via JSON files on disk (no shared memory required)
+- **Agent branch CI** — GitHub Actions workflow auto-benchmarks any `agent/*` branch on push
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
