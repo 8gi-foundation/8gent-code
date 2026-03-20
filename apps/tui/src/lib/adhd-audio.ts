@@ -246,12 +246,24 @@ export class ADHDAudio {
     }
   }
 
+  /** Progress callback — set externally to receive updates */
+  onProgress: ((message: string) => void) | null = null;
+
   /** Poll ACE-Step for task completion */
   private async pollResult(taskId: string, maxWait = 300000): Promise<string | null> {
     const start = Date.now();
     const interval = 2000;
+    let lastProgressAt = 0;
 
     while (Date.now() - start < maxWait) {
+      const elapsed = Math.round((Date.now() - start) / 1000);
+
+      // Send progress every 10 seconds
+      if (this.onProgress && elapsed - lastProgressAt >= 10) {
+        lastProgressAt = elapsed;
+        this.onProgress(`🎵 Generating... ${elapsed}s elapsed`);
+      }
+
       try {
         const res = await fetch(`${this._config.apiUrl}/query_result`, {
           method: "POST",

@@ -1492,24 +1492,29 @@ export function App({ initialCommand, args }: AppProps) {
           }
           // Quick play aliases
           else if (musicSub === "lofi") {
+            musicAudio.onProgress = (msg) => addSystemMessage(msg);
             addSystemMessage(`Generating lofi (${musicAudio.config.duration}s)...`);
-            musicAudio.play("lofi").then(r => addSystemMessage(r.message));
+            musicAudio.play("lofi").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
           }
           else if (musicSub === "rain" || musicSub === "rainsound") {
+            musicAudio.onProgress = (msg) => addSystemMessage(msg);
             addSystemMessage(`Generating rain sounds (${musicAudio.config.duration}s)...`);
-            musicAudio.play("rainsound").then(r => addSystemMessage(r.message));
+            musicAudio.play("rainsound").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
           }
           else if (musicSub === "white" || musicSub === "whitenoise") {
+            musicAudio.onProgress = (msg) => addSystemMessage(msg);
             addSystemMessage(`Generating white noise (${musicAudio.config.duration}s)...`);
-            musicAudio.play("whitenoise").then(r => addSystemMessage(r.message));
+            musicAudio.play("whitenoise").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
           }
           else if (musicSub === "ambient") {
+            musicAudio.onProgress = (msg) => addSystemMessage(msg);
             addSystemMessage(`Generating ambient (${musicAudio.config.duration}s)...`);
-            musicAudio.play("ambient").then(r => addSystemMessage(r.message));
+            musicAudio.play("ambient").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
           }
           else if (musicSub === "piano" || musicSub === "classical") {
+            musicAudio.onProgress = (msg) => addSystemMessage(msg);
             addSystemMessage(`Generating piano (${musicAudio.config.duration}s)...`);
-            musicAudio.play("classical").then(r => addSystemMessage(r.message));
+            musicAudio.play("classical").then(r => { addSystemMessage(r.message); musicAudio.onProgress = null; });
           }
           // Custom prompt generation
           else if (musicSub === "gen" && args.length >= 2) {
@@ -1543,13 +1548,22 @@ export function App({ initialCommand, args }: AppProps) {
                   addSystemMessage("Failed to start generation. Is ACE-Step running?");
                   return;
                 }
-                addSystemMessage(`Task submitted (${taskId.slice(0, 8)}...). Polling for result...`);
+                addSystemMessage(`🎵 Generating... (task ${taskId.slice(0, 8)})`);
 
-                // Poll for result
+                // Poll for result with progress updates
                 const poll = async () => {
                   const maxWait = 300000;
                   const start = Date.now();
+                  let lastUpdate = 0;
                   while (Date.now() - start < maxWait) {
+                    const elapsed = Math.round((Date.now() - start) / 1000);
+
+                    // Progress update every 10s
+                    if (elapsed - lastUpdate >= 10) {
+                      lastUpdate = elapsed;
+                      addSystemMessage(`🎵 Still generating... ${elapsed}s elapsed`);
+                    }
+
                     try {
                       const res = await fetch(`${cfg.apiUrl}/query_result`, {
                         method: "POST",
