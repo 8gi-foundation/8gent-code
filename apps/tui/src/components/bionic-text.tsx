@@ -260,7 +260,9 @@ export const ADHD_MODE_ENABLED_MSG = `
 Nice. This'll help your mind lock in — words hit different now.
 Don't worry about it, just focus. I got you.
 
-/adhd off when you're done.
+/adhd stop — pause music
+/adhd off  — turn everything off
+/music     — generate a custom focus track
 `;
 
 export const ADHD_MODE_DISABLED_MSG = `
