@@ -266,7 +266,7 @@ export function App({ initialCommand, args }: AppProps) {
     {
       id: "welcome",
       role: "system",
-      content: `\u221E 8gent Code - The Infinite Gentleman\n\n${randomGreeting}\n\nTry /help for commands, Tab for suggestions, or just ask.`,
+      content: `\u221E 8gent Code \u2014 The Infinite Gentleman\n\n${randomGreeting}\n/help for commands, Tab for suggestions, or just ask.`,
       timestamp: new Date(),
     },
   ]);
@@ -1816,18 +1816,12 @@ export function App({ initialCommand, args }: AppProps) {
           if ((command as string) === "auth") {
             const sub = args[0] || "status";
             if (sub === "login") {
-              addSystemMessage("Opening browser for authentication...\nPress Enter to open, or visit the URL shown.");
+              addSystemMessage("Opening browser to sign in...");
               import("../../../packages/auth/cli-auth-server.js").then(({ runCLIAuthFlow }) => {
                 runCLIAuthFlow("https://8gent.world", {
-                  onServerReady: (url, port) => {
-                    addSystemMessage(`Auth server listening on port ${port}\nOpening: ${url}`);
-                  },
-                  onBrowserOpened: () => {
-                    addSystemMessage("Browser opened. Sign in to continue...");
-                  },
-                  onWaiting: () => {
-                    addSystemMessage("Waiting for authentication... (5 min timeout)");
-                  },
+                  onServerReady: () => {},
+                  onBrowserOpened: () => {},
+                  onWaiting: () => {},
                   onTokenReceived: (result) => {
                     if (result.success) {
                       setAuthStatus("authenticated");
@@ -1835,21 +1829,17 @@ export function App({ initialCommand, args }: AppProps) {
                         displayName: result.displayName || "User",
                         plan: "free",
                       });
-                      addSystemMessage(`Authenticated as ${result.displayName || result.email || "User"}`);
+                      addSystemMessage(`Signed in as ${result.displayName || result.email || "User"}`);
 
-                      // Set up GitHub integration silently
+                      // Set up GitHub integration silently (no messages)
                       import("../../../packages/auth/github.js").then(({ getGitHubAuth }) => {
                         const gh = getGitHubAuth();
                         if (result.token) {
-                          // If the auth result includes a GitHub token, store it
                           gh.storeToken(result.token);
                           gh.configureGhCli(result.token).catch(() => {});
                         }
-                        gh.getUser().then((user) => {
-                          if (user) {
-                            addSystemMessage(`Connected to GitHub as @${user.username}`);
-                          }
-                        }).catch(() => {});
+                        // Silently verify GitHub — no chat message
+                        gh.getUser().catch(() => {});
                       }).catch(() => {});
                     }
                   },
