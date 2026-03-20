@@ -87,6 +87,8 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - [ClawTeam](https://github.com/AimingLab/ClawTeam) - worktree agent swarms
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
+- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) - persistent memory and self-evolution patterns
+- [CashClaw](https://github.com/cashclaw) - autonomous work discovery and value generation patterns
 
 ## License
 
