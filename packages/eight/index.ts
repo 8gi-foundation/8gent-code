@@ -38,6 +38,25 @@ export { Agent } from "./agent";
 // CLI REPL
 export { startREPL } from "./repl";
 
+// Hypothesis loop engine
+export { HypothesisEngine } from "./hypothesis";
+export type { HypothesisResult, Lesson, HypothesisStats } from "./hypothesis";
+
+// Verifiers
+export {
+  verifyTests,
+  verifyTypecheck,
+  verifyLint,
+  verifyBuild,
+  verifyAll,
+  createVerifier,
+} from "./verifiers";
+export type { VerifyResult } from "./verifiers";
+
+// Self-healing executor
+export { SelfHealingExecutor } from "./self-healing";
+export type { HealingResult, SandboxResult, ClassifiedError, ErrorType } from "./self-healing";
+
 // Context engineering (existing file)
 export {
   estimateTokens,
