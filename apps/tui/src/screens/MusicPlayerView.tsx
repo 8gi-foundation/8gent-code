@@ -26,6 +26,7 @@ interface MusicPlayerViewProps {
   isPlaying: boolean;
   currentTrack: string | null;
   onPlay: (soundscape: string) => void;
+  onPlayFile: (filePath: string) => void;
   onStop: () => void;
   onClose: () => void;
   onGenerate: (prompt: string) => void;
@@ -78,6 +79,7 @@ export function MusicPlayerView({
   isPlaying,
   currentTrack,
   onPlay,
+  onPlayFile,
   onStop,
   onClose,
   onGenerate,
@@ -119,9 +121,7 @@ export function MusicPlayerView({
         const preset = PRESETS[selectedIndex];
         if (preset) onPlay(preset.key);
       } else if (section === "playlist" && tracks[selectedIndex]) {
-        // Play from cache — use the track name as soundscape key
-        const trackName = basename(tracks[selectedIndex].path, ".mp3");
-        onPlay(trackName);
+        onPlayFile(tracks[selectedIndex].path);
       }
     }
 
