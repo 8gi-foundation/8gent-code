@@ -662,6 +662,11 @@ export function createSelfAutonomy(workingDirectory?: string): SelfAutonomy {
 // Re-export onboarding
 export { OnboardingManager, type UserConfig, type OnboardingStep } from "./onboarding.js";
 
+// Re-export evolution
+export { reflect, type SessionData } from "./reflection.js";
+export { learnSkill, getRelevantSkills, reinforceSkill, buildSkillsContext } from "./learned-skills.js";
+export type { LearnedSkill, SessionReflection } from "./evolution-db.js";
+
 export default {
   SelfAutonomy,
   AutoGit,
