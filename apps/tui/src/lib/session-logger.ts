@@ -1,8 +1,12 @@
 /**
- * Session Logger — writes structured session events to ~/.8gent/sessions/ in real-time.
+ * Session Logger — writes structured session events to ~/.8gent/sessions/ as JSONL.
  *
- * Used by the TUI to capture every message, tool call, error, and tab switch
- * so that the debug CLI can inspect, tail, and analyze sessions.
+ * Each line is one JSON object with { type, timestamp, sequenceNumber, ... }.
+ * The debugger webapp reads these .jsonl files via SSE streaming.
+ *
+ * Event types match the debugger schema:
+ *   session_start, user_message, assistant_message, tool_call, tool_result,
+ *   step_finish, error, tab_switch, session_end
  */
 
 import * as fs from "fs";
@@ -13,11 +17,10 @@ import * as path from "path";
 // ============================================
 
 export interface SessionEvent {
-  type: "message" | "tool_start" | "tool_end" | "step" | "error" | "tab_switch" | "system";
+  type: string;
   timestamp: string;
-  tabId: string;
-  tabName: string;
-  data: Record<string, unknown>;
+  sequenceNumber: number;
+  [key: string]: unknown;
 }
 
 export interface SessionLog {
@@ -43,10 +46,27 @@ export interface SessionLog {
 // State
 // ============================================
 
-let session: SessionLog | null = null;
+let sessionId: string | null = null;
 let sessionFilePath: string | null = null;
+let sessionStartedAt: string | null = null;
+let sessionModel: string | null = null;
+let sessionProvider: string | null = null;
+let sessionName: string | null = null;
+let sequenceNumber = 0;
+
+// In-memory event buffer for getSessionLog / getSessionSummary
+let events: SessionEvent[] = [];
+
+// Stats counters (incremental — no need to recompute)
+let statMessages = 0;
+let statToolCalls = 0;
+let statTotalTokens = 0;
+let statErrors = 0;
+let stepCount = 0;
+
+// Pending writes buffer (batched via flush timer)
+let pendingLines: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let dirty = false;
 
 const SESSIONS_DIR = path.join(
   process.env.HOME || process.env.USERPROFILE || "",
@@ -54,7 +74,7 @@ const SESSIONS_DIR = path.join(
   "sessions"
 );
 
-const FLUSH_INTERVAL_MS = 1000;
+const FLUSH_INTERVAL_MS = 500;
 
 // ============================================
 // Internal helpers
@@ -66,62 +86,58 @@ function ensureSessionsDir(): void {
   }
 }
 
-function sanitizeFilename(s: string): string {
-  return s
-    .replace(/[^a-zA-Z0-9_-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
+function getGitBranch(): string | null {
+  try {
+    const headPath = path.join(process.cwd(), ".git", "HEAD");
+    if (fs.existsSync(headPath)) {
+      const head = fs.readFileSync(headPath, "utf-8").trim();
+      if (head.startsWith("ref: refs/heads/")) {
+        return head.slice("ref: refs/heads/".length);
+      }
+      return head.slice(0, 8); // detached HEAD
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
-function recomputeStats(): void {
-  if (!session) return;
-  const events = session.events;
-  let messageCount = 0;
-  let toolCalls = 0;
-  let totalTokens = 0;
-  let errors = 0;
-
-  for (const e of events) {
-    if (e.type === "message") messageCount++;
-    if (e.type === "tool_end") toolCalls++;
-    if (e.type === "error") errors++;
-    if (e.type === "step" && typeof e.data.totalTokens === "number") {
-      totalTokens += e.data.totalTokens as number;
-    }
-  }
-
-  const startMs = new Date(session.startedAt).getTime();
-  const durationMs = Date.now() - startMs;
-
-  session.stats = { messageCount, toolCalls, totalTokens, errors, durationMs };
+function appendLine(event: SessionEvent): void {
+  events.push(event);
+  pendingLines.push(JSON.stringify(event));
+  scheduleFlush();
 }
 
 function scheduleFlush(): void {
-  dirty = true;
-  if (flushTimer) return; // already scheduled
+  if (flushTimer) return;
   flushTimer = setTimeout(() => {
     flushTimer = null;
-    writeToDisk();
+    writePending();
   }, FLUSH_INTERVAL_MS);
 }
 
-function writeToDisk(): void {
-  if (!session || !sessionFilePath || !dirty) return;
-  dirty = false;
-  session.lastUpdatedAt = new Date().toISOString();
-  recomputeStats();
+function writePending(): void {
+  if (!sessionFilePath || pendingLines.length === 0) return;
+  const chunk = pendingLines.join("\n") + "\n";
+  pendingLines = [];
   try {
-    fs.writeFileSync(sessionFilePath, JSON.stringify(session, null, 2), "utf-8");
+    fs.appendFileSync(sessionFilePath, chunk, "utf-8");
   } catch {
     // Silently ignore write failures — don't crash the TUI
   }
 }
 
-function pushEvent(event: SessionEvent): void {
-  if (!session) return;
-  session.events.push(event);
-  scheduleFlush();
+function nextSeq(): number {
+  return sequenceNumber++;
+}
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function getDurationMs(): number {
+  if (!sessionStartedAt) return 0;
+  return Date.now() - new Date(sessionStartedAt).getTime();
 }
 
 // ============================================
@@ -129,39 +145,58 @@ function pushEvent(event: SessionEvent): void {
 // ============================================
 
 export function initSessionLogger(
-  sessionId: string,
+  id: string,
   model: string,
   provider: string
 ): void {
   ensureSessionsDir();
 
-  const now = new Date();
-  const ts = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const filename = `${ts}-${sanitizeFilename(sessionId)}.json`;
+  const ts = new Date();
+  const tsStr = ts.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const random = Math.random().toString(36).slice(2, 8);
+  const filename = `session_${tsStr}_${random}.jsonl`;
   sessionFilePath = path.join(SESSIONS_DIR, filename);
 
-  session = {
-    id: sessionId,
-    name: sessionId,
-    startedAt: now.toISOString(),
-    lastUpdatedAt: now.toISOString(),
-    model,
-    provider,
-    tabId: "default",
-    tabName: "Chat",
-    events: [],
-    stats: {
-      messageCount: 0,
-      toolCalls: 0,
-      totalTokens: 0,
-      errors: 0,
-      durationMs: 0,
+  sessionId = id;
+  sessionStartedAt = ts.toISOString();
+  sessionModel = model;
+  sessionProvider = provider;
+  sessionName = id;
+  sequenceNumber = 0;
+  events = [];
+  pendingLines = [];
+  statMessages = 0;
+  statToolCalls = 0;
+  statTotalTokens = 0;
+  statErrors = 0;
+  stepCount = 0;
+
+  // Write the session_start event immediately (not batched)
+  const startEvent: SessionEvent = {
+    type: "session_start",
+    timestamp: sessionStartedAt,
+    sequenceNumber: nextSeq(),
+    meta: {
+      sessionId: id,
+      version: 2,
+      startedAt: sessionStartedAt,
+      agent: {
+        model,
+        runtime: `bun@${typeof Bun !== "undefined" ? Bun.version : "unknown"}`,
+      },
+      environment: {
+        workingDirectory: process.cwd(),
+        gitBranch: getGitBranch(),
+      },
     },
   };
 
-  // Write the initial file immediately
-  dirty = true;
-  writeToDisk();
+  events.push(startEvent);
+  try {
+    fs.writeFileSync(sessionFilePath, JSON.stringify(startEvent) + "\n", "utf-8");
+  } catch {
+    // ignore
+  }
 }
 
 export function logMessage(
@@ -170,19 +205,26 @@ export function logMessage(
   role: string,
   content: string
 ): void {
-  if (!session) return;
+  if (!sessionId) return;
 
   // Set session name from first user message
-  if (role === "user" && session.name === session.id) {
-    session.name = content.slice(0, 50).trim() || session.id;
+  if (role === "user" && sessionName === sessionId) {
+    sessionName = content.slice(0, 50).trim() || sessionId;
   }
 
-  pushEvent({
-    type: "message",
-    timestamp: new Date().toISOString(),
+  statMessages++;
+
+  const type = role === "user" ? "user_message" : "assistant_message";
+  appendLine({
+    type,
+    timestamp: now(),
+    sequenceNumber: nextSeq(),
+    message: {
+      role,
+      content: content.slice(0, 2000),
+    },
     tabId,
     tabName,
-    data: { role, content: content.slice(0, 2000) },
   });
 }
 
@@ -193,16 +235,19 @@ export function logToolStart(
   toolCallId: string,
   args: Record<string, unknown>
 ): void {
-  pushEvent({
-    type: "tool_start",
-    timestamp: new Date().toISOString(),
+  if (!sessionId) return;
+
+  appendLine({
+    type: "tool_call",
+    timestamp: now(),
+    sequenceNumber: nextSeq(),
+    toolCall: {
+      toolCallId,
+      name: toolName,
+      arguments: JSON.parse(JSON.stringify(args || {}).slice(0, 2000)),
+    },
     tabId,
     tabName,
-    data: {
-      toolName,
-      toolCallId,
-      args: JSON.parse(JSON.stringify(args || {}).slice(0, 2000)),
-    },
   });
 }
 
@@ -212,31 +257,35 @@ export function logToolEnd(
   durationMs: number,
   resultPreview?: string
 ): void {
-  if (!session) return;
+  if (!sessionId) return;
 
-  // Find the matching tool_start to get tabId/tabName
+  statToolCalls++;
+
+  // Find the matching tool_call to get tabId/tabName
   let tabId = "default";
   let tabName = "Chat";
-  for (let i = session.events.length - 1; i >= 0; i--) {
-    const e = session.events[i];
-    if (e.type === "tool_start" && e.data.toolCallId === toolCallId) {
-      tabId = e.tabId;
-      tabName = e.tabName;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (
+      e.type === "tool_call" &&
+      (e.toolCall as { toolCallId: string })?.toolCallId === toolCallId
+    ) {
+      tabId = (e.tabId as string) || "default";
+      tabName = (e.tabName as string) || "Chat";
       break;
     }
   }
 
-  pushEvent({
-    type: "tool_end",
-    timestamp: new Date().toISOString(),
+  appendLine({
+    type: "tool_result",
+    timestamp: now(),
+    sequenceNumber: nextSeq(),
+    toolCallId,
+    result: resultPreview?.slice(0, 500) ?? null,
+    success,
+    durationMs,
     tabId,
     tabName,
-    data: {
-      toolCallId,
-      success,
-      durationMs,
-      resultPreview: resultPreview?.slice(0, 500),
-    },
   });
 }
 
@@ -247,12 +296,21 @@ export function logStep(
   totalTokens: number,
   text?: string
 ): void {
-  pushEvent({
-    type: "step",
-    timestamp: new Date().toISOString(),
+  if (!sessionId) return;
+
+  statTotalTokens += totalTokens;
+  stepCount = Math.max(stepCount, stepNumber);
+
+  appendLine({
+    type: "step_finish",
+    timestamp: now(),
+    sequenceNumber: nextSeq(),
+    stepNumber,
+    finishReason: "stop",
+    totalTokens,
+    text: text?.slice(0, 500),
     tabId,
     tabName,
-    data: { stepNumber, totalTokens, text: text?.slice(0, 500) },
   });
 }
 
@@ -261,12 +319,19 @@ export function logError(
   tabName: string,
   error: string
 ): void {
-  pushEvent({
+  if (!sessionId) return;
+
+  statErrors++;
+
+  appendLine({
     type: "error",
-    timestamp: new Date().toISOString(),
+    timestamp: now(),
+    sequenceNumber: nextSeq(),
+    error: {
+      message: error.slice(0, 2000),
+    },
     tabId,
     tabName,
-    data: { error: error.slice(0, 2000) },
   });
 }
 
@@ -275,21 +340,42 @@ export function logTabSwitch(
   toTabId: string,
   toTabName: string
 ): void {
-  pushEvent({
+  if (!sessionId) return;
+
+  appendLine({
     type: "tab_switch",
-    timestamp: new Date().toISOString(),
+    timestamp: now(),
+    sequenceNumber: nextSeq(),
+    fromTabId,
+    toTabId,
+    toTabName,
     tabId: toTabId,
     tabName: toTabName,
-    data: { fromTabId, toTabId, toTabName },
   });
 }
 
 export function getSessionLog(): SessionLog {
-  if (!session) {
+  if (!sessionId) {
     throw new Error("Session logger not initialized");
   }
-  recomputeStats();
-  return { ...session };
+  return {
+    id: sessionId,
+    name: sessionName || sessionId,
+    startedAt: sessionStartedAt || new Date().toISOString(),
+    lastUpdatedAt: now(),
+    model: sessionModel || "",
+    provider: sessionProvider || "",
+    tabId: "default",
+    tabName: "Chat",
+    events,
+    stats: {
+      messageCount: statMessages,
+      toolCalls: statToolCalls,
+      totalTokens: statTotalTokens,
+      errors: statErrors,
+      durationMs: getDurationMs(),
+    },
+  };
 }
 
 export function getSessionPath(): string {
@@ -300,18 +386,16 @@ export function getSessionPath(): string {
 }
 
 export function getSessionSummary(): string {
-  if (!session) return "No active session";
-  recomputeStats();
-  const s = session.stats;
-  const dur = (s.durationMs / 1000 / 60).toFixed(1);
+  if (!sessionId) return "No active session";
+  const dur = (getDurationMs() / 1000 / 60).toFixed(1);
   return [
-    `Session: ${session.name}`,
-    `Model: ${session.model} (${session.provider})`,
+    `Session: ${sessionName}`,
+    `Model: ${sessionModel} (${sessionProvider})`,
     `Duration: ${dur}m`,
-    `Messages: ${s.messageCount}`,
-    `Tool calls: ${s.toolCalls}`,
-    `Tokens: ${s.totalTokens.toLocaleString()}`,
-    `Errors: ${s.errors}`,
+    `Messages: ${statMessages}`,
+    `Tool calls: ${statToolCalls}`,
+    `Tokens: ${statTotalTokens.toLocaleString()}`,
+    `Errors: ${statErrors}`,
   ].join(" | ");
 }
 
@@ -320,8 +404,26 @@ export function flushSession(): void {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  if (session) {
-    dirty = true;
-    writeToDisk();
+
+  // Write session_end event
+  if (sessionId) {
+    const endEvent: SessionEvent = {
+      type: "session_end",
+      timestamp: now(),
+      sequenceNumber: nextSeq(),
+      summary: {
+        exitReason: "user_exit",
+        durationMs: getDurationMs(),
+        totalSteps: stepCount,
+        messageCount: statMessages,
+        toolCalls: statToolCalls,
+        totalTokens: statTotalTokens,
+        errors: statErrors,
+      },
+    };
+    events.push(endEvent);
+    pendingLines.push(JSON.stringify(endEvent));
   }
+
+  writePending();
 }
