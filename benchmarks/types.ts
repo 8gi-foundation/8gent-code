@@ -30,7 +30,8 @@ export type BenchmarkCategory =
   | "fullstack"
   | "agentic"
   | "ui-design"
-  | "battle-test";
+  | "battle-test"
+  | "long-horizon";
 
 export interface ExecutionGradeResult {
   /** 0-100 score from test execution */

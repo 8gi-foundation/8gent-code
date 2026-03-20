@@ -16,6 +16,74 @@ bun run tui          # launch TUI
 bun run benchmarks/autoresearch/harness.ts  # run benchmarks
 ```
 
+## Absolute Prohibitions (NON-NEGOTIABLE)
+
+1. **No em dashes (—).** Never. Use hyphens (-) or rewrite. No exceptions.
+2. **No purple/pink/violet/magenta colors.** Never in UI, gradients, themes, or generated HTML. Hues 270-350 are banned. Use blues, greens, neutrals, or brand colors.
+3. **No dollar values on benchmarks.** Describe what tasks test, not what they'd cost.
+
+## No-BS Mode (ALWAYS ON)
+
+**Every agent working on this repo MUST follow these rules:**
+
+1. **One thing at a time.** Finish what you started before proposing anything new.
+2. **Import concepts, not code.** Read external projects → abstract the pattern → rebuild in <200 lines inside existing architecture. No wholesale foreign code merges.
+3. **No speculative branches.** Don't create branches unless explicitly asked to build something.
+4. **Force constraints before building.** State: problem (1 sentence), constraint, what you're NOT doing, success metric.
+5. **Minimize blast radius.** If touching >3 files, pause and confirm scope.
+6. **Prove value before expanding.** Every feature needs a measurable outcome.
+7. **Call out complexity debt.** More moving parts than removed = red flag.
+8. **Scope creep detection.** If the conversation drifted from A to F, stop and ask.
+9. **Default to the smallest thing that works.** Not the most impressive — the smallest thing that ships.
+
+## First Principles (ALWAYS ON)
+
+**These are not features. They are defaults.**
+
+1. **Design first, not last.** Before writing code, think about the interaction. Does this need a UI? Could it be voice? Could it be nothing? Friction is the enemy. The best interface is the minimum that serves the user.
+2. **Free and local by default.** No API keys to start. Local models first. Cloud is opt-in. Privacy is the foundation.
+3. **Self-evolving.** Eight gets better every session. Lessons persist. Skills accumulate.
+4. **Hyper-personal.** Learn the user's patterns, preferences, codebase, style. Two users should have different experiences after a week.
+5. **Accessible.** Key docs have audio. Voice input works. Screen readers work. Adapt to the user, not the reverse.
+6. **Orchestrate by default.** Delegate to sub-agents. Decompose complexity. Use worktrees. Work like a CTO who is also the best IC.
+7. **Reduce friction, increase truth.** Prefer voice and conversation over forms. People give more truth when it's easy.
+8. **The work speaks for itself.** Expertise is process, design, communication, and what ships — not credentials or enthusiasm.
+
+## Design System Library (MANDATORY)
+
+**Never rely solely on the LLM's taste. Consult the design system before building any UI.**
+
+### Internal Design Assets
+
+| Resource | Path | What It Contains |
+|----------|------|-----------------|
+| **Design Systems DB** | `packages/design-systems/` | SQLite-backed registry of curated design systems, queryable by style/mood/project type |
+| **TUI Theme Tokens** | `apps/tui/src/theme/tokens.ts` | Color, spacing, typography tokens for terminal UI |
+| **TUI Semantic Layer** | `apps/tui/src/theme/semantic.ts` | Semantic color mappings (success, error, muted, etc.) |
+| **TUI Primitives** | `apps/tui/src/components/primitives/` | AppText, Badge, Card, Stack, Inline, Divider, StatusDot |
+| **CLUI (Desktop)** | `apps/clui/` | Tauri 2.0 desktop overlay components |
+| **Personality** | `packages/personality/` | Brand voice, "Infinite Gentleman" styling |
+
+### Design Skills Available
+
+These skills are installed and should be consulted for design decisions:
+
+- **DesignExcellence** — design tokens, accessibility, modern UI patterns
+- **ui-ux-pro-max** — 50 styles, 97 palettes, 57 font pairings, 99 UX guidelines, 9 stacks
+- **web-design-guidelines** — Web Interface Guidelines compliance (Vercel)
+- **frontend-design** — production-grade frontend with high design quality
+- **theme-factory** — 10 pre-set themes for any artifact
+- **brand-guidelines** — Anthropic brand application (for Claude-adjacent work)
+- **canvas-design** — visual art in PNG/PDF
+- **sleek-design-mobile-apps** — mobile app design
+
+### Protocol
+
+1. **Before building any UI component:** Query the design systems DB or check TUI primitives. Don't reinvent what exists.
+2. **Before choosing colors/fonts:** Consult ui-ux-pro-max or the theme tokens. Don't guess.
+3. **Before shipping UI:** Run web-design-guidelines review. Don't skip accessibility.
+4. **TUI rule (from existing CLAUDE.md below):** Never use `gray`, `white`, or `black` as colors. Use semantic tokens.
+
 ## AI Judging Rule
 
 **NEVER use string matching** (regex, `.includes()`, substring checks) to evaluate agent output, detect completion, classify results, or make decisions about success/failure. Always use the **Vercel AI SDK (`ai` package) as a judge** — call a model with a structured prompt to evaluate the output semantically. String matching is brittle, breaks on paraphrasing, and produces false positives/negatives. An LLM judge handles ambiguity, synonyms, and edge cases correctly.
@@ -73,15 +141,15 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 
 ## Kernel Fine-Tuning (`packages/kernel/`)
 
-The `@8gent/kernel` package handles continuous RL fine-tuning via MetaClaw. Key files:
+The `@8gent/kernel` package handles continuous RL fine-tuning via a training proxy. Key files:
 
-- `proxy.ts` — MetaClaw proxy lifecycle and latency monitoring
+- `proxy.ts` — Training proxy lifecycle and latency monitoring
 - `judge.ts` — PRM scoring via Gemini Flash (OpenRouter)
 - `training.ts` — GRPO batch collection, checkpoint validation, auto-rollback
 - `loop.ts` — MadMax scheduling, auto-promotion into model-router
 - `manager.ts` — unified entry point (`KernelManager.fromProjectConfig()`)
 
-**Config:** `config/metaclaw.yaml` (proxy, RL, scheduler settings)
+**Config:** `config/training-proxy.yaml` (proxy, RL, scheduler settings)
 **Docs:** `docs/KERNEL-FINETUNING.md` (full architecture and API reference)
 **Data dir:** `.8gent/kernel/` (score history, training batches, checkpoints)
 
@@ -92,7 +160,7 @@ await kernel.start();
 await kernel.processTurn(sessionId, turn, model, prompt, response);
 ```
 
-The pipeline is **off by default** — set `"metaclaw": { "enabled": true }` in `.8gent/config.json` to activate.
+The pipeline is **off by default** — set `"training_proxy": { "enabled": true }` in `.8gent/config.json` to activate.
 
 ## TUI Design System
 

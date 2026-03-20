@@ -58,7 +58,7 @@ The name "CLUI" (Command Line User Interface) signals that this is not a browser
 | **Component library** | Built from scratch | Adapted from 32+ existing Ink TUI components |
 | **Design system** | Tailwind defaults | Ported design tokens (6 safe ANSI colors mapped to CSS vars) |
 | **Plugin system** | Marketplace (planned) | Toolshed + Skills (already built in packages/toolshed, packages/skills) |
-| **Fine-tuning** | None | MetaClaw kernel pipeline (packages/kernel) |
+| **Fine-tuning** | None | RL training proxy pipeline (packages/kernel) |
 | **Cost** | Anthropic API billing | Free with local models, pay-per-token with OpenRouter |
 
 ---

@@ -321,7 +321,7 @@ Collection happens automatically. To enable the full RL training pipeline (GRPO 
 
 ```json
 {
-  "metaclaw": {
+  "training_proxy": {
     "enabled": true
   }
 }
@@ -450,7 +450,7 @@ The project-level config controls sync behavior:
     "enabled": true,
     "convexUrl": "https://your-deployment.convex.cloud"
   },
-  "metaclaw": {
+  "training_proxy": {
     "enabled": false
   }
 }
@@ -460,7 +460,7 @@ The project-level config controls sync behavior:
 |------|---------|-------------|
 | `sync.enabled` | `true` | Enable Convex cloud sync for preferences and sessions |
 | `sync.convexUrl` | deployment URL | Convex deployment endpoint |
-| `metaclaw.enabled` | `false` | Enable RL fine-tuning pipeline |
+| `training_proxy.enabled` | `false` | Enable RL fine-tuning pipeline |
 
 ### Autonomy Thresholds
 

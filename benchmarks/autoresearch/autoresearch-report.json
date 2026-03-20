@@ -1,0 +1,95 @@
+{
+  "config": {
+    "maxIterations": 2,
+    "passThreshold": 80,
+    "models": [
+      "ollama::eight:latest"
+    ],
+    "temperatures": [
+      0.3,
+      0.5,
+      0.7
+    ],
+    "category": "long-horizon"
+  },
+  "history": [
+    {
+      "iteration": 1,
+      "avgScore": 64,
+      "passing": 0,
+      "total": 5,
+      "scores": {
+        "LH001": 59,
+        "LH002": 71,
+        "LH003": 65,
+        "LH004": 75,
+        "LH005": 52
+      },
+      "tokens": {
+        "LH001": 9487,
+        "LH002": 9124,
+        "LH003": 9030,
+        "LH004": 6558,
+        "LH005": 9244
+      },
+      "durations": {
+        "LH001": 294430,
+        "LH002": 257274,
+        "LH003": 248807,
+        "LH004": 259610,
+        "LH005": 295436
+      },
+      "totalTokens": 43443,
+      "totalDurationMs": 1355557,
+      "mutationsAdded": [
+        "[LH002] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[LH004] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[LH005] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec."
+      ],
+      "timestamp": "2026-03-20T18:30:29.658Z"
+    },
+    {
+      "iteration": 2,
+      "avgScore": 68,
+      "passing": 2,
+      "total": 5,
+      "scores": {
+        "LH001": 49,
+        "LH002": 66,
+        "LH003": 45,
+        "LH004": 80,
+        "LH005": 100
+      },
+      "tokens": {
+        "LH001": 9599,
+        "LH002": 8318,
+        "LH003": 9654,
+        "LH004": 7360,
+        "LH005": 8762
+      },
+      "durations": {
+        "LH001": 272031,
+        "LH002": 257276,
+        "LH003": 265933,
+        "LH004": 187459,
+        "LH005": 233297
+      },
+      "totalTokens": 43693,
+      "totalDurationMs": 1215996,
+      "mutationsAdded": [
+        "[LH001] Key patterns missing: generateReview, ReviewReport, ReviewComment, blocker, warning. Make sure to implement all required methods and use the specified names.",
+        "[LH002] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[LH003] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec."
+      ],
+      "timestamp": "2026-03-20T19:25:36.481Z"
+    }
+  ],
+  "finalMutations": [
+    "[LH002] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+    "[LH004] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+    "[LH005] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+    "[LH001] Key patterns missing: generateReview, ReviewReport, ReviewComment, blocker, warning. Make sure to implement all required methods and use the specified names.",
+    "[LH003] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec."
+  ],
+  "systemPrompt": "You are a senior TypeScript/JavaScript engineer. You solve coding tasks with correct, production-quality code.\n\nRULES:\n1. Include all necessary imports, types, and exports.\n2. Export the main class or function as a named export AND as the default export.\n3. Handle edge cases: null inputs, empty strings, concurrent access, missing optional fields.\n4. Do NOT include example usage, tests, or explanations outside the code block.\n5. Prefer built-in APIs over external dependencies. Use Bun-compatible TypeScript.\n6. Use async/await for concurrent operations. Guard shared state with mutex patterns.\n7. Every public method/function must handle being called with invalid arguments gracefully.\n\nSINGLE-FILE TASKS:\nOutput ONE fenced code block:\n```typescript\n// your complete implementation here\n```\n\nMULTI-FILE TASKS:\nWhen the task requires multiple files, output EACH file in a SEPARATE fenced code block with the filename after the language tag:\n```typescript // auth.ts\n// auth implementation\n```\n```typescript // routes.ts\n// routes implementation\n```\n```typescript // app.ts\n// app wiring\n```\n\nCRITICAL RULES FOR MULTI-FILE TASKS:\n- Import fixture files (database.ts, http.ts) using relative imports: import { Database } from \"./database\"\n- Each file must be self-contained with its own imports\n- Use the EXACT filenames specified in the task\n- Export a createApp() or main entry function from the top-level module\n- Do NOT reimplement fixture classes — import and use them as provided\n\nLEARNINGS FROM PREVIOUS ITERATIONS:\n1. [LH002] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.\n2. [LH004] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.\n3. [LH005] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.\n4. [LH001] Key patterns missing: generateReview, ReviewReport, ReviewComment, blocker, warning. Make sure to implement all required methods and use the specified names.\n5. [LH003] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec."
+}
