@@ -46,6 +46,8 @@ import {
   ADHD_MODE_ENABLED_MSG,
   ADHD_MODE_DISABLED_MSG,
 } from "./components/bionic-text.js";
+import { getADHDAudio, type ADHDSoundscape } from "./lib/adhd-audio.js";
+import { getTaskRouter, type TaskCategory } from "@8gent/ai/task-router";
 import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
 import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
@@ -1258,26 +1260,208 @@ export function App({ initialCommand, args }: AppProps) {
           }
           break;
 
-        case "adhd":
-          // Toggle ADHD/bionic reading mode
-          if (args.length > 0) {
-            const setting = args[0].toLowerCase();
-            if (setting === "on" || setting === "enable" || setting === "true") {
-              setAdhdMode(true);
-              addSystemMessage(ADHD_MODE_ENABLED_MSG);
-            } else if (setting === "off" || setting === "disable" || setting === "false") {
-              setAdhdMode(false);
-              addSystemMessage(ADHD_MODE_DISABLED_MSG);
-            } else {
-              addSystemMessage(`Usage: /adhd [on|off]\nCurrent: ${adhdMode ? "enabled" : "disabled"}`);
-            }
-          } else {
-            // Toggle
+        case "adhd": {
+          // ADHD mode — focus toolkit
+          const adhdAudio = getADHDAudio();
+          const sub = args[0]?.toLowerCase();
+
+          if (!sub) {
+            // Toggle text mode
             const newMode = !adhdMode;
             setAdhdMode(newMode);
             addSystemMessage(newMode ? ADHD_MODE_ENABLED_MSG : ADHD_MODE_DISABLED_MSG);
+            break;
+          }
+
+          // Text mode toggles
+          if (sub === "on" || sub === "enable" || sub === "true") {
+            setAdhdMode(true);
+            addSystemMessage(ADHD_MODE_ENABLED_MSG);
+          } else if (sub === "off" || sub === "disable" || sub === "false") {
+            setAdhdMode(false);
+            adhdAudio.stop();
+            addSystemMessage(ADHD_MODE_DISABLED_MSG);
+          }
+          // Audio controls
+          else if (sub === "stop") {
+            adhdAudio.stop();
+            addSystemMessage("Audio stopped. Text mode still " + (adhdMode ? "on" : "off") + ".");
+          }
+          // Config: /adhd config, /adhd set <key> <value>
+          else if (sub === "config" || sub === "settings") {
+            const cfg = adhdAudio.config;
+            addSystemMessage(
+              "ADHD Audio Config\n\n" +
+              `  duration:       ${cfg.duration}s\n` +
+              `  bpm:            ${cfg.bpm ?? "auto (per preset)"}\n` +
+              `  inferenceSteps: ${cfg.inferenceSteps}\n` +
+              `  guidanceScale:  ${cfg.guidanceScale}\n` +
+              `  batchSize:      ${cfg.batchSize}\n` +
+              `  apiUrl:         ${cfg.apiUrl}\n\n` +
+              "Set with: /adhd set <key> <value>\n" +
+              "Example:  /adhd set duration 120"
+            );
+          }
+          else if (sub === "set" && args.length >= 3) {
+            const key = args[1].toLowerCase();
+            const val = args[2];
+            const validKeys: Record<string, string> = {
+              duration: "duration", length: "duration", time: "duration",
+              bpm: "bpm", tempo: "bpm",
+              steps: "inferenceSteps", inferencesteps: "inferenceSteps", quality: "inferenceSteps",
+              guidance: "guidanceScale", guidancescale: "guidanceScale",
+              batch: "batchSize", batchsize: "batchSize",
+              api: "apiUrl", apiurl: "apiUrl", url: "apiUrl",
+            };
+            const configKey = validKeys[key];
+            if (!configKey) {
+              addSystemMessage(`Unknown config key "${key}". Valid: ${Object.keys(validKeys).join(", ")}`);
+            } else if (configKey === "apiUrl") {
+              const updated = adhdAudio.setConfig({ apiUrl: val });
+              addSystemMessage(`apiUrl set to ${updated.apiUrl}`);
+            } else {
+              const numVal = Number(val);
+              if (isNaN(numVal)) {
+                addSystemMessage(`"${val}" isn't a number.`);
+              } else if (configKey === "bpm" && val === "auto") {
+                adhdAudio.setConfig({ bpm: null });
+                addSystemMessage("bpm set to auto (uses preset default).");
+              } else {
+                const updated = adhdAudio.setConfig({ [configKey]: numVal } as any);
+                addSystemMessage(`${configKey} set to ${(updated as any)[configKey]}. Cached audio cleared.`);
+              }
+            }
+          }
+          // Clear cache
+          else if (sub === "clear" || sub === "regenerate" || sub === "regen") {
+            adhdAudio.clearCache();
+            addSystemMessage("Audio cache cleared. Next play will regenerate fresh tracks.");
+          }
+          // Soundscapes: lofi, rainsound, whitenoise, ambient, classical
+          else if (["lofi", "rainsound", "whitenoise", "ambient", "classical"].includes(sub)) {
+            if (!adhdMode) {
+              setAdhdMode(true);
+              addSystemMessage(ADHD_MODE_ENABLED_MSG);
+            }
+            addSystemMessage(`Loading ${sub}...`);
+            adhdAudio.play(sub as ADHDSoundscape).then((result) => {
+              addSystemMessage(result.message);
+            });
+          }
+          else {
+            const cfg = adhdAudio.config;
+            addSystemMessage(
+              "ADHD Mode — your focus toolkit\n\n" +
+              "  /adhd              Toggle text mode\n" +
+              "  /adhd on|off       Enable/disable\n\n" +
+              "  Audio:\n" +
+              "  /adhd lofi         Lofi beats\n" +
+              "  /adhd rainsound    Rain sounds\n" +
+              "  /adhd whitenoise   White noise\n" +
+              "  /adhd ambient      Ambient synths\n" +
+              "  /adhd classical    Soft piano\n" +
+              "  /adhd stop         Stop audio\n\n" +
+              "  Config:\n" +
+              "  /adhd config       Show current settings\n" +
+              "  /adhd set <k> <v>  Change a setting\n" +
+              "  /adhd regen        Clear cache & regenerate\n\n" +
+              `Status: text=${adhdMode ? "on" : "off"} · audio=${adhdAudio.isPlaying ? adhdAudio.current : "off"} · duration=${cfg.duration}s`
+            );
           }
           break;
+        }
+
+        case "router": {
+          const router = getTaskRouter();
+          const sub = args[0]?.toLowerCase();
+
+          if (!sub || sub === "status") {
+            const cfg = router.getConfig();
+            const lines = [
+              `Task Router — ${cfg.enabled ? "enabled" : "disabled"}`,
+              "",
+              "Slot Assignments:",
+              `  code:      ${cfg.slots.code.model} (${cfg.slots.code.provider})`,
+              `  reasoning: ${cfg.slots.reasoning.model} (${cfg.slots.reasoning.provider})`,
+              `  simple:    ${cfg.slots.simple.model} (${cfg.slots.simple.provider})`,
+              `  creative:  ${cfg.slots.creative.model} (${cfg.slots.creative.provider})`,
+              "",
+              `  classifier: ${cfg.classifierModel}`,
+              `  threshold:  ${cfg.confidenceThreshold}`,
+              `  default:    ${cfg.defaultModel.model}`,
+              "",
+              "Commands:",
+              "  /router on|off           Enable/disable routing",
+              "  /router set <cat> <model> Assign model to category",
+              "  /router test <prompt>     Test classification",
+              "  /router stats             Show routing stats",
+              "  /router auto              Auto-assign from Ollama models",
+            ];
+            addSystemMessage(lines.join("\n"));
+          } else if (sub === "on" || sub === "enable") {
+            router.setConfig({ enabled: true });
+            addSystemMessage("Task router enabled. Messages will be classified and routed.");
+          } else if (sub === "off" || sub === "disable") {
+            router.setConfig({ enabled: false });
+            addSystemMessage("Task router disabled. All messages go to default model.");
+          } else if (sub === "set" && args.length >= 3) {
+            const cat = args[1].toLowerCase() as TaskCategory;
+            const model = args.slice(2).join(" ");
+            if (!["code", "reasoning", "simple", "creative"].includes(cat)) {
+              addSystemMessage(`Unknown category "${cat}". Use: code, reasoning, simple, creative`);
+            } else {
+              router.setSlot(cat, { model, provider: currentProvider as any || "ollama" });
+              addSystemMessage(`${cat} → ${model}`);
+            }
+          } else if (sub === "test" && args.length >= 2) {
+            const testPrompt = args.slice(1).join(" ");
+            addSystemMessage(`Classifying: "${testPrompt}"...`);
+            router.route(testPrompt).then((decision) => {
+              addSystemMessage(
+                `Category: ${decision.category} (${(decision.confidence * 100).toFixed(0)}%)\n` +
+                `Model: ${decision.model}\n` +
+                `Reasoning: ${decision.reasoning}`
+              );
+            }).catch((err) => {
+              addSystemMessage(`Classification failed: ${err instanceof Error ? err.message : String(err)}`);
+            });
+          } else if (sub === "stats") {
+            const stats = (await import("@8gent/ai/task-router")).getRouterStats();
+            const lines = [
+              `Router Stats (${stats.totalRouted} total routes)`,
+              "",
+              "By Category:",
+              ...Object.entries(stats.byCategory).map(([k, v]) => `  ${k}: ${v}`),
+              "",
+              "By Model:",
+              ...Object.entries(stats.byModel).map(([k, v]) =>
+                `  ${k}: ${v.routed} routes, avg ${Math.round(v.avgLatencyMs)}ms`
+              ),
+            ];
+            addSystemMessage(lines.join("\n"));
+          } else if (sub === "classifier" && args.length >= 2) {
+            router.setConfig({ classifierModel: args.slice(1).join(" ") });
+            addSystemMessage(`Classifier model set to ${args.slice(1).join(" ")}`);
+          } else if (sub === "threshold" && args[1]) {
+            const val = parseFloat(args[1]);
+            if (!isNaN(val)) {
+              router.setConfig({ confidenceThreshold: Math.max(0, Math.min(1, val)) });
+              addSystemMessage(`Confidence threshold set to ${val}`);
+            }
+          } else if (sub === "auto") {
+            addSystemMessage("Scanning Ollama models...");
+            router.autoAssign().then((changes) => {
+              if (changes.length === 0) {
+                addSystemMessage("No changes — slots already optimal.");
+              } else {
+                addSystemMessage("Auto-assigned:\n" + changes.map(c => `  ${c}`).join("\n"));
+              }
+            });
+          } else {
+            addSystemMessage("Unknown router command. Try /router for help.");
+          }
+          break;
+        }
 
         case "design":
           // Trigger design agent manually
@@ -1692,6 +1876,22 @@ export function App({ initialCommand, args }: AppProps) {
 
       if (agent && agentReady) {
         try {
+          // Task Router: classify and potentially switch model
+          const router = getTaskRouter();
+          const routerConfig = router.getConfig();
+          if (routerConfig.enabled) {
+            try {
+              const decision = await router.route(message);
+              if (decision.model !== currentModel && decision.confidence >= routerConfig.confidenceThreshold) {
+                // Switch model for this task
+                setCurrentModel(decision.model);
+                addSystemMessage(`Routed to ${decision.model} (${decision.category}, ${(decision.confidence * 100).toFixed(0)}%)`);
+              }
+            } catch {
+              // Router failed silently — continue with current model
+            }
+          }
+
           // Inject agent mode context into the message
           const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
           const img = imageInput.currentImage;

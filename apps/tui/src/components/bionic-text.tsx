@@ -1,5 +1,5 @@
 /**
- * 8gent Code - Bionic/ADHD Reading Mode
+ * 8gent Code - ADHD Reading Mode
  *
  * Makes text easier to read by bolding the first ~50% of each word.
  * This technique helps the brain recognize words faster by providing
@@ -250,24 +250,21 @@ export function SmartText({ children, color }: SmartTextProps) {
 // ============================================
 
 export const ADHD_MODE_SUGGESTION = `
-💡 Tip: Try ADHD mode for faster reading!
-
-Type /adhd to enable bionic reading - it bolds the
-first half of each word so your brain processes
-text faster. Perfect for code reviews and long outputs.
+💡 Hey — try /adhd if you want help locking in.
+Bolds the key parts of words so your brain grabs them faster.
 `;
 
 export const ADHD_MODE_ENABLED_MSG = `
-✦ ADHD Mode Enabled
+✦ ADHD Mode On
 
-Text will now display with **bio**nic **read**ing style.
-Your **br**ain will **th**ank you.
+Nice. This'll help your mind lock in — words hit different now.
+Don't worry about it, just focus. I got you.
 
-Type /adhd off to disable.
+/adhd off when you're done.
 `;
 
 export const ADHD_MODE_DISABLED_MSG = `
-ADHD Mode Disabled
+ADHD Mode Off
 
-Back to normal text rendering.
+Back to normal. Hit /adhd whenever you need to lock in again.
 `;
