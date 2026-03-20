@@ -10,6 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GitHub integration** — `packages/auth/github.ts` for GitHub provider token management (Keychain/encrypted storage), `packages/auth/github-tools.ts` with REST API helpers (repos, issues, PRs, branch detection), `/github` slash command in TUI, `/auth status` now shows GitHub connection info, auto-configures `gh` CLI after login
 - **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
 - **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
 - **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
@@ -68,14 +69,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Security fixes ported to `packages/eight`** — hardened command execution, input sanitization, and permission checks carried over from agent package
 
 ### Added (prior)
-- **`@8gent/kernel` package** — full 4-phase RL fine-tuning pipeline via MetaClaw
-  - **Phase 1: Proxy manager** (`proxy.ts`) — start/stop MetaClaw, health checks, latency overhead monitoring with configurable threshold
+- **`@8gent/kernel` package** — full 4-phase RL fine-tuning pipeline via training proxy
+  - **Phase 1: Proxy manager** (`proxy.ts`) — start/stop training proxy, health checks, latency overhead monitoring with configurable threshold
   - **Phase 2: Judge scoring** (`judge.ts`) — PRM wiring via Gemini Flash (free), score distribution tracking, per-model stats, daily trend analysis
   - **Phase 3: Training orchestration** (`training.ts`) — GRPO batch collection with score filtering, checkpoint creation, benchmark validation gate, auto-rollback on regression
   - **Phase 4: Production loop** (`loop.ts`) — MadMax scheduling (sleep/idle windows), auto-promotion of improved checkpoints into model-router, health monitoring, score trend alerts
   - **Kernel manager** (`manager.ts`) — unified entry point, reads `.8gent/config.json`, safe no-op when disabled
-- **MetaClaw RL fine-tuning exploration** — architecture doc, proxy config, and integration plan for continuous GRPO fine-tuning of local Ollama models via MetaClaw
-- **MetaClaw proxy toggle** — `METACLAW_PROXY_URL` env var and `.8gent/config.json` metaclaw section to route Ollama calls through MetaClaw's OpenAI-compatible proxy
+- **RL fine-tuning exploration** — architecture doc, proxy config, and integration plan for continuous GRPO fine-tuning of local Ollama models via training proxy
+- **Training proxy toggle** — `TRAINING_PROXY_URL` env var and `.8gent/config.json` training_proxy section to route Ollama calls through the OpenAI-compatible training proxy
 - **RL checkpoint validation gate** — `benchmarks/autoresearch/validate-checkpoint.ts` runs benchmark suite against fine-tuned models and compares against baseline scores to prevent regressions
 - **Kernel Fine-Tuning section in README** — documents proxy architecture, base model recommendations, and how to enable
 - **Remotion video demos** (`apps/demos/`) — React-based video generation for product reels and landing page content
