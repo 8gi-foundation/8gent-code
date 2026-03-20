@@ -2884,20 +2884,7 @@ export function App({ initialCommand, args }: AppProps) {
         )}
       </Box>
 
-      {/* Mini kanban when in chat mode and has items */}
-      {viewMode === "chat" && activeTabType === "chat" && (
-        autoKanban.stats.total > 0 ? (
-          (autoKanban.columns.ready.length > 0 || autoKanban.columns.inProgress.length > 0) && (
-            <Box paddingX={1} marginBottom={1}>
-              <AutoMiniKanban columns={autoKanban.columns} stats={autoKanban.stats} />
-            </Box>
-          )
-        ) : (kanbanBoard.ready.length > 0 || kanbanBoard.inProgress.length > 0) ? (
-          <Box paddingX={1} marginBottom={1}>
-            <MiniKanban board={kanbanBoard as any} />
-          </Box>
-        ) : null
-      )}
+      {/* Mini kanban removed — full board available via Ctrl+K */}
 
       {/* Status verb - always visible */}
       <Box paddingX={1} marginBottom={1}>
