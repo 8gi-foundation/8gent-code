@@ -80,7 +80,8 @@ export type SlashCommand =
   | "continue"
   | "compact"
   | "chat"
-  | "agent";
+  | "agent"
+  | "github";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -244,6 +245,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["login", "account"],
     description: "Authentication (login, logout, status)",
     usage: "/auth [login|logout|status]",
+  },
+  {
+    name: "github",
+    aliases: ["gh"],
+    description: "GitHub integration (issues, PRs, repos)",
+    usage: "/github [issues|pr|repos|status]",
   },
   {
     name: "vision",
