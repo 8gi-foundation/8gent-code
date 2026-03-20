@@ -2472,6 +2472,7 @@ export function App({ initialCommand, args }: AppProps) {
           <CommandInput
             onSubmit={handleSubmit}
             isProcessing={isProcessing}
+            focused={viewMode === "chat" || viewMode === "onboarding"}
             processingStage={processingStage}
             showAnimations={showAnimations}
             activeTool={activeTool}
