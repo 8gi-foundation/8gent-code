@@ -45,6 +45,8 @@ interface CommandInputProps {
   onSlashCommand?: (command: string, args: string[]) => void;
   /** Text injected from voice transcription — appended to current input for review */
   injectedText?: string | null;
+  /** Whether the input is focused (false when non-chat views are active) */
+  focused?: boolean;
 }
 
 export type SlashCommand =
@@ -306,6 +308,7 @@ export function CommandInput({
   recentCommands = [],
   onSlashCommand,
   injectedText = null,
+  focused = true,
 }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [promptPulse, setPromptPulse] = useState(true);
@@ -360,7 +363,7 @@ export function CommandInput({
         return;
       }
     },
-    { isActive: !isProcessing }
+    { isActive: !isProcessing && focused }
   );
 
   const handleSubmit = useCallback(
