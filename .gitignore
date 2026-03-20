@@ -60,3 +60,10 @@ yarn.lock
 .next/
 .history/
 .bmad/
+
+# Claude worktrees (isolated agent workspaces, never commit)
+.claude/worktrees/
+
+# Audio files (too large for git, regenerate with sync-audio.ts)
+docs/audio/*.aiff
+docs/branch-audio/*.aiff
