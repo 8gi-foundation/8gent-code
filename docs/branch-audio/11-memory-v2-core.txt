@@ -1,0 +1,1 @@
+Branch report for memory v2 core. Already merged into main. It added the SQLite plus FTS5 memory storage layer with five-layer taxonomy, hybrid search, and V1 migration. Merged at commit a334b5c. This branch can be safely deleted.

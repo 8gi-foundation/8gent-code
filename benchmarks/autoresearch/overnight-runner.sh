@@ -9,7 +9,7 @@ cd "$(dirname "$0")/../.."
 source ~/8gent-code/.env
 export OPENROUTER_API_KEY
 
-STOP_HOUR=99  # Run indefinitely — user will stop manually
+STOP_HOUR=7  # Stop at 7 AM
 LOG_FILE="benchmarks/autoresearch/overnight.log"
 STATE_FILE="benchmarks/autoresearch/loop-state.json"
 
@@ -67,13 +67,14 @@ while true; do
   log "══════ ROUND $ROUND ══════"
 
   # Alternate between ALL categories — battle-test gets extra iterations
-  case $((ROUND % 7)) in
+  case $((ROUND % 8)) in
     1) run_category "battle-test" 5 ;;
     2) run_category "agentic" 3 ;;
     3) run_category "fullstack" 3 ;;
     4) run_category "battle-test" 5 ;;
     5) run_category "ui-design" 3 ;;
-    6) run_category "bug-fixing" 2 ;;
+    6) run_category "long-horizon" 3 ;;
+    7) run_category "bug-fixing" 2 ;;
     0) run_category "feature-implementation" 2 ;;
   esac
 

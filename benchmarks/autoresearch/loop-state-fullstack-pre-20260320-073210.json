@@ -1,0 +1,179 @@
+{
+  "iteration": 3,
+  "mutations": [
+    "[TC001] Use relative imports (\"./filename\") for all cross-file references. Import fixture files exactly as documented in the task.",
+    "[TC001] The serializer must preserve enough structure for roundtrip fidelity. parse(serialize(parse(input))) must produce structurally equivalent ASTs.",
+    "[DP001] Use relative imports (\"./filename\") for all cross-file references. Import fixture files exactly as documented in the task.",
+    "[DP001] Strip BOM (\\uFEFF) from the start of CSV input. Handle mixed line endings (CRLF/LF). Parse quoted fields that contain commas.",
+    "[DP001] Key patterns missing: aggregate, quality, BOM, referential. Make sure to implement all required methods and use the specified names.",
+    "[SD001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+    "[SD001] Three bugs to fix: (1) broker.ts race condition — add mutex/lock for concurrent subscribe/unsubscribe, (2) history.ts memory leak — prune internal array to maxHistory after each add, (3) router.ts off-by-one — wildcard * must match zero or more chars, not one or more.",
+    "[SD001] Key patterns missing: wildcard, prune, concurrent, lock, mutex. Make sure to implement all required methods and use the specified names.",
+    "[AR001] Implement cycle detection in the dependency resolver using DFS with a \"visiting\" set. When a cycle is found, throw an error that names the cycle path.",
+    "[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.",
+    "[CB001] When traversing for git repos, skip nested .git directories (submodules). Only count top-level repos. Parse git log format: \"Author: Name <email>\".",
+    "[CB001] Key patterns missing: repository, stats, extension, submodule. Make sure to implement all required methods and use the specified names.",
+    "[MR001] Key patterns missing: AC-3, arc, consistency, prune, propagate. Make sure to implement all required methods and use the specified names.",
+    "[TC001] Avoid infinite loops or unbounded waits. Worker polling must stop cleanly when stop() is called. Use bounded iteration counts.",
+    "[TC001] Key patterns missing: interpolation, recursive, children, tokenize. Make sure to implement all required methods and use the specified names.",
+    "[AR001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+    "[AR001] Key patterns missing: topological, lazy, cascade, requires. Make sure to implement all required methods and use the specified names."
+  ],
+  "history": [
+    {
+      "iteration": 1,
+      "avgScore": 38,
+      "passing": 0,
+      "total": 7,
+      "scores": {
+        "TC001": 28,
+        "DP001": 23,
+        "RE001": 38,
+        "SD001": 43,
+        "AR001": 36,
+        "CB001": 62,
+        "MR001": 35
+      },
+      "tokens": {
+        "TC001": 9393,
+        "DP001": 2978,
+        "RE001": 2329,
+        "SD001": 3652,
+        "AR001": 6191,
+        "CB001": 2749,
+        "MR001": 4183
+      },
+      "durations": {
+        "TC001": 262923,
+        "DP001": 153796,
+        "RE001": 153848,
+        "SD001": 246689,
+        "AR001": 264728,
+        "CB001": 97399,
+        "MR001": 200690
+      },
+      "totalTokens": 31475,
+      "totalDurationMs": 1380073,
+      "mutationsAdded": [
+        "[TC001] Use relative imports (\"./filename\") for all cross-file references. Import fixture files exactly as documented in the task.",
+        "[TC001] The serializer must preserve enough structure for roundtrip fidelity. parse(serialize(parse(input))) must produce structurally equivalent ASTs.",
+        "[DP001] Use relative imports (\"./filename\") for all cross-file references. Import fixture files exactly as documented in the task.",
+        "[DP001] Strip BOM (\\uFEFF) from the start of CSV input. Handle mixed line endings (CRLF/LF). Parse quoted fields that contain commas.",
+        "[DP001] Key patterns missing: aggregate, quality, BOM, referential. Make sure to implement all required methods and use the specified names.",
+        "[SD001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[SD001] Three bugs to fix: (1) broker.ts race condition — add mutex/lock for concurrent subscribe/unsubscribe, (2) history.ts memory leak — prune internal array to maxHistory after each add, (3) router.ts off-by-one — wildcard * must match zero or more chars, not one or more.",
+        "[SD001] Key patterns missing: wildcard, prune, concurrent, lock, mutex. Make sure to implement all required methods and use the specified names.",
+        "[AR001] Implement cycle detection in the dependency resolver using DFS with a \"visiting\" set. When a cycle is found, throw an error that names the cycle path.",
+        "[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.",
+        "[CB001] When traversing for git repos, skip nested .git directories (submodules). Only count top-level repos. Parse git log format: \"Author: Name <email>\".",
+        "[CB001] Key patterns missing: repository, stats, extension, submodule. Make sure to implement all required methods and use the specified names.",
+        "[MR001] Key patterns missing: AC-3, arc, consistency, prune, propagate. Make sure to implement all required methods and use the specified names."
+      ],
+      "timestamp": "2026-03-20T01:12:00.609Z"
+    },
+    {
+      "iteration": 2,
+      "avgScore": 47,
+      "passing": 0,
+      "total": 7,
+      "scores": {
+        "TC001": 58,
+        "DP001": 52,
+        "RE001": 46,
+        "SD001": 42,
+        "AR001": 31,
+        "CB001": 69,
+        "MR001": 28
+      },
+      "tokens": {
+        "TC001": 4155,
+        "DP001": 5650,
+        "RE001": 2613,
+        "SD001": 3443,
+        "AR001": 3161,
+        "CB001": 2935,
+        "MR001": 4338
+      },
+      "durations": {
+        "TC001": 205606,
+        "DP001": 240112,
+        "RE001": 247986,
+        "SD001": 161826,
+        "AR001": 185250,
+        "CB001": 122841,
+        "MR001": 263552
+      },
+      "totalTokens": 26295,
+      "totalDurationMs": 1427173,
+      "mutationsAdded": [
+        "[TC001] Avoid infinite loops or unbounded waits. Worker polling must stop cleanly when stop() is called. Use bounded iteration counts.",
+        "[TC001] Key patterns missing: interpolation, recursive, children, tokenize. Make sure to implement all required methods and use the specified names.",
+        "[DP001] Use relative imports (\"./filename\") for all cross-file references. Import fixture files exactly as documented in the task.",
+        "[DP001] Strip BOM (\\uFEFF) from the start of CSV input. Handle mixed line endings (CRLF/LF). Parse quoted fields that contain commas.",
+        "[DP001] Key patterns missing: join, aggregate, quality, referential. Make sure to implement all required methods and use the specified names.",
+        "[SD001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[SD001] Three bugs to fix: (1) broker.ts race condition — add mutex/lock for concurrent subscribe/unsubscribe, (2) history.ts memory leak — prune internal array to maxHistory after each add, (3) router.ts off-by-one — wildcard * must match zero or more chars, not one or more.",
+        "[AR001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[AR001] Implement cycle detection in the dependency resolver using DFS with a \"visiting\" set. When a cycle is found, throw an error that names the cycle path.",
+        "[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.",
+        "[AR001] Key patterns missing: topological, lazy, cascade, requires. Make sure to implement all required methods and use the specified names.",
+        "[CB001] When traversing for git repos, skip nested .git directories (submodules). Only count top-level repos. Parse git log format: \"Author: Name <email>\".",
+        "[CB001] Key patterns missing: repository, stats, extension, submodule. Make sure to implement all required methods and use the specified names.",
+        "[MR001] Key patterns missing: AC-3, consistency, MCV, checking, propagate. Make sure to implement all required methods and use the specified names."
+      ],
+      "timestamp": "2026-03-20T03:46:52.182Z"
+    },
+    {
+      "iteration": 3,
+      "avgScore": 40,
+      "passing": 0,
+      "total": 7,
+      "scores": {
+        "TC001": 28,
+        "DP001": 52,
+        "RE001": 35,
+        "SD001": 43,
+        "AR001": 31,
+        "CB001": 71,
+        "MR001": 18
+      },
+      "tokens": {
+        "TC001": 4170,
+        "DP001": 6138,
+        "RE001": 3013,
+        "SD001": 3807,
+        "AR001": 3308,
+        "CB001": 2882,
+        "MR001": 4422
+      },
+      "durations": {
+        "TC001": 199877,
+        "DP001": 268902,
+        "RE001": 210495,
+        "SD001": 185014,
+        "AR001": 231424,
+        "CB001": 105087,
+        "MR001": 249345
+      },
+      "totalTokens": 27740,
+      "totalDurationMs": 1450144,
+      "mutationsAdded": [
+        "[TC001] The serializer must preserve enough structure for roundtrip fidelity. parse(serialize(parse(input))) must produce structurally equivalent ASTs.",
+        "[DP001] Use relative imports (\"./filename\") for all cross-file references. Import fixture files exactly as documented in the task.",
+        "[DP001] Strip BOM (\\uFEFF) from the start of CSV input. Handle mixed line endings (CRLF/LF). Parse quoted fields that contain commas.",
+        "[DP001] Key patterns missing: join, aggregate, referential, malformed. Make sure to implement all required methods and use the specified names.",
+        "[SD001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[SD001] Three bugs to fix: (1) broker.ts race condition — add mutex/lock for concurrent subscribe/unsubscribe, (2) history.ts memory leak — prune internal array to maxHistory after each add, (3) router.ts off-by-one — wildcard * must match zero or more chars, not one or more.",
+        "[AR001] Always export the main class/function both as named export AND default export. Match the exact export names from the task spec.",
+        "[AR001] Implement cycle detection in the dependency resolver using DFS with a \"visiting\" set. When a cycle is found, throw an error that names the cycle path.",
+        "[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.",
+        "[AR001] Key patterns missing: topological, lazy, cascade, requires. Make sure to implement all required methods and use the specified names.",
+        "[CB001] When traversing for git repos, skip nested .git directories (submodules). Only count top-level repos. Parse git log format: \"Author: Name <email>\".",
+        "[MR001] Key patterns missing: AC-3, arc, consistency, MCV, forward. Make sure to implement all required methods and use the specified names."
+      ],
+      "timestamp": "2026-03-20T07:28:56.706Z"
+    }
+  ],
+  "startedAt": null,
+  "lastRunAt": "2026-03-20T07:28:56.706Z"
+}

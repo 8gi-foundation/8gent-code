@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Continuous RL fine-tuning via MetaClaw — proxy, judge, training, production loop",
+  "description": "Continuous RL fine-tuning pipeline — proxy, judge, training, production loop",
   "main": "index.ts",
   "types": "index.ts"
 }

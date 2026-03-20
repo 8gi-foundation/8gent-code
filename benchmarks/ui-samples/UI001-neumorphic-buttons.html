@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neumorphic Buttons</title>
+    <style>
+        :root {
+            /* Base Background Color */
+            --bg-color: #e0e5ec;
+            /* Light Shadow Color (Top Left) */
+            --light-shadow: #ffffff;
+            /* Dark Shadow Color (Bottom Right) */
+            --dark-shadow: #a3b1c6;
+            /* Text Colors */
+            --text-primary: #4d4d4d;
+            --text-secondary: #7d7d7d;
+            --text-disabled: #a3a3a3;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            gap: 2rem;
+        }
+
+        .button-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        /* Base Neumorphic Button Style */
+        .neu-btn {
+            background-color: var(--bg-color);
+            border: none;
+            padding: 12px 28px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 16px; /* >= 12px requirement */
+            cursor: pointer;
+            transition: all 0.3s ease; /* Smooth transition requirement */
+            color: var(--text-primary);
+            /* Dual Box Shadow: Light Top-Left, Dark Bottom-Right */
+            box-shadow: 
+                9px 9px 16px var(--dark-shadow), 
+                -9px -9px 16px var(--light-shadow);
+            outline: none;
+            user-select: none;
+        }
+
+        /* Hover State: Slightly lift the button */
+        .neu-btn:hover {
+            box-shadow: 
+                12px 12px 20px var(--dark-shadow), 
+                -12px -12px 20px var(--light-shadow);
+        }
+
+        /* Primary Button */
+        .neu-btn.primary {
+            color: var(--text-primary);
+        }
+
+        /* Secondary Button */
+        .neu-btn.secondary {
+            color: var(--text-secondary);
+        }
+
+        /* Pressed/Active State: Inset Shadows */
+        .neu-btn:active,
+        .neu-btn.pressed {
+            box-shadow: 
+                inset 6px 6px 10px var(--dark-shadow), 
+                inset -6px -6px 10px var(--light-shadow);
+            transform: translateY(2px); /* Slight physical movement */
+        }
+
+        /* Disabled State */
+        .neu-btn.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+            color: var(--text-disabled);
+        }
+
+        /* Specific class for the "Pressed" demo button to show the style without JS */
+        .demo-pressed {
+            box-shadow: 
+                inset 6px 6px 10px var(--dark-shadow), 
+                inset -6px -6px 10px var(--light-shadow);
+            transform: translateY(2px);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="button-container">
+        <!-- Primary Button -->
+        <button class="neu-btn primary">Primary Action</button>
+
+        <!-- Secondary Button -->
+        <button class="neu-btn secondary">Secondary Action</button>
+
+        <!-- Pressed/Active Button (Demonstrating the style) -->
+        <button class="neu-btn pressed">Pressed State</button>
+
+        <!-- Disabled Button -->
+        <button class="neu-btn disabled">Disabled</button>
+    </div>
+
+</body>
+</html>
