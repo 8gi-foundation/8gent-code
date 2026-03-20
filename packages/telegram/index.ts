@@ -22,6 +22,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { startRemoteTerminal, stopRemoteTerminal, getRemoteTerminal } from "../tools/remote-terminal";
 
 // ============================================
 // Types
@@ -390,6 +391,7 @@ async function registerBotCommands(token: string): Promise<void> {
       { command: "skills", description: "Show skill registry" },
       { command: "btw", description: "Quick side question" },
       { command: "run", description: "Run a shell command" },
+      { command: "watch", description: "Start remote terminal viewer" },
       { command: "help", description: "Show help" },
     ],
   });
@@ -646,6 +648,8 @@ export class TelegramBot {
         "*/skills* — Show skill registry",
         "*/btw <question>* — Side question (no tools)",
         "*/run <cmd>* — Execute shell command",
+        "*/watch* — Start remote terminal (watch agent from phone)",
+        "*/watch stop* — Stop remote terminal",
         "",
         "Or just type any message to chat with the agent.",
         "The agent has full tool access (file read/write, git, web, etc.)",
@@ -670,6 +674,57 @@ export class TelegramBot {
         await sendMsg(this.config.token, chat.id, `💭 *btw:*\n\n${answer}`, buildQuickActions());
       } catch (err: any) {
         await sendMsg(this.config.token, chat.id, `❌ ${err.message?.slice(0, 200)}`);
+      }
+      return;
+    }
+
+    // /watch — Remote terminal viewer
+    if (text === "/watch" || text.startsWith("/watch ")) {
+      const args = text.slice(6).trim();
+      const server = getRemoteTerminal();
+
+      if (args === "stop") {
+        if (server.isRunning()) {
+          stopRemoteTerminal();
+          await sendMsg(this.config.token, chat.id, "Remote terminal stopped.", buildQuickActions());
+        } else {
+          await sendMsg(this.config.token, chat.id, "No remote terminal running.");
+        }
+        return;
+      }
+
+      if (server.isRunning()) {
+        const session = server.getSession();
+        const url = session?.tunnelUrl ?? `http://localhost:${session?.port}`;
+        await sendMsg(
+          this.config.token,
+          chat.id,
+          `Remote terminal already running:\n\n` +
+            `URL: \`${url}\`\n` +
+            `Clients: ${session?.clients ?? 0}\n` +
+            `Uptime: ${Math.round((Date.now() - (session?.startedAt ?? Date.now())) / 60000)}m\n\n` +
+            `Send \`/watch stop\` to stop.`,
+          buildQuickActions()
+        );
+        return;
+      }
+
+      try {
+        const port = args ? parseInt(args, 10) || 8765 : 8765;
+        const session = await startRemoteTerminal({ port, enableTunnel: true });
+        const url = session.tunnelUrl ?? `http://localhost:${session.port}`;
+        await sendMsg(
+          this.config.token,
+          chat.id,
+          `Remote terminal started!\n\n` +
+            `Local: \`http://localhost:${session.port}\`\n` +
+            (session.tunnelUrl ? `Tunnel: \`${session.tunnelUrl}\`\n` : "") +
+            `\nOpen the URL to watch the agent work live via xterm.js.\n` +
+            `Send \`/watch stop\` to stop.`,
+          buildQuickActions()
+        );
+      } catch (err: any) {
+        await sendMsg(this.config.token, chat.id, `Failed to start remote terminal: ${err.message}`);
       }
       return;
     }
