@@ -49,6 +49,13 @@ import {
 import { getADHDAudio, type ADHDSoundscape } from "./lib/adhd-audio.js";
 import { getTaskRouter, getRouterStats, type TaskCategory } from "../../../packages/ai/task-router.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
+import { NotesView } from "./screens/NotesView.js";
+import { IdeasView } from "./screens/IdeasView.js";
+import { BTWView } from "./screens/BTWView.js";
+import { QuestionsView } from "./screens/QuestionsView.js";
+import { ProjectsView } from "./screens/ProjectsView.js";
+import { TabBar } from "./components/TabBar.js";
+import { useWorkspaceTabs, type TabType } from "./hooks/useWorkspaceTabs.js";
 import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
 import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
@@ -327,8 +334,12 @@ export function App({ initialCommand, args }: AppProps) {
   const [predictedSteps, setPredictedSteps] = useState<ProactiveStep[]>([]);
   const [planNextStep, setPlanNextStep] = useState<string | null>(null);
 
-  // View state
+  // View state — now driven by workspace tabs
   const [viewMode, setViewMode] = useState<ViewMode>("chat");
+
+  // Workspace tabs
+  const workspaceTabs = useWorkspaceTabs();
+  const activeTabType = workspaceTabs.activeTab?.type || "chat";
 
   // Infinite mode state
   const [infiniteModeActive, setInfiniteModeActive] = useState(false);
@@ -493,8 +504,14 @@ export function App({ initialCommand, args }: AppProps) {
       setFancyHeader((prev) => !prev);
     }
 
-    // Toggle kanban with Ctrl+K
+    // Toggle kanban with Ctrl+K (opens as tab)
     if (key.ctrl && input === "k") {
+      if (activeTabType === "kanban") {
+        const chatTab = workspaceTabs.tabs.find(t => t.type === "chat");
+        if (chatTab) workspaceTabs.switchTab(chatTab.id);
+      } else {
+        workspaceTabs.addTab("kanban");
+      }
       setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
     }
 
@@ -513,29 +530,60 @@ export function App({ initialCommand, args }: AppProps) {
       processPanel.toggleSidebar();
     }
 
-    // Cycle agent mode with Ctrl+T (Planning → Researching → Implementing → Testing → Demoing)
+    // Ctrl+T: new chat tab
     if (key.ctrl && input === "t") {
-      setAgentMode((prev) => {
-        const idx = AGENT_MODES.indexOf(prev);
-        return AGENT_MODES[(idx + 1) % AGENT_MODES.length];
-      });
+      workspaceTabs.addTab("chat");
+      setViewMode("chat");
     }
 
-    // Shift+Tab: cycle agents when active, otherwise cycle views
+    // Ctrl+W: close current tab
+    if (key.ctrl && input === "w") {
+      if (workspaceTabs.tabs.length > 1) {
+        workspaceTabs.removeTab(workspaceTabs.activeTab.id);
+        // After removal, sync viewMode to new active tab
+        setTimeout(() => {
+          const newActive = workspaceTabs.tabs.find(t => t.active);
+          if (newActive) setViewMode(newActive.type === "chat" ? "chat" : newActive.type as ViewMode);
+        }, 0);
+      }
+    }
+
+    // Ctrl+1-9: switch to tab by index
+    if (key.ctrl && input >= "1" && input <= "9") {
+      const idx = parseInt(input, 10) - 1;
+      if (idx < workspaceTabs.tabs.length) {
+        workspaceTabs.switchToIndex(idx);
+        const tab = workspaceTabs.tabs[idx];
+        if (tab) {
+          // Map tab type back to viewMode for legacy compatibility
+          const tabTypeToView: Record<string, ViewMode> = {
+            chat: "chat", kanban: "kanban", music: "music",
+          };
+          setViewMode(tabTypeToView[tab.type] || "chat");
+        }
+      }
+    }
+
+    // Shift+Tab: cycle through open tabs (agents take priority if active)
     if (key.shift && key.tab) {
       if (orchestration.agents.length > 0) {
         orchestration.cycleAgent();
       } else {
-        const modes: ViewMode[] = ["chat", "kanban", "avenues", "predict", "music"];
-        setViewMode((prev) => {
-          const currentIndex = modes.indexOf(prev);
-          if (currentIndex === -1) return "chat";
-          return modes[(currentIndex + 1) % modes.length];
-        });
+        workspaceTabs.cycleTab(1);
+        // Sync viewMode after cycle
+        setTimeout(() => {
+          const newActive = workspaceTabs.tabs.find(t => t.active);
+          if (newActive) {
+            const tabTypeToView: Record<string, ViewMode> = {
+              chat: "chat", kanban: "kanban", music: "music",
+            };
+            setViewMode(tabTypeToView[newActive.type] || "chat");
+          }
+        }, 0);
       }
     }
 
-    // Escape: abort generation if processing, otherwise return to chat
+    // Escape: abort generation if processing, otherwise switch to chat tab or close view
     if (key.escape) {
       if (isProcessing && agent) {
         agent.abort();
@@ -543,6 +591,10 @@ export function App({ initialCommand, args }: AppProps) {
         setActiveTool(null);
         agentRunningRef.current = false;
         addSystemMessage("Generation interrupted.");
+      } else if (activeTabType !== "chat" && viewMode === "chat") {
+        // In a non-chat tab, escape switches back to first chat tab
+        const chatTab = workspaceTabs.tabs.find(t => t.type === "chat");
+        if (chatTab) workspaceTabs.switchTab(chatTab.id);
       } else if (viewMode !== "chat") {
         setViewMode("chat");
       }
@@ -934,6 +986,11 @@ export function App({ initialCommand, args }: AppProps) {
               "  /avenues - Show planned avenues\n" +
               "  /design [task] - Get design system suggestions\n" +
               "  /evidence - Show full evidence breakdown\n" +
+              "  /notes - Open scratchpad notes tab\n" +
+              "  /ideas - Open idea capture tab\n" +
+              "  /btw - Open sidequest queue tab\n" +
+              "  /questions - Open research questions tab\n" +
+              "  /projects - Open project overview tab\n" +
               "  /auth [login|logout|status] - Authentication\n" +
               "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
@@ -943,6 +1000,10 @@ export function App({ initialCommand, args }: AppProps) {
               "  /quit - Exit 8gent Code\n\n" +
               "Keyboard shortcuts:\n" +
               "  Tab - Accept ghost suggestion\n" +
+              "  Ctrl+T - New chat tab\n" +
+              "  Ctrl+W - Close current tab\n" +
+              "  Ctrl+1-9 - Switch to tab by number\n" +
+              "  Shift+Tab - Cycle through tabs\n" +
               "  Ctrl+A - Toggle animations\n" +
               "  Ctrl+S - Toggle sound\n" +
               "  Ctrl+H - Toggle fancy header"
@@ -1787,6 +1848,22 @@ export function App({ initialCommand, args }: AppProps) {
           else if (command === "vision" as any) {
             handleVisionCommand(args);
           }
+          // Workspace tab commands
+          else if (command === "notes" as any) {
+            workspaceTabs.addTab("notes");
+          }
+          else if (command === "ideas" as any) {
+            workspaceTabs.addTab("ideas");
+          }
+          else if (command === "btw" as any) {
+            workspaceTabs.addTab("btw");
+          }
+          else if (command === "questions" as any) {
+            workspaceTabs.addTab("questions");
+          }
+          else if (command === "projects" as any) {
+            workspaceTabs.addTab("projects");
+          }
           break;
       }
     },
@@ -1811,6 +1888,7 @@ export function App({ initialCommand, args }: AppProps) {
       adhdMode,
       agent,
       orchestration,
+      workspaceTabs,
     ]
   );
 
@@ -2116,8 +2194,103 @@ export function App({ initialCommand, args }: AppProps) {
 
   };
 
-  // Render main content based on view mode
+  // Helper to close tab-based views (switch back to first chat tab)
+  const closeTabView = () => {
+    const chatTab = workspaceTabs.tabs.find(t => t.type === "chat");
+    if (chatTab) workspaceTabs.switchTab(chatTab.id);
+  };
+
+  // Render main content based on view mode + active tab type
   const renderMainContent = () => {
+    // Tab-driven views: when viewMode is "chat", check if the active tab is a utility tab
+    if (viewMode === "chat" && activeTabType !== "chat") {
+      switch (activeTabType) {
+        case "notes":
+          return (
+            <NotesView
+              visible={true}
+              data={workspaceTabs.activeTab?.data || {}}
+              onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
+              onClose={closeTabView}
+            />
+          );
+        case "ideas":
+          return (
+            <IdeasView
+              visible={true}
+              data={workspaceTabs.activeTab?.data || {}}
+              onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
+              onClose={closeTabView}
+            />
+          );
+        case "btw":
+          return (
+            <BTWView
+              visible={true}
+              data={workspaceTabs.activeTab?.data || {}}
+              onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
+              onClose={closeTabView}
+            />
+          );
+        case "questions":
+          return (
+            <QuestionsView
+              visible={true}
+              data={workspaceTabs.activeTab?.data || {}}
+              onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
+              onClose={closeTabView}
+            />
+          );
+        case "projects":
+          return (
+            <ProjectsView
+              visible={true}
+              onClose={closeTabView}
+            />
+          );
+        case "kanban":
+          return (
+            <PlanKanban
+              board={kanbanBoard as any}
+              visible={true}
+              onClose={closeTabView}
+              compact={false}
+            />
+          );
+        case "music":
+          return (
+            <MusicPlayerView
+              visible={true}
+              isPlaying={getADHDAudio().isPlaying}
+              currentTrack={getADHDAudio().current}
+              duration={getADHDAudio().config.duration}
+              onPlay={(soundscape) => {
+                const audio = getADHDAudio();
+                audio.onProgress = (msg) => addSystemMessage(msg);
+                audio.play(soundscape as any).then((r) => {
+                  addSystemMessage(r.message);
+                  audio.onProgress = null;
+                });
+              }}
+              onPlayFile={(filePath) => {
+                const audio = getADHDAudio();
+                const result = audio.playFile(filePath);
+                addSystemMessage(result.message);
+              }}
+              onStop={() => {
+                getADHDAudio().stop();
+                addSystemMessage("Music stopped.");
+              }}
+              onClose={closeTabView}
+              onGenerate={(prompt) => {
+                addSystemMessage(`Custom gen: "${prompt}" — use /music gen ${prompt}`);
+                closeTabView();
+              }}
+            />
+          );
+      }
+    }
+
     switch (viewMode) {
       case "kanban":
         return (
@@ -2333,6 +2506,9 @@ export function App({ initialCommand, args }: AppProps) {
         <Header isProcessing={isProcessing} showAnimations={showAnimations} updateAvailable={updateInfo} />
       )}
 
+      {/* Workspace tab bar */}
+      <TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+
       {/* Main content area with optional process sidebar on right */}
       <Box flexDirection="row" flexGrow={1}>
         {/* Left: main content (chat / kanban / etc.) or process detail */}
@@ -2388,7 +2564,7 @@ export function App({ initialCommand, args }: AppProps) {
       </Box>
 
       {/* Mini kanban when in chat mode and has items */}
-      {viewMode === "chat" && (kanbanBoard.ready.length > 0 || kanbanBoard.inProgress.length > 0) && (
+      {viewMode === "chat" && activeTabType === "chat" && (kanbanBoard.ready.length > 0 || kanbanBoard.inProgress.length > 0) && (
         <Box paddingX={1} marginBottom={1}>
           <MiniKanban board={kanbanBoard as any} />
         </Box>
@@ -2435,7 +2611,7 @@ export function App({ initialCommand, args }: AppProps) {
           <CommandInput
             onSubmit={handleSubmit}
             isProcessing={isProcessing}
-            focused={viewMode === "chat" || viewMode === "onboarding"}
+            focused={(viewMode === "chat" && activeTabType === "chat") || viewMode === "onboarding"}
             processingStage={processingStage}
             showAnimations={showAnimations}
             activeTool={activeTool}
