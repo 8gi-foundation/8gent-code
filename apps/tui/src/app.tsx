@@ -47,7 +47,7 @@ import {
   ADHD_MODE_DISABLED_MSG,
 } from "./components/bionic-text.js";
 import { getADHDAudio, type ADHDSoundscape } from "./lib/adhd-audio.js";
-import { getTaskRouter, type TaskCategory } from "@8gent/ai/task-router";
+import { getTaskRouter, getRouterStats, type TaskCategory } from "@8gent/ai/task-router";
 import { AppText, MutedText, Heading, Label, Inline, Stack, Divider, Spacer, ShortcutHint } from "./components/primitives/index.js";
 import { ProcessSidebar, ProcessDetailView, ProcessBadge } from "./components/process-panel/index.js";
 import { formatTokens } from "./lib/index.js";
@@ -1426,7 +1426,7 @@ export function App({ initialCommand, args }: AppProps) {
               addSystemMessage(`Classification failed: ${err instanceof Error ? err.message : String(err)}`);
             });
           } else if (sub === "stats") {
-            const stats = (await import("@8gent/ai/task-router")).getRouterStats();
+            const stats = getRouterStats();
             const lines = [
               `Router Stats (${stats.totalRouted} total routes)`,
               "",
