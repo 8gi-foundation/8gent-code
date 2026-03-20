@@ -50,21 +50,17 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
   const engineRef = useRef<VoiceEngine | null>(null);
 
   // ESC key interrupts speech or stops voice chat
+  // IMPORTANT: Always active but only acts on ESC — lets all other keys flow through
   useInput(
     (input, key) => {
-      if (!isActive) return;
+      if (!isActive || !key.escape) return;
 
-      if (key.escape) {
-        if (state === "speaking") {
-          // Interrupt mid-speech, keep chatting
-          loopRef.current?.interrupt();
-        } else {
-          // Stop voice chat entirely
-          stop();
-        }
+      if (state === "speaking") {
+        loopRef.current?.interrupt();
+      } else {
+        stop();
       }
     },
-    { isActive }
   );
 
   const start = useCallback(async () => {
