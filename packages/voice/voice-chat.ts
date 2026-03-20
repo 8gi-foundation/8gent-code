@@ -351,6 +351,8 @@ export class VoiceChatLoop {
   private async speakText(text: string): Promise<void> {
     // Clean and truncate
     const clean = text
+      .replace(/\[_EOT_\]/g, "")
+      .replace(/<\|.*?\|>/g, "")
       .replace(/```[\s\S]*?```/g, " code block ")
       .replace(/[*_~`#]/g, "")
       .replace(/\bhttps?:\/\/\S+/g, " link ")
