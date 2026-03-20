@@ -305,23 +305,14 @@ export function App({ initialCommand, args }: AppProps) {
   const voiceChat = useVoiceChat({
     onAgentMessage: async (transcript) => {
       if (!agent || !agentReady) return "Agent not ready.";
-      // Add user message to chat
-      setMessages((prev) => [...prev, {
-        id: `voice-user-${Date.now()}`,
-        role: "user" as const,
-        content: `🎤 ${transcript}`,
-        timestamp: new Date(),
-      }]);
+      // Strip model artifacts from transcript
+      const clean = transcript.replace(/\[_EOT_\]/g, "").replace(/<\|.*?\|>/g, "").trim();
+      if (!clean) return "";
       try {
-        const response = await agent.chat(transcript);
-        // Add agent response to chat
-        setMessages((prev) => [...prev, {
-          id: `voice-agent-${Date.now()}`,
-          role: "assistant" as const,
-          content: response,
-          timestamp: new Date(),
-        }]);
-        return response;
+        // agent.chat() already adds both user and assistant messages to the chat
+        // so we don't add them here to avoid duplicates
+        const response = await agent.chat(clean);
+        return response.replace(/\[_EOT_\]/g, "").replace(/<\|.*?\|>/g, "").trim();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return `Error: ${msg}`;
