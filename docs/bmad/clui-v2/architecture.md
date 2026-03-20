@@ -54,8 +54,8 @@
   |                    AvenueTracker)     ValidationReporter)         |
   |                                                                  |
   |  @8gent/auth      @8gent/eight       @8gent/kernel               |
-  |  (Clerk device    (agent engine)     (MetaClaw RL                |
-  |   flow, Keychain)                     fine-tuning)               |
+  |  (Clerk device    (agent engine)     (RL training                |
+  |   flow, Keychain)                     proxy)                     |
   +------------------------------------------------------------------+
 ```
 

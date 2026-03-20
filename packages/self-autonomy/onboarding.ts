@@ -174,13 +174,76 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       };
     },
   },
+  // ── Agent Personalization ────────────────────────────────
+  {
+    step: "voice" as OnboardingStep,
+    question:
+      "What should your 8gent be called? (default: Eight)\n\n" +
+      "This is your personal AI — name it whatever you want.\n" +
+      "Press Enter for the default, or type a name:",
+    processor: (answer, user) => {
+      const agentName = answer.trim() || "Eight";
+      return {
+        ...user,
+        preferences: {
+          ...user.preferences,
+          voice: {
+            ...user.preferences.voice,
+            voiceId: user.preferences.voice?.voiceId ?? "Moira", // Irish voice default
+            agentName,
+          } as any,
+        },
+        completedSteps: [...user.completedSteps, "voice"],
+      };
+    },
+  },
+  {
+    step: "voice" as OnboardingStep,
+    question:
+      "Pick a voice for your agent:\n\n" +
+      "1. Moira (Irish — the default Gentleman)\n" +
+      "2. Daniel (British)\n" +
+      "3. Samantha (American, female)\n" +
+      "4. Karen (Australian, female)\n" +
+      "5. Rishi (Indian)\n" +
+      "6. Reed (American, male)\n" +
+      "7. Custom — upload an audio file to clone your voice\n\n" +
+      "Choose 1-7:",
+    options: ["1", "2", "3", "4", "5", "6", "7"],
+    processor: (answer, user) => {
+      const voiceMap: Record<string, string> = {
+        "1": "Moira",
+        "2": "Daniel",
+        "3": "Samantha",
+        "4": "Karen",
+        "5": "Rishi",
+        "6": "Reed",
+      };
+      const voice = voiceMap[answer] || "Moira";
+      const engine = answer === "7" ? "local-tts" : "system";
+      return {
+        ...user,
+        preferences: {
+          ...user.preferences,
+          voice: {
+            ...user.preferences.voice,
+            enabled: true,
+            engine: engine as any,
+            voiceId: answer === "7" ? null : voice,
+          },
+        },
+      };
+    },
+  },
   {
     step: "confirmation",
     question:
       "Excellent. All set:\n\n" +
       "- Name: {name}\n" +
       "- Style: {style}\n" +
-      "- Provider: {provider}\n\n" +
+      "- Provider: {provider}\n" +
+      "- Agent: {agent_name}\n" +
+      "- Voice: {voice}\n\n" +
       "Ready to begin? (yes/no)",
     options: ["yes", "no", "y", "n"],
     processor: (answer, user) => {

@@ -1,5 +1,5 @@
 /**
- * Local LoRA Training Backend for MetaClaw
+ * Local LoRA Training Backend
  *
  * Runs entirely on Apple M2 Max — no cloud services.
  * Collects GRPO pairs from session data, trains LoRA adapters
@@ -113,7 +113,7 @@ const DEFAULT_CONFIG: LocalTrainerConfig = {
   goodScoreThreshold: 0.7,
   badScoreThreshold: 0.3,
   sessionPaths: [
-    join(HOME, ".metaclaw", "data"),
+    join(HOME, ".8gent", "training-data"),
     join(HOME, ".8gent", "sessions"),
   ],
   checkpointDir: join(HOME, ".8gent", "checkpoints"),

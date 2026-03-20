@@ -10,7 +10,7 @@
  *   bun run benchmarks/autoresearch/validate-checkpoint.ts [--model <model>] [--baseline <path>]
  *
  * Environment:
- *   METACLAW_PROXY_URL — MetaClaw proxy URL (default: http://localhost:30000)
+ *   TRAINING_PROXY_URL — Training proxy URL (default: http://localhost:30000)
  *   OPENROUTER_API_KEY — for judge model (gemini-2.5-flash:free)
  */
 
@@ -35,7 +35,7 @@ const MODEL = process.argv.includes("--model")
   ? process.argv[process.argv.indexOf("--model") + 1]
   : "qwen2.5-coder:14b";
 
-const PROXY_URL = process.env.METACLAW_PROXY_URL || "http://localhost:30000";
+const PROXY_URL = process.env.TRAINING_PROXY_URL || "http://localhost:30000";
 const PASS_THRESHOLD = 80;
 
 // ── Benchmarks (subset for fast validation) ─────────────────────────

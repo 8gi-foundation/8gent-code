@@ -9,7 +9,7 @@
  * - Graceful degradation when components are unavailable
  */
 
-import { MetaClawProxy, type ProxyConfig, type ProxyStatus } from "./proxy";
+import { TrainingProxy, type ProxyConfig, type ProxyStatus } from "./proxy";
 import { JudgeScorer, type JudgeConfig, type ScoreRecord } from "./judge";
 import { TrainingOrchestrator, type TrainingConfig, type CheckpointInfo } from "./training";
 import { recordResult, getModelOrder, getExperienceSummary } from "../../benchmarks/autoresearch/model-router";
@@ -71,7 +71,7 @@ const DEFAULT_PRODUCTION_CONFIG: ProductionConfig = {
 
 export class ProductionLoop {
   private config: ProductionConfig;
-  private proxy: MetaClawProxy;
+  private proxy: TrainingProxy;
   private judge: JudgeScorer;
   private trainer: TrainingOrchestrator;
   private lastActivityAt: number = Date.now();
@@ -88,7 +88,7 @@ export class ProductionLoop {
       this.config.fineTunedModelTag = `${base.replace(/:.*/, "")}-ft`;
     }
 
-    this.proxy = new MetaClawProxy({
+    this.proxy = new TrainingProxy({
       ...this.config.proxy,
       mode: this.config.madmaxEnabled ? "madmax" : "rl",
     });
