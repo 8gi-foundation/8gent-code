@@ -284,10 +284,7 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
 }
 
 function SystemMessageText({ content }: { content: string }) {
-  const { enabled: adhdMode } = useADHDMode();
-  if (adhdMode) {
-    return <BionicText dimNormal>{content}</BionicText>;
-  }
+  // System messages are structured (commands, help) — never bionic them
   return <MutedText>{content}</MutedText>;
 }
 

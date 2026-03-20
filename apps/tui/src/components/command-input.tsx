@@ -196,6 +196,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     usage: "/adhd [on|off|lofi|rainsound|whitenoise|ambient|classical|stop]",
   },
   {
+    name: "music",
+    aliases: ["audio", "soundscape"],
+    description: "Generate & play focus music (ACE-Step)",
+    usage: "/music [lofi|rain|white|ambient|piano|gen <prompt>|stop|config]",
+  },
+  {
     name: "router",
     aliases: ["route", "routing"],
     description: "Task router — assign models to task categories",
