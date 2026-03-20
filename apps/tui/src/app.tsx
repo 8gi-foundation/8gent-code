@@ -74,6 +74,7 @@ import { ThinkingView } from "./components/ThinkingView.js";
 import { ActivityMonitor, pushActivity, completeActivity, clearActivity } from "./components/ActivityMonitor.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
+import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
 import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
@@ -297,6 +298,43 @@ export function App({ initialCommand, args }: AppProps) {
     onTranscript: (text) => {
       setVoiceTranscript(text);
       addSystemMessage(`Transcribed: "${text}" — edit or press Enter to send`);
+    },
+  });
+
+  // Voice chat mode — full duplex voice conversation loop
+  const voiceChat = useVoiceChat({
+    onAgentMessage: async (transcript) => {
+      if (!agent || !agentReady) return "Agent not ready.";
+      // Add user message to chat
+      setMessages((prev) => [...prev, {
+        id: `voice-user-${Date.now()}`,
+        role: "user" as const,
+        content: `🎤 ${transcript}`,
+        timestamp: new Date(),
+      }]);
+      try {
+        const response = await agent.chat(transcript);
+        // Add agent response to chat
+        setMessages((prev) => [...prev, {
+          id: `voice-agent-${Date.now()}`,
+          role: "assistant" as const,
+          content: response,
+          timestamp: new Date(),
+        }]);
+        return response;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `Error: ${msg}`;
+      }
+    },
+    voice: "Daniel",
+    silenceMs: 1500,
+    onActiveChange: (active) => {
+      if (active) {
+        addSystemMessage("🎙️ Voice chat active. Speak naturally. ESC to stop, ESC during speech to interrupt.");
+      } else {
+        addSystemMessage("Voice chat ended.");
+      }
     },
   });
 
@@ -1852,8 +1890,16 @@ export function App({ initialCommand, args }: AppProps) {
           break;
 
         case "voice":
-          // Enhanced voice command — toggle STT recording
-          if (args[0] === "record" || args[0] === "listen" || args[0] === "stt") {
+          // Enhanced voice command — toggle STT recording or voice chat
+          if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
+            if (voiceChat.isActive) {
+              voiceChat.stop();
+            } else {
+              voiceChat.start().catch((err: Error) => {
+                addSystemMessage(`Voice chat error: ${err.message}`);
+              });
+            }
+          } else if (args[0] === "record" || args[0] === "listen" || args[0] === "stt") {
             voice.toggle().catch((err: Error) => {
               addSystemMessage(`Voice error: ${err.message}`);
             });
@@ -1864,15 +1910,26 @@ export function App({ initialCommand, args }: AppProps) {
             );
           } else if (args[0] === "status") {
             const setupInfo = voice.setupStatus;
+            const voiceChatStatus = voiceChat.isActive
+              ? `\nVoice Chat: Active (${voiceChat.state})`
+              : "\nVoice Chat: Inactive";
             const status = voice.isAvailable
-              ? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})`
+              ? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
               : `Voice: Not available — ${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"}`;
             addSystemMessage(status);
+          } else if (args[0] === "stop") {
+            if (voiceChat.isActive) {
+              voiceChat.stop();
+            } else {
+              addSystemMessage("Voice chat is not active.");
+            }
           } else {
             addSystemMessage(
               "Voice commands:\n" +
-              "  /voice record  — Toggle STT recording (or press Ctrl+V)\n" +
+              "  /voice chat    — Start/stop voice conversation mode\n" +
+              "  /voice record  — Toggle STT recording (or press Ctrl+R)\n" +
               "  /voice status  — Check voice system status\n" +
+              "  /voice stop    — Stop voice chat mode\n" +
               "  /voice on|off  — Toggle TTS output"
             );
           }
@@ -3006,8 +3063,9 @@ export function App({ initialCommand, args }: AppProps) {
           adhdMode={adhdMode}
           authStatus={authStatus}
           authUser={authUser}
-          voiceState={voice.state}
+          voiceState={voiceChat.isActive ? voiceChat.state : voice.state}
           voiceEnabled={voice.isAvailable}
+          voiceChatActive={voiceChat.isActive}
         />
       ) : (
         <StatusBar

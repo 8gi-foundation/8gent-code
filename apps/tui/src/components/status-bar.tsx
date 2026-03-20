@@ -69,8 +69,9 @@ export interface EnhancedStatusBarProps {
   authUser?: { displayName: string; plan: string } | null;
 
   // Voice status
-  voiceState?: "idle" | "recording" | "transcribing" | "downloading";
+  voiceState?: "idle" | "recording" | "transcribing" | "downloading" | "listening" | "thinking" | "speaking" | "stopping";
   voiceEnabled?: boolean;
+  voiceChatActive?: boolean;
 }
 
 // Legacy interface for backward compatibility
@@ -108,6 +109,7 @@ export function EnhancedStatusBar({
   authUser,
   voiceState,
   voiceEnabled = false,
+  voiceChatActive = false,
 }: EnhancedStatusBarProps) {
   const [elapsed, setElapsed] = useState("0:00");
 
@@ -309,6 +311,15 @@ function AuthStatusItem({ status, user }: { status: string; user?: { displayName
 }
 
 function VoiceStatusItem({ state }: { state: string }) {
+  if (state === "listening") {
+    return <Badge label={"\u25CF VOICE CHAT"} color="green" variant="outline" />;
+  }
+  if (state === "speaking") {
+    return <Badge label={"\u266B SPEAKING"} color="blue" variant="outline" />;
+  }
+  if (state === "thinking") {
+    return <Badge label={"\u2026 THINKING"} color="yellow" variant="outline" />;
+  }
   if (state === "recording") {
     return <Badge label={"\u25CF REC"} color="red" variant="outline" />;
   }
