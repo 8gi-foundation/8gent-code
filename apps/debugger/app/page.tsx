@@ -14,6 +14,34 @@ export default function Home() {
   const [sidebarWidth, setSidebarWidth] = useState(360);
   const [dragging, setDragging] = useState(false);
   const [view, setView] = useState<"sessions" | "health">("sessions");
+  const [isDark, setIsDark] = useState(true);
+
+  // Init theme from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("8gent-debugger-theme");
+    if (saved === "light") {
+      setIsDark(false);
+      document.documentElement.classList.remove("dark");
+    } else if (saved === "dark" || document.documentElement.classList.contains("dark")) {
+      setIsDark(true);
+    } else {
+      // System preference
+      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      setIsDark(dark);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    if (next) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("8gent-debugger-theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("8gent-debugger-theme", "light");
+    }
+  };
 
   // Read session ID from URL on mount
   const getSessionIdFromURL = useCallback(() => {
@@ -87,19 +115,26 @@ export default function Home() {
   }, [dragging]);
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-200">
+    <div className="flex h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
       {/* Sidebar */}
       <div
-        className="flex-shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col"
-        style={{ width: sidebarWidth }}
+        className="flex-shrink-0 flex flex-col"
+        style={{ width: sidebarWidth, borderRight: "1px solid var(--border)", background: "var(--background)" }}
       >
-        {/* Logo + View Toggle */}
-        <div className="px-4 py-3 border-b border-zinc-800">
+        {/* Logo + View Toggle + Theme */}
+        <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="flex items-center gap-2">
             <span className="text-emerald-400 font-mono font-bold text-lg">
               8gent
             </span>
-            <span className="text-zinc-600 text-xs">debugger</span>
+            <span style={{ color: "var(--muted)" }} className="text-xs">debugger</span>
+            <button
+              onClick={toggleTheme}
+              className="ml-auto text-xs px-2 py-0.5 rounded"
+              style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
+            >
+              {isDark ? "☀ Light" : "🌙 Dark"}
+            </button>
           </div>
           <div className="flex items-center gap-1 mt-2">
             <button
