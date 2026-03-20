@@ -622,7 +622,7 @@ export function App({ initialCommand, args }: AppProps) {
       if (orchestration.agents.length > 0) {
         orchestration.cycleAgent();
       } else {
-        workspaceTabs.cycleTab(1, ["kanban", "music"]);
+        workspaceTabs.cycleTab(1, ["kanban"]);
         setViewMode("chat");
       }
     }
@@ -1645,8 +1645,8 @@ export function App({ initialCommand, args }: AppProps) {
           const musicSub = args[0]?.toLowerCase();
 
           if (!musicSub) {
-            // Open the music player view instead of dumping help into chat
-            setViewMode("music");
+            // Open music as a persistent tab
+            workspaceTabs.addTab("music");
           }
           // Quick play aliases
           else if (["lofi", "rain", "rainsound", "white", "whitenoise", "ambient", "piano", "classical"].includes(musicSub)) {
