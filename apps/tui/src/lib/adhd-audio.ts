@@ -292,18 +292,21 @@ export class ADHDAudio {
     return null;
   }
 
+  private _playingFile: string | null = null;
+
   /** Play audio file on loop using afplay (macOS) */
   private startPlayback(filePath: string): void {
     this.stopPlayback();
+    this._playingFile = filePath;
 
     const loop = () => {
-      if (!this.currentSoundscape) return;
+      if (!this._playingFile) return;
 
       this.playerProcess = spawn(["afplay", filePath], {
         stdout: "ignore",
         stderr: "ignore",
         onExit: () => {
-          if (this.currentSoundscape) loop();
+          if (this._playingFile) loop();
         },
       });
     };
@@ -312,10 +315,24 @@ export class ADHDAudio {
   }
 
   private stopPlayback(): void {
+    this._playingFile = null;
     if (this.playerProcess) {
       this.playerProcess.kill();
       this.playerProcess = null;
     }
+  }
+
+  /** Play any audio file directly on loop */
+  playFile(filePath: string): { ok: boolean; message: string } {
+    const { existsSync } = require("fs");
+    const { basename } = require("path");
+    if (!existsSync(filePath)) {
+      return { ok: false, message: `File not found: ${filePath}` };
+    }
+    this.stop();
+    this.currentSoundscape = basename(filePath, ".mp3") as any;
+    this.startPlayback(filePath);
+    return { ok: true, message: `Playing ${basename(filePath)}. /music stop to end.` };
   }
 
   /** Play a soundscape (generates if not cached) */
