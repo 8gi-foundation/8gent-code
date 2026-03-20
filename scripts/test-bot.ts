@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 // Quick test: send a message from @eightgentcodebot
 
-const TOKEN = "8651805768:AAFvSVOMc7U9l2itsBUTWPzgBkPxdle4B4U";
-const CHAT_ID = "5486040131";
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+if (!TOKEN || !CHAT_ID) { console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env"); process.exit(1); }
 
 const text = `🤖 *@eightgentcodebot is ALIVE*
 
