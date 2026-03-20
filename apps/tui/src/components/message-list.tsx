@@ -172,16 +172,19 @@ function MessageItem({
           borderStyle="round"
           borderColor={isUser ? "yellow" : "cyan"}
           paddingX={1}
-          marginLeft={isUser ? 10 : 0}
-          marginRight={isUser ? 0 : 10}
+          marginLeft={isUser ? 20 : 0}
+          marginRight={isUser ? 0 : 20}
+          flexShrink={1}
         >
-          <MessageContent
-            content={message.content}
-            role={message.role}
-            isNew={isNew}
-            animate={animate}
-            onTypingComplete={() => setTypingComplete(true)}
-          />
+          <Box flexShrink={1} flexDirection="column">
+            <MessageContent
+              content={message.content}
+              role={message.role}
+              isNew={isNew}
+              animate={animate}
+              onTypingComplete={() => setTypingComplete(true)}
+            />
+          </Box>
         </Box>
       </Box>
     </FadeIn>
