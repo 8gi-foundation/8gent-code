@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
 :root {
+  --background: #fafafa;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --surface-hover: #f4f4f5;
+  --border: #e4e4e7;
+  --muted: #71717a;
+  --accent: #10b981;
+  --accent-bg: rgba(16, 185, 129, 0.1);
+}
+
+.dark {
   --background: #09090b;
   --foreground: #e4e4e7;
+  --surface: #18181b;
+  --surface-hover: #27272a;
+  --border: #27272a;
+  --muted: #71717a;
+  --accent: #10b981;
+  --accent-bg: rgba(16, 185, 129, 0.15);
 }
 
 @theme inline {
@@ -27,12 +44,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: var(--border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: var(--muted);
 }
 
 /* Line clamp utility */
