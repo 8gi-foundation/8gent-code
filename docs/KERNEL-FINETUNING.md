@@ -1,16 +1,16 @@
-# Kernel Fine-Tuning: MetaClaw RL Integration
+# Kernel Fine-Tuning: RL Training Proxy Integration
 
-> Exploration doc for continuous RL fine-tuning of 8gent's local models via [MetaClaw](https://github.com/aiming-lab/MetaClaw).
+> Exploration doc for continuous RL fine-tuning of 8gent's local models via a training proxy (inspired by [MetaClaw](https://github.com/aiming-lab/MetaClaw)).
 
 ## Motivation
 
-8gent currently routes to static model weights (Ollama local, OpenRouter cloud). Models never improve from our sessions. MetaClaw lets us close the loop: every coding session becomes training data, and GRPO continuously evolves a LoRA adapter on top of our base model.
+8gent currently routes to static model weights (Ollama local, OpenRouter cloud). Models never improve from our sessions. The training proxy lets us close the loop: every coding session becomes training data, and GRPO continuously evolves a LoRA adapter on top of our base model.
 
 ## Architecture
 
 ```
 ┌─────────────┐      ┌──────────────────┐      ┌──────────────┐
-│  8gent TUI  │─────▶│  MetaClaw Proxy  │─────▶│    Ollama     │
+│  8gent TUI  │─────▶│  Training Proxy  │─────▶│    Ollama     │
 │  (Bun/Ink)  │◀─────│  :30000          │◀─────│  :11434       │
 └─────────────┘      └────────┬─────────┘      └──────────────┘
                               │
@@ -88,32 +88,32 @@ The `version-manager.ts` module in `packages/eight/` manages this lifecycle. The
 
 When a new Eight version releases (Layer 2 update), users are prompted to retrain their Personal LoRA (Layer 3) so it aligns with the updated base adapter weights.
 
-## MetaClaw Config for 8gent
+## Training Proxy Config for 8gent
 
-See `config/metaclaw.yaml` for the ready-to-use configuration.
+See `config/training-proxy.yaml` for the ready-to-use configuration.
 
 Key decisions:
 - **Mode: `madmax`** — RL training deferred to idle/sleep so it never blocks active coding sessions
 - **Judge: `gemini-2.5-flash:free`** via OpenRouter — we already have this configured, free, fast enough for async scoring
 - **Backend: `mint`** — open-source, runs locally, no cloud dependency for training
 - **LoRA rank: 32** — balanced capacity vs training speed
-- **Skills dir** points to our benchmark learnings so MetaClaw can inject relevant context
+- **Skills dir** points to our benchmark learnings so the training proxy can inject relevant context
 
 ## Integration Points
 
 ### 1. Provider Redirect (minimal change)
 
-The Ollama client in `packages/eight/clients/ollama.ts` already accepts a `baseUrl` parameter. When MetaClaw is running, we redirect:
+The Ollama client in `packages/eight/clients/ollama.ts` already accepts a `baseUrl` parameter. When the training proxy is running, we redirect:
 
 ```typescript
 // Before: direct to Ollama
 const client = new OllamaClient(model, "http://localhost:11434")
 
-// After: through MetaClaw proxy
+// After: through training proxy
 const client = new OllamaClient(model, "http://localhost:30000")
 ```
 
-MetaClaw's proxy is OpenAI-compatible, so no request format changes needed.
+The training proxy is OpenAI-compatible, so no request format changes needed.
 
 ### 2. Config Toggle
 
@@ -121,7 +121,7 @@ Add to `.8gent/config.json`:
 
 ```json
 {
-  "metaclaw": {
+  "training_proxy": {
     "enabled": false,
     "proxyUrl": "http://localhost:30000",
     "autoStart": false
@@ -129,7 +129,7 @@ Add to `.8gent/config.json`:
 }
 ```
 
-When `metaclaw.enabled`, the provider manager routes Ollama calls through the proxy.
+When `training_proxy.enabled`, the provider manager routes Ollama calls through the proxy.
 
 ### 3. Benchmark Validation Loop
 
@@ -147,7 +147,7 @@ The `model-router.ts` experience system naturally tracks this — fine-tuned mod
 
 ### 4. Judge Model Wiring
 
-MetaClaw needs a PRM (Process Reward Model) to score responses. We use Gemini Flash via OpenRouter:
+The training proxy needs a PRM (Process Reward Model) to score responses. We use Gemini Flash via OpenRouter:
 
 ```yaml
 rl:
@@ -206,7 +206,7 @@ await kernel.stop();
 
 | File | Phase | Purpose |
 |------|-------|---------|
-| `proxy.ts` | 1 | MetaClaw proxy lifecycle — start/stop, health checks, latency overhead monitoring |
+| `proxy.ts` | 1 | Training proxy lifecycle — start/stop, health checks, latency overhead monitoring |
 | `judge.ts` | 2 | PRM scoring via Gemini Flash — async scoring, score distributions, daily trends |
 | `training.ts` | 3 | GRPO batch collection — score filtering, checkpoint validation gate, auto-rollback |
 | `loop.ts` | 4 | Production loop — MadMax scheduling, auto-promotion, health monitoring |
@@ -215,7 +215,7 @@ await kernel.stop();
 
 ### Key APIs
 
-**MetaClawProxy** (Phase 1):
+**TrainingProxy** (Phase 1):
 - `start()` / `stop()` — lifecycle
 - `measureLatency()` — compare direct vs proxied request times
 - `isLatencyAcceptable()` — check overhead against threshold
@@ -241,7 +241,7 @@ await kernel.stop();
 ## Phase Plan
 
 ### Phase 1: Proxy Only (no training) — **IMPLEMENTED**
-- ✅ Start/stop MetaClaw proxy process
+- ✅ Start/stop training proxy process
 - ✅ Health checks with configurable timeout
 - ✅ Latency overhead monitoring (direct vs proxied)
 - ✅ Configurable latency threshold with alerting
@@ -276,4 +276,4 @@ await kernel.stop();
 - [ ] LoRA adapter format compatibility between MinT output and Ollama's expected GGUF adapters
 - [x] Optimal PRM scoring criteria — implemented as 4-axis: execution success (40%), code quality (20%), tool efficiency (20%), directness (20%)
 - [x] Multi-turn conversations — scoring each turn independently, overall tracked per-session via score history
-- [ ] Interaction between MetaClaw's skill injection and 8gent's own system prompt mutations
+- [ ] Interaction between the training proxy's skill injection and 8gent's own system prompt mutations

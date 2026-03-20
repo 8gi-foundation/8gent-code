@@ -469,14 +469,14 @@ Completion Report + Voice Output
 | `packages/auth` | Clerk authentication, device code flow, token management |
 | `packages/personality` | The Infinite Gentleman voice |
 | `benchmarks/` | 44 benchmarks across 12 categories + autoresearch harness |
-| `config/metaclaw.yaml` | MetaClaw RL fine-tuning configuration |
+| `config/training-proxy.yaml` | RL fine-tuning proxy configuration |
 
 ### Kernel Fine-Tuning (Experimental)
 
-8gent can continuously improve its local models via [MetaClaw](https://github.com/aiming-lab/MetaClaw) RL fine-tuning. Every coding session becomes training data — a judge model scores responses, and GRPO evolves a LoRA adapter on top of your base model. The model gets better at *your* workflows over time.
+8gent can continuously improve its local models via RL fine-tuning (inspired by [MetaClaw](https://github.com/aiming-lab/MetaClaw)). Every coding session becomes training data — a judge model scores responses, and GRPO evolves a LoRA adapter on top of your base model. The model gets better at *your* workflows over time.
 
 ```
-8gent TUI ──> MetaClaw Proxy (:30000) ──> Ollama (:11434)
+8gent TUI ──> Training Proxy (:30000) ──> Ollama (:11434)
                     │
               Judge LLM scores responses async
                     │
@@ -488,13 +488,13 @@ Completion Report + Voice Output
 **How to enable:**
 
 ```bash
-# 1. Install MetaClaw
+# 1. Install the training proxy
 pip install -e ".[rl,evolve,scheduler]"
 
 # 2. Point 8gent through the proxy
-export METACLAW_PROXY_URL=http://localhost:30000
+export TRAINING_PROXY_URL=http://localhost:30000
 
-# 3. Start MetaClaw (uses config/metaclaw.yaml)
+# 3. Start the training proxy (uses config/training-proxy.yaml)
 metaclaw start
 
 # 4. Run 8gent normally — sessions now generate training signal

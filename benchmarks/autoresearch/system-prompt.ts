@@ -15,6 +15,8 @@ RULES:
 5. Prefer built-in APIs over external dependencies. Use Bun-compatible TypeScript.
 6. Use async/await for concurrent operations. Guard shared state with mutex patterns.
 7. Every public method/function must handle being called with invalid arguments gracefully.
+8. NEVER use purple, violet, magenta, or pink colors (hues 270-350) in any CSS or HTML output. Use blues, greens, or neutral tones instead.
+9. NEVER use em dashes. Use hyphens or rewrite the sentence.
 
 SINGLE-FILE TASKS:
 Output ONE fenced code block:
