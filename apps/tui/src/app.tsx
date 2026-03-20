@@ -1283,9 +1283,9 @@ export function App({ initialCommand, args }: AppProps) {
             addSystemMessage(ADHD_MODE_DISABLED_MSG);
           }
           // Audio controls
-          else if (sub === "stop") {
+          else if (sub === "stop" || sub === "pause") {
             adhdAudio.stop();
-            addSystemMessage("Audio stopped. Text mode still " + (adhdMode ? "on" : "off") + ".");
+            addSystemMessage("Audio paused. Text mode still " + (adhdMode ? "on" : "off") + ". Play again with /adhd lofi etc.");
           }
           // Config: /adhd config, /adhd set <key> <value>
           else if (sub === "config" || sub === "settings") {
@@ -1459,6 +1459,189 @@ export function App({ initialCommand, args }: AppProps) {
             });
           } else {
             addSystemMessage("Unknown router command. Try /router for help.");
+          }
+          break;
+        }
+
+        case "music": {
+          // Interactive music generation via ACE-Step
+          const musicAudio = getADHDAudio();
+          const musicSub = args[0]?.toLowerCase();
+
+          if (!musicSub) {
+            // Show interactive menu
+            addSystemMessage(
+              "🎵 Music Generator (powered by ACE-Step)\n\n" +
+              "Quick play:\n" +
+              "  /music lofi          Lofi hip hop beats\n" +
+              "  /music rain          Rain & thunder ambience\n" +
+              "  /music white         White noise\n" +
+              "  /music ambient       Ambient synths\n" +
+              "  /music piano         Soft classical piano\n\n" +
+              "Custom generation:\n" +
+              "  /music gen <prompt>  Generate from your own description\n" +
+              "  /music gen chill jazz saxophone, late night, smoky bar\n\n" +
+              "Controls:\n" +
+              "  /music stop          Stop playback\n" +
+              "  /music config        Audio settings (duration, quality)\n" +
+              "  /music set duration 300   Set to 5 minutes\n" +
+              "  /music set bpm 90        Set tempo\n" +
+              "  /music regen         Clear cache, regenerate all\n\n" +
+              `Duration: ${musicAudio.config.duration}s · Playing: ${musicAudio.isPlaying ? musicAudio.current ?? "custom" : "nothing"}`
+            );
+          }
+          // Quick play aliases
+          else if (musicSub === "lofi") {
+            addSystemMessage(`Generating lofi (${musicAudio.config.duration}s)...`);
+            musicAudio.play("lofi").then(r => addSystemMessage(r.message));
+          }
+          else if (musicSub === "rain" || musicSub === "rainsound") {
+            addSystemMessage(`Generating rain sounds (${musicAudio.config.duration}s)...`);
+            musicAudio.play("rainsound").then(r => addSystemMessage(r.message));
+          }
+          else if (musicSub === "white" || musicSub === "whitenoise") {
+            addSystemMessage(`Generating white noise (${musicAudio.config.duration}s)...`);
+            musicAudio.play("whitenoise").then(r => addSystemMessage(r.message));
+          }
+          else if (musicSub === "ambient") {
+            addSystemMessage(`Generating ambient (${musicAudio.config.duration}s)...`);
+            musicAudio.play("ambient").then(r => addSystemMessage(r.message));
+          }
+          else if (musicSub === "piano" || musicSub === "classical") {
+            addSystemMessage(`Generating piano (${musicAudio.config.duration}s)...`);
+            musicAudio.play("classical").then(r => addSystemMessage(r.message));
+          }
+          // Custom prompt generation
+          else if (musicSub === "gen" && args.length >= 2) {
+            const customPrompt = args.slice(1).join(" ");
+            const cfg = musicAudio.config;
+            addSystemMessage(`Generating custom track (${cfg.duration}s):\n  "${customPrompt}"\n\nThis may take a moment...`);
+
+            // Use ACE-Step API directly for custom prompts
+            fetch(`${cfg.apiUrl}/release_task`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                prompt: customPrompt + ", instrumental",
+                lyrics: "[instrumental]",
+                audio_duration: cfg.duration,
+                bpm: cfg.bpm || null,
+                inference_steps: cfg.inferenceSteps,
+                guidance_scale: cfg.guidanceScale,
+                use_random_seed: true,
+                task_type: "text2music",
+                thinking: false,
+                use_cot_caption: false,
+                use_cot_language: false,
+                batch_size: 1,
+              }),
+            })
+              .then(r => r.json())
+              .then((data: any) => {
+                const taskId = data?.data?.task_id;
+                if (!taskId) {
+                  addSystemMessage("Failed to start generation. Is ACE-Step running?");
+                  return;
+                }
+                addSystemMessage(`Task submitted (${taskId.slice(0, 8)}...). Polling for result...`);
+
+                // Poll for result
+                const poll = async () => {
+                  const maxWait = 300000;
+                  const start = Date.now();
+                  while (Date.now() - start < maxWait) {
+                    try {
+                      const res = await fetch(`${cfg.apiUrl}/query_result`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ task_id_list: [taskId] }),
+                      });
+                      const result: any = await res.json();
+                      const job = result?.data?.[0];
+                      if (job?.status === 1) {
+                        const results = JSON.parse(job.result);
+                        const audioUrl = results?.[0]?.file;
+                        if (audioUrl) {
+                          // Download and play
+                          const fullUrl = audioUrl.startsWith("http") ? audioUrl : `${cfg.apiUrl}${audioUrl}`;
+                          const audioRes = await fetch(fullUrl);
+                          const buf = await audioRes.arrayBuffer();
+                          const { join } = await import("path");
+                          const cachePath = join(process.env.HOME || "~", ".8gent", "adhd-audio", "custom.mp3");
+                          await Bun.write(cachePath, buf);
+                          addSystemMessage(`Track ready! Playing on loop. /music stop to end.`);
+                          // Play via afplay loop
+                          const { spawn } = await import("bun");
+                          const loopPlay = () => {
+                            const proc = spawn(["afplay", cachePath], {
+                              stdout: "ignore", stderr: "ignore",
+                              onExit: () => { if (musicAudio.isPlaying) loopPlay(); },
+                            });
+                          };
+                          loopPlay();
+                          return;
+                        }
+                      }
+                      if (job?.status === 2) {
+                        addSystemMessage("Generation failed. Try a different prompt.");
+                        return;
+                      }
+                    } catch {}
+                    await Bun.sleep(2000);
+                  }
+                  addSystemMessage("Generation timed out (5 min). Try shorter duration: /music set duration 60");
+                };
+                poll();
+              })
+              .catch(() => {
+                addSystemMessage("ACE-Step isn't running. Start it first:\n  cd ~/ace-step/ace-step-1.5 && uv run --frozen python -m uvicorn acestep.api_server:app --host 0.0.0.0 --port 8001 --workers 1");
+              });
+          }
+          // Controls
+          else if (musicSub === "stop" || musicSub === "pause") {
+            musicAudio.stop();
+            addSystemMessage("Music stopped.");
+          }
+          else if (musicSub === "config" || musicSub === "settings") {
+            const cfg = musicAudio.config;
+            addSystemMessage(
+              "Music Config\n\n" +
+              `  duration:  ${cfg.duration}s (${Math.round(cfg.duration / 60)}min)\n` +
+              `  bpm:       ${cfg.bpm ?? "auto"}\n` +
+              `  quality:   ${cfg.inferenceSteps} steps\n` +
+              `  guidance:  ${cfg.guidanceScale}\n` +
+              `  api:       ${cfg.apiUrl}\n\n` +
+              "Change with: /music set <key> <value>"
+            );
+          }
+          else if (musicSub === "set" && args.length >= 3) {
+            const key = args[1].toLowerCase();
+            const val = args[2];
+            const keyMap: Record<string, string> = {
+              duration: "duration", length: "duration", time: "duration",
+              bpm: "bpm", tempo: "bpm",
+              steps: "inferenceSteps", quality: "inferenceSteps",
+              guidance: "guidanceScale",
+            };
+            const configKey = keyMap[key];
+            if (!configKey) {
+              addSystemMessage(`Unknown key. Use: duration, bpm, steps, guidance`);
+            } else {
+              const numVal = Number(val);
+              if (isNaN(numVal)) {
+                addSystemMessage(`"${val}" isn't a number.`);
+              } else {
+                musicAudio.setConfig({ [configKey]: numVal } as any);
+                addSystemMessage(`${configKey} set to ${numVal}. Cache cleared — next play regenerates.`);
+              }
+            }
+          }
+          else if (musicSub === "regen" || musicSub === "clear") {
+            musicAudio.clearCache();
+            addSystemMessage("Cache cleared. Next play will generate fresh tracks.");
+          }
+          else {
+            addSystemMessage(`Unknown: /music ${musicSub}. Try /music for help.`);
           }
           break;
         }

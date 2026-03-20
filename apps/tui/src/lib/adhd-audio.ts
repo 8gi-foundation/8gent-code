@@ -48,7 +48,7 @@ export interface ADHDAudioConfig {
 }
 
 const DEFAULT_CONFIG: ADHDAudioConfig = {
-  duration: 60,
+  duration: 180,
   bpm: null,
   inferenceSteps: 8,
   guidanceScale: 7.0,
