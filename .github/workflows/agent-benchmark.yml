@@ -1,0 +1,36 @@
+name: Agent Branch Benchmark
+
+on:
+  push:
+    branches: ['agent/*']
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      - run: bun test || true
+
+      - name: Run benchmarks
+        run: |
+          MODELS_OVERRIDE="ollama::eight:latest" \
+          MAX_ITERATIONS=1 \
+          bun benchmarks/autoresearch/autoresearch-loop.ts || true
+
+      - name: Post results
+        if: always()
+        run: |
+          echo "## Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          cat benchmarks/autoresearch/loop-state.json | python3 -c "
+          import json,sys
+          s=json.load(sys.stdin)
+          if s.get('history'):
+            h=s['history'][-1]
+            print(f'Average: {h[\"avgScore\"]}')
+            print(f'Passing: {h[\"passing\"]}/{h[\"total\"]}')
+          " >> $GITHUB_STEP_SUMMARY || true
