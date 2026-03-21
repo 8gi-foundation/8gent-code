@@ -793,6 +793,25 @@ export type { WorktreeInfo } from "./worktree-manager";
 export { ContextManager, getContextManager } from "./context-manager";
 export type { ContextPolicy, ContextSlice } from "./context-manager";
 
+// Macro Action Decomposer — coarse-grained parallel task planning
+export {
+  decompose,
+  findParallelGroups,
+  findCriticalPath,
+  estimatePlan,
+  buildPlan,
+  createAction,
+  formatPlan,
+  type MacroAction,
+  type MacroActionPlan,
+  type DecomposeContext,
+  type PlanEstimate,
+} from "./macro-actions";
+
+// Token Throughput Tracker — global TPS metrics across agents/sessions/benchmarks
+export { ThroughputTracker, getThroughputTracker, resetThroughputTracker } from "./throughput-tracker";
+export type { TokenEvent, ThroughputSnapshot, DailyReport, AgentUtilization } from "./throughput-tracker";
+
 // Worktree Pool — parallel sub-agent execution with git isolation
 export { WorktreePool } from "./worktree-pool";
 export { WorktreeMessaging } from "./worktree-messaging";
