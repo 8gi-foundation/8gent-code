@@ -495,7 +495,13 @@ export default {
 // ============================================
 
 export type { Opportunity } from "./opportunity-scanner.ts";
-export { scanGitHubIssues, scanLocalBacklog } from "./opportunity-scanner.ts";
+export {
+  scanGitHubIssues,
+  scanGitHubDiscussions,
+  scanContributingSection,
+  scanCodeTodos,
+  scanLocalBacklog,
+} from "./opportunity-scanner.ts";
 export type { MatchResult } from "./capability-matcher.ts";
 export {
   evaluateOpportunity,
@@ -511,6 +517,31 @@ export {
   getPipelineSummary,
   getTopOpportunities,
 } from "./work-tracker.ts";
+
+// Revenue engine
+export type { RevenueStream } from "./revenue-engine.ts";
+export {
+  identifyRevenueStreams,
+  trackRevenue,
+  advanceStreamStatus,
+  getRevenueReport,
+} from "./revenue-engine.ts";
+
+// Deliverable generator
+export type { Deliverable } from "./deliverable-generator.ts";
+export {
+  planDeliverable,
+  estimateEffort,
+  advanceDeliverable,
+  isActionable,
+} from "./deliverable-generator.ts";
+
+// Client outreach
+export {
+  composeResponse,
+  composePRDescription,
+  composeProactiveOutreach,
+} from "./client-outreach.ts";
 
 // ============================================
 // Auto-Research ability
