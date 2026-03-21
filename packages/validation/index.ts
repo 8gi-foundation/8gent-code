@@ -46,3 +46,16 @@ export {
   findPriorFailure,
   type FailureEntry,
 } from "./failure-log";
+
+export {
+  scanFile,
+  scanDirectory,
+  scanContent,
+  summarizeFindings,
+  hasCriticalFindings,
+  type SecurityFinding,
+  type ScanOptions,
+  type ScanSummary,
+} from "./security-scanner";
+
+export { SECRET_PATTERNS, VULNERABILITY_PATTERNS } from "./secret-patterns";
