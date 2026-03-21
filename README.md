@@ -25,8 +25,11 @@ bun run tui
 - **8 core abilities.** Memory, parallel worktrees, policy engine, self-evolution, self-healing, entrepreneurship, AST blast radius, and browser access. Not plugins. Built-in.
 - **Voice chat.** `/voice chat` starts a half-duplex conversation loop. Speak, Eight transcribes, thinks, and speaks back. ESC to interrupt mid-speech.
 - **AST-first code navigation.** Reads symbols, not files. 97% token reduction vs reading whole files. The agent stays fast in large codebases.
-- **Self-improving prompts.** Autoresearch harness (Karpathy-style) runs benchmarks in a loop, mutates system prompts, re-tests. Scores go up without manual tuning.
-- **Multi-agent orchestration.** Spawns sub-agents in isolated git worktrees, up to 4 concurrent, coordinates via filesystem messaging.
+- **Self-improving prompts.** Autoresearch harness (Karpathy-style) runs benchmarks in a loop, mutates system prompts, re-tests. Meta-optimizer also tunes few-shots, model routing, and grading weights.
+- **Multi-agent orchestration.** Spawns sub-agents in isolated git worktrees, up to 4 concurrent, coordinates via filesystem messaging. Macro action decomposer finds parallel groups automatically.
+- **Ability scorecards.** Each of the 8 abilities has measurable metrics tracked per session with baseline comparison.
+- **Actuator tools.** Deploy to Vercel/Railway/Fly, publish to npm/GitHub, notify via Telegram. Dry-run by default.
+- **Telegram portal.** Single chat interface to all automation: `/status`, `/agents`, `/benchmark`, `/deploy`, `/throughput`, `/scorecard`.
 - **Workspace tabs.** Chat, Notes, Ideas, BTW, Questions, and Music tabs in a neumorphic folder UI.
 - **Task router.** Classifies prompts (code / reasoning / simple / creative) and routes to the best model automatically.
 - **Activity monitor.** Real tool-call feed replaces the decorative spinner. See exactly what the agent is doing.
@@ -112,13 +115,13 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
     eight/         Core agent engine (Vercel AI SDK)
     ai/            Provider abstraction (Ollama, OpenRouter, LM Studio)
     memory/        SQLite + FTS5 persistent memory
-    orchestration/ WorktreePool multi-agent coordination
+    orchestration/ WorktreePool, macro actions, throughput tracking
     permissions/   YAML policy engine
-    self-autonomy/ Evolution and reflection
-    validation/    Self-healing executor
+    self-autonomy/ Evolution, reflection, persona mutation
+    validation/    Self-healing executor + ability scorecards
     proactive/     Entrepreneurship scanner
     ast-index/     Blast radius engine
-    tools/         Tool implementations (browser, filesystem, shell)
+    tools/         Tool implementations (browser, actuators, filesystem, shell)
     voice/         STT (whisper.cpp) + voice chat loop
     auth/          Clerk auth + GitHub integration
     db/            Convex reactive database
@@ -146,6 +149,10 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
 | `/github` | GitHub integration |
 | `/auth status` | Check auth state |
 | `/debug` | Session inspector |
+| `/deploy <target>` | Deploy to Vercel/Railway/Fly (via Telegram) |
+| `/throughput` | Token throughput stats |
+| `/scorecard` | Ability scorecard metrics |
+| `/soul` | Current persona calibration |
 
 ## Docs
 
@@ -176,6 +183,7 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 - [Durable 2.0](https://durable.com) - AI business builder with specialized agents
 - [Paperclip](https://github.com/paperclipai/paperclip) - autonomous agent work platform patterns
+- Karpathy's autoresearch methodology - iterative prompt mutation, meta-optimization, token throughput maximization
 
 ## License
 
