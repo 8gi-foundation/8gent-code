@@ -2,19 +2,21 @@
  * Gateway - WebSocket server for the daemon.
  *
  * Accepts connections from OS frontend, Telegram, Discord, etc.
- * Routes messages to sessions, broadcasts agent events to clients.
+ * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
-import { bus, type EventName, type EventPayload } from "./events";
+import { bus, type EventName } from "./events";
+import type { AgentPool } from "./agent-pool";
 
 export interface GatewayConfig {
   port: number;
   authToken: string | null; // null = no auth required
+  pool: AgentPool;
 }
 
 interface ClientState {
   id: string;
-  channel: string; // "tui", "telegram", "discord", "api"
+  channel: string; // "os", "telegram", "discord", "api"
   sessionId: string | null;
   authenticated: boolean;
 }
@@ -25,7 +27,6 @@ type InboundMessage =
   | { type: "session:resume"; sessionId: string }
   | { type: "session:compact"; sessionId: string }
   | { type: "session:destroy"; sessionId: string }
-  | { type: "tool:execute"; tool: string; input: unknown }
   | { type: "prompt"; text: string }
   | { type: "ping" };
 
@@ -88,6 +89,8 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
     return;
   }
 
+  const pool = config.pool;
+
   switch (msg.type) {
     case "ping":
       send(ws, { type: "pong" });
@@ -97,6 +100,10 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
       const sessionId = generateSessionId();
       state.sessionId = sessionId;
       state.channel = msg.channel || "api";
+
+      // Create an Agent instance for this session
+      pool.createSession(sessionId, state.channel);
+
       bus.emit("session:start", { sessionId, channel: state.channel });
       send(ws, { type: "session:created", sessionId });
       break;
@@ -104,13 +111,18 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
     case "session:resume": {
       state.sessionId = msg.sessionId;
+
+      // If pool doesn't have this session, create a new agent for it
+      if (!pool.hasSession(msg.sessionId)) {
+        pool.createSession(msg.sessionId, state.channel);
+      }
+
       bus.emit("session:start", { sessionId: msg.sessionId, channel: state.channel });
       send(ws, { type: "session:resumed", sessionId: msg.sessionId });
       break;
     }
 
     case "session:compact": {
-      // Signal to agent to compact the session history
       if (msg.sessionId) {
         bus.emit("agent:thinking", { sessionId: msg.sessionId });
       }
@@ -119,21 +131,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 
     case "session:destroy": {
       if (msg.sessionId) {
+        pool.destroySession(msg.sessionId);
         bus.emit("session:end", { sessionId: msg.sessionId, reason: "client-destroy" });
-        // Clear sessionId from any clients using it
         for (const [, s] of clients) {
           if (s.sessionId === msg.sessionId) s.sessionId = null;
         }
       }
-      break;
-    }
-
-    case "tool:execute": {
-      if (!state.sessionId) {
-        send(ws, { type: "error", message: "no active session" });
-        return;
-      }
-      bus.emit("tool:start", { sessionId: state.sessionId, tool: msg.tool, input: msg.input });
       break;
     }
 
@@ -142,12 +145,24 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
         send(ws, { type: "error", message: "no active session" });
         return;
       }
-      bus.emit("agent:thinking", { sessionId: state.sessionId });
+
+      // Route the message to the agent via the pool
+      // This runs async - events will be broadcast as the agent works
+      const sid = state.sessionId;
+      pool.chat(sid, msg.text).then((response) => {
+        // Final response - signal session:end for this turn
+        bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
+      }).catch((err) => {
+        bus.emit("agent:error", {
+          sessionId: sid,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       break;
     }
 
     default:
-      send(ws, { type: "error", message: `unknown message type` });
+      send(ws, { type: "error", message: "unknown message type" });
   }
 }
 
@@ -173,7 +188,18 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
     port: config.port,
     fetch(req, server) {
       if (server.upgrade(req)) return undefined;
-      return new Response("Eight Daemon WebSocket", { status: 200 });
+
+      // Health check endpoint
+      const url = new URL(req.url);
+      if (url.pathname === "/health") {
+        return Response.json({
+          status: "ok",
+          sessions: config.pool.size,
+          uptime: process.uptime(),
+        });
+      }
+
+      return new Response("Eight Daemon - ws://localhost:" + config.port, { status: 200 });
     },
     websocket: {
       open(ws) {
@@ -182,16 +208,20 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
           id,
           channel: "api",
           sessionId: null,
-          authenticated: !config.authToken, // auto-auth if no token required
+          authenticated: !config.authToken,
         });
+        console.log(`[gateway] client ${id} connected`);
       },
       message(ws, raw) {
         handleMessage(ws, config, typeof raw === "string" ? raw : new TextDecoder().decode(raw));
       },
       close(ws) {
         const state = clients.get(ws);
-        if (state?.sessionId) {
-          bus.emit("session:end", { sessionId: state.sessionId, reason: "client-disconnect" });
+        if (state) {
+          console.log(`[gateway] client ${state.id} disconnected`);
+          if (state.sessionId) {
+            bus.emit("session:end", { sessionId: state.sessionId, reason: "client-disconnect" });
+          }
         }
         clients.delete(ws);
       },
