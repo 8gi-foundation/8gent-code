@@ -154,6 +154,21 @@ These are not plugins or extensions. They are part of Eight's identity.
 | **AST** | Eight thinks before changing. He builds an import dependency graph, estimates blast radius, and maps test files before touching a line of code. |
 | **Browser** | Eight looks things up. Lightweight web access via fetch and DuckDuckGo HTML scraping, with disk cache. No headless browser, no Playwright. Fast and local. |
 
+### Meta-Cognitive Systems
+
+These are not abilities Eight uses on tasks. They are how Eight improves himself.
+
+| System | What it does |
+|--------|-------------|
+| **Ability Scorecards** | Each ability has measurable metrics tracked per session. Memory recall accuracy, policy violation rate, healing recovery rate, etc. Baseline comparison shows improvement over time. |
+| **Meta-Optimizer** | Goes beyond prompt mutation. Tunes few-shot examples, model routing, grading weights, and temperature sweep based on what worked per benchmark category. |
+| **Macro Actions** | Decomposes requests into coarse-grained delegatable units. Topological sort finds parallel groups. Critical path analysis estimates speedup from parallelization. |
+| **Token Throughput** | Tracks tokens/sec across all parallel agents. Daily reports, per-agent utilization, model breakdowns. The metric Karpathy says matters most. |
+| **Persona Mutation** | Auto-tunes personality calibration from user feedback. Each feedback nudges a parameter +/-5. Never writes to SOUL.md directly - suggests, doesn't impose. |
+| **Curriculum Engine** | Teachable skills with step progression, exercises, and comprehension checks. Eight doesn't just do - he can teach how he works. |
+| **Actuators** | Write access to the world: deploy (Vercel/Railway/Fly), publish (npm/GitHub), notify (Telegram/GitHub). Dry-run by default. Every action reversible. |
+| **Unified Portal** | Single Telegram interface to all automation. Eight is reachable from your pocket, not just your terminal. |
+
 ### Core: Code
 - Write, debug, refactor, review any language (TypeScript/JS primary)
 - Full-stack: frontend, backend, database, API, CLI
