@@ -9,16 +9,56 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-21
+
 ### Added
-- **Self-healing executor** — `packages/validation/healing.ts` implements the Hypothesis Loop pattern: checkpoint-action-verify-revert. `SelfHealer.healingLoop()` retries failing actions up to `maxRetries` (from `.8gent/config.json`), reverts via git stash on failure, and logs all failure entries to `~/.8gent/healing/failures.jsonl`. Companion modules: `checkpoint.ts` (git stash checkpoints) and `failure-log.ts` (append-only JSONL failure tracking with prior-failure lookup).
-- **Voice chat mode** — `/voice chat` starts a half-duplex voice conversation loop (listen -> transcribe -> agent -> speak -> listen). Uses VAD for auto-stop on silence. ESC interrupts agent mid-speech. Status bar shows VOICE CHAT / SPEAKING / THINKING states. `packages/voice/voice-chat.ts` orchestrator with `VoiceChatLoop` class, `useVoiceChat` TUI hook.
-- **GitHub integration** — `packages/auth/github.ts` for GitHub provider token management (Keychain/encrypted storage), `packages/auth/github-tools.ts` with REST API helpers (repos, issues, PRs, branch detection), `/github` slash command in TUI, `/auth status` now shows GitHub connection info, auto-configures `gh` CLI after login
-- **Tenant Convex persistence** — `tenants` table in Convex schema with CRUD mutations, `ConvexTenantStore` with in-memory fallback
-- **Automatic Convex session sync** — `SessionSyncManager` batches token/tool-call deltas, flushes every 10s, fire-and-forget
-- **`syncToConvex` config flag** — enable/disable Convex session sync in `.8gent/config.json`
-- **Real Stripe billing** — real SDK calls replacing all stubs, webhook signature verification, Hono+Express handlers, lazy init (free tier never loads Stripe)
-- **Knowledge graph** — SQLite entity/relationship store with BFS traversal, heuristic extraction from tool results, user preference detection, fire-and-forget ingestion
-- **Memory v2** — SQLite+FTS5+embeddings replacing JSONL, 5 memory types, hybrid search, knowledge graph tables, version history, v1 migration
+
+#### Eight Core Abilities (8 new packages)
+- **Memory** (`packages/memory/`) - SQLite + FTS5 persistent recall with Ollama embeddings, 30-day decay, frequency-based promotion via `PromotionManager`, semantic search via `SemanticRecall`
+- **Worktree** (`packages/orchestration/`) - `WorktreePool` for multi-agent parallel execution via git worktrees, max 4 concurrent agents, filesystem-based inter-agent messaging
+- **Policy** (`packages/permissions/`) - YAML-driven policy engine with 11 default rules, approval gates for destructive operations, privacy-aware model routing
+- **Evolution** (`packages/self-autonomy/`) - Post-session reflection, Bayesian skill confidence scoring, self-improvement SQLite database, learns from successes and failures
+- **Healing** (`packages/validation/`) - Hypothesis Loop pattern: checkpoint-action-verify-revert. Git-stash atomic snapshots, failure log (`~/.8gent/healing/failures.jsonl`), configurable retry limits
+- **Entrepreneurship** (`packages/proactive/`) - GitHub bounty and help-wanted issue scanner, capability matcher, opportunity pipeline with full lifecycle tracking
+- **AST** (`packages/ast-index/`) - Blast Radius Engine: import dependency graph, test file mapping, change impact estimation before any edit
+- **Browser** (`packages/tools/browser/`) - Lightweight web access via fetch + DuckDuckGo HTML scraping, disk cache, no headless browser dependencies
+
+#### Voice Chat Mode
+- **`/voice chat`** - Half-duplex voice conversation loop: listen -> transcribe -> agent -> speak -> listen
+- Sox-based recording with built-in silence detection (auto-stops when you stop talking)
+- Local transcription via whisper.cpp, OpenAI Whisper cloud fallback
+- macOS TTS via `say` command with sentence-chunked delivery for natural speech
+- ESC interrupts agent mid-speech, status bar shows VOICE CHAT / SPEAKING / THINKING states
+- `VoiceChatLoop` class (`packages/voice/voice-chat.ts`), `useVoiceChat` React hook
+
+#### TUI Overhaul
+- **Neumorphic folder tabs** - Chat, Notes, Ideas, BTW, Questions, Music workspace tabs
+- **Activity monitor** - Real tool-call feed replacing decorative spinner
+- **Responsive chat bubbles** - Terminal-width-aware indent (10%, capped at 12 cols)
+- **Folder frame** - Vertical borders on content area
+- **ADHD mode** - Bionic text boldening + ACE-Step LoFi music generation
+
+#### Infrastructure
+- **SOUL.md** - Agent persona definition: "The Infinite Gentleman" identity, voice calibration, 11 principles, anti-patterns, heartbeat system, daily schedule
+- **GitHub integration** - Token management (Keychain/encrypted), REST API helpers, `/github` slash command, `gh` CLI auto-config
+- **Ability showcase benchmark** - Single task exercising all 8 abilities end-to-end
+- **Long-horizon benchmarks** (LH001-LH005) - Review bot, migration, scheduler, API gateway, CLI framework
+- **Competition infrastructure** - `overnight-competition.ts`, `overnight-orchestrator.sh`, `sync-results.ts`
+- **Tenant Convex persistence** - `tenants` table with CRUD mutations, in-memory fallback
+- **Session sync** - `SessionSyncManager` batches token/tool-call deltas, flushes every 10s
+- **Real Stripe billing** - Real SDK calls, webhook verification, Hono+Express handlers, lazy init
+- **Knowledge graph** - SQLite entity/relationship store with BFS traversal, heuristic extraction
+- **Memory v2** - SQLite+FTS5+embeddings replacing JSONL, 5 memory types, hybrid search, version history
+
+### Fixed
+- **Voice TUI freeze** - Replaced blocking `while(running)` with non-blocking `setTimeout` scheduler; fixed `useInput` consuming all keyboard input
+- **Recording never stopping** - VoiceEngine audio levels were simulated (random numbers); switched to sox native silence detection
+- **Duplicate voice messages** - Voice hook and agent.chat() both adding messages to state
+- **[_EOT_] tokens in display** - Strip qwen3.5 end-of-turn markers from transcript, display, and TTS
+- **Chat bubbles disappearing** - `useStdout()` called conditionally, violating React hook rules; moved to top of component
+- **Voice messages not showing** - `agent.chat()` doesn't update React state; added explicit `setMessages()` calls
+- **Text overlap in message list** - Hardcoded `marginLeft={20}` replaced with responsive terminal-width-based indent
+- **Security** - Removed all hardcoded Telegram tokens, moved to .env
 
 ## [0.7.0] — 2026-03-18
 
