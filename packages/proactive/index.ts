@@ -511,3 +511,10 @@ export {
   getPipelineSummary,
   getTopOpportunities,
 } from "./work-tracker.ts";
+
+// ============================================
+// Auto-Research ability
+// ============================================
+
+export { research } from "./autoresearch.ts";
+export type { ResearchOptions, ResearchReport, ResearchSource, ResearchPattern } from "./research-types.ts";
