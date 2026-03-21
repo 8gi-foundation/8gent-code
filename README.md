@@ -24,6 +24,23 @@ bun run tui
 - **Local-first, free by default.** Runs entirely on your machine. Cloud models (OpenRouter) are opt-in. No telemetry, no API keys to start.
 - **AST-first code navigation.** Reads symbols, not files. 97% token reduction vs reading whole files. The agent stays fast in large codebases.
 - **Self-improving prompts.** Autoresearch harness (Karpathy-style) runs benchmarks in a loop, mutates system prompts, re-tests. Scores go up without manual tuning.
+- **Workspace tabs.** Chat, Notes, Ideas, BTW, Questions, and Music tabs in a neumorphic folder UI.
+- **ADHD mode.** Text boldening for focus + ACE-Step lofi music generation, toggleable at runtime.
+- **Task router.** Classifies prompts (code / reasoning / simple / creative) and routes to the best model automatically.
+- **Activity monitor.** Real tool-call feed replaces the decorative spinner — see exactly what the agent is doing.
+
+## Core Abilities
+
+| Ability | Package | What it does |
+|---------|---------|--------------|
+| **Memory** | `packages/memory/` | SQLite + FTS5 persistent recall, Ollama embeddings, 30-day decay, frequency-based promotion |
+| **Worktree** | `packages/orchestration/` | Multi-agent parallel execution via git worktrees, max 4 concurrent, filesystem messaging |
+| **Policy** | `packages/permissions/` | YAML policy engine, 11 default rules, approval gates, privacy-aware model routing |
+| **Evolution** | `packages/self-autonomy/` | Post-session reflection, Bayesian skill confidence, self-improvement DB |
+| **Healing** | `packages/validation/` | Checkpoint-verify-revert loop, git-stash atomic snapshots, failure log |
+| **Entrepreneurship** | `packages/proactive/` | GitHub bounty/help-wanted scanner, capability matcher, opportunity pipeline |
+| **AST** | `packages/ast-index/` | Blast radius engine, import dependency graph, test file mapping, change impact estimation |
+| **Browser** | `packages/tools/browser/` | Lightweight web access via fetch + DuckDuckGo HTML scraping, disk cache, no headless deps |
 
 ## How it works
 
@@ -80,14 +97,14 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
 
 Architecture credits. These projects informed specific parts of 8gent's design.
 
-- [OpenClaw](https://openclaw.ai) - agent framework patterns
-- [Hermes Agent](https://github.com/NousResearch) (NousResearch) - self-evolution, persistent memory
-- [codex-autoresearch](https://github.com/karpathy/autoresearch) - hypothesis-commit-verify loop
-- [code-review-graph](https://github.com/nicepkg/code-review-graph) - blast-radius AST analysis
-- [ClawTeam](https://github.com/AimingLab/ClawTeam) - worktree agent swarms
-- [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
+- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) - persistent memory and self-evolution patterns
+- [CashClaw](https://github.com/nicepkg/CashClaw) - autonomous work discovery and value generation
+- NemoClaw - policy-driven governance and approval gate architecture
+- Hypothesis Loop - atomic commit-verify-revert development cycle
+- Blast Radius Engine - AST-based change impact estimation
+- Claude Code - worktree isolation pattern for parallel agent execution
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
-- [CashClaw](https://github.com/cashclaw) - autonomous work discovery and value generation patterns
+- [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 
 ## License
 
