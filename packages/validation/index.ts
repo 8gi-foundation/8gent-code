@@ -59,3 +59,13 @@ export {
 } from "./security-scanner";
 
 export { SECRET_PATTERNS, VULNERABILITY_PATTERNS } from "./secret-patterns";
+
+export {
+  AbilityScorecardTracker,
+  ABILITIES,
+  ABILITY_METRIC_DESCRIPTIONS,
+  type AbilityScorecard,
+  type AbilityMetric,
+  type AbilityName,
+  type BaselineDelta,
+} from "./ability-scorecard";
