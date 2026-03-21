@@ -489,3 +489,25 @@ export default {
   formatQuestion,
   detectTaskType,
 };
+
+// ============================================
+// Entrepreneurship ability re-exports
+// ============================================
+
+export type { Opportunity } from "./opportunity-scanner.ts";
+export { scanGitHubIssues, scanLocalBacklog } from "./opportunity-scanner.ts";
+export type { MatchResult } from "./capability-matcher.ts";
+export {
+  evaluateOpportunity,
+  evaluateAll,
+  DEFAULT_CAPABILITIES,
+} from "./capability-matcher.ts";
+export {
+  trackOpportunity,
+  trackAll,
+  getOpportunities,
+  advanceStatus,
+  pruneByStatus,
+  getPipelineSummary,
+  getTopOpportunities,
+} from "./work-tracker.ts";
