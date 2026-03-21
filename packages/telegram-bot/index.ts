@@ -530,3 +530,5 @@ export { commands, routeCommand } from "./commands";
 export { TelegramAgentMode } from "./agent-mode";
 export { BotMemory } from "./memory";
 export { LiveDashboard } from "./live-dashboard";
+export { UnifiedPortal, formatForTelegram } from "./unified-portal";
+export type { PortalCommand } from "./unified-portal";
