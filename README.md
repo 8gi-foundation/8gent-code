@@ -82,13 +82,13 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 
 - [OpenClaw](https://openclaw.ai) - agent framework patterns
 - [Hermes Agent](https://github.com/NousResearch) (NousResearch) - self-evolution, persistent memory
-- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) - self-evolution and persistent learning patterns
 - [codex-autoresearch](https://github.com/karpathy/autoresearch) - hypothesis-commit-verify loop
 - [code-review-graph](https://github.com/nicepkg/code-review-graph) - blast-radius AST analysis
 - [ClawTeam](https://github.com/AimingLab/ClawTeam) - worktree agent swarms
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
-- Hypothesis Loop pattern - atomic commit-verify-revert for self-healing agents
+- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) - persistent memory and self-evolution patterns
+- [CashClaw](https://github.com/cashclaw) - autonomous work discovery and value generation patterns
 
 ## License
 
