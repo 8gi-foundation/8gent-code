@@ -1,0 +1,89 @@
+version: 1
+
+# 8gent Code — Default Safe Policies
+# User can override by placing a custom policies.yaml at ~/.8gent/policies.yaml
+#
+# Condition syntax: plain English checked against context fields.
+# Examples: "content contains SECRET", "branch in [main, master]", "command contains rm -rf"
+#
+# Decisions:
+#   block           — hard deny, no bypass
+#   require_approval — soft deny, user must confirm
+#   allow           — explicit allow (overrides block rules when evaluated first)
+
+policies:
+  # ── Secrets ─────────────────────────────────────────────────────────────────
+
+  - name: "no-secrets-in-files"
+    action: write_file
+    condition: "content contains API_KEY or content contains SECRET or content contains PASSWORD or content contains TOKEN or content contains PRIVATE_KEY"
+    decision: block
+    message: "Cannot write secrets or credentials to files. Use .env + process.env."
+
+  - name: "no-env-file-leak"
+    action: write_file
+    condition: "path contains .env and content contains ="
+    decision: require_approval
+    message: "Writing to .env file requires confirmation."
+
+  # ── Destructive commands ─────────────────────────────────────────────────────
+
+  - name: "no-rm-rf-root"
+    action: run_command
+    condition: "command contains rm -rf /"
+    decision: block
+    message: "Recursive delete from root is blocked."
+
+  - name: "no-fork-bomb"
+    action: run_command
+    condition: "command contains :(){ :|:"
+    decision: block
+    message: "Fork bomb pattern blocked."
+
+  - name: "no-pipe-to-shell"
+    action: run_command
+    condition: "command contains |sh or command contains |bash or command contains |zsh or command contains | sh or command contains | bash or command contains | zsh"
+    decision: require_approval
+    message: "Piping to shell interpreter requires confirmation."
+
+  - name: "no-sudo-destructive"
+    action: run_command
+    condition: "command contains sudo rm or command contains sudo mkfs or command contains sudo dd"
+    decision: block
+    message: "Destructive sudo command blocked."
+
+  # ── Git protections ───────────────────────────────────────────────────────────
+
+  - name: "protected-branches-push"
+    action: git_push
+    condition: "branch in [main, master, production, prod]"
+    decision: require_approval
+    message: "Push to protected branch requires confirmation."
+
+  - name: "no-force-push-main"
+    action: run_command
+    condition: "command contains git push --force and command contains main or command contains git push -f and command contains main"
+    decision: block
+    message: "Force push to main is blocked."
+
+  - name: "no-hard-reset"
+    action: run_command
+    condition: "command contains git reset --hard"
+    decision: require_approval
+    message: "Hard git reset requires confirmation."
+
+  # ── Network ───────────────────────────────────────────────────────────────────
+
+  - name: "no-exfil-domains"
+    action: network_request
+    condition: "url contains pastebin.com or url contains ngrok.io or url contains requestbin"
+    decision: block
+    message: "Request to known data-exfil domain blocked."
+
+  # ── File access ───────────────────────────────────────────────────────────────
+
+  - name: "no-delete-config"
+    action: delete_file
+    condition: "path contains package.json or path contains tsconfig or path contains CLAUDE.md"
+    decision: require_approval
+    message: "Deleting project config files requires confirmation."
