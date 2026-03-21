@@ -187,3 +187,5 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 ## License
 
 MIT - 8GI Foundation
+
+Follow: [X/Twitter](https://x.com/8gentapp) | [GitHub](https://github.com/8gi-foundation/8gent-code)
