@@ -15,6 +15,8 @@
 
 import { VoiceEngine } from "./index.js";
 import type { TranscriptEvent } from "./types.js";
+import { TTSEngine, getTTSEngine } from "./tts-engine.js";
+import type { TTSProcess } from "./tts-engine.js";
 import { tmpdir } from "os";
 import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
@@ -74,9 +76,10 @@ export class VoiceChatLoop {
 
   private state: VoiceChatState = "idle";
   private running = false;
-  private ttsProcess: { kill: () => void; exited: Promise<number> } | null = null;
+  private ttsProcess: TTSProcess | null = null;
   private recProcess: { kill: () => void; exited: Promise<number> } | null = null;
   private listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
+  private ttsEngine: TTSEngine;
 
   constructor(config: VoiceChatConfig) {
     this.engine = config.engine;
@@ -87,6 +90,7 @@ export class VoiceChatLoop {
     this.maxSpeakLength = config.maxSpeakLength ?? 500;
     this.onStateChange = config.onStateChange;
     this.onError = config.onError;
+    this.ttsEngine = getTTSEngine();
   }
 
   // ---- Public API ----
@@ -369,9 +373,8 @@ export class VoiceChatLoop {
     for (const chunk of chunks) {
       if (!this.running) break;
 
-      const safe = chunk.replace(/"/g, '\\"');
       try {
-        this.ttsProcess = Bun.spawn(["say", "-v", this.voice, "-r", String(this.rate), safe]);
+        this.ttsProcess = await this.ttsEngine.speak(chunk, { voice: this.voice, rate: this.rate });
         await this.ttsProcess.exited;
         this.ttsProcess = null;
       } catch {
@@ -393,10 +396,8 @@ export class VoiceChatLoop {
       } catch {}
       this.ttsProcess = null;
     }
-    // Also kill any stray say processes from this session
-    try {
-      Bun.spawnSync(["killall", "say"]);
-    } catch {}
+    // Use engine-level interrupt to clean up provider-specific processes
+    await this.ttsEngine.interrupt();
   }
 }
 
