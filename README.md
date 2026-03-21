@@ -175,6 +175,7 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 - [Durable 2.0](https://durable.com) - AI business builder with specialized agents
+- [Paperclip](https://github.com/paperclipai/paperclip) - autonomous agent work platform patterns
 
 ## License
 
