@@ -792,3 +792,14 @@ export type { WorktreeInfo } from "./worktree-manager";
 // Context isolation for multi-agent orchestration
 export { ContextManager, getContextManager } from "./context-manager";
 export type { ContextPolicy, ContextSlice } from "./context-manager";
+
+// Worktree Pool — parallel sub-agent execution with git isolation
+export { WorktreePool } from "./worktree-pool";
+export { WorktreeMessaging } from "./worktree-messaging";
+export type {
+  WorktreeTask,
+  WorktreeResult,
+  AgentMessage as WorktreeAgentMessage,
+  WorktreePoolOptions,
+  WorktreeTaskStatus,
+} from "./worktree-pool-types";
