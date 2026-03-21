@@ -139,6 +139,21 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 4. **Never ship without updating the changelog.** If you add a feature, fix a bug, or refactor something significant — document it in CHANGELOG.md before committing.
 5. **Tag releases** with `git tag v0.x.0` after version bumps.
 
+## Core Ability Packages
+
+Eight's native skills live in these packages. Each is self-contained and can be enabled/disabled independently.
+
+| Package | Ability | Key entry point |
+|---------|---------|-----------------|
+| `packages/memory/` | Persistent recall | SQLite + FTS5 + Ollama embeddings, 30-day decay, frequency promotion |
+| `packages/orchestration/` | Worktree agents | `WorktreePool` — max 4 concurrent, filesystem-based inter-agent messaging |
+| `packages/permissions/` | Policy engine | YAML rules, 11 defaults, approval gates for secrets/destructive/network/git/files |
+| `packages/self-autonomy/` | Evolution | Post-session reflection, Bayesian skill confidence, self-improvement DB |
+| `packages/validation/` | Healing | Checkpoint-verify-revert loop, `git stash` atomic snapshots, failure log |
+| `packages/proactive/` | Entrepreneurship | GitHub bounty scanner, capability matcher, opportunity pipeline tracker |
+| `packages/ast-index/` | Blast radius | Import dependency graph, test file mapping, change impact estimation |
+| `packages/tools/browser/` | Browser | Fetch + DuckDuckGo HTML scraper, HTML-to-text, disk cache, no headless deps |
+
 ## Kernel Fine-Tuning (`packages/kernel/`)
 
 The `@8gent/kernel` package handles continuous RL fine-tuning via a training proxy. Key files:
@@ -215,6 +230,11 @@ apps/tui/src/
 | `/continue` | Resume most recent session |
 | `/resume` | Pick from last 5 sessions |
 | `/compact` | Compress conversation history |
+| `/debug` | Open debug CLI with real-time session log viewer |
+| `/music` | Toggle ACE-Step lofi music generation (ADHD mode) |
+| `/router` | Show current task router classification and model selection |
+| `/github` | GitHub auth status and issue/PR integration |
+| `/rename` | Rename the current session |
 
 ### ESC Behavior
 - During generation: **aborts the AI SDK stream** (calls `agent.abort()`)
