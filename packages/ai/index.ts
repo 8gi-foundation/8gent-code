@@ -36,3 +36,7 @@ export type { TaskCategory, RouteDecision, ModelSlot, RouterConfig } from "./tas
 
 // Toolshed bridge
 export { registerToolsInToolshed } from "./toolshed-bridge";
+
+// Edge Inference - local embedding + classification, no API key required
+export { embed, batchEmbed, similarity, classify, isEdgeInferenceAvailable } from "./edge-inference";
+export { EmbeddingCache, getEmbeddingCache, cosineSimilarity } from "./embedding-cache";
