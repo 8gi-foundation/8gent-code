@@ -2,9 +2,11 @@
  * 8gent - Opportunity Scanner
  *
  * Scans GitHub for work opportunities: bounties, good-first-issues, help-wanted.
- * Uses GitHub REST API directly — no library deps.
+ * Also scans Discussions, Contributing sections, and TODO/FIXME markers in code.
+ * Uses GitHub REST API directly - no library deps.
  *
  * Inspired by: CashClaw (autonomous work discovery patterns)
+ * Reference: Paperclip - autonomous agent work platform (goal-aligned task discovery)
  */
 
 export interface Opportunity {
@@ -97,12 +99,12 @@ export async function scanGitHubIssues(
     try {
       const res = await fetch(url, { headers });
       if (!res.ok) {
-        // 404 = repo not found, 403 = rate limit — skip silently
+        // 404 = repo not found, 403 = rate limit - skip silently
         continue;
       }
       issues = (await res.json()) as GitHubIssue[];
     } catch {
-      // Network failure — skip this repo
+      // Network failure - skip this repo
       continue;
     }
 
@@ -127,6 +129,198 @@ export async function scanGitHubIssues(
   }
 
   return opportunities;
+}
+
+// -- GitHub Discussions -------------------------------------------------
+
+interface GitHubDiscussion {
+  number: number;
+  title: string;
+  body: string | null;
+  html_url: string;
+  category: { name: string };
+  created_at: string;
+}
+
+/**
+ * Scan GitHub Discussions for help-seeking threads.
+ * Looks for "Q&A" and "Help" category discussions as collaboration opportunities.
+ */
+export async function scanGitHubDiscussions(
+  repos: string[],
+  token?: string
+): Promise<Opportunity[]> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "8gent-opportunity-scanner",
+  };
+  if (token) headers["Authorization"] = `token ${token}`;
+
+  const opportunities: Opportunity[] = [];
+
+  for (const repo of repos) {
+    const [owner, repoName] = repo.split("/");
+    const query = `
+      query {
+        repository(owner: "${owner}", name: "${repoName}") {
+          discussions(first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            nodes {
+              number title body url
+              category { name }
+              createdAt
+            }
+          }
+        }
+      }`;
+
+    let discussions: GitHubDiscussion[] = [];
+    try {
+      const res = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as {
+        data?: { repository?: { discussions?: { nodes?: GitHubDiscussion[] } } };
+      };
+      discussions = data?.data?.repository?.discussions?.nodes ?? [];
+    } catch {
+      continue;
+    }
+
+    for (const disc of discussions) {
+      const categoryName = disc.category?.name?.toLowerCase() ?? "";
+      if (!categoryName.match(/help|q&a|question|support/)) continue;
+
+      opportunities.push({
+        id: `github-discussion-${repo.replace("/", "-")}-${disc.number}`,
+        source: "github",
+        title: disc.title,
+        description: (disc.body || "").slice(0, 500),
+        url: disc.html_url,
+        repo,
+        labels: ["discussion", categoryName],
+        estimatedEffort: "small",
+        matchScore: 0,
+        status: "found",
+        createdAt: disc.created_at,
+      });
+    }
+  }
+
+  return opportunities;
+}
+
+// -- Contributing section scanner ---------------------------------------
+
+/**
+ * Scan a repo's CONTRIBUTING.md for maintainer needs.
+ * Surfaces "help wanted" signals from the contributing guide.
+ */
+export async function scanContributingSection(
+  repos: string[],
+  token?: string
+): Promise<Opportunity[]> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "8gent-opportunity-scanner",
+  };
+  if (token) headers["Authorization"] = `token ${token}`;
+
+  const opportunities: Opportunity[] = [];
+  const NEED_PATTERNS = [
+    /help\s+wanted/i, /looking\s+for\s+(contributor|help)/i,
+    /we\s+need/i, /seeking\s+(help|contributor)/i,
+    /good\s+first\s+(issue|contribution)/i,
+  ];
+
+  for (const repo of repos) {
+    for (const filename of ["CONTRIBUTING.md", "CONTRIBUTING", "contributing.md"]) {
+      const url = `https://api.github.com/repos/${repo}/contents/${filename}`;
+      try {
+        const res = await fetch(url, { headers });
+        if (!res.ok) continue;
+        const meta = await res.json() as { content?: string };
+        const raw = meta.content ? Buffer.from(meta.content, "base64").toString() : "";
+        if (!raw) continue;
+
+        const matchedPatterns = NEED_PATTERNS.filter((p) => p.test(raw));
+        if (matchedPatterns.length === 0) continue;
+
+        opportunities.push({
+          id: `github-contributing-${repo.replace("/", "-")}`,
+          source: "github",
+          title: `Maintainer needs contributors - ${repo}`,
+          description: raw.slice(0, 500),
+          url: `https://github.com/${repo}/blob/main/${filename}`,
+          repo,
+          labels: ["contributing", "help-wanted"],
+          estimatedEffort: "small",
+          matchScore: 0,
+          status: "found",
+          createdAt: new Date().toISOString(),
+        });
+        break;
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return opportunities;
+}
+
+// -- TODO/FIXME code scanner -------------------------------------------
+
+interface GitHubSearchResult {
+  total_count: number;
+  items: Array<{
+    name: string;
+    path: string;
+    html_url: string;
+    repository: { full_name: string };
+  }>;
+}
+
+/**
+ * Search for repos with TODO/FIXME markers via GitHub code search.
+ * Surfaces potential contribution opportunities in active projects.
+ */
+export async function scanCodeTodos(
+  query: string,
+  token?: string,
+  maxResults = 10
+): Promise<Opportunity[]> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "8gent-opportunity-scanner",
+  };
+  if (token) headers["Authorization"] = `token ${token}`;
+
+  const searchUrl = `https://api.github.com/search/code?q=${encodeURIComponent(query + " TODO OR FIXME")}&per_page=${maxResults}`;
+
+  try {
+    const res = await fetch(searchUrl, { headers });
+    if (!res.ok) return [];
+    const data = await res.json() as GitHubSearchResult;
+
+    return data.items.map((item) => ({
+      id: `github-todo-${item.repository.full_name.replace("/", "-")}-${item.path.replace(/\//g, "-")}`,
+      source: "github" as const,
+      title: `TODO/FIXME in ${item.path} (${item.repository.full_name})`,
+      description: `Potential improvement opportunity in ${item.path}`,
+      url: item.html_url,
+      repo: item.repository.full_name,
+      labels: ["todo", "code-quality"],
+      estimatedEffort: "small" as const,
+      matchScore: 0,
+      status: "found" as const,
+      createdAt: new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**
