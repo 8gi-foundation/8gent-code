@@ -171,6 +171,7 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - Hypothesis Loop - atomic commit-verify-revert development cycle
 - Blast Radius Engine - AST-based change impact estimation
 - Claude Code - worktree isolation pattern for parallel agent execution
+- [Nemotron-3-Nano WebGPU](https://huggingface.co/spaces/webml-community/Nemotron-3-Nano-WebGPU) - edge inference inspiration for lightweight local classification
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 
