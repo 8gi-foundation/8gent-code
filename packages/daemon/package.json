@@ -1,0 +1,11 @@
+{
+  "name": "@8gent/daemon",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "start": "bun run index.ts",
+    "install-service": "bun run service.ts install",
+    "uninstall-service": "bun run service.ts uninstall"
+  }
+}
