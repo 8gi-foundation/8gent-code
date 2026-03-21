@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Security** (`packages/validation/security-scanner.ts`, `secret-patterns.ts`) - Static security scanner: detects leaked secrets (API keys, AWS credentials, DB connection strings, JWTs, private keys) and vulnerability patterns (eval injection, SQL concat, innerHTML XSS). `scanFile`, `scanContent`, `scanDirectory` API. Pre-commit gate via `hasCriticalFindings`. Credit: [0din-ai/ai-scanner](https://github.com/0din-ai/ai-scanner) for pattern taxonomy.
+
 ## [0.8.0] - 2026-03-21
 
 ### Added
