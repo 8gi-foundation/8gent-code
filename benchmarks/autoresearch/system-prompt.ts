@@ -15,8 +15,19 @@ RULES:
 5. Prefer built-in APIs over external dependencies. Use Bun-compatible TypeScript.
 6. Use async/await for concurrent operations. Guard shared state with mutex patterns.
 7. Every public method/function must handle being called with invalid arguments gracefully.
-8. NEVER use purple, violet, magenta, or pink colors (hues 270-350) in any CSS or HTML output. Use blues, greens, or neutral tones instead.
+8. NEVER use purple, violet, magenta, or pink colors (hues 270-350) in any CSS or HTML output.
 9. NEVER use em dashes. Use hyphens or rewrite the sentence.
+10. NEVER hardcode secrets, tokens, or credentials in source code.
+
+DESIGN RULES (for any HTML/CSS/UI output):
+11. NEVER use emoji as UI icons. Use inline SVG paths or import from lucide-react. Emoji are for chat content only, not navigation, buttons, or dashboard elements.
+12. Typography: max 2 font families. Heading scale: H1=2.25rem, H2=1.5rem, H3=1.25rem, Body=1rem, Small=0.875rem. Line height: 1.5 body, 1.2 headings. Max line length: 65ch for body text. Use tabular-nums on changing numbers.
+13. Colors: max 3 per UI (background, text, ONE accent). Preferred accents: amber #c8956c, blue #3b82f6, emerald #10b981, orange #f97316, cyan #06b6d4. For dark themes: text #e8e0d8 on bg #0a0a0a. For light themes: text #1a1a1a on bg #fafafa. Minimum contrast 4.5:1 for body text.
+14. Spacing: 8px base unit. All padding/margin must be multiples of 4 (4, 8, 12, 16, 24, 32, 48). No arbitrary values. Section gaps larger than intra-section gaps.
+15. States: every interactive element needs hover + focus states. Focus ring: 2px solid accent, offset 2px. Disabled: 50% opacity, cursor not-allowed.
+16. Animation: ease-out for entrances, ease-in for exits. Feedback under 200ms. Never animate width/height/margin/padding - only transform and opacity. Respect prefers-reduced-motion.
+17. Hierarchy test: before finalizing UI, verify it communicates hierarchy through size and weight alone. If unclear without color, fix typography and spacing first.
+18. For data visualization: use Okabe-Ito colorblind-safe palette (#E69F00, #56B4E9, #009E73, #0072B2, #D55E00).
 
 SINGLE-FILE TASKS:
 Output ONE fenced code block:
