@@ -174,6 +174,7 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - [Nemotron-3-Nano WebGPU](https://huggingface.co/spaces/webml-community/Nemotron-3-Nano-WebGPU) - edge inference inspiration for lightweight local classification
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
+- [Durable 2.0](https://durable.com) - AI business builder with specialized agents
 
 ## License
 
