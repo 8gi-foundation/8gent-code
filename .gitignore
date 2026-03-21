@@ -67,3 +67,10 @@ yarn.lock
 # Audio files (too large for git, regenerate with sync-audio.ts)
 docs/audio/*.aiff
 docs/branch-audio/*.aiff
+
+# UI sample outputs (artifacts belong in 8gent-world, not the harness)
+benchmarks/ui-samples/
+benchmarks/artifacts/
+
+# Content drafts (belong in ~/Myresumeportfolio/content/)
+docs/content/
