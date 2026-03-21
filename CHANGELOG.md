@@ -9,6 +9,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `packages/ai/edge-inference.ts` - lightweight local embedding + classification via Ollama `nomic-embed-text`, no API key required
+- `packages/ai/embedding-cache.ts` - in-memory LRU cache (max 1000 entries) with disk persistence at `~/.8gent/embedding-cache.json`
+- Exported `embed`, `batchEmbed`, `similarity`, `classify`, `isEdgeInferenceAvailable`, `EmbeddingCache`, `cosineSimilarity` from `@8gent/ai`
+- README inspiration credit: Nemotron-3-Nano WebGPU (edge inference pattern)
+
 ## [0.8.0] - 2026-03-21
 
 ### Added
