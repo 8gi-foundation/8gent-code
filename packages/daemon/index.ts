@@ -10,6 +10,7 @@ import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { startCron, stopCron } from "./cron";
+import { AgentPool, loadPoolConfig } from "./agent-pool";
 
 const PORT = 18789;
 const LOG_PATH = `${process.env.HOME}/.8gent/daemon.log`;
@@ -67,6 +68,7 @@ function setupLogging(): void {
 }
 
 let server: ReturnType<typeof startGateway> | null = null;
+let pool: AgentPool | null = null;
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`\n[daemon] received ${signal}, shutting down...`);
@@ -76,6 +78,7 @@ async function shutdown(signal: string): Promise<void> {
     server.stop();
     server = null;
   }
+  pool = null;
   bus.clear();
   console.log("[daemon] stopped");
   process.exit(0);
@@ -83,17 +86,23 @@ async function shutdown(signal: string): Promise<void> {
 
 async function main(): Promise<void> {
   const config = await loadConfig();
+  const poolConfig = await loadPoolConfig();
 
   console.log(`[daemon] Eight Daemon starting...`);
   console.log(`[daemon] port=${config.port} heartbeat=${config.heartbeatEnabled} auth=${config.authToken ? "enabled" : "disabled"}`);
+  console.log(`[daemon] model=${poolConfig.model || "qwen3.5:14b"} runtime=${poolConfig.runtime || "ollama"}`);
 
   // Setup log file writer
   setupLogging();
 
-  // Start WebSocket gateway
+  // Create the agent pool - manages Agent instances per session
+  pool = new AgentPool(poolConfig);
+
+  // Start WebSocket gateway with agent pool
   server = startGateway({
     port: config.port,
     authToken: config.authToken,
+    pool,
   });
 
   // Start heartbeat
@@ -106,6 +115,7 @@ async function main(): Promise<void> {
   await startCron();
 
   console.log(`[daemon] ready - ws://localhost:${config.port}`);
+  console.log(`[daemon] health check: http://localhost:${config.port}/health`);
 
   // Graceful shutdown
   process.on("SIGTERM", () => shutdown("SIGTERM"));
