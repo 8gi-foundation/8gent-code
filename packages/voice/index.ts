@@ -47,6 +47,17 @@ export { findWhisperBinary, transcribeLocal } from "./transcriber.js";
 export { transcribeCloud, isCloudAvailable } from "./cloud-transcriber.js";
 export { VoiceActivityDetector } from "./vad.js";
 export { VoiceChatLoop, type VoiceChatState, type VoiceChatConfig } from "./voice-chat.js";
+export {
+  TTSEngine,
+  MacOSTTSProvider,
+  KittenTTSProvider,
+  getTTSEngine,
+  setTTSEngine,
+  type TTSProvider,
+  type TTSSpeakOptions,
+  type TTSProcess,
+  type TTSProviderName,
+} from "./tts-engine.js";
 
 /**
  * Main Voice Engine — orchestrates recording, transcription, and events.
