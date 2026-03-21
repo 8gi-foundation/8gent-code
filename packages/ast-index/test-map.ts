@@ -25,19 +25,16 @@ export function findTestsFor(filePath: string, rootDir: string): string[] {
   const base = path.basename(absFile).replace(/\.(ts|tsx|js|jsx)$/, "");
   const found: string[] = [];
 
-  // 1. Sibling test file
   for (const suffix of TEST_SUFFIXES) {
     const candidate = path.join(dir, base + suffix);
     if (fs.existsSync(candidate)) found.push(candidate);
   }
 
-  // 2. __tests__ directory alongside the source file
   for (const suffix of TEST_SUFFIXES) {
     const candidate = path.join(dir, "__tests__", base + suffix);
     if (fs.existsSync(candidate)) found.push(candidate);
   }
 
-  // 3. Root-level tests/ or test/ directory, mirroring the src path
   const relToRoot = path.relative(absRoot, absFile).replace(/\.(ts|tsx|js|jsx)$/, "");
   for (const testDir of ["tests", "test", "__tests__"]) {
     for (const suffix of TEST_SUFFIXES) {
@@ -46,13 +43,11 @@ export function findTestsFor(filePath: string, rootDir: string): string[] {
     }
   }
 
-  // Deduplicate
   return [...new Set(found)];
 }
 
 /**
  * Build a full source -> tests map for all files in the graph.
- * Pass in the list of source files to avoid re-walking.
  */
 export function buildTestMap(sourceFiles: string[], rootDir: string): Map<string, string[]> {
   const map = new Map<string, string[]>();

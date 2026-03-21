@@ -40,20 +40,13 @@ function walkDir(dir: string): string[] {
 
 /** Resolve a relative import specifier to an absolute file path */
 function resolveImport(specifier: string, fromFile: string, rootDir: string): string | null {
-  // Skip bare module specifiers (node_modules)
   if (!specifier.startsWith(".") && !specifier.startsWith("/")) return null;
-
   const base = path.resolve(path.dirname(fromFile), specifier);
-
-  // Exact match with extension
   if (fs.existsSync(base) && fs.statSync(base).isFile()) return base;
-
-  // Try appending extensions / index files
   for (const suffix of RESOLVE_EXTS) {
     const candidate = base + suffix;
     if (fs.existsSync(candidate)) return candidate;
   }
-
   return null;
 }
 
@@ -77,19 +70,13 @@ export function buildDepGraph(rootDir: string): DepGraph {
   const files = walkDir(absRoot);
   const graph: DepGraph = { nodes: new Map(), rootDir: absRoot };
 
-  // Initialise nodes
   for (const file of files) {
     graph.nodes.set(file, { imports: [], exportedBy: [] });
   }
 
-  // Parse imports and build forward + reverse edges
   for (const file of files) {
     let content: string;
-    try {
-      content = fs.readFileSync(file, "utf-8");
-    } catch {
-      continue;
-    }
+    try { content = fs.readFileSync(file, "utf-8"); } catch { continue; }
 
     const specifiers = extractImports(content);
     const node = graph.nodes.get(file)!;
@@ -97,13 +84,9 @@ export function buildDepGraph(rootDir: string): DepGraph {
     for (const spec of specifiers) {
       const resolved = resolveImport(spec, file, absRoot);
       if (!resolved || !graph.nodes.has(resolved)) continue;
-      if (!node.imports.includes(resolved)) {
-        node.imports.push(resolved);
-      }
+      if (!node.imports.includes(resolved)) node.imports.push(resolved);
       const target = graph.nodes.get(resolved)!;
-      if (!target.exportedBy.includes(file)) {
-        target.exportedBy.push(file);
-      }
+      if (!target.exportedBy.includes(file)) target.exportedBy.push(file);
     }
   }
 
