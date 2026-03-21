@@ -36,22 +36,14 @@ export class PromotionManager {
 
   /**
    * Run promotion pass on the database.
-   *
-   * - Memories with access_count >= PROMOTE_RECALL_THRESHOLD and not already
-   *   core type get their importance boosted to 1.0 and decay_factor set to 0.1
-   *   (very slow decay — effectively "pinned").
-   *
-   * - Memories with last_accessed older than ARCHIVE_MS (or never accessed and
-   *   created more than ARCHIVE_MS ago) get soft-deleted.
-   *
-   * Returns counts for observability.
+   * - Memories recalled 3+ times: importance boosted to 1.0, decay slowed to 0.1
+   * - Memories untouched for 30 days: soft-deleted (archived)
    */
   run(): PromotionResult {
     const start = Date.now();
     const now = Date.now();
     const cutoff = now - ARCHIVE_MS;
 
-    // ── Promote: high-recall non-core memories ─────────────────────
     const promotedResult = this.db
       .prepare(
         `UPDATE memories
@@ -65,11 +57,6 @@ export class PromotionManager {
       )
       .run(now, PROMOTE_RECALL_THRESHOLD);
 
-    const promoted = promotedResult.changes;
-
-    // ── Archive: untouched memories past the cutoff ────────────────
-    // A memory is stale if its last access (or creation, if never accessed)
-    // is older than ARCHIVE_MS. Working memory is excluded — it has its own TTL.
     const archivedResult = this.db
       .prepare(
         `UPDATE memories
@@ -85,9 +72,6 @@ export class PromotionManager {
       )
       .run(now, now, cutoff, cutoff);
 
-    const archived = archivedResult.changes;
-
-    // ── Count remaining active memories ───────────────────────────
     const retained = (
       this.db
         .prepare("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL")
@@ -95,17 +79,14 @@ export class PromotionManager {
     ).c;
 
     return {
-      promoted,
-      archived,
+      promoted: promotedResult.changes,
+      archived: archivedResult.changes,
       retained,
       durationMs: Date.now() - start,
     };
   }
 
-  /**
-   * Get memories that are candidates for promotion (for preview/dry-run).
-   */
-  getPromotionCandidates(limit = 20): Array<{ id: string; type: string; accessCount: number; content: string }> {
+  getPromotionCandidates(limit = 20): Array<{ id: string; type: string; access_count: number; content_text: string }> {
     return this.db
       .prepare(
         `SELECT id, type, access_count, content_text
@@ -117,13 +98,10 @@ export class PromotionManager {
          ORDER BY access_count DESC
          LIMIT ?`
       )
-      .all(PROMOTE_RECALL_THRESHOLD, limit) as Array<{ id: string; type: string; accessCount: number; content: string }>;
+      .all(PROMOTE_RECALL_THRESHOLD, limit) as Array<{ id: string; type: string; access_count: number; content_text: string }>;
   }
 
-  /**
-   * Get memories that are candidates for archival (for preview/dry-run).
-   */
-  getArchiveCandidates(limit = 20): Array<{ id: string; type: string; lastAccessed: number | null; createdAt: number }> {
+  getArchiveCandidates(limit = 20): Array<{ id: string; type: string; last_accessed: number | null; created_at: number }> {
     const cutoff = Date.now() - ARCHIVE_MS;
     return this.db
       .prepare(
@@ -139,46 +117,32 @@ export class PromotionManager {
          ORDER BY COALESCE(last_accessed, created_at) ASC
          LIMIT ?`
       )
-      .all(cutoff, cutoff, limit) as Array<{ id: string; type: string; lastAccessed: number | null; createdAt: number }>;
+      .all(cutoff, cutoff, limit) as Array<{ id: string; type: string; last_accessed: number | null; created_at: number }>;
   }
 
-  // ── Private ───────────────────────────────────────────────────────
-
-  /** Ensure the memories table has the columns we need (safe no-op if already exist) */
   private _ensureColumns(): void {
-    // bun:sqlite throws if column exists — check first
     try {
       const cols = this.db
         .prepare("PRAGMA table_info(memories)")
         .all() as Array<{ name: string }>;
       const names = new Set(cols.map((c) => c.name));
-
       if (!names.has("decay_factor")) {
         this.db.exec("ALTER TABLE memories ADD COLUMN decay_factor REAL NOT NULL DEFAULT 1.0");
       }
     } catch {
-      // Table doesn't exist yet — schema will be created by MemoryStore
+      // Table not yet created — MemoryStore will handle schema init
     }
   }
 }
 
 // ── Standalone helpers ────────────────────────────────────────────────
 
-/**
- * Quick check: should a memory be considered "core knowledge"?
- * Based on access count and age — no DB required.
- */
 export function isPromoted(accessCount: number, importanceScore: number): boolean {
   return accessCount >= PROMOTE_RECALL_THRESHOLD && importanceScore >= 0.9;
 }
 
-/**
- * Calculate how many days until a memory would be archived.
- * Returns 0 if it's already past the threshold.
- */
 export function daysUntilArchival(lastAccessedMs: number | null, createdAtMs: number): number {
   const lastActivity = lastAccessedMs ?? createdAtMs;
-  const elapsed = Date.now() - lastActivity;
-  const remaining = ARCHIVE_MS - elapsed;
+  const remaining = ARCHIVE_MS - (Date.now() - lastActivity);
   return Math.max(0, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
 }
