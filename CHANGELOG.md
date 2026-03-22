@@ -7,7 +7,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [1.0.0] - 2026-03-22
 
 ### Added
 - **Daemon Protocol** (`docs/DAEMON-PROTOCOL.md`) - WebSocket protocol specification for external clients (8gent.app, 8gent OS, Telegram). Defines connection handshake, auth, session lifecycle, prompt/response streaming, cron management, and health checks. The contract between the brain and the interfaces.
