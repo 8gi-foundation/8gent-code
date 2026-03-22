@@ -407,9 +407,16 @@ export class PermissionManager {
    * Prompt user for permission (Y/n)
    */
   private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
-    // In daemon/headless mode (no TTY), auto-approve to avoid blocking
-    // The daemon routes approval through Telegram instead
+    // In daemon/headless mode (no TTY), auto-approve most actions
+    // Only block merge/push to main - that requires Telegram approval
     if (!process.stdin.isTTY) {
+      const cmd = (command || "").toLowerCase();
+      const isMainPush = cmd.includes("push") && (cmd.includes("main") || cmd.includes("master"));
+      const isMerge = cmd.includes("merge") && (cmd.includes("main") || cmd.includes("master"));
+      if (isMainPush || isMerge) {
+        console.log(`[permissions] BLOCKED (headless): merge/push to main requires Telegram approval - ${command}`);
+        return false;
+      }
       console.log(`[permissions] auto-approved (headless): ${action} - ${command || details}`);
       return true;
     }
