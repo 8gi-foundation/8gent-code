@@ -77,6 +77,20 @@ async function run(): Promise<void> {
     });
   }
 
+  /** Wait for a message of a specific type, skipping event broadcasts */
+  async function waitForType(type: string, timeoutMs = TIMEOUT_MS): Promise<any> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const msg = await waitForMessage(deadline - Date.now());
+      if (msg.type === type) return msg;
+      // Log skipped event messages
+      if (msg.type === "event") {
+        log(`  (skipped event: ${msg.event})`);
+      }
+    }
+    throw new Error(`Timeout waiting for message type: ${type}`);
+  }
+
   ws.onmessage = (event: MessageEvent) => {
     const msg = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer));
     if (resolveNext) {
@@ -121,7 +135,7 @@ async function run(): Promise<void> {
 
   // --- Test 3: Create session ---
   ws.send(JSON.stringify({ type: "session:create", channel: "test" }));
-  const sessionReply = await waitForMessage(5000);
+  const sessionReply = await waitForType("session:created", 10000);
   if (sessionReply.type === "session:created" && sessionReply.sessionId) {
     sessionId = sessionReply.sessionId;
     pass("session:create", `Session ${sessionId}`);
@@ -134,7 +148,7 @@ async function run(): Promise<void> {
 
   // --- Test 4: Health check via WebSocket ---
   ws.send(JSON.stringify({ type: "health" }));
-  const healthReply = await waitForMessage(5000);
+  const healthReply = await waitForType("health", 10000);
   if (healthReply.type === "health" && healthReply.data?.status === "ok") {
     gotHealth = true;
     pass("health", `sessions=${healthReply.data.sessions} uptime=${Math.round(healthReply.data.uptime)}s`);
@@ -144,7 +158,7 @@ async function run(): Promise<void> {
 
   // --- Test 5: List sessions ---
   ws.send(JSON.stringify({ type: "sessions:list" }));
-  const listReply = await waitForMessage(5000);
+  const listReply = await waitForType("sessions:list", 10000);
   if (listReply.type === "sessions:list" && Array.isArray(listReply.sessions)) {
     gotSessionsList = true;
     pass("sessions:list", `${listReply.sessions.length} session(s) active`);
