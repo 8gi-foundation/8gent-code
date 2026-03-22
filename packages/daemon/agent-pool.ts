@@ -26,6 +26,7 @@ interface SessionEntry {
   agent: Agent;
   channel: string;
   createdAt: number;
+  lastActiveAt: number;
   messageCount: number;
   busy: boolean; // true while agent.chat() is in flight
 }
@@ -33,10 +34,12 @@ interface SessionEntry {
 const DEFAULT_MODEL = "qwen3.5:14b";
 const DEFAULT_RUNTIME = "ollama" as const;
 const MAX_SESSIONS = 10;
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 export class AgentPool {
   private sessions = new Map<string, SessionEntry>();
   private config: PoolConfig;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: Partial<PoolConfig> = {}) {
     this.config = {
@@ -46,6 +49,21 @@ export class AgentPool {
       apiKey: config.apiKey,
       maxTurns: config.maxTurns || 50,
     };
+
+    // Clean up idle sessions every 5 minutes
+    this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+  }
+
+  /** Remove sessions that have been idle for longer than IDLE_TIMEOUT_MS */
+  private cleanupIdleSessions(): void {
+    const now = Date.now();
+    for (const [id, entry] of this.sessions) {
+      if (!entry.busy && (now - entry.lastActiveAt) > IDLE_TIMEOUT_MS) {
+        console.log(`[agent-pool] evicting idle session ${id} (idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`);
+        this.sessions.delete(id);
+        bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
+      }
+    }
   }
 
   /** Create a new session with its own Agent instance */
@@ -78,10 +96,12 @@ export class AgentPool {
 
     const agent = new Agent(agentConfig);
 
+    const now = Date.now();
     this.sessions.set(sessionId, {
       agent,
       channel,
-      createdAt: Date.now(),
+      createdAt: now,
+      lastActiveAt: now,
       messageCount: 0,
       busy: false,
     });
@@ -104,14 +124,14 @@ export class AgentPool {
 
     entry.busy = true;
     entry.messageCount++;
+    entry.lastActiveAt = Date.now();
     bus.emit("agent:thinking", { sessionId });
 
     try {
       const response = await entry.agent.chat(text);
 
-      // Emit the full response as a stream chunk
-      // (future: hook into AI SDK onChunk for real streaming)
-      bus.emit("agent:stream", { sessionId, chunk: response });
+      // Emit the full final response (distinct from stream chunks)
+      bus.emit("agent:stream", { sessionId, chunk: response, final: true });
 
       return response;
     } catch (err) {
@@ -151,6 +171,20 @@ export class AgentPool {
   /** Get count of active sessions */
   get size(): number {
     return this.sessions.size;
+  }
+
+  /** Return metadata for all active sessions (for state persistence) */
+  getActiveSessions(): Array<{ sessionId: string; channel: string; messageCount: number; createdAt: number }> {
+    const result: Array<{ sessionId: string; channel: string; messageCount: number; createdAt: number }> = [];
+    for (const [id, entry] of this.sessions) {
+      result.push({
+        sessionId: id,
+        channel: entry.channel,
+        messageCount: entry.messageCount,
+        createdAt: entry.createdAt,
+      });
+    }
+    return result;
   }
 
   /** Build event callbacks that bridge Agent events to the daemon EventBus */
