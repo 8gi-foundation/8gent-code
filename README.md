@@ -3,7 +3,7 @@
 The brain of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent that runs on local LLMs via Ollama. No API keys, no usage caps, no cloud dependency.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.8.0-brightgreen)](https://8gent.dev)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](https://8gent.dev)
 [![8gent OS](https://img.shields.io/badge/8gent_OS-8gentos.com-orange)](https://8gentos.com)
 
 ## Install
