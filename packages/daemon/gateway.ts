@@ -112,11 +112,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
       state.sessionId = sessionId;
       state.channel = msg.channel || "api";
 
-      // Create an Agent instance for this session
-      pool.createSession(sessionId, state.channel);
-
+      // Respond immediately - agent creation can be slow (AST indexing)
       bus.emit("session:start", { sessionId, channel: state.channel });
       send(ws, { type: "session:created", sessionId });
+
+      // Create Agent instance async (doesn't block the response)
+      setTimeout(() => pool.createSession(sessionId, state.channel), 0);
       break;
     }
 
