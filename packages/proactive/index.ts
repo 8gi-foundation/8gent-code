@@ -543,6 +543,16 @@ export {
   composeProactiveOutreach,
 } from "./client-outreach.ts";
 
+// Content packaging (data-backed hook optimization)
+export type { PackagingScore, RuleScore, PackagingRuleName, FormulaName, Grade, PackagingRule, AuditReport } from "./content-packaging.ts";
+export {
+  scoreHook,
+  diagnoseHook,
+  applyFormula,
+  repackage,
+  auditBatch,
+} from "./content-packaging.ts";
+
 // ============================================
 // Auto-Research ability
 // ============================================
