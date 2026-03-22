@@ -228,21 +228,24 @@ export class AgentPool {
   }
 }
 
-/** Load pool config from ~/.8gent/config.json */
+/** Load pool config from env vars, then ~/.8gent/config.json as fallback */
 export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
+  let fileConfig: Record<string, any> = {};
   try {
     const configPath = `${process.env.HOME}/.8gent/config.json`;
     const file = Bun.file(configPath);
-    if (!(await file.exists())) return {};
-    const raw = await file.json();
-    return {
-      model: raw?.model || raw?.defaultModel,
-      runtime: raw?.runtime || raw?.provider,
-      workingDirectory: raw?.workingDirectory || process.cwd(),
-      apiKey: raw?.apiKey || process.env.OPENROUTER_API_KEY,
-      maxTurns: raw?.maxTurns,
-    };
+    if (await file.exists()) {
+      fileConfig = await file.json();
+    }
   } catch {
-    return {};
+    // No config file - use env vars and defaults
   }
+
+  return {
+    model: process.env.DEFAULT_MODEL || fileConfig?.model || fileConfig?.defaultModel,
+    runtime: (process.env.DEFAULT_RUNTIME || fileConfig?.runtime || fileConfig?.provider) as PoolConfig["runtime"],
+    workingDirectory: fileConfig?.workingDirectory || process.cwd(),
+    apiKey: process.env.OPENROUTER_API_KEY || fileConfig?.apiKey,
+    maxTurns: fileConfig?.maxTurns,
+  };
 }
