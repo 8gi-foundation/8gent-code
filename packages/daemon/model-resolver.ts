@@ -136,11 +136,59 @@ export async function resolveBestFreeModel(apiKey?: string): Promise<ResolvedMod
     console.log(`  ${score.toFixed(1)} - ${model.id} (ctx: ${model.context_length})`);
   }
 
+  // Try top candidates until one actually responds
+  for (const { model } of scored.slice(0, 5)) {
+    const works = await probeModel(model.id, apiKey);
+    if (works) {
+      return {
+        id: model.id,
+        name: model.name || model.id,
+        contextLength: model.context_length || 4096,
+        free: true,
+      };
+    }
+    console.log(`[model-resolver] ${model.id} failed probe, trying next...`);
+  }
+
+  // None of the top 5 responded - use the highest scored anyway
   const best = scored[0].model;
+  console.warn(`[model-resolver] no model passed probe, using ${best.id} anyway`);
   return {
     id: best.id,
     name: best.name || best.id,
     contextLength: best.context_length || 4096,
     free: true,
   };
+}
+
+/** Send a tiny test prompt to verify a model is actually responding */
+async function probeModel(modelId: string, apiKey?: string): Promise<boolean> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey || ""}`,
+        "HTTP-Referer": "https://8gent.dev",
+        "X-Title": "8gent Daemon",
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: "user", content: "Say OK" }],
+        max_tokens: 5,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.log(`[model-resolver] probe ${modelId}: ${res.status} ${body.slice(0, 100)}`);
+      return false;
+    }
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    console.log(`[model-resolver] probe ${modelId}: OK ("${content.slice(0, 20)}")`);
+    return true;
+  } catch (err) {
+    console.log(`[model-resolver] probe ${modelId}: error ${err}`);
+    return false;
+  }
 }
