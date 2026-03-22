@@ -559,3 +559,18 @@ export {
 
 export { research } from "./autoresearch.ts";
 export type { ResearchOptions, ResearchReport, ResearchSource, ResearchPattern } from "./research-types.ts";
+
+// ============================================
+// Business agent system
+// ============================================
+
+// Business agent system
+export type { BusinessAgentRole, ScopingPhase, BusinessScope, AgentOutput } from "./business-agents.ts";
+export {
+  BUSINESS_AGENTS,
+  SCOPING_PHASES,
+  scopeBusiness,
+  getAgentPrompt,
+  getPhaseAgents,
+  getCollaborators,
+} from "./business-agents.ts";
