@@ -407,6 +407,13 @@ export class PermissionManager {
    * Prompt user for permission (Y/n)
    */
   private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
+    // In daemon/headless mode (no TTY), auto-approve to avoid blocking
+    // The daemon routes approval through Telegram instead
+    if (!process.stdin.isTTY) {
+      console.log(`[permissions] auto-approved (headless): ${action} - ${command || details}`);
+      return true;
+    }
+
     return new Promise((resolve) => {
       const rl = readline.createInterface({
         input: process.stdin,
