@@ -1,0 +1,48 @@
+# 8gent Daemon - Always-on agent process
+# Connects to an external Ollama instance (OLLAMA_HOST env var)
+
+FROM oven/bun:1 AS base
+WORKDIR /app
+
+# Copy package files for dependency resolution
+# Bun workspaces need the root + all workspace package.json files
+COPY package.json bun.lock ./
+COPY apps/clui/package.json apps/clui/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/debugger/package.json apps/debugger/
+COPY apps/demos/package.json apps/demos/
+COPY apps/tui/package.json apps/tui/
+COPY packages/auth/package.json packages/auth/
+COPY packages/control-plane/package.json packages/control-plane/
+COPY packages/daemon/package.json packages/daemon/
+COPY packages/db/package.json packages/db/
+COPY packages/design-agent/package.json packages/design-agent/
+COPY packages/design-systems/package.json packages/design-systems/
+COPY packages/harness-cli/package.json packages/harness-cli/
+COPY packages/kernel/package.json packages/kernel/
+COPY packages/memory/package.json packages/memory/
+COPY packages/personality/package.json packages/personality/
+COPY packages/planning/package.json packages/planning/
+COPY packages/reporting/package.json packages/reporting/
+COPY packages/secrets/package.json packages/secrets/
+COPY packages/specifications/package.json packages/specifications/
+COPY packages/telegram-bot/package.json packages/telegram-bot/
+COPY packages/voice/package.json packages/voice/
+
+RUN bun install --frozen-lockfile
+
+# Copy full source
+COPY . .
+
+# State directory - mount a Fly volume here for persistence
+RUN mkdir -p /root/.8gent
+
+# WebSocket gateway port
+EXPOSE 18789
+
+# Health check against the HTTP endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD bun -e "fetch('http://localhost:18789/health').then(r=>r.json()).then(d=>{if(d.status!=='ok')process.exit(1)}).catch(()=>process.exit(1))"
+
+# Run the daemon
+CMD ["bun", "run", "packages/daemon/index.ts"]
