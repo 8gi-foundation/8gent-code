@@ -7,6 +7,7 @@
 
 import { bus, type EventName } from "./events";
 import type { AgentPool } from "./agent-pool";
+import { getJobs, addJob, removeJob, type CronJob } from "./cron";
 
 export interface GatewayConfig {
   port: number;
@@ -28,6 +29,11 @@ type InboundMessage =
   | { type: "session:compact"; sessionId: string }
   | { type: "session:destroy"; sessionId: string }
   | { type: "prompt"; text: string }
+  | { type: "sessions:list" }
+  | { type: "cron:list" }
+  | { type: "cron:add"; job: unknown }
+  | { type: "cron:remove"; jobId: string }
+  | { type: "health" }
   | { type: "ping" };
 
 type OutboundMessage =
@@ -35,6 +41,11 @@ type OutboundMessage =
   | { type: "auth:fail" }
   | { type: "session:created"; sessionId: string }
   | { type: "session:resumed"; sessionId: string }
+  | { type: "sessions:list"; sessions: unknown[] }
+  | { type: "cron:list"; jobs: unknown[] }
+  | { type: "cron:added"; jobId: string }
+  | { type: "cron:removed"; jobId: string }
+  | { type: "health"; data: unknown }
   | { type: "event"; event: EventName; payload: unknown }
   | { type: "error"; message: string }
   | { type: "pong" };
@@ -157,6 +168,50 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
           sessionId: sid,
           error: err instanceof Error ? err.message : String(err),
         });
+      });
+      break;
+    }
+
+    case "sessions:list": {
+      send(ws, { type: "sessions:list", sessions: pool.getActiveSessions() });
+      break;
+    }
+
+    case "cron:list": {
+      send(ws, { type: "cron:list", jobs: getJobs() });
+      break;
+    }
+
+    case "cron:add": {
+      const job = msg.job as CronJob;
+      if (!job || !job.id || !job.name) {
+        send(ws, { type: "error", message: "invalid cron job: requires id, name, expression, type, payload" });
+        break;
+      }
+      addJob(job);
+      send(ws, { type: "cron:added", jobId: job.id });
+      break;
+    }
+
+    case "cron:remove": {
+      const removed = removeJob(msg.jobId);
+      if (removed) {
+        send(ws, { type: "cron:removed", jobId: msg.jobId });
+      } else {
+        send(ws, { type: "error", message: `cron job ${msg.jobId} not found` });
+      }
+      break;
+    }
+
+    case "health": {
+      send(ws, {
+        type: "health",
+        data: {
+          status: "ok",
+          sessions: pool.size,
+          uptime: process.uptime(),
+          cronJobs: getJobs().length,
+        },
       });
       break;
     }
