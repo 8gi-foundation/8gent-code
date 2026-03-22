@@ -24,6 +24,12 @@ interface TelegramUpdate {
     chat: { id: number };
     text?: string;
   };
+  callback_query?: {
+    id: string;
+    from: { id: number };
+    data?: string;
+    message?: { message_id: number; chat: { id: number } };
+  };
 }
 
 interface BridgeConfig {
@@ -86,6 +92,7 @@ class TelegramDaemonBridge {
   private polling = false;
   private agentReady = false;
   private agentBusy = false;
+  private pendingApprovals = new Map<string, { tool: string; input: unknown }>();
 
   constructor(config: BridgeConfig) {
     this.config = config;
@@ -186,6 +193,11 @@ class TelegramDaemonBridge {
         this.agentBusy = false;
         break;
 
+      case "approval:required":
+        // NemoClaw-style operator approval via Telegram
+        this.sendApprovalRequest(payload);
+        break;
+
       case "tool:start":
         tgTyping(this.config.telegramToken, this.config.chatId);
         break;
@@ -204,7 +216,9 @@ class TelegramDaemonBridge {
         if (data.ok && data.result) {
           for (const update of data.result as TelegramUpdate[]) {
             this.lastUpdateId = update.update_id;
-            if (update.message?.text) {
+            if (update.callback_query) {
+              await this.handleCallbackQuery(update.callback_query);
+            } else if (update.message?.text) {
               await this.handleTelegramMessage(update.message.text, update.message.chat.id);
             }
           }
@@ -264,6 +278,80 @@ class TelegramDaemonBridge {
 
     this.agentBusy = true;
     this.ws.send(JSON.stringify({ type: "prompt", text }));
+  }
+
+  private async sendApprovalRequest(payload: any): Promise<void> {
+    const { requestId, tool, input } = payload;
+    this.pendingApprovals.set(requestId, { tool, input });
+
+    const inputPreview = typeof input === "string"
+      ? input.slice(0, 200)
+      : JSON.stringify(input).slice(0, 200);
+
+    try {
+      await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: this.config.chatId,
+          text: `*Permission Required*\n\nTool: \`${tool}\`\nAction: ${inputPreview}`,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "Approve", callback_data: `approve:${requestId}` },
+              { text: "Deny", callback_data: `deny:${requestId}` },
+            ]],
+          },
+        }),
+      });
+    } catch (err) {
+      console.error("[telegram-bridge] failed to send approval request:", err);
+    }
+  }
+
+  private async handleCallbackQuery(query: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
+    const data = query.data || "";
+    const [action, requestId] = data.split(":");
+
+    // Answer the callback to remove the loading spinner
+    await fetch(`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: query.id }),
+    }).catch(() => {});
+
+    if (!requestId || !this.pendingApprovals.has(requestId)) {
+      return;
+    }
+
+    const approval = this.pendingApprovals.get(requestId)!;
+    this.pendingApprovals.delete(requestId);
+
+    const approved = action === "approve";
+    const statusText = approved ? "Approved" : "Denied";
+
+    // Update the message to show the decision
+    if (query.message) {
+      await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: query.message.chat.id,
+          message_id: query.message.message_id,
+          text: `*${statusText}:* \`${approval.tool}\``,
+          parse_mode: "Markdown",
+        }),
+      }).catch(() => {});
+    }
+
+    // Send the approval decision back to the daemon
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "approval:response",
+        requestId,
+        approved,
+      }));
+    }
   }
 
   stop(): void {
