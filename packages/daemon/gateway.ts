@@ -241,6 +241,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 
   const server = Bun.serve({
     port: config.port,
+    hostname: "0.0.0.0",
     fetch(req, server) {
       if (server.upgrade(req)) return undefined;
 
