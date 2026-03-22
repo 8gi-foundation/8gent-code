@@ -2,11 +2,25 @@
 
 ## Project
 
-8gent Code — autonomous coding agent TUI powered by local LLMs (Ollama) or cloud models (OpenRouter).
+8gent Code - the brain of the 8gent ecosystem. Open source autonomous coding agent TUI powered by local LLMs (Ollama) or cloud models (OpenRouter). The free on-ramp to 8gent OS.
 
+- **Domain:** 8gent.dev
 - **Runtime:** Bun
 - **TUI:** Ink v6 (React for CLI)
 - **Monorepo:** `apps/tui/` (frontend), `packages/` (agent, providers, tools, etc.)
+
+### Ecosystem
+
+| Product | Domain | Role |
+|---------|--------|------|
+| **8gent OS** | 8gentos.com | Parent platform - the paid product |
+| **8gent Code** | 8gent.dev | Open source coding agent (this repo) - the free on-ramp |
+| **8gent** | 8gent.app | GUI client |
+| **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children |
+| **8gent World** | 8gent.world | Documentation and ecosystem hub |
+| **8gent Games** | 8gent.games | AI civilisation playground |
+
+See [BRAND.md](BRAND.md) for all design, color, typography, and brand rules.
 
 ## Commands
 
@@ -18,8 +32,8 @@ bun run benchmarks/autoresearch/harness.ts  # run benchmarks
 
 ## Absolute Prohibitions (NON-NEGOTIABLE)
 
-1. **No em dashes (—).** Never. Use hyphens (-) or rewrite. No exceptions.
-2. **No purple/pink/violet/magenta colors.** Never in UI, gradients, themes, or generated HTML. Hues 270-350 are banned. Use blues, greens, neutrals, or brand colors.
+1. **No em dashes.** Never. Use hyphens (-) or rewrite. No exceptions.
+2. **No purple/pink/violet/magenta colors.** Hues 270-350 are banned. See BRAND.md for approved palette.
 3. **No dollar values on benchmarks.** Describe what tasks test, not what they'd cost.
 
 ## No-BS Mode (ALWAYS ON)
