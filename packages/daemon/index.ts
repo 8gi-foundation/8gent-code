@@ -5,7 +5,7 @@
  * Logs to ~/.8gent/daemon.log. Graceful shutdown on SIGTERM/SIGINT.
  */
 
-import { existsSync } from "fs";
+import { existsSync, appendFileSync, mkdirSync } from "fs";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
@@ -50,10 +50,10 @@ async function loadConfig(): Promise<DaemonConfig> {
 function setupLogging(): void {
   const logDir = `${process.env.HOME}/.8gent`;
   if (!existsSync(logDir)) {
-    Bun.spawnSync(["mkdir", "-p", logDir]);
+    mkdirSync(logDir, { recursive: true });
   }
 
-  // Subscribe to all events and log them
+  // Subscribe to all events and append to log file
   const events = [
     "tool:start", "tool:result", "agent:thinking", "agent:stream",
     "agent:error", "memory:saved", "approval:required", "session:start", "session:end",
@@ -62,16 +62,40 @@ function setupLogging(): void {
   for (const event of events) {
     bus.on(event, (payload: any) => {
       const line = `${new Date().toISOString()} [${event}] ${JSON.stringify(payload)}\n`;
-      Bun.write(LOG_PATH, line).catch(() => {});
+      try {
+        appendFileSync(LOG_PATH, line);
+      } catch {
+        // Log dir may not exist on first write
+      }
     });
   }
 }
 
+const STATE_PATH = `${process.env.HOME}/.8gent/daemon-state.json`;
+
 let server: ReturnType<typeof startGateway> | null = null;
 let pool: AgentPool | null = null;
 
+/** Save active session IDs to disk so they can be resumed after restart */
+function saveState(): void {
+  if (!pool) return;
+  try {
+    const state = {
+      savedAt: new Date().toISOString(),
+      sessions: pool.getActiveSessions(),
+    };
+    const data = JSON.stringify(state, null, 2);
+    // Sync write - we're shutting down, can't afford async
+    require("fs").writeFileSync(STATE_PATH, data);
+    console.log(`[daemon] saved ${state.sessions.length} session(s) to disk`);
+  } catch (err) {
+    console.error("[daemon] failed to save state:", err);
+  }
+}
+
 async function shutdown(signal: string): Promise<void> {
   console.log(`\n[daemon] received ${signal}, shutting down...`);
+  saveState();
   stopHeartbeat();
   stopCron();
   if (server) {

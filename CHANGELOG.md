@@ -10,6 +10,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Daemon Protocol** (`docs/DAEMON-PROTOCOL.md`) - WebSocket protocol specification for external clients (8gent.app, 8gent OS, Telegram). Defines connection handshake, auth, session lifecycle, prompt/response streaming, cron management, and health checks. The contract between the brain and the interfaces.
+- **BRAND.md** - Canonical brand reference copied from 8gent-world. Typography (Fraunces/Inter/JetBrains Mono), color palette, domain table.
+- **Changesets** - Added @changesets/cli for monorepo version management across 40+ packages.
+- **Daemon gateway expansion** (`packages/daemon/gateway.ts`) - New WebSocket message types: `sessions:list`, `cron:list`, `cron:add`, `cron:remove`, `health`. External clients can now manage cron jobs and query daemon state.
+- **Session state persistence** (`packages/daemon/index.ts`) - Saves active session metadata to `~/.8gent/daemon-state.json` on graceful shutdown. Clients can resume sessions after daemon restart.
+- **Idle session cleanup** (`packages/daemon/agent-pool.ts`) - Sessions idle for 30+ minutes are automatically evicted. Cleanup runs every 5 minutes.
+
+### Fixed
+- **Daemon log overwrite bug** (`packages/daemon/index.ts`) - `Bun.write()` was overwriting the log file on every event instead of appending. Switched to `appendFileSync()`.
+- **Ecosystem references** - CLAUDE.md and README.md now reference 8gent.dev as canonical domain and link to all ecosystem products (8gentos.com, 8gent.app, 8gentjr.com, 8gent.world, 8gent.games).
+
+### Changed
+- **CLAUDE.md** - Added ecosystem table and reference to BRAND.md. 8gent Code positioned as "the brain" and free on-ramp to 8gent OS.
+
 - **Security** (`packages/validation/security-scanner.ts`, `secret-patterns.ts`) - Static security scanner: detects leaked secrets (API keys, AWS credentials, DB connection strings, JWTs, private keys) and vulnerability patterns (eval injection, SQL concat, innerHTML XSS). `scanFile`, `scanContent`, `scanDirectory` API. Pre-commit gate via `hasCriticalFindings`. Credit: [0din-ai/ai-scanner](https://github.com/0din-ai/ai-scanner) for pattern taxonomy.
 - **Ability Scorecards** (`packages/validation/ability-scorecard.ts`) - Measurable metrics per ability: memory recall accuracy, worktree parallelization efficiency, policy violation rate, evolution improvement delta, healing recovery rate, entrepreneurship hit rate, AST blast radius accuracy, browser research relevance. JSONL persistence per session, baseline comparison.
 - **Meta-Optimizer** (`benchmarks/autoresearch/meta-optimizer.ts`) - Optimizes beyond system prompt: mutates few-shot examples, model routing priority, grading weights (exec/keyword split), and temperature sweep. Heuristic suggestions based on what worked per category. Inspired by Karpathy's program.md meta-optimization concept.
