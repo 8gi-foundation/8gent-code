@@ -1,9 +1,10 @@
 # 8gent Code
 
-Autonomous coding agent that runs on local LLMs via Ollama. No API keys, no usage caps, no cloud dependency.
+The brain of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent that runs on local LLMs via Ollama. No API keys, no usage caps, no cloud dependency.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.8.0-brightgreen)](https://github.com/PodJamz/8gent-code)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](https://8gent.dev)
+[![8gent OS](https://img.shields.io/badge/8gent_OS-8gentos.com-orange)](https://8gentos.com)
 
 ## Install
 
@@ -184,8 +185,19 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - [Paperclip](https://github.com/paperclipai/paperclip) - autonomous agent work platform patterns
 - Karpathy's autoresearch methodology - iterative prompt mutation, meta-optimization, token throughput maximization
 
+## Ecosystem
+
+| Product | Domain | What |
+|---------|--------|------|
+| **8gent OS** | [8gentos.com](https://8gentos.com) | The paid platform |
+| **8gent Code** | [8gent.dev](https://8gent.dev) | Open source coding agent (you are here) |
+| **8gent** | [8gent.app](https://8gent.app) | GUI client |
+| **8gent Jr** | [8gentjr.com](https://8gentjr.com) | AI OS for neurodivergent children |
+| **8gent World** | [8gent.world](https://8gent.world) | Docs and ecosystem hub |
+| **8gent Games** | [8gent.games](https://8gent.games) | AI civilisation playground |
+
 ## License
 
 MIT - James Spalding
 
-Follow: [X/Twitter](https://x.com/8gentapp) | [GitHub](https://github.com/PodJamz/8gent-code)
+Follow: [X/Twitter](https://x.com/8gentapp) | [GitHub](https://github.com/PodJamz/8gent-code) | [8gent.dev](https://8gent.dev)
