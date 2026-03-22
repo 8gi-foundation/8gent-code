@@ -11,6 +11,7 @@ import { startGateway } from "./gateway";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { startCron, stopCron } from "./cron";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
+import { resolveBestFreeModel } from "./model-resolver";
 
 const PORT = 18789;
 const LOG_PATH = `${process.env.HOME}/.8gent/daemon.log`;
@@ -114,7 +115,18 @@ async function main(): Promise<void> {
 
   console.log(`[daemon] Eight Daemon starting...`);
   console.log(`[daemon] port=${config.port} heartbeat=${config.heartbeatEnabled} auth=${config.authToken ? "enabled" : "disabled"}`);
-  console.log(`[daemon] model=${poolConfig.model || "qwen3.5:14b"} runtime=${poolConfig.runtime || "ollama"}`);
+
+  // Auto-resolve best free model if requested
+  const modelValue = poolConfig.model || DEFAULT_MODEL;
+  if (modelValue === "auto:free" || modelValue === "auto") {
+    console.log(`[daemon] model=auto:free - resolving best free model from OpenRouter...`);
+    const resolved = await resolveBestFreeModel(poolConfig.apiKey);
+    poolConfig.model = resolved.id;
+    poolConfig.runtime = "openrouter";
+    console.log(`[daemon] selected: ${resolved.id} (ctx: ${resolved.contextLength}, free: ${resolved.free})`);
+  } else {
+    console.log(`[daemon] model=${modelValue} runtime=${poolConfig.runtime || "ollama"}`);
+  }
 
   // Setup log file writer
   setupLogging();
