@@ -84,6 +84,8 @@ class TelegramDaemonBridge {
   private sessionId: string | null = null;
   private lastUpdateId = 0;
   private polling = false;
+  private agentReady = false;
+  private agentBusy = false;
 
   constructor(config: BridgeConfig) {
     this.config = config;
@@ -95,16 +97,22 @@ class TelegramDaemonBridge {
     // Connect to daemon WebSocket
     await this.connectDaemon();
 
-    // Start Telegram polling
-    this.polling = true;
-    this.poll();
-
-    // Send startup message
+    // Send startup message (direct to Telegram, not through agent)
     await tgSend(
       this.config.telegramToken,
       this.config.chatId,
       "Eight is online. What do we work on next?"
     );
+
+    // Wait for agent to finish initializing (AST indexing takes ~5s)
+    console.log("[telegram-bridge] waiting for agent initialization...");
+    await new Promise((r) => setTimeout(r, 8000));
+    this.agentReady = true;
+    console.log("[telegram-bridge] agent ready, accepting messages");
+
+    // Start Telegram polling
+    this.polling = true;
+    this.poll();
 
     console.log("[telegram-bridge] ready - polling Telegram, connected to daemon");
   }
@@ -160,12 +168,13 @@ class TelegramDaemonBridge {
     switch (event) {
       case "agent:stream":
         if (payload.final && payload.chunk) {
-          // Send the final response to Telegram
+          this.agentBusy = false;
           tgSend(this.config.telegramToken, this.config.chatId, payload.chunk);
         }
         break;
 
       case "agent:error":
+        this.agentBusy = false;
         tgSend(
           this.config.telegramToken,
           this.config.chatId,
@@ -173,8 +182,11 @@ class TelegramDaemonBridge {
         );
         break;
 
+      case "session:end":
+        this.agentBusy = false;
+        break;
+
       case "tool:start":
-        // Show typing indicator when tools run
         tgTyping(this.config.telegramToken, this.config.chatId);
         break;
     }
@@ -245,6 +257,12 @@ class TelegramDaemonBridge {
       return;
     }
 
+    if (this.agentBusy) {
+      await tgSend(this.config.telegramToken, this.config.chatId, "Still working on the previous request. I'll get to this next.");
+      return;
+    }
+
+    this.agentBusy = true;
     this.ws.send(JSON.stringify({ type: "prompt", text }));
   }
 
