@@ -1,0 +1,57 @@
+app = "8gent-daemon"
+primary_region = "dub"
+
+[build]
+  dockerfile = "docker/Dockerfile.daemon"
+
+[env]
+  # Ollama host - set to your Ollama instance URL
+  # For local GPU inference, run Ollama separately and point here
+  OLLAMA_HOST = "http://localhost:11434"
+  # Default model for the agent pool
+  DEFAULT_MODEL = "qwen3.5:14b"
+  # Default runtime provider
+  DEFAULT_RUNTIME = "ollama"
+
+[http_service]
+  internal_port = 18789
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 50
+
+# Mount persistent volume for daemon state
+# Create with: fly volumes create 8gent_data --region dub --size 1
+[mounts]
+  source = "8gent_data"
+  destination = "/root/.8gent"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# Health check
+[[services]]
+  protocol = "tcp"
+  internal_port = 18789
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.http_checks]]
+    interval = 30000
+    grace_period = "10s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
+    timeout = 5000
