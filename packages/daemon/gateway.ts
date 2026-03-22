@@ -34,6 +34,7 @@ type InboundMessage =
   | { type: "cron:add"; job: unknown }
   | { type: "cron:remove"; jobId: string }
   | { type: "health" }
+  | { type: "approval:response"; requestId: string; approved: boolean }
   | { type: "ping" };
 
 type OutboundMessage =
@@ -201,6 +202,17 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
       } else {
         send(ws, { type: "error", message: `cron job ${msg.jobId} not found` });
       }
+      break;
+    }
+
+    case "approval:response": {
+      // Route approval decision back through the event bus
+      bus.emit("approval:required", {
+        sessionId: state.sessionId || "unknown",
+        tool: "approval-response",
+        input: { requestId: msg.requestId, approved: msg.approved },
+        requestId: msg.requestId,
+      });
       break;
     }
 
