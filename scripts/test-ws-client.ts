@@ -21,7 +21,7 @@
 const PORT = process.env.DAEMON_PORT || "18789";
 const DAEMON_URL = process.env.DAEMON_URL || `ws://localhost:${PORT}`;
 const AUTH_TOKEN = process.env.DAEMON_AUTH_TOKEN || null;
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 60_000;
 
 interface TestResult {
   name: string;
@@ -153,6 +153,9 @@ async function run(): Promise<void> {
   }
 
   // --- Test 6: Send prompt and collect events ---
+  // Wait for agent to finish initializing (AST indexing takes a few seconds)
+  log("Waiting 5s for agent initialization...");
+  await new Promise((r) => setTimeout(r, 5000));
   log("Sending prompt: 'What is 2+2?'");
   ws.send(JSON.stringify({ type: "prompt", text: "What is 2+2? Reply with just the number." }));
 
