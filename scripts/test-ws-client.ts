@@ -3,11 +3,11 @@
  * Minimal WebSocket client to verify the daemon protocol works.
  *
  * Usage:
- *   1. Start the daemon: bun run packages/daemon/index.ts
- *   2. Run this script:  bun run scripts/test-ws-client.ts
+ *   Local:  bun run scripts/test-ws-client.ts
+ *   Remote: DAEMON_URL=wss://8gent-daemon.fly.dev bun run scripts/test-ws-client.ts
  *
  * Tests:
- *   - Connect to ws://localhost:18789
+ *   - Connect to ws://localhost:18789 (or DAEMON_URL)
  *   - Auth handshake (if token configured)
  *   - Create session
  *   - Send prompt ("What is 2+2?")
@@ -19,6 +19,7 @@
  */
 
 const PORT = process.env.DAEMON_PORT || "18789";
+const DAEMON_URL = process.env.DAEMON_URL || `ws://localhost:${PORT}`;
 const AUTH_TOKEN = process.env.DAEMON_AUTH_TOKEN || null;
 const TIMEOUT_MS = 30_000;
 
@@ -45,9 +46,9 @@ function fail(name: string, detail: string): void {
 }
 
 async function run(): Promise<void> {
-  log(`Connecting to ws://localhost:${PORT}...`);
+  log(`Connecting to ${DAEMON_URL}...`);
 
-  const ws = new WebSocket(`ws://localhost:${PORT}`);
+  const ws = new WebSocket(DAEMON_URL);
   let sessionId: string | null = null;
   let gotFinalResponse = false;
   let finalResponseText = "";
@@ -94,7 +95,7 @@ async function run(): Promise<void> {
     setTimeout(() => reject(new Error("Connection timeout")), 5000);
   });
 
-  pass("connect", `Connected to ws://localhost:${PORT}`);
+  pass("connect", `Connected to ${DAEMON_URL}`);
 
   // --- Test 1: Auth handshake ---
   if (AUTH_TOKEN) {
