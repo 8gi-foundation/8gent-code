@@ -9,13 +9,16 @@ import { existsSync, appendFileSync, mkdirSync } from "fs";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
-import { startCron, stopCron } from "./cron";
+import { startCron, stopCron, getJobs, addJob } from "./cron";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { resolveBestFreeModel } from "./model-resolver";
+import { getDataDir } from "./data-dir";
 
 const PORT = 18789;
-const LOG_PATH = `${process.env.HOME}/.8gent/daemon.log`;
-const CONFIG_PATH = `${process.env.HOME}/.8gent/config.json`;
+const DATA_DIR = getDataDir();
+const LOG_PATH = `${DATA_DIR}/daemon.log`;
+const CONFIG_PATH = `${DATA_DIR}/config.json`;
+const DEFAULT_MODEL = "qwen3.5:14b";
 
 interface DaemonConfig {
   port: number;
@@ -49,9 +52,8 @@ async function loadConfig(): Promise<DaemonConfig> {
 }
 
 function setupLogging(): void {
-  const logDir = `${process.env.HOME}/.8gent`;
-  if (!existsSync(logDir)) {
-    mkdirSync(logDir, { recursive: true });
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true });
   }
 
   // Subscribe to all events and append to log file
@@ -72,7 +74,7 @@ function setupLogging(): void {
   }
 }
 
-const STATE_PATH = `${process.env.HOME}/.8gent/daemon-state.json`;
+const STATE_PATH = `${DATA_DIR}/daemon-state.json`;
 
 let server: ReturnType<typeof startGateway> | null = null;
 let pool: AgentPool | null = null;
@@ -149,6 +151,23 @@ async function main(): Promise<void> {
 
   // Start cron scheduler
   await startCron();
+
+  // Auto-register daily CEO summary if not present
+  const existingJobs = getJobs();
+  if (!existingJobs.find((j: any) => j.id === "daily-ceo-summary")) {
+    addJob({
+      id: "daily-ceo-summary",
+      name: "CEO Daily Summary",
+      expression: "0 9 * * *",
+      type: "agent-prompt",
+      payload: "Generate a brief daily summary: list completed tasks, open PRs, and any pending work from the task registry at ~/.8gent/tasks.json",
+      enabled: true,
+      lastRun: null,
+      nextRun: null,
+      recurring: true,
+    });
+    console.log("[daemon] registered daily CEO summary cron (9 AM)");
+  }
 
   console.log(`[daemon] ready - ws://localhost:${config.port}`);
   console.log(`[daemon] health check: http://localhost:${config.port}/health`);
