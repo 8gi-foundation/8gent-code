@@ -34,6 +34,10 @@ import {
   type WorkingMemory,
   type V1MemoryEntry,
   type V1RecallResult,
+  type ConsolidationLevel,
+  type LearningType,
+  type MemoryWithEvidence,
+  type PeerRepresentation,
   generateId,
   estimateTokens,
   effectiveImportance,
@@ -48,7 +52,7 @@ import {
 import { migrateV1ToV2, type MigrationResult } from "./migrate.js";
 import { KnowledgeGraph, type Entity, type Relationship, type SubgraphResult } from "./graph.js";
 import { extractFromToolResult, extractPreferencesFromMessage, type ExtractionResult, type ExtractedEntity, type ExtractedRelationship } from "./extractor.js";
-import { PromotionManager, isPromoted, daysUntilArchival, type PromotionResult } from "./promote.js";
+import { PromotionManager, isPromoted, daysUntilArchival, softUnlearn, boostEvidence, type PromotionResult } from "./promote.js";
 import { SemanticRecall, createSemanticRecall, type RecallOptions } from "./recall.js";
 
 // ── Re-exports ────────────────────────────────────────────────────────
@@ -93,6 +97,8 @@ export {
   PromotionManager,
   isPromoted,
   daysUntilArchival,
+  softUnlearn,
+  boostEvidence,
   SemanticRecall,
   createSemanticRecall,
 };
@@ -100,6 +106,10 @@ export {
 export type {
   PromotionResult,
   RecallOptions,
+  ConsolidationLevel,
+  LearningType,
+  MemoryWithEvidence,
+  PeerRepresentation,
 };
 
 export type {
@@ -874,6 +884,204 @@ export class MemoryManager {
 
   getGlobalMemories(): MemoryEntry[] {
     return readJsonlSafe(this.globalJsonlPath);
+  }
+
+  // ── Consolidation, Ask, Representations ─────────────────────────────
+
+  /**
+   * Ask a natural-language question against a user's memories.
+   * Returns a synthesized answer from the most relevant memories.
+   */
+  async ask(question: string, userId: string): Promise<string> {
+    await this.init();
+    const results = await this.recall(question, { limit: 10, userId }) as SearchResult[];
+    if (results.length === 0) return "No relevant memories found.";
+
+    // Build a synthesized answer from top results
+    const facts = results
+      .slice(0, 5)
+      .map((r) => extractFactFromMemory(r.memory))
+      .filter(Boolean);
+
+    if (facts.length === 0) return "No relevant memories found.";
+    return `Based on ${facts.length} memories:\n${facts.map((f) => `- ${f}`).join("\n")}`;
+  }
+
+  /**
+   * Consolidate memories at a given level.
+   * Groups raw memories and returns consolidation candidates.
+   */
+  async consolidate(level: ConsolidationLevel): Promise<{
+    level: ConsolidationLevel;
+    candidateCount: number;
+    candidates: Array<{ id: string; content: string; importance: number }>;
+  }> {
+    await this.init();
+    const store = this.projectStore;
+    if (!store) return { level, candidateCount: 0, candidates: [] };
+
+    // Find memories at the current consolidation level (or raw by default)
+    const sourceLevel = level === "daily" ? "raw"
+      : level === "weekly" ? "daily"
+      : level === "monthly" ? "weekly"
+      : level === "archetype" ? "monthly"
+      : "raw";
+
+    const db = store.getDb();
+    const rows = db
+      .prepare(
+        `SELECT id, data, importance FROM memories
+         WHERE deleted_at IS NULL
+           AND COALESCE(consolidation_level, 'raw') = ?
+         ORDER BY importance DESC
+         LIMIT 100`
+      )
+      .all(sourceLevel) as Array<{ id: string; data: string; importance: number }>;
+
+    const candidates = rows.map((row) => {
+      const memory = JSON.parse(row.data) as Memory;
+      return {
+        id: row.id,
+        content: extractFactFromMemory(memory),
+        importance: row.importance,
+      };
+    });
+
+    return { level, candidateCount: candidates.length, candidates };
+  }
+
+  /**
+   * Generate a peer representation for a user from their memories.
+   * Summarizes preferences, patterns, and key facts.
+   */
+  async getRepresentation(userId: string): Promise<PeerRepresentation> {
+    await this.init();
+    const memories: Memory[] = [];
+
+    if (this.projectStore) {
+      memories.push(...this.projectStore.searchByUser(userId, { limit: 50 }));
+    }
+    if (this.globalStore) {
+      memories.push(...this.globalStore.searchByUser(userId, { limit: 50 }));
+    }
+
+    // Extract preferences from semantic memories
+    const preferences: Array<{ key: string; value: string; confidence: number }> = [];
+    const patterns: string[] = [];
+
+    for (const mem of memories) {
+      if (mem.type === "semantic" && mem.category === "preference") {
+        preferences.push({
+          key: mem.key,
+          value: mem.value,
+          confidence: mem.confidence,
+        });
+      }
+      if (mem.type === "semantic" && mem.category === "pattern") {
+        patterns.push(mem.value);
+      }
+    }
+
+    const summary = preferences.length > 0
+      ? `User has ${preferences.length} known preferences and ${patterns.length} behavioral patterns across ${memories.length} memories.`
+      : `User has ${memories.length} memories stored. No explicit preferences extracted yet.`;
+
+    return {
+      userId,
+      summary,
+      preferences,
+      patterns,
+      memoryCount: memories.length,
+      generatedAt: Date.now(),
+    };
+  }
+
+  /**
+   * Soft unlearn a memory - decay confidence instead of hard delete.
+   * With soft=true (default), halves importance. With soft=false, delegates to forget().
+   */
+  async unlearn(id: string, options?: { soft?: boolean }): Promise<void> {
+    await this.init();
+    const useSoft = options?.soft !== false;
+
+    if (!useSoft) {
+      await this.forget(id, "unlearned");
+      return;
+    }
+
+    // Try soft unlearn on both stores
+    if (this.projectStore) {
+      const db = this.projectStore.getDb();
+      if (softUnlearn(db, id)) return;
+    }
+    if (this.globalStore) {
+      const db = this.globalStore.getDb();
+      if (softUnlearn(db, id)) return;
+    }
+  }
+
+  /**
+   * Semantic learning with evidence tracking.
+   * If a memory with the same key+userId already exists, boosts evidence instead of duplicating.
+   */
+  async learn(
+    key: string,
+    value: string,
+    category: string,
+    options?: { userId?: string; confidence?: number }
+  ): Promise<{ id: string; action: "created" | "boosted" }> {
+    await this.init();
+    const store = this.projectStore;
+    if (!store) {
+      // Fallback to remember
+      const id = await this.remember(`${key}: ${value}`, "semantic", {
+        key,
+        category: category as SemanticCategory,
+        confidence: options?.confidence,
+      });
+      return { id, action: "created" };
+    }
+
+    // Check for existing memory with same key+userId
+    const db = store.getDb();
+    const userId = options?.userId ?? this.userId;
+    let existing: { id: string } | null = null;
+
+    if (userId) {
+      existing = db
+        .prepare(
+          `SELECT id FROM memories
+           WHERE deleted_at IS NULL
+             AND json_extract(data, '$.key') = ?
+             AND json_extract(data, '$.userId') = ?
+           LIMIT 1`
+        )
+        .get(key, userId) as { id: string } | null;
+    } else {
+      existing = db
+        .prepare(
+          `SELECT id FROM memories
+           WHERE deleted_at IS NULL
+             AND json_extract(data, '$.key') = ?
+             AND json_extract(data, '$.userId') IS NULL
+           LIMIT 1`
+        )
+        .get(key) as { id: string } | null;
+    }
+
+    if (existing) {
+      boostEvidence(db, existing.id);
+      return { id: existing.id, action: "boosted" };
+    }
+
+    // Create new semantic memory
+    const id = await this.remember(`${key}: ${value}`, "semantic", {
+      key,
+      category: category as SemanticCategory,
+      confidence: options?.confidence ?? 0.7,
+      scope: "project",
+    });
+    return { id, action: "created" };
   }
 
   // ── Knowledge Graph ──────────────────────────────────────────────────
