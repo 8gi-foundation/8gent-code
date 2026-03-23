@@ -50,3 +50,9 @@ export {
   type ParsedOutput,
   type NotebookInfo,
 } from "./notebook";
+
+// Rate limiter
+export {
+  RateLimiter,
+  type RateLimitConfig,
+} from "./rate-limiter";
