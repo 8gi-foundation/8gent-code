@@ -163,8 +163,9 @@ export class MemoryManager {
 
   constructor(workingDirectory: string) {
     this.workingDirectory = workingDirectory;
+    const globalDataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
     this.projectJsonlPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
-    this.globalJsonlPath = path.join(os.homedir(), ".8gent", "memory", "global.jsonl");
+    this.globalJsonlPath = path.join(globalDataDir, "memory", "global.jsonl");
   }
 
   /**
@@ -192,8 +193,9 @@ export class MemoryManager {
       const projectDbPath = path.join(projectDbDir, "memory.db");
       this.projectStore = new MemoryStore(projectDbPath, this.embeddingProvider);
 
-      // Create global store
-      const globalDbDir = path.join(os.homedir(), ".8gent", "memory");
+      // Create global store (EIGHT_DATA_DIR for cloud deployments)
+      const globalBase = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+      const globalDbDir = path.join(globalBase, "memory");
       ensureDir(globalDbDir);
       const globalDbPath = path.join(globalDbDir, "memory.db");
       this.globalStore = new MemoryStore(globalDbPath, this.embeddingProvider);
