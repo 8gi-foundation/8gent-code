@@ -26,7 +26,10 @@ const DEFAULT_POLICY_PATH = path.join(
   "default-policies.yaml"
 );
 
-const USER_POLICY_PATH = path.join(os.homedir(), ".8gent", "policies.yaml");
+const USER_POLICY_PATH = path.join(
+  process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+  "policies.yaml"
+);
 
 // ============================================
 // In-memory policy store
