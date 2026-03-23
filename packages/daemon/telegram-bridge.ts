@@ -37,6 +37,7 @@ interface BridgeConfig {
   chatId: string;
   daemonUrl: string; // ws://localhost:18789 (same container)
   authToken?: string;
+  devGroupId?: string; // Optional dev group for verbose logs
 }
 
 async function tgSend(token: string, chatId: string, text: string, parseMode = "Markdown"): Promise<void> {
@@ -84,6 +85,9 @@ async function tgTyping(token: string, chatId: string): Promise<void> {
   }).catch(() => {});
 }
 
+// Import CoS router lazily to avoid circular deps
+let CoSRouterClass: typeof import("./cos-router").CoSRouter | null = null;
+
 class TelegramDaemonBridge {
   private config: BridgeConfig;
   private ws: WebSocket | null = null;
@@ -93,6 +97,7 @@ class TelegramDaemonBridge {
   private agentReady = false;
   private agentBusy = false;
   private pendingApprovals = new Map<string, { tool: string; input: unknown }>();
+  private cosRouter: InstanceType<typeof import("./cos-router").CoSRouter> | null = null;
 
   constructor(config: BridgeConfig) {
     this.config = config;
@@ -104,11 +109,37 @@ class TelegramDaemonBridge {
     // Connect to daemon WebSocket
     await this.connectDaemon();
 
+    // Initialize CoS router for CEO command handling
+    try {
+      const { CoSRouter } = await import("./cos-router");
+      const { NotificationDispatcher } = await import("./notifications");
+      const { AgentPool } = await import("./agent-pool");
+
+      // Get the pool from the daemon (create a separate one for delegations)
+      const cosPool = new AgentPool({
+        model: process.env.DEFAULT_MODEL || "auto:free",
+        runtime: (process.env.DEFAULT_RUNTIME as any) || "openrouter",
+        workingDirectory: process.env.HOME ? `${process.env.HOME}/.8gent/workspace` : "/app",
+        apiKey: process.env.OPENROUTER_API_KEY,
+      });
+
+      const notifications = new NotificationDispatcher(
+        this.config.telegramToken,
+        this.config.chatId,
+        this.config.devGroupId
+      );
+
+      this.cosRouter = new CoSRouter({ pool: cosPool, notifications });
+      console.log("[telegram-bridge] CoS router initialized");
+    } catch (err) {
+      console.error("[telegram-bridge] CoS router failed to initialize:", err);
+    }
+
     // Send startup message (direct to Telegram, not through agent)
     await tgSend(
       this.config.telegramToken,
       this.config.chatId,
-      "Eight is online. What do we work on next?"
+      "Eight is online. Commands: /delegate, /status, /review, /plan, /goals\n\nWhat do we work on next?"
     );
 
     // Wait for agent to finish initializing (AST indexing takes ~5s)
@@ -239,7 +270,13 @@ class TelegramDaemonBridge {
     // Show typing
     await tgTyping(this.config.telegramToken, this.config.chatId);
 
-    // Handle commands
+    // CEO commands via CoS router (delegate, plan, review, goals, kill)
+    if (this.cosRouter) {
+      const handled = await this.cosRouter.handleCommand(text, chatId);
+      if (handled) return;
+    }
+
+    // Handle built-in commands
     if (text.startsWith("/status")) {
       try {
         const res = await fetch(this.config.daemonUrl.replace("ws", "http").replace("wss", "https").replace(/:\d+/, ":18789") + "/health");
@@ -379,6 +416,7 @@ if (import.meta.main) {
     chatId,
     daemonUrl: process.env.DAEMON_URL || "ws://localhost:18789",
     authToken: process.env.DAEMON_AUTH_TOKEN,
+    devGroupId: process.env.TELEGRAM_DEV_GROUP_ID,
   });
 
   bridge.start().catch((err) => {
