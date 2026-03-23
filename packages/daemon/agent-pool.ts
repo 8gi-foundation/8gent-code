@@ -58,6 +58,8 @@ export class AgentPool {
   private cleanupIdleSessions(): void {
     const now = Date.now();
     for (const [id, entry] of this.sessions) {
+      // Never evict telegram sessions - they persist like NemoClaw sandboxes
+      if (entry.channel === "telegram" || entry.channel === "delegation") continue;
       if (!entry.busy && (now - entry.lastActiveAt) > IDLE_TIMEOUT_MS) {
         console.log(`[agent-pool] evicting idle session ${id} (idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`);
         this.sessions.delete(id);
