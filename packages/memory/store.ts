@@ -179,10 +179,16 @@ export class MemoryStore {
     this.embeddingProvider = embeddingProvider ?? null;
 
     // Configure WAL mode and pragmas
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.db.pragma("cache_size = -64000"); // 64MB cache
-    this.db.pragma("foreign_keys = ON");
+    // Use db.exec() instead of db.pragma() for bun:sqlite compatibility
+    try {
+      this.db.exec("PRAGMA journal_mode = WAL");
+      this.db.exec("PRAGMA synchronous = NORMAL");
+      this.db.exec("PRAGMA cache_size = -64000"); // 64MB cache
+      this.db.exec("PRAGMA foreign_keys = ON");
+    } catch (err) {
+      // Gracefully degrade if pragmas fail (some SQLite builds restrict them)
+      console.warn("[memory] PRAGMA init warning:", (err as Error).message);
+    }
 
     // Initialize schema
     this.db.exec(SCHEMA_SQL);
