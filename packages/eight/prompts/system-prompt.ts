@@ -288,20 +288,26 @@ export const RULES_SEGMENT = `## CRITICAL RULES
  * Full system prompt for autonomous mode.
  * Uses soul layers for identity (defaults to owner tier).
  */
-export const FULL_SYSTEM_PROMPT = [
-  composeSoulPrompt("owner"),
-  // Inject vessel context if running as a deployed instance
-  process.env.EIGHT_VESSEL_CONTEXT || "",
-  ARCHITECTURE_SEGMENT,
-  BMAD_SEGMENT,
-  THINKING_PATTERNS_SEGMENT,
-  SWE_PATTERNS_SEGMENT,
-  TOOL_PATTERNS_SEGMENT,
-  DESIGN_FIRST_SEGMENT,
-  ERROR_RECOVERY_SEGMENT,
-  COMPLETION_SEGMENT,
-  RULES_SEGMENT,
-].filter(Boolean).join("\n\n");
+/** Build full system prompt lazily (reads env vars at call time, not import time) */
+export function getFullSystemPrompt(): string {
+  return [
+    composeSoulPrompt("owner"),
+    // Inject vessel context if running as a deployed instance
+    process.env.EIGHT_VESSEL_CONTEXT || "",
+    ARCHITECTURE_SEGMENT,
+    BMAD_SEGMENT,
+    THINKING_PATTERNS_SEGMENT,
+    SWE_PATTERNS_SEGMENT,
+    TOOL_PATTERNS_SEGMENT,
+    DESIGN_FIRST_SEGMENT,
+    ERROR_RECOVERY_SEGMENT,
+    COMPLETION_SEGMENT,
+    RULES_SEGMENT,
+  ].filter(Boolean).join("\n\n");
+}
+
+/** @deprecated Use getFullSystemPrompt() for lazy env var evaluation */
+export const FULL_SYSTEM_PROMPT = getFullSystemPrompt();
 
 /**
  * Build a full system prompt for a specific access tier.
