@@ -17,6 +17,8 @@ export type MemoryScope = "session" | "project" | "global";
 
 export type ConsolidationLevel = "raw" | "daily" | "weekly" | "monthly" | "archetype";
 
+export type LearningType = "preference" | "behavior" | "outcome" | "correction" | "feedback";
+
 export type SourceType =
   | "conversation"
   | "tool_result"
@@ -241,6 +243,25 @@ export interface Relationship {
   metadata?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
+}
+
+// ── Evidence-based Memory ─────────────────────────────────────────────
+
+export interface MemoryWithEvidence extends MemoryBase {
+  evidenceCount: number;
+  consolidationLevel: ConsolidationLevel;
+  learningType?: LearningType;
+}
+
+// ── Peer Representation ──────────────────────────────────────────────
+
+export interface PeerRepresentation {
+  userId: string;
+  summary: string;
+  preferences: Array<{ key: string; value: string; confidence: number }>;
+  patterns: string[];
+  memoryCount: number;
+  generatedAt: number;
 }
 
 // ── V1 Compatibility ──────────────────────────────────────────────────
