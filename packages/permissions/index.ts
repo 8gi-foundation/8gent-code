@@ -209,7 +209,8 @@ export class PermissionManager {
   private infiniteMode: boolean = false;
 
   constructor(configPath?: string) {
-    this.configPath = configPath || path.join(os.homedir(), ".8gent", "permissions.json");
+    const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+    this.configPath = configPath || path.join(dataDir, "permissions.json");
     this.config = this.loadConfig();
     this.log = {
       requests: [],
@@ -407,6 +408,20 @@ export class PermissionManager {
    * Prompt user for permission (Y/n)
    */
   private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
+    // In daemon/headless mode (no TTY), auto-approve most actions
+    // Only block merge/push to main - that requires Telegram approval
+    if (!process.stdin.isTTY) {
+      const cmd = (command || "").toLowerCase();
+      const isMainPush = cmd.includes("push") && (cmd.includes("main") || cmd.includes("master"));
+      const isMerge = cmd.includes("merge") && (cmd.includes("main") || cmd.includes("master"));
+      if (isMainPush || isMerge) {
+        console.log(`[permissions] BLOCKED (headless): merge/push to main requires Telegram approval - ${command}`);
+        return false;
+      }
+      console.log(`[permissions] auto-approved (headless): ${action} - ${command || details}`);
+      return true;
+    }
+
     return new Promise((resolve) => {
       const rl = readline.createInterface({
         input: process.stdin,
