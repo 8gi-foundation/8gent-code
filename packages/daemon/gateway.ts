@@ -34,6 +34,7 @@ type InboundMessage =
   | { type: "cron:add"; job: unknown }
   | { type: "cron:remove"; jobId: string }
   | { type: "health" }
+  | { type: "approval:response"; requestId: string; approved: boolean }
   | { type: "ping" };
 
 type OutboundMessage =
@@ -112,11 +113,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
       state.sessionId = sessionId;
       state.channel = msg.channel || "api";
 
-      // Create an Agent instance for this session
-      pool.createSession(sessionId, state.channel);
-
-      bus.emit("session:start", { sessionId, channel: state.channel });
+      // Respond to the client first, then emit events and create agent
       send(ws, { type: "session:created", sessionId });
+      bus.emit("session:start", { sessionId, channel: state.channel });
+
+      // Create Agent instance async (constructor does blocking AST indexing)
+      setTimeout(() => pool.createSession(sessionId, state.channel), 0);
       break;
     }
 
@@ -203,6 +205,17 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
       break;
     }
 
+    case "approval:response": {
+      // Route approval decision back through the event bus
+      bus.emit("approval:required", {
+        sessionId: state.sessionId || "unknown",
+        tool: "approval-response",
+        input: { requestId: msg.requestId, approved: msg.approved },
+        requestId: msg.requestId,
+      });
+      break;
+    }
+
     case "health": {
       send(ws, {
         type: "health",
@@ -241,6 +254,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 
   const server = Bun.serve({
     port: config.port,
+    hostname: "0.0.0.0",
     fetch(req, server) {
       if (server.upgrade(req)) return undefined;
 

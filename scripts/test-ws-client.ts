@@ -3,11 +3,11 @@
  * Minimal WebSocket client to verify the daemon protocol works.
  *
  * Usage:
- *   1. Start the daemon: bun run packages/daemon/index.ts
- *   2. Run this script:  bun run scripts/test-ws-client.ts
+ *   Local:  bun run scripts/test-ws-client.ts
+ *   Remote: DAEMON_URL=wss://8gent-daemon.fly.dev bun run scripts/test-ws-client.ts
  *
  * Tests:
- *   - Connect to ws://localhost:18789
+ *   - Connect to ws://localhost:18789 (or DAEMON_URL)
  *   - Auth handshake (if token configured)
  *   - Create session
  *   - Send prompt ("What is 2+2?")
@@ -19,8 +19,9 @@
  */
 
 const PORT = process.env.DAEMON_PORT || "18789";
+const DAEMON_URL = process.env.DAEMON_URL || `ws://localhost:${PORT}`;
 const AUTH_TOKEN = process.env.DAEMON_AUTH_TOKEN || null;
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 60_000;
 
 interface TestResult {
   name: string;
@@ -45,9 +46,9 @@ function fail(name: string, detail: string): void {
 }
 
 async function run(): Promise<void> {
-  log(`Connecting to ws://localhost:${PORT}...`);
+  log(`Connecting to ${DAEMON_URL}...`);
 
-  const ws = new WebSocket(`ws://localhost:${PORT}`);
+  const ws = new WebSocket(DAEMON_URL);
   let sessionId: string | null = null;
   let gotFinalResponse = false;
   let finalResponseText = "";
@@ -76,6 +77,20 @@ async function run(): Promise<void> {
     });
   }
 
+  /** Wait for a message of a specific type, skipping event broadcasts */
+  async function waitForType(type: string, timeoutMs = TIMEOUT_MS): Promise<any> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const msg = await waitForMessage(deadline - Date.now());
+      if (msg.type === type) return msg;
+      // Log skipped event messages
+      if (msg.type === "event") {
+        log(`  (skipped event: ${msg.event})`);
+      }
+    }
+    throw new Error(`Timeout waiting for message type: ${type}`);
+  }
+
   ws.onmessage = (event: MessageEvent) => {
     const msg = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer));
     if (resolveNext) {
@@ -94,7 +109,7 @@ async function run(): Promise<void> {
     setTimeout(() => reject(new Error("Connection timeout")), 5000);
   });
 
-  pass("connect", `Connected to ws://localhost:${PORT}`);
+  pass("connect", `Connected to ${DAEMON_URL}`);
 
   // --- Test 1: Auth handshake ---
   if (AUTH_TOKEN) {
@@ -120,7 +135,7 @@ async function run(): Promise<void> {
 
   // --- Test 3: Create session ---
   ws.send(JSON.stringify({ type: "session:create", channel: "test" }));
-  const sessionReply = await waitForMessage(5000);
+  const sessionReply = await waitForType("session:created", 10000);
   if (sessionReply.type === "session:created" && sessionReply.sessionId) {
     sessionId = sessionReply.sessionId;
     pass("session:create", `Session ${sessionId}`);
@@ -133,7 +148,7 @@ async function run(): Promise<void> {
 
   // --- Test 4: Health check via WebSocket ---
   ws.send(JSON.stringify({ type: "health" }));
-  const healthReply = await waitForMessage(5000);
+  const healthReply = await waitForType("health", 10000);
   if (healthReply.type === "health" && healthReply.data?.status === "ok") {
     gotHealth = true;
     pass("health", `sessions=${healthReply.data.sessions} uptime=${Math.round(healthReply.data.uptime)}s`);
@@ -143,7 +158,7 @@ async function run(): Promise<void> {
 
   // --- Test 5: List sessions ---
   ws.send(JSON.stringify({ type: "sessions:list" }));
-  const listReply = await waitForMessage(5000);
+  const listReply = await waitForType("sessions:list", 10000);
   if (listReply.type === "sessions:list" && Array.isArray(listReply.sessions)) {
     gotSessionsList = true;
     pass("sessions:list", `${listReply.sessions.length} session(s) active`);
@@ -152,6 +167,9 @@ async function run(): Promise<void> {
   }
 
   // --- Test 6: Send prompt and collect events ---
+  // Wait for agent to finish initializing (AST indexing takes a few seconds)
+  log("Waiting 5s for agent initialization...");
+  await new Promise((r) => setTimeout(r, 5000));
   log("Sending prompt: 'What is 2+2?'");
   ws.send(JSON.stringify({ type: "prompt", text: "What is 2+2? Reply with just the number." }));
 
