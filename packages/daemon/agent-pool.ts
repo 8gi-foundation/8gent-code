@@ -232,7 +232,8 @@ export class AgentPool {
 export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
   let fileConfig: Record<string, any> = {};
   try {
-    const configPath = `${process.env.HOME}/.8gent/config.json`;
+    const dataDir = process.env.EIGHT_DATA_DIR || `${process.env.HOME}/.8gent`;
+    const configPath = `${dataDir}/config.json`;
     const file = Bun.file(configPath);
     if (await file.exists()) {
       fileConfig = await file.json();

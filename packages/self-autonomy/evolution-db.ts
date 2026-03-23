@@ -37,7 +37,8 @@ export interface LearnedSkill {
 // ============================================
 
 function getDbPath(): string {
-  const dir = path.join(os.homedir(), ".8gent", "evolution");
+  const base = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+  const dir = path.join(base, "evolution");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, "evolution.db");
 }
