@@ -194,6 +194,27 @@ export const SAFE_PATTERNS = [
   "grep",
   "tree",
   "wc",
+
+  // File operations (needed for delegation)
+  "mkdir",
+  "touch",
+  "cp",
+
+  // Git write operations (needed for delegation - push to main blocked separately)
+  "git push",
+  "git merge",
+
+  // GitHub CLI (non-destructive)
+  "gh issue",
+  "gh pr",
+  "gh repo view",
+  "gh api",
+
+  // Misc tools
+  "curl",
+  "wget",
+  "jq",
+  "echo",
 ];
 
 // ============================================
@@ -404,9 +425,41 @@ export class PermissionManager {
   }
 
   /**
+   * Detect if running in headless mode (no TTY, e.g. Docker container, daemon)
+   */
+  private isHeadless(): boolean {
+    return !process.stdin.isTTY || !!process.env.EIGHT_HEADLESS;
+  }
+
+  /**
+   * Check if a command pushes to main/master (always blocked even in headless)
+   */
+  private isPushToMain(command: string): boolean {
+    const cmd = command.toLowerCase().trim();
+    return /git\s+push\s+.*\b(main|master)\b/.test(cmd) ||
+           (cmd.includes("git push") && !cmd.includes("-u") && !/\b(feat|fix|feature|hotfix|release|chore)\b/.test(cmd));
+  }
+
+  /**
    * Prompt user for permission (Y/n)
+   * In headless mode: auto-approve safe commands, deny dangerous ones
    */
   private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
+    // Headless mode: no TTY available for interactive prompts
+    if (this.isHeadless()) {
+      if (command && this.isDangerous(command)) {
+        console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
+        return false;
+      }
+      if (command && this.isPushToMain(command)) {
+        console.log(`[permissions] DENIED (headless, push to main): ${command}`);
+        return false;
+      }
+      // Auto-approve non-dangerous commands in headless mode
+      console.log(`[permissions] AUTO-APPROVED (headless): ${command || action}`);
+      return true;
+    }
+
     return new Promise((resolve) => {
       const rl = readline.createInterface({
         input: process.stdin,
