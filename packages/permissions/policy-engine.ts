@@ -32,10 +32,113 @@ const USER_POLICY_PATH = path.join(
 );
 
 // ============================================
+// Condition syntax validation
+// ============================================
+
+/** Max allowed length for regex-like patterns in conditions to prevent ReDoS */
+const MAX_PATTERN_LENGTH = 200;
+
+/** Valid condition operators */
+const VALID_OPERATORS = ["contains", "in", "equals", "starts_with", "ends_with"] as const;
+
+type ConditionOperator = typeof VALID_OPERATORS[number];
+
+interface ParsedClause {
+  field: string;
+  operator: ConditionOperator;
+  value: string;       // for contains, equals, starts_with, ends_with
+  values?: string[];   // for "in" operator
+}
+
+interface ParsedCondition {
+  /** Clauses joined by OR - any match = true */
+  orGroups: ParsedClause[][];
+}
+
+/**
+ * Parse and validate a condition string at load time.
+ * Throws if syntax is invalid, so bad policies fail fast.
+ */
+function parseCondition(condition: string): ParsedCondition {
+  const cond = condition.trim();
+  if (!cond) throw new Error("Empty condition");
+  if (cond.length > 2000) throw new Error("Condition too long (max 2000 chars)");
+
+  // Split on " or " for OR groups, then " and " within each group for AND
+  const orParts = cond.split(/\s+or\s+/i);
+  const orGroups: ParsedClause[][] = [];
+
+  for (const orPart of orParts) {
+    const andParts = orPart.split(/\s+and\s+/i);
+    const andClauses: ParsedClause[] = [];
+
+    for (const rawClause of andParts) {
+      const clause = rawClause.trim();
+      if (!clause) throw new Error(`Empty clause in condition: "${condition}"`);
+
+      const parsed = parseClause(clause);
+      if (!parsed) {
+        throw new Error(
+          `Invalid condition syntax: "${clause}". ` +
+          `Expected: "field contains value", "field in [a, b]", "field equals value", ` +
+          `"field starts_with value", or "field ends_with value"`
+        );
+      }
+      andClauses.push(parsed);
+    }
+
+    orGroups.push(andClauses);
+  }
+
+  return { orGroups };
+}
+
+function parseClause(clause: string): ParsedClause | null {
+  // "field contains value"
+  const containsMatch = clause.match(/^(\w+)\s+contains\s+(.+)$/i);
+  if (containsMatch) {
+    const value = containsMatch[2].trim();
+    if (value.length > MAX_PATTERN_LENGTH) {
+      throw new Error(`Pattern too long (max ${MAX_PATTERN_LENGTH} chars): "${value.slice(0, 50)}..."`);
+    }
+    return { field: containsMatch[1], operator: "contains", value };
+  }
+
+  // "field in [a, b, c]"
+  const inMatch = clause.match(/^(\w+)\s+in\s+\[([^\]]*)\]$/i);
+  if (inMatch) {
+    const values = inMatch[2].split(",").map((s) => s.trim()).filter(Boolean);
+    return { field: inMatch[1], operator: "in", value: "", values };
+  }
+
+  // "field equals value"
+  const equalsMatch = clause.match(/^(\w+)\s+equals\s+(.+)$/i);
+  if (equalsMatch) {
+    return { field: equalsMatch[1], operator: "equals", value: equalsMatch[2].trim() };
+  }
+
+  // "field starts_with value"
+  const startsMatch = clause.match(/^(\w+)\s+starts_with\s+(.+)$/i);
+  if (startsMatch) {
+    return { field: startsMatch[1], operator: "starts_with", value: startsMatch[2].trim() };
+  }
+
+  // "field ends_with value"
+  const endsMatch = clause.match(/^(\w+)\s+ends_with\s+(.+)$/i);
+  if (endsMatch) {
+    return { field: endsMatch[1], operator: "ends_with", value: endsMatch[2].trim() };
+  }
+
+  return null;
+}
+
+// ============================================
 // In-memory policy store
 // ============================================
 
 let _policies: PolicyRule[] = [];
+/** Pre-parsed conditions keyed by rule index for fast evaluation */
+let _parsedConditions: Map<number, ParsedCondition> = new Map();
 let _loaded = false;
 
 // ============================================
@@ -65,13 +168,27 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
   }
 
   const rules: PolicyRule[] = [];
+  const parsed: Map<number, ParsedCondition> = new Map();
 
   for (const src of sources) {
     try {
       const raw = fs.readFileSync(src, "utf-8");
-      const parsed = parseYaml(raw) as PolicyFile;
-      if (parsed?.policies && Array.isArray(parsed.policies)) {
-        rules.push(...parsed.policies);
+      const file = parseYaml(raw) as PolicyFile;
+      if (file?.policies && Array.isArray(file.policies)) {
+        for (const rule of file.policies) {
+          const idx = rules.length;
+          // Validate condition syntax at load time - fail fast
+          try {
+            parsed.set(idx, parseCondition(rule.condition));
+          } catch (err) {
+            console.warn(
+              `[policy-engine] Invalid condition in rule "${rule.name}" from ${src}: ${err}`
+            );
+            // Skip invalid rules rather than crash
+            continue;
+          }
+          rules.push(rule);
+        }
       }
     } catch (err) {
       console.warn(`[policy-engine] Failed to load ${src}: ${err}`);
@@ -79,6 +196,7 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
   }
 
   _policies = rules;
+  _parsedConditions = parsed;
   _loaded = true;
   return rules;
 }
@@ -88,6 +206,10 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
  */
 export function addPolicy(rule: PolicyRule): void {
   if (!_loaded) loadPolicies();
+  // Validate at add time - throws if invalid
+  const parsed = parseCondition(rule.condition);
+  const idx = _policies.length;
+  _parsedConditions.set(idx, parsed);
   _policies.push(rule);
 }
 
@@ -104,44 +226,78 @@ export function getPolicies(): PolicyRule[] {
 // ============================================
 
 /**
- * Evaluates a plain-English condition string against a context object.
+ * Coerce a context value to a comparable string.
+ * Handles null, undefined, numbers, booleans, arrays, and objects.
+ */
+function coerceToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(coerceToString).join(",");
+  if (typeof value === "object") {
+    try { return JSON.stringify(value); } catch { return ""; }
+  }
+  return String(value);
+}
+
+/**
+ * Evaluates a pre-parsed condition against a context object.
+ * Uses the parsed condition cache from load time.
  *
  * Supported syntax:
  *   "field contains VALUE"
- *   "field contains A or field contains B"
+ *   "field equals VALUE"
+ *   "field starts_with VALUE"
+ *   "field ends_with VALUE"
  *   "field in [a, b, c]"
+ *   Clauses joined by "and" (all must match) or "or" (any must match)
  *
- * All comparisons are case-insensitive substring or set membership.
+ * All comparisons are case-insensitive.
  */
-function evaluateCondition(condition: string, context: PolicyContext): boolean {
-  // Normalise
-  const cond = condition.trim().toLowerCase();
+function evaluateCondition(ruleIndex: number, condition: string, context: PolicyContext): boolean {
+  // Use pre-parsed condition if available
+  let parsed = _parsedConditions.get(ruleIndex);
+  if (!parsed) {
+    // Fallback: parse at runtime (e.g. for dynamically added rules)
+    try {
+      parsed = parseCondition(condition);
+    } catch {
+      return false; // Invalid conditions never match
+    }
+  }
 
-  // Split on " or " (all must be checked — any match = true)
-  const clauses = cond.split(/\s+or\s+/);
-
-  return clauses.some((clause) => evaluateClause(clause.trim(), context));
+  // OR groups: any group matching = true
+  return parsed.orGroups.some((andClauses) =>
+    // AND within group: all clauses must match
+    andClauses.every((clause) => evaluateClauseParsed(clause, context))
+  );
 }
 
-function evaluateClause(clause: string, context: PolicyContext): boolean {
-  // "field contains value"
-  const containsMatch = clause.match(/^(\w+)\s+contains\s+(.+)$/);
-  if (containsMatch) {
-    const [, field, needle] = containsMatch;
-    const haystack = String(context[field] ?? "").toLowerCase();
-    return haystack.includes(needle.trim().toLowerCase());
-  }
+function evaluateClauseParsed(clause: ParsedClause, context: PolicyContext): boolean {
+  const rawValue = context[clause.field];
+  const haystack = coerceToString(rawValue).toLowerCase();
 
-  // "field in [a, b, c]"
-  const inMatch = clause.match(/^(\w+)\s+in\s+\[([^\]]+)\]$/);
-  if (inMatch) {
-    const [, field, listRaw] = inMatch;
-    const items = listRaw.split(",").map((s) => s.trim().toLowerCase());
-    const value = String(context[field] ?? "").toLowerCase();
-    return items.includes(value);
-  }
+  switch (clause.operator) {
+    case "contains":
+      return haystack.includes(clause.value.toLowerCase());
 
-  return false;
+    case "equals":
+      return haystack === clause.value.toLowerCase();
+
+    case "starts_with":
+      return haystack.startsWith(clause.value.toLowerCase());
+
+    case "ends_with":
+      return haystack.endsWith(clause.value.toLowerCase());
+
+    case "in": {
+      const items = (clause.values ?? []).map((s) => s.toLowerCase());
+      return items.includes(haystack);
+    }
+
+    default:
+      return false;
+  }
 }
 
 // ============================================
@@ -170,23 +326,29 @@ export function evaluatePolicy(
       (r.action === action || r.action === "*")
   );
 
-  // 1. Explicit allow — early exit
-  for (const rule of applicable.filter((r) => r.decision === "allow")) {
-    if (evaluateCondition(rule.condition, context)) {
+  // Build index-aware list for pre-parsed condition lookup
+  const withIndex = applicable.map((r) => ({
+    rule: r,
+    index: _policies.indexOf(r),
+  }));
+
+  // 1. Explicit allow - early exit
+  for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "allow")) {
+    if (evaluateCondition(index, rule.condition, context)) {
       return { allowed: true };
     }
   }
 
   // 2. Hard block
-  for (const rule of applicable.filter((r) => r.decision === "block")) {
-    if (evaluateCondition(rule.condition, context)) {
+  for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "block")) {
+    if (evaluateCondition(index, rule.condition, context)) {
       return { allowed: false, reason: `[${rule.name}] ${rule.message}` };
     }
   }
 
   // 3. Soft deny (requires user approval)
-  for (const rule of applicable.filter((r) => r.decision === "require_approval")) {
-    if (evaluateCondition(rule.condition, context)) {
+  for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "require_approval")) {
+    if (evaluateCondition(index, rule.condition, context)) {
       return {
         allowed: false,
         reason: `[${rule.name}] ${rule.message}`,
