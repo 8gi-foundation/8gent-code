@@ -69,7 +69,7 @@ export class AgentPool {
   }
 
   /** Create a new session with its own Agent instance */
-  createSession(sessionId: string, channel: string): void {
+  createSession(sessionId: string, channel: string, overrides?: { maxTurns?: number }): void {
     if (this.sessions.size >= MAX_SESSIONS) {
       // Evict oldest idle session
       let oldestId: string | null = null;
@@ -87,12 +87,16 @@ export class AgentPool {
 
     const events = this.buildEventCallbacks(sessionId);
 
+    // Delegation sessions get more tool turns than Telegram chat
+    const maxTurns = overrides?.maxTurns
+      ?? (channel === "delegation" ? 25 : this.config.maxTurns);
+
     const agentConfig: AgentConfig = {
       model: this.config.model,
       runtime: this.config.runtime,
       workingDirectory: this.config.workingDirectory,
       apiKey: this.config.apiKey,
-      maxTurns: this.config.maxTurns,
+      maxTurns,
       events,
     };
 
