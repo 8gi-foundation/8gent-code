@@ -362,6 +362,23 @@ class TelegramDaemonBridge {
     }
 
     // Handle built-in commands
+    if (text === "/logs") {
+      try {
+        const { execSync } = await import("child_process");
+        const logs = execSync("tail -30 /root/.8gent/daemon.log 2>/dev/null || echo 'No log file'", { encoding: "utf-8", timeout: 5000 });
+        await tgSend(this.config.telegramToken, this.config.chatId, `*Recent Logs*\n\`\`\`\n${logs.slice(-3000)}\n\`\`\``);
+      } catch {
+        await tgSend(this.config.telegramToken, this.config.chatId, "Could not read logs.");
+      }
+      return;
+    }
+
+    if (text === "/unstick") {
+      this.agentBusy = false;
+      await tgSend(this.config.telegramToken, this.config.chatId, "Cleared busy state. Ready for new messages.");
+      return;
+    }
+
     if (text.startsWith("/status")) {
       try {
         const res = await fetch(this.config.daemonUrl.replace("ws", "http").replace("wss", "https").replace(/:\d+/, ":18789") + "/health");
