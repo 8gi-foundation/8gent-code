@@ -209,7 +209,8 @@ export class PermissionManager {
   private infiniteMode: boolean = false;
 
   constructor(configPath?: string) {
-    this.configPath = configPath || path.join(os.homedir(), ".8gent", "permissions.json");
+    const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+    this.configPath = configPath || path.join(dataDir, "permissions.json");
     this.config = this.loadConfig();
     this.log = {
       requests: [],
