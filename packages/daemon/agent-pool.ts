@@ -47,7 +47,7 @@ export class AgentPool {
       runtime: config.runtime || DEFAULT_RUNTIME,
       workingDirectory: config.workingDirectory || process.cwd(),
       apiKey: config.apiKey,
-      maxTurns: config.maxTurns || 50,
+      maxTurns: config.maxTurns || 15, // Hard limit for Telegram - prevents free model loops
     };
 
     // Clean up idle sessions every 5 minutes
