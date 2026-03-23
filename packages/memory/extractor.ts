@@ -461,3 +461,28 @@ export function extractPreferencesFromMessage(
 
   return { entities, relationships };
 }
+
+// ============================================
+// Feedback loop prevention
+// ============================================
+
+/**
+ * Strip previously-injected memory context from a message before extraction.
+ * Without this, the extractor re-learns its own injections and memory grows unboundedly.
+ *
+ * Removes:
+ *   - [Memory Context]...[/Memory Context] blocks
+ *   - "What I know about this user:" paragraphs
+ *   - [Memory]...[/Memory] blocks (from recallAsText)
+ *   - Profile: ... lines from auto-inject
+ */
+export function stripInjectedContext(message: string): string {
+  return message
+    .replace(/\[Memory Context\][\s\S]*?\[\/Memory Context\]/g, "")
+    .replace(/\[Memory\][\s\S]*?(?=\n\n|$)/g, "")
+    .replace(/What I know about this user:[\s\S]*?(?=\n\n|$)/g, "")
+    .replace(/^Profile:.*$/gm, "")
+    .replace(/^Relevant memories:\n(?:- .*\n?)*/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

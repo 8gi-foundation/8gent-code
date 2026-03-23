@@ -11,6 +11,15 @@
 import { Database } from "bun:sqlite";
 import { type ConsolidationLevel, type Memory, generateId } from "./types.js";
 
+// ── Consolidation Prompt ──────────────────────────────────────────────
+
+/** LLM prompt for consolidation — frames output as the ENTIRE surviving memory */
+export const CONSOLIDATION_PROMPT = `You are the memory curator for an AI agent.
+Your output will become THE ENTIRETY of the agent's memory about this user.
+Any information you do not include in your output will be IMMEDIATELY AND PERMANENTLY FORGOTTEN.
+Be precise. Be selective. Preserve what matters. Discard noise.
+Output structured observations, not prose.`;
+
 // ── Public Types ──────────────────────────────────────────────────────
 
 export interface ConsolidationResult {
@@ -58,17 +67,18 @@ export function ensureConsolidationSchema(db: Database): void {
 export async function consolidate(
   db: Database,
   level: ConsolidationLevel,
-  userId?: string
+  userId?: string,
+  previousSummary?: string
 ): Promise<ConsolidationResult> {
   ensureConsolidationSchema(db);
 
   switch (level) {
     case "daily":
-      return consolidateDaily(db, userId);
+      return consolidateDaily(db, userId, previousSummary);
     case "weekly":
-      return consolidateWeekly(db, userId);
+      return consolidateWeekly(db, userId, previousSummary);
     case "monthly":
-      return consolidateMonthly(db, userId);
+      return consolidateMonthly(db, userId, previousSummary);
     default:
       return { level, memoriesProcessed: 0, summariesCreated: 0, timestamp: new Date().toISOString() };
   }
@@ -76,7 +86,7 @@ export async function consolidate(
 
 // ── Daily Consolidation ───────────────────────────────────────────────
 
-function consolidateDaily(db: Database, userId?: string): ConsolidationResult {
+function consolidateDaily(db: Database, userId?: string, previousSummary?: string): ConsolidationResult {
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
   const rows = queryMemoriesByLevel(db, "raw", oneDayAgo, userId);
 
@@ -88,7 +98,7 @@ function consolidateDaily(db: Database, userId?: string): ConsolidationResult {
     for (const [category, members] of groups) {
       if (members.length < 3) continue;
 
-      const summaryId = createSummaryMemory(db, members, "daily", category);
+      const summaryId = createSummaryMemory(db, members, "daily", category, previousSummary);
       logConsolidation(db, "daily", members.map((m) => m.id), summaryId);
       markConsolidated(db, members.map((m) => m.id), "daily");
 
@@ -109,7 +119,7 @@ function consolidateDaily(db: Database, userId?: string): ConsolidationResult {
 
 // ── Weekly Consolidation ──────────────────────────────────────────────
 
-function consolidateWeekly(db: Database, userId?: string): ConsolidationResult {
+function consolidateWeekly(db: Database, userId?: string, previousSummary?: string): ConsolidationResult {
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const rows = queryMemoriesByLevel(db, "daily", oneWeekAgo, userId);
 
@@ -121,7 +131,7 @@ function consolidateWeekly(db: Database, userId?: string): ConsolidationResult {
     for (const [category, members] of groups) {
       if (members.length < 2) continue;
 
-      const summaryId = createSummaryMemory(db, members, "weekly", category);
+      const summaryId = createSummaryMemory(db, members, "weekly", category, previousSummary);
       logConsolidation(db, "weekly", members.map((m) => m.id), summaryId);
       markConsolidated(db, members.map((m) => m.id), "weekly");
 
@@ -142,7 +152,7 @@ function consolidateWeekly(db: Database, userId?: string): ConsolidationResult {
 
 // ── Monthly Consolidation ─────────────────────────────────────────────
 
-function consolidateMonthly(db: Database, userId?: string): ConsolidationResult {
+function consolidateMonthly(db: Database, userId?: string, previousSummary?: string): ConsolidationResult {
   const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const rows = queryMemoriesByLevel(db, "weekly", oneMonthAgo, userId);
 
@@ -154,7 +164,7 @@ function consolidateMonthly(db: Database, userId?: string): ConsolidationResult 
     for (const [category, members] of groups) {
       if (members.length < 2) continue;
 
-      const summaryId = createSummaryMemory(db, members, "archetype", category);
+      const summaryId = createSummaryMemory(db, members, "archetype", category, previousSummary);
       logConsolidation(db, "monthly", members.map((m) => m.id), summaryId);
       markConsolidated(db, members.map((m) => m.id), "archetype");
 
@@ -221,14 +231,18 @@ function createSummaryMemory(
   db: Database,
   members: GroupedRow[],
   level: ConsolidationLevel,
-  category: string
+  category: string,
+  previousSummary?: string
 ): string {
   const id = generateId("mem");
   const now = Date.now();
 
-  // Deterministic summarization: concatenate with count prefix
+  // Iterative consolidation: if previous summary exists, UPDATE it with new observations
+  // instead of regenerating from scratch. Saves tokens and preserves context.
   const contents = members.map((m) => m.content_text).filter(Boolean);
-  const summaryText = `From ${members.length} observations: ${contents.join(" | ")}`;
+  const summaryText = previousSummary
+    ? `${previousSummary} | Updated with ${members.length} new observations: ${contents.join(" | ")}`
+    : `From ${members.length} observations: ${contents.join(" | ")}`;
 
   // Collect most common tags across all members
   const tagCounts = new Map<string, number>();
