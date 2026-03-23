@@ -271,17 +271,18 @@ class TelegramDaemonBridge {
       case "agent:stream":
         if (payload.final && payload.chunk) {
           this.agentBusy = false;
+          if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
           tgSend(this.config.telegramToken, this.config.chatId, payload.chunk);
         }
         break;
 
       case "agent:error":
         this.agentBusy = false;
+        if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
         // If session was evicted, recreate it silently
         if (payload.error === "session not found") {
           console.log("[telegram-bridge] session evicted, recreating...");
           this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
-          // Don't send error to user, just retry silently
           return;
         }
         tgSend(
@@ -293,6 +294,7 @@ class TelegramDaemonBridge {
 
       case "session:end":
         this.agentBusy = false;
+        if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
         break;
 
       case "approval:required":
@@ -416,20 +418,63 @@ class TelegramDaemonBridge {
     }
 
     this.agentBusy = true;
-    this.ws.send(JSON.stringify({ type: "prompt", text }));
-
-    // Hard timeout: if agent doesn't respond in 2 minutes, unstick and notify
-    setTimeout(() => {
-      if (this.agentBusy) {
-        this.agentBusy = false;
-        tgSend(
-          this.config.telegramToken,
-          this.config.chatId,
-          "Timed out after 2 minutes. The task was too complex for a single turn. Try breaking it into smaller steps."
-        );
-      }
-    }, 120_000);
+    this.retryPrompt(text, 1);
   }
+
+  /**
+   * Retry loop: tries the prompt up to 4 times with different strategies.
+   * The Infinite Gentleman never gives up.
+   *
+   * Attempt 1: Send as-is (2 min timeout)
+   * Attempt 2: Simplify - prepend "Answer briefly without using tools: " (90s timeout)
+   * Attempt 3: Direct - prepend "In one paragraph, no tools: " (60s timeout)
+   * Attempt 4: Fallback - acknowledge the issue and ask for simpler request
+   */
+  private retryPrompt(originalText: string, attempt: number): void {
+    const maxAttempts = 4;
+    const timeouts = [120_000, 90_000, 60_000, 30_000];
+    const timeout = timeouts[attempt - 1] || 30_000;
+
+    let prompt = originalText;
+    if (attempt === 2) {
+      prompt = `Answer briefly and concisely. Limit tool use to 5 calls maximum. Original question: ${originalText}`;
+      tgSend(this.config.telegramToken, this.config.chatId, "Taking a bit longer than expected. Trying a simpler approach...");
+    } else if (attempt === 3) {
+      prompt = `Respond in one short paragraph. Do NOT use any tools. Just answer from what you know. Question: ${originalText}`;
+      tgSend(this.config.telegramToken, this.config.chatId, "Still working on it. Trying without tools this time...");
+    } else if (attempt >= 4) {
+      // Final fallback - just acknowledge
+      this.agentBusy = false;
+      tgSend(
+        this.config.telegramToken,
+        this.config.chatId,
+        "I tried 3 different approaches but couldn't complete this one. Could you rephrase or break it into a smaller task? I'm ready for the next message."
+      );
+      return;
+    }
+
+    // Send the prompt
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "prompt", text: prompt }));
+    }
+
+    // Set timeout for this attempt
+    const timer = setTimeout(() => {
+      if (this.agentBusy) {
+        // Create a new session to clear any stuck state
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+        }
+        // Retry with next strategy
+        this.retryPrompt(originalText, attempt + 1);
+      }
+    }, timeout);
+
+    // Clear the timer if we get a response (handled by agentBusy being set to false)
+    this._retryTimer = timer;
+  }
+
+  private _retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   private async sendApprovalRequest(payload: any): Promise<void> {
     const { requestId, tool, input } = payload;
