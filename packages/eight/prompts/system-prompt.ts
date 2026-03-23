@@ -290,6 +290,8 @@ export const RULES_SEGMENT = `## CRITICAL RULES
  */
 export const FULL_SYSTEM_PROMPT = [
   composeSoulPrompt("owner"),
+  // Inject vessel context if running as a deployed instance
+  process.env.EIGHT_VESSEL_CONTEXT || "",
   ARCHITECTURE_SEGMENT,
   BMAD_SEGMENT,
   THINKING_PATTERNS_SEGMENT,
@@ -299,7 +301,7 @@ export const FULL_SYSTEM_PROMPT = [
   ERROR_RECOVERY_SEGMENT,
   COMPLETION_SEGMENT,
   RULES_SEGMENT,
-].join("\n\n");
+].filter(Boolean).join("\n\n");
 
 /**
  * Build a full system prompt for a specific access tier.
