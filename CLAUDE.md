@@ -168,6 +168,20 @@ Eight's native skills live in these packages. Each is self-contained and can be 
 | `packages/ast-index/` | Blast radius | Import dependency graph, test file mapping, change impact estimation |
 | `packages/tools/browser/` | Browser | Fetch + DuckDuckGo HTML scraper, HTML-to-text, disk cache, no headless deps |
 
+## Memory Layer (`packages/memory/`)
+
+The memory layer is implemented with dual-layer episodic + semantic storage. Key capabilities:
+
+- **Episodic memories** - timestamped facts extracted from conversations, auto-decayed over 30 days
+- **Semantic memories** - consolidated, promoted facts with frequency-based scoring
+- **Natural language queries** - FTS5 full-text search + Ollama embeddings for semantic retrieval
+- **Auto-injection** - relevant memories injected into system prompt each turn
+- **Consolidation** - background process merges, deduplicates, and promotes episodic to semantic
+
+**API reference:** [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md)
+
+**v1 enhancements in progress** on `feature/memory-v1-enhancements` branch. See GitHub issues #7-#11 for the roadmap (contradiction detection, health introspection, checkpointing, procedural memory, lease-based job queue).
+
 ## Kernel Fine-Tuning (`packages/kernel/`)
 
 The `@8gent/kernel` package handles continuous RL fine-tuning via a training proxy. Key files:
