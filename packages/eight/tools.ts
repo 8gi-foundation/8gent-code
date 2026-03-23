@@ -208,7 +208,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "get_outline",
-          description: "Get the outline (functions, classes, etc.) of a source file. Use this FIRST before reading full files to understand structure.",
+          description: "[CODE] Returns a list of all symbols (functions, classes, types, exports) in a file with their line numbers and signatures. Use this FIRST before read_file to understand file structure - much cheaper than reading the whole file. Typically followed by get_symbol to extract just the function you need. If the file is not indexed, falls back to AST parsing.",
           parameters: {
             type: "object",
             properties: {
@@ -222,7 +222,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "get_symbol",
-          description: "Get the full source code of a specific symbol (function, class, etc.)",
+          description: "[CODE] Returns the full source code of a single symbol (function, class, variable, type) by ID. Use this after get_outline to extract exactly the code you need without reading the entire file. Typically used after get_outline or search_symbols. If the symbol is not found, check the ID format: 'path/to/file.ts::symbolName'.",
           parameters: {
             type: "object",
             properties: {
@@ -236,7 +236,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "search_symbols",
-          description: "Search for symbols (functions, classes, etc.) across the codebase",
+          description: "[CODE] Returns matching symbol names, locations, and kinds across the entire indexed codebase. Use this when you know what you are looking for but not where it lives. Prefer this over reading multiple files to find a function. If no results, try broader query terms or check that the project is indexed with get_project_outline.",
           parameters: {
             type: "object",
             properties: {
@@ -251,7 +251,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "get_project_outline",
-          description: "Get a compact map of the entire project: all indexed files with their symbol counts and names. Use this FIRST to understand the codebase before diving into specific files.",
+          description: "[CODE] Returns a compact map of every indexed file in the project with symbol counts and names. Use this FIRST when starting work on an unfamiliar codebase to understand its structure. Much faster than listing directories and reading files individually. Follow up with get_outline on specific files of interest.",
           parameters: {
             type: "object",
             properties: {},
@@ -263,7 +263,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "read_file",
-          description: "Read the contents of a file",
+          description: "[FILE] Returns the full text content of a file at the given path. Use when you need to see existing code before modifying it. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
           parameters: {
             type: "object",
             properties: {
@@ -277,7 +277,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "write_file",
-          description: "Write content to a file (creates or overwrites). ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths like '/8gent-code/server.ts'.",
+          description: "[FILE] Creates a new file or completely overwrites an existing file with the given content. Use when creating new files or rewriting an entire file. Prefer edit_file for surgical changes to existing files. ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths. If the parent directory does not exist, this will fail - use run_command to mkdir first.",
           parameters: {
             type: "object",
             properties: {
@@ -292,7 +292,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "edit_file",
-          description: "Edit a file by replacing text",
+          description: "[FILE] Returns confirmation after replacing an exact text match in a file with new text. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
           parameters: {
             type: "object",
             properties: {
@@ -308,7 +308,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "list_files",
-          description: "List files in a directory",
+          description: "[FILE] Returns a list of filenames and directories at the given path, optionally filtered by glob pattern. Use this to explore project structure or find files by name pattern. For finding files by content, use search_symbols or run_command with grep instead.",
           parameters: {
             type: "object",
             properties: {
@@ -323,7 +323,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "git_status",
-          description: "Get git status",
+          description: "[GIT] Returns the working tree status: modified, staged, untracked, and deleted files. Use this before git_add or git_commit to see what has changed. Also useful after edits to verify your changes landed in the right files.",
           parameters: { type: "object", properties: {} }
         }
       },
@@ -331,7 +331,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "git_diff",
-          description: "Show git diff",
+          description: "[GIT] Returns the line-by-line diff of changes. Use without 'staged' to see unstaged working tree changes; use with staged=true to review what will be included in the next commit. Typically used after git_status to inspect specific changes before committing.",
           parameters: {
             type: "object",
             properties: {
@@ -344,7 +344,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "git_log",
-          description: "Show git commit log",
+          description: "[GIT] Returns recent commit hashes, messages, authors, and dates. Use this to understand project history, find when a change was introduced, or check commit message conventions before writing your own. Defaults to 10 commits.",
           parameters: {
             type: "object",
             properties: {
@@ -357,7 +357,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "git_add",
-          description: "Stage files for commit",
+          description: "[GIT] Stages files for the next commit. Use after making edits and before git_commit. Pass specific file paths to stage selectively, or omit to stage all changes. Typically used after git_status confirms the right files were modified.",
           parameters: {
             type: "object",
             properties: {
@@ -370,7 +370,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "git_commit",
-          description: "Create a git commit",
+          description: "[GIT] Creates a git commit with the staged changes and returns the commit hash. Use after git_add. If nothing is staged, this will fail - run git_status first to verify staged files. Follow the project's commit message conventions (check git_log for examples).",
           parameters: {
             type: "object",
             properties: {
@@ -385,7 +385,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "run_command",
-          description: "Run a shell command",
+          description: "[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls.",
           parameters: {
             type: "object",
             properties: {
@@ -400,7 +400,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "spawn_agent",
-          description: "Spawn a background agent. Use runtime='claude' for complex tasks that need a stronger model, runtime='8gent' for standard tasks, runtime='shell' for simple commands.",
+          description: "[SHELL] Launches a background agent and returns an agentId for tracking. Use runtime='claude' for complex multi-step tasks needing a stronger model, runtime='8gent' for standard coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. For 8gent runtime, pass model='auto:free' to auto-select the best free model.",
           parameters: {
             type: "object",
             properties: {
@@ -417,7 +417,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "check_agent",
-          description: "Check the status and result of a spawned background agent by ID. Works with all runtimes (8gent, claude, shell).",
+          description: "[SHELL] Returns the current status (running/completed/failed) and output of a background agent. Use this to poll a previously spawned agent by its ID. If status is 'running', wait and check again. Typically used after spawn_agent to collect results.",
           parameters: {
             type: "object",
             properties: {
@@ -431,7 +431,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "list_agents",
-          description: "List all spawned background agents (8gent, claude, shell) with their status. Shows unified overview across all runtimes.",
+          description: "[SHELL] Returns a summary of all spawned background agents with their IDs, runtimes, statuses, and elapsed times. Use this to get an overview before checking individual agents, or to find an agentId you lost track of.",
           parameters: { type: "object", properties: {} }
         }
       },
@@ -440,7 +440,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "web_search",
-          description: "Search the web",
+          description: "[WEB] Returns a list of search results (titles, URLs, snippets) from DuckDuckGo. Use when you need to find documentation, look up error messages, or research a topic. Follow up with web_fetch on a specific result URL to get full page content. If results are poor, try rephrasing with more specific technical terms.",
           parameters: {
             type: "object",
             properties: {
@@ -455,7 +455,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "web_fetch",
-          description: "Fetch content from a URL",
+          description: "[WEB] Returns the text content of a web page at the given URL (HTML stripped to readable text). Use after web_search to read a specific page, or directly when you have a known URL (docs, GitHub, npm). Results are cached to disk. If the page is too large, only the first portion is returned.",
           parameters: {
             type: "object",
             properties: {
@@ -470,7 +470,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "suggest_design",
-          description: "Get design system recommendations for the current project or task. Use BEFORE creating UI components to ensure excellent design. Analyzes the task and suggests design systems, color palettes, typography, and component libraries.",
+          description: "[DESIGN] Returns design system recommendations including color palettes, typography, and component libraries matched to your task. Use this BEFORE writing any UI code to get curated design guidance. Typically the first design tool to call - follow up with query_design_system for specific palette/component details. Prefer this over guessing colors or fonts.",
           parameters: {
             type: "object",
             properties: {
@@ -485,7 +485,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "query_design_system",
-          description: "Query the design systems database for components, color palettes, typography, and patterns. Search by name, style, mood, or tag.",
+          description: "[DESIGN] Returns design system data from a curated SQLite database - palettes, typography, components, and patterns. Use when you need specific design tokens (hex colors, font stacks, spacing scales). Can output as summary, CSS variables, Tailwind config, or hex palette. Typically used after suggest_design to get implementation-ready values for a recommended system.",
           parameters: {
             type: "object",
             properties: {
@@ -502,7 +502,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "enable_infinite_mode",
-          description: "Enable infinite/autonomous execution mode. The agent will loop until the task is complete, recovering from errors automatically. Use when a task requires extended autonomous execution without user intervention.",
+          description: "[SHELL] Activates autonomous looping execution for a task and returns a runner handle. The agent will iterate until the task is complete, recovering from errors automatically. Use this when a task is too large for a single pass - e.g., refactoring across many files, running repeated test-fix cycles, or multi-step research. Set maxIterations and maxTimeMs to bound execution. If the task can be done in one shot, prefer direct tool calls instead.",
           parameters: {
             type: "object",
             properties: {
@@ -519,7 +519,7 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "remember",
-          description: "Save a fact to memory. Use 'session' for temporary context, 'project' for facts about this codebase (persisted in .8gent/), 'global' for cross-project knowledge (persisted in ~/.8gent/).",
+          description: "[MEMORY] Persists a fact to the specified memory layer and returns confirmation. Use 'session' for temporary context that disappears when the session ends. Use 'project' for facts about this codebase (persisted in .8gent/ - e.g., architecture decisions, user preferences for this repo). Use 'global' for cross-project knowledge (persisted in ~/.8gent/ - e.g., user's coding style, tool preferences). Keep facts concise and searchable. Pair with recall to retrieve later.",
           parameters: {
             type: "object",
             properties: {
@@ -534,11 +534,11 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "recall",
-          description: "Search memory for relevant facts. Searches across all layers (session, project, global) using keyword matching.",
+          description: "[MEMORY] Returns matching facts from all memory layers (session, project, global) ranked by relevance. Use this when you need context about the user, project conventions, past decisions, or previously learned information. Search with broad keywords first, then narrow down. If no results, try synonyms or related terms. Useful at the start of a task to check for prior context.",
           parameters: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Search query — keywords to match against stored memories" },
+              query: { type: "string", description: "Search query - keywords to match against stored memories" },
               limit: { type: "number", description: "Max results to return (default: 10)" }
             },
             required: ["query"]
