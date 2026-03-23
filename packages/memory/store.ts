@@ -59,12 +59,13 @@ CREATE TABLE IF NOT EXISTS embeddings (
   created_at    INTEGER NOT NULL
 );
 
--- Full-text search index
+-- Full-text search index (porter stemmer for fuzzy matching)
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   content_text,
   tags,
   content='memories',
-  content_rowid='rowid'
+  content_rowid='rowid',
+  tokenize='porter unicode61'
 );
 
 -- FTS sync triggers
@@ -623,12 +624,12 @@ export class MemoryStore {
   private _ftsSearch(query: string, options: SearchOptions): SearchResult[] {
     if (!query) return [];
 
-    // Build FTS5 query — escape special chars and use OR for partial matching
+    // Build FTS5 query — prefix-expanded OR queries for porter stemmer matching
     const ftsQuery = query
-      .replace(/['"(){}[\]*+?\\^$|]/g, "")
+      .replace(/[^\w\s]/g, "")
       .split(/\s+/)
-      .filter((t) => t.length > 1)
-      .map((t) => `"${t}"`)
+      .filter((t) => t.length > 2)
+      .map((t) => `${t}*`)
       .join(" OR ");
 
     if (!ftsQuery) return [];
