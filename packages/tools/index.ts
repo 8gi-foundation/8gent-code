@@ -51,6 +51,20 @@ export {
   type NotebookInfo,
 } from "./notebook";
 
+// Browser Use CLI wrapper
+export {
+  browserOpen,
+  browserState,
+  browserScreenshot,
+  browserTask,
+  browserClick,
+  browserType,
+  browserEval,
+  browserScroll,
+  browserClose,
+  browserSessions,
+} from "./browser-use";
+
 // Rate limiter
 export {
   RateLimiter,

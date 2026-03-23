@@ -79,6 +79,12 @@ import {
   listMoods as listDesignMoods,
 } from "../design-systems/index.js";
 import { createInfiniteRunner, formatInfiniteState, type InfiniteRunner } from "../infinite";
+import {
+  browserOpen,
+  browserState,
+  browserScreenshot,
+  browserTask,
+} from "../tools/browser-use";
 import { getMemoryManager } from "../memory";
 import { RateLimiter } from "../tools/rate-limiter";
 
@@ -539,6 +545,66 @@ export class ToolExecutor {
           }
         }
       },
+      // Browser Use tools
+      {
+        type: "function",
+        function: {
+          name: "browser_open",
+          description: "Open a URL in a real browser and return the page state (title, URL, clickable elements). Use for web interaction, form filling, scraping dynamic pages.",
+          parameters: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "URL to navigate to" },
+              browser: { type: "string", description: "Browser to use (default: chromium). Use 'remote' for cloud browsers." },
+              session: { type: "string", description: "Session ID for persistent browser sessions" }
+            },
+            required: ["url"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_state",
+          description: "Get the current browser page state: URL, title, and all clickable/interactive elements with their indices. Use after browser_open to see what you can interact with.",
+          parameters: {
+            type: "object",
+            properties: {
+              session: { type: "string", description: "Session ID (if using persistent sessions)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_task",
+          description: "Run a complex browser task described in natural language. The browser-use agent will plan and execute multi-step interactions (clicking, typing, navigating) to complete the task.",
+          parameters: {
+            type: "object",
+            properties: {
+              task: { type: "string", description: "Natural language description of the browser task to perform" },
+              browser: { type: "string", description: "Browser to use (default: chromium). Use 'remote' for cloud browsers." },
+              session: { type: "string", description: "Session ID for persistent browser sessions" }
+            },
+            required: ["task"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_screenshot",
+          description: "Take a screenshot of the current browser page. Returns the file path where the screenshot was saved.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "File path to save screenshot (default: auto-generated)" },
+              session: { type: "string", description: "Session ID (if using persistent sessions)" }
+            }
+          }
+        }
+      },
     ];
   }
 
@@ -731,6 +797,27 @@ export class ToolExecutor {
         return this.handleRemember(args.fact as string, args.layer as "session" | "project" | "global");
       case "recall":
         return this.handleRecall(args.query as string, args.limit as number | undefined);
+
+      // Browser Use tools
+      case "browser_open":
+        return this.handleBrowserOpen(
+          args.url as string,
+          args.browser as string | undefined,
+          args.session as string | undefined
+        );
+      case "browser_state":
+        return this.handleBrowserState(args.session as string | undefined);
+      case "browser_task":
+        return this.handleBrowserTask(
+          args.task as string,
+          args.browser as string | undefined,
+          args.session as string | undefined
+        );
+      case "browser_screenshot":
+        return this.handleBrowserScreenshot(
+          args.path as string | undefined,
+          args.session as string | undefined
+        );
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -1850,6 +1937,53 @@ export class ToolExecutor {
       return `Found ${results.length} memor${results.length === 1 ? "y" : "ies"} matching "${query}":\n${lines.join("\n")}`;
     } catch (err) {
       return `Failed to recall: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Browser Use Tools
+  // ============================================
+
+  private async handleBrowserOpen(
+    url: string,
+    browser?: string,
+    session?: string
+  ): Promise<string> {
+    try {
+      return browserOpen(url, { browser, session });
+    } catch (err) {
+      return `browser_open failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserState(session?: string): Promise<string> {
+    try {
+      return browserState(session);
+    } catch (err) {
+      return `browser_state failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserTask(
+    task: string,
+    browser?: string,
+    session?: string
+  ): Promise<string> {
+    try {
+      return browserTask(task, { browser, session });
+    } catch (err) {
+      return `browser_task failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserScreenshot(
+    filePath?: string,
+    session?: string
+  ): Promise<string> {
+    try {
+      return browserScreenshot(filePath, session);
+    } catch (err) {
+      return `browser_screenshot failed: ${err}`;
     }
   }
 }
