@@ -3,24 +3,33 @@
  *
  * Context-optimized system prompt with structured thinking patterns,
  * efficient token usage, and clear behavioral guidelines.
+ *
+ * Identity and access control are composed via soul-layers.ts.
  */
+
+import {
+  composeSoulPrompt,
+  determineTier,
+  type AccessTier,
+  type UserContext,
+} from "./soul-layers";
+
+export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
 // ============================================
 // Prompt Segments (Composable)
 // ============================================
 
-export const IDENTITY_SEGMENT = `## IDENTITY
+/**
+ * @deprecated Use composeSoulPrompt() from soul-layers.ts instead.
+ * Kept for backward compatibility with any direct imports.
+ */
+export const IDENTITY_SEGMENT = composeSoulPrompt("owner");
 
-You are **8gent** - "The Infinite Gentleman" - an autonomous AI coding agent.
-
-**Core Traits:**
-- Direct executor: You DO things, never explain how
-- Tool ownership: Results come from YOUR tools
-- Self-aware AI: You own it with class
-- Efficient: No filler words, no "certainly!"
-
-**Voice:** British wit, dry humor, confident but not arrogant.`;
-
+/**
+ * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
+ * Kept for backward compatibility with any direct imports.
+ */
 export const USER_CONTEXT_SEGMENT = (userData: {
   name?: string | null;
   role?: string | null;
@@ -276,10 +285,11 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 // ============================================
 
 /**
- * Full system prompt for autonomous mode
+ * Full system prompt for autonomous mode.
+ * Uses soul layers for identity (defaults to owner tier).
  */
 export const FULL_SYSTEM_PROMPT = [
-  IDENTITY_SEGMENT,
+  composeSoulPrompt("owner"),
   ARCHITECTURE_SEGMENT,
   BMAD_SEGMENT,
   THINKING_PATTERNS_SEGMENT,
@@ -290,6 +300,28 @@ export const FULL_SYSTEM_PROMPT = [
   COMPLETION_SEGMENT,
   RULES_SEGMENT,
 ].join("\n\n");
+
+/**
+ * Build a full system prompt for a specific access tier.
+ * Includes all tool/coding segments, but identity layer varies by tier.
+ */
+export function buildTieredSystemPrompt(
+  tier: AccessTier,
+  userContext?: UserContext,
+): string {
+  return [
+    composeSoulPrompt(tier, userContext),
+    ARCHITECTURE_SEGMENT,
+    BMAD_SEGMENT,
+    THINKING_PATTERNS_SEGMENT,
+    SWE_PATTERNS_SEGMENT,
+    TOOL_PATTERNS_SEGMENT,
+    DESIGN_FIRST_SEGMENT,
+    ERROR_RECOVERY_SEGMENT,
+    COMPLETION_SEGMENT,
+    RULES_SEGMENT,
+  ].join("\n\n");
+}
 
 /**
  * Minimal system prompt for subagents (reduced tokens)
@@ -382,7 +414,8 @@ export function compressContext(messages: Array<{ role: string; content: string 
 }
 
 /**
- * Build context-aware system prompt with current state
+ * Build context-aware system prompt with current state.
+ * Uses soul layers for identity - tier and channel determine access level.
  */
 export function buildContextualPrompt(state: {
   workingDirectory: string;
@@ -398,7 +431,27 @@ export function buildContextualPrompt(state: {
     language?: string;
   };
   memoryContext?: string;
+  channel?: string;
+  userId?: string;
 }): string {
+  // Determine access tier from channel
+  const tier = state.channel
+    ? determineTier(state.channel, state.userId)
+    : "owner";
+
+  // Build user context for soul layers
+  const userContext: UserContext | undefined = state.userData
+    ? {
+        name: state.userData.name ?? undefined,
+        role: state.userData.role ?? undefined,
+        communicationStyle:
+          state.userData.communicationStyle ?? undefined,
+        peerRepresentation: state.memoryContext ?? undefined,
+      }
+    : state.memoryContext
+      ? { peerRepresentation: state.memoryContext }
+      : undefined;
+
   const contextSection = `## CURRENT CONTEXT
 - Directory: ${state.workingDirectory}
 - Git: ${state.isGitRepo ? `Yes (${state.branch || "unknown"})` : "No"}
@@ -407,9 +460,7 @@ ${state.currentPlan ? `- Plan in progress: Yes` : ""}
 ${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
 
   return [
-    IDENTITY_SEGMENT,
-    ...(state.userData ? [USER_CONTEXT_SEGMENT(state.userData)] : []),
-    ...(state.memoryContext ? [`## RECALLED PREFERENCES\n${state.memoryContext}`] : []),
+    composeSoulPrompt(tier, userContext),
     contextSection,
     BMAD_SEGMENT,
     TOOL_PATTERNS_SEGMENT,
@@ -588,6 +639,82 @@ export const BUG_FIXING_ENHANCED = `
 // Failures: fib, parse
 // BENCHMARK FAILURE fib: Score 30. Needs improvement.
 // BENCHMARK FAILURE parse: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 1 — 2026-03-21T02:15:04.305Z
+// Failures: fib, sort, cache, validate
+// BENCHMARK FAILURE fib: Score 30. Needs improvement.
+// BENCHMARK FAILURE sort: Score 30. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 2 — 2026-03-21T02:28:20.028Z
+// Failures: fib, sort, validate
+// BENCHMARK FAILURE fib: Score 30. Needs improvement.
+// BENCHMARK FAILURE sort: Score 30. Needs improvement.
+// BENCHMARK FAILURE validate: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 3 — 2026-03-21T02:41:25.243Z
+// Failures: fib, sort, cache
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 30. Needs improvement.
+// BENCHMARK FAILURE cache: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 4 — 2026-03-21T02:54:41.263Z
+// Failures: sort, cache, validate
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 30. Needs improvement.
+// BENCHMARK FAILURE validate: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 5 — 2026-03-21T03:07:51.698Z
+// Failures: cache, validate
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 1 — 2026-03-22T02:11:20.339Z
+// Failures: parse
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 2 — 2026-03-22T02:26:28.309Z
+// Failures: fib, sort, cache, parse
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE sort: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE parse: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 3 — 2026-03-22T02:41:37.293Z
+// Failures: fib, cache, validate
+// BENCHMARK FAILURE fib: Score 0. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+// BENCHMARK FAILURE validate: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 4 — 2026-03-22T02:52:38.664Z
+// Failures: sort
+// BENCHMARK FAILURE sort: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 5 — 2026-03-22T03:05:21.945Z
+// Failures: fib, cache
+// BENCHMARK FAILURE fib: Score 30. Needs improvement.
+// BENCHMARK FAILURE cache: Score 0. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 2 — 2026-03-23T02:20:30.438Z
+// Failures: sort
+// BENCHMARK FAILURE sort: Score 30. Needs improvement.
+
+// NIGHTLY TRAINING ITERATION 5 — 2026-03-23T02:51:20.050Z
+// Failures: fib
+// BENCHMARK FAILURE fib: Score 30. Needs improvement.
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

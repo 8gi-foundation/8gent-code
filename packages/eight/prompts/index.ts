@@ -6,6 +6,12 @@
  */
 
 export {
+  // Soul Layers (access-based prompt composition)
+  composeSoulPrompt,
+  determineTier,
+  type AccessTier,
+  type UserContext,
+
   // Prompt Segments (composable)
   IDENTITY_SEGMENT,
   ARCHITECTURE_SEGMENT,
@@ -25,5 +31,6 @@ export {
   // Context Engineering Functions
   compressContext,
   buildContextualPrompt,
+  buildTieredSystemPrompt,
   getTaskSpecificPrompt,
 } from "./system-prompt";
