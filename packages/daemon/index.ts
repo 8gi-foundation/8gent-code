@@ -130,6 +130,16 @@ async function main(): Promise<void> {
     console.log(`[daemon] model=${modelValue} runtime=${poolConfig.runtime || "ollama"}`);
   }
 
+  // Load vessel context for self-awareness
+  try {
+    const vesselContextPath = `${import.meta.dir}/VESSEL-CONTEXT.md`;
+    const vesselFile = Bun.file(vesselContextPath);
+    if (await vesselFile.exists()) {
+      process.env.EIGHT_VESSEL_CONTEXT = await vesselFile.text();
+      console.log("[daemon] vessel context loaded (self-awareness active)");
+    }
+  } catch {}
+
   // Setup log file writer
   setupLogging();
 
