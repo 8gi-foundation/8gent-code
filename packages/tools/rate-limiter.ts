@@ -15,6 +15,7 @@ export interface RateLimitConfig {
 /** Per-tool rate limit overrides (calls per minute) */
 const TOOL_LIMITS: Record<string, number> = {
   run_command: 30,
+  read_file: 10,  // Prevent loop-reading same file
   web_fetch: 20,
   web_search: 20,
   write_file: 50,
