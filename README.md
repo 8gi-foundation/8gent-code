@@ -2,6 +2,8 @@
 
 The brain of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent that runs on local LLMs via Ollama. No API keys, no usage caps, no cloud dependency.
 
+**v1.0.0 tagged** - daemon stable. Vessel deployed at [eight-vessel.fly.dev](https://eight-vessel.fly.dev).
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](https://8gent.dev)
 [![8gent OS](https://img.shields.io/badge/8gent_OS-8gentos.com-orange)](https://8gentos.com)
@@ -41,7 +43,7 @@ Eight has 8 built-in abilities that define how he works:
 
 | Ability | Package | What it does |
 |---------|---------|--------------|
-| **Memory** | `packages/memory/` | SQLite + FTS5 persistent recall, Ollama embeddings, 30-day decay, frequency-based promotion |
+| **Memory** | `packages/memory/` | Dual-layer episodic + semantic memory, natural language queries, auto-injection into system prompt, SQLite + FTS5, Ollama embeddings, 30-day decay, frequency-based promotion |
 | **Worktree** | `packages/orchestration/` | Multi-agent parallel execution via git worktrees, max 4 concurrent, filesystem messaging |
 | **Policy** | `packages/permissions/` | YAML policy engine, 11 default rules, approval gates, privacy-aware model routing |
 | **Evolution** | `packages/self-autonomy/` | Post-session reflection, Bayesian skill confidence, self-improvement DB |
@@ -161,12 +163,15 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
 |-----|----------------|
 | [SOUL.md](SOUL.md) | Agent persona and principles |
 | [CLAUDE.md](CLAUDE.md) | Dev conventions, design system, repo rules |
+| [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md) | Memory layer architecture and API reference |
+| [docs/HARNESS-PLAN.md](docs/HARNESS-PLAN.md) | Vessel harness plan and roadmap |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Full benchmark methodology |
 | [docs/KERNEL-FINETUNING.md](docs/KERNEL-FINETUNING.md) | RL fine-tuning pipeline |
 | [docs/PERSONALIZATION.md](docs/PERSONALIZATION.md) | 5-layer personalization system |
 | [docs/TOOLSHED.md](docs/TOOLSHED.md) | Capability discovery and skill registry |
 | [docs/permissions.md](docs/permissions.md) | Policy engine and approval gates |
 | [docs/BRANCH-DECISIONS.md](docs/BRANCH-DECISIONS.md) | Architecture decision log |
+| [8gent.world/constitution](https://8gent.world/constitution) | 8gent constitution |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 ## Inspirations
