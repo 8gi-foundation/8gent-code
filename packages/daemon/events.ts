@@ -15,6 +15,12 @@ export interface DaemonEvents {
   "approval:required": { sessionId: string; tool: string; input: unknown; requestId: string };
   "session:start": { sessionId: string; channel: string };
   "session:end": { sessionId: string; reason: string };
+  // CEO task lifecycle events
+  "task:created": { taskId: string; description: string };
+  "task:delegated": { taskId: string; description: string };
+  "task:progress": { taskId: string; step: string; progress: string };
+  "task:completed": { taskId: string; description: string; result: string; sessionId: string };
+  "task:failed": { taskId: string; error: string; sessionId: string };
 }
 
 export type EventName = keyof DaemonEvents;
