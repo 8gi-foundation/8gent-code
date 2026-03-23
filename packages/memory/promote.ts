@@ -135,6 +135,39 @@ export class PromotionManager {
   }
 }
 
+// ── Soft Unlearn & Evidence Boost ─────────────────────────────────────
+
+/**
+ * Soft unlearn - instead of deleting, halve the confidence/importance.
+ * Returns true if the memory was found and updated.
+ */
+export function softUnlearn(db: Database, memoryId: string): boolean {
+  const result = db
+    .prepare(
+      `UPDATE memories
+       SET importance = importance * 0.5,
+           evidence_count = MAX(COALESCE(evidence_count, 1) - 1, 0),
+           updated_at = ?
+       WHERE id = ? AND deleted_at IS NULL`
+    )
+    .run(Date.now(), memoryId);
+  return result.changes > 0;
+}
+
+/**
+ * Boost evidence for a memory - increments evidence count and nudges importance up.
+ * Importance is capped at 1.0.
+ */
+export function boostEvidence(db: Database, memoryId: string): void {
+  db.prepare(
+    `UPDATE memories
+     SET evidence_count = COALESCE(evidence_count, 0) + 1,
+         importance = MIN(importance * 1.1, 1.0),
+         updated_at = ?
+     WHERE id = ? AND deleted_at IS NULL`
+  ).run(Date.now(), memoryId);
+}
+
 // ── Standalone helpers ────────────────────────────────────────────────
 
 export function isPromoted(accessCount: number, importanceScore: number): boolean {

@@ -187,6 +187,26 @@ export class MemoryStore {
     // Initialize schema
     this.db.exec(SCHEMA_SQL);
     this.db.exec(INDEXES_SQL);
+
+    // Migration: add new columns if they don't exist
+    this._migrateNewColumns();
+  }
+
+  /** Add consolidation, learning, and tenant columns if missing */
+  private _migrateNewColumns(): void {
+    const migrations = [
+      "ALTER TABLE memories ADD COLUMN consolidation_level TEXT DEFAULT 'raw'",
+      "ALTER TABLE memories ADD COLUMN learning_type TEXT",
+      "ALTER TABLE memories ADD COLUMN organization_id TEXT",
+      "ALTER TABLE memories ADD COLUMN project_id TEXT",
+    ];
+    for (const sql of migrations) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists - expected on subsequent runs
+      }
+    }
   }
 
   /** Set or update the embedding provider (e.g., after Ollama becomes available) */
@@ -524,6 +544,27 @@ export class MemoryStore {
     this.db
       .prepare("UPDATE entities SET mention_count = mention_count + 1, last_seen = ?, updated_at = ? WHERE id = ?")
       .run(now, now, entityId);
+  }
+
+  // ── User-Scoped Search ──────────────────────────────────────────────
+
+  /**
+   * Search memories filtered by userId, ordered by importance DESC.
+   * Useful for building per-user representations and ask() queries.
+   */
+  searchByUser(userId: string, options?: { limit?: number }): Memory[] {
+    const limit = options?.limit ?? 20;
+    const rows = this.db
+      .prepare(
+        `SELECT data FROM memories
+         WHERE deleted_at IS NULL
+           AND json_extract(data, '$.userId') = ?
+         ORDER BY importance DESC
+         LIMIT ?`
+      )
+      .all(userId, limit) as Array<{ data: string }>;
+
+    return rows.map((row) => JSON.parse(row.data) as Memory);
   }
 
   // ── Stats ─────────────────────────────────────────────────────────
