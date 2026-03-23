@@ -200,6 +200,9 @@ export class MemoryStore {
       "ALTER TABLE memories ADD COLUMN learning_type TEXT",
       "ALTER TABLE memories ADD COLUMN organization_id TEXT",
       "ALTER TABLE memories ADD COLUMN project_id TEXT",
+      "ALTER TABLE memories ADD COLUMN retrieval_count INTEGER DEFAULT 0",
+      "ALTER TABLE memories ADD COLUMN contributed_to_success INTEGER DEFAULT 0",
+      "ALTER TABLE memories ADD COLUMN last_retrieved_at INTEGER",
     ];
     for (const sql of migrations) {
       try {
@@ -339,13 +342,14 @@ export class MemoryStore {
     // Sort final results
     results.sort((a, b) => b.score - a.score);
 
-    // Bump access counts for returned results
+    // Bump access counts and retrieval tracking for returned results
     const updateStmt = this.db.prepare(
-      "UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?"
+      `UPDATE memories SET access_count = access_count + 1, last_accessed = ?,
+       retrieval_count = COALESCE(retrieval_count, 0) + 1, last_retrieved_at = ? WHERE id = ?`
     );
     const now = Date.now();
     for (const r of results) {
-      updateStmt.run(now, r.memory.id);
+      updateStmt.run(now, now, r.memory.id);
     }
 
     return results.slice(0, limit);
@@ -545,6 +549,25 @@ export class MemoryStore {
     this.db
       .prepare("UPDATE entities SET mention_count = mention_count + 1, last_seen = ?, updated_at = ? WHERE id = ?")
       .run(now, now, entityId);
+  }
+
+  // ── Success Tracking ────────────────────────────────────────────────
+
+  /**
+   * Increment contributedToSuccess for memories that were in context
+   * when a task completed successfully. High-success memories get priority
+   * during consolidation.
+   */
+  trackSuccess(memoryIds: string[]): void {
+    if (memoryIds.length === 0) return;
+    const stmt = this.db.prepare(
+      `UPDATE memories SET contributed_to_success = COALESCE(contributed_to_success, 0) + 1,
+       updated_at = ? WHERE id = ? AND deleted_at IS NULL`
+    );
+    const now = Date.now();
+    for (const id of memoryIds) {
+      stmt.run(now, id);
+    }
   }
 
   // ── User-Scoped Search ──────────────────────────────────────────────
