@@ -40,82 +40,181 @@ export interface PermissionLog {
   autoApprovedCount: number;
 }
 
+export interface InfiniteModeAuditEntry {
+  timestamp: Date;
+  command: string;
+  action: string;
+  details: string;
+  blocked: boolean;
+  reason?: string;
+}
+
 // ============================================
 // Constants
 // ============================================
 
 /**
- * Commands that are considered dangerous and require explicit user approval.
- * These can cause data loss, system damage, or security issues.
+ * Maximum duration for infinite mode in milliseconds (30 minutes).
  */
-export const DANGEROUS_COMMANDS = [
+const INFINITE_MODE_MAX_DURATION_MS = 30 * 60 * 1000;
+
+/**
+ * Commands that are NEVER allowed, even in infinite mode.
+ * These are catastrophic system-level destructive operations.
+ */
+export const ALWAYS_BLOCKED_COMMANDS: Array<{
+  command: string;
+  args: string[];
+  description: string;
+}> = [
+  { command: "rm", args: ["-rf", "/"], description: "recursive delete root filesystem" },
+  { command: "rm", args: ["-rf", "/*"], description: "recursive delete all root contents" },
+  { command: "rm", args: ["-rf", "--no-preserve-root", "/"], description: "force recursive delete root" },
+  { command: "chmod", args: ["000", "/"], description: "remove all permissions from root" },
+  { command: "chmod", args: ["-R", "000", "/"], description: "recursively remove all permissions from root" },
+  { command: "chown", args: ["-R"], description: "recursive ownership change (check target)" },
+  { command: "dd", args: ["of=/dev/sda"], description: "overwrite primary disk" },
+  { command: "dd", args: ["of=/dev/nvme0n1"], description: "overwrite primary nvme" },
+  { command: "mkfs", args: ["/dev/sda"], description: "format primary disk" },
+  { command: ":(){ :|:& };:", args: [], description: "fork bomb" },
+];
+
+/**
+ * Dangerous command definitions using token-based matching.
+ * Each entry defines a command and optional argument patterns that make it dangerous.
+ */
+export const DANGEROUS_COMMAND_RULES: Array<{
+  command: string;
+  argPatterns?: string[][];
+  description: string;
+}> = [
   // Destructive file operations
-  "rm -rf",
-  "rm -r",
-  "rmdir",
-  "del /s",
-  "deltree",
+  { command: "rm", argPatterns: [["-rf"], ["-r"], ["-f"]], description: "file deletion" },
+  { command: "rmdir", description: "directory removal" },
+  { command: "del", argPatterns: [["/s"]], description: "recursive delete (Windows)" },
+  { command: "deltree", description: "tree deletion (Windows)" },
 
   // Privilege escalation
-  "sudo",
-  "su ",
-  "doas",
-  "pkexec",
+  { command: "sudo", description: "privilege escalation" },
+  { command: "su", description: "switch user" },
+  { command: "doas", description: "privilege escalation" },
+  { command: "pkexec", description: "polkit privilege escalation" },
 
   // Permission changes
-  "chmod",
-  "chown",
-  "chgrp",
-  "icacls",
-  "cacls",
+  { command: "chmod", description: "permission change" },
+  { command: "chown", description: "ownership change" },
+  { command: "chgrp", description: "group change" },
+  { command: "icacls", description: "Windows ACL change" },
+  { command: "cacls", description: "Windows ACL change" },
 
   // Disk operations
-  "dd ",
-  "mkfs",
-  "fdisk",
-  "parted",
-  "diskutil eraseDisk",
-  "format ",
+  { command: "dd", description: "disk copy" },
+  { command: "mkfs", description: "filesystem creation" },
+  { command: "fdisk", description: "disk partitioning" },
+  { command: "parted", description: "disk partitioning" },
+  { command: "diskutil", argPatterns: [["eraseDisk"], ["erasevolume"]], description: "disk utility" },
+  { command: "format", description: "disk format (Windows)" },
 
   // System modification
-  "systemctl",
-  "service ",
-  "launchctl",
-  "reboot",
-  "shutdown",
-  "init ",
+  { command: "systemctl", description: "system service control" },
+  { command: "service", description: "service control" },
+  { command: "launchctl", description: "macOS service control" },
+  { command: "reboot", description: "system reboot" },
+  { command: "shutdown", description: "system shutdown" },
+  { command: "init", description: "init level change" },
 
   // Network exposure
-  "iptables",
-  "ufw ",
-  "firewall-cmd",
-  "netsh ",
+  { command: "iptables", description: "firewall rule change" },
+  { command: "ufw", description: "firewall control" },
+  { command: "firewall-cmd", description: "firewall control" },
+  { command: "netsh", description: "Windows network config" },
 
-  // Package managers with system access
-  "apt remove",
-  "apt purge",
-  "yum remove",
-  "dnf remove",
-  "brew uninstall",
-  "npm uninstall -g",
+  // Package removal
+  { command: "apt", argPatterns: [["remove"], ["purge"]], description: "package removal" },
+  { command: "yum", argPatterns: [["remove"]], description: "package removal" },
+  { command: "dnf", argPatterns: [["remove"]], description: "package removal" },
+  { command: "brew", argPatterns: [["uninstall"]], description: "package removal" },
+  { command: "npm", argPatterns: [["uninstall", "-g"]], description: "global package removal" },
 
   // Dangerous git operations
-  "git push --force",
-  "git reset --hard",
-  "git clean -fd",
+  { command: "git", argPatterns: [["push", "--force"], ["reset", "--hard"], ["clean", "-fd"], ["clean", "-f"]], description: "destructive git operation" },
 
   // Environment manipulation
-  "export PATH=",
-  "setx PATH",
+  { command: "export", argPatterns: [["PATH="]], description: "PATH modification" },
+  { command: "setx", argPatterns: [["PATH"]], description: "persistent PATH modification" },
+];
 
-  // Curl/wget to pipes (code execution risk)
-  "curl|",
-  "curl |",
-  "wget|",
-  "wget |",
-  "|sh",
-  "|bash",
-  "|zsh",
+/**
+ * Patterns in piped commands that indicate code execution risk.
+ */
+const DANGEROUS_PIPE_PATTERNS = ["| sh", "| bash", "| zsh", "|sh", "|bash", "|zsh"];
+const DANGEROUS_PIPE_SOURCES = ["curl", "wget"];
+
+/**
+ * Commands that are considered safe for headless auto-approval.
+ * Only read-only operations that cannot modify state.
+ */
+export const HEADLESS_SAFE_COMMANDS: string[] = [
+  // Git read-only
+  "git status",
+  "git diff",
+  "git log",
+  "git show",
+  "git branch",
+  "git remote",
+  "git tag",
+  "git rev-parse",
+  "git describe",
+  "git ls-files",
+  "git ls-tree",
+  "git cat-file",
+
+  // File reading
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "find",
+  "grep",
+  "rg",
+  "tree",
+  "wc",
+  "file",
+  "stat",
+  "du",
+  "df",
+  "which",
+  "whereis",
+  "type",
+  "echo",
+  "printf",
+  "date",
+  "uname",
+  "whoami",
+  "pwd",
+  "env",
+  "printenv",
+
+  // Build/test (read or idempotent)
+  "tsc --noEmit",
+  "bun run typecheck",
+];
+
+/**
+ * Legacy list kept for backward compatibility in exports.
+ */
+export const DANGEROUS_COMMANDS = [
+  "rm -rf", "rm -r", "rmdir", "del /s", "deltree",
+  "sudo", "su ", "doas", "pkexec",
+  "chmod", "chown", "chgrp", "icacls", "cacls",
+  "dd ", "mkfs", "fdisk", "parted", "diskutil eraseDisk", "format ",
+  "systemctl", "service ", "launchctl", "reboot", "shutdown", "init ",
+  "iptables", "ufw ", "firewall-cmd", "netsh ",
+  "apt remove", "apt purge", "yum remove", "dnf remove",
+  "brew uninstall", "npm uninstall -g",
+  "git push --force", "git reset --hard", "git clean -fd",
+  "export PATH=", "setx PATH",
+  "curl|", "curl |", "wget|", "wget |", "|sh", "|bash", "|zsh",
 ];
 
 /**
@@ -123,78 +222,95 @@ export const DANGEROUS_COMMANDS = [
  */
 export const SAFE_PATTERNS = [
   // Package management (non-destructive)
-  "npm install",
-  "npm i ",
-  "npm run",
-  "npm test",
-  "npm start",
-  "npm build",
-  "bun install",
-  "bun run",
-  "bun test",
-  "yarn install",
-  "yarn add",
-  "yarn run",
-  "pnpm install",
-  "pnpm add",
-  "pnpm run",
+  "npm install", "npm i ", "npm run", "npm test", "npm start", "npm build",
+  "bun install", "bun run", "bun test",
+  "yarn install", "yarn add", "yarn run",
+  "pnpm install", "pnpm add", "pnpm run",
 
   // Git (non-destructive)
-  "git status",
-  "git log",
-  "git diff",
-  "git branch",
-  "git checkout",
-  "git add",
-  "git commit",
-  "git pull",
-  "git fetch",
-  "git stash",
-  "git show",
+  "git status", "git log", "git diff", "git branch", "git checkout",
+  "git add", "git commit", "git pull", "git fetch", "git stash", "git show",
 
   // Build tools
-  "tsc",
-  "esbuild",
-  "vite",
-  "webpack",
-  "rollup",
-  "turbo",
+  "tsc", "esbuild", "vite", "webpack", "rollup", "turbo",
 
   // Testing
-  "jest",
-  "vitest",
-  "mocha",
-  "pytest",
-  "cargo test",
-  "go test",
+  "jest", "vitest", "mocha", "pytest", "cargo test", "go test",
 
   // Linting/formatting
-  "eslint",
-  "prettier",
-  "biome",
-  "rustfmt",
-  "gofmt",
-  "black",
+  "eslint", "prettier", "biome", "rustfmt", "gofmt", "black",
 
   // Development servers
-  "next dev",
-  "vite dev",
-  "npm run dev",
-  "bun run dev",
+  "next dev", "vite dev", "npm run dev", "bun run dev",
 
   // File listing/reading (non-destructive)
-  "ls",
-  "dir",
-  "cat",
-  "head",
-  "tail",
-  "less",
-  "more",
-  "find",
-  "grep",
-  "tree",
-  "wc",
+  "ls", "dir", "cat", "head", "tail", "less", "more", "find", "grep", "tree", "wc",
 ];
+
+// ============================================
+// Command Parsing Utility
+// ============================================
+
+/**
+ * Parse a command string into a command name and arguments.
+ * Handles quoted strings and basic shell syntax.
+ */
+export function parseCommand(cmd: string): { command: string; args: string[] } {
+  const trimmed = cmd.trim();
+  if (!trimmed) return { command: "", args: [] };
+
+  const tokens: string[] = [];
+  let current = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escapeNext = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+
+    if (escapeNext) {
+      current += char;
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === "\\" && !inSingleQuote) {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if ((char === " " || char === "\t") && !inSingleQuote && !inDoubleQuote) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  if (tokens.length === 0) return { command: "", args: [] };
+
+  return {
+    command: tokens[0],
+    args: tokens.slice(1),
+  };
+}
 
 // ============================================
 // Permission Manager
@@ -207,6 +323,8 @@ export class PermissionManager {
   private approvedCommands: Set<string> = new Set();
   private deniedCommands: Set<string> = new Set();
   private infiniteMode: boolean = false;
+  private infiniteModeStartTime: number | null = null;
+  private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
 
   constructor(configPath?: string) {
     const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
@@ -221,26 +339,135 @@ export class PermissionManager {
   }
 
   /**
-   * Enable infinite mode - bypasses ALL permission checks
-   * Like Claude Code's --dangerously-skip-permissions
+   * Enable infinite mode - bypasses most permission checks.
+   * Expires after 30 minutes. Catastrophic commands are still blocked.
    */
   enableInfiniteMode(): void {
     this.infiniteMode = true;
-    console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m");
+    this.infiniteModeStartTime = Date.now();
+    this.infiniteModeAuditLog = [];
+    console.log(
+      `\x1b[33m[INF] Infinite Loop mode enabled (expires in 30 minutes)\x1b[0m`
+    );
   }
 
   /**
-   * Disable infinite mode - normal permission checks resume
+   * Disable infinite mode - normal permission checks resume.
    */
   disableInfiniteMode(): void {
     this.infiniteMode = false;
+    this.infiniteModeStartTime = null;
+    console.log(`\x1b[33m[INF] Infinite Loop mode disabled\x1b[0m`);
   }
 
   /**
-   * Check if infinite mode is active
+   * Check if infinite mode is active (accounts for expiry).
    */
   isInfiniteMode(): boolean {
-    return this.infiniteMode;
+    if (!this.infiniteMode) return false;
+
+    // Check time limit
+    if (this.infiniteModeStartTime !== null) {
+      const elapsed = Date.now() - this.infiniteModeStartTime;
+      if (elapsed >= INFINITE_MODE_MAX_DURATION_MS) {
+        console.log(
+          `\x1b[33m[INF] Infinite Loop mode expired after 30 minutes\x1b[0m`
+        );
+        this.infiniteMode = false;
+        this.infiniteModeStartTime = null;
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Get the audit log of all actions taken during infinite mode.
+   */
+  getInfiniteModeAuditLog(): InfiniteModeAuditEntry[] {
+    return [...this.infiniteModeAuditLog];
+  }
+
+  /**
+   * Get remaining time in infinite mode (in ms), or 0 if not active.
+   */
+  getInfiniteModeRemainingMs(): number {
+    if (!this.infiniteMode || this.infiniteModeStartTime === null) return 0;
+    const elapsed = Date.now() - this.infiniteModeStartTime;
+    return Math.max(0, INFINITE_MODE_MAX_DURATION_MS - elapsed);
+  }
+
+  /**
+   * Check if a command is catastrophic and should ALWAYS be blocked,
+   * even in infinite mode.
+   */
+  private isAlwaysBlocked(command: string): { blocked: boolean; reason?: string } {
+    const parsed = parseCommand(command);
+    const cmd = parsed.command.toLowerCase();
+    const argsLower = parsed.args.map((a) => a.toLowerCase());
+
+    for (const rule of ALWAYS_BLOCKED_COMMANDS) {
+      if (cmd !== rule.command && !cmd.endsWith("/" + rule.command)) continue;
+
+      // If rule has no args, just matching the command is enough
+      if (rule.args.length === 0) {
+        return { blocked: true, reason: rule.description };
+      }
+
+      // Check if all rule args appear in the command args
+      const allArgsPresent = rule.args.every((ruleArg) =>
+        argsLower.some((a) => a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase()))
+      );
+
+      if (allArgsPresent) {
+        return { blocked: true, reason: rule.description };
+      }
+    }
+
+    // Also block fork bombs by content
+    if (command.includes(":(){ :|:& };:")) {
+      return { blocked: true, reason: "fork bomb" };
+    }
+
+    return { blocked: false };
+  }
+
+  /**
+   * Log an action during infinite mode.
+   */
+  private auditInfiniteMode(
+    command: string,
+    action: string,
+    details: string,
+    blocked: boolean,
+    reason?: string
+  ): void {
+    const entry: InfiniteModeAuditEntry = {
+      timestamp: new Date(),
+      command,
+      action,
+      details,
+      blocked,
+      reason,
+    };
+    this.infiniteModeAuditLog.push(entry);
+
+    // Also write to log file if configured
+    if (this.config.logPath) {
+      const logLine =
+        JSON.stringify({
+          ...entry,
+          timestamp: entry.timestamp.toISOString(),
+          mode: "infinite",
+        }) + "\n";
+
+      try {
+        fs.appendFileSync(this.config.logPath, logLine);
+      } catch (err) {
+        // Silent - don't break the flow for audit logging
+      }
+    }
   }
 
   /**
@@ -276,21 +503,65 @@ export class PermissionManager {
   }
 
   /**
-   * Check if a command matches any dangerous patterns
+   * Check if a command matches any dangerous patterns.
+   * Uses token-based parsing instead of substring matching.
    */
   isDangerous(command: string): boolean {
-    const normalizedCmd = command.toLowerCase().trim();
+    const normalizedCmd = command.trim();
+    const parsed = parseCommand(normalizedCmd);
+    const cmdLower = parsed.command.toLowerCase();
+    const argsLower = parsed.args.map((a) => a.toLowerCase());
+    const fullCmdLower = normalizedCmd.toLowerCase();
 
-    // Check against dangerous commands list
-    for (const dangerous of DANGEROUS_COMMANDS) {
-      if (normalizedCmd.includes(dangerous.toLowerCase())) {
+    // Check for dangerous pipe patterns (curl/wget piped to shell)
+    for (const source of DANGEROUS_PIPE_SOURCES) {
+      if (cmdLower === source) {
+        for (const pipePattern of DANGEROUS_PIPE_PATTERNS) {
+          if (fullCmdLower.includes(pipePattern)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    // Also check if a pipe to shell exists anywhere in the command
+    for (const pipePattern of DANGEROUS_PIPE_PATTERNS) {
+      if (fullCmdLower.includes(pipePattern)) {
+        // Only flag if the pipe target is a shell
         return true;
+      }
+    }
+
+    // Token-based matching against dangerous command rules
+    for (const rule of DANGEROUS_COMMAND_RULES) {
+      // Check if the command (first token) matches the rule
+      if (cmdLower !== rule.command && !cmdLower.endsWith("/" + rule.command)) {
+        continue;
+      }
+
+      // If no specific arg patterns, the command itself is dangerous
+      if (!rule.argPatterns || rule.argPatterns.length === 0) {
+        return true;
+      }
+
+      // Check if any arg pattern matches
+      for (const argPattern of rule.argPatterns) {
+        const allArgsMatch = argPattern.every((requiredArg) => {
+          const reqLower = requiredArg.toLowerCase();
+          return argsLower.some(
+            (a) => a === reqLower || a.startsWith(reqLower)
+          );
+        });
+
+        if (allArgsMatch) {
+          return true;
+        }
       }
     }
 
     // Check against user-defined denied patterns
     for (const pattern of this.config.deniedPatterns) {
-      if (this.matchPattern(normalizedCmd, pattern)) {
+      if (this.matchPattern(fullCmdLower, pattern)) {
         return true;
       }
     }
@@ -346,6 +617,36 @@ export class PermissionManager {
   }
 
   /**
+   * Check if a command is safe for headless auto-approval.
+   * Uses the first token of the command for matching.
+   */
+  private isHeadlessSafe(command: string): boolean {
+    const parsed = parseCommand(command);
+    const cmdLower = parsed.command.toLowerCase();
+    const fullCmdLower = command.toLowerCase().trim();
+
+    for (const safe of HEADLESS_SAFE_COMMANDS) {
+      const safeParts = safe.split(" ");
+      const safeCmd = safeParts[0].toLowerCase();
+
+      if (cmdLower === safeCmd) {
+        // If the safe entry has specific subcommands, check them
+        if (safeParts.length > 1) {
+          const safeSubCmd = safeParts.slice(1).join(" ").toLowerCase();
+          if (fullCmdLower.startsWith(safe.toLowerCase())) {
+            return true;
+          }
+        } else {
+          // Just the command name matches, no subcommand required
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Request permission from the user for a command/action
    */
   async requestPermission(action: string, details: string, command?: string): Promise<boolean> {
@@ -357,8 +658,30 @@ export class PermissionManager {
       timestamp: new Date(),
     };
 
-    // INFINITE MODE: Bypass all permission checks
-    if (this.infiniteMode) {
+    // INFINITE MODE: Bypass most permission checks, but block catastrophic commands
+    if (this.isInfiniteMode()) {
+      if (command) {
+        const blockCheck = this.isAlwaysBlocked(command);
+        if (blockCheck.blocked) {
+          this.auditInfiniteMode(
+            command,
+            action,
+            details,
+            true,
+            `BLOCKED even in infinite mode: ${blockCheck.reason}`
+          );
+          request.approved = false;
+          this.log.requests.push(request);
+          this.log.deniedCount++;
+          console.log(
+            `\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`
+          );
+          return false;
+        }
+      }
+
+      // Audit and approve
+      this.auditInfiniteMode(command || "", action, details, false);
       request.approved = true;
       request.autoApproved = true;
       this.log.requests.push(request);
@@ -408,18 +731,27 @@ export class PermissionManager {
    * Prompt user for permission (Y/n)
    */
   private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
-    // In daemon/headless mode (no TTY), auto-approve most actions
-    // Only block merge/push to main - that requires Telegram approval
+    // In daemon/headless mode (no TTY), only auto-approve read-only operations
     if (!process.stdin.isTTY) {
-      const cmd = (command || "").toLowerCase();
+      const cmd = (command || "").toLowerCase().trim();
+
+      // Always block push/merge to main/master
       const isMainPush = cmd.includes("push") && (cmd.includes("main") || cmd.includes("master"));
       const isMerge = cmd.includes("merge") && (cmd.includes("main") || cmd.includes("master"));
       if (isMainPush || isMerge) {
         console.log(`[permissions] BLOCKED (headless): merge/push to main requires Telegram approval - ${command}`);
         return false;
       }
-      console.log(`[permissions] auto-approved (headless): ${action} - ${command || details}`);
-      return true;
+
+      // Only auto-approve commands on the headless safe list
+      if (command && this.isHeadlessSafe(command)) {
+        console.log(`[permissions] auto-approved (headless/read-only): ${action} - ${command || details}`);
+        return true;
+      }
+
+      // Everything else requires explicit approval in headless mode
+      console.log(`[permissions] BLOCKED (headless): ${action} requires explicit approval - ${command || details}`);
+      return false;
     }
 
     return new Promise((resolve) => {
@@ -454,8 +786,14 @@ export class PermissionManager {
    * Returns: "allowed" | "denied" | "ask"
    */
   checkPermission(command: string): "allowed" | "denied" | "ask" {
-    // INFINITE MODE: Everything is allowed
-    if (this.infiniteMode) {
+    // INFINITE MODE: Allow everything except always-blocked commands
+    if (this.isInfiniteMode()) {
+      if (command) {
+        const blockCheck = this.isAlwaysBlocked(command);
+        if (blockCheck.blocked) {
+          return "denied";
+        }
+      }
       return "allowed";
     }
 
@@ -637,8 +975,8 @@ export function isCommandDangerous(command: string): boolean {
 }
 
 /**
- * Enable infinite mode - bypasses ALL permission checks
- * Like Claude Code's --dangerously-skip-permissions
+ * Enable infinite mode - bypasses most permission checks (30 min limit).
+ * Catastrophic commands are still blocked.
  */
 export function enableInfiniteMode(): void {
   const manager = getPermissionManager();
