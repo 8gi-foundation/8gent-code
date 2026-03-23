@@ -24,6 +24,8 @@ export interface RecallOptions {
   minImportance?: number;
   /** Boost promoted memories (access_count >= 3). Default: true */
   boostPromoted?: boolean;
+  /** Session context words for re-scoring results by relevance to current session */
+  sessionContext?: string[];
 }
 
 // ── SemanticRecall ────────────────────────────────────────────────────
@@ -64,6 +66,24 @@ export class SemanticRecall {
         results.sort((a, b) => b.score - a.score);
       }
 
+      // Session context re-scoring: boost results that overlap with current session words
+      if (options.sessionContext && options.sessionContext.length > 0) {
+        const contextWords = new Set(options.sessionContext.map((w) => w.toLowerCase()));
+        for (const r of results) {
+          const memContent = this._extractContent(r.memory).toLowerCase();
+          const memWords = memContent.split(/\s+/).filter((w) => w.length > 2);
+          let overlap = 0;
+          for (const word of memWords) {
+            if (contextWords.has(word)) overlap++;
+          }
+          if (overlap > 0) {
+            const overlapRatio = overlap / Math.max(memWords.length, 1);
+            r.score *= 1.0 + overlapRatio * 0.5; // Up to 50% boost
+          }
+        }
+        results.sort((a, b) => b.score - a.score);
+      }
+
       return results.slice(0, limit);
     } catch {
       return [];
@@ -97,6 +117,18 @@ export class SemanticRecall {
 
   isEmbeddingReady(): boolean {
     return this.embeddingReady;
+  }
+
+  /** Extract searchable content text from a memory for session context matching */
+  private _extractContent(memory: SearchResult["memory"]): string {
+    switch (memory.type) {
+      case "core":      return `${memory.title} ${memory.content}`;
+      case "semantic":  return `${memory.key} ${memory.value}`;
+      case "episodic":  return memory.content;
+      case "procedural":return `${memory.name} ${memory.description}`;
+      case "working":   return `${memory.key} ${memory.value}`;
+      default:          return "";
+    }
   }
 
   private async _warmEmbeddings(): Promise<void> {
