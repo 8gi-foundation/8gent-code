@@ -23,6 +23,8 @@ interface TelegramUpdate {
     from: { id: number; first_name: string; username?: string };
     chat: { id: number };
     text?: string;
+    voice?: { file_id: string; duration: number };
+    audio?: { file_id: string; duration: number };
   };
   callback_query?: {
     id: string;
@@ -75,6 +77,61 @@ async function tgSend(token: string, chatId: string, text: string, parseMode = "
       }).catch(() => {});
     }
   }
+}
+
+/** Download a Telegram voice/audio file and transcribe it via OpenRouter Whisper */
+async function transcribeVoice(token: string, fileId: string): Promise<string> {
+  // 1. Get file path from Telegram
+  const fileRes = await fetch(`${TELEGRAM_API}${token}/getFile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_id: fileId }),
+  });
+  const fileData = await fileRes.json();
+  if (!fileData.ok || !fileData.result?.file_path) {
+    return "[could not download voice message]";
+  }
+
+  // 2. Download the audio file
+  const audioUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
+  const audioRes = await fetch(audioUrl);
+  const audioBuffer = await audioRes.arrayBuffer();
+
+  // 3. Transcribe via Groq Whisper (free, fast) or OpenAI Whisper
+  const groqKey = process.env.GROQ_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const transcriptionKey = groqKey || openaiKey;
+  const transcriptionUrl = groqKey
+    ? "https://api.groq.com/openai/v1/audio/transcriptions"
+    : "https://api.openai.com/v1/audio/transcriptions";
+
+  if (!transcriptionKey) {
+    return "[set GROQ_API_KEY or OPENAI_API_KEY for voice transcription]";
+  }
+
+  try {
+    const formData = new FormData();
+    const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
+    formData.append("file", audioBlob, "voice.ogg");
+    formData.append("model", groqKey ? "whisper-large-v3" : "whisper-1");
+
+    const whisperRes = await fetch(transcriptionUrl, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${transcriptionKey}` },
+      body: formData,
+    });
+
+    if (whisperRes.ok) {
+      const result = await whisperRes.json();
+      return result.text || "[empty transcription]";
+    }
+    const errText = await whisperRes.text();
+    console.error("[telegram-bridge] transcription error:", errText);
+  } catch (err) {
+    console.error("[telegram-bridge] transcription failed:", err);
+  }
+
+  return "[voice message received - transcription failed, please send as text]";
 }
 
 async function tgTyping(token: string, chatId: string): Promise<void> {
@@ -249,6 +306,20 @@ class TelegramDaemonBridge {
             this.lastUpdateId = update.update_id;
             if (update.callback_query) {
               await this.handleCallbackQuery(update.callback_query);
+            } else if (update.message?.voice || update.message?.audio) {
+              // Voice/audio message - transcribe then process
+              const fileId = update.message.voice?.file_id || update.message.audio?.file_id;
+              if (fileId && update.message.chat) {
+                await tgTyping(this.config.telegramToken, this.config.chatId);
+                const transcript = await transcribeVoice(this.config.telegramToken, fileId);
+                console.log(`[telegram-bridge] voice transcription: "${transcript.slice(0, 100)}"`);
+                if (!transcript.startsWith("[")) {
+                  await tgSend(this.config.telegramToken, this.config.chatId, `Heard: "${transcript}"`);
+                  await this.handleTelegramMessage(transcript, update.message.chat.id);
+                } else {
+                  await tgSend(this.config.telegramToken, this.config.chatId, transcript);
+                }
+              }
             } else if (update.message?.text) {
               await this.handleTelegramMessage(update.message.text, update.message.chat.id);
             }
