@@ -205,6 +205,13 @@ class TelegramDaemonBridge {
     this.agentReady = true;
     console.log("[telegram-bridge] agent ready, accepting messages");
 
+    // Keep session alive with periodic pings (prevent 30min idle eviction)
+    setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 10 * 60 * 1000); // Every 10 minutes
+
     // Start Telegram polling
     this.polling = true;
     this.poll();
@@ -270,6 +277,13 @@ class TelegramDaemonBridge {
 
       case "agent:error":
         this.agentBusy = false;
+        // If session was evicted, recreate it silently
+        if (payload.error === "session not found") {
+          console.log("[telegram-bridge] session evicted, recreating...");
+          this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
+          // Don't send error to user, just retry silently
+          return;
+        }
         tgSend(
           this.config.telegramToken,
           this.config.chatId,
