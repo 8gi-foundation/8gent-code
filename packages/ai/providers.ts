@@ -27,9 +27,14 @@ const DEFAULT_URLS: Record<ProviderName, string> = {
 /**
  * Create a language model from provider config.
  * This is the single entry point for getting an AI SDK model.
+ *
+ * For OpenRouter free models: uses intelligent retry with exponential
+ * backoff (2s, 4s, 8s, 16s, 32s) and up to 8 attempts. Free models
+ * allow 1000 calls/day but have per-minute rate limits.
  */
 export function createModel(config: ProviderConfig): LanguageModel {
   const baseURL = config.baseURL || DEFAULT_URLS[config.name];
+  const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
 
   const provider = createOpenAICompatible({
     name: config.name,
@@ -47,6 +52,16 @@ export function createModel(config: ProviderConfig): LanguageModel {
   });
 
   return provider(config.model);
+}
+
+/**
+ * Get retry config for free models.
+ * Free models allow 1000 calls/day but have per-minute rate limits.
+ * Use exponential backoff: 2s, 4s, 8s, 16s, 32s across 8 attempts.
+ */
+export function getRetryConfig(config: ProviderConfig): { maxRetries: number } {
+  const isFreeModel = config.model.includes(":free");
+  return { maxRetries: isFreeModel ? 8 : 3 };
 }
 
 function getApiKeyFromEnv(name: ProviderName): string | undefined {
