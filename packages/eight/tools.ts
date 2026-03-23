@@ -80,28 +80,68 @@ import {
 } from "../design-systems/index.js";
 import { createInfiniteRunner, formatInfiniteState, type InfiniteRunner } from "../infinite";
 import { getMemoryManager } from "../memory";
+import { RateLimiter } from "../tools/rate-limiter";
 
 /**
  * Validate that a user-provided path stays within the working directory.
  * Prevents path traversal attacks (../../etc/passwd).
+ * Always normalizes the raw input - no pre-processing should be done by callers.
  */
 function safePath(userPath: string, workingDirectory: string): string {
-  const absolutePath = path.isAbsolute(userPath)
-    ? path.resolve(userPath)
-    : path.resolve(workingDirectory, userPath);
+  // Normalize first to collapse ../ sequences before resolving
+  const normalized = path.normalize(userPath);
+  const absolutePath = path.isAbsolute(normalized)
+    ? path.resolve(normalized)
+    : path.resolve(workingDirectory, normalized);
 
-  const normalizedBase = path.resolve(workingDirectory) + path.sep;
+  const normalizedBase = path.resolve(workingDirectory);
   const normalizedTarget = path.resolve(absolutePath);
 
   // Allow the working directory itself
-  if (normalizedTarget === path.resolve(workingDirectory)) return normalizedTarget;
+  if (normalizedTarget === normalizedBase) return normalizedTarget;
 
   // Must be inside the working directory
-  if (!normalizedTarget.startsWith(normalizedBase)) {
+  if (!normalizedTarget.startsWith(normalizedBase + path.sep)) {
     throw new Error(`Path traversal blocked: "${userPath}" resolves outside working directory`);
   }
 
   return normalizedTarget;
+}
+
+/**
+ * Validate a shell command for dangerous metacharacters.
+ * Blocks command chaining, command substitution, and background execution
+ * while allowing safe operators like pipes and redirects.
+ */
+function sanitizeShellCommand(command: string): { safe: boolean; reason?: string } {
+  // Block command substitution: $(...) and backticks
+  if (/\$\(/.test(command)) {
+    return { safe: false, reason: "Command substitution $(...) is not allowed" };
+  }
+  if (/`/.test(command)) {
+    return { safe: false, reason: "Command substitution via backticks is not allowed" };
+  }
+
+  // Block semicolon chaining: ; cmd
+  if (/;/.test(command)) {
+    return { safe: false, reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead" };
+  }
+
+  // Block && and || chaining
+  if (/&&/.test(command)) {
+    return { safe: false, reason: "Command chaining with && is not allowed. Use separate run_command calls instead" };
+  }
+  if (/\|\|/.test(command)) {
+    return { safe: false, reason: "Command chaining with || is not allowed. Use separate run_command calls instead" };
+  }
+
+  // Block background execution: & at end of command (but not 2>&1 which is a redirect)
+  // Match & that is NOT preceded by > (redirect) and NOT part of &&
+  if (/(?<!>)&\s*$/.test(command)) {
+    return { safe: false, reason: "Background execution (&) is not allowed" };
+  }
+
+  return { safe: true };
 }
 
 /**
@@ -502,7 +542,13 @@ export class ToolExecutor {
     ];
   }
 
+  private rateLimiter = new RateLimiter();
+
   async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+    // Rate limit check - prevents LLM loops from exhausting resources
+    const rateLimitError = this.rateLimiter.check(toolName);
+    if (rateLimitError) return rateLimitError;
+
     switch (toolName) {
       // Code exploration
       case "get_outline":
@@ -545,13 +591,7 @@ export class ToolExecutor {
         return this.readFile(safe);
       }
       case "write_file": {
-        let writePath = args.path as string;
-        // Fix: models sometimes pass absolute-looking paths like "/8gent-code/server.ts"
-        // that aren't truly absolute (not inside workingDirectory). Strip to relative.
-        if (writePath.startsWith("/") && !writePath.startsWith(this.workingDirectory)) {
-          writePath = writePath.replace(/^\/+/, "");
-        }
-        const safe = safePath(writePath, this.workingDirectory);
+        const safe = safePath(args.path as string, this.workingDirectory);
         return this.writeFile(safe, args.content as string);
       }
       case "edit_file": {
@@ -1004,6 +1044,12 @@ export class ToolExecutor {
       if (!allowed) {
         return `[PERMISSION DENIED] User declined to execute: ${command}`;
       }
+    }
+
+    // Validate command for shell injection before execution
+    const validation = sanitizeShellCommand(command);
+    if (!validation.safe) {
+      return `[BLOCKED] ${validation.reason}. Command: ${command}`;
     }
 
     const startTime = Date.now();
