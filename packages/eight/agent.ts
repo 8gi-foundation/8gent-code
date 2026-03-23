@@ -180,9 +180,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Inject orchestrator awareness into system prompt
     const orchestratorBlock = "\n\n" + ORCHESTRATOR_SEGMENT;
 
+    // Inject vessel context if running as a deployed instance (set by daemon at startup)
+    const vesselContext = process.env.EIGHT_VESSEL_CONTEXT ? "\n\n" + process.env.EIGHT_VESSEL_CONTEXT : "";
+
     this.messageHistory.push({
       role: "system",
-      content: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction,
+      content: basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction,
     });
 
     // Initialize session persistence (v2)
