@@ -417,6 +417,18 @@ class TelegramDaemonBridge {
 
     this.agentBusy = true;
     this.ws.send(JSON.stringify({ type: "prompt", text }));
+
+    // Hard timeout: if agent doesn't respond in 2 minutes, unstick and notify
+    setTimeout(() => {
+      if (this.agentBusy) {
+        this.agentBusy = false;
+        tgSend(
+          this.config.telegramToken,
+          this.config.chatId,
+          "Timed out after 2 minutes. The task was too complex for a single turn. Try breaking it into smaller steps."
+        );
+      }
+    }, 120_000);
   }
 
   private async sendApprovalRequest(payload: any): Promise<void> {
