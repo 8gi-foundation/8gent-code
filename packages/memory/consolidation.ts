@@ -11,6 +11,15 @@
 import { Database } from "bun:sqlite";
 import { type ConsolidationLevel, type Memory, generateId } from "./types.js";
 
+// ── Consolidation Prompt ──────────────────────────────────────────────
+
+/** LLM prompt for consolidation — frames output as the ENTIRE surviving memory */
+export const CONSOLIDATION_PROMPT = `You are the memory curator for an AI agent.
+Your output will become THE ENTIRETY of the agent's memory about this user.
+Any information you do not include in your output will be IMMEDIATELY AND PERMANENTLY FORGOTTEN.
+Be precise. Be selective. Preserve what matters. Discard noise.
+Output structured observations, not prose.`;
+
 // ── Public Types ──────────────────────────────────────────────────────
 
 export interface ConsolidationResult {
