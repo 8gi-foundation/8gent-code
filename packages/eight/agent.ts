@@ -728,7 +728,31 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
       // Create abort controller for ESC interruption
       this.abortController = new AbortController();
-      const result = await agent.generate({ messages, abortSignal: this.abortController.signal });
+
+      // Retry with exponential backoff for rate-limited free models
+      let result: any;
+      const maxAttempts = 8;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          result = await agent.generate({ messages, abortSignal: this.abortController!.signal });
+          break; // Success
+        } catch (err: any) {
+          const isRateLimit = err?.message?.includes("429") || err?.message?.includes("rate") || err?.message?.includes("Provider returned error");
+          const isAborted = err?.name === "AbortError";
+
+          if (isAborted) throw err; // User pressed ESC
+
+          if (isRateLimit && attempt < maxAttempts) {
+            const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+            console.log(`[agent] rate limited, retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+
+          throw err; // Non-retryable error or max attempts reached
+        }
+      }
+
       this.abortController = null;
 
       const content = result.text;
