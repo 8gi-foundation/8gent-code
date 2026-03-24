@@ -231,6 +231,11 @@ async function main() {
       await memoryCommand(restArgs);
       break;
 
+    case "airdrop":
+    case "drop":
+      await airdropCommand(restArgs);
+      break;
+
     case "onboard":
       await onboardCommand(restArgs);
       break;
@@ -630,6 +635,78 @@ async function tuiCommand(args: string[]) {
   });
 
   proc.on("exit", (code) => process.exit(code || 0));
+}
+
+async function airdropCommand(args: string[]) {
+  if (process.platform !== "darwin") {
+    console.log("AirDrop is macOS only. Use 8gent send for cross-platform sharing.");
+    return;
+  }
+
+  if (args.length === 0) {
+    console.log("Usage: 8gent airdrop <file|text>");
+    console.log("  8gent airdrop ./report.pdf     - AirDrop a file");
+    console.log("  8gent airdrop \"Hello from 8gent\" - AirDrop text as a note");
+    console.log('  8gent drop ./file.txt          - shorthand');
+    return;
+  }
+
+  const target = args.join(" ");
+  const { execSync } = await import("child_process");
+
+  // Check if it's a file path
+  if (fs.existsSync(target) || fs.existsSync(path.resolve(target))) {
+    const resolved = path.resolve(target);
+    console.log(`AirDropping: ${resolved}`);
+
+    // Use osascript to trigger AirDrop via Finder
+    const script = `
+      tell application "Finder"
+        activate
+        set theFile to POSIX file "${resolved}" as alias
+        set theWindow to make new Finder window
+        set target of theWindow to theFile
+      end tell
+      tell application "System Events"
+        tell process "Finder"
+          delay 0.5
+          click menu item "AirDrop" of menu "Go" of menu bar 1
+        end tell
+      end tell
+    `;
+
+    // Simpler approach: open the share sheet via NSSharingService from a helper
+    const swiftHelper = `
+      import Cocoa
+      let url = URL(fileURLWithPath: "${resolved}")
+      if let service = NSSharingService(named: .sendViaAirDrop) {
+        if service.canPerform(withItems: [url]) {
+          service.perform(withItems: [url])
+          RunLoop.main.run(until: Date(timeIntervalSinceNow: 30))
+        } else {
+          print("AirDrop not available - check Bluetooth and WiFi")
+          exit(1)
+        }
+      }
+    `;
+
+    const tmpSwift = "/tmp/eight-airdrop.swift";
+    fs.writeFileSync(tmpSwift, swiftHelper);
+    try {
+      execSync(`swiftc -o /tmp/eight-airdrop -framework Cocoa "${tmpSwift}" && /tmp/eight-airdrop`, {
+        stdio: "inherit",
+        timeout: 60000,
+      });
+    } catch {
+      console.log("AirDrop window closed or timed out");
+    }
+  } else {
+    // It's text - write to temp file and AirDrop
+    const tmpFile = `/tmp/eight-note-${Date.now()}.txt`;
+    fs.writeFileSync(tmpFile, target);
+    console.log(`AirDropping note: "${target.slice(0, 50)}..."`);
+    await airdropCommand([tmpFile]);
+  }
 }
 
 async function petCommand(args: string[]) {
