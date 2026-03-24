@@ -566,6 +566,15 @@ enum AgentState: String, CaseIterable {
     case typing
 }
 
+// MARK: - Companion Mode
+
+enum CompanionMode: String {
+    case coding
+    case languageTutor = "language"
+    case studyPal = "study"
+    case planning
+}
+
 // MARK: - Character Skin
 
 struct CharacterSkin {
@@ -985,6 +994,7 @@ class PetController {
     var isWalking = false
     var daemonDriven = false
     var isDragging = false
+    var companionMode: CompanionMode = .coding
 
     // Idle personality
     var idleSeconds: TimeInterval = 0
@@ -1199,6 +1209,29 @@ class PetController {
         // /stop cancels running task
         if text.lowercased() == "/stop" {
             chatView.appendMessage(ChatMessage(role: .system, text: "Stopped"))
+            return
+        }
+
+        // /lang <language> - start language practice
+        if text.lowercased().hasPrefix("/lang ") {
+            let language = String(text.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            chatView.appendMessage(ChatMessage(role: .system, text: "Starting \(language) practice..."))
+            companionMode = .languageTutor
+            manager.startLanguageSession(language, pet: self)
+            return
+        }
+
+        // /plan - planning mode
+        if text.lowercased() == "/plan" {
+            companionMode = .planning
+            chatView.appendMessage(ChatMessage(role: .system, text: "Planning mode - what should we work on?"))
+            return
+        }
+
+        // /code - back to coding mode
+        if text.lowercased() == "/code" {
+            companionMode = .coding
+            chatView.appendMessage(ChatMessage(role: .system, text: "Back to coding mode"))
             return
         }
 
@@ -1526,9 +1559,15 @@ class PetController {
 
             // Idle personality based on how long idle
             if self.idleSeconds > 120 {
-                // Very idle - go to sleep
-                self.setStateInternal(.sleep)
-                self.nameLabel.update(text: "zzz", aboveWindow: self.window)
+                // Very idle - offer companion activity before sleeping
+                if self.companionMode == .coding && !self.daemonDriven {
+                    self.petManager?.speak("Hey, want to practice a language while we wait? Say slash lang and a language name.")
+                    self.setStateInternal(.wave)
+                    self.nameLabel.update(text: "bored?", aboveWindow: self.window)
+                } else {
+                    self.setStateInternal(.sleep)
+                    self.nameLabel.update(text: "zzz", aboveWindow: self.window)
+                }
             } else if self.idleSeconds > 60 {
                 // Moderately idle - sit down
                 self.setStateInternal(.sit)
@@ -2329,10 +2368,36 @@ class PetManager: DaemonClientDelegate {
 
     // MARK: - Local Chat (text model, no daemon)
 
+    func startLanguageSession(_ language: String, pet: PetController) {
+        pet.onThinking()
+        let systemPrompt = "You are a friendly \(language) conversation partner helping a developer practice \(language) during coding breaks. Mix \(language) and English naturally. Start with a simple greeting in \(language). Keep responses to 1-2 sentences. Correct mistakes gently. Be warm and encouraging."
+
+        ollamaChat(model: "qwen3.5", system: systemPrompt, user: "Let's start! Greet me in \(language).") { [weak self] response in
+            DispatchQueue.main.async {
+                let content = response ?? "Language model not available right now"
+                pet.chatView.appendMessage(ChatMessage(role: .assistant, text: content))
+                pet.onStream(chunk: nil, final: true)
+                self?.speak(content)
+            }
+        }
+    }
+
     func chatLocally(_ text: String, pet: PetController) {
         pet.onThinking()
 
-        ollamaChat(model: "qwen3.5", system: "You are Eight, a helpful AI assistant on macOS. Be concise and direct. Keep responses under 2 sentences.", user: text) { [weak self] response in
+        let systemPrompt: String
+        switch pet.companionMode {
+        case .languageTutor:
+            systemPrompt = "You are a friendly language conversation partner. Mix the target language and English naturally. Keep responses to 1-2 sentences. Correct mistakes gently. Be conversational."
+        case .planning:
+            systemPrompt = "You are Eight, a planning assistant. Help organize tasks and next steps. Be concise and actionable."
+        case .studyPal:
+            systemPrompt = "You are Eight, a study partner. Quiz the user, explain concepts. Be engaging and concise."
+        case .coding:
+            systemPrompt = "You are Eight, a helpful AI assistant on macOS. Be concise and direct. Keep responses under 2 sentences."
+        }
+
+        ollamaChat(model: "qwen3.5", system: systemPrompt, user: text) { [weak self] response in
             DispatchQueue.main.async {
                 let content = response ?? "Ollama offline - is it running?"
                 pet.chatView.appendMessage(ChatMessage(role: .assistant, text: content))
