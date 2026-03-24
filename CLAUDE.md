@@ -111,20 +111,39 @@ bun run benchmarks/autoresearch/harness.ts   # run harness directly
 7. **Reduce friction, increase truth.** Prefer voice and conversation over forms.
 8. **The work speaks for itself.** Expertise is process, design, communication, and what ships - not credentials or enthusiasm.
 
-## Core Ability Packages (8 Powers)
+## Core Ability Packages (9 Powers)
 
-Eight's 8 Powers. Each is self-contained and can be enabled/disabled independently.
+Eight's 9 Powers. Each is self-contained, CLI-callable, and usable by any agent.
 
 | Package | Power | Key capabilities |
 |---------|-------|-----------------|
 | `packages/memory/` | Memory | SQLite + FTS5 + Ollama embeddings, procedural memory, health monitoring, contradiction detection, consolidation, lease-based job queue |
+| `packages/music/` | DJ & Music | YouTube streaming (mpv+yt-dlp), 30k+ internet radio, 15-genre sox synth, Replicate MusicGen, mixing, BPM detection, looping, queue |
 | `packages/orchestration/` | Worktree | `WorktreePool` - max 4 concurrent, filesystem messaging, macro-actions, delegation |
 | `packages/permissions/` | Policy | NemoClaw YAML engine, 11 defaults, approval gates, headless mode, infinite mode |
 | `packages/self-autonomy/` | Evolution | Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, self-improvement DB |
 | `packages/validation/` | Healing | Checkpoint-verify-revert loop, `git stash` atomic snapshots, failure log |
-| `packages/proactive/` | Entrepreneurship | GitHub bounty scanner, capability matcher, opportunity pipeline |
+| `packages/proactive/` | Entrepreneurship | GitHub bounty scanner, capability matcher, opportunity pipeline, business agents |
 | `packages/ast-index/` | AST | Import dependency graph, test file mapping, change impact estimation |
 | `packages/tools/browser/` | Browser | Fetch + DuckDuckGo HTML scraper, HTML-to-text, disk cache, no headless deps |
+
+## Agent CLI Quick Reference
+
+Any agent can call these packages directly. No TUI required.
+
+```bash
+# DJ - stream YouTube, radio, produce tracks
+bun -e "import {DJ} from './packages/music/dj.ts'; const d=new DJ(); await d.play('lofi hip hop')"
+bun -e "import {DJ} from './packages/music/dj.ts'; const d=new DJ(); await d.radio('techno')"
+bun -e "import {MusicProducer} from './packages/music/producer.ts'; const p=new MusicProducer(); const t=await p.produce({genre:'house'}); p.loop(t)"
+
+# Memory - query, health, consolidate
+bun -e "import {MemoryStore} from './packages/memory/store.ts'; const s=new MemoryStore('.8gent/memory.db'); console.log(s.getStats())"
+bun -e "import {memoryHealth} from './packages/memory/health.ts'; import {Database} from 'bun:sqlite'; console.log(memoryHealth(new Database('.8gent/memory.db')))"
+
+# Stop playback
+pkill -f mpv; pkill -f afplay
+```
 
 ## Memory Layer (`packages/memory/`)
 
