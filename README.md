@@ -1,8 +1,10 @@
 # 8gent Code
 
-The kernel of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent powered by local LLMs (Ollama) or free cloud models (OpenRouter). No API keys, no usage caps, no cloud dependency. 42 packages. 39 benchmarks. Always-on daemon.
+The kernel of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent powered by local LLMs (Ollama) or free cloud models (OpenRouter). No API keys, no usage caps, no cloud dependency.
 
-**v1.0.0** - Daemon stable. Vessel deployed at [eight-vessel.fly.dev](https://eight-vessel.fly.dev). Model shootout winner: Step 3.5 Flash (15s per task).
+Part of a 6-product ecosystem. See [8gent.world](https://8gent.world) for the full story, and the [8gent Constitution](https://8gent.world/constitution) for the founding document.
+
+**v1.0.0** - Daemon stable. Eight kernel deployed as persistent daemon on Fly.io (Amsterdam).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](https://8gent.dev)
@@ -10,15 +12,20 @@ The kernel of the [8gent ecosystem](https://8gent.world). Open source autonomous
 
 ## Ecosystem
 
+6 products, 6 domains.
+
 | Product | Domain | Role |
 |---------|--------|------|
-| **8gent Code** | [8gent.dev](https://8gent.dev) | Open source coding agent (this repo) - free on-ramp |
-| **8gent OS** | [8gentos.com](https://8gentos.com) | Personal AI operating system - paid product |
-| **8gent Jr** | [8gentjr.com](https://8gentjr.com) | AI OS for neurodivergent children - free |
-| **8gent World** | [8gent.world](https://8gent.world) | Ecosystem hub, docs, investor decks |
-| **8gent Games** | [8gent.games](https://8gent.games) | AI civilisation simulator |
-| **The Vessel** | [eight-vessel.fly.dev](https://eight-vessel.fly.dev) | Cloud deployment (Fly.io Amsterdam) |
-| **Telegram App** | [8gent-telegram-app.vercel.app](https://8gent-telegram-app.vercel.app) | iOS-style Mini App control panel |
+| **8gent OS** | [8gentos.com](https://8gentos.com) | Parent site. Paid product. Revenue engine. |
+| **8gent Code** | [8gent.dev](https://8gent.dev) | Open source developer agent. Free on-ramp. (this repo) |
+| **8gent** | [8gent.app](https://8gent.app) | Consumer GUI client for the OS. |
+| **8gent World** | [8gent.world](https://8gent.world) | Ecosystem story, docs, media. 14 presentation decks at [8gent.world/media/decks](https://8gent.world/media/decks). |
+| **8gent Games** | [8gent.games](https://8gent.games) | Agent simulation playground. |
+| **8gent Jr** | [8gentjr.com](https://8gentjr.com) | AI assistant for kids. Accessibility first. Free. |
+
+Additional resources:
+- [8gent.world/constitution](https://8gent.world/constitution) - the founding document that governs all decisions
+- [8gent.world/inspirations](https://8gent.world/inspirations) - architecture credits and influences
 
 ## Install
 
@@ -37,38 +44,31 @@ bun run tui
 ## What's different
 
 - **Local-first, free by default.** Runs entirely on your machine. Cloud models (OpenRouter free tier) are opt-in. No telemetry, no API keys to start.
-- **Always-on daemon.** `packages/daemon/` runs as a persistent process with WebSocket protocol. Deployed as "The Vessel" on Fly.io Amsterdam.
-- **Telegram integration.** Bot (@aijamesosbot) with voice transcription, plus an iOS-style Telegram Mini App control panel.
-- **12 core packages.** Memory, daemon, parallel worktrees, policy engine, self-evolution, self-healing, business agents, AST blast radius, browser access, kernel fine-tuning, personality, and content packaging. Not plugins. Built-in.
+- **Model-agnostic.** Auto-selects from best free models on OpenRouter. Runs Qwen 3.5 via Ollama locally. Task router classifies prompts (code / reasoning / simple / creative) and picks the best model automatically.
+- **Eight kernel.** Persistent daemon deployed on Fly.io Amsterdam ([eight-vessel.fly.dev](https://eight-vessel.fly.dev)). WebSocket protocol, 4-strategy retry loop, session persistence across reconnections.
+- **8 Powers.** Memory, parallel worktrees, NemoClaw policy engine, self-evolution, self-healing, entrepreneurship, AST blast radius, and browser access. Not plugins. Built-in.
+- **NemoClaw policy engine.** YAML-based, deny-by-default, rebuilt from scratch. 11 default rules with approval gates for secrets, destructive ops, network, git, and file access. Headless and infinite modes for autonomous operation.
+- **HyperAgent meta-improvement.** Metacognitive self-modification spec ([docs/HYPERAGENT-SPEC.md](docs/HYPERAGENT-SPEC.md)). The agent can improve how it improves - meta-config is editable while the evaluation protocol stays human-controlled.
+- **AutoResearch.** Overnight improvement loops (Karpathy-style). Runs benchmarks, mutates system prompts, re-tests. Meta-optimizer also tunes few-shots, model routing, and grading weights.
 - **Voice chat.** `/voice chat` starts a half-duplex conversation loop. Speak, Eight transcribes, thinks, and speaks back. ESC to interrupt mid-speech.
-- **AST-first code navigation.** Reads symbols, not files. 97% token reduction vs reading whole files. The agent stays fast in large codebases.
-- **Self-improving prompts.** Autoresearch harness (Karpathy-style) runs benchmarks in a loop, mutates system prompts, re-tests. Meta-optimizer also tunes few-shots, model routing, and grading weights.
-- **Multi-agent orchestration.** Spawns sub-agents in isolated git worktrees, up to 4 concurrent, coordinates via filesystem messaging. Macro action decomposer finds parallel groups automatically.
-- **Ability scorecards.** Each ability has measurable metrics tracked per session with baseline comparison.
-- **Actuator tools.** Deploy to Vercel/Railway/Fly, publish to npm/GitHub, notify via Telegram. Dry-run by default.
-- **Telegram portal.** Single chat interface to all automation: `/status`, `/agents`, `/benchmark`, `/deploy`, `/throughput`, `/scorecard`.
-- **Workspace tabs.** Chat, Notes, Ideas, BTW, Questions, and Music tabs in a neumorphic folder UI.
-- **Task router.** Classifies prompts (code / reasoning / simple / creative) and routes to the best model automatically.
-- **Activity monitor.** Real tool-call feed replaces the decorative spinner. See exactly what the agent is doing.
+- **AST-first code navigation.** Reads symbols, not files. The agent stays fast in large codebases.
+- **Multi-agent orchestration.** Spawns sub-agents in isolated git worktrees, up to 4 concurrent, coordinates via filesystem messaging.
+- **Telegram portal.** Bot with voice transcription, plus an iOS-style Telegram Mini App control panel.
 
-## Core Packages
+## 8 Powers
 
-Eight's native abilities live in these packages. Each is self-contained and can be enabled/disabled independently.
+Eight has 8 built-in abilities that define how he works:
 
-| Package | Ability | What it does |
-|---------|---------|--------------|
-| `packages/eight/` | Core agent | Vercel AI SDK agent loop, system prompt, session management |
-| `packages/daemon/` | Always-on daemon | Persistent process with WebSocket protocol, agent pool |
-| `packages/memory/` | Persistent recall | Dual-layer episodic + semantic memory, SQLite + FTS5 + Ollama embeddings, procedural memory, health monitoring, contradiction detection, consolidation, job queue |
-| `packages/permissions/` | Policy engine | YAML rules, 11 defaults, approval gates, headless mode, infinite mode, dangerous command detection |
-| `packages/orchestration/` | Worktree agents | WorktreePool - max 4 concurrent, filesystem messaging, macro-actions, delegation |
-| `packages/tools/` | Tool implementations | Browser-use, rate limiter, tool definitions, actuators, filesystem, shell |
-| `packages/proactive/` | Business agents | Opportunity scanner, capability matcher, content packaging, business agent system |
-| `packages/self-autonomy/` | Evolution | Post-session reflection, Bayesian skill confidence, self-improvement DB |
-| `packages/validation/` | Healing | Checkpoint-verify-revert loop, git-stash atomic snapshots, failure log |
-| `packages/ast-index/` | Blast radius | Import dependency graph, test file mapping, change impact estimation |
-| `packages/kernel/` | RL fine-tuning | Training proxy, GRPO batch collection, checkpoint validation, auto-rollback, auto-promotion |
-| `packages/personality/` | Brand voice | "Infinite Gentleman" styling, persona calibration |
+| Power | Package | What it does |
+|-------|---------|--------------|
+| **Memory** | `packages/memory/` | Dual-layer episodic + semantic memory, SQLite + FTS5, Ollama embeddings, procedural memory, health monitoring, contradiction detection, consolidation, lease-based job queue |
+| **Worktree** | `packages/orchestration/` | Multi-agent parallel execution via git worktrees, max 4 concurrent, filesystem messaging, macro-actions, delegation |
+| **Policy** | `packages/permissions/` | NemoClaw YAML policy engine, 11 default rules, approval gates, headless mode, infinite mode, dangerous command detection |
+| **Evolution** | `packages/self-autonomy/` | Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, self-improvement DB |
+| **Healing** | `packages/validation/` | Checkpoint-verify-revert loop, git-stash atomic snapshots, failure log |
+| **Entrepreneurship** | `packages/proactive/` | GitHub bounty/help-wanted scanner, capability matcher, opportunity pipeline |
+| **AST** | `packages/ast-index/` | Blast radius engine, import dependency graph, test file mapping, change impact estimation |
+| **Browser** | `packages/tools/browser/` | Lightweight web access via fetch + DuckDuckGo HTML scraping, disk cache, no headless deps |
 
 ## Voice Chat
 
@@ -97,7 +97,7 @@ The agent decomposes work, delegates to sub-agents, validates output against tes
 
 ## Benchmarks
 
-39 execution-graded tests across 15 professional domains. All local inference via Ollama.
+Execution-graded tests across professional domains. All local inference via Ollama.
 
 Code compiles and runs against `bun:test` suites, or it fails. No string matching, no vibes.
 
@@ -121,48 +121,59 @@ CATEGORY=battle-test bun run benchmark:loop  # autoresearch loop
 
 Full results: [benchmarks/README.md](benchmarks/README.md)
 
+Model shootout (local 14B vs cloud 120B): [docs/MODEL-SHOOTOUT.md](docs/MODEL-SHOOTOUT.md)
+
 ## Project Structure
 
 ```
-8gent-code/                    42 packages
+8gent-code/
   apps/
     tui/           Ink v6 terminal UI (main interface)
-    clui/          Tauri 2.0 desktop overlay
+    clui/          Tauri 2.0 desktop overlay (scaffolded)
     dashboard/     Next.js admin panel
     debugger/      Session debugger
     demos/         Remotion video generation
     installer/     Interactive install wizard
   packages/
     eight/         Core agent engine (Vercel AI SDK)
-    daemon/        Always-on daemon with WebSocket protocol
+    daemon/        Persistent vessel daemon (Fly.io Amsterdam)
     ai/            Provider abstraction (Ollama, OpenRouter, LM Studio)
     memory/        SQLite + FTS5 persistent memory with health monitoring
     orchestration/ WorktreePool, macro actions, throughput tracking
-    permissions/   YAML policy engine with headless/infinite modes
-    self-autonomy/ Evolution, reflection, persona mutation
+    permissions/   NemoClaw YAML policy engine
+    self-autonomy/ Evolution, reflection, HyperAgent meta-mutation
     validation/    Self-healing executor + ability scorecards
-    proactive/     Business agents, opportunity scanner, content packaging
+    proactive/     Business agents, opportunity scanner
     ast-index/     Blast radius engine
     tools/         Tool implementations (browser, actuators, filesystem, shell)
     voice/         STT (whisper.cpp) + voice chat loop
+    kernel/        RL fine-tuning pipeline (GRPO, off by default)
+    personality/   Brand voice, "Infinite Gentleman"
+    telegram/      Telegram bot portal
     auth/          Clerk auth + GitHub integration
     db/            Convex reactive database
-    kernel/        RL fine-tuning pipeline (GRPO)
-    personality/   Brand voice, "Infinite Gentleman"
     control-plane/ Multi-tenant management
-  benchmarks/      39 execution-graded benchmarks + autoresearch
+  benchmarks/      Execution-graded benchmarks + autoresearch
   bin/             CLI entry points (8gent, debug)
   docs/            Architecture docs, methodology, guides
 ```
 
-## Deployment
+## Roadmap
 
-**The Vessel** runs on Fly.io Amsterdam as the cloud deployment of 8gent Code.
+### NOW
+- Memory v1 enhancements: procedural memory and lease-based job queue landed. Contradiction detection, health introspection, and checkpointing in progress.
+- Model shootout iteration: improving autonomous task completion rates after 0/5 in first round.
+- Daemon reliability: 4-strategy retry loop landed.
 
-- Endpoint: [eight-vessel.fly.dev](https://eight-vessel.fly.dev)
-- Daemon: Always-on process with WebSocket protocol via `packages/daemon/`
-- Telegram bot: @aijamesosbot with voice transcription
-- Telegram Mini App: [8gent-telegram-app.vercel.app](https://8gent-telegram-app.vercel.app) - iOS-style home screen control panel
+### NEXT
+- HyperAgent meta-improvement loop (specified in [docs/HYPERAGENT-SPEC.md](docs/HYPERAGENT-SPEC.md))
+- Kernel fine-tuning pipeline activation (specified, off by default - [docs/KERNEL-FINETUNING.md](docs/KERNEL-FINETUNING.md))
+- Personal LoRA from session training pairs
+
+### LATER
+- Desktop client (Tauri 2.0, scaffolded in `apps/clui/`)
+- Multi-tenant control plane
+- Full autonomous issue resolution
 
 ## Slash Commands
 
@@ -195,32 +206,32 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
 |-----|----------------|
 | [SOUL.md](SOUL.md) | Agent persona and principles |
 | [CLAUDE.md](CLAUDE.md) | Dev conventions, design system, repo rules |
+| [docs/HYPERAGENT-SPEC.md](docs/HYPERAGENT-SPEC.md) | HyperAgent metacognitive self-modification spec |
+| [docs/MODEL-SHOOTOUT.md](docs/MODEL-SHOOTOUT.md) | Local vs cloud model comparison results |
 | [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md) | Memory layer architecture and API reference |
-| [docs/HARNESS-PLAN.md](docs/HARNESS-PLAN.md) | Vessel harness plan and roadmap |
-| [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Full benchmark methodology |
 | [docs/KERNEL-FINETUNING.md](docs/KERNEL-FINETUNING.md) | RL fine-tuning pipeline |
 | [docs/PERSONALIZATION.md](docs/PERSONALIZATION.md) | 5-layer personalization system |
 | [docs/TOOLSHED.md](docs/TOOLSHED.md) | Capability discovery and skill registry |
 | [docs/permissions.md](docs/permissions.md) | Policy engine and approval gates |
 | [docs/BRANCH-DECISIONS.md](docs/BRANCH-DECISIONS.md) | Architecture decision log |
-| [8gent.world/constitution](https://8gent.world/constitution) | 8gent constitution |
+| [8gent.world/constitution](https://8gent.world/constitution) | 8gent Constitution |
+| [8gent.world/media/decks](https://8gent.world/media/decks) | Presentation decks |
+| [8gent.world/inspirations](https://8gent.world/inspirations) | Architecture inspirations |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 ## Inspirations
 
-Architecture credits. These projects informed specific parts of 8gent's design.
+Architecture credits. These projects informed specific parts of 8gent's design. Full list at [8gent.world/inspirations](https://8gent.world/inspirations).
 
 - [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) - persistent memory and self-evolution patterns
 - [CashClaw](https://github.com/nicepkg/CashClaw) - autonomous work discovery and value generation
 - NemoClaw - policy-driven governance and approval gate architecture
+- HyperAgents (Meta FAIR, March 2026) - metacognitive self-modification
 - Hypothesis Loop - atomic commit-verify-revert development cycle
 - Blast Radius Engine - AST-based change impact estimation
 - Claude Code - worktree isolation pattern for parallel agent execution
-- [Nemotron-3-Nano WebGPU](https://huggingface.co/spaces/webml-community/Nemotron-3-Nano-WebGPU) - edge inference inspiration for lightweight local classification
+- Karpathy's autoresearch methodology - iterative prompt mutation and meta-optimization
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) - agent persona standard
-- [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
-- [Paperclip](https://github.com/paperclipai/paperclip) - autonomous agent work platform patterns
-- Karpathy's autoresearch methodology - iterative prompt mutation, meta-optimization, token throughput maximization
 
 ## License
 
