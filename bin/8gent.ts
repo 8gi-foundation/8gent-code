@@ -487,10 +487,39 @@ async function spawnPet(sessionId?: string) {
   // Windows/Linux: terminal-rendered pet (future: Electron/Tauri)
   if (platform !== "darwin") {
     console.log("\x1b[36m[pet] Lil Eight terminal mode (cross-platform)\x1b[0m");
-    // TODO: spawn terminal-rendered pet via Ink component
-    // For now, register with mesh and skip native app
+
+    // Start terminal pet in background
     try {
-      const meshDir = path.join(process.env.HOME || process.env.USERPROFILE || "~", ".8gent", "mesh");
+      const petPath = path.join(__dirname, "../packages/pet/terminal-pet.ts");
+      if (fs.existsSync(petPath)) {
+        const { TerminalPet } = await import(petPath);
+        const pet = new TerminalPet({ label: sessionId || "eight" });
+
+        const rows = process.stdout.rows || 24;
+        const petHeight = 8;
+
+        pet.onRender = (lines: string[], x: number, label: string) => {
+          const startRow = rows - petHeight - 1;
+          const padding = " ".repeat(Math.max(0, x));
+          process.stdout.write("\x1b7");
+          for (let i = 0; i < lines.length; i++) {
+            process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`);
+          }
+          process.stdout.write(`\x1b[${startRow + lines.length};1H\x1b[2K${" ".repeat(Math.max(0, x + 4))}\x1b[2m${label}\x1b[0m`);
+          process.stdout.write("\x1b8");
+        };
+
+        pet.start();
+        process.on("exit", () => pet.stop());
+      }
+    } catch (e) {
+      // Terminal pet failed - continue without it
+    }
+
+    // Register with mesh
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "~";
+      const meshDir = path.join(home, ".8gent", "mesh");
       fs.mkdirSync(meshDir, { recursive: true });
       const registryPath = path.join(meshDir, "registry.json");
       let registry: Record<string, any> = {};

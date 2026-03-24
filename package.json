@@ -1,5 +1,5 @@
 {
-  "name": "8gent-code",
+  "name": "@podjamz/8gent-code",
   "version": "1.0.0",
   "private": false,
   "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
@@ -10,7 +10,7 @@
     "8gent-code": "./dist/cli.js"
   },
   "files": [
-    "dist",
+    "dist/cli.js",
     "README.md",
     "LICENSE"
   ],
@@ -26,10 +26,10 @@
     "install-wizard": "bun run apps/installer/src/index.tsx",
     "cli": "bun run bin/8gent.ts",
     "dev": "next dev",
-    "build": "bun build packages/eight/index.ts --outfile dist/cli.js --target node && chmod +x dist/cli.js",
+    "build": "bun build packages/eight/index.ts --outfile dist/cli.js --target bun && sed -i '' '1i\\\n#!/usr/bin/env bun' dist/cli.js && chmod +x dist/cli.js",
     "build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
     "prepublishOnly": "npm run build",
-    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Run: 8gent\\n\\nPrerequisite: Ollama must be running.\\nInstall Ollama: https://ollama.ai\\nStart it: ollama serve\\nPull a model: ollama pull qwen3.5\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
+    "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Just type: 8gent\\n\\nFirst run will guide you through Ollama setup if needed.\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
     "test": "bun test",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
@@ -89,6 +89,9 @@
     "tree-sitter-rust": "^0.21.0",
     "tree-sitter-typescript": "^0.21.0",
     "zod": "^4.3.6"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "author": "James Spalding",
   "license": "MIT"
