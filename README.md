@@ -81,13 +81,15 @@
 ## Quick Start
 
 ```bash
-# 1. Install Ollama + pull a model
-curl -fsSL https://ollama.ai/install.sh | sh && ollama pull qwen3.5
+npm install -g @podjamz/8gent-code
+8gent
+```
 
-# 2. Install Bun
-curl -fsSL https://bun.sh/install | bash
+That's it. Ollama runs locally by default - if you don't have it, 8gent will guide you through setup on first launch.
 
-# 3. Clone and run
+### From source (contributors)
+
+```bash
 git clone https://github.com/PodJamz/8gent-code.git && cd 8gent-code && bun install
 bun run tui
 ```
