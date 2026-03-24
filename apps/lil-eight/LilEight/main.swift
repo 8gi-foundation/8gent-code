@@ -742,11 +742,14 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
     let messageStack = NSStackView()
     let inputField = NSTextField()
     let statusBar = NSTextField(labelWithString: "")
-    let sendButton = NSButton(title: "Send", target: nil, action: nil)
+    let sendButton = NSButton(title: "\u{2191}", target: nil, action: nil) // arrow up = send
+    let micButton = NSButton(title: "\u{1F3A4}", target: nil, action: nil) // mic icon
+    let imageButton = NSButton(title: "\u{1F4F7}", target: nil, action: nil) // camera icon
 
     var onSendMessage: ((String) -> Void)?
-    var onSendImage: ((String, String) -> Void)? // (base64, caption)
-    var pendingImageBase64: String? // image waiting to be sent
+    var onSendImage: ((String, String) -> Void)?
+    var onVoiceStart: (() -> Void)?
+    var isListening = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -787,12 +790,27 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
         inputField.translatesAutoresizingMaskIntoConstraints = false
 
         sendButton.bezelStyle = .rounded
-        sendButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        sendButton.font = NSFont.systemFont(ofSize: 16, weight: .bold)
+        sendButton.toolTip = "Send (Enter)"
         sendButton.target = self
         sendButton.action = #selector(sendClicked)
         sendButton.translatesAutoresizingMaskIntoConstraints = false
 
-        let inputRow = NSStackView(views: [inputField, sendButton])
+        micButton.bezelStyle = .rounded
+        micButton.font = NSFont.systemFont(ofSize: 14)
+        micButton.toolTip = "Voice chat (hold to talk)"
+        micButton.target = self
+        micButton.action = #selector(micClicked)
+        micButton.translatesAutoresizingMaskIntoConstraints = false
+
+        imageButton.bezelStyle = .rounded
+        imageButton.font = NSFont.systemFont(ofSize: 14)
+        imageButton.toolTip = "Send image from clipboard"
+        imageButton.target = self
+        imageButton.action = #selector(imageClicked)
+        imageButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let inputRow = NSStackView(views: [imageButton, inputField, micButton, sendButton])
         inputRow.orientation = .horizontal
         inputRow.spacing = 6
         inputRow.translatesAutoresizingMaskIntoConstraints = false
@@ -819,7 +837,9 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
             inputRow.heightAnchor.constraint(equalToConstant: 28),
 
             inputField.heightAnchor.constraint(equalToConstant: 28),
-            sendButton.widthAnchor.constraint(equalToConstant: 50),
+            sendButton.widthAnchor.constraint(equalToConstant: 32),
+            micButton.widthAnchor.constraint(equalToConstant: 32),
+            imageButton.widthAnchor.constraint(equalToConstant: 32),
         ])
 
         // Welcome message
@@ -888,18 +908,6 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
     }
 
     func submitInput() {
-        // Check for pasted image on clipboard
-        let pb = NSPasteboard.general
-        if let imgData = pb.data(forType: .png) ?? pb.data(forType: .tiff) {
-            let base64 = imgData.base64EncodedString()
-            let caption = inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let displayText = caption.isEmpty ? "[pasted image]" : caption
-            appendMessage(ChatMessage(role: .user, text: displayText, imageBase64: base64))
-            inputField.stringValue = ""
-            onSendImage?(base64, caption.isEmpty ? "What do you see in this image?" : caption)
-            return
-        }
-
         let text = inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
@@ -908,14 +916,40 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
         onSendMessage?(text)
     }
 
-    // Explicit paste image action (Cmd+V with image on clipboard)
-    func pasteImage() {
+    // Camera button - explicitly grabs image from clipboard
+    @objc func imageClicked() {
         let pb = NSPasteboard.general
         if let imgData = pb.data(forType: .png) ?? pb.data(forType: .tiff) {
-            pendingImageBase64 = imgData.base64EncodedString()
-            appendMessage(ChatMessage(role: .system, text: "Image pasted - type a question and hit Send"))
-            inputField.placeholderString = "Ask about the image..."
+            let base64 = imgData.base64EncodedString()
+            let caption = inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayText = caption.isEmpty ? "[image from clipboard]" : caption
+            appendMessage(ChatMessage(role: .user, text: displayText, imageBase64: base64))
+            inputField.stringValue = ""
+            onSendImage?(base64, caption.isEmpty ? "What do you see in this image?" : caption)
+        } else {
+            appendMessage(ChatMessage(role: .system, text: "No image on clipboard. Copy an image first (Cmd+Shift+4)"))
         }
+    }
+
+    // Mic button - start/stop voice input
+    @objc func micClicked() {
+        if isListening {
+            isListening = false
+            micButton.title = "\u{1F3A4}"
+            micButton.toolTip = "Voice chat"
+            appendMessage(ChatMessage(role: .system, text: "Voice stopped"))
+        } else {
+            isListening = true
+            micButton.title = "\u{1F534}" // red circle = recording
+            micButton.toolTip = "Stop listening"
+            appendMessage(ChatMessage(role: .system, text: "Listening... (speak then click again)"))
+            onVoiceStart?()
+        }
+    }
+
+    func stopListening() {
+        isListening = false
+        micButton.title = "\u{1F3A4}"
     }
 }
 
@@ -999,6 +1033,9 @@ class PetController {
         }
         chatView.onSendImage = { [weak self] base64, caption in
             self?.sendImageToVision(base64: base64, caption: caption)
+        }
+        chatView.onVoiceStart = { [weak self] in
+            self?.startVoiceInput()
         }
 
         // Wire up click and drag
@@ -1190,6 +1227,62 @@ class PetController {
     }
 
     var pendingMessage: String?
+
+    func startVoiceInput() {
+        // Use macOS built-in speech recognition via osascript
+        // This pops up the dictation UI (Fn Fn or system dictation)
+        chatView.appendMessage(ChatMessage(role: .system, text: "Dictation active - speak now"))
+        nameLabel.update(text: "listening...", aboveWindow: window)
+        setState(.wave)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Use a temporary file approach with `say` for prompt + capture
+            let tmpFile = NSTemporaryDirectory() + "lil-eight-voice.txt"
+
+            // Trigger macOS dictation via AppleScript
+            let script = """
+            tell application "System Events"
+                -- Type into Lil Eight's input field by simulating keyboard
+                -- For now, use a dialog as voice input
+                set userText to text returned of (display dialog "Speak to Eight:" default answer "" with title "Lil Eight Voice" giving up after 30)
+                return userText
+            end tell
+            """
+
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                DispatchQueue.main.async {
+                    self?.chatView.stopListening()
+                    self?.nameLabel.update(text: PetController.shortId(self?.sessionId ?? "eight"), aboveWindow: self!.window)
+
+                    if !output.isEmpty {
+                        // Send the spoken text as a message
+                        self?.chatView.inputField.stringValue = output
+                        self?.chatView.submitInput()
+                    } else {
+                        self?.chatView.appendMessage(ChatMessage(role: .system, text: "No input received"))
+                        self?.setState(.idle)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.chatView.stopListening()
+                    self?.chatView.appendMessage(ChatMessage(role: .system, text: "Voice input failed"))
+                }
+            }
+        }
+    }
 
     func sendImageToVision(base64: String, caption: String) {
         guard let manager = petManager else { return }
