@@ -1559,9 +1559,10 @@ class PetController {
 
             // Idle personality based on how long idle
             if self.idleSeconds > 120 {
-                // Very idle - offer companion activity before sleeping
-                if self.companionMode == .coding && !self.daemonDriven {
-                    self.petManager?.speak("Hey, want to practice a language while we wait? Say slash lang and a language name.")
+                // Only the default pet offers companion activities (not session pets)
+                if self.sessionId == "eight" && self.companionMode == .coding && !self.daemonDriven && self.idleSeconds < 130 {
+                    // Fire once (within 10s window) then go to sleep
+                    self.petManager?.speak("Hey, want to practice a language while we wait?")
                     self.setStateInternal(.wave)
                     self.nameLabel.update(text: "bored?", aboveWindow: self.window)
                 } else {
