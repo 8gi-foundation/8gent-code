@@ -40,6 +40,11 @@ The Eight kernel runs as a persistent daemon on **Fly.io** (Amsterdam region).
 ## Commands
 
 ```bash
+# Users
+npm install -g @podjamz/8gent-code       # install globally
+8gent                                     # launch anywhere
+
+# Contributors (from source)
 bun install                              # install deps
 bun run tui                              # launch TUI
 bun run benchmark:v2                     # single benchmark pass
