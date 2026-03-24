@@ -2,60 +2,94 @@
 
 ## Project
 
-8gent Code v1.0.0 - the kernel of the 8gent ecosystem. Open source autonomous coding agent TUI powered by local LLMs (Ollama) or cloud models (OpenRouter free tier). The free on-ramp to 8gent OS.
+8gent Code - the kernel of the 8gent ecosystem. Open source autonomous coding agent TUI powered by local LLMs (Ollama) or free cloud models (OpenRouter). The free on-ramp to 8gent OS.
 
-- **Domain:** 8gent.dev (developer docs)
+- **Domain:** 8gent.dev
 - **Runtime:** Bun
 - **TUI:** Ink v6 (React for CLI)
-- **Monorepo:** 42 packages across `apps/` and `packages/`
-- **Default model:** Ollama (local) or OpenRouter free models (cloud)
-- **Deployment:** "The Vessel" on Fly.io Amsterdam ([eight-vessel.fly.dev](https://eight-vessel.fly.dev))
-- **Telegram:** Bot @aijamesosbot with voice transcription + iOS-style Mini App
-- **Model shootout winner:** Step 3.5 Flash (15s per task)
-- **Benchmarks:** 39 execution-graded tests
+- **Monorepo:** `apps/` (tui, clui, dashboard, debugger, demos, installer) + `packages/` (agent, providers, tools, etc.)
+- **Default model:** Ollama (Qwen 3.5 local) or OpenRouter free models (cloud). Task router auto-selects.
+- **Deployment:** Eight kernel as persistent daemon on Fly.io Amsterdam ([eight-vessel.fly.dev](https://eight-vessel.fly.dev))
 
 ### Ecosystem
 
+6 products, 6 domains.
+
 | Product | Domain | Role |
 |---------|--------|------|
-| **8gent Code** | 8gent.dev | Open source coding agent (this repo) - free on-ramp |
-| **8gent OS** | 8gentos.com | Personal AI operating system - paid product |
-| **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children - free |
-| **8gent World** | 8gent.world | Ecosystem hub, docs, investor decks |
-| **8gent Games** | 8gent.games | AI civilisation simulator |
-| **The Vessel** | eight-vessel.fly.dev | Cloud deployment (Fly.io Amsterdam) |
-| **Telegram App** | 8gent-telegram-app.vercel.app | iOS-style Mini App control panel |
+| **8gent OS** | 8gentos.com | Parent site. Paid product. Revenue engine. |
+| **8gent Code** | 8gent.dev | Open source developer agent. Free on-ramp. (this repo) |
+| **8gent** | 8gent.app | Consumer GUI client for the OS. |
+| **8gent World** | 8gent.world | Ecosystem story, docs, media. |
+| **8gent Games** | 8gent.games | Agent simulation playground. |
+| **8gent Jr** | 8gentjr.com | AI assistant for kids. Accessibility first. Free. |
+
+The [8gent Constitution](https://8gent.world/constitution) governs all decisions.
 
 See [BRAND.md](BRAND.md) for all design, color, typography, and brand rules.
 
-### The Vessel (Daemon)
+### Eight Kernel (Vessel Daemon)
 
-The eight-vessel daemon is deployed and running on **Fly.io** (Amsterdam region - `ams`).
+The Eight kernel runs as a persistent daemon on **Fly.io** (Amsterdam region).
 
 - **URL:** [eight-vessel.fly.dev](https://eight-vessel.fly.dev)
 - **Protocol:** Daemon Protocol v1.0 (WebSocket, auth, sessions, streaming)
-- **Package:** `packages/daemon/` - always-on process with agent pool via `AgentPool`
+- **Package:** `packages/daemon/` - always-on process with `AgentPool`
+- **Retry:** 4-strategy retry loop
 
 ## Commands
 
 ```bash
-bun install          # install deps
-bun run tui          # launch TUI
-bun run benchmarks/autoresearch/harness.ts  # run benchmarks
+bun install                              # install deps
+bun run tui                              # launch TUI
+bun run benchmark:v2                     # single benchmark pass
+CATEGORY=battle-test bun run benchmark:loop  # autoresearch loop
+bun run benchmarks/autoresearch/harness.ts   # run harness directly
 ```
+
+## Key Files
+
+| File | What it does |
+|------|--------------|
+| `packages/eight/tools.ts` | Core tool definitions for the agent |
+| `packages/eight/agent.ts` | Agent loop, abort, checkpoint restore |
+| `packages/eight/prompts/system-prompt.ts` | System prompt with user context injection |
+| `packages/permissions/policy-engine.ts` | NemoClaw policy engine (YAML-based, deny-by-default) |
+| `packages/memory/store.ts` | Memory store (SQLite + FTS5, episodic + semantic) |
+| `packages/self-autonomy/` | Evolution, reflection, HyperAgent meta-mutation, persona mutation |
+| `packages/daemon/` | Persistent vessel daemon |
+| `packages/kernel/` | RL fine-tuning pipeline (GRPO, off by default) |
+| `docs/HYPERAGENT-SPEC.md` | HyperAgent metacognitive self-modification spec |
+| `docs/MODEL-SHOOTOUT.md` | Local vs cloud model comparison |
+| `docs/KERNEL-FINETUNING.md` | RL fine-tuning architecture |
 
 ## Absolute Prohibitions (NON-NEGOTIABLE)
 
 1. **No em dashes.** Never. Use hyphens (-) or rewrite. No exceptions.
 2. **No purple/pink/violet colors.** Hues 270-350 are banned. See BRAND.md for approved palette.
 3. **No dollar values on benchmarks.** Describe what tasks test, not what they'd cost.
+4. **No stat padding.** Never pad descriptions with arbitrary numbers (package counts, benchmark counts, commit counts). Only state what actually exists with evidence.
+5. **No enthusiasm inflation.** Don't oversell. State what was done, what works, what doesn't.
+
+## Writing Rules
+
+- **No em dashes.** Use hyphens or rewrite.
+- **NOW/NEXT/LATER** for timelines, not Q1/Q2/Q3/Q4.
+- **Evidence over vibes.** Every claim needs a benchmark score, test count, or link.
+- **No stat padding.** If unsure about a feature's status, say "specified" or "in progress" rather than "implemented."
+
+## Brand
+
+- **Typography:** Fraunces (serif, weight 800) for brand wordmark. Inter (sans) for UI text. JetBrains Mono for code.
+- **Accent color:** #E8610A (orange). No purple.
+- **Full brand rules:** [BRAND.md](BRAND.md)
 
 ## No-BS Mode (ALWAYS ON)
 
 **Every agent working on this repo MUST follow these rules:**
 
 1. **One thing at a time.** Finish what you started before proposing anything new.
-2. **Import concepts, not code.** Read external projects, abstract the pattern, rebuild in <200 lines inside existing architecture. No wholesale foreign code merges.
+2. **Import concepts, not code.** Read external projects - abstract the pattern - rebuild in <200 lines inside existing architecture. No wholesale foreign code merges.
 3. **No speculative branches.** Don't create branches unless explicitly asked to build something.
 4. **Force constraints before building.** State: problem (1 sentence), constraint, what you're NOT doing, success metric.
 5. **Minimize blast radius.** If touching >3 files, pause and confirm scope.
@@ -68,14 +102,60 @@ bun run benchmarks/autoresearch/harness.ts  # run benchmarks
 
 **These are not features. They are defaults.**
 
-1. **Design first, not last.** Before writing code, think about the interaction. Does this need a UI? Could it be voice? Could it be nothing? Friction is the enemy. The best interface is the minimum that serves the user.
+1. **Design first, not last.** Before writing code, think about the interaction. Friction is the enemy. The best interface is the minimum that serves the user.
 2. **Free and local by default.** No API keys to start. Local models first. Cloud is opt-in. Privacy is the foundation.
 3. **Self-evolving.** Eight gets better every session. Lessons persist. Skills accumulate.
 4. **Hyper-personal.** Learn the user's patterns, preferences, codebase, style. Two users should have different experiences after a week.
 5. **Accessible.** Key docs have audio. Voice input works. Screen readers work. Adapt to the user, not the reverse.
-6. **Orchestrate by default.** Delegate to sub-agents. Decompose complexity. Use worktrees. Work like a CTO who is also the best IC.
-7. **Reduce friction, increase truth.** Prefer voice and conversation over forms. People give more truth when it's easy.
+6. **Orchestrate by default.** Delegate to sub-agents. Decompose complexity. Use worktrees.
+7. **Reduce friction, increase truth.** Prefer voice and conversation over forms.
 8. **The work speaks for itself.** Expertise is process, design, communication, and what ships - not credentials or enthusiasm.
+
+## Core Ability Packages (8 Powers)
+
+Eight's 8 Powers. Each is self-contained and can be enabled/disabled independently.
+
+| Package | Power | Key capabilities |
+|---------|-------|-----------------|
+| `packages/memory/` | Memory | SQLite + FTS5 + Ollama embeddings, procedural memory, health monitoring, contradiction detection, consolidation, lease-based job queue |
+| `packages/orchestration/` | Worktree | `WorktreePool` - max 4 concurrent, filesystem messaging, macro-actions, delegation |
+| `packages/permissions/` | Policy | NemoClaw YAML engine, 11 defaults, approval gates, headless mode, infinite mode |
+| `packages/self-autonomy/` | Evolution | Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, self-improvement DB |
+| `packages/validation/` | Healing | Checkpoint-verify-revert loop, `git stash` atomic snapshots, failure log |
+| `packages/proactive/` | Entrepreneurship | GitHub bounty scanner, capability matcher, opportunity pipeline |
+| `packages/ast-index/` | AST | Import dependency graph, test file mapping, change impact estimation |
+| `packages/tools/browser/` | Browser | Fetch + DuckDuckGo HTML scraper, HTML-to-text, disk cache, no headless deps |
+
+## Memory Layer (`packages/memory/`)
+
+Dual-layer episodic + semantic storage:
+
+- **Episodic memories** - timestamped facts extracted from conversations, auto-decayed over 30 days
+- **Semantic memories** - consolidated, promoted facts with frequency-based scoring
+- **Procedural memory** - learned procedures and workflows (landed)
+- **Natural language queries** - FTS5 full-text search + Ollama embeddings for semantic retrieval
+- **Auto-injection** - relevant memories injected into system prompt each turn
+- **Consolidation** - background process via lease-based job queue (landed)
+- **Health monitoring** - in progress
+- **Contradiction detection** - in progress
+
+**API reference:** [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md)
+
+## Kernel Fine-Tuning (`packages/kernel/`)
+
+The `@8gent/kernel` package handles continuous RL fine-tuning via a training proxy. Key files:
+
+- `proxy.ts` - Training proxy lifecycle and latency monitoring
+- `judge.ts` - PRM scoring via Gemini Flash (OpenRouter)
+- `training.ts` - GRPO batch collection, checkpoint validation, auto-rollback
+- `loop.ts` - MadMax scheduling, auto-promotion into model-router
+- `manager.ts` - unified entry point (`KernelManager.fromProjectConfig()`)
+
+**Config:** `config/training-proxy.yaml`
+**Docs:** `docs/KERNEL-FINETUNING.md`
+**Data dir:** `.8gent/kernel/`
+
+The pipeline is **off by default** - set `"training_proxy": { "enabled": true }` in `.8gent/config.json` to activate.
 
 ## Design System Library (MANDATORY)
 
@@ -85,7 +165,7 @@ bun run benchmarks/autoresearch/harness.ts  # run benchmarks
 
 | Resource | Path | What It Contains |
 |----------|------|-----------------|
-| **Design Systems DB** | `packages/design-systems/` | SQLite-backed registry of curated design systems, queryable by style/mood/project type |
+| **Design Systems DB** | `packages/design-systems/` | SQLite-backed registry of curated design systems |
 | **TUI Theme Tokens** | `apps/tui/src/theme/tokens.ts` | Color, spacing, typography tokens for terminal UI |
 | **TUI Semantic Layer** | `apps/tui/src/theme/semantic.ts` | Semantic color mappings (success, error, muted, etc.) |
 | **TUI Primitives** | `apps/tui/src/components/primitives/` | AppText, Badge, Card, Stack, Inline, Divider, StatusDot |
@@ -97,10 +177,10 @@ bun run benchmarks/autoresearch/harness.ts  # run benchmarks
 These skills are installed and should be consulted for design decisions:
 
 - **DesignExcellence** - design tokens, accessibility, modern UI patterns
-- **ui-ux-pro-max** - 50 styles, 97 palettes, 57 font pairings, 99 UX guidelines, 9 stacks
+- **ui-ux-pro-max** - styles, palettes, font pairings, UX guidelines
 - **web-design-guidelines** - Web Interface Guidelines compliance (Vercel)
 - **frontend-design** - production-grade frontend with high design quality
-- **theme-factory** - 10 pre-set themes for any artifact
+- **theme-factory** - pre-set themes for any artifact
 - **brand-guidelines** - Anthropic brand application (for Claude-adjacent work)
 - **canvas-design** - visual art in PNG/PDF
 - **sleek-design-mobile-apps** - mobile app design
@@ -108,13 +188,13 @@ These skills are installed and should be consulted for design decisions:
 ### Protocol
 
 1. **Before building any UI component:** Query the design systems DB or check TUI primitives. Don't reinvent what exists.
-2. **Before choosing colors/fonts:** Consult ui-ux-pro-max or the theme tokens. Don't guess.
-3. **Before shipping UI:** Run web-design-guidelines review. Don't skip accessibility.
+2. **Before choosing colors/fonts:** Consult the theme tokens. Don't guess.
+3. **Before shipping UI:** Review accessibility. Don't skip it.
 4. **TUI rule:** Never use `gray`, `white`, or `black` as colors. Use semantic tokens.
 
 ## AI Judging Rule
 
-**NEVER use string matching** (regex, `.includes()`, substring checks) to evaluate agent output, detect completion, classify results, or make decisions about success/failure. Always use the **Vercel AI SDK (`ai` package) as a judge** - call a model with a structured prompt to evaluate the output semantically. String matching is brittle, breaks on paraphrasing, and produces false positives/negatives. An LLM judge handles ambiguity, synonyms, and edge cases correctly.
+**NEVER use string matching** (regex, `.includes()`, substring checks) to evaluate agent output, detect completion, classify results, or make decisions about success/failure. Always use the **Vercel AI SDK (`ai` package) as a judge** - call a model with a structured prompt to evaluate the output semantically.
 
 This applies to: harness validation, loop detection heuristics, completion verification, test result parsing, session analysis, and any other situation where you need to interpret or classify natural-language or semi-structured output.
 
@@ -136,8 +216,6 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 
 **Safe named colors:** `red`, `green`, `yellow`, `blue`, `cyan`
 
-**Hex/RGB colors** are OK for decorative animations (rainbow, gradients) but never for readable text - they degrade unpredictably on terminals without truecolor.
-
 | Purpose | Props |
 |---------|-------|
 | Secondary/muted text | `dimColor` |
@@ -152,77 +230,16 @@ Terminal users have wildly different themes (dark, light, Solarized, etc.). Foll
 
 ## Versioning & Release Rules
 
-**Every agent working on this repo MUST follow these rules:**
-
 1. **Version lives in 3 places** - keep them in sync:
-   - `package.json` -> `"version"` (source of truth)
-   - `bin/8gent.ts` -> `const VERSION`
-   - `README.md` -> version badge
-2. **CHANGELOG.md is mandatory** - every PR or significant batch of work must add an entry under `[Unreleased]` or a new version section. Follow [Keep a Changelog](https://keepachangelog.com/) format.
+   - `package.json` - `"version"` (source of truth)
+   - `bin/8gent.ts` - `const VERSION`
+   - `README.md` - version badge
+2. **CHANGELOG.md is mandatory** - every PR or significant batch of work must add an entry. Follow [Keep a Changelog](https://keepachangelog.com/) format.
 3. **SemVer strictly:**
    - PATCH (1.0.x): bug fixes, minor tweaks
    - MINOR (1.x.0): new features, new benchmarks, new packages
    - MAJOR (x.0.0): breaking changes to CLI, session format, or API
-4. **Never ship without updating the changelog.** If you add a feature, fix a bug, or refactor something significant - document it in CHANGELOG.md before committing.
-5. **Tag releases** with `git tag v1.x.0` after version bumps.
-
-## Core Packages
-
-Eight's native abilities live in these packages. Each is self-contained and can be enabled/disabled independently.
-
-| Package | Ability | Key capabilities |
-|---------|---------|-----------------|
-| `packages/eight/` | Core agent | Vercel AI SDK agent loop, system prompt, session management |
-| `packages/daemon/` | Always-on daemon | Persistent process, WebSocket protocol, AgentPool |
-| `packages/memory/` | Persistent recall | SQLite + FTS5 + Ollama embeddings, dual-layer episodic + semantic, procedural memory, health monitoring, contradiction detection, consolidation, job queue |
-| `packages/permissions/` | Policy engine | YAML rules, 11 defaults, approval gates, headless mode, infinite mode, dangerous command detection |
-| `packages/orchestration/` | Worktree agents | WorktreePool - max 4 concurrent, filesystem messaging, macro-actions, delegation |
-| `packages/tools/` | Tool implementations | Browser-use, rate limiter, tool definitions, actuators, filesystem, shell |
-| `packages/proactive/` | Business agents | Opportunity scanner, capability matcher, content packaging, business agent system |
-| `packages/self-autonomy/` | Evolution | Post-session reflection, Bayesian skill confidence, self-improvement DB |
-| `packages/validation/` | Healing | Checkpoint-verify-revert loop, `git stash` atomic snapshots, failure log |
-| `packages/ast-index/` | Blast radius | Import dependency graph, test file mapping, change impact estimation |
-| `packages/kernel/` | RL fine-tuning | Training proxy, GRPO batch collection, checkpoint validation, auto-rollback, auto-promotion |
-| `packages/personality/` | Brand voice | "Infinite Gentleman" styling, persona calibration |
-
-## Memory Layer (`packages/memory/`)
-
-The memory layer is implemented with dual-layer episodic + semantic storage. Key capabilities:
-
-- **Episodic memories** - timestamped facts extracted from conversations, auto-decayed over 30 days
-- **Semantic memories** - consolidated, promoted facts with frequency-based scoring
-- **Natural language queries** - FTS5 full-text search + Ollama embeddings for semantic retrieval
-- **Auto-injection** - relevant memories injected into system prompt each turn
-- **Consolidation** - background process merges, deduplicates, and promotes episodic to semantic
-- **Procedural memory** - learned procedures and workflows stored for reuse
-- **Health monitoring** - memory health introspection and self-diagnostics
-- **Contradiction detection** - identifies and resolves conflicting memories
-- **Job queue** - lease-based background task processing
-
-**API reference:** [docs/MEMORY-SPEC.md](docs/MEMORY-SPEC.md)
-
-## Kernel Fine-Tuning (`packages/kernel/`)
-
-The `@8gent/kernel` package handles continuous RL fine-tuning via a training proxy. Key files:
-
-- `proxy.ts` - Training proxy lifecycle and latency monitoring
-- `judge.ts` - PRM scoring via Gemini Flash (OpenRouter)
-- `training.ts` - GRPO batch collection, checkpoint validation, auto-rollback
-- `loop.ts` - MadMax scheduling, auto-promotion into model-router
-- `manager.ts` - unified entry point (`KernelManager.fromProjectConfig()`)
-
-**Config:** `config/training-proxy.yaml` (proxy, RL, scheduler settings)
-**Docs:** `docs/KERNEL-FINETUNING.md` (full architecture and API reference)
-**Data dir:** `.8gent/kernel/` (score history, training batches, checkpoints)
-
-Agent loop integration:
-```typescript
-const kernel = KernelManager.fromProjectConfig();
-await kernel.start();
-await kernel.processTurn(sessionId, turn, model, prompt, response);
-```
-
-The pipeline is **off by default** - set `"training_proxy": { "enabled": true }` in `.8gent/config.json` to activate.
+4. **Tag releases** with `git tag v1.x.0` after version bumps.
 
 ## TUI Design System
 
@@ -232,14 +249,13 @@ The TUI follows a **design-system-first** architecture. Never use raw Ink `<Text
 
 ```
 apps/tui/src/
-  theme/          # tokens -> semantic -> ThemeProvider
+  theme/          # tokens - semantic - ThemeProvider
   components/
     primitives/   # AppText, MutedText, Heading, Label, Stack, Inline, Card, Badge, etc.
     feedback/     # Alert, SpinnerRow, ProgressBar
     forms/        # TextField, SelectField
     data-display/ # Table, KeyValueList
     navigation/   # Header, Footer
-    (existing)    # All legacy components refactored to use primitives
   hooks/          # useHotkeys, useViewport, useAsyncTask, useSelection, useGhostSuggestion
   lib/            # text (truncate, wrapText), layout (clamp, columnWidth), format (formatTokens, formatDuration)
   screens/        # ChatScreen, OnboardingScreen - compose components, no raw styling
@@ -258,30 +274,15 @@ apps/tui/src/
 
 ## Personalization System
 
-8gent has a 5-layer personalization system. Key files:
+5-layer personalization system. Key files:
 
 - `packages/self-autonomy/onboarding.ts` - Smart onboarding with `autoDetect()`, 3-question flow
-- `packages/self-autonomy/preferences-sync.ts` - Cloud sync via Convex (`syncOnLogin`, `pushToCloud`)
+- `packages/self-autonomy/preferences-sync.ts` - Cloud sync via Convex
 - `packages/eight/prompts/system-prompt.ts` - `USER_CONTEXT_SEGMENT` for adaptive prompts
 - `packages/eight/session-sync.ts` - Checkpoint saving, conversation history, resume
 - `packages/eight/agent.ts` - `abort()` for ESC interruption, `restoreFromCheckpoint()` for resume
 - `packages/kernel/personal-collector.ts` - Training pair collection for personal LoRA
 - `packages/memory/types.ts` - `userId` on `MemoryBase` for user-scoped recall
-- `packages/db/convex/conversations.ts` - Conversation history persistence
-- `apps/tui/src/screens/HistoryScreen.tsx` - Session browser UI
-
-### Slash Commands
-| Command | Purpose |
-|---------|---------|
-| `/history` | Browse past sessions |
-| `/continue` | Resume most recent session |
-| `/resume` | Pick from last 5 sessions |
-| `/compact` | Compress conversation history |
-| `/debug` | Open debug CLI with real-time session log viewer |
-| `/music` | Toggle ACE-Step lofi music generation (ADHD mode) |
-| `/router` | Show current task router classification and model selection |
-| `/github` | GitHub auth status and issue/PR integration |
-| `/rename` | Rename the current session |
 
 ### ESC Behavior
 - During generation: **aborts the AI SDK stream** (calls `agent.abort()`)
@@ -291,12 +292,12 @@ apps/tui/src/
 
 **Every HTML presentation, landing page, dashboard, or visual artifact MUST be:**
 
-1. **Mobile-first responsive** - design for 375px first, scale up. Use `clamp()` for all font sizes and spacing. Never use fixed pixel values for padding/margins on any layout element.
+1. **Mobile-first responsive** - design for 375px first, scale up. Use `clamp()` for all font sizes and spacing.
 2. **Touch-friendly** - swipe navigation, 44px minimum touch targets, no hover-only interactions.
-3. **Animated** - staggered entrance animations, smooth transitions between states, number counters animate to value. Static = unacceptable.
-4. **Tested before delivery** - mentally verify at 375px (iPhone SE), 393px (iPhone 14), 768px (iPad), 1440px (desktop) before sending to James.
-5. **Tables on mobile** - always wrap in horizontal scroll container with `-webkit-overflow-scrolling: touch`.
+3. **Animated** - staggered entrance animations, smooth transitions between states.
+4. **Tested before delivery** - mentally verify at 375px (iPhone SE), 393px (iPhone 14), 768px (iPad), 1440px (desktop).
+5. **Tables on mobile** - always wrap in horizontal scroll container.
 6. **Grids on mobile** - single column below 600px, 2-col at 768px, full grid at 960px+.
-7. **No fixed pixel fonts** - always `clamp(min, preferred, max)` e.g. `clamp(28px, 5vw, 56px)`.
+7. **No fixed pixel fonts** - always `clamp(min, preferred, max)`.
 
 **Quality bar:** If you wouldn't show it to a $10M investor on their phone, don't ship it.
