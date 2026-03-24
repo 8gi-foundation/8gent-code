@@ -14,22 +14,20 @@ Instead of reading entire files and searching through codebases, we use:
 
 ## Getting Started
 
+### Users
+
 ```bash
-# Clone the repo
+npm install -g @podjamz/8gent-code
+8gent
+```
+
+### Contributors (from source)
+
+```bash
 git clone https://github.com/PodJamz/8gent-code.git
 cd 8gent-code
-
-# Install dependencies (requires Bun)
 bun install
-
-# Make sure Ollama is running with the Eight model
-ollama pull eight-1.0-q3:14b
-
-# Run the agent
-bun run packages/eight/index.ts
-
-# Or test with a specific model via the TUI
-# /model eight-1.0-q3:14b
+bun run tui
 ```
 
 ## Project Structure
