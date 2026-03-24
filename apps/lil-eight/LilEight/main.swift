@@ -518,7 +518,7 @@ class SpriteManager {
 
 class SoundManager {
     var players: [String: AVAudioPlayer] = [:]
-    var volume: Float = 0.5
+    var volume: Float = 0.25 // subtle by default
     var muted = false
 
     func loadSounds(fromDir dir: String) {
@@ -1161,7 +1161,7 @@ class PetController {
                 preferredEdge: .maxY
             )
             popoverShown = true
-            soundManager.play("ping-connect")
+            soundManager.play("hum")
 
             // Focus the input field
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -1235,7 +1235,8 @@ class PetController {
     var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     var recognitionTask: SFSpeechRecognitionTask?
     var audioEngine: AVAudioEngine?
-    var silenceTimer: Timer? // auto-send after pause
+    var silenceTimer: Timer?
+    var voiceFinished = false // prevent double-handling
 
     func startVoiceInput() {
         // If already listening, stop and send
@@ -1280,54 +1281,48 @@ class PetController {
         }
 
         recognitionRequest.shouldReportPartialResults = true
+        voiceFinished = false
 
-        // Update UI
         nameLabel.update(text: "listening...", aboveWindow: window)
         setState(.wave)
-        chatView.appendMessage(ChatMessage(role: .system, text: "Speak now..."))
         eightLog("Voice: started listening")
 
-        var lastTranscript = ""
-
         recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            guard let self = self else { return }
+            guard let self = self, !self.voiceFinished else { return }
 
             if let result = result {
                 let transcript = result.bestTranscription.formattedString
-                lastTranscript = transcript
 
-                // Show live transcription in the input field
                 DispatchQueue.main.async {
                     self.chatView.inputField.stringValue = transcript
 
                     // Reset silence timer - auto-send after 1.5s of no new speech
                     self.silenceTimer?.invalidate()
-                    self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
-                        guard let self = self, !transcript.isEmpty else { return }
-                        eightLog("Voice: silence detected, auto-sending")
-                        self.finishVoiceInput(transcript: transcript)
+                    if !transcript.isEmpty {
+                        self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+                            guard let self = self, !self.voiceFinished else { return }
+                            eightLog("Voice: silence detected, auto-sending")
+                            self.finishVoiceInput(transcript: transcript)
+                        }
                     }
                 }
 
                 if result.isFinal {
                     DispatchQueue.main.async {
                         self.silenceTimer?.invalidate()
-                        self.finishVoiceInput(transcript: transcript)
+                        self.finishVoiceInput(transcript: result.bestTranscription.formattedString)
                     }
                 }
             }
 
-            if let error = error {
-                eightLog("Voice error: \(error.localizedDescription)")
+            // Only show error if we haven't already finished successfully
+            if error != nil && !self.voiceFinished {
+                let currentText = self.chatView.inputField.stringValue
                 DispatchQueue.main.async {
-                    if !lastTranscript.isEmpty {
-                        self.finishVoiceInput(transcript: lastTranscript)
-                    } else {
-                        self.chatView.appendMessage(ChatMessage(role: .system, text: "Didn't catch that"))
-                        self.chatView.stopListening()
-                        self.setState(.idle)
-                        self.nameLabel.update(text: PetController.shortId(self.sessionId), aboveWindow: self.window)
+                    if !currentText.isEmpty {
+                        self.finishVoiceInput(transcript: currentText)
                     }
+                    // Don't show "didn't catch that" - just silently reset
                 }
             }
         }
@@ -1367,8 +1362,11 @@ class PetController {
     }
 
     func finishVoiceInput(transcript: String) {
+        guard !voiceFinished else { return } // prevent double-fire
+        voiceFinished = true
         silenceTimer?.invalidate()
         silenceTimer = nil
+        recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
@@ -1461,7 +1459,7 @@ class PetController {
         isDragging = true
         daemonDriven = false
         setStateInternal(.drag)
-        soundManager.play("ping-walk")
+        // subtle - no sound for walk
     }
 
     func handleDragMove(_ origin: NSPoint) {
@@ -1564,7 +1562,7 @@ class PetController {
         idleSeconds = 0
         setStateInternal(.think)
         nameLabel.update(text: "thinking...", aboveWindow: window)
-        soundManager.play("ping-think")
+        // subtle - no sound for thinking
     }
 
     func onToolStart(tool: String) {
@@ -1585,7 +1583,7 @@ class PetController {
 
         let displayTool = tool.count > 10 ? String(tool.prefix(10)) : tool
         nameLabel.update(text: displayTool, aboveWindow: window)
-        soundManager.play("ping-tool")
+        // subtle - no sound for tool use
     }
 
     func onToolResult(tool: String) {
@@ -1606,7 +1604,7 @@ class PetController {
         if final {
             setStateInternal(.celebrate)
             nameLabel.update(text: "done!", aboveWindow: window)
-            soundManager.play("ping-success")
+            soundManager.play("hum")
             Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
                 self.daemonDriven = false
@@ -1624,7 +1622,7 @@ class PetController {
         lastActivityTime = Date()
         setStateInternal(.error)
         nameLabel.update(text: "error!", aboveWindow: window)
-        soundManager.play("ping-error")
+        soundManager.play("hum")
         Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             self.daemonDriven = false
@@ -1649,7 +1647,7 @@ class PetController {
         let prev = currentState
         setStateInternal(.success)
         nameLabel.update(text: "memory!", aboveWindow: window)
-        soundManager.play("ping-memory")
+        // subtle - no sound for memory
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             self.setStateInternal(prev)
@@ -1662,7 +1660,7 @@ class PetController {
         setStateInternal(.wave) // wave for attention
         walkSpeed = 0
         nameLabel.update(text: "approve?", aboveWindow: window)
-        soundManager.play("ping-approval")
+        soundManager.play("hum")
     }
 
     func destroy() {
@@ -2016,7 +2014,7 @@ class PetManager: DaemonClientDelegate {
         pet.petManager = self
         pets[sessionId] = pet
         print("[lil-eight] Spawned pet for session: \(sessionId)")
-        soundManager.play("ping-connect")
+        soundManager.play("hum")
         appDelegate?.updateMenu()
     }
 
@@ -2025,7 +2023,7 @@ class PetManager: DaemonClientDelegate {
         pet.destroy()
         pets.removeValue(forKey: sessionId)
         print("[lil-eight] Despawned pet for session: \(sessionId)")
-        soundManager.play("ping-disconnect")
+        // subtle - no sound for disconnect
         appDelegate?.updateMenu()
     }
 
@@ -2139,7 +2137,7 @@ class PetManager: DaemonClientDelegate {
                 return
             }
             self?.daemonClient.sendScreenshot(requestId: requestId, base64: base64)
-            self?.soundManager.play("ping-tool")
+            // subtle - no sound for tool use
 
             // Animate the default pet
             if let pet = self?.pets["eight"] {
@@ -2167,7 +2165,7 @@ class PetManager: DaemonClientDelegate {
         print("[lil-eight] Executing: \(actionStr) - \(computerAction.reasoning ?? "")")
         computerEngine.execute(computerAction)
         daemonClient.sendActionResult(success: true, message: actionStr)
-        soundManager.play("ping-tool")
+        // subtle - no sound for tool use
 
         // Show what's happening on the default pet
         if let pet = pets["eight"] {
@@ -2323,7 +2321,7 @@ class PetManager: DaemonClientDelegate {
 
                 DispatchQueue.main.async {
                     pet.onStream(chunk: nil, final: true)
-                    self.soundManager.play("ping-success")
+                    self.soundManager.play("hum")
                 }
             }
         }
@@ -2368,7 +2366,7 @@ class PetManager: DaemonClientDelegate {
             DispatchQueue.main.async {
                 pet.chatView.appendMessage(ChatMessage(role: .assistant, text: reason))
                 pet.onStream(chunk: nil, final: true)
-                self?.soundManager.play("ping-success")
+                self?.soundManager.play("hum")
             }
         }
         computerEngine.runTask(task)
