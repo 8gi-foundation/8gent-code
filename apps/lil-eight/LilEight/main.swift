@@ -1235,6 +1235,7 @@ class PetController {
     var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     var recognitionTask: SFSpeechRecognitionTask?
     var audioEngine: AVAudioEngine?
+    var silenceTimer: Timer? // auto-send after pause
 
     func startVoiceInput() {
         // If already listening, stop and send
@@ -1298,10 +1299,19 @@ class PetController {
                 // Show live transcription in the input field
                 DispatchQueue.main.async {
                     self.chatView.inputField.stringValue = transcript
+
+                    // Reset silence timer - auto-send after 1.5s of no new speech
+                    self.silenceTimer?.invalidate()
+                    self.silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+                        guard let self = self, !transcript.isEmpty else { return }
+                        eightLog("Voice: silence detected, auto-sending")
+                        self.finishVoiceInput(transcript: transcript)
+                    }
                 }
 
                 if result.isFinal {
                     DispatchQueue.main.async {
+                        self.silenceTimer?.invalidate()
                         self.finishVoiceInput(transcript: transcript)
                     }
                 }
@@ -1357,6 +1367,8 @@ class PetController {
     }
 
     func finishVoiceInput(transcript: String) {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
