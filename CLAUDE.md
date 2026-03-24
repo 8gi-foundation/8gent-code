@@ -11,16 +11,25 @@
 
 ### Ecosystem
 
-| Product | Domain | Role |
-|---------|--------|------|
-| **8gent OS** | 8gentos.com | Parent platform - the paid product |
-| **8gent Code** | 8gent.dev | Open source coding agent (this repo) - the free on-ramp |
-| **8gent** | 8gent.app | GUI client |
-| **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children |
-| **8gent World** | 8gent.world | Documentation and ecosystem hub |
-| **8gent Games** | 8gent.games | AI civilisation playground |
+| Product | Domain | Status |
+|---------|--------|--------|
+| **8gent Jr** | 8gentjr.com | Live - 40 games, 7 apps, full AAC engine |
+| **8gent OS** | 8gentos.com | In development |
+| **8gent Code** | github.com/PodJamz/8gent-code | Open source (this repo) |
+| **8gent World** | 8gent.world | Live |
+| **8gent Games** | 8gent.games | Live |
 
 See [BRAND.md](BRAND.md) for all design, color, typography, and brand rules.
+
+### eight-vessel Daemon
+
+The eight-vessel daemon is deployed and running on **Fly.io** (Amsterdam region - `ams`).
+
+- **URL:** [eight-vessel.fly.dev](https://eight-vessel.fly.dev)
+- **Protocol:** Daemon Protocol v1.0 (WebSocket, auth, sessions, streaming)
+- **Open issues:**
+  - [#27](https://github.com/PodJamz/8gent-code/issues/27) - Deploy vessel
+  - [#28](https://github.com/PodJamz/8gent-code/issues/28) - Auth token
 
 ## Commands
 
