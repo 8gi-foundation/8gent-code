@@ -1,0 +1,50 @@
+{
+  "idle": {
+    "start": 0,
+    "count": 4
+  },
+  "walk-right": {
+    "start": 4,
+    "count": 6
+  },
+  "walk-left": {
+    "start": 10,
+    "count": 6
+  },
+  "think": {
+    "start": 16,
+    "count": 4
+  },
+  "success": {
+    "start": 20,
+    "count": 4
+  },
+  "error": {
+    "start": 24,
+    "count": 4
+  },
+  "sleep": {
+    "start": 28,
+    "count": 6
+  },
+  "wave": {
+    "start": 34,
+    "count": 4
+  },
+  "sit": {
+    "start": 38,
+    "count": 4
+  },
+  "celebrate": {
+    "start": 42,
+    "count": 6
+  },
+  "drag": {
+    "start": 48,
+    "count": 2
+  },
+  "typing": {
+    "start": 50,
+    "count": 4
+  }
+}
