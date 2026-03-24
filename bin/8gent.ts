@@ -33,7 +33,8 @@ USAGE:
   8gent <command> [options]
 
 COMMANDS:
-  tui                         Launch interactive TUI
+  tui                         Launch interactive TUI (auto-spawns dock pet)
+  pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
   session <sub>               Session history & resume
@@ -84,6 +85,8 @@ OPTIONS:
   --provider=<p> Override provider (e.g., --provider=ollama)
   --cwd=<dir>    Override working directory
   --infinite     Enable infinite mode (autonomous until done)
+  --pet          Also spawn Lil Eight dock companion (auto with tui)
+  --no-pet       Disable dock pet auto-spawn
 
 EXAMPLES:
   # Non-interactive chat (pipe-friendly)
@@ -123,9 +126,15 @@ Learn more: https://github.com/PodJamz/8gent-code
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
+  if (args.includes("-h") || args.includes("--help")) {
     console.log(BANNER);
     console.log(HELP);
+    return;
+  }
+
+  // No args = launch TUI with pet (the default experience)
+  if (args.length === 0) {
+    await tuiCommand([]);
     return;
   }
 
@@ -150,6 +159,16 @@ async function main() {
   // If just --infinite with no command, launch TUI in infinite mode
   if (args.length === 0 && hasInfiniteFlag) {
     args.push("tui");
+  }
+
+  // Handle --pet / -pet as standalone (same as 8gent pet start)
+  if (args.includes("--pet") || args.includes("-pet")) {
+    const filtered = args.filter(a => a !== "--pet" && a !== "-pet");
+    if (filtered.length === 0) {
+      await petCommand(["start"]);
+      return;
+    }
+    // Otherwise it's a flag on another command - handled by tuiCommand
   }
 
   const command = args[0];
@@ -182,6 +201,10 @@ async function main() {
 
     case "tui":
       await tuiCommand(restArgs);
+      break;
+
+    case "pet":
+      await petCommand(restArgs);
       break;
 
     case "infinite":
@@ -455,20 +478,153 @@ async function demoCommand(args: string[]) {
   proc.on("exit", (code) => process.exit(code || 0));
 }
 
+// Spawn Lil Eight dock pet (non-blocking, idempotent)
+async function spawnPet(sessionId?: string) {
+  const { spawn: spawnProc, execSync } = await import("child_process");
+  const lilEightScript = path.join(__dirname, "lil-eight.sh");
+
+  // Check if already running
+  try {
+    execSync("pgrep -f LilEight", { stdio: "pipe" });
+    // Already running - just register with mesh
+  } catch {
+    // Not running - spawn it
+    if (fs.existsSync(lilEightScript)) {
+      const pet = spawnProc("bash", [lilEightScript, "start"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      pet.unref();
+      console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
+    } else {
+      // Try build first
+      const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
+      if (fs.existsSync(buildScript)) {
+        console.log("\x1b[36m[pet] Building Lil Eight...\x1b[0m");
+        try {
+          execSync(`bash "${buildScript}"`, { stdio: "pipe" });
+          const pet = spawnProc("bash", [lilEightScript, "start"], {
+            detached: true,
+            stdio: "ignore",
+          });
+          pet.unref();
+          console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
+        } catch (e) {
+          console.log("\x1b[33m[pet] Could not build Lil Eight\x1b[0m");
+        }
+      }
+    }
+  }
+
+  // Register this session with the Agent Mesh
+  try {
+    const meshDir = path.join(process.env.HOME || "~", ".8gent", "mesh");
+    const registryPath = path.join(meshDir, "registry.json");
+    fs.mkdirSync(meshDir, { recursive: true });
+
+    const agentId = sessionId || `eight-tui-${process.pid}`;
+    let registry: Record<string, any> = {};
+    try { registry = JSON.parse(fs.readFileSync(registryPath, "utf-8")); } catch {}
+
+    registry[agentId] = {
+      id: agentId,
+      type: "eight",
+      name: "TUI",
+      pid: process.pid,
+      cwd: process.cwd(),
+      capabilities: ["code", "orchestrate", "memory", "tools"],
+      startedAt: Date.now(),
+      lastHeartbeat: Date.now(),
+      channel: "terminal",
+    };
+
+    fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+
+    // Clean up on exit
+    const cleanup = () => {
+      try {
+        const reg = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+        delete reg[agentId];
+        fs.writeFileSync(registryPath, JSON.stringify(reg, null, 2));
+      } catch {}
+    };
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => { cleanup(); process.exit(0); });
+    process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+  } catch {}
+}
+
 async function tuiCommand(args: string[]) {
   console.log(BANNER);
+
+  // Auto-spawn pet unless --no-pet
+  const noPet = args.includes("--no-pet");
+  const filteredArgs = args.filter(a => a !== "--no-pet" && a !== "--pet");
+
+  if (!noPet) {
+    await spawnPet();
+  }
+
   console.log("Launching TUI...\n");
 
-  // Dynamic import to launch TUI
   const { spawn } = await import("child_process");
   const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
 
-  const proc = spawn("bun", ["run", tuiPath, ...args], {
+  const proc = spawn("bun", ["run", tuiPath, ...filteredArgs], {
     stdio: "inherit",
     cwd: path.join(__dirname, ".."),
   });
 
   proc.on("exit", (code) => process.exit(code || 0));
+}
+
+async function petCommand(args: string[]) {
+  const subCmd = args[0] || "start";
+  const { execSync } = await import("child_process");
+  const lilEightScript = path.join(__dirname, "lil-eight.sh");
+
+  if (!fs.existsSync(lilEightScript)) {
+    console.log("Building Lil Eight first...");
+    const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
+    execSync(`bash "${buildScript}"`, { stdio: "inherit" });
+  }
+
+  switch (subCmd) {
+    case "start":
+    case "open":
+      await spawnPet();
+      break;
+    case "stop":
+    case "kill":
+      try { execSync("pkill -f LilEight"); console.log("Lil Eight stopped"); } catch { console.log("Not running"); }
+      break;
+    case "restart":
+      try { execSync("pkill -f LilEight"); } catch {}
+      setTimeout(() => spawnPet(), 1000);
+      break;
+    case "build":
+      execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build.sh")}"`, { stdio: "inherit" });
+      break;
+    case "log":
+    case "logs":
+      const { spawn: sp } = await import("child_process");
+      const logPath = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
+      sp("tail", ["-f", logPath], { stdio: "inherit" });
+      break;
+    case "status":
+      try {
+        execSync("pgrep -f LilEight", { stdio: "pipe" });
+        console.log("Lil Eight is running");
+        const logP = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
+        if (fs.existsSync(logP)) {
+          const lines = fs.readFileSync(logP, "utf-8").trim().split("\n").slice(-3);
+          lines.forEach(l => console.log(`  ${l}`));
+        }
+      } catch { console.log("Lil Eight is not running"); }
+      break;
+    default:
+      console.log("Usage: 8gent pet [start|stop|restart|build|log|status]");
+  }
 }
 
 async function infiniteCommand(args: string[]) {
