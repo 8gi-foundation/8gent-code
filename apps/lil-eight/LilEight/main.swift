@@ -3,6 +3,8 @@ import AVFoundation
 import UserNotifications
 import CoreGraphics
 import ScreenCaptureKit
+import Speech
+import AVFAudio
 
 // MARK: - Computer Use Engine (Free Stack - Ollama Vision)
 
@@ -1228,59 +1230,150 @@ class PetController {
 
     var pendingMessage: String?
 
+    // Real speech recognition state
+    var speechRecognizer: SFSpeechRecognizer?
+    var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    var recognitionTask: SFSpeechRecognitionTask?
+    var audioEngine: AVAudioEngine?
+
     func startVoiceInput() {
-        // Use macOS built-in speech recognition via osascript
-        // This pops up the dictation UI (Fn Fn or system dictation)
-        chatView.appendMessage(ChatMessage(role: .system, text: "Dictation active - speak now"))
-        nameLabel.update(text: "listening...", aboveWindow: window)
-        setState(.wave)
+        // If already listening, stop and send
+        if recognitionTask != nil {
+            stopVoiceInput()
+            return
+        }
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Use a temporary file approach with `say` for prompt + capture
-            let tmpFile = NSTemporaryDirectory() + "lil-eight-voice.txt"
-
-            // Trigger macOS dictation via AppleScript
-            let script = """
-            tell application "System Events"
-                -- Type into Lil Eight's input field by simulating keyboard
-                -- For now, use a dialog as voice input
-                set userText to text returned of (display dialog "Speak to Eight:" default answer "" with title "Lil Eight Voice" giving up after 30)
-                return userText
-            end tell
-            """
-
-            let process = Process()
-            let pipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", script]
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-                DispatchQueue.main.async {
+        // Request speech recognition permission
+        SFSpeechRecognizer.requestAuthorization { [weak self] status in
+            DispatchQueue.main.async {
+                switch status {
+                case .authorized:
+                    self?.beginListening()
+                case .denied, .restricted:
+                    self?.chatView.appendMessage(ChatMessage(role: .system, text: "Speech recognition denied. Enable in System Settings > Privacy > Speech Recognition"))
                     self?.chatView.stopListening()
-                    self?.nameLabel.update(text: PetController.shortId(self?.sessionId ?? "eight"), aboveWindow: self!.window)
-
-                    if !output.isEmpty {
-                        // Send the spoken text as a message
-                        self?.chatView.inputField.stringValue = output
-                        self?.chatView.submitInput()
-                    } else {
-                        self?.chatView.appendMessage(ChatMessage(role: .system, text: "No input received"))
-                        self?.setState(.idle)
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self?.chatView.stopListening()
-                    self?.chatView.appendMessage(ChatMessage(role: .system, text: "Voice input failed"))
+                case .notDetermined:
+                    self?.chatView.appendMessage(ChatMessage(role: .system, text: "Requesting speech permission..."))
+                @unknown default:
+                    break
                 }
             }
+        }
+    }
+
+    func beginListening() {
+        speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+            chatView.appendMessage(ChatMessage(role: .system, text: "Speech recognition not available"))
+            chatView.stopListening()
+            return
+        }
+
+        audioEngine = AVAudioEngine()
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+
+        guard let recognitionRequest = recognitionRequest,
+              let audioEngine = audioEngine else {
+            chatView.stopListening()
+            return
+        }
+
+        recognitionRequest.shouldReportPartialResults = true
+
+        // Update UI
+        nameLabel.update(text: "listening...", aboveWindow: window)
+        setState(.wave)
+        chatView.appendMessage(ChatMessage(role: .system, text: "Speak now..."))
+        eightLog("Voice: started listening")
+
+        var lastTranscript = ""
+
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+            guard let self = self else { return }
+
+            if let result = result {
+                let transcript = result.bestTranscription.formattedString
+                lastTranscript = transcript
+
+                // Show live transcription in the input field
+                DispatchQueue.main.async {
+                    self.chatView.inputField.stringValue = transcript
+                }
+
+                if result.isFinal {
+                    DispatchQueue.main.async {
+                        self.finishVoiceInput(transcript: transcript)
+                    }
+                }
+            }
+
+            if let error = error {
+                eightLog("Voice error: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    if !lastTranscript.isEmpty {
+                        self.finishVoiceInput(transcript: lastTranscript)
+                    } else {
+                        self.chatView.appendMessage(ChatMessage(role: .system, text: "Didn't catch that"))
+                        self.chatView.stopListening()
+                        self.setState(.idle)
+                        self.nameLabel.update(text: PetController.shortId(self.sessionId), aboveWindow: self.window)
+                    }
+                }
+            }
+        }
+
+        // Configure audio input
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            recognitionRequest.append(buffer)
+        }
+
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            eightLog("Voice: audio engine started")
+        } catch {
+            eightLog("Voice: audio engine failed: \(error)")
+            chatView.appendMessage(ChatMessage(role: .system, text: "Mic access failed"))
+            chatView.stopListening()
+        }
+    }
+
+    func stopVoiceInput() {
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        recognitionRequest?.endAudio()
+
+        // Wait briefly for final result, then force finish with what we have
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            let currentText = self.chatView.inputField.stringValue
+            if !currentText.isEmpty && self.recognitionTask != nil {
+                self.finishVoiceInput(transcript: currentText)
+            }
+        }
+    }
+
+    func finishVoiceInput(transcript: String) {
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine = nil
+
+        chatView.stopListening()
+        nameLabel.update(text: PetController.shortId(sessionId), aboveWindow: window)
+
+        eightLog("Voice transcript: \(transcript)")
+
+        if !transcript.isEmpty {
+            chatView.inputField.stringValue = transcript
+            chatView.submitInput()
+        } else {
+            setState(.idle)
         }
     }
 
