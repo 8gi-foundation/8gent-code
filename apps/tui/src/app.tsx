@@ -1847,6 +1847,48 @@ export function App({ initialCommand, args }: AppProps) {
           break;
         }
 
+        case "dj": {
+          const djSub = args[0] || "";
+          const djArgs = args.slice(1);
+          // Lazy import the DJ hook handler
+          import("./hooks/useDJ.js").then(async ({ useDJ: _ }) => {
+            // Direct instantiation since we can't use hooks outside React
+            const { DJ } = await import("../../../packages/music/dj.js");
+            const dj = new DJ();
+            let result: string;
+            switch (djSub) {
+              case "play": result = await dj.play(djArgs.join(" ") || ""); break;
+              case "radio": result = await dj.radio(djArgs.join(" ") || "lofi"); break;
+              case "pause": result = await dj.pause(); break;
+              case "stop": dj.stop(); try { require("child_process").execSync("pkill -f afplay 2>/dev/null"); } catch {} result = "Stopped."; break;
+              case "skip": result = await dj.skip(); break;
+              case "np": result = await dj.nowPlaying(); break;
+              case "vol": case "volume": result = await dj.volume(parseInt(djArgs[0] || "80")); break;
+              case "loop": case "repeat": result = dj.repeat(); break;
+              case "queue": result = dj.queue(djArgs.join(" ")); break;
+              case "dl": case "download": result = dj.download(djArgs[0] || ""); break;
+              case "bpm": result = dj.bpm(djArgs[0] || ""); break;
+              case "mix": result = dj.mix(djArgs[0] || "", djArgs[1] || "", parseInt(djArgs[2] || "5")); break;
+              case "resume": result = await dj.resume(); break;
+              case "presets": case "genres": result = "Radio: " + dj.radioPresets().join(", "); break;
+              case "doctor": case "status": { const d = dj.doctor(); result = `mpv:${d.mpv?"OK":"X"} yt-dlp:${d.ytdlp?"OK":"X"} ffmpeg:${d.ffmpeg?"OK":"X"} sox:${d.sox?"OK":"X"}`; break; }
+              case "produce": case "gen": {
+                addSystemMessage(`Producing ${djArgs[0] || "house"} track...`);
+                const { MusicProducer } = await import("../../../packages/music/producer.js");
+                const p = new MusicProducer();
+                const t = await p.produce({ genre: (djArgs[0] || "house") as any, durationSec: 60, loop: true });
+                p.loop(t);
+                result = `Playing: ${t.genre} at ${t.bpm} BPM (${t.layers.length} layers)`;
+                break;
+              }
+              default:
+                result = "DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools";
+            }
+            addSystemMessage(result);
+          }).catch((err) => addSystemMessage(`DJ error: ${err.message}`));
+          break;
+        }
+
         case "design":
           // Trigger design agent manually
           const designTask = args.length > 0 ? args.join(" ") : "create a new UI component";
