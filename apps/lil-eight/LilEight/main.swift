@@ -2336,7 +2336,14 @@ class PetManager: DaemonClientDelegate {
         User: open google -> {"commands": ["open https://google.com"], "explanation": "Opening Google"}
         User: take screenshot -> {"commands": ["screencapture -x ~/Desktop/screenshot.png"], "explanation": "Screenshot saved"}
         User: play music -> {"commands": ["open -a Music"], "explanation": "Opening Music app"}
+        User: airdrop that to me -> {"commands": ["AIRDROP:last"], "explanation": "AirDropping last file"}
+        User: airdrop this file -> {"commands": ["AIRDROP:last"], "explanation": "AirDropping"}
+        User: send me the report -> {"commands": ["AIRDROP:report"], "explanation": "Looking for report to AirDrop"}
+        User: airdrop package.json -> {"commands": ["AIRDROP:package.json"], "explanation": "AirDropping package.json"}
+        User: send that to my phone -> {"commands": ["AIRDROP:last"], "explanation": "AirDropping to phone"}
+        User: drop me the screenshot -> {"commands": ["AIRDROP:screenshot"], "explanation": "AirDropping screenshot"}
 
+        For AirDrop requests, use the special AIRDROP: prefix. "last" means the most recent file mentioned or created. Otherwise specify the filename.
         ONLY output the JSON object. No markdown, no explanation, no backticks. Just the raw JSON.
         """
 
@@ -2389,6 +2396,15 @@ class PetManager: DaemonClientDelegate {
             // Execute on background thread
             DispatchQueue.global(qos: .userInitiated).async {
                 for cmd in commands {
+                    // Handle AIRDROP: special command
+                    if cmd.hasPrefix("AIRDROP:") {
+                        let target = String(cmd.dropFirst(8))
+                        DispatchQueue.main.async {
+                            self.handleAirdropRequest(target: target, pet: pet)
+                        }
+                        continue
+                    }
+
                     DispatchQueue.main.async {
                         pet.chatView.appendMessage(ChatMessage(role: .system, text: "$ \(cmd)"))
                     }
@@ -2401,7 +2417,7 @@ class PetManager: DaemonClientDelegate {
                         }
                     }
 
-                    Thread.sleep(forTimeInterval: 0.3) // brief pause between commands
+                    Thread.sleep(forTimeInterval: 0.3)
                 }
 
                 DispatchQueue.main.async {
@@ -2415,6 +2431,86 @@ class PetManager: DaemonClientDelegate {
     // MARK: - Local Chat (text model, no daemon)
 
     // MARK: - AirDrop
+
+    /// Track last file created/mentioned for "airdrop that to me"
+    var lastMentionedFile: String?
+
+    func handleAirdropRequest(target: String, pet: PetController) {
+        eightLog("AirDrop request: \(target)")
+
+        // Resolve what to airdrop
+        var filePath: String?
+
+        if target == "last" || target.isEmpty {
+            // Try last mentioned file, or most recent in ~/Desktop, or cwd
+            if let last = lastMentionedFile, FileManager.default.fileExists(atPath: last) {
+                filePath = last
+            } else {
+                // Find most recent file on Desktop
+                let desktop = NSString(string: "~/Desktop").expandingTildeInPath
+                filePath = mostRecentFile(in: desktop)
+            }
+        } else if target.contains("/") || target.contains(".") {
+            // Looks like a path/filename
+            let expanded = NSString(string: target).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: expanded) {
+                filePath = expanded
+            } else {
+                // Try in cwd
+                let cwdPath = FileManager.default.currentDirectoryPath + "/" + target
+                if FileManager.default.fileExists(atPath: cwdPath) {
+                    filePath = cwdPath
+                }
+            }
+        } else {
+            // Fuzzy search - find files matching the keyword
+            let keyword = target.lowercased()
+            let searchDirs = [
+                FileManager.default.currentDirectoryPath,
+                NSString(string: "~/Desktop").expandingTildeInPath,
+                NSString(string: "~/Downloads").expandingTildeInPath,
+            ]
+            for dir in searchDirs {
+                if let found = findFile(matching: keyword, in: dir) {
+                    filePath = found
+                    break
+                }
+            }
+        }
+
+        if let path = filePath {
+            pet.chatView.appendMessage(ChatMessage(role: .system, text: "Found: \(URL(fileURLWithPath: path).lastPathComponent)"))
+            airdropFile(path, pet: pet)
+        } else {
+            pet.chatView.appendMessage(ChatMessage(role: .system, text: "Could not find a file to AirDrop. Try: /airdrop <filepath>"))
+        }
+    }
+
+    func mostRecentFile(in dir: String) -> String? {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+        var newest: (path: String, date: Date)?
+        for file in files where !file.hasPrefix(".") {
+            let fullPath = dir + "/" + file
+            if let attrs = try? fm.attributesOfItem(atPath: fullPath),
+               let mod = attrs[.modificationDate] as? Date {
+                if newest == nil || mod > newest!.date {
+                    newest = (fullPath, mod)
+                }
+            }
+        }
+        return newest?.path
+    }
+
+    func findFile(matching keyword: String, in dir: String) -> String? {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+        // Exact match first
+        for file in files where file.lowercased() == keyword || file.lowercased().contains(keyword) {
+            return dir + "/" + file
+        }
+        return nil
+    }
 
     func airdropFile(_ filePath: String, pet: PetController) {
         // Expand ~ and resolve path
