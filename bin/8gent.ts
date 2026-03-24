@@ -481,6 +481,31 @@ async function demoCommand(args: string[]) {
 // Spawn Lil Eight dock pet (non-blocking, idempotent)
 async function spawnPet(sessionId?: string) {
   const { spawn: spawnProc, execSync } = await import("child_process");
+  const platform = process.platform; // darwin, win32, linux
+
+  // macOS: native Swift dock pet
+  // Windows/Linux: terminal-rendered pet (future: Electron/Tauri)
+  if (platform !== "darwin") {
+    console.log("\x1b[36m[pet] Lil Eight terminal mode (cross-platform)\x1b[0m");
+    // TODO: spawn terminal-rendered pet via Ink component
+    // For now, register with mesh and skip native app
+    try {
+      const meshDir = path.join(process.env.HOME || process.env.USERPROFILE || "~", ".8gent", "mesh");
+      fs.mkdirSync(meshDir, { recursive: true });
+      const registryPath = path.join(meshDir, "registry.json");
+      let registry: Record<string, any> = {};
+      try { registry = JSON.parse(fs.readFileSync(registryPath, "utf-8")); } catch {}
+      const agentId = sessionId || `eight-tui-${process.pid}`;
+      registry[agentId] = {
+        id: agentId, type: "eight", name: "TUI", pid: process.pid,
+        cwd: process.cwd(), capabilities: ["code", "orchestrate"],
+        startedAt: Date.now(), lastHeartbeat: Date.now(), channel: "terminal"
+      };
+      fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+    } catch {}
+    return;
+  }
+
   const lilEightScript = path.join(__dirname, "lil-eight.sh");
 
   // Check if already running
