@@ -82,7 +82,9 @@ export type SlashCommand =
   | "chat"
   | "agent"
   | "github"
-  | "debug";
+  | "debug"
+  | "music"
+  | "dj";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -204,6 +206,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["audio", "soundscape"],
     description: "Generate & play focus music (ACE-Step)",
     usage: "/music [lofi|rain|white|ambient|piano|gen <prompt>|stop|config]",
+  },
+  {
+    name: "dj",
+    aliases: ["play", "radio"],
+    description: "DJ Eight — YouTube, radio, produce, mix",
+    usage: "/dj [play|radio|produce|pause|stop|skip|np|vol|loop|queue|dl|bpm|mix]",
   },
   {
     name: "router",
