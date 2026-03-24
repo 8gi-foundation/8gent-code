@@ -30,5 +30,9 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lil Eight uses speech recognition for voice chat</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lil Eight needs mic access for voice input</string>
 </dict>
 </plist>
