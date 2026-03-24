@@ -1,0 +1,16 @@
+{
+  "name": "@8gent/pet",
+  "version": "0.1.0",
+  "description": "Lil Eight - cross-platform terminal pet companion",
+  "main": "terminal-pet.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run terminal-pet.ts",
+    "demo": "bun run terminal-pet.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "ink": "^5.0.0",
+    "react": "^18.0.0"
+  }
+}
