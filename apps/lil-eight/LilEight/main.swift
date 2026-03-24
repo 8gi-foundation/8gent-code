@@ -1235,6 +1235,22 @@ class PetController {
             return
         }
 
+        // /airdrop <file> - AirDrop a file to nearby devices
+        if text.lowercased().hasPrefix("/airdrop ") {
+            let filePath = String(text.dropFirst(9)).trimmingCharacters(in: .whitespaces)
+            chatView.appendMessage(ChatMessage(role: .system, text: "AirDropping: \(filePath)"))
+            petManager?.airdropFile(filePath, pet: self)
+            return
+        }
+
+        // /send <text> - AirDrop a text note
+        if text.lowercased().hasPrefix("/send ") {
+            let content = String(text.dropFirst(6))
+            chatView.appendMessage(ChatMessage(role: .system, text: "AirDropping note..."))
+            petManager?.airdropText(content, pet: self)
+            return
+        }
+
         // Regular chat - route to Ollama text model
         if !manager.daemonOnline {
             manager.chatLocally(text, pet: self)
@@ -2397,6 +2413,61 @@ class PetManager: DaemonClientDelegate {
     }
 
     // MARK: - Local Chat (text model, no daemon)
+
+    // MARK: - AirDrop
+
+    func airdropFile(_ filePath: String, pet: PetController) {
+        // Expand ~ and resolve path
+        let expanded = NSString(string: filePath).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded)
+
+        guard FileManager.default.fileExists(atPath: expanded) else {
+            pet.chatView.appendMessage(ChatMessage(role: .system, text: "File not found: \(filePath)"))
+            return
+        }
+
+        eightLog("AirDrop file: \(expanded)")
+
+        DispatchQueue.main.async {
+            let service = NSSharingService(named: .sendViaAirDrop)
+            if let service = service {
+                if service.canPerform(withItems: [url]) {
+                    service.perform(withItems: [url])
+                    pet.chatView.appendMessage(ChatMessage(role: .system, text: "AirDrop sheet opened"))
+                    pet.setState(.celebrate)
+                    self.soundManager.play("hum")
+                } else {
+                    pet.chatView.appendMessage(ChatMessage(role: .system, text: "AirDrop not available - check Bluetooth/WiFi"))
+                }
+            } else {
+                pet.chatView.appendMessage(ChatMessage(role: .system, text: "AirDrop service unavailable"))
+            }
+        }
+    }
+
+    func airdropText(_ text: String, pet: PetController) {
+        // Write text to a temp file, then AirDrop it
+        let tmpPath = NSTemporaryDirectory() + "eight-note-\(Int(Date().timeIntervalSince1970)).txt"
+        do {
+            try text.write(toFile: tmpPath, atomically: true, encoding: .utf8)
+            airdropFile(tmpPath, pet: pet)
+        } catch {
+            pet.chatView.appendMessage(ChatMessage(role: .system, text: "Failed to create note"))
+        }
+    }
+
+    func airdropItems(_ items: [Any], pet: PetController) {
+        DispatchQueue.main.async {
+            let service = NSSharingService(named: .sendViaAirDrop)
+            if let service = service, service.canPerform(withItems: items) {
+                service.perform(withItems: items)
+                pet.chatView.appendMessage(ChatMessage(role: .system, text: "AirDrop ready - select your device"))
+                pet.setState(.celebrate)
+            } else {
+                pet.chatView.appendMessage(ChatMessage(role: .system, text: "AirDrop not available"))
+            }
+        }
+    }
 
     func startLanguageSession(_ language: String, pet: PetController) {
         pet.onThinking()
