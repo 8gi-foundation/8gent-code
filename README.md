@@ -1,12 +1,24 @@
 # 8gent Code
 
-The brain of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent that runs on local LLMs via Ollama. No API keys, no usage caps, no cloud dependency.
+The kernel of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent powered by local LLMs (Ollama) or free cloud models (OpenRouter). No API keys, no usage caps, no cloud dependency. 42 packages. 39 benchmarks. Always-on daemon.
 
-**v1.0.0 tagged** - daemon stable. Vessel deployed at [eight-vessel.fly.dev](https://eight-vessel.fly.dev).
+**v1.0.0** - Daemon stable. Vessel deployed at [eight-vessel.fly.dev](https://eight-vessel.fly.dev). Model shootout winner: Step 3.5 Flash (15s per task).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](https://8gent.dev)
 [![8gent OS](https://img.shields.io/badge/8gent_OS-8gentos.com-orange)](https://8gentos.com)
+
+## Ecosystem
+
+| Product | Domain | Role |
+|---------|--------|------|
+| **8gent Code** | [8gent.dev](https://8gent.dev) | Open source coding agent (this repo) - free on-ramp |
+| **8gent OS** | [8gentos.com](https://8gentos.com) | Personal AI operating system - paid product |
+| **8gent Jr** | [8gentjr.com](https://8gentjr.com) | AI OS for neurodivergent children - free |
+| **8gent World** | [8gent.world](https://8gent.world) | Ecosystem hub, docs, investor decks |
+| **8gent Games** | [8gent.games](https://8gent.games) | AI civilisation simulator |
+| **The Vessel** | [eight-vessel.fly.dev](https://eight-vessel.fly.dev) | Cloud deployment (Fly.io Amsterdam) |
+| **Telegram App** | [8gent-telegram-app.vercel.app](https://8gent-telegram-app.vercel.app) | iOS-style Mini App control panel |
 
 ## Install
 
@@ -24,33 +36,39 @@ bun run tui
 
 ## What's different
 
-- **Local-first, free by default.** Runs entirely on your machine. Cloud models (OpenRouter) are opt-in. No telemetry, no API keys to start.
-- **8 core abilities.** Memory, parallel worktrees, policy engine, self-evolution, self-healing, entrepreneurship, AST blast radius, and browser access. Not plugins. Built-in.
+- **Local-first, free by default.** Runs entirely on your machine. Cloud models (OpenRouter free tier) are opt-in. No telemetry, no API keys to start.
+- **Always-on daemon.** `packages/daemon/` runs as a persistent process with WebSocket protocol. Deployed as "The Vessel" on Fly.io Amsterdam.
+- **Telegram integration.** Bot (@aijamesosbot) with voice transcription, plus an iOS-style Telegram Mini App control panel.
+- **12 core packages.** Memory, daemon, parallel worktrees, policy engine, self-evolution, self-healing, business agents, AST blast radius, browser access, kernel fine-tuning, personality, and content packaging. Not plugins. Built-in.
 - **Voice chat.** `/voice chat` starts a half-duplex conversation loop. Speak, Eight transcribes, thinks, and speaks back. ESC to interrupt mid-speech.
 - **AST-first code navigation.** Reads symbols, not files. 97% token reduction vs reading whole files. The agent stays fast in large codebases.
 - **Self-improving prompts.** Autoresearch harness (Karpathy-style) runs benchmarks in a loop, mutates system prompts, re-tests. Meta-optimizer also tunes few-shots, model routing, and grading weights.
 - **Multi-agent orchestration.** Spawns sub-agents in isolated git worktrees, up to 4 concurrent, coordinates via filesystem messaging. Macro action decomposer finds parallel groups automatically.
-- **Ability scorecards.** Each of the 8 abilities has measurable metrics tracked per session with baseline comparison.
+- **Ability scorecards.** Each ability has measurable metrics tracked per session with baseline comparison.
 - **Actuator tools.** Deploy to Vercel/Railway/Fly, publish to npm/GitHub, notify via Telegram. Dry-run by default.
 - **Telegram portal.** Single chat interface to all automation: `/status`, `/agents`, `/benchmark`, `/deploy`, `/throughput`, `/scorecard`.
 - **Workspace tabs.** Chat, Notes, Ideas, BTW, Questions, and Music tabs in a neumorphic folder UI.
 - **Task router.** Classifies prompts (code / reasoning / simple / creative) and routes to the best model automatically.
 - **Activity monitor.** Real tool-call feed replaces the decorative spinner. See exactly what the agent is doing.
 
-## Core Abilities
+## Core Packages
 
-Eight has 8 built-in abilities that define how he works:
+Eight's native abilities live in these packages. Each is self-contained and can be enabled/disabled independently.
 
-| Ability | Package | What it does |
+| Package | Ability | What it does |
 |---------|---------|--------------|
-| **Memory** | `packages/memory/` | Dual-layer episodic + semantic memory, natural language queries, auto-injection into system prompt, SQLite + FTS5, Ollama embeddings, 30-day decay, frequency-based promotion |
-| **Worktree** | `packages/orchestration/` | Multi-agent parallel execution via git worktrees, max 4 concurrent, filesystem messaging |
-| **Policy** | `packages/permissions/` | YAML policy engine, 11 default rules, approval gates, privacy-aware model routing |
-| **Evolution** | `packages/self-autonomy/` | Post-session reflection, Bayesian skill confidence, self-improvement DB |
-| **Healing** | `packages/validation/` | Checkpoint-verify-revert loop, git-stash atomic snapshots, failure log |
-| **Entrepreneurship** | `packages/proactive/` | GitHub bounty/help-wanted scanner, capability matcher, opportunity pipeline |
-| **AST** | `packages/ast-index/` | Blast radius engine, import dependency graph, test file mapping, change impact estimation |
-| **Browser** | `packages/tools/browser/` | Lightweight web access via fetch + DuckDuckGo HTML scraping, disk cache, no headless deps |
+| `packages/eight/` | Core agent | Vercel AI SDK agent loop, system prompt, session management |
+| `packages/daemon/` | Always-on daemon | Persistent process with WebSocket protocol, agent pool |
+| `packages/memory/` | Persistent recall | Dual-layer episodic + semantic memory, SQLite + FTS5 + Ollama embeddings, procedural memory, health monitoring, contradiction detection, consolidation, job queue |
+| `packages/permissions/` | Policy engine | YAML rules, 11 defaults, approval gates, headless mode, infinite mode, dangerous command detection |
+| `packages/orchestration/` | Worktree agents | WorktreePool - max 4 concurrent, filesystem messaging, macro-actions, delegation |
+| `packages/tools/` | Tool implementations | Browser-use, rate limiter, tool definitions, actuators, filesystem, shell |
+| `packages/proactive/` | Business agents | Opportunity scanner, capability matcher, content packaging, business agent system |
+| `packages/self-autonomy/` | Evolution | Post-session reflection, Bayesian skill confidence, self-improvement DB |
+| `packages/validation/` | Healing | Checkpoint-verify-revert loop, git-stash atomic snapshots, failure log |
+| `packages/ast-index/` | Blast radius | Import dependency graph, test file mapping, change impact estimation |
+| `packages/kernel/` | RL fine-tuning | Training proxy, GRPO batch collection, checkpoint validation, auto-rollback, auto-promotion |
+| `packages/personality/` | Brand voice | "Infinite Gentleman" styling, persona calibration |
 
 ## Voice Chat
 
@@ -106,7 +124,7 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
 ## Project Structure
 
 ```
-8gent-code/
+8gent-code/                    42 packages
   apps/
     tui/           Ink v6 terminal UI (main interface)
     clui/          Tauri 2.0 desktop overlay
@@ -116,24 +134,35 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
     installer/     Interactive install wizard
   packages/
     eight/         Core agent engine (Vercel AI SDK)
+    daemon/        Always-on daemon with WebSocket protocol
     ai/            Provider abstraction (Ollama, OpenRouter, LM Studio)
-    memory/        SQLite + FTS5 persistent memory
+    memory/        SQLite + FTS5 persistent memory with health monitoring
     orchestration/ WorktreePool, macro actions, throughput tracking
-    permissions/   YAML policy engine
+    permissions/   YAML policy engine with headless/infinite modes
     self-autonomy/ Evolution, reflection, persona mutation
     validation/    Self-healing executor + ability scorecards
-    proactive/     Entrepreneurship scanner
+    proactive/     Business agents, opportunity scanner, content packaging
     ast-index/     Blast radius engine
     tools/         Tool implementations (browser, actuators, filesystem, shell)
     voice/         STT (whisper.cpp) + voice chat loop
     auth/          Clerk auth + GitHub integration
     db/            Convex reactive database
     kernel/        RL fine-tuning pipeline (GRPO)
+    personality/   Brand voice, "Infinite Gentleman"
     control-plane/ Multi-tenant management
   benchmarks/      39 execution-graded benchmarks + autoresearch
   bin/             CLI entry points (8gent, debug)
   docs/            Architecture docs, methodology, guides
 ```
+
+## Deployment
+
+**The Vessel** runs on Fly.io Amsterdam as the cloud deployment of 8gent Code.
+
+- Endpoint: [eight-vessel.fly.dev](https://eight-vessel.fly.dev)
+- Daemon: Always-on process with WebSocket protocol via `packages/daemon/`
+- Telegram bot: @aijamesosbot with voice transcription
+- Telegram Mini App: [8gent-telegram-app.vercel.app](https://8gent-telegram-app.vercel.app) - iOS-style home screen control panel
 
 ## Slash Commands
 
@@ -156,6 +185,9 @@ Full results: [benchmarks/README.md](benchmarks/README.md)
 | `/throughput` | Token throughput stats |
 | `/scorecard` | Ability scorecard metrics |
 | `/soul` | Current persona calibration |
+| `/router` | Task router classification and model selection |
+| `/music` | Toggle lofi music generation (ADHD mode) |
+| `/rename` | Rename the current session |
 
 ## Docs
 
@@ -189,17 +221,6 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - [Voicebox](https://github.com/facebookresearch/voicebox) - local TTS patterns
 - [Paperclip](https://github.com/paperclipai/paperclip) - autonomous agent work platform patterns
 - Karpathy's autoresearch methodology - iterative prompt mutation, meta-optimization, token throughput maximization
-
-## Ecosystem
-
-| Product | Domain | What |
-|---------|--------|------|
-| **8gent OS** | [8gentos.com](https://8gentos.com) | The paid platform |
-| **8gent Code** | [8gent.dev](https://8gent.dev) | Open source coding agent (you are here) |
-| **8gent** | [8gent.app](https://8gent.app) | GUI client |
-| **8gent Jr** | [8gentjr.com](https://8gentjr.com) | AI OS for neurodivergent children |
-| **8gent World** | [8gent.world](https://8gent.world) | Docs and ecosystem hub |
-| **8gent Games** | [8gent.games](https://8gent.games) | AI civilisation playground |
 
 ## License
 
