@@ -1,3 +1,5 @@
+![Header](.github/assets/readme-header.png)
+
 # 8gent Code
 
 The kernel of the [8gent ecosystem](https://8gent.world). Open source autonomous coding agent powered by local LLMs (Ollama) or free cloud models (OpenRouter). No API keys, no usage caps, no cloud dependency.
