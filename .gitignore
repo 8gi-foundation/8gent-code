@@ -74,3 +74,10 @@ benchmarks/artifacts/
 
 # Content drafts (belong in ~/Myresumeportfolio/content/)
 docs/content/
+
+# Lil Eight build artifacts (rebuild with: bun run pet:build)
+apps/lil-eight/build/
+
+# Large media files
+*.mp4
+*.wav
