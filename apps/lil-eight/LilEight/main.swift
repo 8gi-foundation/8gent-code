@@ -1508,6 +1508,13 @@ class PetController {
 
     func handleRightClick(_ event: NSEvent) {
         let menu = NSMenu()
+        let shortId = PetController.shortId(sessionId)
+
+        // Header
+        let header = NSMenuItem(title: sessionId == "eight" ? "Lil Eight" : "Agent: \(shortId)", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
 
         let chatItem = NSMenuItem(title: "Chat", action: #selector(AppDelegate.rightClickChat(_:)), keyEquivalent: "")
         chatItem.representedObject = sessionId
@@ -1528,13 +1535,20 @@ class PetController {
         menu.addItem(sleepItem)
         menu.addItem(.separator())
 
-        let restartItem = NSMenuItem(title: "Restart Lil Eight", action: #selector(AppDelegate.restartApp), keyEquivalent: "")
-        menu.addItem(restartItem)
+        if sessionId != "eight" {
+            // Session pet - can dismiss just this one
+            let dismissItem = NSMenuItem(title: "Dismiss", action: #selector(AppDelegate.rightClickDismiss(_:)), keyEquivalent: "")
+            dismissItem.representedObject = sessionId
+            menu.addItem(dismissItem)
+        } else {
+            // Main pet - full controls
+            let restartItem = NSMenuItem(title: "Restart", action: #selector(AppDelegate.restartApp), keyEquivalent: "")
+            menu.addItem(restartItem)
+            menu.addItem(.separator())
+            let quitItem = NSMenuItem(title: "Quit All", action: #selector(AppDelegate.quit), keyEquivalent: "q")
+            menu.addItem(quitItem)
+        }
 
-        let quitItem = NSMenuItem(title: "Quit Lil Eight", action: #selector(AppDelegate.quit), keyEquivalent: "q")
-        menu.addItem(quitItem)
-
-        // Show context menu at mouse location
         NSMenu.popUpContextMenu(menu, with: event, for: imageView)
     }
 
@@ -1984,7 +1998,22 @@ class PetManager: DaemonClientDelegate {
     }
 
     func startDaemon() {
-        let eightCodePath = NSString(string: "~/8gent-code").expandingTildeInPath
+        // Find 8gent-code repo: check env, then common locations
+        let eightCodePath: String = ProcessInfo.processInfo.environment["EIGHT_CODE_PATH"]
+            ?? {
+                let candidates = [
+                    Bundle.main.bundlePath + "/../../../..", // relative to app in repo
+                    NSString(string: "~/8gent-code").expandingTildeInPath,
+                    NSString(string: "~/Code/8gent-code").expandingTildeInPath,
+                    NSString(string: "~/.8gent/repo").expandingTildeInPath,
+                ]
+                for path in candidates {
+                    if FileManager.default.fileExists(atPath: path + "/packages/daemon/index.ts") {
+                        return path
+                    }
+                }
+                return NSString(string: "~/8gent-code").expandingTildeInPath
+            }()
         let daemonScript = "\(eightCodePath)/packages/daemon/index.ts"
 
         guard FileManager.default.fileExists(atPath: daemonScript) else {
@@ -2871,6 +2900,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func rightClickCelebrate(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let pet = petManager?.pets[id] else { return }
         pet.onStream(chunk: nil, final: true)
+    }
+
+    @objc func rightClickDismiss(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        petManager?.despawnPet(sessionId: id)
     }
 
     @objc func rightClickSleep(_ sender: NSMenuItem) {
