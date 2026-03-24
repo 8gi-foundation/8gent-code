@@ -45,6 +45,8 @@ swiftc \
   -framework Cocoa \
   -framework AVFoundation \
   -framework UserNotifications \
+  -framework Speech \
+  -framework ScreenCaptureKit \
   -O \
   "$SCRIPT_DIR/LilEight/main.swift"
 
