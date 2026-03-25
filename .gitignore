@@ -81,3 +81,9 @@ apps/lil-eight/build/
 # Large media files
 *.mp4
 *.wav
+
+# Archived media/video/audio directories (moved to 8gent-code-archive)
+video-8gent-app/
+smoke-and-fly/
+docs/audio/
+docs/branch-audio/
