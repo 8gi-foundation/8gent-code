@@ -70,3 +70,13 @@ export {
   RateLimiter,
   type RateLimitConfig,
 } from "./rate-limiter";
+
+// ASCII progress indicators (non-TTY safe)
+export {
+  asciiBar,
+  dots,
+  percentage,
+  fraction,
+  spinner,
+  statusLine,
+} from "./ascii-progress";
