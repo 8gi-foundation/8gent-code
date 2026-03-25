@@ -1,52 +1,56 @@
-# Quarantine: Log Rotation
+# Quarantine: log-rotation
 
-## Status: Quarantined
-
-Not wired into any agent loop or CLI command yet. Needs review and integration testing before promotion.
+**Package:** `packages/tools/log-rotation.ts`
+**Status:** Quarantine - awaiting integration decision
 
 ## What it does
 
-`packages/tools/log-rotation.ts` exports `rotateLogs()` which:
+Rotates log files by size. When a log file exceeds `maxSize` bytes, it is renamed:
 
-1. Scans `~/.8gent/` (or a custom dir) for `.log` files
-2. Rotates any file exceeding a size threshold (default 5MB)
-3. Keeps the last N rotated copies (default 5)
-4. Compresses rotated files at index >= 2 with gzip
-5. Prunes excess rotated files beyond the keep count
+```
+file.log     -> file.log.1
+file.log.1   -> file.log.2
+...
+file.log.N   -> deleted (oldest, beyond maxFiles limit)
+```
 
-## API
+A fresh `file.log` is created after each rotation. Optionally, rotated files are compressed with gzip (`file.log.1.gz`).
+
+## Exports
+
+- `RotatingLogger` - class with `write(line)`, `forceRotate()`, `currentSize()`, `listFiles()`
+- `rotateFile(path, options)` - standalone async rotate function
+
+## Config options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxSize` | number (bytes) | 10MB | Rotate when file reaches this size |
+| `maxFiles` | number | 5 | How many rotated files to keep |
+| `compress` | boolean | false | Gzip rotated files |
+
+## Usage example
 
 ```ts
-import { rotateLogs } from "packages/tools/log-rotation";
+import { RotatingLogger } from "./packages/tools/log-rotation";
 
-const result = await rotateLogs({
-  logDir: "~/.8gent/",     // default
-  maxSizeBytes: 5_000_000, // default 5MB
-  keepCount: 5,            // default
-  extension: ".log",       // default
+const logger = new RotatingLogger(".8gent/eight.log", {
+  maxSize: 5 * 1024 * 1024, // 5MB
+  maxFiles: 3,
+  compress: true,
 });
-// result: { scanned: number, rotated: string[], errors: string[] }
+
+await logger.write("agent loop started");
+await logger.write("tool call: bash");
 ```
 
-## Rotation scheme
+## Integration notes
 
-For a file `agent.log` exceeding the limit:
+- No dependencies beyond Node built-ins (fs, zlib, stream)
+- Thread-safety: single-process only - `rotating` flag prevents concurrent rotations within one process
+- Rotation happens before the triggering `write()` completes
+- Empty log file is created after rotation so append always has a target
 
-```
-agent.log        -> agent.1.log          (recent, uncompressed)
-agent.1.log      -> agent.2.log.gz       (compressed)
-agent.2.log.gz   -> agent.3.log.gz       (compressed)
-...
-agent.N.log.gz   -> deleted (if N > keepCount)
-```
+## Why quarantine
 
-## Integration path
-
-- Wire into daemon startup or session-end hook
-- Add CLI command: `8gent logs rotate`
-- Add to cron/interval in long-running daemon mode
-
-## Files
-
-- `packages/tools/log-rotation.ts` - implementation (~80 lines)
-- `quarantine/log-rotation.md` - this file
+Not yet wired into the agent loop or any package's logging path. Needs a decision on which packages adopt it before promotion.
