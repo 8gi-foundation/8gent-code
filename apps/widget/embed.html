@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8gent Chat Widget</title>
+<style>
+  /* 8gent Brand Tokens */
+  :root {
+    --8g-orange: #F07A28;
+    --8g-bg-0: #0A0908;
+    --8g-bg-1: #12100E;
+    --8g-bg-2: #1C1A17;
+    --8g-bg-3: #252220;
+    --8g-text-primary: #FAF7F4;
+    --8g-text-secondary: #C8C2BA;
+    --8g-text-tertiary: #8A8078;
+    --8g-border: #2E2A26;
+    --8g-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --8g-font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  }
+
+  #eight-widget-root * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Bubble */
+  #eight-bubble {
+    position: fixed; bottom: 24px; right: 24px; z-index: 99999;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--8g-orange); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    font-family: var(--8g-font);
+  }
+  #eight-bubble:hover { transform: scale(1.08); box-shadow: 0 6px 28px rgba(0,0,0,0.5); }
+  #eight-bubble svg { width: 26px; height: 26px; fill: var(--8g-text-primary); }
+
+  /* Chat window */
+  #eight-chat {
+    position: fixed; bottom: 92px; right: 24px; z-index: 99998;
+    width: 380px; max-width: calc(100vw - 32px);
+    height: 520px; max-height: calc(100vh - 120px);
+    background: var(--8g-bg-1); border: 1px solid var(--8g-border);
+    border-radius: 16px; display: none; flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    font-family: var(--8g-font); overflow: hidden;
+    animation: eight-slide-up 0.25s ease-out;
+  }
+  #eight-chat.open { display: flex; }
+  @keyframes eight-slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Header */
+  #eight-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; background: var(--8g-bg-0);
+    border-bottom: 1px solid var(--8g-border);
+  }
+  #eight-header-title {
+    font-size: 14px; font-weight: 600; color: var(--8g-text-primary);
+    display: flex; align-items: center; gap: 8px;
+  }
+  #eight-header-title .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--8g-text-tertiary);
+  }
+  #eight-header-title .dot.connected { background: #4ade80; }
+  #eight-close {
+    background: none; border: none; cursor: pointer;
+    color: var(--8g-text-tertiary); font-size: 20px; line-height: 1;
+    padding: 2px 6px; border-radius: 6px;
+  }
+  #eight-close:hover { background: var(--8g-bg-3); color: var(--8g-text-secondary); }
+
+  /* Messages */
+  #eight-messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    scrollbar-width: thin; scrollbar-color: var(--8g-bg-3) transparent;
+  }
+  .eight-msg {
+    max-width: 85%; padding: 10px 14px; border-radius: 12px;
+    font-size: 13px; line-height: 1.5; word-break: break-word;
+  }
+  .eight-msg.user {
+    align-self: flex-end; background: var(--8g-orange);
+    color: var(--8g-text-primary); border-bottom-right-radius: 4px;
+  }
+  .eight-msg.assistant {
+    align-self: flex-start; background: var(--8g-bg-3);
+    color: var(--8g-text-primary); border-bottom-left-radius: 4px;
+  }
+  .eight-msg.system {
+    align-self: center; background: none;
+    color: var(--8g-text-tertiary); font-size: 12px; text-align: center;
+  }
+  .eight-msg.assistant code {
+    background: var(--8g-bg-0); padding: 1px 5px; border-radius: 4px;
+    font-family: var(--8g-font-mono); font-size: 12px;
+  }
+  .eight-typing { display: flex; gap: 4px; padding: 4px 0; }
+  .eight-typing span {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--8g-text-tertiary);
+    animation: eight-bounce 1.2s infinite;
+  }
+  .eight-typing span:nth-child(2) { animation-delay: 0.15s; }
+  .eight-typing span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes eight-bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  /* Input */
+  #eight-input-area {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; background: var(--8g-bg-0);
+    border-top: 1px solid var(--8g-border);
+  }
+  #eight-input {
+    flex: 1; background: var(--8g-bg-2); border: 1px solid var(--8g-border);
+    border-radius: 10px; padding: 10px 14px; color: var(--8g-text-primary);
+    font-size: 13px; font-family: var(--8g-font); outline: none; resize: none;
+    min-height: 40px; max-height: 100px;
+  }
+  #eight-input::placeholder { color: var(--8g-text-tertiary); }
+  #eight-input:focus { border-color: var(--8g-orange); }
+  #eight-send {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: var(--8g-orange); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: opacity 0.15s;
+  }
+  #eight-send:disabled { opacity: 0.4; cursor: default; }
+  #eight-send svg { width: 16px; height: 16px; fill: var(--8g-text-primary); }
+</style>
+</head>
+<body>
+<div id="eight-widget-root">
+  <!-- Floating bubble -->
+  <button id="eight-bubble" aria-label="Open chat">
+    <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+  </button>
+
+  <!-- Chat window -->
+  <div id="eight-chat">
+    <div id="eight-header">
+      <span id="eight-header-title"><span class="dot" id="eight-dot"></span> Eight</span>
+      <button id="eight-close" aria-label="Close chat">&times;</button>
+    </div>
+    <div id="eight-messages"></div>
+    <div id="eight-input-area">
+      <textarea id="eight-input" placeholder="Ask Eight anything..." rows="1"></textarea>
+      <button id="eight-send" disabled aria-label="Send"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // Config - override via window.EightWidgetConfig before loading
+  const cfg = Object.assign({
+    wsUrl: 'wss://eight-vessel.fly.dev',
+    authToken: null,
+    channel: 'widget',
+    greeting: 'Hey - I am Eight. How can I help?',
+  }, window.EightWidgetConfig || {});
+
+  const $ = (sel) => document.querySelector(sel);
+  const bubble = $('#eight-bubble');
+  const chat = $('#eight-chat');
+  const close = $('#eight-close');
+  const messages = $('#eight-messages');
+  const input = $('#eight-input');
+  const send = $('#eight-send');
+  const dot = $('#eight-dot');
+
+  let ws = null;
+  let sessionId = null;
+  let connected = false;
+  let reconnectTimer = null;
+  let reconnectDelay = 1000;
+  let streamBuf = '';
+  let streamEl = null;
+
+  // --- UI helpers ---
+
+  function addMsg(text, role) {
+    const el = document.createElement('div');
+    el.className = 'eight-msg ' + role;
+    el.textContent = text;
+    messages.appendChild(el);
+    messages.scrollTop = messages.scrollHeight;
+    return el;
+  }
+
+  function showTyping() {
+    const el = document.createElement('div');
+    el.className = 'eight-msg assistant';
+    el.id = 'eight-typing';
+    el.innerHTML = '<div class="eight-typing"><span></span><span></span><span></span></div>';
+    messages.appendChild(el);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function hideTyping() {
+    const el = $('#eight-typing');
+    if (el) el.remove();
+  }
+
+  function setConnected(state) {
+    connected = state;
+    dot.classList.toggle('connected', state);
+    send.disabled = !state || !input.value.trim();
+  }
+
+  // --- WebSocket ---
+
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    try { ws = new WebSocket(cfg.wsUrl); } catch(e) { scheduleReconnect(); return; }
+
+    ws.onopen = function() {
+      reconnectDelay = 1000;
+      if (cfg.authToken) {
+        ws.send(JSON.stringify({ type: 'auth', token: cfg.authToken }));
+      } else {
+        setConnected(true);
+        createSession();
+      }
+    };
+
+    ws.onmessage = function(ev) {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      handleServerMessage(msg);
+    };
+
+    ws.onclose = function() {
+      setConnected(false);
+      scheduleReconnect();
+    };
+
+    ws.onerror = function() {
+      setConnected(false);
+    };
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(function() {
+      reconnectTimer = null;
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      connect();
+    }, reconnectDelay);
+  }
+
+  function createSession() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'session:create', channel: cfg.channel }));
+  }
+
+  function handleServerMessage(msg) {
+    switch (msg.type) {
+      case 'auth:ok':
+        setConnected(true);
+        createSession();
+        break;
+      case 'auth:fail':
+        addMsg('Authentication failed. Check your token.', 'system');
+        break;
+      case 'session:created':
+        sessionId = msg.sessionId;
+        break;
+      case 'session:resumed':
+        sessionId = msg.sessionId;
+        break;
+      case 'event':
+        handleEvent(msg.event, msg.payload);
+        break;
+      case 'error':
+        addMsg(msg.message, 'system');
+        break;
+      case 'pong':
+        break;
+    }
+  }
+
+  function handleEvent(event, payload) {
+    switch (event) {
+      case 'agent:thinking':
+        hideTyping();
+        showTyping();
+        break;
+      case 'agent:stream':
+        hideTyping();
+        if (!streamEl) {
+          streamEl = document.createElement('div');
+          streamEl.className = 'eight-msg assistant';
+          messages.appendChild(streamEl);
+        }
+        streamBuf += (payload.chunk || '');
+        streamEl.textContent = streamBuf;
+        messages.scrollTop = messages.scrollHeight;
+        break;
+      case 'session:end':
+        hideTyping();
+        if (streamEl) { streamEl = null; streamBuf = ''; }
+        break;
+      case 'agent:error':
+        hideTyping();
+        streamEl = null; streamBuf = '';
+        addMsg('Something went wrong. Please try again.', 'system');
+        break;
+      case 'tool:start':
+        // Optionally show tool use
+        break;
+    }
+  }
+
+  function sendMessage() {
+    const text = input.value.trim();
+    if (!text || !connected || !ws || ws.readyState !== WebSocket.OPEN) return;
+    addMsg(text, 'user');
+    ws.send(JSON.stringify({ type: 'prompt', text: text }));
+    input.value = '';
+    send.disabled = true;
+    streamEl = null;
+    streamBuf = '';
+    showTyping();
+  }
+
+  // --- Events ---
+
+  bubble.addEventListener('click', function() {
+    chat.classList.toggle('open');
+    if (chat.classList.contains('open')) {
+      input.focus();
+      if (!ws || ws.readyState === WebSocket.CLOSED) connect();
+      if (messages.children.length === 0 && cfg.greeting) {
+        addMsg(cfg.greeting, 'assistant');
+      }
+    }
+  });
+
+  close.addEventListener('click', function() {
+    chat.classList.remove('open');
+  });
+
+  input.addEventListener('input', function() {
+    send.disabled = !connected || !input.value.trim();
+    // Auto-resize
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  send.addEventListener('click', sendMessage);
+
+  // Keepalive ping every 30s
+  setInterval(function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'ping' }));
+    }
+  }, 30000);
+
+})();
+</script>
+</body>
+</html>
