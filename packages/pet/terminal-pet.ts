@@ -12,18 +12,23 @@
 
 import { readFileSync, existsSync } from "fs"
 import { join } from "path"
+import { generateCompanion, type Companion } from "./companion.js"
 
 // MARK: - Sprite Data (inline fallback if PNG not available)
 
 // 16x16 pixel grid for each frame, stored as color indices
-// 0 = transparent, 1 = body (#1A1A2E), 2 = orange (#E8610A), 3 = accent (#FF8C42), 4 = eye (#E8610A)
-const PALETTE: Record<number, string> = {
+// 0 = transparent, 1 = body, 2 = accent, 3 = highlight, 4 = eye
+// Default palette (overridden by companion system per session)
+const DEFAULT_PALETTE: Record<number, string> = {
   0: "",           // transparent
   1: "\x1b[38;2;26;26;46m",    // body dark navy
   2: "\x1b[38;2;232;97;10m",   // brand orange
   3: "\x1b[38;2;255;140;66m",  // accent lighter orange
   4: "\x1b[38;2;232;97;10m",   // eye orange (same as brand)
 }
+
+// Active palette (set by companion)
+let PALETTE: Record<number, string> = { ...DEFAULT_PALETTE }
 
 const RESET = "\x1b[0m"
 const BLOCK_UPPER = "\u2580" // upper half block
@@ -150,10 +155,9 @@ export function renderSpriteToAnsi(sprite: number[][]): string {
         line += (PALETTE[top] || "") + BLOCK_FULL + RESET
       } else {
         // Different colors: use upper half block with fg=top, bg=bottom
-        const fg = PALETTE[top] || ""
-        const bgColor = top === 1 ? "48;2;26;26;46" : top === 2 ? "48;2;232;97;10" : top === 3 ? "48;2;255;140;66" : "48;2;232;97;10"
         const fgTop = PALETTE[top] || ""
-        const bgBottom = bottom === 1 ? "\x1b[48;2;26;26;46m" : bottom === 2 ? "\x1b[48;2;232;97;10m" : bottom === 3 ? "\x1b[48;2;255;140;66m" : "\x1b[48;2;232;97;10m"
+        // Convert fg ANSI to bg by replacing 38; with 48;
+        const bgBottom = (PALETTE[bottom] || "").replace("38;", "48;")
         line += fgTop + bgBottom + BLOCK_UPPER + RESET
       }
     }
@@ -178,13 +182,22 @@ export class TerminalPet {
   private idleSeconds: number = 0
   private label: string = "eight"
   private visible: boolean = true
+  public companion: Companion | null = null
 
   // Callbacks
   onRender?: (lines: string[], x: number, label: string) => void
 
-  constructor(opts?: { label?: string; maxWidth?: number }) {
+  constructor(opts?: { label?: string; maxWidth?: number; userId?: string }) {
     this.label = opts?.label || "eight"
     this.maxX = (opts?.maxWidth || process.stdout.columns || 80) - 18
+
+    // Generate companion identity seeded from user
+    const seed = opts?.userId || opts?.label || process.env.USER || "eight"
+    this.companion = generateCompanion(seed)
+    this.label = this.companion.label
+
+    // Apply companion's color palette to sprites
+    PALETTE = { ...this.companion.ansiPalette }
   }
 
   start() {
@@ -300,9 +313,15 @@ export class TerminalPet {
 // MARK: - Standalone mode (run directly)
 
 if (import.meta.main) {
-  console.log("\x1b[36mLil Eight - Terminal Mode\x1b[0m\n")
+  const userId = process.env.USER || process.env.USERNAME || "eight"
+  const pet = new TerminalPet({ userId })
 
-  const pet = new TerminalPet()
+  // Show companion card on spawn
+  console.log("\x1b[36mLil Eight - Terminal Mode\x1b[0m\n")
+  if (pet.companion) {
+    console.log(pet.companion.card)
+    console.log()
+  }
 
   // Simple terminal renderer - draws at bottom of screen
   const rows = process.stdout.rows || 24
