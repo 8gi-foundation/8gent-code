@@ -41,7 +41,7 @@ export function useUpdateCheck(): UpdateInfo | null {
       try {
         // Check GitHub API for latest package.json on main
         const res = await fetch(
-          "https://raw.githubusercontent.com/PodJamz/8gent-code/main/package.json",
+          "https://raw.githubusercontent.com/zerwiz/8gent-code/main/package.json",
           { signal: AbortSignal.timeout(5000) }
         );
         if (!res.ok) return;

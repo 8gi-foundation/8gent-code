@@ -14,6 +14,19 @@ import { readFileSync, existsSync } from "fs"
 import { join } from "path"
 import { generateCompanion, registerCompanion, endSession, type Companion } from "./companion.js"
 
+function readSessionIdFromActiveCompanion(): string | null {
+  const home = process.env.HOME || process.env.USERPROFILE
+  if (!home) return null
+  const p = join(home, ".8gent", "active-companion.json")
+  if (!existsSync(p)) return null
+  try {
+    const raw = JSON.parse(readFileSync(p, "utf-8")) as { sessionId?: string }
+    return typeof raw.sessionId === "string" && raw.sessionId.length > 0 ? raw.sessionId : null
+  } catch {
+    return null
+  }
+}
+
 // MARK: - Sprite Data (inline fallback if PNG not available)
 
 // 16x16 pixel grid for each frame, stored as color indices
@@ -189,7 +202,8 @@ export class TerminalPet {
   onRender?: (lines: string[], x: number, label: string) => void
 
   constructor(opts?: { label?: string; maxWidth?: number; sessionId?: string; model?: string }) {
-    this.sessionId = opts?.sessionId || opts?.label || `session-${Date.now()}`
+    this.sessionId =
+      opts?.sessionId || readSessionIdFromActiveCompanion() || opts?.label || `session-${Date.now()}`
     this.label = opts?.label || "eight"
     this.maxX = (opts?.maxWidth || process.stdout.columns || 80) - 18
 
@@ -319,8 +333,7 @@ export class TerminalPet {
 // MARK: - Standalone mode (run directly)
 
 if (import.meta.main) {
-  const sessionId = `${process.env.USER || "eight"}-${Date.now()}`
-  const pet = new TerminalPet({ sessionId })
+  const pet = new TerminalPet()
 
   // Show companion card on spawn
   console.log("\x1b[36mLil Eight - Terminal Mode\x1b[0m\n")

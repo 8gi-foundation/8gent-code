@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://8gentjr.com"><img src="https://img.shields.io/badge/Jr-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Jr Live" /></a>
   <a href="https://8gentos.com"><img src="https://img.shields.io/badge/OS-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="OS In Dev" /></a>
-  <a href="https://github.com/PodJamz/8gent-code"><img src="https://img.shields.io/badge/Code-Open_Source-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Code Open Source" /></a>
+  <a href="https://github.com/zerwiz/8gent-code"><img src="https://img.shields.io/badge/Code-Open_Source-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Code Open Source" /></a>
   <a href="https://8gent.world"><img src="https://img.shields.io/badge/World-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="World Live" /></a>
   <a href="https://8gent.games"><img src="https://img.shields.io/badge/Games-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Games Live" /></a>
 </p>
@@ -22,6 +22,10 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-E8610A?style=for-the-badge&labelColor=1A1612" alt="MIT License" /></a>
   <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-1.0.1-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v1.0.1" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
+</p>
+
+<p align="center">
+  <sub><strong>GitHub (this tree):</strong> <a href="https://github.com/zerwiz/8gent-code">zerwiz/8gent-code</a>. <strong>Project:</strong> <a href="https://github.com/PodJamz/">PodJamz</a> (8gent Code). Linux fork (alpha) by <a href="https://github.com/zerwiz/">zerwiz</a> · <a href="https://whynotproductions.netlify.app/">WhyNot Productions</a>. <strong>Upstream:</strong> <a href="https://github.com/PodJamz/8gent-code">PodJamz/8gent-code</a>. Linux-first docs, scripts, and checks; expect rough edges.</sub>
 </p>
 
 <br />
@@ -44,7 +48,7 @@
 <sub>Parent site. Paid product. Revenue engine.</sub>
 
 **8gent Code** — [8gent.dev](https://8gent.dev)<br />
-<sub>Open source developer agent. Free on-ramp. <em>(this repo)</em></sub>
+<sub>Open source developer agent. Free on-ramp. PodJamz project; <em>Linux fork (this repo)</em>.</sub>
 
 </td>
 <td valign="top" width="33%">
@@ -80,14 +84,31 @@
 
 ## Quick Start
 
+**Primary repo for this copy:** [github.com/zerwiz/8gent-code](https://github.com/zerwiz/8gent-code). **8gent Code** is a [PodJamz](https://github.com/PodJamz/) project; npm ships as **`@podjamz/8gent-code`** from upstream. [zerwiz](https://github.com/zerwiz/) maintains **this fork** for Linux-first workflows; sync and contributions to the main product go to [PodJamz/8gent-code](https://github.com/PodJamz/8gent-code) when appropriate.
+
+### npm global install (official package, PodJamz)
+
+Published as **`@podjamz/8gent-code`**. Release cadence follows the main project. It may run on Linux; this contributor fork tracks Linux-specific fixes separately.
+
 ```bash
 npm install -g @podjamz/8gent-code
 8gent
 ```
 
-That's it. Ollama runs locally by default - if you don't have it, 8gent will guide you through setup on first launch.
+**Linux:** for fixes and docs maintained here, prefer **from source** (next section). **Later:** a scoped npm package or tarball from [this repo’s Releases](https://github.com/zerwiz/8gent-code/releases) could be added without removing or renaming the command above.
 
-### From source (contributors)
+Ollama runs locally by default - if you don't have it, 8gent will guide you through setup on first launch.
+
+### From source (Linux fork, zerwiz)
+
+Fork for Linux workstation work (pet, `start.sh`, `docs/PLANNING-LINUX-PORT.md`, `bun run linux:check`). Contribute upstream fixes to [PodJamz/8gent-code](https://github.com/PodJamz/8gent-code) when they are not fork-specific.
+
+```bash
+git clone https://github.com/zerwiz/8gent-code.git && cd 8gent-code && bun install
+./start.sh
+```
+
+### From source (canonical project, PodJamz)
 
 ```bash
 git clone https://github.com/PodJamz/8gent-code.git && cd 8gent-code && bun install
@@ -567,7 +588,8 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 
 <p align="center">
   <a href="https://x.com/8gentapp">X / Twitter</a> &nbsp;·&nbsp;
-  <a href="https://github.com/PodJamz/8gent-code">GitHub</a> &nbsp;·&nbsp;
+  <a href="https://github.com/zerwiz/8gent-code">GitHub</a> &nbsp;·&nbsp;
+  <a href="https://github.com/PodJamz/8gent-code">Upstream (PodJamz)</a> &nbsp;·&nbsp;
   <a href="https://8gent.dev">8gent.dev</a> &nbsp;·&nbsp;
   <a href="https://8gent.world">8gent.world</a>
 </p>

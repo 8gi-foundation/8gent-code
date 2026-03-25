@@ -7,6 +7,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`8gent doctor`** and **`bun run doctor`** - runs **`harness:doctor`** (sessions, Ollama, LM Studio, OpenRouter, agent load) plus on **Linux** the workspace section from **`linux-check`** (pet, terminals, TTS, shebang) without duplicating model rows. Prints a **macOS vs Linux command parity** table on Darwin/Windows. **`linux-check --workspace-only`** skips provider rows for scripting.
+- **`linux:check`** (`scripts/linux-setup-check.ts`) and **`8gent linux-check`** - verifies Ollama and/or OpenRouter hints, Lil Eight pet assets, terminal emulators for `/pet start`, optional TTS, and `dist/cli.js` shebang; `--full` runs typecheck and lint. Documented in `docs/TODO-LINUX.md`.
+- **`scripts/add-cli-shebang.ts`** - prepends `#!/usr/bin/env bun` to `dist/cli.js` so `bun run build` works on Linux without BSD `sed -i ''`.
+- **Lil Eight on Linux** - `apps/lil-eight/build-linux.sh` generates sprites and a `.desktop` launcher; `apps/lil-eight/run-terminal-pet.sh` runs the cross-platform terminal pet. TUI `/pet start` on Linux opens `gnome-terminal`, `kitty`, `konsole`, `xfce4-terminal`, `alacritty`, or `xterm` when available. `active-companion.json` now includes `sessionId` so the terminal pet matches the card from `/pet start`. Scripts: `bun run pet:build:linux`; `bin/lil-eight.sh` runs the terminal pet on non-macOS.
+
+### Changed
+- **Attribution** - **Primary GitHub for this tree:** [zerwiz/8gent-code](https://github.com/zerwiz/8gent-code) (**README** badge, footer, **`package.json` `homepage` + `repository`**, **`8gent --help`**, issue template discussions first). **PodJamz** remains the project owner; **npm** `@podjamz/8gent-code` and **upstream** link [PodJamz/8gent-code](https://github.com/PodJamz/8gent-code). Contributor [zerwiz](https://github.com/zerwiz/), [WhyNot Productions](https://whynotproductions.netlify.app/).
+- **`harness doctor`** - exit / return value follows **workable** (any of Ollama, LM Studio, or OpenRouter + agent + tools) so Ollama-only setups pass **`8gent doctor`**.
+- **DJ** (`packages/music/dj.ts`) - install hints use **apt** on Linux instead of only **brew**.
+
+### Fixed
+- **`8gent pet restart`** on Linux now pkill’s `terminal-pet.ts` (previously only `LilEight`, macOS only). Missing **`bin/lil-eight.sh`** triggers **`build-linux.sh`** on non-macOS instead of Swift **`build.sh`**.
+- **`AutoGit.exec`** (`packages/self-autonomy/index.ts`) uses piped `stdio` for `execSync` so failed git calls on empty repos do not print `fatal: ambiguous argument 'HEAD'` to the terminal under Bun during the git heartbeat.
+- Workspace root dependency on `chalk` ^5.6 so Bun hoists a version compatible with Ink 6. `bmad-method` had pulled `chalk` 4 to the root, which broke the TUI (`chalk.dim is not a function` under Bun's CJS interop).
+- `start.sh` exports Bun's bin directory on `PATH` before `bun run tui`, so nested `bun run` from the `tui` npm script works when Bun is only installed under `~/.bun/bin` (not on shell PATH).
+
+---
+
 ## [1.0.0] - 2026-03-22
 
 ### Added

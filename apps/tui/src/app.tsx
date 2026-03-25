@@ -1905,6 +1905,7 @@ export function App({ initialCommand, args }: AppProps) {
 
                 // Write companion data for the dock pet to read
                 const companionData = {
+                  sessionId,
                   fullName: companion.fullName,
                   species: companion.species,
                   element: companion.element,
@@ -1944,8 +1945,60 @@ export function App({ initialCommand, args }: AppProps) {
                   } else {
                     addSystemMessage("[pet] lil-eight.sh not found. Tried:\n  " + candidates.join("\n  "));
                   }
+                } else if (process.platform === "linux") {
+                  try { execSync("pkill -f 'terminal-pet\\.ts' 2>/dev/null || true"); } catch {}
+
+                  const findRepo = (): string | null => {
+                    const roots = [
+                      process.cwd(),
+                      path.join(__dirname, "..", "..", ".."),
+                      path.join(__dirname, "..", ".."),
+                    ];
+                    for (const r of roots) {
+                      if (fs.existsSync(path.join(r, "packages/pet/terminal-pet.ts"))) return r;
+                    }
+                    return null;
+                  };
+                  const repo = findRepo();
+                  const script = repo ? path.join(repo, "apps/lil-eight/run-terminal-pet.sh") : null;
+                  const bunDir =
+                    (process.execPath.includes("bun") ? path.dirname(process.execPath) : null) ||
+                    path.join(home, ".bun", "bin");
+                  const petEnv = {
+                    ...process.env,
+                    PATH: `${bunDir}:${process.env.PATH || ""}`,
+                  };
+                  const tryTerm = (file: string, args: string[]): boolean => {
+                    try {
+                      const c = spawnProc(file, args, { detached: true, stdio: "ignore", env: petEnv });
+                      c.unref();
+                      return true;
+                    } catch {
+                      return false;
+                    }
+                  };
+                  if (script && fs.existsSync(script)) {
+                    const opened =
+                      tryTerm("gnome-terminal", ["--", script]) ||
+                      tryTerm("kitty", [script]) ||
+                      tryTerm("konsole", ["-e", script]) ||
+                      tryTerm("xfce4-terminal", ["-x", script]) ||
+                      tryTerm("alacritty", ["-e", script]) ||
+                      tryTerm("xterm", ["-e", script]);
+                    if (opened) {
+                      addSystemMessage(`[pet] ${companion.fullName} opened in a new terminal (Lil Eight)`);
+                    } else {
+                      addSystemMessage(
+                        `[pet] No supported terminal emulator found. Run manually:\n  bash ${script}`
+                      );
+                    }
+                  } else {
+                    addSystemMessage(
+                      "[pet] run-terminal-pet.sh not found. Set cwd to the repo root or reinstall."
+                    );
+                  }
                 } else {
-                  addSystemMessage("[pet] Desktop pet is macOS only (for now)");
+                  addSystemMessage("[pet] Desktop dock pet is macOS-only. Use Linux: /pet start (terminal) or Windows: bun run packages/pet/terminal-pet.ts");
                 }
                 // Show companion card
                 addSystemMessage(companion.card.replace(/\x1b\[[0-9;]*m/g, ""));
@@ -1953,10 +2006,16 @@ export function App({ initialCommand, args }: AppProps) {
               }
               case "stop": {
                 try {
-                  execSync("pkill -f 'Lil.Eight' 2>/dev/null");
-                  execSync("sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &");
+                  if (process.platform === "darwin") {
+                    execSync("pkill -f 'Lil.Eight' 2>/dev/null");
+                    execSync("sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &");
+                  } else if (process.platform === "linux") {
+                    try { execSync("pkill -f 'terminal-pet\\.ts'"); } catch { /* none running */ }
+                  }
                   addSystemMessage("[pet] All companions dismissed");
-                } catch { addSystemMessage("[pet] Not running"); }
+                } catch {
+                  addSystemMessage("[pet] Not running");
+                }
                 break;
               }
               case "deck": case "collection": {

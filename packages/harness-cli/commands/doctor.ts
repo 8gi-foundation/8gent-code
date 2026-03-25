@@ -10,8 +10,12 @@ import * as os from "os";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 
-export async function doctor(_args: string[]): Promise<void> {
-  console.log("\n  8gent Harness — Health Check\n");
+export async function doctor(
+  _args: string[],
+  options?: { title?: string }
+): Promise<boolean> {
+  const title = options?.title ?? "8gent Harness — Health Check";
+  console.log(`\n  ${title}\n`);
 
   const checks: Array<{ name: string; pass: boolean; detail: string }> = [];
 
@@ -104,10 +108,25 @@ export async function doctor(_args: string[]): Promise<void> {
     if (!check.pass) allPass = false;
   }
 
+  const ollamaPass = checks.find(c => c.name === "Ollama")?.pass ?? false;
+  const lmPass = checks.find(c => c.name === "LM Studio")?.pass ?? false;
+  const orPass = checks.find(c => c.name === "OpenRouter API key")?.pass ?? false;
+  const hasProvider = ollamaPass || lmPass || orPass;
+  const agentPass = checks.find(c => c.name === "Agent module")?.pass ?? false;
+  const toolsPass = checks.find(c => c.name === "AI SDK tools")?.pass ?? false;
+  /** Enough to run locally: one LLM path + agent stack */
+  const workable = hasProvider && agentPass && toolsPass;
+
   console.log();
   if (allPass) {
     console.log("  \x1b[32mAll checks passed.\x1b[0m\n");
+  } else if (workable) {
+    console.log(
+      "  \x1b[32mCore OK\x1b[0m (Ollama, LM Studio, or OpenRouter). Other lines are optional.\n",
+    );
   } else {
-    console.log("  \x1b[33mSome checks failed — 8gent may not work fully.\x1b[0m\n");
+    console.log("  \x1b[33mSome checks failed — start Ollama or set OPENROUTER_API_KEY.\x1b[0m\n");
   }
+
+  return workable;
 }

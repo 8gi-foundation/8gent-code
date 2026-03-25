@@ -8,40 +8,65 @@ APP_DIR="$SCRIPT_DIR/apps/lil-eight/build/Lil Eight.app"
 
 case "${1:-start}" in
   build)
-    bash "$SCRIPT_DIR/apps/lil-eight/build.sh"
+    if [ "$(uname -s)" = "Darwin" ]; then
+      bash "$SCRIPT_DIR/apps/lil-eight/build.sh"
+    else
+      bash "$SCRIPT_DIR/apps/lil-eight/build-linux.sh"
+    fi
     ;;
   open|start)
-    # Build if not built
-    if [ ! -d "$APP_DIR" ]; then
-      echo "Building Lil Eight first..."
-      bash "$SCRIPT_DIR/apps/lil-eight/build.sh"
+    if [ "$(uname -s)" = "Darwin" ]; then
+      if [ ! -d "$APP_DIR" ]; then
+        echo "Building Lil Eight first..."
+        bash "$SCRIPT_DIR/apps/lil-eight/build.sh"
+      fi
+      pkill -f LilEight 2>/dev/null || true
+      sleep 0.5
+      open "$APP_DIR"
+      echo "Lil Eight is on your Dock"
+    else
+      chmod +x "$SCRIPT_DIR/apps/lil-eight/run-terminal-pet.sh" 2>/dev/null || true
+      bash "$SCRIPT_DIR/apps/lil-eight/run-terminal-pet.sh"
     fi
-    # Kill existing if running
-    pkill -f LilEight 2>/dev/null || true
-    sleep 0.5
-    open "$APP_DIR"
-    echo "Lil Eight is on your Dock"
     ;;
   kill|stop)
-    pkill -f LilEight 2>/dev/null && echo "Lil Eight stopped" || echo "Not running"
+    if [ "$(uname -s)" = "Darwin" ]; then
+      pkill -f LilEight 2>/dev/null && echo "Lil Eight stopped" || echo "Not running"
+    else
+      pkill -f 'terminal-pet\.ts' 2>/dev/null && echo "Lil Eight stopped" || echo "Not running"
+    fi
     ;;
   restart)
-    pkill -f LilEight 2>/dev/null || true
-    sleep 1
-    open "$APP_DIR"
-    echo "Lil Eight restarted"
+    if [ "$(uname -s)" = "Darwin" ]; then
+      pkill -f LilEight 2>/dev/null || true
+      sleep 1
+      open "$APP_DIR"
+      echo "Lil Eight restarted"
+    else
+      pkill -f 'terminal-pet\.ts' 2>/dev/null || true
+      sleep 1
+      bash "$SCRIPT_DIR/apps/lil-eight/run-terminal-pet.sh"
+    fi
     ;;
   log|logs)
     tail -f ~/.8gent/lil-eight.log
     ;;
   status)
-    if pgrep -f LilEight > /dev/null 2>&1; then
-      PID=$(pgrep -f LilEight)
-      echo "Lil Eight running (pid $PID)"
-      echo "Log: ~/.8gent/lil-eight.log"
-      tail -3 ~/.8gent/lil-eight.log 2>/dev/null
+    if [ "$(uname -s)" = "Darwin" ]; then
+      if pgrep -f LilEight > /dev/null 2>&1; then
+        PID=$(pgrep -f LilEight)
+        echo "Lil Eight running (pid $PID)"
+        echo "Log: ~/.8gent/lil-eight.log"
+        tail -3 ~/.8gent/lil-eight.log 2>/dev/null
+      else
+        echo "Lil Eight is not running"
+      fi
     else
-      echo "Lil Eight is not running"
+      if pgrep -f 'terminal-pet\.ts' > /dev/null 2>&1; then
+        echo "Lil Eight (terminal) running"
+      else
+        echo "Lil Eight is not running"
+      fi
     fi
     ;;
   *)

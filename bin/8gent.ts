@@ -33,8 +33,8 @@ USAGE:
   8gent <command> [options]
 
 COMMANDS:
-  tui                         Launch interactive TUI (auto-spawns dock pet)
-  pet                         Launch Lil Eight dock companion only
+  tui                         Launch interactive TUI (macOS: dock pet; Linux: terminal pet inline)
+  pet                         Lil Eight: macOS dock app; Linux/WSL: terminal pet (see PLATFORM NOTES)
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
   session <sub>               Session history & resume
@@ -42,6 +42,8 @@ COMMANDS:
   memory <sub>                Remember, recall, forget
   onboard                     Run onboarding (auto-detect + configure)
   status                      Show full system status
+  doctor                      Full health: providers (like harness:doctor) + Linux workspace checks
+  linux-check                 Linux/TODO only: models, pet, TTS (use doctor on Linux for both)
   init                        Initialize 8gent in current directory
   outline <file>              Get symbol outline of a file
   symbol <file>::<name>       Get source code for a specific symbol
@@ -114,13 +116,21 @@ EXAMPLES:
   8gent infinite "Build a REST API for user management"
   8gent chat "Add tests" --yes --infinite
 
+PLATFORM NOTES:
+  Works on Linux: tui, chat, agent, session, preferences, memory, auth, status, doctor,
+  linux-check, init, outline, symbol, search, benchmark, demo, infinite, onboard (same CLI).
+  macOS-only: airdrop / drop (on Linux prints a hint; use file share or cloud).
+  Pet: macOS uses Swift dock app (pet:build + open); Linux uses terminal pet (pet:build:linux).
+  DJ (/dj in TUI): brew on macOS; apt install mpv yt-dlp ffmpeg sox on Ubuntu.
+
 MACHINE INTEGRATION:
   All commands support --json for structured output.
   Use --yes for non-interactive execution (no prompts).
   Exit codes: 0=success, 1=error, 2=auth required.
   Designed for orchestration by Claude Code, Cursor, aider, etc.
 
-Learn more: https://github.com/PodJamz/8gent-code
+Repo: https://github.com/zerwiz/8gent-code
+Upstream (PodJamz): https://github.com/PodJamz/8gent-code
 `;
 
 async function main() {
@@ -243,6 +253,22 @@ async function main() {
     case "status":
       await statusCommand(restArgs);
       break;
+
+    case "linux-check": {
+      const { runLinuxSetupCheck } = await import("../scripts/linux-setup-check.ts");
+      const code = await runLinuxSetupCheck({
+        full: restArgs.includes("--full"),
+        json: restArgs.includes("--json"),
+        workspaceOnly: restArgs.includes("--workspace-only"),
+      });
+      process.exit(code);
+      break;
+    }
+
+    case "doctor": {
+      await doctorCommand(restArgs);
+      break;
+    }
 
     case "auth":
       await authCommand(restArgs);
@@ -543,10 +569,12 @@ async function spawnPet(sessionId?: string) {
   // Generate companion and write JSON for dock pet to read
   try {
     const { generateCompanion } = await import("../packages/pet/companion.js");
-    const companion = generateCompanion(sessionId || `session-${Date.now()}`);
+    const sid = sessionId || `session-${Date.now()}`;
+    const companion = generateCompanion(sid);
     const home = process.env.HOME || "~";
     fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
     fs.writeFileSync(path.join(home, ".8gent", "active-companion.json"), JSON.stringify({
+      sessionId: sid,
       fullName: companion.fullName, species: companion.species, element: companion.element,
       rarity: companion.rarity, accessory: companion.accessory, shiny: companion.shiny,
       palette: companion.palette, lore: companion.lore,
@@ -728,9 +756,12 @@ async function petCommand(args: string[]) {
   const lilEightScript = path.join(__dirname, "lil-eight.sh");
 
   if (!fs.existsSync(lilEightScript)) {
-    console.log("Building Lil Eight first...");
-    const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
-    execSync(`bash "${buildScript}"`, { stdio: "inherit" });
+    console.log("bin/lil-eight.sh missing; run pet build for your OS...");
+    if (process.platform === "darwin") {
+      execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build.sh")}"`, { stdio: "inherit" });
+    } else {
+      execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build-linux.sh")}"`, { stdio: "inherit" });
+    }
   }
 
   switch (subCmd) {
@@ -740,14 +771,28 @@ async function petCommand(args: string[]) {
       break;
     case "stop":
     case "kill":
-      try { execSync("pkill -f LilEight"); console.log("Lil Eight stopped"); } catch { console.log("Not running"); }
+      if (process.platform === "darwin") {
+        try { execSync("pkill -f LilEight"); console.log("Lil Eight stopped"); } catch { console.log("Not running"); }
+      } else if (process.platform === "linux") {
+        try { execSync("pkill -f 'terminal-pet\\.ts'"); console.log("Lil Eight stopped"); } catch { console.log("Not running"); }
+      } else {
+        console.log("Not running");
+      }
       break;
     case "restart":
-      try { execSync("pkill -f LilEight"); } catch {}
+      if (process.platform === "darwin") {
+        try { execSync("pkill -f LilEight"); } catch { /* none */ }
+      } else if (process.platform === "linux") {
+        try { execSync("pkill -f 'terminal-pet\\.ts'"); } catch { /* none */ }
+      }
       setTimeout(() => spawnPet(), 1000);
       break;
     case "build":
-      execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build.sh")}"`, { stdio: "inherit" });
+      if (process.platform === "darwin") {
+        execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build.sh")}"`, { stdio: "inherit" });
+      } else {
+        execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build-linux.sh")}"`, { stdio: "inherit" });
+      }
       break;
     case "log":
     case "logs":
@@ -757,7 +802,14 @@ async function petCommand(args: string[]) {
       break;
     case "status":
       try {
-        execSync("pgrep -f LilEight", { stdio: "pipe" });
+        if (process.platform === "darwin") {
+          execSync("pgrep -f LilEight", { stdio: "pipe" });
+        } else if (process.platform === "linux") {
+          execSync("pgrep -f 'terminal-pet\\.ts'", { stdio: "pipe" });
+        } else {
+          console.log("Pet status: use Task Manager (terminal pet is Linux / macOS).");
+          break;
+        }
         console.log("Lil Eight is running");
         const logP = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
         if (fs.existsSync(logP)) {
@@ -1466,6 +1518,43 @@ async function onboardCommand(args: string[]) {
       console.log("Run with --yes to auto-complete onboarding with defaults.");
     }
   }
+}
+
+// ── Doctor (harness + Linux workspace) ──────────────────────────
+
+function printCommandParityHints(p: NodeJS.Platform): void {
+  console.log("\n  macOS vs Linux (equivalent commands)\n");
+  console.log(`  ${"Topic".padEnd(16)} ${"macOS".padEnd(30)} Linux / other`);
+  console.log(`  ${"-".repeat(16)} ${"-".repeat(30)} ${"-".repeat(40)}`);
+  console.log(`  ${"Pet (visual)".padEnd(16)} ${"pet:build + open .app".padEnd(30)} pet:build:linux, /pet start`);
+  console.log(`  ${"lil-eight.sh".padEnd(16)} ${"open dock app".padEnd(30)} bash run-terminal-pet.sh`);
+  console.log(`  ${"AirDrop".padEnd(16)} ${"8gent airdrop".padEnd(30)} use cloud / manual share`);
+  console.log(`  ${"DJ (TUI /dj)".padEnd(16)} ${"brew install mpv …".padEnd(30)} sudo apt install mpv yt-dlp ffmpeg sox`);
+  console.log(`  ${"This doctor".padEnd(16)} ${"8gent doctor".padEnd(30)} same; adds linux-check on Linux`);
+  console.log(`  ${"Harness only".padEnd(16)} ${"bun run harness:doctor".padEnd(30)} same\n`);
+  if (p === "win32") {
+    console.log("  Windows: prefer WSL for pet script parity; tools vary by install.\n");
+  }
+}
+
+async function doctorCommand(args: string[]) {
+  const full = args.includes("--full");
+  const json = args.includes("--json");
+
+  console.log("\n  8gent Code — Doctor\n");
+
+  const { doctor } = await import("../packages/harness-cli/commands/doctor.js");
+  const harnessOk = await doctor([], { title: "Core: sessions, Ollama, LM Studio, OpenRouter, agent" });
+
+  let linuxExit = 0;
+  if (process.platform === "linux") {
+    const { runLinuxSetupCheck } = await import("../scripts/linux-setup-check.ts");
+    linuxExit = await runLinuxSetupCheck({ full, json, workspaceOnly: true });
+  } else if (!json) {
+    printCommandParityHints(process.platform);
+  }
+
+  process.exit(harnessOk && linuxExit === 0 ? 0 : 1);
 }
 
 // ── Status Command ────────────────────────────────────────────────

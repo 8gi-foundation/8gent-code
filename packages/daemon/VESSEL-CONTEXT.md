@@ -86,7 +86,7 @@ He prefers voice messages - transcribe and respond naturally.
 
 | Project | Repo/Domain | What It Is | Status |
 |---------|-------------|-----------|--------|
-| **8gent Code** | PodJamz/8gent-code | Open source coding agent (this repo, your brain) | Active |
+| **8gent Code** | PodJamz/8gent-code (project); zerwiz/8gent-code (Linux fork) | Open source coding agent (PodJamz; Linux port by contributor) | Active |
 | **8gent OS** | PodJamz/8gent-OS | Personal AI operating system (paid product) | Active |
 | **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children (Nick's project) | Concept |
 | **8gent World** | PodJamz/8gent-world | Ecosystem hub | Active |

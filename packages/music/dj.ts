@@ -23,6 +23,13 @@ import * as net from "net";
 
 // ---- Platform ----
 const IS_MAC = platform() === "darwin";
+const IS_LINUX = platform() === "linux";
+
+function pkgInstallHint(packages: string): string {
+  if (IS_MAC) return `brew install ${packages}`;
+  if (IS_LINUX) return `sudo apt install ${packages}  # or your distro packages`;
+  return `Install ${packages} using your OS package manager`;
+}
 const HOME = homedir();
 const TMP = tmpdir();
 const IPC_PATH = join(TMP, "mpv-8gent-dj.sock");
@@ -134,15 +141,15 @@ export class DJ {
       ytdlp: !!t.ytdlp,
       ffmpeg: !!t.ffmpeg,
       sox: !!t.sox,
-      installCmd: "brew install mpv yt-dlp ffmpeg sox",
+      installCmd: pkgInstallHint("mpv yt-dlp ffmpeg sox"),
     };
   }
 
   /** Play a YouTube video/song by query or URL */
   async play(queryOrUrl: string): Promise<string> {
     const t = detectTools();
-    if (!t.mpv) return "mpv not installed. Run: brew install mpv";
-    if (!t.ytdlp && !queryOrUrl.startsWith("http")) return "yt-dlp not installed. Run: brew install yt-dlp";
+    if (!t.mpv) return `mpv not installed. Run: ${pkgInstallHint("mpv")}`;
+    if (!t.ytdlp && !queryOrUrl.startsWith("http")) return `yt-dlp not installed. Run: ${pkgInstallHint("yt-dlp")}`;
 
     let url = queryOrUrl;
     let title = queryOrUrl;
@@ -186,7 +193,7 @@ export class DJ {
   /** Play internet radio by genre or station name */
   async radio(query: string): Promise<string> {
     const t = detectTools();
-    if (!t.mpv) return "mpv not installed. Run: brew install mpv";
+    if (!t.mpv) return `mpv not installed. Run: ${pkgInstallHint("mpv")}`;
 
     // Direct URL
     if (query.startsWith("http")) {

@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to 8gent Code — The Infinite Gentleman!
 
+**This repository:** [https://github.com/zerwiz/8gent-code](https://github.com/zerwiz/8gent-code). **Project:** [PodJamz](https://github.com/PodJamz/). Bug fixes and features that belong in the main product should go to [PodJamz/8gent-code](https://github.com/PodJamz/8gent-code). Contributor [zerwiz](https://github.com/zerwiz/) maintains this fork for Linux-first scripts and docs.
+
 ## Philosophy
 
 8gent is built on a simple principle: **structure beats brute-force**.
@@ -21,7 +23,18 @@ npm install -g @podjamz/8gent-code
 8gent
 ```
 
-### Contributors (from source)
+### Contributors (Linux fork, zerwiz)
+
+```bash
+git clone https://github.com/zerwiz/8gent-code.git
+cd 8gent-code
+bun install
+./start.sh
+```
+
+See [docs/PLANNING-LINUX-PORT.md](docs/PLANNING-LINUX-PORT.md). Open PRs upstream when changes are not fork-specific.
+
+### Contributors (canonical repo, PodJamz)
 
 ```bash
 git clone https://github.com/PodJamz/8gent-code.git

@@ -20,13 +20,14 @@
     "tui": "bun run apps/tui/src/index.tsx",
     "pet": "bash apps/lil-eight/build.sh && open 'apps/lil-eight/build/Lil Eight.app'",
     "pet:build": "bash apps/lil-eight/build.sh",
+    "pet:build:linux": "bash apps/lil-eight/build-linux.sh",
     "pet:open": "open 'apps/lil-eight/build/Lil Eight.app'",
     "pet:kill": "pkill -f LilEight",
     "pet:log": "tail -f ~/.8gent/lil-eight.log",
     "install-wizard": "bun run apps/installer/src/index.tsx",
     "cli": "bun run bin/8gent.ts",
     "dev": "next dev",
-    "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && sed -i '' '1i\\\n#!/usr/bin/env bun' dist/cli.js && chmod +x dist/cli.js",
+    "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && bun run scripts/add-cli-shebang.ts && chmod +x dist/cli.js",
     "build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
     "prepublishOnly": "npm run build",
     "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Just type: 8gent\\n\\nFirst run will guide you through Ollama setup if needed.\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
@@ -43,10 +44,12 @@
     "harness:sessions": "bun run packages/harness-cli/index.ts sessions",
     "harness:inspect": "bun run packages/harness-cli/index.ts inspect",
     "harness:doctor": "bun run packages/harness-cli/index.ts doctor",
+    "doctor": "bun run bin/8gent.ts doctor",
     "demos:studio": "cd apps/demos && bun run studio",
     "demos:render": "cd apps/demos && bun run render:all",
     "demos:media": "cd apps/demos && bun run media",
-    "debug": "bun run bin/debug.ts"
+    "debug": "bun run bin/debug.ts",
+    "linux:check": "bun run scripts/linux-setup-check.ts"
   },
   "workspaces": [
     "apps/*",
@@ -68,6 +71,7 @@
     "@types/react": "^19.2.14",
     "ai": "^6.0.116",
     "better-sqlite3": "^12.8.0",
+    "chalk": "^5.6.0",
     "cheerio": "^1.2.0",
     "glob": "^13.0.6",
     "ink": "^6.8.0",
@@ -92,6 +96,11 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "homepage": "https://github.com/zerwiz/8gent-code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zerwiz/8gent-code.git"
   },
   "author": "James Spalding",
   "license": "MIT"

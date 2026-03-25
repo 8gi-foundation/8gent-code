@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Discussions
+  - name: Discussions (this repo)
+    url: https://github.com/zerwiz/8gent-code/discussions
+    about: Questions and ideas for zerwiz/8gent-code
+  - name: Discussions (upstream PodJamz)
     url: https://github.com/PodJamz/8gent-code/discussions
-    about: Ask questions and share ideas
+    about: Main project and upstream topics
   - name: X / Twitter
     url: https://x.com/james__spalding
     about: Follow for updates
