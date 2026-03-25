@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8gent Session Terrain</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; color: #e0e0e0; font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #tooltip {
+    position: fixed; display: none; pointer-events: none;
+    background: rgba(10, 10, 10, 0.95); border: 1px solid #E8610A;
+    border-radius: 8px; padding: 12px 16px; max-width: 320px;
+    font-size: 13px; line-height: 1.5; z-index: 100;
+    box-shadow: 0 4px 24px rgba(232, 97, 10, 0.15);
+  }
+  #tooltip .title { color: #E8610A; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  #tooltip .meta { color: #999; font-size: 12px; }
+  #tooltip .stat { color: #ccc; }
+  #tooltip .stat b { color: #E8610A; }
+  #hud {
+    position: fixed; top: 16px; left: 16px; z-index: 50;
+    font-size: 13px; color: #666;
+  }
+  #hud h1 { font-family: 'Fraunces', Georgia, serif; font-weight: 800; font-size: 20px; color: #E8610A; margin-bottom: 4px; }
+  #hud .sub { color: #555; font-size: 12px; }
+  #legend {
+    position: fixed; bottom: 16px; left: 16px; z-index: 50;
+    font-size: 11px; color: #666; display: flex; gap: 12px;
+  }
+  #legend .item { display: flex; align-items: center; gap: 4px; }
+  #legend .swatch { width: 10px; height: 10px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>Session Terrain</h1>
+  <div class="sub">3D token usage landscape - drag to orbit, scroll to zoom</div>
+</div>
+<div id="tooltip">
+  <div class="title"></div>
+  <div class="meta"></div>
+  <div class="stat"></div>
+</div>
+<div id="legend"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// -- Mock session data --
+const PROJECTS = ['8gent-code', '8gent-app', '8gent-os', '8gent-jr', '8gent-world', '8gent-games'];
+const FOCUSES = ['agent-work', 'hook-development', 'testing-session', 'deployment', 'blog-work', 'skill-updates'];
+const PROJECT_COLORS = {
+  '8gent-code':  0xE8610A,
+  '8gent-app':   0x0A8BE8,
+  '8gent-os':    0x0AE86B,
+  '8gent-jr':    0xE8C40A,
+  '8gent-world': 0x0AE8D4,
+  '8gent-games': 0xE80A3C
+};
+
+function generateMockSessions(count) {
+  const sessions = [];
+  const startDate = new Date('2026-02-01');
+  for (let i = 0; i < count; i++) {
+    const dayOffset = Math.floor(i / 5);
+    const date = new Date(startDate.getTime() + dayOffset * 86400000);
+    const project = PROJECTS[Math.floor(Math.random() * PROJECTS.length)];
+    const tokens = Math.floor(800 + Math.random() * 12000 + Math.sin(i * 0.3) * 4000);
+    const tools = Math.floor(2 + Math.random() * 25);
+    const files = Math.floor(1 + Math.random() * 12);
+    const duration = Math.floor(5 + Math.random() * 90);
+    sessions.push({
+      id: `ses_${i.toString(36).padStart(4, '0')}`,
+      date: date.toISOString().split('T')[0],
+      dayIndex: dayOffset,
+      slotIndex: i % 5,
+      project,
+      focus: FOCUSES[Math.floor(Math.random() * FOCUSES.length)],
+      tokens, tools, files, duration
+    });
+  }
+  return sessions;
+}
+
+const sessions = generateMockSessions(250);
+const GRID_X = Math.max(...sessions.map(s => s.dayIndex)) + 1;
+const GRID_Z = 5;
+const CELL = 1.2;
+
+// -- Scene setup --
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0a);
+scene.fog = new THREE.FogExp2(0x0a0a0a, 0.012);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(GRID_X * CELL * 0.5, 18, GRID_Z * CELL + 20);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(GRID_X * CELL * 0.5, 2, GRID_Z * CELL * 0.5);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.45;
+controls.update();
+
+// -- Lights --
+const ambient = new THREE.AmbientLight(0x333333, 1.5);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(20, 30, 10);
+scene.add(dirLight);
+const pointLight = new THREE.PointLight(0xE8610A, 0.6, 80);
+pointLight.position.set(GRID_X * CELL * 0.5, 15, GRID_Z * CELL * 0.5);
+scene.add(pointLight);
+
+// -- Ground plane --
+const groundGeo = new THREE.PlaneGeometry(GRID_X * CELL + 20, GRID_Z * CELL + 20);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(GRID_X * CELL * 0.5, -0.01, GRID_Z * CELL * 0.5);
+scene.add(ground);
+
+// -- Grid lines --
+const gridMat = new THREE.LineBasicMaterial({ color: 0x1a1a1a });
+for (let x = 0; x <= GRID_X; x += 5) {
+  const pts = [new THREE.Vector3(x * CELL, 0, 0), new THREE.Vector3(x * CELL, 0, GRID_Z * CELL)];
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+}
+for (let z = 0; z <= GRID_Z; z++) {
+  const pts = [new THREE.Vector3(0, 0, z * CELL), new THREE.Vector3(GRID_X * CELL, 0, z * CELL)];
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+}
+
+// -- Session pillars --
+const maxTokens = Math.max(...sessions.map(s => s.tokens));
+const pillarGroup = new THREE.Group();
+const sessionMeshes = [];
+
+sessions.forEach(s => {
+  const h = Math.max(0.15, (s.tokens / maxTokens) * 10);
+  const geo = new THREE.BoxGeometry(CELL * 0.7, h, CELL * 0.7);
+  const color = new THREE.Color(PROJECT_COLORS[s.project] || 0xE8610A);
+  const mat = new THREE.MeshStandardMaterial({
+    color, roughness: 0.5, metalness: 0.2,
+    emissive: color, emissiveIntensity: 0.08
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(s.dayIndex * CELL, h / 2, s.slotIndex * CELL);
+  mesh.userData = s;
+  pillarGroup.add(mesh);
+  sessionMeshes.push(mesh);
+});
+
+scene.add(pillarGroup);
+
+// -- Raycaster for hover --
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const tooltip = document.getElementById('tooltip');
+let hoveredMesh = null;
+
+function onPointerMove(e) {
+  pointer.x = (e.clientX / innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(sessionMeshes);
+
+  if (hits.length > 0) {
+    const mesh = hits[0].object;
+    const s = mesh.userData;
+
+    if (hoveredMesh !== mesh) {
+      if (hoveredMesh) hoveredMesh.material.emissiveIntensity = 0.08;
+      mesh.material.emissiveIntensity = 0.4;
+      hoveredMesh = mesh;
+    }
+
+    tooltip.style.display = 'block';
+    tooltip.style.left = Math.min(e.clientX + 16, innerWidth - 340) + 'px';
+    tooltip.style.top = Math.min(e.clientY + 16, innerHeight - 120) + 'px';
+    tooltip.querySelector('.title').textContent = `${s.project} - ${s.focus}`;
+    tooltip.querySelector('.meta').textContent = `${s.date} - Session ${s.id}`;
+    tooltip.querySelector('.stat').innerHTML =
+      `<b>${s.tokens.toLocaleString()}</b> tokens - ` +
+      `<b>${s.tools}</b> tool calls - ` +
+      `<b>${s.files}</b> files - ` +
+      `<b>${s.duration}</b>min`;
+  } else {
+    if (hoveredMesh) {
+      hoveredMesh.material.emissiveIntensity = 0.08;
+      hoveredMesh = null;
+    }
+    tooltip.style.display = 'none';
+  }
+}
+
+window.addEventListener('pointermove', onPointerMove);
+
+// -- Legend --
+const legendEl = document.getElementById('legend');
+Object.entries(PROJECT_COLORS).forEach(([name, hex]) => {
+  const item = document.createElement('div');
+  item.className = 'item';
+  const swatch = document.createElement('div');
+  swatch.className = 'swatch';
+  swatch.style.background = '#' + hex.toString(16).padStart(6, '0');
+  item.appendChild(swatch);
+  item.appendChild(document.createTextNode(name));
+  legendEl.appendChild(item);
+});
+
+// -- Resize --
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// -- Animate --
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
