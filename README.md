@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-E8610A?style=for-the-badge&labelColor=1A1612" alt="MIT License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-1.0.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v1.0.0" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-1.0.1-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v1.0.1" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -223,6 +223,48 @@ bun run tui
 </td>
 </tr>
 </table>
+
+<br />
+
+---
+
+<br />
+
+## Companion System
+
+Every session spawns a unique companion. Your coding history becomes a collectible deck.
+
+- **40 species** across 5 rarity tiers (Common 60% to Legendary 1%)
+- **10 elements** inspired by MTG color pie (Void, Ember, Aether, Verdant, Radiant, Chrome, Prism, Frost, Thunder, Shadow)
+- **29 accessories** from Pokeball to Triforce to One Ring
+- **6 stats** per companion (DEBUG, CHAOS, WISDOM, PATIENCE, SNARK, ARCANA)
+- **1% shiny** chance
+- **Collection deck** persists at `~/.8gent/companion-deck.json`
+- **macOS dock pet** spawns with companion's name and colors
+
+```bash
+/pet start      # Spawn companion on dock
+/pet deck       # View your collection
+/pet card       # Roll a new card
+```
+
+See [packages/pet/README.md](packages/pet/README.md) for the full bestiary.
+
+<br />
+
+---
+
+<br />
+
+## Presentations
+
+| Deck | Link |
+|------|------|
+| **npm Launch** | [8gent.world/media/decks/npm-launch](https://8gent.world/media/decks/npm-launch) |
+| **Lil Eight Pets** | [8gent.world/media/decks/lil-eight](https://8gent.world/media/decks/lil-eight) |
+| **Companion System** | [8gent.world/media/decks/companion-system](https://8gent.world/media/decks/companion-system) |
+| **Code Roadmap** | [8gent.world/media/decks/code-roadmap](https://8gent.world/media/decks/code-roadmap) |
+| **All Decks** | [8gent.world/media/decks](https://8gent.world/media/decks) |
 
 <br />
 
@@ -504,6 +546,8 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 - Claude Code — worktree isolation pattern for parallel agent execution
 - Karpathy's autoresearch methodology — iterative prompt mutation and meta-optimization
 - [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) — agent persona standard
+- [usecomputer](https://github.com/remorses/usecomputer) — cross-platform desktop automation via native Zig N-API
+- [Quitty](https://github.com/iad1tya/Quitty) — process management and resource conservation UX
 
 </td>
 </tr>
