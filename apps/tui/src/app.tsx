@@ -1104,6 +1104,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /projects - Open project overview tab\n" +
               "  /auth [login|logout|status] - Authentication\n" +
               "  /github [issues|pr|repos] - GitHub integration\n" +
+              "  /pet [start|stop|deck|card] - Lil Eight companion\n" +
               "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
               "  /plan - Show current plan status\n" +
@@ -1886,6 +1887,54 @@ export function App({ initialCommand, args }: AppProps) {
             }
             addSystemMessage(result);
           }).catch((err) => addSystemMessage(`DJ error: ${err.message}`));
+          break;
+        }
+
+        case "pet": {
+          const petSub = args[0]?.toLowerCase() || "start";
+          import("../../../packages/pet/companion.js").then(async ({ generateCompanion, formatDeckSummary }) => {
+            const { execSync, spawn: spawnProc } = await import("child_process");
+            const fs = await import("fs");
+            const path = await import("path");
+
+            switch (petSub) {
+              case "start": {
+                // Spawn dock pet on macOS
+                if (process.platform === "darwin") {
+                  const lilEightScript = path.join(__dirname, "../bin/lil-eight.sh");
+                  if (fs.existsSync(lilEightScript)) {
+                    const pet = spawnProc("bash", [lilEightScript, "start"], { detached: true, stdio: "ignore" });
+                    pet.unref();
+                    addSystemMessage("[pet] Lil Eight spawned on Dock");
+                  } else {
+                    addSystemMessage("[pet] lil-eight.sh not found - run from source repo");
+                  }
+                } else {
+                  addSystemMessage("[pet] Desktop pet is macOS only (for now)");
+                }
+                // Show companion card
+                const sessionId = `session-${Date.now()}`;
+                const companion = generateCompanion(sessionId);
+                addSystemMessage(companion.card.replace(/\x1b\[[0-9;]*m/g, ""));
+                break;
+              }
+              case "stop": {
+                try { execSync("pkill -f LilEight 2>/dev/null"); addSystemMessage("[pet] Lil Eight dismissed"); } catch { addSystemMessage("[pet] Not running"); }
+                break;
+              }
+              case "deck": case "collection": {
+                addSystemMessage(formatDeckSummary().replace(/\x1b\[[0-9;]*m/g, ""));
+                break;
+              }
+              case "card": {
+                const c = generateCompanion(`card-${Date.now()}`);
+                addSystemMessage(c.card.replace(/\x1b\[[0-9;]*m/g, ""));
+                break;
+              }
+              default:
+                addSystemMessage("Lil Eight\n  /pet start - Spawn dock companion\n  /pet stop - Dismiss\n  /pet deck - View collection\n  /pet card - Roll a new companion card");
+            }
+          }).catch((err: Error) => addSystemMessage(`Pet error: ${err.message}`));
           break;
         }
 
