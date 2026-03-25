@@ -9,7 +9,6 @@ export type TreeStyle = "ascii" | "unicode";
 export interface TreeOptions {
   style?: TreeStyle;
   maxDepth?: number;
-  indent?: number;
 }
 
 interface StyleSet {
@@ -40,7 +39,7 @@ const STYLES: Record<TreeStyle, StyleSet> = {
  * @param root        - The root node of the tree.
  * @param getChildren - Returns (or resolves to) the children of a node.
  * @param getLabel    - Returns the display label for a node.
- * @param options     - Style, depth limit, and indent width.
+ * @param options     - Style, depth limit.
  * @returns           - Formatted tree string.
  */
 export async function printTree<T>(
@@ -81,7 +80,7 @@ export async function printTree<T>(
  * @param roots       - Array of root nodes.
  * @param getChildren - Returns (or resolves to) the children of a node.
  * @param getLabel    - Returns the display label for a node.
- * @param options     - Style, depth limit, and indent width.
+ * @param options     - Style, depth limit.
  * @returns           - Formatted forest string with blank lines between trees.
  */
 export async function printForest<T>(

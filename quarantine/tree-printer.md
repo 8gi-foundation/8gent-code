@@ -2,7 +2,7 @@
 
 ## What
 
-Self-contained tree structure printer that renders any tree data structure as indented text with branch connectors. Supports Unicode box-drawing characters (`├──`, `└──`, `│`) and ASCII fallback (`|--`, `` `-- ``, `|`). Handles async child resolvers, configurable depth limits, and multi-root forests.
+Self-contained tree structure printer that renders any tree data structure as indented text with branch connectors. Supports Unicode box-drawing characters and ASCII fallback. Handles async child resolvers, configurable depth limits, and multi-root forests.
 
 ## File
 
