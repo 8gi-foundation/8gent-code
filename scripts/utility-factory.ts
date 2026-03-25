@@ -219,42 +219,32 @@ async function sendTelegramVoice(audioPath: string): Promise<void> {
 }
 
 function generatePitch(spec: UtilitySpec): string {
-  const categories: Record<string, string> = {
-    string: "any developer working with text",
-    data: "agents that need fast in-memory data structures",
-    async: "concurrent workflows and agent orchestration",
-    fs: "file system operations in autonomous agents",
-    net: "network-aware agents and API integrations",
-    crypto: "security, hashing, and identity in agent systems",
-    date: "time-aware agents and scheduling",
-    math: "analytics, scoring, and numerical reasoning",
-    cli: "terminal-based agent interfaces",
-    test: "self-validating agents that test their own output",
-    parse: "agents that read and transform structured data",
-    encoding: "data transport between agents and services",
-  };
-  const category = spec.requirements[0]?.toLowerCase().includes("string") ? "string"
-    : spec.requirements[0]?.toLowerCase().includes("async") ? "async"
-    : spec.requirements[0]?.toLowerCase().includes("file") ? "fs"
-    : spec.requirements[0]?.toLowerCase().includes("parse") ? "parse"
-    : "data";
-  const audience = categories[category] ?? "autonomous coding agents";
-  return `New ability obtained: *${spec.name}*
+  // Build a real explanation of what this does and why it matters
+  const reqs = spec.requirements.map(r => `- ${r}`).join("\n");
 
+  return `*New ability: ${spec.name}*
+
+*What it does:*
 ${spec.description}
 
-*Who it's for:* ${audience}
-*Job to be done:* ${spec.requirements.slice(0, 2).join(". ")}
-*Why it matters:* Every ability Eight obtains makes it more autonomous. This one means Eight no longer needs external dependencies for this task - it can do it itself, in under ${spec.maxLines ?? 150} lines, zero deps.`;
+*In plain terms:*
+Before this, Eight would need to install an npm package or ask a human to handle this. Now Eight can do it natively - ${spec.requirements[0]?.toLowerCase() || "solving this problem"} without leaving the codebase. ${spec.maxLines ?? 150} lines, zero dependencies, works offline.
+
+*What the user gets:*
+${reqs}
+
+*Why this matters for 8gent:*
+Every utility Eight absorbs is one less external dependency, one less API call, one less point of failure. This is ability abstraction - study the concept, rebuild it from scratch, own it forever. The agent gets stronger every time.`;
 }
 
 async function sendPRNotification(spec: UtilitySpec, prUrl: string): Promise<void> {
   const msg = generatePitch(spec) + `\n\n${prUrl}`;
   await sendTelegram(msg);
 
-  // Generate voice pitch via macOS say
+  // Generate voice pitch via macOS say - explain in plain terms
   try {
-    const voiceText = `New ability: ${spec.name}. ${spec.description}. Eight can now do this autonomously with zero dependencies.`;
+    const firstReq = spec.requirements[0] || spec.description;
+    const voiceText = `Hey James. Eight just picked up a new ability called ${spec.name.replace(/-/g, " ")}. Here's what it does. ${spec.description}. In practice, this means the agent can now ${firstReq.toLowerCase()}. Before this, you'd need an npm package or write it from scratch. Now it's built in, zero dependencies, under ${spec.maxLines ?? 150} lines. One more thing Eight can do on its own.`;
     const aiffPath = `/tmp/8gent-voice-${spec.name}.aiff`;
     const oggPath = `/tmp/8gent-voice-${spec.name}.ogg`;
     execSync(`say -v Ava -o "${aiffPath}" "${voiceText.replace(/"/g, '\\"')}"`, { stdio: "pipe" });
