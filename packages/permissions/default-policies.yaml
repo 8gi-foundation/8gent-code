@@ -80,6 +80,32 @@ policies:
     decision: block
     message: "Request to known data-exfil domain blocked."
 
+  # ── Desktop computer use ─────────────────────────────────────────────────────
+
+  - name: "desktop-require-approval"
+    action: desktop_use
+    condition: "action in [click, type, press, drag, clipboard_set]"
+    decision: require_approval
+    message: "Desktop automation action requires user confirmation."
+
+  - name: "desktop-block-dangerous-keys"
+    action: desktop_use
+    condition: "keys contains cmd+q or keys contains alt+f4 or keys contains ctrl+alt+delete or keys contains cmd+shift+q"
+    decision: block
+    message: "Dangerous key combination blocked (would quit/logout)."
+
+  - name: "desktop-allow-screenshot"
+    action: desktop_use
+    condition: "action equals screenshot or action equals window_list or action equals display_list or action equals hover or action equals scroll or action equals clipboard_get or action equals list_processes or action equals suggest_quit or action equals safe_list"
+    decision: allow
+    message: "Read-only desktop actions are allowed without confirmation."
+
+  - name: "desktop-quit-require-approval"
+    action: desktop_use
+    condition: "action equals quit_app"
+    decision: require_approval
+    message: "Quitting an application requires user confirmation."
+
   # ── File access ───────────────────────────────────────────────────────────────
 
   - name: "no-delete-config"
