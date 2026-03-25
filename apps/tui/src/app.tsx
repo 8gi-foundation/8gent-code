@@ -1921,6 +1921,12 @@ export function App({ initialCommand, args }: AppProps) {
                   JSON.stringify(companionData, null, 2)
                 );
 
+                // Kill any existing dock pets first
+                if (process.platform === "darwin") {
+                  try { execSync("pkill -f 'Lil Eight' 2>/dev/null"); } catch {}
+                  try { execSync("pkill -f LilEight 2>/dev/null"); } catch {}
+                }
+
                 // Spawn dock pet on macOS
                 if (process.platform === "darwin") {
                   // Try multiple paths: cwd (source), __dirname relative, home .8gent

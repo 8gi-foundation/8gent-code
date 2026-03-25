@@ -540,13 +540,26 @@ async function spawnPet(sessionId?: string) {
     return;
   }
 
+  // Generate companion and write JSON for dock pet to read
+  try {
+    const { generateCompanion } = await import("../packages/pet/companion.js");
+    const companion = generateCompanion(sessionId || `session-${Date.now()}`);
+    const home = process.env.HOME || "~";
+    fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".8gent", "active-companion.json"), JSON.stringify({
+      fullName: companion.fullName, species: companion.species, element: companion.element,
+      rarity: companion.rarity, accessory: companion.accessory, shiny: companion.shiny,
+      palette: companion.palette, lore: companion.lore,
+    }, null, 2));
+  } catch {}
+
   const lilEightScript = path.join(__dirname, "lil-eight.sh");
 
-  // Check if already running
-  try {
-    execSync("pgrep -f LilEight", { stdio: "pipe" });
-    // Already running - just register with mesh
-  } catch {
+  // Kill existing pets, then spawn fresh
+  try { execSync("pkill -f LilEight 2>/dev/null", { stdio: "pipe" }); } catch {}
+
+  // Spawn new pet
+  {
     // Not running - spawn it
     if (fs.existsSync(lilEightScript)) {
       const pet = spawnProc("bash", [lilEightScript, "start"], {
