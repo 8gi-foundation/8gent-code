@@ -7,6 +7,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.0.1] - 2026-03-25
+
+### Fixed
+- **Double shebang bug** - Build output had `#!/usr/bin/env bun` prepended twice, breaking execution on Linux. Now checks if shebang exists before prepending. This fix is critical for all Linux users and Docker-based benchmarks.
+- **Cross-platform build script** - Replaced macOS-only `sed -i ''` with cross-platform Node one-liner.
+- **CI workflows** - Added version sync check, secrets scan, policy engine integrity test to CI. Release workflow now auto-publishes to npm.
+- **Harbor adapter** - Fixed AgentContext API (pydantic data model, not message store). Added robust Bun + 8gent installation in Docker containers.
+
+### Added
+- **Terminal-Bench Harbor adapter** (`benchmarks/harbor_adapter/`) - Runs 8gent through Terminal-Bench 2.0 via Harbor framework. Oracle baseline validated at 80%.
+- **Ollama timeout increase** - 5 minute timeout for 14B model pulls.
+
+---
+
 ## [2.0.0] - 2026-03-25
 
 ### Added
