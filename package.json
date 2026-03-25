@@ -26,7 +26,7 @@
     "install-wizard": "bun run apps/installer/src/index.tsx",
     "cli": "bun run bin/8gent.ts",
     "dev": "next dev",
-    "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node -e \"const fs=require('fs');const f='dist/cli.js';fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+fs.readFileSync(f))\" && chmod +x dist/cli.js",
+    "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node -e \"const fs=require('fs');const f='dist/cli.js';const c=fs.readFileSync(f,'utf-8');if(!c.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+c);\" && chmod +x dist/cli.js",
     "build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
     "prepublishOnly": "npm run build",
     "postinstall": "node -e \"console.log('\\n✨ 8gent installed! Just type: 8gent\\n\\nFirst run will guide you through Ollama setup if needed.\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
