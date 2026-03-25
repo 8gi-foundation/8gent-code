@@ -25,7 +25,7 @@ function seedRng(seed: string): () => number {
 // -- Species --
 
 const SPECIES = [
-  // Common (weight 60)
+  // Common (weight 60) - starter creatures
   { name: "Imp", glyph: "imp", tier: "common", lore: "A minor daemon of mischief. Useful for fetch quests and merge conflicts." },
   { name: "Goblin", glyph: "goblin", tier: "common", lore: "Hoards stack traces. Will trade bugs for shiny tokens." },
   { name: "Sprite", glyph: "sprite", tier: "common", lore: "A flickering code spirit. Born from abandoned TODO comments." },
@@ -34,7 +34,11 @@ const SPECIES = [
   { name: "Gremlin", glyph: "gremlin", tier: "common", lore: "Feeds after midnight. Do not expose to production." },
   { name: "Kobold", glyph: "kobold", tier: "common", lore: "Small but cunning. Sets traps in your test suite." },
   { name: "Wisp", glyph: "wisp", tier: "common", lore: "A fragment of a crashed process. Still glows faintly." },
-  // Uncommon (weight 25)
+  { name: "Patchling", glyph: "patchling", tier: "common", lore: "A tiny creature made of diff fragments. Evolves through commits." },
+  { name: "Bytebug", glyph: "bytebug", tier: "common", lore: "A harmless insect that feeds on unused variables. Surprisingly fast." },
+  { name: "Nullpup", glyph: "nullpup", tier: "common", lore: "A void puppy. Undefined until observed. Then it licks your face." },
+  { name: "Sparkmote", glyph: "sparkmote", tier: "common", lore: "A floating ember of electricity. Powers up near active terminals." },
+  // Uncommon (weight 25) - evolved forms
   { name: "Drake", glyph: "drake", tier: "uncommon", lore: "A young dragon. Breathes hot takes about framework choices." },
   { name: "Golem", glyph: "golem", tier: "uncommon", lore: "Carved from petrified legacy code. Slow but unbreakable." },
   { name: "Wraith", glyph: "wraith", tier: "uncommon", lore: "A phantom of a deleted branch. Seeks resolution." },
@@ -42,19 +46,30 @@ const SPECIES = [
   { name: "Gryphon", glyph: "gryphon", tier: "uncommon", lore: "Half eagle, half lion, fully type-safe." },
   { name: "Elemental", glyph: "elemental", tier: "uncommon", lore: "Manifests as the dominant element of the current codebase." },
   { name: "Chimera", glyph: "chimera", tier: "uncommon", lore: "Three heads. One writes tests, one writes code, one reviews PRs." },
-  // Rare (weight 10)
+  { name: "Patchbeast", glyph: "patchbeast", tier: "uncommon", lore: "Evolved from Patchling after 10 merges. Immune to rebase conflicts." },
+  { name: "Voltaur", glyph: "voltaur", tier: "uncommon", lore: "A centaur crackling with static. Charges your async pipelines." },
+  { name: "Hexacat", glyph: "hexacat", tier: "uncommon", lore: "A six-legged feline that walks on hex grids. Purrs in base 16." },
+  { name: "Recursaur", glyph: "recursaur", tier: "uncommon", lore: "A dinosaur that contains smaller versions of itself. Stack overflow imminent." },
+  // Rare (weight 10) - powerful beings
   { name: "Phoenix", glyph: "phoenix", tier: "rare", lore: "Rises from git stash. Your code was never truly lost." },
   { name: "Ent", glyph: "ent", tier: "rare", lore: "An ancient tree guardian. Speaks slowly about dependency management." },
   { name: "Djinn", glyph: "djinn", tier: "rare", lore: "Grants three refactors. Choose wisely." },
   { name: "Wyrm", glyph: "wyrm", tier: "rare", lore: "An elder serpent coiled in the root directory since epoch." },
   { name: "Kitsune", glyph: "kitsune", tier: "rare", lore: "Nine-tailed fox. Each tail holds a different design pattern." },
-  // Epic (weight 4)
+  { name: "Chocobot", glyph: "chocobot", tier: "rare", lore: "A golden bird-machine hybrid. Wark! Fast travel between directories." },
+  { name: "Gigavolt", glyph: "gigavolt", tier: "rare", lore: "Evolved from Voltaur in a thunderstorm of async/await. Pure power." },
+  { name: "Mooglemancer", glyph: "mooglemancer", tier: "rare", lore: "Kupo! A floating mage-critter that casts beneficial buffs on your build." },
+  // Epic (weight 4) - mythic tier
   { name: "Leviathan", glyph: "leviathan", tier: "epic", lore: "Dwells in the deep ocean of node_modules. Awakened by npm install." },
   { name: "Archon", glyph: "archon", tier: "epic", lore: "A cosmic judge. Evaluates your code against the platonic ideal." },
   { name: "Behemoth", glyph: "behemoth", tier: "epic", lore: "The weight of a thousand microservices made flesh." },
-  // Legendary (weight 1)
+  { name: "Mewtwo", glyph: "mewtwo", tier: "epic", lore: "Engineered in a lab. The ultimate AI. Questions its own existence between deployments." },
+  { name: "Treebeard", glyph: "treebeard", tier: "epic", lore: "Don't be hasty. Reviews your entire git history before approving one line." },
+  // Legendary (weight 1) - gods
   { name: "Bahamut", glyph: "bahamut", tier: "legendary", lore: "The Dragon King. Compiler of worlds. All PRs are approved." },
   { name: "Sauron", glyph: "sauron", tier: "legendary", lore: "The All-Seeing Eye. Watches every git diff. Judges silently." },
+  { name: "Arceus", glyph: "arceus", tier: "legendary", lore: "The Original One. Typed the first commit. All languages descend from it." },
+  { name: "Sephiroth", glyph: "sephiroth", tier: "legendary", lore: "The One-Winged Angel. Descends from the cloud to delete your main branch." },
 ] as const
 
 // -- Elements (MTG-inspired color pie) --
@@ -68,41 +83,61 @@ const ELEMENTS = [
   { name: "Chrome", color: "#27272A", accent: "#A1A1AA", symbol: "chrome", description: "Artifice. Machines. Zero dependencies." },
   { name: "Prism", color: "#1E1B4B", accent: "#A78BFA", symbol: "prism", description: "Chaos. Multiverse. Quantum bugs." },
   { name: "Frost", color: "#0C4A6E", accent: "#67E8F9", symbol: "frost", description: "Patience. Immutability. Frozen state." },
+  { name: "Thunder", color: "#422006", accent: "#FACC15", symbol: "thunder", description: "Speed. Parallelism. Async lightning." },
+  { name: "Shadow", color: "#0F0F0F", accent: "#EC4899", symbol: "shadow", description: "Stealth. Dark mode. Null-safe." },
 ] as const
 
 // -- Titles (FF job-class style) --
 
 const TITLES = [
-  // Common
-  "Apprentice", "Vagrant", "Scribe", "Tinker", "Scout", "Novice",
-  // Uncommon
-  "Arcanist", "Sentinel", "Alchemist", "Warden", "Invoker", "Artificer",
-  // Rare
-  "Archmagus", "Paladin", "Chronomancer", "Summoner", "Sage",
-  // Epic
-  "Planeswalker", "Lich King", "Astral Watcher",
-  // Legendary
-  "Omniscient", "World Ender",
+  // Common - early game classes
+  "Apprentice", "Vagrant", "Scribe", "Tinker", "Scout", "Novice", "Trainer", "Ranger",
+  // Uncommon - mid game
+  "Arcanist", "Sentinel", "Alchemist", "Warden", "Invoker", "Artificer", "Gym Leader", "Dark Knight",
+  // Rare - prestige
+  "Archmagus", "Paladin", "Chronomancer", "Summoner", "Sage", "Elite Four", "Dragoon",
+  // Epic - mythic
+  "Planeswalker", "Lich King", "Astral Watcher", "Champion",
+  // Legendary - god tier
+  "Omniscient", "World Ender", "First Coder",
 ]
 
 // -- Accessories --
 
 const ACCESSORIES = [
+  // Common - starter gear
   { name: "None", rarity: "common" },
   { name: "Wizard Hat", rarity: "common" },
   { name: "Monocle", rarity: "common" },
   { name: "Scarf", rarity: "common" },
   { name: "Tiny Sword", rarity: "common" },
+  { name: "Pokeball", rarity: "common" },
+  { name: "Bandana", rarity: "common" },
+  // Uncommon - mid gear
   { name: "Lantern", rarity: "uncommon" },
   { name: "Spell Tome", rarity: "uncommon" },
   { name: "Iron Crown", rarity: "uncommon" },
+  { name: "Great Ball", rarity: "uncommon" },
+  { name: "Buster Sword", rarity: "uncommon" },
+  { name: "Chocobo Feather", rarity: "uncommon" },
+  // Rare - prestige items
   { name: "Phoenix Feather", rarity: "rare" },
   { name: "Mithril Helm", rarity: "rare" },
   { name: "Third Eye", rarity: "rare" },
+  { name: "Ultra Ball", rarity: "rare" },
+  { name: "Materia Orb", rarity: "rare" },
+  { name: "Evenstar", rarity: "rare" },
+  // Epic - mythic artifacts
   { name: "Infinity Gauntlet", rarity: "epic" },
   { name: "Silmaril", rarity: "epic" },
+  { name: "Master Ball", rarity: "epic" },
+  { name: "Limit Break Band", rarity: "epic" },
+  { name: "Black Lotus", rarity: "epic" },
+  // Legendary - god items
   { name: "One Ring", rarity: "legendary" },
   { name: "Masamune", rarity: "legendary" },
+  { name: "GS Ball", rarity: "legendary" },
+  { name: "Triforce", rarity: "legendary" },
 ] as const
 
 // -- Eye styles --
