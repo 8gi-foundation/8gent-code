@@ -3007,6 +3007,63 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Running Apps - quit idle apps to free resources
+        menu.addItem(.separator())
+        let appsMenu = NSMenu()
+        let runningApps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+
+        if runningApps.isEmpty {
+            let emptyItem = NSMenuItem(title: "No apps running", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            appsMenu.addItem(emptyItem)
+        } else {
+            // Memory info header
+            let totalMB = ProcessInfo.processInfo.physicalMemory / (1024 * 1024)
+            let freeMB: UInt64 = {
+                var stats = vm_statistics64()
+                var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+                let result = withUnsafeMutablePointer(to: &stats) {
+                    $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                        host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                    }
+                }
+                if result == KERN_SUCCESS {
+                    let pageSize = UInt64(vm_kernel_page_size)
+                    return (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize / (1024 * 1024)
+                }
+                return 0
+            }()
+            let usedPercent = totalMB > 0 ? Int((totalMB - freeMB) * 100 / totalMB) : 0
+            let memHeader = NSMenuItem(title: "Memory: \(usedPercent)% used (\(freeMB) MB free)", action: nil, keyEquivalent: "")
+            memHeader.isEnabled = false
+            appsMenu.addItem(memHeader)
+            appsMenu.addItem(.separator())
+
+            for app in runningApps {
+                let name = app.localizedName ?? "Unknown"
+                let pid = app.processIdentifier
+                let item = NSMenuItem(title: "\(name)", action: #selector(quitRunningApp(_:)), keyEquivalent: "")
+                item.representedObject = pid
+                item.target = self
+                if let icon = app.icon {
+                    icon.size = NSSize(width: 16, height: 16)
+                    item.image = icon
+                }
+                appsMenu.addItem(item)
+            }
+
+            appsMenu.addItem(.separator())
+            let quitAllItem = NSMenuItem(title: "Quit All Non-Essential...", action: #selector(quitAllNonEssential), keyEquivalent: "")
+            quitAllItem.target = self
+            appsMenu.addItem(quitAllItem)
+        }
+
+        let appsItem = NSMenuItem(title: "Running Apps (\(runningApps.count))", action: nil, keyEquivalent: "")
+        appsItem.submenu = appsMenu
+        menu.addItem(appsItem)
+
         menu.addItem(.separator())
         menu.addItem(withTitle: "Refresh Sessions", action: #selector(refreshSessions), keyEquivalent: "r")
         menu.addItem(withTitle: "Reconnect Daemon", action: #selector(reconnectDaemon), keyEquivalent: "d")
@@ -3104,6 +3161,82 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let sm = petManager?.soundManager else { return }
         sm.volume = max(0.0, sm.volume - 0.1)
         sm.play("ping-connect")
+    }
+
+    // MARK: - App Management
+
+    /// Apps that must never be quit - system stability depends on them
+    private static let protectedApps: Set<String> = [
+        "Finder", "Dock", "SystemUIServer", "loginwindow",
+        "Lil Eight", "LilEight", "Terminal", "iTerm2",
+        "Activity Monitor", "System Preferences", "System Settings",
+    ]
+
+    @objc func quitRunningApp(_ sender: NSMenuItem) {
+        guard let pid = sender.representedObject as? pid_t else { return }
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        let name = app.localizedName ?? "Unknown"
+
+        if AppDelegate.protectedApps.contains(name) {
+            let alert = NSAlert()
+            alert.messageText = "Protected App"
+            alert.informativeText = "\(name) is protected and cannot be quit from here."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Quit \(name)?"
+        alert.informativeText = "This will ask \(name) to save and close gracefully."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Force Quit")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .informational
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            app.terminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.updateMenu()
+            }
+        } else if response == .alertSecondButtonReturn {
+            app.forceTerminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.updateMenu()
+            }
+        }
+    }
+
+    @objc func quitAllNonEssential() {
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .filter { !AppDelegate.protectedApps.contains($0.localizedName ?? "") }
+
+        if apps.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Nothing to quit"
+            alert.informativeText = "All running apps are either protected or essential."
+            alert.runModal()
+            return
+        }
+
+        let names = apps.compactMap { $0.localizedName }.joined(separator: ", ")
+        let alert = NSAlert()
+        alert.messageText = "Quit \(apps.count) apps?"
+        alert.informativeText = "This will gracefully quit: \(names)"
+        alert.addButton(withTitle: "Quit All")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            for app in apps {
+                app.terminate()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.updateMenu()
+            }
+        }
     }
 
     // MARK: - Global
