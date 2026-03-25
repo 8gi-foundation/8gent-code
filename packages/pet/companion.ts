@@ -179,11 +179,10 @@ function hexToAnsi(hex: string): string {
   return `\x1b[38;2;${r};${g};${b}m`
 }
 
-export function generateCompanion(userId?: string): Companion {
-  // Seed from user identity - same user always gets the same base companion
-  // Add date component so companion "evolves" daily with a new accessory/element shift
-  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-  const seed = `${userId || process.env.USER || "eight"}-companion-${today}`
+export function generateCompanion(sessionId?: string): Companion {
+  // Each session gets a unique companion - seeded from session ID
+  // Same session ID = same companion (deterministic)
+  const seed = sessionId || `session-${Date.now()}-${Math.random()}`
   const rng = seedRng(seed)
 
   // Roll species
@@ -298,13 +297,185 @@ export function generateCompanion(userId?: string): Companion {
   }
 }
 
+// -- Collection Deck (persistent session history) --
+
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs"
+import { join } from "path"
+
+export interface DeckEntry {
+  sessionId: string
+  companion: {
+    species: string
+    element: string
+    title: string
+    fullName: string
+    accessory: string
+    rarity: Rarity
+    shiny: boolean
+    eyes: string
+    lore: string
+    stats: Record<string, number>
+    palette: { body: string; accent: string; highlight: string; eye: string }
+  }
+  session: {
+    startedAt: string       // ISO timestamp
+    endedAt?: string        // ISO timestamp
+    cwd: string             // working directory
+    model?: string          // LLM model used
+    summary?: string        // what was accomplished (set at session end)
+    toolCalls?: number      // total tool invocations
+    tokensUsed?: number     // total tokens
+  }
+}
+
+export interface CompanionDeck {
+  userId: string
+  companions: DeckEntry[]
+  stats: {
+    totalSessions: number
+    speciesSeen: string[]
+    rarestPull: Rarity
+    shiniesFound: number
+    legendaryCount: number
+  }
+}
+
+function getDeckPath(): string {
+  const home = process.env.HOME || process.env.USERPROFILE || "~"
+  return join(home, ".8gent", "companion-deck.json")
+}
+
+export function loadDeck(): CompanionDeck {
+  const deckPath = getDeckPath()
+  try {
+    if (existsSync(deckPath)) {
+      return JSON.parse(readFileSync(deckPath, "utf-8"))
+    }
+  } catch {}
+  return {
+    userId: process.env.USER || "unknown",
+    companions: [],
+    stats: { totalSessions: 0, speciesSeen: [], rarestPull: "common", shiniesFound: 0, legendaryCount: 0 },
+  }
+}
+
+function saveDeck(deck: CompanionDeck) {
+  const deckPath = getDeckPath()
+  const dir = join(process.env.HOME || "~", ".8gent")
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(deckPath, JSON.stringify(deck, null, 2))
+}
+
+const RARITY_ORDER: Rarity[] = ["common", "uncommon", "rare", "epic", "legendary"]
+
+export function registerCompanion(sessionId: string, companion: Companion, model?: string): DeckEntry {
+  const deck = loadDeck()
+
+  const entry: DeckEntry = {
+    sessionId,
+    companion: {
+      species: companion.species,
+      element: companion.element,
+      title: companion.title,
+      fullName: companion.fullName,
+      accessory: companion.accessory,
+      rarity: companion.rarity,
+      shiny: companion.shiny,
+      eyes: companion.eyes,
+      lore: companion.lore,
+      stats: companion.stats,
+      palette: companion.palette,
+    },
+    session: {
+      startedAt: new Date().toISOString(),
+      cwd: process.cwd(),
+      model,
+    },
+  }
+
+  deck.companions.push(entry)
+
+  // Update deck stats
+  deck.stats.totalSessions = deck.companions.length
+  if (!deck.stats.speciesSeen.includes(companion.species)) {
+    deck.stats.speciesSeen.push(companion.species)
+  }
+  if (RARITY_ORDER.indexOf(companion.rarity) > RARITY_ORDER.indexOf(deck.stats.rarestPull)) {
+    deck.stats.rarestPull = companion.rarity
+  }
+  if (companion.shiny) deck.stats.shiniesFound++
+  if (companion.rarity === "legendary") deck.stats.legendaryCount++
+
+  saveDeck(deck)
+  return entry
+}
+
+export function endSession(sessionId: string, summary?: string, toolCalls?: number, tokensUsed?: number) {
+  const deck = loadDeck()
+  const entry = deck.companions.find(c => c.sessionId === sessionId)
+  if (entry) {
+    entry.session.endedAt = new Date().toISOString()
+    if (summary) entry.session.summary = summary
+    if (toolCalls) entry.session.toolCalls = toolCalls
+    if (tokensUsed) entry.session.tokensUsed = tokensUsed
+    saveDeck(deck)
+  }
+}
+
+export function formatDeckSummary(): string {
+  const deck = loadDeck()
+  const reset = "\x1b[0m"
+  const bold = "\x1b[1m"
+  const dim = "\x1b[2m"
+
+  if (deck.companions.length === 0) {
+    return `${dim}No companions yet. Start a session to collect your first.${reset}`
+  }
+
+  const lines: string[] = [
+    `${bold}Companion Deck - ${deck.userId}${reset}`,
+    `${dim}${deck.stats.totalSessions} sessions | ${deck.stats.speciesSeen.length}/${SPECIES.length} species | Rarest: ${deck.stats.rarestPull}${reset}`,
+    `${dim}Shinies: ${deck.stats.shiniesFound} | Legendaries: ${deck.stats.legendaryCount}${reset}`,
+    "",
+  ]
+
+  // Show last 10 companions (most recent first)
+  const recent = deck.companions.slice(-10).reverse()
+  for (const entry of recent) {
+    const rc = RARITY_COLORS[entry.companion.rarity]
+    const date = entry.session.startedAt.slice(0, 10)
+    const summary = entry.session.summary ? ` - ${entry.session.summary.slice(0, 50)}` : ""
+    const shinyTag = entry.companion.shiny ? " *" : ""
+    lines.push(
+      `  ${rc}${entry.companion.fullName}${shinyTag}${reset} ${dim}[${entry.companion.element}]${reset} ${dim}${date}${summary}${reset}`
+    )
+  }
+
+  if (deck.companions.length > 10) {
+    lines.push(`${dim}  ...and ${deck.companions.length - 10} more${reset}`)
+  }
+
+  return lines.join("\n")
+}
+
 // -- Standalone test --
 
 if (import.meta.main) {
-  // Generate 5 random companions to show off the system
-  for (let i = 0; i < 5; i++) {
-    const c = generateCompanion(`demo-${i}-${Date.now()}`)
-    console.log(c.card)
-    console.log()
+  const args = process.argv.slice(2)
+
+  if (args[0] === "deck") {
+    // Show collection deck
+    console.log(formatDeckSummary())
+  } else {
+    // Generate and register 5 random companions
+    for (let i = 0; i < 5; i++) {
+      const sessionId = `demo-${i}-${Date.now()}`
+      const c = generateCompanion(sessionId)
+      registerCompanion(sessionId, c)
+      console.log(c.card)
+      console.log()
+    }
+    console.log("\n--- Your Deck ---\n")
+    console.log(formatDeckSummary())
   }
 }
