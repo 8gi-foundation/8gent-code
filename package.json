@@ -1,6 +1,6 @@
 {
   "name": "@podjamz/8gent-code",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "private": false,
   "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
   "type": "module",

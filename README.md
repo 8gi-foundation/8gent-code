@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-E8610A?style=for-the-badge&labelColor=1A1612" alt="MIT License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-1.0.1-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v1.0.1" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-2.0.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v2.0.0" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
