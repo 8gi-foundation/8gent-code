@@ -1921,9 +1921,10 @@ export function App({ initialCommand, args }: AppProps) {
                   JSON.stringify(companionData, null, 2)
                 );
 
-                // Kill ALL existing dock pets first (force kill)
+                // Kill ALL existing dock pets (SIGTERM first for clean window close, then SIGKILL)
                 if (process.platform === "darwin") {
-                  try { execSync("pkill -9 -f 'Lil.Eight' 2>/dev/null"); } catch {}
+                  try { execSync("pkill -f 'Lil.Eight' 2>/dev/null"); } catch {}
+                  try { execSync("sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &"); } catch {}
                 }
 
                 // Spawn dock pet on macOS
@@ -1951,7 +1952,11 @@ export function App({ initialCommand, args }: AppProps) {
                 break;
               }
               case "stop": {
-                try { execSync("pkill -9 -f 'Lil.Eight' 2>/dev/null"); addSystemMessage("[pet] All companions dismissed"); } catch { addSystemMessage("[pet] Not running"); }
+                try {
+                  execSync("pkill -f 'Lil.Eight' 2>/dev/null");
+                  execSync("sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &");
+                  addSystemMessage("[pet] All companions dismissed");
+                } catch { addSystemMessage("[pet] Not running"); }
                 break;
               }
               case "deck": case "collection": {
