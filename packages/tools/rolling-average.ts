@@ -129,3 +129,6 @@ export class ExponentialMovingAverage {
     return this._count;
   }
 }
+
+// Convenience aliases
+export { SimpleMovingAverage as SMA, ExponentialMovingAverage as EMA };
