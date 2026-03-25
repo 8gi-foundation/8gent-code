@@ -156,6 +156,71 @@ Output ONLY the TypeScript code inside a fenced code block like:
 }
 
 // ============================================
+// Security gate - reject unsafe generated code
+// ============================================
+
+function securityReview(code: string, name: string): string[] {
+  const issues: string[] = [];
+
+  // No auto-executing code at module level (side effects on import)
+  // Allow: export, type, interface, const, let, function, class, //, /*, import
+  const lines = code.split("\n").filter(l => l.trim() && !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"));
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^(export|import|type |interface |const |let |var |function |class |enum |declare |\/\/)/.test(trimmed)) continue;
+    if (/^\}/.test(trimmed)) continue; // closing braces
+    if (/^\*/.test(trimmed)) continue; // comment continuation
+    if (/^(if|else|for|while|switch|case|break|return|throw|try|catch|finally|default|do)/.test(trimmed)) continue; // control flow inside functions
+    if (/^[a-zA-Z_$].*\(/.test(trimmed) && !trimmed.startsWith("export")) {
+      // Top-level function call - potential side effect
+      // Only flag if it's at indent level 0 (not inside a function)
+      if (!line.startsWith(" ") && !line.startsWith("\t")) {
+        issues.push(`Auto-executing code at module level: "${trimmed.slice(0, 60)}"`);
+      }
+    }
+  }
+
+  // No CommonJS require()
+  if (/\brequire\s*\(/.test(code)) {
+    issues.push("Uses require() instead of ESM imports");
+  }
+
+  // No process.env mutation (writing to process.env)
+  if (/process\.env\[.*\]\s*=/.test(code) || /process\.env\.[\w]+\s*=/.test(code)) {
+    issues.push("Mutates process.env - read-only access only");
+  }
+
+  // No eval or Function constructor
+  if (/\beval\s*\(/.test(code) || /new\s+Function\s*\(/.test(code)) {
+    issues.push("Uses eval() or new Function() - code injection risk");
+  }
+
+  // No child_process unless the utility is explicitly about process management
+  if (/child_process|exec\s*\(|execSync|spawn/.test(code) && !name.includes("process") && !name.includes("exec") && !name.includes("shell")) {
+    issues.push("Spawns child processes without being a process management utility");
+  }
+
+  // No network access unless the utility is explicitly about networking
+  if (/\bfetch\s*\(|http\.|https\.|net\.|dgram\./.test(code) && !name.includes("http") && !name.includes("url") && !name.includes("fetch") && !name.includes("net")) {
+    issues.push("Makes network calls without being a networking utility");
+  }
+
+  // Excessive use of `any` type (more than 3 instances)
+  const anyCount = (code.match(/:\s*any\b/g) || []).length;
+  if (anyCount > 3) {
+    issues.push(`Excessive 'any' types (${anyCount} instances) - defeats type safety`);
+  }
+
+  // File too long
+  const lineCount = code.split("\n").length;
+  if (lineCount > 250) {
+    issues.push(`Too long (${lineCount} lines) - max 200 for quarantine utilities`);
+  }
+
+  return issues;
+}
+
+// ============================================
 // Quarantine doc generator
 // ============================================
 
@@ -312,6 +377,17 @@ async function main() {
       // Generate code
       console.log(`[${spec.name}] Calling Ollama...`);
       const code = await generateUtility(spec);
+
+      // Security gate - reject unsafe code before creating branch
+      const securityIssues = securityReview(code, spec.name);
+      if (securityIssues.length > 0) {
+        console.log(`[${spec.name}] SECURITY REJECTED: ${securityIssues.join("; ")}`);
+        appendLog({ name: spec.name, status: "error", error: `security: ${securityIssues.join("; ")}`, timestamp: new Date().toISOString() }, log);
+        errorCount++;
+        await sleep(RATE_LIMIT_MS);
+        continue;
+      }
+
       const doc = generateQuarantineDoc(spec);
 
       const toolPath = path.join(TOOLS_DIR, `${spec.name}.ts`);
