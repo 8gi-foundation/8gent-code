@@ -1899,6 +1899,28 @@ export function App({ initialCommand, args }: AppProps) {
 
             switch (petSub) {
               case "start": {
+                // Generate companion first so we can write its data
+                const sessionId = `session-${Date.now()}`;
+                const companion = generateCompanion(sessionId);
+
+                // Write companion data for the dock pet to read
+                const companionData = {
+                  fullName: companion.fullName,
+                  species: companion.species,
+                  element: companion.element,
+                  rarity: companion.rarity,
+                  accessory: companion.accessory,
+                  shiny: companion.shiny,
+                  palette: companion.palette,
+                  lore: companion.lore,
+                };
+                const home = process.env.HOME || "~";
+                fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
+                fs.writeFileSync(
+                  path.join(home, ".8gent", "active-companion.json"),
+                  JSON.stringify(companionData, null, 2)
+                );
+
                 // Spawn dock pet on macOS
                 if (process.platform === "darwin") {
                   // Try multiple paths: cwd (source), __dirname relative, home .8gent
@@ -1912,7 +1934,7 @@ export function App({ initialCommand, args }: AppProps) {
                   if (lilEightScript) {
                     const pet = spawnProc("bash", [lilEightScript, "start"], { detached: true, stdio: "ignore" });
                     pet.unref();
-                    addSystemMessage("[pet] Lil Eight spawned on Dock");
+                    addSystemMessage(`[pet] ${companion.fullName} spawned on Dock`);
                   } else {
                     addSystemMessage("[pet] lil-eight.sh not found. Tried:\n  " + candidates.join("\n  "));
                   }
@@ -1920,8 +1942,6 @@ export function App({ initialCommand, args }: AppProps) {
                   addSystemMessage("[pet] Desktop pet is macOS only (for now)");
                 }
                 // Show companion card
-                const sessionId = `session-${Date.now()}`;
-                const companion = generateCompanion(sessionId);
                 addSystemMessage(companion.card.replace(/\x1b\[[0-9;]*m/g, ""));
                 break;
               }
