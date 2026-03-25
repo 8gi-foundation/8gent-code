@@ -7,6 +7,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.0.0] - 2026-03-25
+
+### Added
+- **Computer Use - Power #10** (`packages/computer/`) - Desktop automation via usecomputer bridge. Screenshot, click, type, press, scroll, drag, hover, clipboard, window list. Security-gated with point validation, max limits, dangerous key detection.
+- **Process Manager** (`packages/computer/process-manager.ts`) - Process listing with memory/CPU, graceful/force quit, safe list, system-critical protection (22 blocked processes), suggest quittable apps.
+- **13 desktop tools** in ToolExecutor - `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_press`, `desktop_scroll`, `desktop_drag`, `desktop_hover`, `desktop_windows`, `desktop_clipboard`, `desktop_processes`, `desktop_quit_app`, `desktop_suggest_quit`, `desktop_safe_list`.
+- **Running Apps menu** in Lil Eight's macOS menu bar - memory stats, per-app quit/force-quit dialogs, Quit All Non-Essential, protected app list.
+- **CLUI tray upgrade** (`apps/clui/src-tauri/src/lib.rs`) - Daemon status, session count, Resource Manager submenu, Settings submenu with daemon control, log viewer, config access.
+- **AGENTS.md** - Universal agent instructions for any AI coding harness (Pi, Hermes, OpenCode, Aider, Goose, Cline, Continue, SWE-Agent).
+- **NemoClaw desktop policies** - Desktop automation policy rules: read-only ops allowed, mutations require approval, dangerous key combos (cmd+q, alt+f4) hard-blocked.
+
+### Changed
+- **README.md** - Added usecomputer and Quitty to inspirations. Fixed Hermes credit to NousResearch (was incorrectly ArcadeAI).
+
+### Removed
+- **60+ quarantined tool files** - Cleaned up unused utility packages and their quarantine docs. All recoverable from git history.
+
+---
+
 ## [1.0.0] - 2026-03-22
 
 ### Added
