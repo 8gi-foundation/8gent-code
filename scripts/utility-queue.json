@@ -3573,7 +3573,7 @@
   },
   {
     "name": "ruflo",
-    "description": "🌊 The leading agent orchestration platform for Claude. Deploy intelligent multi-agent swarms, coordinate autonomous workflows, and build co",
+    "description": "\ud83c\udf0a The leading agent orchestration platform for Claude. Deploy intelligent multi-agent swarms, coordinate autonomous workflows, and build co",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3617,7 +3617,7 @@
   },
   {
     "name": "firecrawl",
-    "description": "🔥 The Web Data API for AI - Turn entire websites into LLM-ready markdown or structured data",
+    "description": "\ud83d\udd25 The Web Data API for AI - Turn entire websites into LLM-ready markdown or structured data",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3694,7 +3694,7 @@
   },
   {
     "name": "ruview",
-    "description": "π RuView: WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection — ",
+    "description": "\u03c0 RuView: WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection \u2014 ",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3716,7 +3716,7 @@
   },
   {
     "name": "strix",
-    "description": "Open-source AI hackers to find and fix your app’s vulnerabilities.",
+    "description": "Open-source AI hackers to find and fix your app\u2019s vulnerabilities.",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3727,7 +3727,7 @@
   },
   {
     "name": "tradingagents-cn",
-    "description": "基于多智能体LLM的中文金融交易框架 - TradingAgents中文增强版",
+    "description": "\u57fa\u4e8e\u591a\u667a\u80fd\u4f53LLM\u7684\u4e2d\u6587\u91d1\u878d\u4ea4\u6613\u6846\u67b6 - TradingAgents\u4e2d\u6587\u589e\u5f3a\u7248",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3749,7 +3749,7 @@
   },
   {
     "name": "show-optio-orchestrate-coding",
-    "description": "Show HN: Optio – Orchestrate AI coding agents in K8s to go from ticket to PR",
+    "description": "Show HN: Optio \u2013 Orchestrate AI coding agents in K8s to go from ticket to PR",
     "requirements": [
       "Implement the core idea as a TypeScript utility",
       "Zero external dependencies",
@@ -3815,5 +3815,2069 @@
     ],
     "maxLines": 120,
     "source": "feynman"
+  },
+  {
+    "name": "brief-intake",
+    "description": "Structured creative brief parser that extracts goals, audience, tone, deliverables, and deadline from free-form client text.",
+    "requirements": [
+      "parseBrief(text): extracts { goals, audience, tone, deliverables, deadline, budget }",
+      "validateBrief(brief): returns missing required fields",
+      "formatBrief(brief): renders a clean markdown brief document",
+      "scoreBrief(brief): 0-100 completeness score with gap list"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "draft-review-cycle",
+    "description": "State machine for content draft lifecycle: brief -> draft -> review -> revision -> approved -> published.",
+    "requirements": [
+      "transition(state, event): returns next state or throws invalid transition error",
+      "addComment(draft, comment): appends reviewer comment with timestamp and author",
+      "summarizeRevisions(draft): returns diff summary of each revision round",
+      "exportTimeline(draft): chronological log of all state transitions and comments"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "invoice-generator",
+    "description": "Generate a complete invoice as structured data with line items, subtotal, tax, discounts, and total.",
+    "requirements": [
+      "createInvoice({ client, items, taxRate, discount }): returns Invoice object",
+      "addLineItem(invoice, { description, qty, unitPrice }): returns updated invoice",
+      "calculateTotals(invoice): computes subtotal, taxAmount, discountAmount, total",
+      "renderText(invoice): renders plain-text invoice ready for PDF or email",
+      "toCSV(invoice): exports line items as CSV"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "proposal-writer",
+    "description": "Structured proposal generator covering executive summary, scope, timeline, pricing, and terms.",
+    "requirements": [
+      "buildProposal({ client, project, phases, pricing, terms }): returns Proposal object",
+      "renderMarkdown(proposal): full markdown document with sections",
+      "estimateTotalPrice(phases): sums phase costs with optional margin percentage",
+      "generateTimeline(phases): returns ordered milestones with ISO dates"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "contract-clause-builder",
+    "description": "Library of standard contract clauses that can be assembled into a binding agreement skeleton.",
+    "requirements": [
+      "getClause(type): returns clause text for types: payment, ip, confidentiality, termination, liability, dispute",
+      "buildContract(clauses, parties): assembles full contract with party names interpolated",
+      "listClauses(): returns all available clause types with one-line descriptions",
+      "validateContract(contract): checks that required clauses (payment, termination) are present"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "competitive-analysis",
+    "description": "Framework for structuring a competitive analysis across dimensions: features, pricing, positioning, strengths, weaknesses.",
+    "requirements": [
+      "addCompetitor(analysis, { name, pricing, features, strengths, weaknesses })",
+      "compareFeatureMatrix(analysis): returns feature-vs-competitor boolean grid",
+      "rankByStrength(analysis): orders competitors by strength score",
+      "renderReport(analysis): outputs markdown report with tables and summary"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "swot-engine",
+    "description": "SWOT analysis builder with scoring, prioritization, and strategy generation (SO, ST, WO, WT).",
+    "requirements": [
+      "addFactor(swot, quadrant, { text, score }): quadrant is S|W|O|T",
+      "prioritize(swot): sorts each quadrant by score descending",
+      "generateStrategies(swot): produces SO/ST/WO/WT strategy pairs",
+      "renderMarkdown(swot): full SWOT report with prioritized factors and strategies"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "business-model-canvas",
+    "description": "Business Model Canvas with all 9 blocks, validation, and markdown export.",
+    "requirements": [
+      "createCanvas(): returns empty canvas with all 9 blocks",
+      "setBlock(canvas, block, items[]): block is one of the 9 BMC blocks",
+      "validate(canvas): returns list of empty or weak blocks",
+      "renderMarkdown(canvas): formatted canvas as a readable document",
+      "scoreCompleteness(canvas): 0-100 score"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "pricing-strategy",
+    "description": "Pricing strategy calculator supporting cost-plus, value-based, competitive, and tiered models.",
+    "requirements": [
+      "costPlus(cogs, marginPercent): returns price",
+      "valueBased(perceivedValue, capturePercent): returns price",
+      "competitive(competitorPrice, positioningOffset): returns price",
+      "buildTiers(basePrice, tiers[]): generates tier pricing with feature gates",
+      "compareStrategies(inputs): returns all four prices for comparison"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "customer-journey-mapper",
+    "description": "Maps customer journey stages with touchpoints, emotions, pain points, and opportunities.",
+    "requirements": [
+      "addStage(journey, { name, touchpoints, emotion, painPoints, opportunities })",
+      "identifyGaps(journey): returns stages with no opportunities defined",
+      "renderTimeline(journey): ASCII timeline of stages",
+      "exportJSON(journey): clean serializable structure",
+      "scoreExperience(journey): average emotion score across stages"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "email-sequence-builder",
+    "description": "Drip campaign email sequence builder with delay scheduling, A/B variants, and goal tracking.",
+    "requirements": [
+      "addEmail(sequence, { subject, body, delayDays, goal })",
+      "addVariant(email, variant): A/B variant for subject or body",
+      "generateSchedule(sequence, startDate): returns array of { date, emailId }",
+      "validateSequence(sequence): checks for gaps, missing goals, duplicate subjects",
+      "renderPreview(email): plain text preview with metadata"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "meeting-notes-summarizer",
+    "description": "Parses raw meeting notes to extract decisions, action items, owners, and deadlines.",
+    "requirements": [
+      "parse(text): returns { attendees, decisions[], actions[], blockers[] }",
+      "extractActions(text): returns array of { task, owner, deadline }",
+      "formatSummary(parsed): clean markdown summary",
+      "detectBlockers(text): identifies BLOCKED/blocker keywords with context",
+      "exportTasks(parsed): returns action items as a checklist"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "okr-tracker",
+    "description": "OKR framework: objectives with key results, scoring (0.0-1.0), and progress reporting.",
+    "requirements": [
+      "addObjective(tracker, { title, quarter })",
+      "addKeyResult(objectiveId, { title, target, current, unit })",
+      "score(keyResult): returns 0.0-1.0 based on current/target",
+      "objectiveScore(objective): average score of all key results",
+      "renderReport(tracker): markdown OKR report with scores and RAG status"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "sprint-planner",
+    "description": "Agile sprint planner with story points, team velocity, capacity, and auto-assignment.",
+    "requirements": [
+      "createSprint({ name, startDate, endDate, teamCapacity })",
+      "addStory(sprint, { title, points, assignee, priority })",
+      "calculateLoad(sprint): returns { totalPoints, capacity, loadPercent }",
+      "autoAssign(sprint, team[]): distributes unassigned stories by capacity",
+      "renderBoard(sprint): ASCII kanban view grouped by assignee"
+    ],
+    "maxLines": 170
+  },
+  {
+    "name": "kanban-state-machine",
+    "description": "Kanban board as a formal state machine with columns, WIP limits, and throughput metrics.",
+    "requirements": [
+      "createBoard(columns[], wipLimits{})",
+      "moveCard(board, cardId, toColumn): throws if WIP limit exceeded",
+      "getBlockedColumns(board): returns columns at WIP limit",
+      "cycleTime(card): days from first move to Done",
+      "throughput(board, days): cards completed per day over last N days",
+      "renderBoard(board): ASCII board with card counts per column"
+    ],
+    "maxLines": 170
+  },
+  {
+    "name": "time-tracker",
+    "description": "Time tracking with billing rates, project buckets, and invoice-ready summaries.",
+    "requirements": [
+      "startTimer(projectId): returns entry with start timestamp",
+      "stopTimer(entry): closes entry, returns duration in minutes",
+      "logManual(projectId, startISO, endISO): add manual entry",
+      "summary(entries, rateMap): returns { project, hours, rate, amount }[] and total",
+      "toInvoiceLines(summary): formats for invoice-generator compatibility"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "content-calendar",
+    "description": "Content calendar generator for a given month with channel slots, themes, and publishing frequency.",
+    "requirements": [
+      "generate(month, year, channels[], postsPerWeek): returns CalendarDay[]",
+      "assignTheme(calendar, weekNumber, theme): sets weekly content theme",
+      "fillSlots(calendar, contentItems[]): distributes content across open slots",
+      "renderCalendar(calendar): ASCII monthly grid with content titles",
+      "exportCSV(calendar): CSV with date, channel, title, status"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "pipeline-stage-tracker",
+    "description": "Sales or deal pipeline tracker with stages, probabilities, and weighted forecast.",
+    "requirements": [
+      "addDeal(pipeline, { name, value, stage, closeDate })",
+      "moveStage(deal, stage): records stage transition with timestamp",
+      "forecast(pipeline): sum of value * probability for each deal",
+      "stageConversionRate(pipeline, fromStage, toStage): historical conversion %",
+      "renderFunnel(pipeline): ASCII funnel with deal counts and values per stage"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "sla-monitor",
+    "description": "SLA definition and breach detector for support tickets or service endpoints.",
+    "requirements": [
+      "defineSLA(priority, responseMinutes, resolutionMinutes)",
+      "checkBreach(ticket, sla): returns { breached, minutesOverdue, urgency }",
+      "auditTickets(tickets[]): returns breached list with severity",
+      "renderReport(audit): markdown SLA compliance report with pass/fail rates"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "stakeholder-map",
+    "description": "Stakeholder mapping with influence/interest matrix, communication plan, and engagement strategy.",
+    "requirements": [
+      "addStakeholder(map, { name, role, influence, interest, sentiment })",
+      "quadrant(stakeholder): returns manage-closely | keep-satisfied | keep-informed | monitor",
+      "communicationPlan(map): generates touchpoint frequency by quadrant",
+      "renderMatrix(map): 2x2 ASCII influence/interest grid with names",
+      "exportCSV(map): stakeholder list with all attributes"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "risk-register",
+    "description": "Project risk register with probability/impact scoring, mitigation plans, and heat map.",
+    "requirements": [
+      "addRisk(register, { description, probability, impact, owner, mitigation })",
+      "riskScore(risk): probability * impact",
+      "classify(risk): returns critical | high | medium | low",
+      "renderHeatMap(register): ASCII 5x5 probability-impact heat map",
+      "topRisks(register, n): returns top N risks by score"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "brand-voice-checker",
+    "description": "Checks copy against a defined brand voice profile for tone consistency.",
+    "requirements": [
+      "defineVoice({ traits[], avoidWords[], preferWords[], sentenceLength })",
+      "analyzeText(voice, text): returns { score, violations[], suggestions[] }",
+      "scoreReadability(text): Flesch-Kincaid grade level",
+      "highlightViolations(voice, text): returns text with violation markers"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "nps-calculator",
+    "description": "NPS (Net Promoter Score) calculator with cohort segmentation and trend analysis.",
+    "requirements": [
+      "calculate(scores[]): returns { nps, promoters, passives, detractors, counts }",
+      "trend(scoresByPeriod{}): returns NPS per period and MoM delta",
+      "segmentBySource(responses[], sourceKey): NPS broken down by segment",
+      "renderSummary(result): formatted NPS report with benchmark comparison"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "churn-predictor",
+    "description": "Rule-based churn risk scorer using recency, frequency, and engagement signals.",
+    "requirements": [
+      "scoreCustomer({ lastActiveDate, sessionsLast30d, supportTickets, planAge }): returns 0-100 risk score",
+      "classify(score): returns low | medium | high | critical",
+      "batchScore(customers[]): returns sorted risk list",
+      "topChurnRisks(customers[], n): returns top N at-risk customers with scores"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "persona-builder",
+    "description": "User persona builder from survey or behavioral data into structured persona cards.",
+    "requirements": [
+      "buildPersona({ name, age, role, goals[], pains[], motivations[], channels[] })",
+      "renderCard(persona): formatted ASCII persona card",
+      "comparePersonas(a, b): returns shared and divergent goals/pains",
+      "exportJSON(persona): clean persona data structure"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "roi-calculator",
+    "description": "ROI calculator with payback period, NPV, and IRR for project or investment analysis.",
+    "requirements": [
+      "simpleROI(gain, cost): (gain - cost) / cost as percent",
+      "paybackPeriod(initialCost, annualCashFlow): years to break even",
+      "npv(rate, cashFlows[]): net present value",
+      "irr(cashFlows[]): internal rate of return via Newton-Raphson",
+      "renderReport({ cost, cashFlows, rate }): formatted investment summary"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "scope-creep-detector",
+    "description": "Detects scope creep in project requirements by comparing initial vs current scope items.",
+    "requirements": [
+      "captureBaseline(requirements[]): stores baseline scope snapshot",
+      "compareScope(baseline, current): returns { added[], removed[], changed[] }",
+      "estimateImpact(changes, hourlyRate): cost and time impact estimate",
+      "renderChangeLog(comparison): formatted markdown change summary"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "job-description-builder",
+    "description": "Structured job description builder with role summary, responsibilities, requirements, and benefits.",
+    "requirements": [
+      "buildJD({ title, level, team, summary, responsibilities[], requirements[], benefits[] })",
+      "renderMarkdown(jd): full job description document",
+      "scoreInclusion(jd): checks for gendered or exclusionary language, returns issues[]",
+      "exportATS(jd): plain text format for ATS systems"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "feedback-aggregator",
+    "description": "Aggregates qualitative feedback from multiple sources into themes with frequency and sentiment.",
+    "requirements": [
+      "addFeedback(pool, { text, source, date, rating? })",
+      "clusterByKeyword(pool, keywords[]): groups feedback by matching keywords",
+      "sentimentSummary(pool): positive/neutral/negative counts from rating or heuristic",
+      "topThemes(pool, n): returns most frequent themes with example quotes",
+      "renderReport(pool): markdown report with themes and sample feedback"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "case-study-formatter",
+    "description": "Formats a client success story into a structured case study: problem, solution, results, quote.",
+    "requirements": [
+      "buildCaseStudy({ client, industry, challenge, solution, results[], quote, metrics{} })",
+      "renderMarkdown(caseStudy): full case study document",
+      "renderOnePager(caseStudy): condensed 1-page version",
+      "extractKeyMetrics(caseStudy): returns results with numbers highlighted",
+      "exportJSON(caseStudy): structured data for CMS ingestion"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "press-release-builder",
+    "description": "Structured press release generator following AP style with headline, dateline, body, boilerplate.",
+    "requirements": [
+      "buildRelease({ headline, subheadline, dateline, body[], quote, boilerplate, contact })",
+      "renderText(release): AP-style formatted press release",
+      "wordCount(release): total word count",
+      "validateStructure(release): checks required fields (headline, dateline, boilerplate)",
+      "renderHTML(release): basic HTML version with semantic markup"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "testimonial-collector",
+    "description": "Structures and scores customer testimonials for use in marketing and sales collateral.",
+    "requirements": [
+      "addTestimonial(pool, { author, role, company, text, rating, date })",
+      "score(testimonial): 0-100 quality score based on specificity, length, role seniority",
+      "topTestimonials(pool, n): returns best-scoring testimonials",
+      "renderCard(testimonial): formatted testimonial card",
+      "filterByIndustry(pool, industry): returns relevant testimonials"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "launch-checklist",
+    "description": "Product or campaign launch checklist engine with phases, owners, and completion tracking.",
+    "requirements": [
+      "createChecklist(phases[], items[]): structured launch plan",
+      "complete(checklist, itemId): marks item done with timestamp",
+      "readinessScore(checklist): percent of items complete overall and per phase",
+      "blockers(checklist): items in critical phase that are incomplete",
+      "renderMarkdown(checklist): full checklist document with status indicators"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "affiliate-tracker",
+    "description": "Affiliate and referral program tracker: links, conversions, commissions, and payout summary.",
+    "requirements": [
+      "createAffiliate(tracker, { id, name, commissionRate })",
+      "logConversion(tracker, { affiliateId, orderId, amount })",
+      "calculateCommissions(tracker): { affiliateId, conversions, revenue, commission }[]",
+      "topAffiliates(tracker, n): sorted by commission earned",
+      "renderPayoutReport(tracker): markdown payout summary table"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "ab-experiment-manager",
+    "description": "A/B experiment lifecycle manager: define variants, assign users, collect results, declare winner.",
+    "requirements": [
+      "createExperiment(exp, { name, variants[], metric })",
+      "assignVariant(exp, userId): deterministic variant assignment via hash",
+      "recordResult(exp, userId, value)",
+      "analyze(exp): returns { winner, confidence, uplift, sampleSize } per variant",
+      "renderReport(exp): markdown experiment results report"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "market-sizing-calculator",
+    "description": "TAM/SAM/SOM market sizing calculator with top-down and bottom-up approaches.",
+    "requirements": [
+      "topDown(totalMarket, targetSegmentPercent, capturePercent): returns { tam, sam, som }",
+      "bottomUp(unitPrice, targetCustomers, penetrationRate): returns som with build-up",
+      "compareApproaches(topDown, bottomUp): returns delta and recommendation",
+      "renderReport(sizing): markdown market sizing summary"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "go-to-market-planner",
+    "description": "GTM strategy builder with ICP definition, channels, messaging pillars, and 90-day milestone plan.",
+    "requirements": [
+      "defineICP({ company, role, pain, gain, trigger })",
+      "addChannel(gtm, { name, type, audience, budget, kpi })",
+      "buildMessagingPillars(gtm, pillars[]): value propositions with proof points",
+      "generate90DayPlan(gtm): phased milestone plan with owners",
+      "renderDocument(gtm): full GTM strategy document in markdown"
+    ],
+    "maxLines": 170
+  },
+  {
+    "name": "usp-extractor",
+    "description": "Extracts and ranks unique selling propositions from product descriptions or feature lists.",
+    "requirements": [
+      "extract(text): returns USP candidates as bullet points",
+      "rank(usps[], competitorFeatures[]): sorts by uniqueness against competitor list",
+      "elevatorPitch(usps[], audience): generates a 30-second pitch from top USPs",
+      "validateUSP(usp): checks for vague language, buzzwords, and specificity score"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "budget-allocator",
+    "description": "Marketing or project budget allocator with channel weightings, caps, and scenario modeling.",
+    "requirements": [
+      "allocate(totalBudget, channels[], weights{}): distributes budget proportionally",
+      "applyCap(allocation, channelId, maxAmount): respects per-channel caps",
+      "scenario(budget, scenarios{}): runs multiple allocation scenarios side by side",
+      "renderBreakdown(allocation): ASCII bar chart of budget distribution"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "retainer-tracker",
+    "description": "Monthly retainer tracker: hours allocated, hours used, overage warnings, and billing summary.",
+    "requirements": [
+      "createRetainer({ client, monthlyHours, hourlyRate, month })",
+      "logHours(retainer, { date, description, hours })",
+      "status(retainer): returns { used, remaining, overage, utilizationPercent }",
+      "renderStatement(retainer): formatted monthly statement with line items",
+      "warnOverage(retainer, threshold): triggers warning at threshold% utilization"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "partnership-scorecard",
+    "description": "Evaluates and scores potential business partnerships across strategic fit, reach, and risk.",
+    "requirements": [
+      "scorePartner({ name, audienceOverlap, techCompatibility, brandAlignment, risk }): returns composite score",
+      "rank(partners[]): returns sorted list by score",
+      "renderScorecard(partner): formatted partner evaluation card",
+      "comparePartners(a, b): side-by-side dimension comparison"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "port-scanner",
+    "description": "TCP connect port scanner for a host and port range, returning open/closed/filtered status.",
+    "requirements": [
+      "scan(host, portRange): returns PortResult[] with status and latency",
+      "scanCommon(host): scans top 20 common ports (80, 443, 22, 3306, etc.)",
+      "renderReport(results): formatted ASCII table of open ports",
+      "Uses net module only, no external dependencies"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "http-header-auditor",
+    "description": "Analyzes HTTP response headers for security best practices and OWASP recommendations.",
+    "requirements": [
+      "audit(headers{}): returns { present[], missing[], misconfigured[], score }",
+      "checkHeader(name, value): validates individual header value correctness",
+      "CHECKS: X-Frame-Options, HSTS, X-Content-Type-Options, Referrer-Policy, Permissions-Policy",
+      "renderReport(audit): markdown report with pass/fail per header and remediation"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "ssl-cert-checker",
+    "description": "SSL certificate inspector: expiry, issuer, SANs, chain validity, and cipher suite check.",
+    "requirements": [
+      "parseCertInfo(pemString): returns { subject, issuer, validFrom, validTo, sans[], serial }",
+      "daysUntilExpiry(cert): number of days remaining",
+      "isExpired(cert): boolean",
+      "checkChain(certs[]): validates issuer chain is unbroken",
+      "renderSummary(cert): formatted certificate summary"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "dns-inspector",
+    "description": "DNS record inspector supporting A, AAAA, MX, TXT, NS, CNAME, and SOA lookups with TTL.",
+    "requirements": [
+      "lookup(domain, type): returns DNS records using Node dns module",
+      "lookupAll(domain): fetches all common record types in parallel",
+      "checkSPF(domain): parses TXT record for SPF policy",
+      "checkDMARC(domain): parses _dmarc TXT record",
+      "renderReport(results): formatted DNS audit table"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "subdomain-enumerator",
+    "description": "Subdomain brute-force enumerator using a wordlist, returns resolvable subdomains.",
+    "requirements": [
+      "enumerate(domain, wordlist[]): resolves each subdomain and collects hits",
+      "defaultWordlist(): returns built-in 50-entry common subdomain list",
+      "filterAlive(results): returns only resolvable entries",
+      "renderReport(results): list of discovered subdomains with IP addresses"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "password-strength-scorer",
+    "description": "Password strength scorer using entropy, patterns, common-word detection, and NIST guidelines.",
+    "requirements": [
+      "score(password): returns 0-100 strength score",
+      "analyze(password): returns { entropy, length, hasUpper, hasDigit, hasSymbol, patterns[] }",
+      "feedback(password): human-readable improvement suggestions",
+      "classify(score): returns very-weak | weak | fair | strong | very-strong",
+      "estimateCrackTime(password): rough crack time at 10B guesses/sec"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "jwt-validator",
+    "description": "JWT decoder, structure validator, and claim verifier without external crypto libraries.",
+    "requirements": [
+      "decode(token): returns { header, payload, signature } without verification",
+      "validateStructure(token): checks three-part base64url format",
+      "verifyClaims(payload, { issuer?, audience?, now? }): validates exp, nbf, iss, aud",
+      "isExpired(payload): boolean",
+      "renderSummary(decoded): formatted JWT inspection output"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "cors-validator",
+    "description": "CORS policy validator that checks headers against a ruleset for common misconfigurations.",
+    "requirements": [
+      "validate(headers{}, allowedOrigins[]): returns violations[]",
+      "check ACAO wildcard with credentials",
+      "check exposed headers for sensitive data (Authorization, Set-Cookie)",
+      "check preflight response correctness",
+      "renderReport(result): markdown CORS audit with severity per issue"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "owasp-checklist",
+    "description": "OWASP Top 10 compliance checklist generator with risk descriptions and remediation guidance.",
+    "requirements": [
+      "getChecklist(): returns all 10 items with description, risk, and remediation",
+      "markItem(checklist, id, status): status is pass | fail | na | todo",
+      "complianceScore(checklist): percent of non-na items passing",
+      "renderReport(checklist): markdown checklist with status icons and remediations",
+      "exportJSON(checklist): structured compliance data"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "sqli-pattern-detector",
+    "description": "SQL injection pattern detector that scans input strings for common injection payloads.",
+    "requirements": [
+      "detect(input): returns { detected, patterns[], severity }",
+      "patterns: UNION SELECT, OR 1=1, comment sequences (--, #), stacked queries (;)",
+      "scan(inputs{}): scans all form fields, returns per-field results",
+      "renderReport(results): table of field, input, detected patterns",
+      "sanitizeHint(pattern): suggests parameterized query fix"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "xss-payload-scanner",
+    "description": "XSS payload scanner and sanitizer that detects script injection patterns in HTML strings.",
+    "requirements": [
+      "detect(html): returns { vulnerable, payloads[], contexts[] }",
+      "contexts: attribute, script-tag, event-handler, data-uri",
+      "sanitize(html): strips dangerous tags and attributes",
+      "escapeForContext(text, context): context-aware escaping",
+      "renderReport(results): per-field XSS risk summary"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "rate-limit-tester",
+    "description": "Rate limit bypass technique tester that simulates common bypass patterns and reports effectiveness.",
+    "requirements": [
+      "techniques(): returns list of bypass techniques: IP rotation, header spoofing, path variation",
+      "analyzeHeaders(headers{}): detects rate limit header patterns (X-RateLimit-*, Retry-After)",
+      "parseRateLimitHeaders(headers{}): extracts limit, remaining, reset values",
+      "renderReport(analysis): markdown report with detected limits and bypass surface"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "api-key-scanner",
+    "description": "Scans source code strings for leaked API keys and secrets using pattern matching.",
+    "requirements": [
+      "scan(text): returns { found[], clean } where each hit has { type, value, line }",
+      "patterns: AWS, OpenAI, Stripe, GitHub, Slack, Twilio, GCP patterns",
+      "scanFile(content, filename): scans file content with filename context",
+      "redact(text): replaces detected keys with REDACTED placeholders",
+      "renderReport(results): table of detected secrets with severity"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "dep-vulnerability-checker",
+    "description": "Checks package.json dependencies against a built-in CVE-pattern database for known vulnerable versions.",
+    "requirements": [
+      "checkDependencies(packageJson): returns VulnResult[] per dependency",
+      "builtinRules(): static list of 20+ known vulnerable package@version patterns",
+      "severityScore(vuln): returns critical | high | medium | low",
+      "renderReport(results): markdown vulnerability report with remediation versions",
+      "exportSBOM(packageJson): simplified software bill of materials"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "tls-config-auditor",
+    "description": "TLS configuration auditor that evaluates cipher suites, protocol versions, and HSTS policy.",
+    "requirements": [
+      "auditConfig({ protocols[], ciphers[], hstsMaxAge, ocspStapling })",
+      "flagWeakCiphers(ciphers[]): identifies RC4, DES, 3DES, EXPORT ciphers",
+      "flagOldProtocols(protocols[]): flags TLS 1.0, 1.1, SSL 2/3",
+      "score(audit): 0-100 TLS quality score",
+      "renderReport(audit): markdown TLS audit report with A/B/C/F grade"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "secret-entropy-analyzer",
+    "description": "Analyzes strings for high-entropy patterns that indicate secrets, tokens, or keys.",
+    "requirements": [
+      "shannonEntropy(str): returns bits of entropy",
+      "isLikelySecret(str): heuristic combining entropy, length, charset",
+      "scanTokens(text): tokenizes and flags high-entropy tokens",
+      "threshold(context): returns entropy threshold for different contexts (env, url, code)",
+      "renderReport(results): table of suspicious tokens with entropy scores"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "oauth-flow-validator",
+    "description": "OAuth 2.0 flow validator checking state parameter, PKCE, redirect URI, and scope handling.",
+    "requirements": [
+      "validateAuthRequest(params{}): checks response_type, client_id, redirect_uri, state, scope",
+      "validateCallback(params{}, expectedState): verifies state matches, checks error field",
+      "validatePKCE(codeVerifier, codeChallenge, method): S256 and plain verification",
+      "renderReport(validations): markdown OAuth flow audit"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "cookie-security-auditor",
+    "description": "Audits Set-Cookie headers for security flags: HttpOnly, Secure, SameSite, Path, Max-Age.",
+    "requirements": [
+      "parseCookie(setCookieHeader): returns { name, value, flags{} }",
+      "audit(cookie): returns { issues[], score } checking for missing security flags",
+      "scanHeaders(headers[]): audits all Set-Cookie headers in a response",
+      "renderReport(results): markdown cookie security report per cookie name"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "path-traversal-detector",
+    "description": "Detects path traversal attack patterns in URLs, file paths, and query parameters.",
+    "requirements": [
+      "detect(input): returns { vulnerable, patterns[] } for ../, ..\\\\ encoded variants",
+      "normalize(path): resolves and normalizes a path for safe usage",
+      "isWithinBase(basePath, filePath): checks filePath stays within basePath",
+      "scan(inputs{}): scans multiple inputs, returns per-field results"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "clickjacking-detector",
+    "description": "Detects clickjacking vulnerability by analyzing X-Frame-Options and CSP frame-ancestors.",
+    "requirements": [
+      "analyze(headers{}): returns { protected, method, issues[] }",
+      "checkXFO(value): validates X-Frame-Options is DENY or SAMEORIGIN",
+      "checkCSPFrameAncestors(csp): parses frame-ancestors directive",
+      "renderReport(analysis): markdown report with protection status and recommendations"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "open-redirect-scanner",
+    "description": "Scans URLs and redirect parameters for open redirect vulnerabilities.",
+    "requirements": [
+      "detect(url): returns { vulnerable, params[] } where redirect params exist",
+      "validateRedirect(url, allowedDomains[]): checks destination is in allowed list",
+      "extractRedirectParams(url): finds params named url, redirect, next, return, goto",
+      "renderReport(results): markdown report of open redirect risks found"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "security-headers-builder",
+    "description": "Generates a complete set of recommended HTTP security headers for a web application.",
+    "requirements": [
+      "buildHeaders({ environment, framePolicy?, hstsMaxAge?, cspPolicy? }): returns headers{}",
+      "defaults(env): returns opinionated default headers for development vs production",
+      "toNginxConf(headers): renders as nginx add_header directives",
+      "toExpressMiddleware(headers): renders as Express middleware code snippet"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "brute-force-detector",
+    "description": "Detects brute-force attack patterns in auth attempt logs using rate and pattern analysis.",
+    "requirements": [
+      "analyzeAttempts(attempts[]): returns { suspicious, attackPatterns[], recommendedBlock[] }",
+      "rateByIP(attempts[], windowMs): attempts per IP in a time window",
+      "detectCredentialStuffing(attempts[]): detects many usernames from same IP",
+      "renderReport(analysis): markdown report with top attacker IPs and recommendations"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "idor-pattern-scanner",
+    "description": "Scans API route definitions for Insecure Direct Object Reference (IDOR) anti-patterns.",
+    "requirements": [
+      "scanRoutes(routes[]): flags routes with user-controlled ID params without auth middleware",
+      "patternMatch(route): detects GET /resource/:id, /users/:userId patterns",
+      "renderReport(results): markdown report with IDOR risk per route",
+      "remediation(route): generates recommendation for ownership check"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "secure-random",
+    "description": "Cryptographically secure random generators: tokens, UUIDs, passwords, and numeric ranges.",
+    "requirements": [
+      "token(byteLength): hex string from crypto.randomBytes",
+      "password(length, options?): random password with configurable charset",
+      "integer(min, max): unbiased random integer in range using rejection sampling",
+      "choice(array): random element from array",
+      "shuffle(array): Fisher-Yates shuffle using secure random"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "file-upload-validator",
+    "description": "Validates uploaded files for type, size, extension, MIME consistency, and malicious patterns.",
+    "requirements": [
+      "validate(file, rules{}): checks against max size, allowed extensions, MIME types",
+      "detectMimeFromBytes(buffer): infers MIME from magic bytes (first 16 bytes)",
+      "extensionMismatch(filename, buffer): returns true if extension contradicts magic bytes",
+      "scanForScripts(buffer): detects PHP/script tags in non-text uploads",
+      "renderReport(result): markdown validation report"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "input-fuzzer",
+    "description": "Input fuzzer generating edge-case test payloads for strings, numbers, and structured inputs.",
+    "requirements": [
+      "stringPayloads(): returns 50+ edge-case strings (empty, unicode, long, null bytes, etc.)",
+      "numberPayloads(): returns boundary numbers (0, -1, MAX_SAFE_INT, Infinity, NaN, etc.)",
+      "sqlPayloads(): returns SQL injection test strings",
+      "xssPayloads(): returns XSS test strings",
+      "fuzz(schema{}): generates payloads for each field based on declared type"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "permission-matrix",
+    "description": "Role-based permission matrix builder and checker with inheritance and wildcard support.",
+    "requirements": [
+      "defineRole(matrix, role, permissions[]): wildcards like resource:* allowed",
+      "inherits(matrix, role, parentRole): role inherits all parent permissions",
+      "can(matrix, role, permission): boolean check with inheritance resolution",
+      "diff(matrixA, matrixB): returns permission changes between two matrices",
+      "renderMatrix(matrix): ASCII table of roles vs permissions"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "threat-model-builder",
+    "description": "STRIDE threat model builder for system components with attack trees and mitigations.",
+    "requirements": [
+      "addComponent(model, { name, type, dataFlows[] })",
+      "addThreat(model, componentId, { stride, description, mitigation, risk })",
+      "strideCategories(): Spoofing, Tampering, Repudiation, Information Disclosure, DoS, EoP",
+      "riskMatrix(model): severity vs likelihood matrix",
+      "renderReport(model): markdown threat model report per component"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "context-window-optimizer",
+    "description": "Fits maximum relevant content into a token budget using priority-based selection.",
+    "requirements": [
+      "fit(items[], tokenBudget, tokenizerFn?): returns selected items within budget",
+      "prioritize(items[], scoreFn): sorts by relevance score",
+      "trim(text, maxTokens, tokenizerFn?): truncates text to token limit preserving sentence boundaries",
+      "summarizeOverflow(items[], budget): reports what was excluded and why"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "tool-call-router",
+    "description": "Routes natural language user intents to registered tools using keyword and pattern matching.",
+    "requirements": [
+      "register(router, tool, { intents[], patterns[], examples[] })",
+      "route(router, query): returns best-match tool with confidence score",
+      "disambiguate(router, query): returns top 3 candidates when confidence is low",
+      "renderRoutes(router): table of registered tools with intent examples"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "agent-memory-compactor",
+    "description": "Compacts long conversation history into a structured summary preserving key facts and decisions.",
+    "requirements": [
+      "compact(messages[], maxTokens, tokenizerFn?): returns { summary, kept[], dropped }",
+      "extractFacts(messages[]): returns named facts from assistant responses",
+      "extractDecisions(messages[]): returns decision points and outcomes",
+      "scoreImportance(message): 0-1 importance score for retention prioritization"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "embedding-similarity",
+    "description": "Cosine similarity and nearest-neighbor search over embedding vectors.",
+    "requirements": [
+      "cosine(vecA, vecB): dot product / (|a| * |b|)",
+      "euclidean(vecA, vecB): L2 distance",
+      "nearest(query, corpus[], topK): returns topK results with similarity scores",
+      "cluster(embeddings[], k): simple k-means cluster assignment",
+      "normalize(vec): unit-length normalization"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "rag-query-builder",
+    "description": "RAG query builder that formulates retrieval queries, ranks chunks, and assembles context.",
+    "requirements": [
+      "buildQuery(userQuestion, conversationHistory): reformulates for retrieval",
+      "rankChunks(chunks[], query, scoreFn): returns top-k chunks by relevance",
+      "assembleContext(chunks[], tokenBudget): fits ranked chunks into budget",
+      "buildPrompt(query, context, systemPrompt): returns final RAG prompt"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "few-shot-selector",
+    "description": "Selects the best few-shot examples for a prompt based on semantic similarity to current input.",
+    "requirements": [
+      "addExample(pool, { input, output, tags[] })",
+      "select(pool, query, k, scoreFn): returns k most relevant examples",
+      "formatExamples(examples[], format?): formats as chat messages or Q/A blocks",
+      "balanced(pool, query, k, tagKey): ensures category balance in selection"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "prompt-template-engine",
+    "description": "Variable-driven prompt template engine with partials, conditional blocks, and escaping.",
+    "requirements": [
+      "compile(template): returns function (vars) => string",
+      "Supports {{variable}}, {{#if condition}}, {{#each list}}, {{> partial}}",
+      "register(name, template): register named partial",
+      "validate(template, vars): returns missing variable names",
+      "lint(template): detects unclosed blocks and typos"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "llm-output-parser",
+    "description": "Extracts structured data (JSON, lists, key-value pairs) from unstructured LLM text output.",
+    "requirements": [
+      "extractJSON(text): finds and parses first valid JSON block in text",
+      "extractList(text): extracts bulleted or numbered lists as string[]",
+      "extractKeyValues(text): parses Key: Value patterns into object",
+      "extractCodeBlocks(text): returns all fenced code blocks with language",
+      "parseStructured(text, schema): best-effort schema extraction"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "agent-delegation",
+    "description": "Parent-child agent task delegation protocol with task assignment, status tracking, and result aggregation.",
+    "requirements": [
+      "createTask(parent, { goal, context, constraints, timeout })",
+      "assign(task, agentId): marks task as delegated",
+      "report(task, result): child reports completion",
+      "aggregate(tasks[]): merges child results into parent context",
+      "renderTaskTree(parent): ASCII tree of delegated tasks and statuses"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "conversation-state-machine",
+    "description": "Conversation flow state machine with intent detection, slot filling, and branching logic.",
+    "requirements": [
+      "defineState(machine, { name, prompt, slots[], transitions[] })",
+      "transition(machine, state, userInput): returns next state based on matched transition",
+      "fillSlots(state, userInput): extracts declared slot values from input",
+      "isComplete(state): all required slots filled",
+      "renderDiagram(machine): ASCII state diagram"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "multi-model-fallback",
+    "description": "Multi-model fallback chain: tries primary model, falls back on error or low confidence.",
+    "requirements": [
+      "chain(models[], callFn): creates fallback chain configuration",
+      "execute(chain, prompt, options?): tries each model, returns first success",
+      "withRetry(chain, maxAttempts): wraps with per-model retry",
+      "onFallback(chain, handler): callback when fallback occurs with reason",
+      "renderChain(chain): shows model order and fallback conditions"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "token-budget-calculator",
+    "description": "Calculates token budgets for multi-part prompts: system, history, context, and output reservation.",
+    "requirements": [
+      "allocate(totalLimit, { system, history, context, outputReserve }): proportional allocation",
+      "remaining(total, used, reserved): available tokens for content",
+      "estimateTokens(text): character-based approximation (chars/4)",
+      "fitWithinBudget(sections{}, budget): trims longest sections first to fit",
+      "renderBudget(allocation): table of sections with token counts and percents"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "structured-output-validator",
+    "description": "Validates LLM structured output against a JSON schema with helpful error messages.",
+    "requirements": [
+      "validate(data, schema): returns { valid, errors[] } with JSON-path errors",
+      "coerce(data, schema): attempts type coercion for common LLM output issues (strings as numbers)",
+      "generateExample(schema): produces a valid example from schema",
+      "renderErrors(errors[]): human-readable error list for prompt feedback"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "agent-capability-registry",
+    "description": "Registry of agent capabilities with discovery, matching, and dependency resolution.",
+    "requirements": [
+      "register(registry, capability, { description, inputs, outputs, tags[] })",
+      "find(registry, query): returns matching capabilities by tag or description keyword",
+      "resolve(registry, goal): suggests capability chain to achieve a goal",
+      "dependencies(registry, capabilityId): returns required capabilities",
+      "renderRegistry(registry): formatted capability catalog"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "step-reasoning-tracer",
+    "description": "Traces chain-of-thought reasoning steps with validation, backtracking, and confidence scoring.",
+    "requirements": [
+      "addStep(trace, { thought, action, observation, confidence })",
+      "validate(trace): checks each step has an observation before next thought",
+      "backtrack(trace, stepIndex): rolls back to a previous step",
+      "finalAnswer(trace, answer, confidence)",
+      "renderTrace(trace): numbered reasoning trace with confidence scores"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "tool-use-auditor",
+    "description": "Audits agent tool calls for safety, relevance, and compliance against a policy.",
+    "requirements": [
+      "definePolicy({ blockedTools[], requireApproval[], maxCallsPerTool{} })",
+      "auditCall(policy, toolCall): returns { allowed, reason, requiresApproval }",
+      "auditSession(policy, calls[]): session-level compliance check",
+      "renderReport(audit): markdown tool usage report with violations"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "agent-scratchpad-v2",
+    "description": "Structured agent scratchpad with typed entries: thoughts, plans, facts, and tasks.",
+    "requirements": [
+      "add(pad, type, content): type is thought | plan | fact | task | result",
+      "facts(pad): returns all fact entries",
+      "tasks(pad): returns pending task entries",
+      "render(pad): formatted scratchpad view grouped by type",
+      "summarize(pad): one-paragraph summary of pad contents"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "hallucination-detector",
+    "description": "Detects likely hallucination patterns in LLM output: unverified specifics, contradictions, uncertainty markers.",
+    "requirements": [
+      "detectUncertaintyMarkers(text): flags hedging phrases (I believe, might be, I think)",
+      "detectOverconfidence(text): flags absolute claims about specific numbers or dates",
+      "checkFactConsistency(text, facts[]): finds contradictions with known facts",
+      "score(text): 0-100 hallucination risk score",
+      "renderReport(analysis): markdown hallucination risk report"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "plan-decomposer",
+    "description": "Decomposes a high-level goal into a tree of subtasks with dependencies and effort estimates.",
+    "requirements": [
+      "decompose(goal, maxDepth): returns task tree with parent-child relationships",
+      "addTask(tree, parentId, { title, effort, dependencies[] })",
+      "criticalPath(tree): returns the longest dependency chain",
+      "totalEffort(tree): sums leaf task efforts",
+      "renderTree(tree): ASCII task tree with effort estimates"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "intent-classifier",
+    "description": "Keyword and pattern-based intent classifier for routing user messages to handlers.",
+    "requirements": [
+      "addIntent(classifier, { name, keywords[], patterns[], priority })",
+      "classify(classifier, text): returns best match with score",
+      "classifyAll(classifier, text): returns all matching intents sorted by score",
+      "defaultIntent(classifier, fallback)",
+      "renderClassifier(classifier): table of intents with keywords"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "action-executor",
+    "description": "Type-safe action executor with validation, middleware hooks, and result logging.",
+    "requirements": [
+      "defineAction(executor, { name, schema, handler })",
+      "execute(executor, name, input): validates input, runs handler, logs result",
+      "use(executor, middleware): adds pre/post execution middleware",
+      "history(executor): returns execution log with timestamps and outcomes",
+      "renderHistory(executor): formatted execution history table"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "goal-evaluator",
+    "description": "Evaluates whether an agent achieved its goal by comparing intended vs actual outcomes.",
+    "requirements": [
+      "defineGoal(evaluator, { description, successCriteria[], failureCriteria[] })",
+      "evaluate(evaluator, outcome): returns { achieved, score, matchedCriteria[], missedCriteria[] }",
+      "score(evaluation): 0-100 achievement score",
+      "renderReport(evaluation): markdown goal achievement report"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "context-injector",
+    "description": "Injects relevant context segments into prompts based on relevance scores and token budget.",
+    "requirements": [
+      "addSegment(injector, { key, content, priority, tags[] })",
+      "build(injector, query, budget, scoreFn): returns context string within budget",
+      "refresh(injector, key, newContent): updates a segment",
+      "renderSegments(injector): table of segments with priority and token count"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "output-cache",
+    "description": "Semantic output cache for LLM calls: deduplicates similar queries and returns cached results.",
+    "requirements": [
+      "set(cache, query, response, embedding?)",
+      "get(cache, query, threshold, scoreFn?): returns cached response if similarity above threshold",
+      "evict(cache, maxAge): removes entries older than maxAge ms",
+      "stats(cache): { size, hitRate, avgAge }",
+      "renderStats(cache): formatted cache statistics"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "agent-persona",
+    "description": "Agent persona definition with trait injection into system prompts and behavior modifiers.",
+    "requirements": [
+      "definePersona({ name, role, traits[], tone, forbidden[], vocabulary[] })",
+      "buildSystemPrompt(persona, basePrompt): injects persona definition",
+      "checkCompliance(persona, response): flags responses violating persona constraints",
+      "mutatePersona(persona, experience): updates traits based on session learnings"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "reflection-scorer",
+    "description": "Scores agent session performance through self-reflection metrics: task completion, efficiency, accuracy.",
+    "requirements": [
+      "scoreSession({ tasksAttempted, tasksCompleted, toolCalls, retries, errors })",
+      "efficiency(session): score based on tool calls per completed task",
+      "accuracy(session): score based on retries and errors",
+      "reflection(session): generates natural language performance summary",
+      "trend(sessions[]): performance trend over multiple sessions"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "skill-confidence-tracker",
+    "description": "Tracks agent skill confidence levels using Bayesian updates from success/failure outcomes.",
+    "requirements": [
+      "initSkill(tracker, name, alpha?, beta?): beta distribution priors",
+      "update(tracker, skill, success): updates alpha or beta",
+      "confidence(tracker, skill): expected value of beta distribution",
+      "topSkills(tracker, n): highest confidence skills",
+      "renderSkills(tracker): table of skills with confidence and attempt count"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "message-buffer",
+    "description": "Buffered message accumulator for streaming LLM output with sentence detection and flushing.",
+    "requirements": [
+      "append(buffer, chunk): adds streaming token to buffer",
+      "flush(buffer): returns complete buffer content and resets",
+      "completeSentences(buffer): returns complete sentences, retains incomplete",
+      "peek(buffer): returns current buffer without consuming",
+      "onSentence(buffer, handler): callback for each complete sentence"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "tool-schema-builder",
+    "description": "Builds JSON Schema definitions for LLM tool calling (OpenAI/Anthropic format) from TypeScript-style specs.",
+    "requirements": [
+      "define({ name, description, params{} }): builds complete tool schema",
+      "param(type, description, required?, enumValues?): creates parameter schema",
+      "toOpenAI(tool): converts to OpenAI function calling format",
+      "toAnthropic(tool): converts to Anthropic tool use format",
+      "validate(schema): checks schema structure is valid"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "linear-regression",
+    "description": "Ordinary least squares linear regression from scratch: fit, predict, R-squared, residuals.",
+    "requirements": [
+      "fit(xs, ys): returns { slope, intercept, rSquared }",
+      "predict(model, x): returns predicted y value",
+      "residuals(model, xs, ys): returns actual - predicted per point",
+      "multivariate(X, y): matrix form OLS via normal equations",
+      "renderSummary(model): formatted regression summary"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "kmeans-clustering",
+    "description": "K-means clustering from scratch with random initialization, iteration, and convergence detection.",
+    "requirements": [
+      "fit(points[], k, maxIter?): returns { centroids, assignments, iterations }",
+      "predict(model, point): returns nearest centroid index",
+      "inertia(model, points[]): sum of squared distances to assigned centroids",
+      "elbow(points[], maxK): runs k from 2 to maxK, returns inertia per k",
+      "renderClusters(model, points[]): ASCII 2D scatter if 2D data"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "decision-tree",
+    "description": "Decision tree classifier using GINI impurity, supporting categorical and numeric features.",
+    "requirements": [
+      "fit(data[], features[], labelKey, maxDepth?): builds tree",
+      "predict(tree, sample): returns predicted label",
+      "gini(labels[]): impurity score",
+      "featureImportance(tree): returns importance score per feature",
+      "renderTree(tree): ASCII decision tree visualization"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "confusion-matrix",
+    "description": "Confusion matrix calculator with precision, recall, F1, and accuracy for binary and multi-class.",
+    "requirements": [
+      "build(actuals[], predictions[]): returns ConfusionMatrix",
+      "accuracy(cm): overall accuracy",
+      "precision(cm, label?): precision per class or macro-averaged",
+      "recall(cm, label?): recall per class or macro-averaged",
+      "f1(cm, label?): F1 score",
+      "renderMatrix(cm): ASCII confusion matrix"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "ab-significance",
+    "description": "A/B test statistical significance calculator using chi-squared and z-test for conversion rates.",
+    "requirements": [
+      "zTest(controlConversions, controlTotal, treatmentConversions, treatmentTotal): returns { zScore, pValue, significant }",
+      "chiSquared(contingencyTable): chi-squared statistic and p-value",
+      "requiredSampleSize(baseRate, mde, alpha?, power?): minimum detectable effect sample size",
+      "renderReport(result): markdown A/B test result summary"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "cohort-analysis",
+    "description": "Cohort retention analysis: groups users by acquisition date and tracks retention over periods.",
+    "requirements": [
+      "buildCohorts(events[], userIdKey, dateKey, periodUnit): groups events by cohort",
+      "retentionMatrix(cohorts): returns cohort x period retention rates",
+      "renderHeatMap(matrix): ASCII heat map of retention rates",
+      "averageRetention(matrix, period): average retention at a given period across cohorts"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "funnel-calculator",
+    "description": "Conversion funnel calculator with per-step rates, drop-off analysis, and optimization scoring.",
+    "requirements": [
+      "buildFunnel(steps[]): each step has { name, users }",
+      "conversionRate(funnel, fromStep, toStep): percentage converted between steps",
+      "biggestDropOff(funnel): step with highest drop-off",
+      "projectRevenue(funnel, conversionValue): revenue at current conversion rates",
+      "renderFunnel(funnel): ASCII funnel visualization"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "time-series-ma",
+    "description": "Time series moving average library: SMA, EMA, WMA, and Bollinger Bands.",
+    "requirements": [
+      "sma(values[], period): simple moving average",
+      "ema(values[], period): exponential moving average",
+      "wma(values[], weights[]): weighted moving average",
+      "bollingerBands(values[], period, stdDev?): upper, middle, lower bands",
+      "renderChart(values[], mas): ASCII line chart with overlaid MAs"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "anomaly-detector",
+    "description": "Anomaly detection using z-score, IQR, and modified z-score methods.",
+    "requirements": [
+      "zScore(values[], threshold?): returns indices of anomalies",
+      "iqr(values[], factor?): IQR-based outlier detection",
+      "modifiedZScore(values[], threshold?): uses median absolute deviation",
+      "explain(values[], idx): returns why value at index is anomalous",
+      "renderReport(values[], anomalies): ASCII series plot with anomalies flagged"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "correlation-matrix",
+    "description": "Pearson and Spearman correlation matrix builder for multivariate datasets.",
+    "requirements": [
+      "pearson(xs, ys): correlation coefficient between two series",
+      "spearman(xs, ys): rank-based correlation",
+      "matrix(data{}, method?): n x n correlation matrix for all column pairs",
+      "strongestPairs(matrix, threshold): returns pairs with |r| > threshold",
+      "renderMatrix(matrix): ASCII correlation matrix with values"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "ascii-histogram",
+    "description": "ASCII histogram generator for numeric distributions with bin calculation and statistics.",
+    "requirements": [
+      "build(values[], bins?): auto-bins data using Sturges rule",
+      "render(histogram): ASCII bar chart with bin ranges and counts",
+      "stats(values[]): min, max, mean, median, stddev",
+      "cumulative(histogram): returns cumulative frequency per bin",
+      "normalize(histogram): returns relative frequency per bin"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "chi-squared-test",
+    "description": "Chi-squared test for independence and goodness of fit with critical value lookup.",
+    "requirements": [
+      "goodnessOfFit(observed[], expected[]): returns { chi2, df, pValue }",
+      "independence(contingencyTable): chi-squared test for 2D table",
+      "pValue(chi2, df): approximates p-value using chi-squared CDF",
+      "criticalValue(df, alpha): returns critical value for rejection",
+      "renderReport(result): markdown test result with interpretation"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "monte-carlo",
+    "description": "Monte Carlo simulation engine for risk modeling, option pricing, and probability estimation.",
+    "requirements": [
+      "simulate(scenarios, iterations, sampleFn): runs iterations of scenario function",
+      "estimate(outcomes[]): mean, stddev, confidence interval",
+      "percentile(outcomes[], p): p-th percentile of simulation results",
+      "riskOfLoss(outcomes[], threshold): probability outcome falls below threshold",
+      "renderHistogram(outcomes[]): ASCII result distribution"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "bayesian-inference",
+    "description": "Bayesian inference engine with beta-binomial, normal-normal, and Poisson-gamma conjugates.",
+    "requirements": [
+      "betaBinomial(alpha, beta, successes, trials): posterior { alpha, beta, mean, credibleInterval }",
+      "normalNormal(priorMean, priorVar, likelihood[], likelihoodVar): posterior normal params",
+      "poissonGamma(alpha, beta, observations[]): posterior gamma params",
+      "credibleInterval(distribution, prob): HPD interval",
+      "renderPosterior(distribution): ASCII posterior density sketch"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "feature-importance",
+    "description": "Feature importance calculator using permutation importance and correlation-based ranking.",
+    "requirements": [
+      "permutation(model, data[], labels[], feature, scoreFn): importance via score drop",
+      "correlation(features{}, target): importance by absolute correlation to target",
+      "variance(features{}): importance by explained variance",
+      "rank(importances{}): sorted feature ranking",
+      "renderChart(importances): ASCII horizontal bar chart of importance scores"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "data-normalizer",
+    "description": "Data normalization and standardization: min-max, z-score, log, and robust scaling.",
+    "requirements": [
+      "minMax(values[], featureRange?): scales to [0,1] or custom range",
+      "zScore(values[]): standardizes to mean=0 std=1",
+      "log(values[], base?): log transform with zero-handling",
+      "robust(values[]): median/IQR-based scaling resistant to outliers",
+      "inverse(scaled, params): reverses transformation"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "data-imputer",
+    "description": "Missing data imputation strategies: mean, median, mode, forward-fill, and interpolation.",
+    "requirements": [
+      "mean(values[]): replaces null/NaN with column mean",
+      "median(values[]): replaces with column median",
+      "mode(values[]): replaces with most frequent value",
+      "forwardFill(values[]): fills with last non-null value",
+      "interpolate(values[]): linear interpolation between known values"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "dimensionality-reducer",
+    "description": "PCA-based dimensionality reducer from scratch using covariance matrix and eigenvalue decomposition.",
+    "requirements": [
+      "fit(data[], nComponents): returns { components, explainedVariance }",
+      "transform(model, data[]): projects data to lower dimension",
+      "explainedVarianceRatio(model): proportion of variance per component",
+      "inverse(model, reduced[]): reconstruct original space approximation"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "survival-analysis",
+    "description": "Kaplan-Meier survival analysis for time-to-event data with confidence intervals.",
+    "requirements": [
+      "fit(events[]): each event has { time, observed: boolean }",
+      "survivalFunction(model): returns survival probability at each time point",
+      "medianSurvival(model): time at which survival probability crosses 0.5",
+      "confidenceInterval(model, alpha): Greenwood formula CI",
+      "renderCurve(model): ASCII Kaplan-Meier survival curve"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "forecasting-engine",
+    "description": "Simple forecasting using Holt-Winters exponential smoothing for trend and seasonality.",
+    "requirements": [
+      "fit(series[], season, alpha, beta, gamma): fitted model",
+      "forecast(model, periods): returns next N period predictions",
+      "mape(actual[], forecast[]): mean absolute percentage error",
+      "renderForecast(series[], forecast[]): ASCII series with forecast continuation"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "lift-calculator",
+    "description": "Market basket lift, support, and confidence calculator for association rule mining.",
+    "requirements": [
+      "support(transactions[], itemset): fraction of transactions containing itemset",
+      "confidence(transactions[], antecedent, consequent): P(B|A)",
+      "lift(transactions[], antecedent, consequent): confidence / support(B)",
+      "strongRules(transactions[], minSupport, minConfidence): returns qualifying rules",
+      "renderRules(rules[]): table with support, confidence, and lift"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "session-analytics",
+    "description": "Web session analytics: session grouping, bounce rate, avg session duration, and page depth.",
+    "requirements": [
+      "buildSessions(events[], timeout?): groups events into sessions by user and time gap",
+      "bounceRate(sessions[]): percent of single-page sessions",
+      "avgDuration(sessions[]): mean session duration in seconds",
+      "topPages(sessions[], n): most viewed pages across sessions",
+      "renderReport(sessions[]): markdown session analytics summary"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "event-sequence-miner",
+    "description": "Mines frequent event sequences in user behavior logs using sliding window approach.",
+    "requirements": [
+      "mine(sequences[][], minSupport, windowSize): returns frequent subsequences",
+      "support(sequences[][], subsequence): fraction of sequences containing it",
+      "topSequences(sequences[][], n): most common event sequences",
+      "renderReport(sequences): table with sequence, support, and frequency count"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "data-quality-scorer",
+    "description": "Scores a dataset for completeness, consistency, uniqueness, and validity.",
+    "requirements": [
+      "scoreColumn(values[], rules?): returns { completeness, uniqueness, validity }",
+      "scoreDataset(data{}): per-column and overall quality scores",
+      "detectDuplicates(data[]): returns duplicate row indices",
+      "validateTypes(data{}, schema{}): type conformance check per column",
+      "renderReport(scores): markdown data quality report"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "pivot-table",
+    "description": "In-memory pivot table builder with grouping, aggregation, and cross-tabulation.",
+    "requirements": [
+      "build(data[], rows[], cols[], values[], aggFn?): returns pivot structure",
+      "aggFunctions: sum, mean, count, min, max, median",
+      "drill(pivot, rowKey, colKey): returns underlying records for a cell",
+      "renderTable(pivot): ASCII pivot table with totals row and column"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "dockerfile-generator",
+    "description": "Generates optimized Dockerfiles for common stacks: Node, Python, Go, Rust, with multi-stage builds.",
+    "requirements": [
+      "generate({ stack, version, entrypoint, port, env{} }): returns Dockerfile string",
+      "multiStage(build, runtime): generates multi-stage Dockerfile",
+      "addHealthCheck(dockerfile, cmd, interval): inserts HEALTHCHECK instruction",
+      "lint(dockerfile): flags common issues (root user, no .dockerignore suggestion, large layers)",
+      "generateDockerignore(stack): returns appropriate .dockerignore content"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "docker-compose-builder",
+    "description": "Docker Compose YAML builder for multi-service stacks with networks, volumes, and env.",
+    "requirements": [
+      "createCompose(version?): empty compose spec",
+      "addService(compose, { name, image, ports[], env{}, volumes[], depends_on[] })",
+      "addNetwork(compose, name, driver?)",
+      "addVolume(compose, name)",
+      "render(compose): properly formatted docker-compose.yml string"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "nginx-config-generator",
+    "description": "Generates Nginx server block configurations for static sites, reverse proxies, and SSL.",
+    "requirements": [
+      "staticSite({ domain, root, index? }): basic static file server block",
+      "reverseProxy({ domain, upstream, port, sslCert?, sslKey? }): proxy_pass config",
+      "loadBalancer({ name, upstreams[], method? }): upstream block with round-robin/least-conn",
+      "sslRedirect(domain): HTTP to HTTPS redirect block",
+      "render(config): formatted nginx config string"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "github-actions-builder",
+    "description": "GitHub Actions workflow YAML builder for CI/CD pipelines with common job templates.",
+    "requirements": [
+      "createWorkflow({ name, on[], env{} }): workflow shell",
+      "addJob(workflow, { id, runsOn, steps[] })",
+      "stepCheckout(options?): actions/checkout step",
+      "stepSetupNode(version): actions/setup-node step",
+      "stepCache(key, paths[]): actions/cache step",
+      "render(workflow): YAML string output"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "terraform-scaffolder",
+    "description": "Generates Terraform module scaffolding with main.tf, variables.tf, outputs.tf.",
+    "requirements": [
+      "scaffold(module, resources[], variables[], outputs[]): returns file map",
+      "resource(type, name, config{}): generates resource block",
+      "variable(name, type, description, default?): generates variable block",
+      "output(name, value, description?): generates output block",
+      "renderModule(scaffold): returns { main, variables, outputs } as strings"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "k8s-manifest-generator",
+    "description": "Generates Kubernetes manifests: Deployment, Service, ConfigMap, Ingress, HPA.",
+    "requirements": [
+      "deployment({ name, image, replicas, port, env{} }): returns Deployment YAML",
+      "service({ name, selector{}, port, type? }): returns Service YAML",
+      "configmap({ name, data{} }): returns ConfigMap YAML",
+      "ingress({ name, host, serviceName, port }): returns Ingress YAML",
+      "hpa({ name, targetRef, minReplicas, maxReplicas, cpuPercent }): returns HPA YAML"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "load-balancer-config",
+    "description": "Load balancer configuration builder supporting round-robin, weighted, and least-connections.",
+    "requirements": [
+      "roundRobin(backends[]): assigns requests cyclically",
+      "weighted(backends[], weights[]): distributes by weight",
+      "leastConnections(backends[], connections{}): selects backend with fewest connections",
+      "healthCheck(config, { path, interval, threshold }): attaches health check",
+      "renderConfig(lb): formatted load balancer configuration"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "blue-green-manager",
+    "description": "Blue-green deployment state manager tracking which environment is live and managing cutover.",
+    "requirements": [
+      "createDeployment({ app, blue, green }): state object",
+      "cutover(deployment, to): switches live environment",
+      "rollback(deployment): reverts to previous live environment",
+      "status(deployment): returns { live, standby, version, lastCutover }",
+      "renderStatus(deployment): formatted deployment status card"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "canary-controller",
+    "description": "Canary release controller with traffic split percentages, error rate monitoring, and auto-rollback.",
+    "requirements": [
+      "startCanary(config, { canaryVersion, initialPercent })",
+      "promote(canary, incrementPercent): increases canary traffic",
+      "rollback(canary, reason): returns to 0% canary",
+      "shouldRollback(canary, { errorRate, latencyP99 }, thresholds): auto-rollback check",
+      "renderStatus(canary): traffic split and health metrics"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "health-check-orchestrator",
+    "description": "Orchestrates multiple health checks with dependencies, aggregated status, and alert logic.",
+    "requirements": [
+      "addCheck(orchestrator, { name, fn, critical, dependencies[] })",
+      "runAll(orchestrator): executes all checks, respects dependency order",
+      "overall(results): healthy | degraded | unhealthy based on critical check failures",
+      "renderReport(results): formatted health check dashboard",
+      "alertOn(results, handler): calls handler on first critical failure"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "log-parser",
+    "description": "Structured log parser supporting JSON logs, Apache/Nginx common log format, and syslog.",
+    "requirements": [
+      "parseJSON(line): parses JSON log line into LogEntry",
+      "parseCommonLog(line): parses Apache/Nginx combined log format",
+      "parseSyslog(line): parses RFC 5424 syslog format",
+      "parseAuto(line): detects format and dispatches to correct parser",
+      "filter(entries[], { level?, status?, after?, before? }): filters log entries"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "metric-aggregator",
+    "description": "Metric aggregation engine: count, sum, avg, min, max, p50, p95, p99 over time windows.",
+    "requirements": [
+      "record(agg, metric, value, timestamp?)",
+      "aggregate(agg, metric, window, fns[]): computes stats over time window",
+      "p99(values[]): 99th percentile",
+      "rate(agg, metric, window): events per second",
+      "renderReport(agg, metric): formatted metric summary"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "alert-rule-builder",
+    "description": "Alert rule builder with threshold conditions, silence windows, and severity levels.",
+    "requirements": [
+      "defineRule({ name, metric, condition, threshold, severity, silenceMinutes? })",
+      "evaluate(rule, value): returns { firing, severity, message }",
+      "isSilenced(rule, now): checks silence window",
+      "evaluateAll(rules[], metrics{}): batch evaluation",
+      "renderRules(rules[]): markdown alert rule documentation"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "cron-parser",
+    "description": "Cron expression parser and validator with next-run calculation and human description.",
+    "requirements": [
+      "parse(expression): returns { minute, hour, day, month, weekday } as arrays",
+      "validate(expression): returns { valid, errors[] }",
+      "nextRun(expression, from?): returns next Date matching the expression",
+      "describe(expression): returns human-readable description",
+      "upcomingRuns(expression, n, from?): returns next N scheduled dates"
+    ],
+    "maxLines": 160
+  },
+  {
+    "name": "ssl-expiry-monitor",
+    "description": "SSL certificate expiry monitor that tracks multiple domains and raises alerts before expiry.",
+    "requirements": [
+      "addDomain(monitor, { domain, alertDaysBefore })",
+      "checkDomain(domain): parses SSL cert and returns expiry status",
+      "checkAll(monitor): returns status for all tracked domains",
+      "expiringSoon(monitor, days): returns domains expiring within N days",
+      "renderReport(monitor): formatted expiry dashboard with traffic-light status"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "env-config-templater",
+    "description": "Generates .env files from a schema with defaults, validation, and environment-specific overrides.",
+    "requirements": [
+      "defineVar(schema, { key, type, required, default?, description })",
+      "generate(schema, values{}, env?): returns .env file content",
+      "validate(schema, env{}): returns missing and type-invalid vars",
+      "diff(schemaA, schemaB): returns added and removed vars",
+      "renderDocs(schema): markdown documentation table for all vars"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "release-notes-generator",
+    "description": "Generates release notes from git commit messages using conventional commits format.",
+    "requirements": [
+      "parseCommits(commits[]): categorizes by feat, fix, chore, docs, breaking",
+      "generateNotes({ version, date, commits }): returns formatted release notes",
+      "formatChangelog(notes[]): full CHANGELOG.md section",
+      "bump(currentVersion, changes): determines semver bump from change types",
+      "renderMarkdown(notes): formatted markdown release notes"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "rollout-calculator",
+    "description": "Progressive rollout planner: calculates staged rollout percentages, timing, and go/no-go criteria.",
+    "requirements": [
+      "plan({ stages, totalUsers, startDate, stageDuration }): returns stage plan",
+      "evaluate(stage, { errorRate, latency, complaints }): go | no-go decision",
+      "nextStage(rollout): advances to next stage or halts",
+      "renderPlan(rollout): ASCII Gantt-style rollout timeline"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "dependency-graph",
+    "description": "Service dependency graph builder with circular dependency detection and startup order.",
+    "requirements": [
+      "addService(graph, name, dependencies[])",
+      "detectCycles(graph): returns circular dependency paths",
+      "startupOrder(graph): topological sort for startup sequence",
+      "impactOf(graph, service): services affected if this service goes down",
+      "renderGraph(graph): ASCII directed graph visualization"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "config-diff",
+    "description": "Configuration diff tool that compares two config objects and reports semantic changes.",
+    "requirements": [
+      "diff(configA, configB): returns { added, removed, changed, unchanged } at each path",
+      "semanticChanges(diff): filters trivial changes (whitespace, reordering)",
+      "riskScore(diff): rates change risk based on which keys changed",
+      "renderDiff(diff): colored diff output with path and old/new values"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "secret-rotation-planner",
+    "description": "Plans and tracks secret rotation schedules with expiry alerts and rotation procedures.",
+    "requirements": [
+      "addSecret(planner, { name, type, lastRotated, rotationDays })",
+      "dueForRotation(planner, now?): returns secrets past or within 7 days of expiry",
+      "markRotated(planner, name, date?): updates last rotation timestamp",
+      "procedure(secretType): returns step-by-step rotation guide for known types",
+      "renderDashboard(planner): expiry timeline with urgency indicators"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "port-conflict-resolver",
+    "description": "Detects port conflicts in service configurations and suggests alternative assignments.",
+    "requirements": [
+      "register(registry, service, ports[])",
+      "conflicts(registry): returns port -> services[] map for conflicted ports",
+      "suggest(registry, service, preferredPort): returns next available port",
+      "wellKnownPorts(): returns map of common service -> default port",
+      "renderRegistry(registry): formatted port allocation table"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "deployment-checklist",
+    "description": "Pre-deployment checklist engine with environment-specific checks and rollback plan.",
+    "requirements": [
+      "createChecklist(environment, items[])",
+      "check(item): marks item complete or failed with timestamp and notes",
+      "readiness(checklist): returns { ready, blocking[], warnings[] }",
+      "rollbackPlan(checklist): returns rollback steps for failed items",
+      "renderChecklist(checklist): formatted deployment readiness report"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "service-mesh-config",
+    "description": "Service mesh configuration builder for traffic policies, retries, timeouts, and circuit breaking.",
+    "requirements": [
+      "trafficPolicy({ service, retries, timeout, circuitBreaker }): returns policy config",
+      "virtualService({ host, routes[], timeout }): HTTP routing rules",
+      "destinationRule({ host, trafficPolicy, subsets[] }): Istio-compatible destination rule",
+      "renderYAML(config): formatted service mesh YAML manifest"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "observability-setup",
+    "description": "Observability bootstrapper that generates logging, metrics, and tracing config for a service.",
+    "requirements": [
+      "configure({ service, environment, logLevel, metricsPort, tracingEndpoint })",
+      "loggerConfig(config): structured logging configuration",
+      "metricsConfig(config): Prometheus-compatible metrics setup",
+      "tracingConfig(config): OpenTelemetry tracer setup",
+      "renderSetup(config): complete observability setup as code snippets"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "blog-scaffolder",
+    "description": "Scaffolds a complete blog post with title, meta description, slug, outline, and section stubs.",
+    "requirements": [
+      "scaffold({ topic, keywords[], audience, wordCount }): returns BlogPost structure",
+      "generateOutline(topic, sections?): H2/H3 section outline with subtopics",
+      "metaDescription(title, keywords[]): 150-char SEO meta description",
+      "readingTime(wordCount): estimated minutes to read",
+      "renderMarkdown(post): full blog post template in markdown"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "social-time-optimizer",
+    "description": "Calculates optimal posting times per platform based on audience time zone and engagement patterns.",
+    "requirements": [
+      "optimalTimes(platform, timezone): returns top 3 posting windows",
+      "platforms: twitter, linkedin, instagram, facebook, tiktok",
+      "schedule(posts[], timezone): distributes posts across optimal windows",
+      "renderSchedule(posts[]): formatted weekly posting calendar"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "headline-scorer",
+    "description": "Scores headlines for emotional value, power words, clarity, and SEO using rule-based analysis.",
+    "requirements": [
+      "score(headline): returns { overall, emotional, clarity, seo, wordCount }",
+      "powerWords(): built-in list of 100+ high-impact words",
+      "analyze(headline): returns { issues[], suggestions[], score }",
+      "compare(headlines[]): ranks headlines by score",
+      "optimize(headline): returns improved headline suggestion"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "seo-meta-generator",
+    "description": "Generates SEO-optimized meta tags: title, description, canonical, OG, Twitter Card.",
+    "requirements": [
+      "generate({ title, description, url, image?, type? }): returns meta tag set",
+      "titleTag(title, siteName?): 60-char optimized title",
+      "metaDescription(description): 155-char meta description with keyword density check",
+      "renderHTML(meta): HTML meta tag strings",
+      "validate(meta): checks lengths and required fields"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "og-tag-builder",
+    "description": "Open Graph and Twitter Card tag builder with property validation and fallback generation.",
+    "requirements": [
+      "buildOG({ title, description, image, url, type?, siteName? }): OG properties object",
+      "buildTwitterCard({ title, description, image, card? }): Twitter Card meta",
+      "renderHTML(og, twitter): both tag sets as HTML strings",
+      "validate(og): checks required OG properties and image dimensions hint",
+      "preview(og): ASCII card preview of how share will look"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "rss-parser",
+    "description": "RSS/Atom feed parser that extracts items with title, link, description, date, and author.",
+    "requirements": [
+      "parse(xmlString): returns Feed with { title, link, items[] }",
+      "parseAtom(xmlString): handles Atom format",
+      "parseRSS(xmlString): handles RSS 2.0 format",
+      "normalizeItem(item): maps both formats to unified Item schema",
+      "renderFeed(feed): formatted feed summary"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "markdown-to-html",
+    "description": "Markdown to HTML converter supporting headings, bold, italic, links, lists, code, and tables.",
+    "requirements": [
+      "convert(markdown): returns HTML string",
+      "headings, bold, italic, strikethrough, inline code, fenced code blocks",
+      "ordered and unordered lists with nesting",
+      "tables (GFM), blockquotes, horizontal rules",
+      "convertSafe(markdown): sanitizes output for XSS"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "reading-time-estimator",
+    "description": "Estimates reading time for text content accounting for word count, code blocks, and images.",
+    "requirements": [
+      "estimate(text, options?): returns { minutes, seconds, words }",
+      "wpm: 238 average for technical content (configurable)",
+      "codeBlockTime(content): adds extra time per code block",
+      "imageTime(content, count): adds 12 seconds per image",
+      "format(estimate): 5 min read style string"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "readability-scorer",
+    "description": "Flesch-Kincaid readability scorer with grade level, reading ease, and improvement suggestions.",
+    "requirements": [
+      "fleschEase(text): Flesch Reading Ease score 0-100",
+      "fleschKincaidGrade(text): grade level",
+      "gunningFog(text): Gunning Fog index",
+      "analyze(text): all metrics with descriptive labels (Easy, Difficult, etc.)",
+      "suggestions(text): actionable improvement tips based on scores"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "hashtag-strategist",
+    "description": "Hashtag strategy builder for social media: extracts themes, categorizes by reach, and builds sets.",
+    "requirements": [
+      "extract(text): derives hashtag candidates from content keywords",
+      "categorize(hashtags[], volumes{}): niche | medium | large by volume ranges",
+      "buildSet(content, { niche, medium, broad }): balanced hashtag set",
+      "renderStrategy(set): formatted hashtag strategy with rationale"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "email-subject-optimizer",
+    "description": "Email subject line optimizer scoring for open rate potential, spam triggers, and personalization.",
+    "requirements": [
+      "score(subject): returns { openRate, spamRisk, length, hasPersonalization }",
+      "spamTriggers(): built-in list of 50+ spam trigger words",
+      "optimize(subject): returns improved subject line suggestions",
+      "abVariants(subject, n): generates N A/B test variants",
+      "compare(subjects[]): ranks by predicted open rate"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "content-repurposer",
+    "description": "Repurposes long-form content into multiple formats: tweets, LinkedIn posts, bullets, email blurb.",
+    "requirements": [
+      "toTweets(text, n?): splits content into tweet-length chunks with continuity",
+      "toLinkedIn(text): reformats as LinkedIn post with hook and CTA",
+      "toBullets(text, n?): extracts key points as bullet list",
+      "toEmailBlurb(text, words?): condenses to email-appropriate length",
+      "renderAll(text): all formats in a single output document"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "story-framework",
+    "description": "Brand storytelling framework builder (Hero's Journey, Problem-Agitate-Solve, STAR).",
+    "requirements": [
+      "heroJourney(elements{}): builds narrative across 12 stages",
+      "pas({ problem, agitation, solution }): Problem-Agitate-Solve framework",
+      "star({ situation, task, action, result }): STAR story format",
+      "aida({ attention, interest, desire, action }): AIDA marketing framework",
+      "renderStory(framework, type): formatted story document"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "ad-copy-generator",
+    "description": "Ad copy generator for Google Ads, Meta Ads, and LinkedIn with character limit compliance.",
+    "requirements": [
+      "googleAd({ headline, description, url }): 3 headlines (30 chars) + 2 descriptions (90 chars)",
+      "metaAd({ primary, headline, description, cta }): Meta ad copy fields",
+      "linkedInAd({ intro, headline, description }): LinkedIn sponsored content format",
+      "checkLimits(copy): validates all character limits",
+      "renderPreview(copy, platform): formatted ad preview"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "newsletter-builder",
+    "description": "Newsletter issue builder with sections, intro, featured content, and CTA blocks.",
+    "requirements": [
+      "createIssue({ number, date, subject, previewText })",
+      "addSection(issue, { type, title, content, cta? })",
+      "renderText(issue): plain-text newsletter format",
+      "renderHTML(issue): HTML newsletter with inline styles",
+      "wordCount(issue): total word count across all sections"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "copy-tone-adjuster",
+    "description": "Adjusts copy tone from formal to casual, aggressive to gentle, using rule-based word substitution.",
+    "requirements": [
+      "defineToneMap(from, to, substitutions{}): word/phrase replacement rules",
+      "adjust(text, toneMap): applies substitutions preserving structure",
+      "formalToInformal(text): built-in formal -> casual transformation",
+      "activeVoice(text): converts passive voice patterns to active",
+      "renderDiff(original, adjusted): side-by-side tone comparison"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "brand-name-generator",
+    "description": "Generates brand name candidates from keywords using morphological patterns and checks.",
+    "requirements": [
+      "generate(keywords[], options?): returns 20+ name candidates",
+      "patterns: compound, portmanteau, initialism, metaphor, truncation",
+      "score(name): scores on memorability, pronounceability, domain-friendliness",
+      "filter(names[], domainSuffix?): filters for likely-available domains",
+      "renderReport(names[]): scored brand name shortlist"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "video-script-builder",
+    "description": "Video script builder with hook, body segments, b-roll notes, and CTA for YouTube/short-form.",
+    "requirements": [
+      "buildScript({ title, duration, audience, goal })",
+      "addSegment(script, { timecode, narration, visual, bRoll? })",
+      "hook(topic, style?): generates attention-grabbing opening line",
+      "cta(goal, platform): generates platform-appropriate call-to-action",
+      "renderTeleprompter(script): clean narration-only view"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "podcast-show-notes",
+    "description": "Generates structured podcast show notes from episode outline: summary, timestamps, links, quotes.",
+    "requirements": [
+      "buildShowNotes({ title, guest?, duration, topics[] })",
+      "addTimestamp(notes, { time, topic })",
+      "addQuote(notes, { text, speaker, timecode })",
+      "renderMarkdown(notes): full show notes document",
+      "renderSEO(notes): SEO-optimized description under 300 words"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "content-brief",
+    "description": "Content brief generator for SEO articles: keyword strategy, competitor gaps, and outline.",
+    "requirements": [
+      "createBrief({ keyword, audience, intent, wordCount, competitors[] })",
+      "keywordVariants(keyword): derives related long-tail variants",
+      "competitorGaps(ownTopics[], competitorTopics[]): finds uncovered angles",
+      "outline(brief): H2/H3 outline optimized for search intent",
+      "renderBrief(brief): complete content brief document"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "landing-page-copywriter",
+    "description": "Structured landing page copy builder: hero, social proof, features, objections, CTA sections.",
+    "requirements": [
+      "buildPage({ product, audience, primaryCTA, pain, gain })",
+      "heroSection(page): headline, subheadline, CTA button copy",
+      "featuresSection(page, features[]): benefit-first feature descriptions",
+      "objectionHandler(objections[]): FAQ-style objection responses",
+      "renderMarkdown(page): full landing page copy document"
+    ],
+    "maxLines": 140
+  },
+  {
+    "name": "ugc-prompt-builder",
+    "description": "User-generated content prompt builder for community engagement and social proof collection.",
+    "requirements": [
+      "buildPrompt({ type, brand, product, platform, incentive? }): returns UGC prompt",
+      "types: review, photo, video, story, testimonial",
+      "moderate(text): checks for prohibited content patterns",
+      "toCampaignBrief(prompts[]): full UGC campaign brief document",
+      "renderBatch(prompts[]): formatted prompt collection"
+    ],
+    "maxLines": 110
+  },
+  {
+    "name": "editorial-calendar-builder",
+    "description": "Editorial calendar builder with themes, formats, channels, and assignment tracking.",
+    "requirements": [
+      "createCalendar(period, channels[])",
+      "addEntry(calendar, { date, channel, format, title, author, status })",
+      "assignEntry(calendar, id, author)",
+      "overdue(calendar, now?): entries past due date without published status",
+      "renderCalendar(calendar): ASCII monthly editorial grid"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "growth-hack-analyzer",
+    "description": "Scores and prioritizes growth experiments using ICE (Impact, Confidence, Ease) framework.",
+    "requirements": [
+      "addExperiment(backlog, { name, impact, confidence, ease, owner })",
+      "iceScore(experiment): (impact + confidence + ease) / 3",
+      "prioritize(backlog): sorts by ICE score descending",
+      "renderRoadmap(backlog): markdown growth experiment roadmap"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "compound-interest",
+    "description": "Compound interest calculator with period options, contribution schedules, and growth projections.",
+    "requirements": [
+      "calculate({ principal, rate, periods, compounds?, contributions? }): returns FV",
+      "futureValue(principal, rate, n): standard compound formula",
+      "withContributions(principal, rate, n, contrib, start?): PMT-adjusted FV",
+      "growthTable(inputs, periods[]): FV at each period",
+      "renderReport(result): formatted investment projection"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "amortization-schedule",
+    "description": "Loan amortization schedule generator with monthly payments, interest, principal splits, and totals.",
+    "requirements": [
+      "generate({ principal, rate, termMonths }): full amortization schedule",
+      "monthlyPayment(principal, rate, months): PMT formula",
+      "summary(schedule): total interest paid, total paid, payoff date",
+      "payoffAt(schedule, month): remaining balance at any month",
+      "renderTable(schedule): formatted amortization table (first/last 3 periods)"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "dcf-valuation",
+    "description": "Discounted cash flow (DCF) valuation model with terminal value, sensitivity table, and equity value.",
+    "requirements": [
+      "calculate({ cashFlows[], discountRate, terminalGrowthRate }): returns { npv, terminalValue, enterpriseValue }",
+      "terminalValue(lastCashFlow, growthRate, discountRate): Gordon Growth Model",
+      "sensitivityTable(base, rates[], growths[]): NPV matrix across rate/growth combos",
+      "perShare(value, netDebt, shares): equity value per share",
+      "renderReport(result): markdown DCF valuation summary"
+    ],
+    "maxLines": 140
   }
 ]
