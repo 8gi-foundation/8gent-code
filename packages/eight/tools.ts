@@ -85,6 +85,29 @@ import {
   browserScreenshot,
   browserTask,
 } from "../tools/browser-use";
+import {
+  screenshot as computerScreenshot,
+  click as computerClick,
+  typeText as computerType,
+  press as computerPress,
+  scroll as computerScroll,
+  drag as computerDrag,
+  hover as computerHover,
+  mousePosition as computerMousePosition,
+  windowList as computerWindowList,
+  clipboardGet as computerClipboardGet,
+  clipboardSet as computerClipboardSet,
+  listProcesses as computerListProcesses,
+  quitProcess as computerQuitProcess,
+  quitByName as computerQuitByName,
+  suggestQuittable as computerSuggestQuittable,
+  loadSafeList as computerLoadSafeList,
+  addToSafeList as computerAddToSafeList,
+  removeFromSafeList as computerRemoveFromSafeList,
+  imageToDesktop,
+  decodeCoordMap,
+  getToolDefinitions as getComputerToolDefs,
+} from "../computer";
 import { getMemoryManager } from "../memory";
 import { RateLimiter } from "../tools/rate-limiter";
 
@@ -545,6 +568,8 @@ export class ToolExecutor {
           }
         }
       },
+      // Desktop Computer Use tools (Power #10)
+      ...getComputerToolDefs(),
       // Browser Use tools
       {
         type: "function",
@@ -797,6 +822,34 @@ export class ToolExecutor {
         return this.handleRemember(args.fact as string, args.layer as "session" | "project" | "global");
       case "recall":
         return this.handleRecall(args.query as string, args.limit as number | undefined);
+
+      // Desktop Computer Use tools (Power #10)
+      case "desktop_screenshot":
+        return this.handleDesktopScreenshot(args.path as string | undefined, args.displayId as number | undefined);
+      case "desktop_click":
+        return this.handleDesktopClick(args.x as number, args.y as number, args.button as string | undefined, args.count as number | undefined, args.coordMap as string | undefined);
+      case "desktop_type":
+        return this.handleDesktopType(args.text as string, args.delay as number | undefined);
+      case "desktop_press":
+        return this.handleDesktopPress(args.keys as string, args.count as number | undefined, args.delay as number | undefined);
+      case "desktop_scroll":
+        return this.handleDesktopScroll(args.direction as string, args.amount as number | undefined, args.x as number | undefined, args.y as number | undefined);
+      case "desktop_drag":
+        return this.handleDesktopDrag(args.fromX as number, args.fromY as number, args.toX as number, args.toY as number, args.button as string | undefined, args.duration as number | undefined);
+      case "desktop_hover":
+        return this.handleDesktopHover(args.x as number, args.y as number, args.coordMap as string | undefined);
+      case "desktop_windows":
+        return this.handleDesktopWindows();
+      case "desktop_clipboard":
+        return this.handleDesktopClipboard(args.action as string, args.text as string | undefined);
+      case "desktop_processes":
+        return this.handleDesktopProcesses(args.sort as string | undefined);
+      case "desktop_quit_app":
+        return this.handleDesktopQuitApp(args.name as string | undefined, args.pid as number | undefined, args.strategy as string | undefined);
+      case "desktop_suggest_quit":
+        return this.handleDesktopSuggestQuit();
+      case "desktop_safe_list":
+        return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 
       // Browser Use tools
       case "browser_open":
@@ -1937,6 +1990,214 @@ export class ToolExecutor {
       return `Found ${results.length} memor${results.length === 1 ? "y" : "ies"} matching "${query}":\n${lines.join("\n")}`;
     } catch (err) {
       return `Failed to recall: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Desktop Computer Use Tools (Power #10)
+  // ============================================
+
+  private async handleDesktopScreenshot(savePath?: string, displayId?: number): Promise<string> {
+    try {
+      const result = computerScreenshot({ path: savePath, displayId });
+      if (!result.ok) return `desktop_screenshot failed: ${result.error}`;
+      return JSON.stringify({
+        path: result.path,
+        coordMap: `${result.coordMap.captureX},${result.coordMap.captureY},${result.coordMap.captureWidth},${result.coordMap.captureHeight},${result.coordMap.imageWidth},${result.coordMap.imageHeight}`,
+        hint: "Use the coordMap value with desktop_click/desktop_hover to translate image coordinates to screen coordinates.",
+      });
+    } catch (err) {
+      return `desktop_screenshot failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopClick(x: number, y: number, button?: string, count?: number, coordMap?: string): Promise<string> {
+    try {
+      let point = { x, y };
+      if (coordMap) {
+        point = imageToDesktop(point, decodeCoordMap(coordMap));
+      }
+      const result = computerClick({
+        point,
+        button: (button as "left" | "right" | "middle") || "left",
+        count,
+      });
+      if (!result.ok) return `desktop_click failed: ${result.error}`;
+      return `Clicked at (${point.x}, ${point.y})${button ? ` with ${button} button` : ""}${count && count > 1 ? ` x${count}` : ""}`;
+    } catch (err) {
+      return `desktop_click failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopType(text: string, delay?: number): Promise<string> {
+    try {
+      const result = computerType({ text, delay });
+      if (!result.ok) return `desktop_type failed: ${result.error}`;
+      return `Typed ${text.length} characters`;
+    } catch (err) {
+      return `desktop_type failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopPress(keys: string, count?: number, delay?: number): Promise<string> {
+    try {
+      const result = computerPress({ keys, count, delay });
+      if (!result.ok) return `desktop_press failed: ${result.error}`;
+      const warning = result.error ? ` (${result.error})` : "";
+      return `Pressed ${keys}${count && count > 1 ? ` x${count}` : ""}${warning}`;
+    } catch (err) {
+      return `desktop_press failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopScroll(direction: string, amount?: number, x?: number, y?: number): Promise<string> {
+    try {
+      const result = computerScroll({
+        direction: direction as "up" | "down" | "left" | "right",
+        amount,
+        point: (x !== undefined && y !== undefined) ? { x, y } : undefined,
+      });
+      if (!result.ok) return `desktop_scroll failed: ${result.error}`;
+      return `Scrolled ${direction}${amount ? ` x${amount}` : ""}`;
+    } catch (err) {
+      return `desktop_scroll failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopDrag(fromX: number, fromY: number, toX: number, toY: number, button?: string, duration?: number): Promise<string> {
+    try {
+      const result = computerDrag({
+        from: { x: fromX, y: fromY },
+        to: { x: toX, y: toY },
+        button: (button as "left" | "right" | "middle") || "left",
+        duration,
+      });
+      if (!result.ok) return `desktop_drag failed: ${result.error}`;
+      return `Dragged from (${fromX}, ${fromY}) to (${toX}, ${toY})`;
+    } catch (err) {
+      return `desktop_drag failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopHover(x: number, y: number, coordMap?: string): Promise<string> {
+    try {
+      let point = { x, y };
+      if (coordMap) {
+        point = imageToDesktop(point, decodeCoordMap(coordMap));
+      }
+      const result = computerHover(point);
+      if (!result.ok) return `desktop_hover failed: ${result.error}`;
+      return `Moved cursor to (${point.x}, ${point.y})`;
+    } catch (err) {
+      return `desktop_hover failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopWindows(): Promise<string> {
+    try {
+      const result = computerWindowList();
+      if (!result.ok) return `desktop_windows failed: ${result.error}`;
+      if (!result.windows || result.windows.length === 0) return "No windows found";
+      const lines = result.windows.map((w, i) =>
+        `${i + 1}. [${w.app}] "${w.title}" at (${w.x},${w.y}) ${w.width}x${w.height}`
+      );
+      return `Open windows (${result.windows.length}):\n${lines.join("\n")}`;
+    } catch (err) {
+      return `desktop_windows failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopClipboard(action: string, text?: string): Promise<string> {
+    try {
+      if (action === "set") {
+        if (!text) return "desktop_clipboard set requires text parameter";
+        const result = computerClipboardSet(text);
+        if (!result.ok) return `desktop_clipboard failed: ${result.error}`;
+        return `Clipboard set (${text.length} chars)`;
+      } else {
+        const result = computerClipboardGet();
+        if (!result.ok) return `desktop_clipboard failed: ${result.error}`;
+        return `Clipboard contents:\n${result.text || "(empty)"}`;
+      }
+    } catch (err) {
+      return `desktop_clipboard failed: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Process Management Tools
+  // ============================================
+
+  private async handleDesktopProcesses(sort?: string): Promise<string> {
+    try {
+      const processes = computerListProcesses((sort as "memory" | "cpu" | "name") || "memory");
+      if (processes.length === 0) return "No processes found";
+      const lines = processes.map((p, i) =>
+        `${String(i + 1).padStart(2)}. ${p.name.padEnd(25)} ${String(p.memoryMB).padStart(6)} MB  ${String(p.cpu ?? 0).padStart(5)}% CPU  (PID ${p.pid})`
+      );
+      return `Running processes (top ${processes.length}, sorted by ${sort || "memory"}):\n${lines.join("\n")}`;
+    } catch (err) {
+      return `desktop_processes failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopQuitApp(name?: string, pid?: number, strategy?: string): Promise<string> {
+    try {
+      if (!name && !pid) return "desktop_quit_app requires either 'name' or 'pid' parameter";
+      const strat = (strategy as "graceful" | "force") || "graceful";
+
+      if (pid) {
+        const result = computerQuitProcess(pid, strat);
+        if (!result.ok) return `desktop_quit_app failed: ${result.error}`;
+        return `Quit PID ${pid} (${strat})`;
+      } else {
+        const result = computerQuitByName(name!, strat);
+        if (!result.ok) return `desktop_quit_app failed: ${result.error}`;
+        return `Quit "${name}" (${strat})`;
+      }
+    } catch (err) {
+      return `desktop_quit_app failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopSuggestQuit(): Promise<string> {
+    try {
+      const { apps, safeList, memSummary } = computerSuggestQuittable();
+      const memLine = `Memory: ${memSummary.usedMB}/${memSummary.totalMB} MB (${memSummary.usedPercent}% used, ${memSummary.freeMB} MB free)`;
+
+      if (apps.length === 0) {
+        return `${memLine}\nNo quittable apps found - everything is either system-critical or on the safe list.`;
+      }
+
+      const lines = apps.slice(0, 15).map((p, i) =>
+        `${String(i + 1).padStart(2)}. ${p.name.padEnd(25)} ${String(p.memoryMB).padStart(6)} MB  (PID ${p.pid})`
+      );
+
+      const totalFreeable = apps.slice(0, 15).reduce((sum, p) => sum + p.memoryMB, 0);
+      const safeNote = safeList.length > 0 ? `\nSafe list (protected): ${safeList.join(", ")}` : "";
+
+      return `${memLine}\n\nApps that could be quit to free resources:\n${lines.join("\n")}\n\nPotential savings: ~${totalFreeable} MB${safeNote}\n\nUse desktop_quit_app to quit specific apps (requires confirmation).`;
+    } catch (err) {
+      return `desktop_suggest_quit failed: ${err}`;
+    }
+  }
+
+  private async handleDesktopSafeList(action: string, app?: string): Promise<string> {
+    try {
+      if (action === "list") {
+        const list = computerLoadSafeList();
+        if (list.length === 0) return "Safe list is empty. Add apps with action='add' to protect them from being quit.";
+        return `Safe list (${list.length} apps protected):\n${list.map((a, i) => `${i + 1}. ${a}`).join("\n")}`;
+      } else if (action === "add") {
+        if (!app) return "desktop_safe_list add requires 'app' parameter";
+        return computerAddToSafeList(app);
+      } else if (action === "remove") {
+        if (!app) return "desktop_safe_list remove requires 'app' parameter";
+        return computerRemoveFromSafeList(app);
+      }
+      return `Unknown safe list action: ${action}. Use 'list', 'add', or 'remove'.`;
+    } catch (err) {
+      return `desktop_safe_list failed: ${err}`;
     }
   }
 
