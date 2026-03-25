@@ -128,7 +128,7 @@ Output ONLY the TypeScript code inside a fenced code block like:
 \`\`\``;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 120_000);
+  const timer = setTimeout(() => controller.abort(), 300_000);
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
