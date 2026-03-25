@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8gent Architecture - Interactive Explorer</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  :root{--orange:#E8610A;--dark:#1A1A2E;--darker:#12121F;--mid:#2A2A3E;--light:#E0E0E0;--muted:#888}
+  body{font-family:'Inter',sans-serif;background:var(--dark);color:var(--light);min-height:100vh;overflow-x:hidden}
+  header{text-align:center;padding:2rem 1rem 1rem}
+  header h1{font-size:clamp(1.4rem,3vw,2rem);font-weight:700;color:var(--orange)}
+  header p{color:var(--muted);font-size:clamp(0.8rem,1.5vw,0.95rem);margin-top:0.4rem}
+  #canvas{width:100%;max-width:960px;margin:0 auto;display:block}
+  #detail{position:fixed;pointer-events:none;background:var(--darker);border:1px solid var(--orange);border-radius:8px;padding:1rem 1.2rem;max-width:300px;opacity:0;transition:opacity 0.2s;font-size:0.85rem;line-height:1.5;z-index:10;box-shadow:0 4px 24px rgba(0,0,0,0.5)}
+  #detail h3{color:var(--orange);margin-bottom:0.3rem;font-size:0.95rem}
+  #detail code{font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--orange);background:var(--mid);padding:0.1rem 0.35rem;border-radius:3px}
+  #detail .tag{display:inline-block;font-size:0.65rem;background:var(--mid);color:var(--muted);padding:0.15rem 0.4rem;border-radius:3px;margin-top:0.4rem;margin-right:0.25rem}
+  footer{text-align:center;padding:1.5rem;color:var(--muted);font-size:0.75rem}
+  footer a{color:var(--orange);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>8gent Architecture</h1>
+  <p>Hover or tap nodes to explore the 9 Powers and data flow</p>
+</header>
+<svg id="canvas" viewBox="0 0 960 640"></svg>
+<div id="detail"></div>
+<footer>8gent Code - <a href="https://8gent.dev">8gent.dev</a> - Open source autonomous coding agent</footer>
+<script>
+const POWERS = [
+  {id:'memory',label:'Memory',x:160,y:100,desc:'SQLite + FTS5 + Ollama embeddings. Episodic, semantic, and procedural memory with auto-decay and consolidation.',pkg:'packages/memory/',tags:['SQLite','FTS5','embeddings']},
+  {id:'music',label:'DJ & Music',x:360,y:60,desc:'YouTube streaming via mpv, 30k+ internet radio stations, 15-genre sox synth, Replicate MusicGen.',pkg:'packages/music/',tags:['mpv','yt-dlp','sox']},
+  {id:'worktree',label:'Worktree',x:560,y:60,desc:'WorktreePool with max 4 concurrent agents, filesystem messaging, macro-actions, delegation.',pkg:'packages/orchestration/',tags:['git worktree','concurrency']},
+  {id:'policy',label:'Policy',x:760,y:100,desc:'NemoClaw YAML engine with 11 default rules, approval gates, headless mode, infinite mode.',pkg:'packages/permissions/',tags:['YAML','deny-by-default']},
+  {id:'evolution',label:'Evolution',x:820,y:300,desc:'Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, self-improvement DB.',pkg:'packages/self-autonomy/',tags:['Bayesian','reflection']},
+  {id:'healing',label:'Healing',x:760,y:500,desc:'Checkpoint-verify-revert loop with git stash atomic snapshots and failure logging.',pkg:'packages/validation/',tags:['checkpoint','git stash']},
+  {id:'business',label:'Entrepreneurship',x:560,y:560,desc:'GitHub bounty scanner, capability matcher, opportunity pipeline, business agents.',pkg:'packages/proactive/',tags:['bounties','pipeline']},
+  {id:'ast',label:'AST',x:360,y:560,desc:'Import dependency graph, test file mapping, change impact estimation.',pkg:'packages/ast-index/',tags:['imports','impact']},
+  {id:'browser',label:'Browser',x:160,y:500,desc:'Fetch + DuckDuckGo HTML scraper, HTML-to-text, disk cache. No headless deps.',pkg:'packages/tools/browser/',tags:['fetch','scraper']}
+];
+const CORE = [
+  {id:'daemon',label:'Eight Daemon',x:480,y:200,r:38,desc:'Persistent vessel on Fly.io Amsterdam. WebSocket sessions, auth, streaming.',pkg:'packages/daemon/'},
+  {id:'agent',label:'Agent Loop',x:480,y:320,r:32,desc:'Core agent loop with abort, checkpoint restore, tool dispatch.',pkg:'packages/eight/agent.ts'},
+  {id:'tools',label:'Tools',x:340,y:310,r:26,desc:'Tool definitions - file ops, shell, browser, memory, code actions.',pkg:'packages/eight/tools.ts'},
+  {id:'prompt',label:'System Prompt',x:620,y:310,r:26,desc:'Adaptive system prompt with user context injection and memory recall.',pkg:'packages/eight/prompts/'}
+];
+const FLOWS = [
+  ['daemon','agent'],['agent','tools'],['agent','prompt'],
+  ['tools','memory'],['tools','browser'],['tools','ast'],
+  ['agent','worktree'],['agent','evolution'],['agent','healing'],
+  ['prompt','memory'],['daemon','policy'],['agent','music'],
+  ['evolution','memory'],['healing','agent'],['business','browser']
+];
+const svg = document.getElementById('canvas');
+const detail = document.getElementById('detail');
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag,attrs){const e=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,v);return e}
+function pos(id){const p=POWERS.find(n=>n.id===id);if(p)return{x:p.x,y:p.y};const c=CORE.find(n=>n.id===id);return c?{x:c.x,y:c.y}:{x:0,y:0}}
+
+// Draw flow lines
+const flowG = el('g',{});
+svg.appendChild(flowG);
+FLOWS.forEach(([a,b])=>{
+  const pa=pos(a),pb=pos(b);
+  const line=el('line',{x1:pa.x,y1:pa.y,x2:pb.x,y2:pb.y,stroke:'#2A2A3E','stroke-width':'1.5','stroke-dasharray':'4,4'});
+  line.classList.add('flow');
+  flowG.appendChild(line);
+});
+
+// Animate flows
+let tick=0;
+function animateFlows(){tick+=0.3;flowG.querySelectorAll('.flow').forEach(l=>l.setAttribute('stroke-dashoffset',tick));requestAnimationFrame(animateFlows)}
+animateFlows();
+
+// Draw 9 Powers (hexagons)
+function hexPoints(cx,cy,r){let pts=[];for(let i=0;i<6;i++){const a=Math.PI/3*i-Math.PI/6;pts.push(`${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`);}return pts.join(' ')}
+POWERS.forEach(p=>{
+  const g=el('g',{'data-id':p.id,class:'node power',style:'cursor:pointer'});
+  const hex=el('polygon',{points:hexPoints(p.x,p.y,36),fill:'var(--darker)',stroke:'var(--orange)','stroke-width':'2',opacity:'0.85'});
+  const txt=el('text',{x:p.x,y:p.y+4,'text-anchor':'middle','font-size':'11','font-weight':'600',fill:'#E0E0E0','font-family':'Inter, sans-serif'});
+  txt.textContent=p.label;
+  g.appendChild(hex);g.appendChild(txt);svg.appendChild(g);
+  function show(e){
+    hex.setAttribute('stroke-width','3');hex.setAttribute('fill','#1e1e32');
+    highlightFlows(p.id);
+    showDetail(p,e);
+  }
+  function hide(){
+    hex.setAttribute('stroke-width','2');hex.setAttribute('fill','var(--darker)');
+    resetFlows();detail.style.opacity='0';
+  }
+  g.addEventListener('mouseenter',show);g.addEventListener('mouseleave',hide);
+  g.addEventListener('touchstart',e=>{e.preventDefault();show(e.touches[0]);},{passive:false});
+  g.addEventListener('touchend',hide);
+});
+
+// Draw core nodes (circles)
+CORE.forEach(c=>{
+  const g=el('g',{'data-id':c.id,class:'node core',style:'cursor:pointer'});
+  const circle=el('circle',{cx:c.x,cy:c.y,r:c.r,fill:'var(--orange)',opacity:'0.15',stroke:'var(--orange)','stroke-width':'2'});
+  const txt=el('text',{x:c.x,y:c.y+4,'text-anchor':'middle','font-size':'11','font-weight':'600',fill:'var(--orange)','font-family':'Inter, sans-serif'});
+  txt.textContent=c.label;
+  g.appendChild(circle);g.appendChild(txt);svg.appendChild(g);
+  function show(e){
+    circle.setAttribute('opacity','0.35');highlightFlows(c.id);showDetail(c,e);
+  }
+  function hide(){
+    circle.setAttribute('opacity','0.15');resetFlows();detail.style.opacity='0';
+  }
+  g.addEventListener('mouseenter',show);g.addEventListener('mouseleave',hide);
+  g.addEventListener('touchstart',e=>{e.preventDefault();show(e.touches[0]);},{passive:false});
+  g.addEventListener('touchend',hide);
+});
+
+function highlightFlows(id){
+  flowG.querySelectorAll('.flow').forEach((l,i)=>{
+    const[a,b]=FLOWS[i];
+    if(a===id||b===id){l.setAttribute('stroke','var(--orange)');l.setAttribute('stroke-width','2.5');l.setAttribute('stroke-dasharray','none');}
+    else{l.setAttribute('stroke','#1e1e2a');l.setAttribute('stroke-width','1');}
+  });
+}
+function resetFlows(){
+  flowG.querySelectorAll('.flow').forEach(l=>{l.setAttribute('stroke','#2A2A3E');l.setAttribute('stroke-width','1.5');l.setAttribute('stroke-dasharray','4,4');});
+}
+function showDetail(node,e){
+  let html=`<h3>${node.label}</h3><p>${node.desc}</p><p style="margin-top:0.4rem"><code>${node.pkg}</code></p>`;
+  if(node.tags)html+=node.tags.map(t=>`<span class="tag">${t}</span>`).join('');
+  detail.innerHTML=html;
+  const rect=document.body.getBoundingClientRect();
+  let left=e.clientX+16,top=e.clientY-20;
+  if(left+310>window.innerWidth)left=e.clientX-320;
+  if(top+200>window.innerHeight)top=e.clientY-180;
+  detail.style.left=left+'px';detail.style.top=top+'px';detail.style.opacity='1';
+}
+
+// Pulse animation on core nodes
+function pulse(){
+  CORE.forEach(c=>{
+    const circle=svg.querySelector(`g[data-id="${c.id}"] circle`);
+    if(circle){
+      const base=parseFloat(circle.getAttribute('opacity'));
+      circle.setAttribute('opacity',String(0.15+0.05*Math.sin(Date.now()/800)));
+    }
+  });
+  requestAnimationFrame(pulse);
+}
+pulse();
+</script>
+</body>
+</html>
