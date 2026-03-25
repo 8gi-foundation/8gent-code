@@ -112,3 +112,5 @@ export function assertType(
 export function checkType(val: unknown, expected: string): boolean {
   return typeOf(val) === expected;
 }
+// quarantine marker: type-check
+// Tests and docs live in quarantine/type-check.md
