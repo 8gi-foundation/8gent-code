@@ -1,0 +1,90 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test
+        run: bun test
+
+      - name: Build CLI
+        run: bun run build
+
+      - name: Verify dist artifact
+        run: |
+          test -f dist/cli.js || (echo "Build did not produce dist/cli.js" && exit 1)
+          head -1 dist/cli.js | grep -q "#!/usr/bin/env bun"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package.json version matches tag
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "${{ steps.version.outputs.TAG_VERSION }}" ]; then
+            echo "Tag v${{ steps.version.outputs.TAG_VERSION }} does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.TAG_VERSION }}"
+          NOTES=$(awk "/^## \\[?${VERSION}\\]?/{found=1; next} /^## /{if(found) exit} found{print}" CHANGELOG.md 2>/dev/null || echo "Release v${VERSION}")
+          echo "NOTES<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.TAG_VERSION }}
+          body: |
+            ## @podjamz/8gent-code v${{ steps.version.outputs.TAG_VERSION }}
+
+            ```bash
+            npm install -g @podjamz/8gent-code
+            ```
+
+            ${{ steps.changelog.outputs.NOTES }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.TAG_VERSION, '-') }}
