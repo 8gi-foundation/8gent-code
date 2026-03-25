@@ -126,6 +126,13 @@ Learn more: https://github.com/PodJamz/8gent-code
 async function main() {
   const args = process.argv.slice(2);
 
+  // --cli flag: non-interactive subagent mode - bypasses TUI entirely
+  if (args.includes("--cli")) {
+    const { runCLI } = await import("../packages/eight/cli.ts");
+    await runCLI(args);
+    return;
+  }
+
   if (args.includes("-h") || args.includes("--help")) {
     console.log(BANNER);
     console.log(HELP);
