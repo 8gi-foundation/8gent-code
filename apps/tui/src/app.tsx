@@ -3151,7 +3151,7 @@ export function App({ initialCommand, args }: AppProps) {
       )}
 
       {/* Lil Eight - terminal pet companion */}
-      <PetWidget sessionId={sessionId || "eight"} />
+      <PetWidget sessionId="eight" />
     </FixedFrame>
     </ADHDModeContext.Provider>
   );
