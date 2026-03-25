@@ -84,10 +84,6 @@ export class AsyncEventEmitter<Events extends Record<string, unknown> = Record<s
     return this;
   }
 
-  // -------------------------------------------------------------------------
-  // Internal helpers
-  // -------------------------------------------------------------------------
-
   private addListener<K extends keyof Events>(
     event: K,
     handler: AsyncHandler<Events[K]>,
@@ -98,10 +94,6 @@ export class AsyncEventEmitter<Events extends Record<string, unknown> = Record<s
     this.listeners.set(event, entries);
   }
 
-  /**
-   * Returns current entries for the event, removing any once-listeners so
-   * they fire exactly once even under concurrent emits.
-   */
   private drainOnce<K extends keyof Events>(event: K): HandlerEntry<unknown>[] {
     const entries = this.listeners.get(event);
     if (!entries || entries.length === 0) return [];
