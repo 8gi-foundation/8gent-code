@@ -1,0 +1,1261 @@
+[
+  {
+    "name": "slugify",
+    "description": "Convert any string into a URL-safe slug.",
+    "requirements": [
+      "Handle unicode characters by transliterating to ASCII",
+      "Strip leading/trailing hyphens",
+      "Collapse consecutive hyphens",
+      "Accept optional separator character (default: hyphen)",
+      "Lowercase output"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "camel-case",
+    "description": "Convert strings between camelCase, PascalCase, snake_case, kebab-case, and SCREAMING_SNAKE_CASE.",
+    "requirements": [
+      "Export toCamel, toPascal, toSnake, toKebab, toScreaming",
+      "Handle mixed input correctly (e.g. 'foo-barBaz' -> 'fooBarBaz')",
+      "Preserve consecutive uppercase acronyms (HTTP -> http)",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "pluralize",
+    "description": "English pluralization and singularization with irregular word support.",
+    "requirements": [
+      "pluralize(word, count?) returns plural or singular based on count",
+      "singularize(word) returns singular form",
+      "Built-in irregulars: person/people, child/children, etc.",
+      "Built-in uncountables: information, series, etc.",
+      "addIrregular(singular, plural) for custom words"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "template-engine",
+    "description": "Minimal template engine with variable interpolation, conditionals, and loops.",
+    "requirements": [
+      "{{ variable }} interpolation with dot-path support",
+      "{{#if condition}} ... {{/if}} blocks",
+      "{{#each array}} ... {{/each}} loops with {{this}} and {{@index}}",
+      "HTML-escape by default, {{{ raw }}} for unescaped output",
+      "Under 150 lines"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "lru-cache",
+    "description": "LRU cache with optional TTL expiry and max size eviction.",
+    "requirements": [
+      "set(key, value, ttlMs?) and get(key) returning T | undefined",
+      "delete(key) and clear()",
+      "Evict least-recently-used when capacity exceeded",
+      "TTL expiry on get (lazy eviction)",
+      "size property and has(key)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "priority-queue",
+    "description": "Binary heap priority queue with generic comparator support.",
+    "requirements": [
+      "push(item) and pop() returning T | undefined",
+      "peek() without removal",
+      "size property and isEmpty()",
+      "Generic type T with comparator (a: T, b: T) => number",
+      "Min-heap by default, max-heap via negated comparator"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "ring-buffer",
+    "description": "Fixed-capacity circular ring buffer with overwrite-on-full semantics.",
+    "requirements": [
+      "push(item) overwrites oldest when full",
+      "pop() removes from front",
+      "toArray() returns items in insertion order",
+      "size, capacity, isFull, isEmpty properties",
+      "Generic type parameter"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "trie-search",
+    "description": "Prefix trie for fast autocomplete and word lookups.",
+    "requirements": [
+      "insert(word) and search(word) for exact match",
+      "startsWith(prefix) returns boolean",
+      "autocomplete(prefix, limit?) returns matching words",
+      "delete(word)",
+      "count property for total words"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "bloom-filter",
+    "description": "Probabilistic Bloom filter for fast membership testing with configurable false-positive rate.",
+    "requirements": [
+      "add(item: string) and has(item: string) -> boolean",
+      "Constructor accepts capacity and falsePositiveRate",
+      "Uses multiple FNV hash functions internally",
+      "estimatedFalsePositiveRate() based on current fill",
+      "Zero external dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "debounce",
+    "description": "Debounce and throttle higher-order functions with cancellation support.",
+    "requirements": [
+      "debounce(fn, delayMs, options?) - trailing/leading edge",
+      "throttle(fn, intervalMs) - limit call rate",
+      "Both return a wrapped function with .cancel() method",
+      "debounce returns a promise resolving to the fn's return value",
+      "TypeScript generics preserve argument and return types"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "async-pool",
+    "description": "Limit concurrent async tasks with a promise pool.",
+    "requirements": [
+      "pool(tasks: (() => Promise<T>)[], concurrency: number) -> Promise<T[]>",
+      "Preserves result order matching input order",
+      "Starts new tasks as slots free",
+      "Propagates first rejection (fail-fast mode)",
+      "allSettled mode option to collect all results"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "retry",
+    "description": "Retry an async function with configurable backoff strategies.",
+    "requirements": [
+      "retry(fn, options) where options has maxAttempts, delay, backoff ('fixed'|'exponential'|'linear')",
+      "onRetry(attempt, error) callback",
+      "retryIf(error) predicate to skip retrying on certain errors",
+      "Returns the successful result or throws the last error",
+      "jitter option adds randomness to delay"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "timeout-wrap",
+    "description": "Wrap any promise with a timeout that rejects after a deadline.",
+    "requirements": [
+      "withTimeout(promise, ms, message?) -> Promise<T>",
+      "Cleans up the timer on resolution",
+      "Throws TimeoutError with configurable message",
+      "raceWithTimeout(promises, ms) races multiple promises",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "glob-matcher",
+    "description": "Glob pattern matching for file paths without filesystem access.",
+    "requirements": [
+      "match(pattern, path) -> boolean",
+      "Support *, **, ?, and {a,b} brace expansion",
+      "Negate patterns with ! prefix",
+      "matchAll(patterns, paths) -> string[] filtered results",
+      "Case-insensitive option"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "temp-dir",
+    "description": "Create and manage temporary directories with automatic cleanup.",
+    "requirements": [
+      "createTempDir(prefix?) -> { path: string, cleanup: () => void }",
+      "withTempDir(fn) - auto-cleans after callback",
+      "Uses OS temp directory (os.tmpdir())",
+      "Recursive directory removal on cleanup",
+      "Returns absolute path"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "url-parser",
+    "description": "Parse and build URLs with query string manipulation.",
+    "requirements": [
+      "parseUrl(url) returns { protocol, host, port, path, query, hash }",
+      "buildUrl(parts) assembles a URL from parts",
+      "parseQueryString(qs) -> Record<string, string | string[]>",
+      "stringifyQuery(params) -> string",
+      "addQueryParam, removeQueryParam helpers"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "hmac-sha256",
+    "description": "HMAC-SHA256 message authentication using Web Crypto API.",
+    "requirements": [
+      "sign(key: string, message: string) -> Promise<string> (hex output)",
+      "verify(key, message, signature) -> Promise<boolean>",
+      "Works in Node.js via globalThis.crypto (Node 19+) or require('crypto')",
+      "No external dependencies",
+      "Constant-time comparison for verify"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "uuid-v4",
+    "description": "RFC 4122 UUID v4 generator using crypto random bytes.",
+    "requirements": [
+      "generate() -> string in 8-4-4-4-12 format",
+      "generateShort() -> 8-char base62 ID",
+      "isValid(str) -> boolean",
+      "Uses crypto.getRandomValues or crypto.randomBytes",
+      "No external dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "base32",
+    "description": "Base32 encoding and decoding (RFC 4648).",
+    "requirements": [
+      "encode(input: Uint8Array | string) -> string",
+      "decode(input: string) -> Uint8Array",
+      "Support standard alphabet (A-Z 2-7) and hex alphabet",
+      "Proper padding with '='",
+      "Throw on invalid input characters"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "hex-codec",
+    "description": "Efficient hex encoding and decoding for binary data.",
+    "requirements": [
+      "encode(input: Uint8Array | string) -> string (lowercase hex)",
+      "decode(hex: string) -> Uint8Array",
+      "toHex(num: number, padTo?: number) -> string",
+      "fromHex(hex: string) -> number",
+      "Validate input and throw descriptive errors"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "date-format",
+    "description": "Date formatting and parsing with pattern strings (no external libs).",
+    "requirements": [
+      "format(date: Date, pattern: string) -> string",
+      "Patterns: YYYY MM DD HH mm ss SSS ddd DDD",
+      "parse(str: string, pattern: string) -> Date",
+      "relative(date: Date, now?: Date) -> string ('2 hours ago')",
+      "Zero dependencies"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "duration",
+    "description": "Parse and format human-readable durations (e.g. '2h 30m', '90s').",
+    "requirements": [
+      "parse(str: string) -> number (milliseconds)",
+      "format(ms: number, precision?: number) -> string",
+      "Support years, weeks, days, hours, minutes, seconds, ms",
+      "humanize(ms) -> '2 hours' using largest unit",
+      "add(ms1, ms2) and subtract(ms1, ms2) helpers"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "stats",
+    "description": "Descriptive statistics for numeric arrays.",
+    "requirements": [
+      "mean, median, mode, variance, stddev",
+      "min, max, range, sum",
+      "percentile(arr, p) -> number",
+      "histogram(arr, bins) -> { value: number, count: number }[]",
+      "All functions accept number[]"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "moving-average",
+    "description": "Simple, exponential, and weighted moving averages for time-series data.",
+    "requirements": [
+      "sma(data, period) -> number[] simple moving average",
+      "ema(data, period) -> number[] exponential moving average",
+      "wma(data, period) -> number[] weighted moving average",
+      "StreamingSMA class for incremental updates",
+      "StreamingEMA class for incremental updates"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "clamp",
+    "description": "Math utilities: clamp, lerp, remap, wrap, and smooth-step.",
+    "requirements": [
+      "clamp(value, min, max) -> number",
+      "lerp(a, b, t) -> number linear interpolation",
+      "remap(value, inMin, inMax, outMin, outMax) -> number",
+      "wrap(value, min, max) -> number wrapping modulo",
+      "smoothstep(edge0, edge1, x) -> number"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "arg-parser",
+    "description": "Minimal CLI argument parser with typed flags, positional args, and help generation.",
+    "requirements": [
+      "define flags with type ('string'|'boolean'|'number'), default, alias",
+      "parse(argv) returns typed result object",
+      "Positional arguments collected in _",
+      "generateHelp(programName) -> string",
+      "Unknown flag error with did-you-mean suggestion"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "table-format",
+    "description": "Format 2D data as an aligned ASCII table for terminal output.",
+    "requirements": [
+      "table(rows: string[][], options?) -> string",
+      "Column alignment: left, right, center",
+      "Optional header row with separator",
+      "Max column width with truncation",
+      "Box-drawing characters option (unicode borders)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "ansi-strip",
+    "description": "Strip ANSI escape sequences from strings.",
+    "requirements": [
+      "strip(str: string) -> string removes all ANSI codes",
+      "stripColor(str) removes only color/style codes",
+      "stripCursor(str) removes only cursor movement codes",
+      "visibleLength(str) -> number length without escape codes",
+      "isAnsiString(str) -> boolean"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "ansi-colors",
+    "description": "ANSI color and style codes for terminal output.",
+    "requirements": [
+      "red, green, yellow, blue, cyan, magenta, white, dim, bold, italic",
+      "bg.red, bg.green etc for background colors",
+      "reset() and stripAll()",
+      "Detect NO_COLOR env var to disable",
+      "Chain: bold(red('error'))"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "spinner",
+    "description": "Terminal spinner with multiple animation styles.",
+    "requirements": [
+      "Spinner class with start(text), stop(), succeed(text), fail(text)",
+      "Multiple frames: dots, line, arc, bounce",
+      "Update text while spinning",
+      "Clears line on stop",
+      "Returns elapsed time on stop"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "csv-parser",
+    "description": "Parse and stringify CSV data with RFC 4180 compliance.",
+    "requirements": [
+      "parse(csv: string, options?) -> string[][]",
+      "parseWithHeaders(csv) -> Record<string, string>[]",
+      "stringify(rows: string[][], headers?) -> string",
+      "Handle quoted fields with embedded commas and newlines",
+      "Custom delimiter option"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "toml-parser",
+    "description": "Minimal TOML parser for configuration files.",
+    "requirements": [
+      "parse(toml: string) -> Record<string, unknown>",
+      "Support string, integer, float, boolean, datetime, array, table",
+      "Inline tables and arrays of tables",
+      "Throw ParseError with line number on syntax error",
+      "Under 180 lines"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "frontmatter",
+    "description": "Parse YAML/TOML frontmatter from Markdown and other text files.",
+    "requirements": [
+      "parse(content: string) -> { data: Record<string, unknown>, body: string }",
+      "stringify(data, body) -> string",
+      "Support --- (YAML) and +++ (TOML) delimiters",
+      "detect(content) -> 'yaml' | 'toml' | null",
+      "Zero dependencies - parse YAML subset inline"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "json-path",
+    "description": "JSONPath expression evaluator for querying nested JSON.",
+    "requirements": [
+      "query(obj, path) -> unknown[] all matching values",
+      "get(obj, path) -> unknown | undefined first match",
+      "Support $, ., .., [], [*], [0:2], [?(@.x > 1)]",
+      "set(obj, path, value) -> void mutates first match",
+      "exists(obj, path) -> boolean"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "markdown-parser",
+    "description": "Parse Markdown to an AST suitable for rendering or transformation.",
+    "requirements": [
+      "parse(md: string) -> Node[] AST",
+      "Node types: heading, paragraph, code, blockquote, list, listItem, link, image, bold, italic, inlineCode, hr",
+      "toString(nodes) serializes back to Markdown",
+      "toPlainText(nodes) strips all markup",
+      "Under 200 lines"
+    ],
+    "maxLines": 200
+  },
+  {
+    "name": "html-entities",
+    "description": "HTML entity encoding and decoding.",
+    "requirements": [
+      "encode(str: string) -> string escapes <>&'\"",
+      "decode(str: string) -> string unescapes named and numeric entities",
+      "encodeAll(str) -> string encodes all non-ASCII as numeric entities",
+      "stripTags(html) -> string removes all HTML tags",
+      "Support &amp; &lt; &gt; &apos; &quot; and numeric &#xxx;"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "url-encode",
+    "description": "URL percent-encoding and decoding utilities.",
+    "requirements": [
+      "encode(str: string) -> string full percent-encoding",
+      "decode(str: string) -> string",
+      "encodeComponent(str) -> string (like encodeURIComponent but stricter)",
+      "encodeForm(obj: Record<string, string>) -> string application/x-www-form-urlencoded",
+      "decodeForm(str: string) -> Record<string, string>"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "deep-merge",
+    "description": "Deep merge objects and arrays with configurable conflict resolution.",
+    "requirements": [
+      "merge(target, source) -> merged object (non-mutating)",
+      "mergeAll(objects[]) -> merged",
+      "Options: arrayMerge ('replace'|'concat'|'unique'), depth limit",
+      "Handle null, undefined, Date, RegExp correctly",
+      "TypeScript generics preserve types"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "object-diff",
+    "description": "Compute structural diff between two objects.",
+    "requirements": [
+      "diff(a, b) -> Change[] where Change has path, type ('added'|'removed'|'changed'), oldValue, newValue",
+      "patch(obj, changes) applies a diff",
+      "invert(changes) reverses a diff for undo",
+      "Handles nested objects and arrays",
+      "Circular reference detection"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "object-clone",
+    "description": "Deep clone objects with support for special types.",
+    "requirements": [
+      "clone(obj: T) -> T deep clone",
+      "cloneWith(obj, customizer) for special type handling",
+      "Handle Date, RegExp, Map, Set, TypedArray, ArrayBuffer",
+      "Circular reference preservation",
+      "Faster than JSON.parse/stringify for most cases"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "object-freeze-deep",
+    "description": "Recursively freeze objects to prevent mutation.",
+    "requirements": [
+      "deepFreeze(obj: T) -> Readonly<T>",
+      "isFrozen(obj) -> boolean checks recursively",
+      "deepSeal(obj) seals without freezing",
+      "Handle circular references without infinite loop",
+      "Skip non-plain objects (Date, Map, etc.)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "key-value-store",
+    "description": "In-memory key-value store with namespacing, TTL, and event hooks.",
+    "requirements": [
+      "get(key), set(key, value, ttlMs?), delete(key), has(key)",
+      "Namespace(prefix) returns scoped sub-store",
+      "onChange(callback) fires on any mutation",
+      "keys(), values(), entries() iteration",
+      "clear() and size property"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "event-bus",
+    "description": "Typed publish-subscribe event bus.",
+    "requirements": [
+      "on(event, handler) and off(event, handler)",
+      "once(event, handler) auto-unsubscribes after first call",
+      "emit(event, data) synchronous dispatch",
+      "emitAsync(event, data) -> Promise<void> sequential async",
+      "TypeScript generic EventMap for type-safe events"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "state-machine",
+    "description": "Finite state machine with typed transitions and guards.",
+    "requirements": [
+      "Define states, events, and transitions declaratively",
+      "transition(event) returns new state or throws if invalid",
+      "onEnter(state, handler) and onExit(state, handler) hooks",
+      "Guard conditions: can(event) -> boolean",
+      "TypeScript generics for state and event unions"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "observable",
+    "description": "Observable values that notify subscribers on change.",
+    "requirements": [
+      "observable(initialValue) -> Observable<T>",
+      "subscribe(observer) and unsubscribe",
+      "computed(deps, fn) -> Observable derived value",
+      "batch(fn) groups multiple mutations into single notification",
+      "peek(obs) read without subscribing"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "pipe",
+    "description": "Functional pipe and compose operators for value transformation.",
+    "requirements": [
+      "pipe(value, ...fns) -> result (left-to-right)",
+      "compose(...fns) -> fn (right-to-left)",
+      "pipeAsync(value, ...asyncFns) -> Promise",
+      "TypeScript inference preserves types through the pipeline",
+      "Up to 10-step overloads"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "curry",
+    "description": "Auto-curry functions of any arity.",
+    "requirements": [
+      "curry(fn) -> curried version accepting partial args",
+      "Supports placeholder _ for argument holes",
+      "Works with functions of arity 1-8",
+      "TypeScript overloads for arity 1-4",
+      "Partial application returns callable with remaining args"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "memoize",
+    "description": "Memoize pure functions with configurable cache key and size limit.",
+    "requirements": [
+      "memoize(fn, options?) -> memoized function",
+      "keyResolver: (...args) -> string for custom cache key",
+      "maxSize evicts oldest entries",
+      "cache.clear(), cache.size, cache.has(key)",
+      "TypeScript generics preserve argument and return types"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "once",
+    "description": "Ensure a function is called at most once.",
+    "requirements": [
+      "once(fn) -> fn that only executes on first call",
+      "Returns same value on subsequent calls",
+      "onceAsync(fn) -> promise-returning version",
+      "reset(onceFn) to allow re-execution",
+      "TypeScript generics preserve types"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "partial",
+    "description": "Partial application - bind some arguments to a function.",
+    "requirements": [
+      "partial(fn, ...preArgs) -> function accepting remaining args",
+      "partialRight(fn, ...postArgs) -> function accepting preceding args",
+      "Support placeholder _ for argument holes",
+      "TypeScript inference for common arities",
+      "Works with async functions"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "result",
+    "description": "Result/Either monad for type-safe error handling without exceptions.",
+    "requirements": [
+      "ok(value: T) -> Result<T, never>",
+      "err(error: E) -> Result<never, E>",
+      "map, flatMap, mapErr on Result",
+      "unwrap() throws if Err, unwrapOr(default) for safe access",
+      "match(result, { ok, err }) pattern matching"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "option",
+    "description": "Option/Maybe monad for nullable value handling.",
+    "requirements": [
+      "some(value: T) -> Option<T>",
+      "none() -> Option<never>",
+      "fromNullable(val) -> Option<T>",
+      "map, flatMap, filter, getOrElse",
+      "isSome, isNone type guards"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "linked-list",
+    "description": "Doubly linked list with O(1) head/tail insert and delete.",
+    "requirements": [
+      "prepend(value), append(value), insertAfter(node, value)",
+      "remove(node) O(1)",
+      "toArray() and fromArray(arr)",
+      "forEach, map, filter, find",
+      "size property and Symbol.iterator"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "deque",
+    "description": "Double-ended queue with O(1) push/pop at both ends.",
+    "requirements": [
+      "pushFront(value), pushBack(value)",
+      "popFront() -> T | undefined, popBack() -> T | undefined",
+      "peekFront() and peekBack()",
+      "size, isEmpty, toArray(), Symbol.iterator",
+      "Generic type parameter"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "sparse-array",
+    "description": "Memory-efficient sparse array for large index ranges.",
+    "requirements": [
+      "set(index: number, value: T)",
+      "get(index: number) -> T | undefined",
+      "delete(index: number)",
+      "indices() and values() iterators",
+      "toArray(length?) pads with undefined"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "bit-flags",
+    "description": "Type-safe bit flag utilities for permission/option sets.",
+    "requirements": [
+      "createFlags(names[]) -> typed flag object",
+      "combine(...flags) -> number",
+      "has(value, flag) -> boolean",
+      "toggle(value, flag) -> number",
+      "toNames(value, flags) -> string[]"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "enum-utils",
+    "description": "Utilities for working with TypeScript enums and string unions.",
+    "requirements": [
+      "fromString(enumObj, str) -> T | undefined",
+      "values(enumObj) -> T[]",
+      "keys(enumObj) -> string[]",
+      "isEnumValue(enumObj, val) -> type guard",
+      "parseEnum(enumObj, str) throws if invalid"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "type-guard",
+    "description": "Runtime type guards and assertion utilities.",
+    "requirements": [
+      "isString, isNumber, isBoolean, isNull, isUndefined, isArray, isObject",
+      "isNonNull(val): val is NonNullable<T>",
+      "assert(condition, message) throws if false",
+      "assertNonNull(val, message)",
+      "isRecord(val) -> val is Record<string, unknown>"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "schema-validator",
+    "description": "Runtime JSON schema validator for TypeScript objects.",
+    "requirements": [
+      "validate(schema, value) -> { valid: boolean, errors: string[] }",
+      "Schema supports: type, required, properties, items, minimum, maximum, pattern, enum",
+      "coerce(schema, value) attempts type coercion",
+      "TypeScript type inference from schema shape",
+      "Nested object and array validation"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "natural-sort",
+    "description": "Natural sort algorithm for strings containing numbers.",
+    "requirements": [
+      "naturalSort(a: string, b: string) -> -1|0|1 comparator",
+      "sortBy(arr, key?) sorts strings or objects by string key",
+      "Handles embedded numbers: 'file10' after 'file9'",
+      "Case-insensitive option",
+      "Handles leading zeros correctly"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "string-distance",
+    "description": "String similarity metrics: Levenshtein, Jaro-Winkler, Hamming.",
+    "requirements": [
+      "levenshtein(a, b) -> number edit distance",
+      "jaro(a, b) -> number similarity 0-1",
+      "jaroWinkler(a, b, p?) -> number",
+      "hamming(a, b) -> number (requires equal length)",
+      "mostSimilar(query, candidates[]) -> string closest match"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "fuzzy-match",
+    "description": "Fuzzy string matching for search and autocomplete.",
+    "requirements": [
+      "score(pattern, str) -> number 0-1 match quality",
+      "match(pattern, str) -> { matched: boolean, score: number, indices: number[] }",
+      "filter(pattern, items[]) -> sorted matches",
+      "highlight(pattern, str) -> { text: string, highlighted: boolean }[]",
+      "Algorithm similar to fzf sequential character matching"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "string-builder",
+    "description": "Efficient string builder for concatenation-heavy operations.",
+    "requirements": [
+      "append(str), prepend(str), insert(index, str)",
+      "toString() joins internal buffer efficiently",
+      "length property",
+      "replace(pattern, replacement)",
+      "Dramatically faster than string += for large text"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "rope",
+    "description": "Rope data structure for efficient large text editing.",
+    "requirements": [
+      "insert(index, text), delete(start, end)",
+      "charAt(index), substring(start, end)",
+      "toString() and length property",
+      "O(log n) operations using balanced binary tree",
+      "Suitable for text editor use cases"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "word-wrap",
+    "description": "Word-wrap text to a maximum line width.",
+    "requirements": [
+      "wrap(text, width, options?) -> string",
+      "Options: indent, preserveNewlines, breakWords",
+      "Returns lines[] or joined string",
+      "Handles ANSI escape codes correctly (ignores them for width)",
+      "Hard-wrap fallback for words longer than width"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "crc32",
+    "description": "CRC32 checksum computation for data integrity.",
+    "requirements": [
+      "crc32(data: string | Uint8Array) -> number",
+      "crc32Hex(data) -> string (8-char hex)",
+      "update(crc: number, data) -> number for streaming",
+      "Uses lookup table for performance",
+      "Compatible with standard CRC32 polynomial"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "fnv-hash",
+    "description": "FNV-1a hash function for fast non-cryptographic hashing.",
+    "requirements": [
+      "fnv1a32(data: string | Uint8Array) -> number",
+      "fnv1a64(data) -> bigint",
+      "fnv1a128(data) -> string (hex)",
+      "Streaming API: FNV class with update(chunk) and digest()",
+      "Pure TypeScript, zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "ip-address",
+    "description": "IPv4 and IPv6 address parsing, validation, and manipulation.",
+    "requirements": [
+      "parseIPv4(str) -> { valid: boolean, octets: number[] }",
+      "isValidIPv4(str), isValidIPv6(str)",
+      "ipToLong(ip) -> number and longToIp(n) -> string",
+      "inCIDR(ip, cidr) -> boolean",
+      "expandIPv6(str) -> full form"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "mime-type",
+    "description": "MIME type lookup and file extension mapping.",
+    "requirements": [
+      "fromExtension(ext: string) -> string | undefined",
+      "fromPath(filePath: string) -> string | undefined",
+      "toExtension(mimeType: string) -> string | undefined",
+      "isText(mimeType: string) -> boolean",
+      "Built-in map of 100+ common types"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "content-type",
+    "description": "Parse and format HTTP Content-Type headers.",
+    "requirements": [
+      "parse(header: string) -> { type: string, params: Record<string, string> }",
+      "format(type: string, params?) -> string",
+      "charset(header: string) -> string | undefined",
+      "isJSON(header), isHTML(header), isText(header)",
+      "Normalize media type casing"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "http-status",
+    "description": "HTTP status code lookup with categories and messages.",
+    "requirements": [
+      "getMessage(code: number) -> string",
+      "isSuccess(code), isRedirect(code), isClientError(code), isServerError(code)",
+      "getCategory(code) -> '1xx'|'2xx'|'3xx'|'4xx'|'5xx'",
+      "All standard HTTP codes from 100 to 599",
+      "fromName('NOT_FOUND') -> 404"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "semver",
+    "description": "Semantic versioning parse, compare, and range matching.",
+    "requirements": [
+      "parse(str) -> { major, minor, patch, prerelease, build }",
+      "compare(a, b) -> -1|0|1",
+      "satisfies(version, range) -> boolean for ^, ~, >, <, =, *",
+      "increment(ver, 'major'|'minor'|'patch') -> string",
+      "isValid(str) -> boolean"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "topological-sort",
+    "description": "Topological sort for directed acyclic graphs.",
+    "requirements": [
+      "sort(nodes: string[], edges: [string, string][]) -> string[]",
+      "Throw CycleError with cycle path when cycle detected",
+      "hasCycle(nodes, edges) -> boolean",
+      "getCycles(nodes, edges) -> string[][]",
+      "Works with any node type via generic + key extractor"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "dag-builder",
+    "description": "Build and traverse directed acyclic graphs.",
+    "requirements": [
+      "addNode(id, data), addEdge(from, to)",
+      "dependsOn(id) -> string[] direct dependencies",
+      "dependedOnBy(id) -> string[] reverse dependencies",
+      "executionOrder() -> string[][] batches of parallel groups",
+      "Cycle detection on addEdge"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "interval-tree",
+    "description": "Interval tree for fast overlap queries.",
+    "requirements": [
+      "insert(start: number, end: number, data: T)",
+      "findOverlapping(start, end) -> T[]",
+      "findContaining(point: number) -> T[]",
+      "remove(start, end) -> boolean",
+      "Generic type parameter for associated data"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "binary-search",
+    "description": "Binary search variants on sorted arrays.",
+    "requirements": [
+      "binarySearch(arr, target, comparator?) -> index or -1",
+      "lowerBound(arr, target) -> first index >= target",
+      "upperBound(arr, target) -> first index > target",
+      "insertionPoint(arr, target) -> where to insert to keep sorted",
+      "Works with any type via comparator function"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "sorted-set",
+    "description": "Sorted set maintaining insertion order and uniqueness.",
+    "requirements": [
+      "add(value), has(value), delete(value)",
+      "min(), max(), floor(val), ceiling(val)",
+      "range(min, max) -> T[] values between bounds",
+      "size property, toArray(), Symbol.iterator",
+      "Generic type with comparator"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "ordered-map",
+    "description": "Map that maintains sorted key order.",
+    "requirements": [
+      "set(key, value), get(key), delete(key), has(key)",
+      "keys(), values(), entries() in sorted order",
+      "firstKey(), lastKey()",
+      "submap(fromKey, toKey) -> OrderedMap slice",
+      "Generic K extends string | number, V"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "multimap",
+    "description": "Map that associates each key with multiple values.",
+    "requirements": [
+      "set(key, value) appends value",
+      "get(key) -> T[]",
+      "delete(key, value?) removes one or all values for key",
+      "has(key, value?)",
+      "keys(), entries(), size"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "bimap",
+    "description": "Bidirectional map for one-to-one key-value relationships.",
+    "requirements": [
+      "set(key: K, value: V)",
+      "getByKey(key: K) -> V | undefined",
+      "getByValue(value: V) -> K | undefined",
+      "deleteByKey(key) and deleteByValue(value)",
+      "size, has, clear, entries"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "weak-ref-cache",
+    "description": "Cache backed by WeakRef for GC-friendly object caching.",
+    "requirements": [
+      "set(key: object, value: T)",
+      "get(key: object) -> T | undefined",
+      "Uses FinalizationRegistry to clean up stale entries",
+      "size (approximate) property",
+      "Suitable for caching computed data associated with DOM nodes or other objects"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "expiring-cache",
+    "description": "Cache with automatic per-entry TTL expiration.",
+    "requirements": [
+      "set(key, value, ttlMs), get(key) -> T | undefined",
+      "Lazy expiration on access",
+      "Active sweep via prune() to remove stale entries",
+      "onExpire(key, value) callback",
+      "remainingTtl(key) -> number"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "deep-equal",
+    "description": "Structural equality comparison for any JavaScript value.",
+    "requirements": [
+      "equal(a, b) -> boolean",
+      "Support primitives, objects, arrays, Date, RegExp, Map, Set",
+      "Circular reference handling",
+      "Options: strict (=== vs ==), ignoreKeys: string[]",
+      "diff(a, b) -> string describing first difference"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "assert",
+    "description": "Rich assertion library for tests and runtime contracts.",
+    "requirements": [
+      "assert(condition, message?) throws AssertionError",
+      "assertEqual(a, b), assertNotEqual(a, b)",
+      "assertDeepEqual(a, b), assertThrows(fn)",
+      "assertRejects(asyncFn) -> Promise",
+      "AssertionError includes actual and expected values"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "mock",
+    "description": "Function mock and spy utilities for testing.",
+    "requirements": [
+      "mock(impl?) -> Mock<T> with .calls, .callCount, .returnValues",
+      "spy(obj, method) wraps an existing method",
+      "Mock.returns(val), Mock.rejects(err), Mock.resolves(val)",
+      "Mock.reset() and Mock.restore()",
+      "TypeScript generics preserve argument and return types"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "snapshot",
+    "description": "Snapshot testing utilities for serializing and comparing values.",
+    "requirements": [
+      "serialize(value) -> string deterministic representation",
+      "matchSnapshot(value, name) compares against stored snapshot",
+      "updateSnapshot(name, value) saves new baseline",
+      "Snapshot stored as JSON file in __snapshots__",
+      "diff output when mismatch detected"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "test-runner",
+    "description": "Minimal test runner with describe/it/beforeEach/afterEach.",
+    "requirements": [
+      "describe(name, fn), it(name, fn), test(name, fn)",
+      "beforeEach(fn), afterEach(fn), beforeAll(fn), afterAll(fn)",
+      "Run tests with run() -> { passed, failed, duration }",
+      "Async test support",
+      "Minimal output format: pass/fail with timing"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "fixture-builder",
+    "description": "Builder pattern for creating test fixture objects.",
+    "requirements": [
+      "defineFixture(defaults) -> FixtureBuilder<T>",
+      "builder.build(overrides?) -> T",
+      "builder.buildMany(count, overrides?) -> T[]",
+      "Supports nested fixtures",
+      "TypeScript generics preserve the shape"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "structured-log",
+    "description": "Structured JSON logger with log levels and context.",
+    "requirements": [
+      "Logger class with debug, info, warn, error methods",
+      "Each log outputs JSON: { level, message, timestamp, ...context }",
+      "withContext(fields) -> child logger with merged context",
+      "Level filter: setLevel(level) suppresses below",
+      "Pluggable transport: setTransport(fn)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "log-rotate",
+    "description": "Log rotation for file-based loggers.",
+    "requirements": [
+      "RotatingLogger class wrapping file write",
+      "Rotate by size (maxBytes) and age (maxDays)",
+      "Keep N rotated files, delete older ones",
+      "Atomic rename-based rotation (no log loss)",
+      "Works on macOS and Linux"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "env-reader",
+    "description": "Type-safe environment variable reader with validation.",
+    "requirements": [
+      "env(key: string) -> EnvValue with .string(), .number(), .boolean(), .required()",
+      "Load from process.env and optional .env file",
+      "default(val) for fallback",
+      "validate(fn) for custom validation",
+      "Collect all errors before throwing (no fail-fast)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "dotenv",
+    "description": "Parse and load .env files into the environment.",
+    "requirements": [
+      "parse(content: string) -> Record<string, string>",
+      "load(path?) reads .env and merges into process.env",
+      "Override mode: existing vars not overwritten by default",
+      "Support # comments and multi-line values with quotes",
+      "expand(value, env) resolves ${VAR} references"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "path-resolver",
+    "description": "Project-aware path resolution utilities.",
+    "requirements": [
+      "findProjectRoot(startDir?) -> string by looking for package.json",
+      "resolveFromRoot(rel: string) -> absolute path",
+      "isSubpath(parent, child) -> boolean",
+      "normalizePath(p) -> forward slashes on all OS",
+      "relativeTo(from, to) -> relative path"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "file-walker",
+    "description": "Recursive file system walker with filtering and limiting.",
+    "requirements": [
+      "walk(dir, options?) -> AsyncIterable<string>",
+      "Options: include (glob patterns), exclude, maxDepth, followSymlinks",
+      "walkSync(dir, options?) -> string[]",
+      "Yields absolute paths",
+      "Error callback for permission errors"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "process-env-reader",
+    "description": "Safe process.env reader with type coercion and defaults.",
+    "requirements": [
+      "getEnv(key: string, defaultVal?: T) -> T",
+      "requireEnv(key) throws if missing",
+      "getAllByPrefix(prefix) -> Record<string, string>",
+      "parseEnvBool(val: string) -> boolean ('true','1','yes' -> true)",
+      "parseEnvList(val: string, sep?) -> string[]"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "signal-handler",
+    "description": "Graceful process signal handling with ordered shutdown.",
+    "requirements": [
+      "onShutdown(handler, priority?) registers cleanup handlers",
+      "Handle SIGINT, SIGTERM, SIGHUP",
+      "Handlers run in priority order with timeout",
+      "Exit code preserved from original signal",
+      "shutdown() for programmatic graceful exit"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "typed-event-emitter",
+    "description": "Node.js EventEmitter replacement with TypeScript event map types.",
+    "requirements": [
+      "TypedEventEmitter<Events extends Record<string, unknown>>",
+      "on(event, handler), off(event, handler), emit(event, data)",
+      "once(event) -> Promise<data>",
+      "listenerCount(event) and removeAllListeners(event?)",
+      "Fully type-safe - no string-keyed event leakage"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "middleware",
+    "description": "Compose middleware chains like Koa/Express without the framework.",
+    "requirements": [
+      "compose(middlewares) -> single handler",
+      "Middleware is (ctx: T, next: () => Promise<void>) => Promise<void>",
+      "useMiddleware(middleware) builder pattern",
+      "Error handling middleware (4-arg form)",
+      "Works with any context type via generic"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "pubsub",
+    "description": "In-process pub/sub with topics, wildcards, and backpressure.",
+    "requirements": [
+      "subscribe(topic, handler) -> unsubscribe function",
+      "Wildcard topics: 'user.*' matches 'user.created'",
+      "publish(topic, data) -> Promise<void>",
+      "Backpressure: drop or queue when handler is slow",
+      "subscribeOnce(topic) -> Promise<data>"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "command-bus",
+    "description": "Command/handler pattern for decoupled command dispatch.",
+    "requirements": [
+      "register(commandType, handler) binds handler",
+      "dispatch(command) -> Promise<result>",
+      "Middleware pipeline on all commands",
+      "TypeScript: handler type inferred from command",
+      "CommandNotFoundError with command type name"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "query-builder",
+    "description": "Type-safe SQL query builder (no DB connection required).",
+    "requirements": [
+      "select(columns), from(table), where(condition), orderBy, limit, offset",
+      "join(table, on), leftJoin, innerJoin",
+      "toSQL() -> { sql: string, params: unknown[] }",
+      "insert(table, data) and update(table, data, where)",
+      "Parameterized queries only - no string injection"
+    ],
+    "maxLines": 180
+  },
+  {
+    "name": "migration-runner",
+    "description": "Run versioned migration files in order with rollback support.",
+    "requirements": [
+      "run(migrationsDir, db) applies pending migrations",
+      "rollback(migrationsDir, db, steps?) reverts last N",
+      "Migration files named {timestamp}_{name}.ts with up() and down()",
+      "Track applied migrations in _migrations table",
+      "status() shows pending and applied"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "lazy-init",
+    "description": "Lazy initialization wrappers for expensive resources.",
+    "requirements": [
+      "lazy(factory: () => T) -> { value: T } computed on first access",
+      "lazyAsync(factory: () => Promise<T>) -> { get: () => Promise<T> }",
+      "reset(lazy) clears cached value for re-init",
+      "isInitialized(lazy) -> boolean",
+      "Thread-safe init guard (no double-init race)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "cache-invalidator",
+    "description": "Tag-based cache invalidation for grouped cache entries.",
+    "requirements": [
+      "set(key, value, tags: string[])",
+      "get(key) -> T | undefined",
+      "invalidate(tag) removes all entries with that tag",
+      "invalidateMany(tags[]) removes entries matching any tag",
+      "stats() -> { size, hitCount, missCount }"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "lock",
+    "description": "Async mutex and semaphore for coordinating concurrent access.",
+    "requirements": [
+      "Mutex class: acquire() -> Promise<release()>, withLock(fn)",
+      "ReadWriteLock: acquireRead(), acquireWrite()",
+      "Semaphore(n): acquire() blocks when all permits taken",
+      "Timeout option on acquire",
+      "No dependencies - pure async/await"
+    ],
+    "maxLines": 120
+  }
+]
