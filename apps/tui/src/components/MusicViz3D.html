@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eight - 3D Music Visualizer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1A1A2E; overflow: hidden; font-family: 'Inter', sans-serif; }
+  canvas { display: block; }
+  #controls {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 12px; z-index: 10;
+  }
+  #controls button, #controls label {
+    background: rgba(232, 97, 10, 0.15); border: 1px solid #E8610A;
+    color: #E8610A; padding: 10px 20px; border-radius: 6px; cursor: pointer;
+    font-size: 14px; transition: background 0.2s;
+  }
+  #controls button:hover, #controls label:hover { background: rgba(232, 97, 10, 0.3); }
+  #controls input[type="file"] { display: none; }
+  #title {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+    color: #E8610A; font-size: 18px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; z-index: 10; opacity: 0.8;
+  }
+  #hint {
+    position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+    color: rgba(232, 97, 10, 0.5); font-size: 12px; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<div id="title">Eight Visualizer</div>
+<div id="hint">Load audio or use mic to begin</div>
+<div id="controls">
+  <label for="audioFile">Load Audio</label>
+  <input type="file" id="audioFile" accept="audio/*">
+  <button id="micBtn">Use Mic</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const ORANGE = 0xE8610A;
+const BG = 0x1A1A2E;
+const BAR_COUNT = 64;
+const SPHERE_COUNT = 12;
+
+// Scene setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.FogExp2(BG, 0.015);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 12, 30);
+camera.lookAt(0, 4, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+// Lights
+const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+scene.add(ambient);
+const point = new THREE.PointLight(ORANGE, 2, 80);
+point.position.set(0, 20, 10);
+scene.add(point);
+const point2 = new THREE.PointLight(0x3366ff, 1, 60);
+point2.position.set(-15, 10, -10);
+scene.add(point2);
+
+// Ground plane
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(100, 100),
+  new THREE.MeshStandardMaterial({ color: 0x0d0d1a, roughness: 0.9 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.1;
+scene.add(ground);
+
+// Frequency bars - circular arrangement
+const bars = [];
+const barGeo = new THREE.BoxGeometry(0.6, 1, 0.6);
+const barMat = new THREE.MeshStandardMaterial({
+  color: ORANGE, emissive: ORANGE, emissiveIntensity: 0.3, metalness: 0.6, roughness: 0.3
+});
+for (let i = 0; i < BAR_COUNT; i++) {
+  const bar = new THREE.Mesh(barGeo, barMat.clone());
+  const angle = (i / BAR_COUNT) * Math.PI * 2;
+  const radius = 10;
+  bar.position.set(Math.cos(angle) * radius, 0.5, Math.sin(angle) * radius);
+  bar.lookAt(0, 0.5, 0);
+  scene.add(bar);
+  bars.push(bar);
+}
+
+// Floating spheres
+const spheres = [];
+const sphereGeo = new THREE.SphereGeometry(0.5, 24, 24);
+for (let i = 0; i < SPHERE_COUNT; i++) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: ORANGE, emissive: ORANGE, emissiveIntensity: 0.2,
+    metalness: 0.8, roughness: 0.2, transparent: true, opacity: 0.7
+  });
+  const sphere = new THREE.Mesh(sphereGeo, mat);
+  const angle = (i / SPHERE_COUNT) * Math.PI * 2;
+  sphere.userData.baseAngle = angle;
+  sphere.userData.baseY = 6 + Math.random() * 4;
+  sphere.userData.orbitRadius = 5 + Math.random() * 3;
+  sphere.position.set(
+    Math.cos(angle) * sphere.userData.orbitRadius,
+    sphere.userData.baseY,
+    Math.sin(angle) * sphere.userData.orbitRadius
+  );
+  scene.add(sphere);
+  spheres.push(sphere);
+}
+
+// Center core - wireframe icosahedron
+const coreGeo = new THREE.IcosahedronGeometry(2, 2);
+const coreMat = new THREE.MeshStandardMaterial({
+  color: ORANGE, emissive: ORANGE, emissiveIntensity: 0.5,
+  metalness: 0.9, roughness: 0.1, wireframe: true
+});
+const core = new THREE.Mesh(coreGeo, coreMat);
+core.position.y = 6;
+scene.add(core);
+
+// Audio setup
+let audioCtx, analyser, dataArray, source;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new AudioContext();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.8;
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+}
+
+document.getElementById('audioFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  initAudio();
+  if (source) source.disconnect();
+  const buf = await file.arrayBuffer();
+  const audioBuf = await audioCtx.decodeAudioData(buf);
+  source = audioCtx.createBufferSource();
+  source.buffer = audioBuf;
+  source.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  source.loop = true;
+  source.start();
+  document.getElementById('hint').textContent = 'Playing: ' + file.name;
+});
+
+document.getElementById('micBtn').addEventListener('click', async () => {
+  try {
+    initAudio();
+    if (source) source.disconnect();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    document.getElementById('hint').textContent = 'Listening to mic input';
+  } catch (err) {
+    document.getElementById('hint').textContent = 'Mic access denied';
+  }
+});
+
+// Animation loop
+const clock = new THREE.Clock();
+let mouseX = 0, mouseY = 0;
+document.addEventListener('mousemove', (e) => {
+  mouseX = (e.clientX / innerWidth - 0.5) * 2;
+  mouseY = (e.clientY / innerHeight - 0.5) * 2;
+});
+
+function getFreq(index) {
+  if (!dataArray) return 0;
+  analyser.getByteFrequencyData(dataArray);
+  const i = Math.floor((index / BAR_COUNT) * dataArray.length);
+  return dataArray[i] / 255;
+}
+
+function avgFreq() {
+  if (!dataArray) return 0;
+  analyser.getByteFrequencyData(dataArray);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+  return sum / (dataArray.length * 255);
+}
+
+function bassFreq() {
+  if (!dataArray) return 0;
+  analyser.getByteFrequencyData(dataArray);
+  let sum = 0;
+  const count = Math.floor(dataArray.length * 0.15);
+  for (let i = 0; i < count; i++) sum += dataArray[i];
+  return sum / (count * 255);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const avg = avgFreq();
+  const bass = bassFreq();
+
+  // Bars react to frequency bins
+  for (let i = 0; i < BAR_COUNT; i++) {
+    const freq = getFreq(i);
+    const targetY = 0.5 + freq * 15;
+    bars[i].scale.y += (targetY - bars[i].scale.y) * 0.15;
+    bars[i].position.y = bars[i].scale.y * 0.5;
+    bars[i].material.emissiveIntensity = 0.2 + freq * 0.8;
+  }
+
+  // Spheres orbit and pulse with average level
+  for (let i = 0; i < SPHERE_COUNT; i++) {
+    const s = spheres[i];
+    const angle = s.userData.baseAngle + t * 0.3;
+    const r = s.userData.orbitRadius + avg * 3;
+    s.position.x = Math.cos(angle) * r;
+    s.position.z = Math.sin(angle) * r;
+    s.position.y = s.userData.baseY + Math.sin(t * 2 + i) * 1.5 + bass * 3;
+    const scale = 0.8 + avg * 1.5;
+    s.scale.setScalar(scale);
+    s.material.emissiveIntensity = 0.1 + avg * 0.9;
+  }
+
+  // Core pulses with bass
+  const coreScale = 1 + bass * 1.5;
+  core.scale.setScalar(coreScale);
+  core.rotation.x = t * 0.2;
+  core.rotation.y = t * 0.3;
+  core.position.y = 6 + Math.sin(t) * 0.5;
+  coreMat.emissiveIntensity = 0.3 + bass * 1.2;
+
+  // Point light intensity follows bass
+  point.intensity = 1.5 + bass * 3;
+
+  // Camera follows mouse gently
+  camera.position.x += (mouseX * 8 - camera.position.x) * 0.02;
+  camera.position.y += (12 - mouseY * 4 - camera.position.y) * 0.02;
+  camera.lookAt(0, 4, 0);
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
