@@ -1257,5 +1257,2563 @@
       "No dependencies - pure async/await"
     ],
     "maxLines": 120
+  },
+  {
+    "name": "rest-client",
+    "description": "Minimal REST client with typed responses and error handling.",
+    "requirements": [
+      "get/post/put/patch/delete methods",
+      "Typed response wrapper with ok/error",
+      "Configurable base URL and default headers",
+      "Timeout support via AbortSignal",
+      "No external dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "graphql-client",
+    "description": "Lightweight GraphQL query executor over HTTP.",
+    "requirements": [
+      "query(doc, variables?) sends POST to /graphql",
+      "Typed response with data and errors fields",
+      "Handles network errors vs GraphQL errors separately",
+      "Supports custom headers",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "websocket-frame",
+    "description": "WebSocket frame encoder and decoder per RFC 6455.",
+    "requirements": [
+      "encodeFrame(payload, opcode) returns Buffer",
+      "decodeFrame(buffer) returns opcode + payload",
+      "Supports text, binary, ping, pong, close opcodes",
+      "Masking for client frames",
+      "Pure TypeScript, no Node ws module"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "sse-parser",
+    "description": "Server-Sent Events stream parser.",
+    "requirements": [
+      "parse(chunk) accumulates partial chunks",
+      "Emits SSEEvent objects: event, data, id, retry",
+      "Handles multi-line data fields",
+      "reset() clears buffer",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "cors-handler",
+    "description": "CORS policy evaluator for server-side request validation.",
+    "requirements": [
+      "CorsPolicy: allowedOrigins, methods, headers, maxAge",
+      "isAllowed(origin, method) returns boolean",
+      "buildHeaders(origin, method) returns response headers object",
+      "Wildcard origin support",
+      "Preflight detection helper"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "http-retry",
+    "description": "HTTP fetch wrapper with exponential backoff retry.",
+    "requirements": [
+      "fetchWithRetry(url, init, opts) retries on 5xx and network errors",
+      "Configurable maxRetries (default 3), baseDelay (default 300ms)",
+      "Exponential backoff with jitter",
+      "Respects Retry-After header",
+      "Returns last response or throws after exhausting retries"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "query-string",
+    "description": "URL query string encoder and decoder.",
+    "requirements": [
+      "stringify(obj) converts object to ?key=val&... string",
+      "parse(search) returns typed object from query string",
+      "Handles arrays as repeated keys",
+      "Handles boolean and number coercion",
+      "No external dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "multipart-form",
+    "description": "Build multipart/form-data bodies for file uploads.",
+    "requirements": [
+      "MultipartForm class with append(name, value, filename?)",
+      "build() returns {body: Uint8Array, contentType: string}",
+      "Supports string and binary fields",
+      "Generates random boundary",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "http-cache",
+    "description": "In-memory HTTP response cache with ETags and max-age.",
+    "requirements": [
+      "store(url, response, headers) caches by URL",
+      "get(url) returns cached entry or null",
+      "Respects Cache-Control: max-age",
+      "Supports ETag conditional requests",
+      "LRU eviction when capacity exceeded"
+    ],
+    "maxLines": 130
+  },
+  {
+    "name": "webhook-verifier",
+    "description": "Verify HMAC signatures on incoming webhooks (GitHub, Stripe style).",
+    "requirements": [
+      "verify(payload, signature, secret, algorithm?) returns boolean",
+      "Timing-safe comparison",
+      "Supports sha256 and sha1 prefix formats",
+      "parse(header) extracts algorithm and hex from 'sha256=xxx'",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "query-cache",
+    "description": "SQL query result cache with TTL and tag-based invalidation.",
+    "requirements": [
+      "set(key, result, ttl, tags[]) stores result",
+      "get(key) returns fresh result or null",
+      "invalidate(tag) evicts all entries with that tag",
+      "clear() flushes everything",
+      "Stats: hits, misses, evictions"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "migration-state",
+    "description": "Track and apply database migration state.",
+    "requirements": [
+      "Migration: {id, name, up: string, down: string}",
+      "MigrationState tracks applied migration IDs",
+      "getPending(applied[]) returns unapplied migrations in order",
+      "markApplied(id, appliedList) returns new list",
+      "isValid(migrations) checks for duplicate IDs"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "schema-diff",
+    "description": "Compute structural diff between two JSON schemas.",
+    "requirements": [
+      "diff(schemaA, schemaB) returns added, removed, changed fields",
+      "Field path notation: 'user.address.city'",
+      "Detects type changes, required changes, new/removed fields",
+      "Returns typed SchemaDiff object",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "seed-builder",
+    "description": "Reproducible test data seed builder.",
+    "requirements": [
+      "SeedBuilder with deterministic pseudo-random from seed string",
+      "int(min, max), float(min, max), string(len), bool(), pick(arr[])",
+      "uuid() generates deterministic UUID v4",
+      "reset() restores to initial seed state",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "record-diff",
+    "description": "Compute field-level diff between two plain objects for audit logs.",
+    "requirements": [
+      "diff(before, after) returns array of {field, from, to}",
+      "Handles nested objects with dot-path notation",
+      "Ignores undefined fields",
+      "Supports ignore list",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "bulk-insert",
+    "description": "Batch rows into chunked bulk INSERT statements.",
+    "requirements": [
+      "chunk(rows, size) splits rows into groups",
+      "toInsertSQL(table, rows) generates parameterized SQL",
+      "toValues(rows, columns) returns values array for driver",
+      "Handles null/undefined as NULL",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "row-mapper",
+    "description": "Map database rows to typed objects with column aliasing.",
+    "requirements": [
+      "RowMapper<T> with column-to-field mapping config",
+      "map(row) converts snake_case columns to camelCase fields",
+      "mapAll(rows) maps array",
+      "Type coercions: string-to-number, string-to-date, string-to-bool",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "cursor-paginator",
+    "description": "Cursor-based pagination helper for sorted queries.",
+    "requirements": [
+      "encode(cursor) encodes opaque base64 cursor from field values",
+      "decode(token) returns cursor values",
+      "buildWhere(cursor, direction) returns SQL WHERE fragment",
+      "PageResult<T>: items, nextCursor, prevCursor, hasMore",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "upsert-builder",
+    "description": "Build INSERT ... ON CONFLICT DO UPDATE statements.",
+    "requirements": [
+      "upsert(table, rows, conflictColumns, updateColumns) returns {sql, params}",
+      "Supports PostgreSQL and SQLite dialects",
+      "Handles partial upsert (only update subset of columns)",
+      "Validates that conflictColumns are in rows",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "jwt-decode",
+    "description": "Decode and validate JWT tokens without a secret (structure only).",
+    "requirements": [
+      "decode(token) returns {header, payload, signature}",
+      "isExpired(payload) checks exp claim",
+      "getClaims(token) returns typed payload object",
+      "validateStructure(token) checks 3-part format",
+      "Zero dependencies, no verification (use jwt-verify for that)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "jwt-sign",
+    "description": "Sign and verify JWTs using HMAC-SHA256.",
+    "requirements": [
+      "sign(payload, secret, expiresInSec?) returns JWT string",
+      "verify(token, secret) returns payload or throws",
+      "Uses Web Crypto API (subtleCrypto)",
+      "Handles exp, iat, nbf standard claims",
+      "Zero external dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "oauth-state",
+    "description": "Generate and validate OAuth 2.0 state parameters.",
+    "requirements": [
+      "generate() returns random base64url state string",
+      "store(state, metadata) saves with TTL (10 min default)",
+      "consume(state) validates and removes, returns metadata or null",
+      "isExpired(state) checks TTL",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "session-token",
+    "description": "Secure session token generation and validation.",
+    "requirements": [
+      "generate(len?) returns cryptographically random base64url token",
+      "hash(token) returns SHA-256 hex for DB storage",
+      "verify(token, hash) compares timing-safe",
+      "encode(id, token) packs session ID into token",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "csrf-token",
+    "description": "CSRF token generation and double-submit cookie validation.",
+    "requirements": [
+      "generate() returns random token",
+      "validate(cookieToken, formToken) timing-safe compare",
+      "createHeader(token) returns header name and value",
+      "extractFromHeader(headers) pulls token from X-CSRF-Token",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "password-policy",
+    "description": "Validate passwords against configurable security policies.",
+    "requirements": [
+      "PasswordPolicy: minLength, requireUpper, requireDigit, requireSymbol",
+      "validate(password, policy) returns {ok, violations[]}",
+      "strength(password) returns score 0-100",
+      "generateStrong(len?) returns policy-compliant password",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "token-bucket-auth",
+    "description": "Token bucket for per-user API rate limiting with auth context.",
+    "requirements": [
+      "TokenBucket per identity key",
+      "consume(key, tokens?) returns {allowed, remaining, resetAt}",
+      "refill is continuous (not interval-based)",
+      "getState(key) for inspecting bucket",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "api-key",
+    "description": "API key generation, hashing, and prefix-based lookup.",
+    "requirements": [
+      "generate(prefix?) returns {key, hash, prefix} e.g. 'sk_live_...'",
+      "hash(key) returns SHA-256 for storage",
+      "verify(key, hash) timing-safe compare",
+      "parsePrefix(key) returns prefix segment",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "scopes",
+    "description": "OAuth-style permission scope parser and validator.",
+    "requirements": [
+      "parse(scopeString) returns string[] from space-delimited string",
+      "hasScope(granted, required) checks subset",
+      "hasAnyScope(granted, anyOf) checks intersection",
+      "expand(scope, definitions) expands wildcard scopes",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "basic-auth",
+    "description": "HTTP Basic Authentication header encoder and decoder.",
+    "requirements": [
+      "encode(username, password) returns 'Basic <base64>'",
+      "decode(header) returns {username, password} or null",
+      "validate(header, credentials) timing-safe compare",
+      "isBasicAuth(header) type guard",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "tool-registry",
+    "description": "Registry for LLM tool definitions with validation.",
+    "requirements": [
+      "ToolRegistry stores name -> {description, schema, handler}",
+      "register(tool) adds with schema validation",
+      "get(name) retrieves handler",
+      "toOpenAITools() returns OpenAI-compatible tool array",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "prompt-chain",
+    "description": "Chain prompts sequentially, passing outputs as inputs.",
+    "requirements": [
+      "PromptChain with ordered steps",
+      "each step: (input: string) => Promise<string>",
+      "run(initialInput) executes chain and returns final output",
+      "onStep callback for observability",
+      "Abortable via AbortSignal"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "context-window",
+    "description": "Manage LLM context window with token budget.",
+    "requirements": [
+      "ContextWindow with maxTokens budget",
+      "add(message) inserts if budget allows, evicts oldest if not",
+      "getMessages() returns current window",
+      "tokenCount() returns total estimated tokens",
+      "Simple whitespace tokenizer (1 token per ~4 chars)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "token-budget",
+    "description": "Track and enforce token budgets across LLM calls.",
+    "requirements": [
+      "TokenBudget with total limit and per-call limit",
+      "spend(tokens, label) deducts and logs",
+      "remaining() returns available tokens",
+      "isExhausted() boolean check",
+      "reset() clears spend log"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "conversation-history",
+    "description": "Typed conversation history with role validation and truncation.",
+    "requirements": [
+      "ConversationHistory with max message count",
+      "append(role, content) adds user/assistant/system messages",
+      "truncate(maxTokens, estimator?) trims oldest non-system messages",
+      "toMessages() returns OpenAI-compatible array",
+      "clone() deep copies history"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "tool-call-parser",
+    "description": "Parse LLM tool call responses from raw text.",
+    "requirements": [
+      "parse(text) extracts tool calls from JSON blocks",
+      "ToolCall: {name, arguments, id}",
+      "parseMultiple(text) returns all tool calls in order",
+      "validate(call, schema) checks arguments against JSON schema",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "structured-output",
+    "description": "Parse and validate LLM structured output (JSON mode).",
+    "requirements": [
+      "extract(text) pulls JSON from markdown code blocks or raw text",
+      "parse<T>(text, schema) validates against JSON schema",
+      "repair(text) attempts to fix truncated JSON",
+      "isComplete(json) checks for balanced braces",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "agent-memory-window",
+    "description": "Sliding window memory for agent conversation context.",
+    "requirements": [
+      "AgentMemoryWindow with windowSize and summarize hook",
+      "add(turn) appends and evicts when full",
+      "getSummary() returns summary of evicted context",
+      "getWindow() returns current visible turns",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "function-schema",
+    "description": "Generate JSON Schema from TypeScript-style function signatures.",
+    "requirements": [
+      "FunctionParam: name, type, description, required",
+      "buildSchema(name, description, params) returns OpenAI function schema",
+      "toZodShape(params) returns Zod-compatible shape object",
+      "validate(args, schema) checks args against schema",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "agent-scratchpad",
+    "description": "Key-value scratchpad for agent working memory.",
+    "requirements": [
+      "Scratchpad with get/set/delete/clear",
+      "has(key) check",
+      "keys() and entries() iteration",
+      "toContext() serializes to LLM-readable string",
+      "fromContext(text) parses back from string format"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "aria-label",
+    "description": "Generate accessible ARIA labels from element context.",
+    "requirements": [
+      "labelFor(element) returns descriptive label string",
+      "buttonLabel(text, icon?) combines text and icon context",
+      "inputLabel(name, type, required) builds form input label",
+      "listLabel(count, noun) builds 'N items' style label",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "color-contrast",
+    "description": "WCAG 2.1 color contrast ratio calculator.",
+    "requirements": [
+      "contrast(hex1, hex2) returns ratio 1-21",
+      "isAA(ratio, large?) checks WCAG AA threshold",
+      "isAAA(ratio, large?) checks WCAG AAA threshold",
+      "relativeLuminance(hex) returns 0-1 value",
+      "suggestAccessible(fg, bg) returns adjusted fg that passes AA"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "focus-trap",
+    "description": "Focus trap logic for modal dialogs (DOM-free, index-based).",
+    "requirements": [
+      "FocusTrap with focusable element count",
+      "next(currentIndex) returns next focusable index",
+      "prev(currentIndex) returns previous focusable index",
+      "first() and last() return boundary indices",
+      "wrapAround enabled by default"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "screen-reader-text",
+    "description": "Generate screen-reader-friendly text alternatives.",
+    "requirements": [
+      "describe(node) returns verbose description from node metadata",
+      "abbreviate(text, expansions) expands known abbreviations",
+      "tableCaption(rows, cols) describes table structure",
+      "progressText(value, max, label?) returns '75% complete'",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "keyboard-nav",
+    "description": "Keyboard navigation handler for lists and grids.",
+    "requirements": [
+      "KeyboardNav with orientation: horizontal | vertical | grid",
+      "handleKey(event, currentIndex, itemCount) returns new index",
+      "gridNav(event, row, col, cols, rows) returns {row, col}",
+      "Handles Home/End/PageUp/PageDown",
+      "Zero dependencies (no DOM required)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "reduced-motion",
+    "description": "Respect prefers-reduced-motion in animation configs.",
+    "requirements": [
+      "MotionConfig: duration, easing, enabled",
+      "reduced(config) returns zero-duration config if motion is reduced",
+      "isReduced(mediaQueryList?) detects preference",
+      "withMotion(full, reduced) picks config based on preference",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "alt-text",
+    "description": "Generate descriptive alt text for images from metadata.",
+    "requirements": [
+      "altText(filename, context?) generates from filename heuristics",
+      "isDecorative(alt) returns true for empty or purely decorative alt",
+      "truncate(alt, maxLen) trims without cutting words",
+      "normalizeFilename(name) strips extension and separators",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "tab-order",
+    "description": "Manage logical tab order for custom interactive components.",
+    "requirements": [
+      "TabOrder with ordered element IDs",
+      "add(id, after?) inserts into order",
+      "remove(id) removes",
+      "next(id) returns next ID",
+      "prev(id) returns previous ID"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "locale-parser",
+    "description": "Parse and normalize BCP 47 locale strings.",
+    "requirements": [
+      "parse('en-US') returns {language, region?, script?, variants[]}",
+      "normalize(locale) returns canonical form",
+      "isValid(locale) checks format",
+      "match(requested[], available[]) finds best match",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "date-locale",
+    "description": "Locale-aware date formatting without Intl polyfills.",
+    "requirements": [
+      "format(date, pattern, locale) formats date",
+      "Patterns: YYYY, MM, DD, day name, month name",
+      "Short and long month/day names for en, fr, de, es, pt",
+      "relative(date, now, locale?) returns '3 days ago' style",
+      "Zero dependencies"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "plural-rules",
+    "description": "Pluralization rules for major languages.",
+    "requirements": [
+      "plural(count, locale) returns 'zero'|'one'|'two'|'few'|'many'|'other'",
+      "Implements CLDR plural rules for en, fr, de, es, pt, ru, ar, zh",
+      "selectForm(count, forms, locale) picks correct string from forms array",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "rtl-detect",
+    "description": "Detect RTL text direction and apply bidi logic.",
+    "requirements": [
+      "isRTL(locale) returns boolean for locale string",
+      "detectDirection(text) infers from Unicode bidi characters",
+      "toDir(locale) returns 'rtl' or 'ltr'",
+      "wrapBidi(text, dir) wraps with Unicode bidi markers",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "currency-format",
+    "description": "Format currency values by locale and currency code.",
+    "requirements": [
+      "format(amount, currency, locale) returns formatted string",
+      "Handles major currencies: USD, EUR, GBP, JPY, BRL, etc.",
+      "Compact notation: 1.2K, 3.4M",
+      "Negative formatting with parentheses option",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "number-format-locale",
+    "description": "Locale-aware number formatting with grouping and decimal separators.",
+    "requirements": [
+      "format(n, locale) uses correct decimal/group separator per locale",
+      "Locales: en-US (1,234.56), de-DE (1.234,56), fr-FR (1 234,56)",
+      "formatPercent(n, locale) appends % with locale rules",
+      "formatCompact(n, locale) returns 1.2K/1.2M style",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "message-format",
+    "description": "ICU MessageFormat-style string interpolation with plurals and selects.",
+    "requirements": [
+      "format(template, args) interpolates {name} placeholders",
+      "Plural: {count, plural, one{item} other{items}}",
+      "Select: {gender, select, male{he} female{she} other{they}}",
+      "Nested placeholders",
+      "Zero dependencies"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "transliterate",
+    "description": "Transliterate non-Latin scripts to ASCII.",
+    "requirements": [
+      "toASCII(text) transliterates common Unicode to Latin",
+      "Handles Cyrillic, Greek, Arabic, Hebrew basics",
+      "Accented Latin chars -> base char",
+      "Used for URL slug generation and sorting",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "timezone-offset",
+    "description": "Timezone offset utilities without full tz database.",
+    "requirements": [
+      "offsetToString(minutes) returns '+05:30' style",
+      "stringToOffset(str) parses offset string to minutes",
+      "utcToLocal(date, offsetMinutes) shifts date",
+      "localToUTC(date, offsetMinutes) unshifts date",
+      "isValidOffset(str) validates format"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "locale-sort",
+    "description": "Locale-aware string sorting with collation order.",
+    "requirements": [
+      "sort(items, locale?, key?) sorts array respecting locale rules",
+      "compare(a, b, locale) returns -1/0/1",
+      "Handles numeric sort: 'file10' after 'file9'",
+      "Ignores diacritics option",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "health-check",
+    "description": "HTTP health check endpoint builder with structured status response.",
+    "requirements": [
+      "HealthCheck with named checks: () => Promise<boolean>",
+      "run() executes all checks in parallel",
+      "toJSON() returns {status: 'ok'|'degraded'|'down', checks: {}}",
+      "statusCode() returns 200, 503, or 503",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "metrics-collector",
+    "description": "In-process metrics collector (counters, gauges, histograms).",
+    "requirements": [
+      "counter(name) increments count",
+      "gauge(name, value) sets current value",
+      "histogram(name, value) records observation",
+      "getAll() returns snapshot",
+      "reset() clears all metrics"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "log-aggregator",
+    "description": "Aggregate structured log lines with level filtering and buffering.",
+    "requirements": [
+      "LogAggregator with level threshold",
+      "add(entry) buffers structured log entry",
+      "flush() returns buffered entries and clears",
+      "filter(level) returns entries at or above level",
+      "toText(entries) formats as plain text lines"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "env-validator",
+    "description": "Validate required environment variables at startup.",
+    "requirements": [
+      "EnvSchema: {[key]: {required, default?, pattern?, description?}}",
+      "validate(schema, env) returns {ok, missing[], invalid[], values}",
+      "toError(result) formats human-readable error",
+      "withDefaults(schema, env) returns env with defaults applied",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "feature-flag",
+    "description": "Simple boolean feature flag store with overrides.",
+    "requirements": [
+      "FeatureFlags with default flags map",
+      "isEnabled(flag) returns boolean",
+      "override(flag, value) sets temporary override",
+      "withFlags(flags) creates scoped child instance",
+      "toJSON() returns current state for debugging"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "circuit-breaker",
+    "description": "Circuit breaker pattern for external service calls.",
+    "requirements": [
+      "CircuitBreaker with failureThreshold and timeout",
+      "execute(fn) wraps async call",
+      "States: closed, open, half-open",
+      "onOpen/onClose/onHalfOpen callbacks",
+      "getState() returns current state and stats"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "backoff",
+    "description": "Configurable backoff strategies for retry delays.",
+    "requirements": [
+      "exponential(attempt, base, max) returns ms delay",
+      "linear(attempt, step, max) returns ms delay",
+      "constant(delay) returns fixed delay",
+      "jitter(delay, factor) adds random variance",
+      "withJitter(strategy, factor) wraps any strategy"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "process-health",
+    "description": "Monitor Node/Bun process health metrics.",
+    "requirements": [
+      "memoryUsage() returns rss, heapUsed, heapTotal in MB",
+      "cpuUsage() returns user and system in ms",
+      "uptime() returns seconds since start",
+      "isUnhealthy(thresholds) checks against limits",
+      "snapshot() returns all metrics at once"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "shutdown-handler",
+    "description": "Graceful shutdown handler for process signals.",
+    "requirements": [
+      "onShutdown(fn) registers async cleanup handler",
+      "trigger(signal?) initiates shutdown sequence",
+      "All handlers run in registration order",
+      "Timeout after maxWaitMs",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "deploy-lock",
+    "description": "Distributed deploy lock using filesystem or in-memory.",
+    "requirements": [
+      "DeployLock with lockFile path and TTL",
+      "acquire() returns true if lock obtained",
+      "release() removes lock",
+      "isLocked() checks current state",
+      "lockInfo() returns {lockedAt, pid, host}"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "use-debounce",
+    "description": "React hook for debouncing values and callbacks.",
+    "requirements": [
+      "useDebounce<T>(value, delay) returns debounced value",
+      "useDebouncedCallback(fn, delay) returns stable debounced fn",
+      "Clears on unmount",
+      "Works with React 18+",
+      "Zero dependencies beyond React"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "use-local-storage",
+    "description": "React hook for synced localStorage state.",
+    "requirements": [
+      "useLocalStorage<T>(key, initial) returns [value, setter, remove]",
+      "Serializes/deserializes JSON",
+      "Syncs across tabs via storage event",
+      "Handles SSR (no window)",
+      "Zero external dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "use-async",
+    "description": "React hook for managing async operations with loading/error state.",
+    "requirements": [
+      "useAsync<T>(fn, deps) returns {data, loading, error, refresh}",
+      "Cancels previous call on dep change",
+      "refresh() re-runs manually",
+      "Handles unmount gracefully",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "use-interval",
+    "description": "React hook for declarative setInterval with cleanup.",
+    "requirements": [
+      "useInterval(callback, delay) sets up interval",
+      "delay=null pauses the interval",
+      "Stable callback ref (no stale closure)",
+      "Clears on unmount",
+      "Zero dependencies"
+    ],
+    "maxLines": 40
+  },
+  {
+    "name": "use-click-outside",
+    "description": "React hook to detect clicks outside a referenced element.",
+    "requirements": [
+      "useClickOutside(ref, handler) attaches event listener",
+      "Handles touch events too",
+      "Ignores portal children",
+      "Cleans up on unmount",
+      "Zero dependencies"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "use-media-query",
+    "description": "React hook for responsive breakpoint detection.",
+    "requirements": [
+      "useMediaQuery(query) returns boolean match",
+      "Reacts to resize events",
+      "SSR-safe (defaults to false on server)",
+      "useBreakpoint(breakpoints) returns current breakpoint key",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "use-previous",
+    "description": "React hook to access the previous value of a variable.",
+    "requirements": [
+      "usePrevious<T>(value) returns previous render's value",
+      "Returns undefined on first render",
+      "Works with any value type",
+      "Zero dependencies",
+      "Under 20 lines"
+    ],
+    "maxLines": 20
+  },
+  {
+    "name": "use-toggle",
+    "description": "React hook for boolean toggle state.",
+    "requirements": [
+      "useToggle(initial?) returns [value, toggle, setTrue, setFalse]",
+      "toggle() flips state",
+      "setTrue/setFalse for explicit control",
+      "Zero dependencies",
+      "Under 20 lines"
+    ],
+    "maxLines": 20
+  },
+  {
+    "name": "use-event-listener",
+    "description": "React hook for adding and auto-cleaning event listeners.",
+    "requirements": [
+      "useEventListener(target, event, handler, options?) attaches listener",
+      "Works on window, document, or any EventTarget",
+      "Handles SSR",
+      "Cleans up on unmount",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "use-resize-observer",
+    "description": "React hook wrapping ResizeObserver for element size tracking.",
+    "requirements": [
+      "useResizeObserver(ref) returns {width, height}",
+      "Triggers on element size changes",
+      "Debounced by default",
+      "SSR-safe",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "lazy-value",
+    "description": "Lazily evaluated value with explicit initialization.",
+    "requirements": [
+      "LazyValue<T>(factory) defers computation",
+      "value property computes and caches on first access",
+      "isInitialized() checks if computed",
+      "reset() clears cached value",
+      "Zero dependencies"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "request-dedup",
+    "description": "Deduplicate in-flight async requests by cache key.",
+    "requirements": [
+      "dedup<T>(key, fn) returns shared promise if key is in-flight",
+      "On resolution, all waiters receive same result",
+      "On rejection, all waiters receive same error",
+      "Configurable TTL for caching successful results",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "cache-headers",
+    "description": "Parse and build HTTP cache control headers.",
+    "requirements": [
+      "parse(headerValue) returns CacheControl object",
+      "build(options) generates Cache-Control header string",
+      "isStale(headers, age) checks if resource is stale",
+      "mustRevalidate(headers) boolean check",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "batch-queue",
+    "description": "Coalesce multiple individual requests into batched calls.",
+    "requirements": [
+      "BatchQueue<T, R>(batchFn, options) collects items",
+      "add(item) returns Promise<R>",
+      "Flushes on maxSize or maxWait timeout",
+      "batchFn receives items array and returns results array",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "idle-queue",
+    "description": "Execute tasks during idle time (requestIdleCallback-inspired).",
+    "requirements": [
+      "IdleQueue enqueues low-priority tasks",
+      "add(fn, priority?) queues function",
+      "flush() runs queued tasks immediately",
+      "start()/stop() for auto-drain mode",
+      "Zero dependencies (no browser API required)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "object-pool",
+    "description": "Reusable object pool to reduce GC pressure.",
+    "requirements": [
+      "ObjectPool<T>(factory, reset, maxSize) manages instances",
+      "acquire() gets instance from pool or creates new",
+      "release(obj) returns to pool after reset",
+      "size() returns current pool depth",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "fn-once-async",
+    "description": "Ensure an async function is only called once, caching the result.",
+    "requirements": [
+      "onceAsync<T>(fn) wraps async function",
+      "Concurrent calls wait for the first to complete",
+      "Returns cached result on subsequent calls",
+      "throwOnce(fn) re-throws cached error",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "timed-cache",
+    "description": "Cache with per-entry TTL and lazy eviction.",
+    "requirements": [
+      "TimedCache<K, V>(defaultTTL) stores entries with expiry",
+      "get(key) returns value or undefined if expired",
+      "set(key, value, ttl?) overrides default TTL",
+      "has(key) returns true if present and not expired",
+      "delete(key) explicit removal"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "frame-scheduler",
+    "description": "Schedule work across animation frames (non-browser, timer-based).",
+    "requirements": [
+      "FrameScheduler with targetFPS",
+      "schedule(fn) queues work for next frame",
+      "isRunning() boolean state",
+      "pause()/resume() control",
+      "Uses setInterval internally (no RAF)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "work-queue",
+    "description": "Priority work queue with concurrency control.",
+    "requirements": [
+      "WorkQueue with concurrency and priority levels (0-9)",
+      "add(fn, priority?) returns Promise",
+      "High-priority tasks run before low",
+      "pause()/resume() block new task starts",
+      "getStats() returns pending, running, completed"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "input-sanitize",
+    "description": "Strip dangerous characters from user-supplied input strings.",
+    "requirements": [
+      "sanitize(input) removes control characters and null bytes",
+      "stripHTML(input) removes HTML tags",
+      "normalizeWhitespace(input) collapses runs of whitespace",
+      "maxLength(input, limit) truncates safely",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "xss-escape",
+    "description": "Escape HTML special characters for safe output in HTML contexts.",
+    "requirements": [
+      "escape(str) replaces <, >, &, \", ' with entities",
+      "escapeAttr(str) safe for HTML attribute values",
+      "escapeCSS(str) safe for CSS string values",
+      "escapeURL(str) safe for URL parameter values",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "sql-escape",
+    "description": "Escape values for SQL string interpolation (last-resort only).",
+    "requirements": [
+      "escapeString(value) escapes single quotes by doubling",
+      "escapeIdentifier(name) wraps in double-quotes and escapes",
+      "escapeWildcard(value) escapes LIKE wildcards",
+      "warn(msg) logs to console that parameterized queries are preferred",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "csp-builder",
+    "description": "Build Content-Security-Policy headers programmatically.",
+    "requirements": [
+      "CSPBuilder with directive methods: defaultSrc, scriptSrc, etc.",
+      "nonce() generates a random nonce for inline scripts",
+      "toString() generates header value string",
+      "toMeta() generates <meta> tag content",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "path-traversal",
+    "description": "Detect and block path traversal attacks in file paths.",
+    "requirements": [
+      "isSafe(userPath, root) returns false if path escapes root",
+      "sanitize(userPath, root) returns resolved path or throws",
+      "detect(path) returns array of suspicious patterns found",
+      "normalize(path) resolves .., ., and double slashes",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "redact",
+    "description": "Redact sensitive fields from objects for logging.",
+    "requirements": [
+      "redact(obj, keys[]) replaces matched keys with '[REDACTED]'",
+      "redactDeep(obj, keys[]) recursive redaction",
+      "redactPattern(obj, regex) redacts keys matching pattern",
+      "maskEmail(email) returns 'u***@domain.com'",
+      "maskCard(number) returns '**** **** **** 1234'"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "nonce",
+    "description": "Generate cryptographically secure nonces for CSP and tokens.",
+    "requirements": [
+      "generate(len?) returns base64url nonce",
+      "generateHex(len?) returns hex nonce",
+      "verify(nonce, stored) timing-safe comparison",
+      "Used for script nonces and form tokens",
+      "Zero dependencies"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "entropy",
+    "description": "Estimate entropy of a string for password strength analysis.",
+    "requirements": [
+      "entropy(str) returns bits of entropy estimate",
+      "charsetSize(str) returns character set cardinality",
+      "zxcvbn-lite(str) returns score 0-4 based on patterns",
+      "isCommonPassword(str) checks against small blocklist",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "rate-limit-headers",
+    "description": "Parse and build standard rate limit headers.",
+    "requirements": [
+      "parse(headers) extracts limit, remaining, reset from RateLimit-* or X-RateLimit-* headers",
+      "build(limit, remaining, reset) returns headers object",
+      "isExhausted(headers) boolean check",
+      "retryAfter(headers) returns ms until reset",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "secret-scan",
+    "description": "Scan text for accidentally included secrets (API keys, tokens).",
+    "requirements": [
+      "scan(text) returns array of {type, match, position}",
+      "Patterns: AWS keys, GitHub tokens, generic bearer tokens, private keys",
+      "redact(text) replaces found secrets with '[SECRET]'",
+      "isSafe(text) returns boolean",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "csv-to-json",
+    "description": "Convert CSV text to array of objects with header row support.",
+    "requirements": [
+      "parse(csv) returns array of row objects",
+      "Headers from first row by default",
+      "Handles quoted fields with commas",
+      "trimFields option",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "json-to-csv",
+    "description": "Convert array of objects to CSV string.",
+    "requirements": [
+      "stringify(rows, columns?) generates CSV",
+      "Auto-detects columns from first row",
+      "Quotes fields containing commas or newlines",
+      "Custom separator option",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "xml-parse",
+    "description": "Minimal XML parser for simple documents.",
+    "requirements": [
+      "parse(xml) returns nested object structure",
+      "Handles attributes as @ keys",
+      "Text content as # key",
+      "Handles self-closing tags",
+      "Zero dependencies, no DOM"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "yaml-parse",
+    "description": "Minimal YAML subset parser (scalars, sequences, mappings).",
+    "requirements": [
+      "parse(yaml) returns JS object",
+      "Supports string, number, boolean, null scalars",
+      "Supports nested mappings and sequences",
+      "Handles quoted strings and multiline blocks (|)",
+      "Zero dependencies"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "ndjson",
+    "description": "Newline-delimited JSON (NDJSON) encoder and decoder.",
+    "requirements": [
+      "encode(records) returns NDJSON string",
+      "decode(text) returns array of parsed objects",
+      "stream(text, onRecord) calls callback per line",
+      "encodeRecord(obj) serializes single line",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "msgpack-lite",
+    "description": "Minimal MessagePack encoder for common JS types.",
+    "requirements": [
+      "encode(value) returns Uint8Array",
+      "Supports null, bool, int, float, string, array, map",
+      "decode(buffer) returns JS value",
+      "fixmap, fixarray, fixstr optimizations",
+      "Zero dependencies, no Node Buffer"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "binary-codec",
+    "description": "Encode and decode binary data structures from/to ArrayBuffer.",
+    "requirements": [
+      "BinaryCodec with field definitions: name, type, size",
+      "encode(obj) returns ArrayBuffer",
+      "decode(buffer) returns typed object",
+      "Supported types: uint8, uint16, uint32, int8, int16, int32, float32, float64",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "transform-pipeline",
+    "description": "Composable sync and async data transformation pipeline.",
+    "requirements": [
+      "pipe(...fns) creates a sync pipeline",
+      "asyncPipe(...fns) creates an async pipeline",
+      "Both accept initial value and return transformed result",
+      "Type-safe chaining",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "flatten-tree",
+    "description": "Flatten and unflatten tree structures.",
+    "requirements": [
+      "flatten(tree, childKey) returns array of nodes with parentId",
+      "unflatten(nodes) rebuilds nested tree",
+      "breadthFirst(tree, childKey) traversal",
+      "depthFirst(tree, childKey) traversal",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "proto-encode",
+    "description": "Minimal Protocol Buffers field encoder (wire types 0, 1, 2, 5).",
+    "requirements": [
+      "encodeVarint(n) returns bytes",
+      "encodeField(fieldNum, wireType, value) returns bytes",
+      "encodeString(fieldNum, str) returns bytes",
+      "encodeBytes(fieldNum, buf) returns bytes",
+      "decode(buffer) returns {fieldNum, wireType, value}[]"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "image-dimensions",
+    "description": "Parse image dimensions from raw file headers without decoding.",
+    "requirements": [
+      "detect(buffer) returns {width, height, format} or null",
+      "Supports PNG, JPEG, GIF, WebP header parsing",
+      "format returns 'png'|'jpeg'|'gif'|'webp'|null",
+      "isPNG/isJPEG/isGIF/isWebP type guards",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "dominant-color",
+    "description": "Find dominant color in an image pixel array.",
+    "requirements": [
+      "dominantColor(pixels: Uint8ClampedArray, width, height) returns {r, g, b}",
+      "Uses simple median cut approximation",
+      "toHex(rgb) converts to hex string",
+      "palette(pixels, count) returns top-N colors",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "exif-parse",
+    "description": "Extract EXIF metadata from JPEG files (minimal parser).",
+    "requirements": [
+      "parse(buffer) returns key EXIF fields: make, model, dateTime, width, height",
+      "Reads APP1 marker and IFD0 tags",
+      "Returns null on parse error",
+      "Zero dependencies",
+      "Read-only, no write support"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "svg-sanitize",
+    "description": "Strip unsafe elements and attributes from SVG strings.",
+    "requirements": [
+      "sanitize(svg) removes script, foreignObject, and event handlers",
+      "removeScripts(svg) strips <script> tags",
+      "removeHandlers(svg) strips on* attributes",
+      "isClean(svg) returns boolean",
+      "Zero dependencies, regex-based (safe for simple SVGs)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "audio-duration",
+    "description": "Estimate audio file duration from file headers.",
+    "requirements": [
+      "estimate(buffer, format) returns seconds estimate",
+      "Supports MP3 (CBR bitrate header), WAV (header), OGG (comment header)",
+      "format: 'mp3'|'wav'|'ogg'",
+      "Returns null if unable to determine",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "resize-calc",
+    "description": "Calculate resize dimensions preserving aspect ratio.",
+    "requirements": [
+      "fit(srcW, srcH, maxW, maxH) returns {width, height} within bounds",
+      "fill(srcW, srcH, targetW, targetH) returns crop rect",
+      "cover(srcW, srcH, targetW, targetH) returns scale factor",
+      "contain(srcW, srcH, targetW, targetH) returns scale factor",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "color-palette",
+    "description": "Generate a color palette from a seed color.",
+    "requirements": [
+      "generate(hex, count) returns array of harmonious hex colors",
+      "complementary(hex) returns opposite hue",
+      "analogous(hex, count) returns nearby hues",
+      "triadic(hex) returns 3-color triad",
+      "toRGB(hex) and toHex(rgb) conversions"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "image-hash",
+    "description": "Perceptual image hash (pHash) for similarity detection.",
+    "requirements": [
+      "pHash(pixels, width, height, size?) returns bitstring",
+      "hamming(hash1, hash2) returns distance 0-64",
+      "isSimilar(hash1, hash2, threshold?) returns boolean",
+      "normalize(pixels, width, height, size) downsizes and grayscales",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "video-duration",
+    "description": "Parse video duration from MP4/WebM container headers.",
+    "requirements": [
+      "parse(buffer) returns {duration, format} or null",
+      "MP4: reads mvhd box for duration and timescale",
+      "WebM: reads EBML Segment Duration element",
+      "Supports partial buffer (first 1MB sufficient)",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "mime-detect",
+    "description": "Detect MIME type from file magic bytes (no extension lookup).",
+    "requirements": [
+      "detect(buffer) returns MIME type string or null",
+      "Supports JPEG, PNG, GIF, WebP, MP4, WebM, MP3, PDF, ZIP, GZIP",
+      "getMagic(buffer) returns hex signature",
+      "isImage(buffer) boolean helper",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "string-interpolate",
+    "description": "Safe string interpolation with escape support.",
+    "requirements": [
+      "interpolate(template, vars) replaces {{key}} placeholders",
+      "escape(value) prevents double-interpolation",
+      "strict mode throws on missing keys",
+      "nested: vars can be functions returning string",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "text-truncate",
+    "description": "Truncate text at word boundaries with ellipsis.",
+    "requirements": [
+      "truncate(text, maxLen, ellipsis?) truncates at word boundary",
+      "truncateMiddle(text, maxLen) keeps start and end, replaces middle",
+      "truncateHTML(html, maxLen) truncates tag-aware text content",
+      "countWords(text) returns word count",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "phone-format",
+    "description": "Format and validate phone numbers in E.164 and national formats.",
+    "requirements": [
+      "format(number, country) returns national format",
+      "toE164(number, country) normalizes to +CC...",
+      "isValid(number) basic format validation",
+      "stripFormatting(number) removes non-digits except leading +",
+      "Supports US, UK, IE, BR, DE, FR"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "email-validate",
+    "description": "Validate email addresses with RFC 5321 compliance.",
+    "requirements": [
+      "validate(email) returns {ok, reason?}",
+      "isDisposable(email) checks against small blocklist",
+      "normalizeDomain(email) lowercases domain part",
+      "extractDomain(email) returns domain",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "color-parse",
+    "description": "Parse color strings in multiple formats.",
+    "requirements": [
+      "parse(str) accepts hex, rgb(), rgba(), hsl(), hsla(), named colors",
+      "Returns {r, g, b, a} normalized 0-255 / 0-1",
+      "toHex(rgba) converts back to hex",
+      "toRGBA(str) shortcut",
+      "Supports CSS named colors (140 standard)"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "number-words",
+    "description": "Convert numbers to English words and back.",
+    "requirements": [
+      "toWords(n) converts integer to English: 'one hundred twenty-three'",
+      "fromWords(str) parses English to number",
+      "ordinal(n) returns 'first', 'second', etc.",
+      "Handles up to trillion",
+      "Zero dependencies"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "string-similarity",
+    "description": "String similarity metrics.",
+    "requirements": [
+      "jaro(a, b) returns 0-1 Jaro similarity",
+      "jaroWinkler(a, b) returns 0-1 Jaro-Winkler similarity",
+      "hammingDistance(a, b) returns edit count (same-length strings)",
+      "longestCommonSubstring(a, b) returns LCS string",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "roman-numeral",
+    "description": "Convert between integers and Roman numerals.",
+    "requirements": [
+      "toRoman(n) converts 1-3999 to Roman",
+      "fromRoman(str) parses Roman to integer",
+      "isValid(str) validates Roman numeral string",
+      "Zero dependencies",
+      "Under 60 lines"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "base-convert",
+    "description": "Convert numbers between arbitrary bases 2-36.",
+    "requirements": [
+      "convert(n, fromBase, toBase) converts string representation",
+      "toBinary(n) shortcut for base 2",
+      "toHexStr(n) shortcut for base 16",
+      "toOctal(n) shortcut for base 8",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "regex-escape",
+    "description": "Escape strings for use in regular expressions.",
+    "requirements": [
+      "escape(str) escapes all regex special characters",
+      "escapeReplacement(str) escapes $ in replacement strings",
+      "toPattern(str, flags?) builds RegExp from literal string",
+      "isRegex(value) type guard",
+      "Zero dependencies"
+    ],
+    "maxLines": 40
+  },
+  {
+    "name": "big-int-math",
+    "description": "BigInt arithmetic helpers for precision calculations.",
+    "requirements": [
+      "bigFloor(n, d) integer floor division with BigInt",
+      "bigCeil(n, d) ceiling division",
+      "bigGCD(a, b) greatest common divisor",
+      "bigLCM(a, b) least common multiple",
+      "bigPow(base, exp) integer exponentiation"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "fraction",
+    "description": "Exact rational number arithmetic.",
+    "requirements": [
+      "Fraction(numerator, denominator) class",
+      "add, subtract, multiply, divide methods",
+      "reduce() simplifies to lowest terms",
+      "toDecimal(precision?) converts to string",
+      "equals(other), compare(other)"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "statistics",
+    "description": "Descriptive statistics for numeric arrays.",
+    "requirements": [
+      "mean(arr) arithmetic mean",
+      "median(arr) middle value",
+      "mode(arr) most frequent values",
+      "variance(arr, sample?) population or sample variance",
+      "stdDev(arr, sample?) standard deviation"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "histogram",
+    "description": "Build frequency histograms from numeric data.",
+    "requirements": [
+      "histogram(data, bins) returns bin array with {min, max, count}",
+      "auto(data, maxBins?) auto-selects bin count (Sturges' rule)",
+      "normalize(bins) converts counts to frequencies",
+      "cumulative(bins) builds CDF",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "interpolate-linear",
+    "description": "Linear and bilinear interpolation functions.",
+    "requirements": [
+      "lerp(a, b, t) linear interpolation",
+      "lerpClamped(a, b, t) clamps t to 0-1",
+      "inverseLerp(a, b, value) returns t",
+      "remap(value, inMin, inMax, outMin, outMax) remaps range",
+      "bilinear(q11, q12, q21, q22, tx, ty) 2D interpolation"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "matrix2d",
+    "description": "2D transformation matrix for graphics.",
+    "requirements": [
+      "Matrix2D: a, b, c, d, tx, ty",
+      "multiply(m1, m2) matrix multiplication",
+      "translate(tx, ty), rotate(angle), scale(sx, sy) factory methods",
+      "invert(m) returns inverse",
+      "transformPoint(m, x, y) applies transform"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "percentile",
+    "description": "Compute percentiles and quantiles from sorted arrays.",
+    "requirements": [
+      "percentile(sorted, p) returns value at percentile p (0-100)",
+      "quantile(sorted, q) returns value at quantile q (0-1)",
+      "iqr(sorted) interquartile range",
+      "quartiles(sorted) returns Q1, median, Q3",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "running-stats",
+    "description": "Welford's online algorithm for running mean and variance.",
+    "requirements": [
+      "RunningStats class with push(value)",
+      "mean property",
+      "variance and stdDev properties",
+      "count and sum properties",
+      "reset() resets state"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "unit-convert",
+    "description": "Convert common physical units.",
+    "requirements": [
+      "convert(value, from, to) returns converted value",
+      "Supports: length (m, km, ft, in, mi), mass (kg, g, lb, oz), temp (C, F, K)",
+      "volume (l, ml, gal, fl oz)",
+      "speed (km/h, mph, m/s)",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "roman-calendar",
+    "description": "Calculate day of week, week number, and leap year for any date.",
+    "requirements": [
+      "dayOfWeek(year, month, day) returns 0-6 (Sun-Sat)",
+      "weekNumber(year, month, day) returns ISO week number",
+      "isLeapYear(year) returns boolean",
+      "daysInMonth(year, month) returns day count",
+      "dayOfYear(year, month, day) returns 1-366"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "inverted-index",
+    "description": "Build an inverted index for full-text search.",
+    "requirements": [
+      "InvertedIndex with add(id, text) and search(query)",
+      "Tokenizes text to lowercase words",
+      "search returns array of IDs sorted by frequency",
+      "remove(id) removes document from index",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "graph",
+    "description": "Directed and undirected graph with traversal algorithms.",
+    "requirements": [
+      "Graph<T> with addNode, addEdge, removeNode, removeEdge",
+      "BFS and DFS traversal",
+      "hasPath(from, to) reachability check",
+      "neighbors(node) returns adjacent nodes",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "disjoint-set",
+    "description": "Union-Find (Disjoint Set Union) data structure.",
+    "requirements": [
+      "DisjointSet with union(a, b) and find(a)",
+      "Path compression and union by rank optimizations",
+      "connected(a, b) checks same component",
+      "componentCount() returns number of components",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "lfu-cache",
+    "description": "Least Frequently Used cache eviction policy.",
+    "requirements": [
+      "LFUCache<K, V>(capacity) evicts least-frequently-used entries",
+      "get(key) returns value and increments frequency",
+      "set(key, value) adds or updates",
+      "Ties broken by recency (LRU among equal frequencies)",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "sliding-window",
+    "description": "Sliding window with sum, min, and max queries.",
+    "requirements": [
+      "SlidingWindow(size) with push(value)",
+      "sum() current window sum",
+      "min() current window minimum",
+      "max() current window maximum",
+      "isFull() returns true when window has size elements"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "monotonic-queue",
+    "description": "Monotonic deque for sliding window min/max in O(1).",
+    "requirements": [
+      "MonotonicQueue<T>(compare) for min or max variant",
+      "push(value) maintains monotonic order",
+      "front() returns current optimum",
+      "pop() removes oldest element",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "segment-tree",
+    "description": "Segment tree for range sum queries and point updates.",
+    "requirements": [
+      "SegmentTree(arr) builds from array",
+      "query(l, r) returns sum of range",
+      "update(i, value) updates element",
+      "Supports sum queries (extend for min/max by swapping fn)",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "trie-prefix",
+    "description": "Trie (prefix tree) for autocomplete and prefix search.",
+    "requirements": [
+      "Trie with insert(word), search(word), startsWith(prefix)",
+      "suggest(prefix, limit?) returns words with prefix",
+      "delete(word) removes from trie",
+      "size() returns word count",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "bloom-filter-v2",
+    "description": "Improved Bloom filter with configurable hash count.",
+    "requirements": [
+      "BloomFilter(size, hashCount) with add and has",
+      "Multiple hash functions using FNV-1a variants",
+      "falsePositiveRate(numElements) estimates FPR",
+      "clear() resets filter",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "circular-buffer",
+    "description": "Fixed-size circular buffer (ring buffer) with FIFO semantics.",
+    "requirements": [
+      "CircularBuffer<T>(capacity) with push and shift",
+      "isFull() and isEmpty() checks",
+      "peek() returns front without removing",
+      "toArray() returns ordered contents",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "mutex",
+    "description": "Async mutex for exclusive section locking.",
+    "requirements": [
+      "Mutex with acquire() returns release fn",
+      "Critical sections await acquire() and call release()",
+      "isLocked() boolean",
+      "withMutex(fn) convenience wrapper",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "semaphore",
+    "description": "Async semaphore for concurrency limiting.",
+    "requirements": [
+      "Semaphore(permits) with acquire() and release()",
+      "acquire() waits when no permits available",
+      "withSemaphore(fn) convenience wrapper",
+      "available() returns current permit count",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "promise-pool",
+    "description": "Run async tasks with bounded concurrency.",
+    "requirements": [
+      "PromisePool(tasks, concurrency) processes all tasks",
+      "Results returned in input order",
+      "Errors collected and rethrown or returned per-item",
+      "progress(done, total) callback",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "channel-v2",
+    "description": "Typed async channel (CSP-style) for producer-consumer.",
+    "requirements": [
+      "Channel<T>(bufferSize) with send and receive",
+      "send(value) blocks if buffer full",
+      "receive() blocks if buffer empty",
+      "close() signals no more items",
+      "asyncIterator support"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "task-runner",
+    "description": "Lightweight task runner with dependency resolution.",
+    "requirements": [
+      "TaskRunner with register(name, deps[], fn)",
+      "run(name) executes task and its dependencies in order",
+      "runAll() executes all tasks respecting deps",
+      "Detects circular dependencies",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "future",
+    "description": "Deferred/Future pattern - create a promise and resolve/reject externally.",
+    "requirements": [
+      "Future<T>() returns {promise, resolve, reject}",
+      "resolved(value) creates pre-resolved future",
+      "rejected(error) creates pre-rejected future",
+      "withTimeout(ms) adds timeout rejection",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "observable-v2",
+    "description": "Minimal observable pattern with operators.",
+    "requirements": [
+      "Observable<T>(subscribe) with subscribe method",
+      "map(fn), filter(fn), take(n) operators",
+      "Subject<T> for multicasting",
+      "pipe(...operators) composition",
+      "Zero dependencies"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "async-retry",
+    "description": "Retry async operations with configurable backoff strategies.",
+    "requirements": [
+      "retry(fn, opts) retries on thrown errors",
+      "opts: maxAttempts, delay, backoff (linear|exponential), shouldRetry(err)",
+      "onRetry(attempt, err) callback",
+      "Returns first successful result",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "throttle-async",
+    "description": "Throttle async function calls, ensuring only one runs at a time.",
+    "requirements": [
+      "throttleAsync(fn) returns throttled wrapper",
+      "If called while running, queues latest call (not all calls)",
+      "Only 1 pending call queued at a time",
+      "trailing call executes after current finishes",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "event-queue",
+    "description": "Ordered async event queue with replay and filtering.",
+    "requirements": [
+      "EventQueue<T> with push and subscribe",
+      "subscribe(filter?, handler) receives matching events",
+      "replay(n) sends last N events to new subscriber",
+      "clear() empties queue",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "zod-lite",
+    "description": "Minimal schema validation library inspired by Zod.",
+    "requirements": [
+      "string(), number(), boolean(), null(), undefined() primitives",
+      "object(shape), array(schema), union(schemas)",
+      "parse(value) returns value or throws",
+      "safeParse(value) returns {ok, data} | {ok: false, error}",
+      "Zero dependencies"
+    ],
+    "maxLines": 200
+  },
+  {
+    "name": "json-schema-validate",
+    "description": "Validate data against a JSON Schema (subset: type, required, properties, items).",
+    "requirements": [
+      "validate(data, schema) returns {ok, errors[]}",
+      "Supports type, required, properties, items, minimum, maximum, pattern",
+      "Nested schemas",
+      "Error paths in dot notation",
+      "Zero dependencies"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "coerce",
+    "description": "Coerce values to specific types with fallback.",
+    "requirements": [
+      "toNumber(value, fallback?) coerces or returns fallback",
+      "toString(value) coerces to string",
+      "toBool(value) coerces truthy strings and numbers",
+      "toDate(value) coerces ISO strings and timestamps",
+      "toArray(value) wraps non-arrays in array"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "assert-type",
+    "description": "Runtime type assertions with descriptive errors.",
+    "requirements": [
+      "assertString(v, name?) throws if not string",
+      "assertNumber(v, name?) throws if not number",
+      "assertArray(v, name?) throws if not array",
+      "assertNonNull(v, name?) throws if null or undefined",
+      "assertShape(v, shape, name?) checks object structure"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "ip-validate",
+    "description": "Validate and classify IP addresses (IPv4 and IPv6).",
+    "requirements": [
+      "isIPv4(str) validates dotted-decimal format",
+      "isIPv6(str) validates colon-hex format",
+      "isPrivate(ip) checks RFC 1918 / fc00::/7 ranges",
+      "normalize(ip) expands IPv6 shorthand",
+      "isLoopback(ip) checks 127.x.x.x / ::1"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "url-validate",
+    "description": "Validate URLs with configurable protocol and hostname rules.",
+    "requirements": [
+      "validate(url) returns {ok, reason?}",
+      "isAbsolute(url) checks for scheme",
+      "hasProtocol(url, ...protocols) checks allowed protocols",
+      "isSafeRedirect(url, allowedHosts[]) prevents open redirects",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "credit-card",
+    "description": "Luhn algorithm credit card number validation and masking.",
+    "requirements": [
+      "isValid(number) validates with Luhn check",
+      "mask(number) returns **** **** **** 1234",
+      "detectNetwork(number) returns Visa/Mastercard/Amex/Unknown",
+      "stripFormatting(number) removes spaces and dashes",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "iban-validate",
+    "description": "Validate IBAN bank account numbers.",
+    "requirements": [
+      "validate(iban) returns {ok, reason?}",
+      "normalize(iban) removes spaces, uppercases",
+      "extractCountry(iban) returns 2-letter country code",
+      "mod97(iban) performs IBAN checksum",
+      "Supports all EU country formats"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "date-validate",
+    "description": "Validate and parse date strings in multiple formats.",
+    "requirements": [
+      "isValid(str) returns boolean",
+      "parse(str) returns Date or null",
+      "format: ISO 8601, DD/MM/YYYY, MM/DD/YYYY, YYYY.MM.DD",
+      "isInRange(date, from, to) checks bounds",
+      "isFuture(date) and isPast(date) helpers"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "deep-validate",
+    "description": "Deeply validate object trees with path-based error reporting.",
+    "requirements": [
+      "Validator<T>(rules) with validate(obj) method",
+      "Rule: (value, path) => string | null (returns error or null)",
+      "Collects all errors before returning",
+      "errors array: {path, message} objects",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "cli-table",
+    "description": "Render data as a formatted ASCII table in the terminal.",
+    "requirements": [
+      "table(rows, headers?) returns string",
+      "Auto-sizes columns to content",
+      "Supports alignment: left | center | right per column",
+      "Handles multiline cell content",
+      "Zero dependencies"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "cli-progress",
+    "description": "Terminal progress bar renderer (string-based, no cursor control).",
+    "requirements": [
+      "render(percent, width?, label?) returns bar string",
+      "bar string: [####------] 45% label",
+      "renderETA(percent, elapsed) appends ETA estimate",
+      "style(filled, empty) customizes bar characters",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "cli-spinner-frames",
+    "description": "Collection of terminal spinner frame sets.",
+    "requirements": [
+      "SPINNERS map of name -> frames[]",
+      "braille, dots, line, bounce, earth, moon built-in",
+      "getFrame(name, tick) returns current frame string",
+      "tickMs(name) returns recommended ms per tick",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "cli-box",
+    "description": "Draw ASCII/Unicode box around text blocks.",
+    "requirements": [
+      "box(content, options?) returns bordered string",
+      "Styles: single, double, rounded, bold, ASCII",
+      "Padding option",
+      "Title option (renders in top border)",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "cli-colors-256",
+    "description": "256-color and truecolor ANSI escape code generator.",
+    "requirements": [
+      "fg256(code) returns ANSI escape for 256-color fg",
+      "bg256(code) returns ANSI escape for 256-color bg",
+      "fgRGB(r, g, b) truecolor fg",
+      "bgRGB(r, g, b) truecolor bg",
+      "strip(str) removes all ANSI codes"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "argv-tokenizer",
+    "description": "Tokenize a shell command string into argv array.",
+    "requirements": [
+      "tokenize(cmd) returns string[]",
+      "Handles single and double quoted segments",
+      "Handles backslash escapes",
+      "Handles environment variable placeholders",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "ansi-width",
+    "description": "Measure display width of strings containing ANSI codes.",
+    "requirements": [
+      "width(str) returns visible character count",
+      "stripAnsi(str) removes escape codes",
+      "pad(str, targetWidth, dir?) pads to width",
+      "truncate(str, maxWidth) trims to display width",
+      "Handles wide (CJK) characters as width 2"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "cli-link",
+    "description": "Generate clickable hyperlinks in supported terminals.",
+    "requirements": [
+      "link(text, url) returns OSC 8 hyperlink escape sequence",
+      "isSupported() checks TERM and CI env vars",
+      "stripLinks(str) removes link escapes",
+      "fallback(text, url) returns 'text (url)' for unsupported terminals",
+      "Zero dependencies"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "file-size",
+    "description": "Format and compare file sizes with human-readable output.",
+    "requirements": [
+      "format(bytes, si?) returns '1.5 MB' style string",
+      "parse(str) converts '1.5 MB' back to bytes",
+      "SI units (1000) and binary units (1024) modes",
+      "compare(a, b) returns -1/0/1",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "path-normalize",
+    "description": "Normalize and manipulate file paths cross-platform.",
+    "requirements": [
+      "normalize(path) collapses .., ., double slashes",
+      "join(...segments) joins path segments",
+      "relative(from, to) computes relative path",
+      "isAbsolute(path) checks leading slash",
+      "ext(path) returns file extension without dot"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "glob-expand",
+    "description": "Expand glob patterns to file path lists (pure string matching).",
+    "requirements": [
+      "match(pattern, paths[]) returns matching paths",
+      "Supports * (any chars), ** (any segments), ? (one char)",
+      "negate(pattern, paths[]) returns non-matching paths",
+      "isGlob(str) detects if string contains glob chars",
+      "Zero dependencies, no filesystem access"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "mime-from-ext",
+    "description": "Look up MIME type from file extension.",
+    "requirements": [
+      "fromExt(ext) returns MIME type or null",
+      "fromPath(filepath) extracts extension and returns MIME",
+      "isText(mime) returns true for text/* types",
+      "isImage(mime) returns true for image/* types",
+      "Registry of 150+ common extensions"
+    ],
+    "maxLines": 150
+  },
+  {
+    "name": "file-hash",
+    "description": "Hash file contents using various algorithms.",
+    "requirements": [
+      "hashBuffer(buffer, algorithm) returns hex digest",
+      "Supports md5, sha1, sha256, sha512",
+      "hashString(str, algorithm) hashes UTF-8 string",
+      "compare(hash1, hash2) timing-safe compare",
+      "Uses Node crypto module"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "ignore-patterns",
+    "description": "Parse .gitignore-style pattern files and match paths.",
+    "requirements": [
+      "parse(text) returns array of patterns",
+      "match(patterns, path) returns boolean",
+      "negate patterns (! prefix)",
+      "Directory-only patterns (trailing /)",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "temp-file",
+    "description": "Generate temporary file paths and manage temp file lifecycle.",
+    "requirements": [
+      "tempPath(ext?, prefix?) returns unique path in OS tmp dir",
+      "withTempFile(fn) creates file, runs fn, deletes on done",
+      "withTempDir(fn) creates directory, runs fn, deletes on done",
+      "Uses crypto.randomUUID for uniqueness",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "directory-tree",
+    "description": "Build a tree representation of a directory listing.",
+    "requirements": [
+      "DirNode: {name, path, children?: DirNode[]}",
+      "fromPaths(paths[]) builds tree from path strings",
+      "toText(tree, indent?) renders as ASCII tree",
+      "findNode(tree, path) returns matching node or null",
+      "Zero dependencies"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "trace-context",
+    "description": "W3C Trace Context (traceparent/tracestate) propagation.",
+    "requirements": [
+      "generate() creates new trace and span IDs",
+      "parse(header) parses traceparent header",
+      "format(trace) returns traceparent string",
+      "child(parent) creates child span from parent",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "span-timer",
+    "description": "Measure elapsed time for named spans with nesting.",
+    "requirements": [
+      "startSpan(name) returns Span with end() method",
+      "getSpans() returns completed spans array",
+      "Span: {name, startMs, durationMs}",
+      "reset() clears spans",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "error-code",
+    "description": "Typed error code system with metadata.",
+    "requirements": [
+      "ErrorCode registry with code, message, httpStatus",
+      "AppError class extends Error with code property",
+      "create(code, detail?) creates AppError",
+      "isAppError(err) type guard",
+      "toJSON(err) returns serializable object"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "diagnostic",
+    "description": "Collect and report diagnostic information for debugging.",
+    "requirements": [
+      "Diagnostic with add(key, value) and addError(err)",
+      "toReport() returns structured object",
+      "toText() returns readable multi-line string",
+      "fromError(err) extracts standard error fields",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "audit-log",
+    "description": "Append-only audit log with timestamp and actor.",
+    "requirements": [
+      "AuditLog with log(action, actor, details?)",
+      "AuditEntry: {id, timestamp, action, actor, details}",
+      "query(filter?) returns matching entries",
+      "toCSV(entries) exports as CSV",
+      "Zero dependencies"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "perf-mark",
+    "description": "Performance mark and measure API wrapper (non-browser).",
+    "requirements": [
+      "mark(name) records timestamp",
+      "measure(name, startMark, endMark) computes duration",
+      "getEntries() returns all marks and measures",
+      "clear() resets state",
+      "toTable() renders as string table"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "log-formatter",
+    "description": "Format structured log objects as text or JSON lines.",
+    "requirements": [
+      "text(entry) returns human-readable log line with level+timestamp",
+      "json(entry) returns NDJSON line",
+      "withFields(fields) creates child logger with extra fields",
+      "levels: debug, info, warn, error",
+      "Zero dependencies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "correlation-id",
+    "description": "Generate and propagate correlation IDs across requests.",
+    "requirements": [
+      "generate() returns UUID-like correlation ID",
+      "fromHeaders(headers) extracts X-Correlation-ID or X-Request-ID",
+      "toHeaders(id) returns header object",
+      "isValid(id) checks format",
+      "Zero dependencies"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "editor",
+    "description": "Create and share 3D architectural projects.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "claude-subconscious",
+    "description": "Give Claude Code a subconscious",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "ruflo",
+    "description": "🌊 The leading agent orchestration platform for Claude. Deploy intelligent multi-agent swarms, coordinate autonomous workflows, and build co",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "project-nomad",
+    "description": "Project N.O.M.A.D, is a self-contained, offline survival computer packed with critical tools, knowledge, and AI to keep you informed and emp",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "supermemory",
+    "description": "Memory engine and app that is extremely fast, scalable. The Memory API for the AI era.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "dexter",
+    "description": "An autonomous agent for deep financial research",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "firecrawl",
+    "description": "🔥 The Web Data API for AI - Turn entire websites into LLM-ready markdown or structured data",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "twenty",
+    "description": "Building a modern alternative to Salesforce, powered by the community.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "compound-engineering-plugin",
+    "description": "Office Compound Engineering plugin for Claude Code, Codex, and more",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "chrome-devtools-mcp",
+    "description": "Chrome DevTools for coding agents",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "last30days-skill",
+    "description": "AI agent skill that researches any topic across Reddit, X, YouTube, HN, Polymarket, and the web - then synthesizes a grounded summary",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "deer-flow",
+    "description": "An open-source SuperAgent harness that researches, codes, and creates. With the help of sandboxes, memories, tools, skill, subagents and mes",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "berriai",
+    "description": "Python SDK, Proxy Server (AI Gateway) to call 100+ LLM APIs in OpenAI (or native) format, with cost tracking, guardrails, loadbalancing and ",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "ruview",
+    "description": "π RuView: WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection — ",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "fujiwarachoki",
+    "description": "Automate the process of making money online.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "strix",
+    "description": "Open-source AI hackers to find and fix your app’s vulnerabilities.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "tradingagents-cn",
+    "description": "基于多智能体LLM的中文金融交易框架 - TradingAgents中文增强版",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "claude-linked-output-going",
+    "description": "90% of Claude-linked output going to GitHub repos w <2 stars",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "show-optio-orchestrate-coding",
+    "description": "Show HN: Optio – Orchestrate AI coding agents in K8s to go from ticket to PR",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "goodbye-sora",
+    "description": "Goodbye to Sora",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "health-staff-told-stop",
+    "description": "Health NZ staff told to stop using ChatGPT to write clinical notes",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "research-pipeline",
+    "description": "4-stage adversarial research pipeline - researcher finds sources, writer drafts, verifier checks URLs, reviewer audits adversarially",
+    "requirements": [
+      "Export createResearchPipeline(topic) returning a pipeline orchestrator",
+      "4 stages: research (gather sources with URLs), write (draft from sources only), verify (fetch every URL, remove unverifiable claims), review (adversarial audit with FATAL/MAJOR/MINOR severity)",
+      "File-based intermediate state - each stage writes to disk, next stage reads files not inline content",
+      "Provenance tracking - record sources consulted, accepted, rejected per stage"
+    ],
+    "maxLines": 200,
+    "source": "feynman"
+  },
+  {
+    "name": "research-provenance",
+    "description": "Provenance sidecar generator - tracks sources consulted, accepted, rejected, and verification status for any research artifact",
+    "requirements": [
+      "Export createProvenance(slug) returning a provenance tracker",
+      "Methods: addSource(url, status), addClaim(text, sourceUrl, verified), toMarkdown()",
+      "Track rounds of research, total sources found vs accepted vs rejected",
+      "Generate <slug>.provenance.md sidecar file alongside the research output"
+    ],
+    "maxLines": 100,
+    "source": "feynman"
+  },
+  {
+    "name": "research-integrity",
+    "description": "Research integrity validator - enforces URL-or-it-didnt-happen rules on any text claiming facts or citing sources",
+    "requirements": [
+      "Export validateIntegrity(text) returning { valid: boolean, issues: IntegrityIssue[] }",
+      "Detect claims without URLs, fabricated-looking URLs, dead URL patterns, summary-without-source patterns",
+      "Severity levels: FATAL (fabricated source), MAJOR (claim without citation), MINOR (incomplete reference)",
+      "Export integrityRules as typed constants for use in agent system prompts"
+    ],
+    "maxLines": 120,
+    "source": "feynman"
   }
 ]
