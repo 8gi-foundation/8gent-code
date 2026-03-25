@@ -1945,7 +1945,8 @@ export function App({ initialCommand, args }: AppProps) {
                     addSystemMessage("[pet] lil-eight.sh not found. Tried:\n  " + candidates.join("\n  "));
                   }
                 } else {
-                  addSystemMessage("[pet] Desktop pet is macOS only (for now)");
+                  // Linux/Windows: terminal pet mode
+                  addSystemMessage(`[pet] ${companion.fullName} active (terminal mode)`);
                 }
                 // Show companion card
                 addSystemMessage(companion.card.replace(/\x1b\[[0-9;]*m/g, ""));
