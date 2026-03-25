@@ -1901,13 +1901,20 @@ export function App({ initialCommand, args }: AppProps) {
               case "start": {
                 // Spawn dock pet on macOS
                 if (process.platform === "darwin") {
-                  const lilEightScript = path.join(__dirname, "../bin/lil-eight.sh");
-                  if (fs.existsSync(lilEightScript)) {
+                  // Try multiple paths: cwd (source), __dirname relative, home .8gent
+                  const candidates = [
+                    path.join(process.cwd(), "bin/lil-eight.sh"),
+                    path.join(__dirname, "../bin/lil-eight.sh"),
+                    path.join(__dirname, "../../bin/lil-eight.sh"),
+                    path.join(process.env.HOME || "~", "8gent-code/bin/lil-eight.sh"),
+                  ];
+                  const lilEightScript = candidates.find(p => fs.existsSync(p));
+                  if (lilEightScript) {
                     const pet = spawnProc("bash", [lilEightScript, "start"], { detached: true, stdio: "ignore" });
                     pet.unref();
                     addSystemMessage("[pet] Lil Eight spawned on Dock");
                   } else {
-                    addSystemMessage("[pet] lil-eight.sh not found - run from source repo");
+                    addSystemMessage("[pet] lil-eight.sh not found. Tried:\n  " + candidates.join("\n  "));
                   }
                 } else {
                   addSystemMessage("[pet] Desktop pet is macOS only (for now)");
