@@ -31,7 +31,7 @@ unsub(); // stop watching
 - **Lock file:** `$TMPDIR/8gent-clipboard.lock` - spin lock with 2s timeout, keyed by PID
 - **History cap:** 100 entries (oldest trimmed first)
 - **Watch interval:** 300ms polling via `fs.watchFile`
-- **No native clipboard dependency** - avoids `pbcopy`/`xclip` platform fragmentation
+- **No native clipboard dependency** - avoids pbcopy/xclip platform fragmentation
 
 ## Use cases in 8gent
 
@@ -42,11 +42,11 @@ unsub(); // stop watching
 ## Known limitations
 
 - Spin lock blocks the event loop briefly per cycle - fine for short critical sections
-- `watchFile` polling has ~300ms latency between write and callback
+- watchFile polling has ~300ms latency between write and callback
 - Not suitable for binary data or payloads over ~1MB
 
 ## Integration path
 
-1. Wire into `packages/eight/tools.ts` as optional tool (clipboard_copy, clipboard_paste)
+1. Wire into packages/eight/tools.ts as optional tool (clipboard_copy, clipboard_paste)
 2. Expose in CLUI via clipboard panel in the debugger
-3. Consider replacing spin lock with `flock` via child_process for production hardening
+3. Consider replacing spin lock with flock via child_process for production hardening
