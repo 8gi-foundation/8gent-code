@@ -1,110 +1,122 @@
-/**
- * Log Rotation Tool
- *
- * Rotates log files in ~/.8gent/ when they exceed a size limit.
- * Keeps the last N rotated files and compresses older ones with gzip.
- */
+import { existsSync, statSync, renameSync, unlinkSync, createReadStream, createWriteStream } from "fs";
+import { appendFileSync, writeFileSync } from "fs";
+import { createGzip } from "zlib";
+import { pipeline } from "stream/promises";
 
-import { readdir, stat, rename, unlink } from "node:fs/promises";
-import { join, basename, extname } from "node:path";
-import { homedir } from "node:os";
-import { gzipSync } from "node:zlib";
-
-export interface LogRotationConfig {
-  /** Directory containing log files. Defaults to ~/.8gent/ */
-  logDir?: string;
-  /** Max file size in bytes before rotation. Defaults to 5MB */
-  maxSizeBytes?: number;
-  /** Number of rotated files to keep (uncompressed + compressed). Defaults to 5 */
-  keepCount?: number;
-  /** Glob pattern for log files. Defaults to .log extension */
-  extension?: string;
+export interface RotationOptions {
+  maxSize?: number;   // bytes, default 10MB
+  maxFiles?: number;  // number of rotated files to keep, default 5
+  compress?: boolean; // gzip rotated files, default false
 }
 
-const DEFAULT_CONFIG: Required<LogRotationConfig> = {
-  logDir: join(homedir(), ".8gent"),
-  maxSizeBytes: 5 * 1024 * 1024,
-  keepCount: 5,
-  extension: ".log",
-};
+async function compressFile(src: string, dest: string): Promise<void> {
+  const input = createReadStream(src);
+  const output = createWriteStream(dest);
+  const gzip = createGzip();
+  await pipeline(input, gzip, output);
+  unlinkSync(src);
+}
 
-/** Rotate a single log file: rename current, compress old, prune excess */
-async function rotateFile(
-  filePath: string,
-  keepCount: number,
-): Promise<{ rotated: boolean; pruned: number }> {
-  const dir = join(filePath, "..");
-  const name = basename(filePath, extname(filePath));
-  const ext = extname(filePath);
+export async function rotateFile(filePath: string, options: RotationOptions = {}): Promise<void> {
+  const { maxFiles = 5, compress = false } = options;
+  const ext = compress ? ".gz" : "";
 
-  const entries = await readdir(dir);
-  const rotatedPattern = new RegExp(
-    `^${escapeRegex(name)}\\.(\\d+)${escapeRegex(ext)}(\\.gz)?$`,
-  );
-  const rotated = entries
-    .map((e) => {
-      const m = e.match(rotatedPattern);
-      return m ? { file: e, index: parseInt(m[1], 10), gz: !!m[2] } : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => b!.index - a!.index) as { file: string; index: number; gz: boolean }[];
-
-  for (const r of rotated) {
-    const newIndex = r.index + 1;
-    if (newIndex > keepCount) {
-      await unlink(join(dir, r.file));
-      continue;
-    }
-    const newName = `${name}.${newIndex}${ext}${r.gz ? ".gz" : ""}`;
-    await rename(join(dir, r.file), join(dir, newName));
+  // Remove oldest file if it exists
+  const oldest = `${filePath}.${maxFiles}${ext}`;
+  if (existsSync(oldest)) {
+    unlinkSync(oldest);
   }
 
-  const rotatedPath = join(dir, `${name}.1${ext}`);
-  await rename(filePath, rotatedPath);
-
-  const freshEntries = await readdir(dir);
-  for (const e of freshEntries) {
-    const m = e.match(rotatedPattern);
-    if (m && parseInt(m[1], 10) >= 2 && !m[2]) {
-      const full = join(dir, e);
-      const raw = await Bun.file(full).arrayBuffer();
-      await Bun.write(`${full}.gz`, gzipSync(Buffer.from(raw)));
-      await unlink(full);
+  // Shift existing rotated files up by one
+  for (let i = maxFiles - 1; i >= 1; i--) {
+    const src = `${filePath}.${i}${ext}`;
+    const dest = `${filePath}.${i + 1}${ext}`;
+    if (existsSync(src)) {
+      renameSync(src, dest);
     }
   }
 
-  const pruned = rotated.filter((r) => r.index + 1 > keepCount).length;
-  return { rotated: true, pruned };
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Scan logDir and rotate any files exceeding maxSizeBytes */
-export async function rotateLogs(
-  config: LogRotationConfig = {},
-): Promise<{ scanned: number; rotated: string[]; errors: string[] }> {
-  const cfg = { ...DEFAULT_CONFIG, ...config };
-  const entries = await readdir(cfg.logDir);
-  const logFiles = entries.filter(
-    (e) => e.endsWith(cfg.extension) && !e.match(/\.\d+\.log/),
-  );
-
-  const rotated: string[] = [];
-  const errors: string[] = [];
-
-  for (const file of logFiles) {
-    const fullPath = join(cfg.logDir, file);
-    try {
-      const info = await stat(fullPath);
-      if (!info.isFile() || info.size <= cfg.maxSizeBytes) continue;
-      await rotateFile(fullPath, cfg.keepCount);
-      rotated.push(file);
-    } catch (err) {
-      errors.push(`${file}: ${(err as Error).message}`);
+  // Rotate current log to .1
+  if (existsSync(filePath)) {
+    const dest = `${filePath}.1`;
+    renameSync(filePath, dest);
+    if (compress) {
+      await compressFile(dest, `${dest}.gz`);
     }
   }
 
-  return { scanned: logFiles.length, rotated, errors };
+  // Create fresh log file
+  writeFileSync(filePath, "");
+}
+
+export class RotatingLogger {
+  private readonly filePath: string;
+  private readonly maxSize: number;
+  private readonly maxFiles: number;
+  private readonly compress: boolean;
+  private rotating: boolean = false;
+
+  constructor(filePath: string, options: RotationOptions = {}) {
+    this.filePath = filePath;
+    this.maxSize = options.maxSize ?? 10 * 1024 * 1024; // 10MB default
+    this.maxFiles = options.maxFiles ?? 5;
+    this.compress = options.compress ?? false;
+
+    // Ensure the log file exists
+    if (!existsSync(this.filePath)) {
+      writeFileSync(this.filePath, "");
+    }
+  }
+
+  async write(line: string): Promise<void> {
+    const entry = `${new Date().toISOString()} ${line}\n`;
+
+    // Check if rotation is needed before writing
+    if (!this.rotating && this.shouldRotate()) {
+      this.rotating = true;
+      try {
+        await this.rotate();
+      } finally {
+        this.rotating = false;
+      }
+    }
+
+    appendFileSync(this.filePath, entry);
+  }
+
+  private shouldRotate(): boolean {
+    if (!existsSync(this.filePath)) return false;
+    const { size } = statSync(this.filePath);
+    return size >= this.maxSize;
+  }
+
+  private async rotate(): Promise<void> {
+    await rotateFile(this.filePath, {
+      maxFiles: this.maxFiles,
+      compress: this.compress,
+    });
+  }
+
+  /** Force a rotation regardless of current file size. */
+  async forceRotate(): Promise<void> {
+    await this.rotate();
+  }
+
+  /** Returns the current size of the active log file in bytes. */
+  currentSize(): number {
+    if (!existsSync(this.filePath)) return 0;
+    return statSync(this.filePath).size;
+  }
+
+  /** List all log files managed by this logger (active + rotated). */
+  listFiles(): string[] {
+    const files: string[] = [];
+    if (existsSync(this.filePath)) files.push(this.filePath);
+    const ext = this.compress ? ".gz" : "";
+    for (let i = 1; i <= this.maxFiles; i++) {
+      const rotated = `${this.filePath}.${i}${ext}`;
+      if (existsSync(rotated)) files.push(rotated);
+    }
+    return files;
+  }
 }
