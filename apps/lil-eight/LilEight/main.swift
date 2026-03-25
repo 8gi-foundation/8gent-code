@@ -964,6 +964,61 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
     }
 }
 
+// MARK: - Companion Data (read from TUI)
+
+struct CompanionPalette {
+    let body: NSColor
+    let accent: NSColor
+    let highlight: NSColor
+    let eye: NSColor
+}
+
+struct CompanionData {
+    let fullName: String
+    let species: String
+    let element: String
+    let rarity: String
+    let palette: CompanionPalette
+
+    static func load() -> CompanionData? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let filePath = "\(home)/.8gent/active-companion.json"
+        guard FileManager.default.fileExists(atPath: filePath),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        guard let fullName = json["fullName"] as? String,
+              let species = json["species"] as? String,
+              let element = json["element"] as? String,
+              let rarity = json["rarity"] as? String,
+              let paletteDict = json["palette"] as? [String: String]
+        else { return nil }
+
+        func parseHex(_ hex: String) -> NSColor {
+            let hexStr = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+            if hexStr.count != 6 { return NSColor.orange }
+            var rgb: UInt64 = 0
+            Scanner(string: hexStr).scanHexInt64(&rgb)
+            return NSColor(
+                red: CGFloat((rgb >> 16) & 0xFF) / 255.0,
+                green: CGFloat((rgb >> 8) & 0xFF) / 255.0,
+                blue: CGFloat(rgb & 0xFF) / 255.0,
+                alpha: 1.0
+            )
+        }
+
+        let palette = CompanionPalette(
+            body: parseHex(paletteDict["body"] ?? "E8610A"),
+            accent: parseHex(paletteDict["accent"] ?? "FF8C42"),
+            highlight: parseHex(paletteDict["highlight"] ?? "FFD700"),
+            eye: parseHex(paletteDict["eye"] ?? "1A1A2E")
+        )
+
+        return CompanionData(fullName: fullName, species: species, element: element, rarity: rarity, palette: palette)
+    }
+}
+
 // MARK: - Pet Controller
 
 class PetController {
@@ -1008,6 +1063,10 @@ class PetController {
     var currentTool: String?
     var lastEventTime: Date = Date()
 
+    // Companion identity (from TUI)
+    var companionData: CompanionData?
+    var colorOverlay: CALayer?
+
     weak var petManager: PetManager?
 
     init(sessionId: String, spriteManager: SpriteManager, soundManager: SoundManager, startX: CGFloat) {
@@ -1030,7 +1089,23 @@ class PetController {
 
         self.imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: 64, height: 64))
         self.imageView.imageScaling = .scaleProportionallyUpOrDown
+        self.imageView.wantsLayer = true
         self.window.contentView = imageView
+
+        // Load companion identity from ~/.8gent/active-companion.json
+        if sessionId == "eight" {
+            self.companionData = CompanionData.load()
+            if let comp = self.companionData {
+                print("[lil-eight] Companion loaded: \(comp.fullName) (\(comp.species), \(comp.element))")
+                // Add color overlay layer for body tint
+                let overlay = CALayer()
+                overlay.frame = CGRect(x: 0, y: 0, width: 64, height: 64)
+                overlay.backgroundColor = comp.palette.body.withAlphaComponent(0.3).cgColor
+                overlay.compositingFilter = "multiplyBlendMode"
+                self.imageView.layer?.addSublayer(overlay)
+                self.colorOverlay = overlay
+            }
+        }
 
         // Chat popover setup
         let vc = NSViewController()
@@ -1060,8 +1135,8 @@ class PetController {
         window.orderFront(nil)
         nameLabel.orderFront(nil)
 
-        let shortId = Self.shortId(sessionId)
-        nameLabel.update(text: shortId, aboveWindow: window)
+        let displayName = companionData?.fullName ?? Self.shortId(sessionId)
+        nameLabel.update(text: displayName, aboveWindow: window)
 
         startAnimationLoop()
         scheduleRandomBehavior()
@@ -1076,6 +1151,11 @@ class PetController {
 
     static func shortId(_ id: String) -> String {
         id.count > 8 ? String(id.suffix(6)) : id
+    }
+
+    /// Display name: companion fullName if loaded, otherwise shortId
+    var displayName: String {
+        companionData?.fullName ?? Self.shortId(sessionId)
     }
 
     func startAnimationLoop() {
@@ -1424,7 +1504,7 @@ class PetController {
         audioEngine = nil
 
         chatView.stopListening()
-        nameLabel.update(text: PetController.shortId(sessionId), aboveWindow: window)
+        nameLabel.update(text: displayName, aboveWindow: window)
 
         eightLog("Voice transcript: \(transcript)")
 
@@ -1524,10 +1604,10 @@ class PetController {
 
     func handleRightClick(_ event: NSEvent) {
         let menu = NSMenu()
-        let shortId = PetController.shortId(sessionId)
 
         // Header
-        let header = NSMenuItem(title: sessionId == "eight" ? "Lil Eight" : "Agent: \(shortId)", action: nil, keyEquivalent: "")
+        let headerTitle = sessionId == "eight" ? (companionData?.fullName ?? "Lil Eight") : "Agent: \(Self.shortId(sessionId))"
+        let header = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -1610,11 +1690,11 @@ class PetController {
                 Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
                     guard let self = self else { return }
                     self.setStateInternal(.idle)
-                    self.nameLabel.update(text: Self.shortId(self.sessionId), aboveWindow: self.window)
+                    self.nameLabel.update(text: self.displayName, aboveWindow: self.window)
                 }
             } else if self.isWalking {
                 self.setStateInternal(.idle)
-                self.nameLabel.update(text: Self.shortId(self.sessionId), aboveWindow: self.window)
+                self.nameLabel.update(text: self.displayName, aboveWindow: self.window)
             } else {
                 // Walk randomly
                 self.setStateInternal(Bool.random() ? .walkRight : .walkLeft)
@@ -1679,7 +1759,7 @@ class PetController {
                 guard let self = self else { return }
                 self.daemonDriven = false
                 self.setStateInternal(.idle)
-                self.nameLabel.update(text: Self.shortId(self.sessionId), aboveWindow: self.window)
+                self.nameLabel.update(text: self.displayName, aboveWindow: self.window)
             }
         } else {
             setStateInternal(.typing)
@@ -1697,7 +1777,7 @@ class PetController {
             guard let self = self else { return }
             self.daemonDriven = false
             self.setStateInternal(.idle)
-            self.nameLabel.update(text: Self.shortId(self.sessionId), aboveWindow: self.window)
+            self.nameLabel.update(text: self.displayName, aboveWindow: self.window)
         }
     }
 
@@ -1708,7 +1788,7 @@ class PetController {
         Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             self.setStateInternal(.idle)
-            self.nameLabel.update(text: Self.shortId(self.sessionId), aboveWindow: self.window)
+            self.nameLabel.update(text: self.displayName, aboveWindow: self.window)
         }
     }
 
@@ -1721,7 +1801,7 @@ class PetController {
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             self.setStateInternal(prev)
-            self.nameLabel.update(text: Self.shortId(self.sessionId), aboveWindow: self.window)
+            self.nameLabel.update(text: self.displayName, aboveWindow: self.window)
         }
     }
 
