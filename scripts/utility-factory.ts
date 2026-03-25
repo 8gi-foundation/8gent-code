@@ -21,7 +21,7 @@ import { execSync, spawnSync } from "child_process";
 // ============================================
 
 const OLLAMA_URL = "http://localhost:11434";
-const OLLAMA_MODEL = "qwen3:14b";
+const OLLAMA_MODEL = "eight-1-q-14b:latest";
 const RATE_LIMIT_MS = 5000;
 const TELEGRAM_NOTIFY_EVERY = 25;
 const TELEGRAM_CHAT_ID = "5486040131";
