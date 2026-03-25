@@ -112,3 +112,5 @@ export function assertType(
 export function checkType(val: unknown, expected: string): boolean {
   return typeOf(val) === expected;
 }
+
+// quarantine: type-check - pending CI integration and tool registry wiring
