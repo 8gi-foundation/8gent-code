@@ -12,7 +12,7 @@
 
 import { readFileSync, existsSync } from "fs"
 import { join } from "path"
-import { generateCompanion, type Companion } from "./companion.js"
+import { generateCompanion, registerCompanion, endSession, type Companion } from "./companion.js"
 
 // MARK: - Sprite Data (inline fallback if PNG not available)
 
@@ -183,21 +183,25 @@ export class TerminalPet {
   private label: string = "eight"
   private visible: boolean = true
   public companion: Companion | null = null
+  private sessionId: string = ""
 
   // Callbacks
   onRender?: (lines: string[], x: number, label: string) => void
 
-  constructor(opts?: { label?: string; maxWidth?: number; userId?: string }) {
+  constructor(opts?: { label?: string; maxWidth?: number; sessionId?: string; model?: string }) {
+    this.sessionId = opts?.sessionId || opts?.label || `session-${Date.now()}`
     this.label = opts?.label || "eight"
     this.maxX = (opts?.maxWidth || process.stdout.columns || 80) - 18
 
-    // Generate companion identity seeded from user
-    const seed = opts?.userId || opts?.label || process.env.USER || "eight"
-    this.companion = generateCompanion(seed)
+    // Generate companion identity seeded from session
+    this.companion = generateCompanion(this.sessionId)
     this.label = this.companion.label
 
     // Apply companion's color palette to sprites
     PALETTE = { ...this.companion.ansiPalette }
+
+    // Register in collection deck
+    try { registerCompanion(this.sessionId, this.companion, opts?.model) } catch {}
   }
 
   start() {
@@ -213,9 +217,11 @@ export class TerminalPet {
     this.scheduleRandomAction()
   }
 
-  stop() {
+  stop(summary?: string, toolCalls?: number, tokensUsed?: number) {
     if (this.animTimer) clearInterval(this.animTimer)
     if (this.idleTimer) clearInterval(this.idleTimer)
+    // Save session end to deck
+    try { endSession(this.sessionId, summary, toolCalls, tokensUsed) } catch {}
   }
 
   setState(state: PetState) {
@@ -313,8 +319,8 @@ export class TerminalPet {
 // MARK: - Standalone mode (run directly)
 
 if (import.meta.main) {
-  const userId = process.env.USER || process.env.USERNAME || "eight"
-  const pet = new TerminalPet({ userId })
+  const sessionId = `${process.env.USER || "eight"}-${Date.now()}`
+  const pet = new TerminalPet({ sessionId })
 
   // Show companion card on spawn
   console.log("\x1b[36mLil Eight - Terminal Mode\x1b[0m\n")
