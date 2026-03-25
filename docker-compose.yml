@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  daemon:
+    build: .
+    container_name: eight-daemon
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    volumes:
+      - eight-data:/root/.8gent
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - EIGHT_DATA_DIR=/root/.8gent
+    depends_on:
+      ollama:
+        condition: service_started
+    networks:
+      - eight-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: eight-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - eight-net
+
+volumes:
+  eight-data:
+    driver: local
+  ollama-models:
+    driver: local
+
+networks:
+  eight-net:
+    driver: bridge
