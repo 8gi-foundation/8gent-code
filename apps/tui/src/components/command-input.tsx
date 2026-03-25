@@ -84,7 +84,8 @@ export type SlashCommand =
   | "github"
   | "debug"
   | "music"
-  | "dj";
+  | "dj"
+  | "pet";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -212,6 +213,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["play", "radio"],
     description: "DJ Eight — YouTube, radio, produce, mix",
     usage: "/dj [play|radio|produce|pause|stop|skip|np|vol|loop|queue|dl|bpm|mix]",
+  },
+  {
+    name: "pet",
+    aliases: ["companion", "lileight"],
+    description: "Spawn Lil Eight dock companion + show companion card",
+    usage: "/pet [start|stop|deck|card]",
   },
   {
     name: "router",
