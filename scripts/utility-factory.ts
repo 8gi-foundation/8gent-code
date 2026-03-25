@@ -127,6 +127,8 @@ Output ONLY the TypeScript code inside a fenced code block like:
 // code here
 \`\`\``;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -135,7 +137,9 @@ Output ONLY the TypeScript code inside a fenced code block like:
       messages: [{ role: "user", content: prompt }],
       stream: false,
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timer);
 
   if (!response.ok) {
     throw new Error(`Ollama error: ${response.status} ${await response.text()}`);
@@ -178,29 +182,90 @@ Quarantine - pending review.
 // Telegram notification
 // ============================================
 
+function getTelegramToken(): string | null {
+  if (process.env.TELEGRAM_BOT_TOKEN) return process.env.TELEGRAM_BOT_TOKEN;
+  try {
+    const envPath = path.join(process.env.HOME ?? "", ".claude", ".env");
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      const match = content.match(/TELEGRAM_BOT_TOKEN=(\S+)/);
+      if (match) return match[1];
+    }
+  } catch {}
+  return null;
+}
+
 async function sendTelegram(message: string): Promise<void> {
-  let token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    try {
-      const envPath = path.join(process.env.HOME ?? "", ".claude", ".env");
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, "utf-8");
-        const match = content.match(/TELEGRAM_BOT_TOKEN=(\S+)/);
-        if (match) token = match[1];
-      }
-    } catch {}
-  }
-
-  if (!token) return; // No token - skip silently
-
+  const token = getTelegramToken();
+  if (!token) return;
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message }),
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message, parse_mode: "Markdown" }),
     });
+  } catch {}
+}
+
+async function sendTelegramVoice(audioPath: string): Promise<void> {
+  const token = getTelegramToken();
+  if (!token) return;
+  try {
+    const form = new FormData();
+    form.append("chat_id", TELEGRAM_CHAT_ID);
+    form.append("voice", new Blob([fs.readFileSync(audioPath)], { type: "audio/ogg" }), "voice.ogg");
+    await fetch(`https://api.telegram.org/bot${token}/sendVoice`, { method: "POST", body: form });
+  } catch {}
+}
+
+function generatePitch(spec: UtilitySpec): string {
+  const categories: Record<string, string> = {
+    string: "any developer working with text",
+    data: "agents that need fast in-memory data structures",
+    async: "concurrent workflows and agent orchestration",
+    fs: "file system operations in autonomous agents",
+    net: "network-aware agents and API integrations",
+    crypto: "security, hashing, and identity in agent systems",
+    date: "time-aware agents and scheduling",
+    math: "analytics, scoring, and numerical reasoning",
+    cli: "terminal-based agent interfaces",
+    test: "self-validating agents that test their own output",
+    parse: "agents that read and transform structured data",
+    encoding: "data transport between agents and services",
+  };
+  const category = spec.requirements[0]?.toLowerCase().includes("string") ? "string"
+    : spec.requirements[0]?.toLowerCase().includes("async") ? "async"
+    : spec.requirements[0]?.toLowerCase().includes("file") ? "fs"
+    : spec.requirements[0]?.toLowerCase().includes("parse") ? "parse"
+    : "data";
+  const audience = categories[category] ?? "autonomous coding agents";
+  return `New ability obtained: *${spec.name}*
+
+${spec.description}
+
+*Who it's for:* ${audience}
+*Job to be done:* ${spec.requirements.slice(0, 2).join(". ")}
+*Why it matters:* Every ability Eight obtains makes it more autonomous. This one means Eight no longer needs external dependencies for this task - it can do it itself, in under ${spec.maxLines ?? 150} lines, zero deps.`;
+}
+
+async function sendPRNotification(spec: UtilitySpec, prUrl: string): Promise<void> {
+  const msg = generatePitch(spec) + `\n\n${prUrl}`;
+  await sendTelegram(msg);
+
+  // Generate voice pitch via macOS say
+  try {
+    const voiceText = `New ability: ${spec.name}. ${spec.description}. Eight can now do this autonomously with zero dependencies.`;
+    const aiffPath = `/tmp/8gent-voice-${spec.name}.aiff`;
+    const oggPath = `/tmp/8gent-voice-${spec.name}.ogg`;
+    execSync(`say -v Ava -o "${aiffPath}" "${voiceText.replace(/"/g, '\\"')}"`, { stdio: "pipe" });
+    execSync(`ffmpeg -y -i "${aiffPath}" -c:a libopus "${oggPath}" 2>/dev/null`, { stdio: "pipe" });
+    if (fs.existsSync(oggPath)) {
+      await sendTelegramVoice(oggPath);
+      fs.unlinkSync(aiffPath);
+      fs.unlinkSync(oggPath);
+    }
   } catch {
-    // Non-fatal - factory continues without notification
+    // Voice is optional - continue without it
   }
 }
 
@@ -298,10 +363,13 @@ async function main() {
       appendLog({ name: spec.name, status: "ok", branch, pr: prUrl, timestamp: new Date().toISOString() }, log);
       successCount++;
 
-      // Telegram every 25
+      // Rich Telegram notification per PR
+      await sendPRNotification(spec, prUrl);
+
+      // Summary every 25
       if (successCount % TELEGRAM_NOTIFY_EVERY === 0) {
         await sendTelegram(
-          `Utility factory progress: ${successCount} PRs created. Latest: ${spec.name}.`
+          `Factory checkpoint: ${successCount} PRs created this run. ${errorCount} errors. Keep going.`
         );
       }
 
