@@ -1,0 +1,40 @@
+[
+  {
+    "timestamp": "2026-03-25T23:41:40.941Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 26,
+    "added": 24,
+    "skipped": 5,
+    "newSpecs": [
+      "editor",
+      "claude-subconscious",
+      "ruflo",
+      "project-nomad",
+      "supermemory",
+      "dexter",
+      "firecrawl",
+      "twenty",
+      "compound-engineering-plugin",
+      "chrome-devtools-mcp",
+      "last30days-skill",
+      "deer-flow",
+      "berriai",
+      "ruview",
+      "fujiwarachoki",
+      "strix",
+      "tradingagents-cn",
+      "claude-linked-output-going",
+      "show-optio-orchestrate-coding",
+      "goodbye-sora",
+      "health-staff-told-stop",
+      "research-pipeline",
+      "research-provenance",
+      "research-integrity"
+    ]
+  }
+]
