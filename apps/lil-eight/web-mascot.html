@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lil Eight - Web Mascot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0D0D1A; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .mascot-container { width: clamp(200px, 50vw, 400px); cursor: pointer; }
+    .mascot-container svg { width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <div class="mascot-container">
+    <svg id="lil-eight" viewBox="0 0 200 260" xmlns="http://www.w3.org/2000/svg">
+      <title>Lil Eight - 8gent mascot</title>
+      <desc>An animated 8-shaped robot with orange accents, the mascot of 8gent.</desc>
+
+      <!-- Shadow -->
+      <ellipse id="shadow" cx="100" cy="245" rx="40" ry="8" fill="rgba(0,0,0,0.3)"/>
+
+      <!-- Body group - moves as one for breathing -->
+      <g id="body-group">
+        <!-- Left leg -->
+        <rect id="leg-left" x="72" y="185" width="16" height="28" rx="4" fill="#1A1A2E"/>
+        <rect id="foot-left" x="68" y="208" width="24" height="10" rx="5" fill="#E8610A"/>
+
+        <!-- Right leg -->
+        <rect id="leg-right" x="112" y="185" width="16" height="28" rx="4" fill="#1A1A2E"/>
+        <rect id="foot-right" x="108" y="208" width="24" height="10" rx="5" fill="#E8610A"/>
+
+        <!-- Left arm -->
+        <g id="arm-left">
+          <rect x="38" y="100" width="14" height="40" rx="7" fill="#1A1A2E"/>
+          <rect id="hand-left" x="38" y="132" width="14" height="12" rx="7" fill="#FF8C42"/>
+        </g>
+
+        <!-- Right arm -->
+        <g id="arm-right">
+          <rect x="148" y="100" width="14" height="40" rx="7" fill="#1A1A2E"/>
+          <rect id="hand-right" x="148" y="132" width="14" height="12" rx="7" fill="#FF8C42"/>
+        </g>
+
+        <!-- Lower body (bottom of the "8") -->
+        <ellipse cx="100" cy="168" rx="38" ry="30" fill="#1A1A2E"/>
+
+        <!-- Belt accent -->
+        <rect x="62" y="140" width="76" height="8" rx="4" fill="#E8610A"/>
+
+        <!-- Upper body (top of the "8") -->
+        <ellipse cx="100" cy="105" rx="42" ry="38" fill="#1A1A2E"/>
+
+        <!-- Face visor -->
+        <rect x="68" y="90" width="64" height="30" rx="8" fill="#151528"/>
+
+        <!-- Left eye -->
+        <g id="eye-left">
+          <rect x="74" y="96" width="18" height="18" rx="4" fill="#E8610A"/>
+          <rect class="eye-shine" x="78" y="98" width="6" height="6" rx="2" fill="#FF8C42" opacity="0.7"/>
+        </g>
+
+        <!-- Right eye -->
+        <g id="eye-right">
+          <rect x="108" y="96" width="18" height="18" rx="4" fill="#E8610A"/>
+          <rect class="eye-shine" x="112" y="98" width="6" height="6" rx="2" fill="#FF8C42" opacity="0.7"/>
+        </g>
+
+        <!-- Antenna -->
+        <g id="antenna">
+          <rect x="96" y="55" width="8" height="16" rx="4" fill="#FF8C42"/>
+          <circle id="antenna-tip" cx="100" cy="50" r="8" fill="#E8610A"/>
+          <circle cx="100" cy="48" r="3" fill="#FF8C42" opacity="0.6"/>
+        </g>
+
+        <!-- Chest emblem - small "8" -->
+        <text x="100" y="135" text-anchor="middle" font-family="sans-serif" font-weight="800"
+              font-size="18" fill="#E8610A" opacity="0.6">8</text>
+      </g>
+    </svg>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script>
+    const gsapLoaded = typeof gsap !== "undefined";
+    if (!gsapLoaded) { console.error("GSAP failed to load"); }
+
+    // Breathing - whole body bobs gently
+    gsap.to("#body-group", {
+      y: -4, duration: 1.5, ease: "sine.inOut", yoyo: true, repeat: -1
+    });
+
+    // Shadow scales with breathing
+    gsap.to("#shadow", {
+      attr: { rx: 36, ry: 6 }, duration: 1.5, ease: "sine.inOut", yoyo: true, repeat: -1
+    });
+
+    // Antenna wobble
+    gsap.to("#antenna", {
+      rotation: 8, transformOrigin: "50% 100%",
+      duration: 0.8, ease: "sine.inOut", yoyo: true, repeat: -1
+    });
+
+    // Antenna tip glow pulse
+    gsap.to("#antenna-tip", {
+      attr: { r: 10 }, opacity: 0.8,
+      duration: 1.2, ease: "sine.inOut", yoyo: true, repeat: -1
+    });
+
+    // Arm swing - left
+    gsap.to("#arm-left", {
+      rotation: 5, transformOrigin: "50% 0%",
+      duration: 2, ease: "sine.inOut", yoyo: true, repeat: -1
+    });
+
+    // Arm swing - right (offset)
+    gsap.to("#arm-right", {
+      rotation: -5, transformOrigin: "50% 0%",
+      duration: 2, ease: "sine.inOut", yoyo: true, repeat: -1, delay: 1
+    });
+
+    // Blink function - random interval
+    function blink() {
+      const tl = gsap.timeline({
+        onComplete: () => {
+          const next = 2000 + Math.random() * 4000;
+          setTimeout(blink, next);
+        }
+      });
+      tl.to("#eye-left rect:first-child, #eye-right rect:first-child", {
+        attr: { height: 2, y: "+=8" }, duration: 0.08, ease: "power2.in"
+      });
+      tl.to("#eye-left rect:first-child, #eye-right rect:first-child", {
+        attr: { height: 18, y: "-=8" }, duration: 0.1, ease: "power2.out"
+      });
+      tl.to("#eye-left .eye-shine, #eye-right .eye-shine", {
+        opacity: 0, duration: 0.08
+      }, 0);
+      tl.to("#eye-left .eye-shine, #eye-right .eye-shine", {
+        opacity: 0.7, duration: 0.1
+      }, 0.08);
+    }
+    setTimeout(blink, 1500);
+
+    // Click reaction - happy bounce
+    document.querySelector(".mascot-container").addEventListener("click", () => {
+      const tl = gsap.timeline();
+      tl.to("#body-group", { y: -20, duration: 0.2, ease: "power2.out" });
+      tl.to("#body-group", { y: 0, duration: 0.4, ease: "bounce.out" });
+      tl.to("#antenna", { rotation: 25, duration: 0.15, ease: "power2.out" }, 0);
+      tl.to("#antenna", { rotation: 0, duration: 0.5, ease: "elastic.out(1, 0.3)" }, 0.15);
+      tl.to("#eye-left rect:first-child, #eye-right rect:first-child", {
+        attr: { height: 22, y: "-=2" }, duration: 0.15
+      }, 0);
+      tl.to("#eye-left rect:first-child, #eye-right rect:first-child", {
+        attr: { height: 18, y: "+=2" }, duration: 0.3, ease: "elastic.out(1, 0.5)"
+      }, 0.15);
+    });
+  </script>
+</body>
+</html>
