@@ -60,6 +60,7 @@
       "available": true,
       "models": [
         "eight-1-q-14b:latest",
+        "minicpm-v:latest",
         "eight:latest",
         "eight-1.0-q3:14b",
         "eight-1-qwen3-14b:latest",
