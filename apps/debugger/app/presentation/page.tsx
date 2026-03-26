@@ -214,7 +214,7 @@ function SectionEight() {
           <li>Option to view detailed reports or launch web UI</li>
         </ol>
         <div className="mt-4 p-4 bg-gray-50 rounded">
-          <p className="font-mono text-sm">$ 8gent review codebase /Users/jamesspalding/8gent-code</p>
+          <p className="font-mono text-sm">$ 8gent review codebase ./</p>
           <p className="font-mono text-sm mt-1">🎯 COMPLETED: Another masterpiece. Examined 47 packages, 12 apps, and discovered the debugger web UI. Why do programmers prefer dark mode? Because light attracts bugs.</p>
         </div>
       </div>
