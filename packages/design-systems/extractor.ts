@@ -13,7 +13,7 @@ import type {
 
 /**
  * Extracted theme data from portfolio
- * Pre-extracted from /home/operator/personal-os/src/lib/themes/themes.css
+ * Pre-extracted from portfolio theme CSS
  */
 export interface ExtractedTheme {
   name: string;
