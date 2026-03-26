@@ -756,11 +756,17 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
     let sendButton = NSButton(title: "\u{2191}", target: nil, action: nil) // arrow up = send
     let micButton = NSButton(title: "\u{1F3A4}", target: nil, action: nil) // mic icon
     let imageButton = NSButton(title: "\u{1F4F7}", target: nil, action: nil) // camera icon
+    let flipButton = NSButton(title: "\u{21BB}", target: nil, action: nil) // flip icon
 
     var onSendMessage: ((String) -> Void)?
     var onSendImage: ((String, String) -> Void)?
     var onVoiceStart: (() -> Void)?
     var isListening = false
+
+    // Card flip state
+    var cardView: CompanionCardView?
+    var chatContainer: NSView?
+    var isShowingCard = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -770,6 +776,21 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { nil }
 
     func setupUI() {
+        wantsLayer = true
+
+        // Flip button (top-right corner)
+        flipButton.bezelStyle = .rounded
+        flipButton.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        flipButton.toolTip = "Flip card (Tab)"
+        flipButton.target = self
+        flipButton.action = #selector(flipClicked)
+        flipButton.translatesAutoresizingMaskIntoConstraints = false
+
+        // Chat container - wraps all chat UI so we can swap it with the card
+        let container = NSView(frame: bounds)
+        container.translatesAutoresizingMaskIntoConstraints = false
+        self.chatContainer = container
+
         // Status bar at top
         statusBar.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
         statusBar.textColor = .tertiaryLabelColor
@@ -826,25 +847,40 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
         inputRow.spacing = 6
         inputRow.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(statusBar)
-        addSubview(scrollView)
-        addSubview(inputRow)
+        container.addSubview(statusBar)
+        container.addSubview(scrollView)
+        container.addSubview(inputRow)
+
+        addSubview(container)
+        addSubview(flipButton) // flip button always on top
 
         NSLayoutConstraint.activate([
-            statusBar.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            statusBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            statusBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            // Chat container fills the view
+            container.topAnchor.constraint(equalTo: topAnchor),
+            container.leadingAnchor.constraint(equalTo: leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // Flip button top-right
+            flipButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            flipButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            flipButton.widthAnchor.constraint(equalToConstant: 28),
+            flipButton.heightAnchor.constraint(equalToConstant: 22),
+
+            statusBar.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            statusBar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            statusBar.trailingAnchor.constraint(equalTo: flipButton.leadingAnchor, constant: -4),
 
             scrollView.topAnchor.constraint(equalTo: statusBar.bottomAnchor, constant: 6),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
             scrollView.bottomAnchor.constraint(equalTo: inputRow.topAnchor, constant: -6),
 
             messageStack.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -12),
 
-            inputRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            inputRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            inputRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            inputRow.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            inputRow.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            inputRow.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
             inputRow.heightAnchor.constraint(equalToConstant: 28),
 
             inputField.heightAnchor.constraint(equalToConstant: 28),
@@ -853,8 +889,66 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
             imageButton.widthAnchor.constraint(equalToConstant: 32),
         ])
 
+        // Load companion card if data available
+        if let comp = CompanionData.load() {
+            let card = CompanionCardView(companion: comp, frame: bounds)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            card.isHidden = true
+            addSubview(card, positioned: .below, relativeTo: flipButton)
+            NSLayoutConstraint.activate([
+                card.topAnchor.constraint(equalTo: topAnchor),
+                card.leadingAnchor.constraint(equalTo: leadingAnchor),
+                card.trailingAnchor.constraint(equalTo: trailingAnchor),
+                card.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            self.cardView = card
+        }
+
         // Welcome message
         appendMessage(ChatMessage(role: .system, text: "Click send or press Enter to chat with Eight"))
+    }
+
+    // MARK: - Card Flip
+
+    @objc func flipClicked() {
+        flipCard()
+    }
+
+    func flipCard() {
+        guard let container = chatContainer, let card = cardView else { return }
+
+        let transition = CATransition()
+        transition.duration = 0.4
+        transition.type = .init(rawValue: "flip")
+        transition.subtype = .fromRight
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer?.add(transition, forKey: "flip")
+
+        if isShowingCard {
+            card.isHidden = true
+            container.isHidden = false
+            flipButton.title = "\u{21BB}" // rotate arrow
+            isShowingCard = false
+            // Re-focus input
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.inputField.becomeFirstResponder()
+            }
+        } else {
+            container.isHidden = true
+            card.isHidden = false
+            card.needsDisplay = true
+            flipButton.title = "\u{21BA}" // reverse rotate arrow
+            isShowingCard = true
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Tab key triggers flip
+        if event.keyCode == 48 { // Tab
+            flipCard()
+        } else {
+            super.keyDown(with: event)
+        }
     }
 
     func updateStatus(sessionId: String, state: String, connected: Bool) {
@@ -980,6 +1074,22 @@ struct CompanionData {
     let rarity: String
     let palette: CompanionPalette
     let spriteAtlas: String?
+    let stats: [String: Int]
+    let lore: String
+    let accessory: String
+    let shiny: Bool
+
+    /// Rarity border color for the companion card
+    var rarityColor: NSColor {
+        switch rarity.lowercased() {
+        case "common": return NSColor(red: 0.133, green: 0.773, blue: 0.369, alpha: 1.0) // #22C55E
+        case "uncommon": return NSColor(red: 0.231, green: 0.510, blue: 0.965, alpha: 1.0) // #3B82F6
+        case "rare": return NSColor(red: 0.659, green: 0.333, blue: 0.969, alpha: 1.0) // #A855F7
+        case "epic": return NSColor(red: 0.976, green: 0.451, blue: 0.086, alpha: 1.0) // #F97316
+        case "legendary": return NSColor(red: 0.918, green: 0.702, blue: 0.031, alpha: 1.0) // #EAB308
+        default: return NSColor(red: 0.133, green: 0.773, blue: 0.369, alpha: 1.0)
+        }
+    }
 
     static func load() -> CompanionData? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -1018,7 +1128,221 @@ struct CompanionData {
 
         let spriteAtlas = json["spriteAtlas"] as? String
 
-        return CompanionData(fullName: fullName, species: species, element: element, rarity: rarity, palette: palette, spriteAtlas: spriteAtlas)
+        // Parse new fields with defaults
+        var stats: [String: Int] = [:]
+        if let statsDict = json["stats"] as? [String: Any] {
+            for (key, val) in statsDict {
+                if let intVal = val as? Int { stats[key] = intVal }
+                else if let dblVal = val as? Double { stats[key] = Int(dblVal) }
+            }
+        }
+        // Default stats if none provided
+        if stats.isEmpty {
+            stats = ["DEBUG": 10, "CHAOS": 10, "WISDOM": 10, "PATIENCE": 10, "SNARK": 10, "ARCANA": 10]
+        }
+
+        let lore = json["lore"] as? String ?? "A mysterious companion."
+        let accessory = json["accessory"] as? String ?? "None"
+        let shiny = json["shiny"] as? Bool ?? false
+
+        return CompanionData(fullName: fullName, species: species, element: element, rarity: rarity, palette: palette, spriteAtlas: spriteAtlas, stats: stats, lore: lore, accessory: accessory, shiny: shiny)
+    }
+}
+
+// MARK: - Companion Card View (MTG-style profile card)
+
+class CompanionCardView: NSView {
+    let companion: CompanionData
+    private let statOrder = ["DEBUG", "CHAOS", "WISDOM", "PATIENCE", "SNARK", "ARCANA"]
+
+    init(companion: CompanionData, frame: NSRect) {
+        self.companion = companion
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+
+        let w = bounds.width
+        let h = bounds.height
+        let borderWidth: CGFloat = 3.0
+
+        // -- Rarity border --
+        let rarityCol = companion.rarityColor.cgColor
+        ctx.setFillColor(rarityCol)
+        let borderPath = CGPath(roundedRect: bounds, cornerWidth: 12, cornerHeight: 12, transform: nil)
+        ctx.addPath(borderPath)
+        ctx.fillPath()
+
+        // -- Dark inner background --
+        let inner = bounds.insetBy(dx: borderWidth, dy: borderWidth)
+        let bodyComps = companion.palette.body.usingColorSpace(.sRGB)
+        let bgR = (bodyComps?.redComponent ?? 0.1) * 0.3
+        let bgG = (bodyComps?.greenComponent ?? 0.1) * 0.3
+        let bgB = (bodyComps?.blueComponent ?? 0.12) * 0.3
+        let bgColor = CGColor(red: bgR, green: bgG, blue: bgB, alpha: 1.0)
+        let bgColorBottom = CGColor(red: bgR * 0.5, green: bgG * 0.5, blue: bgB * 0.5, alpha: 1.0)
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [bgColor, bgColorBottom] as CFArray, locations: [0.0, 1.0])!
+        let innerPath = CGPath(roundedRect: inner, cornerWidth: 10, cornerHeight: 10, transform: nil)
+        ctx.saveGState()
+        ctx.addPath(innerPath)
+        ctx.clip()
+        ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: h), end: CGPoint(x: 0, y: 0), options: [])
+        ctx.restoreGState()
+
+        // -- Shiny shimmer overlay --
+        if companion.shiny {
+            let shimmerGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [
+                CGColor(red: 1, green: 1, blue: 1, alpha: 0.0),
+                CGColor(red: 1, green: 1, blue: 1, alpha: 0.08),
+                CGColor(red: 1, green: 1, blue: 1, alpha: 0.0),
+            ] as CFArray, locations: [0.0, 0.5, 1.0])!
+            ctx.saveGState()
+            ctx.addPath(innerPath)
+            ctx.clip()
+            ctx.drawLinearGradient(shimmerGrad, start: CGPoint(x: 0, y: h), end: CGPoint(x: w, y: 0), options: [])
+            ctx.restoreGState()
+        }
+
+        // Layout positions (bottom-up since macOS y=0 is bottom)
+        let padding: CGFloat = 14.0
+        var yPos: CGFloat = h - borderWidth - padding
+
+        // -- Species pixel art --
+        let artSize: CGFloat = 80.0
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let bodyPath = "\(home)/8gent-code/apps/lil-eight/parts/\(companion.species)/body.png"
+        if let img = NSImage(contentsOfFile: bodyPath) {
+            let artRect = NSRect(x: (w - artSize) / 2, y: yPos - artSize, width: artSize, height: artSize)
+            ctx.saveGState()
+            ctx.interpolationQuality = .none // pixel art - nearest neighbor
+            img.draw(in: artRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            ctx.restoreGState()
+            yPos -= artSize + 8
+        }
+
+        // -- Name --
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 15, weight: .bold),
+            .foregroundColor: NSColor.white,
+        ]
+        let nameStr = NSAttributedString(string: companion.fullName, attributes: nameAttrs)
+        let nameSize = nameStr.size()
+        nameStr.draw(at: NSPoint(x: (w - nameSize.width) / 2, y: yPos - nameSize.height))
+        yPos -= nameSize.height + 6
+
+        // -- Element + Rarity badges --
+        let badgeFont = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        let elAttrs: [NSAttributedString.Key: Any] = [
+            .font: badgeFont,
+            .foregroundColor: companion.palette.accent,
+        ]
+        let elStr = NSAttributedString(string: companion.element, attributes: elAttrs)
+        let rarAttrs: [NSAttributedString.Key: Any] = [
+            .font: badgeFont,
+            .foregroundColor: companion.rarityColor,
+        ]
+        let rarStr = NSAttributedString(string: companion.rarity.capitalized, attributes: rarAttrs)
+        let elSize = elStr.size()
+        let rarSize = rarStr.size()
+        let badgeGap: CGFloat = 16
+        let totalBadgeW = elSize.width + badgeGap + rarSize.width
+        let badgeX = (w - totalBadgeW) / 2
+        elStr.draw(at: NSPoint(x: badgeX, y: yPos - elSize.height))
+        rarStr.draw(at: NSPoint(x: badgeX + elSize.width + badgeGap, y: yPos - rarSize.height))
+        yPos -= max(elSize.height, rarSize.height) + 10
+
+        // -- Divider line --
+        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.15))
+        ctx.setLineWidth(1)
+        ctx.move(to: CGPoint(x: padding, y: yPos))
+        ctx.addLine(to: CGPoint(x: w - padding, y: yPos))
+        ctx.strokePath()
+        yPos -= 8
+
+        // -- Stats label --
+        let statLabelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .bold),
+            .foregroundColor: NSColor(white: 1.0, alpha: 0.5),
+        ]
+        let statsLabel = NSAttributedString(string: "STATS", attributes: statLabelAttrs)
+        statsLabel.draw(at: NSPoint(x: padding, y: yPos - 11))
+        yPos -= 16
+
+        // -- Stat bars --
+        let barMaxW: CGFloat = w - padding * 2 - 80
+        let barH: CGFloat = 8.0
+        let accentCG = companion.palette.accent.cgColor
+        let monoFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+
+        for stat in statOrder {
+            let val = companion.stats[stat] ?? 10
+            let pct = CGFloat(min(val, 20)) / 20.0
+
+            // Stat name
+            let labelAttrs: [NSAttributedString.Key: Any] = [
+                .font: monoFont,
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.7),
+            ]
+            let label = NSAttributedString(string: stat, attributes: labelAttrs)
+            label.draw(at: NSPoint(x: padding, y: yPos - 12))
+
+            // Bar background
+            let barX = padding + 68
+            let barY = yPos - 10
+            ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.1))
+            ctx.fill(CGRect(x: barX, y: barY, width: barMaxW, height: barH))
+
+            // Bar fill
+            ctx.setFillColor(accentCG)
+            ctx.fill(CGRect(x: barX, y: barY, width: barMaxW * pct, height: barH))
+
+            // Value
+            let valAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
+                .foregroundColor: NSColor(white: 1.0, alpha: 0.6),
+            ]
+            let valStr = NSAttributedString(string: "\(val)", attributes: valAttrs)
+            valStr.draw(at: NSPoint(x: barX + barMaxW + 4, y: yPos - 12))
+
+            yPos -= 16
+        }
+
+        yPos -= 2
+
+        // -- Accessory --
+        if companion.accessory != "None" {
+            let accAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+                .foregroundColor: companion.palette.highlight,
+            ]
+            let accStr = NSAttributedString(string: "Accessory: \(companion.accessory)", attributes: accAttrs)
+            accStr.draw(at: NSPoint(x: padding, y: yPos - 12))
+            yPos -= 18
+        }
+
+        // -- Lore text (italic) --
+        let loreAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont(descriptor: NSFont.systemFont(ofSize: 10).fontDescriptor.withSymbolicTraits(.italic), size: 10) ?? NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor(white: 1.0, alpha: 0.5),
+        ]
+        let loreStr = NSAttributedString(string: "\"\(companion.lore)\"", attributes: loreAttrs)
+        let loreRect = NSRect(x: padding, y: borderWidth + 28, width: w - padding * 2, height: yPos - borderWidth - 28)
+        loreStr.draw(in: loreRect)
+
+        // -- Footer: 8gent.dev --
+        let footAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8, weight: .light),
+            .foregroundColor: NSColor(white: 1.0, alpha: 0.3),
+        ]
+        let footStr = NSAttributedString(string: "8gent.dev", attributes: footAttrs)
+        let footSize = footStr.size()
+        footStr.draw(at: NSPoint(x: (w - footSize.width) / 2, y: borderWidth + 8))
     }
 }
 

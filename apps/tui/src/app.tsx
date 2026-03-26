@@ -1913,6 +1913,7 @@ export function App({ initialCommand, args }: AppProps) {
                   shiny: companion.shiny,
                   palette: companion.palette,
                   lore: companion.lore,
+                  stats: companion.stats,
                 };
                 const home = process.env.HOME || "~";
                 fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
