@@ -556,7 +556,7 @@ async function spawnPet(sessionId?: string) {
     fs.writeFileSync(path.join(home, ".8gent", "active-companion.json"), JSON.stringify({
       fullName: companion.fullName, species: companion.species, element: companion.element,
       rarity: companion.rarity, accessory: companion.accessory, shiny: companion.shiny,
-      palette: companion.palette, lore: companion.lore,
+      palette: companion.palette, lore: companion.lore, stats: companion.stats,
     }, null, 2));
   } catch {}
 
