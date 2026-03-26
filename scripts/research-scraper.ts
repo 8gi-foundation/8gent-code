@@ -535,13 +535,13 @@ async function run(): Promise<void> {
 // Loop mode
 // ---------------------------------------------------------------------------
 
-const FOUR_HOURS = 4 * 60 * 60 * 1000;
+const CYCLE_MS = 30 * 60 * 1000; // 30 minutes
 
 async function loopForever(): Promise<void> {
   while (true) {
     await run();
-    console.log(`\nSleeping 4 hours until next cycle...`);
-    await new Promise((res) => setTimeout(res, FOUR_HOURS));
+    console.log(`\nSleeping 30 minutes until next cycle...`);
+    await new Promise((res) => setTimeout(res, CYCLE_MS));
   }
 }
 
