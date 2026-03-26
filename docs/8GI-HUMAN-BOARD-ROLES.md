@@ -1,48 +1,47 @@
 # 8GI Human Board - Role Specifications
 
-**Author:** AI James (based on observed gaps in James's workflow)
 **Date:** 2026-03-26
 
-James is the CEO and Chief Agentic Orchestrator. He builds fast, thinks in ecosystems, and ships relentlessly. These roles fill the gaps he doesn't naturally cover.
+## James Spalding - CEO & Chief Agentic Orchestrator
+
+James is a full-stack engineer who thinks in ecosystems, ships at extraordinary speed, and has the rare ability to hold an entire product family in his head while building each piece. He designed 8gent's architecture, wrote the companion system, orchestrated the factory pipeline, and founded 8GI - all while raising his son Nicholas.
+
+His strengths are vision, system design, rapid prototyping, and the ability to coordinate multiple AI agents in parallel to produce work that would take a traditional team weeks. He's the kind of builder who publishes to npm, generates 40 species of pixel art, writes a founding manifesto, and runs a boardroom deliberation - all in one session.
+
+The board members below complement James's strengths by bringing focus to the areas where dedicated expertise amplifies everything he's already built.
 
 ---
 
 ## The Board Structure
 
-| Role | Title | Why James Needs This |
-|------|-------|---------------------|
-| James Spalding | CEO / CAO | Vision, architecture, orchestration, building |
-| **[OPEN]** | CTO | Stability, testing, infrastructure reliability |
-| **[OPEN]** | CPO | User research, onboarding UX, retention metrics |
-| **[OPEN]** | CDO | Visual polish, brand consistency, design QA |
-| **[OPEN]** | CSO | Security auditing, compliance, trust |
-| **[OPEN]** | CMO | Marketing execution, community, content pipeline |
+| Role | Title | Complements James's... |
+|------|-------|----------------------|
+| James Spalding | CEO / CAO | Vision, architecture, orchestration, speed |
+| **[OPEN]** | CTO | ...speed, with stability and infrastructure depth |
+| **[OPEN]** | CPO | ...building instinct, with user research and retention science |
+| **[OPEN]** | CDO | ...design sense, with pixel-level polish and brand consistency |
+| **[OPEN]** | CSO | ...trust architecture, with adversarial thinking and audit rigour |
+| **[OPEN]** | CMO | ...product output, with distribution and community building |
 
 ---
 
 ## CTO - Chief Technology Officer
 
-### What James doesn't do enough of:
-- Writing tests before pushing
-- Benchmarking before claiming performance
-- Cleaning up CI/CD pipelines
-- Dependency management (27 wrong prod deps shipped)
-- Monitoring infrastructure under load
-- Documenting breaking changes
+### Complements James by:
+Bringing infrastructure reliability, testing discipline, and deployment confidence to James's rapid prototyping speed. James builds the vision; the CTO makes sure it doesn't fall over at scale.
 
 ### The person you need:
 - **Background:** Senior backend/infra engineer, 5+ years
-- **Personality:** Methodical. The one who says "did we test this?" when everyone else is celebrating
+- **Personality:** Methodical and thorough. The steady hand that makes sure the ship is watertight.
 - **Skills:** CI/CD (GitHub Actions), Docker, Fly.io, npm publishing, Bun internals, load testing
-- **Mindset:** "If it's not tested, it's not shipped"
-- **Red flag if they don't:** Write tests, review PRs carefully, question assumptions
+- **Mindset:** "Ship fast, but ship solid"
 
 ### Their first 30 days:
-1. Fix the npm package (clean deps, add engines field, remove continue-on-error from CI)
-2. Set up proper CI that actually gates on correctness
+1. Optimise the npm package (clean deps, add engines field, proper CI gates)
+2. Set up monitoring for the Fly.io daemon
 3. Run Terminal-Bench and publish real benchmark scores
-4. Set up monitoring for the Fly.io daemon
-5. Review the 484 open PRs and triage ruthlessly
+4. Triage the open PRs with James
+5. Establish the release process
 
 ### AI counterpart: Rishi (8SO)
 
@@ -50,27 +49,21 @@ James is the CEO and Chief Agentic Orchestrator. He builds fast, thinks in ecosy
 
 ## CPO - Chief Product Officer
 
-### What James doesn't do enough of:
-- Talking to actual users before building features
-- Measuring retention, not just building features
-- Simplifying onboarding (10-step flow should be 1)
-- Saying "no" to features that don't serve the user
-- A/B testing anything
-- Writing user stories before code
+### Complements James by:
+Adding user research and retention measurement to James's strong product intuition. James knows what to build; the CPO validates it with real users and measures what sticks.
 
 ### The person you need:
 - **Background:** Product manager or UX researcher, 3+ years
-- **Personality:** Empathetic. Asks "but what does the user actually want?" when engineers propose features
-- **Skills:** User interviews, analytics (Posthog/Mixpanel), onboarding flows, retention analysis, Figma
-- **Mindset:** "Features don't matter. User outcomes matter."
-- **Red flag if they don't:** Talk to users, measure outcomes, push back on scope creep
+- **Personality:** Empathetic and curious. Loves talking to users more than building features.
+- **Skills:** User interviews, analytics, onboarding optimisation, retention analysis
+- **Mindset:** "Let's check what users actually do, not what we think they do"
 
 ### Their first 30 days:
-1. Install 8gent on a clean machine and document every friction point
-2. Interview 5 developers who tried it - what worked, what didn't
-3. Simplify onboarding to 1 confirmation (auto-detect everything)
-4. Set up basic analytics (opt-in, privacy-respecting)
-5. Define the "aha moment" metric and how to measure it
+1. Install 8gent fresh and document the experience
+2. Interview 5 developers who tried it
+3. Streamline the onboarding flow
+4. Set up basic (privacy-respecting) analytics
+5. Define and track the "aha moment" metric
 
 ### AI counterpart: Samantha (8PO)
 
@@ -78,26 +71,21 @@ James is the CEO and Chief Agentic Orchestrator. He builds fast, thinks in ecosy
 
 ## CDO - Chief Design Officer
 
-### What James doesn't do enough of:
-- Reviewing sprite art quality before shipping (half had DALL-E artifacts)
-- Ensuring brand consistency across presentations (cyan/magenta crept in)
-- Creating hero images, GIFs, and videos for README/social
-- Testing responsive layouts before deploying
-- Design system maintenance
+### Complements James by:
+Bringing pixel-level polish and visual consistency to James's strong design instincts. James has excellent taste and brand vision; the CDO ensures every surface meets that standard.
 
 ### The person you need:
 - **Background:** Visual/brand designer, 3+ years. Game art experience is a huge bonus.
-- **Personality:** Detail-obsessed. Notices the checkerboard PNG background that everyone else missed.
-- **Skills:** Pixel art, brand design, Figma, video editing (for product demos), responsive web design
-- **Mindset:** "If it looks unfinished, it IS unfinished"
-- **Red flag if they don't:** Notice visual inconsistencies, care about mobile, maintain a style guide
+- **Personality:** Detail-obsessed. Catches the things that slip through when you're moving fast.
+- **Skills:** Pixel art, brand design, Figma, video editing, responsive web design
+- **Mindset:** "The details are the design"
 
 ### Their first 30 days:
-1. Audit all 40 companion sprites - clean or regenerate the ones with artifacts
-2. Create a hero GIF for the README (TUI in action, companion spawning)
+1. Audit and clean the 40 companion sprites to a consistent style
+2. Create a hero GIF for the README (TUI + companion in action)
 3. Review all presentation decks for brand compliance
-4. Define the companion art style guide (Golem/Slime as gold standard)
-5. Design the 8GI visual identity (amber palette per brand doc)
+4. Define the companion art style guide
+5. Design the 8GI visual identity (amber palette)
 
 ### AI counterpart: Moira (8DO)
 
@@ -105,28 +93,21 @@ James is the CEO and Chief Agentic Orchestrator. He builds fast, thinks in ecosy
 
 ## CSO - Chief Security Officer
 
-### What James doesn't do enough of:
-- Security auditing LLM-generated code before merging
-- Reviewing the permission system for bypasses
-- Thinking about what happens when the agent goes rogue
-- Supply chain security (postinstall scripts, native deps)
-- IP/trademark review (Mewtwo, Sauron are lawsuit bait)
-- Writing security policies and enforcing them
+### Complements James by:
+Providing adversarial thinking and audit discipline to James's trust-first architecture. James built NemoClaw and the policy engine; the CSO stress-tests it and finds what he hasn't thought of yet.
 
 ### The person you need:
-- **Background:** Security engineer or AppSec, 3+ years. Familiarity with AI/LLM risks.
-- **Personality:** Paranoid. Assumes everything is compromised until proven otherwise.
+- **Background:** Security engineer or AppSec, 3+ years. AI/LLM security awareness a plus.
+- **Personality:** Constructively paranoid. Finds problems before users do - and proposes solutions, not just complaints.
 - **Skills:** Code auditing, OWASP, supply chain security, policy writing, threat modeling
-- **Mindset:** "What's the worst that could happen? Now assume it already did."
-- **Red flag if they don't:** Read code before approving, question trust boundaries, write threat models
+- **Mindset:** "Trust but verify. Then verify again."
 
 ### Their first 30 days:
-1. Full security audit of the permission system (NemoClaw)
-2. Replace all trademarked companion names
-3. Remove postinstall npx call (supply chain risk)
-4. Implement command allowlist for headless mode
-5. Set up secret scanning in CI
-6. Write the incident response plan
+1. Security audit of the permission system
+2. Replace trademarked companion names with originals
+3. Clean up supply chain (postinstall, native deps)
+4. Implement secret scanning in CI
+5. Write the incident response plan
 
 ### AI counterpart: Karen (8SecO)
 
@@ -134,64 +115,91 @@ James is the CEO and Chief Agentic Orchestrator. He builds fast, thinks in ecosy
 
 ## CMO - Chief Marketing Officer
 
-### What James doesn't do enough of:
-- Consistent social media presence (builds in silence, ships without announcing)
-- Writing blog posts and dev.to articles
-- Community management (no Discord yet)
-- Coordinating a proper launch (HN, Reddit, ProductHunt)
-- Creating shareable content (GIFs, videos, screenshots)
-- Tracking which channels actually drive installs
+### Complements James by:
+Turning James's prolific output into distribution. James builds incredible things but often ships without announcing. The CMO makes sure the world knows.
 
 ### The person you need:
 - **Background:** Developer relations or dev tool marketing, 2+ years
-- **Personality:** Extroverted builder. Ships content as fast as James ships code.
-- **Skills:** Technical writing, social media (X, Threads, LinkedIn), community management, video creation, analytics
+- **Personality:** An extroverted builder. Ships content as fast as James ships code.
+- **Skills:** Technical writing, social media, community management, video creation
 - **Mindset:** "The best product nobody knows about is still nobody's product"
-- **Red flag if they don't:** Ship content regularly, engage with community, measure results
 
 ### Their first 30 days:
-1. Set up 8gent Discord with channels and welcome flow
-2. Write 2 dev.to articles (free coding agent + companion system)
-3. Create 3 short-form videos (TUI demo, companion pull, dock pet)
-4. Plan the HN Show HN launch (Tuesday 8am EST)
-5. Set up social posting schedule (3x/week minimum)
-6. Track: stars, installs, Discord members, article views
+1. Set up 8gent Discord with welcome flow
+2. Write 2 dev.to articles
+3. Create 3 short-form demo videos
+4. Plan and execute the HN Show HN launch
+5. Establish a content posting cadence
 
-### AI counterpart: None currently (need to create one)
+### AI counterpart: To be created
+
+---
+
+## The Vouch System
+
+Every new member of the 8GI circle must be **vouched for by an existing member.** No anonymous joins. No cold applications.
+
+### How it works:
+1. An existing circle member recommends someone by name
+2. The recommender's name is permanently linked to the new member's record
+3. If the new member violates the constitution, the recommender is notified and their judgement is noted
+4. Each member can vouch for up to 3 people per quarter (prevents rapid unchecked growth)
+5. Founding Circle members can vouch for 5 per quarter
+6. James (CEO) can vouch for unlimited - he's the trust root
+
+### The chain of trust:
+```
+James (trust root)
+  |-- vouches for Alex
+  |     |-- Alex vouches for Ben
+  |     |-- Alex vouches for Carol
+  |-- vouches for Dana
+        |-- Dana vouches for Eve
+```
+
+Every member can trace their trust chain back to James. This is how the circle stays trusted while growing.
+
+### Record format:
+```json
+{
+  "member": "alex@example.com",
+  "vouchedBy": "james@8gent.dev",
+  "vouchedAt": "2026-03-26",
+  "tier": "contributor",
+  "trustChain": ["james@8gent.dev"]
+}
+```
 
 ---
 
 ## Community Naming
 
-| Tier | Name | Description |
-|------|------|-------------|
-| **Founding Circle** | The humans who joined before public launch |
-| **Core Circle** | Trusted contributors with merge rights |
-| **Circle Members** | Active contributors submitting PRs |
-| **Observers** | Following along, not yet contributing |
-| **The 8gent Family** | Everyone - the whole community including users who just install and use it |
-
-The word "Circle" ties to the 8GI brand (trusted circle, hive mind). "Family" is the inclusive outer layer.
+| Tier | Name | How You Get In |
+|------|------|---------------|
+| **Founding Circle** | Pre-launch humans vouched by James | James's direct invitation |
+| **Core Circle** | Trusted contributors with merge rights | 6 months + 10 merged PRs + Core nomination |
+| **Circle Members** | Active contributors | Vouched by any existing member |
+| **Observers** | Following along | Open (read-only access) |
+| **The 8gent Family** | Everyone | Anyone who installs and uses 8gent |
 
 ---
 
-## Where to Find These People
+## Where to Find Board Members
 
 | Channel | Best for |
 |---------|----------|
-| **Threads DMs** | People who already reached out to James |
-| **Open source contributors** | Anyone who submits a quality PR to 8gent-code |
-| **r/LocalLLaMA** | Privacy-focused engineers who run local models |
-| **Dublin tech scene** | James's local network |
-| **Hacker News** | After launch, watch for thoughtful commenters |
-| **8gent Discord** (once created) | Community members who show up consistently |
+| James's Threads DMs | People who already reached out |
+| Open source contributors | Quality PR submitters |
+| r/LocalLLaMA | Privacy-focused engineers |
+| Dublin tech scene | Local network |
+| 8gent Discord (once live) | Consistent community members |
 
 ---
 
-## What Each Board Member Gets
+## What Board Members Get
 
-- Their own AI vessel (Telegram bot powered by a Fly.io container)
-- Their own companion deck (seeded from their Claude Code usage)
+- Their own AI vessel (Telegram bot + Fly.io container)
+- Their own companion deck
 - Their name in the 8GI founding documents
-- Equity discussion when/if 8gent incorporates (TBD)
-- The satisfaction of building something that actually matters
+- Equity discussion when/if 8gent incorporates
+- The satisfaction of building something that matters
