@@ -756,7 +756,7 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
     let sendButton = NSButton(title: "\u{2191}", target: nil, action: nil) // arrow up = send
     let micButton = NSButton(title: "\u{1F3A4}", target: nil, action: nil) // mic icon
     let imageButton = NSButton(title: "\u{1F4F7}", target: nil, action: nil) // camera icon
-    let flipButton = NSButton(title: "\u{21BB}", target: nil, action: nil) // flip icon
+    let flipButton = NSButton(title: "\u{2139}", target: nil, action: nil) // info icon (shows card)
 
     var onSendMessage: ((String) -> Void)?
     var onSendImage: ((String, String) -> Void)?
@@ -927,7 +927,7 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
         if isShowingCard {
             card.isHidden = true
             container.isHidden = false
-            flipButton.title = "\u{21BB}" // rotate arrow
+            flipButton.title = "\u{2139}" // info icon (flip to card)
             isShowingCard = false
             // Re-focus input
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -937,7 +937,16 @@ class ChatPopoverView: NSView, NSTextFieldDelegate {
             container.isHidden = true
             card.isHidden = false
             card.needsDisplay = true
-            flipButton.title = "\u{21BA}" // reverse rotate arrow
+            flipButton.title = "\u{1F4AC}" // chat bubble (flip back to chat)
+            // Ensure flip button is on top of card view
+            flipButton.removeFromSuperview()
+            addSubview(flipButton)
+            NSLayoutConstraint.activate([
+                flipButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+                flipButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+                flipButton.widthAnchor.constraint(equalToConstant: 28),
+                flipButton.heightAnchor.constraint(equalToConstant: 22),
+            ])
             isShowingCard = true
         }
     }
@@ -1179,20 +1188,35 @@ class CompanionCardView: NSView {
         ctx.addPath(borderPath)
         ctx.fillPath()
 
-        // -- Dark inner background --
+        // -- MTG-style rich inner background --
         let inner = bounds.insetBy(dx: borderWidth, dy: borderWidth)
         let bodyComps = companion.palette.body.usingColorSpace(.sRGB)
-        let bgR = (bodyComps?.redComponent ?? 0.1) * 0.3
-        let bgG = (bodyComps?.greenComponent ?? 0.1) * 0.3
-        let bgB = (bodyComps?.blueComponent ?? 0.12) * 0.3
+        // Richer, more saturated base - not near-black
+        let bgR = max((bodyComps?.redComponent ?? 0.15) * 0.6, 0.08)
+        let bgG = max((bodyComps?.greenComponent ?? 0.12) * 0.6, 0.06)
+        let bgB = max((bodyComps?.blueComponent ?? 0.18) * 0.6, 0.10)
         let bgColor = CGColor(red: bgR, green: bgG, blue: bgB, alpha: 1.0)
-        let bgColorBottom = CGColor(red: bgR * 0.5, green: bgG * 0.5, blue: bgB * 0.5, alpha: 1.0)
-        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [bgColor, bgColorBottom] as CFArray, locations: [0.0, 1.0])!
+        let bgMid = CGColor(red: bgR * 0.7, green: bgG * 0.7, blue: bgB * 0.7, alpha: 1.0)
+        let bgBottom = CGColor(red: bgR * 0.4, green: bgG * 0.4, blue: bgB * 0.4, alpha: 1.0)
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [bgColor, bgMid, bgBottom] as CFArray, locations: [0.0, 0.5, 1.0])!
         let innerPath = CGPath(roundedRect: inner, cornerWidth: 10, cornerHeight: 10, transform: nil)
         ctx.saveGState()
         ctx.addPath(innerPath)
         ctx.clip()
         ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: h), end: CGPoint(x: 0, y: 0), options: [])
+        ctx.restoreGState()
+
+        // -- Subtle texture overlay (MTG card feel) --
+        ctx.saveGState()
+        ctx.addPath(innerPath)
+        ctx.clip()
+        // Diagonal vignette
+        let vignetteGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [
+            CGColor(red: 1, green: 1, blue: 1, alpha: 0.04),
+            CGColor(red: 0, green: 0, blue: 0, alpha: 0.0),
+            CGColor(red: 0, green: 0, blue: 0, alpha: 0.12),
+        ] as CFArray, locations: [0.0, 0.4, 1.0])!
+        ctx.drawLinearGradient(vignetteGrad, start: CGPoint(x: 0, y: h), end: CGPoint(x: w, y: 0), options: [])
         ctx.restoreGState()
 
         // -- Shiny shimmer overlay --
@@ -1213,13 +1237,20 @@ class CompanionCardView: NSView {
         let padding: CGFloat = 14.0
         var yPos: CGFloat = h - borderWidth - padding
 
-        // -- Species pixel art --
+        // -- Species pixel art (with solid bg behind to kill checkerboard) --
         let artSize: CGFloat = 80.0
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let bodyPath = "\(home)/8gent-code/apps/lil-eight/parts/\(companion.species)/body.png"
         if let img = NSImage(contentsOfFile: bodyPath) {
             let artRect = NSRect(x: (w - artSize) / 2, y: yPos - artSize, width: artSize, height: artSize)
+            // Draw solid rounded bg behind the art (kills PNG checkerboard)
+            let artBgRect = artRect.insetBy(dx: -4, dy: -4)
             ctx.saveGState()
+            let artBgPath = CGPath(roundedRect: artBgRect, cornerWidth: 8, cornerHeight: 8, transform: nil)
+            // Use a slightly lighter version of the card bg
+            ctx.setFillColor(CGColor(red: bgR * 1.5, green: bgG * 1.5, blue: bgB * 1.5, alpha: 1.0))
+            ctx.addPath(artBgPath)
+            ctx.fillPath()
             ctx.interpolationQuality = .none // pixel art - nearest neighbor
             img.draw(in: artRect, from: .zero, operation: .sourceOver, fraction: 1.0)
             ctx.restoreGState()
