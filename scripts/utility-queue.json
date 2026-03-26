@@ -5879,5 +5879,3314 @@
       "renderReport(result): markdown DCF valuation summary"
     ],
     "maxLines": 140
+  },
+  {
+    "name": "projectile-motion",
+    "description": "Calculate range, max height, and time of flight for projectile motion given initial velocity and angle.",
+    "requirements": [
+      "Accept velocity (m/s) and angle (degrees)",
+      "Return range, apex height, flight time, and velocity components",
+      "Support optional initial height above ground",
+      "Use standard gravity 9.81 m/s^2 with override option"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "orbital-mechanics",
+    "description": "Compute orbital period, velocity, and altitude for circular Earth orbits.",
+    "requirements": [
+      "Accept orbital altitude in km",
+      "Return period (seconds + human string), orbital velocity, and angular velocity",
+      "Include geostationary orbit constant",
+      "Use real Earth radius 6371 km and GM"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "pendulum-simulator",
+    "description": "Simulate simple and physical pendulum motion, returning period and angular frequency.",
+    "requirements": [
+      "Simple pendulum: period from length and gravity",
+      "Physical pendulum: period from moment of inertia, mass, and pivot distance",
+      "Support small-angle and large-angle (elliptic integral approximation) modes",
+      "Return period, frequency, and angular frequency"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "wave-interference",
+    "description": "Calculate constructive/destructive interference conditions and resultant amplitude for two waves.",
+    "requirements": [
+      "Accept amplitude, frequency, and phase for two waves",
+      "Determine interference type (constructive, destructive, partial)",
+      "Return resultant amplitude and phase",
+      "Support path difference input as alternative to phase"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "doppler-effect",
+    "description": "Calculate observed frequency due to Doppler effect for moving source or observer.",
+    "requirements": [
+      "Accept source frequency, source velocity, observer velocity",
+      "Support sound (user-supplied medium speed) and light (relativistic) modes",
+      "Return observed frequency and shift ratio",
+      "Handle edge cases: source moving away vs toward"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "em-field-strength",
+    "description": "Calculate electric and magnetic field strengths from point charges and current-carrying wires.",
+    "requirements": [
+      "Electric field from point charge via Coulomb's law",
+      "Magnetic field from infinite wire via Biot-Savart",
+      "Accept SI units throughout",
+      "Return field magnitude and direction description"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "ohms-law",
+    "description": "Solve Ohm's law for any missing variable given two of voltage, current, and resistance.",
+    "requirements": [
+      "Accept any two of V, I, R and solve for the third",
+      "Calculate power (P=VI) as a bonus output",
+      "Handle parallel and series resistance combinations",
+      "Return all quantities with units"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "circuit-resistance",
+    "description": "Compute total resistance for series and parallel resistor networks.",
+    "requirements": [
+      "seriesResistance(resistors[]) returns sum",
+      "parallelResistance(resistors[]) returns reciprocal-sum inverse",
+      "combinedNetwork(spec) parses nested series/parallel object",
+      "Return total resistance in ohms"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "heat-transfer",
+    "description": "Calculate conductive, convective, and radiative heat transfer rates.",
+    "requirements": [
+      "Conduction: Fourier's law (k, area, delta-T, thickness)",
+      "Convection: Newton's law (h, area, delta-T)",
+      "Radiation: Stefan-Boltzmann (emissivity, area, T^4 difference)",
+      "Return heat flux in watts"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "reynolds-number",
+    "description": "Compute Reynolds number and classify laminar vs turbulent flow in pipes and over flat plates.",
+    "requirements": [
+      "Accept fluid density, velocity, characteristic length, dynamic viscosity",
+      "Return Re value and flow regime classification",
+      "Support kinematic viscosity as input alternative",
+      "Include common fluid presets (water, air at STP)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "hookes-law",
+    "description": "Apply Hooke's law to calculate spring force, extension, elastic potential energy, and oscillation period.",
+    "requirements": [
+      "F = -kx for force from displacement",
+      "Elastic PE = 0.5kx^2",
+      "SHM period T = 2pi*sqrt(m/k)",
+      "Return force, energy, and period given spring constant, mass, displacement"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "kinetic-potential-energy",
+    "description": "Convert between kinetic and potential energy and calculate total mechanical energy in a system.",
+    "requirements": [
+      "KE = 0.5mv^2, PE = mgh",
+      "Total mechanical energy and conservation check",
+      "Velocity from height (energy conservation)",
+      "Height from velocity (energy conservation)"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "friction-calculator",
+    "description": "Calculate friction force, acceleration on inclined planes, and minimum force to move an object.",
+    "requirements": [
+      "Static and kinetic friction from normal force and coefficient",
+      "Inclined plane: resolve forces along and perpendicular to slope",
+      "Net acceleration including gravity component on slope",
+      "Return friction force, net force, and acceleration"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "center-of-mass",
+    "description": "Find center of mass for systems of point masses in 1D, 2D, and 3D.",
+    "requirements": [
+      "Accept array of {mass, x, y?, z?} objects",
+      "Return center of mass coordinates",
+      "Support uniform shapes (rod, rectangle, triangle) as presets",
+      "Validate total mass > 0"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "moment-of-inertia",
+    "description": "Calculate moment of inertia for common geometric shapes about standard axes.",
+    "requirements": [
+      "Solid sphere, hollow sphere, solid cylinder, hollow cylinder, thin rod, rectangular plate",
+      "Accept mass and relevant dimensions",
+      "Return moment of inertia in kg*m^2",
+      "Apply parallel axis theorem for offset axes"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "torque-calculator",
+    "description": "Calculate torque, angular acceleration, and rotational work from force, lever arm, and moment of inertia.",
+    "requirements": [
+      "Torque = r x F with angle support",
+      "Angular acceleration = torque / I",
+      "Rotational work W = torque * theta",
+      "Rotational kinetic energy KE = 0.5*I*omega^2"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "buoyancy-calculator",
+    "description": "Calculate buoyant force, displaced volume, and whether an object floats or sinks.",
+    "requirements": [
+      "Archimedes principle: F = rho_fluid * V * g",
+      "Compare object weight to buoyant force for float/sink decision",
+      "Calculate submerged fraction for floating objects",
+      "Support common fluid densities as presets"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "lens-equation",
+    "description": "Solve the thin lens equation for image distance, magnification, and image characteristics.",
+    "requirements": [
+      "1/f = 1/do + 1/di",
+      "Return image distance, magnification, and real/virtual/upright/inverted flags",
+      "Support converging and diverging lenses",
+      "Lensmaker's equation from radii of curvature and refractive index"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "snells-law",
+    "description": "Calculate refraction angle, critical angle for total internal reflection, and Brewster's angle.",
+    "requirements": [
+      "Snell's law: n1 sin(theta1) = n2 sin(theta2)",
+      "Critical angle for TIR when n1 > n2",
+      "Brewster's angle for zero reflection of p-polarization",
+      "Common material presets (glass, water, diamond)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "acoustic-resonance",
+    "description": "Calculate resonant frequencies for open and closed tubes, strings, and rectangular rooms.",
+    "requirements": [
+      "Open tube: f_n = nv/2L",
+      "Closed tube: f_n = (2n-1)v/4L",
+      "String: same as open tube with tension/linear-density speed",
+      "Rectangular room mode frequencies (Lx, Ly, Lz)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "terminal-velocity",
+    "description": "Calculate terminal velocity for objects falling through a fluid with drag.",
+    "requirements": [
+      "F_drag = 0.5 * Cd * rho * A * v^2",
+      "Solve for terminal velocity where drag equals weight",
+      "Support spheres with automatic drag coefficient",
+      "Return terminal velocity and time-to-reach estimate"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "elastic-collision",
+    "description": "Compute post-collision velocities for 1D and 2D elastic and inelastic collisions.",
+    "requirements": [
+      "1D elastic: exact solution from momentum and KE conservation",
+      "1D inelastic: coefficient of restitution parameter",
+      "2D elastic: resolve along collision normal and tangent",
+      "Return velocities and kinetic energy lost"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "power-output",
+    "description": "Calculate mechanical, electrical, and thermal power from various input parameters.",
+    "requirements": [
+      "Mechanical: P = F*v, P = torque*omega, P = Work/time",
+      "Electrical: P = VI = I^2*R = V^2/R",
+      "Thermal efficiency: P_useful / P_input",
+      "Return power in watts with unit conversions (hp, kW)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pressure-calculator",
+    "description": "Calculate pressure in fluids, gases, and under varying depths with unit conversion.",
+    "requirements": [
+      "Hydrostatic pressure P = rho*g*h",
+      "Ideal gas pressure from PV=nRT",
+      "Atmospheric pressure altitude model",
+      "Convert between Pa, bar, atm, psi, mmHg, torr"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "magnetic-flux",
+    "description": "Calculate magnetic flux, induced EMF (Faraday's law), and self-inductance.",
+    "requirements": [
+      "Flux = B*A*cos(theta)",
+      "Faraday: EMF = -dFlux/dt (finite difference)",
+      "Self-inductance of solenoid: L = mu0*n^2*A*l",
+      "Induced current from EMF and circuit resistance"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "stefan-boltzmann",
+    "description": "Calculate blackbody radiation power, peak wavelength (Wien's law), and luminosity.",
+    "requirements": [
+      "Total power P = epsilon*sigma*A*T^4",
+      "Wien's displacement: lambda_max = b/T",
+      "Planck spectral radiance at given wavelength and temperature",
+      "Stellar luminosity from radius and temperature"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "bernoulli-equation",
+    "description": "Apply Bernoulli's principle to calculate fluid velocity, pressure, and flow through constrictions.",
+    "requirements": [
+      "P + 0.5*rho*v^2 + rho*g*h = constant",
+      "Venturi effect: velocity increase in constriction",
+      "Torricelli's theorem: efflux velocity from tank",
+      "Return pressure, velocity, and flow rate changes"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "shm-oscillator",
+    "description": "Fully describe simple harmonic motion: position, velocity, acceleration as functions of time.",
+    "requirements": [
+      "x(t) = A cos(omega*t + phi), v(t), a(t) derived",
+      "Return instantaneous values at given time",
+      "Full cycle table at configurable time steps",
+      "Energy distribution (KE vs PE) at each point"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "radioactive-decay",
+    "description": "Model radioactive decay chains, calculate activity, and determine quantities after elapsed time.",
+    "requirements": [
+      "N(t) = N0 * exp(-lambda*t), half-life <-> decay constant",
+      "Activity A = lambda*N in becquerels and curies",
+      "Secular equilibrium condition for decay chains",
+      "Inverse: time to decay to given fraction"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "relativistic-mechanics",
+    "description": "Calculate relativistic momentum, energy, time dilation, and length contraction.",
+    "requirements": [
+      "Lorentz factor gamma = 1/sqrt(1-v^2/c^2)",
+      "Relativistic KE, total energy E = gamma*m*c^2",
+      "Time dilation and length contraction",
+      "Relativistic momentum p = gamma*m*v"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "schwarzschild-radius",
+    "description": "Calculate Schwarzschild radius, event horizon properties, and Hawking temperature for black holes.",
+    "requirements": [
+      "Rs = 2GM/c^2",
+      "Hawking temperature T = hbar*c^3/(8*pi*G*M*k_B)",
+      "Evaporation time estimate",
+      "Tidal force at event horizon"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "drake-equation",
+    "description": "Estimate number of communicating civilizations using the Drake equation with adjustable parameters.",
+    "requirements": [
+      "All seven Drake equation factors as named inputs",
+      "Return N and sensitivity analysis (vary each factor by one order of magnitude)",
+      "Include optimistic, pessimistic, and current-best-estimate presets",
+      "Show intermediate products"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "stellar-magnitude",
+    "description": "Convert between apparent magnitude, absolute magnitude, and stellar flux with distance modulus.",
+    "requirements": [
+      "Distance modulus: m - M = 5*log10(d/10)",
+      "Flux ratio from magnitude difference",
+      "Magnitude from flux ratio",
+      "Bolometric correction and luminosity class lookup table"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "redshift-distance",
+    "description": "Convert cosmological redshift to distance, recession velocity, and lookback time.",
+    "requirements": [
+      "Hubble law (low-z): v = H0 * d",
+      "Relativistic velocity from redshift z",
+      "Comoving distance (numerical integration with H0, Omega_m, Omega_Lambda)",
+      "Lookback time from redshift"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "escape-velocity",
+    "description": "Calculate escape velocity for any celestial body and orbital velocity at given altitude.",
+    "requirements": [
+      "v_escape = sqrt(2GM/r)",
+      "Orbital velocity v_orbit = sqrt(GM/r)",
+      "First, second, third cosmic velocities for Earth",
+      "Table of escape velocities for solar system bodies"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "kepler-orbit-period",
+    "description": "Apply Kepler's laws to compute orbital period, semi-major axis, and orbital speed.",
+    "requirements": [
+      "Third law: T^2 = 4*pi^2*a^3/GM",
+      "Vis-viva equation for speed at any point",
+      "Ellipse parameters from periapsis and apoapsis",
+      "Synodic period from two orbital periods"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "lagrange-points",
+    "description": "Calculate positions of the five Lagrange points for a two-body system.",
+    "requirements": [
+      "L1, L2, L3 distances from primary along the line connecting bodies",
+      "L4, L5 at 60 degree equilateral triangle positions",
+      "Accept primary mass, secondary mass, and orbital radius",
+      "Return Cartesian coordinates relative to center of mass"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "habitable-zone",
+    "description": "Estimate the circumstellar habitable zone boundaries from stellar luminosity and temperature.",
+    "requirements": [
+      "Conservative and optimistic HZ limits (Kopparapu 2013 coefficients)",
+      "Accept luminosity in solar units or calculate from T and R",
+      "Return inner and outer boundaries in AU",
+      "Earth Similarity Index for a given planet"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "parallax-distance",
+    "description": "Convert stellar parallax angle to distance in parsecs, light-years, and AU.",
+    "requirements": [
+      "d(pc) = 1/p(arcsec)",
+      "Convert arcseconds, milliarcseconds, microarcseconds",
+      "Return distance in pc, ly, and AU",
+      "Proper motion to transverse velocity conversion"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "rocket-equation",
+    "description": "Apply Tsiolkovsky rocket equation to calculate delta-v, mass ratio, and propellant requirements.",
+    "requirements": [
+      "delta_v = v_e * ln(m0/m_f)",
+      "Mass ratio from target delta-v and exhaust velocity",
+      "Multi-stage rocket delta-v summation",
+      "Specific impulse (Isp) to exhaust velocity conversion"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "hohmann-transfer",
+    "description": "Calculate delta-v requirements and transfer time for Hohmann orbital transfer maneuvers.",
+    "requirements": [
+      "Two-burn delta-v from initial and target circular orbits",
+      "Transfer time (half ellipse period)",
+      "Bi-elliptic transfer comparison for large radius ratios",
+      "Return delta-v budget and total transfer time"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "tidal-force",
+    "description": "Calculate tidal acceleration, Roche limit, and tidal locking timescale.",
+    "requirements": [
+      "Tidal acceleration a = 2GMr/d^3",
+      "Roche limit: rigid and fluid body formulae",
+      "Tidal heating power estimate",
+      "Tidal locking timescale"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "stellar-luminosity",
+    "description": "Calculate stellar luminosity, radius, and temperature relationships using HR diagram parameters.",
+    "requirements": [
+      "L = 4*pi*R^2*sigma*T^4",
+      "Main sequence mass-luminosity relation L proportional to M^3.5",
+      "Stefan-Boltzmann: radius from L and T",
+      "Spectral class to temperature mapping"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "time-dilation-grav",
+    "description": "Calculate gravitational and special-relativistic time dilation near massive bodies and at velocity.",
+    "requirements": [
+      "Gravitational: t_far/t_near = 1/sqrt(1 - 2GM/rc^2)",
+      "Velocity: t_moving = t_rest/gamma",
+      "GPS satellite combined correction (gravitational + velocity)",
+      "Schwarzschild metric time component"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "asteroid-impact-energy",
+    "description": "Estimate kinetic energy, crater diameter, and equivalent TNT for asteroid impacts.",
+    "requirements": [
+      "KE = 0.5*m*v^2, convert to megatons TNT",
+      "Pi-group scaling laws for crater diameter",
+      "Atmospheric entry and airburst altitude estimate",
+      "Tunguska and Chicxulub as reference benchmarks"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "neutron-star-density",
+    "description": "Calculate neutron star properties: density, surface gravity, escape velocity, and rotation limits.",
+    "requirements": [
+      "Typical NS: M ~1.4 Msun, R ~10 km",
+      "Central density vs nuclear density ratio",
+      "Surface gravity and escape velocity",
+      "Breakup rotation rate (equatorial velocity = orbital velocity)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "cmb-temperature",
+    "description": "Calculate cosmic microwave background temperature, photon energy, and redshift from emission epoch.",
+    "requirements": [
+      "T(z) = T0 * (1+z) where T0 = 2.725 K",
+      "Peak wavelength via Wien's law",
+      "Number density and energy density of CMB photons",
+      "Temperature at matter-radiation equality"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "solar-wind-pressure",
+    "description": "Estimate solar wind dynamic pressure, magnetopause standoff distance, and planetary bow shock.",
+    "requirements": [
+      "Dynamic pressure P = 0.5 * n * m_p * v^2",
+      "Magnetopause standoff: pressure balance with planetary dipole field",
+      "Typical solar wind parameters at 1 AU",
+      "Scale with heliocentric distance"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "planetary-surface-gravity",
+    "description": "Calculate surface gravity, weight on other worlds, and gravitational acceleration at altitude.",
+    "requirements": [
+      "g = GM/R^2",
+      "Weight on all solar system bodies as multiplier table",
+      "g at altitude h: g(h) = g0*(R/(R+h))^2",
+      "Equatorial gravity reduction due to rotation"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "gravitational-wave-freq",
+    "description": "Estimate gravitational wave frequency and strain from binary inspiral systems.",
+    "requirements": [
+      "Orbital frequency and GW frequency (2x orbital)",
+      "Chirp mass from component masses",
+      "Strain amplitude h at given distance",
+      "Time to merger from orbital separation (Peters formula)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "molecular-weight",
+    "description": "Calculate molecular weight of a chemical formula by parsing element symbols and counts.",
+    "requirements": [
+      "Parse formulas like H2O, C6H12O6, Ca(OH)2",
+      "Look up atomic masses from embedded periodic table",
+      "Return molecular weight in g/mol",
+      "Handle parentheses with multipliers"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "ph-calculator",
+    "description": "Calculate pH, pOH, [H+], and [OH-] for strong acids, bases, and buffer solutions.",
+    "requirements": [
+      "Strong acid/base: pH from concentration",
+      "Weak acid: pH from Ka and concentration (quadratic)",
+      "Henderson-Hasselbalch for buffers",
+      "Convert between pH, pOH, [H+], [OH-]"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "molarity-converter",
+    "description": "Convert between molarity, molality, mole fraction, mass percent, and parts per million.",
+    "requirements": [
+      "Molarity M = mol/L",
+      "Molality m = mol/kg_solvent",
+      "Mole fraction and mass percent",
+      "ppm and ppb by mass and volume"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "ideal-gas-law",
+    "description": "Solve the ideal gas law (PV=nRT) for any missing variable, with van der Waals correction.",
+    "requirements": [
+      "Solve for P, V, n, or T given three others",
+      "Van der Waals correction with a, b constants for common gases",
+      "Convert between pressure and temperature units",
+      "Combined gas law for two-state problems"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "half-life-decay",
+    "description": "Calculate radioactive and pharmacological half-life decay with dose scheduling.",
+    "requirements": [
+      "N(t) = N0*(1/2)^(t/t_half)",
+      "Time to reach target fraction",
+      "Multi-dose accumulation (trough/peak)",
+      "Biological, radioactive, and effective half-life combination"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "electron-configuration",
+    "description": "Generate ground-state electron configuration and orbital diagram for elements 1-118.",
+    "requirements": [
+      "Aufbau principle filling order",
+      "Return spdf notation and noble-gas shorthand",
+      "Identify valence electrons and oxidation states",
+      "Flag exceptions (Cr, Cu, etc.)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "periodic-table-lookup",
+    "description": "Look up element data by symbol, name, or atomic number from an embedded periodic table.",
+    "requirements": [
+      "Fields: symbol, name, atomic number, atomic mass, period, group, block, electronegativity, melting point, boiling point",
+      "Search by any field",
+      "Return element family classification",
+      "Embed all 118 elements"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "dna-complement",
+    "description": "Generate DNA complement, reverse complement, RNA transcript, and GC content from a sequence.",
+    "requirements": [
+      "DNA complement: A-T, G-C pairing",
+      "Reverse complement for anti-parallel strand",
+      "DNA to mRNA transcription (T->U)",
+      "Return GC content and sequence length"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "codon-translator",
+    "description": "Translate DNA or RNA codon sequences to amino acid sequences using the standard genetic code.",
+    "requirements": [
+      "Full 64-codon lookup table embedded",
+      "Accept DNA or RNA input",
+      "Return single-letter and three-letter amino acid codes",
+      "Identify start/stop codons"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "gc-content",
+    "description": "Calculate GC content, AT/GC ratio, melting temperature, and sequence complexity metrics.",
+    "requirements": [
+      "GC% = (G+C)/total * 100",
+      "Tm (Wallace rule): 4*(G+C) + 2*(A+T) in Celsius",
+      "Linguistic complexity (vocabulary/max-vocabulary)",
+      "Dinucleotide frequency table"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "hardy-weinberg",
+    "description": "Apply Hardy-Weinberg equilibrium to calculate allele/genotype frequencies and test for deviation.",
+    "requirements": [
+      "p^2 + 2pq + q^2 = 1 from allele frequencies p and q",
+      "Infer p and q from observed genotype counts",
+      "Chi-squared test for HWE deviation",
+      "Return observed vs expected genotype frequencies"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "population-growth",
+    "description": "Model exponential and logistic population growth with time-series output.",
+    "requirements": [
+      "Exponential: N(t) = N0 * exp(r*t)",
+      "Logistic: dN/dt = rN(1 - N/K)",
+      "Runge-Kutta 4 integration for logistic model",
+      "Return population at any time and doubling time"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "michaelis-menten",
+    "description": "Fit enzyme kinetics data to Michaelis-Menten model and return Km, Vmax, and catalytic efficiency.",
+    "requirements": [
+      "v = Vmax*[S]/(Km+[S])",
+      "Lineweaver-Burk linearization",
+      "Competitive and non-competitive inhibition",
+      "Return kcat from Vmax and [E_total]"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "osmotic-pressure",
+    "description": "Calculate osmotic pressure, tonicity, and colligative properties of solutions.",
+    "requirements": [
+      "van 't Hoff: pi = iMRT",
+      "Boiling point elevation and freezing point depression",
+      "Osmolarity from ionic dissociation",
+      "Isotonic, hypotonic, hypertonic classification"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "buffer-solution",
+    "description": "Design buffer solutions using Henderson-Hasselbalch and calculate pH after acid/base addition.",
+    "requirements": [
+      "Henderson-Hasselbalch: pH = pKa + log([A-]/[HA])",
+      "Amount of acid/base needed to reach target pH",
+      "Buffering capacity (beta = dn/dpH)",
+      "Common buffer system presets (phosphate, acetate, TRIS, bicarbonate)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "titration-curve",
+    "description": "Generate titration curve data points for strong-strong, weak-strong, and polyprotic acid-base titrations.",
+    "requirements": [
+      "Strong acid + strong base: exact solution",
+      "Weak acid + strong base: buffer region + equivalence point",
+      "Return array of {volumeAdded, pH} data points",
+      "Identify equivalence point volume and pH"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "oxidation-state",
+    "description": "Determine oxidation states for elements in compounds using electronegativity rules.",
+    "requirements": [
+      "Rule hierarchy: free element, monatomic ion, O=-2, H=+1, halogens",
+      "Solve system of equations for unknown oxidation states",
+      "Common polyatomic ions embedded",
+      "Return oxidation state for each element"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "electronegativity-diff",
+    "description": "Calculate electronegativity difference and classify bond type (ionic, polar covalent, nonpolar covalent).",
+    "requirements": [
+      "Pauling scale values embedded for all elements",
+      "Delta-EN thresholds: <0.4 nonpolar, 0.4-1.7 polar covalent, >1.7 ionic",
+      "Dipole moment estimation for diatomics",
+      "Bond polarity percentage ionic character"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "reaction-rate",
+    "description": "Calculate reaction rate, rate constant from Arrhenius equation, and half-life for various orders.",
+    "requirements": [
+      "Zero, first, second order integrated rate laws",
+      "Arrhenius: k = A*exp(-Ea/RT)",
+      "Half-life for each order",
+      "Activation energy from two-temperature rate constants"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "protein-mw",
+    "description": "Calculate protein molecular weight and isoelectric point from amino acid sequence or composition.",
+    "requirements": [
+      "Single-letter amino acid input",
+      "Sum residue molecular weights minus water per peptide bond",
+      "Average and monoisotopic mass modes",
+      "Estimate pI from pKa values of ionizable residues"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "matrix-ops",
+    "description": "Perform matrix multiplication, determinant, inverse, transpose, and rank for arbitrary matrices.",
+    "requirements": [
+      "Multiply two compatible matrices",
+      "Determinant via LU decomposition (any size)",
+      "Inverse via Gauss-Jordan elimination",
+      "Rank via row reduction; return null for singular matrices"
+    ],
+    "maxLines": 120
+  },
+  {
+    "name": "eigenvalue-calc",
+    "description": "Compute eigenvalues and eigenvectors for real square matrices using the QR algorithm.",
+    "requirements": [
+      "Power iteration for dominant eigenvalue",
+      "QR iteration for all eigenvalues (2x2 and 3x3 exact, larger iterative)",
+      "Return eigenvalue-eigenvector pairs sorted by magnitude",
+      "Characteristic polynomial coefficients"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "fibonacci-gen",
+    "description": "Generate Fibonacci sequences, find the nth term, and calculate the golden ratio approximation.",
+    "requirements": [
+      "Fast nth Fibonacci via matrix exponentiation O(log n)",
+      "Sequence generator up to limit or count",
+      "Golden ratio phi = F(n+1)/F(n) convergence",
+      "Zeckendorf representation of any positive integer"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "prime-factorization",
+    "description": "Factorize integers using trial division and Pollard's rho algorithm with primality testing.",
+    "requirements": [
+      "Trial division for small factors",
+      "Pollard's rho for large composites",
+      "Miller-Rabin primality check integrated",
+      "Return sorted prime factors with exponents"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "extended-gcd",
+    "description": "Compute GCD, LCM, and Bezout coefficients using the extended Euclidean algorithm.",
+    "requirements": [
+      "extendedGcd(a,b) returns {gcd, x, y} where ax+by=gcd",
+      "LCM from GCD",
+      "Modular inverse from Bezout (when gcd=1)",
+      "Handle BigInt inputs for large numbers"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "modular-exponentiation",
+    "description": "Compute modular exponentiation and solve modular equations using fast repeated squaring.",
+    "requirements": [
+      "modPow(base, exp, mod) in O(log exp)",
+      "Handle BigInt for arbitrary precision",
+      "Modular inverse (Fermat's little theorem when mod is prime)",
+      "Chinese Remainder Theorem solver"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "combinatorics",
+    "description": "Calculate combinations, permutations, derangements, Stirling numbers, and Bell numbers.",
+    "requirements": [
+      "nCr and nPr with BigInt overflow protection",
+      "Derangements D(n) = (n-1)*(D(n-1)+D(n-2))",
+      "Stirling numbers of the second kind",
+      "Multinomial coefficient"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "taylor-series",
+    "description": "Compute Taylor series approximations for common functions at a given point to arbitrary order.",
+    "requirements": [
+      "sin, cos, exp, ln, (1+x)^n, arctan",
+      "Return partial sum up to n terms",
+      "Error bound estimate (Lagrange remainder)",
+      "Convergence radius check"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "numerical-integration",
+    "description": "Numerically integrate functions using Simpson's rule, Gaussian quadrature, and Monte Carlo methods.",
+    "requirements": [
+      "Simpson's 1/3 rule with error estimate",
+      "5-point Gaussian-Legendre quadrature",
+      "Monte Carlo integration with confidence interval",
+      "Accept function as callback"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "newton-raphson",
+    "description": "Find roots of functions using Newton-Raphson, bisection, and secant methods.",
+    "requirements": [
+      "Newton-Raphson with automatic numerical derivative",
+      "Bisection method as fallback (guaranteed convergence)",
+      "Secant method (derivative-free)",
+      "Return root, iterations, and convergence flag"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "fourier-series",
+    "description": "Compute Fourier series coefficients (a_n, b_n) for periodic functions via numerical integration.",
+    "requirements": [
+      "Accept function and period as input",
+      "Compute a0, a_n, b_n up to N harmonics",
+      "Reconstruct function from coefficients",
+      "Mean squared error between original and reconstruction"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "boolean-algebra",
+    "description": "Simplify Boolean expressions using Quine-McCluskey algorithm and generate truth tables.",
+    "requirements": [
+      "Parse expression strings (AND, OR, NOT, XOR, NAND, NOR)",
+      "Truth table generation for up to 6 variables",
+      "Quine-McCluskey minimization to SOP form",
+      "Check tautology and contradiction"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "set-operations",
+    "description": "Perform set operations (union, intersection, difference, symmetric difference, power set, Cartesian product).",
+    "requirements": [
+      "All standard set operations",
+      "Power set (for small sets)",
+      "Cartesian product of two sets",
+      "Membership testing and subset/superset checks"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "graph-algorithms",
+    "description": "Run Dijkstra, BFS, DFS, and topological sort on weighted directed/undirected graphs.",
+    "requirements": [
+      "Accept adjacency list or matrix representation",
+      "Dijkstra single-source shortest paths",
+      "BFS and DFS with traversal order output",
+      "Connected components and cycle detection"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "convex-hull",
+    "description": "Compute the convex hull of a 2D point set using Graham scan and gift wrapping algorithms.",
+    "requirements": [
+      "Graham scan O(n log n)",
+      "Gift wrapping (Jarvis march) O(nh)",
+      "Return hull vertices in counterclockwise order",
+      "Hull area and perimeter calculation"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "gaussian-elimination",
+    "description": "Solve systems of linear equations via Gaussian elimination with partial pivoting.",
+    "requirements": [
+      "Augmented matrix input",
+      "Partial pivoting for numerical stability",
+      "Back substitution for solution vector",
+      "Detect no-solution and infinite-solution cases"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "horner-method",
+    "description": "Evaluate polynomials efficiently using Horner's method and compute derivatives and roots.",
+    "requirements": [
+      "Polynomial evaluation in O(n) using Horner's scheme",
+      "First and second derivative evaluation",
+      "Synthetic division (divide by linear factor)",
+      "Return quotient polynomial and remainder"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "complex-numbers",
+    "description": "Perform arithmetic, polar conversion, roots, and logarithms on complex numbers.",
+    "requirements": [
+      "Add, subtract, multiply, divide complex numbers",
+      "Polar form (r, theta) and rectangular conversion",
+      "nth roots of complex numbers",
+      "Complex exponential, logarithm, and trigonometric functions"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "quaternion-math",
+    "description": "Perform quaternion arithmetic, rotation operations, and SLERP interpolation.",
+    "requirements": [
+      "Quaternion multiply, conjugate, norm, inverse",
+      "Rotation quaternion from axis-angle and Euler angles",
+      "Apply rotation to 3D vector",
+      "SLERP between two rotation quaternions"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "number-base-converter",
+    "description": "Convert integers and fractions between bases 2-36 with arbitrary precision.",
+    "requirements": [
+      "Integer conversion any base to any base",
+      "Fractional part conversion (up to configurable precision)",
+      "Two's complement representation for negatives",
+      "Named bases: binary, octal, decimal, hex"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "continued-fraction",
+    "description": "Compute continued fraction representation and best rational approximations for real numbers.",
+    "requirements": [
+      "Convert real number to continued fraction coefficients",
+      "Reconstruct rational approximation from partial quotients",
+      "Convergents sequence",
+      "Detect periodic continued fractions (quadratic irrationals)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "catalan-numbers",
+    "description": "Compute Catalan numbers and enumerate the combinatorial structures they count.",
+    "requirements": [
+      "C_n = C(2n,n)/(n+1) with BigInt support",
+      "Applications: Dyck paths, balanced parentheses, triangulations",
+      "Generate all balanced parenthesis strings for C_n",
+      "Asymptotic approximation for large n"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pascals-triangle",
+    "description": "Generate Pascal's triangle rows and extract binomial coefficients, hockey stick sums, and diagonal sequences.",
+    "requirements": [
+      "Generate first n rows",
+      "Extract any binomial coefficient C(n,k)",
+      "Hockey stick identity verification",
+      "Identify Fibonacci, Catalan, powers-of-2 patterns in diagonals"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "euler-totient",
+    "description": "Compute Euler's totient function phi(n), Jordan's totient, and Carmichael's lambda function.",
+    "requirements": [
+      "phi(n) via prime factorization",
+      "Totient sum and product formulas",
+      "Carmichael's lambda lambda(n)",
+      "Multiplicative order of a modulo n"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "number-theory-utils",
+    "description": "Number theory toolkit: perfect numbers, amicable pairs, abundant/deficient, arithmetic functions.",
+    "requirements": [
+      "Sum-of-proper-divisors sigma(n)",
+      "Perfect, abundant, deficient, semiperfect classification",
+      "Amicable number detection",
+      "Liouville, Mobius, von Mangoldt functions"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "linear-algebra-decomp",
+    "description": "Perform LU, QR, and Cholesky decompositions on matrices.",
+    "requirements": [
+      "LU decomposition with partial pivoting",
+      "QR via Gram-Schmidt orthogonalization",
+      "Cholesky for symmetric positive-definite matrices",
+      "Solve Ax=b using each decomposition"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "numerical-differentiation",
+    "description": "Compute derivatives numerically using finite differences to arbitrary order.",
+    "requirements": [
+      "Forward, backward, central difference formulae",
+      "Higher-order derivatives (up to 4th)",
+      "Richardson extrapolation for improved accuracy",
+      "Return derivative value and estimated error"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "probability-distributions",
+    "description": "Compute PDF, CDF, mean, variance, and quantiles for common probability distributions.",
+    "requirements": [
+      "Normal, exponential, uniform, beta, gamma",
+      "Exact CDF via series/continued fraction where possible",
+      "Inverse CDF (quantile function) via bisection",
+      "Return mean, variance, skewness, kurtosis"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "vector-calculus",
+    "description": "Compute gradient, divergence, curl, and Laplacian of scalar and vector fields numerically.",
+    "requirements": [
+      "Gradient of scalar field f(x,y,z) via finite differences",
+      "Divergence and curl of vector field",
+      "Laplacian of scalar field",
+      "Line integral along parameterized path"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "interpolation",
+    "description": "Interpolate data using Lagrange, Newton divided differences, cubic spline, and PCHIP methods.",
+    "requirements": [
+      "Lagrange polynomial interpolation",
+      "Newton's divided difference form",
+      "Natural cubic spline (tridiagonal system)",
+      "Return interpolated value and polynomial coefficients"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "freq-to-note",
+    "description": "Convert frequency to musical note name, cents deviation, and MIDI number, and vice versa.",
+    "requirements": [
+      "f = 440 * 2^((n-69)/12) mapping",
+      "Return note name, octave, MIDI number, cents deviation",
+      "Nearest note and exact frequency for any MIDI number",
+      "Support alternative tuning (A4 != 440 Hz)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "bpm-converter",
+    "description": "Convert BPM to note durations in milliseconds and samples at given sample rate.",
+    "requirements": [
+      "Whole, half, quarter, eighth, sixteenth, dotted and triplet variants",
+      "Samples at given sample rate for each duration",
+      "Hz equivalent for LFO sync",
+      "Tap tempo averaging from array of timestamps"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "chord-generator",
+    "description": "Generate chord voicings (triads, sevenths, extensions) from root note and chord type.",
+    "requirements": [
+      "Major, minor, diminished, augmented, dominant 7, major 7, minor 7, sus2, sus4, add9",
+      "Return MIDI note numbers, note names, and interval names",
+      "Inversions (root, first, second, third)",
+      "Slash chord notation"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "scale-generator",
+    "description": "Generate scales (major, minor modes, pentatonic, blues, diminished, whole-tone) from a root note.",
+    "requirements": [
+      "12 diatonic modes (Ionian through Locrian)",
+      "Pentatonic major/minor, blues, bebop, melodic minor, harmonic minor",
+      "Return note names, MIDI numbers, and intervals",
+      "Relative modes and parallel modes"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "interval-calculator",
+    "description": "Identify and classify musical intervals between two notes and compute interval inversions.",
+    "requirements": [
+      "Quality (perfect, major, minor, augmented, diminished) and number (unison through octave)",
+      "Semitone count to interval name and vice versa",
+      "Compound intervals (9th, 11th, 13th)",
+      "Interval inversion and enharmonic equivalents"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "key-signature",
+    "description": "Look up key signature sharps/flats, relative keys, and parallel keys for all major and minor keys.",
+    "requirements": [
+      "All 15 major and 15 minor key signatures",
+      "Number of sharps/flats and which accidentals",
+      "Relative major/minor relationship",
+      "Circle of fifths order and enharmonic equivalents"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "midi-note-converter",
+    "description": "Convert MIDI note numbers to frequency, note name, and piano key number, and back.",
+    "requirements": [
+      "MIDI 0-127 range",
+      "Frequency from equal temperament (A4=440)",
+      "Scientific pitch notation (e.g. C4, F#5)",
+      "Piano key number (1-88) mapping"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "equal-temperament",
+    "description": "Generate equal temperament frequency tables for any division of the octave and tuning system.",
+    "requirements": [
+      "12-TET, 19-TET, 24-TET, 31-TET, 53-TET",
+      "Ratio for each step: 2^(k/n)",
+      "Cent deviation from just intonation for each interval",
+      "Comparison table: ET vs just vs Pythagorean"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "just-intonation",
+    "description": "Generate just intonation frequency ratios for intervals and compare against equal temperament.",
+    "requirements": [
+      "5-limit just intonation ratios for all diatonic intervals",
+      "Cent deviation from 12-TET",
+      "Harmonic series up to 16th partial",
+      "Ptolemy's intense diatonic scale"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "harmonic-series",
+    "description": "Generate harmonic series partials, their frequencies, note names, and cents deviation from ET.",
+    "requirements": [
+      "Partials 1-32 for any fundamental",
+      "Frequency, ratio, nearest note name, cents deviation",
+      "Subharmonic series",
+      "Identify which partials are in tune with 12-TET"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "euclidean-rhythm",
+    "description": "Generate Euclidean (Bjorklund) rhythms distributing beats as evenly as possible across steps.",
+    "requirements": [
+      "Bjorklund algorithm for any (beats, steps) pair",
+      "Return binary sequence and onset positions",
+      "Rotation parameter for phase offset",
+      "Named patterns: clave, tresillo, cinquillo, bossa nova"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "circle-of-fifths",
+    "description": "Navigate the circle of fifths returning adjacent keys, chord functions, and modulation paths.",
+    "requirements": [
+      "All 24 keys (12 major + 12 minor) with positions",
+      "Adjacent keys (dominant, subdominant, relative)",
+      "Modulation distance between any two keys",
+      "Diatonic chords for each key"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "lufs-calculator",
+    "description": "Estimate integrated loudness (LUFS/LKFS) and true peak from audio amplitude data.",
+    "requirements": [
+      "K-weighting filter coefficients (ITU-R BS.1770)",
+      "Gating: ungated, -70 LUFS absolute, -10 LU relative",
+      "Return integrated LUFS, LRA (loudness range), and short-term max",
+      "Target loudness offset for normalization"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "dft-spectrum",
+    "description": "Compute Discrete Fourier Transform spectrum of a signal and identify dominant frequencies.",
+    "requirements": [
+      "DFT (not FFT) implementation O(n^2) for simplicity",
+      "Magnitude and phase spectrum",
+      "Return top-N frequency peaks with magnitudes",
+      "Windowing functions: rectangular, Hanning, Hamming"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "pitch-autocorrelation",
+    "description": "Detect fundamental pitch of a signal using autocorrelation and HPS methods.",
+    "requirements": [
+      "Normalized autocorrelation function",
+      "Harmonic Product Spectrum for better octave accuracy",
+      "Return fundamental frequency in Hz and confidence",
+      "YIN algorithm (simplified) as alternative"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "polyrhythm-calculator",
+    "description": "Calculate polyrhythm period, beat coincidences, and generate combined rhythm grid.",
+    "requirements": [
+      "LCM for full cycle length",
+      "Onset positions for each rhythm layer",
+      "Combined grid showing all onsets labeled by layer",
+      "Common polyrhythms: 3:2, 4:3, 5:4, 7:4, 3:4:5"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "adsr-envelope",
+    "description": "Generate ADSR envelope sample values and calculate total duration and energy.",
+    "requirements": [
+      "Attack (linear or exponential), decay, sustain level, release",
+      "Sample-accurate values at given sample rate",
+      "Trigger and release times",
+      "Peak, RMS, and total energy of envelope"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "waveform-generator",
+    "description": "Generate sample arrays for sine, square, sawtooth, triangle, and pulse waveforms.",
+    "requirements": [
+      "Samples at specified frequency, sample rate, and duration",
+      "Amplitude and phase offset parameters",
+      "Pulse width for square/pulse waveforms",
+      "Band-limited versions (additive synthesis) for square/saw/triangle"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "music-theory-interval-quality",
+    "description": "Determine interval quality and function within a key for any two chromatic pitches.",
+    "requirements": [
+      "Identify quality (P/M/m/A/d) and number from pitch classes",
+      "Consonance/dissonance classification",
+      "Scale degree function in context of a key",
+      "Tendency and resolution suggestion"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "song-structure-template",
+    "description": "Generate song structure templates with section labels, bar counts, and key/tempo metadata.",
+    "requirements": [
+      "Common forms: AABA, ABABCB, 12-bar blues, 32-bar standard, verse-chorus",
+      "Assign bar counts and repeat markers",
+      "Generate section list with start bar and description",
+      "Support custom section sequences"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "shepard-tone",
+    "description": "Generate Shepard tone frequency tables creating the auditory illusion of endlessly rising pitch.",
+    "requirements": [
+      "10 frequency components one octave apart",
+      "Amplitude weighting: bell curve centered at 1 kHz",
+      "Rising, falling, and tritone paradox variants",
+      "Return frequency and amplitude pairs for each step"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "audio-sample-rate-converter",
+    "description": "Compute sample rate conversion ratios and anti-aliasing filter cutoff frequencies.",
+    "requirements": [
+      "SRC ratio and nearest simple integer fraction",
+      "Anti-aliasing cutoff: 0.45 * min(Fs_in, Fs_out)",
+      "Output sample count from input count and ratio",
+      "Common sample rates: 8, 22.05, 44.1, 48, 88.2, 96, 192 kHz"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "chord-progression-generator",
+    "description": "Generate diatonic chord progressions from functional harmony rules and common patterns.",
+    "requirements": [
+      "Roman numeral analysis for any key",
+      "Common progressions: I-IV-V-I, ii-V-I, I-V-vi-IV, 12-bar blues",
+      "Chord substitutions (tritone, relative, parallel)",
+      "Return chord names, MIDI root notes, and function labels"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "music-key-detector",
+    "description": "Detect likely musical key from a set of pitch class frequencies using the Krumhansl-Schmuckler algorithm.",
+    "requirements": [
+      "Pitch class histogram input (12 values)",
+      "Correlate with Krumhansl-Kessler key profiles for all 24 keys",
+      "Return ranked list of key matches with correlation scores",
+      "Major vs minor disambiguation"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "pitch-shifting",
+    "description": "Calculate frequency ratios, semitone shifts, and formant correction factors for pitch shifting.",
+    "requirements": [
+      "Semitones to frequency ratio: 2^(n/12)",
+      "Cents to ratio conversion",
+      "Formant shift vs pitch shift difference",
+      "Vocal formant correction factor for natural sound"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "chladni-patterns",
+    "description": "Calculate Chladni nodal line patterns and resonant frequencies for vibrating plates.",
+    "requirements": [
+      "Rectangular plate mode frequency formula with flexural rigidity",
+      "Square plate mode numbers (m,n) for first 20 modes",
+      "Circular plate Bessel function zeros for mode frequencies",
+      "Return frequency and node description for each mode"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "resonant-frequency-plate",
+    "description": "Calculate fundamental and harmonic resonant frequencies for plates and membranes.",
+    "requirements": [
+      "Rectangular membrane mode frequency formula",
+      "Circular membrane Bessel zeros (J_m zeros)",
+      "Rectangular plate flexural rigidity formula",
+      "Material presets: steel, aluminum, glass, wood"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "standing-wave",
+    "description": "Calculate standing wave node/antinode positions and resonant frequencies for strings, rods, and tubes.",
+    "requirements": [
+      "String: nodes at x = n*L/N",
+      "Open tube: antinodes at ends",
+      "Closed tube: node at closed end",
+      "Return all node and antinode positions for mode n"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "lissajous-curve",
+    "description": "Generate Lissajous curve coordinate pairs for given frequency ratios, phases, and amplitude.",
+    "requirements": [
+      "x(t) = A sin(a*omega*t + delta), y(t) = B sin(b*omega*t)",
+      "N sample points over one full period (LCM of periods)",
+      "Identify figure shape from ratio (line, ellipse, figure-8, etc.)",
+      "Return {x,y} array and symmetry description"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "damped-oscillation",
+    "description": "Model damped harmonic oscillation and classify as underdamped, critically damped, or overdamped.",
+    "requirements": [
+      "x(t) = A*exp(-gamma*t)*cos(omega_d*t + phi) for underdamped",
+      "Critically damped and overdamped solutions",
+      "Decay time constant and Q factor",
+      "Logarithmic decrement from successive peaks"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "forced-vibration",
+    "description": "Calculate steady-state amplitude and phase of forced harmonic oscillation near resonance.",
+    "requirements": [
+      "Frequency response function H(omega)",
+      "Amplitude magnification factor vs driving frequency ratio",
+      "Phase lag between force and response",
+      "Resonance peak frequency and half-power bandwidth"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "acoustic-levitation",
+    "description": "Calculate acoustic radiation pressure and minimum sound pressure level for levitation.",
+    "requirements": [
+      "Acoustic radiation force on sphere",
+      "Standing wave node/antinode positions",
+      "Minimum SPL (dB) to levitate a water droplet of given radius",
+      "Frequency vs levitation height spacing"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "vibrational-modes",
+    "description": "Enumerate vibrational mode shapes and frequencies for 1D, 2D, and simple 3D structures.",
+    "requirements": [
+      "1D: string/rod modes with boundary conditions",
+      "2D: rectangular membrane first 9 modes",
+      "Degenerate modes (same frequency, different shape)",
+      "Participation factor for each mode"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "cymatics-freq-mapper",
+    "description": "Map audio frequencies to approximate Chladni pattern complexity and symmetry order.",
+    "requirements": [
+      "Frequency bands mapped to expected nodal line count",
+      "Pattern symmetry order (n-fold) from frequency ratio to fundamental",
+      "Geometric pattern name (star, ring, grid, hexagonal)",
+      "Return pattern descriptor for a given frequency"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "harmonic-oscillator-2d",
+    "description": "Simulate 2D harmonic oscillator (Lissajous motion) with anharmonic perturbation.",
+    "requirements": [
+      "Uncoupled: independent x and y SHM with frequency ratio",
+      "Coupled: normal mode frequencies and eigenvectors",
+      "Phase portrait data (x vs vx, y vs vy)",
+      "Poincare section for given frequency ratio"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "soundex-phonetic",
+    "description": "Encode words with Soundex, Metaphone, and Double Metaphone phonetic algorithms.",
+    "requirements": [
+      "Original Soundex (4-character code)",
+      "Metaphone (American English consonant reduction)",
+      "Double Metaphone (primary and secondary codes)",
+      "Match two words phonetically"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "levenshtein-distance",
+    "description": "Compute Levenshtein, Damerau-Levenshtein, and optimal string alignment distances.",
+    "requirements": [
+      "Standard Levenshtein with DP matrix",
+      "Damerau-Levenshtein (adds transposition)",
+      "Optimal string alignment (restricted edit distance)",
+      "Normalized similarity score 0-1"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "jaro-winkler",
+    "description": "Calculate Jaro similarity and Jaro-Winkler similarity with prefix bonus for name matching.",
+    "requirements": [
+      "Jaro: matching window, transpositions",
+      "Jaro-Winkler prefix scaling (p=0.1)",
+      "Batch scoring of name list against query",
+      "Return similarity score 0-1"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "ngram-generator",
+    "description": "Generate character and word n-grams, skip-grams, and compute n-gram overlap similarity.",
+    "requirements": [
+      "Character n-grams (bigrams, trigrams, etc.)",
+      "Word n-grams and word skip-grams",
+      "Jaccard similarity between two n-gram sets",
+      "N-gram frequency profile (sorted by count)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "syllable-counter",
+    "description": "Count syllables in English words using rule-based algorithm and lookup exceptions.",
+    "requirements": [
+      "Vowel-group counting with silent-e rule",
+      "Handle common exceptions: -le endings, -ed, -es",
+      "Word stress pattern (primary, secondary)",
+      "Haiku syllable validator (5-7-5)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "anagram-solver",
+    "description": "Find anagrams of a word or phrase from a dictionary and score by word quality.",
+    "requirements": [
+      "Sort-key grouping for exact anagrams",
+      "Multi-word anagrams from letter pool",
+      "Score by word frequency / average word length",
+      "Embedded basic English word list (~10k words)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "palindrome-detector",
+    "description": "Detect palindromes, find longest palindromic substring, and generate palindromes.",
+    "requirements": [
+      "Word and phrase palindrome (ignore spaces/punctuation)",
+      "Manacher's algorithm for longest palindromic substring O(n)",
+      "Semi-palindrome (one deletion allowed)",
+      "Generate palindrome by mirroring half"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "text-entropy",
+    "description": "Calculate Shannon entropy, compression ratio estimate, and redundancy of text.",
+    "requirements": [
+      "Character-level entropy H = -sum p log2 p",
+      "Bigram entropy (conditional entropy)",
+      "Compression ratio estimate vs entropy lower bound",
+      "Perplexity from character probabilities"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "zipf-analyzer",
+    "description": "Analyze text against Zipf's law and compute Zipf exponent and vocabulary richness.",
+    "requirements": [
+      "Word frequency rank-frequency table",
+      "Fit power law: f ~ 1/r^alpha via log-linear regression",
+      "Type-token ratio (TTR) and hapax legomena count",
+      "Heaps law: vocabulary growth V ~ K*N^beta"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "readability-index",
+    "description": "Compute multiple readability indices (Flesch, Gunning Fog, SMOG, Coleman-Liau, ARI, Dale-Chall).",
+    "requirements": [
+      "Flesch Reading Ease and Flesch-Kincaid Grade Level",
+      "Gunning Fog Index",
+      "SMOG Grade",
+      "Coleman-Liau and ARI using character counts",
+      "Return grade level and difficulty label for each"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "sentiment-lexicon",
+    "description": "Score text sentiment using AFINN lexicon and return polarity, subjectivity, and top charged words.",
+    "requirements": [
+      "AFINN word scores embedded (top 500 words)",
+      "Negation handling (not, never, no invert window)",
+      "Sentence-level and document-level scores",
+      "Return positive/negative word lists and net score"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "language-detector",
+    "description": "Detect language of text using trigram frequency profiles for 20+ languages.",
+    "requirements": [
+      "Character trigram profiles for 22 languages embedded",
+      "Cosine similarity ranking",
+      "Return top-3 language candidates with scores",
+      "Minimum text length warning"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "tfidf-calculator",
+    "description": "Compute TF-IDF scores for terms across a document collection and rank documents.",
+    "requirements": [
+      "TF: term frequency (raw count or log-normalized)",
+      "IDF: log(N/df) with smoothing options",
+      "TF-IDF matrix for corpus",
+      "Top-N terms per document and document ranking for query"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "named-entity-patterns",
+    "description": "Extract named entities using regex patterns for dates, times, emails, URLs, currencies, and proper nouns.",
+    "requirements": [
+      "Date patterns: ISO, US, EU formats",
+      "Time, email, URL, phone number patterns",
+      "Currency amounts with symbol/code",
+      "Capitalized proper noun sequence detection"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "text-tokenizer",
+    "description": "Tokenize text into sentences, words, and subword units with configurable rules.",
+    "requirements": [
+      "Sentence splitting on . ! ? with abbreviation handling",
+      "Word tokenization with punctuation separation",
+      "Simple BPE (byte-pair encoding) tokenizer trainable on corpus",
+      "Return token array and offset positions"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "rhyme-finder",
+    "description": "Find rhyming words using phonetic endings and return rhyme scheme analysis.",
+    "requirements": [
+      "Extract phonetic ending (last stressed vowel + coda)",
+      "Perfect rhyme, near-rhyme, and eye-rhyme categories",
+      "Rhyme scheme labeling (ABAB, AABB, etc.) for stanza",
+      "Top-N rhymes from embedded word list"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "stop-word-filter",
+    "description": "Remove stop words from text in multiple languages and return content word frequency.",
+    "requirements": [
+      "English, Spanish, French, German, Portuguese stop word lists embedded",
+      "Stemmed stop word matching",
+      "Return filtered tokens and removed stop words",
+      "Configurable custom stop word list"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "word-frequency-counter",
+    "description": "Build word frequency histogram, rank-frequency table, and vocabulary statistics for any text.",
+    "requirements": [
+      "Case-folding and punctuation stripping",
+      "Top-N most frequent words",
+      "Cumulative coverage percentage by top N words",
+      "Unique word count and type-token ratio"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pos-tag-patterns",
+    "description": "Tag parts of speech using rule-based patterns (Brill tagger lite) for English text.",
+    "requirements": [
+      "Lexicon-free context rules (suffix, capitalization, position)",
+      "Basic tags: NN, NNS, VB, VBD, VBZ, JJ, RB, DT, IN, CC, PRP",
+      "Named entity capitalization rule",
+      "Return tagged token array"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "text-similarity",
+    "description": "Compute document similarity using cosine, Jaccard, BM25, and embedding-free semantic methods.",
+    "requirements": [
+      "Cosine similarity on TF-IDF vectors",
+      "Jaccard on word sets and character n-gram sets",
+      "BM25 scoring (k1=1.5, b=0.75)",
+      "Longest common subsequence ratio"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "haversine",
+    "description": "Calculate great-circle distance, bearing, and midpoint between two geographic coordinates.",
+    "requirements": [
+      "Haversine formula for distance in km and miles",
+      "Initial and final bearing",
+      "Midpoint coordinate",
+      "Destination point given bearing and distance"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "coordinate-converter",
+    "description": "Convert geographic coordinates between decimal degrees, DMS, UTM, geohash, and ECEF.",
+    "requirements": [
+      "Decimal degrees <-> DMS (degrees, minutes, seconds)",
+      "WGS84 lat/lng <-> UTM zone and easting/northing",
+      "Geohash encode and decode",
+      "ECEF (Earth-centered, Earth-fixed) conversion"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "sunrise-sunset",
+    "description": "Calculate sunrise, sunset, solar noon, and civil/nautical/astronomical twilight times.",
+    "requirements": [
+      "NOAA solar calculation algorithm",
+      "Accepts date and lat/lng",
+      "Returns times in UTC and local offset",
+      "Polar day/night detection"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "moon-phase",
+    "description": "Calculate moon phase, illumination percentage, and next major phase dates.",
+    "requirements": [
+      "Phase angle from lunar synodic period (29.53 days)",
+      "Named phases: new, waxing crescent, first quarter, waxing gibbous, full, waning gibbous, last quarter, waning crescent",
+      "Next new moon and full moon dates",
+      "Moon age in days"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "geohash-codec",
+    "description": "Encode and decode geohash strings with configurable precision and neighbor calculation.",
+    "requirements": [
+      "Encode lat/lng to geohash string (1-12 chars)",
+      "Decode geohash to lat/lng bounding box",
+      "8 neighbors of a geohash cell",
+      "Precision to approximate cell size table"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "utm-converter",
+    "description": "Convert between WGS84 latitude/longitude and UTM (Universal Transverse Mercator) coordinates.",
+    "requirements": [
+      "Determine UTM zone from longitude",
+      "Forward and inverse projection (Karney series)",
+      "Include zone letter (C-X) for full MGRS context",
+      "Easting, northing, and zone output"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "magnetic-declination",
+    "description": "Estimate magnetic declination and compass correction at any location using IGRF model coefficients.",
+    "requirements": [
+      "Simplified 12th-order IGRF dipole approximation",
+      "Declination (true vs magnetic north difference)",
+      "Annual rate of change",
+      "Return correction instruction (add/subtract from compass bearing)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "wind-chill-heat-index",
+    "description": "Calculate wind chill (cold conditions) and heat index (hot conditions) from temperature and humidity/wind.",
+    "requirements": [
+      "NOAA wind chill formula (T in F or C, wind in mph or km/h)",
+      "Steadman heat index formula",
+      "Feels-like temperature combining both",
+      "Danger level classification"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "sun-position",
+    "description": "Calculate solar azimuth, elevation angle, and air mass at any location and time.",
+    "requirements": [
+      "Solar declination and hour angle",
+      "Azimuth (degrees from north) and elevation angle",
+      "Air mass (Kasten-Young formula)",
+      "Sunrise/sunset confirmation from elevation = 0"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "great-circle-route",
+    "description": "Generate intermediate waypoints along a great circle route between two coordinates.",
+    "requirements": [
+      "N evenly-spaced waypoints along great circle",
+      "Fraction-based interpolation via slerp on unit sphere",
+      "Total distance and per-segment distances",
+      "Compare to rhumb line (constant bearing) distance"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "timezone-from-coords",
+    "description": "Determine UTC offset and timezone name from latitude/longitude using a compact zone lookup.",
+    "requirements": [
+      "Longitude-based approximate UTC offset",
+      "Timezone name from embedded simplified zone polygon data",
+      "DST flag (Northern/Southern hemisphere heuristic)",
+      "Return offset in hours and IANA timezone name estimate"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "mercator-projection",
+    "description": "Convert between geographic coordinates and Mercator map pixel coordinates.",
+    "requirements": [
+      "Web Mercator (EPSG:3857) forward and inverse",
+      "Tile coordinates (z/x/y) from lat/lng and zoom level",
+      "Scale factor at latitude",
+      "Equirectangular projection as comparison"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "tide-prediction",
+    "description": "Generate simplified tide predictions using harmonic constituents (M2, S2, N2, K1, O1).",
+    "requirements": [
+      "Superposition of 5 tidal constituents",
+      "Amplitude, period, phase inputs per constituent",
+      "Return water level array at hourly intervals for given day",
+      "High and low tide times and heights"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "map-scale-converter",
+    "description": "Convert between map scale ratios and real-world distances for different map sizes.",
+    "requirements": [
+      "Scale ratio to ground distance for measured map distance",
+      "Ground distance to map distance at given scale",
+      "Scale bar length in cm for target ground distance",
+      "Common map scales: 1:25000, 1:50000, 1:250000"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "elevation-angle",
+    "description": "Calculate the elevation angle and visibility between two geographic points accounting for Earth curvature.",
+    "requirements": [
+      "Geometric elevation angle from heights and horizontal distance",
+      "Earth curvature correction (drop = d^2/2R)",
+      "Atmospheric refraction correction (k=0.13)",
+      "Line-of-sight clearance for antenna/radio links"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "color-convert",
+    "description": "Convert colors between RGB, HSL, HSV, CMYK, Lab, LCh, XYZ, and Oklab color spaces.",
+    "requirements": [
+      "All pairwise conversions via XYZ as hub",
+      "Oklab for perceptual uniformity",
+      "Round-trip accuracy within floating-point tolerance",
+      "Accept 0-255 RGB, 0-1 normalized, and hex string input"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "color-temperature",
+    "description": "Convert color temperature in Kelvin to RGB values and vice versa (reverse CCT).",
+    "requirements": [
+      "Tanner Helland algorithm for K to RGB (1000-40000K)",
+      "Planckian locus in CIE xy chromaticity",
+      "McCamy's formula for reverse CCT from xy",
+      "Named presets: candlelight, sunrise, daylight, sky, monitor"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "wavelength-to-color",
+    "description": "Convert visible light wavelength (380-700nm) to RGB and perceived color name.",
+    "requirements": [
+      "CIE 1931 color matching function interpolation",
+      "Gamma correction for display",
+      "Color name from wavelength band",
+      "Return RGB, hex, and perceived hue description"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "color-harmony",
+    "description": "Generate color harmony palettes (complementary, triadic, analogous, split-complementary, tetradic) from a seed color.",
+    "requirements": [
+      "Hue rotation in HSL space",
+      "Complementary (180 deg), triadic (120 deg), analogous (+-30 deg), split-complementary, tetradic (90 deg)",
+      "Tint, shade, and tone variants",
+      "Return hex codes and names for each palette color"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "color-blindness-sim",
+    "description": "Simulate how colors appear under different types of color blindness (deuteranopia, protanopia, tritanopia).",
+    "requirements": [
+      "Simulate deuteranopia, protanopia, tritanopia, achromatopsia",
+      "Brettel/Vienot LMS matrix transform method",
+      "Accept RGB input, return simulated RGB",
+      "Confusion line analysis for design guidance"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "perceptual-color-distance",
+    "description": "Compute perceptual color difference using CIEDE2000, CIE94, and CMC metrics.",
+    "requirements": [
+      "CIEDE2000 (DeltaE00) full implementation",
+      "CIE94 for textiles and graphics",
+      "CMC(l:c) for textile industry",
+      "Classify difference: imperceptible, just noticeable, distinct, very distinct"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "gradient-generator",
+    "description": "Generate smooth color gradients with configurable stops and interpolation in multiple color spaces.",
+    "requirements": [
+      "Linear and radial gradient stop interpolation",
+      "Interpolate in RGB, HSL, Lab, or Oklab space",
+      "N-step gradient array output",
+      "CSS gradient string generation"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "color-interpolation",
+    "description": "Interpolate between two colors in perceptually uniform color space (Oklab) at any ratio.",
+    "requirements": [
+      "Linear interpolation in Oklab space",
+      "Hue interpolation: shortest path or specified direction",
+      "Easing functions (linear, ease-in, ease-out, cubic-bezier)",
+      "Return color at parameter t in [0,1] as RGB/hex"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "spectral-color-mixer",
+    "description": "Mix spectral reflectance curves using Kubelka-Munk theory for physical paint-like mixing.",
+    "requirements": [
+      "K/S ratio from reflectance",
+      "Subtractive mixing of two pigments by K/S addition",
+      "Convert mixed K/S back to reflectance",
+      "Return RGB of mixed color"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "chromatic-adaptation",
+    "description": "Transform colors between illuminants using Bradford and von Kries chromatic adaptation transforms.",
+    "requirements": [
+      "Bradford CAT matrix (most accurate for color appearance)",
+      "Von Kries diagonal transform",
+      "D50, D65, A, C, F11 illuminant white points embedded",
+      "Accept XYZ or Lab, return XYZ or Lab under target illuminant"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "color-name-from-hex",
+    "description": "Return the closest named color from a comprehensive color name database given a hex or RGB value.",
+    "requirements": [
+      "Embedded database of 1500+ named colors (CSS, X11, Pantone names)",
+      "Nearest neighbor search in Lab color space",
+      "Return primary name, distance, and RGB of named color",
+      "Top-3 nearest names with distances"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "wcag-contrast",
+    "description": "Calculate WCAG 2.1 contrast ratio and AA/AAA compliance for text and UI components.",
+    "requirements": [
+      "Relative luminance from sRGB (linearize then dot product)",
+      "Contrast ratio = (L1+0.05)/(L2+0.05)",
+      "AA: 4.5:1 normal, 3:1 large text; AAA: 7:1 normal, 4.5:1 large",
+      "Return ratio, pass/fail for each level and size"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "dominant-color-extractor",
+    "description": "Extract dominant colors from an array of RGB pixel data using k-means clustering.",
+    "requirements": [
+      "k-means clustering (k=5 default) on RGB pixels",
+      "Initialize with k-means++ seeding",
+      "Cluster by count, return representative colors",
+      "Return hex, RGB, and proportion for each cluster"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "color-palette-generator",
+    "description": "Generate aesthetically pleasing palettes (monochromatic, earth tones, pastel, neon, material) from constraints.",
+    "requirements": [
+      "Monochromatic: hue locked, vary L and S in HSL",
+      "Earth tones: low saturation warm hues",
+      "Pastel: high L, low-medium S",
+      "Neon: high S, medium L",
+      "Return 5-color palette as hex array"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "ral-to-rgb",
+    "description": "Look up RAL Classic color codes and convert to approximate RGB and hex values.",
+    "requirements": [
+      "Embedded lookup table of all 213 RAL Classic colors",
+      "RAL number to name, RGB, and hex",
+      "Nearest RAL color from any RGB input (Lab distance)",
+      "RAL Design and RAL Effect code flag"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "caesar-cipher",
+    "description": "Encode and decode Caesar, ROT13, and Atbash ciphers with brute-force cracking by frequency analysis.",
+    "requirements": [
+      "Caesar with configurable shift for any alphabet",
+      "ROT13 as special case",
+      "Atbash (reverse alphabet)",
+      "Brute-force all 25 shifts ranked by English frequency match"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "vigenere-cipher",
+    "description": "Encode and decode Vigenere cipher and crack it using Kasiski examination and index of coincidence.",
+    "requirements": [
+      "Vigenere encoding/decoding with keyword",
+      "Kasiski test: find repeated substrings to estimate key length",
+      "Index of coincidence for key length confirmation",
+      "Frequency analysis to recover key once length known"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "xor-cipher",
+    "description": "XOR encryption/decryption with hex and base64 encoding, key rotation, and single-byte key brute-force.",
+    "requirements": [
+      "Single-byte XOR encrypt/decrypt",
+      "Multi-byte repeating key XOR",
+      "Hex and base64 I/O formats",
+      "Single-byte key brute-force ranked by English score"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "sha256-pure",
+    "description": "Pure TypeScript SHA-256 implementation operating on strings and byte arrays.",
+    "requirements": [
+      "Full FIPS 180-4 SHA-256 implementation",
+      "Accept string (UTF-8) and Uint8Array input",
+      "Return hex digest string",
+      "HMAC-SHA256 using the same implementation"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "md5-pure",
+    "description": "Pure TypeScript MD5 implementation for legacy compatibility and file fingerprinting.",
+    "requirements": [
+      "Full RFC 1321 MD5 implementation",
+      "Accept string and Uint8Array input",
+      "Return hex digest",
+      "MD5 collision warning comment in output"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "miller-rabin",
+    "description": "Test integer primality with Miller-Rabin and generate cryptographically-sized probable primes.",
+    "requirements": [
+      "Deterministic for n < 3,215,031,751 (first 4 witnesses)",
+      "Probabilistic with configurable round count",
+      "BigInt support for large numbers",
+      "Next probable prime generator"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "shamir-secret-sharing",
+    "description": "Split a secret into n shares with k-of-n reconstruction using Shamir's Secret Sharing.",
+    "requirements": [
+      "GF(256) field arithmetic for byte-level sharing",
+      "Split secret string into n shares, require k to reconstruct",
+      "Lagrange interpolation for reconstruction",
+      "Verify shares are valid before reconstruction"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "diffie-hellman",
+    "description": "Demonstrate Diffie-Hellman key exchange with small safe primes for educational use.",
+    "requirements": [
+      "Small safe prime and generator pairs embedded",
+      "Private key generation (random)",
+      "Public key and shared secret computation",
+      "Step-by-step explanation output"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "rsa-demo",
+    "description": "Educational RSA key generation and encrypt/decrypt with small primes for demonstration.",
+    "requirements": [
+      "Generate RSA keys from two supplied primes",
+      "Compute n, phi(n), e (65537), d via extended Euclidean",
+      "Encrypt and decrypt single integer message",
+      "CRT optimization for decryption"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "merkle-tree",
+    "description": "Build a Merkle tree from data blocks, compute root hash, and generate/verify inclusion proofs.",
+    "requirements": [
+      "SHA-256 leaf hashing and pairwise combination",
+      "Balanced binary tree construction",
+      "Inclusion proof: sibling hash path to root",
+      "Verify proof without full tree reconstruction"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "one-time-pad",
+    "description": "Generate, apply, and verify one-time pad encryption with key reuse detection.",
+    "requirements": [
+      "Cryptographically random key generation (Math.random note: pseudo)",
+      "XOR application for encrypt/decrypt",
+      "Key reuse detection from ciphertext patterns",
+      "Two-time pad vulnerability demonstration"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "elliptic-curve-ops",
+    "description": "Perform point addition, doubling, and scalar multiplication on secp256k1 curve over a small field.",
+    "requirements": [
+      "Weierstrass curve y^2 = x^3 + ax + b mod p",
+      "Point addition and doubling formulae",
+      "Scalar multiplication via double-and-add",
+      "secp256k1 parameters; small prime for demo mode"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "galois-field",
+    "description": "Perform arithmetic in GF(2^8) used in AES and error-correcting codes.",
+    "requirements": [
+      "GF(2^8) with AES irreducible polynomial (0x11B)",
+      "Addition (XOR), multiplication (Russian peasant), inversion",
+      "Exponentiation and logarithm tables",
+      "Polynomial multiplication in GF(2)[x]"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "baby-step-giant-step",
+    "description": "Solve discrete logarithm g^x = h (mod p) using baby-step giant-step algorithm.",
+    "requirements": [
+      "Baby-step giant-step O(sqrt(p)) space and time",
+      "Pohlig-Hellman decomposition for smooth-order groups",
+      "Works with BigInt for moderate primes",
+      "Return x or 'no solution'"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "pbkdf2-pure",
+    "description": "Pure TypeScript PBKDF2 key derivation using HMAC-SHA256 as the PRF.",
+    "requirements": [
+      "PBKDF2(password, salt, iterations, keyLen, prf=HMAC-SHA256)",
+      "Uses sha256-pure or inline SHA-256",
+      "Returns derived key as hex string",
+      "Recommended iteration count warning (< 100000)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "polynomial-hash",
+    "description": "Compute polynomial rolling hash (Rabin-Karp) and Zobrist hash for strings and board positions.",
+    "requirements": [
+      "Rolling hash: H = sum c_i * p^i mod M",
+      "Rabin-Karp sliding window update O(1)",
+      "Zobrist hash for game state (random table XOR)",
+      "Double hashing to reduce collision probability"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "zero-knowledge-simple",
+    "description": "Demonstrate a zero-knowledge proof for discrete logarithm knowledge (Schnorr protocol).",
+    "requirements": [
+      "Schnorr identification scheme: commit, challenge, respond",
+      "Prover proves knowledge of x where y = g^x mod p",
+      "Verifier check: g^s = R * y^c mod p",
+      "Simulation and soundness demonstration"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "chinese-remainder-theorem",
+    "description": "Solve systems of congruences using the Chinese Remainder Theorem with Garner's algorithm.",
+    "requirements": [
+      "CRT for pairwise coprime moduli",
+      "Garner's algorithm for mixed-radix representation",
+      "Verify solution satisfies all congruences",
+      "Extended to non-coprime moduli (check consistency)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "xorshift-rng",
+    "description": "Implement xorshift, xorshift128+, and xoshiro256** pseudo-random number generators.",
+    "requirements": [
+      "xorshift32 (Marsaglia 2003)",
+      "xorshift128+ (used in V8/SpiderMonkey)",
+      "xoshiro256** (current best practice)",
+      "Statistical tests: chi-squared uniformity, serial correlation"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "homomorphic-add",
+    "description": "Demonstrate additive homomorphic encryption using Paillier cryptosystem with small primes.",
+    "requirements": [
+      "Key generation from two safe primes p, q",
+      "Encrypt and decrypt integers mod n",
+      "Homomorphic addition: E(a)*E(b) = E(a+b)",
+      "Scalar multiplication: E(a)^k = E(k*a)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "minimax",
+    "description": "Minimax algorithm with alpha-beta pruning for two-player zero-sum games.",
+    "requirements": [
+      "Generic minimax(state, depth, maximizing) function",
+      "Alpha-beta pruning for performance",
+      "Move ordering heuristic option",
+      "Return best move, score, and nodes evaluated"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "nash-equilibrium",
+    "description": "Find Nash equilibria for 2x2 and 3x3 normal-form games using support enumeration.",
+    "requirements": [
+      "Pure strategy Nash equilibria by inspection",
+      "Mixed strategy NE for 2x2 via indifference conditions",
+      "Support enumeration for larger games",
+      "Dominant strategy elimination preprocessing"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "prisoners-dilemma",
+    "description": "Simulate iterated Prisoner's Dilemma with configurable strategies and return tournament results.",
+    "requirements": [
+      "Strategies: always-cooperate, always-defect, tit-for-tat, tit-for-two-tats, random, grudger",
+      "Round-robin tournament with configurable iterations",
+      "Payoff matrix: CC=3,3 CD=0,5 DC=5,0 DD=1,1",
+      "Return scores, rankings, and cooperation rate"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "elo-rating",
+    "description": "Calculate Elo rating updates for chess and competitive games with configurable K-factor.",
+    "requirements": [
+      "Expected score: E = 1/(1+10^((Rb-Ra)/400))",
+      "Rating update: R_new = R_old + K*(S-E)",
+      "K-factor by rating tier (32/24/16)",
+      "Multi-player match via pairwise comparison",
+      "Return new ratings and change"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pagerank",
+    "description": "Compute PageRank scores for a directed graph using power iteration.",
+    "requirements": [
+      "Damping factor d=0.85",
+      "Dangling node handling (teleport uniformly)",
+      "Power iteration until convergence (epsilon=1e-8)",
+      "Return node scores normalized to sum 1"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "markov-chain",
+    "description": "Build and simulate Markov chains: compute stationary distribution and mean first passage times.",
+    "requirements": [
+      "Transition matrix validation (rows sum to 1)",
+      "Stationary distribution via power iteration",
+      "Mean first passage time matrix",
+      "N-step transition probabilities"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "multi-armed-bandit",
+    "description": "Simulate epsilon-greedy, UCB1, and Thompson sampling strategies for multi-armed bandits.",
+    "requirements": [
+      "Run N rounds against configurable arm reward distributions",
+      "Epsilon-greedy with configurable epsilon and epsilon-decay",
+      "UCB1 (Upper Confidence Bound)",
+      "Thompson sampling (Beta distribution)",
+      "Return cumulative reward and regret per strategy"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "voting-systems",
+    "description": "Compute election results under Plurality, Borda count, IRV, Condorcet, and Approval voting.",
+    "requirements": [
+      "Accept ranked ballot array",
+      "Plurality, Borda count, instant-runoff voting",
+      "Condorcet winner and Smith set",
+      "Approval voting (top-k approval interpretation)",
+      "Return winner and round-by-round results"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "auction-theory",
+    "description": "Simulate Vickrey (second-price), English, Dutch, and first-price sealed-bid auctions.",
+    "requirements": [
+      "Vickrey: winner pays second-highest bid",
+      "English: ascending price simulation",
+      "Dutch: descending price, first bidder wins",
+      "First-price: winner pays own bid; Nash equilibrium strategy"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "payoff-matrix",
+    "description": "Analyze payoff matrices for dominance, saddle points, mixed strategies, and game value.",
+    "requirements": [
+      "Iterated elimination of strictly dominated strategies",
+      "Saddle point (pure strategy NE) detection",
+      "Game value for zero-sum games via linear programming (simplex)",
+      "Return game type classification and solution"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "kelly-criterion",
+    "description": "Calculate optimal bet sizing using the Kelly criterion for single and multiple simultaneous bets.",
+    "requirements": [
+      "Kelly fraction f = (b*p - q)/b",
+      "Fractional Kelly (half-Kelly, quarter-Kelly)",
+      "Multiple simultaneous bets (approximate Kelly)",
+      "Growth rate and ruin probability at different fractions"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "monte-carlo-tree-search",
+    "description": "Implement basic MCTS with UCT selection for generic game trees.",
+    "requirements": [
+      "UCT: argmax (Q/N + c*sqrt(ln(N_parent)/N))",
+      "Selection, expansion, simulation, backpropagation phases",
+      "Configurable simulation count",
+      "Generic state/action interface for any two-player game"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "evolutionary-stable-strategy",
+    "description": "Compute evolutionary stable strategies (ESS) and replicator dynamics for symmetric games.",
+    "requirements": [
+      "ESS condition: payoff(s,s) > payoff(t,s) for all t != s",
+      "Replicator dynamics ODE integration",
+      "Hawk-Dove, Stag-Hunt, and Rock-Paper-Scissors presets",
+      "Phase portrait data (frequency vs fitness)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "mechanism-design",
+    "description": "Analyze incentive compatibility and efficiency of allocation mechanisms (Groves, Clarke, VCG).",
+    "requirements": [
+      "VCG mechanism: maximize total welfare",
+      "Clarke pivot rule for payments",
+      "Incentive compatibility (dominant strategy) verification",
+      "Revenue equivalence check for standard auctions"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "shapley-value",
+    "description": "Compute Shapley values for cooperative games to fairly allocate value among players.",
+    "requirements": [
+      "Exact Shapley via marginal contribution over all permutations (up to 8 players)",
+      "Monte Carlo approximation for larger coalitions",
+      "Core non-emptiness check",
+      "Weighted Shapley values with priority weights"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "bayes-calculator",
+    "description": "Apply Bayes theorem for single and sequential updates with prior, likelihood, and evidence.",
+    "requirements": [
+      "P(H|E) = P(E|H)*P(H)/P(E)",
+      "Sequential update: posterior becomes next prior",
+      "Multiple hypotheses (Bayesian inference over hypothesis set)",
+      "Bayes factor and odds ratio form"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "normal-distribution",
+    "description": "Compute PDF, CDF, inverse CDF (quantile), and confidence intervals for the normal distribution.",
+    "requirements": [
+      "PDF and CDF using Horner approximation (Abramowitz and Stegun)",
+      "Inverse CDF via rational approximation (Beasley-Springer-Moro)",
+      "Z-score from percentile and vice versa",
+      "Confidence interval for given coverage probability"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "student-t-test",
+    "description": "Perform one-sample, two-sample, and paired t-tests with p-value and confidence interval.",
+    "requirements": [
+      "t-statistic calculation for each test type",
+      "P-value via regularized incomplete beta function approximation",
+      "95% and 99% confidence intervals",
+      "Effect size (Cohen's d) and statistical power"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "one-way-anova",
+    "description": "Perform one-way ANOVA with F-statistic, p-value approximation, and Tukey HSD post-hoc test.",
+    "requirements": [
+      "Between-group and within-group sum of squares",
+      "F-statistic and degrees of freedom",
+      "P-value from F-distribution approximation",
+      "Tukey HSD for pairwise comparisons"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "poisson-distribution",
+    "description": "Compute Poisson PMF, CDF, and confidence intervals for count data.",
+    "requirements": [
+      "PMF: P(k) = lambda^k * exp(-lambda) / k!",
+      "CDF via incomplete gamma function",
+      "Mean, variance (both = lambda)",
+      "Confidence interval for rate lambda from observed count"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "bootstrap-ci",
+    "description": "Compute bootstrap confidence intervals for any statistic from a sample.",
+    "requirements": [
+      "Percentile bootstrap (basic and BCa methods)",
+      "Configurable number of resamples (default 1000)",
+      "Accept any statistic function (mean, median, std, etc.)",
+      "Return point estimate, CI lower, CI upper, standard error"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "kernel-density-estimator",
+    "description": "Estimate probability density function from samples using kernel density estimation.",
+    "requirements": [
+      "Gaussian kernel (default), Epanechnikov option",
+      "Silverman's bandwidth rule of thumb",
+      "Evaluate KDE at any point or over grid",
+      "Return mode estimate and bandwidth used"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "kaplan-meier",
+    "description": "Compute Kaplan-Meier survival function from event/censoring data.",
+    "requirements": [
+      "Accept array of {time, event: bool} observations",
+      "Step-function survival estimate S(t)",
+      "Log-rank test for two-group comparison",
+      "Median survival time and confidence band (Greenwood formula)"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "roc-curve",
+    "description": "Compute ROC curve points and AUC from binary classifier scores and true labels.",
+    "requirements": [
+      "Sort by score, compute TPR/FPR at each threshold",
+      "AUC via trapezoidal rule",
+      "Optimal threshold (Youden's J statistic)",
+      "Precision-recall curve and average precision"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "information-gain",
+    "description": "Compute entropy, information gain, and mutual information for features in classification tasks.",
+    "requirements": [
+      "Shannon entropy H(Y) = -sum p log2 p",
+      "Information gain IG(Y;X) = H(Y) - H(Y|X)",
+      "Mutual information and normalized MI",
+      "Gini impurity as alternative to entropy"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "gini-coefficient",
+    "description": "Calculate Gini coefficient and Lorenz curve for income/wealth distribution data.",
+    "requirements": [
+      "Gini from sorted values: area ratio",
+      "Lorenz curve: cumulative share of income by cumulative share of population",
+      "Perfect equality (G=0) and inequality (G=1) benchmarks",
+      "Theil index as additional inequality measure"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "binomial-distribution",
+    "description": "Compute binomial PMF, CDF, and confidence intervals with normal and Poisson approximations.",
+    "requirements": [
+      "Exact PMF and CDF via regularized beta function",
+      "Normal approximation (np > 5 warning)",
+      "Poisson approximation (p < 0.05)",
+      "Confidence interval for proportion p (Wilson score)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "hypergeometric-distribution",
+    "description": "Compute hypergeometric distribution for sampling without replacement (quality control, card games).",
+    "requirements": [
+      "PMF: C(K,k)*C(N-K,n-k)/C(N,n)",
+      "CDF and exact Fisher's test",
+      "Mean N*K/N and variance",
+      "Card draw probability calculator (poker hand odds)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "maximum-likelihood",
+    "description": "Estimate parameters by maximum likelihood for normal, exponential, Poisson, and Bernoulli distributions.",
+    "requirements": [
+      "Closed-form MLE for normal (mu, sigma^2), exponential (lambda), Poisson (lambda), Bernoulli (p)",
+      "Log-likelihood value at MLE",
+      "Fisher information and Cramer-Rao bound",
+      "AIC and BIC model comparison criteria"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "cross-validation",
+    "description": "Split datasets for k-fold, stratified k-fold, and leave-one-out cross-validation.",
+    "requirements": [
+      "k-fold: split into k equal folds, return train/test index arrays",
+      "Stratified k-fold: maintain class proportions",
+      "LOO-CV: each sample is a test fold",
+      "Shuffle option with configurable random seed"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "voltage-divider",
+    "description": "Solve voltage divider networks, loaded dividers, and Thevenin equivalents.",
+    "requirements": [
+      "Unloaded: Vout = Vin * R2/(R1+R2)",
+      "Loaded: parallel combination of R2 and R_load",
+      "Thevenin equivalent: Vth and Rth",
+      "Current through each resistor"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "rc-time-constant",
+    "description": "Calculate RC circuit time constant, charge/discharge curves, and frequency response.",
+    "requirements": [
+      "tau = RC, 5-tau rule for full charge",
+      "Voltage and current at time t",
+      "Cutoff frequency f_c = 1/(2*pi*RC)",
+      "Charging to target voltage: time calculation"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "lc-resonance",
+    "description": "Calculate LC resonant frequency, bandwidth, Q factor, and impedance response.",
+    "requirements": [
+      "f_r = 1/(2*pi*sqrt(L*C))",
+      "Quality factor Q = (1/R)*sqrt(L/C)",
+      "Bandwidth BW = f_r/Q",
+      "Impedance vs frequency for series and parallel RLC"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "rlc-impedance",
+    "description": "Calculate complex impedance, phase angle, and power factor for RLC circuits at any frequency.",
+    "requirements": [
+      "Z_R = R, Z_L = j*omega*L, Z_C = 1/(j*omega*C)",
+      "Series and parallel RLC total impedance (magnitude and phase)",
+      "Power factor cos(phi) and reactive/apparent/real power",
+      "Resonant and anti-resonant frequencies"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "decibel-converter",
+    "description": "Convert between dB, dBm, dBW, dBu, dBV, voltage ratio, and power ratio.",
+    "requirements": [
+      "Power: dB = 10*log10(P2/P1)",
+      "Voltage: dB = 20*log10(V2/V1)",
+      "dBm: reference 1 mW into 50-ohm, 600-ohm, or custom",
+      "Sound pressure level (SPL) in dB with reference 20 uPa"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "filter-design",
+    "description": "Calculate cutoff frequency, -3dB point, and component values for RC, RL, and LC filters.",
+    "requirements": [
+      "Low-pass, high-pass, band-pass, band-stop (notch)",
+      "RC filter: given R or C, solve for the other at target frequency",
+      "Butterworth 2nd-order: component values",
+      "Return transfer function H(s) coefficients"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "led-resistor",
+    "description": "Calculate current-limiting resistor for LEDs with series and parallel LED configurations.",
+    "requirements": [
+      "R = (Vs - Vf) / If",
+      "Series LEDs: subtract all forward voltages",
+      "Parallel LEDs: resistor per string",
+      "Return power dissipation and efficiency"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "transformer-turns-ratio",
+    "description": "Calculate transformer turns ratio, secondary voltage/current, and reflected impedance.",
+    "requirements": [
+      "Turns ratio N = Np/Ns",
+      "Secondary voltage Vs = Vp / N, current Is = Ip * N",
+      "Reflected impedance Zp = N^2 * Zs",
+      "Transformer power loss from resistance"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pcb-trace-width",
+    "description": "Calculate minimum PCB trace width for given current, temperature rise, and copper weight.",
+    "requirements": [
+      "IPC-2221 formula for external and internal traces",
+      "Temperature rise for given current and trace cross-section",
+      "Resistance and voltage drop of trace",
+      "Fusing current (Preece's equation)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "antenna-gain",
+    "description": "Calculate antenna gain, effective aperture, and link budget for free-space RF communication.",
+    "requirements": [
+      "Dipole gain 2.15 dBi, isotropic 0 dBi",
+      "Friis transmission equation: Pr = Pt + Gt + Gr - FSPL",
+      "Free-space path loss FSPL = 20*log10(4*pi*d/lambda)",
+      "Return received power in dBm for given link parameters"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "power-factor-calc",
+    "description": "Calculate power factor, reactive power, and capacitance needed for power factor correction.",
+    "requirements": [
+      "PF = cos(phi) = P/S where S=VI",
+      "Reactive power Q = S*sin(phi)",
+      "Correction capacitor C to reach target PF",
+      "kVAR rating of capacitor bank needed"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "three-phase-power",
+    "description": "Calculate three-phase balanced power: line/phase voltages, currents, and total power.",
+    "requirements": [
+      "Star (Y): V_line = sqrt(3) * V_phase, I_line = I_phase",
+      "Delta: V_line = V_phase, I_line = sqrt(3) * I_phase",
+      "Total 3-phase power P = sqrt(3) * V_L * I_L * PF",
+      "Per-phase and total apparent, real, reactive power"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "capacitor-energy",
+    "description": "Calculate capacitor energy storage, charge, discharge time, and series/parallel combinations.",
+    "requirements": [
+      "E = 0.5*C*V^2, Q = CV",
+      "Series: 1/C_total = sum(1/Ci)",
+      "Parallel: C_total = sum Ci",
+      "Time to discharge from V0 to Vt through R"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "inductor-energy",
+    "description": "Calculate inductor energy storage, back-EMF, time constant in RL circuit, and series/parallel combinations.",
+    "requirements": [
+      "E = 0.5*L*I^2, back-EMF V = L*dI/dt",
+      "RL time constant tau = L/R",
+      "Current at time t in RL circuit",
+      "Series/parallel inductance combinations"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "nyquist-sampling",
+    "description": "Apply Nyquist-Shannon sampling theorem to determine required sample rate and anti-aliasing filter specs.",
+    "requirements": [
+      "Minimum sample rate = 2 * f_max (Nyquist rate)",
+      "Anti-aliasing filter cutoff recommendation",
+      "Aliased frequency from undersampled signal",
+      "Return required sample rate, oversampling ratio recommendation"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "beam-deflection",
+    "description": "Calculate maximum deflection, slope, and reaction forces for common beam loading cases.",
+    "requirements": [
+      "Simply supported: central point load, uniform distributed load",
+      "Cantilever: point load at tip, UDL",
+      "Moment of inertia for rectangular, I-beam, circular cross-sections",
+      "Return max deflection, location, and reactions"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "load-distribution",
+    "description": "Calculate load distribution, bearing capacity, and factor of safety for structural members.",
+    "requirements": [
+      "Tributary area load distribution",
+      "Dead load + live load combination (1.2D + 1.6L)",
+      "Column load from floor area",
+      "Safety factor check against material strength"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "concrete-mix",
+    "description": "Calculate concrete mix ratios, water-cement ratio, and estimate compressive strength.",
+    "requirements": [
+      "Mix proportions by weight: cement:sand:aggregate",
+      "Water-cement ratio to target strength (Abrams' law)",
+      "Slump estimation from w/c ratio",
+      "Yield: volume of concrete from given quantities"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "stair-calculator",
+    "description": "Calculate stair rise, run, angle, and total stringer length from floor-to-floor height.",
+    "requirements": [
+      "OSHA/IBC: max rise 7.75in, min run 10in",
+      "Number of risers from height",
+      "Stringer length (Pythagorean)",
+      "Headroom clearance check",
+      "Return tread/riser dimensions and riser count"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "roof-pitch",
+    "description": "Convert between roof pitch (x:12), degrees, percent slope, and calculate rafter length.",
+    "requirements": [
+      "Pitch to angle: tan(theta) = rise/run",
+      "Rafter length from span and pitch (hypotenuse)",
+      "Common rafter, hip rafter, valley rafter lengths",
+      "Roof area multiplier from pitch"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "paint-coverage",
+    "description": "Estimate paint coverage, coats needed, and cost for walls, ceilings, and trim.",
+    "requirements": [
+      "Coverage: area / (spread rate * efficiency)",
+      "Door and window deduction (typical sizes)",
+      "Two-coat default with primer option",
+      "Return gallons/liters needed and cost at given price/unit"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "lumber-board-feet",
+    "description": "Calculate lumber board feet, weight, and cost for framing and carpentry projects.",
+    "requirements": [
+      "Board feet = (T * W * L) / 144 (inches) or / 12 (with L in feet)",
+      "Common lumber sizes (2x4, 2x6, 4x4, etc.) with actual dimensions",
+      "Weight from species density",
+      "Total cost at given price per board foot"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pipe-flow",
+    "description": "Calculate pipe flow rate, velocity, pressure drop, and friction loss using Darcy-Weisbach.",
+    "requirements": [
+      "Continuity: Q = A * v",
+      "Darcy-Weisbach: dP = f * (L/D) * (rho*v^2/2)",
+      "Colebrook-White friction factor (iterative)",
+      "Return flow rate, velocity, pressure drop, and head loss"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "hvac-btu",
+    "description": "Estimate HVAC cooling and heating load in BTU/hr for a room or building.",
+    "requirements": [
+      "Manual J simplified: area * ceiling height * U-value method",
+      "Sensible heat gain from windows, walls, occupants, equipment",
+      "Latent heat load from infiltration and occupants",
+      "Return total load in BTU/hr, tons, and kW"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "structural-moment",
+    "description": "Calculate bending moment diagrams and shear force diagrams for beams with multiple loads.",
+    "requirements": [
+      "Multiple point loads and UDLs on simply supported and cantilever beams",
+      "Shear force at any section",
+      "Bending moment at any section",
+      "Return arrays for shear force and moment diagrams at N points"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "recipe-scaler",
+    "description": "Scale recipe ingredient quantities up or down while adjusting time and temperature for pan size changes.",
+    "requirements": [
+      "Scale all ingredient quantities by ratio",
+      "Time scaling: sqrt(new_ratio) for baking (surface area effect)",
+      "Temperature adjustment: -5F per doubling for large items",
+      "Return scaled ingredients with unit conversions"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "cooking-unit-converter",
+    "description": "Convert between cooking measurement units: cups, tablespoons, teaspoons, ml, oz, grams for common ingredients.",
+    "requirements": [
+      "Volume: tsp/tbsp/cup/fl oz/ml/L",
+      "Weight: oz/lb/g/kg",
+      "Ingredient-specific density conversions (flour, sugar, butter, rice)",
+      "US, UK, and metric cup differences"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "bmr-calculator",
+    "description": "Calculate Basal Metabolic Rate using Mifflin-St Jeor, Harris-Benedict, and Katch-McArdle equations.",
+    "requirements": [
+      "Mifflin-St Jeor (most accurate for general population)",
+      "Harris-Benedict (original and revised)",
+      "Katch-McArdle (lean body mass based)",
+      "TDEE from activity multiplier (sedentary to very active)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "macro-calculator",
+    "description": "Calculate daily macronutrient targets for different diet goals (cut, maintain, bulk, keto).",
+    "requirements": [
+      "Protein: 0.8-2.2g/kg bodyweight by goal",
+      "Fat: minimum 0.5g/kg, keto 70% of calories",
+      "Carbs: remainder after protein and fat",
+      "Return grams per macro, calories per macro, and meal split suggestion"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "baking-ratios",
+    "description": "Apply baker's percentages and common baking ratio formulas for bread, pastry, and cake.",
+    "requirements": [
+      "Baker's percentage: ingredient weight / flour weight * 100",
+      "Bread hydration from flour and water weights",
+      "Pastry: 3:2:1 flour:fat:water rule",
+      "Cake formula balance (flour:sugar:fat:eggs)",
+      "Return percentages and scaling from target dough weight"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "fermentation-temp",
+    "description": "Calculate fermentation temperature effects on yeast activity, alcohol yield, and flavor profiles.",
+    "requirements": [
+      "Q10 rule: rate doubles per 10C rise",
+      "Yeast activity curve (0-50C range)",
+      "Alcohol yield: glucose to ethanol + CO2 stoichiometry",
+      "Optimal temperature ranges for ale, lager, wine, bread yeasts"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "coffee-extraction",
+    "description": "Calculate coffee extraction yield, strength, and brew ratio for pour-over, espresso, and French press.",
+    "requirements": [
+      "Extraction yield % = (dissolved solids / coffee weight) * 100",
+      "Target: 18-22% yield for ideal flavor",
+      "TDS (total dissolved solids) from refractometer reading and brew ratio",
+      "Brew ratio water:coffee for target strength"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "brewing-water-chemistry",
+    "description": "Calculate water mineral additions for brewing: residual alkalinity, sulfate-to-chloride ratio, and ion balance.",
+    "requirements": [
+      "Residual alkalinity = alkalinity - (hardness/3.5)",
+      "Ca, Mg, Na, Cl, SO4, HCO3 ion targets by style",
+      "Sulfate:chloride ratio for hop/malt balance",
+      "Salt addition calculator (gypsum, CaCl2, NaHCO3, epsom salt)"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "sourdough-hydration",
+    "description": "Calculate sourdough hydration, starter ratios, and fermentation timing.",
+    "requirements": [
+      "Hydration % = water / flour * 100",
+      "Overall dough hydration accounting for starter water and flour",
+      "Levain (pre-ferment) flour/water contribution",
+      "Estimated fermentation time by temperature (Fahrenheit and Celsius)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "cooking-time-by-weight",
+    "description": "Estimate cooking time for roasts, poultry, and fish by weight and method.",
+    "requirements": [
+      "Roast beef/pork: minutes per pound by doneness target",
+      "Poultry: 20 min/lb at 325F, internal temp targets",
+      "Fish: 10-minute rule (1 inch = 10 minutes at 400F)",
+      "Pressure cooker time reduction (1/3 of conventional)"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "bmi-calculator",
+    "description": "Calculate BMI with WHO classification, adjusted BMI for Asian populations, and ideal weight range.",
+    "requirements": [
+      "BMI = kg/m^2 or 703*lb/in^2",
+      "WHO categories: underweight, normal, overweight, obese I/II/III",
+      "Asian-adjusted thresholds (23/27.5 overweight/obese)",
+      "Ideal weight range for normal BMI at given height"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "body-fat-navy",
+    "description": "Estimate body fat percentage using the US Navy circumference method for male and female.",
+    "requirements": [
+      "Male: BF% = 86.010 * log10(abdomen - neck) - 70.041 * log10(height) + 36.76",
+      "Female: BF% = 163.205 * log10(waist + hip - neck) - 97.684 * log10(height) - 78.387",
+      "Body fat category (essential, athletic, fitness, average, obese)",
+      "Lean body mass and fat mass from total weight"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "heart-rate-zones",
+    "description": "Calculate heart rate training zones by Karvonen, percentage max HR, and lactate threshold methods.",
+    "requirements": [
+      "Max HR: 220 - age (Fox) and 208 - 0.7*age (Tanaka)",
+      "Karvonen: HRR = max_HR - resting_HR, zone = HRR% + resting_HR",
+      "5-zone and 3-zone models",
+      "Return bpm ranges for each zone"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "vo2max-estimator",
+    "description": "Estimate VO2 max from Cooper test, 1.5-mile run, Rockport walk test, and resting HR methods.",
+    "requirements": [
+      "Cooper 12-min run: VO2max = (distance_meters - 504.9) / 44.73",
+      "1.5-mile run: VO2max = 3.5 + 483 / time_minutes",
+      "Rockport: regression from weight, age, sex, HR at finish",
+      "Fitness classification (poor to superior) by age/sex"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "drug-dosage",
+    "description": "Calculate weight-based drug dosages for common over-the-counter medications.",
+    "requirements": [
+      "Dose = weight_kg * dose_mg_per_kg",
+      "Maximum single dose and daily dose cap",
+      "Pediatric weight-band lookup (acetaminophen, ibuprofen doses)",
+      "Frequency interval and next-dose timing",
+      "Disclaimer: educational only, not medical advice"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "gfr-calculator",
+    "description": "Estimate glomerular filtration rate (eGFR) from creatinine using CKD-EPI and Cockcroft-Gault equations.",
+    "requirements": [
+      "CKD-EPI 2021 (race-free) equation",
+      "Cockcroft-Gault for creatinine clearance",
+      "CKD staging from eGFR (G1-G5)",
+      "Age, sex, creatinine (mg/dL or umol/L) inputs"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "corrected-calcium",
+    "description": "Calculate corrected serum calcium for albumin levels and ionized calcium estimate.",
+    "requirements": [
+      "Corrected Ca = measured_Ca + 0.8 * (4.0 - albumin_g/dL)",
+      "Low albumin correction (most common direction)",
+      "Ionized calcium estimate from total and pH",
+      "Hypocalcemia/hypercalcemia classification thresholds"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "anion-gap",
+    "description": "Calculate anion gap with albumin correction and MUDPILES differential list.",
+    "requirements": [
+      "AG = Na - (Cl + HCO3)",
+      "Albumin-corrected AG: +2.5 per g/dL below 4",
+      "Delta-delta ratio for mixed metabolic disorders",
+      "MUDPILES mnemonic output when AG elevated"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "bac-calculator",
+    "description": "Estimate blood alcohol content using Widmark formula with elimination rate over time.",
+    "requirements": [
+      "Widmark: BAC = (drinks * 14g_per_drink) / (body_weight_g * r) - 0.015*hours",
+      "r factor: 0.68 male, 0.55 female",
+      "Impairment level classification by BAC range",
+      "Time to sober (BAC = 0) calculation"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "calorie-burn",
+    "description": "Estimate calories burned during exercise using MET values and duration.",
+    "requirements": [
+      "Calories = MET * weight_kg * duration_hours",
+      "MET table for 40+ common activities embedded",
+      "Gross vs net calorie burn (subtract BMR)",
+      "Weekly deficit/surplus from activity log"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "sleep-cycles",
+    "description": "Calculate optimal sleep duration and wake times based on 90-minute sleep cycles.",
+    "requirements": [
+      "90-minute cycle multiples: 4.5, 6, 7.5, 9 hours",
+      "Bedtime from desired wake time or wake from bedtime",
+      "REM/deep sleep proportion estimate per cycle",
+      "Sleep debt accumulation and recovery calculation"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "hydration-calculator",
+    "description": "Calculate daily water intake needs based on weight, activity, climate, and health conditions.",
+    "requirements": [
+      "Baseline: 35 ml/kg/day",
+      "Exercise addition: 500ml per hour",
+      "Heat/humidity correction factor",
+      "Urine color guide for hydration status",
+      "Output in ml, liters, oz, and cups"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "pregnancy-due-date",
+    "description": "Calculate pregnancy due date, gestational age, and key milestone dates from LMP or conception date.",
+    "requirements": [
+      "Naegele's rule: LMP + 280 days",
+      "Gestational age in weeks + days",
+      "Key milestone dates: 1st trimester end (13w), 2nd (27w), anomaly scan (20w), viability (24w)",
+      "EDD from ultrasound crown-rump length (CRL) via Hadlock"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "glasgow-coma-scale",
+    "description": "Calculate Glasgow Coma Scale (GCS) score from eye, verbal, and motor response inputs.",
+    "requirements": [
+      "Eye (E): 1-4, Verbal (V): 1-5, Motor (M): 1-6",
+      "GCS total and severity classification (mild 13-15, moderate 9-12, severe <=8)",
+      "Intubated patient V-score notation",
+      "Return each component score and total"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "apgar-score",
+    "description": "Calculate APGAR score for newborn assessment at 1 and 5 minutes.",
+    "requirements": [
+      "5 components: Appearance (color), Pulse, Grimace, Activity, Respiration each 0-2",
+      "Total score and clinical interpretation (0-3 critical, 4-6 low, 7-10 normal)",
+      "Minute-by-minute tracking table",
+      "Resuscitation guidance by score range"
+    ],
+    "maxLines": 50
+  },
+  {
+    "name": "fourier-transform-2d",
+    "description": "Compute 2D DFT of a matrix (image data) and return magnitude spectrum and phase.",
+    "requirements": [
+      "2D DFT via row-then-column 1D DFTs",
+      "Magnitude spectrum with DC centered by shifting",
+      "Low-pass and high-pass filter application in frequency domain",
+      "Inverse 2D DFT to reconstruct filtered image"
+    ],
+    "maxLines": 90
+  },
+  {
+    "name": "kalman-filter",
+    "description": "Implement a 1D and 2D Kalman filter for state estimation from noisy measurements.",
+    "requirements": [
+      "Predict step: x_hat = F*x_hat, P = F*P*F' + Q",
+      "Update step: K = P*H'/(H*P*H' + R), update x_hat and P",
+      "1D velocity tracking example",
+      "Return filtered state and uncertainty at each step"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "pid-controller",
+    "description": "Simulate a PID controller with anti-windup and derivative filtering.",
+    "requirements": [
+      "Proportional, integral, derivative terms with gains Kp, Ki, Kd",
+      "Anti-windup via integrator clamping",
+      "Derivative low-pass filter (tau parameter)",
+      "Step response simulation over N time steps"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "bezier-curve",
+    "description": "Evaluate Bezier curves (quadratic and cubic) and generate path points with arc-length parameterization.",
+    "requirements": [
+      "Quadratic and cubic Bezier: de Casteljau algorithm",
+      "N evenly-spaced parameter samples",
+      "Arc-length parameterization via numerical integration",
+      "Tangent vector at any parameter t"
+    ],
+    "maxLines": 70
+  },
+  {
+    "name": "mandelbrot",
+    "description": "Determine Mandelbrot set membership and escape time for complex coordinates.",
+    "requirements": [
+      "Iterate z = z^2 + c up to max_iter",
+      "Smooth coloring via fractional escape count",
+      "Return escape time and smooth value",
+      "Generate parameter grid for a viewport at given resolution"
+    ],
+    "maxLines": 60
+  },
+  {
+    "name": "l-system",
+    "description": "Expand Lindenmayer system (L-system) strings and convert to turtle graphics coordinates.",
+    "requirements": [
+      "Parametric rewriting rules (map axiom to string over N iterations)",
+      "Turtle interpretation: F=forward, +=right, -=left, [=push, ]=pop",
+      "Koch snowflake, Sierpinski triangle, fractal plant presets",
+      "Return coordinate array for path drawing"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "cellular-automaton",
+    "description": "Simulate 1D and 2D cellular automata (Conway's Game of Life, Wolfram rules, Brian's Brain).",
+    "requirements": [
+      "1D: any Wolfram elementary rule (0-255), N generations",
+      "2D: Conway's Life, B3/S23 Moore neighborhood",
+      "Totalistic rule support",
+      "Return grid states as 2D arrays per generation"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "pathfinding-astar",
+    "description": "Find shortest path in a 2D grid using A* algorithm with configurable heuristics.",
+    "requirements": [
+      "Manhattan and Euclidean distance heuristics",
+      "Diagonal movement option",
+      "Obstacle map (passable/impassable cells)",
+      "Return path as coordinate array and total cost"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "qr-code-data",
+    "description": "Encode data into QR code bit stream using Reed-Solomon error correction (educational, up to version 3).",
+    "requirements": [
+      "Byte mode encoding for ASCII strings",
+      "Reed-Solomon error correction codewords (up to error correction level M)",
+      "Data and ECC codeword interleaving",
+      "Return bit string ready for matrix placement (full matrix generation out of scope)"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "run-length-encoding",
+    "description": "Compress and decompress data using run-length encoding, LZW, and Huffman coding.",
+    "requirements": [
+      "RLE encode/decode: count+symbol pairs",
+      "Huffman: build frequency tree, encode to bit string, decode",
+      "LZW encode/decode with growing dictionary",
+      "Return compressed size and compression ratio"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "simplex-method",
+    "description": "Solve linear programming problems using the simplex method for maximization and minimization.",
+    "requirements": [
+      "Standard form conversion (slack variables)",
+      "Bland's rule to prevent cycling",
+      "Phase I for finding initial feasible solution",
+      "Return optimal value, variable values, and basis"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "fft-radix2",
+    "description": "Compute Fast Fourier Transform using Cooley-Tukey radix-2 algorithm on power-of-2 input.",
+    "requirements": [
+      "Cooley-Tukey DIT (decimation-in-time) butterfly",
+      "Zero-pad input to next power of 2 if needed",
+      "Return complex output as {re, im} array",
+      "Inverse FFT and circular convolution via FFT"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "fluid-simulation",
+    "description": "Simulate 2D incompressible fluid using the Jos Stam stable fluids method.",
+    "requirements": [
+      "Velocity and density fields on a grid",
+      "Advection (bilinear interpolation), diffusion, projection steps",
+      "Projection via Gauss-Seidel pressure solve",
+      "Return density grid per step for visualization"
+    ],
+    "maxLines": 100
+  },
+  {
+    "name": "diffusion-equation",
+    "description": "Numerically solve the 1D heat/diffusion equation using explicit and implicit finite difference methods.",
+    "requirements": [
+      "Explicit (FTCS): stable when r = alpha*dt/dx^2 <= 0.5",
+      "Crank-Nicolson (unconditionally stable): tridiagonal solve",
+      "Dirichlet and Neumann boundary conditions",
+      "Return temperature/concentration profile over time"
+    ],
+    "maxLines": 80
+  },
+  {
+    "name": "wave-equation-1d",
+    "description": "Numerically solve the 1D wave equation for a vibrating string using finite differences.",
+    "requirements": [
+      "Explicit finite difference: u(i,n+1) = 2u(i,n) - u(i,n-1) + c^2*r^2*(u(i+1,n)-2u(i,n)+u(i-1,n))",
+      "CFL stability condition check",
+      "Plucked and struck string initial conditions",
+      "Return displacement array per time step"
+    ],
+    "maxLines": 80
   }
 ]
