@@ -2,7 +2,7 @@
 /**
  * @8gent/telegram-bot — Nightly Intelligence Cron
  *
- * Run nightly at 3 AM: 0 3 * * * /Users/jamesspalding/.bun/bin/bun /Users/jamesspalding/8gent-code/packages/telegram-bot/cron-intelligence.ts
+ * Run nightly at 3 AM via: bun run packages/telegram-bot/install-cron.ts
  *
  * Scrapes GitHub trending, scores relevance, updates knowledge base,
  * and sends a formatted digest to the 8gent Telegram chat.

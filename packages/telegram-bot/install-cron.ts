@@ -8,9 +8,10 @@
  *   bun run install-cron.ts --remove # remove
  */
 
-const BUN_PATH = "/Users/jamesspalding/.bun/bin/bun";
-const SCRIPT_PATH = "/Users/jamesspalding/8gent-code/packages/telegram-bot/cron-intelligence.ts";
-const LOG_PATH = "/Users/jamesspalding/.8gent/intelligence/cron.log";
+const HOME = process.env.HOME || require("os").homedir();
+const BUN_PATH = process.env.BUN_INSTALL ? `${process.env.BUN_INSTALL}/bin/bun` : `${HOME}/.bun/bin/bun`;
+const SCRIPT_PATH = `${import.meta.dir}/cron-intelligence.ts`;
+const LOG_PATH = `${process.env.EIGHT_DATA_DIR || `${HOME}/.8gent`}/intelligence/cron.log`;
 const CRON_SCHEDULE = "0 3 * * *";
 const CRON_LINE = `${CRON_SCHEDULE} ${BUN_PATH} ${SCRIPT_PATH} >> ${LOG_PATH} 2>&1`;
 const CRON_MARKER = "8gent-intelligence";
