@@ -979,6 +979,7 @@ struct CompanionData {
     let element: String
     let rarity: String
     let palette: CompanionPalette
+    let spriteAtlas: String?
 
     static func load() -> CompanionData? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -1015,7 +1016,9 @@ struct CompanionData {
             eye: parseHex(paletteDict["eye"] ?? "1A1A2E")
         )
 
-        return CompanionData(fullName: fullName, species: species, element: element, rarity: rarity, palette: palette)
+        let spriteAtlas = json["spriteAtlas"] as? String
+
+        return CompanionData(fullName: fullName, species: species, element: element, rarity: rarity, palette: palette, spriteAtlas: spriteAtlas)
     }
 }
 
@@ -2902,17 +2905,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.font = NSFont.boldSystemFont(ofSize: 14)
         }
 
-        // Load sprites
+        // Load sprites - try species-specific atlas first, then default
         let spriteManager = SpriteManager()
         let resourcePath = Bundle.main.resourcePath ?? "."
-        spriteManager.loadFromAtlas(
-            path: "\(resourcePath)/sprites/atlas.png",
-            manifestPath: "\(resourcePath)/sprites/manifest.json"
-        )
+        let devPath = ProcessInfo.processInfo.environment["LIL_EIGHT_SPRITES"]
+            ?? "\(FileManager.default.currentDirectoryPath)/sprites"
+
+        // Try species-specific atlas from companion data
+        if let comp = CompanionData.load(), let speciesAtlas = comp.spriteAtlas {
+            // Try resource path first, then dev path
+            let resourceAtlasPath = "\(resourcePath)/sprites/\(speciesAtlas)"
+            let devAtlasPath = "\(devPath)/\(speciesAtlas)"
+            if FileManager.default.fileExists(atPath: resourceAtlasPath) {
+                spriteManager.loadFromAtlas(path: resourceAtlasPath, manifestPath: "\(resourcePath)/sprites/manifest.json")
+                print("[lil-eight] Loaded species atlas: \(speciesAtlas)")
+            } else if FileManager.default.fileExists(atPath: devAtlasPath) {
+                spriteManager.loadFromAtlas(path: devAtlasPath, manifestPath: "\(devPath)/manifest.json")
+                print("[lil-eight] Loaded species atlas (dev): \(speciesAtlas)")
+            }
+        }
+
+        // Fall back to default atlas
+        if spriteManager.animations.isEmpty {
+            spriteManager.loadFromAtlas(
+                path: "\(resourcePath)/sprites/atlas.png",
+                manifestPath: "\(resourcePath)/sprites/manifest.json"
+            )
+        }
 
         if spriteManager.animations.isEmpty {
-            let devPath = ProcessInfo.processInfo.environment["LIL_EIGHT_SPRITES"]
-                ?? "\(FileManager.default.currentDirectoryPath)/sprites"
             spriteManager.loadFromAtlas(
                 path: "\(devPath)/atlas.png",
                 manifestPath: "\(devPath)/manifest.json"
