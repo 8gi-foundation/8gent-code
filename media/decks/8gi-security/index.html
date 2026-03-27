@@ -239,7 +239,7 @@
 </style>
 </head>
 <body>
-<div class="watermark">8GI. | Security Framework | 2026-03-26</div>
+<div class="watermark">8GI. | Security Framework | 2026-03-27</div>
 
 <div class="deck" id="deck">
 
@@ -666,8 +666,207 @@
   </div>
 </div>
 
-<!-- SLIDE 11: Closing -->
+<!-- SLIDE 11: Three Gates -->
 <div class="slide" data-slide="10">
+  <h2>Three Mandatory Gates</h2>
+  <p class="subtitle">Between every Lotus ring. All three must pass. Conjunctive. No exceptions.</p>
+  <div class="grid grid-3" style="flex:1; align-items:start;">
+    <div class="card" style="border-top: 3px solid var(--red);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h4 style="margin-bottom:0;">NemoClaw Gate</h4>
+        <span class="badge badge-red">Karen / 8SO</span>
+      </div>
+      <ul class="rule-list">
+        <li>Security policy enforcement</li>
+        <li>Deny-by-default evaluation</li>
+        <li>Secret scanning, exfiltration blocking</li>
+        <li>Supply chain audit</li>
+        <li>Rogue agent detection</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--yellow);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h4 style="margin-bottom:0;">Alignment Gate</h4>
+        <span class="badge badge-yellow">8GO</span>
+      </div>
+      <ul class="rule-list">
+        <li>Ethics verification</li>
+        <li>Constitutional compliance check</li>
+        <li>Harm prevention review</li>
+        <li>Consent and privacy validation</li>
+        <li>Mission alignment scoring</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--amber);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h4 style="margin-bottom:0;">Quality Gate</h4>
+        <span class="badge badge-amber">Moira / 8DO</span>
+      </div>
+      <ul class="rule-list">
+        <li>Design consistency review</li>
+        <li>Brand compliance check</li>
+        <li>Accessibility validation</li>
+        <li>Code quality standards</li>
+        <li>UX coherence scoring</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card" style="margin-top:20px; text-align:center;">
+    <span class="mono" style="font-size:14px; color:var(--text2);">
+      <span style="color:var(--red);">NemoClaw</span>
+      &nbsp;&amp;&amp;&nbsp;
+      <span style="color:var(--yellow);">Alignment</span>
+      &nbsp;&amp;&amp;&nbsp;
+      <span style="color:var(--amber);">Quality</span>
+      &nbsp;=&nbsp;
+      <span style="color:var(--green); font-weight:700;">PASS</span>
+    </span>
+    <p style="margin-top:8px; font-size:13px; color:var(--muted);">Gates must be automated in CI before Ring 2 goes live.</p>
+  </div>
+</div>
+
+<!-- SLIDE 12: Onboarding Security -->
+<div class="slide" data-slide="11">
+  <h2>Onboarding Security</h2>
+  <p class="subtitle">GTM security requirements. No rogue vessels. No open doors.</p>
+  <div class="grid grid-2" style="flex:1; align-items:start;">
+    <div class="card" style="border-top: 3px solid var(--amber);">
+      <h3>Invitation Token</h3>
+      <ul class="rule-list">
+        <li>Single-use token, expires in 24 hours</li>
+        <li>Tied to the vouching member's identity</li>
+        <li>Voucher is accountable for invitee behavior</li>
+        <li>Token invalidated on first use or expiry</li>
+        <li>Revocable by any Core circle member</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--red);">
+      <h3>Vessel Hardening</h3>
+      <ul class="rule-list">
+        <li>NemoClaw baked into vessel - not configurable by member</li>
+        <li>Bot tokens stored in Fly secrets only</li>
+        <li>Vessel authenticated against membership registry</li>
+        <li>No unregistered vessels can join the mesh</li>
+        <li>Vessel identity verified on every session start</li>
+      </ul>
+    </div>
+    <div class="card" style="grid-column: span 2; border-top: 3px solid var(--yellow);">
+      <h3>Accountability Chain</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; align-items:center;">
+        <span class="badge badge-amber">Voucher invites</span>
+        <span style="color:var(--muted);">&rarr;</span>
+        <span class="badge badge-amber">Token issued (24h)</span>
+        <span style="color:var(--muted);">&rarr;</span>
+        <span class="badge badge-yellow">Invitee onboards</span>
+        <span style="color:var(--muted);">&rarr;</span>
+        <span class="badge badge-yellow">Vessel registered</span>
+        <span style="color:var(--muted);">&rarr;</span>
+        <span class="badge badge-green">NemoClaw active</span>
+        <span style="color:var(--muted);">&rarr;</span>
+        <span class="badge badge-green">Member verified</span>
+      </div>
+      <p style="margin-top:12px; font-size:13px; color:var(--muted);">If invitee violates policy, voucher is notified and shares responsibility for remediation.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 13: Karen's Audit Findings -->
+<div class="slide" data-slide="12">
+  <h2>First Security Audit - Karen's Findings</h2>
+  <p class="subtitle">Baseline audit of the 8GI collective. 30 checks. 21 findings.</p>
+  <div style="display:flex; gap:32px; margin-bottom:32px; flex-wrap:wrap; justify-content:center;">
+    <div class="line-metric">
+      <div class="num" style="color:var(--red);">4</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="line-metric">
+      <div class="num" style="color:var(--yellow);">4</div>
+      <div class="label">High</div>
+    </div>
+    <div class="line-metric">
+      <div class="num" style="color:var(--amber);">7</div>
+      <div class="label">Medium</div>
+    </div>
+    <div class="line-metric">
+      <div class="num" style="color:var(--muted);">6</div>
+      <div class="label">Low</div>
+    </div>
+    <div class="line-metric">
+      <div class="num" style="color:var(--green);">9</div>
+      <div class="label">Clean Passes</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Top Priority Actions</h3>
+    <div style="margin-top:12px;">
+      <div class="pipeline-step" style="border-left: 3px solid var(--red);">
+        <span class="step-num" style="color:var(--red);">01</span>
+        <span class="step-label" style="color:var(--red);">CRITICAL</span>
+        <span class="step-desc">Close open sign-up - move to invitation-only with voucher accountability</span>
+      </div>
+      <div class="pipeline-step" style="border-left: 3px solid var(--red);">
+        <span class="step-num" style="color:var(--red);">02</span>
+        <span class="step-label" style="color:var(--red);">CRITICAL</span>
+        <span class="step-desc">Add security headers to all public endpoints (CSP, HSTS, X-Frame-Options)</span>
+      </div>
+      <div class="pipeline-step" style="border-left: 3px solid var(--red);">
+        <span class="step-num" style="color:var(--red);">03</span>
+        <span class="step-label" style="color:var(--red);">CRITICAL</span>
+        <span class="step-desc">Pin curl installs to checksummed versions - no piping curl to bash without verification</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 14: Lotus Attack Surface -->
+<div class="slide" data-slide="13">
+  <h2>Lotus Attack Surface</h2>
+  <p class="subtitle">Trust escalation, factory flooding, and prompt injection risks from the audit.</p>
+  <div class="grid grid-3" style="flex:1; align-items:start;">
+    <div class="card" style="border-left: 3px solid var(--red);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span class="mono" style="color:var(--red); font-weight:700; font-size:14px;">A1</span>
+        <span class="badge badge-red">Critical</span>
+      </div>
+      <h4>Trust Escalation</h4>
+      <p>Ring 1 member exploits promotion criteria to reach Ring 2 privileges. Automated contributions could game velocity metrics to gain trust faster than warranted.</p>
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <span class="mono" style="font-size:12px; color:var(--amber);">Mitigation:</span>
+        <p style="font-size:13px; margin-top:4px;">Human-verified promotion only. Three Gates block all ring transitions.</p>
+      </div>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--red);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span class="mono" style="color:var(--red); font-weight:700; font-size:14px;">A2</span>
+        <span class="badge badge-red">Critical</span>
+      </div>
+      <h4>Factory Flooding</h4>
+      <p>Malicious member overwhelms the factory with junk PRs to exhaust review capacity, burying real attacks in noise. Volume becomes a weapon.</p>
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <span class="mono" style="font-size:12px; color:var(--amber);">Mitigation:</span>
+        <p style="font-size:13px; margin-top:4px;">Max 3 open PRs per member. Rate limiting on factory output. Quality gate rejects low-signal PRs.</p>
+      </div>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--yellow);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span class="mono" style="color:var(--yellow); font-weight:700; font-size:14px;">A3</span>
+        <span class="badge badge-yellow">High</span>
+      </div>
+      <h4>Vessel Prompt Injection</h4>
+      <p>Adversarial content in PRs, issues, or messages crafted to manipulate reviewing vessels into approving malicious changes or bypassing policy.</p>
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <span class="mono" style="font-size:12px; color:var(--amber);">Mitigation:</span>
+        <p style="font-size:13px; margin-top:4px;">NemoClaw evaluates actions, not intent. Structural policy cannot be overridden by prompt content.</p>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:center; margin-top:20px;">
+    <span class="mono" style="font-size:13px; color:var(--muted);">Source: Karen (8SO) - First Audit Report, 2026-03-27</span>
+  </div>
+</div>
+
+<!-- SLIDE 15: Closing -->
+<div class="slide" data-slide="14">
   <div class="hero-glow"></div>
   <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
     <div style="font-family:'Fraunces',serif; font-size:80px; font-weight:800; color:var(--amber); margin-bottom:24px;">8GI.</div>
