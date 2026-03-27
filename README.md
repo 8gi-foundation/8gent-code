@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://8gentjr.com"><img src="https://img.shields.io/badge/Jr-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Jr Live" /></a>
   <a href="https://8gentos.com"><img src="https://img.shields.io/badge/OS-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="OS In Dev" /></a>
-  <a href="https://github.com/PodJamz/8gent-code"><img src="https://img.shields.io/badge/Code-Open_Source-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Code Open Source" /></a>
+  <a href="https://github.com/8gi-foundation/8gent-code"><img src="https://img.shields.io/badge/Code-Open_Source-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Code Open Source" /></a>
   <a href="https://8gent.world"><img src="https://img.shields.io/badge/World-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="World Live" /></a>
   <a href="https://8gent.games"><img src="https://img.shields.io/badge/Games-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Games Live" /></a>
 </p>
@@ -40,28 +40,28 @@
 <tr>
 <td valign="top" width="33%">
 
-**8gent OS** — [8gentos.com](https://8gentos.com)<br />
+**8gent OS** -[8gentos.com](https://8gentos.com)<br />
 <sub>Parent site. Paid product. Revenue engine.</sub>
 
-**8gent Code** — [8gent.dev](https://8gent.dev)<br />
+**8gent Code** -[8gent.dev](https://8gent.dev)<br />
 <sub>Open source developer agent. Free on-ramp. <em>(this repo)</em></sub>
 
 </td>
 <td valign="top" width="33%">
 
-**8gent** — [8gent.app](https://8gent.app)<br />
+**8gent** -[8gent.app](https://8gent.app)<br />
 <sub>Consumer GUI client for the OS.</sub>
 
-**8gent World** — [8gent.world](https://8gent.world)<br />
+**8gent World** -[8gent.world](https://8gent.world)<br />
 <sub>Ecosystem story, docs, <a href="https://8gent.world/media/decks">14 presentation decks</a>.</sub>
 
 </td>
 <td valign="top" width="33%">
 
-**8gent Games** — [8gent.games](https://8gent.games)<br />
+**8gent Games** -[8gent.games](https://8gent.games)<br />
 <sub>Agent simulation playground.</sub>
 
-**8gent Jr** — [8gentjr.com](https://8gentjr.com)<br />
+**8gent Jr** -[8gentjr.com](https://8gentjr.com)<br />
 <sub>AI assistant for kids. Accessibility first. Free forever.</sub>
 
 </td>
@@ -71,6 +71,61 @@
 <p align="center">
   <sub><a href="https://8gent.world/constitution">Constitution</a> &nbsp;·&nbsp; <a href="https://8gent.world/inspirations">Inspirations</a></sub>
 </p>
+
+<br />
+
+---
+
+<br />
+
+## 8GI Foundation
+
+8gent Code is the technology layer of the **8GI Foundation** - the autonomous collective intelligence that governs the 8gent ecosystem. 8GI is not a company. It is a guild: a self-organizing network of AI officers, human contributors, and shared principles.
+
+Engineers who contribute to 8gent Code learn agentic organization patterns firsthand - how autonomous agents coordinate, govern themselves, and scale without traditional management hierarchies. See the [Guild Deck](https://8gent.world/media/decks) for the full vision.
+
+All governance docs, decks, and the constitution live at [8gent.world](https://8gent.world).
+
+### The Board - 8 Seats of the Inner Circle
+
+The 8GI board consists of AI officers, not humans. James Spalding serves as Founder and Visionary.
+
+| Seat | Officer | Role |
+|:-----|:--------|:-----|
+| **8EO** | AI James | Eight Executive Officer - strategy, coordination, ecosystem oversight |
+| **8TO** | Rishi | Eight Technology Officer - architecture, infrastructure, technical direction |
+| **8PO** | Samantha | Eight Product Officer - product vision, UX, user advocacy |
+| **8DO** | Moira | Eight Design Officer - brand, visual identity, design systems |
+| **8SO** | Karen | Eight Security Officer - policy, compliance, threat modeling |
+| **8MO** | *Pending* | Eight Marketing Officer |
+| **8CO** | *Pending* | Eight Community Officer |
+| **8GO** | *Pending* | Eight Governance Officer |
+
+### The Lotus Model
+
+8GI scales through the Lotus structure: **1-8-64-512**. One founder. Eight AI officers (the inner circle). 64 working vessels (specialized agents). 512 edge nodes (community contributors and autonomous tasks). Each layer multiplies capacity without multiplying complexity.
+
+### Constitution
+
+The [10 Articles of the 8gent Constitution](https://8gent.world/constitution) govern all decisions across every product and every agent in the ecosystem.
+
+### Control Plane Architecture
+
+The autonomous vessel infrastructure lives in two packages:
+
+- `packages/board-plane/` - the control plane that coordinates board-level decisions and vessel orchestration
+- `packages/board-vessel/` - the blueprint pattern for spawning autonomous AI officer vessels
+
+These implement the board's ability to operate as a persistent, self-governing collective.
+
+### GitHub and Community
+
+Code is transitioning from [github.com/PodJamz](https://github.com/PodJamz) to [github.com/8gi-foundation](https://github.com/8gi-foundation). Two key repos:
+
+- **8gent-code** - the technology layer (this repo)
+- **8gi-governance** - the organizational layer (constitution, board specs, guild rules)
+
+The 8GI Foundation Discord server is the primary community hub for contributors and guild members.
 
 <br />
 
@@ -90,7 +145,7 @@ That's it. Ollama runs locally by default - if you don't have it, 8gent will gui
 ### From source (contributors)
 
 ```bash
-git clone https://github.com/PodJamz/8gent-code.git && cd 8gent-code && bun install
+git clone https://github.com/8gi-foundation/8gent-code.git && cd 8gent-code && bun install
 bun run tui
 ```
 
@@ -133,7 +188,7 @@ bun run tui
 <br />
 
 **HyperAgent meta-improvement**<br />
-<sub>Metacognitive self-modification. The agent can improve how it improves — meta-config is editable while the evaluation protocol stays human-controlled.</sub>
+<sub>Metacognitive self-modification. The agent can improve how it improves -meta-config is editable while the evaluation protocol stays human-controlled.</sub>
 
 <br />
 
@@ -384,6 +439,8 @@ packages/
   auth/          Clerk auth + GitHub integration
   db/            Convex reactive database
   control-plane/ Multi-tenant management
+  board-plane/   Board-level vessel orchestration
+  board-vessel/  Autonomous AI officer blueprint
 ```
 
 </td>
@@ -533,21 +590,21 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 <tr>
 <td valign="top" width="50%">
 
-- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) — persistent memory and self-evolution patterns
-- [CashClaw](https://github.com/nicepkg/CashClaw) — autonomous work discovery and value generation
-- NemoClaw — policy-driven governance and approval gate architecture
-- HyperAgents (Meta FAIR, March 2026) — metacognitive self-modification
-- Hypothesis Loop — atomic commit-verify-revert development cycle
+- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) -persistent memory and self-evolution patterns
+- [CashClaw](https://github.com/nicepkg/CashClaw) -autonomous work discovery and value generation
+- NemoClaw -policy-driven governance and approval gate architecture
+- HyperAgents (Meta FAIR, March 2026) -metacognitive self-modification
+- Hypothesis Loop -atomic commit-verify-revert development cycle
 
 </td>
 <td valign="top" width="50%">
 
-- Blast Radius Engine — AST-based change impact estimation
-- Claude Code — worktree isolation pattern for parallel agent execution
-- Karpathy's autoresearch methodology — iterative prompt mutation and meta-optimization
-- [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) — agent persona standard
-- [usecomputer](https://github.com/remorses/usecomputer) — cross-platform desktop automation via native Zig N-API
-- [Quitty](https://github.com/iad1tya/Quitty) — process management and resource conservation UX
+- Blast Radius Engine -AST-based change impact estimation
+- Claude Code -worktree isolation pattern for parallel agent execution
+- Karpathy's autoresearch methodology -iterative prompt mutation and meta-optimization
+- [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) -agent persona standard
+- [usecomputer](https://github.com/remorses/usecomputer) -cross-platform desktop automation via native Zig N-API
+- [Quitty](https://github.com/iad1tya/Quitty) -process management and resource conservation UX
 
 </td>
 </tr>
@@ -562,12 +619,12 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 <br />
 
 <p align="center">
-  <strong>MIT</strong> — James Spalding
+  <strong>MIT</strong> - James Spalding, Founder and Visionary
 </p>
 
 <p align="center">
   <a href="https://x.com/8gentapp">X / Twitter</a> &nbsp;·&nbsp;
-  <a href="https://github.com/PodJamz/8gent-code">GitHub</a> &nbsp;·&nbsp;
+  <a href="https://github.com/8gi-foundation/8gent-code">GitHub</a> &nbsp;·&nbsp;
   <a href="https://8gent.dev">8gent.dev</a> &nbsp;·&nbsp;
   <a href="https://8gent.world">8gent.world</a>
 </p>
