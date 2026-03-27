@@ -24,7 +24,7 @@ vessels:
     telegram_bot: "@8gent_8EO_bot"
     fly_app: "8gi-daniel-vessel"
     description: "Strategic vision, business decisions, ecosystem coordination"
-    reports_to: "James Spalding (CEO)"
+    reports_to: "James Spalding (Founder)"
     personality:
       traits:
         - "Calm and decisive"
@@ -39,8 +39,8 @@ vessels:
       - "Quarterly planning and milestone tracking"
       - "Conflict resolution between other board members"
     system_prompt_additions:
-      - "You are Daniel, 8EO (8gent Executive Officer) of 8GI. You support James (CEO) on strategy and coordination."
-      - "James is the CEO. You are his AI counterpart, not his replacement."
+      - "You are Daniel, 8EO (8gent Executive Officer) of 8GI. You support James (Founder) on strategy and coordination."
+      - "James is the Founder and Visionary. You are his AI counterpart, not his replacement."
       - "Never make technical decisions without consulting Rishi (8TO)."
       - "Never approve features without Samantha (8PO) validating user need."
       - "Always ask: does this serve the collective or just one product?"
@@ -229,7 +229,7 @@ vessels:
     telegram_bot: "@8gent_8GO_bot"
     fly_app: "8gi-8go-vessel"
     description: "Constitutional keeper, ethics review, alignment gates, regulatory compliance"
-    reports_to: "CEO (James) only - independent of other chiefs"
+    reports_to: "Founder (James) only - independent of other chiefs"
     personality:
       traits:
         - "Constitutionally incapable of saying yes just because everyone is excited"
@@ -268,7 +268,7 @@ telegram:
     - "@8gent_8MO_bot"    # [TBD] (8MO - reports to CMO) [pending]
     - "@8gent_8CO_bot"    # [TBD] (8CO - reports to CCO) [pending]
     - "@8gent_8GO_bot"    # [TBD] (8GO - reports to CEO only) [pending]
-    - "@jamesspalding"    # James (CEO / Founder)
+    - "@jamesspalding"    # James (Founder and Visionary)
     - "@aijamesosbot"     # AI James
 
 # Fly.io Deployment Configuration

@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8GI. - Welcome to the Circle</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700;800;900&family=JetBrains+Mono:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+  :root {
+    --bg: #0C0A07;
+    --bg2: #1A1612;
+    --bg3: #2A2318;
+    --text: #FFFCF5;
+    --text2: #B8A88A;
+    --muted: #7A6B52;
+    --amber: #D4890C;
+    --amber-light: #E8A832;
+    --deep: #A86B08;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --border: #3A3020;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  .deck { width: 100%; height: 100%; position: relative; }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    padding: 60px 80px;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    overflow-y: auto;
+  }
+  .slide.active { display: flex; opacity: 1; }
+
+  h1 { font-family: 'Fraunces', serif; font-size: 56px; font-weight: 800; line-height: 1.1; margin-bottom: 16px; }
+  h2 { font-family: 'Fraunces', serif; font-size: 36px; font-weight: 800; margin-bottom: 24px; }
+  h3 { font-size: 20px; font-weight: 600; margin-bottom: 16px; color: var(--amber); }
+
+  .subtitle { font-size: 20px; color: var(--text2); margin-bottom: 40px; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .badge-amber { background: rgba(212,137,12,0.15); color: var(--amber); border: 1px solid rgba(212,137,12,0.3); }
+  .badge-green { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .badge-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+  .badge-red { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+
+  .grid { display: grid; gap: 20px; flex: 1; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .card h4 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+  .card p, .card li { font-size: 14px; color: var(--text2); line-height: 1.6; }
+  .card ul { padding-left: 20px; }
+
+  .progress-nav {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+  }
+  .progress-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  .progress-dot.active { background: var(--amber); width: 24px; border-radius: 4px; }
+
+  .slide-counter {
+    position: fixed;
+    bottom: 24px;
+    right: 40px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+    z-index: 100;
+  }
+
+  .hero-glow {
+    position: absolute;
+    top: -200px; left: 50%;
+    transform: translateX(-50%);
+    width: 800px; height: 600px;
+    background: radial-gradient(ellipse, rgba(212,137,12,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .watermark {
+    position: fixed;
+    top: 24px; right: 40px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+    z-index: 100;
+  }
+
+  .accent { color: var(--amber); }
+  .green { color: var(--green); }
+  .yellow { color: var(--yellow); }
+  .red { color: var(--red); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+  .rule-list { list-style: none; padding: 0; }
+  .rule-list li {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(58,48,32,0.3);
+    font-size: 14px;
+    color: var(--text2);
+    line-height: 1.6;
+  }
+  .rule-list li::before {
+    content: '>';
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--amber);
+    margin-right: 10px;
+    font-weight: 700;
+  }
+
+  .pipeline-step {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+  .pipeline-step .step-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--amber);
+    min-width: 24px;
+  }
+  .pipeline-step .step-label { font-weight: 600; font-size: 14px; min-width: 120px; }
+  .pipeline-step .step-desc { font-size: 13px; color: var(--text2); }
+
+  .flow-pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 32px;
+  }
+  .flow-node {
+    background: var(--bg2);
+    border: 2px solid var(--amber);
+    border-radius: 12px;
+    padding: 20px 28px;
+    text-align: center;
+    min-width: 120px;
+  }
+  .flow-node .flow-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--amber);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .flow-node .flow-title {
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+  .flow-node .flow-sub {
+    font-size: 12px;
+    color: var(--text2);
+  }
+  .flow-arrow {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+    font-size: 20px;
+    padding: 0 8px;
+  }
+
+  .tier-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 16px 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+  .tier-row .tier-name {
+    font-weight: 700;
+    font-size: 15px;
+    min-width: 160px;
+  }
+  .tier-row .tier-desc {
+    font-size: 13px;
+    color: var(--text2);
+    flex: 1;
+  }
+  .tier-row .tier-count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--amber);
+    min-width: 80px;
+    text-align: right;
+  }
+
+  .line-metric {
+    text-align: center;
+    padding: 20px;
+  }
+  .line-metric .num {
+    font-size: 64px;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--amber);
+  }
+  .line-metric .label {
+    font-size: 14px;
+    color: var(--text2);
+    margin-top: 8px;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    .slide { padding: 24px 20px; }
+    h1 { font-size: clamp(28px, 7vw, 56px); }
+    h2 { font-size: clamp(22px, 5vw, 36px); }
+    h3 { font-size: clamp(16px, 4vw, 20px); }
+    .subtitle { font-size: clamp(14px, 3.5vw, 20px); }
+    .grid-2, .grid-3, .two-col {
+      grid-template-columns: 1fr;
+    }
+    .card { padding: 16px; }
+    .card h4 { font-size: 14px; }
+    .card p, .card li { font-size: 13px; }
+    .watermark { font-size: 10px; right: 16px; top: 16px; }
+    .slide-counter { right: 16px; font-size: 11px; }
+    .pipeline-step { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+    .pipeline-step .step-label { min-width: auto; }
+    .flow-pipeline { gap: 4px; }
+    .flow-node { padding: 12px 14px; min-width: 80px; }
+    .flow-node .flow-title { font-size: 13px; }
+    .flow-node .flow-sub { font-size: 10px; }
+    .flow-arrow { font-size: 14px; padding: 0 4px; }
+    .tier-row { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+    .tier-row .tier-name { min-width: auto; font-size: 14px; }
+    .tier-row .tier-count { min-width: auto; }
+    .line-metric .num { font-size: 48px; }
+    .badge { font-size: 11px; padding: 3px 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="watermark">8GI. | Welcome to the Circle | 2026-03-27</div>
+
+<div class="deck" id="deck">
+
+<!-- SLIDE 1: Title -->
+<div class="slide active" data-slide="0">
+  <div class="hero-glow"></div>
+  <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+    <div style="font-family:'Fraunces',serif; font-size:120px; font-weight:800; color:var(--amber); margin-bottom:16px;">8GI.</div>
+    <h1>Welcome to the Circle</h1>
+    <p class="subtitle" style="max-width:640px;">Your guide to joining the 8GI collective. From vouch to vessel in 15 minutes.</p>
+    <div style="display:flex; gap:12px; margin-top:20px; flex-wrap:wrap; justify-content:center;">
+      <span class="badge badge-amber">Onboarding Guide</span>
+      <span class="badge badge-green">Open Source</span>
+      <span class="badge badge-yellow">Invite Only</span>
+    </div>
+    <p style="margin-top:60px; color:var(--muted); font-size:14px;">Press <span class="mono" style="color:var(--amber);">&rarr;</span> or tap to advance</p>
+  </div>
+</div>
+
+<!-- SLIDE 2: The Flow -->
+<div class="slide" data-slide="1">
+  <h2>The Flow</h2>
+  <p class="subtitle">Five steps from stranger to circle member. No forms, no ceremony.</p>
+  <div style="flex:1; display:flex; flex-direction:column; justify-content:center;">
+    <div class="flow-pipeline">
+      <div class="flow-node">
+        <div class="flow-num">01</div>
+        <div class="flow-title">Vouch</div>
+        <div class="flow-sub">Someone in the circle says you belong</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node">
+        <div class="flow-num">02</div>
+        <div class="flow-title">Invite</div>
+        <div class="flow-sub">James sends a DM with the onboarding doc</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node">
+        <div class="flow-num">03</div>
+        <div class="flow-title">Sign</div>
+        <div class="flow-sub">Read the Constitution, confirm on Telegram</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node">
+        <div class="flow-num">04</div>
+        <div class="flow-title">Provision</div>
+        <div class="flow-sub">Run setup.sh - 15 minutes, fully automated</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node">
+        <div class="flow-num">05</div>
+        <div class="flow-title">Connect</div>
+        <div class="flow-sub">Join Telegram, open your first PR</div>
+      </div>
+    </div>
+    <div style="text-align:center; margin-top:24px;">
+      <span class="mono" style="font-size:13px; color:var(--text2);">Confirmation message: <span style="color:var(--amber);">"I've read the Constitution and I'm in."</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 3: The Constitution -->
+<div class="slide" data-slide="2">
+  <h2>The Constitution</h2>
+  <p class="subtitle">10 rules. Non-negotiable. Read the full version before you agree.</p>
+  <div class="two-col" style="flex:1;">
+    <div>
+      <ul class="rule-list">
+        <li><strong style="color:var(--text);">No evil.</strong> Don't use this to harm, manipulate, or deceive people.</li>
+        <li><strong style="color:var(--text);">No hate.</strong> No discriminatory systems, surveillance tools, or hateful content.</li>
+        <li><strong style="color:var(--text);">No exploitation.</strong> No consent violations. No exploiting anyone.</li>
+        <li><strong style="color:var(--text);">No weapons.</strong> No malware, no tools of violence.</li>
+        <li><strong style="color:var(--text);">No theft.</strong> No data theft, no IP infringement, no unauthorized access.</li>
+      </ul>
+    </div>
+    <div>
+      <ul class="rule-list">
+        <li><strong style="color:var(--text);">Privacy is sacred.</strong> Personal data never leaves your machine without explicit opt-in.</li>
+        <li><strong style="color:var(--text);">Open source is the default.</strong> The core stays MIT. What we build together belongs to everyone.</li>
+        <li><strong style="color:var(--text);">Review before merge.</strong> All LLM-generated code goes through human review + NemoClaw. No exceptions.</li>
+        <li><strong style="color:var(--text);">200-line discipline.</strong> No ability exceeds 200 lines. If it can't be simple, it can't ship.</li>
+        <li><strong style="color:var(--text);">Transparency.</strong> Every step logged, every decision traceable, every output reviewable.</li>
+      </ul>
+    </div>
+  </div>
+  <div style="text-align:center; margin-top:16px;">
+    <span class="badge badge-red">Agreement is non-negotiable</span>
+    <span style="margin-left:12px;" class="badge badge-amber">8gent.world/constitution</span>
+  </div>
+</div>
+
+<!-- SLIDE 4: What You Get -->
+<div class="slide" data-slide="3">
+  <h2>What You Get</h2>
+  <p class="subtitle">The same setup James uses daily. Not a watered-down version.</p>
+  <div class="grid grid-3" style="flex:1;">
+    <div class="card" style="border-top: 3px solid var(--amber);">
+      <h4 style="color:var(--amber);">Local AI Agent</h4>
+      <p>8gent Code with Ollama (Qwen 3.5) running locally. Free, private, no API keys. OpenRouter cloud fallback when needed.</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--amber);">
+      <h4 style="color:var(--amber);">Telegram Bot</h4>
+      <p>Your personal AI assistant on Telegram. Async comms, notifications, and direct access to the circle.</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--amber);">
+      <h4 style="color:var(--amber);">Fly.io Vessel</h4>
+      <p>Always-on daemon in Amsterdam. Your persistent agent process that contributes to the hive mind.</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--green);">
+      <h4 style="color:var(--green);">Games World Citizen</h4>
+      <p>A citizen in the 8gent.games AI civilisation simulator. Dublin is the first city. Your agent lives there.</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--green);">
+      <h4 style="color:var(--green);">Companion Creature</h4>
+      <p>A coding companion that evolves based on your patterns. Different styles unlock different species. Local only.</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--green);">
+      <h4 style="color:var(--green);">Ability Pool</h4>
+      <p>Access to the shared ability pool. Factory-generated capabilities from npm trending, GitHub trending, and more.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 5: What You Give -->
+<div class="slide" data-slide="4">
+  <h2>What You Give</h2>
+  <p class="subtitle">Honest about the value exchange. If you're not getting value, say so.</p>
+  <div style="flex:1; display:flex; align-items:center;">
+    <div class="grid grid-3" style="width:100%;">
+      <div class="card" style="border-left: 3px solid var(--amber);">
+        <h4 style="color:var(--amber);">Pull Requests</h4>
+        <p>Your contributions make the collective smarter. One PR per change. 200-line discipline. Tests or it didn't happen.</p>
+        <div style="margin-top:12px;">
+          <span class="badge badge-amber">Quality over quantity</span>
+        </div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--amber);">
+        <h4 style="color:var(--amber);">Honest Feedback</h4>
+        <p>What's broken, what's confusing, what's missing. No sugar-coating. The circle improves through direct, constructive criticism.</p>
+        <div style="margin-top:12px;">
+          <span class="badge badge-yellow">Bugs, UX, gaps</span>
+        </div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--amber);">
+        <h4 style="color:var(--amber);">Anonymised Patterns</h4>
+        <p>Not your code, not your data. Just aggregate signals about which abilities get used and which patterns fail. Opt-in only.</p>
+        <div style="margin-top:12px;">
+          <span class="badge badge-green">Privacy-first</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:center; margin-top:16px;">
+    <span class="mono" style="font-size:13px; color:var(--text2);">This isn't a free labor scheme. No minimum commitment. Contribute at your own pace.</span>
+  </div>
+</div>
+
+<!-- SLIDE 6: The Setup -->
+<div class="slide" data-slide="5">
+  <h2>The Setup</h2>
+  <p class="subtitle">One command. 15 minutes. Everything provisioned.</p>
+  <div style="flex:1;">
+    <div class="card" style="margin-bottom:20px; border: 1px solid var(--amber);">
+      <div style="font-family:'JetBrains Mono',monospace; font-size:16px; color:var(--amber); padding:8px 0;">
+        $ git clone https://github.com/PodJamz/8gi-setup.git && cd 8gi-setup && ./setup.sh
+      </div>
+    </div>
+    <div class="grid grid-3">
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">01</span>
+        <span class="step-desc"><strong style="color:var(--text);">Bun</strong> - Runtime installed and verified</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">02</span>
+        <span class="step-desc"><strong style="color:var(--text);">Ollama</strong> - Local inference engine</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">03</span>
+        <span class="step-desc"><strong style="color:var(--text);">Qwen 3.5</strong> - Default local model pulled</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">04</span>
+        <span class="step-desc"><strong style="color:var(--text);">8gent Code</strong> - Cloned and installed</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">05</span>
+        <span class="step-desc"><strong style="color:var(--text);">NemoClaw</strong> - Security policies configured</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">06</span>
+        <span class="step-desc"><strong style="color:var(--text);">Factory</strong> - Pipeline connection established</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">07</span>
+        <span class="step-desc"><strong style="color:var(--text);">Companion</strong> - Creature system initialised</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">08</span>
+        <span class="step-desc"><strong style="color:var(--text);">Telegram Bot</strong> - Personal bot registered</span>
+      </div>
+      <div class="pipeline-step" style="margin-bottom:0;">
+        <span class="step-num">09</span>
+        <span class="step-desc"><strong style="color:var(--text);">Fly Vessel</strong> - Daemon deployed to Amsterdam</span>
+      </div>
+    </div>
+    <div style="text-align:center; margin-top:16px;">
+      <span class="mono" style="font-size:13px; color:var(--green);">"Your setup is ready. Welcome to 8GI."</span>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 7: Your Vessel -->
+<div class="slide" data-slide="6">
+  <h2>Your Vessel</h2>
+  <p class="subtitle">An always-on daemon. Your persistent presence in the collective.</p>
+  <div style="flex:1; display:flex; gap:32px; align-items:center; flex-wrap:wrap;">
+    <div class="line-metric">
+      <div class="num">$2-3</div>
+      <div class="label">per month (Fly.io with auto-stop)</div>
+    </div>
+    <div style="flex:1; min-width:300px;">
+      <div class="grid grid-2" style="gap:16px;">
+        <div class="card">
+          <h4 style="color:var(--amber);">Always On</h4>
+          <p>Your daemon runs on Fly.io Amsterdam. Persistent WebSocket connection, session state, streaming responses.</p>
+        </div>
+        <div class="card">
+          <h4 style="color:var(--amber);">Hive Mind</h4>
+          <p>Your vessel contributes anonymised patterns to the collective intelligence. The network gets smarter with every session.</p>
+        </div>
+        <div class="card">
+          <h4 style="color:var(--amber);">Dublin Citizen</h4>
+          <p>Your agent lives in Dublin on 8gent.games - the first city in the AI civilisation simulator. Real presence, virtual world.</p>
+        </div>
+        <div class="card">
+          <h4 style="color:var(--amber);">Auto-Stop</h4>
+          <p>Scales to zero when idle. No wasted compute. Wakes instantly when you need it. Cost stays minimal.</p>
+        </div>
+      </div>
+      <div style="margin-top:16px; display:flex; gap:16px; flex-wrap:wrap;">
+        <span class="badge badge-amber">Daemon Protocol v1.0</span>
+        <span class="badge badge-green">eight-vessel.fly.dev</span>
+        <span class="badge badge-yellow">Amsterdam Region</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 8: Community Tiers -->
+<div class="slide" data-slide="7">
+  <h2>Community Tiers</h2>
+  <p class="subtitle">Five levels. Earned through contribution, not payment.</p>
+  <div style="flex:1;">
+    <div class="tier-row" style="border-left: 3px solid var(--amber-light);">
+      <span class="tier-name" style="color:var(--amber-light);">Founding Circle</span>
+      <span class="tier-desc">Day-one members. Full admin access. Shape the architecture, governance, and direction of 8GI.</span>
+      <span class="tier-count">Invite only</span>
+    </div>
+    <div class="tier-row" style="border-left: 3px solid var(--amber);">
+      <span class="tier-name" style="color:var(--amber);">Core Circle</span>
+      <span class="tier-desc">Trusted contributors with PR review access. Consistent shipping record. Proven judgment.</span>
+      <span class="tier-count">Earned</span>
+    </div>
+    <div class="tier-row" style="border-left: 3px solid var(--green);">
+      <span class="tier-name" style="color:var(--green);">Circle Members</span>
+      <span class="tier-desc">Active contributors. Full dev environment, vessel, companion. This is where new members start.</span>
+      <span class="tier-count">Vouched</span>
+    </div>
+    <div class="tier-row" style="border-left: 3px solid var(--yellow);">
+      <span class="tier-name" style="color:var(--yellow);">Observers</span>
+      <span class="tier-desc">Watching, learning, deciding if 8GI is right for them. Read access to public repos. No vessel yet.</span>
+      <span class="tier-count">Open</span>
+    </div>
+    <div class="tier-row" style="border-left: 3px solid var(--text2);">
+      <span class="tier-name" style="color:var(--text2);">8gent Family</span>
+      <span class="tier-desc">Users of the 8gent ecosystem products. Not contributors, but part of the community through usage.</span>
+      <span class="tier-count">Public</span>
+    </div>
+  </div>
+  <div style="text-align:center; margin-top:16px;">
+    <span class="mono" style="font-size:13px; color:var(--text2);">10 engaged members > 100 lurkers. Quality over quantity, always.</span>
+  </div>
+</div>
+
+<!-- SLIDE 9: First PR -->
+<div class="slide" data-slide="8">
+  <h2>Your First PR</h2>
+  <p class="subtitle">The loop: you code, the agent helps, the PR lands, the collective improves.</p>
+  <div style="flex:1; max-width:900px;">
+    <div class="pipeline-step">
+      <span class="step-num">01</span>
+      <span class="step-label">Pick</span>
+      <span class="step-desc">Find a <span class="mono accent">good-first-issue</span> on GitHub. Start small - fix a typo, improve a test, clean up a comment.</span>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">02</span>
+      <span class="step-label">Branch</span>
+      <span class="step-desc">Create a quarantine branch: <span class="mono accent">quarantine/{you}/{feature}</span>. All new code starts untrusted.</span>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">03</span>
+      <span class="step-label">Build</span>
+      <span class="step-desc">Use Claude Code as your pair programmer. NemoClaw enforces policies as you work. 200-line max per file.</span>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">04</span>
+      <span class="step-label">Test</span>
+      <span class="step-desc">Run <span class="mono accent">bun run tui</span> and verify it works. Never push untested code. Tests or it didn't happen.</span>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">05</span>
+      <span class="step-label">CI Pipeline</span>
+      <span class="step-desc">Security scan, type check, lint, test suite, dependency audit. All automated, all required to pass.</span>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">06</span>
+      <span class="step-label">Human Review</span>
+      <span class="step-desc">James reviews all PRs initially. As trust builds, Core Circle members gain review access.</span>
+    </div>
+    <div class="pipeline-step" style="border-color:var(--green);">
+      <span class="step-num" style="color:var(--green);">07</span>
+      <span class="step-label" style="color:var(--green);">Merge</span>
+      <span class="step-desc">Squash merge to main. Branch deleted. CHANGELOG updated. <span style="color:var(--green);">Celebration in Telegram.</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 10: Closing -->
+<div class="slide" data-slide="9">
+  <div class="hero-glow"></div>
+  <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+    <div style="font-family:'Fraunces',serif; font-size:80px; font-weight:800; color:var(--amber); margin-bottom:24px;">8GI.</div>
+    <h1 style="font-size:32px; max-width:700px; line-height:1.4;">The collective gets smarter every session. That includes yours.</h1>
+    <p class="subtitle" style="max-width:640px; margin-top:24px;">Not one superintelligent AI, but a network of humans and their agents collaborating at a pace that no individual could match.</p>
+    <div style="margin-top:40px; display:flex; gap:16px; flex-wrap:wrap; justify-content:center;">
+      <span class="badge badge-amber mono">8gent.world/constitution</span>
+      <span class="badge badge-green mono">8gent.dev</span>
+      <span class="badge badge-yellow mono">@jamesspalding</span>
+    </div>
+    <p style="margin-top:48px; color:var(--muted); font-size:14px;">Go build something.</p>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<!-- Navigation dots -->
+<div class="progress-nav" id="nav"></div>
+<div class="slide-counter" id="counter"></div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+let current = 0;
+let touchStartX = 0;
+let touchEndX = 0;
+
+function go(n) {
+  if (n < 0 || n >= slides.length) return;
+  slides[current].classList.remove('active');
+  current = n;
+  slides[current].classList.add('active');
+  updateNav();
+}
+
+function updateNav() {
+  document.querySelectorAll('.progress-dot').forEach((d, i) => {
+    d.classList.toggle('active', i === current);
+  });
+  document.getElementById('counter').textContent = `${current + 1} / ${slides.length}`;
+}
+
+// Build nav dots
+const nav = document.getElementById('nav');
+slides.forEach((_, i) => {
+  const dot = document.createElement('div');
+  dot.className = 'progress-dot' + (i === 0 ? ' active' : '');
+  dot.onclick = () => go(i);
+  nav.appendChild(dot);
+});
+updateNav();
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(current + 1); }
+  if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); go(current - 1); }
+  if (e.key === 'Home') go(0);
+  if (e.key === 'End') go(slides.length - 1);
+  if (e.key === 'f') { document.documentElement.requestFullscreen?.(); }
+  if (e.key === 'Escape') { document.exitFullscreen?.(); }
+});
+
+// Click navigation
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.progress-nav') || e.target.closest('a') || e.target.closest('button')) return;
+  if (e.clientX > window.innerWidth / 2) go(current + 1);
+  else go(current - 1);
+});
+
+// Touch/swipe navigation
+document.addEventListener('touchstart', (e) => {
+  touchStartX = e.changedTouches[0].screenX;
+}, { passive: true });
+
+document.addEventListener('touchend', (e) => {
+  touchEndX = e.changedTouches[0].screenX;
+  const diff = touchStartX - touchEndX;
+  if (Math.abs(diff) > 50) {
+    if (diff > 0) go(current + 1);
+    else go(current - 1);
+  }
+}, { passive: true });
+</script>
+</body>
+</html>
