@@ -75,6 +75,7 @@ bun run benchmarks/autoresearch/harness.ts   # run harness directly
 3. **No dollar values on benchmarks.** Describe what tasks test, not what they'd cost.
 4. **No stat padding.** Never pad descriptions with arbitrary numbers (package counts, benchmark counts, commit counts). Only state what actually exists with evidence.
 5. **No enthusiasm inflation.** Don't oversell. State what was done, what works, what doesn't.
+6. **No secrets in chat. Ever.** Never ask the user to paste tokens, API keys, passwords, or any credentials in the chat. Never output secrets to chat logs. Read secrets from env files or secret managers directly. Use `flyctl secrets set`, env files, or similar tooling. This rule is non-negotiable and applies to all agents, sub-agents, and vessel processes.
 
 ## Writing Rules
 
