@@ -17,7 +17,6 @@ Before you begin, make sure you have the following:
 
 ### Accounts
 - **GitHub account.** You'll be added to the [PodJamz](https://github.com/PodJamz) org. This is where the codebases live.
-- **Anthropic account with Claude Pro/Max.** Claude Code requires an active Anthropic subscription. This is not optional - Claude Code is the backbone of the setup.
 - **Telegram.** Our async comms channel. Download it if you don't have it.
 
 ### Skills
@@ -70,21 +69,7 @@ bun --version
 # Should print 1.x.x
 ```
 
-### Step 2: Install Claude Code
-
-Follow Anthropic's official instructions for Claude Code. You need an active Anthropic subscription (Pro or Max).
-
-```bash
-# Install Claude Code CLI
-npm install -g @anthropic-ai/claude-code
-```
-
-Verify:
-```bash
-claude --version
-```
-
-### Step 3: Install 8gent Code
+### Step 2: Install 8gent Code
 
 Two options - pick the one that fits your role.
 
@@ -97,7 +82,7 @@ npm install -g @podjamz/8gent-code
 **Option B: Contributor install (you want to hack on the codebase)**
 ```bash
 # Clone the repo
-git clone https://github.com/PodJamz/8gent-code.git
+git clone https://github.com/8gi-foundation/8gent-code.git
 cd 8gent-code
 
 # Install dependencies
@@ -109,27 +94,26 @@ bun run tui
 
 Most circle members should do Option B. You're here to contribute.
 
-### Step 4: Clone the 8GI Setup Repo
+### Step 3: Clone the 8GI Setup Repo
 
-This private repo contains the shared configuration that makes your Claude Code + 8gent setup match what the rest of the circle uses.
+This private repo contains the shared configuration that makes your 8gent setup match what the rest of the circle uses.
 
 ```bash
-git clone https://github.com/PodJamz/8gi-setup.git
+git clone https://github.com/8gi-foundation/8gi-setup.git
 cd 8gi-setup && ./setup.sh
 ```
 
 **What setup.sh does:**
-1. Configures Claude Code with the CORE skill system
-2. Installs the 8gent harness alongside Claude Code
+1. Installs Bun and Ollama with the qwen3 model
+2. Installs 8gent-code globally
 3. Sets up NemoClaw security policies (deny-by-default)
 4. Configures the factory pipeline connection
 5. Sets up the companion system (your coding companion - more on this below)
-6. Registers you in the 8GI circle (Telegram group invite, GitHub org access)
-7. Runs a verification check
+6. Runs a verification check
 
 When you see `"Your setup is ready. Welcome to 8GI."` - you're good.
 
-### Step 5: Verify NemoClaw Policies
+### Step 4: Verify NemoClaw Policies
 
 NemoClaw is the policy engine that keeps everyone safe. It runs deny-by-default, meaning anything not explicitly allowed gets blocked or requires your approval.
 
@@ -145,7 +129,7 @@ You should see rules like:
 
 Don't weaken these policies. They exist for good reason.
 
-### Step 6: Verify the Factory Pipeline
+### Step 5: Verify the Factory Pipeline
 
 The factory is the system that generates abilities from real-world sources (npm trending, GitHub trending, etc.) and proposes PRs to the shared codebases.
 
@@ -165,11 +149,10 @@ If connected, you'll see the pipeline status and recent ability proposals.
 
 ```bash
 cd 8gent-code  # or any project
-claude          # start Claude Code
+8gent           # start the TUI
 ```
 
-Claude Code starts with the 8gent harness loaded. This means:
-- Your CLAUDE.md project instructions are active
+8gent launches with your configuration loaded. This means:
 - NemoClaw policies are enforcing security
 - The memory system is learning your patterns (locally, privately)
 - The companion system is tracking your session
@@ -184,9 +167,9 @@ This isn't a gimmick. It's a feedback loop. The companion makes coding sessions 
 
 Here's the play-by-play for your first contribution:
 
-1. **Pick a good-first-issue.** Check the [issues page](https://github.com/PodJamz/8gent-code/issues) for anything tagged `good-first-issue` or `help-wanted`.
+1. **Pick a good-first-issue.** Check the [issues page](https://github.com/8gi-foundation/8gent-code/issues) for anything tagged `good-first-issue` or `help-wanted`.
 2. **Create a branch.** `git checkout -b feature/your-thing`
-3. **Do the work.** Use Claude Code as your pair programmer. That's the whole point.
+3. **Do the work.** Use 8gent as your pair programmer. That's the whole point.
 4. **Test it.** Run `bun run tui` and verify your change actually works. Never push untested code.
 5. **Open a PR.** Push your branch and open a PR against `main`.
 6. **Wait for review.** James reviews all PRs initially. As trust builds, other circle members gain review access.
@@ -291,7 +274,7 @@ This isn't a free labor scheme. If you're not getting value, say so and we'll fi
 ## 9. FAQ
 
 **Q: Do I need to pay for anything?**
-A: You need an Anthropic subscription for Claude Code (Pro or Max). Everything else - Bun, 8gent Code, Ollama, the 8GI setup - is free.
+A: No. Bun, 8gent Code, Ollama, and the 8GI setup are all free. Local models run on your machine at no cost. OpenRouter free models are available as a cloud fallback.
 
 **Q: How much time do I need to commit?**
 A: There's no minimum. Contribute when you can. Some members ship a PR a week, some ship one a month. Quality over quantity.
@@ -329,12 +312,6 @@ npm install -g bun
 # On macOS with Homebrew
 brew install oven-sh/bun/bun
 ```
-
-### Claude Code won't start
-- Verify your Anthropic subscription is active
-- Run `claude --version` to confirm installation
-- Check `claude doctor` for diagnostic output
-- Make sure you're not behind a corporate proxy that blocks Anthropic's API
 
 ### `bun run tui` crashes on launch
 - Run `bun install` again - a dependency might be missing

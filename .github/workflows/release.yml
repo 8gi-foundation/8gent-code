@@ -73,7 +73,7 @@ jobs:
             ${{ steps.notes.outputs.commits }}
 
             ---
-            Full changelog: [CHANGELOG.md](https://github.com/PodJamz/8gent-code/blob/main/CHANGELOG.md)
+            Full changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -90,7 +90,7 @@ curl -fsSL https://bun.sh/install | bash
 npm install -g @podjamz/8gent-code
 
 # 4. Clone the setup repo (private, circle-only)
-git clone https://github.com/PodJamz/8gi-setup.git
+git clone https://github.com/8gi-foundation/8gi-setup.git
 cd 8gi-setup && ./setup.sh
 ```
 

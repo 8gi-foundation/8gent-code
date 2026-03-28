@@ -1,0 +1,23 @@
+app = "8gi-MEMBER-vessel"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  OLLAMA_HOST = "0.0.0.0:11434"
+  BOARD_MEMBER_CODE = "8TO"
+  BOARD_MEMBER_NAME = "Rishi"
+  BOARD_MEMBER_ROLE = "8gent Technology Officer"
+  OLLAMA_MODEL = "qwen3:latest"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
