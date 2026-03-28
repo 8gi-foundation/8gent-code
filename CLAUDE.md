@@ -13,16 +13,33 @@
 
 ### Ecosystem
 
-6 products, 6 domains.
+7 products, 7 domains.
 
 | Product | Domain | Role |
 |---------|--------|------|
 | **8gent OS** | 8gentos.com | Parent site. Paid product. Revenue engine. |
 | **8gent Code** | 8gent.dev | Open source developer agent. Free on-ramp. (this repo) |
-| **8gent** | 8gent.app | Consumer GUI client for the OS. |
+| **8gent** | 8gent.app | The product - single pane of glass dashboard for all 8gent services. |
 | **8gent World** | 8gent.world | Ecosystem story, docs, media. |
 | **8gent Games** | 8gent.games | Agent simulation playground. |
 | **8gent Jr** | 8gentjr.com | AI assistant for kids. Accessibility first. Free. |
+| **8gent Telegram** | t.me/eaborobot | Telegram Mini App - mobile-first 8gent interface. |
+
+### GitHub Organization
+
+All repos live under **8gi-foundation** on GitHub. Apache 2.0 license unless otherwise noted.
+
+| Repo | Role |
+|------|------|
+| `8gent-code` | Open source agent kernel (this repo) |
+| `8gent-world` | Docs, story, marketing site (8gent.world) |
+| `8gent-app` | Single pane of glass dashboard (8gent.app) |
+| `8gent-telegram-app` | Telegram Mini App + bot |
+| `control-plane` | Board Plane - multi-vessel orchestration |
+| `board-vessel` | Board member vessel runtime |
+| `lil-eight` | Swift dock pet companion |
+| `8gent-games` | AI civilisation simulator |
+| `8gentjr` | AI OS for neurodivergent children |
 
 The [8gent Constitution](https://8gent.world/constitution) governs all decisions.
 
@@ -41,7 +58,7 @@ The Eight kernel runs as a persistent daemon on **Fly.io** (Amsterdam region).
 
 ```bash
 # Users
-npm install -g @podjamz/8gent-code       # install globally
+npm install -g @8gi-foundation/8gent-code       # install globally
 8gent                                     # launch anywhere
 
 # Contributors (from source)
