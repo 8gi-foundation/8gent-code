@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-E8610A?style=for-the-badge&labelColor=1A1612" alt="MIT License" /></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
   <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-2.0.1-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v2.0.0" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
@@ -120,10 +120,20 @@ These implement the board's ability to operate as a persistent, self-governing c
 
 ### GitHub and Community
 
-Code is transitioning from [github.com/PodJamz](https://github.com/PodJamz) to [github.com/8gi-foundation](https://github.com/8gi-foundation). Two key repos:
+All code lives under [github.com/8gi-foundation](https://github.com/8gi-foundation).
 
-- **8gent-code** - the technology layer (this repo)
-- **8gi-governance** - the organizational layer (constitution, board specs, guild rules)
+| Repo | Role |
+|------|------|
+| **[8gent](https://github.com/8gi-foundation/8gent)** (8gent.app) | The front door. Dashboard. Auth. Billing. User management. |
+| **[8gi-control-plane](https://github.com/8gi-foundation/8gi-control-plane)** | The brain. Model routing. Rate limiting. Token tracking. |
+| **[8gent-vessel](https://github.com/8gi-foundation/8gent-vessel)** | The body. Compute. Sandboxes. Storage. Health. |
+| **[8gent-code](https://github.com/8gi-foundation/8gent-code)** | The kernel. What runs inside every vessel. *(this repo)* |
+| **[8gent-OS](https://github.com/8gi-foundation/8gent-OS)** | The personal layer on top of the kernel. |
+| **[8gi-governance](https://github.com/8gi-foundation/8gi-governance)** | The constitution. Board decisions. Member registry. |
+| **[8gent-world](https://github.com/8gi-foundation/8gent-world)** | Ecosystem story, docs, media. |
+| **[8gent-dev](https://github.com/8gi-foundation/8gent-dev)** | Developer portal. |
+| **[8gent-games](https://github.com/8gi-foundation/8gent-games)** | Agent simulation playground. |
+| **[8gent-telegram-app](https://github.com/8gi-foundation/8gent-telegram-app)** | Jr Telegram interface. |
 
 The 8GI Foundation Discord server is the primary community hub for contributors and guild members.
 
@@ -136,7 +146,7 @@ The 8GI Foundation Discord server is the primary community hub for contributors 
 ## Quick Start
 
 ```bash
-npm install -g @podjamz/8gent-code
+npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
@@ -164,7 +174,7 @@ No central vendor captures that value.
 
 The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.
 
-Try it: `npm install -g @podjamz/8gent-code && 8gent`
+Try it: `npm install -g @8gi-foundation/8gent-code && 8gent`
 
 ### From source (contributors)
 
@@ -643,7 +653,7 @@ Architecture credits. These projects informed specific parts of 8gent's design.
 <br />
 
 <p align="center">
-  <strong>MIT</strong> - James Spalding, Founder and Visionary
+  <strong>Apache 2.0</strong> - James Spalding, Founder and Visionary
 </p>
 
 <p align="center">
