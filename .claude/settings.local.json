@@ -3,7 +3,10 @@
     "allow": [
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(find /Users/jamesspalding/8gent-code -type f -name *toolshed*)",
+      "Bash(find /Users/jamesspalding/8gi-control-plane -type f -name *toolshed*)",
+      "Bash(find /Users/jamesspalding/8gent-code/packages/toolshed/tools -name \"*.ts\" -type f -exec basename {})"
     ]
   }
 }

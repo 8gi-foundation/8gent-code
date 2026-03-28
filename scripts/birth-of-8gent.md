@@ -226,7 +226,7 @@ And we're just getting started.
 
 *$0 inference cost. 39 benchmarks. 15 domains.*
 
-*Open source: github.com/PodJamz/8gent-code*
+*Open source: github.com/8gi-foundation/8gent-code*
 
 ---
 

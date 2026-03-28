@@ -138,6 +138,6 @@ Type ""
 Enter
 Type "# The Infinite Gentleman. Always at your service."
 Enter
-Type "# github.com/PodJamz/8gent-code"
+Type "# github.com/8gi-foundation/8gent-code"
 Enter
 Sleep 3s
