@@ -2,7 +2,7 @@
   "name": "@podjamz/8gent-code",
   "version": "2.0.1",
   "private": false,
-  "description": "The Infinite Gentleman - Autonomous agentic coding. Never hit usage caps again.",
+  "description": "Autonomous coding agent that runs locally, learns your patterns, and grows smarter from the collective. Zero API cost. Your data stays yours.",
   "type": "module",
   "bin": {
     "8": "./dist/cli.js",
