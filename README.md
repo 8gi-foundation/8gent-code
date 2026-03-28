@@ -158,11 +158,11 @@ That is a business model, not a law of nature. It is also not the only option.
 Every policy that governs what the agent can do is a YAML file you can read, edit, and override.
 Every memory the agent stores is a SQLite database on your own disk. Nothing phones home.
 
-Pattern synthesis: the autoresearch loop runs benchmarks, mutates the system prompt, and promotes what works.
-Your agent gets smarter from the collective. The collective gets smarter from your agent.
+Self-improvement: the autoresearch loop runs benchmarks, mutates the system prompt, and promotes what works. This runs locally.
+Your agent runs locally. Your data never leaves your machine. Every policy is readable YAML.
 No central vendor captures that value.
 
-The floor is zero cost. The ceiling is what a collective of locally-running agents can learn together.
+The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.
 
 Try it: `npm install -g @podjamz/8gent-code && 8gent`
 
