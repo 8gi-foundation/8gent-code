@@ -3573,7 +3573,7 @@
   },
   {
     "name": "ruflo",
-    "description": "\ud83c\udf0a The leading agent orchestration platform for Claude. Deploy intelligent multi-agent swarms, coordinate autonomous workflows, and build co",
+    "description": "🌊 The leading agent orchestration platform for Claude. Deploy intelligent multi-agent swarms, coordinate autonomous workflows, and build co",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3617,7 +3617,7 @@
   },
   {
     "name": "firecrawl",
-    "description": "\ud83d\udd25 The Web Data API for AI - Turn entire websites into LLM-ready markdown or structured data",
+    "description": "🔥 The Web Data API for AI - Turn entire websites into LLM-ready markdown or structured data",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3694,7 +3694,7 @@
   },
   {
     "name": "ruview",
-    "description": "\u03c0 RuView: WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection \u2014 ",
+    "description": "π RuView: WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection — ",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3716,7 +3716,7 @@
   },
   {
     "name": "strix",
-    "description": "Open-source AI hackers to find and fix your app\u2019s vulnerabilities.",
+    "description": "Open-source AI hackers to find and fix your app’s vulnerabilities.",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3727,7 +3727,7 @@
   },
   {
     "name": "tradingagents-cn",
-    "description": "\u57fa\u4e8e\u591a\u667a\u80fd\u4f53LLM\u7684\u4e2d\u6587\u91d1\u878d\u4ea4\u6613\u6846\u67b6 - TradingAgents\u4e2d\u6587\u589e\u5f3a\u7248",
+    "description": "基于多智能体LLM的中文金融交易框架 - TradingAgents中文增强版",
     "requirements": [
       "Implement the core pattern as a self-contained TypeScript module",
       "Export a clean functional API",
@@ -3749,7 +3749,7 @@
   },
   {
     "name": "show-optio-orchestrate-coding",
-    "description": "Show HN: Optio \u2013 Orchestrate AI coding agents in K8s to go from ticket to PR",
+    "description": "Show HN: Optio – Orchestrate AI coding agents in K8s to go from ticket to PR",
     "requirements": [
       "Implement the core idea as a TypeScript utility",
       "Zero external dependencies",
@@ -9188,5 +9188,610 @@
       "Return displacement array per time step"
     ],
     "maxLines": 80
+  },
+  {
+    "name": "two-studies-compiler-optimisations",
+    "description": "Two studies in compiler optimisations",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "show-robust-llm-extractor",
+    "description": "Show HN: Robust LLM Extractor for Websites in TypeScript",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "government-agencies-buy-commercial",
+    "description": "Government agencies buy commercial data about Americans in bulk",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "supersplat",
+    "description": "3D Gaussian Splat Editor",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "dokploy",
+    "description": "Open Source Alternative to Vercel, Netlify and Heroku.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "cypress",
+    "description": "Fast, easy and reliable testing for anything that runs in a browser.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "servers",
+    "description": "Model Context Protocol Servers",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "agentscope",
+    "description": "Build and run agents you can see, understand and trust.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "chandra",
+    "description": "OCR model that handles complex tables, forms, handwriting with full layout.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "stripe-projects-provision-and",
+    "description": "Stripe Projects: Provision and manage services from the CLI",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "ask-running-legacy-x2f",
+    "description": "Ask HN: Running legacy IE&#x2F;ActiveX clients without local admin rights?",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "fast-regex-search-indexing",
+    "description": "Fast regex search: indexing text for agent tools",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "dev-browser",
+    "description": "A Claude Skill to give your agent the ability to use a web browser",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "non-messing-diagonal-sorting",
+    "description": "Non-Messing-Up++: Diagonal Sorting and Young Tableaux",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "chicago-artist-creates-tourism",
+    "description": "Chicago artist creates tourism posters for city&#x27;s neighborhoods",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "judge-blocks-pentagon-effort",
+    "description": "Judge blocks Pentagon effort to &#x27;punish&#x27; Anthropic with supply chain risk label",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "show-minimalist-library-generate",
+    "description": "Show HN: Minimalist library to generate SVG views of scientific data",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "864-yugoslavian-domains",
+    "description": "21,864 Yugoslavian .yu Domains",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "mcp-server-guide",
+    "description": "A guide on how to use the Figma MCP server",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "vscode",
+    "description": "Visual Studio Code",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "langfuse",
+    "description": "🪢 Open source LLM engineering platform: LLM Observability, metrics, evals, prompt management, playground, datasets. Integrates with OpenTel",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "playwright-mcp",
+    "description": "Playwright MCP server",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "nrslib",
+    "description": "TAKT Agent Koordination Topology - Define how AI agents coordinate, where humans intervene, and what gets recorded — in YAML",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "fluentui",
+    "description": "Fluent UI web represents a collection of utilities, React components, and web components for building web applications.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "grafana",
+    "description": "The open and composable observability and data visualization platform. Visualize metrics, logs, and traces from multiple sources like Promet",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "backstage",
+    "description": "Backstage is an open framework for building developer portals",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "expo",
+    "description": "An open-source framework for making universal native apps with React. Expo runs on Android, iOS, and the web.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "juice-shop",
+    "description": "OWASP Juice Shop: Probably the most modern and sophisticated insecure web application",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "openspec",
+    "description": "Spec-driven development (SDD) for AI coding assistants.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "superset",
+    "description": "Apache Superset is a Data Visualization and Data Exploration Platform",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "steipete",
+    "description": "Ask the oracle when you're stuck. Invoke GPT-5 Pro with a custom context and files.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "hacksider",
+    "description": "real time face swap and one-click video deepfake with only a single image",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "ai-scientist-v2",
+    "description": "The AI Scientist-v2: Workshop-Level Automated Scientific Discovery via Agentic Tree Search",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "vibevoice",
+    "description": "Open-Source Frontier Voice AI",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "obra",
+    "description": "An agentic skills framework & software development methodology that works.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "freecad",
+    "description": "Official source code of FreeCAD, a free and opensource multiplatform 3D parametric modeler.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "onyx",
+    "description": "Open Source AI Platform - AI Chat with advanced features that works with every LLM",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "understanding-the-runtime-the",
+    "description": "Understanding the Go Runtime: The Garbage Collector",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "gzip-decompression-250-lines",
+    "description": "Gzip decompression in 250 lines of Rust",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "got-the-blame-for",
+    "description": "AI got the blame for the Iran school bombing. The truth is more worrying",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "embracing-bayesian-methods-clinical",
+    "description": "Embracing Bayesian Methods in Clinical Trials",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "pypi-package-telnyx-has",
+    "description": "PyPI package telnyx has been compromised in yet another supply chain attack",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "telnyx-python-sdk-supply",
+    "description": "Telnyx Python SDK: Supply Chain Security Notice",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "nashville-library-launches-memory",
+    "description": "Nashville library launches Memory Lab for digitizing home movies",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "hard-agents-not-your",
+    "description": "Go hard on agents, not on your filesystem",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "trust-signals-sparklines-for",
+    "description": "Trust Signals as Sparklines for Hacker News",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "learn-claude-code",
+    "description": "Bash is all you need - A nano claude code–like 「agent harness」, built from 0 to 1",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "benjitaylor",
+    "description": "The visual feedback tool for agents.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "open-metadata",
+    "description": "OpenMetadata is a unified metadata platform for data discovery, data observability, and data governance powered by a central metadata reposi",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "json-render",
+    "description": "The Generative UI framework",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "cline",
+    "description": "Autonomous coding agent right in your IDE, capable of creating/editing files, executing commands, using the browser, and more with your perm",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "thedotmack",
+    "description": "A Claude Code plugin that automatically captures everything Claude does during your coding sessions, compresses it with AI (using Claude's a",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "naming-conventions-practical-guide",
+    "description": "Go Naming Conventions: A Practical Guide",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "how-implement-the-outbox",
+    "description": "How to implement the Outbox pattern in Go and Postgres",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "going-founder-mode-cancer",
+    "description": "Going Founder Mode on Cancer",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
   }
 ]
