@@ -11,6 +11,10 @@ import { TaskQueue } from "./task-queue";
 import { DiscordGateway } from "./discord-gateway";
 import { DiscordRest } from "./discord-rest";
 import { TaskRouter, RateLimiter } from "./task-router";
+import { MemoryBridge } from "./memory-bridge";
+import { AuditLog } from "./audit-log";
+import { validateResponse, sanitizeResponse } from "./content-policy";
+import { VesselHealthMonitor } from "./vessel-health";
 
 interface VesselConnection {
   ws: any;
@@ -23,8 +27,14 @@ interface VesselConnection {
 export async function startControlPlane(config: ControlPlaneConfig): Promise<void> {
   console.log("[control-plane] starting...");
 
-  // 1. Open task queue
+  // 1. Open databases and monitors
   const taskQueue = new TaskQueue(config.dbPath);
+  const dbDir = config.dbPath.replace(/[^/]+$/, "");
+  const memory = new MemoryBridge(`${dbDir}board-memory.db`);
+  const audit = new AuditLog(`${dbDir}board-audit.db`);
+  const healthMonitor = new VesselHealthMonitor((msg) => {
+    console.warn(`[health-alert] ${msg}`);
+  });
 
   // 2. Recover stale tasks from previous crash
   const recovered = taskQueue.recoverStaleTasks(config.staleTaskMaxAgeMs);
@@ -74,7 +84,13 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
       if (server.upgrade(req)) return undefined;
       const url = new URL(req.url);
       if (url.pathname === "/health") {
-        return Response.json({ status: "ok", stats: taskQueue.getStats(), vessels: vessels.size });
+        return Response.json({
+          status: "ok",
+          tasks: taskQueue.getStats(),
+          vessels: healthMonitor.getSummary(),
+          memory: memory.getStats(),
+          audit: audit.getStats(),
+        });
       }
       return new Response("Board Control Plane", { status: 200 });
     },
@@ -83,6 +99,7 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
         const id = `v_${nextVesselId++}`;
         vessels.set(ws, { ws, memberCode: "", vesselId: id, authenticated: false, lastHeartbeat: Date.now() });
         console.log(`[control-plane] vessel ${id} connected`);
+        audit.log("vessel:connected", { vesselId: id });
       },
       message(ws, raw) {
         const conn = vessels.get(ws);
@@ -94,10 +111,12 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
           if (msg.type === "auth" && msg.token === config.vesselAuthToken) {
             conn.authenticated = true;
             conn.memberCode = msg.memberCode;
+            healthMonitor.register(conn.vesselId, msg.memberCode);
             sendToVessel(ws, { type: "auth:ok", vesselId: conn.vesselId });
             console.log(`[control-plane] vessel ${conn.vesselId} authenticated as ${msg.memberCode}`);
           } else {
             sendToVessel(ws, { type: "auth:fail", reason: "invalid token" });
+            audit.log("vessel:auth_failed", { vesselId: conn.vesselId });
           }
           return;
         }
@@ -113,10 +132,22 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
             break;
           }
           case "task:complete": {
-            taskQueue.completeTask(msg.taskId, msg.response);
-            // Post response to Discord
-            const completed = taskQueue.getRecentTasks("", 1).find((t) => t.id === msg.taskId);
-            if (completed) rest.postMessage(conn.memberCode, completed.channelId, msg.response);
+            // Content policy gate - validate before posting
+            const policy = validateResponse(msg.response, conn.memberCode);
+            if (!policy.pass) {
+              console.warn(`[control-plane] response blocked: ${policy.reason}`);
+              audit.log("response:blocked", { taskId: msg.taskId, memberCode: conn.memberCode, metadata: { reason: policy.reason } });
+              taskQueue.failTask(msg.taskId, `Content policy: ${policy.reason}`);
+            } else {
+              const safeResponse = sanitizeResponse(msg.response);
+              taskQueue.completeTask(msg.taskId, safeResponse);
+              const completed = taskQueue.getRecentTasks("", 1).find((t) => t.id === msg.taskId);
+              if (completed) {
+                rest.postMessage(conn.memberCode, completed.channelId, safeResponse);
+                memory.storeResponse(completed.channelId, conn.memberCode, safeResponse);
+                audit.log("response:posted", { taskId: msg.taskId, memberCode: conn.memberCode, channelId: completed.channelId, content: safeResponse });
+              }
+            }
             // Assign next task if available
             const next = taskQueue.assignTask(conn.memberCode, conn.vesselId);
             if (next) sendToVessel(ws, { type: "task:assign", task: next });
@@ -132,6 +163,7 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
           }
           case "heartbeat": {
             conn.lastHeartbeat = Date.now();
+            healthMonitor.heartbeat(conn.vesselId, msg.status);
             sendToVessel(ws, { type: "heartbeat:ack" });
             break;
           }
@@ -139,16 +171,25 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
       },
       close(ws) {
         const conn = vessels.get(ws);
-        if (conn) console.log(`[control-plane] vessel ${conn.vesselId} disconnected`);
+        if (conn) {
+          console.log(`[control-plane] vessel ${conn.vesselId} disconnected`);
+          healthMonitor.deregister(conn.vesselId);
+          audit.log("vessel:disconnected", { vesselId: conn.vesselId, memberCode: conn.memberCode });
+        }
         vessels.delete(ws);
       },
     },
   });
 
-  // 7. Health check loop - recover stale tasks, push to idle vessels
+  // 7. Health check loop - recover stale tasks, check vessel health, push to idle vessels
   const healthInterval = setInterval(() => {
     const stale = taskQueue.recoverStaleTasks(config.staleTaskMaxAgeMs);
     if (stale > 0) console.log(`[control-plane] recovered ${stale} stale tasks`);
+    // Check vessel health
+    const alerts = healthMonitor.check();
+    for (const alert of alerts) console.warn(`[control-plane] ${alert}`);
+    // Prune old memory entries periodically
+    memory.prune(50);
     // Push pending tasks to idle authenticated vessels
     for (const [ws, conn] of vessels) {
       if (!conn.authenticated) continue;
@@ -165,6 +206,8 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
     for (const [ws] of vessels) sendToVessel(ws, { type: "shutdown" });
     vesselServer.stop();
     taskQueue.close();
+    memory.close();
+    audit.close();
     console.log("[control-plane] stopped");
     process.exit(0);
   }
