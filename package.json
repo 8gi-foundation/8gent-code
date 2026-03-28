@@ -94,5 +94,13 @@
     "access": "public"
   },
   "author": "James Spalding",
-  "license": "MIT"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/8gi-foundation/8gent-code.git"
+  },
+  "homepage": "https://8gent.dev",
+  "bugs": {
+    "url": "https://github.com/8gi-foundation/8gent-code/issues"
+  }
 }

@@ -59,7 +59,7 @@ Since the automated onboarding pipeline is not built yet, James does each step m
 
 - [ ] **5. Send setup script**
   ```
-  git clone https://github.com/PodJamz/8gi-setup && cd 8gi-setup && ./setup.sh
+  git clone https://github.com/8gi-foundation/8gi-setup && cd 8gi-setup && ./setup.sh
   ```
   Walk them through any failures. Document every issue for automation later.
 

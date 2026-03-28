@@ -24,7 +24,7 @@ npm install -g @podjamz/8gent-code
 ### Contributors (from source)
 
 ```bash
-git clone https://github.com/PodJamz/8gent-code.git
+git clone https://github.com/8gi-foundation/8gent-code.git
 cd 8gent-code
 bun install
 bun run tui

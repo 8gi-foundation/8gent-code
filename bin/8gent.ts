@@ -120,7 +120,7 @@ MACHINE INTEGRATION:
   Exit codes: 0=success, 1=error, 2=auth required.
   Designed for orchestration by Claude Code, Cursor, aider, etc.
 
-Learn more: https://github.com/PodJamz/8gent-code
+Learn more: https://github.com/8gi-foundation/8gent-code
 `;
 
 async function main() {

@@ -30,45 +30,37 @@ Step 2: Runtime Installation
   - Pull default model: ollama pull qwen3.5 (3.8GB, runs on 8GB RAM)
   - Verify: bun --version, ollama list
 
-Step 3: Claude Code Integration
-  - Check for existing Claude Code installation
-  - If present: detect version, warn if outdated
-  - If absent: print instructions (user's own Anthropic subscription required)
-  - Create ~/.claude/ directory structure if missing
-  - Install CORE skill system: copy skills/ to ~/.claude/skills/
-  - Install global CLAUDE.md with 8GI-specific overrides
-
-Step 4: 8gent Installation
+Step 3: 8gent Installation
   - npm install -g @podjamz/8gent-code
   - Verify: 8gent --version
   - Create ~/.8gent/ data directory
   - Initialize SQLite memory store: ~/.8gent/memory.db
   - Write default config: ~/.8gent/config.json
 
-Step 5: NemoClaw Policy Deployment
+Step 4: NemoClaw Policy Deployment
   - Copy 8gi-circle-policies.yaml to ~/.8gent/policies.yaml
   - This is the STRICT circle template (see Section 3)
   - Infinite mode DISABLED (interactive approval only)
   - Audit logging ENABLED
 
-Step 6: Factory Pipeline Configuration
+Step 5: Factory Pipeline Configuration
   - Configure anonymised telemetry endpoint (opt-in prompt)
   - Set member ID (UUID, not tied to identity)
   - Write factory-config to ~/.8gent/factory-sync.json
   - Default: local-only mode, no outbound sync
 
-Step 7: Git & GitHub Configuration
+Step 6: Git & GitHub Configuration
   - Verify GitHub CLI (gh) is authenticated
   - Request GitHub org invitation acceptance (PodJamz/8gi-circle)
   - Configure git commit signing (recommended, not required)
   - Set default branch protection awareness
 
-Step 8: Companion System Bootstrap
+Step 7: Companion System Bootstrap
   - Initialize companion data: ~/.8gent/companion/
   - Assign starter species (random from Common pool)
   - Generate companion deck seed
 
-Step 9: Verification
+Step 8: Verification
   - Run smoke test: 8gent launches, connects to Ollama, loads policies
   - Run policy test: attempt blocked command, confirm denial
   - Run memory test: write + read episodic memory
@@ -92,7 +84,6 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $1" | tee -a "$SETUP_LOG"; }
 
 step_detect_environment
 step_install_runtimes
-step_configure_claude_code
 step_install_8gent
 step_deploy_policies
 step_configure_factory
@@ -103,61 +94,54 @@ step_verify
 
 ---
 
-## 2. Claude Code + 8gent Coexistence
+## 2. 8gent - The Official Tool
 
-### The Dual-Agent Model
+### Agent Architecture
 
-Circle members run two agents on their machine. They are complementary, not competing.
+8gent is the official AI coding tool of the 8GI collective. It runs locally on each member's machine with no subscription required.
+
+Members are free to use any editor or AI tool they prefer alongside 8gent for their personal workflow. 8gent is what the collective standardizes on.
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Member's Machine                                    │
 │                                                      │
-│  ┌──────────────────┐    ┌──────────────────┐       │
-│  │  Claude Code      │    │  8gent            │       │
-│  │  (Anthropic)      │    │  (Local/Free)     │       │
-│  │                   │    │                   │       │
-│  │  - Claude Opus/   │    │  - Ollama local   │       │
-│  │    Sonnet models  │    │  - OpenRouter free│       │
-│  │  - MCP tools      │    │  - Memory store   │       │
-│  │  - Skills system  │    │  - Policy engine  │       │
-│  │  - Hooks          │    │  - Companion      │       │
-│  └────────┬─────────┘    └────────┬─────────┘       │
-│           │                       │                   │
-│           └───────────┬───────────┘                   │
+│  ┌──────────────────────────────────────────┐       │
+│  │  8gent                                    │       │
+│  │  (Local-first, free)                      │       │
+│  │                                           │       │
+│  │  - Ollama local models (qwen3 default)    │       │
+│  │  - OpenRouter free cloud (fallback)       │       │
+│  │  - Persistent memory store (SQLite)       │       │
+│  │  - NemoClaw policy engine                 │       │
+│  │  - Companion system                       │       │
+│  │  - Factory pipeline integration           │       │
+│  └────────────────────┬─────────────────────┘       │
 │                       │                               │
 │              ┌────────▼────────┐                      │
-│              │  Shared Layer    │                      │
+│              │  Data Layer      │                      │
 │              │                  │                      │
-│              │  ~/.claude/      │ Skills, hooks,       │
-│              │  ~/.8gent/       │ memory, policies,    │
-│              │  ~/projects/     │ project codebases    │
+│              │  ~/.8gent/       │ Config, memory,      │
+│              │  ~/projects/     │ policies, codebases  │
 │              └─────────────────┘                      │
 └─────────────────────────────────────────────────────┘
 ```
 
-**How they interact:**
+**Capabilities:**
 
-| Aspect | Claude Code | 8gent |
-|--------|------------|-------|
-| **Model** | Cloud (Anthropic API, user's subscription) | Local (Ollama) or free cloud (OpenRouter) |
-| **Cost** | User pays Anthropic | Free |
-| **Strength** | Complex reasoning, large context, multi-file refactors | Fast iteration, memory persistence, autonomous loops |
-| **When to use** | Architectural decisions, security review, complex debugging | Routine tasks, factory pipeline, companion interaction |
-| **Skills** | Shared ~/.claude/skills/ | Reads same skills via system prompt injection |
-| **Memory** | Session-scoped (no persistence between sessions) | Persistent (SQLite, survives restarts) |
-| **Policies** | Respects NemoClaw via hooks | NemoClaw built into agent loop |
+| Aspect | Details |
+|--------|---------|
+| **Model** | Local (Ollama) or free cloud (OpenRouter) |
+| **Cost** | Free |
+| **Strength** | Fast iteration, memory persistence, autonomous loops, policy enforcement |
+| **Memory** | Persistent (SQLite, survives restarts) |
+| **Policies** | NemoClaw built into agent loop |
+| **Companion** | Session-aware coding companion that evolves with usage |
 
-**Filesystem boundaries:**
+**Filesystem layout:**
 
 ```
-~/.claude/                    # Claude Code config (shared)
-  CLAUDE.md                   # Global instructions
-  skills/                     # Skill definitions (shared)
-  hooks/                      # Pre/post hooks (shared)
-  projects/                   # Per-project memory (Claude Code only)
-
-~/.8gent/                     # 8gent data (8gent only)
+~/.8gent/                     # 8gent data
   config.json                 # Agent configuration
   memory.db                   # SQLite memory store
   policies.yaml               # NemoClaw policies
@@ -165,14 +149,6 @@ Circle members run two agents on their machine. They are complementary, not comp
   factory-sync.json           # Anonymised pattern sync config
   kernel/                     # RL fine-tuning data (if enabled)
 ```
-
-**Conflict avoidance:**
-
-- Claude Code and 8gent never write to the same files simultaneously
-- Skills are read-only at runtime for both agents
-- Memory store has a write lock (SQLite WAL mode) - only 8gent writes
-- Policies are loaded at startup, not hot-reloaded mid-session
-- Git operations use branch isolation - Claude Code and 8gent work on different branches
 
 ---
 
@@ -828,7 +804,7 @@ Minimum viable agent in each language:
 ### Repository Structure
 
 ```
-github.com/PodJamz/
+github.com/8gi-foundation/
   8gent-code/          # TypeScript reference (this repo)
   8gent-py/            # Python implementation
   8gent-rs/            # Rust implementation
@@ -853,7 +829,6 @@ github.com/PodJamz/
 | Git credentials | System keychain | Authentication tokens |
 | .env files | Project directories | API keys and secrets |
 | File contents | Project directories | Source code the agent reads/writes |
-| Claude Code memory | `~/.claude/projects/` | Per-project memory notes |
 
 ### What Gets Shared (opt-in only)
 
@@ -1122,7 +1097,6 @@ After `./setup.sh` completes, the member should see:
 ─────────────────────────────
 [PASS] Bun v1.x.x installed
 [PASS] Ollama running, qwen3.5 loaded
-[PASS] Claude Code detected (v1.x.x)
 [PASS] 8gent installed (v1.x.x)
 [PASS] NemoClaw policies deployed (16 rules)
 [PASS] Memory store initialized (0 entries)

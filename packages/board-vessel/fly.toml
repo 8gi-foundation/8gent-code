@@ -1,0 +1,25 @@
+# 8GI Board Vessel - Fly.io deployment template
+# Stateless inference worker. One per board member.
+# Clone this and set BOARD_MEMBER_CODE per deployment.
+
+app = "8gi-vessel-8eo"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  CONTROL_PLANE_URL = "ws://8gi-board-plane.internal:3100"
+  OLLAMA_MODEL = "qwen3:latest"
+  HEALTH_PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
