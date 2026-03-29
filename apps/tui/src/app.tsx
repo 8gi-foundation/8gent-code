@@ -1144,6 +1144,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /router - Task router settings\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
+              "  /export - Export session as HTML\n" +
               "  /clear - Clear messages\n" +
               "  /quit - Exit 8gent Code\n\n" +
               "Keyboard shortcuts:\n" +
@@ -1253,6 +1254,25 @@ export function App({ initialCommand, args }: AppProps) {
             },
           ]);
           break;
+
+        case "export": {
+          const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
+          const mins = Math.floor(elapsed / 60);
+          const secs = elapsed % 60;
+          import("../../../packages/eight/session-export.js").then(({ saveSessionExport }) => {
+            saveSessionExport(
+              messages.map((m) => ({ role: m.role, content: m.content, timestamp: m.timestamp })),
+              {
+                sessionId: `session-${startTime.getTime()}`,
+                model: currentModel || "unknown",
+                duration: `${mins}m ${secs}s`,
+              }
+            ).then((exportPath) => {
+              addSystemMessage(`Session exported to ${exportPath}`);
+            });
+          });
+          break;
+        }
 
         case "quit":
           flushSession();
