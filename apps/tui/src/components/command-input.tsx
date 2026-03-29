@@ -85,7 +85,8 @@ export type SlashCommand =
   | "debug"
   | "music"
   | "dj"
-  | "pet";
+  | "pet"
+  | "mode";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -315,6 +316,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["agents", "ag"],
     description: "Manage sub-agents (list, spawn, kill, auto, settings)",
     usage: "/agent [list|spawn|kill|auto|settings]",
+  },
+  {
+    name: "mode",
+    aliases: ["persona"],
+    description: "Switch agent mode (code, architect, review, debug, ask)",
+    usage: "/mode [name|list]",
   },
 ];
 
