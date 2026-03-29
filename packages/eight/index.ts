@@ -35,6 +35,9 @@ export { ToolExecutor } from "./tools";
 // Agent core
 export { Agent } from "./agent";
 
+// Mode system
+export { ModeManager, getModeManager, resetModeManager, type AgentMode } from "./modes";
+
 // CLI REPL
 export { startREPL } from "./repl";
 

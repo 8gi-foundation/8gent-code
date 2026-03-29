@@ -116,6 +116,7 @@ import {
 
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/eight/index.js";
+import { getModeManager } from "../../../packages/eight/modes.js";
 import type { AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent, AgentEvidenceEvent, AgentEvidenceSummaryEvent } from "../../../packages/eight/index.js";
 
 // Load .env file if present
@@ -597,6 +598,7 @@ export function App({ initialCommand, args }: AppProps) {
 
   // ADHD/Bionic reading mode
   const [adhdMode, setAdhdMode] = useState(false);
+  const [activeMode, setActiveMode] = useState("code");
   const [adhdSuggested, setAdhdSuggested] = useState(false);
 
   // Design agent state
@@ -1141,6 +1143,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
               "  /telegram - Connect a Telegram bot\n" +
+              "  /mode [name|list] - Switch agent mode\n" +
               "  /router - Task router settings\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
@@ -1498,6 +1501,43 @@ export function App({ initialCommand, args }: AppProps) {
             );
           }
           break;
+
+        case "mode": {
+          const modeManager = getModeManager();
+          if (args.length === 0 || args[0] === "list") {
+            const modes = modeManager.listModes();
+            const currentKey = modeManager.getActiveModeKey();
+            const modeList = modes
+              .map((m) => {
+                const key = m.name.toLowerCase();
+                const marker = key === currentKey ? " (active)" : "";
+                return `  ${m.name}${marker} - ${m.description}`;
+              })
+              .join("\n");
+            addSystemMessage(`Available modes:\n${modeList}\n\nUsage: /mode <name>`);
+          } else {
+            const modeName = args[0].toLowerCase();
+            if (modeManager.setActiveMode(modeName)) {
+              const mode = modeManager.getActiveMode();
+              setActiveMode(modeName);
+              addSystemMessage(
+                `Mode switched to ${mode.name}: ${mode.description}\n` +
+                (mode.deniedTools?.length
+                  ? `Denied tools: ${mode.deniedTools.join(", ")}`
+                  : mode.allowedTools !== undefined
+                  ? mode.allowedTools.length === 0
+                    ? "No tools available (conversation only)"
+                    : `Allowed tools: ${mode.allowedTools.join(", ")}`
+                  : "All tools available")
+              );
+            } else {
+              addSystemMessage(
+                `Unknown mode: "${modeName}". Use /mode list to see available modes.`
+              );
+            }
+          }
+          break;
+        }
 
         case "animations":
           // Show animation showcase
@@ -3286,6 +3326,7 @@ export function App({ initialCommand, args }: AppProps) {
           voiceState={voiceChat.isActive ? voiceChat.state : voice.state}
           voiceEnabled={voice.isAvailable}
           voiceChatActive={voiceChat.isActive}
+          agentMode={activeMode}
         />
       ) : (
         <StatusBar

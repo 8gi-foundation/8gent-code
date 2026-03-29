@@ -72,6 +72,9 @@ export interface EnhancedStatusBarProps {
   voiceState?: "idle" | "recording" | "transcribing" | "downloading" | "listening" | "thinking" | "speaking" | "stopping";
   voiceEnabled?: boolean;
   voiceChatActive?: boolean;
+
+  // Agent mode
+  agentMode?: string;
 }
 
 // Legacy interface for backward compatibility
@@ -110,6 +113,7 @@ export function EnhancedStatusBar({
   voiceState,
   voiceEnabled = false,
   voiceChatActive = false,
+  agentMode,
 }: EnhancedStatusBarProps) {
   const [elapsed, setElapsed] = useState("0:00");
 
@@ -181,10 +185,16 @@ export function EnhancedStatusBar({
           </>
         )}
         <PermissionStatusItem mode={permissionMode} />
+        {agentMode && agentMode !== "code" && (
+          <>
+            <Separator />
+            <Badge label={agentMode.charAt(0).toUpperCase() + agentMode.slice(1)} color="cyan" variant="outline" />
+          </>
+        )}
         {adhdMode && (
           <>
             <Separator />
-            <Label color="magenta">⚡ ADHD</Label>
+            <Label color="magenta">ADHD</Label>
           </>
         )}
       </Inline>
