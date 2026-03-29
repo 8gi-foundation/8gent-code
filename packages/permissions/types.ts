@@ -45,6 +45,8 @@ export interface PolicyRule {
   environments?: string[];
   /** Whether this rule is active (default: true) */
   enabled?: boolean;
+  /** Whether this rule is immutable (cannot be overridden by addPolicy). Set automatically for default rules. */
+  immutable?: boolean;
 }
 
 /** Top-level YAML policy file structure */
