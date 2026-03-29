@@ -31,7 +31,8 @@ export type BenchmarkCategory =
   | "agentic"
   | "ui-design"
   | "battle-test"
-  | "long-horizon";
+  | "long-horizon"
+  | "swe-bench";
 
 export interface ExecutionGradeResult {
   /** 0-100 score from test execution */
