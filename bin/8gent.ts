@@ -33,7 +33,7 @@ USAGE:
   8gent <command> [options]
 
 COMMANDS:
-  tui                         Launch interactive TUI (auto-spawns dock pet)
+  tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -60,7 +60,7 @@ AGENT COMMANDS:
 
 SESSION COMMANDS:
   session list [--limit=N]    List recent sessions
-  session resume <id>         Resume a session by ID
+  session resume <name-or-id> Resume a session by name or ID
   session checkpoint          Save current session checkpoint
   session compact             Compress current session history
 
@@ -649,6 +649,7 @@ async function tuiCommand(args: string[]) {
   const { spawn } = await import("child_process");
   const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
 
+  // Pass --name and --resume flags through to TUI
   const proc = spawn("bun", ["run", tuiPath, ...filteredArgs], {
     stdio: "inherit",
     cwd: path.join(__dirname, ".."),
@@ -1186,24 +1187,24 @@ async function sessionCommand(args: string[]) {
   const { flags, rest } = parseFlags(args);
   const isJson = !!flags.json;
   const sub = rest[0] || "list";
+  const { SessionManager } = await import("../packages/eight/session-manager");
+  const mgr = new SessionManager();
 
   switch (sub) {
     case "list": {
       const limit = parseInt((flags.limit as string) || "10");
-      const { SessionSyncManager } = await import("../packages/eight/session-sync");
-      const sync = new SessionSyncManager(true);
-
-      const convos = await sync.getRecentConversations(limit);
+      const sessions = mgr.list(limit);
       if (isJson) {
-        jsonOut({ count: convos.length, sessions: convos });
+        jsonOut({ count: sessions.length, sessions });
       } else {
-        if (convos.length === 0) {
-          console.log("No sessions found. Requires authentication.");
+        if (sessions.length === 0) {
+          console.log("No sessions found. Use the TUI to create one.");
         } else {
-          for (const c of convos as any[]) {
-            const ago = Math.floor((Date.now() - c.lastActiveAt) / 60000);
+          for (const s of sessions) {
+            const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
             const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
-            console.log(`${c.sessionId}  ${c.title?.slice(0, 50) || "Untitled"}  ${c.model}  ${c.messageCount} msgs  ${timeStr}`);
+            const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
+            console.log(`${s.id}  ${label.slice(0, 40).padEnd(40)}  ${s.model}  ${s.messageCount} msgs  ${timeStr}`);
           }
         }
       }
@@ -1211,15 +1212,15 @@ async function sessionCommand(args: string[]) {
     }
 
     case "resume": {
-      const sessionId = rest[1];
-      if (!sessionId) {
-        console.error("Usage: 8gent session resume <session-id>");
+      const nameOrId = rest[1];
+      if (!nameOrId) {
+        console.error("Usage: 8gent session resume <name-or-id>");
         process.exit(1);
       }
       // Resume launches TUI with session context
       const { spawn } = await import("child_process");
       const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
-      const proc = spawn("bun", ["run", tuiPath, "--resume", sessionId], {
+      const proc = spawn("bun", ["run", tuiPath, "--resume", nameOrId], {
         stdio: "inherit",
         cwd: path.join(__dirname, ".."),
       });
@@ -1230,7 +1231,7 @@ async function sessionCommand(args: string[]) {
     case "compact":
     case "checkpoint": {
       if (isJson) {
-        jsonOut({ success: true, message: `${sub} is a TUI operation — use /compact or /checkpoint in the TUI` });
+        jsonOut({ success: true, message: `${sub} is a TUI operation - use /compact or /checkpoint in the TUI` });
       } else {
         console.log(`${sub} is a TUI operation. Launch the TUI and use /${sub}.`);
       }

@@ -80,6 +80,7 @@ import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
 import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
 import { SpawnRequestCard } from "./components/agent-panel/SpawnRequestCard.js";
 import { initSessionLogger, logMessage, logToolStart, logToolEnd, logStep, logError, logTabSwitch, flushSession } from "./lib/session-logger.js";
+import { SessionManager } from "../../../packages/eight/session-manager.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -211,6 +212,8 @@ import { DesignSuggestionPanel } from "./components/design-selector.js";
 interface AppProps {
   initialCommand: string;
   args: string[];
+  sessionName?: string;
+  sessionResume?: string;
 }
 
 export interface Message {
@@ -270,7 +273,7 @@ interface Avenue {
 // Main App
 // ============================================
 
-export function App({ initialCommand, args }: AppProps) {
+export function App({ initialCommand, args, sessionName, sessionResume }: AppProps) {
   const { exit } = useApp();
 
   // Personality greetings (inline for independence)
@@ -376,10 +379,41 @@ export function App({ initialCommand, args }: AppProps) {
     }).catch(() => setAuthStatus("anonymous"));
   }, []);
 
+  // Named session management
+  const sessionMgr = React.useMemo(() => new SessionManager(), []);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
   // Initialize session logger on mount
   useEffect(() => {
     const sessionId = `session-${Date.now()}`;
     initSessionLogger(sessionId, currentModel, currentProvider);
+
+    // Resume existing session or create a new one
+    if (sessionResume) {
+      const resumed = sessionMgr.resume(sessionResume);
+      if (resumed) {
+        setActiveSessionId(resumed.id);
+        if (resumed.messages.length > 0) {
+          const restored = resumed.messages.map((m, i) => ({
+            id: `restored-${i}`,
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content,
+            timestamp: new Date(),
+          }));
+          setMessages(restored as Message[]);
+        }
+        addSystemMessage(`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`);
+      } else {
+        addSystemMessage(`Session "${sessionResume}" not found.`);
+      }
+    } else {
+      const created = sessionMgr.create({ name: sessionName, model: currentModel, provider: currentProvider });
+      setActiveSessionId(created.id);
+      if (sessionName) {
+        addSystemMessage(`Session named: "${sessionName}"`);
+      }
+    }
+
     return () => { flushSession(); };
   }, []);
 
@@ -481,6 +515,20 @@ export function App({ initialCommand, args }: AppProps) {
   const [currentProvider, setCurrentProvider] = useState(_savedProviderSettings.provider);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+
+  // Auto-save session every 30 seconds when messages change
+  const lastSaveCount = useRef(0);
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const timer = setInterval(() => {
+      if (messages.length > lastSaveCount.current) {
+        lastSaveCount.current = messages.length;
+        const serializable = messages.map((m) => ({ role: m.role, content: m.content }));
+        sessionMgr.update(activeSessionId, serializable, { model: currentModel, provider: currentProvider });
+      }
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [activeSessionId, messages, currentModel, currentProvider]);
 
   // Fetch models dynamically based on selected provider
   useEffect(() => {
@@ -609,7 +657,11 @@ export function App({ initialCommand, args }: AppProps) {
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       if (soundEnabled) playSound("notification");
-      // Finalize session before exiting
+      // Save session and finalize before exiting
+      if (activeSessionId && messages.length > 0) {
+        const serializable = messages.map((m) => ({ role: m.role, content: m.content }));
+        sessionMgr.update(activeSessionId, serializable, { model: currentModel, provider: currentProvider });
+      }
       flushSession();
       if (agent) agent.cleanup().catch(() => {});
       exit();
@@ -1143,6 +1195,7 @@ export function App({ initialCommand, args }: AppProps) {
               "  /telegram - Connect a Telegram bot\n" +
               "  /router - Task router settings\n" +
               "  /plan - Show current plan status\n" +
+              "  /session [name|list|resume] - Named session management\n" +
               "  /status - Show session status\n" +
               "  /clear - Clear messages\n" +
               "  /quit - Exit 8gent Code\n\n" +
@@ -1255,6 +1308,10 @@ export function App({ initialCommand, args }: AppProps) {
           break;
 
         case "quit":
+          if (activeSessionId && messages.length > 0) {
+            const serializable = messages.map((m) => ({ role: m.role, content: m.content }));
+            sessionMgr.update(activeSessionId, serializable, { model: currentModel, provider: currentProvider });
+          }
           flushSession();
           if (agent) agent.cleanup().catch(() => {});
           exit();
@@ -1338,10 +1395,62 @@ export function App({ initialCommand, args }: AppProps) {
           }
           break;
 
+        case "session": {
+          const sub = args[0]?.toLowerCase();
+          if (sub === "name" && args[1]) {
+            const name = args.slice(1).join(" ");
+            if (activeSessionId) {
+              sessionMgr.rename(activeSessionId, name);
+              addSystemMessage(`Session named: "${name}"`);
+            } else {
+              addSystemMessage("No active session to name.");
+            }
+          } else if (sub === "list") {
+            const sessions = sessionMgr.list(10);
+            if (sessions.length === 0) {
+              addSystemMessage("No saved sessions.");
+            } else {
+              const lines = sessions.map((s) => {
+                const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
+                const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
+                const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+                return `  ${s.id}  ${label.slice(0, 30).padEnd(30)}  ${s.messageCount} msgs  ${timeStr}`;
+              });
+              addSystemMessage("Recent sessions:\n" + lines.join("\n"));
+            }
+          } else if (sub === "resume" && args[1]) {
+            const target = args.slice(1).join(" ");
+            const resumed = sessionMgr.resume(target);
+            if (resumed) {
+              setActiveSessionId(resumed.id);
+              if (resumed.messages.length > 0) {
+                const restored = resumed.messages.map((m, i) => ({
+                  id: `restored-${i}`,
+                  role: m.role as "user" | "assistant" | "system",
+                  content: m.content,
+                  timestamp: new Date(),
+                }));
+                setMessages(restored as Message[]);
+              }
+              addSystemMessage(`Resumed: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`);
+            } else {
+              addSystemMessage(`Session "${target}" not found.`);
+            }
+          } else {
+            addSystemMessage(
+              "Usage:\n" +
+              "  /session name <name>   - Name current session\n" +
+              "  /session list          - Show recent sessions\n" +
+              "  /session resume <name> - Resume a session by name or ID"
+            );
+          }
+          break;
+        }
+
         case "history":
           // Show history screen
           if (!agent) {
-            addSystemMessage("No agent active — start a session first.");
+            addSystemMessage("No agent active - start a session first.");
             break;
           }
           agent.getSessionSync().getRecentConversations(20).then((convos) => {
