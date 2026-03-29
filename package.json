@@ -37,6 +37,7 @@
     "benchmark:suite": "bun run benchmarks/runner.ts",
     "benchmark:category": "bun run benchmarks/runner.ts --category",
     "benchmark:single": "bun run benchmarks/runner.ts --bench",
+    "benchmark:swebench": "bun run benchmarks/swebench/run.ts",
     "demo": "bun run scripts/demo-savings.ts",
     "harness": "bun run packages/harness-cli/index.ts",
     "harness:run": "bun run packages/harness-cli/index.ts run",
