@@ -81,6 +81,7 @@ import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
 import { SpawnRequestCard } from "./components/agent-panel/SpawnRequestCard.js";
 import { initSessionLogger, logMessage, logToolStart, logToolEnd, logStep, logError, logTabSwitch, flushSession } from "./lib/session-logger.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
+import { SessionTree } from "../../../packages/eight/session-tree.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -437,6 +438,9 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
   // Git state (would be populated from actual git commands)
   const [isGitRepo] = useState(true);
   const [currentBranch] = useState<string | null>("main");
+
+  // Session branching tree
+  const sessionTreeRef = useRef(new SessionTree());
 
   // Planning state (legacy predicted-step board)
   const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>({
@@ -1196,6 +1200,8 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
               "  /router - Task router settings\n" +
               "  /plan - Show current plan status\n" +
               "  /session [name|list|resume] - Named session management\n" +
+              "  /fork [label] - Fork conversation at current message\n" +
+              "  /branch [list|switch <id>] - List or switch branches\n" +
               "  /status - Show session status\n" +
               "  /export - Export session as HTML\n" +
               "  /clear - Clear messages\n" +
@@ -1324,6 +1330,49 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
               addSystemMessage(`Session exported to ${exportPath}`);
             });
           });
+          break;
+        }
+
+        case "fork": {
+          const tree = sessionTreeRef.current;
+          const tip = tree.tipId;
+          if (!tip) {
+            addSystemMessage("No messages to fork from.");
+            break;
+          }
+          const label = args.length > 0 ? args.join(" ") : undefined;
+          const branchId = tree.fork(tip, label);
+          addSystemMessage(`Forked at current message. New branch: ${branchId} (${label || branchId})\nUse /branch list to see all branches.`);
+          break;
+        }
+
+        case "branch": {
+          const tree = sessionTreeRef.current;
+          const sub = args[0];
+          if (!sub || sub === "list") {
+            const branches = tree.getBranches();
+            const lines = branches.map((b) => {
+              const active = b.id === tree.activeBranch ? " *" : "";
+              return `  ${b.id}${active} - ${b.label} (${b.messageCount} msgs)`;
+            });
+            addSystemMessage("Branches:\n" + lines.join("\n"));
+          } else if (sub === "switch" && args[1]) {
+            try {
+              const history = tree.switchBranch(args[1]);
+              const restored = history.map((n) => ({
+                id: n.id,
+                role: n.role as "user" | "assistant" | "system",
+                content: typeof n.content === "string" ? n.content : JSON.stringify(n.content),
+                timestamp: new Date(n.timestamp),
+              }));
+              setMessages(restored);
+              addSystemMessage(`Switched to branch: ${args[1]}`);
+            } catch (e: any) {
+              addSystemMessage(`Branch error: ${e.message}`);
+            }
+          } else {
+            addSystemMessage("Usage: /branch [list|switch <id>]");
+          }
           break;
         }
 
@@ -2748,12 +2797,15 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
     setRecentCommands((prev) => [input, ...prev].slice(0, 20));
 
     // Add user message to chat immediately
+    const userMsgId = `user-${Date.now()}`;
     setMessages((prev) => [...prev, {
-      id: `user-${Date.now()}`,
+      id: userMsgId,
       role: "user" as const,
       content: input,
       timestamp: new Date(),
     }]);
+    // Track in session tree
+    sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "user", input);
     // Session logger: user message
     logMessage(activeTabId, workspaceTabs.activeTab?.title || "Chat", "user", input);
 
@@ -2831,6 +2883,8 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
           await agent.chat(modePrefix + message, img?.base64, img?.mimeType);
           // Clear image after sending
           if (img) imageInput.removeImage();
+          // Track assistant turn in session tree
+          sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "assistant", "(streamed response)");
           setLastResponseTime(Date.now() - cmdStartTime);
           setStatus("success");
           if (soundEnabled) playSound("success");
