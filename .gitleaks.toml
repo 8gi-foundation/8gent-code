@@ -1,0 +1,32 @@
+# Gitleaks configuration for 8gent-code
+# https://github.com/gitleaks/gitleaks
+
+title = "8gent-code Gitleaks Config"
+
+# Extend the default gitleaks config
+[extend]
+useDefault = true
+
+# Global allowlist configuration
+[allowlist]
+description = "Allowlist for documentation, benchmarks, and placeholder patterns"
+
+# Allowlist paths that contain example/documentation content
+paths = [
+    '''docs/.*\.md$''',
+    '''benchmarks/harbor-results/.*''',
+    '''\.changeset/.*''',
+]
+
+# Allowlist specific patterns that are clearly placeholders
+regexes = [
+    '''YOUR_TOKEN''',
+    '''YOUR_API_KEY''',
+    '''your-api-key''',
+    '''your_api_key''',
+    '''your-secure-password''',
+    '''your_secure_password''',
+    '''sk-example-.*''',
+    '''PLACEHOLDER''',
+    '''xxx+''',
+]
