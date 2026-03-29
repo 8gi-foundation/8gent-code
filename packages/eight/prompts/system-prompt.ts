@@ -14,6 +14,7 @@ import {
   type UserContext,
 } from "./soul-layers";
 import { loadInstructions } from "../instruction-loader";
+import { getRepoMapper } from "../../repo-context";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -400,6 +401,30 @@ export const VALIDATION_PROMPT = `You are a validation agent. Verify task comple
 
 ## Output
 Report confidence (0-100%) with evidence list.`;
+
+// ============================================
+// Repo Context Integration
+// ============================================
+
+/** Cache to avoid re-scanning per session */
+let _repoContextCache: string | null = null;
+
+/**
+ * Generate repo context for a user message.
+ * Scans on first call, caches the mapper, re-ranks per query.
+ */
+export async function getRepoContext(
+  query: string,
+  rootDir?: string,
+  maxTokens = 4000,
+): Promise<string> {
+  try {
+    const mapper = await getRepoMapper(rootDir);
+    return await mapper.getContext(query, maxTokens);
+  } catch {
+    return ""; // graceful fallback - no repo context
+  }
+}
 
 // ============================================
 // Context Compression
