@@ -29,6 +29,7 @@ import { startTelegramBot, getActiveTelegramBot } from "../telegram";
 import { getVault } from "../secrets";
 import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
 import { ToolLoopDetector } from "./tool-loop-detector";
+import { getModeManager, type ModeManager } from "./modes";
 import { getMemoryManager, extractAutoMemories } from "../memory";
 import { SessionSyncManager } from "./session-sync";
 import { KernelManager } from "../kernel/manager";
@@ -102,6 +103,7 @@ export class Agent {
   private kernel: KernelManager;
   private abortController: AbortController | null = null;
   private orchestratorBus: OrchestratorBus;
+  private modeManager: ModeManager;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -150,8 +152,15 @@ export class Agent {
       console.log("[8gent] First run detected — onboarding available. The agent can ask setup questions.");
     }
 
+    // Mode system - scoped personas with tool permissions
+    this.modeManager = getModeManager();
+
     // Build system prompt with personality voice injected
-    const basePrompt = config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    const activeMode = this.modeManager.getActiveMode();
+    const modePrefix = activeMode.systemPromptPrefix
+      ? `## ACTIVE MODE: ${activeMode.name}\n${activeMode.systemPromptPrefix}\n\n`
+      : "";
+    const basePrompt = modePrefix + (config.systemPrompt || DEFAULT_SYSTEM_PROMPT);
     const languageInstruction = this.getLanguageInstruction();
 
     // Inject user context from onboarding data

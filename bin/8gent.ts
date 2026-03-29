@@ -81,6 +81,7 @@ OPTIONS:
   -v, --version  Show version
   --json         Output as JSON (machine-readable)
   --yes          Auto-approve all prompts (non-interactive)
+  --mode=<m>     Agent mode (code, architect, review, debug, ask)
   --model=<m>    Override model (e.g., --model=qwen3:14b)
   --provider=<p> Override provider (e.g., --provider=ollama)
   --cwd=<dir>    Override working directory
@@ -976,6 +977,16 @@ async function chatCommand(args: string[]) {
   const model = (flags.model as string) || undefined;
   const provider = (flags.provider as string) || undefined;
   const cwd = (flags.cwd as string) || process.cwd();
+  const modeFlag = (flags.mode as string) || undefined;
+
+  // Set agent mode if specified
+  if (modeFlag) {
+    const { getModeManager } = await import("../packages/eight/modes");
+    const mgr = getModeManager();
+    if (mgr.setActiveMode(modeFlag)) {
+      console.log(`[Mode] ${mgr.getActiveMode().name}`);
+    }
+  }
 
   let message = rest.join(" ");
 
