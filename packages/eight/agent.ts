@@ -36,6 +36,7 @@ import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orche
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { getExtensionManager } from "../extensions";
+import { CompactionEngine, DEFAULT_COMPACTION_CONFIG, type CompactionResult } from "./compaction";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -68,6 +69,7 @@ import {
 // AI SDK imports
 import {
   createEightAgent,
+  createModel,
   setToolContext,
   type EightAgentConfig,
   type ProviderConfig,
@@ -105,6 +107,7 @@ export class Agent {
   private abortController: AbortController | null = null;
   private orchestratorBus: OrchestratorBus;
   private toolRegistry: ToolRegistry;
+  private compaction: CompactionEngine;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -122,6 +125,7 @@ export class Agent {
 
     // Initialize deferred tool registry (allTools flag loads everything upfront)
     this.toolRegistry = new ToolRegistry(config.allTools ?? false);
+    this.compaction = new CompactionEngine();
 
     // Fire-and-forget AST indexing of working directory for AST-first retrieval
     const cwd = config.workingDirectory || process.cwd();
@@ -850,6 +854,25 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       // Save checkpoint every 5 messages
       if (this.messageHistory.filter(m => m.role === "user").length % 5 === 0) {
         this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
+      }
+
+      // Context compaction - summarize old messages when approaching context limit
+      if (this.compaction.shouldCompact(this.messageHistory)) {
+        try {
+          const compactModel = createModel(providerConfig);
+          const { messages: compacted, result: compactionResult } = await this.compaction.compact(
+            this.messageHistory,
+            compactModel,
+          );
+          this.messageHistory = compacted;
+          console.log(
+            `  [COMPACTION] ${compactionResult.messagesRemoved} messages summarized, ` +
+            `${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`
+          );
+          this.events.onCompaction?.(compactionResult);
+        } catch (err) {
+          console.error("  [COMPACTION] Failed:", (err as Error).message);
+        }
       }
 
       // Move BMAD task to review/done if we had one
