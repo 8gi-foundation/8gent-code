@@ -2,24 +2,24 @@
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # Default owner for everything
-* @jamesspalding
+* @podjamz
 
 # Security-critical - policy engine, permissions
-packages/permissions/ @jamesspalding
+packages/permissions/ @podjamz
 
 # CI/CD workflows and GitHub config
-.github/ @jamesspalding
+.github/ @podjamz
 
 # Vessel infrastructure - daemon, kernel
-packages/daemon/ @jamesspalding
-packages/kernel/ @jamesspalding
+packages/daemon/ @podjamz
+packages/kernel/ @podjamz
 
 # Agent instructions - controls all agent behavior
-CLAUDE.md @jamesspalding
+CLAUDE.md @podjamz
 
 # Governance and security docs
-docs/8GI-*.md @jamesspalding
-SECURITY.md @jamesspalding
+docs/8GI-*.md @podjamz
+SECURITY.md @podjamz
 
 # Package publishing config
-package.json @jamesspalding
+package.json @podjamz
