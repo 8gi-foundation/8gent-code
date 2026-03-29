@@ -13,6 +13,7 @@ import {
   type AccessTier,
   type UserContext,
 } from "./soul-layers";
+import { loadInstructions } from "../instruction-loader";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -290,10 +291,17 @@ export const RULES_SEGMENT = `## CRITICAL RULES
  */
 /** Build full system prompt lazily (reads env vars at call time, not import time) */
 export function getFullSystemPrompt(): string {
+  // Load project-level instruction files (8GENT.md / AGENTS.md / CLAUDE.md)
+  const instructions = loadInstructions(process.cwd());
+  const instructionSegment = instructions
+    ? `## PROJECT INSTRUCTIONS\n\n${instructions}`
+    : "";
+
   return [
     composeSoulPrompt("owner"),
     // Inject vessel context if running as a deployed instance
     process.env.EIGHT_VESSEL_CONTEXT || "",
+    instructionSegment,
     ARCHITECTURE_SEGMENT,
     BMAD_SEGMENT,
     THINKING_PATTERNS_SEGMENT,
@@ -317,8 +325,14 @@ export function buildTieredSystemPrompt(
   tier: AccessTier,
   userContext?: UserContext,
 ): string {
+  const instructions = loadInstructions(process.cwd());
+  const instructionSegment = instructions
+    ? `## PROJECT INSTRUCTIONS\n\n${instructions}`
+    : "";
+
   return [
     composeSoulPrompt(tier, userContext),
+    instructionSegment,
     ARCHITECTURE_SEGMENT,
     BMAD_SEGMENT,
     THINKING_PATTERNS_SEGMENT,
@@ -328,7 +342,7 @@ export function buildTieredSystemPrompt(
     ERROR_RECOVERY_SEGMENT,
     COMPLETION_SEGMENT,
     RULES_SEGMENT,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 /**
@@ -467,15 +481,21 @@ ${state.modifiedFiles?.length ? `- Modified: ${state.modifiedFiles.slice(0, 5).j
 ${state.currentPlan ? `- Plan in progress: Yes` : ""}
 ${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
 
+  const instructions = loadInstructions(state.workingDirectory);
+  const instructionSegment = instructions
+    ? `## PROJECT INSTRUCTIONS\n\n${instructions}`
+    : "";
+
   return [
     composeSoulPrompt(tier, userContext),
     contextSection,
+    instructionSegment,
     BMAD_SEGMENT,
     TOOL_PATTERNS_SEGMENT,
     DESIGN_FIRST_SEGMENT,
     ERROR_RECOVERY_SEGMENT,
     RULES_SEGMENT,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 /**
