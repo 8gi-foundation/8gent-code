@@ -13,26 +13,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
 
       - name: Type check
         run: bun run typecheck
-        continue-on-error: true
 
       - name: Lint
         run: bun run lint
-        continue-on-error: true
 
       - name: Test
         run: bun test
-        continue-on-error: true
 
       - name: Build CLI
         run: bun run build
@@ -79,3 +78,75 @@ jobs:
             }
             console.log(p.policies.length + ' policies loaded - OK');
           "
+
+      - name: Dependency audit
+        run: |
+          npx audit-ci --high 2>/dev/null || {
+            echo "::warning::Dependency audit found high/critical vulnerabilities"
+            npm audit --audit-level=high 2>/dev/null || true
+          }
+
+      - name: 200-line rule check
+        run: |
+          bun -e "
+            import { readdirSync, readFileSync, statSync } from 'fs';
+            import { join, relative } from 'path';
+
+            const EXEMPT_PATTERNS = [
+              /\.d\.ts$/, /\.test\.ts$/, /\.spec\.ts$/, /\.config\./,
+              /node_modules/, /dist\//, /\.next\//, /\.8gent\//,
+              /benchmarks\//, /\.github\//,
+            ];
+
+            const MAX_LINES = 200;
+            const violations: string[] = [];
+
+            function scan(dir: string) {
+              for (const entry of readdirSync(dir, { withFileTypes: true })) {
+                const full = join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git') continue;
+                  scan(full);
+                } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+                  const rel = relative(process.cwd(), full);
+                  if (EXEMPT_PATTERNS.some(p => p.test(rel))) continue;
+
+                  const content = readFileSync(full, 'utf-8');
+                  if (content.includes('8gi:200-exempt')) continue;
+
+                  const lines = content.split('\n')
+                    .filter(l => l.trim() !== '' && !l.trim().startsWith('//') && !l.trim().startsWith('/*') && !l.trim().startsWith('*'))
+                    .length;
+
+                  if (lines > MAX_LINES) {
+                    violations.push(rel + ': ' + lines + ' lines');
+                  }
+                }
+              }
+            }
+
+            scan('packages');
+            scan('apps');
+            scan('bin');
+
+            if (violations.length > 0) {
+              console.log('200-line rule violations (' + violations.length + ' files):');
+              violations.forEach(v => console.log('  ' + v));
+              console.log('');
+              console.log('Add \"// 8gi:200-exempt\" to files with documented exceptions.');
+              console.log('::warning::' + violations.length + ' files exceed 200-line limit');
+            } else {
+              console.log('200-line rule: PASS');
+            }
+          "
+
+      - name: CHANGELOG entry required
+        if: github.event_name == 'pull_request'
+        run: |
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..HEAD 2>/dev/null || git diff --name-only HEAD~1)
+          if echo "$CHANGED" | grep -q "CHANGELOG.md"; then
+            echo "CHANGELOG entry found - OK"
+          else
+            echo "::error::PR must include a CHANGELOG.md entry"
+            exit 1
+          fi
