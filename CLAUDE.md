@@ -93,6 +93,26 @@ bun run benchmarks/autoresearch/harness.ts   # run harness directly
 4. **No stat padding.** Never pad descriptions with arbitrary numbers (package counts, benchmark counts, commit counts). Only state what actually exists with evidence.
 5. **No enthusiasm inflation.** Don't oversell. State what was done, what works, what doesn't.
 6. **No secrets in chat. Ever.** Never ask the user to paste tokens, API keys, passwords, or any credentials in the chat. Never output secrets to chat logs. Read secrets from env files or secret managers directly. Use `flyctl secrets set`, env files, or similar tooling. This rule is non-negotiable and applies to all agents, sub-agents, and vessel processes.
+7. **No AI tooling company traces in 8GI GitHub.** Never add "Co-Authored-By: Claude", "Anthropic", "Generated with Claude Code", "OpenAI", or any AI tool vendor attribution to commits, PRs, issues, or code comments. Work is signed by James Spalding and/or the 8gent vessels (8EO, 8TO, etc.) when James is orchestrating. No third-party AI tool branding in any 8GI repo.
+
+## Work Sign-Off Protocol (8GI FOUNDATION STANDARD)
+
+**Every agent working on ANY 8GI repo MUST end task responses with this sign-off. Non-negotiable.**
+
+```
+SIGN-OFF:
+  VOICE:    say -v {Officer} "{summary}"
+  VALIDATE: {production URL}
+  VISUAL:   {screenshot confirmation or "Deploy pending"}
+  COMMIT:   {message} - {hash} on {branch}
+  PUSHED:   {org}/{repo} {branch}
+  ISSUE:    {GH issue URL} ({status}) or "No linked issue"
+  PR:       {PR URL} or "Direct push to {branch}"
+```
+
+This is the chain of custody. Voice for accessibility. URL for validation. Visual for regression. Git for traceability. GH for project management.
+
+Individual contributors may add personal preferences (voice, formatting, review style) via their own `~/.claude/CLAUDE.md`. But the sign-off protocol is company-wide.
 
 ## Writing Rules
 
