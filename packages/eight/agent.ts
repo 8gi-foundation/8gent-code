@@ -35,6 +35,9 @@ import { KernelManager } from "../kernel/manager";
 import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orchestrator-bus";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 
+// MCP - external tool servers
+import { MCPClient } from "../mcp";
+
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
 
@@ -102,6 +105,7 @@ export class Agent {
   private kernel: KernelManager;
   private abortController: AbortController | null = null;
   private orchestratorBus: OrchestratorBus;
+  private mcpClient: MCPClient;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -224,6 +228,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
     // Initialize orchestrator bus for multi-agent coordination
     this.orchestratorBus = getOrchestratorBus();
+
+    // Initialize MCP client - connects to external tool servers in background
+    this.mcpClient = new MCPClient();
+    this.mcpClient.connect().then(() => {
+      const servers = this.mcpClient.listServers();
+      if (servers.length > 0) {
+        const total = servers.reduce((sum, s) => sum + s.toolCount, 0);
+        console.log(`[mcp] ${servers.length} server(s) connected, ${total} tools available`);
+      }
+    }).catch((err) => {
+      console.error(`[mcp] Connection failed: ${err}`);
+    });
 
     // Populate git info asynchronously
     import("child_process").then(({ exec }) => {
@@ -383,12 +399,19 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Build system instructions
     const systemPrompt = this.messageHistory.find(m => m.role === "system")?.content;
 
+    // Merge MCP tools with built-in tools if any MCP servers are connected
+    const mcpTools = this.mcpClient.isConnected() ? this.mcpClient.getTools() : {};
+    const mergedTools = Object.keys(mcpTools).length > 0
+      ? { ...require("../ai").agentTools, ...mcpTools }
+      : undefined; // undefined = use default agentTools
+
     // Create the AI SDK agent with v2 session callbacks
     const agentConfig: EightAgentConfig = {
       provider: providerConfig,
       instructions: systemPrompt,
       maxSteps: this.config.maxTurns || 30,
       workingDirectory: this.config.workingDirectory || process.cwd(),
+      ...(mergedTools ? { tools: mergedTools } : {}),
 
       onToolCallStart: async (event) => {
         await this.hookManager.executeHooks("beforeTool", {
@@ -1106,6 +1129,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     await this.kernel.stop().catch(() => {});
     // Shutdown orchestrator bus and all sub-agents
     await this.orchestratorBus.shutdown().catch(() => {});
+    // Close MCP server connections
+    this.mcpClient.close();
     // Stop heartbeat agents
     this.heartbeat.stop();
 
