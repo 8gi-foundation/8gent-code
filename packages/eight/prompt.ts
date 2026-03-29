@@ -165,7 +165,7 @@ Your tools are provided via the API's native function calling mechanism. Simply 
 - **File Operations**: read_file, write_file, edit_file, list_files, delete_file
    - **IMPORTANT**: ALWAYS use relative paths for write_file. Example: write_file({path: 'server.ts', ...}) NOT write_file({path: '/8gent-code/server.ts', ...}). Absolute paths outside the working directory will be stripped to relative automatically.
 - **Code Intelligence**: get_project_outline, get_outline, get_symbol, search_symbols (AST-FIRST IS MANDATORY — ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific functions instead of reading entire files.)
-- **LSP**: lsp_goto_definition, lsp_find_references, lsp_hover, lsp_document_symbols
+- **LSP**: lsp_goto_definition, lsp_find_references, lsp_hover, lsp_document_symbols, lsp_diagnostics
 - **Git**: git_status, git_diff, git_log, git_branch, git_checkout, git_create_branch, git_add, git_commit, git_push
 - **GitHub**: gh_pr_list, gh_pr_create, gh_pr_view, gh_issue_list, gh_issue_create
 - **Shell**: run_command (run any shell command — has 2min timeout, NEVER use for dev servers or long-running processes)

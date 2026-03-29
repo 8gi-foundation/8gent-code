@@ -402,6 +402,17 @@ const lspDocumentSymbols = tool({
   },
 });
 
+const lspDiagnostics = tool({
+  description: "Get errors and warnings for a file via LSP",
+  inputSchema: z.object({
+    filePath: z.string().describe("Path to the file"),
+  }),
+  execute: async ({ filePath }) => {
+    const { lspDiagnostics } = await import("../lsp");
+    return lspDiagnostics(filePath, _ctx.workingDirectory);
+  },
+});
+
 // ============================================
 // Image Tools
 // ============================================
@@ -1244,6 +1255,7 @@ export const agentTools = {
   lsp_find_references: lspFindReferences,
   lsp_hover: lspHover,
   lsp_document_symbols: lspDocumentSymbols,
+  lsp_diagnostics: lspDiagnostics,
 
   // Image
   read_image: readImage,
