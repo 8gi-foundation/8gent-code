@@ -70,6 +70,21 @@ interface Hover {
   range?: Range;
 }
 
+interface Diagnostic {
+  range: Range;
+  severity?: number;
+  code?: number | string;
+  source?: string;
+  message: string;
+}
+
+const SEVERITY_MAP: Record<number, string> = {
+  1: "Error",
+  2: "Warning",
+  3: "Information",
+  4: "Hint",
+};
+
 // Symbol kind mapping from LSP spec
 const SYMBOL_KIND_MAP: Record<number, string> = {
   1: "File",
@@ -152,6 +167,7 @@ export class LSPClient {
   private buffer: string = "";
   private initialized: boolean = false;
   private openDocuments: Set<string> = new Set();
+  private diagnosticWaiters: Map<string, (diags: Diagnostic[]) => void> = new Map();
 
   constructor(language: string, workspaceRoot: string) {
     this.language = language;
@@ -298,6 +314,39 @@ export class LSPClient {
     }
 
     return null;
+  }
+
+  /**
+   * Get diagnostics for a file (errors, warnings)
+   * LSP publishes diagnostics via notifications, so we open/change the doc
+   * and collect the next publishDiagnostics notification.
+   */
+  async diagnostics(filePath: string): Promise<Diagnostic[]> {
+    await this.ensureDocumentOpen(filePath);
+
+    return new Promise<Diagnostic[]>((resolve) => {
+      const uri = this.pathToUri(filePath);
+      const handler = (diags: Diagnostic[]) => resolve(diags);
+      this.diagnosticWaiters.set(uri, handler);
+
+      // Re-send didChange to trigger fresh diagnostics
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.join(this.workspaceRoot, filePath);
+      const content = fs.readFileSync(absolutePath, "utf-8");
+      this.sendNotification("textDocument/didChange", {
+        textDocument: { uri, version: Date.now() },
+        contentChanges: [{ text: content }],
+      });
+
+      // Timeout - return empty if server doesn't respond in 5s
+      setTimeout(() => {
+        if (this.diagnosticWaiters.has(uri)) {
+          this.diagnosticWaiters.delete(uri);
+          resolve([]);
+        }
+      }, 5000);
+    });
   }
 
   /**
@@ -461,6 +510,7 @@ export class LSPClient {
   }
 
   private handleMessage(message: LSPMessage): void {
+    // Handle responses to our requests
     if (message.id !== undefined) {
       const pending = this.pendingRequests.get(message.id);
       if (pending) {
@@ -470,6 +520,16 @@ export class LSPClient {
         } else {
           pending.resolve(message.result);
         }
+      }
+    }
+
+    // Handle server-initiated notifications
+    if (message.method === "textDocument/publishDiagnostics" && message.params) {
+      const params = message.params as { uri: string; diagnostics: Diagnostic[] };
+      const waiter = this.diagnosticWaiters.get(params.uri);
+      if (waiter) {
+        this.diagnosticWaiters.delete(params.uri);
+        waiter(params.diagnostics || []);
       }
     }
   }
@@ -766,4 +826,55 @@ export async function lspDocumentSymbols(
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+/**
+ * Diagnostics helper - get errors/warnings for a file
+ */
+export async function lspDiagnostics(
+  filePath: string,
+  workspaceRoot: string = process.cwd()
+): Promise<string> {
+  const manager = getLSPManager();
+  const language = manager.getLanguageForFile(filePath);
+
+  if (!language) {
+    return `Unsupported file type: ${path.extname(filePath)}`;
+  }
+
+  try {
+    const client = await manager.getClient(language, workspaceRoot);
+    const diags = await client.diagnostics(filePath);
+
+    if (!diags || diags.length === 0) {
+      return "No diagnostics (clean)";
+    }
+
+    return `Found ${diags.length} diagnostic(s):\n` +
+      diags.map(d =>
+        `  [${SEVERITY_MAP[d.severity || 1]}] line ${d.range.start.line + 1}: ${d.message}${d.source ? ` (${d.source})` : ""}`
+      ).join("\n");
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+/**
+ * Auto-detect which language server to use based on project config files.
+ * Returns the language key or null if no server matches.
+ */
+export function detectLanguageServer(projectRoot: string): string | null {
+  if (fs.existsSync(path.join(projectRoot, "tsconfig.json")) ||
+      fs.existsSync(path.join(projectRoot, "package.json"))) {
+    return "typescript";
+  }
+  if (fs.existsSync(path.join(projectRoot, "pyproject.toml")) ||
+      fs.existsSync(path.join(projectRoot, "setup.py")) ||
+      fs.existsSync(path.join(projectRoot, "pyrightconfig.json"))) {
+    return "python";
+  }
+  if (fs.existsSync(path.join(projectRoot, "Cargo.toml"))) {
+    return "rust";
+  }
+  return null;
 }

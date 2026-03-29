@@ -636,6 +636,7 @@ function handleLSPCommands(trimmed: string): boolean {
     - lsp_find_references: Find all usages
     - lsp_hover: Get type info and docs
     - lsp_document_symbols: Get all symbols in file
+    - lsp_diagnostics: Get errors and warnings for a file
 `);
     return true;
   }
