@@ -406,10 +406,14 @@ export function evaluatePolicy(
 ): PolicyDecision {
   if (!_loaded) loadPolicies();
 
+  const agentId = context.agentId as string | undefined;
+
   const applicable = _policies.filter(
     (r) =>
       (r.enabled !== false) &&
-      (r.action === action || r.action === "*")
+      (r.action === action || r.action === "*") &&
+      // Agent scope: rule applies if no scope (global) or scope matches agent
+      (!r.agentScope || r.agentScope === agentId)
   );
 
   // Build index-aware list for pre-parsed condition lookup
@@ -479,3 +483,53 @@ export function checkCommand(command: string): PolicyDecision {
 export function checkGitPush(branch: string): PolicyDecision {
   return evaluatePolicy("git_push", { branch });
 }
+
+/**
+ * Get all policy rules that apply to a specific agent.
+ * Returns global rules (no agentScope) plus agent-specific rules.
+ */
+export function getAgentPolicy(agentId: string): PolicyRule[] {
+  if (!_loaded) loadPolicies();
+  return _policies.filter(
+    (r) => (r.enabled !== false) && (!r.agentScope || r.agentScope === agentId)
+  );
+}
+
+/**
+ * Default restrictive policy rules for spawned/imported agents.
+ * These block network, git push, and secret access unless explicitly overridden.
+ */
+export const SPAWNED_AGENT_RESTRICTIONS: PolicyRule[] = [
+  {
+    name: "spawned-no-network",
+    action: "network_request",
+    condition: "url contains .",
+    decision: "block",
+    message: "Spawned agents cannot make network requests by default.",
+    agentScope: "__spawned__",
+  },
+  {
+    name: "spawned-no-git-push",
+    action: "git_push",
+    condition: "branch contains ",
+    decision: "block",
+    message: "Spawned agents cannot push to git by default.",
+    agentScope: "__spawned__",
+  },
+  {
+    name: "spawned-no-secrets",
+    action: "secret_write",
+    condition: "key contains ",
+    decision: "block",
+    message: "Spawned agents cannot write secrets by default.",
+    agentScope: "__spawned__",
+  },
+  {
+    name: "spawned-no-env",
+    action: "env_access",
+    condition: "key contains ",
+    decision: "block",
+    message: "Spawned agents cannot access env vars by default.",
+    agentScope: "__spawned__",
+  },
+];
