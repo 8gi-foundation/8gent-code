@@ -1,0 +1,56 @@
+# 8gent Code - User Hooks Configuration
+#
+# Place this file at ~/.8gent/hooks.yaml to activate.
+# Each hook receives a JSON payload on stdin and can return JSON on stdout.
+# Return { "block": true, "reason": "..." } from PreToolUse to prevent a tool call.
+#
+# Events:
+#   PreToolUse   - Before a tool runs (can block)
+#   PostToolUse  - After a tool completes
+#   SessionStart - When the agent session begins
+#   SessionEnd   - When the agent session ends
+#   OnError      - When the agent encounters an error
+#
+# Fields:
+#   event:   (required) One of the events above
+#   matcher: (optional) Tool name to match, or "*" for all tools. Default: "*"
+#   command: (required) Shell command to run
+#   timeout: (optional) Max execution time in ms. Default: 5000
+
+# --- Examples ---
+
+# Log all tool calls to a file
+- event: PreToolUse
+  matcher: "*"
+  command: |
+    jq -r '"[" + now + "] " + .tool' >> ~/.8gent/logs/tool-calls.log
+
+# Block dangerous shell commands containing "rm -rf /"
+- event: PreToolUse
+  matcher: run_command
+  command: |
+    INPUT=$(cat)
+    CMD=$(echo "$INPUT" | jq -r '.args.command // ""')
+    if echo "$CMD" | grep -q 'rm -rf /'; then
+      echo '{"block": true, "reason": "Blocked: rm -rf / is not allowed"}'
+    else
+      echo '{"block": false}'
+    fi
+
+# Notify on session start
+- event: SessionStart
+  command: |
+    echo "8gent session started" | logger -t 8gent
+
+# Send a notification on error
+- event: OnError
+  command: |
+    INPUT=$(cat)
+    ERR=$(echo "$INPUT" | jq -r '.error // "unknown"')
+    osascript -e "display notification \"$ERR\" with title \"8gent Error\"" 2>/dev/null || true
+
+# Post-tool logging with result preview
+- event: PostToolUse
+  matcher: write_file
+  command: |
+    jq -r '"Wrote file via " + .tool' >> ~/.8gent/logs/file-ops.log
