@@ -50,6 +50,7 @@ const TOOL_CAPABILITIES: Record<string, Capability[]> = {
   lsp_find_references: ["code", "code.symbol"],
   lsp_hover: ["code", "code.symbol"],
   lsp_document_symbols: ["code", "code.symbol"],
+  lsp_diagnostics: ["code", "code.diagnostics"],
 
   // Web
   web_search: ["execution"],

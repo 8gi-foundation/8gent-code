@@ -46,6 +46,7 @@ import {
   lspFindReferences,
   lspHover,
   lspDocumentSymbols,
+  lspDiagnostics,
 } from "../lsp";
 import {
   webSearch,
@@ -675,6 +676,8 @@ export class ToolExecutor {
         );
       case "lsp_document_symbols":
         return lspDocumentSymbols(args.filePath as string, this.workingDirectory);
+      case "lsp_diagnostics":
+        return lspDiagnostics(args.filePath as string, this.workingDirectory);
 
       // File operations (with path traversal protection)
       case "read_file": {
