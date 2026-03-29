@@ -238,6 +238,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       workingDirectory: config.workingDirectory || process.cwd(),
     });
 
+    // Fire YAML SessionStart hooks (best-effort)
+    this.hookManager.fire("SessionStart", {
+      sessionId: this.sessionId,
+      workingDirectory: config.workingDirectory || process.cwd(),
+    }).catch(() => { /* SessionStart hooks are best-effort */ });
+
     // Remove any persisted shell-based voice hooks
     const allHooks = this.hookManager.getAllHooks();
     for (const hook of allHooks) {
@@ -397,6 +403,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
           toolInput: event.args,
           workingDirectory: this.config.workingDirectory || process.cwd(),
         });
+
+        // Fire YAML PreToolUse hooks - if any hook blocks, skip the tool
+        const preResult = await this.hookManager.fire("PreToolUse", {
+          tool: event.toolName,
+          args: event.args,
+          sessionId: this.sessionId,
+        });
+        if (preResult.blocked) {
+          console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
+          throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
+        }
 
         console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
 
@@ -560,6 +577,16 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
           duration: event.durationMs,
           workingDirectory: this.config.workingDirectory || process.cwd(),
         });
+
+        // Fire YAML PostToolUse hooks (non-blocking, best-effort)
+        this.hookManager.fire("PostToolUse", {
+          tool: event.toolName,
+          args: event.args,
+          result: resultStr.slice(0, 2000),
+          success: event.success,
+          durationMs: event.durationMs,
+          sessionId: this.sessionId,
+        }).catch(() => { /* PostToolUse hooks are best-effort */ });
       },
 
       onStepFinish: async (event: StepFinishEvent) => {
@@ -885,6 +912,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
         stack: err instanceof Error ? err.stack ?? null : null,
         recoverable: false,
       });
+
+      // Fire YAML OnError hooks (best-effort)
+      this.hookManager.fire("OnError", {
+        error: errMsg,
+        stack: err instanceof Error ? err.stack : undefined,
+        sessionId: this.sessionId,
+      }).catch(() => { /* OnError hooks are best-effort */ });
 
       if (this.enableReporting) {
         appendRun({
