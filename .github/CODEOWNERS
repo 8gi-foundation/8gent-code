@@ -1,0 +1,25 @@
+# 8gent Code - CODEOWNERS
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* [REDACTED]
+
+# Security-critical - policy engine, permissions
+packages/permissions/ [REDACTED]
+
+# CI/CD workflows and GitHub config
+.github/ [REDACTED]
+
+# Vessel infrastructure - daemon, kernel
+packages/daemon/ [REDACTED]
+packages/kernel/ [REDACTED]
+
+# Agent instructions - controls all agent behavior
+CLAUDE.md [REDACTED]
+
+# Governance and security docs
+docs/8GI-*.md [REDACTED]
+SECURITY.md [REDACTED]
+
+# Package publishing config
+package.json [REDACTED]
