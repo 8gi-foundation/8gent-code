@@ -162,15 +162,36 @@ function loadProviderSettings(): { provider: string; model: string } {
       const data = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
       return {
         provider: data.activeProvider || "ollama",
-        model: data.activeModel || "qwen3.5:latest",
+        model: data.activeModel || "",
       };
     }
   } catch {}
-  return { provider: "ollama", model: "qwen3.5:latest" };
+  return { provider: "ollama", model: "" };
+}
+
+/** Query Ollama for the first available model. Returns empty string if none. */
+function detectDefaultModel(): string {
+  try {
+    // Synchronous fetch via Bun - check what's actually running
+    const { execSync } = require("child_process");
+    const raw = execSync("curl -s http://localhost:11434/api/tags", { timeout: 3000 }).toString();
+    const data = JSON.parse(raw);
+    const models = (data.models || []).map((m: any) => m.name as string);
+    if (models.length === 0) return "";
+    // Prefer "eight" models, then anything else
+    const eight = models.find((m: string) => m.startsWith("eight"));
+    return eight || models[0];
+  } catch {
+    return "";
+  }
 }
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
+// If no model saved, detect from what's actually available
+if (!_savedProviderSettings.model) {
+  _savedProviderSettings.model = detectDefaultModel();
+}
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
@@ -473,7 +494,7 @@ export function App({ initialCommand, args }: AppProps) {
           if (res.ok) {
             const data = await res.json();
             const models = (data.models || []).map((m: any) => m.name as string);
-            if (!cancelled) setAvailableModels(models.length > 0 ? models : ["qwen3.5:latest"]);
+            if (!cancelled) setAvailableModels(models);
           }
         } else if (currentProvider === "lmstudio") {
           // Fetch LM Studio models
@@ -517,9 +538,7 @@ export function App({ initialCommand, args }: AppProps) {
         }
       } catch {
         // Provider not reachable — show fallback
-        if (!cancelled) setAvailableModels(currentProvider === "ollama"
-          ? ["qwen3.5:latest", "devstral:latest"]
-          : ["google/gemini-2.5-flash:free"]);
+        if (!cancelled) setAvailableModels([]);
       }
       if (!cancelled) setModelsLoading(false);
     };
@@ -707,6 +726,20 @@ export function App({ initialCommand, args }: AppProps) {
   useEffect(() => {
     const initAgent = async () => {
       try {
+        // Auto-assign router slots from actually available models
+        if (currentProvider === "ollama") {
+          const router = getTaskRouter();
+          const changes = await router.autoAssign();
+          // If current model is empty, use whatever autoAssign found
+          if (!currentModel) {
+            const cfg = router.getConfig();
+            if (cfg.defaultModel.model) {
+              setCurrentModel(cfg.defaultModel.model);
+              return; // Will re-trigger this effect with the new model
+            }
+          }
+        }
+
         // Map provider to runtime
         let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
         if (currentProvider === "lmstudio") {
@@ -1107,6 +1140,8 @@ export function App({ initialCommand, args }: AppProps) {
               "  /pet [start|stop|deck|card] - Lil Eight companion\n" +
               "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
+              "  /telegram - Connect a Telegram bot\n" +
+              "  /router - Task router settings\n" +
               "  /plan - Show current plan status\n" +
               "  /status - Show session status\n" +
               "  /clear - Clear messages\n" +
@@ -1170,6 +1205,43 @@ export function App({ initialCommand, args }: AppProps) {
               `  Sound: ${soundEnabled ? "on" : "off"}`
           );
           break;
+
+        case "telegram": {
+          const sub = args[0]?.toLowerCase();
+          if (sub === "status") {
+            const hasToken = !!process.env.TELEGRAM_BOT_TOKEN;
+            const chatId = process.env.TELEGRAM_CHAT_ID || "not set";
+            addSystemMessage(
+              `Telegram Bot Status:\n` +
+              `  Token: ${hasToken ? "configured" : "not configured"}\n` +
+              `  Chat ID: ${chatId}\n\n` +
+              (hasToken ? "Bot is running." : "Run /telegram setup to connect a bot.")
+            );
+          } else if (sub === "setup") {
+            addSystemMessage(
+              "Telegram Bot Setup:\n\n" +
+              "1. Open Telegram and message @BotFather\n" +
+              "2. Send /newbot and follow the prompts\n" +
+              "3. Copy the bot token (looks like 123456:ABC-DEF...)\n" +
+              "4. Add it to your environment:\n\n" +
+              "   echo 'TELEGRAM_BOT_TOKEN=your_token_here' >> ~/.8gent/.env\n\n" +
+              "5. Optionally restrict to your chat:\n" +
+              "   - Message your bot, then check:\n" +
+              "     curl https://api.telegram.org/bot<TOKEN>/getUpdates\n" +
+              "   - Copy your chat_id and add:\n" +
+              "     echo 'TELEGRAM_CHAT_ID=your_id' >> ~/.8gent/.env\n\n" +
+              "6. Restart 8gent to activate the bot.\n\n" +
+              "Your bot becomes a mobile interface to 8gent."
+            );
+          } else {
+            addSystemMessage(
+              "Telegram commands:\n" +
+              "  /telegram status  - Check connection\n" +
+              "  /telegram setup   - Setup instructions"
+            );
+          }
+          break;
+        }
 
         case "clear":
           setMessages([
@@ -2594,6 +2666,17 @@ export function App({ initialCommand, args }: AppProps) {
         ready: newPredictions.slice(0, 3) as any,
         backlog: newPredictions.slice(3) as any,
       }));
+
+      if (!currentModel) {
+        addSystemMessage(
+          "[No model available] No Ollama models detected.\n" +
+          "Pull a model first: ollama pull qwen3:14b\n" +
+          "Or switch provider with /provider"
+        );
+        agentRunningRef.current = false;
+        setIsProcessing(false);
+        return;
+      }
 
       if (agent && agentReady) {
         try {
