@@ -1019,3 +1019,10 @@ export function isInfiniteMode(): boolean {
   const manager = getPermissionManager();
   return manager.isInfiniteMode();
 }
+
+// ============================================
+// Re-exports: ToolG8 + Policy Engine
+// ============================================
+
+export { ToolG8 } from "./toolg8.js";
+export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS } from "./policy-engine.js";
