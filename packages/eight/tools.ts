@@ -20,6 +20,8 @@ import {
   isCommandDangerous,
   type PermissionManager,
 } from "../permissions";
+import { ToolG8 } from "../permissions/toolg8.js";
+import type { PolicyActionType } from "../permissions/types.js";
 import {
   getHookManager,
   type HookManager,
@@ -197,12 +199,16 @@ export class ToolExecutor {
   private workingDirectory: string;
   private permissionManager: PermissionManager;
   private hookManager: HookManager;
+  private toolG8: ToolG8;
+  private agentId: string;
   private astIndexReady: boolean = false;
   private astRepoId: string | null = null;
   private astIndexPromise: Promise<RepoIndex> | null = null;
 
-  constructor(workingDirectory: string = process.cwd()) {
+  constructor(workingDirectory: string = process.cwd(), agentId: string = "primary") {
     this.workingDirectory = workingDirectory;
+    this.agentId = agentId;
+    this.toolG8 = ToolG8.instance();
     this.permissionManager = getPermissionManager();
     this.hookManager = getHookManager();
     this.hookManager.setWorkingDirectory(workingDirectory);
@@ -636,10 +642,42 @@ export class ToolExecutor {
 
   private rateLimiter = new RateLimiter();
 
+  /**
+   * Map tool names to policy action types for ToolG8 gate evaluation.
+   */
+  private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
+    read_file: "read_file",
+    write_file: "write_file",
+    edit_file: "write_file",
+    delete_file: "delete_file",
+    run_command: "run_command",
+    git_push: "git_push",
+    git_commit: "git_commit",
+    web_search: "network_request",
+    web_fetch: "network_request",
+  };
+
   async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
     // Rate limit check - prevents LLM loops from exhausting resources
     const rateLimitError = this.rateLimiter.check(toolName);
     if (rateLimitError) return rateLimitError;
+
+    // ToolG8 gate - evaluate policy before execution
+    const policyAction = ToolExecutor.TOOL_ACTION_MAP[toolName];
+    if (policyAction) {
+      const gateResult = this.toolG8.gate(this.agentId, policyAction, {
+        path: args.path as string,
+        content: args.content as string,
+        command: args.command as string,
+        branch: args.branch as string,
+        url: args.url as string,
+        key: args.key as string,
+      });
+      if (!gateResult.allowed) {
+        const alt = gateResult.alternative ? ` Alternative: ${gateResult.alternative}` : "";
+        return `[TOOLG8 BLOCKED] ${gateResult.reason}${alt}`;
+      }
+    }
 
     switch (toolName) {
       // Code exploration
