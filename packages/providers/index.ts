@@ -17,6 +17,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { AuthRotator } from "./auth-rotation";
+import { ModelFailover } from "./failover";
 
 // ============================================
 // Types
@@ -271,10 +273,14 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 export class ProviderManager {
   private settings: ProviderSettings;
   private settingsPath: string;
+  readonly authRotator: AuthRotator;
+  readonly failover: ModelFailover;
 
   constructor(settingsPath?: string) {
     this.settingsPath = settingsPath || path.join(os.homedir(), ".8gent", "providers.json");
     this.settings = this.loadSettings();
+    this.authRotator = new AuthRotator();
+    this.failover = new ModelFailover();
   }
 
   private loadSettings(): ProviderSettings {
@@ -373,8 +379,12 @@ export class ProviderManager {
   }
 
   getApiKey(name: ProviderName): string | null {
+    // Try rotated profiles first (round-robin with cooldown awareness)
+    const rotated = this.authRotator.getKey(name);
+    if (rotated) return rotated;
+
     const config = this.getProvider(name);
-    // Check saved key first
+    // Check saved key
     if (config.apiKey) return config.apiKey;
     // Then environment variable
     if (config.apiKeyEnv && process.env[config.apiKeyEnv]) {
@@ -507,6 +517,18 @@ export class ProviderManager {
       headers,
       body: JSON.stringify(body),
     });
+
+    if (response.status === 429) {
+      // Rate limited - mark profile and try failover
+      this.authRotator.markRateLimited(provider.name);
+      const fallback = this.failover.resolve(model);
+      if (fallback.model !== model || fallback.provider !== provider.name) {
+        const fallbackProvider = this.getProvider(fallback.provider as ProviderName);
+        return this.chatOpenAICompatible(fallbackProvider, request, fallback.model);
+      }
+      const errorText = await response.text();
+      throw new Error(`${provider.displayName} rate limited: 429 ${errorText}`);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -741,6 +763,9 @@ export const PROVIDER_NAMES: ProviderName[] = [
   "fireworks",
   "replicate",
 ];
+
+export { AuthRotator, type AuthProfile } from "./auth-rotation";
+export { ModelFailover, type FailoverChain, type FailoverEntry } from "./failover";
 
 export default {
   getProviderManager,
