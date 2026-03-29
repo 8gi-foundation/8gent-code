@@ -35,6 +35,7 @@ import { KernelManager } from "../kernel/manager";
 import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orchestrator-bus";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
+import { getExtensionManager } from "../extensions";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -282,6 +283,22 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
         });
       }
     }
+
+    // ── Extensions: Load from ~/.8gent/extensions/ ──────────────────
+    const extMgr = getExtensionManager();
+    extMgr.loadAll().then((exts) => {
+      const loaded = exts.filter((e) => e.status === "loaded");
+      if (loaded.length > 0) {
+        const extTools = extMgr.getTools();
+        for (const [name, fn] of Object.entries(extTools)) {
+          // Register as AI SDK tools via the tool registry
+          this.toolRegistry.registerExternalTool(name, fn);
+        }
+        console.log(`[ext] ${loaded.length} extension(s), ${Object.keys(extTools).length} tool(s) registered`);
+      }
+    }).catch((err) => {
+      console.log(`[ext] Extension loading failed: ${err}`);
+    });
   }
 
   async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
