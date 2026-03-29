@@ -65,6 +65,11 @@ export class ToolRegistry {
     return Object.fromEntries(this.activeTools) as ToolSet;
   }
 
+  /** Register an external tool (e.g. from extensions) */
+  registerExternalTool(name: string, handler: Function): void {
+    this.activeTools.set(name, handler as ToolSet[string]);
+  }
+
   /** Which categories are currently loaded */
   getLoadedCategories(): string[] {
     return [...this.loadedCategories];
