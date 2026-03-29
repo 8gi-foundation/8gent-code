@@ -879,7 +879,7 @@ async function authCommand(args: string[]) {
     }
 
     case "status": {
-      const { initAuth } = await import("../packages/auth");
+      const { initAuth, getVesselId, getProxyUrl, isProxyAvailable } = await import("../packages/auth");
       const state = await initAuth();
 
       if (state.state === "authenticated") {
@@ -897,9 +897,22 @@ async function authCommand(args: string[]) {
         } else {
           console.log(`  Token:   expired (will refresh on next use)`);
         }
+
+        // Show proxy and vessel info
+        const vesselId = getVesselId();
+        const proxyUrl = getProxyUrl();
+        console.log(`  Vessel:  ${vesselId}`);
+        console.log(`  Proxy:   ${proxyUrl}`);
+
+        const proxyUp = await isProxyAvailable(proxyUrl);
+        console.log(`  Status:  proxy ${proxyUp ? "reachable" : "unreachable (will use local Ollama)"}`);
       } else {
         console.log("Not logged in.");
         console.log("Run `8gent auth login` to authenticate with GitHub.");
+
+        // Still show vessel ID - it exists regardless of auth
+        const vesselId = getVesselId();
+        console.log(`\n  Vessel:  ${vesselId} (local-only mode)`);
       }
       break;
     }
