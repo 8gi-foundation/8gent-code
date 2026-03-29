@@ -85,7 +85,8 @@ export type SlashCommand =
   | "debug"
   | "music"
   | "dj"
-  | "pet";
+  | "pet"
+  | "export";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -219,6 +220,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["companion", "lileight"],
     description: "Spawn Lil Eight dock companion + show companion card",
     usage: "/pet [start|stop|deck|card]",
+  },
+  {
+    name: "export",
+    aliases: ["save"],
+    description: "Export current session as self-contained HTML",
+    usage: "/export",
   },
   {
     name: "router",
