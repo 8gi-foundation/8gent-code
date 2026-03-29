@@ -78,6 +78,7 @@ export interface AgentEventCallbacks {
   onStepFinish?: (event: AgentStepEvent) => void;
   onEvidence?: (event: AgentEvidenceEvent) => void;
   onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;
+  onCompaction?: (event: { summary: string; tokensBefore: number; tokensAfter: number; messagesRemoved: number; filesRead: string[]; filesModified: string[] }) => void;
 }
 
 export interface AgentConfig {
