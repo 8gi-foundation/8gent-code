@@ -10,6 +10,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 import { parse as parseYaml } from "yaml";
 import type { PolicyRule, PolicyDecision, PolicyContext, PolicyActionType, PolicyFile } from "./types.js";
 
@@ -29,6 +30,11 @@ const DEFAULT_POLICY_PATH = path.join(
 const USER_POLICY_PATH = path.join(
   process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
   "policies.yaml"
+);
+
+const POLICY_CHECKSUM_PATH = path.join(
+  process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+  "policy-checksum"
 );
 
 // ============================================
@@ -140,39 +146,84 @@ let _policies: PolicyRule[] = [];
 /** Pre-parsed conditions keyed by rule index for fast evaluation */
 let _parsedConditions: Map<number, ParsedCondition> = new Map();
 let _loaded = false;
+/** Flag set when policy file checksum does not match stored hash */
+let _integrityWarning: string | null = null;
 
 // ============================================
 // YAML Loader
 // ============================================
 
 /**
+ * Compute SHA-256 hash of a string.
+ */
+function sha256(content: string): string {
+  return crypto.createHash("sha256").update(content, "utf-8").digest("hex");
+}
+
+/**
+ * Verify or store a policy file checksum.
+ * On first load, stores the hash. On subsequent loads, compares.
+ * Returns null if valid/first-run, or an error string if mismatch.
+ */
+function verifyChecksum(yamlContent: string): string | null {
+  const hash = sha256(yamlContent);
+
+  try {
+    if (fs.existsSync(POLICY_CHECKSUM_PATH)) {
+      const storedHash = fs.readFileSync(POLICY_CHECKSUM_PATH, "utf-8").trim();
+      if (storedHash !== hash) {
+        return `Policy checksum mismatch: expected ${storedHash.slice(0, 12)}..., got ${hash.slice(0, 12)}...`;
+      }
+      return null;
+    }
+
+    // First run - store the checksum
+    const dir = path.dirname(POLICY_CHECKSUM_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(POLICY_CHECKSUM_PATH, hash + "\n");
+    return null;
+  } catch (err) {
+    return `Policy checksum verification failed: ${err}`;
+  }
+}
+
+/**
  * Load policies from a YAML file path.
  * Falls back to default-policies.yaml if path not provided or missing.
+ *
+ * Default policy rules are marked immutable - they cannot be overridden by addPolicy().
  */
 export function loadPolicies(yamlPath?: string): PolicyRule[] {
-  const sources: string[] = [];
+  const sources: { path: string; isDefault: boolean }[] = [];
 
   // 1. Ship defaults
   if (fs.existsSync(DEFAULT_POLICY_PATH)) {
-    sources.push(DEFAULT_POLICY_PATH);
+    sources.push({ path: DEFAULT_POLICY_PATH, isDefault: true });
   }
 
   // 2. User overrides
   if (fs.existsSync(USER_POLICY_PATH)) {
-    sources.push(USER_POLICY_PATH);
+    sources.push({ path: USER_POLICY_PATH, isDefault: false });
   }
 
   // 3. Caller-specified path
   if (yamlPath && fs.existsSync(yamlPath)) {
-    sources.push(yamlPath);
+    sources.push({ path: yamlPath, isDefault: false });
   }
 
   const rules: PolicyRule[] = [];
   const parsed: Map<number, ParsedCondition> = new Map();
+  _integrityWarning = null;
+
+  // Collect all YAML content for checksum verification
+  const allYamlContent: string[] = [];
 
   for (const src of sources) {
     try {
-      const raw = fs.readFileSync(src, "utf-8");
+      const raw = fs.readFileSync(src.path, "utf-8");
+      allYamlContent.push(raw);
       const file = parseYaml(raw) as PolicyFile;
       if (file?.policies && Array.isArray(file.policies)) {
         for (const rule of file.policies) {
@@ -182,16 +233,30 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
             parsed.set(idx, parseCondition(rule.condition));
           } catch (err) {
             console.warn(
-              `[policy-engine] Invalid condition in rule "${rule.name}" from ${src}: ${err}`
+              `[policy-engine] Invalid condition in rule "${rule.name}" from ${src.path}: ${err}`
             );
             // Skip invalid rules rather than crash
             continue;
+          }
+          // Mark default policy rules as immutable
+          if (src.isDefault) {
+            rule.immutable = true;
           }
           rules.push(rule);
         }
       }
     } catch (err) {
-      console.warn(`[policy-engine] Failed to load ${src}: ${err}`);
+      console.warn(`[policy-engine] Failed to load ${src.path}: ${err}`);
+    }
+  }
+
+  // Verify policy integrity via checksum
+  if (allYamlContent.length > 0) {
+    const combinedContent = allYamlContent.join("\n---\n");
+    const checksumResult = verifyChecksum(combinedContent);
+    if (checksumResult) {
+      _integrityWarning = checksumResult;
+      console.warn(`[policy-engine] WARNING: ${checksumResult}`);
     }
   }
 
@@ -203,11 +268,32 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
 
 /**
  * Add a rule at runtime (e.g. from agent configuration).
+ *
+ * Rejects any "allow" rule that targets the same action as an immutable "block" rule.
+ * This prevents runtime overrides of default security policies.
  */
 export function addPolicy(rule: PolicyRule): void {
   if (!_loaded) loadPolicies();
+
   // Validate at add time - throws if invalid
   const parsed = parseCondition(rule.condition);
+
+  // Security: reject allow rules that would override immutable block rules
+  if (rule.decision === "allow") {
+    const immutableBlocks = _policies.filter(
+      (r) => r.immutable && r.decision === "block" && (r.action === rule.action || r.action === "*" || rule.action === "*")
+    );
+    if (immutableBlocks.length > 0) {
+      const blockNames = immutableBlocks.map((r) => r.name).join(", ");
+      throw new Error(
+        `[policy-engine] Cannot add allow rule "${rule.name}" - it would override immutable block rule(s): ${blockNames}`
+      );
+    }
+  }
+
+  // Runtime rules are never immutable
+  rule.immutable = false;
+
   const idx = _policies.length;
   _parsedConditions.set(idx, parsed);
   _policies.push(rule);
@@ -307,11 +393,11 @@ function evaluateClauseParsed(clause: ParsedClause, context: PolicyContext): boo
 /**
  * Evaluate all loaded policies for a given action + context.
  *
- * Evaluation order:
+ * Evaluation order (blocks take priority over allows):
  *   1. Disabled rules skipped
- *   2. "allow" rules checked first — if matched, immediately allowed
- *   3. "block" rules checked — if matched, hard deny
- *   4. "require_approval" rules checked — if matched, soft deny
+ *   2. "block" rules checked first - if matched, hard deny (no override possible)
+ *   3. "require_approval" rules checked - if matched, soft deny
+ *   4. "allow" rules checked - if matched, explicitly allowed
  *   5. Default: allowed
  */
 export function evaluatePolicy(
@@ -332,21 +418,14 @@ export function evaluatePolicy(
     index: _policies.indexOf(r),
   }));
 
-  // 1. Explicit allow - early exit
-  for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "allow")) {
-    if (evaluateCondition(index, rule.condition, context)) {
-      return { allowed: true };
-    }
-  }
-
-  // 2. Hard block
+  // 1. Hard block - checked FIRST, blocks always win
   for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "block")) {
     if (evaluateCondition(index, rule.condition, context)) {
       return { allowed: false, reason: `[${rule.name}] ${rule.message}` };
     }
   }
 
-  // 3. Soft deny (requires user approval)
+  // 2. Soft deny (requires user approval)
   for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "require_approval")) {
     if (evaluateCondition(index, rule.condition, context)) {
       return {
@@ -357,6 +436,13 @@ export function evaluatePolicy(
     }
   }
 
+  // 3. Explicit allow
+  for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "allow")) {
+    if (evaluateCondition(index, rule.condition, context)) {
+      return { allowed: true };
+    }
+  }
+
   // Default: allow
   return { allowed: true };
 }
@@ -364,6 +450,20 @@ export function evaluatePolicy(
 // ============================================
 // Convenience helpers
 // ============================================
+
+/**
+ * Verify policy file integrity.
+ * Returns whether stored checksum matches current policy files.
+ */
+export function verifyPolicies(): { valid: boolean; reason: string } {
+  if (!_loaded) loadPolicies();
+
+  if (_integrityWarning) {
+    return { valid: false, reason: _integrityWarning };
+  }
+
+  return { valid: true, reason: "Policy checksums match" };
+}
 
 /** Quick check: is this file write allowed? */
 export function checkFileWrite(filePath: string, content?: string): PolicyDecision {
