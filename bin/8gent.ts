@@ -50,6 +50,7 @@ COMMANDS:
   infinite <task>             Run task in autonomous infinite mode
   export <session-id|--last>    Export a session as self-contained HTML
   auth <sub>                  Authentication (login, logout, status)
+  rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
 
 AGENT COMMANDS:
   agent list                  List active sub-agents
@@ -88,6 +89,7 @@ OPTIONS:
   --infinite     Enable infinite mode (autonomous until done)
   --pet          Also spawn Lil Eight dock companion (auto with tui)
   --no-pet       Disable dock pet auto-spawn
+  --rpc          Start in JSON-RPC mode (headless, stdin/stdout)
 
 EXAMPLES:
   # Non-interactive chat (pipe-friendly)
@@ -126,6 +128,13 @@ Learn more: https://github.com/8gi-foundation/8gent-code
 
 async function main() {
   const args = process.argv.slice(2);
+
+  // --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
+  if (args.includes("--rpc")) {
+    const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
+    await startRPCServer();
+    return;
+  }
 
   // --cli flag: non-interactive subagent mode - bypasses TUI entirely
   if (args.includes("--cli")) {
@@ -259,6 +268,12 @@ async function main() {
     case "auth":
       await authCommand(restArgs);
       break;
+
+    case "rpc": {
+      const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
+      await startRPCServer();
+      break;
+    }
 
     default:
       console.error(`Unknown command: ${command}`);
