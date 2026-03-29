@@ -47,6 +47,8 @@ export interface PolicyRule {
   enabled?: boolean;
   /** Whether this rule is immutable (cannot be overridden by addPolicy). Set automatically for default rules. */
   immutable?: boolean;
+  /** Agent scope - if set, rule only applies to matching agent IDs. Empty/undefined = global (all agents). */
+  agentScope?: string;
 }
 
 /** Top-level YAML policy file structure */
@@ -69,6 +71,8 @@ export interface PolicyContext {
   url?: string;
   /** For env_access / secret_write */
   key?: string;
+  /** Agent ID for per-agent policy scoping */
+  agentId?: string;
   /** Freeform extra fields */
   [key: string]: unknown;
 }
