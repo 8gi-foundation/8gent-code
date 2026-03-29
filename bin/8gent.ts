@@ -48,6 +48,7 @@ COMMANDS:
   search <query>              Search for symbols across files
   benchmark                   Run efficiency benchmarks
   infinite <task>             Run task in autonomous infinite mode
+  export <session-id|--last>    Export a session as self-contained HTML
   auth <sub>                  Authentication (login, logout, status)
 
 AGENT COMMANDS:
@@ -228,6 +229,10 @@ async function main() {
 
     case "session":
       await sessionCommand(restArgs);
+      break;
+
+    case "export":
+      await exportCommand(restArgs);
       break;
 
     case "preferences":
@@ -1241,6 +1246,61 @@ async function sessionCommand(args: string[]) {
       console.error(`Unknown session subcommand: ${sub}`);
       console.log("Available: list, resume, compact, checkpoint");
       process.exit(1);
+  }
+}
+
+// ── Export Command ────────────────────────────────────────────────
+
+async function exportCommand(args: string[]) {
+  const { flags, rest } = parseFlags(args);
+  const isJson = !!flags.json;
+  const isLast = !!flags.last;
+  const sessionId = rest[0];
+
+  if (!sessionId && !isLast) {
+    console.error("Usage: 8gent export <session-id> or 8gent export --last");
+    process.exit(1);
+  }
+
+  const { SessionSyncManager } = await import("../packages/eight/session-sync");
+  const sync = new SessionSyncManager(true);
+
+  // Resolve which session to export
+  let targetId = sessionId;
+  if (isLast) {
+    const convos = await sync.getRecentConversations(1);
+    if (!convos || convos.length === 0) {
+      console.error("No sessions found. Requires authentication for cloud sessions.");
+      process.exit(1);
+    }
+    targetId = (convos[0] as any).sessionId;
+  }
+
+  // Fetch conversation messages
+  const convo = await sync.getConversation(targetId);
+  if (!convo || !convo.messages || convo.messages.length === 0) {
+    console.error(`Session ${targetId} not found or has no messages.`);
+    process.exit(1);
+  }
+
+  const { saveSessionExport } = await import("../packages/eight/session-export");
+  const filePath = await saveSessionExport(
+    convo.messages.map((m: any) => ({
+      role: m.role || "system",
+      content: m.content || "",
+      timestamp: new Date(m.timestamp || Date.now()),
+    })),
+    {
+      sessionId: targetId,
+      model: convo.model || "unknown",
+      duration: convo.duration || "unknown",
+    }
+  );
+
+  if (isJson) {
+    jsonOut({ success: true, path: filePath, sessionId: targetId });
+  } else {
+    console.log(`Session exported to ${filePath}`);
   }
 }
 
