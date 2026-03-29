@@ -89,6 +89,8 @@ export interface AgentConfig {
   apiKey?: string;
   /** Real-time event callbacks for UI integration */
   events?: AgentEventCallbacks;
+  /** Load all tools upfront instead of deferred loading (default: false) */
+  allTools?: boolean;
 }
 
 export interface LLMResponse {
