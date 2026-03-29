@@ -28,6 +28,7 @@ import { OnboardingManager } from "../self-autonomy/onboarding";
 import { startTelegramBot, getActiveTelegramBot } from "../telegram";
 import { getVault } from "../secrets";
 import { createInfiniteRunner, type InfiniteRunner, type InfiniteState } from "../infinite";
+import { ToolLoopDetector } from "./tool-loop-detector";
 import { getMemoryManager, extractAutoMemories } from "../memory";
 import { SessionSyncManager } from "./session-sync";
 import { KernelManager } from "../kernel/manager";
@@ -84,6 +85,7 @@ export class Agent {
   private messageHistory: Array<{ role: string; content: string }> = [];
   private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
   private loopWarningInjected = false;
+  private loopDetector = new ToolLoopDetector();
   private events: AgentEventCallbacks;
   private planner: ProactivePlanner;
   private evidenceCollector: EvidenceCollector;
@@ -269,6 +271,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
   }
 
   async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+    // Reset circuit breaker for each new turn
+    this.loopDetector.reset();
+
     // If image attached, fire off parallel vision interpretation (like /btw)
     // The main agent stays on its text model — never switches.
     // Vision result gets injected as a system message when ready.
@@ -436,6 +441,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
         // Reset loop warning flag on successful calls so it can fire again for new loops
         if (event.success) {
           this.loopWarningInjected = false;
+        }
+
+        // Circuit breaker: record call and check for loop patterns
+        this.loopDetector.record(event.toolName, event.args as Record<string, unknown>);
+        const loopResult = this.loopDetector.check();
+        if (loopResult) {
+          console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
+          this.abort();
         }
 
         if (event.success) {
