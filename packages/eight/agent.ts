@@ -34,6 +34,7 @@ import { SessionSyncManager } from "./session-sync";
 import { KernelManager } from "../kernel/manager";
 import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orchestrator-bus";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
+import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -102,6 +103,7 @@ export class Agent {
   private kernel: KernelManager;
   private abortController: AbortController | null = null;
   private orchestratorBus: OrchestratorBus;
+  private toolRegistry: ToolRegistry;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -116,6 +118,9 @@ export class Agent {
 
     // Set tool context for AI SDK tools
     setToolContext({ workingDirectory: config.workingDirectory || process.cwd() });
+
+    // Initialize deferred tool registry (allTools flag loads everything upfront)
+    this.toolRegistry = new ToolRegistry(config.allTools ?? false);
 
     // Fire-and-forget AST indexing of working directory for AST-first retrieval
     const cwd = config.workingDirectory || process.cwd();
@@ -185,9 +190,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Inject vessel context if running as a deployed instance (set by daemon at startup)
     const vesselContext = process.env.EIGHT_VESSEL_CONTEXT ? "\n\n" + process.env.EIGHT_VESSEL_CONTEXT : "";
 
+    // Inject deferred tool categories when not loading all tools upfront
+    const deferredToolBlock = config.allTools ? "" : "\n\n" + getDeferredToolSegment();
+
     this.messageHistory.push({
       role: "system",
-      content: basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction,
+      content: basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + deferredToolBlock + languageInstruction,
     });
 
     // Initialize session persistence (v2)
@@ -389,6 +397,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       instructions: systemPrompt,
       maxSteps: this.config.maxTurns || 30,
       workingDirectory: this.config.workingDirectory || process.cwd(),
+      tools: this.toolRegistry.getTools(),
 
       onToolCallStart: async (event) => {
         await this.hookManager.executeHooks("beforeTool", {
