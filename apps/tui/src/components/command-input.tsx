@@ -75,6 +75,7 @@ export type SlashCommand =
   | "evidence"
   | "auth"
   | "vision"
+  | "session"
   | "resume"
   | "history"
   | "continue"
@@ -285,6 +286,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["res"],
     description: "Resume a recent session (pick from last 5)",
     usage: "/resume",
+  },
+  {
+    name: "session",
+    aliases: ["sess"],
+    description: "Named session management (name, list, resume)",
+    usage: "/session [name|list|resume] <args>",
   },
   {
     name: "history",
