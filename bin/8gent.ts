@@ -34,6 +34,7 @@ USAGE:
 
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
+  doctor                      Check system health (Ollama, models, tools, config)
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -274,6 +275,10 @@ async function main() {
       await startRPCServer();
       break;
     }
+
+    case "doctor":
+      await doctorCommand();
+      break;
 
     default:
       console.error(`Unknown command: ${command}`);
@@ -1014,11 +1019,27 @@ async function chatCommand(args: string[]) {
     process.exit(1);
   }
 
+  // Detect model dynamically if not specified
+  let resolvedModel = model;
+  if (!resolvedModel) {
+    try {
+      const res = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(3000) });
+      const data = await res.json() as any;
+      const models = (data.models || []).map((m: any) => m.name as string);
+      resolvedModel = models.find((m: string) => m.startsWith("eight")) || models.find((m: string) => !m.includes("embed")) || models[0];
+    } catch {}
+    if (!resolvedModel) {
+      const errMsg = "No Ollama models available. Pull a model first: ollama pull qwen3:14b";
+      if (isJson) { jsonOut({ success: false, error: errMsg }); } else { console.error(errMsg); }
+      process.exit(1);
+    }
+  }
+
   try {
     const { Agent } = await import("../packages/eight/agent");
 
     const agent = new Agent({
-      model: model || "qwen3.5:latest",
+      model: resolvedModel,
       runtime: provider || "ollama",
       workingDirectory: cwd,
       maxTurns: 30,
@@ -1032,7 +1053,7 @@ async function chatCommand(args: string[]) {
         success: true,
         message,
         response,
-        model: model || "qwen3.5:latest",
+        model: resolvedModel,
         provider: provider || "ollama",
       });
     } else {
@@ -1685,6 +1706,37 @@ function getSymbolIcon(kind: string): string {
     module: "□",
   };
   return icons[kind] || "·";
+}
+
+async function doctorCommand() {
+  const { execSync } = require("child_process");
+  const green = (s: string) => `\x1b[32m\u2713 ${s}\x1b[0m`;
+  const red = (s: string) => `\x1b[31m\u2717 ${s}\x1b[0m`;
+  const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+  console.log(`\n8gent Doctor v${VERSION}\n`);
+  let issues = 0;
+  try {
+    const res = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(3000) });
+    const data = await res.json() as any;
+    const models = (data.models || []).map((m: any) => m.name);
+    console.log(green(`Ollama running - ${models.length} models available`));
+    models.forEach((m: string) => console.log(dim(`  ${m}`)));
+  } catch { console.log(red("Ollama not reachable")); issues++; }
+  console.log(process.env.OPENROUTER_API_KEY ? green("OpenRouter API key configured") : dim("  OpenRouter not set (optional)"));
+  for (const t of ["mpv", "yt-dlp", "rg"]) {
+    try { execSync(`which ${t}`, { stdio: "ignore" }); console.log(green(`${t} installed`)); }
+    catch { console.log(red(`${t} not found`)); issues++; }
+  }
+  const dbPath = path.join(process.env.HOME || "", ".8gent", "memory.db");
+  console.log(fs.existsSync(dbPath) ? green(`Memory DB (${(fs.statSync(dbPath).size/1024).toFixed(0)} KB)`) : dim("  No memory DB yet"));
+  const cfgPath = path.join(process.env.HOME || "", ".8gent", "config.json");
+  if (fs.existsSync(cfgPath)) { try { JSON.parse(fs.readFileSync(cfgPath,"utf-8")); console.log(green("Config valid")); } catch { console.log(red("Config invalid JSON")); issues++; } }
+  else console.log(dim("  No config (using defaults)"));
+  try { const{verifyPolicies}=await import("../packages/permissions/policy-engine.ts"); const r=verifyPolicies(); console.log(r.valid?green("NemoClaw verified"):red(`NemoClaw: ${r.reason}`)); if(!r.valid)issues++; } catch { console.log(dim("  NemoClaw skip")); }
+  const mcpPath = path.join(process.env.HOME || "", ".8gent", "mcp.json");
+  if (fs.existsSync(mcpPath)) { try { const m=JSON.parse(fs.readFileSync(mcpPath,"utf-8")); console.log(green(`MCP: ${Object.keys(m.servers||m.mcpServers||{}).length} servers`)); } catch { console.log(red("MCP config invalid")); issues++; } }
+  else console.log(dim("  No MCP servers (~/.8gent/mcp.json)"));
+  console.log(issues===0?`\n${green("All checks passed.")}\n`:`\n\x1b[33m${issues} issue(s) found.\x1b[0m\n`);
 }
 
 main().catch((error) => {
