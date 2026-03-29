@@ -58,6 +58,8 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "packages/skills/business-builder",
+    "packages/tools/markdown-parser.ts"
   ]
 }
