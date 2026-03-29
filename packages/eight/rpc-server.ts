@@ -31,7 +31,7 @@ type Handler = (id: number | string, params: Record<string, unknown>) => Promise
 
 const methods: Record<string, Handler> = {
   "session.create": async (id, params) => {
-    const model = (params.model as string) || "qwen3.5:latest";
+    const model = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
     const cwd = (params.cwd as string) || process.cwd();
     const sessionId = `rpc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
