@@ -87,7 +87,9 @@ export type SlashCommand =
   | "music"
   | "dj"
   | "pet"
-  | "export";
+  | "export"
+  | "fork"
+  | "branch";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -229,9 +231,21 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     usage: "/export",
   },
   {
+    name: "fork",
+    aliases: ["f"],
+    description: "Fork conversation at current message",
+    usage: "/fork [label]",
+  },
+  {
+    name: "branch",
+    aliases: ["branches", "br"],
+    description: "List or switch branches",
+    usage: "/branch [list|switch <id>]",
+  },
+  {
     name: "router",
     aliases: ["route", "routing"],
-    description: "Task router — assign models to task categories",
+    description: "Task router - assign models to task categories",
     usage: "/router [on|off|set|test|stats|status]",
   },
   {
