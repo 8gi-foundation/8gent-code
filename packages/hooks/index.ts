@@ -9,6 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { spawn, exec } from "child_process";
+import { parse as parseYaml } from "yaml";
 
 // ============================================
 // Types
@@ -92,6 +93,134 @@ export interface HookResult {
 }
 
 // ============================================
+// YAML Hook Types (user-customizable lifecycle hooks)
+// ============================================
+
+export type YamlHookEvent =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "SessionStart"
+  | "SessionEnd"
+  | "OnError";
+
+/** Maps YAML event names to internal HookType names */
+const YAML_EVENT_MAP: Record<YamlHookEvent, HookType> = {
+  PreToolUse: "beforeTool",
+  PostToolUse: "afterTool",
+  SessionStart: "onStart",
+  SessionEnd: "onExit",
+  OnError: "onError",
+};
+
+export interface YamlHookConfig {
+  event: YamlHookEvent;
+  matcher?: string;    // tool name glob: exact name or "*"
+  command: string;     // shell command to run
+  timeout?: number;    // ms, default 5000
+}
+
+export interface YamlHookFireResult {
+  blocked: boolean;
+  reason?: string;
+  hookResults: Array<{
+    command: string;
+    success: boolean;
+    output?: unknown;
+    error?: string;
+    durationMs: number;
+  }>;
+}
+
+const YAML_HOOKS_PATH = path.join(
+  process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+  "hooks.yaml"
+);
+
+const DEFAULT_YAML_TIMEOUT = 5000;
+
+/**
+ * Check if a tool name matches a glob pattern.
+ * Supports exact match and "*" wildcard (matches everything).
+ */
+function matchesToolName(pattern: string | undefined, toolName: string | undefined): boolean {
+  if (!pattern || pattern === "*") return true;
+  if (!toolName) return true; // non-tool events always match
+  return pattern === toolName;
+}
+
+/**
+ * Run a YAML hook command, sending payload via stdin and reading JSON from stdout.
+ * Returns parsed JSON output or null on failure.
+ */
+function runYamlHookCommand(
+  command: string,
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+  cwd: string,
+): Promise<{ output: unknown; success: boolean; error?: string; durationMs: number }> {
+  const start = Date.now();
+
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn("sh", ["-c", command], {
+        cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      proc.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+      proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+      const timer = setTimeout(() => {
+        proc.kill("SIGTERM");
+        resolve({
+          output: null,
+          success: false,
+          error: `Hook timed out after ${timeoutMs}ms`,
+          durationMs: Date.now() - start,
+        });
+      }, timeoutMs);
+
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+        const durationMs = Date.now() - start;
+
+        if (code !== 0) {
+          resolve({ output: null, success: false, error: `Exit code ${code}: ${stderr}`, durationMs });
+          return;
+        }
+
+        // Try parsing stdout as JSON
+        const trimmed = stdout.trim();
+        if (!trimmed) {
+          resolve({ output: null, success: true, durationMs });
+          return;
+        }
+
+        try {
+          resolve({ output: JSON.parse(trimmed), success: true, durationMs });
+        } catch {
+          resolve({ output: trimmed, success: true, durationMs });
+        }
+      });
+
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        resolve({ output: null, success: false, error: String(err), durationMs: Date.now() - start });
+      });
+
+      // Send payload as JSON to stdin
+      proc.stdin.write(JSON.stringify(payload));
+      proc.stdin.end();
+    } catch (err) {
+      resolve({ output: null, success: false, error: String(err), durationMs: Date.now() - start });
+    }
+  });
+}
+
+// ============================================
 // Hook Manager
 // ============================================
 
@@ -102,9 +231,12 @@ export class HookManager {
   private workingDirectory: string;
   private results: HookResult[] = [];
 
+  private yamlHooks: YamlHookConfig[] = [];
+
   constructor(configPath?: string) {
     this.configPath = configPath || path.join(os.homedir(), ".8gent", "hooks.json");
     this.config = this.loadConfig();
+    this.yamlHooks = this.loadYamlHooks();
     this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     this.workingDirectory = process.cwd();
   }
@@ -128,6 +260,120 @@ export class HookManager {
       globalTimeout: 30000, // 30 seconds
       enabled: true,
     };
+  }
+
+  /**
+   * Load YAML hook configs from ~/.8gent/hooks.yaml
+   */
+  private loadYamlHooks(): YamlHookConfig[] {
+    const yamlPath = process.env.EIGHT_HOOKS_YAML || YAML_HOOKS_PATH;
+    try {
+      if (!fs.existsSync(yamlPath)) return [];
+      const raw = fs.readFileSync(yamlPath, "utf-8");
+      const parsed = parseYaml(raw);
+      if (!Array.isArray(parsed)) {
+        console.warn(`[hooks] hooks.yaml should be an array of hook configs`);
+        return [];
+      }
+      // Validate each entry
+      const valid: YamlHookConfig[] = [];
+      for (const entry of parsed) {
+        if (!entry.event || !entry.command) {
+          console.warn(`[hooks] Skipping invalid YAML hook (missing event or command):`, entry);
+          continue;
+        }
+        if (!["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "OnError"].includes(entry.event)) {
+          console.warn(`[hooks] Unknown event "${entry.event}", skipping`);
+          continue;
+        }
+        valid.push({
+          event: entry.event,
+          matcher: entry.matcher || "*",
+          command: entry.command,
+          timeout: typeof entry.timeout === "number" ? entry.timeout : DEFAULT_YAML_TIMEOUT,
+        });
+      }
+      return valid;
+    } catch (err) {
+      console.warn(`[hooks] Failed to load hooks.yaml: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Reload YAML hooks from disk (useful after editing hooks.yaml)
+   */
+  reloadYamlHooks(): number {
+    this.yamlHooks = this.loadYamlHooks();
+    return this.yamlHooks.length;
+  }
+
+  /**
+   * Fire YAML hooks for a given event.
+   *
+   * Sends payload as JSON to stdin, reads stdout as JSON.
+   * If any hook returns { block: true, reason: "..." }, the result is blocked.
+   *
+   * Hooks that fail or timeout are logged but do not crash the agent.
+   */
+  async fire(
+    event: YamlHookEvent,
+    payload: Record<string, unknown>,
+  ): Promise<YamlHookFireResult> {
+    const toolName = payload.tool as string | undefined;
+    const matching = this.yamlHooks.filter(
+      (h) => h.event === event && matchesToolName(h.matcher, toolName),
+    );
+
+    if (matching.length === 0) {
+      return { blocked: false, hookResults: [] };
+    }
+
+    const hookResults: YamlHookFireResult["hookResults"] = [];
+    let blocked = false;
+    let blockReason: string | undefined;
+
+    for (const hook of matching) {
+      const result = await runYamlHookCommand(
+        hook.command,
+        payload,
+        hook.timeout ?? DEFAULT_YAML_TIMEOUT,
+        this.workingDirectory,
+      );
+
+      hookResults.push({
+        command: hook.command,
+        success: result.success,
+        output: result.output,
+        error: result.error,
+        durationMs: result.durationMs,
+      });
+
+      if (!result.success) {
+        console.warn(`[hooks] YAML hook failed: ${hook.command} - ${result.error}`);
+        continue;
+      }
+
+      // Check for blocking response
+      if (
+        result.output &&
+        typeof result.output === "object" &&
+        (result.output as Record<string, unknown>).block === true
+      ) {
+        blocked = true;
+        blockReason = String((result.output as Record<string, unknown>).reason || "Blocked by hook");
+        break; // First block wins
+      }
+    }
+
+    return { blocked, reason: blockReason, hookResults };
+  }
+
+  /**
+   * Get loaded YAML hooks count
+   */
+  getYamlHookCount(): number {
+    return this.yamlHooks.length;
   }
 
   /**
