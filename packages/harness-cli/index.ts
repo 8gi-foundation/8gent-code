@@ -52,6 +52,7 @@ COMMANDS:
     --expect <substring>     Expect output to contain substring
     --expect-file <path>     Expect file to have been created
     --expect-exit <reason>   Expect exit reason
+    --strict-artifacts       Verify referenced artifacts exist on disk
 
   doctor                     Health-check providers and tools
 
