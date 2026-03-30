@@ -51,6 +51,7 @@ COMMANDS:
   infinite <task>             Run task in autonomous infinite mode
   export <session-id|--last>    Export a session as self-contained HTML
   auth <sub>                  Authentication (login, logout, status)
+  policy <sub>                NemoClaw policy tools
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
 
 AGENT COMMANDS:
@@ -78,6 +79,9 @@ MEMORY COMMANDS:
   memory remember <fact>      Store a memory
   memory forget <id>          Delete a memory
   memory stats                Show memory statistics
+
+POLICY COMMANDS:
+  policy validate <files...>  Dry-run files through NemoClaw policy checks
 
 OPTIONS:
   -h, --help     Show this help message
@@ -268,6 +272,10 @@ async function main() {
 
     case "auth":
       await authCommand(restArgs);
+      break;
+
+    case "policy":
+      await policyCommand(restArgs);
       break;
 
     case "rpc": {
@@ -1706,6 +1714,20 @@ function getSymbolIcon(kind: string): string {
     module: "□",
   };
   return icons[kind] || "·";
+}
+
+async function policyCommand(args: string[]) {
+  const sub = args[0] || "help";
+  switch (sub) {
+    case "validate": {
+      const { runCLI } = await import("../packages/permissions/ci-validator.ts");
+      await runCLI(args.slice(1));
+      break;
+    }
+    default:
+      console.log("Usage: 8gent policy validate <files...>");
+      break;
+  }
 }
 
 async function doctorCommand() {

@@ -113,3 +113,36 @@ policies:
     condition: "path contains package.json or path contains tsconfig or path contains CLAUDE.md"
     decision: require_approval
     message: "Deleting project config files requires confirmation."
+
+  - name: "no-read-private-keys"
+    action: read_file
+    condition: "path ends_with .pem or path ends_with id_rsa or path ends_with id_ed25519"
+    decision: require_approval
+    message: "Reading private key files requires confirmation."
+
+  # ── Environment access ──────────────────────────────────────────────────────
+
+  - name: "no-prod-env-access"
+    action: env_access
+    condition: "key contains PROD_ or key contains PRODUCTION_"
+    decision: require_approval
+    message: "Accessing production environment variables requires confirmation."
+    environments:
+      - development
+      - staging
+
+  # ── Git commit ──────────────────────────────────────────────────────────────
+
+  - name: "no-commit-secrets"
+    action: git_commit
+    condition: "content contains API_KEY or content contains SECRET or content contains PASSWORD or content contains PRIVATE_KEY"
+    decision: block
+    message: "Committing files containing secret patterns is blocked."
+
+  # ── Secret write ────────────────────────────────────────────────────────────
+
+  - name: "no-secret-overwrite"
+    action: secret_write
+    condition: "key contains master or key contains root or key contains admin"
+    decision: block
+    message: "Overwriting master/root/admin secrets is blocked."
