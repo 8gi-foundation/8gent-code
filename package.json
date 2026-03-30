@@ -1,6 +1,6 @@
 {
   "name": "@podjamz/8gent-code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
   "type": "module",
