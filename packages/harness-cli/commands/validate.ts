@@ -21,6 +21,7 @@ interface ValidateOptions {
   expectFile: string | null;
   expectExit: string | null;
   expectNoErrors: boolean;
+  strictArtifacts: boolean;
   json: boolean;
 }
 
@@ -31,6 +32,7 @@ function parseArgs(args: string[]): ValidateOptions {
     expectFile: null,
     expectExit: null,
     expectNoErrors: false,
+    strictArtifacts: false,
     json: false,
   };
 
@@ -48,6 +50,10 @@ function parseArgs(args: string[]): ValidateOptions {
         break;
       case "--no-errors":
         opts.expectNoErrors = true;
+        break;
+      case "--strict":
+      case "--strict-artifacts":
+        opts.strictArtifacts = true;
         break;
       case "--json":
         opts.json = true;
@@ -102,13 +108,64 @@ interface ValidationResult {
   filesCreated: string[];
   totalSteps: number;
   totalTokens: number;
+  artifactChecks?: {
+    checked: string[];
+    missing: string[];
+  };
+}
+
+function collectArtifactRefs(entries: SessionEntry[], sessionEnd: any): string[] {
+  const refs = new Set<string>();
+
+  for (const p of [...(sessionEnd?.summary?.filesCreated ?? []), ...(sessionEnd?.summary?.filesModified ?? [])]) {
+    if (typeof p === "string" && p.trim()) refs.add(p.trim());
+  }
+
+  for (const e of entries) {
+    if (e.type !== "tool_result") continue;
+    const raw = (e as any).result;
+    if (!raw) continue;
+
+    let obj: Record<string, unknown> | null = null;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") obj = parsed as Record<string, unknown>;
+      } catch {
+        obj = null;
+      }
+    } else if (typeof raw === "object") {
+      obj = raw as Record<string, unknown>;
+    }
+
+    if (!obj) continue;
+    for (const k of ["path", "file", "output_path", "raw_output_path"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim()) refs.add(v.trim());
+    }
+  }
+
+  return [...refs];
+}
+
+function pathExistsFlexible(refPath: string, sessionFilePath: string): boolean {
+  if (fs.existsSync(refPath)) return true;
+
+  const sessionDir = path.dirname(sessionFilePath);
+  const candidates = [
+    path.resolve(refPath),
+    path.resolve(sessionDir, refPath),
+    path.resolve(process.cwd(), refPath),
+  ];
+
+  return candidates.some((p) => fs.existsSync(p));
 }
 
 export async function validate(args: string[]): Promise<void> {
   const opts = parseArgs(args);
 
   if (!opts.sessionId) {
-    console.error("Usage: harness-cli validate <session-id> [--expect <substr>] [--expect-file <path>]");
+    console.error("Usage: harness-cli validate <session-id> [--expect <substr>] [--expect-file <path>] [--strict-artifacts]");
     process.exit(1);
   }
 
@@ -216,6 +273,24 @@ export async function validate(args: string[]): Promise<void> {
     if (!noErrors) result.pass = false;
   }
 
+  // Check 6: Strict artifact existence
+  if (opts.strictArtifacts) {
+    const checked = collectArtifactRefs(entries, sessionEnd);
+    const missing = checked.filter((p) => !pathExistsFlexible(p, filePath));
+    result.artifactChecks = { checked, missing };
+
+    const pass = missing.length === 0;
+    result.checks.push({
+      name: "artifacts_exist",
+      pass,
+      message: pass
+        ? `All referenced artifacts exist (${checked.length} checked)`
+        : `${missing.length} missing artifact(s): ${missing.slice(0, 3).join(", ")}`,
+    });
+
+    if (!pass) result.pass = false;
+  }
+
   // Output
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -230,6 +305,9 @@ export async function validate(args: string[]): Promise<void> {
     }
 
     console.log(`\n  Steps: ${result.totalSteps}, Tokens: ${result.totalTokens}, Errors: ${result.errors.length}`);
+    if (result.artifactChecks) {
+      console.log(`  Artifacts checked: ${result.artifactChecks.checked.length}, missing: ${result.artifactChecks.missing.length}`);
+    }
 
     if (result.assistantOutput) {
       console.log(`\n  Last output (first 500 chars):`);

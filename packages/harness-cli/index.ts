@@ -45,6 +45,7 @@ COMMANDS:
     --json                   Output as JSON
     --entries <types>        Filter entry types (comma-separated)
     --summary                Show summary only
+                             (combine with --json for machine-readable summary)
 
   tail <session-id>          Live-tail a running session
 
@@ -52,6 +53,7 @@ COMMANDS:
     --expect <substring>     Expect output to contain substring
     --expect-file <path>     Expect file to have been created
     --expect-exit <reason>   Expect exit reason
+    --strict-artifacts       Verify referenced artifacts exist on disk
 
   doctor                     Health-check providers and tools
 
