@@ -1,0 +1,42 @@
+name: 8gent Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Get PR diff
+        run: git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
+
+      - name: Run 8gent review
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          REVIEW=$(bun run bin/8gent.ts review --diff=/tmp/pr.diff --json 2>&1 || true)
+          echo "$REVIEW" > /tmp/review.json
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(cat /tmp/review.json | bun -e "
+            const j = JSON.parse(await Bun.stdin.text());
+            console.log('## 8gent Review\n\n' + (j.review || j.error || 'No output'));
+          ")
+          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            -f body="$BODY"
