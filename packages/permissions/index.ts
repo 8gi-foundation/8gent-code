@@ -1026,3 +1026,4 @@ export function isInfiniteMode(): boolean {
 
 export { ToolG8 } from "./toolg8.js";
 export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS } from "./policy-engine.js";
+export { privacyGate, isSensitiveContext, forceLocalModel } from "./privacy-router.js";
