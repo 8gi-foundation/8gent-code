@@ -28,6 +28,7 @@ import {
   AutoPlanKanban,
   AutoMiniKanban,
 } from "./components/plan-kanban.js";
+import { PetWidget } from "../../../packages/pet/PetWidget.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import {
@@ -3502,6 +3503,9 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
           </MutedText>
         </Box>
       )}
+
+      {/* Lil Eight - terminal pet companion */}
+      <PetWidget sessionId={sessionId || "eight"} />
     </FixedFrame>
     </ADHDModeContext.Provider>
   );
