@@ -92,6 +92,8 @@ export interface AgentConfig {
   events?: AgentEventCallbacks;
   /** Load all tools upfront instead of deferred loading (default: false) */
   allTools?: boolean;
+  /** Inference-time scaling: generate N attempts and pick the best via critic (default: 1, no scaling) */
+  scale?: number;
 }
 
 export interface LLMResponse {
