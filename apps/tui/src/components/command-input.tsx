@@ -89,7 +89,8 @@ export type SlashCommand =
   | "pet"
   | "export"
   | "fork"
-  | "branch";
+  | "branch"
+  | "cron";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -241,6 +242,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["branches", "br"],
     description: "List or switch branches",
     usage: "/branch [list|switch <id>]",
+  },
+  {
+    name: "cron",
+    aliases: ["jobs", "schedule"],
+    description: "Manage scheduled cron jobs",
+    usage: "/cron [list|add|remove|enable|disable]",
   },
   {
     name: "router",

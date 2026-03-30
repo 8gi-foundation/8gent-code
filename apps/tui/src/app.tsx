@@ -1383,6 +1383,39 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
           break;
         }
 
+        case "cron": {
+          const { CronManager } = await import("../../../packages/cron/index.ts");
+          const mgr = new CronManager();
+          const sub = args[0];
+          if (!sub || sub === "list") {
+            const jobs = mgr.list();
+            if (jobs.length === 0) {
+              addSystemMessage("No cron jobs. Use: /cron add <name> <schedule> <command>");
+            } else {
+              const lines = jobs.map((j: any) => {
+                const s = j.enabled ? "ON" : "OFF";
+                return `[${s}] ${j.id}  ${j.name}  ${j.schedule} -> ${j.command}`;
+              });
+              addSystemMessage("Cron Jobs:\n" + lines.join("\n"));
+            }
+          } else if (sub === "add" && args.length >= 4) {
+            const job = mgr.add({ name: args[1], schedule: args[2], command: args.slice(3).join(" "), enabled: true });
+            addSystemMessage(`Added cron job: ${job.id} (${job.name})`);
+          } else if (sub === "remove" && args[1]) {
+            const ok = mgr.remove(args[1]);
+            addSystemMessage(ok ? `Removed job ${args[1]}` : `Job ${args[1]} not found`);
+          } else if (sub === "enable" && args[1]) {
+            mgr.enable(args[1]);
+            addSystemMessage(`Enabled job ${args[1]}`);
+          } else if (sub === "disable" && args[1]) {
+            mgr.disable(args[1]);
+            addSystemMessage(`Disabled job ${args[1]}`);
+          } else {
+            addSystemMessage("Usage: /cron [list|add <name> <schedule> <cmd>|remove <id>|enable <id>|disable <id>]");
+          }
+          break;
+        }
+
         case "quit":
           if (activeSessionId && messages.length > 0) {
             const serializable = messages.map((m) => ({ role: m.role, content: m.content }));
