@@ -24,6 +24,8 @@ import {
   effectiveImportance,
 } from "./types.js";
 import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
+import { hybridSearch, type HybridResult, type HybridSearchOptions } from "./hybrid-search.js";
+import { expandQuery } from "./query-expansion.js";
 
 // ── Schema SQL ────────────────────────────────────────────────────────
 
@@ -359,6 +361,49 @@ export class MemoryStore {
     }
 
     return results.slice(0, limit);
+  }
+
+  // ── Hybrid Recall (FTS + Vector + MMR) ─────────────────────────────
+
+  /**
+   * Advanced recall using hybrid search with MMR diversity re-ranking.
+   * Combines FTS5 text matching with vector cosine similarity, then
+   * applies Maximal Marginal Relevance to reduce redundant results.
+   *
+   * Falls back to standard recall() if embedding provider is unavailable.
+   */
+  async hybridRecall(
+    query: string,
+    opts?: HybridSearchOptions & { expandTerms?: boolean }
+  ): Promise<HybridResult[]> {
+    // Generate query embedding if provider available
+    let queryEmbedding: Float32Array = new Float32Array(0);
+    if (this.embeddingProvider?.available && query) {
+      try {
+        queryEmbedding = await this.embeddingProvider.generate(query) as Float32Array;
+      } catch {
+        // Continue with FTS-only hybrid search
+      }
+    }
+
+    // Optionally expand query terms for better FTS recall
+    const searchQuery = opts?.expandTerms !== false ? expandQuery(query) : query;
+
+    const results = hybridSearch(this.db, searchQuery, queryEmbedding, opts);
+
+    // Bump access counts for returned results
+    if (results.length > 0) {
+      const updateStmt = this.db.prepare(
+        `UPDATE memories SET access_count = access_count + 1, last_accessed = ?,
+         retrieval_count = COALESCE(retrieval_count, 0) + 1, last_retrieved_at = ? WHERE id = ?`
+      );
+      const now = Date.now();
+      for (const r of results) {
+        updateStmt.run(now, now, r.id);
+      }
+    }
+
+    return results;
   }
 
   // ── Update ────────────────────────────────────────────────────────
