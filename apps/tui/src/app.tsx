@@ -1200,6 +1200,8 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
               "  /projects - Open project overview tab\n" +
               "  /auth [login|logout|status] - Authentication\n" +
               "  /github [issues|pr|repos] - GitHub integration\n" +
+              "  /deploy - Trigger Vercel deploy\n" +
+              "  /vercel [status|env|logs|projects|domains] - Vercel management\n" +
               "  /pet [start|stop|deck|card] - Lil Eight companion\n" +
               "  /voice record - Toggle voice input (Ctrl+R)\n" +
               "  /vision - Vision & OCR model settings\n" +
@@ -2539,6 +2541,91 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
                 }).catch(() => addSystemMessage("GitHub: Failed to get token."));
               }).catch(() => addSystemMessage("GitHub module not available."));
             }
+          }
+          // Handle /deploy command - trigger Vercel deploy
+          if ((command as string) === "deploy") {
+            addSystemMessage("Detecting Vercel project...");
+            import("../../packages/tools/vercel.js").then(({ vercelDetectProject, vercelDeploy }) => {
+              vercelDetectProject().then((projectId) => {
+                if (!projectId) {
+                  addSystemMessage("Could not detect Vercel project. Use /vercel projects to list them.");
+                  return;
+                }
+                addSystemMessage(`Found project ${projectId}. Triggering deploy...`);
+                vercelDeploy(projectId).then((result) => {
+                  addSystemMessage(`Deploy result:\n${result}`);
+                }).catch((err: Error) => addSystemMessage(`Deploy failed: ${err.message}`));
+              }).catch((err: Error) => addSystemMessage(`Project detection failed: ${err.message}`));
+            }).catch(() => addSystemMessage("Vercel tools not available."));
+          }
+          // Handle /vercel command
+          if ((command as string) === "vercel") {
+            const sub = args[0] || "status";
+            import("../../packages/tools/vercel.js").then((vercel) => {
+              if (sub === "projects") {
+                vercel.vercelListProjects().then((result: string) => {
+                  addSystemMessage(`Vercel Projects:\n${result}`);
+                }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+              } else if (sub === "status") {
+                vercel.vercelDetectProject().then((projectId: string | null) => {
+                  if (!projectId) {
+                    addSystemMessage("Could not detect project. Use /vercel projects.");
+                    return;
+                  }
+                  vercel.vercelGetDeployments(projectId, 3).then((result: string) => {
+                    addSystemMessage(`Latest Deployments:\n${result}`);
+                  }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+                }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+              } else if (sub === "env") {
+                vercel.vercelDetectProject().then((projectId: string | null) => {
+                  if (!projectId) {
+                    addSystemMessage("Could not detect project. Use /vercel projects.");
+                    return;
+                  }
+                  vercel.vercelGetEnv(projectId).then((result: string) => {
+                    addSystemMessage(`Environment Variables:\n${result}`);
+                  }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+                }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+              } else if (sub === "logs") {
+                vercel.vercelDetectProject().then((projectId: string | null) => {
+                  if (!projectId) {
+                    addSystemMessage("Could not detect project. Use /vercel projects.");
+                    return;
+                  }
+                  vercel.vercelGetDeployments(projectId, 1).then((result: string) => {
+                    const data = JSON.parse(result);
+                    if (!data.deployments?.length) {
+                      addSystemMessage("No deployments found.");
+                      return;
+                    }
+                    const deployId = data.deployments[0].id;
+                    vercel.vercelGetDeploymentLogs(deployId).then((logs: string) => {
+                      addSystemMessage(`Deployment Logs:\n${logs}`);
+                    }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+                  }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+                }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+              } else if (sub === "domains") {
+                vercel.vercelDetectProject().then((projectId: string | null) => {
+                  if (!projectId) {
+                    addSystemMessage("Could not detect project. Use /vercel projects.");
+                    return;
+                  }
+                  vercel.vercelListDomains(projectId).then((result: string) => {
+                    addSystemMessage(`Domains:\n${result}`);
+                  }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+                }).catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
+              } else {
+                addSystemMessage(
+                  "Vercel commands:\n" +
+                  "  /vercel status  - Show latest deployments\n" +
+                  "  /vercel env     - List environment variables\n" +
+                  "  /vercel logs    - Show recent deployment logs\n" +
+                  "  /vercel projects - List all projects\n" +
+                  "  /vercel domains - Show custom domains\n" +
+                  "  /deploy         - Trigger redeploy"
+                );
+              }
+            }).catch(() => addSystemMessage("Vercel tools not available. Check VERCEL_TOKEN."));
           }
           // Handle /model command
           if (command === "model" as any) {
