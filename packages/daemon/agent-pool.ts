@@ -8,6 +8,7 @@
 import { Agent } from "../eight/agent";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { bus } from "./events";
+import { getUsageMonitor } from "../providers/usage-monitor";
 
 export interface PoolConfig {
   /** Default model to use (e.g. "qwen3.5:14b") */
@@ -31,7 +32,7 @@ interface SessionEntry {
   busy: boolean; // true while agent.chat() is in flight
 }
 
-const DEFAULT_MODEL = "qwen3.5:14b";
+const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
 const DEFAULT_RUNTIME = "ollama" as const;
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -128,6 +129,19 @@ export class AgentPool {
       return "[error] agent is busy";
     }
 
+    // Usage monitor gate - stop burning tokens when limits hit
+    const usage = getUsageMonitor();
+    const budget = usage.check();
+    if (!budget.allowed) {
+      const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
+      bus.emit("agent:error", { sessionId, error: msg });
+      return msg;
+    }
+    const warning = usage.getWarning();
+    if (warning) {
+      bus.emit("agent:stream", { sessionId, chunk: `[usage warning] ${warning}`, final: false });
+    }
+
     entry.busy = true;
     entry.messageCount++;
     entry.lastActiveAt = Date.now();
@@ -135,6 +149,10 @@ export class AgentPool {
 
     try {
       const response = await entry.agent.chat(text);
+
+      // Track token usage (estimate from response length)
+      const estimatedTokens = Math.ceil((text.length + response.length) / 4);
+      usage.record(estimatedTokens);
 
       // Emit the full final response (distinct from stream chunks)
       bus.emit("agent:stream", { sessionId, chunk: response, final: true });
