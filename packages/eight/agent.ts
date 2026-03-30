@@ -37,6 +37,7 @@ import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orches
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { getExtensionManager } from "../extensions";
 import { CompactionEngine, DEFAULT_COMPACTION_CONFIG, type CompactionResult } from "./compaction";
+import { privacyGate, forceLocalModel } from "../permissions/privacy-router";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -108,6 +109,7 @@ export class Agent {
   private orchestratorBus: OrchestratorBus;
   private toolRegistry: ToolRegistry;
   private compaction: CompactionEngine;
+  private recentFilePaths: string[] = [];
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -306,8 +308,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
   }
 
   async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
-    // Reset circuit breaker for each new turn
+    // Reset circuit breaker and privacy tracker for each new turn
     this.loopDetector.reset();
+    this.recentFilePaths = [];
 
     // If image attached, fire off parallel vision interpretation (like /btw)
     // The main agent stays on its text model — never switches.
@@ -443,6 +446,26 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
         if (preResult.blocked) {
           console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
           throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
+        }
+
+        // ── NemoClaw Privacy Gate: track file paths for sensitive context detection
+        const toolPath = event.args?.path as string | undefined;
+        if (toolPath && ["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)) {
+          this.recentFilePaths.push(toolPath);
+          // Keep bounded - only last 20 paths
+          if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+
+          const gate = privacyGate(this.recentFilePaths, providerConfig.name);
+          if (gate.shouldForceLocal) {
+            const fallback = forceLocalModel(providerConfig.name);
+            if (fallback) {
+              console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
+              console.log(`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`);
+              providerConfig.name = fallback.provider as typeof providerConfig.name;
+              providerConfig.model = fallback.model;
+              delete providerConfig.apiKey;
+            }
+          }
         }
 
         console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
