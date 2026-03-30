@@ -89,7 +89,9 @@ export type SlashCommand =
   | "pet"
   | "export"
   | "fork"
-  | "branch";
+  | "branch"
+  | "deploy"
+  | "vercel";
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -241,6 +243,18 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["branches", "br"],
     description: "List or switch branches",
     usage: "/branch [list|switch <id>]",
+  },
+  {
+    name: "deploy",
+    aliases: ["redeploy"],
+    description: "Trigger Vercel deploy of current project",
+    usage: "/deploy",
+  },
+  {
+    name: "vercel",
+    aliases: ["vc"],
+    description: "Vercel deployment management",
+    usage: "/vercel [status|env|logs|projects|domains]",
   },
   {
     name: "router",
