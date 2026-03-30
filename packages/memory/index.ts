@@ -109,6 +109,8 @@ export { checkpoint, rollback, listCheckpoints } from "./checkpoint.js";
 export { detectContradictions, resolveContradiction, type Contradiction } from "./contradictions.js";
 export { recordProcedure, recordFailure, findProcedures, getTopProcedures, type ProceduralMemory } from "./procedural.js";
 export { enqueue, acquireLease, completeLease, failLease, pendingCount, type Job } from "./queue.js";
+export { hybridSearch, type HybridResult, type HybridSearchOptions } from "./hybrid-search.js";
+export { expandQuery } from "./query-expansion.js";
 
 export type {
   PromotionResult,
