@@ -775,3 +775,5 @@ export default {
   PROVIDER_NAMES,
   PROVIDER_DEFAULTS,
 };
+
+export { UsageMonitor, getUsageMonitor } from "./usage-monitor";
