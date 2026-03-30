@@ -45,6 +45,7 @@ COMMANDS:
     --json                   Output as JSON
     --entries <types>        Filter entry types (comma-separated)
     --summary                Show summary only
+                             (combine with --json for machine-readable summary)
 
   tail <session-id>          Live-tail a running session
 
