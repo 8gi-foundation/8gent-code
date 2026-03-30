@@ -213,7 +213,7 @@ export function ActivityMonitor({
       <Box marginBottom={1}>
         <Text color="cyan" bold>┌─ Agent Activity </Text>
         <Text dimColor>step {stepCount} · {toolCount} tools · {elapsedStr}</Text>
-        <Box flexGrow={1} />
+        <Box flexGrow={1} flexShrink={1} />
         <Text color={processingStage === "executing" ? "green" : "yellow"}>
           {processingStage === "planning" ? "THINKING" : processingStage === "executing" ? "WORKING" : processingStage.toUpperCase()}
         </Text>
@@ -256,8 +256,8 @@ export function ActivityMonitor({
                 </Box>
 
                 {/* Detail */}
-                <Box flexGrow={1}>
-                  <Text dimColor={entry.done} bold={isActive}>
+                <Box flexGrow={1} flexShrink={1}>
+                  <Text dimColor={entry.done} bold={isActive} wrap="truncate">
                     {entry.detail}
                   </Text>
                 </Box>

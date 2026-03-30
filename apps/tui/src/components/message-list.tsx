@@ -157,6 +157,7 @@ function MessageItem({
         flexDirection="column"
         alignItems={isUser ? "flex-end" : "flex-start"}
         marginBottom={1}
+        width={termWidth}
       >
         {/* Sender label */}
         <Box>
@@ -180,8 +181,9 @@ function MessageItem({
           marginLeft={isUser ? bubbleIndent : 0}
           marginRight={isUser ? 0 : bubbleIndent}
           flexShrink={1}
+          width={Math.max(20, termWidth - bubbleIndent - 4)}
         >
-          <Box flexShrink={1} flexDirection="column">
+          <Box flexShrink={1} flexDirection="column" width={Math.max(16, termWidth - bubbleIndent - 8)}>
             <MessageContent
               content={message.content}
               role={message.role}
@@ -266,13 +268,14 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
                 borderColor="blue"
                 paddingX={1}
                 marginY={1}
+                flexShrink={1}
               >
                 {language && (
                   <MutedText>
                     {language}
                   </MutedText>
                 )}
-                <Text color="green">{code.trim()}</Text>
+                <Text color="green" wrap="truncate">{code.trim()}</Text>
               </Box>
             );
           }
