@@ -125,48 +125,134 @@ export interface AutoDetected {
 // Onboarding Questions
 // ============================================
 
+// ── Vibe Detection ─────────────────────────────────────────
+// After the first couple of questions, detect the user's personality
+// and adapt the rest of the onboarding to feel like home.
+
+type VibeType = "hacker" | "creative" | "nerd" | "exec" | "chill" | "unknown";
+
+function detectVibe(name: string, style: CommunicationStyle): VibeType {
+  const lower = name.toLowerCase();
+  // Fantasy/nerdy indicators
+  if (/gandalf|frodo|aragorn|legolas|bilbo|sauron|elf|wizard|mage|dungeon|dragon|hobbit|shire/i.test(lower)) return "nerd";
+  if (style === "casual") return "chill";
+  if (style === "formal") return "exec";
+  if (style === "detailed") return "creative";
+  if (style === "concise") return "hacker";
+  return "unknown";
+}
+
+function vibeGreeting(vibe: VibeType, name: string): string {
+  switch (vibe) {
+    case "nerd": return `A fellow traveler. Welcome, ${name}. The quest begins.`;
+    case "hacker": return `Right. ${name}. Let's build something.`;
+    case "creative": return `${name} - I can already tell we're going to make beautiful things together.`;
+    case "exec": return `${name}, pleasure to meet you. I'm ready when you are.`;
+    case "chill": return `Nice to meet you, ${name}. Let's keep it easy.`;
+    default: return `Welcome, ${name}. This is going to be good.`;
+  }
+}
+
+function vibeMusic(vibe: VibeType): string {
+  switch (vibe) {
+    case "nerd": return "epic orchestral";
+    case "hacker": return "synthwave";
+    case "creative": return "lofi hip hop";
+    case "exec": return "jazz";
+    case "chill": return "ambient";
+    default: return "lofi hip hop";
+  }
+}
+
+// ── Onboarding Side Effects ────────────────────────────────
+// These fire during onboarding to create magical moments.
+
+async function startVibeMusic(genre: string): Promise<void> {
+  try {
+    const { DJ } = await import("../../packages/music/dj.ts");
+    const dj = new DJ();
+    await dj.radio(genre);
+    // Lower volume for background vibes
+    const { execSync } = require("child_process");
+    try { execSync("osascript -e 'set volume output volume 25'", { stdio: "ignore" }); } catch {}
+  } catch {
+    // Music not available - that's fine, skip silently
+  }
+}
+
+async function spawnCompanion(): Promise<void> {
+  try {
+    const { execSync } = require("child_process");
+    // Try to spawn Lil Eight dock pet
+    execSync("open -g /Applications/LilEight.app 2>/dev/null || true", { stdio: "ignore" });
+  } catch {
+    // Companion not installed - skip
+  }
+}
+
+// ============================================
+// Onboarding Questions - The Magic Flow
+// ============================================
+//
+// Flow:
+// 1. Identity (auto-detect + name)
+// 2. Communication style
+// 3. >>> VIBE MOMENT: music or companion based on detected personality <<<
+// 4. Agent name + voice
+// 5. Telegram (optional)
+// 6. Confirmation (personalized based on vibe)
+
 const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
+  // ── Step 1: Who are you? ───────────────────────────────
   {
     step: "identity",
     question:
-      "Good day. I'm 8gent, The Infinite Gentleman.\n\n" +
-      "Here's what I detected:\n" +
+      "Good day. I'm Eight - The Infinite Gentleman.\n\n" +
+      "I've already had a look around:\n" +
       "  Name: {detected_name}\n" +
       "  Email: {detected_email}\n" +
       "  GitHub: {detected_github}\n" +
-      "  Provider: {detected_provider}\n" +
       "  Models: {detected_models}\n\n" +
-      "Press Enter to accept, or type your preferred name:",
+      "Is that you? Press Enter to confirm, or type your name:",
     processor: (answer, user) => {
       const name = answer.trim() || user.identity.name;
       return {
         ...user,
         identity: { ...user.identity, name: name || user.identity.name },
-        completedSteps: [...user.completedSteps, "identity", "role", "projects", "model", "language", "voice", "telegram", "github", "mcps"],
+        completedSteps: [...user.completedSteps, "identity", "role", "projects", "model", "language", "github", "mcps"],
       };
     },
   },
+  // ── Step 2: How do you like to work? ───────────────────
   {
     step: "communication",
     question:
-      "How should I communicate with you?\n\n" +
-      "1. Concise & direct (just the facts)\n" +
-      "2. Detailed & explanatory (teach me as we go)\n" +
-      "3. Casual & friendly (we're collaborators)\n" +
-      "4. Formal & precise (professional tone)",
+      "How do you like to work?\n\n" +
+      "1. Fast and direct - no fluff, just results\n" +
+      "2. Teach me as we go - I like to understand\n" +
+      "3. Like friends working together - keep it casual\n" +
+      "4. Professional and precise - this is serious work",
     options: ["1", "2", "3", "4", "concise", "detailed", "casual", "formal"],
     processor: (answer, user) => {
       const styleMap: Record<string, CommunicationStyle> = {
-        "1": "concise",
-        "2": "detailed",
-        "3": "casual",
-        "4": "formal",
-        concise: "concise",
-        detailed: "detailed",
-        casual: "casual",
-        formal: "formal",
+        "1": "concise", "2": "detailed", "3": "casual", "4": "formal",
+        concise: "concise", detailed: "detailed", casual: "casual", formal: "formal",
       };
       const style = styleMap[answer.toLowerCase()] || "concise";
+      const name = user.identity.name || "friend";
+      const vibe = detectVibe(name, style);
+
+      // >>> THE MAGIC MOMENT <<<
+      // Based on detected vibe, either start music or spawn companion
+      if (vibe === "nerd") {
+        // Spawn the companion pet for the nerdy types
+        spawnCompanion().catch(() => {});
+      } else {
+        // Start background music for everyone else
+        const genre = vibeMusic(vibe);
+        startVibeMusic(genre).catch(() => {});
+      }
+
       return {
         ...user,
         identity: { ...user.identity, communicationStyle: style },
@@ -174,13 +260,16 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       };
     },
   },
-  // ── Agent Personalization ────────────────────────────────
+  // ── Step 3: The vibe check ─────────────────────────────
+  // This question adapts based on what just happened
   {
     step: "voice" as OnboardingStep,
     question:
-      "What should your 8gent be called? (default: Eight)\n\n" +
-      "This is your personal AI — name it whatever you want.\n" +
-      "Press Enter for the default, or type a name:",
+      "{vibe_message}\n\n" +
+      "What should I be called? (default: Eight)\n\n" +
+      "This is your personal AI. Name me whatever you want.\n" +
+      "Some people go with their own name. Some pick something wild.\n" +
+      "Press Enter for Eight, or type a name:",
     processor: (answer, user) => {
       const agentName = answer.trim() || "Eight";
       return {
@@ -189,7 +278,7 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
           ...user.preferences,
           voice: {
             ...user.preferences.voice,
-            voiceId: user.preferences.voice?.voiceId ?? "Moira", // Irish voice default
+            voiceId: user.preferences.voice?.voiceId ?? "Moira",
             agentName,
           } as any,
         },
@@ -197,30 +286,44 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       };
     },
   },
+  // ── Step 4: Voice selection ────────────────────────────
   {
     step: "voice" as OnboardingStep,
     question:
-      "Pick a voice for your agent:\n\n" +
-      "1. Moira (Irish — the default Gentleman)\n" +
-      "2. Daniel (British)\n" +
-      "3. Samantha (American, female)\n" +
-      "4. Karen (Australian, female)\n" +
-      "5. Rishi (Indian)\n" +
-      "6. Reed (American, male)\n" +
-      "7. Custom — upload an audio file to clone your voice\n\n" +
+      "Pick a voice (I'll speak to you when tasks complete):\n\n" +
+      "1. Moira    (Irish - the original Gentleman)\n" +
+      "2. Daniel   (British - distinguished)\n" +
+      "3. Samantha (American - friendly)\n" +
+      "4. Karen    (Australian - no-nonsense)\n" +
+      "5. Rishi    (Indian - our 8TO officer)\n" +
+      "6. Reed     (American - deep)\n" +
+      "7. Surprise me\n\n" +
       "Choose 1-7:",
     options: ["1", "2", "3", "4", "5", "6", "7"],
     processor: (answer, user) => {
       const voiceMap: Record<string, string> = {
-        "1": "Moira",
-        "2": "Daniel",
-        "3": "Samantha",
-        "4": "Karen",
-        "5": "Rishi",
-        "6": "Reed",
+        "1": "Moira", "2": "Daniel", "3": "Samantha",
+        "4": "Karen", "5": "Rishi", "6": "Reed",
       };
-      const voice = voiceMap[answer] || "Moira";
-      const engine = answer === "7" ? "local-tts" : "system";
+      let voice: string;
+      if (answer === "7") {
+        // Surprise - pick a voice based on their vibe
+        const style = user.identity.communicationStyle || "concise";
+        const vibe = detectVibe(user.identity.name || "", style);
+        const surpriseMap: Record<VibeType, string> = {
+          nerd: "Daniel", hacker: "Reed", creative: "Samantha",
+          exec: "Moira", chill: "Karen", unknown: "Moira",
+        };
+        voice = surpriseMap[vibe];
+      } else {
+        voice = voiceMap[answer] || "Moira";
+      }
+      // Say hello in the chosen voice
+      try {
+        const { execSync } = require("child_process");
+        const name = user.identity.name || "friend";
+        execSync(`say -v ${voice} "Hello ${name}. I'm ${(user.preferences.voice as any)?.agentName || 'Eight'}. Lovely to meet you."`, { stdio: "ignore" });
+      } catch {}
       return {
         ...user,
         preferences: {
@@ -228,26 +331,51 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
           voice: {
             ...user.preferences.voice,
             enabled: true,
-            engine: engine as any,
-            voiceId: answer === "7" ? null : voice,
+            engine: "system" as any,
+            voiceId: voice,
           },
         },
       };
     },
   },
+  // ── Step 5: Telegram (optional) ────────────────────────
+  {
+    step: "telegram" as OnboardingStep,
+    question:
+      "Want me on your phone too? I can run as a Telegram bot.\n\n" +
+      "1. Yes - set it up\n" +
+      "2. Not now - I'll do /telegram later\n\n" +
+      "(If yes: message @BotFather on Telegram, create a bot, paste the token)",
+    options: ["1", "2", "yes", "skip", "no"],
+    processor: (answer, user) => {
+      const lower = answer.toLowerCase().trim();
+      if (["2", "skip", "no", "not now"].includes(lower)) {
+        return { ...user, completedSteps: [...user.completedSteps, "telegram"] };
+      }
+      if (/^\d+:/.test(answer.trim())) {
+        return {
+          ...user,
+          preferences: { ...user.preferences, telegramToken: answer.trim() },
+          completedSteps: [...user.completedSteps, "telegram"],
+        } as any;
+      }
+      return { ...user, completedSteps: [...user.completedSteps, "telegram"] };
+    },
+  },
+  // ── Step 6: Confirmation ───────────────────────────────
   {
     step: "confirmation",
     question:
-      "Excellent. All set:\n\n" +
-      "- Name: {name}\n" +
-      "- Style: {style}\n" +
-      "- Provider: {provider}\n" +
-      "- Agent: {agent_name}\n" +
-      "- Voice: {voice}\n\n" +
-      "Ready to begin? (yes/no)",
-    options: ["yes", "no", "y", "n"],
+      "{confirmation_message}\n\n" +
+      "Ready? (yes/no)",
+    options: ["yes", "no", "y", "n", "let's go", "yep", "absolutely"],
     processor: (answer, user) => {
-      if (["yes", "y", ""].includes(answer.toLowerCase())) {
+      if (["yes", "y", "", "let's go", "yep", "absolutely", "lets go"].includes(answer.toLowerCase())) {
+        // Stop the onboarding music - the real work begins
+        try {
+          const { execSync } = require("child_process");
+          execSync("pkill -f mpv 2>/dev/null || true", { stdio: "ignore" });
+        } catch {}
         return {
           ...user,
           onboardingComplete: true,
@@ -557,6 +685,40 @@ export class OnboardingManager {
     text = text.replace("{detected_github}", this.user.integrations.github.username || "not detected");
     text = text.replace("{detected_provider}", this.user.preferences.model.provider || "not detected");
     text = text.replace("{detected_models}", this.user.integrations.ollama.models.slice(0, 3).join(", ") || "none found");
+
+    // Vibe-aware templates
+    const name = this.user.identity.name || "friend";
+    const style = this.user.identity.communicationStyle || "concise";
+    const vibe = detectVibe(name, style);
+    const greeting = vibeGreeting(vibe, name);
+
+    // The vibe message plays after music starts or companion spawns
+    let vibeMsg = greeting;
+    if (vibe === "nerd") {
+      vibeMsg += "\n\nI've summoned a companion to keep you company. Check your dock.";
+    } else {
+      vibeMsg += `\n\nI put some ${vibeMusic(vibe)} on while we set things up. Hope that's alright.`;
+    }
+    text = text.replace("{vibe_message}", vibeMsg);
+
+    // Personalized confirmation
+    const agentName = (this.user.preferences.voice as any)?.agentName || "Eight";
+    const confirmLines = [
+      `Here's what I know about you, ${name}:`,
+      "",
+      `  Name: ${name}`,
+      `  Style: ${style}`,
+      `  Agent: ${agentName}`,
+      `  Voice: ${this.user.preferences.voice?.voiceId || "Moira"}`,
+      `  Provider: ${this.user.preferences.model.provider || "ollama"}`,
+      "",
+      vibe === "nerd" ? "Your companion awaits in the dock. The adventure begins."
+        : vibe === "hacker" ? "Zero config left. Let's ship."
+        : vibe === "creative" ? "Everything is set. Let's make something beautiful."
+        : vibe === "exec" ? "Configuration complete. I'm at your service."
+        : "We're good to go. This is going to be fun.",
+    ];
+    text = text.replace("{confirmation_message}", confirmLines.join("\n"));
 
     return { ...question, question: text };
   }
