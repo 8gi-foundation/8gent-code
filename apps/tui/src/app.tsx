@@ -53,6 +53,7 @@ import { getADHDAudio, type ADHDSoundscape } from "./lib/adhd-audio.js";
 import { getTaskRouter, getRouterStats, type TaskCategory } from "../../../packages/ai/task-router.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { NotesView } from "./screens/NotesView.js";
+import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { BTWView } from "./screens/BTWView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
@@ -640,6 +641,8 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
   const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<string | null>(null);
+  const [onboardingSteps, setOnboardingSteps] = useState<Array<{ question: string; answer?: string; status: "pending" | "active" | "done" }>>([]);
+  const [onboardingStepIndex, setOnboardingStepIndex] = useState(0);
 
   // Animation showcase
   const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
@@ -1069,6 +1072,10 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
         const question = onboardingManager.getNextQuestion();
         if (question) {
           setCurrentOnboardingQuestion(question.question);
+          setOnboardingSteps([{ question: question.question, status: "active" }]);
+          setOnboardingStepIndex(0);
+          // Speak the first question
+          try { require("child_process").execSync(`say -v Moira "${question.question.split("\\n")[0].slice(0, 80).replace(/"/g, '')}"`, { stdio: "ignore" }); } catch {}
           // Use setMessages directly to avoid stale closure issue
           setMessages((prev) => [
             ...prev,
@@ -2763,21 +2770,50 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
 
     // Handle onboarding answers first
     if (showOnboarding && !input.startsWith("/")) {
+      // Track the answer for display
+      setOnboardingSteps((prev) => {
+        const updated = [...prev];
+        const activeIdx = updated.findIndex((s) => s.status === "active");
+        if (activeIdx >= 0) {
+          updated[activeIdx] = { ...updated[activeIdx], answer: input, status: "done" as const };
+        }
+        return updated;
+      });
+
+      // Telegram token feedback
+      if (/^\d+:/.test(input.trim())) {
+        addSystemMessage("Telegram token received. Your bot will activate on next launch.");
+        // Speak confirmation
+        try { require("child_process").execSync(`say -v Moira "Telegram bot token saved. Brilliant."`, { stdio: "ignore" }); } catch {}
+      }
+
       const result = onboardingManager.processAnswer(input);
       if (result.success) {
         if (result.nextQuestion) {
           setCurrentOnboardingQuestion(result.nextQuestion.question);
-          addSystemMessage(result.nextQuestion.question);
+          setOnboardingStepIndex((prev) => prev + 1);
+          setOnboardingSteps((prev) => [...prev, { question: result.nextQuestion!.question, status: "active" as const }]);
+          // Speak each question aloud during onboarding
+          try {
+            const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId || "Moira";
+            const firstLine = result.nextQuestion.question.split("\n")[0].slice(0, 100);
+            require("child_process").execSync(`say -v ${voice} "${firstLine.replace(/"/g, '')}"`, { stdio: "ignore" });
+          } catch {}
         } else {
           // Onboarding complete
           setShowOnboarding(false);
           setViewMode("chat");
           const user = onboardingManager.getUser();
+          const name = user.identity.name || "friend";
           addSystemMessage(
-            `∞ Splendid, ${user.identity.name || "friend"}.\n\n` +
-            `I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\n` +
+            `Welcome, ${name}. I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\n` +
             "Let's build something magnificent."
           );
+          // Speak the welcome
+          try {
+            const voice = user.preferences?.voice?.voiceId || "Moira";
+            require("child_process").execSync(`say -v ${voice} "Welcome ${name}. Let's build something magnificent."`, { stdio: "ignore" });
+          } catch {}
 
           // Apply user preferences to current session
           if (user.preferences.model.provider) {
@@ -3138,20 +3174,15 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
         );
 
       case "onboarding":
-        // Onboarding uses the same message list but with a different header indicator
         return (
-          <Stack>
-            <Box marginBottom={1}>
-              <Heading>∞ Onboarding</Heading>
-              <MutedText> - </MutedText>
-              <AppText color="yellow">Getting to know you</AppText>
-            </Box>
-            <MessageList
-              messages={messages}
-              animateTyping={showAnimations}
-              soundEnabled={soundEnabled}
-            />
-          </Stack>
+          <OnboardingScreen
+            steps={onboardingSteps}
+            currentQuestion={currentOnboardingQuestion || ""}
+            stepIndex={onboardingStepIndex}
+            totalSteps={6}
+            userName={onboardingManager.getUser()?.identity?.name || undefined}
+            agentName={(onboardingManager.getUser()?.preferences?.voice as any)?.agentName || undefined}
+          />
         );
 
       case "animations":
