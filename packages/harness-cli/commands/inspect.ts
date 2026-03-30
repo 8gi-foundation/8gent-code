@@ -20,6 +20,25 @@ interface InspectOptions {
   summary: boolean;
 }
 
+interface InspectSummary {
+  entries: number;
+  types: Record<string, number>;
+  firstPrompt: string;
+  lastResponse: string;
+  totalTokens: number;
+  exitReason: string | null;
+  durationMs: number;
+  steps: number;
+  toolCalls: number;
+  filesCreated: string[];
+  filesModified: string[];
+  errors: string[];
+  analysisAvailable: boolean;
+  analysisMarkdownAvailable: boolean;
+  analysisTopCount: number;
+  analysisMaxScore: number;
+}
+
 function parseArgs(args: string[]): InspectOptions {
   const opts: InspectOptions = {
     sessionId: "",
@@ -223,12 +242,61 @@ function typeLabel(type: string): string {
   return `${color}${type}${reset}`;
 }
 
-function printSummary(entries: SessionEntry[]): void {
+function collectArtifactRefs(entries: SessionEntry[], sessionEnd: any): string[] {
+  const refs = new Set<string>();
+  for (const p of [...(sessionEnd?.summary?.filesCreated ?? []), ...(sessionEnd?.summary?.filesModified ?? [])]) {
+    if (typeof p === "string" && p.trim()) refs.add(p.trim());
+  }
+
+  for (const e of entries) {
+    if (e.type !== "tool_result") continue;
+    const raw = (e as any).result;
+    if (!raw) continue;
+
+    let obj: Record<string, unknown> | null = null;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") obj = parsed as Record<string, unknown>;
+      } catch {
+        obj = null;
+      }
+    } else if (typeof raw === "object") {
+      obj = raw as Record<string, unknown>;
+    }
+
+    if (!obj) continue;
+    for (const k of ["path", "file", "output_path", "raw_output_path"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim()) refs.add(v.trim());
+    }
+  }
+
+  return [...refs];
+}
+
+function resolveExistingPath(refPath: string, sessionFilePath: string): string | null {
+  if (fs.existsSync(refPath)) return refPath;
+
+  const sessionDir = path.dirname(sessionFilePath);
+  const candidates = [
+    path.resolve(refPath),
+    path.resolve(sessionDir, refPath),
+    path.resolve(process.cwd(), refPath),
+  ];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+function buildSummary(entries: SessionEntry[], sessionFilePath: string): InspectSummary {
   const counts: Record<string, number> = {};
   let firstUser = "";
   let lastAssistant = "";
   let totalTokens = 0;
-  let errors: string[] = [];
+  const errors: string[] = [];
 
   for (const e of entries) {
     counts[e.type] = (counts[e.type] || 0) + 1;
@@ -256,33 +324,88 @@ function printSummary(entries: SessionEntry[]): void {
   }
 
   const sessionEnd = entries.find(e => e.type === "session_end") as any;
+  const refs = collectArtifactRefs(entries, sessionEnd);
+  let analysisJsonPath: string | null = null;
+  let analysisMdPath: string | null = null;
+
+  for (const ref of refs) {
+    const base = path.basename(ref).toLowerCase();
+    if (base !== "analysis.json" && base !== "analysis.md") continue;
+    const resolved = resolveExistingPath(ref, sessionFilePath);
+    if (!resolved) continue;
+    if (base === "analysis.json") analysisJsonPath = resolved;
+    if (base === "analysis.md") analysisMdPath = resolved;
+  }
+
+  let analysisTopCount = 0;
+  let analysisMaxScore = 0;
+  if (analysisJsonPath) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(analysisJsonPath, "utf-8"));
+      if (parsed && typeof parsed === "object") {
+        analysisTopCount = Number((parsed as any).top_count ?? 0) || 0;
+        analysisMaxScore = Number((parsed as any).max_score ?? 0) || 0;
+      }
+    } catch {
+      analysisTopCount = 0;
+      analysisMaxScore = 0;
+    }
+  }
+
+  return {
+    entries: entries.length,
+    types: counts,
+    firstPrompt: firstUser,
+    lastResponse: lastAssistant,
+    totalTokens: totalTokens || sessionEnd?.summary?.totalTokens || 0,
+    exitReason: sessionEnd?.summary?.exitReason ?? null,
+    durationMs: sessionEnd?.summary?.durationMs ?? 0,
+    steps: sessionEnd?.summary?.totalSteps ?? 0,
+    toolCalls: sessionEnd?.summary?.totalToolCalls ?? 0,
+    filesCreated: sessionEnd?.summary?.filesCreated ?? [],
+    filesModified: sessionEnd?.summary?.filesModified ?? [],
+    errors,
+    analysisAvailable: !!analysisJsonPath,
+    analysisMarkdownAvailable: !!analysisMdPath,
+    analysisTopCount,
+    analysisMaxScore,
+  };
+}
+
+function printSummary(entries: SessionEntry[], sessionFilePath: string): void {
+  const summary = buildSummary(entries, sessionFilePath);
 
   console.log("\n  Session Summary");
   console.log("  " + "─".repeat(60));
-  console.log(`  Entries: ${entries.length}`);
-  console.log(`  Types: ${Object.entries(counts).map(([k, v]) => `${k}(${v})`).join(", ")}`);
-  console.log(`  First prompt: ${firstUser || "—"}`);
-  console.log(`  Last response: ${lastAssistant.slice(0, 150) || "—"}${lastAssistant.length > 150 ? "..." : ""}`);
-  console.log(`  Total tokens: ${totalTokens || sessionEnd?.summary?.totalTokens || "?"}`);
+  console.log(`  Entries: ${summary.entries}`);
+  console.log(`  Types: ${Object.entries(summary.types).map(([k, v]) => `${k}(${v})`).join(", ")}`);
+  console.log(`  First prompt: ${summary.firstPrompt || "—"}`);
+  console.log(`  Last response: ${summary.lastResponse.slice(0, 150) || "—"}${summary.lastResponse.length > 150 ? "..." : ""}`);
+  console.log(`  Total tokens: ${summary.totalTokens || "?"}`);
 
-  if (sessionEnd) {
-    console.log(`  Exit reason: ${sessionEnd.summary?.exitReason ?? "?"}`);
-    console.log(`  Duration: ${sessionEnd.summary?.durationMs ? (sessionEnd.summary.durationMs / 1000).toFixed(1) + "s" : "?"}`);
-    console.log(`  Steps: ${sessionEnd.summary?.totalSteps ?? "?"}`);
-    console.log(`  Tool calls: ${sessionEnd.summary?.totalToolCalls ?? "?"}`);
-    if (sessionEnd.summary?.filesCreated?.length) {
-      console.log(`  Files created: ${sessionEnd.summary.filesCreated.join(", ")}`);
+  if (summary.exitReason) {
+    console.log(`  Exit reason: ${summary.exitReason}`);
+    console.log(`  Duration: ${summary.durationMs ? (summary.durationMs / 1000).toFixed(1) + "s" : "?"}`);
+    console.log(`  Steps: ${summary.steps || "?"}`);
+    console.log(`  Tool calls: ${summary.toolCalls || "?"}`);
+    if (summary.filesCreated.length) {
+      console.log(`  Files created: ${summary.filesCreated.join(", ")}`);
     }
-    if (sessionEnd.summary?.filesModified?.length) {
-      console.log(`  Files modified: ${sessionEnd.summary.filesModified.join(", ")}`);
+    if (summary.filesModified.length) {
+      console.log(`  Files modified: ${summary.filesModified.join(", ")}`);
     }
   } else {
     console.log(`  Status: \x1b[33mRUNNING (no session_end found)\x1b[0m`);
   }
 
-  if (errors.length > 0) {
-    console.log(`  \x1b[31mErrors (${errors.length}):\x1b[0m`);
-    for (const err of errors.slice(0, 10)) {
+  console.log(`  Analysis JSON: ${summary.analysisAvailable}`);
+  console.log(`  Analysis Markdown: ${summary.analysisMarkdownAvailable}`);
+  console.log(`  Analysis top_count: ${summary.analysisTopCount}`);
+  console.log(`  Analysis max_score: ${summary.analysisMaxScore}`);
+
+  if (summary.errors.length > 0) {
+    console.log(`  \x1b[31mErrors (${summary.errors.length}):\x1b[0m`);
+    for (const err of summary.errors.slice(0, 10)) {
       console.log(`    - ${err.slice(0, 120)}`);
     }
   }
@@ -306,13 +429,18 @@ export async function inspect(args: string[]): Promise<void> {
     filtered = entries.filter(e => opts.entryTypes!.includes(e.type));
   }
 
+  if (opts.summary && opts.json) {
+    console.log(JSON.stringify(buildSummary(entries, filePath), null, 2));
+    return;
+  }
+
   if (opts.json) {
     console.log(JSON.stringify(filtered, null, 2));
     return;
   }
 
   if (opts.summary) {
-    printSummary(entries);
+    printSummary(entries, filePath);
     return;
   }
 
@@ -326,5 +454,5 @@ export async function inspect(args: string[]): Promise<void> {
   }
 
   // Print summary at the end
-  printSummary(entries);
+  printSummary(entries, filePath);
 }
