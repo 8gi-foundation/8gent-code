@@ -1025,4 +1025,8 @@ export function isInfiniteMode(): boolean {
 // ============================================
 
 export { ToolG8 } from "./toolg8.js";
-export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS } from "./policy-engine.js";
+export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS, watchPolicies, unwatchPolicies, setEnvironment, getEnvironment } from "./policy-engine.js";
+export { AuditTrail } from "./audit-trail.js";
+export type { AuditEvent } from "./audit-trail.js";
+export { validateChangedFiles } from "./ci-validator.js";
+export type { ValidationResult, PolicyViolation } from "./ci-validator.js";

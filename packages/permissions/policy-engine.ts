@@ -148,6 +148,10 @@ let _parsedConditions: Map<number, ParsedCondition> = new Map();
 let _loaded = false;
 /** Flag set when policy file checksum does not match stored hash */
 let _integrityWarning: string | null = null;
+/** Active file watcher for hot-reload */
+let _watcher: ReturnType<typeof fs.watch> | null = null;
+/** Current environment (development, staging, production) */
+let _currentEnvironment: string = process.env.EIGHT_ENV || process.env.NODE_ENV || "development";
 
 // ============================================
 // YAML Loader
@@ -413,7 +417,9 @@ export function evaluatePolicy(
       (r.enabled !== false) &&
       (r.action === action || r.action === "*") &&
       // Agent scope: rule applies if no scope (global) or scope matches agent
-      (!r.agentScope || r.agentScope === agentId)
+      (!r.agentScope || r.agentScope === agentId) &&
+      // Environment scope: rule applies if no environments listed or current env matches
+      (!r.environments || r.environments.length === 0 || r.environments.includes(_currentEnvironment))
   );
 
   // Build index-aware list for pre-parsed condition lookup
@@ -493,6 +499,59 @@ export function getAgentPolicy(agentId: string): PolicyRule[] {
   return _policies.filter(
     (r) => (r.enabled !== false) && (!r.agentScope || r.agentScope === agentId)
   );
+}
+
+/**
+ * Set the current environment for environment-scoped rules.
+ */
+export function setEnvironment(env: string): void {
+  _currentEnvironment = env;
+}
+
+/**
+ * Get the current environment.
+ */
+export function getEnvironment(): string {
+  return _currentEnvironment;
+}
+
+/**
+ * Watch policy files for changes and auto-reload.
+ * Call once at startup. Subsequent calls are no-ops.
+ */
+export function watchPolicies(): void {
+  if (_watcher) return;
+
+  const targets = [DEFAULT_POLICY_PATH, USER_POLICY_PATH].filter(fs.existsSync);
+  if (targets.length === 0) return;
+
+  // Watch the first available policy file (user overrides take priority)
+  const watchTarget = targets[targets.length - 1];
+  try {
+    _watcher = fs.watch(watchTarget, (eventType) => {
+      if (eventType === "change") {
+        try {
+          loadPolicies();
+          console.log("[policy-engine] Policies hot-reloaded");
+        } catch (err) {
+          console.warn(`[policy-engine] Hot-reload failed: ${err}`);
+        }
+      }
+    });
+    _watcher.unref(); // Don't keep process alive for the watcher
+  } catch {
+    // Silent - watch is best-effort
+  }
+}
+
+/**
+ * Stop watching policy files.
+ */
+export function unwatchPolicies(): void {
+  if (_watcher) {
+    _watcher.close();
+    _watcher = null;
+  }
 }
 
 /**
