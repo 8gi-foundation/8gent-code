@@ -37,6 +37,7 @@ import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orches
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { getExtensionManager } from "../extensions";
 import { CompactionEngine, DEFAULT_COMPACTION_CONFIG, type CompactionResult } from "./compaction";
+import { scaleInference, type ScalingResult } from "./inference-scaling";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import { needsClarification, createGatherer, formatQuestion, type ProactiveGatherer } from "../proactive";
@@ -828,7 +829,29 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
       this.abortController = null;
 
-      const content = result.text;
+      // ── Inference-Time Scaling (best-of-N with critic) ─────────
+      // When scale > 1, generate N alternative text responses and
+      // pick the best via critic scoring. Tools already ran in the
+      // agent loop above - this refines the final text answer.
+      let content = result.text;
+      const scaleN = this.config.scale ?? 1;
+
+      if (scaleN > 1 && content.length > 0) {
+        try {
+          const scalingResult: ScalingResult = await scaleInference(
+            userMessage,
+            providerConfig,
+            typeof systemPrompt === "string" ? systemPrompt : undefined,
+            { attempts: scaleN },
+          );
+          content = scalingResult.best.response;
+          console.log(
+            `  [SCALING] Generated ${scaleN} solutions, selected best (score: ${scalingResult.best.score.toFixed(2)})`
+          );
+        } catch (err) {
+          console.error("  [SCALING] Failed, using original response:", (err as Error).message);
+        }
+      }
 
       // Apply personality voice flavoring to the response
       const flavor = personalityVoice.getFlavor("complete");
