@@ -90,8 +90,12 @@ export type SlashCommand =
   | "export"
   | "fork"
   | "branch"
+<<<<<<< feat/cron-scheduler-973
+  | "cron";
+=======
   | "deploy"
   | "vercel";
+>>>>>>> main
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
@@ -245,6 +249,12 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     usage: "/branch [list|switch <id>]",
   },
   {
+<<<<<<< feat/cron-scheduler-973
+    name: "cron",
+    aliases: ["jobs", "schedule"],
+    description: "Manage scheduled cron jobs",
+    usage: "/cron [list|add|remove|enable|disable]",
+=======
     name: "deploy",
     aliases: ["redeploy"],
     description: "Trigger Vercel deploy of current project",
@@ -255,6 +265,7 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
     aliases: ["vc"],
     description: "Vercel deployment management",
     usage: "/vercel [status|env|logs|projects|domains]",
+>>>>>>> main
   },
   {
     name: "router",
