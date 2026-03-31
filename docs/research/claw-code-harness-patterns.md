@@ -84,12 +84,20 @@ Eight should **abstract patterns**, not vendor their implementation language (Py
 
 ## 5. Suggested engineering priorities (from this research)
 
-1. **P0:** Tool pool + permission context alignment (ToolGate [#988](https://github.com/8gi-foundation/8gent-code/issues/988) + simple/safe mode).
-2. **P1:** Route-debug CLI (prompt → candidate tools/commands) + registry [#983](https://github.com/8gi-foundation/8gent-code/issues/983).
-3. **P1:** Exportable “session report” Markdown (support bundle) tying doctor + last N turns + policy snapshot.
-4. **P2:** Parity-style **internal** audit: documented tools vs implementation (no third-party archive).
-5. **P2:** Explicit bootstrap stage list in docs + tests (bootstrap graph pattern).
-6. **P3:** Labeled cost event stream (extend existing metrics).
+Tracked as **detailed GitHub issues** (epic: [#1076](https://github.com/8gi-foundation/8gent-code/issues/1076)):
+
+| Priority | Issue | Title |
+|----------|--------|--------|
+| P0 adj. | [#1083](https://github.com/8gi-foundation/8gent-code/issues/1083) | Progressive tool surface (safe subset + MCP toggle) |
+| P1 | [#1077](https://github.com/8gi-foundation/8gent-code/issues/1077) | Route-debug CLI |
+| P1 | [#1078](https://github.com/8gi-foundation/8gent-code/issues/1078) | Exportable support bundle (Markdown) |
+| P2 | [#1079](https://github.com/8gi-foundation/8gent-code/issues/1079) | CI internal capability parity check |
+| P2 | [#1080](https://github.com/8gi-foundation/8gent-code/issues/1080) | Bootstrap pipeline docs + tests |
+| P3 | [#1084](https://github.com/8gi-foundation/8gent-code/issues/1084) | Labeled cost attribution events |
+
+**Also filed:** [#1081](https://github.com/8gi-foundation/8gent-code/issues/1081) prefetch, [#1082](https://github.com/8gi-foundation/8gent-code/issues/1082) system prompt bootstrap segment, [#1085](https://github.com/8gi-foundation/8gent-code/issues/1085) unified execution registry, [#1086](https://github.com/8gi-foundation/8gent-code/issues/1086) structured agent history, [#1087](https://github.com/8gi-foundation/8gent-code/issues/1087) TUI stream events, [#1088](https://github.com/8gi-foundation/8gent-code/issues/1088) transcript sliding window, [#1089](https://github.com/8gi-foundation/8gent-code/issues/1089) central TS types, [#1090](https://github.com/8gi-foundation/8gent-code/issues/1090) command taxonomy, [#1091](https://github.com/8gi-foundation/8gent-code/issues/1091) workspace context report, [#1092](https://github.com/8gi-foundation/8gent-code/issues/1092) trust-gated deferred init, [#1093](https://github.com/8gi-foundation/8gent-code/issues/1093) extension subsystem manifest.
+
+**Existing issues** still apply: ToolGate [#988](https://github.com/8gi-foundation/8gent-code/issues/988), skills registry [#983](https://github.com/8gi-foundation/8gent-code/issues/983), structured logging [#981](https://github.com/8gi-foundation/8gent-code/issues/981), sessions [#1051](https://github.com/8gi-foundation/8gent-code/issues/1051), daemon [#956](https://github.com/8gi-foundation/8gent-code/issues/956), sandbox [#993](https://github.com/8gi-foundation/8gent-code/issues/993).
 
 ---
 
@@ -98,3 +106,4 @@ Eight should **abstract patterns**, not vendor their implementation language (Py
 | Date | Author | Note |
 |------|--------|------|
 | 2026-03-31 | CAO research | Initial deep competitor abstraction; issue #1076 |
+| 2026-03-31 | CAO research | Detailed child issues #1077-#1093 |
