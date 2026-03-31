@@ -2,6 +2,8 @@
 
 Use **GitHub Projects (new)** for roadmap and backlog so triage, priority, and ownership stay visible next to code. Issues stay in `8gi-foundation/8gent-code`; the Project is the planning surface.
 
+**Live org project:** [8gent-code roadmap](https://github.com/orgs/8gi-foundation/projects/1) (project `1`). Linked to `8gi-foundation/8gent-code`. Epic **#1076** and issues **#1077–#1093** are already on the board.
+
 ## One-time: CLI access
 
 The `gh` token must include the **project** scope:
@@ -20,6 +22,8 @@ gh project list --owner 8gi-foundation --limit 5
 ```
 
 ## Create an org project and link the repo
+
+Skip this section if you use the [live project](https://github.com/orgs/8gi-foundation/projects/1) above.
 
 1. **Create** (org-owned project, visible to the org):
 
