@@ -53,6 +53,7 @@ COMMANDS:
   review                      Review current git diff for bugs/security/style
   review --pr <number>        Review a specific PR diff
   auth <sub>                  Authentication (login, logout, status)
+  cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
 
 AGENT COMMANDS:
@@ -80,6 +81,13 @@ MEMORY COMMANDS:
   memory remember <fact>      Store a memory
   memory forget <id>          Delete a memory
   memory stats                Show memory statistics
+
+CRON COMMANDS:
+  cron list                   List scheduled jobs
+  cron add <name> <schedule> <command>  Add a cron job
+  cron remove <id>            Remove a cron job
+  cron enable <id>            Enable a job
+  cron disable <id>           Disable a job
 
 OPTIONS:
   -h, --help     Show this help message
@@ -270,6 +278,10 @@ async function main() {
 
     case "auth":
       await authCommand(restArgs);
+      break;
+
+    case "cron":
+      await cronCommand(restArgs);
       break;
 
     case "rpc": {
@@ -997,6 +1009,55 @@ function parseFlags(args: string[]): { flags: Record<string, string | boolean>; 
 
 function jsonOut(data: unknown): void {
   console.log(JSON.stringify(data, null, 2));
+}
+
+// ── Cron Command ──────────────────────────────────────────────────
+
+async function cronCommand(args: string[]) {
+  const { CronManager } = await import("../packages/cron/index.ts");
+  const mgr = new CronManager();
+  const sub = args[0];
+
+  if (!sub || sub === "list") {
+    const jobs = mgr.list();
+    if (jobs.length === 0) {
+      console.log("No cron jobs configured. Use: 8gent cron add <name> <schedule> <command>");
+      return;
+    }
+    console.log("Cron Jobs:\n");
+    for (const j of jobs) {
+      const status = j.enabled ? "ON" : "OFF";
+      const last = j.lastRun ? ` (last: ${j.lastRun})` : "";
+      console.log(`  [${status}] ${j.id}  ${j.name}  ${j.schedule}  -> ${j.command}${last}`);
+    }
+  } else if (sub === "add") {
+    if (args.length < 4) {
+      console.error("Usage: 8gent cron add <name> <schedule> <command>");
+      console.error('Example: 8gent cron add "deploy-check" "0 */6 * * *" "chat \'check deploy status\'"');
+      process.exit(1);
+    }
+    const name = args[1];
+    const schedule = args[2];
+    const command = args.slice(3).join(" ");
+    const job = mgr.add({ name, schedule, command, enabled: true });
+    console.log(`Added cron job: ${job.id} (${job.name}) - ${job.schedule} -> ${job.command}`);
+  } else if (sub === "remove") {
+    if (!args[1]) { console.error("Usage: 8gent cron remove <id>"); process.exit(1); }
+    const removed = mgr.remove(args[1]);
+    console.log(removed ? `Removed job ${args[1]}` : `Job ${args[1]} not found`);
+  } else if (sub === "enable") {
+    if (!args[1]) { console.error("Usage: 8gent cron enable <id>"); process.exit(1); }
+    mgr.enable(args[1]);
+    console.log(`Enabled job ${args[1]}`);
+  } else if (sub === "disable") {
+    if (!args[1]) { console.error("Usage: 8gent cron disable <id>"); process.exit(1); }
+    mgr.disable(args[1]);
+    console.log(`Disabled job ${args[1]}`);
+  } else {
+    console.error(`Unknown cron subcommand: ${sub}`);
+    console.log("Available: list, add, remove, enable, disable");
+    process.exit(1);
+  }
 }
 
 // ── Chat Command (non-interactive, pipe-friendly) ─────────────────
