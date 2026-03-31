@@ -1570,5 +1570,276 @@
     "added": 0,
     "skipped": 25,
     "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T15:30:56.420Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 15,
+    "skipped": 16,
+    "newSpecs": [
+      "freecodecamp",
+      "vas3k",
+      "logto-io",
+      "airi",
+      "humanlayer",
+      "appwrite",
+      "cal-com",
+      "fluxerapp",
+      "luongnv89",
+      "sherlock",
+      "fastfetch",
+      "math-rigor-vital-but",
+      "build123d-python-cad-programming",
+      "spring-boot-done-right",
+      "pretext-typescript-library-for"
+    ]
+  },
+  {
+    "timestamp": "2026-03-30T16:00:57.693Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 27,
+    "added": 0,
+    "skipped": 30,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T16:30:59.239Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 1,
+    "skipped": 30,
+    "newSpecs": [
+      "bitwarden-integrates-with-onecli"
+    ]
+  },
+  {
+    "timestamp": "2026-03-30T17:01:00.681Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 0,
+    "skipped": 31,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T17:31:01.972Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 0,
+    "skipped": 31,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T18:01:03.347Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 25,
+    "added": 0,
+    "skipped": 28,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T18:31:04.639Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 25,
+    "added": 0,
+    "skipped": 28,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T19:01:06.012Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 26,
+    "added": 1,
+    "skipped": 28,
+    "newSpecs": [
+      "fedware-government-apps-that"
+    ]
+  },
+  {
+    "timestamp": "2026-03-30T19:31:07.204Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 27,
+    "added": 0,
+    "skipped": 30,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T20:01:08.630Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 1,
+    "skipped": 30,
+    "newSpecs": [
+      "the-hateful-eight-500"
+    ]
+  },
+  {
+    "timestamp": "2026-03-30T20:31:10.054Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 27,
+    "added": 0,
+    "skipped": 30,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T21:01:11.340Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 27,
+    "added": 0,
+    "skipped": 30,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T21:31:12.623Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 1,
+    "skipped": 30,
+    "newSpecs": [
+      "what-learned-building-100"
+    ]
+  },
+  {
+    "timestamp": "2026-03-30T22:01:13.885Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 28,
+    "added": 0,
+    "skipped": 31,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T22:31:15.292Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 27,
+    "added": 0,
+    "skipped": 30,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T23:01:16.704Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 25,
+    "added": 0,
+    "skipped": 28,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-30T23:31:17.937Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 25,
+    "added": 0,
+    "skipped": 28,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-31T00:01:19.118Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 25,
+    "added": 0,
+    "skipped": 28,
+    "newSpecs": []
+  },
+  {
+    "timestamp": "2026-03-31T00:31:20.496Z",
+    "sources": [
+      "npm",
+      "github-ts",
+      "github-all",
+      "hn"
+    ],
+    "found": 25,
+    "added": 0,
+    "skipped": 28,
+    "newSpecs": []
   }
 ]

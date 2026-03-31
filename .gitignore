@@ -72,6 +72,12 @@ docs/branch-audio/*.aiff
 benchmarks/ui-samples/
 benchmarks/artifacts/
 
+# Ecosystem media (canonical: 8gent-world public/media)
+/media/
+
+# Local reference clone (nested .git; do not commit)
+claude-code/
+
 # Content drafts (belong in ~/Myresumeportfolio/content/)
 docs/content/
 

@@ -48,7 +48,7 @@ The following are out of scope:
 
 ## Security Framework
 
-For the full 8GI Security Framework covering governance, threat models, and compliance, see [docs/8GI-SECURITY.md](docs/8GI-SECURITY.md).
+For the full 8GI Security Framework covering governance, threat models, and compliance, see the canonical document in the [8gi-governance repository](https://github.com/8gi-foundation/8gi-governance/blob/main/docs/8GI-SECURITY.md).
 
 ## License
 

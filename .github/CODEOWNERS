@@ -17,8 +17,7 @@ packages/kernel/ @podjamz
 # Agent instructions - controls all agent behavior
 CLAUDE.md @podjamz
 
-# Governance and security docs
-docs/8GI-*.md @podjamz
+# Security policy (ecosystem governance docs live in 8gi-governance)
 SECURITY.md @podjamz
 
 # Package publishing config

@@ -14,12 +14,12 @@
     "communication",
     "confirmation"
   ],
-  "lastPrompted": "2026-03-19T03:34:56.977Z",
-  "promptCount": 3,
+  "lastPrompted": "2026-03-31T14:51:39.909Z",
+  "promptCount": 4,
   "identity": {
     "name": "podjamz",
     "role": null,
-    "communicationStyle": "casual",
+    "communicationStyle": "detailed",
     "language": "en"
   },
   "projects": {
@@ -34,7 +34,7 @@
       "voiceId": null
     },
     "model": {
-      "default": "eight:latest",
+      "default": "eight-1-q-14b:latest",
       "provider": "ollama",
       "fallbacks": [],
       "preferLocal": true
@@ -60,14 +60,9 @@
       "available": true,
       "models": [
         "eight-1-q-14b:latest",
+        "qwen3:14b",
         "minicpm-v:latest",
         "eight:latest",
-        "eight-1.0-q3:14b",
-        "eight-1-qwen3-14b:latest",
-        "eight:0.1",
-        "qwen3:14b",
-        "devstral:latest",
-        "qwen3.5:latest",
         "nomic-embed-text:latest"
       ]
     },
@@ -77,8 +72,8 @@
     }
   },
   "understanding": {
-    "confidenceScore": 0.20800000000000002,
+    "confidenceScore": 0.46199999999999997,
     "areasUnclear": [],
-    "lastUpdated": "2026-03-19T03:34:56.977Z"
+    "lastUpdated": "2026-03-31T14:51:39.909Z"
   }
 }
