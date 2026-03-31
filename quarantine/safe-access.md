@@ -1,21 +1,4 @@
-commit b4f3a96b1c28cc31e95a0a9e04862836db4052bc
-Author: podjamz <podjamz@gmail.com>
-Date:   Wed Mar 25 07:10:08 2026 +0000
-
-    feat: safe deep property access
-    
-    Add safeGet/safeSet/safeHas/safePick/safeOmit utilities for null-safe
-    deeply nested object access without throwing. Quarantine md included.
-    
-    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-diff --git a/quarantine/safe-access.md b/quarantine/safe-access.md
-new file mode 100644
-index 00000000..2628419c
---- /dev/null
-+++ b/quarantine/safe-access.md
-@@ -0,0 +1,30 @@
-+# safe-access
+# safe-access
 +
 +## Description
 +
