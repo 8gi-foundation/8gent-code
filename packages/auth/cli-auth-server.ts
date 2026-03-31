@@ -5,7 +5,7 @@
  * This is the Claude Code / gh auth login pattern:
  *
  * 1. CLI starts local server on a random port
- * 2. Opens browser to 8gent.world/auth/cli?port=XXXX&state=YYYY
+ * 2. Opens browser to 8gent.app/auth/cli?port=XXXX&state=YYYY
  * 3. User signs in via Clerk on the web
  * 4. After sign-in, browser JS POSTs the session token to localhost:XXXX/callback
  * 5. CLI receives token, stores it, closes server
@@ -39,7 +39,7 @@ export interface CLIAuthCallbacks {
  * - Return token
  */
 export async function runCLIAuthFlow(
-  webBaseUrl: string = "https://8gent.world",
+  webBaseUrl: string = "https://8gent.app",
   callbacks?: CLIAuthCallbacks,
   timeoutMs: number = 5 * 60 * 1000, // 5 min
 ): Promise<CLIAuthResult> {
