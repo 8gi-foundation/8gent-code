@@ -9793,5 +9793,214 @@
     ],
     "maxLines": 150,
     "source": "hn"
+  },
+  {
+    "name": "freecodecamp",
+    "description": "freeCodeCamp.org's open-source codebase and curriculum. Learn math, programming, and computer science for free.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "vas3k",
+    "description": "Self-hosted AI accounting app. LLM analyzer for receipts, invoices, transactions with custom prompts and categories",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "logto-io",
+    "description": "🧑‍🚀 Authentication and authorization infrastructure for SaaS and AI apps, built on OIDC and OAuth 2.1 with multi-tenancy, SSO, and RBAC.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "airi",
+    "description": "💖🧸 Self hosted, you-owned Grok Companion, a container of souls of waifu, cyber livings to bring them into our worlds, wishing to achieve N",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "humanlayer",
+    "description": "The best way to get AI coding agents to solve hard problems in complex codebases.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "appwrite",
+    "description": "Appwrite® - complete cloud infrastructure for your web, mobile and AI apps. Including Auth, Databases, Storage, Functions, Messaging, Hostin",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "cal-com",
+    "description": "Scheduling infrastructure for absolutely everyone.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "fluxerapp",
+    "description": "A free and open source instant messaging and VoIP platform built for friends, groups, and communities. Self-hosting and more activity in thi",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-ts"
+  },
+  {
+    "name": "luongnv89",
+    "description": "A visual, example-driven guide to Claude Code — from basic concepts to advanced agents, with copy-paste templates that bring immediate value",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "sherlock",
+    "description": "Hunt down social media accounts by username across social networks",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "fastfetch",
+    "description": "A maintained, feature-rich and performance oriented, neofetch like system information tool.",
+    "requirements": [
+      "Implement the core pattern as a self-contained TypeScript module",
+      "Export a clean functional API",
+      "Under 200 lines, zero dependencies"
+    ],
+    "maxLines": 200,
+    "source": "github-all"
+  },
+  {
+    "name": "math-rigor-vital-but",
+    "description": "In Math, Rigor Is Vital. But Are Digitized Proofs Taking It Too Far?",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "build123d-python-cad-programming",
+    "description": "Build123d: A Python CAD programming library",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "spring-boot-done-right",
+    "description": "Spring Boot Done Right: Lessons from a 400-Module Codebase",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "pretext-typescript-library-for",
+    "description": "Pretext: TypeScript library for multiline text measurement and layout",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "bitwarden-integrates-with-onecli",
+    "description": "Bitwarden Integrates with OneCLI Agent Vault",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "fedware-government-apps-that",
+    "description": "Fedware: Government Apps That Spy Harder Than the Apps They Ban",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "the-hateful-eight-500",
+    "description": "The Hateful Eight is 85% of S&P 500 Decline",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
+  },
+  {
+    "name": "what-learned-building-100",
+    "description": "What we learned building 100 API integrations with OpenCode",
+    "requirements": [
+      "Implement the core idea as a TypeScript utility",
+      "Zero external dependencies",
+      "Minimal API - one clear export"
+    ],
+    "maxLines": 150,
+    "source": "hn"
   }
 ]
