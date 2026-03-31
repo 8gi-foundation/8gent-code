@@ -7,6 +7,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **GitHub Projects playbook** - `docs/process/GITHUB-PROJECTS.md` and `scripts/gh-project-roadmap.sh` for org Project setup, linking `8gent-code`, and bulk-adding epic **#1076** and **#1077–#1093**. Org project [**8gent-code roadmap**](https://github.com/orgs/8gi-foundation/projects/1) (number `1`) is live and linked to the repo.
+- **Auth** - `packages/auth/proxy-provider.ts` sketch for OpenAI-compatible routing via the 8GI control-plane gateway (local Ollama fallback).
+- **toolshed** - `toolshed/example.ts` placeholder for shared tooling experiments.
+- **Docs** - `onboarding.md` (local onboarding notes).
+- **Benchmarks** - `benchmarks/autoresearch/loop-state-battle-test-pre-20260329-025619.json` autoresearch loop snapshot.
+
+### Changed
+- **Repository scope** - Ecosystem governance markdown (`docs/8GI-*.md`, `8GO-SPEC.md`, presentation scripts) and product PRD drafts moved to [`8gi-governance`](https://github.com/8gi-foundation/8gi-governance) and [`8gent-world`](https://github.com/8gi-foundation/8gent-world). Static `media/` decks and avatars now live under `8gent-world` (`public/media/`). This repo keeps kernel and agent documentation only.
+- **Housekeeping** - README, SECURITY, CODEOWNERS, `quarantine/safe-access.md`, `scripts/research-log.json`, `scripts/utility-queue.json`, `bun.lock`, `.8gent/user.json`. `.gitignore` now ignores local `claude-code/` reference trees (nested `.git`).
+
+---
+
 ## [2.0.1] - 2026-03-25
 
 ### Fixed

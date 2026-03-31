@@ -9,7 +9,7 @@
 import * as path from "path";
 import * as fs from "fs";
 
-const VERSION = "2.1.0";
+const VERSION = "0.1.2";
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -50,6 +50,8 @@ COMMANDS:
   benchmark                   Run efficiency benchmarks
   infinite <task>             Run task in autonomous infinite mode
   export <session-id|--last>    Export a session as self-contained HTML
+  review                      Review current git diff for bugs/security/style
+  review --pr <number>        Review a specific PR diff
   auth <sub>                  Authentication (login, logout, status)
   cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
@@ -287,6 +289,10 @@ async function main() {
       await startRPCServer();
       break;
     }
+
+    case "review":
+      await reviewCommand(restArgs);
+      break;
 
     case "doctor":
       await doctorCommand();
@@ -1767,6 +1773,44 @@ function getSymbolIcon(kind: string): string {
     module: "□",
   };
   return icons[kind] || "·";
+}
+
+async function reviewCommand(args: string[]) {
+  const { flags } = parseFlags(args);
+  const isJson = !!flags.json;
+  const prNumber = flags.pr as string | undefined;
+  const diffFile = flags.diff as string | undefined;
+
+  const { reviewDiff } = await import("../packages/ci/review");
+  const { execSync } = await import("child_process");
+
+  let diff: string;
+  try {
+    if (diffFile) {
+      diff = fs.readFileSync(diffFile, "utf-8");
+    } else if (prNumber) {
+      diff = execSync(`gh pr diff ${prNumber}`, { encoding: "utf-8" });
+    } else {
+      diff = execSync("git diff HEAD", { encoding: "utf-8" });
+      if (!diff.trim()) diff = execSync("git diff --cached", { encoding: "utf-8" });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isJson) { jsonOut({ success: false, error: msg }); } else { console.error(`Failed to get diff: ${msg}`); }
+    process.exit(1);
+  }
+
+  if (!diff.trim()) {
+    if (isJson) { jsonOut({ success: true, review: "No changes to review." }); } else { console.log("No changes to review."); }
+    return;
+  }
+
+  const review = await reviewDiff(diff);
+  if (isJson) {
+    jsonOut({ success: true, review, pr: prNumber || null });
+  } else {
+    console.log(review);
+  }
 }
 
 async function doctorCommand() {

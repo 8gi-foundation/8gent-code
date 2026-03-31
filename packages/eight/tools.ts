@@ -57,6 +57,15 @@ import {
   formatFetchResult,
 } from "../tools/web";
 import {
+  vercelListProjects,
+  vercelGetDeployments,
+  vercelDeploy,
+  vercelSetEnv,
+  vercelGetEnv,
+  vercelListDomains,
+  vercelGetDeploymentLogs,
+} from "../tools/vercel";
+import {
   getBackgroundTaskManager,
   formatTaskStatus,
   formatTaskOutput,
@@ -495,6 +504,103 @@ export class ToolExecutor {
           }
         }
       },
+      // Vercel deployment tools
+      {
+        type: "function",
+        function: {
+          name: "vercel_list_projects",
+          description: "[DEPLOY] Returns all Vercel projects with IDs, names, frameworks, and last update times. Use this to discover project IDs needed by other vercel_ tools. Requires VERCEL_TOKEN env var.",
+          parameters: { type: "object", properties: {} }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "vercel_get_deployments",
+          description: "[DEPLOY] Returns recent deployments for a Vercel project including state, URL, and commit message. Use after vercel_list_projects to check deployment status.",
+          parameters: {
+            type: "object",
+            properties: {
+              projectId: { type: "string", description: "Vercel project ID" },
+              limit: { type: "number", description: "Number of deployments to return (default: 5)" }
+            },
+            required: ["projectId"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "vercel_deploy",
+          description: "[DEPLOY] Triggers a redeployment of the latest deployment for a Vercel project. Returns the new deployment ID and URL.",
+          parameters: {
+            type: "object",
+            properties: {
+              projectId: { type: "string", description: "Vercel project ID" }
+            },
+            required: ["projectId"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "vercel_set_env",
+          description: "[DEPLOY] Creates or updates an environment variable on a Vercel project. Value is stored encrypted. Targets production, preview, and development by default.",
+          parameters: {
+            type: "object",
+            properties: {
+              projectId: { type: "string", description: "Vercel project ID" },
+              key: { type: "string", description: "Environment variable name" },
+              value: { type: "string", description: "Environment variable value" },
+              target: { type: "array", items: { type: "string" }, description: "Targets: production, preview, development (default: all)" }
+            },
+            required: ["projectId", "key", "value"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "vercel_get_env",
+          description: "[DEPLOY] Returns all environment variables for a Vercel project (keys and targets only, values are encrypted).",
+          parameters: {
+            type: "object",
+            properties: {
+              projectId: { type: "string", description: "Vercel project ID" }
+            },
+            required: ["projectId"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "vercel_list_domains",
+          description: "[DEPLOY] Returns all custom domains configured for a Vercel project with verification status.",
+          parameters: {
+            type: "object",
+            properties: {
+              projectId: { type: "string", description: "Vercel project ID" }
+            },
+            required: ["projectId"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "vercel_get_deployment_logs",
+          description: "[DEPLOY] Returns build/runtime logs for a specific deployment. Use the deployment ID from vercel_get_deployments.",
+          parameters: {
+            type: "object",
+            properties: {
+              deploymentId: { type: "string", description: "Deployment ID (uid from vercel_get_deployments)" }
+            },
+            required: ["deploymentId"]
+          }
+        }
+      },
       // Design tools
       {
         type: "function",
@@ -655,6 +761,13 @@ export class ToolExecutor {
     git_commit: "git_commit",
     web_search: "network_request",
     web_fetch: "network_request",
+    vercel_list_projects: "network_request",
+    vercel_get_deployments: "network_request",
+    vercel_deploy: "network_request",
+    vercel_set_env: "network_request",
+    vercel_get_env: "network_request",
+    vercel_list_domains: "network_request",
+    vercel_get_deployment_logs: "network_request",
   };
 
   async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
@@ -825,6 +938,22 @@ export class ToolExecutor {
         return this.handleWebSearch(args.query as string, args.maxResults as number);
       case "web_fetch":
         return this.handleWebFetch(args.url as string);
+
+      // Vercel deployment tools
+      case "vercel_list_projects":
+        return vercelListProjects();
+      case "vercel_get_deployments":
+        return vercelGetDeployments(args.projectId as string, args.limit as number);
+      case "vercel_deploy":
+        return vercelDeploy(args.projectId as string);
+      case "vercel_set_env":
+        return vercelSetEnv(args.projectId as string, args.key as string, args.value as string, args.target as string[]);
+      case "vercel_get_env":
+        return vercelGetEnv(args.projectId as string);
+      case "vercel_list_domains":
+        return vercelListDomains(args.projectId as string);
+      case "vercel_get_deployment_logs":
+        return vercelGetDeploymentLogs(args.deploymentId as string);
 
       // MCP tools
       case "mcp_list_tools":
