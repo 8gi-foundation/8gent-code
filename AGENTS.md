@@ -45,6 +45,38 @@ Democratize infinite general intelligence for everyone. Free, local-first, priva
 
 ---
 
+## GitHub Workflow (MANDATORY for ALL agents)
+
+**Every agent MUST use GitHub issues and projects properly. No exceptions.**
+
+1. **Before starting work:** Check for existing issues. Use `gh issue list --repo 8gi-foundation/8gent-code`.
+2. **Link work to issues:** Every PR references the issue it closes. Use `Closes #N` in PR body.
+3. **Move project items:** When starting an issue, move it from Todo to In Progress. When done, move to Done.
+4. **Branch naming:** `feat/description`, `fix/description`, `docs/description`. Never push directly to main without PR.
+5. **PR process:** Create branch, commit, push, open PR with summary + test plan. Merge via `gh pr merge --admin` only after review.
+6. **Issue creation:** All new work gets an issue FIRST. Use labels: `P0` (critical), `P1` (high), `build` (board-approved), `vessel` (infra).
+7. **Project board:** https://github.com/orgs/8gi-foundation/projects/1 -- ALL work tracked here.
+8. **Close issues with evidence:** Include commit hash, PR number, and validation URL when closing.
+
+---
+
+## Work Sign-Off Protocol (8GI STANDARD)
+
+**Every agent working on ANY 8GI repo MUST end task responses with this sign-off. Non-negotiable.**
+
+```
+SIGN-OFF:
+  VOICE:    say -v {Officer} "{summary}"
+  VALIDATE: {production URL}
+  VISUAL:   {screenshot confirmation or "Deploy pending"}
+  COMMIT:   {message} - {hash} on {branch}
+  PUSHED:   {org}/{repo} {branch}
+  ISSUE:    {GH issue URL} ({status}) or "No linked issue"
+  PR:       {PR URL} or "Direct push to {branch}"
+```
+
+---
+
 ## This Repo
 
 8gent Code - open source autonomous coding agent TUI. The free on-ramp to 8gent OS.
