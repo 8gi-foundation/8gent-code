@@ -73,13 +73,67 @@ interface BenchmarkResult {
 async function runBenchmarks(model: string): Promise<BenchmarkResult[]> {
   log(`Running benchmarks with model: ${model}`);
 
-  // Use the harness CLI to run a subset of benchmarks
+  // ARC-AGI inspired benchmarks. Test novel reasoning, not memorized patterns.
+  // Each task requires the agent to discover a hidden rule, generalize from examples,
+  // and produce correct output for unseen inputs. No task is solvable by pattern matching alone.
+  // Upgraded 2026-04-01 by board directive.
   const tasks = [
-    { id: "fib", prompt: "Write a fibonacci function in TypeScript that returns the nth fibonacci number. Handle edge cases (n=0 returns 0, n=1 returns 1, negative n throws)." },
-    { id: "sort", prompt: "Write a merge sort function in TypeScript: function mergeSort(arr: number[]): number[]. Must be stable sort, handle empty arrays and single elements." },
-    { id: "cache", prompt: "Write an LRU cache class in TypeScript with get(key), set(key, value), and a maxSize constructor param. Use Map for O(1) operations." },
-    { id: "validate", prompt: "Write a function validateEmail(email: string): boolean that checks for valid email format. Must handle edge cases: no @, multiple @, no domain, no TLD." },
-    { id: "parse", prompt: "Write a function parseQueryString(qs: string): Record<string, string> that parses URL query strings like '?foo=bar&baz=qux'. Handle encoded values with decodeURIComponent." },
+    { id: "ARC-pattern-induction", prompt: `Given these input-output pairs, discover the transformation rule and apply it to the test input.
+
+Training examples:
+Input 1: [[0,0,1],[0,1,0],[1,0,0]]  Output 1: [[1,0,0],[0,1,0],[0,0,1]]
+Input 2: [[1,1,0],[0,0,0],[0,0,1]]  Output 2: [[0,0,1],[0,0,0],[1,1,0]]
+Input 3: [[0,1,1],[1,0,0],[0,1,0]]  Output 3: [[0,1,0],[1,0,0],[0,1,1]]
+
+Test input: [[1,0,0],[0,0,1],[0,1,0]]
+
+Write a TypeScript function that implements the discovered rule generically (not hardcoded for these examples), apply it to the test input, and verify your answer with a test. Explain your reasoning step by step before writing code.` },
+
+    { id: "ARC-grid-abstraction", prompt: `You are given a 5x5 grid. The rule transforms it based on a pattern you must discover.
+
+Example 1:
+Input:  [[0,0,0,0,0],[0,2,2,0,0],[0,2,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]
+Output: [[0,0,0,0,0],[0,2,2,0,0],[0,2,0,0,0],[0,0,0,3,0],[0,0,3,3,0]]
+
+Example 2:
+Input:  [[0,0,0,0,0],[0,0,0,0,0],[0,0,2,2,0],[0,0,0,2,0],[0,0,0,0,0]]
+Output: [[0,3,0,0,0],[0,3,3,0,0],[0,0,2,2,0],[0,0,0,2,0],[0,0,0,0,0]]
+
+Test input: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[2,2,0,0,0],[0,2,0,0,0]]
+
+Discover the rule. Write TypeScript that implements it generically. Show your reasoning. Verify with tests.` },
+
+    { id: "novel-algorithm", prompt: `Design and implement a data structure called IntervalMerger that supports these operations in better than O(n) per operation:
+- add(start: number, end: number): adds an interval
+- query(point: number): boolean: returns true if point is in any interval
+- merge(): returns all intervals merged (overlapping intervals combined)
+- remove(start: number, end: number): removes an interval range
+
+The catch: intervals can overlap, be adjacent, or be nested. Your merge operation must handle all cases. Write implementation + comprehensive tests. Analyze the time complexity of each operation.` },
+
+    { id: "self-modifying-system", prompt: `Build a rule engine in TypeScript where:
+1. Rules are functions (condition, action) stored in a priority queue
+2. Rules can ADD new rules, MODIFY existing rules, or REMOVE rules during execution
+3. The engine detects infinite loops (rule A triggers rule B triggers rule A) and breaks them
+4. Execution order follows priority, but newly added rules can preempt current execution
+
+Implement the engine with: addRule, removeRule, evaluate(facts), and getExecutionTrace.
+Write tests that verify: basic rule firing, priority ordering, self-modification, and loop detection.
+This tests your ability to reason about recursive self-modifying systems.` },
+
+    { id: "emergent-behavior", prompt: `Implement a cellular automaton in TypeScript with these requirements:
+1. Grid is toroidal (wraps around edges)
+2. Each cell has 3 possible states (0, 1, 2) instead of Conway's binary
+3. Rules: a cell transitions based on the MODE (most common value) of its 8 neighbors
+   - If mode is 0: cell becomes (cell + 1) % 3
+   - If mode is 1: cell stays the same
+   - If mode is 2: cell becomes (cell - 1 + 3) % 3
+   - Ties broken by current cell value
+4. Run for N generations and detect if the system reaches a cycle (repeating state)
+
+Implement: step(), run(n), detectCycle(), and visualize() (ASCII grid output).
+Write tests that verify: toroidal wrapping, state transitions, cycle detection.
+Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
   ];
 
   const results: BenchmarkResult[] = [];
@@ -241,33 +295,111 @@ async function analyzeAndMutate(results: BenchmarkResult[], iteration: number): 
   const uniqueMutations = [...new Set(mutations)].slice(0, 5);
 
   if (uniqueMutations.length > 0) {
-    // Append mutations as a new section in the system prompt
-    const mutationBlock = `
-// NIGHTLY TRAINING ITERATION ${iteration} — ${new Date().toISOString()}
-// Failures: ${failures.map(f => f.benchmarkId).join(", ")}
-${uniqueMutations.join("\n")}
-`;
-
-    // Check if there's already a nightly section and append
-    if (promptContent.includes("// NIGHTLY TRAINING ITERATION")) {
-      // Append after the last nightly section
-      const lastIndex = promptContent.lastIndexOf("// NIGHTLY TRAINING ITERATION");
-      const nextNewlineAfterBlock = promptContent.indexOf("\n\n", lastIndex + 50);
-      const insertPoint = nextNewlineAfterBlock > 0 ? nextNewlineAfterBlock : promptContent.length;
-
-      const updated = promptContent.slice(0, insertPoint) + "\n" + mutationBlock + promptContent.slice(insertPoint);
-      fs.writeFileSync(SYSTEM_PROMPT_PATH, updated);
-    } else {
-      // Add before the last export
-      const lastExportIndex = promptContent.lastIndexOf("export ");
-      if (lastExportIndex > 0) {
-        const updated = promptContent.slice(0, lastExportIndex) + mutationBlock + "\n" + promptContent.slice(lastExportIndex);
-        fs.writeFileSync(SYSTEM_PROMPT_PATH, updated);
-      }
-    }
-
-    log(`Applied ${uniqueMutations.length} prompt mutations`);
+    // DISABLED: Writing mutations to system-prompt.ts was degrading model performance.
+    // 213 lines of "BENCHMARK FAILURE: needs improvement" caused scores to drop from 70 to 0.
+    // Mutations now logged to a separate file for analysis without polluting the prompt.
+    const mutationBlock = `ITERATION ${iteration} — ${new Date().toISOString()}\nFailures: ${failures.map(f => f.benchmarkId).join(", ")}\n${uniqueMutations.join("\n")}\n---\n`;
+    const learningsPath = path.join(os.homedir(), ".8gent", "benchmark-learnings.log");
+    fs.appendFileSync(learningsPath, mutationBlock);
+    log(`Logged ${uniqueMutations.length} learnings to benchmark-learnings.log (prompt NOT modified)`);
   }
+}
+
+// ============================================
+// Phase 2b: Post failures to Discord boardroom for collective deliberation
+// ============================================
+
+const DISCORD_BOARDROOM_CHANNEL = "1487059185299357797";
+const DISCORD_BOT_TOKEN_8EO = process.env.DISCORD_TOKEN_8EO || "";
+
+async function postToBoardroom(results: BenchmarkResult[], iteration: number): Promise<void> {
+  if (!DISCORD_BOT_TOKEN_8EO) {
+    log("No Discord token — skipping boardroom post");
+    return;
+  }
+
+  const failures = results.filter(r => !r.passed);
+  if (failures.length === 0) return;
+
+  const failureList = failures.map(f =>
+    `- **${f.benchmarkId}**: score ${f.score}${f.error ? ` (${f.error.slice(0, 100)})` : ""}`
+  ).join("\n");
+
+  const avgScore = results.reduce((s, r) => s + r.score, 0) / results.length;
+  const passCount = results.filter(r => r.passed).length;
+
+  const message = [
+    `**AUTORESEARCH ITER ${iteration}** | Avg: ${avgScore.toFixed(0)} | Pass: ${passCount}/${results.length}`,
+    "",
+    "**Failures needing collective review:**",
+    failureList,
+    "",
+    "<@8TO> what engineering approach would improve these scores?",
+    "<@8SO> are there security implications in the failure patterns?",
+    "<@8PO> which failures matter most for the user experience?",
+    "",
+    "*Deliberate here. Learnings will feed into the next iteration.*",
+  ].join("\n");
+
+  // Truncate to Discord limit
+  const truncated = message.length > 1900 ? message.slice(0, 1900) + "..." : message;
+
+  try {
+    const res = await fetch(`https://discord.com/api/v10/channels/${DISCORD_BOARDROOM_CHANNEL}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bot ${DISCORD_BOT_TOKEN_8EO}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content: truncated }),
+    });
+
+    if (res.ok) {
+      log(`Posted ${failures.length} failures to #boardroom for deliberation`);
+    } else {
+      log(`Boardroom post failed: ${res.status} ${res.statusText}`);
+    }
+  } catch (err) {
+    log(`Boardroom post error: ${err}`);
+  }
+}
+
+// ============================================
+// Phase 2c: Send Telegram update
+// ============================================
+
+const TELEGRAM_BOT_TOKEN = "8064662731:AAEJ8bDvY9zpxP9ieBU2tBfcpCX81YkDyIs";
+const TELEGRAM_CHAT_ID = "5486040131";
+
+async function sendTelegramUpdate(results: BenchmarkResult[], iteration: number, maxIterations: number): Promise<void> {
+  const avgScore = results.reduce((s, r) => s + r.score, 0) / results.length;
+  const passCount = results.filter(r => r.passed).length;
+
+  const resultLines = results.map(r => {
+    const icon = r.passed ? "✅" : (r.score > 0 ? "⚠️" : "❌");
+    return `${icon} ${r.benchmarkId}: ${r.score}`;
+  }).join("\n");
+
+  const text = [
+    `🔬 *ARC-AGI AUTORESEARCH #${iteration}/${maxIterations}*`,
+    `Avg: *${avgScore.toFixed(0)}* | Pass: *${passCount}/${results.length}*`,
+    "",
+    resultLines,
+    "",
+    `_Next iteration in 2 min_`,
+  ].join("\n");
+
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        parse_mode: "Markdown",
+        text,
+      }),
+    });
+  } catch { /* best effort */ }
 }
 
 // ============================================
@@ -435,6 +567,12 @@ async function main() {
 
     // Phase 2: Analyze + Mutate
     await analyzeAndMutate(results, i);
+
+    // Phase 2b: Post failures to Discord boardroom for collective deliberation
+    await postToBoardroom(results, i);
+
+    // Phase 2c: Send Telegram update
+    await sendTelegramUpdate(results, i, maxIterations);
 
     // Phase 3: Collect training data
     const dataPath = await collectTrainingData(results, i);
