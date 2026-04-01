@@ -93,3 +93,6 @@ video-8gent-app/
 smoke-and-fly/
 docs/audio/
 docs/branch-audio/
+
+# Session plan dumps
+*-plan-location-*.txt
