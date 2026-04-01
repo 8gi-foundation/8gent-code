@@ -1386,6 +1386,7 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
         }
 
         case "cron": {
+          void (async () => {
           const { CronManager } = await import("../../../packages/cron/index.ts");
           const mgr = new CronManager();
           const sub = args[0];
@@ -1415,6 +1416,7 @@ export function App({ initialCommand, args, sessionName, sessionResume }: AppPro
           } else {
             addSystemMessage("Usage: /cron [list|add <name> <schedule> <cmd>|remove <id>|enable <id>|disable <id>]");
           }
+          })();
           break;
         }
 
