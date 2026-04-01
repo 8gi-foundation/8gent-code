@@ -668,6 +668,26 @@ export const BUG_FIXING_ENHANCED = `
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 export const FEATURE_IMPLEMENTATION_ENHANCED = `
 ## Enhanced Feature Implementation Protocol (Autoresearch-tuned)
 
