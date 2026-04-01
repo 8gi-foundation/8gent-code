@@ -114,6 +114,19 @@ This is the chain of custody. Voice for accessibility. URL for validation. Visua
 
 Individual contributors may add personal preferences (voice, formatting, review style) via their own `~/.claude/CLAUDE.md`. But the sign-off protocol is company-wide.
 
+## GitHub Workflow (MANDATORY for ALL agents)
+
+**Every agent MUST use GitHub issues and projects properly. No exceptions.**
+
+1. **Before starting work:** Check for existing issues. Use `gh issue list --repo 8gi-foundation/{repo}`.
+2. **Link work to issues:** Every PR references the issue it closes. Use `Closes #N` in PR body.
+3. **Move project items:** When starting an issue, move it from Todo to In Progress. When done, move to Done. Use `gh project item-edit` or the web UI.
+4. **Branch naming:** `feat/description`, `fix/description`, `docs/description`. Never push directly to main without PR.
+5. **PR process:** Create branch, commit, push, open PR with summary + test plan. Merge via `gh pr merge --admin` only after review.
+6. **Issue creation:** All new work gets an issue FIRST. Use labels: `P0` (critical), `P1` (high), `build` (board-approved), `vessel` (infra).
+7. **Project board:** https://github.com/orgs/8gi-foundation/projects/1 -- ALL work tracked here. Todo -> In Progress -> Done.
+8. **Close issues with evidence:** Include commit hash, PR number, and validation URL when closing.
+
 ## Writing Rules
 
 - **No em dashes.** Use hyphens or rewrite.
