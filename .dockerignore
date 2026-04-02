@@ -1,0 +1,12 @@
+node_modules
+.claude
+.git
+*.log
+docs
+apps
+dist
+.next
+.turbo
+config/avatars
+*.md
+!package.json
