@@ -26,12 +26,15 @@ echo "[board-vessel] ${MEMBER} vessel ready - model: ${MODEL}"
 case "${MODE}" in
   autoresearch)
     # Autonomous benchmark mode with adaptive HyperAgent pipeline
+    # After completion, falls back to daemon mode (keeps process alive)
     ITERS=${AUTORESEARCH_ITERATIONS:-5}
     echo "[board-vessel] AUTORESEARCH mode: ${ITERS} iterations with ${MODEL}"
-    exec bun run /app/scripts/nightly-train.ts \
+    bun run /app/scripts/nightly-train.ts \
       --sequential --skip-training \
       --iterations "${ITERS}" \
-      --model "${MODEL}"
+      --model "${MODEL}" || true
+    echo "[board-vessel] Autoresearch complete. Falling back to daemon mode."
+    exec bun run packages/board-vessel/vessel.ts
     ;;
   daemon)
     # Standard board vessel daemon (default)
