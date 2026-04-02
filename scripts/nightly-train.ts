@@ -84,7 +84,13 @@ function defaultParams(promptLength: number): InferenceParams {
   };
 }
 
-async function ollamaChat(model: string, systemPrompt: string, userPrompt: string, params?: Partial<InferenceParams>): Promise<{ content: string; durationMs: number }> {
+// Auto-detect inference backend: model-proxy (cloud) or Ollama (local)
+const INFERENCE_MODE = process.env.INFERENCE_MODE || "ollama";
+const MODEL_PROXY_URL = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
+const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
+const VESSEL_ID = process.env.BOARD_MEMBER_CODE || "local";
+
+async function inferenceChat(model: string, systemPrompt: string, userPrompt: string, params?: Partial<InferenceParams>): Promise<{ content: string; durationMs: number }> {
   const p = { ...defaultParams(userPrompt.length), ...params };
   const start = Date.now();
 
@@ -92,26 +98,57 @@ async function ollamaChat(model: string, systemPrompt: string, userPrompt: strin
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), p.timeout);
 
-    const res = await fetch("http://localhost:11434/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        stream: false,
-        options: { temperature: p.temperature, num_predict: p.num_predict },
-      }),
-      signal: controller.signal,
-    });
+    let content = "";
 
-    clearTimeout(timer);
-    const data = await res.json() as any;
-    return { content: data.message?.content || "", durationMs: Date.now() - start };
+    if (INFERENCE_MODE === "proxy") {
+      // Cloud mode: use model-proxy (OpenAI-compatible)
+      const proxyKey = process.env.PROXY_API_KEY || process.env.OPENROUTER_API_KEY || "";
+      const res = await fetch(`${MODEL_PROXY_URL}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${proxyKey}`,
+          "X-Vessel-ID": VESSEL_ID,
+          "X-User-Id": VESSEL_ID,
+        },
+        body: JSON.stringify({
+          model: model === "qwen3:14b" ? "auto:free" : model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: p.num_predict,
+          temperature: p.temperature,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const data = await res.json() as any;
+      content = data.choices?.[0]?.message?.content || "";
+    } else {
+      // Local mode: use Ollama directly
+      const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          stream: false,
+          options: { temperature: p.temperature, num_predict: p.num_predict },
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const data = await res.json() as any;
+      content = data.message?.content || "";
+    }
+
+    return { content, durationMs: Date.now() - start };
   } catch (err) {
-    log(`    ollamaChat error: ${err}`);
+    log(`    inferenceChat error: ${err}`);
     return { content: "", durationMs: Date.now() - start };
   }
 }
@@ -142,7 +179,7 @@ async function adaptiveSequentialPreProcess(model: string, taskPrompt: string, t
     }
 
     log(`  [SEQ] Pass 1: Analyst for ${taskId} (attempt ${analystAttempt})`);
-    const result = await ollamaChat(model,
+    const result = await inferenceChat(model,
       `You are an Analyst. Your ONLY job is to identify the transformation rule or algorithm required.
 Be precise. State the rule in formal terms. Do NOT write code. Do NOT implement anything.
 Keep your response under 500 words.
@@ -164,7 +201,7 @@ EDGE CASES: <what could go wrong>`,
 
   // --- Pass 2: Critic (no-BS mode) ---
   log(`  [SEQ] Pass 2: Critic for ${taskId}`);
-  const critiqueResult = await ollamaChat(model,
+  const critiqueResult = await inferenceChat(model,
     `You are a Critic operating in no-BS mode. You receive an Analyst's rule identification and the original problem.
 Your ONLY job is to find flaws, missed cases, or errors in the analysis.
 Be harsh. Be specific. Do not let sloppy analysis pass.
@@ -185,7 +222,7 @@ IMPLEMENTATION RISKS: <what will go wrong when coding this>`,
   // --- Critic rejection triggers analyst retry ---
   if (critique.includes("REJECTED") && analystAttempt < MAX_ANALYST_RETRIES) {
     log(`  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback`);
-    const retryResult = await ollamaChat(model,
+    const retryResult = await inferenceChat(model,
       `You are an Analyst. Your previous analysis was REJECTED by a critic.
 Read the critic's feedback carefully and provide a corrected analysis.
 Be precise. State the rule in formal terms. Do NOT write code.
