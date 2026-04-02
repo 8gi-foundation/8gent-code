@@ -148,13 +148,21 @@ async function inferenceChat(model: string, systemPrompt: string, userPrompt: st
     let content = "";
 
     if (INFERENCE_MODE === "proxy") {
-      // Cloud mode: use model-proxy (OpenAI-compatible)
-      const proxyKey = process.env.PROXY_API_KEY || process.env.OPENROUTER_API_KEY || process.env.DAEMON_AUTH_TOKEN || "";
-      const res = await fetch(`${MODEL_PROXY_URL}/v1/chat/completions`, {
+      // Cloud mode: call OpenRouter directly (most reliable) or model-proxy
+      const proxyKey = process.env.PROXY_API_KEY || "";
+      const openrouterKey = process.env.OPENROUTER_API_KEY || "";
+      // Prefer model-proxy if we have the proxy key, otherwise call OpenRouter directly
+      const useDirectOpenRouter = !proxyKey && openrouterKey;
+      const apiUrl = useDirectOpenRouter
+        ? "https://openrouter.ai/api/v1/chat/completions"
+        : `${MODEL_PROXY_URL}/v1/chat/completions`;
+      const authKey = useDirectOpenRouter ? openrouterKey : proxyKey;
+
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${proxyKey}`,
+          "Authorization": `Bearer ${authKey}`,
           "X-Vessel-ID": VESSEL_ID,
           "X-User-Id": VESSEL_ID,
         },
