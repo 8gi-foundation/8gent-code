@@ -148,15 +148,11 @@ async function inferenceChat(model: string, systemPrompt: string, userPrompt: st
     let content = "";
 
     if (INFERENCE_MODE === "proxy") {
-      // Cloud mode: call OpenRouter directly (most reliable) or model-proxy
-      const proxyKey = process.env.PROXY_API_KEY || "";
-      const openrouterKey = process.env.OPENROUTER_API_KEY || "";
-      // Prefer model-proxy if we have the proxy key, otherwise call OpenRouter directly
-      const useDirectOpenRouter = !proxyKey && openrouterKey;
-      const apiUrl = useDirectOpenRouter
-        ? "https://openrouter.ai/api/v1/chat/completions"
-        : `${MODEL_PROXY_URL}/v1/chat/completions`;
-      const authKey = useDirectOpenRouter ? openrouterKey : proxyKey;
+      // Cloud mode: call OpenRouter directly for analyst/critic (bypasses proxy token limits)
+      // The model-proxy is used by the harness-cli agent loop, not by pre-processing
+      const openrouterKey = process.env.OPENROUTER_API_KEY || process.env.PROXY_API_KEY || "";
+      const apiUrl = "https://openrouter.ai/api/v1/chat/completions";
+      const authKey = openrouterKey;
 
       const res = await fetch(apiUrl, {
         method: "POST",
