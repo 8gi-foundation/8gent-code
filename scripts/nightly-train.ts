@@ -19,7 +19,10 @@ const CHECKPOINTS_DIR = path.join(os.homedir(), ".8gent", "checkpoints");
 const TRAINING_DATA_DIR = path.join(os.homedir(), ".8gent", "training-data");
 const NIGHTLY_LOG = path.join(os.homedir(), ".8gent", "nightly.log");
 const SYSTEM_PROMPT_PATH = path.join(PROJECT_ROOT, "packages/eight/prompts/system-prompt.ts");
-const BUN_PATH = path.join(os.homedir(), ".bun/bin/bun");
+// Auto-detect bun path (local: ~/.bun/bin/bun, container: /usr/local/bin/bun)
+const BUN_PATH = fs.existsSync(path.join(os.homedir(), ".bun/bin/bun"))
+  ? path.join(os.homedir(), ".bun/bin/bun")
+  : "/usr/local/bin/bun";
 const OLLAMA_PATH = "/usr/local/bin/ollama";
 
 // Parse args
@@ -38,6 +41,50 @@ function log(msg: string) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
   fs.appendFileSync(NIGHTLY_LOG, line + "\n");
+}
+
+// ============================================
+// Session Persistence: checkpoint + resume on crash
+// ============================================
+
+interface RunCheckpoint {
+  iteration: number;
+  taskIndex: number;
+  results: BenchmarkResult[];
+  startedAt: string;
+  lastUpdated: string;
+}
+
+const CHECKPOINT_PATH = path.join(os.homedir(), ".8gent", "run-checkpoint.json");
+const HARNESS_STATE_PATH = path.join(os.homedir(), ".8gent", "harness-state.json");
+
+function saveCheckpoint(cp: RunCheckpoint): void {
+  fs.writeFileSync(CHECKPOINT_PATH, JSON.stringify(cp, null, 2));
+}
+
+function loadCheckpoint(): RunCheckpoint | null {
+  try {
+    if (fs.existsSync(CHECKPOINT_PATH)) {
+      const data = JSON.parse(fs.readFileSync(CHECKPOINT_PATH, "utf-8"));
+      log(`[RESUME] Found checkpoint: iter ${data.iteration}, task ${data.taskIndex}/${data.results.length} completed`);
+      return data;
+    }
+  } catch { /* corrupted checkpoint, start fresh */ }
+  return null;
+}
+
+function clearCheckpoint(): void {
+  try { fs.unlinkSync(CHECKPOINT_PATH); } catch { /* ok */ }
+}
+
+function loadHarnessState(): void {
+  try {
+    if (fs.existsSync(HARNESS_STATE_PATH)) {
+      const saved = JSON.parse(fs.readFileSync(HARNESS_STATE_PATH, "utf-8"));
+      Object.assign(harnessState, saved);
+      log(`[RESUME] Loaded harness state: temp=${harnessState.globalTemperature}, steps=${harnessState.maxSteps}`);
+    }
+  } catch { /* start fresh */ }
 }
 
 function runCommand(cmd: string, args: string[], opts?: { timeout?: number; cwd?: string }): Promise<{ stdout: string; stderr: string; exitCode: number }> {
@@ -336,7 +383,17 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
 
   const results: BenchmarkResult[] = [];
 
-  for (const task of tasks) {
+  // Resume from checkpoint if available
+  const checkpoint = loadCheckpoint();
+  let startIndex = 0;
+  if (checkpoint && checkpoint.iteration === 0) { // iteration 0 = current runBenchmarks call
+    startIndex = checkpoint.taskIndex;
+    results.push(...checkpoint.results);
+    log(`[RESUME] Skipping ${startIndex} already-completed tasks`);
+  }
+
+  for (let ti = startIndex; ti < tasks.length; ti++) {
+    const task = tasks[ti];
     log(`  Benchmark: ${task.id}`);
     try {
       // Sequential pipeline: Analyst + Critic pre-process before Implementer
@@ -345,11 +402,15 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
         ? await adaptiveSequentialPreProcess(model, task.prompt, task.id)
         : task.prompt;
 
+      // Determine runtime: if using model-proxy (cloud), route via openrouter
+      // If local ollama model name (no slash), use ollama
+      const runtime = INFERENCE_MODE === "proxy" ? "openrouter" : (model.includes("/") ? "openrouter" : "ollama");
+
       const result = await runCommand(BUN_PATH, [
         "run", path.join(PROJECT_ROOT, "packages/harness-cli/index.ts"), "run",
         effectivePrompt,
         "--model", model,
-        "--runtime", model.includes("/") ? "openrouter" : "ollama",
+        "--runtime", runtime,
         "--max-steps", String(useSequential ? harnessState.maxSteps : 15),
         "--timeout", "120000",
         "--json",
@@ -437,9 +498,12 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
 
       results.push({ benchmarkId: task.id, score, passed, sessionId });
       log(`    → ${passed ? "PASS" : "FAIL"} (score: ${score})`);
+      // Checkpoint after each task for crash recovery
+      saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
     } catch (err) {
       results.push({ benchmarkId: task.id, score: 0, passed: false, error: String(err) });
       log(`    → ERROR: ${err}`);
+      saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
     }
   }
 
@@ -825,15 +889,19 @@ async function main() {
   log(`Sequential pipeline (Run D): ${useSequential}`);
   log("═══════════════════════════════════════════════════");
 
+  // Load persisted harness state from previous runs (survives crashes)
+  loadHarnessState();
+
   let currentModel = baseModel;
   const allResults: Array<{ iteration: number; results: BenchmarkResult[]; model: string }> = [];
 
   for (let i = 1; i <= maxIterations; i++) {
     log(`\n─── Iteration ${i}/${maxIterations} ───────────────────────`);
 
-    // Phase 1: Benchmark
+    // Phase 1: Benchmark (resumes from checkpoint if crashed mid-iteration)
     const results = await runBenchmarks(currentModel);
     allResults.push({ iteration: i, results, model: currentModel });
+    clearCheckpoint(); // Iteration complete, clear checkpoint
 
     // Phase 2: Analyze + Mutate
     await analyzeAndMutate(results, i);
