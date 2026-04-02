@@ -730,19 +730,40 @@ const TELEGRAM_CHAT_ID = "5486040131";
 async function sendTelegramUpdate(results: BenchmarkResult[], iteration: number, maxIterations: number): Promise<void> {
   const avgScore = results.reduce((s, r) => s + r.score, 0) / results.length;
   const passCount = results.filter(r => r.passed).length;
+  const passRate = ((passCount / results.length) * 100).toFixed(0);
+
+  // Determine environment
+  const location = INFERENCE_MODE === "proxy" ? "Cloud (Amsterdam)" : "Local (MacBook)";
+  const model = baseModel;
 
   const resultLines = results.map(r => {
     const icon = r.passed ? "✅" : (r.score > 0 ? "⚠️" : "❌");
     return `${icon} ${r.benchmarkId}: ${r.score}`;
   }).join("\n");
 
+  // Performance commentary
+  let commentary = "";
+  if (passCount === results.length) commentary = "PERFECT SCORE. All tasks passed.";
+  else if (passCount >= 4) commentary = "Strong run. Nearly perfect.";
+  else if (passCount >= 2) commentary = "Mixed results. HyperAgent adapting.";
+  else if (passCount === 1) commentary = "Struggling. Self-healing active.";
+  else commentary = "All failed. Major adaptation needed.";
+
   const text = [
-    `🔬 *ARC-AGI AUTORESEARCH #${iteration}/${maxIterations}*`,
-    `Avg: *${avgScore.toFixed(0)}* | Pass: *${passCount}/${results.length}*`,
+    `🔬 *AUTORESEARCH #${iteration}/${maxIterations}*`,
+    "",
+    `*Model:* ${model}`,
+    `*Where:* ${location}`,
+    `*Vessel:* ${VESSEL_ID}`,
+    `*Temp:* ${harnessState.globalTemperature} | *Steps:* ${harnessState.maxSteps}`,
+    "",
+    `*Result: ${passRate}% (${passCount}/${results.length})* | Avg: ${avgScore.toFixed(0)}`,
     "",
     resultLines,
     "",
-    `_Next iteration in 2 min_`,
+    `💬 _${commentary}_`,
+    "",
+    `_Iteration ${iteration < maxIterations ? iteration + 1 : "complete"}${iteration < maxIterations ? " starting..." : ". Falling back to daemon."}_`,
   ].join("\n");
 
   try {
