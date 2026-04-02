@@ -1,0 +1,25 @@
+# Lean Board Vessel - connects to control plane + model proxy
+# No Ollama, no heavy deps. ~200MB image.
+app = "eight-vessel"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  BOARD_MEMBER_CODE = "8EO"
+  INFERENCE_MODE = "proxy"
+  MODEL_PROXY_URL = "http://8gi-model-proxy.internal:3200"
+  CONTROL_PLANE_URL = "wss://8gi-board-plane.fly.dev"
+  HEALTH_PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

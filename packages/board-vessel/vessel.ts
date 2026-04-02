@@ -46,35 +46,52 @@ if (!MEMBER_CODE) {
 // -- State --
 const startTime = Date.now();
 let currentTaskId: string | null = null;
-let ollamaReady = false;
+let inferenceReady = false;
+const INFERENCE_MODE = process.env.INFERENCE_MODE || "proxy";
 
-// -- Wait for Ollama to become available --
-async function waitForOllama(maxRetries = 30): Promise<boolean> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const res = await fetch("http://localhost:11434/api/tags");
-      if (res.ok) {
-        const data = await res.json();
-        const modelCount = data.models?.length ?? 0;
-        console.log(`[vessel] Ollama ready - ${modelCount} models available`);
-        return true;
-      }
-    } catch {
-      // Ollama not ready yet
+// -- Wait for inference backend to become available --
+async function waitForInference(maxRetries = 30): Promise<boolean> {
+  if (INFERENCE_MODE === "proxy") {
+    // Model proxy mode - check proxy health
+    const proxyUrl = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const res = await fetch(`${proxyUrl}/health`);
+        if (res.ok) {
+          console.log(`[vessel] Model proxy ready at ${proxyUrl}`);
+          return true;
+        }
+      } catch { /* not ready */ }
+      console.log(`[vessel] Waiting for model proxy... (${i + 1}/${maxRetries})`);
+      await Bun.sleep(2000);
     }
-    console.log(`[vessel] Waiting for Ollama... (${i + 1}/${maxRetries})`);
-    await Bun.sleep(2000);
+    console.error("[vessel] Model proxy unreachable after max retries");
+    return false;
+  } else {
+    // Ollama mode - wait for local Ollama
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const res = await fetch("http://localhost:11434/api/tags");
+        if (res.ok) {
+          const data = await res.json() as any;
+          console.log(`[vessel] Ollama ready - ${data.models?.length ?? 0} models`);
+          return true;
+        }
+      } catch { /* not ready */ }
+      console.log(`[vessel] Waiting for Ollama... (${i + 1}/${maxRetries})`);
+      await Bun.sleep(2000);
+    }
+    console.error("[vessel] Ollama failed to start");
+    return false;
   }
-  console.error("[vessel] Ollama failed to start after max retries");
-  return false;
 }
 
 // -- Vessel status for heartbeats and health checks --
 function getStatus(): VesselStatus {
   return {
     memberCode: MEMBER_CODE,
-    ollamaReady,
-    modelLoaded: ollamaReady,
+    inferenceReady,
+    modelLoaded: inferenceReady,
     currentTaskId,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     memoryMb: Math.floor(process.memoryUsage.rss() / 1024 / 1024),
@@ -106,9 +123,9 @@ async function main(): Promise<void> {
   console.log(`[vessel] Model: ${OLLAMA_MODEL}`);
   console.log(`[vessel] Control plane: ${CONTROL_PLANE_URL}`);
 
-  // Wait for Ollama
-  ollamaReady = await waitForOllama();
-  if (!ollamaReady) {
+  // Wait for inference backend (proxy or Ollama)
+  inferenceReady = await waitForInference();
+  if (!inferenceReady) {
     process.exit(1);
   }
 
