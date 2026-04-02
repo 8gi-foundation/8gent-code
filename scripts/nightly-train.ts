@@ -500,8 +500,92 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
         score = passed ? 30 : 0;
       }
 
-      results.push({ benchmarkId: task.id, score, passed, sessionId });
       log(`    → ${passed ? "PASS" : "FAIL"} (score: ${score})`);
+
+      // Self-healing: if task failed, read the error, learn, retry once
+      if (!passed && useSequential) {
+        log(`  [HEAL] Task failed. Reading session log for error context...`);
+        let failureContext = "";
+        if (sessionId) {
+          const failSessionPath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
+          if (fs.existsSync(failSessionPath)) {
+            const lines = fs.readFileSync(failSessionPath, "utf-8").split("\n").filter(Boolean);
+            // Extract last error and last assistant message
+            for (const line of lines.slice(-20)) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.type === "tool_error" || entry.type === "error") {
+                  failureContext += `ERROR: ${JSON.stringify(entry.error || entry.result || "").slice(0, 300)}\n`;
+                }
+              } catch { /* skip */ }
+            }
+          }
+        }
+        if (!failureContext) failureContext = `Score was ${score}/100. Task did not produce passing output.`;
+
+        log(`  [HEAL] Retrying with failure context (${failureContext.length} chars)`);
+
+        // Build a healing prompt: original task + analyst/critic context + failure lesson
+        const healPrompt = `${effectivePrompt}
+
+--- PREVIOUS ATTEMPT FAILED ---
+${failureContext}
+
+--- HEALING DIRECTIVE ---
+Your previous attempt at this task failed. Read the error above carefully.
+Do NOT repeat the same approach. Identify what went wrong and try a different strategy.
+Focus on getting working code with passing tests. Simplify if needed.`;
+
+        const retryResult = await runCommand(BUN_PATH, [
+          "run", path.join(PROJECT_ROOT, "packages/harness-cli/index.ts"), "run",
+          healPrompt,
+          "--model", model,
+          "--runtime", runtime,
+          "--max-steps", String(Math.min(30, (useSequential ? harnessState.maxSteps : 15) + 10)),
+          "--timeout", "120000",
+          "--json",
+        ], { timeout: 180000, cwd: PROJECT_ROOT });
+
+        // Re-score the retry
+        let retryScore = 0;
+        let retryPassed = false;
+        try {
+          const jsonMatch = retryResult.stdout.match(/\{[\s\S]*"success"[\s\S]*\}/);
+          if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[0]);
+            // Same multi-signal scoring
+            let filesScore = 0;
+            if (data.workdir && fs.existsSync(data.workdir)) {
+              const files = fs.readdirSync(data.workdir).filter((f: string) => !f.startsWith("."));
+              filesScore = files.length > 0 ? 40 : 0;
+            }
+            let toolsScore = 0;
+            if (data.sessionPath && fs.existsSync(data.sessionPath)) {
+              const sc = fs.readFileSync(data.sessionPath, "utf-8").split("\n").filter(Boolean);
+              let tt = 0, ts = 0;
+              for (const l of sc) { try { const e = JSON.parse(l); if (e.type === "tool_result") { tt++; if (e.success) ts++; } } catch {} }
+              if (tt > 0) toolsScore = Math.round((ts / tt) * 30);
+            }
+            let exitScore = 0;
+            if (data.sessionPath && fs.existsSync(data.sessionPath)) {
+              const sc = fs.readFileSync(data.sessionPath, "utf-8").split("\n").filter(Boolean);
+              for (const l of sc) { try { const e = JSON.parse(l); if (e.type === "session_end") { const r = e.summary?.exitReason; if (r && !["error","timeout","crash"].includes(r)) exitScore = 30; } } catch {} }
+            }
+            retryScore = filesScore + toolsScore + exitScore;
+            retryPassed = retryScore >= 50;
+          }
+        } catch { /* use defaults */ }
+
+        if (retryScore > score) {
+          log(`  [HEAL] Retry improved: ${score} → ${retryScore} ${retryPassed ? "PASS" : "FAIL"}`);
+          score = retryScore;
+          passed = retryPassed;
+        } else {
+          log(`  [HEAL] Retry did not improve: ${retryScore} (keeping original ${score})`);
+        }
+      }
+
+      results.push({ benchmarkId: task.id, score, passed, sessionId });
       // Checkpoint after each task for crash recovery
       saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
     } catch (err) {
