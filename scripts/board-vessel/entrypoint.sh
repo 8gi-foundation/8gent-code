@@ -2,19 +2,43 @@
 set -e
 
 MEMBER=${BOARD_MEMBER_CODE:-UNKNOWN}
-echo "[board-vessel] Starting vessel for ${MEMBER}"
+MODE=${VESSEL_MODE:-daemon}
+INFERENCE=${INFERENCE_MODE:-proxy}
+echo "[board-vessel] Starting vessel for ${MEMBER} in ${MODE} mode (inference: ${INFERENCE})"
 
-# Start Ollama in background
-ollama serve &
-OLLAMA_PID=$!
-sleep 5
+# Only start Ollama if in ollama inference mode (factory/local)
+if [ "${INFERENCE}" = "ollama" ]; then
+  if command -v ollama &>/dev/null; then
+    ollama serve &
+    sleep 5
+    MODEL=${OLLAMA_MODEL:-qwen3:latest}
+    echo "[board-vessel] Pulling ${MODEL}"
+    ollama pull "${MODEL}"
+  else
+    echo "[board-vessel] WARN: INFERENCE_MODE=ollama but ollama not installed. Falling back to proxy."
+    export INFERENCE_MODE=proxy
+  fi
+fi
 
-# Pull the model
-MODEL=${OLLAMA_MODEL:-qwen3:latest}
-echo "[board-vessel] Pulling ${MODEL}"
-ollama pull "${MODEL}"
+MODEL=${OLLAMA_MODEL:-auto:free}
+echo "[board-vessel] ${MEMBER} vessel ready - model: ${MODEL}"
 
-echo "[board-vessel] ${MEMBER} vessel ready - launching daemon"
-
-# Run the board vessel daemon
-exec bun run /app/scripts/board-vessel/daemon.ts
+case "${MODE}" in
+  autoresearch)
+    # Autonomous benchmark mode with adaptive HyperAgent pipeline
+    ITERS=${AUTORESEARCH_ITERATIONS:-5}
+    echo "[board-vessel] AUTORESEARCH mode: ${ITERS} iterations with ${MODEL}"
+    exec bun run /app/scripts/nightly-train.ts \
+      --sequential --skip-training \
+      --iterations "${ITERS}" \
+      --model "${MODEL}"
+    ;;
+  daemon)
+    # Standard board vessel daemon (default)
+    exec bun run packages/board-vessel/vessel.ts
+    ;;
+  *)
+    echo "[board-vessel] Unknown mode: ${MODE}"
+    exit 1
+    ;;
+esac
