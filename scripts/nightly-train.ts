@@ -27,6 +27,7 @@ const args = process.argv.slice(2);
 const maxIterations = parseInt(args.find((_, i, a) => a[i - 1] === "--iterations") || "5");
 const baseModel = args.find((_, i, a) => a[i - 1] === "--model") || "qwen3:14b";
 const skipTraining = args.includes("--skip-training");
+const useSequential = args.includes("--sequential");
 
 // Ensure dirs exist
 for (const dir of [SESSIONS_DIR, CHECKPOINTS_DIR, TRAINING_DATA_DIR]) {
@@ -56,6 +57,166 @@ function runCommand(cmd: string, args: string[], opts?: { timeout?: number; cwd?
       resolve({ stdout, stderr: err.message, exitCode: 1 });
     });
   });
+}
+
+// ============================================
+// Sequential Multi-Inference Pipeline (Run D)
+// Paper: arxiv 2603.28990v1 - fixed ordering + autonomous role selection
+// Three passes: Analyst -> Critic -> Implementer
+// ============================================
+
+// Adaptive parameters - the harness tunes these at runtime
+interface InferenceParams {
+  temperature: number;
+  num_predict: number;
+  timeout: number;
+}
+
+function defaultParams(promptLength: number): InferenceParams {
+  // Adaptive timeout: longer prompts need more thinking time
+  // qwen3 thinking mode: ~1 token/30ms thinking + ~1 token/30ms content
+  const baseTimeout = 180000; // 3 min minimum
+  const perCharTimeout = Math.min(promptLength * 50, 420000); // scale with prompt, cap at 7 min extra
+  return {
+    temperature: 0.7,
+    num_predict: 8192,
+    timeout: baseTimeout + perCharTimeout,
+  };
+}
+
+async function ollamaChat(model: string, systemPrompt: string, userPrompt: string, params?: Partial<InferenceParams>): Promise<{ content: string; durationMs: number }> {
+  const p = { ...defaultParams(userPrompt.length), ...params };
+  const start = Date.now();
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), p.timeout);
+
+    const res = await fetch("http://localhost:11434/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        stream: false,
+        options: { temperature: p.temperature, num_predict: p.num_predict },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+    const data = await res.json() as any;
+    return { content: data.message?.content || "", durationMs: Date.now() - start };
+  } catch (err) {
+    log(`    ollamaChat error: ${err}`);
+    return { content: "", durationMs: Date.now() - start };
+  }
+}
+
+// ============================================
+// Adaptive HyperAgent: self-improving sequential pipeline
+// Strategy: Analyst -> Critic (no-BS) -> retry if rejected -> Implementer
+// Self-adjusts: timeout, temperature, retries based on results
+// ============================================
+
+const MAX_ANALYST_RETRIES = 2;
+
+async function adaptiveSequentialPreProcess(model: string, taskPrompt: string, taskId: string): Promise<string> {
+  // --- Pass 1: Analyst (with retry on empty/timeout) ---
+  let analysis = "";
+  let analystAttempt = 0;
+  let analystParams: Partial<InferenceParams> = {};
+
+  while (analystAttempt < MAX_ANALYST_RETRIES && !analysis) {
+    analystAttempt++;
+    if (analystAttempt > 1) {
+      // Self-improve: increase timeout, raise temperature for diversity
+      analystParams = {
+        timeout: (analystParams.timeout || defaultParams(taskPrompt.length).timeout) * 1.5,
+        temperature: Math.min(0.9, (analystParams.temperature || 0.7) + 0.1),
+      };
+      log(`  [HYPER] Analyst retry ${analystAttempt} - timeout: ${Math.round((analystParams.timeout || 0) / 1000)}s, temp: ${analystParams.temperature}`);
+    }
+
+    log(`  [SEQ] Pass 1: Analyst for ${taskId} (attempt ${analystAttempt})`);
+    const result = await ollamaChat(model,
+      `You are an Analyst. Your ONLY job is to identify the transformation rule or algorithm required.
+Be precise. State the rule in formal terms. Do NOT write code. Do NOT implement anything.
+Keep your response under 500 words.
+Output format:
+RULE: <one sentence formal description>
+EVIDENCE: <which examples prove this rule>
+EDGE CASES: <what could go wrong>`,
+      taskPrompt,
+      analystParams
+    );
+    analysis = result.content;
+    log(`  [SEQ] Pass 1 complete (${analysis.length} chars, ${Math.round(result.durationMs / 1000)}s)`);
+  }
+
+  if (!analysis) {
+    log(`  [HYPER] Analyst failed after ${MAX_ANALYST_RETRIES} attempts - falling back to direct mode`);
+    return taskPrompt; // Fall back to non-sequential mode
+  }
+
+  // --- Pass 2: Critic (no-BS mode) ---
+  log(`  [SEQ] Pass 2: Critic for ${taskId}`);
+  const critiqueResult = await ollamaChat(model,
+    `You are a Critic operating in no-BS mode. You receive an Analyst's rule identification and the original problem.
+Your ONLY job is to find flaws, missed cases, or errors in the analysis.
+Be harsh. Be specific. Do not let sloppy analysis pass.
+If the analysis is WRONG, say REJECTED and explain why.
+If the analysis is CORRECT, say APPROVED and list implementation pitfalls.
+Keep your response under 300 words.
+Output format:
+VERDICT: APPROVED or REJECTED
+FLAWS: <list specific errors or gaps, or "None" if approved>
+CORRECTIONS: <what the rule actually is, if different>
+IMPLEMENTATION RISKS: <what will go wrong when coding this>`,
+    `ORIGINAL PROBLEM:\n${taskPrompt}\n\nANALYST OUTPUT:\n${analysis}`
+  );
+
+  const critique = critiqueResult.content;
+  log(`  [SEQ] Pass 2 complete (${critique.length} chars, ${Math.round(critiqueResult.durationMs / 1000)}s)`);
+
+  // --- Critic rejection triggers analyst retry ---
+  if (critique.includes("REJECTED") && analystAttempt < MAX_ANALYST_RETRIES) {
+    log(`  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback`);
+    const retryResult = await ollamaChat(model,
+      `You are an Analyst. Your previous analysis was REJECTED by a critic.
+Read the critic's feedback carefully and provide a corrected analysis.
+Be precise. State the rule in formal terms. Do NOT write code.
+Keep your response under 500 words.
+Output format:
+RULE: <corrected one sentence formal description>
+EVIDENCE: <which examples prove this rule>
+EDGE CASES: <what could go wrong>`,
+      `ORIGINAL PROBLEM:\n${taskPrompt}\n\nYOUR PREVIOUS ANALYSIS:\n${analysis}\n\nCRITIC FEEDBACK:\n${critique}`,
+      { temperature: 0.5 } // Lower temp for corrected analysis
+    );
+
+    if (retryResult.content) {
+      log(`  [HYPER] Analyst correction complete (${retryResult.content.length} chars, ${Math.round(retryResult.durationMs / 1000)}s)`);
+      analysis = retryResult.content;
+    }
+  }
+
+  // --- Build enhanced prompt for Implementer ---
+  const enhancedPrompt = `${taskPrompt}
+
+--- ANALYST REPORT ---
+${analysis}
+
+--- CRITIC REVIEW ---
+${critique}
+
+--- IMPLEMENTATION DIRECTIVE ---
+You have received analysis and critique from two prior reviewers. Use their insights to write a correct implementation. If the critic found flaws in the analysis, trust the critic's corrections. Write the code, run tests, verify correctness.`;
+
+  return enhancedPrompt;
 }
 
 // ============================================
@@ -141,12 +302,18 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
   for (const task of tasks) {
     log(`  Benchmark: ${task.id}`);
     try {
+      // Sequential pipeline: Analyst + Critic pre-process before Implementer
+      // Uses adaptive HyperAgent with retry, parameter tuning, and critic rejection
+      const effectivePrompt = useSequential
+        ? await adaptiveSequentialPreProcess(model, task.prompt, task.id)
+        : task.prompt;
+
       const result = await runCommand(BUN_PATH, [
         "run", path.join(PROJECT_ROOT, "packages/harness-cli/index.ts"), "run",
-        task.prompt,
+        effectivePrompt,
         "--model", model,
         "--runtime", model.includes("/") ? "openrouter" : "ollama",
-        "--max-steps", "15",
+        "--max-steps", String(useSequential ? harnessState.maxSteps : 15),
         "--timeout", "120000",
         "--json",
       ], { timeout: 180000, cwd: PROJECT_ROOT });
@@ -403,6 +570,71 @@ async function sendTelegramUpdate(results: BenchmarkResult[], iteration: number,
 }
 
 // ============================================
+// HyperAgent: Inter-iteration self-improvement
+// Learns from results, adjusts strategy for next iteration
+// ============================================
+
+interface HarnessState {
+  taskPerformance: Record<string, { bestScore: number; bestStrategy: string; failCount: number }>;
+  globalTemperature: number;
+  maxSteps: number;
+}
+
+const harnessState: HarnessState = {
+  taskPerformance: {},
+  globalTemperature: 0.7,
+  maxSteps: 15,
+};
+
+function selfImprove(results: BenchmarkResult[], iteration: number): void {
+  log(`  [HYPER] Self-improvement analysis for iteration ${iteration}`);
+
+  const avgScore = results.reduce((s, r) => s + r.score, 0) / results.length;
+  const passRate = results.filter(r => r.passed).length / results.length;
+
+  // Track per-task performance
+  for (const r of results) {
+    const prev = harnessState.taskPerformance[r.benchmarkId];
+    if (!prev || r.score > prev.bestScore) {
+      harnessState.taskPerformance[r.benchmarkId] = {
+        bestScore: r.score,
+        bestStrategy: useSequential ? "sequential" : "direct",
+        failCount: r.passed ? 0 : (prev?.failCount || 0) + 1,
+      };
+    } else if (!r.passed) {
+      harnessState.taskPerformance[r.benchmarkId] = {
+        ...prev,
+        failCount: prev.failCount + 1,
+      };
+    }
+  }
+
+  // Adaptive temperature: if pass rate is low, try higher temperature for diversity
+  if (passRate < 0.4) {
+    harnessState.globalTemperature = Math.min(0.95, harnessState.globalTemperature + 0.05);
+    log(`  [HYPER] Low pass rate (${(passRate * 100).toFixed(0)}%) - raising temperature to ${harnessState.globalTemperature}`);
+  } else if (passRate > 0.6) {
+    harnessState.globalTemperature = Math.max(0.5, harnessState.globalTemperature - 0.05);
+    log(`  [HYPER] Good pass rate (${(passRate * 100).toFixed(0)}%) - lowering temperature to ${harnessState.globalTemperature} for consistency`);
+  }
+
+  // Adaptive max steps: if pass rate is low, give more steps for implementation
+  if (passRate < 0.4 && harnessState.maxSteps < 30) {
+    harnessState.maxSteps = Math.min(30, harnessState.maxSteps + 5);
+    log(`  [HYPER] Low pass rate with rich analysis - increasing max steps to ${harnessState.maxSteps}`);
+  } else if (passRate > 0.8 && harnessState.maxSteps > 15) {
+    harnessState.maxSteps = Math.max(15, harnessState.maxSteps - 5);
+    log(`  [HYPER] High pass rate - reducing max steps to ${harnessState.maxSteps} for efficiency`);
+  }
+
+  // Log the harness state for analysis
+  const stateLog = JSON.stringify(harnessState, null, 2);
+  const statePath = path.join(os.homedir(), ".8gent", "harness-state.json");
+  fs.writeFileSync(statePath, stateLog);
+  log(`  [HYPER] State saved to ${statePath}`);
+}
+
+// ============================================
 // Phase 3: Collect Training Data
 // ============================================
 
@@ -553,6 +785,7 @@ async function main() {
   log(`Base model: ${baseModel}`);
   log(`Max iterations: ${maxIterations}`);
   log(`Skip training: ${skipTraining}`);
+  log(`Sequential pipeline (Run D): ${useSequential}`);
   log("═══════════════════════════════════════════════════");
 
   let currentModel = baseModel;
@@ -574,26 +807,26 @@ async function main() {
     // Phase 2c: Send Telegram update
     await sendTelegramUpdate(results, i, maxIterations);
 
+    // Phase 2d: HyperAgent self-improvement (adjusts params for next iteration)
+    if (useSequential) {
+      selfImprove(results, i);
+    }
+
     // Phase 3: Collect training data
     const dataPath = await collectTrainingData(results, i);
 
     // Phase 4: Train + Create model (if we have data and not skipping)
+    // NOTE: Model switching disabled. Previous runs showed persona-tuned models
+    // degrade performance (Opus-4B: 0% pass despite high process scores).
+    // Keep base model throughout all iterations for consistent results.
     if (dataPath && !skipTraining) {
       const checkpoint = await trainLoRA(dataPath, i);
       if (checkpoint) {
         const created = await createOllamaModel(checkpoint, i);
         if (created) {
-          currentModel = "eight";
-          log("Switched to model 'eight' for next iteration");
+          log("LoRA model created but NOT switching - keeping base model for consistency");
         }
       }
-    } else if (i === 1) {
-      // On first iteration, create "eight" as a persona-tuned version even without LoRA
-      const simpleCheckpoint = path.join(CHECKPOINTS_DIR, `eight_persona_${Date.now()}`);
-      fs.mkdirSync(simpleCheckpoint, { recursive: true });
-      await createOllamaModel(simpleCheckpoint, i);
-      currentModel = "eight";
-      log("Created 'eight' persona model (no LoRA yet, just system prompt tuning)");
     }
 
     // Brief pause between iterations
