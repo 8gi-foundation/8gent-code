@@ -149,7 +149,7 @@ async function inferenceChat(model: string, systemPrompt: string, userPrompt: st
 
     if (INFERENCE_MODE === "proxy") {
       // Cloud mode: use model-proxy (OpenAI-compatible)
-      const proxyKey = process.env.PROXY_API_KEY || process.env.OPENROUTER_API_KEY || "";
+      const proxyKey = process.env.PROXY_API_KEY || process.env.OPENROUTER_API_KEY || process.env.DAEMON_AUTH_TOKEN || "";
       const res = await fetch(`${MODEL_PROXY_URL}/v1/chat/completions`, {
         method: "POST",
         headers: {
