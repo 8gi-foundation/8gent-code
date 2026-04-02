@@ -25,14 +25,26 @@ echo "[board-vessel] ${MEMBER} vessel ready - model: ${MODEL}"
 
 case "${MODE}" in
   autoresearch)
+    # Check if we already completed autoresearch recently (prevent restart loop)
+    MARKER="/root/.8gent/autoresearch-completed"
+    if [ -f "${MARKER}" ]; then
+      MARKER_AGE=$(( $(date +%s) - $(stat -c %Y "${MARKER}" 2>/dev/null || stat -f %m "${MARKER}" 2>/dev/null || echo 0) ))
+      if [ "${MARKER_AGE}" -lt 3600 ]; then
+        echo "[board-vessel] Autoresearch completed ${MARKER_AGE}s ago. Skipping to daemon mode."
+        exec bun run packages/board-vessel/vessel.ts
+      fi
+    fi
+
     # Autonomous benchmark mode with adaptive HyperAgent pipeline
-    # After completion, falls back to daemon mode (keeps process alive)
     ITERS=${AUTORESEARCH_ITERATIONS:-5}
     echo "[board-vessel] AUTORESEARCH mode: ${ITERS} iterations with ${MODEL}"
     bun run /app/scripts/nightly-train.ts \
       --sequential --skip-training \
       --iterations "${ITERS}" \
       --model "${MODEL}" || true
+
+    # Mark completion so restarts don't re-run immediately
+    date > "${MARKER}"
     echo "[board-vessel] Autoresearch complete. Falling back to daemon mode."
     exec bun run packages/board-vessel/vessel.ts
     ;;
