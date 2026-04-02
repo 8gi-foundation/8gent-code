@@ -77,6 +77,26 @@ async function runBenchmarks(model: string): Promise<BenchmarkResult[]> {
   // Each task requires the agent to discover a hidden rule, generalize from examples,
   // and produce correct output for unseen inputs. No task is solvable by pattern matching alone.
   // Upgraded 2026-04-01 by board directive.
+
+  // Deliberation preamble: when --deliberate flag is set, prepend scratchpad protocol to each task.
+  // This forces the agent to reason in writing before implementing, using a reasoning.md file
+  // as a scratchpad where it argues with itself across two perspectives.
+  const useDeliberation = args.includes("--deliberate");
+  const DELIBERATION_PREAMBLE = `BEFORE writing any code, you MUST follow this deliberation protocol:
+
+1. Create a file called reasoning.md
+2. Write your INITIAL ANALYSIS: what pattern do you see? What is the rule? State your hypothesis clearly.
+3. Then add a section called CHALLENGE: argue AGAINST your own hypothesis. What could be wrong? What edge cases break it? What alternative explanations exist?
+4. Then add a section called REVISED HYPOTHESIS: given the challenge, refine or change your answer. Be specific.
+5. Then add a section called IMPLEMENTATION PLAN: exactly what code you will write, what functions, what tests.
+6. Only AFTER completing all 4 sections in reasoning.md should you write any code files.
+
+The reasoning.md file is your scratchpad. Use it to think. Do not skip steps. Do not write code before completing the deliberation.
+
+Now here is the task:
+
+`;
+
   const tasks = [
     { id: "ARC-pattern-induction", prompt: `Given these input-output pairs, discover the transformation rule and apply it to the test input.
 
@@ -138,18 +158,23 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
 
   const results: BenchmarkResult[] = [];
 
+  if (useDeliberation) {
+    log("DELIBERATION MODE: scratchpad protocol prepended to all tasks");
+  }
+
   for (const task of tasks) {
-    log(`  Benchmark: ${task.id}`);
+    const taskPrompt = useDeliberation ? DELIBERATION_PREAMBLE + task.prompt : task.prompt;
+    log(`  Benchmark: ${task.id}${useDeliberation ? " [deliberation]" : ""}`);
     try {
       const result = await runCommand(BUN_PATH, [
         "run", path.join(PROJECT_ROOT, "packages/harness-cli/index.ts"), "run",
-        task.prompt,
+        taskPrompt,
         "--model", model,
         "--runtime", model.includes("/") ? "openrouter" : "ollama",
-        "--max-steps", "15",
-        "--timeout", "120000",
+        "--max-steps", "50",
+        "--timeout", "300000",
         "--json",
-      ], { timeout: 180000, cwd: PROJECT_ROOT });
+      ], { timeout: 360000, cwd: PROJECT_ROOT });
 
       let score = 0;
       let passed = false;
@@ -577,24 +602,12 @@ async function main() {
     // Phase 3: Collect training data
     const dataPath = await collectTrainingData(results, i);
 
-    // Phase 4: Train + Create model (if we have data and not skipping)
-    if (dataPath && !skipTraining) {
-      const checkpoint = await trainLoRA(dataPath, i);
-      if (checkpoint) {
-        const created = await createOllamaModel(checkpoint, i);
-        if (created) {
-          currentModel = "eight";
-          log("Switched to model 'eight' for next iteration");
-        }
-      }
-    } else if (i === 1) {
-      // On first iteration, create "eight" as a persona-tuned version even without LoRA
-      const simpleCheckpoint = path.join(CHECKPOINTS_DIR, `eight_persona_${Date.now()}`);
-      fs.mkdirSync(simpleCheckpoint, { recursive: true });
-      await createOllamaModel(simpleCheckpoint, i);
-      currentModel = "eight";
-      log("Created 'eight' persona model (no LoRA yet, just system prompt tuning)");
-    }
+    // Phase 4: DISABLED — keep using base model until we understand what to fine-tune on.
+    // The base qwen3:14b with clean prompt scored 4/5 (80%) on ARC-AGI tasks.
+    // Fine-tuning to "eight" degraded scores in subsequent iterations.
+    // Hold off on fine-tuning until we have enough data to know what works.
+    // - James directive, 2026-04-01
+    log("Phase 4 skipped — using base model for all iterations (fine-tuning paused)");
 
     // Brief pause between iterations
     await new Promise(r => setTimeout(r, 5000));
