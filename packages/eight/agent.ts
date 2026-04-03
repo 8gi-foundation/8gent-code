@@ -202,7 +202,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
     this.messageHistory.push({
       role: "system",
-      content: basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + deferredToolBlock + languageInstruction,
+      // Local providers have limited context windows — use minimal system prompt
+      content: (this.config.runtime === "lmstudio" || this.config.runtime === "ollama")
+        ? "You are a coding agent. Use tools to read, write, and run code. Be concise."
+        : basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + deferredToolBlock + languageInstruction,
     });
 
     // Initialize session persistence (v2)
