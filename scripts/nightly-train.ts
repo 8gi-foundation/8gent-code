@@ -131,10 +131,11 @@ function defaultParams(promptLength: number): InferenceParams {
   };
 }
 
-// Auto-detect inference backend: model-proxy (cloud) or Ollama (local)
+// Auto-detect inference backend: model-proxy (cloud), Ollama (local), or LM Studio (local)
 const INFERENCE_MODE = process.env.INFERENCE_MODE || "ollama";
 const MODEL_PROXY_URL = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
+const LM_STUDIO_HOST = process.env.LM_STUDIO_HOST || "http://127.0.0.1:1234";
 const VESSEL_ID = process.env.BOARD_MEMBER_CODE || "local";
 
 async function inferenceChat(model: string, systemPrompt: string, userPrompt: string, params?: Partial<InferenceParams>): Promise<{ content: string; durationMs: number }> {
@@ -170,6 +171,26 @@ async function inferenceChat(model: string, systemPrompt: string, userPrompt: st
           ],
           max_tokens: p.num_predict,
           temperature: p.temperature,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const data = await res.json() as any;
+      content = data.choices?.[0]?.message?.content || "";
+    } else if (INFERENCE_MODE === "lmstudio") {
+      // LM Studio mode: OpenAI-compatible API at local port 1234
+      const res = await fetch(`${LM_STUDIO_HOST}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer lm-studio" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: p.num_predict,
+          temperature: p.temperature,
+          stream: false,
         }),
         signal: controller.signal,
       });
@@ -408,17 +429,22 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
 
       // Determine runtime: if using model-proxy (cloud), route via openrouter
       // If local ollama model name (no slash), use ollama
-      const runtime = INFERENCE_MODE === "proxy" ? "openrouter" : (model.includes("/") ? "openrouter" : "ollama");
+      const runtime = INFERENCE_MODE === "proxy" ? "openrouter" : INFERENCE_MODE === "lmstudio" ? "lmstudio" : (model.includes("/") ? "openrouter" : "ollama");
+
+      // LM Studio (31B local) is slower — give it 10 min per task vs 2 min for cloud/ollama
+      const taskTimeout = INFERENCE_MODE === "lmstudio" ? 600000 : 120000;
+      const subprocessTimeout = INFERENCE_MODE === "lmstudio" ? 660000 : 180000;
+      const maxStepsForMode = INFERENCE_MODE === "lmstudio" ? 10 : (useSequential ? harnessState.maxSteps : 15);
 
       const result = await runCommand(BUN_PATH, [
         "run", path.join(PROJECT_ROOT, "packages/harness-cli/index.ts"), "run",
         effectivePrompt,
         "--model", model,
         "--runtime", runtime,
-        "--max-steps", String(useSequential ? harnessState.maxSteps : 15),
-        "--timeout", "120000",
+        "--max-steps", String(maxStepsForMode),
+        "--timeout", String(taskTimeout),
         "--json",
-      ], { timeout: 180000, cwd: PROJECT_ROOT });
+      ], { timeout: subprocessTimeout, cwd: PROJECT_ROOT });
 
       let score = 0;
       let passed = false;
@@ -541,10 +567,10 @@ Focus on getting working code with passing tests. Simplify if needed.`;
           healPrompt,
           "--model", model,
           "--runtime", runtime,
-          "--max-steps", String(Math.min(30, (useSequential ? harnessState.maxSteps : 15) + 10)),
-          "--timeout", "120000",
+          "--max-steps", String(Math.min(30, maxStepsForMode + 5)),
+          "--timeout", String(taskTimeout),
           "--json",
-        ], { timeout: 180000, cwd: PROJECT_ROOT });
+        ], { timeout: subprocessTimeout, cwd: PROJECT_ROOT });
 
         // Re-score the retry
         let retryScore = 0;
@@ -733,7 +759,7 @@ async function sendTelegramUpdate(results: BenchmarkResult[], iteration: number,
   const passRate = ((passCount / results.length) * 100).toFixed(0);
 
   // Determine environment
-  const location = INFERENCE_MODE === "proxy" ? "Cloud (Amsterdam)" : "Local (MacBook)";
+  const location = INFERENCE_MODE === "proxy" ? "Cloud (Amsterdam)" : INFERENCE_MODE === "lmstudio" ? "Local (LM Studio / Gemma 4)" : "Local (Ollama)";
   const model = baseModel;
 
   const resultLines = results.map(r => {
