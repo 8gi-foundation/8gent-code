@@ -122,7 +122,14 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
   setToolContext({ workingDirectory: workingDir });
 
   const model = createModel(config.provider);
-  const tools = (config.tools as AgentTools) || agentTools;
+
+  // LM Studio has limited context — 49 tools blows the context window.
+  // For local providers, use only the core coding tools.
+  const CORE_TOOLS = ["read_file", "write_file", "edit_file", "list_files", "run_command", "git_status", "git_diff", "git_add", "git_commit"];
+  const defaultTools = config.provider.name === "lmstudio" || config.provider.name === "ollama"
+    ? Object.fromEntries(Object.entries(agentTools).filter(([k]) => CORE_TOOLS.includes(k))) as AgentTools
+    : agentTools;
+  const tools = (config.tools as AgentTools) || defaultTools;
 
   const agent = new ToolLoopAgent<never, AgentTools>({
     model,
