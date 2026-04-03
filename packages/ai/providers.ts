@@ -49,6 +49,25 @@ export function createModel(config: ProviderConfig): LanguageModel {
           }
         : {}),
     },
+    // LM Studio requires `type: "object"` in tool parameter schemas.
+    // The AI SDK strips it — patch it back for lmstudio.
+    ...(config.name === "lmstudio"
+      ? {
+          transformRequestBody: (body: Record<string, unknown>) => {
+            if (Array.isArray(body.tools)) {
+              body.tools = (body.tools as Array<Record<string, unknown>>).map((t) => {
+                const fn = t.function as Record<string, unknown> | undefined;
+                if (fn && fn.parameters && typeof fn.parameters === "object") {
+                  const params = fn.parameters as Record<string, unknown>;
+                  if (!params.type) params.type = "object";
+                }
+                return t;
+              });
+            }
+            return body;
+          },
+        }
+      : {}),
   });
 
   return provider(config.model);
