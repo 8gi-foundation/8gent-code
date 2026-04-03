@@ -131,9 +131,13 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
     : agentTools;
   const tools = (config.tools as AgentTools) || defaultTools;
 
+  const isLocalProvider = config.provider.name === "lmstudio" || config.provider.name === "ollama";
+
   const agent = new ToolLoopAgent<never, AgentTools>({
     model,
     instructions: config.instructions,
+    // Cap response size for local providers to keep within their context window
+    ...(isLocalProvider ? { maxOutputTokens: 1024 } : {}),
     tools,
     stopWhen: stepCountIs(config.maxSteps || 30),
 
