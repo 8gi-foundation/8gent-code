@@ -422,12 +422,20 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     const systemPrompt = this.messageHistory.find(m => m.role === "system")?.content;
 
     // Create the AI SDK agent with v2 session callbacks
+    // Local providers have limited context — cap at core tools to avoid "Context size exceeded"
+    const CORE_TOOLS = ["read_file", "write_file", "edit_file", "list_files", "run_command", "git_status", "git_diff", "git_add", "git_commit"];
+    const allTools = this.toolRegistry.getTools();
+    const isLocalProvider = providerConfig.name === "lmstudio" || providerConfig.name === "ollama";
+    const effectiveTools = isLocalProvider
+      ? Object.fromEntries(Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)))
+      : allTools;
+
     const agentConfig: EightAgentConfig = {
       provider: providerConfig,
       instructions: systemPrompt,
       maxSteps: this.config.maxTurns || 30,
       workingDirectory: this.config.workingDirectory || process.cwd(),
-      tools: this.toolRegistry.getTools(),
+      tools: effectiveTools,
 
       onToolCallStart: async (event) => {
         await this.hookManager.executeHooks("beforeTool", {
