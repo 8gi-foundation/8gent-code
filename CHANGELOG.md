@@ -12,6 +12,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### CI
 - ci: add check:harness scoped typecheck for harness entrypoints (#1227)
 - ci: block merge conflict markers in TS/TSX sources (#1226)
+- docs: add harness smoke quick start path and CI smoke job (#1228)
 
 ### Fixed
 - **TUI CLI provider/model** - `apps/tui/src/index.tsx` now parses `--provider=`, `--model=`, `--yes`/`-y` (and keeps `--infinite`, `--name`, `--resume`). The first positional defaults to `repl` when argv is flags-only, so `8gent tui --provider=lmstudio --model=...` applies. **`bin/8gent.ts`** prepends implicit `tui` when the first token is a flag (e.g. `8gent --provider=lmstudio --yes`).
