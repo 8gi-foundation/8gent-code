@@ -3,6 +3,7 @@ import { Box, useInput } from "ink";
 import type { TaskInfo, TaskStatus } from "../../../../../packages/tools/background.js";
 import { AppText, MutedText, Heading, Badge, Divider, Stack, Inline, ShortcutHint, Spacer } from "../primitives/index.js";
 import { ProcessListItem } from "./ProcessListItem.js";
+import { isAgentProcessTaskId } from "../ActivityMonitor.js";
 
 interface ProcessSidebarProps {
   tasks: TaskInfo[];
@@ -39,7 +40,12 @@ export function ProcessSidebar({
         return;
       }
       if (key.escape) { onUnfocus(); return; }
-      if (input === "k" && !key.ctrl && tasks[selectedIndex]?.status === "running") {
+      if (
+        input === "k" &&
+        !key.ctrl &&
+        tasks[selectedIndex]?.status === "running" &&
+        !isAgentProcessTaskId(tasks[selectedIndex]!.id)
+      ) {
         onKill();
         return;
       }
@@ -71,7 +77,7 @@ export function ProcessSidebar({
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {tasks.length === 0 ? (
           <Box paddingX={1} paddingY={1}>
-            <MutedText>No background processes</MutedText>
+            <MutedText>No shell jobs or tool trace yet</MutedText>
           </Box>
         ) : (
           tasks.map((task, i) => (
@@ -92,7 +98,10 @@ export function ProcessSidebar({
           <Box paddingX={1} gap={1}>
             <ShortcutHint keys="↑↓" description="nav" />
             <ShortcutHint keys="⏎" description="view" />
-            <ShortcutHint keys="k" description="kill" />
+            {tasks[selectedIndex]?.status === "running" &&
+              !isAgentProcessTaskId(tasks[selectedIndex]!.id) && (
+              <ShortcutHint keys="k" description="kill" />
+            )}
           </Box>
         </>
       )}
