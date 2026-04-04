@@ -10,6 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### CI
+- ci: add check:harness scoped typecheck for harness entrypoints (#1227)
 - ci: block merge conflict markers in TS/TSX sources (#1226)
 
 ### Fixed
