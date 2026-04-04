@@ -822,3 +822,16 @@ export type {
   WorktreePoolOptions,
   WorktreeTaskStatus,
 } from "./worktree-pool-types";
+
+// HyperAgent Sequential Pipeline — Analyst → Critic → Implementer (Run D)
+export {
+  type InferenceParams,
+  type HyperAgentOptions,
+  type RunCheckpoint,
+  defaultParams,
+  inferenceChat,
+  adaptiveSequentialPreProcess,
+  saveCheckpoint,
+  loadCheckpoint,
+  clearCheckpoint,
+} from "./sequential-pipeline";
