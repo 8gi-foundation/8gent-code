@@ -360,26 +360,34 @@ function EvidenceItem({ evidence, isLast }: { evidence: EvidenceSummary; isLast:
 }
 
 function StatsGrid({ report }: { report: CompletionReportData }) {
-  const stats = [
-    { label: "Tools used", value: String(report.toolsUsed), color: "cyan" as const },
-    { label: "Duration", value: report.duration, color: "yellow" as const },
-    { label: "Confidence", value: `${report.confidence}%`, color: report.confidence >= 80 ? "green" as const : report.confidence >= 50 ? "yellow" as const : "red" as const },
+  type StatRow =
+    | { label: string; value: string; color: "red" | "green" | "yellow" | "cyan" | "blue" }
+    | { label: string; value: string; dim: true };
+
+  const stats: StatRow[] = [
+    { label: "Tools used", value: String(report.toolsUsed), color: "cyan" },
+    { label: "Duration", value: report.duration, color: "yellow" },
+    {
+      label: "Confidence",
+      value: `${report.confidence}%`,
+      color: report.confidence >= 80 ? "green" : report.confidence >= 50 ? "yellow" : "red",
+    },
   ];
 
   if (report.tokensUsed) {
-    stats.push({ label: "Tokens used", value: formatTokens(report.tokensUsed), color: "gray" as const });
+    stats.push({ label: "Tokens used", value: formatTokens(report.tokensUsed), dim: true });
   }
 
   if (report.tokensSaved) {
-    stats.push({ label: "Tokens saved", value: formatTokens(report.tokensSaved), color: "green" as const });
+    stats.push({ label: "Tokens saved", value: formatTokens(report.tokensSaved), color: "green" });
   }
 
   if (report.gitBranch) {
-    stats.push({ label: "Branch", value: report.gitBranch, color: "yellow" as const });
+    stats.push({ label: "Branch", value: report.gitBranch, color: "yellow" });
   }
 
   if (report.gitCommit) {
-    stats.push({ label: "Commit", value: report.gitCommit.slice(0, 7), color: "magenta" as const });
+    stats.push({ label: "Commit", value: report.gitCommit.slice(0, 7), color: "cyan" });
   }
 
   return (
@@ -387,7 +395,11 @@ function StatsGrid({ report }: { report: CompletionReportData }) {
       {stats.map((stat, i) => (
         <Inline key={i} gap={0}>
           <MutedText>{stat.label.padEnd(15)}</MutedText>
-          <Text color={stat.color}>{stat.value}</Text>
+          {"dim" in stat ? (
+            <Text dimColor>{stat.value}</Text>
+          ) : (
+            <Text color={stat.color}>{stat.value}</Text>
+          )}
         </Inline>
       ))}
     </Stack>

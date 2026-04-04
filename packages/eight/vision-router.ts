@@ -26,6 +26,13 @@ const OLLAMA_VISION_MODELS = [
   "qwen2.5-vl",
   "smolvlm2",
   "internvl2",
+  // Gemma multimodal (Ollama tags often look like gemma3:latest, google/gemma-3-*, etc.)
+  "gemma3",
+  "gemma-3",
+  "gemma4",
+  "gemma-4",
+  "gemma2",
+  "gemma-2",
 ];
 
 // OCR-specialized models (Ollama) — preferred for text extraction tasks
@@ -246,7 +253,7 @@ async function checkOpenRouterVision(apiKey?: string): Promise<VisionModel[]> {
         m.architecture?.modality?.includes("image") ||
         m.architecture?.input_modalities?.includes("image") ||
         // Fallback: check common vision model name patterns
-        /vision|llava|pixtral|moondream|gpt-4o|claude.*sonnet|gemini/i.test(m.id);
+        /vision|llava|pixtral|moondream|gpt-4o|claude.*sonnet|gemini|gemma/i.test(m.id);
 
       if (!hasVision) continue;
 

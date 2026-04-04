@@ -2,6 +2,20 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSelection } from "./useSelection.js";
 import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
 import { getBackgroundTaskManager } from "../../../../packages/tools/background.js";
+import {
+  getActivityLogAsTaskInfos,
+  getAgentTaskOutput,
+  isAgentProcessTaskId,
+} from "../components/ActivityMonitor.js";
+
+function mergeTasksByRecency(shell: TaskInfo[], agent: TaskInfo[]): TaskInfo[] {
+  const all = [...shell, ...agent];
+  all.sort(
+    (a, b) =>
+      new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+  );
+  return all;
+}
 
 export type FocusZone = "input" | "sidebar" | "detail";
 
@@ -47,35 +61,44 @@ export function useProcessPanel(): ProcessPanelState {
   const selection = useSelection(tasks, { loop: true });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Poll task statuses
+  // Poll shell jobs + agent tool trace (activity log) so Ctrl+B reflects real work
   const poll = useCallback(() => {
     try {
       const manager = getBackgroundTaskManager();
-      const taskList = manager.listTasks({ limit: 50 });
-      setTasks(taskList);
-      setTaskCounts(manager.getTaskCounts());
+      const shellTasks = manager.listTasks({ limit: 40 });
+      const agentTasks = getActivityLogAsTaskInfos();
+      const merged = mergeTasksByRecency(shellTasks, agentTasks).slice(0, 60);
+      setTasks(merged);
+
+      const base = manager.getTaskCounts();
+      const agentRunning = agentTasks.filter((t) => t.status === "running").length;
+      setTaskCounts({
+        ...base,
+        running: base.running + agentRunning,
+      });
 
       if (detailTaskId) {
-        const output = manager.getTaskOutput(detailTaskId, { tail: 200 });
-        if (output) setDetailOutput(output);
+        if (isAgentProcessTaskId(detailTaskId)) {
+          const out = getAgentTaskOutput(detailTaskId);
+          if (out) setDetailOutput(out);
+        } else {
+          const output = manager.getTaskOutput(detailTaskId, { tail: 200 });
+          if (output) setDetailOutput(output);
+        }
       }
     } catch {
       // Manager may not exist yet
     }
   }, [detailTaskId]);
 
-  // Start/stop polling based on visibility
+  // Keep process list fresh (badge + instant sidebar) without heavy CPU
   useEffect(() => {
-    // Always do an initial poll
     poll();
-
-    if (sidebarOpen || detailTaskId) {
-      pollRef.current = setInterval(poll, 1000);
-      return () => {
-        if (pollRef.current) clearInterval(pollRef.current);
-      };
-    }
-  }, [sidebarOpen, detailTaskId, poll]);
+    pollRef.current = setInterval(poll, 1500);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [poll]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((prev) => {
@@ -93,12 +116,18 @@ export function useProcessPanel(): ProcessPanelState {
   const openDetail = useCallback((taskId: string) => {
     setDetailTaskId(taskId);
     setFocusZone("detail");
-    // Immediate fetch
     try {
+      if (isAgentProcessTaskId(taskId)) {
+        const out = getAgentTaskOutput(taskId);
+        if (out) setDetailOutput(out);
+        return;
+      }
       const manager = getBackgroundTaskManager();
       const output = manager.getTaskOutput(taskId, { tail: 200 });
       if (output) setDetailOutput(output);
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const closeDetail = useCallback(() => {
@@ -115,6 +144,7 @@ export function useProcessPanel(): ProcessPanelState {
       ? tasks.find((t) => t.id === detailTaskId)
       : selection.selectedItem;
     if (!task || task.status !== "running") return null;
+    if (isAgentProcessTaskId(task.id)) return null;
 
     try {
       const manager = getBackgroundTaskManager();

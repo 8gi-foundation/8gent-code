@@ -288,20 +288,23 @@ export function useChatTabState(
               e.state.stepCount += 1;
               e.state.totalTokens += event.usage.totalTokens;
 
-              // Stream assistant's intermediate reasoning into messages
-              if (event.text && event.text.trim()) {
-                const stepMsg: Message = {
-                  id: `assistant-step-${event.stepNumber}-${Date.now()}`,
-                  role: "assistant",
-                  content: event.text,
+              // Do not append assistant bubbles per step (stacks N messages; Ink draws over itself).
+              // stepNumber 0 = vision/synthetic notices only, as one truncated system line.
+              if (event.text && event.text.trim() && event.stepNumber === 0) {
+                const t = event.text.trim();
+                const content = t.length > 720 ? `${t.slice(0, 717)}...` : t;
+                const sysMsg: Message = {
+                  id: `system-step0-${Date.now()}`,
+                  role: "system",
+                  content,
                   timestamp: new Date(),
                 };
-                e.state.messages = [...e.state.messages, stepMsg];
+                e.state.messages = [...e.state.messages, sysMsg];
                 schedulePersist(tid, e.state.messages);
               }
 
-              // Update status based on step content
-              if (event.toolCalls.length > 0) {
+              const toolCalls = event.toolCalls ?? [];
+              if (toolCalls.length > 0) {
                 e.state.status = "executing";
               } else {
                 e.state.status = "thinking";
@@ -439,7 +442,18 @@ export function useChatTabState(
 
       if (agent) {
         try {
-          await agent.chat(message, imageBase64, imageMimeType);
+          const reply = await agent.chat(message, imageBase64, imageMimeType);
+          const trimmed = (reply ?? "").trim();
+          if (trimmed) {
+            const assistantMsg: Message = {
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              content: trimmed,
+              timestamp: new Date(),
+            };
+            e.state.messages = [...e.state.messages, assistantMsg];
+            schedulePersist(tabId, e.state.messages);
+          }
           updateTabState(tabId, { status: "success" });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
