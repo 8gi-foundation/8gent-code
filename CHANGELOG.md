@@ -9,6 +9,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### CI
+- ci: block merge conflict markers in TS/TSX sources (#1226)
+
 ### Fixed
 - **TUI CLI provider/model** - `apps/tui/src/index.tsx` now parses `--provider=`, `--model=`, `--yes`/`-y` (and keeps `--infinite`, `--name`, `--resume`). The first positional defaults to `repl` when argv is flags-only, so `8gent tui --provider=lmstudio --model=...` applies. **`bin/8gent.ts`** prepends implicit `tui` when the first token is a flag (e.g. `8gent --provider=lmstudio --yes`).
 - **TUI default model (LM Studio / Ollama)** - After the model list loads, selection is corrected to skip embedding/rerank ids and to honor CLI `--model` via fuzzy match. Ollama startup default uses the same ranking (prefers `eight*`, instruct/chat sizes) instead of raw API order.
