@@ -9,7 +9,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **TUI CLI provider/model** - `apps/tui/src/index.tsx` now parses `--provider=`, `--model=`, `--yes`/`-y` (and keeps `--infinite`, `--name`, `--resume`). The first positional defaults to `repl` when argv is flags-only, so `8gent tui --provider=lmstudio --model=...` applies. **`bin/8gent.ts`** prepends implicit `tui` when the first token is a flag (e.g. `8gent --provider=lmstudio --yes`).
+- **TUI default model (LM Studio / Ollama)** - After the model list loads, selection is corrected to skip embedding/rerank ids and to honor CLI `--model` via fuzzy match. Ollama startup default uses the same ranking (prefers `eight*`, instruct/chat sizes) instead of raw API order.
+- **TUI infinite mode indicator** - Footer `permissionMode` now initializes from `isInfiniteMode()` so `8gent --infinite` matches the status line (was always "ask" until `/infinite` toggled React state).
+- **TUI narrow terminals** - Status bar switches to a single-line compact layout under ~92 columns (avoids wrapped/garbled chrome). Process sidebar width scales down with terminal width so chat keeps a minimum slice. Agent mode strip shows only the active mode under ~78 columns; token meter columns and shortcut hints truncate more aggressively on small widths.
+- **TUI turn endings** - After a streamed assistant turn with no question in the last lines, the chat log gets a short follow-up prompt so the session does not feel stuck on "awaiting command". System prompt now asks the model to close with a concrete question when pausing after research or planning.
+- **Processes panel (Ctrl+B)** - Lists recent agent tool traces (from the activity log) merged with shell background jobs; detail view shows tool metadata. Shell-only `k` kill is hidden for tool-trace rows.
+- **TUI model list** - `/model` picker no longer uses `gray` for the cursor column (often invisible on Solarized-style themes), removes the fake per-row icon column that shifted labels, uses bold only on the highlighted row, initializes scroll for long lists, filters empty Ollama or LM Studio model ids, and remounts the picker when the model list changes.
+
+### Changed
+- **TUI animations** - `^A` off now disables ActivityMonitor scan-line/footer dots, message bubble `FadeIn` delays, and keeps activity refresh on a slower tick. `^A` on keeps the previous motion.
+- **TUI status bar copy** - Permission and run lines use plain `perm` / `run` labels instead of bracket badges so they read as telemetry, not controls. After a turn finishes, green state is labeled **ready (awaiting input)** instead of **Done** (which implied the whole task succeeded).
+
 ### Added
+- **Skills loader** - TUI slash skills now load from bundled `packages/skills/*/SKILL.md` (and `dist/skills/` in the published CLI), plus optional `.claude/skills/*/SKILL.md` under `process.cwd()` (loaded before bundled so repo copies override defaults). Symlinked skill folders under `.claude/skills` resolve correctly. Supports `trigger`, `aliases`, and `/alias` resolution (e.g. **Billion Dollar Boardroom** at `/billiondollarboardroom`, `/bdb`, `/billionboard`).
+- **TUI skill slash commands** - Unknown `/commands` are no longer sent to the model as raw text; if the name matches a loaded skill, the chat turn uses the same expanded prompt as the REPL (`[SKILL: …]` + body). No need to run `/skills` first.
+- **TUI slash UX** - Ghost completions now include every built-in slash plus loaded skill triggers (sorted longest-first). Slash palette stays open for long commands (no 10-char cutoff; hides after the first space). `/skills` is implemented in the TUI handler and lists loaded skills. Palette merges built-ins with dynamic skill names/aliases.
 - **GitHub Projects playbook** - `docs/process/GITHUB-PROJECTS.md` and `scripts/gh-project-roadmap.sh` for org Project setup, linking `8gent-code`, and bulk-adding epic **#1076** and **#1077–#1093**. Org project [**8gent-code roadmap**](https://github.com/orgs/8gi-foundation/projects/1) (number `1`) is live and linked to the repo.
 - **Auth** - `packages/auth/proxy-provider.ts` sketch for OpenAI-compatible routing via the 8GI control-plane gateway (local Ollama fallback).
 - **toolshed** - `toolshed/example.ts` placeholder for shared tooling experiments.

@@ -9,558 +9,346 @@
  * - Slash command support (/kanban, /predict, /avenues)
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
-import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
-import { WaveProgress } from "./progress-bar.js";
+import TextInput from "ink-text-input";
+import React, {
+	useState,
+	useEffect,
+	useCallback,
+	useRef,
+	useMemo,
+} from "react";
+import {
+	type ContextSuggestion,
+	getSuggestionSourceLabel,
+	useGhostSuggestion,
+} from "../hooks/use-ghost-suggestion.js";
+import type { SlashCommand } from "../lib/slash-commands.js";
+import {
+	type SlashRegistryEntry,
+	getBuiltInSlashCommands,
+	getSlashRegistry,
+	resolveSlashInput,
+	toGhostSuggestions,
+} from "../lib/slash-registry.js";
+import {
+	AnimatedSpinner,
+	StatusIndicator,
+	StepIndicator,
+} from "./animated-spinner.js";
 import { Blink } from "./fade-transition.js";
 import {
-  useGhostSuggestion,
-  getSuggestionSourceLabel,
-} from "../hooks/use-ghost-suggestion.js";
-import { AppText, MutedText, Label, ShortcutHint, Inline } from './primitives/index.js';
-
-// ============================================
-// Types
-// ============================================
+	AppText,
+	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
+} from "./primitives/index.js";
+import { WaveProgress } from "./progress-bar.js";
 
 interface CommandInputProps {
-  onSubmit: (input: string) => void;
-  isProcessing: boolean;
-  processingStage?: "planning" | "toolshed" | "executing" | "complete";
-  showAnimations?: boolean;
-  // Real-time agent progress
-  activeTool?: string | null;
-  stepCount?: number;
-  toolCount?: number;
-  totalTokens?: number;
-  // Ghost suggestion options
-  isGitRepo?: boolean;
-  currentBranch?: string | null;
-  planNextStep?: string | null;
-  recentCommands?: string[];
-  // Slash command handlers
-  onSlashCommand?: (command: string, args: string[]) => void;
-  /** Text injected from voice transcription — appended to current input for review */
-  injectedText?: string | null;
-  /** Whether the input is focused (false when non-chat views are active) */
-  focused?: boolean;
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
+	processingStage?: "planning" | "toolshed" | "executing" | "complete";
+	showAnimations?: boolean;
+	// Real-time agent progress
+	activeTool?: string | null;
+	stepCount?: number;
+	toolCount?: number;
+	totalTokens?: number;
+	// Ghost suggestion options
+	isGitRepo?: boolean;
+	currentBranch?: string | null;
+	planNextStep?: string | null;
+	recentCommands?: string[];
+	// Slash command handlers
+	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
+	/** Text injected from voice transcription — appended to current input for review */
+	injectedText?: string | null;
+	/** Whether the input is focused (false when non-chat views are active) */
+	focused?: boolean;
+	/** Rewrite the input on each change (e.g. consume a lone pasted file path into an attachment) */
+	transformInputValue?: (value: string) => string;
+	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
+	allowEmptySubmit?: boolean;
 }
-
-export type SlashCommand =
-  | "help"
-  | "kanban"
-  | "predict"
-  | "avenues"
-  | "clear"
-  | "quit"
-  | "plan"
-  | "status"
-  | "model"
-  | "provider"
-  | "voice"
-  | "language"
-  | "infinite"
-  | "onboarding"
-  | "preferences"
-  | "skip"
-  | "animations"
-  | "adhd"
-  | "quarantine"
-  | "toolshed"
-  | "skills"
-  | "design"
-  | "evidence"
-  | "auth"
-  | "vision"
-  | "session"
-  | "resume"
-  | "history"
-  | "continue"
-  | "compact"
-  | "chat"
-  | "agent"
-  | "github"
-  | "debug"
-  | "music"
-  | "dj"
-  | "pet"
-  | "export"
-  | "fork"
-  | "branch"
-<<<<<<< feat/cron-scheduler-973
-  | "cron";
-=======
-  | "deploy"
-  | "vercel";
->>>>>>> main
 
 // Processing stages for multi-step indicator
 const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
 
-// ============================================
-// Slash Command Definitions
-// ============================================
-
-interface SlashCommandDef {
-  name: SlashCommand;
-  aliases: string[];
-  description: string;
-  usage?: string;
+function buildBuiltInSlashGhostSuggestions(): ContextSuggestion[] {
+	const out: ContextSuggestion[] = [];
+	for (const cmd of getBuiltInSlashCommands()) {
+		out.push({ trigger: `/${cmd.name}`, suggestion: "", confidence: 0.87 });
+		for (const a of cmd.aliases) {
+			if (a.length < 1) continue;
+			out.push({ trigger: `/${a}`, suggestion: "", confidence: 0.83 });
+		}
+	}
+	return out.sort((a, b) => b.trigger.length - a.trigger.length);
 }
-
-const SLASH_COMMANDS: SlashCommandDef[] = [
-  {
-    name: "help",
-    aliases: ["h", "?"],
-    description: "Show available commands",
-  },
-  {
-    name: "kanban",
-    aliases: ["k", "board"],
-    description: "Toggle kanban board view",
-  },
-  {
-    name: "predict",
-    aliases: ["p", "next"],
-    description: "Show predicted next steps",
-  },
-  {
-    name: "avenues",
-    aliases: ["a", "paths"],
-    description: "Show all planned avenues",
-  },
-  {
-    name: "plan",
-    aliases: ["pl"],
-    description: "Show current execution plan",
-  },
-  {
-    name: "clear",
-    aliases: ["cls", "c"],
-    description: "Clear the screen",
-  },
-  {
-    name: "status",
-    aliases: ["s", "st"],
-    description: "Show session status",
-  },
-  {
-    name: "quit",
-    aliases: ["q", "exit"],
-    description: "Exit 8gent Code",
-  },
-  {
-    name: "model",
-    aliases: ["m"],
-    description: "Select LLM model (↑↓ to scroll)",
-    usage: "/model [name]",
-  },
-  {
-    name: "provider",
-    aliases: ["pr"],
-    description: "Select LLM provider (↑↓ to scroll)",
-    usage: "/provider [name]",
-  },
-  {
-    name: "voice",
-    aliases: ["v"],
-    description: "Voice TTS settings",
-    usage: "/voice [on|off|test]",
-  },
-  {
-    name: "language",
-    aliases: ["lang", "l"],
-    description: "Set response language",
-    usage: "/language [code]",
-  },
-  {
-    name: "infinite",
-    aliases: ["inf", "∞"],
-    description: "Enable infinite mode (autonomous until done)",
-    usage: "/infinite [task]",
-  },
-  {
-    name: "onboarding",
-    aliases: ["onboard", "setup", "intro"],
-    description: "Start or restart personalization setup",
-    usage: "/onboarding",
-  },
-  {
-    name: "preferences",
-    aliases: ["prefs", "settings"],
-    description: "View or edit your preferences",
-    usage: "/preferences [category]",
-  },
-  {
-    name: "skip",
-    aliases: ["later"],
-    description: "Skip current onboarding question",
-    usage: "/skip [all]",
-  },
-  {
-    name: "animations",
-    aliases: ["anim", "fx"],
-    description: "Preview ASCII animations",
-    usage: "/animations [matrix|fire|dna|stars|dots|glitch|confetti|wave|all]",
-  },
-  {
-    name: "adhd",
-    aliases: ["focus"],
-    description: "ADHD mode — text + audio focus toolkit",
-    usage: "/adhd [on|off|lofi|rainsound|whitenoise|ambient|classical|stop]",
-  },
-  {
-    name: "music",
-    aliases: ["audio", "soundscape"],
-    description: "Generate & play focus music (ACE-Step)",
-    usage: "/music [lofi|rain|white|ambient|piano|gen <prompt>|stop|config]",
-  },
-  {
-    name: "dj",
-    aliases: ["play", "radio"],
-    description: "DJ Eight — YouTube, radio, produce, mix",
-    usage: "/dj [play|radio|produce|pause|stop|skip|np|vol|loop|queue|dl|bpm|mix]",
-  },
-  {
-    name: "pet",
-    aliases: ["companion", "lileight"],
-    description: "Spawn Lil Eight dock companion + show companion card",
-    usage: "/pet [start|stop|deck|card]",
-  },
-  {
-    name: "export",
-    aliases: ["save"],
-    description: "Export current session as self-contained HTML",
-    usage: "/export",
-  },
-  {
-    name: "fork",
-    aliases: ["f"],
-    description: "Fork conversation at current message",
-    usage: "/fork [label]",
-  },
-  {
-    name: "branch",
-    aliases: ["branches", "br"],
-    description: "List or switch branches",
-    usage: "/branch [list|switch <id>]",
-  },
-  {
-<<<<<<< feat/cron-scheduler-973
-    name: "cron",
-    aliases: ["jobs", "schedule"],
-    description: "Manage scheduled cron jobs",
-    usage: "/cron [list|add|remove|enable|disable]",
-=======
-    name: "deploy",
-    aliases: ["redeploy"],
-    description: "Trigger Vercel deploy of current project",
-    usage: "/deploy",
-  },
-  {
-    name: "vercel",
-    aliases: ["vc"],
-    description: "Vercel deployment management",
-    usage: "/vercel [status|env|logs|projects|domains]",
->>>>>>> main
-  },
-  {
-    name: "router",
-    aliases: ["route", "routing"],
-    description: "Task router - assign models to task categories",
-    usage: "/router [on|off|set|test|stats|status]",
-  },
-  {
-    name: "quarantine",
-    aliases: ["quar", "sandbox"],
-    description: "Manage skill quarantine (add, scan, release, reject)",
-    usage: "/quarantine [add|scan|list|release|reject] [args]",
-  },
-  {
-    name: "toolshed",
-    aliases: ["shed", "tools"],
-    description: "Query available tools and capabilities",
-    usage: "/toolshed [list|search|stats]",
-  },
-  {
-    name: "skills",
-    aliases: ["sk"],
-    description: "List and manage skills",
-    usage: "/skills [list|search|info] [name]",
-  },
-  {
-    name: "design",
-    aliases: ["d", "ui", "style"],
-    description: "Suggest design systems for current task",
-    usage: "/design [task description]",
-  },
-  {
-    name: "evidence",
-    aliases: ["ev", "proof"],
-    description: "Show full evidence breakdown for this session",
-    usage: "/evidence",
-  },
-  {
-    name: "auth",
-    aliases: ["login", "account"],
-    description: "Authentication (login, logout, status)",
-    usage: "/auth [login|logout|status]",
-  },
-  {
-    name: "github",
-    aliases: ["gh"],
-    description: "GitHub integration (issues, PRs, repos)",
-    usage: "/github [issues|pr|repos|status]",
-  },
-  {
-    name: "debug",
-    aliases: ["inspect", "logs"],
-    description: "Session debugger (sessions, health, tools, errors)",
-    usage: "/debug [sessions|health|tools|errors|inspect <id>|export <id>]",
-  },
-  {
-    name: "vision",
-    aliases: ["vis", "ocr", "eye"],
-    description: "Vision & OCR model settings",
-    usage: "/vision [status|model|ocr|pull] [args]",
-  },
-  {
-    name: "resume",
-    aliases: ["res"],
-    description: "Resume a recent session (pick from last 5)",
-    usage: "/resume",
-  },
-  {
-    name: "session",
-    aliases: ["sess"],
-    description: "Named session management (name, list, resume)",
-    usage: "/session [name|list|resume] <args>",
-  },
-  {
-    name: "history",
-    aliases: ["hist", "sessions"],
-    description: "Browse all past sessions",
-    usage: "/history",
-  },
-  {
-    name: "continue",
-    aliases: ["cont", "last"],
-    description: "Continue most recent session automatically",
-    usage: "/continue",
-  },
-  {
-    name: "compact",
-    aliases: ["compress", "summarize"],
-    description: "Summarize and compress current conversation",
-    usage: "/compact",
-  },
-  {
-    name: "chat",
-    aliases: ["talk"],
-    description: "Toggle chat mode (background work continues)",
-    usage: "/chat",
-  },
-  {
-    name: "agent",
-    aliases: ["agents", "ag"],
-    description: "Manage sub-agents (list, spawn, kill, auto, settings)",
-    usage: "/agent [list|spawn|kill|auto|settings]",
-  },
-];
 
 // ============================================
 // Main Command Input
 // ============================================
 
 export function CommandInput({
-  onSubmit,
-  isProcessing,
-  processingStage = "planning",
-  showAnimations = true,
-  activeTool = null,
-  stepCount = 0,
-  toolCount = 0,
-  totalTokens = 0,
-  isGitRepo = false,
-  currentBranch = null,
-  planNextStep = null,
-  recentCommands = [],
-  onSlashCommand,
-  injectedText = null,
-  focused = true,
+	onSubmit,
+	isProcessing,
+	processingStage = "planning",
+	showAnimations = true,
+	activeTool = null,
+	stepCount = 0,
+	toolCount = 0,
+	totalTokens = 0,
+	isGitRepo = false,
+	currentBranch = null,
+	planNextStep = null,
+	recentCommands = [],
+	onSlashCommand,
+	injectedText = null,
+	focused = true,
+	transformInputValue,
+	allowEmptySubmit = false,
 }: CommandInputProps) {
-  const [value, setValue] = useState("");
-  const [promptPulse, setPromptPulse] = useState(true);
-  const [showSlashHelp, setShowSlashHelp] = useState(false);
+	const [value, setValue] = useState("");
+	const [promptPulse, setPromptPulse] = useState(true);
+	const [showSlashHelp, setShowSlashHelp] = useState(false);
+	const [slashRegistryEntries, setSlashRegistryEntries] = useState<
+		SlashRegistryEntry[]
+	>([]);
+	const [slashByToken, setSlashByToken] = useState<
+		Map<string, SlashRegistryEntry>
+	>(new Map());
 
-  // Inject text from voice transcription (appends to current input)
-  const lastInjectedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (injectedText && injectedText !== lastInjectedRef.current) {
-      lastInjectedRef.current = injectedText;
-      setValue((prev) => (prev ? prev + " " + injectedText : injectedText));
-    }
-  }, [injectedText]);
+	const builtInSlashGhosts = useMemo(
+		() => buildBuiltInSlashGhostSuggestions(),
+		[],
+	);
+	const extraSlashContext = useMemo(
+		() => [
+			...builtInSlashGhosts,
+			...toGhostSuggestions({
+				entries: slashRegistryEntries,
+				byToken: slashByToken,
+			}),
+		],
+		[builtInSlashGhosts, slashRegistryEntries, slashByToken],
+	);
 
-  // Ghost suggestion hook
-  const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
-    isGitRepo,
-    currentBranch,
-    planNextStep,
-    recentCommands,
-  });
+	// Inject text from voice transcription (appends to current input)
+	const lastInjectedRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (injectedText && injectedText !== lastInjectedRef.current) {
+			lastInjectedRef.current = injectedText;
+			setValue((prev) => (prev ? prev + " " + injectedText : injectedText));
+		}
+	}, [injectedText]);
 
-  // Pulsing prompt animation when idle
-  useEffect(() => {
-    if (isProcessing) return;
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const registry = await getSlashRegistry();
+				if (cancelled) return;
+				setSlashRegistryEntries(registry.entries);
+				setSlashByToken(registry.byToken);
+			} catch {
+				if (!cancelled) {
+					setSlashRegistryEntries([]);
+					setSlashByToken(new Map());
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
-    const interval = setInterval(() => {
-      setPromptPulse((prev) => !prev);
-    }, 800);
+	// Ghost suggestion hook
+	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
+		isGitRepo,
+		currentBranch,
+		planNextStep,
+		recentCommands,
+		extraContextSuggestions: extraSlashContext,
+	});
 
-    return () => clearInterval(interval);
-  }, [isProcessing]);
+	// Pulsing prompt animation when idle
+	useEffect(() => {
+		if (isProcessing) return;
 
-  // Show slash help when typing /
-  useEffect(() => {
-    setShowSlashHelp(value.startsWith("/") && value.length < 10);
-  }, [value]);
+		const interval = setInterval(() => {
+			setPromptPulse((prev) => !prev);
+		}, 800);
 
-  // Handle keyboard input
-  useInput(
-    (input, key) => {
-      // Tab to accept ghost suggestion
-      if (key.tab && isVisible && suggestion) {
-        const newValue = accept();
-        setValue(newValue);
-        return;
-      }
+		return () => clearInterval(interval);
+	}, [isProcessing]);
 
-      // Escape to dismiss suggestion
-      if (key.escape && isVisible) {
-        dismiss();
-        return;
-      }
-    },
-    { isActive: !isProcessing && focused }
-  );
+	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
+	useEffect(() => {
+		const t = value.trimStart();
+		setShowSlashHelp(t.startsWith("/") && !t.slice(1).includes(" "));
+	}, [value]);
 
-  const handleSubmit = useCallback(
-    (input: string) => {
-      if (!input.trim()) return;
+	// Handle keyboard input
+	useInput(
+		(input, key) => {
+			// Tab to accept ghost suggestion
+			if (key.tab && isVisible && suggestion) {
+				const newValue = accept();
+				setValue(newValue);
+				return;
+			}
 
-      // Check for slash command
-      if (input.startsWith("/")) {
-        const parts = input.slice(1).split(/\s+/);
-        const cmdName = parts[0].toLowerCase();
-        const args = parts.slice(1);
+			// Escape to dismiss suggestion
+			if (key.escape && isVisible) {
+				dismiss();
+				return;
+			}
+		},
+		{ isActive: !isProcessing && focused },
+	);
 
-        // Find matching command
-        const cmd = SLASH_COMMANDS.find(
-          (c) => c.name === cmdName || c.aliases.includes(cmdName)
-        );
+	const handleSubmit = useCallback(
+		(input: string) => {
+			const trimmed = input.trim();
+			if (!trimmed && !allowEmptySubmit) return;
 
-        if (cmd && onSlashCommand) {
-          onSlashCommand(cmd.name, args);
-          setValue("");
-          return;
-        }
-      }
+			// Check for slash command
+			if (trimmed.startsWith("/")) {
+				const resolved = resolveSlashInput(input, {
+					entries: slashRegistryEntries,
+					byToken: slashByToken,
+				});
+				if (
+					resolved &&
+					resolved.entry.kind === "builtin" &&
+					resolved.entry.builtInName &&
+					onSlashCommand
+				) {
+					onSlashCommand(resolved.entry.builtInName, resolved.args);
+					setValue("");
+					return;
+				}
+			}
 
-      // Regular command
-      onSubmit(input);
-      setValue("");
-    },
-    [onSubmit, onSlashCommand]
-  );
+			// Regular command
+			onSubmit(input);
+			setValue("");
+		},
+		[
+			onSubmit,
+			onSlashCommand,
+			allowEmptySubmit,
+			slashRegistryEntries,
+			slashByToken,
+		],
+	);
 
-  // Get current step index
-  const getCurrentStep = (): number => {
-    switch (processingStage) {
-      case "planning":
-        return 0;
-      case "toolshed":
-        return 1;
-      case "executing":
-        return 2;
-      case "complete":
-        return 3;
-      default:
-        return 0;
-    }
-  };
+	// Get current step index
+	const getCurrentStep = (): number => {
+		switch (processingStage) {
+			case "planning":
+				return 0;
+			case "toolshed":
+				return 1;
+			case "executing":
+				return 2;
+			case "complete":
+				return 3;
+			default:
+				return 0;
+		}
+	};
 
-  // Build processing status line (shown above input when agent is working)
-  const processingStatusLine = isProcessing ? (() => {
-    const label = activeTool
-      ? `Running ${activeTool}`
-      : stepCount === 0
-        ? "Thinking"
-        : "Reasoning";
+	// Build processing status line (shown above input when agent is working)
+	const processingStatusLine = isProcessing
+		? (() => {
+				const label = activeTool
+					? `Running ${activeTool}`
+					: stepCount === 0
+						? "Thinking"
+						: "Reasoning";
 
-    const stats = [];
-    if (stepCount > 0) stats.push(`step ${stepCount}`);
-    if (toolCount > 0) stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
-    if (totalTokens > 0) stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
+				const stats = [];
+				if (stepCount > 0) stats.push(`step ${stepCount}`);
+				if (toolCount > 0)
+					stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
+				if (totalTokens > 0)
+					stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
 
-    return { label, stats };
-  })() : null;
+				return { label, stats };
+			})()
+		: null;
 
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      {/* Processing status — compact line above input, not replacing it */}
-      {processingStatusLine && (
-        <Box marginBottom={0}>
-          <AnimatedSpinner
-            type="dots"
-            color="cyan"
-            label={processingStatusLine.label}
-            showDots={true}
-          />
-          {processingStatusLine.stats.length > 0 && (
-            <MutedText>  ({processingStatusLine.stats.join(" · ")})</MutedText>
-          )}
-        </Box>
-      )}
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			{/* Processing status — compact line above input, not replacing it */}
+			{processingStatusLine && (
+				<Box marginBottom={0}>
+					<AnimatedSpinner
+						type="dots"
+						color="cyan"
+						label={processingStatusLine.label}
+						showDots={true}
+					/>
+					{processingStatusLine.stats.length > 0 && (
+						<MutedText> ({processingStatusLine.stats.join(" · ")})</MutedText>
+					)}
+				</Box>
+			)}
 
-      {/* Main input row — ALWAYS visible */}
-      <Box>
-        {/* Animated prompt */}
-        <PromptIndicator pulse={promptPulse && showAnimations} />
-        <Text> </Text>
+			{/* Main input row — ALWAYS visible */}
+			<Box>
+				{/* Animated prompt */}
+				<PromptIndicator pulse={promptPulse && showAnimations} />
+				<Text> </Text>
 
-        {/* Text input with ghost overlay */}
-        <Box>
-          <TextInput
-            value={value}
-            onChange={setValue}
-            onSubmit={handleSubmit}
-            placeholder={isProcessing ? "Queue a follow-up message..." : (isVisible ? "" : "Type a command or ask a question...")}
-          />
+				{/* Text input with ghost overlay */}
+				<Box>
+					<TextInput
+						value={value}
+						onChange={(v) =>
+							setValue(transformInputValue ? transformInputValue(v) : v)
+						}
+						onSubmit={handleSubmit}
+						placeholder={
+							isProcessing
+								? "Queue a follow-up message..."
+								: isVisible
+									? ""
+									: "Type a command or ask a question..."
+						}
+					/>
 
-          {/* Ghost suggestion text */}
-          {!isProcessing && isVisible && suggestion && (
-            <MutedText>
-              {suggestion.text}
-            </MutedText>
-          )}
-        </Box>
-      </Box>
+					{/* Ghost suggestion text */}
+					{!isProcessing && isVisible && suggestion && (
+						<MutedText>{suggestion.text}</MutedText>
+					)}
+				</Box>
+			</Box>
 
-      {/* Ghost suggestion hint */}
-      {!isProcessing && isVisible && suggestion && (
-        <Box paddingLeft={2}>
-          <ShortcutHint keys="[Tab]" description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`} />
-        </Box>
-      )}
+			{/* Ghost suggestion hint */}
+			{!isProcessing && isVisible && suggestion && (
+				<Box paddingLeft={2}>
+					<ShortcutHint
+						keys="[Tab]"
+						description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`}
+					/>
+				</Box>
+			)}
 
-      {/* Slash command help */}
-      {!isProcessing && showSlashHelp && <SlashCommandHelp filter={value.slice(1)} />}
-    </Box>
-  );
+			{/* Slash command help */}
+			{!isProcessing && showSlashHelp && (
+				<SlashCommandHelp
+					filter={value.trimStart().slice(1)}
+					entries={slashRegistryEntries}
+				/>
+			)}
+		</Box>
+	);
 }
 
 // ============================================
@@ -569,74 +357,81 @@ export function CommandInput({
 
 // Animated prompt indicator
 interface PromptIndicatorProps {
-  pulse: boolean;
+	pulse: boolean;
 }
 
 function PromptIndicator({ pulse }: PromptIndicatorProps) {
-  const [colorIndex, setColorIndex] = useState(0);
-  const colors = ["cyan", "blue", "magenta", "cyan"];
+	const [colorIndex, setColorIndex] = useState(0);
+	const colors = ["cyan", "blue", "magenta", "cyan"];
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setColorIndex((prev) => (prev + 1) % colors.length);
-    }, 300);
+	useEffect(() => {
+		const interval = setInterval(() => {
+			setColorIndex((prev) => (prev + 1) % colors.length);
+		}, 300);
 
-    return () => clearInterval(interval);
-  }, []);
+		return () => clearInterval(interval);
+	}, []);
 
-  return (
-    <Text color={colors[colorIndex] as any} bold>
-      {"\u276F"}
-    </Text>
-  );
+	return (
+		<Text color={colors[colorIndex] as any} bold>
+			{"\u276F"}
+		</Text>
+	);
 }
 
 function getProcessingLabel(stage: string): string {
-  switch (stage) {
-    case "planning":
-      return "Planning approach";
-    case "toolshed":
-      return "Querying toolshed";
-    case "executing":
-      return "Executing";
-    case "complete":
-      return "Finalizing";
-    default:
-      return "Processing";
-  }
+	switch (stage) {
+		case "planning":
+			return "Planning approach";
+		case "toolshed":
+			return "Querying toolshed";
+		case "executing":
+			return "Executing";
+		case "complete":
+			return "Finalizing";
+		default:
+			return "Processing";
+	}
 }
 
-// Slash command help dropdown
-function SlashCommandHelp({ filter }: { filter: string }) {
-  const filtered = SLASH_COMMANDS.filter(
-    (cmd) =>
-      cmd.name.startsWith(filter.toLowerCase()) ||
-      cmd.aliases.some((a) => a.startsWith(filter.toLowerCase()))
-  );
+// Slash command help dropdown (built-ins + loaded skills)
+function SlashCommandHelp({
+	filter,
+	entries,
+}: {
+	filter: string;
+	entries: SlashRegistryEntry[];
+}) {
+	const f = filter.toLowerCase();
+	const filtered = entries.filter((entry) =>
+		entry.name.toLowerCase().startsWith(f),
+	);
 
-  if (filtered.length === 0) return null;
+	const combined = filtered.map((entry) => ({
+		key: `${entry.kind}:${entry.token}`,
+		label: entry.name,
+		description: entry.description,
+	}));
 
-  return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="blue"
-      paddingX={1}
-      marginTop={1}
-    >
-      <MutedText>
-        Commands:
-      </MutedText>
-      {filtered.slice(0, 6).map((cmd) => (
-        <Box key={cmd.name}>
-          <AppText color="cyan">/{cmd.name}</AppText>
-          <MutedText>
-            {" "}- {cmd.description}
-          </MutedText>
-        </Box>
-      ))}
-    </Box>
-  );
+	if (combined.length === 0) return null;
+
+	return (
+		<Box
+			flexDirection="column"
+			borderStyle="round"
+			borderColor="blue"
+			paddingX={1}
+			marginTop={1}
+		>
+			<MutedText>Commands:</MutedText>
+			{combined.slice(0, 14).map((row) => (
+				<Box key={row.key}>
+					<AppText color="cyan">/{row.label}</AppText>
+					<MutedText> - {row.description}</MutedText>
+				</Box>
+			))}
+		</Box>
+	);
 }
 
 // ============================================
@@ -644,41 +439,39 @@ function SlashCommandHelp({ filter }: { filter: string }) {
 // ============================================
 
 export function MinimalCommandInput({
-  onSubmit,
-  isProcessing,
+	onSubmit,
+	isProcessing,
 }: CommandInputProps) {
-  const [value, setValue] = useState("");
+	const [value, setValue] = useState("");
 
-  const handleSubmit = (input: string) => {
-    if (!input.trim()) return;
-    onSubmit(input);
-    setValue("");
-  };
+	const handleSubmit = (input: string) => {
+		if (!input.trim()) return;
+		onSubmit(input);
+		setValue("");
+	};
 
-  return (
-    <Box paddingX={1}>
-      {isProcessing ? (
-        <Box>
-          <AppText color="cyan">
-            <Spinner type="dots" />
-          </AppText>
-          <MutedText> Working...</MutedText>
-        </Box>
-      ) : (
-        <Box>
-          <Label color="cyan">
-            ${" "}
-          </Label>
-          <TextInput
-            value={value}
-            onChange={setValue}
-            onSubmit={handleSubmit}
-            placeholder="Enter command..."
-          />
-        </Box>
-      )}
-    </Box>
-  );
+	return (
+		<Box paddingX={1}>
+			{isProcessing ? (
+				<Box>
+					<AppText color="cyan">
+						<Spinner type="dots" />
+					</AppText>
+					<MutedText> Working...</MutedText>
+				</Box>
+			) : (
+				<Box>
+					<Label color="cyan">$ </Label>
+					<TextInput
+						value={value}
+						onChange={setValue}
+						onSubmit={handleSubmit}
+						placeholder="Enter command..."
+					/>
+				</Box>
+			)}
+		</Box>
+	);
 }
 
 // ============================================
@@ -686,28 +479,29 @@ export function MinimalCommandInput({
 // ============================================
 
 interface MultiLineInputProps {
-  onSubmit: (input: string) => void;
-  isProcessing: boolean;
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
 }
 
-export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) {
-  const [lines, setLines] = useState<string[]>([""]);
-  const [currentLine, setCurrentLine] = useState(0);
+export function MultiLineInput({
+	onSubmit,
+	isProcessing,
+}: MultiLineInputProps) {
+	const [lines, setLines] = useState<string[]>([""]);
+	const [currentLine, setCurrentLine] = useState(0);
 
-  // Not fully implemented - placeholder for future
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <MutedText>
-        Multi-line mode (Ctrl+Enter to submit)
-      </MutedText>
-      {lines.map((line, index) => (
-        <Box key={index}>
-          <MutedText>{index === currentLine ? "\u276F" : " "} </MutedText>
-          <Text>{line}</Text>
-        </Box>
-      ))}
-    </Box>
-  );
+	// Not fully implemented - placeholder for future
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			<MutedText>Multi-line mode (Ctrl+Enter to submit)</MutedText>
+			{lines.map((line, index) => (
+				<Box key={index}>
+					<MutedText>{index === currentLine ? "\u276F" : " "} </MutedText>
+					<Text>{line}</Text>
+				</Box>
+			))}
+		</Box>
+	);
 }
 
 // ============================================
@@ -715,72 +509,73 @@ export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) 
 // ============================================
 
 interface CommandPaletteProps {
-  onSubmit: (input: string) => void;
-  suggestions?: string[];
+	onSubmit: (input: string) => void;
+	suggestions?: string[];
 }
 
-export function CommandPalette({ onSubmit, suggestions = [] }: CommandPaletteProps) {
-  const [value, setValue] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
+export function CommandPalette({
+	onSubmit,
+	suggestions = [],
+}: CommandPaletteProps) {
+	const [value, setValue] = useState("");
+	const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const filteredSuggestions = suggestions.filter((s) =>
-    s.toLowerCase().includes(value.toLowerCase())
-  );
+	const filteredSuggestions = suggestions.filter((s) =>
+		s.toLowerCase().includes(value.toLowerCase()),
+	);
 
-  useInput((input, key) => {
-    if (key.downArrow) {
-      setSelectedIndex((prev) =>
-        Math.min(prev + 1, filteredSuggestions.length - 1)
-      );
-    } else if (key.upArrow) {
-      setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    }
-  });
+	useInput((input, key) => {
+		if (key.downArrow) {
+			setSelectedIndex((prev) =>
+				Math.min(prev + 1, filteredSuggestions.length - 1),
+			);
+		} else if (key.upArrow) {
+			setSelectedIndex((prev) => Math.max(prev - 1, 0));
+		}
+	});
 
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box
-        borderStyle="round"
-        borderColor="cyan"
-        paddingX={1}
-        flexDirection="column"
-      >
-        <Box>
-          <Label color="cyan">
-            {"\u276F"}{" "}
-          </Label>
-          <TextInput
-            value={value}
-            onChange={(v) => {
-              setValue(v);
-              setSelectedIndex(0);
-            }}
-            onSubmit={() => {
-              const selected = filteredSuggestions[selectedIndex] || value;
-              onSubmit(selected);
-              setValue("");
-            }}
-          />
-        </Box>
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			<Box
+				borderStyle="round"
+				borderColor="cyan"
+				paddingX={1}
+				flexDirection="column"
+			>
+				<Box>
+					<Label color="cyan">{"\u276F"} </Label>
+					<TextInput
+						value={value}
+						onChange={(v) => {
+							setValue(v);
+							setSelectedIndex(0);
+						}}
+						onSubmit={() => {
+							const selected = filteredSuggestions[selectedIndex] || value;
+							onSubmit(selected);
+							setValue("");
+						}}
+					/>
+				</Box>
 
-        {value && filteredSuggestions.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            {filteredSuggestions.slice(0, 5).map((suggestion, index) => (
-              <Box key={suggestion}>
-                <Text
-                  color={index === selectedIndex ? "cyan" : "gray"}
-                  bold={index === selectedIndex}
-                >
-                  {index === selectedIndex ? "\u25B8 " : "  "}
-                  {suggestion}
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
+				{value && filteredSuggestions.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						{filteredSuggestions.slice(0, 5).map((suggestion, index) => (
+							<Box key={suggestion}>
+								<Text
+									color={index === selectedIndex ? "cyan" : "gray"}
+									bold={index === selectedIndex}
+								>
+									{index === selectedIndex ? "\u25B8 " : "  "}
+									{suggestion}
+								</Text>
+							</Box>
+						))}
+					</Box>
+				)}
+			</Box>
+		</Box>
+	);
 }
 
 // ============================================
@@ -788,67 +583,67 @@ export function CommandPalette({ onSubmit, suggestions = [] }: CommandPalettePro
 // ============================================
 
 export interface GhostCommandInputProps {
-  onSubmit: (input: string) => void;
-  isProcessing: boolean;
-  isGitRepo?: boolean;
-  currentBranch?: string | null;
-  planNextStep?: string | null;
-  recentCommands?: string[];
-  onSlashCommand?: (command: string, args: string[]) => void;
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
+	isGitRepo?: boolean;
+	currentBranch?: string | null;
+	planNextStep?: string | null;
+	recentCommands?: string[];
+	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
 }
 
 export function GhostCommandInput({
-  onSubmit,
-  isProcessing,
-  isGitRepo = false,
-  currentBranch = null,
-  planNextStep = null,
-  recentCommands = [],
-  onSlashCommand,
+	onSubmit,
+	isProcessing,
+	isGitRepo = false,
+	currentBranch = null,
+	planNextStep = null,
+	recentCommands = [],
+	onSlashCommand,
 }: GhostCommandInputProps) {
-  return (
-    <CommandInput
-      onSubmit={onSubmit}
-      isProcessing={isProcessing}
-      isGitRepo={isGitRepo}
-      currentBranch={currentBranch}
-      planNextStep={planNextStep}
-      recentCommands={recentCommands}
-      onSlashCommand={onSlashCommand}
-    />
-  );
+	return (
+		<CommandInput
+			onSubmit={onSubmit}
+			isProcessing={isProcessing}
+			isGitRepo={isGitRepo}
+			currentBranch={currentBranch}
+			planNextStep={planNextStep}
+			recentCommands={recentCommands}
+			onSlashCommand={onSlashCommand}
+		/>
+	);
 }
 
 // ============================================
 // Export Slash Commands for External Use
 // ============================================
 
-export function getSlashCommands(): SlashCommandDef[] {
-  return SLASH_COMMANDS;
+export function getSlashCommands() {
+	return getBuiltInSlashCommands();
 }
 
 export function isSlashCommand(input: string): boolean {
-  if (!input.startsWith("/")) return false;
-  const cmdName = input.slice(1).split(/\s+/)[0].toLowerCase();
-  return SLASH_COMMANDS.some(
-    (c) => c.name === cmdName || c.aliases.includes(cmdName)
-  );
+	if (!input.startsWith("/")) return false;
+	const cmdName = input.slice(1).split(/\s+/)[0].toLowerCase();
+	return getBuiltInSlashCommands().some(
+		(c) => c.name === cmdName || c.aliases.includes(cmdName),
+	);
 }
 
 export function parseSlashCommand(
-  input: string
+	input: string,
 ): { command: SlashCommand; args: string[] } | null {
-  if (!input.startsWith("/")) return null;
+	if (!input.startsWith("/")) return null;
 
-  const parts = input.slice(1).split(/\s+/);
-  const cmdName = parts[0].toLowerCase();
-  const args = parts.slice(1);
+	const parts = input.slice(1).split(/\s+/);
+	const cmdName = parts[0].toLowerCase();
+	const args = parts.slice(1);
 
-  const cmd = SLASH_COMMANDS.find(
-    (c) => c.name === cmdName || c.aliases.includes(cmdName)
-  );
+	const cmd = getBuiltInSlashCommands().find(
+		(c) => c.name === cmdName || c.aliases.includes(cmdName),
+	);
 
-  if (!cmd) return null;
+	if (!cmd) return null;
 
-  return { command: cmd.name, args };
+	return { command: cmd.name, args };
 }

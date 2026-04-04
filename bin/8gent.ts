@@ -138,7 +138,7 @@ Learn more: https://github.com/8gi-foundation/8gent-code
 `;
 
 async function main() {
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
 
   // --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
   if (args.includes("--rpc")) {
@@ -197,6 +197,11 @@ async function main() {
       return;
     }
     // Otherwise it's a flag on another command - handled by tuiCommand
+  }
+
+  // Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
+  if (args.length > 0 && args[0].startsWith("-")) {
+    args = ["tui", ...args];
   }
 
   const command = args[0];

@@ -11,11 +11,11 @@
  * Users can paste image paths directly.
  */
 
-import React, { useState, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { Box, useInput } from "ink";
 import * as fs from "fs";
 import * as path from "path";
-import { AppText, MutedText, Label, ShortcutHint, Inline, Stack, Badge } from './primitives/index.js';
+import { AppText, MutedText, Label, ShortcutHint, Inline, Stack } from './primitives/index.js';
 
 // ============================================
 // Types
@@ -37,7 +37,9 @@ export interface ImageInputProps {
 }
 
 // Supported image extensions
-const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".heic", ".avif"];
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i;
 
 // ============================================
 // Utility Functions
@@ -52,39 +54,121 @@ export function isImagePath(inputPath: string): boolean {
 }
 
 /**
+ * Normalize a path token from terminal paste / drag-drop (file URLs, quotes, %20).
+ */
+export function normalizePathToken(raw: string): string {
+  let s = raw.trim().replace(/^["'`]|["'`]$/g, "");
+  if (!s) return s;
+  if (s.startsWith("file:")) {
+    try {
+      const u = new URL(s);
+      let pathname = u.pathname;
+      if (process.platform === "win32" && pathname.startsWith("/") && /^\/[A-Za-z]:/.test(pathname)) {
+        pathname = pathname.slice(1);
+      }
+      return decodeURIComponent(pathname.replace(/\+/g, " "));
+    } catch {
+      s = s.replace(/^file:\/+/, "");
+    }
+  }
+  try {
+    s = decodeURIComponent(s);
+  } catch {
+    /* keep s */
+  }
+  return s;
+}
+
+function resolveIfExists(candidate: string): string | null {
+  const abs = path.isAbsolute(candidate) ? candidate : path.resolve(process.cwd(), candidate);
+  if (fs.existsSync(abs) && isImagePath(abs)) return abs;
+  if (fs.existsSync(candidate) && isImagePath(candidate)) return path.normalize(candidate);
+  return null;
+}
+
+/**
  * Extract image paths from pasted text
  * Handles:
- * - Direct file paths
- * - file:// URLs
- * - Paths with quotes (from drag-drop)
+ * - Direct file paths (Unix / Windows)
+ * - file:// and file:/// URLs embedded in text
+ * - Quoted paths with spaces
+ * - Drag-drop from terminals that paste the path as one token
  */
 export function extractImagePaths(text: string): string[] {
   const paths: string[] = [];
+  const seen = new Set<string>();
 
-  // Remove quotes and handle file:// URLs
-  let cleaned = text.trim();
-  cleaned = cleaned.replace(/^["']|["']$/g, ""); // Remove surrounding quotes
-  cleaned = cleaned.replace(/^file:\/\//, ""); // Remove file:// prefix
-  cleaned = decodeURIComponent(cleaned); // Decode URL encoding
+  const push = (resolved: string) => {
+    if (!seen.has(resolved)) {
+      seen.add(resolved);
+      paths.push(resolved);
+    }
+  };
 
-  // Check if it's a valid image path
-  if (isImagePath(cleaned) && fs.existsSync(cleaned)) {
-    paths.push(cleaned);
+  const tryToken = (token: string) => {
+    const cleaned = normalizePathToken(token);
+    if (!cleaned || !IMAGE_EXT_RE.test(cleaned)) return;
+    const hit = resolveIfExists(cleaned);
+    if (hit) push(hit);
+  };
+
+  // Quoted paths (spaces inside)
+  const quotedRe = /["']([^"']+\.(?:png|jpe?g|gif|webp|bmp|svg|heic|avif))["']/gi;
+  let qm: RegExpExecArray | null;
+  while ((qm = quotedRe.exec(text)) !== null) {
+    tryToken(qm[1]);
   }
 
-  // Also check for multiple paths (space or newline separated)
-  const parts = text.split(/[\n\r\s]+/).filter(Boolean);
-  for (const part of parts) {
-    let partCleaned = part.replace(/^["']|["']$/g, "");
-    partCleaned = partCleaned.replace(/^file:\/\//, "");
-    partCleaned = decodeURIComponent(partCleaned);
+  // file:// URLs
+  const fileUrlRe = /file:\/{2,3}[^\s)\]\}'"`]+/gi;
+  let fm: RegExpExecArray | null;
+  while ((fm = fileUrlRe.exec(text)) !== null) {
+    tryToken(fm[0]);
+  }
 
-    if (isImagePath(partCleaned) && fs.existsSync(partCleaned) && !paths.includes(partCleaned)) {
-      paths.push(partCleaned);
-    }
+  // Whole trimmed string (single-line drop)
+  const whole = text.trim();
+  if (whole) tryToken(whole);
+
+  // Whitespace / newline separated tokens
+  const parts = text.split(/[\n\r\t]+|\s+/).filter(Boolean);
+  for (const part of parts) {
+    tryToken(part);
   }
 
   return paths;
+}
+
+/**
+ * Strip a filesystem path from text without regex metacharacter issues.
+ */
+export function stripPathFromText(text: string, resolvedPath: string): string {
+  let s = text;
+  for (const p of [resolvedPath, resolvedPath.replace(/\\/g, "/")]) {
+    if (p) s = s.split(p).join("");
+  }
+  const rawVariants = [resolvedPath, `file://${resolvedPath}`, `file:///${resolvedPath.replace(/^\//, "")}`];
+  for (const v of rawVariants) {
+    if (v.length > 4) s = s.split(v).join("");
+  }
+  return s.replace(/["'`]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * If the entire input is only an image path (typical terminal drag-drop), attach and return "".
+ */
+export function consumeIfWholeValueIsImagePath(
+  value: string,
+  attach: (absolutePath: string) => boolean
+): string {
+  const t = value.trim();
+  if (!t) return value;
+  const paths = extractImagePaths(t);
+  if (paths.length !== 1) return value;
+  const p = paths[0];
+  const remainder = stripPathFromText(t, p);
+  if (remainder.length > 0) return value;
+  return attach(p) ? "" : value;
 }
 
 /**
@@ -106,6 +190,8 @@ export function readImageFile(imagePath: string): ImageAttachment | null {
       ".webp": "image/webp",
       ".bmp": "image/bmp",
       ".svg": "image/svg+xml",
+      ".heic": "image/heic",
+      ".avif": "image/avif",
     };
 
     const data = fs.readFileSync(imagePath);
@@ -174,18 +260,24 @@ export function supportsIterm2Images(): boolean {
 export function ImageBadge({
   image,
   onRemove,
+  maxNameLen = 36,
 }: {
   image: ImageAttachment;
   onRemove?: () => void;
+  maxNameLen?: number;
 }) {
+  const name =
+    image.filename.length > maxNameLen
+      ? `${image.filename.slice(0, maxNameLen - 1)}…`
+      : image.filename;
   return (
-    <Inline gap={0} borderStyle="round" borderColor="magenta" paddingX={1}>
-      <AppText color="magenta">📷 </AppText>
-      <Label>{image.filename}</Label>
-      <MutedText> ({formatSize(image.size)})</MutedText>
-      {onRemove && (
-        <MutedText> [x]</MutedText>
-      )}
+    <Inline gap={0} borderStyle="round" borderColor="cyan" paddingX={1}>
+      <AppText color="cyan" bold>
+        {"\u25A3 "}
+      </AppText>
+      <Label>{name}</Label>
+      <MutedText> {formatSize(image.size)}</MutedText>
+      {onRemove && <MutedText dimColor> · esc</MutedText>}
     </Inline>
   );
 }
@@ -202,8 +294,9 @@ export function ImageIndicator({
 }) {
   if (compact) {
     return (
-      <AppText color="magenta">
-        📷 {image.filename}
+      <AppText color="cyan" bold>
+        {"\u25A3 "}
+        {image.filename}
       </AppText>
     );
   }
@@ -211,12 +304,15 @@ export function ImageIndicator({
   return (
     <Stack>
       <Inline gap={0}>
-        <Label color="magenta">📷 Image attached: </Label>
+        <AppText color="cyan" bold>
+          {"\u25A3 "}
+        </AppText>
+        <Label>Attached</Label>
         <Label>{image.filename}</Label>
       </Inline>
       <Box paddingLeft={3}>
         <MutedText>
-          {formatSize(image.size)} • {image.mimeType}
+          {formatSize(image.size)} · {image.mimeType}
         </MutedText>
       </Box>
     </Stack>
@@ -246,7 +342,7 @@ export function ImageInput({
     return (
       <Box>
         <MutedText>
-          📷 Drag image or paste path to attach
+          Drop image file here (pastes path) or paste a file path
         </MutedText>
       </Box>
     );
@@ -276,7 +372,18 @@ export interface UseImageInputOptions {
 }
 
 export function useImageInput(options: UseImageInputOptions = {}) {
+  const onAttachRef = useRef(options.onAttach);
+  const onRemoveRef = useRef(options.onRemove);
+  useEffect(() => {
+    onAttachRef.current = options.onAttach;
+    onRemoveRef.current = options.onRemove;
+  }, [options.onAttach, options.onRemove]);
+
   const [currentImage, setCurrentImage] = useState<ImageAttachment | null>(null);
+  const currentImageRef = useRef<ImageAttachment | null>(null);
+  useEffect(() => {
+    currentImageRef.current = currentImage;
+  }, [currentImage]);
 
   /**
    * Process input text for image paths
@@ -289,12 +396,12 @@ export function useImageInput(options: UseImageInputOptions = {}) {
       const image = readImageFile(imagePaths[0]);
       if (image) {
         setCurrentImage(image);
-        options.onAttach?.(image);
+        currentImageRef.current = image;
+        onAttachRef.current?.(image);
 
-        // Remove the image path from input
         let remaining = input;
         for (const p of imagePaths) {
-          remaining = remaining.replace(p, "").replace(/["']/g, "").trim();
+          remaining = stripPathFromText(remaining, p);
         }
 
         return { text: remaining, image };
@@ -302,28 +409,34 @@ export function useImageInput(options: UseImageInputOptions = {}) {
     }
 
     return { text: input, image: null };
-  }, [options]);
+  }, []);
 
   const attachImage = useCallback((imagePath: string) => {
     const image = readImageFile(imagePath);
     if (image) {
       setCurrentImage(image);
-      options.onAttach?.(image);
+      currentImageRef.current = image;
+      onAttachRef.current?.(image);
       return true;
     }
     return false;
-  }, [options]);
+  }, []);
 
   const removeImage = useCallback(() => {
     setCurrentImage(null);
-    options.onRemove?.();
-  }, [options]);
+    currentImageRef.current = null;
+    onRemoveRef.current?.();
+  }, []);
+
+  /** Same-frame attachment (after processInput / attachImage) when React state has not flushed yet */
+  const getAttachedImage = useCallback((): ImageAttachment | null => currentImageRef.current, []);
 
   return {
     currentImage,
     processInput,
     attachImage,
     removeImage,
+    getAttachedImage,
     hasImage: !!currentImage,
   };
 }

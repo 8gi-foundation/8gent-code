@@ -16,9 +16,10 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Box } from "ink";
+import { Box, useStdout } from "ink";
 import { AppText, MutedText, Label, Badge, StatusDot, ShortcutHint, Inline, Spacer } from './primitives/index.js';
-import { formatTokens, formatDuration } from '../lib/index.js';
+import { formatTokens, formatDuration, truncate } from '../lib/index.js';
+import { TUI_STATUS_COMPACT_BELOW } from '../lib/layout-breakpoints.js';
 import { TokenSavingsBar, Sparkline } from "./progress-bar.js";
 import { StatusIndicator } from "./animated-spinner.js";
 import { RainbowBorder, AnimatedSeparator } from "./rainbow-border.js";
@@ -111,6 +112,16 @@ export function EnhancedStatusBar({
   voiceEnabled = false,
   voiceChatActive = false,
 }: EnhancedStatusBarProps) {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 80;
+  const barWidth = Math.max(24, columns - 4);
+  const modelMax = Math.max(6, Math.min(28, Math.floor(barWidth * 0.2)));
+  const branchMax = Math.max(6, Math.min(22, Math.floor(barWidth * 0.16)));
+  const authNameMax = Math.max(6, Math.min(16, Math.floor(barWidth * 0.12)));
+  const planVerbMax = Math.max(12, Math.floor(barWidth * 0.22));
+  const displayModel = truncate(modelName, modelMax);
+  const displayBranch = currentBranch ? truncate(currentBranch, branchMax) : null;
+
   const [elapsed, setElapsed] = useState("0:00");
 
   // Update elapsed time
@@ -131,7 +142,9 @@ export function EnhancedStatusBar({
   const savings =
     savingsPercentage ?? (tokensTotal > 0 ? Math.round((tokensSaved / tokensTotal) * 100) : 0);
 
-  if (compact) {
+  const effectiveCompact = compact || columns < TUI_STATUS_COMPACT_BELOW;
+
+  if (effectiveCompact) {
     return (
       <ClaudeStyleCompactBar
         modelName={modelName}
@@ -144,75 +157,89 @@ export function EnhancedStatusBar({
     );
   }
 
+  const tokenMetaShort = truncate(
+    `${elapsed} ${"\u00B7"} ${formatTokens(tokensSaved)} tok`,
+    Math.max(8, Math.min(24, Math.floor(barWidth * 0.16)))
+  );
+
   return (
     <Box
       borderStyle={showBorder ? "single" : undefined}
       borderColor="blue"
       paddingX={1}
       marginTop={1}
+      width={barWidth}
+      flexShrink={0}
+      flexDirection="row"
       justifyContent="space-between"
-      flexWrap="wrap"
+      alignItems="center"
     >
-      {/* Left section: Model & Agents */}
-      <Inline gap={1}>
-        <ActiveIndicator active={true} />
-        <ModelStatusItem name={modelName} />
-        <Separator />
-        <AgentStatusItem running={runningAgents} total={totalAgents} />
-      </Inline>
+      {/* Left: model and agents (truncated model name) */}
+      <Box flexShrink={0}>
+        <Inline gap={1}>
+          <ActiveIndicator active={true} />
+          <ModelStatusItem name={displayModel} />
+          <Separator />
+          <AgentStatusItem running={runningAgents} total={totalAgents} />
+        </Inline>
+      </Box>
 
-      {/* Center section: Plan status with animated verb & Permissions */}
-      <Inline gap={1}>
-        {planStatus !== "idle" && (
-          <>
-            <PlanStatusItem
-              status={planStatus}
-              completed={planStepsCompleted}
-              total={planStepsTotal}
-              showAnimatedVerb={showAnimations}
-            />
-            {/* Show elapsed and tokens inline when processing */}
-            {(planStatus === "planning" || planStatus === "executing") && (
-              <MutedText>
-                ({elapsed} {"\u00B7"} {formatTokens(tokensSaved)} tokens)
-              </MutedText>
-            )}
-            <Separator />
-          </>
-        )}
-        <PermissionStatusItem mode={permissionMode} />
-        {adhdMode && (
-          <>
-            <Separator />
-            <Label color="magenta">⚡ ADHD</Label>
-          </>
-        )}
-      </Inline>
+      {/* Center: plan, permissions */}
+      <Box flexShrink={1} marginX={1} minWidth={0}>
+        <Inline gap={1}>
+          {planStatus !== "idle" && (
+            <>
+              <PlanStatusItem
+                status={planStatus}
+                completed={planStepsCompleted}
+                total={planStepsTotal}
+                showAnimatedVerb={showAnimations}
+                verbMaxWidth={planVerbMax}
+              />
+              {(planStatus === "planning" || planStatus === "executing") && (
+                <MutedText>
+                  ({tokenMetaShort})
+                </MutedText>
+              )}
+              <Separator />
+            </>
+          )}
+          <PermissionStatusItem mode={permissionMode} />
+          {adhdMode && (
+            <>
+              <Separator />
+              <Label color="magenta">⚡ ADHD</Label>
+            </>
+          )}
+        </Inline>
+      </Box>
 
-      {/* Right section: Tokens, Branch, Auth, Voice, Time */}
-      <Inline gap={1}>
-        <TokenSavingsItem saved={tokensSaved} percentage={savings} />
-        {currentBranch && (
-          <>
-            <Separator />
-            <GitBranchItem branch={currentBranch} hasChanges={hasUncommittedChanges} />
-          </>
-        )}
-        {authStatus && authStatus !== "unknown" && (
-          <>
-            <Separator />
-            <AuthStatusItem status={authStatus} user={authUser} />
-          </>
-        )}
-        {voiceEnabled && (
-          <>
-            <Separator />
-            <VoiceStatusItem state={voiceState || "idle"} />
-          </>
-        )}
-        <Separator />
-        <ElapsedTimeItem time={elapsed} />
-      </Inline>
+      {/* Right: savings, branch, auth, voice, time */}
+      <Box flexShrink={0}>
+        <Inline gap={1}>
+          <TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
+          {displayBranch && (
+            <>
+              <Separator />
+              <GitBranchItem branch={displayBranch} hasChanges={hasUncommittedChanges} />
+            </>
+          )}
+          {authStatus && authStatus !== "unknown" && (
+            <>
+              <Separator />
+              <AuthStatusItem status={authStatus} user={authUser} nameMax={authNameMax} />
+            </>
+          )}
+          {voiceEnabled && (
+            <>
+              <Separator />
+              <VoiceStatusItem state={voiceState || "idle"} />
+            </>
+          )}
+          <Separator />
+          <ElapsedTimeItem time={elapsed} />
+        </Inline>
+      </Box>
     </Box>
   );
 }
@@ -222,11 +249,10 @@ export function EnhancedStatusBar({
 // ============================================
 
 function ActiveIndicator({ active }: { active: boolean }) {
-  return (
-    <AppText color={active ? "green" : "gray"}>
-      {"\u25B8\u25B8"}
-    </AppText>
-  );
+  if (active) {
+    return <AppText color="green">{"\u25B8\u25B8"}</AppText>;
+  }
+  return <MutedText>{"\u25B8\u25B8"}</MutedText>;
 }
 
 function Separator() {
@@ -245,31 +271,52 @@ function AgentStatusItem({ running, total }: { running: number; total: number })
   return (
     <Inline gap={0}>
       <StatusDot status={running > 0 ? "info" : "idle"} />
-      <AppText color={running > 0 ? "magenta" : "gray"}>
-        {" "}{running}/{total} agents
-      </AppText>
+      {running > 0 ? (
+        <AppText color="magenta">
+          {" "}{running}/{total} agents
+        </AppText>
+      ) : (
+        <MutedText>
+          {" "}{running}/{total} agents
+        </MutedText>
+      )}
     </Inline>
   );
 }
 
 function PermissionStatusItem({ mode }: { mode: EnhancedStatusBarProps["permissionMode"] }) {
   const configs = {
-    full: { color: "red" as const, icon: "\u26A0", label: "Full Access" },
-    ask: { color: "yellow" as const, icon: "\u2753", label: "Ask Mode" },
-    restricted: { color: "green" as const, icon: "\u2713", label: "Restricted" },
-    sandbox: { color: "blue" as const, icon: "\u25A3", label: "Sandbox" },
-    infinite: { color: "magenta" as const, icon: "\u221E", label: "Infinite" },
+    full: { color: "red" as const, icon: "\u26A0", label: "full access" },
+    ask: { color: "yellow" as const, icon: "\u2753", label: "ask (approve tools)" },
+    restricted: { color: "green" as const, icon: "\u2713", label: "restricted" },
+    sandbox: { color: "blue" as const, icon: "\u25A3", label: "sandbox" },
+    infinite: { color: "magenta" as const, icon: "\u221E", label: "infinite (no gates)" },
   };
 
   const config = configs[mode || "ask"];
 
+  // Read-only status: avoid bracket badges that read like clickable controls (DesignExcellence)
   return (
-    <Badge label={`${config.icon} ${config.label}`} color={config.color} variant="outline" />
+    <Inline gap={0}>
+      <MutedText>perm </MutedText>
+      <AppText color={config.color}>
+        {config.icon} {config.label}
+      </AppText>
+    </Inline>
   );
 }
 
-function TokenSavingsItem({ saved, percentage }: { saved: number; percentage: number }) {
-  const savingsColor = percentage > 50 ? "green" : percentage > 20 ? "yellow" : "gray";
+function TokenSavingsItem({
+  saved,
+  percentage,
+  barWidth,
+}: {
+  saved: number;
+  percentage: number;
+  barWidth: number;
+}) {
+  const savingsColor = percentage > 50 ? "green" : percentage > 20 ? "yellow" : "blue";
+  const tokenBit = truncate(`(${formatTokens(saved)} tok)`, Math.max(6, Math.floor(barWidth * 0.14)));
 
   return (
     <Inline gap={0}>
@@ -278,7 +325,7 @@ function TokenSavingsItem({ saved, percentage }: { saved: number; percentage: nu
         {percentage}%
       </Label>
       <MutedText>
-        {" "}({formatTokens(saved)} tokens)
+        {" "}{tokenBit}
       </MutedText>
     </Inline>
   );
@@ -301,10 +348,19 @@ function ElapsedTimeItem({ time }: { time: string }) {
   );
 }
 
-function AuthStatusItem({ status, user }: { status: string; user?: { displayName: string; plan: string } | null }) {
+function AuthStatusItem({
+  status,
+  user,
+  nameMax,
+}: {
+  status: string;
+  user?: { displayName: string; plan: string } | null;
+  nameMax: number;
+}) {
   if (status === "authenticated" && user) {
+    const short = truncate(user.displayName, nameMax);
     return (
-      <Badge label={`\u2713 ${user.displayName}`} color="green" variant="outline" />
+      <Badge label={`\u2713 ${short}`} color="green" variant="outline" />
     );
   }
   return <MutedText>{"\u25CB"} Guest</MutedText>;
@@ -334,17 +390,19 @@ function PlanStatusItem({
   completed,
   total,
   showAnimatedVerb = true,
+  verbMaxWidth,
 }: {
   status: EnhancedStatusBarProps["planStatus"];
   completed: number;
   total: number;
   showAnimatedVerb?: boolean;
+  verbMaxWidth?: number;
 }) {
   const configs = {
-    idle: { color: "gray" as const, icon: "\u25CB", label: "Idle", verbType: null },
-    planning: { color: "cyan" as const, icon: "\u25D4", label: "Planning...", verbType: "planning" as StatusVerbType },
+    idle: { color: "blue" as const, icon: "\u25CB", label: "idle", verbType: null },
+    planning: { color: "cyan" as const, icon: "\u25D4", label: "planning...", verbType: "planning" as StatusVerbType },
     executing: { color: "yellow" as const, icon: "\u25B6", label: `${completed}/${total}`, verbType: "executing" as StatusVerbType },
-    completed: { color: "green" as const, icon: "\u2713", label: "Done", verbType: null },
+    completed: { color: "green" as const, icon: "\u2713", label: "ready (awaiting input)", verbType: null },
   };
 
   const config = configs[status || "idle"];
@@ -358,11 +416,17 @@ function PlanStatusItem({
           type={config.verbType}
           showIcon={true}
           active={true}
+          maxWidth={verbMaxWidth}
         />
       )}
-      {/* Show static status when not showing verb or when idle/completed */}
+      {/* Read-only run state: not a button (DesignExcellence) */}
       {(!isActive || !showAnimatedVerb) && (
-        <Badge label={`${config.icon} ${config.label}`} color={config.color} variant="outline" />
+        <Inline gap={0}>
+          <MutedText>run </MutedText>
+          <AppText color={config.color}>
+            {config.icon} {config.label}
+          </AppText>
+        </Inline>
       )}
     </Box>
   );
@@ -383,6 +447,12 @@ function ClaudeStyleCompactBar({
   currentBranch: string | null;
   elapsed: string;
 }) {
+  const { stdout } = useStdout();
+  const cols = Math.max(24, (stdout?.columns ?? 80) - 4);
+  const modelShort = truncate(modelName, Math.max(6, Math.min(24, Math.floor(cols * 0.28))));
+  const branchShort = currentBranch ? truncate(currentBranch, Math.max(6, Math.min(18, Math.floor(cols * 0.22)))) : null;
+  const showBranch = branchShort != null && cols >= 40;
+
   const permissionIcons = {
     full: { color: "red" as const, icon: "\u26A0" },
     ask: { color: "yellow" as const, icon: "?" },
@@ -394,9 +464,9 @@ function ClaudeStyleCompactBar({
   const permConfig = permissionIcons[permissionMode || "ask"];
 
   return (
-    <Inline paddingX={1} marginTop={1} gap={0}>
+    <Inline paddingX={1} marginTop={1} gap={0} width={cols} flexShrink={0}>
       <MutedText>[</MutedText>
-      <AppText color="cyan">{modelName}</AppText>
+      <AppText color="cyan">{modelShort}</AppText>
       <MutedText>] </MutedText>
 
       <StatusDot status={runningAgents > 0 ? "info" : "idle"} />
@@ -407,10 +477,10 @@ function ClaudeStyleCompactBar({
       <MutedText> </MutedText>
       <AppText color="green">{savings}%</AppText>
 
-      {currentBranch && (
+      {showBranch && (
         <>
           <MutedText> </MutedText>
-          <AppText color="yellow">{currentBranch}</AppText>
+          <AppText color="yellow">{branchShort}</AppText>
         </>
       )}
 

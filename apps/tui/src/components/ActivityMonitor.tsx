@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
+import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
 
 // ── Activity Types ──────────────────────────────────────────────────
 
@@ -133,6 +134,8 @@ interface ActivityMonitorProps {
   processingStage: "planning" | "toolshed" | "executing" | "complete";
   /** Max visible entries */
   maxEntries?: number;
+  /** When false, skip scan-line and footer pulse (matches global ^A anim toggle) */
+  showAnimations?: boolean;
 }
 
 // ── Singleton activity log (persists across re-renders) ─────────────
@@ -172,6 +175,61 @@ export function clearActivity(): void {
   logVersion++;
 }
 
+const AGENT_TASK_PREFIX = "agent-op-";
+
+/** Map recent tool traces into TaskInfo rows for the Processes sidebar (merged with shell jobs). */
+export function getActivityLogAsTaskInfos(): TaskInfo[] {
+  return activityLog.map((entry) => {
+    const now = Date.now();
+    const done = entry.done;
+    const failed = done && entry.color === "red";
+    const status: TaskStatus = done ? (failed ? "failed" : "completed") : "running";
+    const durationMs = done
+      ? entry.durationMs ?? 0
+      : Math.max(0, now - entry.timestamp);
+    const startedAt = new Date(entry.timestamp).toISOString();
+    const endedAt = done
+      ? new Date(entry.timestamp + (entry.durationMs ?? 0)).toISOString()
+      : null;
+    return {
+      id: `${AGENT_TASK_PREFIX}${entry.id}`,
+      command: `◇ ${entry.tool} · ${entry.action}: ${entry.detail}`.slice(0, 140),
+      status,
+      exitCode: done ? (failed ? 1 : 0) : null,
+      startedAt,
+      endedAt,
+      runtime: durationMs,
+      outputLength: 0,
+      errorLength: failed ? 1 : 0,
+    };
+  });
+}
+
+export function isAgentProcessTaskId(id: string): boolean {
+  return id.startsWith(AGENT_TASK_PREFIX);
+}
+
+export function getAgentTaskOutput(taskId: string): TaskOutput | null {
+  if (!taskId.startsWith(AGENT_TASK_PREFIX)) return null;
+  const inner = taskId.slice(AGENT_TASK_PREFIX.length);
+  const entry = activityLog.find((e) => e.id === inner);
+  if (!entry) return null;
+  const lines = [
+    `Tool: ${entry.tool}`,
+    `Action: ${entry.action}`,
+    `Detail: ${entry.detail}`,
+    `Status: ${entry.done ? (entry.color === "red" ? "failed" : "completed") : "running"}`,
+    entry.durationMs != null ? `Duration: ${entry.durationMs}ms` : "",
+  ].filter(Boolean);
+  const combined = lines.join("\n");
+  return {
+    id: taskId,
+    stdout: combined,
+    stderr: "",
+    combined,
+  };
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export function ActivityMonitor({
@@ -180,24 +238,26 @@ export function ActivityMonitor({
   toolCount,
   processingStage,
   maxEntries = 12,
+  showAnimations = true,
 }: ActivityMonitorProps) {
   const [tick, setTick] = useState(0);
   const [startTime] = useState(Date.now());
   const [elapsed, setElapsed] = useState(0);
   const [, forceRender] = useState(0);
 
-  // Animation tick
+  // Animation tick (activity list still refreshes when animations off)
   useEffect(() => {
+    const ms = showAnimations ? 300 : 800;
     const interval = setInterval(() => {
       setTick((t) => t + 1);
       setElapsed(Date.now() - startTime);
       forceRender((v) => v + 1); // Re-read activity log
-    }, 300);
+    }, ms);
     return () => clearInterval(interval);
-  }, [startTime]);
+  }, [startTime, showAnimations]);
 
   const visibleEntries = activityLog.slice(-maxEntries);
-  const dots = ".".repeat((tick % 3) + 1);
+  const dots = showAnimations ? ".".repeat((tick % 3) + 1) : "";
 
   // Format elapsed
   const secs = Math.floor(elapsed / 1000);
@@ -205,7 +265,7 @@ export function ActivityMonitor({
 
   // Scanning animation for the active entry
   const scanChars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"];
-  const scanBar = scanChars[tick % scanChars.length];
+  const scanBar = showAnimations ? scanChars[tick % scanChars.length] : "·";
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
@@ -230,7 +290,7 @@ export function ActivityMonitor({
       >
         {visibleEntries.length === 0 ? (
           <Box justifyContent="center" alignItems="center" flexGrow={1}>
-            <Text dimColor>Thinking{dots}</Text>
+            <Text dimColor>{showAnimations ? `Thinking${dots}` : "Thinking…"}</Text>
           </Box>
         ) : (
           visibleEntries.map((entry, i) => {
@@ -277,12 +337,10 @@ export function ActivityMonitor({
         <Text color="cyan" bold>└─ </Text>
         {activeTool ? (
           <Text bold>
-            {toolToActivity(activeTool, {}).icon} {activeTool}{dots}
+            {toolToActivity(activeTool, {}).icon} {activeTool}{showAnimations ? dots : ""}
           </Text>
         ) : (
-          <Text dimColor>
-            Reasoning{dots}
-          </Text>
+          <Text dimColor>{showAnimations ? `Reasoning${dots}` : "Reasoning…"}</Text>
         )}
       </Box>
     </Box>
