@@ -35,6 +35,7 @@
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "typecheck:tui": "tsc --noEmit -p apps/tui/tsconfig.json",
+    "check:harness": "tsc --noEmit -p tsconfig.harness.json",
     "benchmark": "bun run scripts/benchmark.ts",
     "benchmark:suite": "bun run benchmarks/runner.ts",
     "benchmark:category": "bun run benchmarks/runner.ts --category",
