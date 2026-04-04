@@ -65,6 +65,7 @@ export {
   detectCapabilities,
   selectBestBackend,
 } from "./full-duplex-provider";
+export { MoshiMLXProvider } from "./backends/moshi-mlx";
 
 /**
  * Main Voice Engine — orchestrates recording, transcription, and events.
