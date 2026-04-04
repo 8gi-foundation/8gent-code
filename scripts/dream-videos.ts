@@ -39,16 +39,65 @@ function log(msg: string) {
 // ============================================
 
 function getTodaysLearnings(): string[] {
-  return [
-    "Wired BMAD planning, evidence collection, and AST indexing into the agent loop — three pillars that were dead code are now alive",
-    "Installed the RL training proxy and started the self-improving kernel — the agent now routes through a proxy that captures every session",
-    "Tried to make 8gent build its own dashboard — it read the files, made a plan, but timed out before finishing. Classic intern behavior",
-    "Built a local LoRA trainer that runs on Apple Silicon — qwen3:14b is getting fine-tuned into 'eight' overnight",
-    "Created a System Health dashboard for the debugger — real-time AST stats, kanban board, evidence summary",
-    "The nightly benchmark loop is running 5 iterations of test-mutate-train-repeat while James sleeps",
-    "Fixed a near-catastrophe — filled up the entire 926GB hard drive with HuggingFace model caches. 99% to 40% in one cleanup",
-    "Reviewed a security PR from an external contributor — good shell injection fixes but git_add has a bug",
-  ];
+  const learnings: string[] = [];
+
+  // 1. Pull today's git commits from 8gent-code
+  try {
+    const { execSync } = require("child_process");
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    const gitLog = execSync(
+      `git -C ${os.homedir()}/8gent-code log --since="${since.toISOString()}" --oneline --no-merges 2>/dev/null`,
+      { encoding: "utf-8", timeout: 5000 }
+    ).trim();
+    if (gitLog) {
+      gitLog.split("\n").slice(0, 4).forEach((line: string) => {
+        const msg = line.replace(/^[a-f0-9]+ /, "").trim();
+        if (msg) learnings.push(msg);
+      });
+    }
+  } catch { /* no git or no commits today */ }
+
+  // 2. Pull last benchmark run summary from nightly log
+  try {
+    const nightlyLog = path.join(os.homedir(), ".8gent", "nightly.log");
+    if (fs.existsSync(nightlyLog)) {
+      const lines = fs.readFileSync(nightlyLog, "utf-8").split("\n").filter(Boolean);
+      const summaries = lines.filter(l => l.includes("Benchmark summary:")).slice(-3);
+      summaries.forEach(s => {
+        const m = s.match(/Benchmark summary: (.+)/);
+        if (m) learnings.push(`Benchmark run: ${m[1]}`);
+      });
+      const heals = lines.filter(l => l.includes("[HEAL]") || l.includes("[HYPER]")).slice(-2);
+      heals.forEach(h => {
+        const m = h.match(/\] (.+)/);
+        if (m) learnings.push(m[1].trim());
+      });
+    }
+  } catch { /* best effort */ }
+
+  // 3. Pull last few benchmark learnings
+  try {
+    const learningsLog = path.join(os.homedir(), ".8gent", "benchmark-learnings.log");
+    if (fs.existsSync(learningsLog)) {
+      const content = fs.readFileSync(learningsLog, "utf-8");
+      const blocks = content.split("---").filter(Boolean);
+      const latest = blocks[blocks.length - 1] || "";
+      const failures = latest.match(/Failures: (.+)/);
+      if (failures) learnings.push(`Benchmark failures today: ${failures[1]}`);
+    }
+  } catch { /* best effort */ }
+
+  // Fallback if nothing found
+  if (learnings.length === 0) {
+    learnings.push(
+      "Ran the nightly benchmark loop while James slept",
+      "HyperAgent adapted its parameters based on critic feedback",
+      "The sequential pipeline kept running — Analyst, Critic, Implementer, repeat"
+    );
+  }
+
+  return learnings.slice(0, 6);
 }
 
 function generateDreamPrompts(): Array<{ prompt: string; caption: string }> {
