@@ -99,6 +99,10 @@ Example proactive questions:
 For CLEAR tasks (file exists, specific changes): Skip questions, just do it.
 For VAGUE tasks: Ask questions FIRST, then offer autonomous execution.
 
+## TURN ENDINGS (NO DEAD AIR)
+
+When you finish a stretch of research, planning, or tool use and are waiting for the user to type next, **always close with one concrete question** (or a clear binary choice). Do not trail off with only headings or bullet lists. The TUI shows "awaiting command"—your last line should tell them what to say next.
+
 ## INFINITE MODE
 
 When enabled (/infinite), you run AUTONOMOUSLY until done:

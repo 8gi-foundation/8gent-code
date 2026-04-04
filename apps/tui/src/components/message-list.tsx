@@ -21,6 +21,10 @@ interface MessageListProps {
   animateTyping?: boolean;
   soundEnabled?: boolean;
   maxVisible?: number;
+  /** When set, row and bubble width math use this instead of stdout.columns. */
+  contentWidth?: number;
+  /** When false, skip bubble fade-in delays (matches ^A global anim toggle). */
+  showAnimations?: boolean;
 }
 
 export function MessageList({
@@ -28,7 +32,13 @@ export function MessageList({
   animateTyping = true,
   soundEnabled = false,
   maxVisible = 50,
+  contentWidth: contentWidthProp,
+  showAnimations = true,
 }: MessageListProps) {
+  const { stdout } = useStdout();
+  const resolvedContentWidth =
+    contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
+
   const prevCountRef = useRef(messages.length);
   const [newMessageId, setNewMessageId] = useState<string | null>(null);
 
@@ -49,7 +59,7 @@ export function MessageList({
     : messages;
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} minHeight={0}>
       {visibleMessages.map((message, index) => (
         <MessageItem
           key={message.id}
@@ -58,6 +68,8 @@ export function MessageList({
           animate={animateTyping}
           soundEnabled={soundEnabled}
           index={index}
+          contentWidth={resolvedContentWidth}
+          showAnimations={showAnimations}
         />
       ))}
     </Box>
@@ -70,6 +82,8 @@ interface MessageItemProps {
   animate: boolean;
   soundEnabled: boolean;
   index: number;
+  contentWidth: number;
+  showAnimations: boolean;
 }
 
 function MessageItem({
@@ -78,14 +92,17 @@ function MessageItem({
   animate,
   soundEnabled,
   index,
+  contentWidth,
+  showAnimations,
 }: MessageItemProps) {
   const [showContent, setShowContent] = useState(!isNew);
   const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
-  // Terminal width for responsive bubble sizing — must be called unconditionally (React hook rule)
-  const { stdout } = useStdout();
-  const termWidth = stdout?.columns ?? 100;
-  const bubbleIndent = Math.max(2, Math.min(12, Math.floor(termWidth * 0.1)));
+  const bubbleIndent = Math.max(2, Math.min(12, Math.floor(contentWidth * 0.1)));
+  // Outer round border: leave margin vs content column; inner must stay inside border + paddingX + corner slack.
+  const bubbleOuterWidth = Math.max(20, contentWidth - bubbleIndent - 8);
+  const innerColumnWidth = Math.max(12, bubbleOuterWidth - 6);
+  const textWrapWidth = Math.max(8, innerColumnWidth - 2);
 
   // Play sound on completion for assistant messages
   useCompletionSound(
@@ -118,26 +135,31 @@ function MessageItem({
   if (message.role === "system") {
     if (!showContent) return null;
     const isMultiLine = message.content.includes("\n");
+    const fadeWrap = (node: React.ReactNode) =>
+      showAnimations ? (
+        <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
+          {node}
+        </FadeIn>
+      ) : (
+        <Box>{node}</Box>
+      );
+
     if (isMultiLine) {
       // Multi-line system messages (e.g. /evidence, /help) render as a full block
-      return (
-        <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
-          <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
-            <Text dimColor>{'─'.repeat(3)}</Text>
-            <SystemMessageText content={message.content} />
-            <Text dimColor>{'─'.repeat(3)}</Text>
-          </Box>
-        </FadeIn>
+      return fadeWrap(
+        <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
+          <Text dimColor>{'─'.repeat(3)}</Text>
+          <SystemMessageText content={message.content} />
+          <Text dimColor>{'─'.repeat(3)}</Text>
+        </Box>,
       );
     }
-    return (
-      <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
-        <Box justifyContent="center" marginBottom={1}>
-          <Text dimColor>{'─'.repeat(3)} </Text>
-          <SystemMessageText content={message.content.slice(0, 60)} />
-          <Text dimColor> {'─'.repeat(3)}</Text>
-        </Box>
-      </FadeIn>
+    return fadeWrap(
+      <Box justifyContent="center" marginBottom={1}>
+        <Text dimColor>{'─'.repeat(3)} </Text>
+        <SystemMessageText content={message.content.slice(0, 60)} />
+        <Text dimColor> {'─'.repeat(3)}</Text>
+      </Box>,
     );
   }
 
@@ -151,13 +173,12 @@ function MessageItem({
     );
   }
 
-  return (
-    <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
+  const bubble = (
       <Box
         flexDirection="column"
         alignItems={isUser ? "flex-end" : "flex-start"}
         marginBottom={1}
-        width={termWidth}
+        width={contentWidth}
       >
         {/* Sender label */}
         <Box>
@@ -178,23 +199,36 @@ function MessageItem({
           borderStyle="round"
           borderColor={isUser ? "yellow" : "cyan"}
           paddingX={1}
+          paddingY={1}
           marginLeft={isUser ? bubbleIndent : 0}
           marginRight={isUser ? 0 : bubbleIndent}
           flexShrink={1}
-          width={Math.max(20, termWidth - bubbleIndent - 4)}
+          width={bubbleOuterWidth}
         >
-          <Box flexShrink={1} flexDirection="column" width={Math.max(16, termWidth - bubbleIndent - 8)}>
+          <Box
+            flexShrink={1}
+            flexDirection="column"
+            width={innerColumnWidth}
+          >
             <MessageContent
               content={message.content}
               role={message.role}
               isNew={isNew}
               animate={animate}
               onTypingComplete={() => setTypingComplete(true)}
+              wrapWidth={textWrapWidth}
             />
           </Box>
         </Box>
       </Box>
+  );
+
+  return showAnimations ? (
+    <FadeIn duration={200} delay={isNew ? index * 20 : 0}>
+      {bubble}
     </FadeIn>
+  ) : (
+    bubble
   );
 }
 
@@ -204,6 +238,7 @@ interface MessageContentProps {
   isNew: boolean;
   animate: boolean;
   onTypingComplete: () => void;
+  wrapWidth: number;
 }
 
 function MessageContent({
@@ -212,6 +247,7 @@ function MessageContent({
   isNew,
   animate,
   onTypingComplete,
+  wrapWidth,
 }: MessageContentProps) {
   const { enabled: adhdMode } = useADHDMode();
 
@@ -222,44 +258,67 @@ function MessageContent({
     // Use word-by-word for longer content, character for shorter
     if (content.length > 200) {
       return (
-        <WordByWord text={content} speed={30} onComplete={onTypingComplete} />
+        <Box width={wrapWidth}>
+          <WordByWord text={content} speed={30} onComplete={onTypingComplete} />
+        </Box>
       );
     }
     return (
-      <TypingText
-        text={content}
-        speed={12}
-        onComplete={onTypingComplete}
-        cursor={true}
-      />
+      <Box width={wrapWidth}>
+        <TypingText
+          text={content}
+          speed={12}
+          onComplete={onTypingComplete}
+          cursor={true}
+        />
+      </Box>
     );
   }
 
   // Check for code blocks and format accordingly
   if (content.includes("```")) {
-    return <FormattedContent content={content} adhdMode={adhdMode} />;
+    return (
+      <FormattedContent content={content} adhdMode={adhdMode} wrapWidth={wrapWidth} />
+    );
   }
 
   // Apply bionic reading if ADHD mode is enabled
   if (adhdMode) {
-    return <BionicText>{content}</BionicText>;
+    return (
+      <Box width={wrapWidth}>
+        <BionicText>{content}</BionicText>
+      </Box>
+    );
   }
 
-  return <AppText wrap="wrap">{content}</AppText>;
+  return (
+    <Box width={wrapWidth}>
+      <AppText wrap="wrap">{content}</AppText>
+    </Box>
+  );
 }
 
 // Format content with code blocks
-function FormattedContent({ content, adhdMode = false }: { content: string; adhdMode?: boolean }) {
+function FormattedContent({
+  content,
+  adhdMode = false,
+  wrapWidth,
+}: {
+  content: string;
+  adhdMode?: boolean;
+  wrapWidth: number;
+}) {
   const parts = content.split(/(```[\s\S]*?```)/);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width={wrapWidth}>
       {parts.map((part, index) => {
         if (part.startsWith("```")) {
           // Extract language and code
           const match = part.match(/```(\w+)?\n?([\s\S]*?)```/);
           if (match) {
             const [, language, code] = match;
+            const fenceInner = Math.max(8, wrapWidth - 8);
             return (
               <Box
                 key={index}
@@ -267,27 +326,37 @@ function FormattedContent({ content, adhdMode = false }: { content: string; adhd
                 borderStyle="round"
                 borderColor="blue"
                 paddingX={1}
+                paddingY={1}
                 marginY={1}
                 flexShrink={1}
+                width={wrapWidth}
               >
                 {language && (
                   <MutedText>
                     {language}
                   </MutedText>
                 )}
-                <Text color="green" wrap="truncate">{code.trim()}</Text>
+                <Box width={fenceInner}>
+                  <Text color="green" wrap="wrap">
+                    {code.trim()}
+                  </Text>
+                </Box>
               </Box>
             );
           }
         }
         // Apply bionic reading to non-code parts if ADHD mode is enabled
         if (adhdMode) {
-          return <BionicText key={index}>{part}</BionicText>;
+          return (
+            <Box key={index} width={wrapWidth}>
+              <BionicText>{part}</BionicText>
+            </Box>
+          );
         }
         return (
-          <AppText key={index} wrap="wrap">
-            {part}
-          </AppText>
+          <Box key={index} width={wrapWidth}>
+            <AppText wrap="wrap">{part}</AppText>
+          </Box>
         );
       })}
     </Box>
