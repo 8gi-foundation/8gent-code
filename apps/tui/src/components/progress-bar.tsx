@@ -118,7 +118,7 @@ export function AnimatedProgressBar({
         {buildBar()}
         <MutedText>]</MutedText>
         {showPercentage && (
-          <Text color={barColor}> {formatPercentage(displayValue)}</Text>
+          <Text color={barColor}> {formatPercentage(displayValue, 100)}</Text>
         )}
       </Inline>
     </Box>

@@ -13,6 +13,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
 import { MutedText, Inline } from './primitives/index.js';
+import { truncate } from "../lib/index.js";
 
 // Import from personality package (relative path for monorepo)
 // In production, this would be: import { ... } from "@8gent/personality";
@@ -103,6 +104,8 @@ export interface AnimatedStatusVerbProps {
   intervalMs?: number;
   /** Whether animation is active */
   active?: boolean;
+  /** Max visible characters for the verb (icon + space reserved when showIcon). */
+  maxWidth?: number;
 }
 
 export interface StatusLineProps {
@@ -164,6 +167,7 @@ export function AnimatedStatusVerb({
   color = "yellow",
   intervalMs = 2000,
   active = true,
+  maxWidth,
 }: AnimatedStatusVerbProps) {
   const [verb, setVerb] = useState(getRandomVerb(type));
 
@@ -193,10 +197,15 @@ export function AnimatedStatusVerb({
     return null;
   }
 
+  const prefixCols = showIcon ? 3 : 0;
+  const verbMax =
+    maxWidth != null ? Math.max(4, maxWidth - prefixCols) : undefined;
+  const verbShown = verbMax != null ? truncate(verb, verbMax) : verb;
+
   return (
     <Text color={color as any}>
       {showIcon && <Text>{icon} </Text>}
-      {verb}
+      {verbShown}
     </Text>
   );
 }

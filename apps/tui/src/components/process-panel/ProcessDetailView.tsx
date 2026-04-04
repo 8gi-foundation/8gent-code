@@ -4,6 +4,7 @@ import type { TaskInfo, TaskOutput } from "../../../../../packages/tools/backgro
 import { AppText, MutedText, Heading, Badge, Label, Inline, Stack, Divider, ShortcutHint } from "../primitives/index.js";
 import { formatDuration } from "../../lib/index.js";
 import { truncate } from "../../lib/text.js";
+import { isAgentProcessTaskId } from "../ActivityMonitor.js";
 
 function statusColor(status: string): "green" | "red" | "yellow" | "cyan" {
   switch (status) {
@@ -70,7 +71,12 @@ export function ProcessDetailView({
         setAutoScroll(true);
         return;
       }
-      if (input === "k" && !key.ctrl && task.status === "running") {
+      if (
+        input === "k" &&
+        !key.ctrl &&
+        task.status === "running" &&
+        !isAgentProcessTaskId(task.id)
+      ) {
         onKill();
         return;
       }
@@ -119,7 +125,7 @@ export function ProcessDetailView({
         <ShortcutHint keys="Esc" description="back" />
         <ShortcutHint keys="↑↓" description="scroll" />
         <ShortcutHint keys="G" description="bottom" />
-        {task.status === "running" && (
+        {task.status === "running" && !isAgentProcessTaskId(task.id) && (
           <ShortcutHint keys="k" description="kill" />
         )}
       </Box>

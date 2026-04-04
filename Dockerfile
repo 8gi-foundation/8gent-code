@@ -29,4 +29,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD bun -e "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["bun", "run", "packages/board-vessel/vessel.ts"]
+CMD ["/bin/sh", "/app/scripts/board-vessel/entrypoint.sh"]

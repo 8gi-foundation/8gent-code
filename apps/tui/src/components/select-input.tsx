@@ -15,9 +15,21 @@
  * - Highlighted current selection
  */
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
-import { AppText, MutedText, Heading, Label, Badge, Card, Stack, Inline, Spacer } from './primitives/index.js';
+import React, { useState, useEffect, useMemo } from "react";
+import { Box, useInput, type TextProps } from "ink";
+import { AppText, MutedText, Heading, Label, Card, Stack, Inline } from './primitives/index.js';
+
+function clampScrollOffset(
+  selectedIndex: number,
+  total: number,
+  maxVisible: number,
+): number {
+  if (total <= maxVisible) return 0;
+  const maxScroll = total - maxVisible;
+  let off = Math.max(0, selectedIndex - maxVisible + 1);
+  off = Math.min(off, maxScroll);
+  return off;
+}
 
 // ============================================
 // Types
@@ -58,17 +70,24 @@ export function SelectInput<T = string>({
   searchable = true,
   highlightColor = "cyan",
 }: SelectInputProps<T>) {
+  const inkHighlight = highlightColor as NonNullable<TextProps["color"]>;
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
   const [search, setSearch] = useState("");
-  const [scrollOffset, setScrollOffset] = useState(0);
+  const filteredOptions = useMemo(
+    () =>
+      searchable && search
+        ? options.filter(
+            (opt) =>
+              opt.label.toLowerCase().includes(search.toLowerCase()) ||
+              opt.description?.toLowerCase().includes(search.toLowerCase()),
+          )
+        : options,
+    [options, search, searchable],
+  );
 
-  // Filter options based on search
-  const filteredOptions = searchable && search
-    ? options.filter(opt =>
-        opt.label.toLowerCase().includes(search.toLowerCase()) ||
-        opt.description?.toLowerCase().includes(search.toLowerCase())
-      )
-    : options;
+  const [scrollOffset, setScrollOffset] = useState(() =>
+    clampScrollOffset(initialIndex, options.length, maxVisible),
+  );
 
   // Ensure selection is within bounds
   useEffect(() => {
@@ -149,7 +168,7 @@ export function SelectInput<T = string>({
       {/* Title */}
       {title && (
         <Box marginBottom={1}>
-          <Heading color={highlightColor as any}>
+          <Heading color={inkHighlight}>
             {title}
           </Heading>
         </Box>
@@ -180,17 +199,19 @@ export function SelectInput<T = string>({
         return (
           <Stack key={String(option.value)} gap={0}>
             <Inline gap={0}>
-              {/* Selection indicator */}
-              <AppText color={isSelected ? highlightColor as any : "gray"}>
-                {isSelected ? "❯ " : "  "}
-              </AppText>
+              {/* Selection indicator (avoid color="gray" — invisible on some themes) */}
+              {isSelected ? (
+                <AppText color={inkHighlight}>{"\u276F "}</AppText>
+              ) : (
+                <AppText dimColor>{"  "}</AppText>
+              )}
 
-              {/* Icon if present */}
-              {option.icon && (
-                <AppText dimColor={isDisabled} bold={!isDisabled}>
+              {/* Icon if present (omit placeholder spaces — they still rendered a column) */}
+              {option.icon ? (
+                <AppText dimColor={isDisabled}>
                   {option.icon}{" "}
                 </AppText>
-              )}
+              ) : null}
 
               {/* Label */}
               {isDisabled ? (
@@ -199,8 +220,8 @@ export function SelectInput<T = string>({
                 </MutedText>
               ) : (
                 <AppText
-                  color={isSelected ? highlightColor as any : undefined}
-                  bold={isSelected || !isDisabled}
+                  color={isSelected ? inkHighlight : undefined}
+                  bold={isSelected}
                 >
                   {option.label}
                 </AppText>
@@ -428,17 +449,18 @@ export function ModelSelector({
   onCancel,
   provider = "Ollama",
 }: ModelSelectorProps) {
-  const options: SelectOption<string>[] = models.map(model => ({
+  const options: SelectOption<string>[] = models.map((model) => ({
     label: model,
     value: model,
-    icon: model === currentModel ? "✓" : " ",
+    icon: model === currentModel ? "\u2713" : undefined,
     description: model === currentModel ? "Currently active" : undefined,
   }));
 
-  const currentIndex = models.findIndex(m => m === currentModel);
+  const currentIndex = models.findIndex((m) => m === currentModel);
 
   return (
     <SelectInput
+      key={`models-${models.join("\0")}`}
       title={`Select Model (${provider})`}
       options={options}
       onSelect={onSelect}
@@ -473,10 +495,10 @@ export function ProviderSelector({
   onSelect,
   onCancel,
 }: ProviderSelectorProps) {
-  const options: SelectOption<string>[] = providers.map(p => ({
+  const options: SelectOption<string>[] = providers.map((p) => ({
     label: p.displayName,
     value: p.name,
-    icon: p.name === currentProvider ? "✓" : p.hasApiKey ? "🔑" : " ",
+    icon: p.name === currentProvider ? "\u2713" : p.hasApiKey ? "\u{1F511}" : undefined,
     description: p.name === currentProvider
       ? "Currently active"
       : p.hasApiKey

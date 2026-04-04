@@ -59,16 +59,15 @@
     "ollama": {
       "available": true,
       "models": [
-        "eight-1-q-14b:latest",
-        "qwen3:14b",
-        "minicpm-v:latest",
-        "eight:latest",
         "nomic-embed-text:latest"
       ]
     },
     "lmstudio": {
-      "available": false,
-      "models": []
+      "available": true,
+      "models": [
+        "google/gemma-4-26b-a4b",
+        "text-embedding-nomic-embed-text-v1.5"
+      ]
     }
   },
   "understanding": {

@@ -251,6 +251,7 @@ The pipeline is **off by default** - set `"training_proxy": { "enabled": true }`
 
 These skills are installed and should be consulted for design decisions:
 
+- **Billion Dollar Boardroom** - `.claude/skills/billiondollarboardroom` (symlink to `packages/skills/billiondollarboardroom/SKILL.md`). Slash commands: `/billiondollarboardroom`, `/bdb`, `/billionboard`. Eight commercial advisors (offer, sales, positioning, content, funnels, etc.); same skill can live in **8gi-governance** under `.claude/skills/` for Cursor, and is picked up by the **8gent** TUI when your cwd is that repo.
 - **DesignExcellence** - design tokens, accessibility, modern UI patterns
 - **ui-ux-pro-max** - styles, palettes, font pairings, UX guidelines
 - **web-design-guidelines** - Web Interface Guidelines compliance (Vercel)

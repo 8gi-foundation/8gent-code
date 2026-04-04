@@ -315,6 +315,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     this.loopDetector.reset();
     this.recentFilePaths = [];
 
+    const textForAgent =
+      userMessage.trim() ||
+      (imageBase64
+        ? "The user attached an image with no text. Describe what you see and help with anything relevant in the image."
+        : userMessage);
+
     // If image attached, fire off parallel vision interpretation (like /btw)
     // The main agent stays on its text model — never switches.
     // Vision result gets injected as a system message when ready.
@@ -330,11 +336,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
           // Notify via event so TUI can show it
           this.config.events?.onStepFinish?.({
-            text: `🔍 Image interpreted by ${result.model}${result.free ? " (free)" : ""} in ${(result.durationMs / 1000).toFixed(1)}s:\n${result.description.slice(0, 200)}${result.description.length > 200 ? "..." : ""}`,
+            text: `Image interpreted by ${result.model}${result.free ? " (free)" : ""} in ${(result.durationMs / 1000).toFixed(1)}s:\n${result.description.slice(0, 200)}${result.description.length > 200 ? "..." : ""}`,
             stepNumber: 0,
+            toolCalls: [],
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
             finishReason: "other",
-          } as any);
+          });
         },
       });
 
@@ -342,18 +349,19 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       visionId = interpreter.interpret(imageBase64, imageMimeType || "image/png");
 
       this.config.events?.onStepFinish?.({
-        text: `📷 Image attached — vision interpreter running in background...`,
+        text: `Image attached — vision interpreter running in the background.`,
         stepNumber: 0,
+        toolCalls: [],
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         finishReason: "other",
-      } as any);
+      });
     }
 
     // ── Proactive Questioning Gate ─────────────────────────────────
     // For vague/ambiguous requests (short messages without clear intent),
     // the proactive system injects clarifying questions before execution.
-    if (needsClarification(userMessage)) {
-      this.proactiveGatherer = createGatherer(userMessage);
+    if (needsClarification(textForAgent) && !imageBase64) {
+      this.proactiveGatherer = createGatherer(textForAgent);
       const question = this.proactiveGatherer.getCurrentQuestion();
       if (question) {
         // Inject a system message telling the agent to ask this question
@@ -368,11 +376,11 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
     // ── Workflow Kanban Tracking ──────────────────────────────────
     // Classify the task and create a BMAD Kanban card for tracking
-    const taskSize = classifyTaskSize(userMessage);
+    const taskSize = classifyTaskSize(textForAgent);
     if (taskSize !== "trivial") {
       this.currentBmadTask = this.kanban.createTask(
-        userMessage.slice(0, 80),
-        userMessage,
+        textForAgent.slice(0, 80),
+        textForAgent,
         { size: taskSize }
       );
       this.kanban.moveTask(this.currentBmadTask.id, "ready");
@@ -385,12 +393,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // instruction that forces the model to emit a numbered plan first.
     const PLANNING_KEYWORDS = /\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
     const needsPlanningGate =
-      userMessage.length > 100 || PLANNING_KEYWORDS.test(userMessage);
+      textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent);
 
     if (needsPlanningGate) {
       this.messageHistory.push({
         role: "user",
-        content: userMessage,
+        content: textForAgent,
       });
       // Inject a hard planning constraint the model can't ignore because
       // it's the last user-turn content before generation starts.
@@ -401,11 +409,11 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       });
     } else {
       // Simple / short messages go through without a planning gate
-      this.messageHistory.push({ role: "user", content: userMessage });
+      this.messageHistory.push({ role: "user", content: textForAgent });
     }
 
     // Log user message to session
-    this.sessionWriter.writeUserMessage(userMessage);
+    this.sessionWriter.writeUserMessage(textForAgent);
 
     // Reset cost tracking for this run
     this.totalCost = null;
@@ -874,7 +882,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       if (this.kernel.isActive || this.kernel.isEnabled) {
         this.kernel.collectSessionTrace(
           this.sessionId,
-          userMessage,
+          textForAgent,
           flavoredContent,
           0.8, // Default score — PRM judge would score this properly if kernel is active
           {
@@ -936,7 +944,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
           modified: Array.from(this.sessionWriter.getFilesModified()),
           session: this.sessionId,
           cwd: this.config.workingDirectory || process.cwd(),
-          prompt: userMessage.slice(0, 120),
+          prompt: textForAgent.slice(0, 120),
         });
       }
       const finalContent = flavoredContent;
@@ -976,7 +984,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
             const recovery = await autonomy.handleError(
               err,
               "agent-chat",
-              () => this.chat(userMessage, imageBase64, imageMimeType),
+              () => this.chat(textForAgent, imageBase64, imageMimeType),
               2 // max 2 retries in infinite mode
             );
             if (recovery.success) {
@@ -1016,7 +1024,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
           modified: Array.from(this.sessionWriter.getFilesModified()),
           session: this.sessionId,
           cwd: this.config.workingDirectory || process.cwd(),
-          prompt: userMessage.slice(0, 120),
+          prompt: textForAgent.slice(0, 120),
           error: errMsg.slice(0, 200),
         });
       }

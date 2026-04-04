@@ -1045,7 +1045,7 @@ async function handleSkillsCommands(trimmed: string): Promise<boolean> {
         }
       }
       if (skills.length === 0) {
-        console.log("  No skills found. Create .md files in ~/.8gent/skills/");
+        console.log("  No skills found. Add .md files in ~/.8gent/skills/ or run from a repo with .claude/skills/*/SKILL.md");
       }
     } catch (err) {
       console.error(`\x1b[31mError loading skills: ${err}\x1b[0m`);

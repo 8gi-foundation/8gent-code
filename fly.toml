@@ -9,6 +9,10 @@ primary_region = "ams"
 [env]
   BOARD_MEMBER_CODE = "8EO"
   INFERENCE_MODE = "proxy"
+  VESSEL_MODE = "autoresearch"
+  AUTORESEARCH_ITERATIONS = "1"
+  OLLAMA_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+  DEFAULT_RUNTIME = "openrouter"
   MODEL_PROXY_URL = "http://8gi-model-proxy.internal:3200"
   CONTROL_PLANE_URL = "wss://8gi-board-plane.fly.dev"
   HEALTH_PORT = "8080"
@@ -16,9 +20,9 @@ primary_region = "ams"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = false
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[vm]]
   size = "shared-cpu-1x"
