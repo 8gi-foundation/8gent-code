@@ -28,6 +28,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **TUI status bar copy** - Permission and run lines use plain `perm` / `run` labels instead of bracket badges so they read as telemetry, not controls. After a turn finishes, green state is labeled **ready (awaiting input)** instead of **Done** (which implied the whole task succeeded).
 
 ### Added
+- feat: extract HyperAgent sequential pipeline into @8gent/orchestration (#1251)
 - **Skills loader** - TUI slash skills now load from bundled `packages/skills/*/SKILL.md` (and `dist/skills/` in the published CLI), plus optional `.claude/skills/*/SKILL.md` under `process.cwd()` (loaded before bundled so repo copies override defaults). Symlinked skill folders under `.claude/skills` resolve correctly. Supports `trigger`, `aliases`, and `/alias` resolution (e.g. **Billion Dollar Boardroom** at `/billiondollarboardroom`, `/bdb`, `/billionboard`).
 - **TUI skill slash commands** - Unknown `/commands` are no longer sent to the model as raw text; if the name matches a loaded skill, the chat turn uses the same expanded prompt as the REPL (`[SKILL: …]` + body). No need to run `/skills` first.
 - **TUI slash UX** - Ghost completions now include every built-in slash plus loaded skill triggers (sorted longest-first). Slash palette stays open for long commands (no 10-char cutoff; hides after the first space). `/skills` is implemented in the TUI handler and lists loaded skills. Palette merges built-ins with dynamic skill names/aliases.
