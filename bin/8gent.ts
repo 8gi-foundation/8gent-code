@@ -9,7 +9,7 @@
 import * as path from "path";
 import * as fs from "fs";
 
-const VERSION = "0.2.0";
+const VERSION = "0.1.3";
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
