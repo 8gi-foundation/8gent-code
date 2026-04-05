@@ -3963,7 +3963,7 @@ export function App({
 
 		if (!input && !attached) return;
 
-		// Intercept gh auth response — agent can't reliably run interactive CLI
+		// Intercept gh auth response — open a terminal tab and run gh auth login --web inside the PTY
 		const lastMsg = messages[messages.length - 1];
 		const isGhAuthPrompt = lastMsg?.id?.startsWith("gh-auth-notice");
 		const isYes = /^(yes|yeah|yep|sure|ok|go ahead|do it|yup|y)$/i.test(input.trim());
@@ -3971,15 +3971,17 @@ export function App({
 			setMessages((prev) => [
 				...prev,
 				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
-				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...", timestamp: new Date() },
+				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening a terminal tab — follow the prompts there to log in.", timestamp: new Date() },
 			]);
-			try {
-				// gh auth login --web needs a real TTY — spawn in a new Terminal window
-				require("child_process").exec(
-					`osascript -e 'tell application "Terminal" to do script "gh auth login --web && echo DONE"'`,
-					() => {}
-				);
-			} catch (e) {}
+			// Open a terminal tab and run gh auth login --web inside the real PTY
+			const newTab = workspaceTabs.addTab("terminal", "gh login");
+			if (newTab) {
+				// Give the PTY a moment to spawn, then send the command
+				setTimeout(() => {
+					const { writeToTerminal } = require("./hooks/useTerminal.js");
+					writeToTerminal(newTab.id, "gh auth login --web");
+				}, 800);
+			}
 			return;
 		}
 
