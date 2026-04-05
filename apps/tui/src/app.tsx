@@ -4574,6 +4574,29 @@ export function App({
 
 			case "chat":
 			default:
+				// Voice chat mode: minimal render to avoid Ink repaint collisions
+				// (audio level + timer + message updates all fire simultaneously → ghost text)
+				if (voiceChat.isActive) {
+					const voiceMessages = messages.filter(
+						(m) => m.role === "user" || m.role === "assistant",
+					).slice(-8);
+					return (
+						<Stack minHeight={0} flexGrow={1}>
+							<Box paddingX={1} paddingY={1} flexDirection="column" gap={1}>
+								<AppText color="cyan" bold>
+									🎙 Voice Chat — {voiceChat.state === "listening" ? "Listening..." : voiceChat.state === "transcribing" ? "Transcribing..." : voiceChat.state === "speaking" ? "Speaking..." : voiceChat.state === "thinking" ? "Thinking..." : "Ready"}
+								</AppText>
+								{voiceMessages.map((m) => (
+									<Box key={m.id} flexDirection="column">
+										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
+										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
+									</Box>
+								))}
+							</Box>
+						</Stack>
+					);
+				}
+
 				// TV Mode: show task cards when agent is using tools
 				// Fall back to message list for text-only conversation
 				if (tvTasks.length > 0) {
