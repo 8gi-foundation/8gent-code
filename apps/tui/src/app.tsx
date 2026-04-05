@@ -1524,6 +1524,19 @@ export function App({
 			const detected = await OnboardingManager.autoDetect();
 			onboardingManager.applyAutoDetected(detected);
 
+			// Prompt gh login if not authenticated
+			if (!detected.githubUsername) {
+				setMessages((prev) => [
+					...prev,
+					{
+						id: `gh-auth-notice-${Date.now()}`,
+						role: "assistant" as const,
+						content: "GitHub CLI not logged in. Run `gh auth login` in your terminal to enable issue creation, PR tools, and GitHub integration.",
+						timestamp: new Date(),
+					},
+				]);
+			}
+
 			// Also detect integrations (LM Studio, etc.)
 			await onboardingManager.detectIntegrations();
 
