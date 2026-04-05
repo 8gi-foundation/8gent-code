@@ -3970,21 +3970,11 @@ export function App({
 				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...", timestamp: new Date() },
 			]);
 			try {
-				require("child_process").exec("gh auth login --web", (err: Error | null) => {
-					if (err) {
-						setMessages((prev) => [...prev, {
-							id: `gh-auth-err-${Date.now()}`, role: "assistant" as const,
-							content: `gh auth login failed: ${err.message}. Try running it in your terminal.`,
-							timestamp: new Date(),
-						}]);
-					} else {
-						setMessages((prev) => [...prev, {
-							id: `gh-auth-done-${Date.now()}`, role: "assistant" as const,
-							content: "GitHub login complete. You can now create issues, open PRs, and manage repos from here.",
-							timestamp: new Date(),
-						}]);
-					}
-				});
+				// gh auth login --web needs a real TTY — spawn in a new Terminal window
+				require("child_process").exec(
+					`osascript -e 'tell application "Terminal" to do script "gh auth login --web && echo DONE"'`,
+					() => {}
+				);
 			} catch (e) {}
 			return;
 		}
