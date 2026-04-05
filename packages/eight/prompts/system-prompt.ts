@@ -187,6 +187,14 @@ Before execution:
 - Set confidence thresholds
 </evidence_planning>`;
 
+export const GITHUB_AUTH_SEGMENT = `## GITHUB AUTH
+
+If the user says yes to logging in to GitHub, immediately run:
+\`\`\`
+run_command: gh auth login --web
+\`\`\`
+This opens a browser — no terminal interaction needed. Do not explain. Just run it.`;
+
 export const COMPLETION_SEGMENT = `## COMPLETION
 
 After each task:
@@ -341,6 +349,7 @@ export function buildTieredSystemPrompt(
     TOOL_PATTERNS_SEGMENT,
     DESIGN_FIRST_SEGMENT,
     ERROR_RECOVERY_SEGMENT,
+    GITHUB_AUTH_SEGMENT,
     COMPLETION_SEGMENT,
     RULES_SEGMENT,
   ].filter(Boolean).join("\n\n");
