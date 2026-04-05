@@ -282,3 +282,35 @@ export function loadCheckpoint(checkpointPath?: string): RunCheckpoint | null {
 export function clearCheckpoint(checkpointPath?: string): void {
   try { fs.unlinkSync(checkpointPath || DEFAULT_CHECKPOINT_PATH); } catch { /* ok */ }
 }
+
+// ── critiqueResponse ───────────────────────────────────────────────────────
+// Run D critic pattern: qwen3:32b scores a Gemma 4 response.
+// Returns { approved, feedback } — caller decides whether to retry.
+
+const CRITIC_SYSTEM = `You are a Critic. Your job is to evaluate a response for correctness, completeness, and clarity.
+Be concise and harsh. One retry budget — make the feedback count.
+Output format (exact):
+VERDICT: APPROVED or REJECTED
+FLAWS: <specific issues, or "None">
+FIX: <what to change in one sentence, or "N/A">`;
+
+export async function critiqueResponse(
+  query: string,
+  response: string,
+  ollamaHost = "http://localhost:11434"
+): Promise<{ approved: boolean; feedback: string }> {
+  try {
+    const result = await inferenceChat(
+      "qwen3:32b",
+      CRITIC_SYSTEM,
+      `QUERY: ${query}\n\nRESPONSE: ${response}`,
+      { num_predict: 300, temperature: 0.3, timeout: 30000 },
+      { inferenceMode: "ollama", ollamaHost }
+    );
+    const approved = !result.content.includes("REJECTED");
+    return { approved, feedback: result.content };
+  } catch {
+    // Critic unavailable — approve by default (don't block the user)
+    return { approved: true, feedback: "" };
+  }
+}
