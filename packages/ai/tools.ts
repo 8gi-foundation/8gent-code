@@ -1257,6 +1257,43 @@ const writeNotesTool = tool({
   },
 });
 
+// ============================================
+// Terminal
+// ============================================
+
+/**
+ * write_terminal — send a shell command or text to a terminal tab's PTY.
+ * The terminal tab must already be open (user opens it or /terminal slash command).
+ * The command runs in the tab's live shell, so interactive programs work.
+ */
+const writeTerminalTool = tool({
+  description:
+    "Send a shell command to an open terminal tab. The command runs in a real PTY shell, so interactive programs, `gh auth login --web`, and TTY-requiring commands all work. Call list_terminals first if you don't know the tabId.",
+  inputSchema: z.object({
+    tabId: z
+      .string()
+      .describe("The terminal tab ID (e.g. 'terminal-1234abcd'). Use 'default' if only one terminal is open."),
+    input: z
+      .string()
+      .describe("The command or text to send. A newline will be appended automatically."),
+  }),
+  execute: async ({ tabId, input }) => {
+    // Dynamic import to avoid bundling node-pty in non-TUI contexts
+    const { writeToTerminal, listTerminals } = await import(
+      "../../apps/tui/src/hooks/useTerminal.js"
+    );
+    // If caller passed 'default', resolve to the first open terminal
+    let resolvedId = tabId;
+    if (tabId === "default") {
+      const open = listTerminals();
+      if (open.length === 0) return { error: "No terminal tabs are open. Ask the user to open one with /terminal." };
+      resolvedId = open[0];
+    }
+    const result = writeToTerminal(resolvedId, input);
+    return { ok: true, tabId: resolvedId, result };
+  },
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -1293,6 +1330,9 @@ export const agentTools = {
 
   // Notes
   write_notes: writeNotesTool,
+
+  // Terminal tabs
+  write_terminal: writeTerminalTool,
 
   // Shell
   run_command: runCommand,
