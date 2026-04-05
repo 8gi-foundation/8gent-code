@@ -67,8 +67,7 @@ export function Header({ isProcessing = false, showAnimations = true, updateAvai
         {updateAvailable && (
           <>
             <MutedText>│</MutedText>
-            <AppText color="yellow"> ↑ v{updateAvailable.latest} available</AppText>
-            <MutedText> git pull && bun install</MutedText>
+            <AppText color="yellow"> ↑ v{updateAvailable.latest}</AppText>
           </>
         )}
       </Inline>
