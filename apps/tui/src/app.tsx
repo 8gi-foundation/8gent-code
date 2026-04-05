@@ -860,6 +860,16 @@ export function App({
 		}
 	}, [modelsLoading, availableModels, currentProvider, currentModel]);
 
+	// If models have loaded and there's still no valid chat model, show provider selector
+	// so the user can pick a provider / download a model without the app crashing.
+	useEffect(() => {
+		if (modelsLoading) return;
+		if (currentModel && !isLikelyEmbeddingModelId(currentModel)) return;
+		if (availableModels.some((m) => !isLikelyEmbeddingModelId(m))) return;
+		// No chat model anywhere — guide user to provider setup
+		if (viewMode === "chat") setViewMode("provider-select");
+	}, [modelsLoading, availableModels, currentModel, viewMode]);
+
 	const [availableProviders] = useState<ProviderOption[]>([
 		{
 			name: "ollama",
