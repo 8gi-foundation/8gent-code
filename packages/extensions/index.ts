@@ -31,3 +31,5 @@ export function getExtensionManager(): ExtensionManager {
   _manager = manager;
   return manager;
 }
+
+export { craftExtension, type CraftOptions, type CraftResult } from "./crafter";

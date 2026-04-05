@@ -2,12 +2,21 @@
  * useVoiceChat — React hook for voice chat mode in the TUI.
  *
  * Wraps VoiceChatLoop with React state and keyboard interrupt (ESC to stop).
- * Half-duplex: listen -> transcribe -> agent -> speak -> listen.
+ * Auto-detects best available backend via selectBestBackend():
+ *   - moshi-mlx / moshi-cpu: full-duplex streaming (Moshi model required)
+ *   - whisper-kokoro: half-duplex listen → STT → agent → TTS (default, no extra deps)
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useInput } from "ink";
-import { VoiceChatLoop, type VoiceChatState, VoiceEngine } from "@8gent/voice";
+import {
+  VoiceChatLoop,
+  type VoiceChatState,
+  VoiceEngine,
+  detectCapabilities,
+  selectBestBackend,
+  type VoiceBackend,
+} from "@8gent/voice";
 
 export interface UseVoiceChatOptions {
   /** Send message to agent, return response text */
@@ -31,6 +40,8 @@ export interface UseVoiceChatReturn {
   lastAgentSaid: string | null;
   /** Error message if any */
   error: string | null;
+  /** Active voice backend (detected on start) */
+  backend: VoiceBackend | null;
   /** Start voice chat mode */
   start: () => Promise<void>;
   /** Stop voice chat mode */
@@ -45,6 +56,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
   const [lastUserSaid, setLastUserSaid] = useState<string | null>(null);
   const [lastAgentSaid, setLastAgentSaid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backend, setBackend] = useState<VoiceBackend | null>(null);
 
   const loopRef = useRef<VoiceChatLoop | null>(null);
   const engineRef = useRef<VoiceEngine | null>(null);
@@ -66,7 +78,12 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
   const start = useCallback(async () => {
     if (isActive) return;
 
-    // Create engine if needed
+    // Detect best backend for this machine
+    const caps = await detectCapabilities();
+    const selectedBackend = await selectBestBackend(caps);
+    setBackend(selectedBackend);
+
+    // Create whisper engine if needed (used for whisper-kokoro and as moshi fallback)
     if (!engineRef.current) {
       engineRef.current = new VoiceEngine({ model: "tiny" });
     }
@@ -77,6 +94,11 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
       setError("Voice not available. Install sox and whisper.cpp: brew install sox whisper-cpp");
       return;
     }
+
+    // TODO: When moshi model is downloaded, route moshi-mlx / moshi-cpu backends
+    // through MoshiMLXProvider full-duplex streaming instead of VoiceChatLoop.
+    // For now, all backends fall through to whisper-kokoro (VoiceChatLoop).
+    // Track: packages/voice/backends/moshi-mlx.ts — MoshiMLXProvider
 
     const loop = new VoiceChatLoop({
       engine,
@@ -141,6 +163,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
     lastUserSaid,
     lastAgentSaid,
     error,
+    backend,
     start,
     stop,
     interrupt,

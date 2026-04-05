@@ -152,17 +152,49 @@ function makeDefaultTabs(): WorkspaceTab[] {
   const now = new Date().toISOString();
   return [
     {
-      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: "tab-orchestrator",
       type: "chat",
-      title: "Chat 1",
+      title: "Orchestrator",
       active: true,
       createdAt: now,
       lastAccessedAt: now,
       pinned: true,
-      data: {},
+      data: {
+        role: "orchestrator",
+        systemPrompt: "You are the Orchestrator. Plan, delegate, and coordinate. Think before acting. No code — direct others.",
+        modelSelected: false,
+      },
     },
     {
-      id: `notes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: "tab-engineer",
+      type: "chat",
+      title: "Engineer",
+      active: false,
+      createdAt: now,
+      lastAccessedAt: now,
+      pinned: true,
+      data: {
+        role: "engineer",
+        systemPrompt: "You are the Engineer. Write code, edit files, run commands. Implement exactly what is asked. No fluff.",
+        modelSelected: false,
+      },
+    },
+    {
+      id: "tab-qa",
+      type: "chat",
+      title: "QA",
+      active: false,
+      createdAt: now,
+      lastAccessedAt: now,
+      pinned: true,
+      data: {
+        role: "qa",
+        systemPrompt: "You are QA. Find bugs, review diffs, run tests. Be harsh. Reject anything that doesn't meet the spec.",
+        modelSelected: false,
+      },
+    },
+    {
+      id: "tab-notes",
       type: "notes",
       title: "Notes",
       active: false,

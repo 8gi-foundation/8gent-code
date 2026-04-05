@@ -24,6 +24,18 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Check for merge conflict markers
+        run: |
+          if grep -rn --include='*.ts' --include='*.tsx' -l '<<<<<<<\|=======\|>>>>>>>' \
+            packages/ apps/ bin/ scripts/ \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
+            2>/dev/null | grep .; then
+            echo "::error::Merge conflict markers found in TypeScript source files"
+            echo "Run: grep -rn --include='*.ts' --include='*.tsx' '<<<<<<<' packages/ apps/ bin/"
+            exit 1
+          fi
+          echo "Conflict marker check: PASS"
+
       - name: Type check
         run: bun run typecheck
 
@@ -150,3 +162,23 @@ jobs:
             echo "::error::PR must include a CHANGELOG.md entry"
             exit 1
           fi
+
+  smoke:
+    name: Harness Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install
+      - name: CLI version check
+        run: |
+          OUTPUT=$(bun run cli -- --version 2>&1 || true)
+          echo "CLI output: $OUTPUT"
+          echo "$OUTPUT" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+' || (echo "::error::CLI did not output a version" && exit 1)
+          echo "CLI smoke: PASS"
+        env:
+          INFERENCE_MODE: offline

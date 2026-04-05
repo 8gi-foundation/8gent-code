@@ -152,6 +152,28 @@ npm install -g @8gi-foundation/8gent-code
 
 That's it. Ollama runs locally by default - if you don't have it, 8gent will guide you through setup on first launch.
 
+## Quick Start (Harness Smoke)
+
+```bash
+# 1. Clone and install
+git clone https://github.com/8gi-foundation/8gent-code.git
+cd 8gent-code
+bun install
+
+# 2. Verify CLI works
+bun run cli -- --version
+# Expected: 0.x.x (8gent Code)
+
+# 3. Verify harness typecheck
+bun run check:harness
+# Expected: exit 0 (or type errors listed — not a crash)
+```
+
+If Ollama is not installed, 8gent will prompt you on first run. For offline/CI use:
+```bash
+INFERENCE_MODE=proxy bun run cli -- --version
+```
+
 <br />
 
 ---
