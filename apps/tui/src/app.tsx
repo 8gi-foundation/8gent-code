@@ -732,24 +732,27 @@ export function App({
 			setModelsLoading(true);
 			try {
 				if (currentProvider === "ollama") {
-					// Fetch locally installed Ollama models
+					// Fetch locally installed Ollama models — filter embedding models at source
 					const res = await fetch("http://localhost:11434/api/tags");
 					if (res.ok) {
 						const data = await res.json();
-						const models = (data.models || [])
+						const allModels = (data.models || [])
 							.map((m: any) => String(m.name ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						if (!cancelled) setAvailableModels(models);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "lmstudio") {
-					// Fetch LM Studio models
+					// Fetch LM Studio models — filter embedding models at source so they
+					// never pollute the model list or get auto-selected as chat models
 					const res = await fetch("http://localhost:1234/v1/models");
 					if (res.ok) {
 						const data = await res.json();
-						const models = (data.data || [])
+						const allModels = (data.data || [])
 							.map((m: any) => String(m.id ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						if (!cancelled) setAvailableModels(models.length > 0 ? models : []);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
