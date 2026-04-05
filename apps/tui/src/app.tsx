@@ -3959,6 +3959,36 @@ export function App({
 
 		if (!input && !attached) return;
 
+		// Intercept gh auth response — agent can't reliably run interactive CLI
+		const lastMsg = messages[messages.length - 1];
+		const isGhAuthPrompt = lastMsg?.id?.startsWith("gh-auth-notice");
+		const isYes = /^(yes|yeah|yep|sure|ok|go ahead|do it|yup|y)$/i.test(input.trim());
+		if (isGhAuthPrompt && isYes) {
+			setMessages((prev) => [
+				...prev,
+				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
+				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...", timestamp: new Date() },
+			]);
+			try {
+				require("child_process").exec("gh auth login --web", (err: Error | null) => {
+					if (err) {
+						setMessages((prev) => [...prev, {
+							id: `gh-auth-err-${Date.now()}`, role: "assistant" as const,
+							content: `gh auth login failed: ${err.message}. Try running it in your terminal.`,
+							timestamp: new Date(),
+						}]);
+					} else {
+						setMessages((prev) => [...prev, {
+							id: `gh-auth-done-${Date.now()}`, role: "assistant" as const,
+							content: "GitHub login complete. You can now create issues, open PRs, and manage repos from here.",
+							timestamp: new Date(),
+						}]);
+					}
+				});
+			} catch (e) {}
+			return;
+		}
+
 		if (showOnboarding && !input && attached) {
 			addSystemMessage(
 				"Answer onboarding in text first. Your image is still in the input bar if you need it after setup.",
