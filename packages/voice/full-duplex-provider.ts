@@ -5,14 +5,28 @@
  * Full-duplex = listens and speaks simultaneously (no turn-taking).
  *
  * Backend priority:
- * 1. moshi-mlx    — Mac Apple Silicon + MLX installed + moshi Python package installed
- * 2. moshi-cpu    — moshi Python package installed (any platform, slower)
- * 3. whisper-kokoro — always available (current Whisper STT + TTS stack)
+ * 1. moshi-mlx    — Mac Apple Silicon + MLX Python pkg + moshi pkg + model cached
+ * 2. moshi-cpu    — moshi pkg + model cached (any platform, uses MPS on Apple Silicon)
+ * 3. whisper-kokoro — always available (Whisper STT + macOS TTS, no extra deps)
  * 4. nim-api      — NVIDIA_NIM_KEY env var set
  * 5. web-speech   — browser environments only
+ *
+ * Moshi model: kyutai/moshiko-pytorch-bf16
+ * Cached at: ~/.cache/huggingface/hub/models--kyutai--moshiko-pytorch-bf16/
+ * Install:    pip install moshi && python3 -c "from huggingface_hub import snapshot_download; snapshot_download('kyutai/moshiko-pytorch-bf16')"
  */
 
 import { execSync } from "child_process";
+import { existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+
+const MOSHI_HF_REPO = "kyutai/moshiko-pytorch-bf16";
+const MOSHI_HF_CACHE_PATH = join(
+  homedir(),
+  ".cache", "huggingface", "hub",
+  "models--kyutai--moshiko-pytorch-bf16", "snapshots"
+);
 
 export type VoiceBackend =
   | "moshi-mlx"
@@ -37,6 +51,8 @@ export interface BackendCapabilities {
   hasMLX: boolean;
   /** True if moshi Python package is importable */
   hasMoshiInstalled: boolean;
+  /** True if kyutai/moshiko-pytorch-bf16 model is cached locally */
+  hasMoshiModel: boolean;
   /** True if CUDA is available (nvidia-smi succeeds) */
   hasCUDA: boolean;
   /** True if NVIDIA_NIM_KEY env var is set */
@@ -44,6 +60,8 @@ export interface BackendCapabilities {
   platform: NodeJS.Platform;
   arch: string;
 }
+
+export { MOSHI_HF_REPO };
 
 function tryExec(cmd: string): boolean {
   try {
@@ -61,6 +79,7 @@ export async function detectCapabilities(): Promise<BackendCapabilities> {
 
   const hasMLX = hasAppleSilicon && tryExec("python3 -c \"import mlx\"");
   const hasMoshiInstalled = tryExec("python3 -c \"import moshi\"");
+  const hasMoshiModel = existsSync(MOSHI_HF_CACHE_PATH);
   const hasCUDA = tryExec("nvidia-smi");
   const hasNIMKey = !!process.env.NVIDIA_NIM_KEY;
 
@@ -68,6 +87,7 @@ export async function detectCapabilities(): Promise<BackendCapabilities> {
     hasAppleSilicon,
     hasMLX,
     hasMoshiInstalled,
+    hasMoshiModel,
     hasCUDA,
     hasNIMKey,
     platform,
@@ -78,10 +98,10 @@ export async function detectCapabilities(): Promise<BackendCapabilities> {
 export async function selectBestBackend(
   caps: BackendCapabilities
 ): Promise<VoiceBackend> {
-  if (caps.hasAppleSilicon && caps.hasMLX && caps.hasMoshiInstalled) {
+  if (caps.hasAppleSilicon && caps.hasMLX && caps.hasMoshiInstalled && caps.hasMoshiModel) {
     return "moshi-mlx";
   }
-  if (caps.hasMoshiInstalled) {
+  if (caps.hasMoshiInstalled && caps.hasMoshiModel) {
     return "moshi-cpu";
   }
   if (caps.hasNIMKey) {

@@ -18,6 +18,7 @@
 import { execSync, spawn, type ChildProcess } from "child_process";
 import type WS from "ws";
 import type { FullDuplexProvider, VoiceBackend } from "../full-duplex-provider";
+import { MOSHI_HF_REPO } from "../full-duplex-provider";
 
 const MOSHI_WS_PORT = 8998;
 const MOSHI_WS_URL = `ws://localhost:${MOSHI_WS_PORT}`;
@@ -120,6 +121,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
       "-m", "moshi.server",
       "--port", String(MOSHI_WS_PORT),
       "--device", device,
+      "--hf-repo", MOSHI_HF_REPO,
     ], {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
