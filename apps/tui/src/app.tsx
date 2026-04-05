@@ -251,10 +251,12 @@ function detectDefaultModel(): string {
 			timeout: 3000,
 		}).toString();
 		const data = JSON.parse(raw);
-		const models = (data.models || [])
+		const allModels = (data.models || [])
 			.map((m: any) => String(m.name ?? "").trim())
 			.filter(Boolean);
-		return pickBestChatModel(models);
+		// Only consider non-embedding models — return empty string if none available
+		const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+		return chatModels.length > 0 ? pickBestChatModel(chatModels) : "";
 	} catch {
 		return "";
 	}
