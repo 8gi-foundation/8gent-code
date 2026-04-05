@@ -280,13 +280,17 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
 	}
 
-	// 3. Apfel (Apple Intelligence via localhost:11434 compatible endpoint)
-	const apfelModels = fetchChatModels(
-		"http://localhost:6660/v1/models",
-		(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
-	);
-	if (apfelModels.length > 0) {
-		return { provider: "ollama", model: pickBestChatModel(apfelModels) };
+	// 3. Apfel (Apple Intelligence — macOS 26+, Apple Silicon only)
+	// Run with: apfel --serve --port 11435
+	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+	if (isAppleSilicon) {
+		const apfelModels = fetchChatModels(
+			"http://localhost:11435/v1/models",
+			(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+		);
+		if (apfelModels.length > 0) {
+			return { provider: "apfel", model: pickBestChatModel(apfelModels) };
+		}
 	}
 
 	return { provider: "ollama", model: "" };
