@@ -87,6 +87,7 @@ import {
 	type SelectOption,
 } from "./components/select-input.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
+import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	DetailedStatusBar,
 	EnhancedStatusBar,
@@ -243,28 +244,68 @@ function loadProviderSettings(): { provider: string; model: string } {
 	return { provider: "ollama", model: "" };
 }
 
-/** Query Ollama for a sensible default chat model (skip embeddings). */
-function detectDefaultModel(): string {
-	try {
-		const { execSync } = require("child_process");
-		const raw = execSync("curl -s http://localhost:11434/api/tags", {
-			timeout: 3000,
-		}).toString();
-		const data = JSON.parse(raw);
-		const models = (data.models || [])
-			.map((m: any) => String(m.name ?? "").trim())
-			.filter(Boolean);
-		return pickBestChatModel(models);
-	} catch {
-		return "";
+/**
+ * Probe all local providers at startup and return the best available chat model + provider.
+ * Priority: LM Studio → Ollama → Apfel (Apple Intelligence) → empty
+ * Embedding-only providers are skipped.
+ */
+function detectBestLocalProvider(): { provider: string; model: string } {
+	const { execSync } = require("child_process");
+
+	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
+		try {
+			const raw = execSync(`curl -s --max-time 2 "${url}"`, { timeout: 3000 }).toString();
+			const data = JSON.parse(raw);
+			const all = extract(data).map((s: string) => s.trim()).filter(Boolean);
+			return all.filter((id: string) => !isLikelyEmbeddingModelId(id));
+		} catch {
+			return [];
+		}
 	}
+
+	// 1. LM Studio
+	const lmModels = fetchChatModels(
+		"http://localhost:1234/v1/models",
+		(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+	);
+	if (lmModels.length > 0) {
+		return { provider: "lmstudio", model: pickBestChatModel(lmModels) };
+	}
+
+	// 2. Ollama
+	const ollamaModels = fetchChatModels(
+		"http://localhost:11434/api/tags",
+		(d) => (d.models || []).map((m: any) => String(m.name ?? "")),
+	);
+	if (ollamaModels.length > 0) {
+		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
+	}
+
+	// 3. Apfel (Apple Intelligence — macOS 26+, Apple Silicon only)
+	// Run with: apfel --serve --port 11435
+	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+	if (isAppleSilicon) {
+		const apfelModels = fetchChatModels(
+			"http://localhost:11435/v1/models",
+			(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+		);
+		if (apfelModels.length > 0) {
+			return { provider: "apfel", model: pickBestChatModel(apfelModels) };
+		}
+	}
+
+	return { provider: "ollama", model: "" };
 }
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
-// If no model saved, detect from what's actually available
+// If no saved provider/model, auto-detect the best available local provider
 if (!_savedProviderSettings.model) {
-	_savedProviderSettings.model = detectDefaultModel();
+	const detected = detectBestLocalProvider();
+	if (detected.model) {
+		_savedProviderSettings.provider = detected.provider;
+		_savedProviderSettings.model = detected.model;
+	}
 }
 
 /** Merge saved ~/.8gent/providers.json with optional CLI --provider / --model. */
@@ -282,7 +323,7 @@ function computeCliOverrides(
 	if (cliModelTrim) model = cliModelTrim;
 	else if (providerSwitchedByCli) model = "";
 	else model = savedM;
-	if (!model && provider === "ollama") model = detectDefaultModel();
+	if (!model) { const d = detectBestLocalProvider(); model = d.model; }
 	return { provider, model };
 }
 
@@ -481,7 +522,14 @@ export function App({
 			]);
 
 			try {
-				const response = await agent.chat(clean);
+				// Run D critic loop: Gemma 4 generates, qwen3:32b critiques, one retry if rejected
+				let response = await agent.chat(clean);
+				const { approved, feedback } = await critiqueResponse(clean, response || "");
+				if (!approved && feedback) {
+					response = await agent.chat(
+						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`
+					);
+				}
 				const cleanResponse = (response || "")
 					.replace(/\[_EOT_\]/g, "")
 					.replace(/<\|.*?\|>/g, "")
@@ -732,24 +780,27 @@ export function App({
 			setModelsLoading(true);
 			try {
 				if (currentProvider === "ollama") {
-					// Fetch locally installed Ollama models
+					// Fetch locally installed Ollama models — filter embedding models at source
 					const res = await fetch("http://localhost:11434/api/tags");
 					if (res.ok) {
 						const data = await res.json();
-						const models = (data.models || [])
+						const allModels = (data.models || [])
 							.map((m: any) => String(m.name ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						if (!cancelled) setAvailableModels(models);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "lmstudio") {
-					// Fetch LM Studio models
+					// Fetch LM Studio models — filter embedding models at source so they
+					// never pollute the model list or get auto-selected as chat models
 					const res = await fetch("http://localhost:1234/v1/models");
 					if (res.ok) {
 						const data = await res.json();
-						const models = (data.data || [])
+						const allModels = (data.data || [])
 							.map((m: any) => String(m.id ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						if (!cancelled) setAvailableModels(models.length > 0 ? models : []);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
@@ -820,6 +871,16 @@ export function App({
 			setCurrentModel(next);
 		}
 	}, [modelsLoading, availableModels, currentProvider, currentModel]);
+
+	// If models have loaded and there's still no valid chat model, show provider selector
+	// so the user can pick a provider / download a model without the app crashing.
+	useEffect(() => {
+		if (modelsLoading) return;
+		if (currentModel && !isLikelyEmbeddingModelId(currentModel)) return;
+		if (availableModels.some((m) => !isLikelyEmbeddingModelId(m))) return;
+		// No chat model anywhere — guide user to provider setup
+		if (viewMode === "chat") setViewMode("provider-select");
+	}, [modelsLoading, availableModels, currentModel, viewMode]);
 
 	const [availableProviders] = useState<ProviderOption[]>([
 		{
@@ -1462,6 +1523,19 @@ export function App({
 			// Auto-detect environment (git config, ollama models, gh auth)
 			const detected = await OnboardingManager.autoDetect();
 			onboardingManager.applyAutoDetected(detected);
+
+			// Proactively offer gh login if not authenticated
+			if (!detected.githubUsername) {
+				setMessages((prev) => [
+					...prev,
+					{
+						id: `gh-auth-notice-${Date.now()}`,
+						role: "assistant" as const,
+						content: "Hey — you're not logged in to GitHub. Want me to log you in now so we can create issues, open PRs, and manage repos directly from here? Just say yes and I'll handle it.",
+						timestamp: new Date(),
+					},
+				]);
+			}
 
 			// Also detect integrations (LM Studio, etc.)
 			await onboardingManager.detectIntegrations();
@@ -3098,9 +3172,10 @@ export function App({
 						);
 					} else if (args[0] === "status") {
 						const setupInfo = voice.setupStatus;
+						const backendLabel = voiceChat.backend ? ` [${voiceChat.backend}]` : "";
 						const voiceChatStatus = voiceChat.isActive
-							? `\nVoice Chat: Active (${voiceChat.state})`
-							: "\nVoice Chat: Inactive";
+							? `\nVoice Chat: Active (${voiceChat.state})${backendLabel}`
+							: `\nVoice Chat: Inactive${backendLabel}`;
 						const status = voice.isAvailable
 							? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
 							: `Voice: Not available — ${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"}`;
@@ -3884,6 +3959,26 @@ export function App({
 
 		if (!input && !attached) return;
 
+		// Intercept gh auth response — agent can't reliably run interactive CLI
+		const lastMsg = messages[messages.length - 1];
+		const isGhAuthPrompt = lastMsg?.id?.startsWith("gh-auth-notice");
+		const isYes = /^(yes|yeah|yep|sure|ok|go ahead|do it|yup|y)$/i.test(input.trim());
+		if (isGhAuthPrompt && isYes) {
+			setMessages((prev) => [
+				...prev,
+				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
+				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...", timestamp: new Date() },
+			]);
+			try {
+				// gh auth login --web needs a real TTY — spawn in a new Terminal window
+				require("child_process").exec(
+					`osascript -e 'tell application "Terminal" to do script "gh auth login --web && echo DONE"'`,
+					() => {}
+				);
+			} catch (e) {}
+			return;
+		}
+
 		if (showOnboarding && !input && attached) {
 			addSystemMessage(
 				"Answer onboarding in text first. Your image is still in the input bar if you need it after setup.",
@@ -4524,6 +4619,29 @@ export function App({
 
 			case "chat":
 			default:
+				// Voice chat mode: minimal render to avoid Ink repaint collisions
+				// (audio level + timer + message updates all fire simultaneously → ghost text)
+				if (voiceChat.isActive) {
+					const voiceMessages = messages.filter(
+						(m) => m.role === "user" || m.role === "assistant",
+					).slice(-8);
+					return (
+						<Stack minHeight={0} flexGrow={1}>
+							<Box paddingX={1} paddingY={1} flexDirection="column" gap={1}>
+								<AppText color="cyan" bold>
+									🎙 Voice Chat — {voiceChat.state === "listening" ? "Listening..." : voiceChat.state === "transcribing" ? "Transcribing..." : voiceChat.state === "speaking" ? "Speaking..." : voiceChat.state === "thinking" ? "Thinking..." : "Ready"}
+								</AppText>
+								{voiceMessages.map((m) => (
+									<Box key={m.id} flexDirection="column">
+										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
+										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
+									</Box>
+								))}
+							</Box>
+						</Stack>
+					);
+				}
+
 				// TV Mode: show task cards when agent is using tools
 				// Fall back to message list for text-only conversation
 				if (tvTasks.length > 0) {

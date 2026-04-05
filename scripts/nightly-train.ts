@@ -12,6 +12,16 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import {
+  type InferenceParams,
+  type RunCheckpoint,
+  defaultParams,
+  inferenceChat,
+  adaptiveSequentialPreProcess,
+  saveCheckpoint,
+  loadCheckpoint,
+  clearCheckpoint,
+} from "../packages/orchestration/sequential-pipeline";
 
 const PROJECT_ROOT = path.resolve(path.dirname(import.meta.dir)); // -> ~/8gent-code
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
@@ -47,34 +57,14 @@ function log(msg: string) {
 // Session Persistence: checkpoint + resume on crash
 // ============================================
 
-interface RunCheckpoint {
-  iteration: number;
-  taskIndex: number;
-  results: BenchmarkResult[];
-  startedAt: string;
-  lastUpdated: string;
-}
+// RunCheckpoint, saveCheckpoint, loadCheckpoint, clearCheckpoint
+// are imported from packages/orchestration/sequential-pipeline
 
 const CHECKPOINT_PATH = path.join(os.homedir(), ".8gent", "run-checkpoint.json");
 const HARNESS_STATE_PATH = path.join(os.homedir(), ".8gent", "harness-state.json");
 
-function saveCheckpoint(cp: RunCheckpoint): void {
-  fs.writeFileSync(CHECKPOINT_PATH, JSON.stringify(cp, null, 2));
-}
-
-function loadCheckpoint(): RunCheckpoint | null {
-  try {
-    if (fs.existsSync(CHECKPOINT_PATH)) {
-      const data = JSON.parse(fs.readFileSync(CHECKPOINT_PATH, "utf-8"));
-      log(`[RESUME] Found checkpoint: iter ${data.iteration}, task ${data.taskIndex}/${data.results.length} completed`);
-      return data;
-    }
-  } catch { /* corrupted checkpoint, start fresh */ }
-  return null;
-}
-
-function clearCheckpoint(): void {
-  try { fs.unlinkSync(CHECKPOINT_PATH); } catch { /* ok */ }
+function logCheckpointResume(data: RunCheckpoint): void {
+  log(`[RESUME] Found checkpoint: iter ${data.iteration}, task ${data.taskIndex}/${(data.results as unknown[]).length} completed`);
 }
 
 function loadHarnessState(): void {
@@ -110,223 +100,8 @@ function runCommand(cmd: string, args: string[], opts?: { timeout?: number; cwd?
 // Sequential Multi-Inference Pipeline (Run D)
 // Paper: arxiv 2603.28990v1 - fixed ordering + autonomous role selection
 // Three passes: Analyst -> Critic -> Implementer
+// Imported from packages/orchestration/sequential-pipeline
 // ============================================
-
-// Adaptive parameters - the harness tunes these at runtime
-interface InferenceParams {
-  temperature: number;
-  num_predict: number;
-  timeout: number;
-}
-
-function defaultParams(promptLength: number): InferenceParams {
-  // Adaptive timeout: longer prompts need more thinking time
-  // qwen3 thinking mode: ~1 token/30ms thinking + ~1 token/30ms content
-  const baseTimeout = 180000; // 3 min minimum
-  const perCharTimeout = Math.min(promptLength * 50, 420000); // scale with prompt, cap at 7 min extra
-  return {
-    temperature: 0.7,
-    num_predict: 8192,
-    timeout: baseTimeout + perCharTimeout,
-  };
-}
-
-// Auto-detect inference backend: model-proxy (cloud), Ollama (local), or LM Studio (local)
-const INFERENCE_MODE = process.env.INFERENCE_MODE || "ollama";
-const MODEL_PROXY_URL = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
-const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
-const LM_STUDIO_HOST = process.env.LM_STUDIO_HOST || "http://127.0.0.1:1234";
-const VESSEL_ID = process.env.BOARD_MEMBER_CODE || "local";
-
-async function inferenceChat(model: string, systemPrompt: string, userPrompt: string, params?: Partial<InferenceParams>): Promise<{ content: string; durationMs: number }> {
-  const p = { ...defaultParams(userPrompt.length), ...params };
-  const start = Date.now();
-
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), p.timeout);
-
-    let content = "";
-
-    if (INFERENCE_MODE === "proxy") {
-      // Cloud mode: call OpenRouter directly for analyst/critic (bypasses proxy token limits)
-      // The model-proxy is used by the harness-cli agent loop, not by pre-processing
-      const openrouterKey = process.env.OPENROUTER_API_KEY || process.env.PROXY_API_KEY || "";
-      const apiUrl = "https://openrouter.ai/api/v1/chat/completions";
-      const authKey = openrouterKey;
-
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${authKey}`,
-          "X-Vessel-ID": VESSEL_ID,
-          "X-User-Id": VESSEL_ID,
-        },
-        body: JSON.stringify({
-          model: model === "qwen3:14b" ? "auto:free" : model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: p.num_predict,
-          temperature: p.temperature,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      const data = await res.json() as any;
-      content = data.choices?.[0]?.message?.content || "";
-    } else if (INFERENCE_MODE === "lmstudio") {
-      // LM Studio mode: OpenAI-compatible API at local port 1234
-      const res = await fetch(`${LM_STUDIO_HOST}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer lm-studio" },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: p.num_predict,
-          temperature: p.temperature,
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      const data = await res.json() as any;
-      content = data.choices?.[0]?.message?.content || "";
-    } else {
-      // Local mode: use Ollama directly
-      const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          stream: false,
-          options: { temperature: p.temperature, num_predict: p.num_predict },
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      const data = await res.json() as any;
-      content = data.message?.content || "";
-    }
-
-    return { content, durationMs: Date.now() - start };
-  } catch (err) {
-    log(`    inferenceChat error: ${err}`);
-    return { content: "", durationMs: Date.now() - start };
-  }
-}
-
-// ============================================
-// Adaptive HyperAgent: self-improving sequential pipeline
-// Strategy: Analyst -> Critic (no-BS) -> retry if rejected -> Implementer
-// Self-adjusts: timeout, temperature, retries based on results
-// ============================================
-
-const MAX_ANALYST_RETRIES = 2;
-
-async function adaptiveSequentialPreProcess(model: string, taskPrompt: string, taskId: string): Promise<string> {
-  // --- Pass 1: Analyst (with retry on empty/timeout) ---
-  let analysis = "";
-  let analystAttempt = 0;
-  let analystParams: Partial<InferenceParams> = {};
-
-  while (analystAttempt < MAX_ANALYST_RETRIES && !analysis) {
-    analystAttempt++;
-    if (analystAttempt > 1) {
-      // Self-improve: increase timeout, raise temperature for diversity
-      analystParams = {
-        timeout: (analystParams.timeout || defaultParams(taskPrompt.length).timeout) * 1.5,
-        temperature: Math.min(0.9, (analystParams.temperature || 0.7) + 0.1),
-      };
-      log(`  [HYPER] Analyst retry ${analystAttempt} - timeout: ${Math.round((analystParams.timeout || 0) / 1000)}s, temp: ${analystParams.temperature}`);
-    }
-
-    log(`  [SEQ] Pass 1: Analyst for ${taskId} (attempt ${analystAttempt})`);
-    const result = await inferenceChat(model,
-      `You are an Analyst. Your ONLY job is to identify the transformation rule or algorithm required.
-Be precise. State the rule in formal terms. Do NOT write code. Do NOT implement anything.
-Keep your response under 500 words.
-Output format:
-RULE: <one sentence formal description>
-EVIDENCE: <which examples prove this rule>
-EDGE CASES: <what could go wrong>`,
-      taskPrompt,
-      analystParams
-    );
-    analysis = result.content;
-    log(`  [SEQ] Pass 1 complete (${analysis.length} chars, ${Math.round(result.durationMs / 1000)}s)`);
-  }
-
-  if (!analysis) {
-    log(`  [HYPER] Analyst failed after ${MAX_ANALYST_RETRIES} attempts - falling back to direct mode`);
-    return taskPrompt; // Fall back to non-sequential mode
-  }
-
-  // --- Pass 2: Critic (no-BS mode) ---
-  log(`  [SEQ] Pass 2: Critic for ${taskId}`);
-  const critiqueResult = await inferenceChat(model,
-    `You are a Critic operating in no-BS mode. You receive an Analyst's rule identification and the original problem.
-Your ONLY job is to find flaws, missed cases, or errors in the analysis.
-Be harsh. Be specific. Do not let sloppy analysis pass.
-If the analysis is WRONG, say REJECTED and explain why.
-If the analysis is CORRECT, say APPROVED and list implementation pitfalls.
-Keep your response under 300 words.
-Output format:
-VERDICT: APPROVED or REJECTED
-FLAWS: <list specific errors or gaps, or "None" if approved>
-CORRECTIONS: <what the rule actually is, if different>
-IMPLEMENTATION RISKS: <what will go wrong when coding this>`,
-    `ORIGINAL PROBLEM:\n${taskPrompt}\n\nANALYST OUTPUT:\n${analysis}`
-  );
-
-  const critique = critiqueResult.content;
-  log(`  [SEQ] Pass 2 complete (${critique.length} chars, ${Math.round(critiqueResult.durationMs / 1000)}s)`);
-
-  // --- Critic rejection triggers analyst retry ---
-  if (critique.includes("REJECTED") && analystAttempt < MAX_ANALYST_RETRIES) {
-    log(`  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback`);
-    const retryResult = await inferenceChat(model,
-      `You are an Analyst. Your previous analysis was REJECTED by a critic.
-Read the critic's feedback carefully and provide a corrected analysis.
-Be precise. State the rule in formal terms. Do NOT write code.
-Keep your response under 500 words.
-Output format:
-RULE: <corrected one sentence formal description>
-EVIDENCE: <which examples prove this rule>
-EDGE CASES: <what could go wrong>`,
-      `ORIGINAL PROBLEM:\n${taskPrompt}\n\nYOUR PREVIOUS ANALYSIS:\n${analysis}\n\nCRITIC FEEDBACK:\n${critique}`,
-      { temperature: 0.5 } // Lower temp for corrected analysis
-    );
-
-    if (retryResult.content) {
-      log(`  [HYPER] Analyst correction complete (${retryResult.content.length} chars, ${Math.round(retryResult.durationMs / 1000)}s)`);
-      analysis = retryResult.content;
-    }
-  }
-
-  // --- Build enhanced prompt for Implementer ---
-  const enhancedPrompt = `${taskPrompt}
-
---- ANALYST REPORT ---
-${analysis}
-
---- CRITIC REVIEW ---
-${critique}
-
---- IMPLEMENTATION DIRECTIVE ---
-You have received analysis and critique from two prior reviewers. Use their insights to write a correct implementation. If the critic found flaws in the analysis, trust the critic's corrections. Write the code, run tests, verify correctness.`;
-
-  return enhancedPrompt;
-}
 
 // ============================================
 // Phase 1: Run Benchmarks
@@ -409,11 +184,12 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.` },
   const results: BenchmarkResult[] = [];
 
   // Resume from checkpoint if available
-  const checkpoint = loadCheckpoint();
+  const checkpoint = loadCheckpoint(CHECKPOINT_PATH);
   let startIndex = 0;
   if (checkpoint && checkpoint.iteration === 0) { // iteration 0 = current runBenchmarks call
+    logCheckpointResume(checkpoint);
     startIndex = checkpoint.taskIndex;
-    results.push(...checkpoint.results);
+    results.push(...checkpoint.results as BenchmarkResult[]);
     log(`[RESUME] Skipping ${startIndex} already-completed tasks`);
   }
 
@@ -613,11 +389,11 @@ Focus on getting working code with passing tests. Simplify if needed.`;
 
       results.push({ benchmarkId: task.id, score, passed, sessionId });
       // Checkpoint after each task for crash recovery
-      saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
+      saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() }, CHECKPOINT_PATH);
     } catch (err) {
       results.push({ benchmarkId: task.id, score: 0, passed: false, error: String(err) });
       log(`    → ERROR: ${err}`);
-      saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
+      saveCheckpoint({ iteration: 0, taskIndex: ti + 1, results, startedAt: new Date().toISOString(), lastUpdated: new Date().toISOString() }, CHECKPOINT_PATH);
     }
   }
 
@@ -1036,7 +812,7 @@ async function main() {
     // Phase 1: Benchmark (resumes from checkpoint if crashed mid-iteration)
     const results = await runBenchmarks(currentModel);
     allResults.push({ iteration: i, results, model: currentModel });
-    clearCheckpoint(); // Iteration complete, clear checkpoint
+    clearCheckpoint(CHECKPOINT_PATH); // Iteration complete, clear checkpoint
 
     // Phase 2: Analyze + Mutate
     await analyzeAndMutate(results, i);

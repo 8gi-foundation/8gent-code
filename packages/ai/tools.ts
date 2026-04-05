@@ -327,13 +327,16 @@ const ghIssueList = tool({
 });
 
 const ghIssueCreate = tool({
-  description: "Create an issue",
+  description: "Create a GitHub issue and assign it to the current user",
   inputSchema: z.object({
     title: z.string().describe("Issue title"),
-    body: z.string().optional().describe("Issue description"),
+    body: z.string().optional().describe("Issue description in markdown"),
+    assignee: z.string().optional().describe("GitHub username to assign. Defaults to @me (current user)"),
   }),
-  execute: async ({ title, body }) =>
-    runShellCommand(`gh issue create --title "${title}" --body "${body || ""}"`),
+  execute: async ({ title, body, assignee }) => {
+    const who = assignee || "@me";
+    return runShellCommand(`gh issue create --title "${title}" --body "${body || ""}" --assignee "${who}"`);
+  },
 });
 
 // ============================================
@@ -1213,6 +1216,47 @@ const merge_agent_work = tool({
 // Composed ToolSet
 // ============================================
 
+// ============================================
+// Notes
+// ============================================
+
+const writeNotesTool = tool({
+  description: "Write or append a note to the Notes tab. The note will appear immediately in the Notes panel.",
+  inputSchema: z.object({
+    title: z.string().describe("Note title (first line)"),
+    content: z.string().describe("Note content in plain text or markdown"),
+    append: z.boolean().optional().describe("If true, appends to existing note with same title instead of creating new"),
+  }),
+  execute: async ({ title, content, append }) => {
+    const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const dataDir = join(process.env.HOME || "~", ".8gent", "tabs");
+    const filepath = join(dataDir, "notes.json");
+    if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+    let notes: any[] = [];
+    try {
+      if (existsSync(filepath)) {
+        const raw = JSON.parse(readFileSync(filepath, "utf-8"));
+        notes = raw.notes || [];
+      }
+    } catch {}
+    const now = new Date().toISOString();
+    if (append) {
+      const existing = notes.find((n: any) => n.title === title);
+      if (existing) {
+        existing.content = `${existing.content}\n\n${content}`;
+        existing.updatedAt = now;
+      } else {
+        notes.push({ id: `note-${Date.now()}`, title, content, createdAt: now, updatedAt: now });
+      }
+    } else {
+      notes.push({ id: `note-${Date.now()}`, title, content, createdAt: now, updatedAt: now });
+    }
+    writeFileSync(filepath, JSON.stringify({ notes }, null, 2));
+    return { ok: true, noteCount: notes.length, title };
+  },
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -1246,6 +1290,9 @@ export const agentTools = {
   gh_pr_view: ghPrView,
   gh_issue_list: ghIssueList,
   gh_issue_create: ghIssueCreate,
+
+  // Notes
+  write_notes: writeNotesTool,
 
   // Shell
   run_command: runCommand,

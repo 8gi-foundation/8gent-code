@@ -58,6 +58,14 @@ export {
   type TTSProcess,
   type TTSProviderName,
 } from "./tts-engine.js";
+export {
+  type VoiceBackend,
+  type FullDuplexProvider,
+  type BackendCapabilities,
+  detectCapabilities,
+  selectBestBackend,
+} from "./full-duplex-provider";
+export { MoshiMLXProvider } from "./backends/moshi-mlx";
 
 /**
  * Main Voice Engine — orchestrates recording, transcription, and events.

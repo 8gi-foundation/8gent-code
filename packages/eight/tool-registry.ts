@@ -17,6 +17,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools)[]> = {
   git: ["git_status", "git_diff", "git_log", "git_add", "git_commit",
         "git_push", "git_branch", "git_checkout", "git_create_branch"],
   github: ["gh_pr_list", "gh_pr_create", "gh_pr_view", "gh_issue_list", "gh_issue_create"],
+  notes: ["write_notes"],
   web: ["web_search", "web_fetch"],
   lsp: ["lsp_goto_definition", "lsp_find_references", "lsp_hover", "lsp_document_symbols", "lsp_diagnostics"],
   media: ["read_image", "describe_image", "read_pdf", "read_pdf_page",
