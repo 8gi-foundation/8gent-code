@@ -138,6 +138,7 @@ import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { NarratorView } from "./screens/index.js";
+import { TerminalView } from "./screens/TerminalView.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -1717,6 +1718,7 @@ export function App({
 							"  /btw - Open sidequest queue tab\n" +
 							"  /questions - Open research questions tab\n" +
 							"  /projects - Open project overview tab\n" +
+							"  /terminal - Open a live terminal tab (PTY shell)\n" +
 							"  /auth [login|logout|status] - Authentication\n" +
 							"  /github [issues|pr|repos] - GitHub integration\n" +
 							"  /deploy - Trigger Vercel deploy\n" +
@@ -3762,6 +3764,8 @@ export function App({
 						workspaceTabs.addTab("questions");
 					} else if (command === ("projects" as any)) {
 						workspaceTabs.addTab("projects");
+					} else if (command === ("terminal" as any)) {
+						workspaceTabs.addTab("terminal", (args as any[])?.[0] || "Terminal");
 					}
 					break;
 			}
@@ -4426,6 +4430,15 @@ export function App({
 								);
 								closeTabView();
 							}}
+						/>
+					);
+				case "terminal":
+					return (
+						<TerminalView
+							tabId={workspaceTabs.activeTab?.id || "terminal-default"}
+							cwd={projectCwd}
+							visible={true}
+							onClose={closeTabView}
 						/>
 					);
 			}
