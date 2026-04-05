@@ -1524,14 +1524,14 @@ export function App({
 			const detected = await OnboardingManager.autoDetect();
 			onboardingManager.applyAutoDetected(detected);
 
-			// Prompt gh login if not authenticated — agent can run gh auth login --web itself
+			// Proactively offer gh login if not authenticated
 			if (!detected.githubUsername) {
 				setMessages((prev) => [
 					...prev,
 					{
 						id: `gh-auth-notice-${Date.now()}`,
 						role: "assistant" as const,
-						content: "GitHub CLI not logged in. Type: `gh auth login --web` to authenticate (opens browser). Or ask me to run it for you.",
+						content: "Hey — you're not logged in to GitHub. Want me to log you in now so we can create issues, open PRs, and manage repos directly from here? Just say yes and I'll handle it.",
 						timestamp: new Date(),
 					},
 				]);
