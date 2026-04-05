@@ -124,7 +124,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     hints: string[];
   } | null>(null);
 
-  // Duration timer
+  // Duration timer — 500ms interval to reduce render frequency and avoid
+  // Ink terminal corruption when voice state changes fire simultaneously
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Wire up engine events
@@ -133,8 +134,14 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       setState(to);
     };
 
+    // Throttle audio level updates to max 4/sec — high frequency causes Ink render collisions
+    let lastAudioUpdate = 0;
     const onAudioLevel = ({ level }: { level: number }) => {
-      setAudioLevel(level);
+      const now = Date.now();
+      if (now - lastAudioUpdate > 250) {
+        lastAudioUpdate = now;
+        setAudioLevel(level);
+      }
     };
 
     const onFinalTranscript = (event: TranscriptEvent) => {
@@ -204,7 +211,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       const startTime = Date.now();
       durationTimerRef.current = setInterval(() => {
         setRecordingDurationMs(Date.now() - startTime);
-      }, 100);
+      }, 500); // 500ms — was 100ms, reduced to prevent Ink render collisions with voice events
     } else {
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
