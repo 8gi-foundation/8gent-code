@@ -286,11 +286,11 @@ function AgentStatusItem({ running, total }: { running: number; total: number })
 
 function PermissionStatusItem({ mode }: { mode: EnhancedStatusBarProps["permissionMode"] }) {
   const configs = {
-    full: { color: "red" as const, icon: "\u26A0", label: "full access" },
-    ask: { color: "yellow" as const, icon: "\u2753", label: "ask (approve tools)" },
+    full: { color: "red" as const, icon: "\u26A0", label: "full" },
+    ask: { color: "yellow" as const, icon: "\u2753", label: "ask" },
     restricted: { color: "green" as const, icon: "\u2713", label: "restricted" },
     sandbox: { color: "blue" as const, icon: "\u25A3", label: "sandbox" },
-    infinite: { color: "magenta" as const, icon: "\u221E", label: "infinite (no gates)" },
+    infinite: { color: "magenta" as const, icon: "\u221E", label: "infinite" },
   };
 
   const config = configs[mode || "ask"];
