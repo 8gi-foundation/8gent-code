@@ -1174,9 +1174,14 @@ export function App({
 				}
 
 				// Map provider to runtime
+				// Apfel is OpenAI-compatible — treat as lmstudio but on port 11435
 				let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
-				if (currentProvider === "lmstudio") {
+				if (currentProvider === "apfel") {
 					runtime = "lmstudio";
+					process.env.LM_STUDIO_HOST = "http://localhost:11435";
+				} else if (currentProvider === "lmstudio") {
+					runtime = "lmstudio";
+					process.env.LM_STUDIO_HOST = "http://localhost:1234";
 				} else if (
 					currentProvider === "openrouter" ||
 					currentProvider === "openrouter-free"

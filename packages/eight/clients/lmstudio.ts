@@ -9,7 +9,7 @@ export class LMStudioClient implements LLMClient {
   private model: string;
   private apiKey: string;
 
-  constructor(model: string, baseUrl: string = "http://localhost:1234", apiKey: string = "lm-studio") {
+  constructor(model: string, baseUrl: string = process.env.LM_STUDIO_HOST || "http://localhost:1234", apiKey: string = "lm-studio") {
     this.model = model;
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
