@@ -28,7 +28,8 @@ export type TabType =
   | "questions"
   | "kanban"
   | "music"
-  | "projects";
+  | "projects"
+  | "terminal";
 
 export interface WorkspaceTab {
   id: string;
@@ -57,6 +58,7 @@ export const TAB_ICONS: TabIcon[] = [
   { type: "kanban", icon: "#:", label: "Kanban" },
   { type: "music", icon: "~:", label: "Music" },
   { type: "projects", icon: "P:", label: "Projects" },
+  { type: "terminal", icon: "$:", label: "Terminal" },
 ];
 
 /** Singleton tab types (only one instance allowed) */
