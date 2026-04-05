@@ -1150,15 +1150,6 @@ export function App({
 	useEffect(() => {
 		const initAgent = async () => {
 			try {
-				// Per-tab model override (Apfel / Gemma 4 / qwen3:32b tabs)
-				const tabOverride = workspaceTabs.activeTab?.data?.modelOverride as
-					| { provider: string; model: string }
-					| undefined;
-				if (tabOverride) {
-					setCurrentProvider(tabOverride.provider);
-					setCurrentModel(tabOverride.model === "auto" ? "" : tabOverride.model);
-				}
-
 				// Auto-assign router slots from actually available models
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();
@@ -1174,14 +1165,9 @@ export function App({
 				}
 
 				// Map provider to runtime
-				// Apfel is OpenAI-compatible — treat as lmstudio but on port 11435
 				let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
-				if (currentProvider === "apfel") {
+				if (currentProvider === "lmstudio") {
 					runtime = "lmstudio";
-					process.env.LM_STUDIO_HOST = "http://localhost:11435";
-				} else if (currentProvider === "lmstudio") {
-					runtime = "lmstudio";
-					process.env.LM_STUDIO_HOST = "http://localhost:1234";
 				} else if (
 					currentProvider === "openrouter" ||
 					currentProvider === "openrouter-free"
