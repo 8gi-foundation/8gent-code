@@ -2,8 +2,12 @@
  * MoshiMLXProvider — full-duplex voice via Moshi (Kyutai) on Apple Silicon
  *
  * Moshi: https://github.com/kyutai-labs/moshi
- * Install: pip install moshi[mlx]
- * Cost: $0, MIT license, ~200ms latency
+ * Install: pip install moshi
+ * Device: --device mps on Apple Silicon (Metal Performance Shaders), --device cpu elsewhere
+ * Cost: $0, MIT license, ~200ms latency on MPS
+ *
+ * Note: moshi 0.2.13 uses PyTorch (not MLX). The [mlx] extra does not exist in this version.
+ * Uses --device mps (Apple Metal) on arm64 Darwin for GPU acceleration.
  *
  * Architecture:
  * - Spawns a Python subprocess running Moshi's WebSocket server on localhost:8998
@@ -12,6 +16,7 @@
  */
 
 import { execSync, spawn, type ChildProcess } from "child_process";
+import type WS from "ws";
 import type { FullDuplexProvider, VoiceBackend } from "../full-duplex-provider";
 
 const MOSHI_WS_PORT = 8998;
@@ -50,7 +55,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
     const { default: WebSocket } = await import("ws").catch(() => {
       throw new Error(
         "WebSocket package not found. Run: bun add ws\n" +
-        "Or install moshi and its dependencies: pip install moshi[mlx]"
+        "Or install moshi: pip install moshi"
       );
     });
 
@@ -61,7 +66,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
   }
 
   private async *_duplexStream(
-    ws: import("ws"),
+    ws: WS,
     audioIn: AsyncIterable<Buffer>
   ): AsyncIterable<Buffer> {
     const outputQueue: Buffer[] = [];
@@ -108,10 +113,13 @@ export class MoshiMLXProvider implements FullDuplexProvider {
   private async _ensureServer(): Promise<void> {
     if (this._process && !this._process.killed) return;
 
+    // Use MPS (Apple Metal) on Apple Silicon for GPU acceleration, CPU elsewhere
+    const device = process.platform === "darwin" && process.arch === "arm64" ? "mps" : "cpu";
+
     this._process = spawn("python3", [
       "-m", "moshi.server",
       "--port", String(MOSHI_WS_PORT),
-      "--backend", "mlx",
+      "--device", device,
     ], {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
@@ -142,7 +150,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
     }
     throw new Error(
       `Moshi server did not start within ${timeoutMs / 1000}s on port ${port}.\n` +
-      "Make sure moshi is installed: pip install moshi[mlx]"
+      "Make sure moshi is installed: pip install moshi"
     );
   }
 }
