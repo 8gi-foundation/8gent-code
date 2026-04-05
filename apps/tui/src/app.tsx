@@ -87,6 +87,7 @@ import {
 	type SelectOption,
 } from "./components/select-input.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
+import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	DetailedStatusBar,
 	EnhancedStatusBar,
@@ -521,7 +522,14 @@ export function App({
 			]);
 
 			try {
-				const response = await agent.chat(clean);
+				// Run D critic loop: Gemma 4 generates, qwen3:32b critiques, one retry if rejected
+				let response = await agent.chat(clean);
+				const { approved, feedback } = await critiqueResponse(clean, response || "");
+				if (!approved && feedback) {
+					response = await agent.chat(
+						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`
+					);
+				}
 				const cleanResponse = (response || "")
 					.replace(/\[_EOT_\]/g, "")
 					.replace(/<\|.*?\|>/g, "")
