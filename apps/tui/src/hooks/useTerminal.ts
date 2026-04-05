@@ -8,11 +8,37 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import * as pty from "node-pty";
+import { createRequire } from "module";
 import * as os from "os";
 import * as path from "path";
 
-const SHELL = process.env.SHELL || "/bin/zsh";
+// Use createRequire for node-pty — Bun native addon compatibility
+const _require = createRequire(import.meta.url);
+const pty = _require("node-pty") as typeof import("node-pty");
+
+// Bun's `bun add` doesn't set +x on prebuilt binaries — ensure spawn-helper is executable
+try {
+  const { chmodSync, existsSync } = _require("fs") as typeof import("fs");
+  const nodePtyDir = _require.resolve("node-pty/package.json").replace("/package.json", "");
+  const helper = `${nodePtyDir}/prebuilds/${process.platform}-${process.arch}/spawn-helper`;
+  if (existsSync(helper)) chmodSync(helper, 0o755);
+} catch { /* non-fatal */ }
+
+// Try shells in order until one exists
+function resolveShell(): string {
+  const { existsSync } = _require("fs") as typeof import("fs");
+  const candidates = [
+    process.env.SHELL,
+    "/bin/zsh",
+    "/bin/bash",
+    "/bin/sh",
+  ].filter(Boolean) as string[];
+  for (const s of candidates) {
+    try { if (existsSync(s)) return s; } catch {}
+  }
+  return "/bin/sh";
+}
+const SHELL = resolveShell();
 const MAX_LINES = 1000;
 
 // -------------------------------------------------------
@@ -88,13 +114,22 @@ export function useTerminal(tabId: string, cwd?: string) {
     if (ptyRef.current) return; // already running
 
     const workDir = cwd || process.cwd();
-    const proc = pty.spawn(SHELL, ["-l"], {
-      name: "xterm-256color",
-      cols: 120,
-      rows: 30,
-      cwd: workDir,
-      env: process.env as Record<string, string>,
-    });
+
+    let proc: ReturnType<typeof pty.spawn>;
+    try {
+      proc = pty.spawn(SHELL, [], {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 30,
+        cwd: workDir,
+        env: { ...process.env } as Record<string, string>,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      linesRef.current = [`[terminal error] ${msg}`, `[shell: ${SHELL}]`, ""];
+      setState({ lines: linesRef.current, isRunning: false, pid: null });
+      return;
+    }
 
     ptyRef.current = proc;
     linesRef.current = [];
