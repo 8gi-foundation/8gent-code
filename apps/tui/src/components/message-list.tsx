@@ -51,12 +51,43 @@ export function MessageList({
     prevCountRef.current = messages.length;
   }, [messages]);
 
+  // Collapse consecutive tool messages — max MAX_CONSECUTIVE_TOOL per run,
+  // remainder replaced with a "… N tool calls" summary line.
+  const MAX_CONSECUTIVE_TOOL = 3;
+  const collapsed: Message[] = [];
+  let toolRun = 0;
+  let toolRunStart = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "tool") {
+      if (toolRun === 0) toolRunStart = i;
+      toolRun++;
+      if (toolRun <= MAX_CONSECUTIVE_TOOL) {
+        collapsed.push(m);
+      } else if (toolRun === MAX_CONSECUTIVE_TOOL + 1) {
+        collapsed.push({
+          id: `tool-collapsed-${toolRunStart}`,
+          role: "system" as const,
+          content: `… ${toolRun} tool calls`,
+          timestamp: m.timestamp,
+        } as Message);
+      } else {
+        const last = collapsed[collapsed.length - 1];
+        if (last?.id?.startsWith("tool-collapsed-")) {
+          last.content = `… ${toolRun} tool calls`;
+        }
+      }
+    } else {
+      toolRun = 0;
+      toolRunStart = -1;
+      collapsed.push(m);
+    }
+  }
+
   // Only render the most recent messages to prevent scroll jumping.
-  // The terminal scrollback handles upward scrolling naturally.
-  // This keeps the view pinned to the bottom (latest messages).
-  const visibleMessages = messages.length > maxVisible
-    ? messages.slice(-maxVisible)
-    : messages;
+  const visibleMessages = collapsed.length > maxVisible
+    ? collapsed.slice(-maxVisible)
+    : collapsed;
 
   return (
     <Box flexDirection="column" flexGrow={1} minHeight={0}>
