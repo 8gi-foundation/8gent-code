@@ -11,6 +11,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import { getVault } from "../secrets";
 
 const execAsync = promisify(exec);
@@ -274,7 +275,8 @@ export class OnboardingManager {
   private user: UserConfig;
 
   constructor(workingDirectory: string = process.cwd()) {
-    this.userConfigPath = path.join(workingDirectory, ".8gent", "user.json");
+    // Always use home dir for user config — workingDirectory varies by launch location
+    this.userConfigPath = path.join(process.env.HOME || os.homedir(), ".8gent", "user.json");
     this.user = this.loadUserConfig();
   }
 
