@@ -174,71 +174,58 @@ export function EnhancedStatusBar({
       justifyContent="space-between"
       alignItems="center"
     >
-      {/* Left: model and agents (truncated model name) */}
-      <Box flexShrink={0}>
-        <Inline gap={1}>
-          <ActiveIndicator active={true} />
-          <ModelStatusItem name={displayModel} />
-          <Separator />
-          <AgentStatusItem running={runningAgents} total={totalAgents} />
-        </Inline>
+      {/* Left: model and agents — flexShrink={0}, no wrap */}
+      <Box flexShrink={0} flexDirection="row" overflow="hidden">
+        <ActiveIndicator active={true} />
+        <MutedText> </MutedText>
+        <ModelStatusItem name={displayModel} />
+        <Separator />
+        <AgentStatusItem running={runningAgents} total={totalAgents} />
       </Box>
 
-      {/* Center: plan, permissions */}
-      <Box flexShrink={1} marginX={1} minWidth={0}>
-        <Inline gap={1}>
-          {planStatus !== "idle" && (
-            <>
-              <PlanStatusItem
-                status={planStatus}
-                completed={planStepsCompleted}
-                total={planStepsTotal}
-                showAnimatedVerb={showAnimations}
-                verbMaxWidth={planVerbMax}
-              />
-              {(planStatus === "planning" || planStatus === "executing") && (
-                <MutedText>
-                  ({tokenMetaShort})
-                </MutedText>
-              )}
-              <Separator />
-            </>
-          )}
-          <PermissionStatusItem mode={permissionMode} />
-          {adhdMode && (
-            <>
-              <Separator />
-              <Label color="magenta">⚡ ADHD</Label>
-            </>
-          )}
-        </Inline>
+      {/* Center: permissions — shrinks first, hidden when too narrow */}
+      <Box flexShrink={1} marginX={1} minWidth={0} flexDirection="row" overflow="hidden">
+        {planStatus !== "idle" && (
+          <>
+            <PlanStatusItem
+              status={planStatus}
+              completed={planStepsCompleted}
+              total={planStepsTotal}
+              showAnimatedVerb={showAnimations}
+              verbMaxWidth={planVerbMax}
+            />
+            {(planStatus === "planning" || planStatus === "executing") && (
+              <MutedText> ({tokenMetaShort})</MutedText>
+            )}
+            <Separator />
+          </>
+        )}
+        <PermissionStatusItem mode={permissionMode} />
       </Box>
 
-      {/* Right: savings, branch, auth, voice, time */}
-      <Box flexShrink={0}>
-        <Inline gap={1}>
-          <TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
-          {displayBranch && (
-            <>
-              <Separator />
-              <GitBranchItem branch={displayBranch} hasChanges={hasUncommittedChanges} />
-            </>
-          )}
-          {authStatus && authStatus !== "unknown" && (
-            <>
-              <Separator />
-              <AuthStatusItem status={authStatus} user={authUser} nameMax={authNameMax} />
-            </>
-          )}
-          {voiceEnabled && (
-            <>
-              <Separator />
-              <VoiceStatusItem state={voiceState || "idle"} />
-            </>
-          )}
-          <Separator />
-          <ElapsedTimeItem time={elapsed} />
-        </Inline>
+      {/* Right: savings, branch, auth, voice, time — no wrap */}
+      <Box flexShrink={0} flexDirection="row" overflow="hidden">
+        <TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
+        {displayBranch && (
+          <>
+            <Separator />
+            <GitBranchItem branch={displayBranch} hasChanges={hasUncommittedChanges} />
+          </>
+        )}
+        {authStatus && authStatus !== "unknown" && (
+          <>
+            <Separator />
+            <AuthStatusItem status={authStatus} user={authUser} nameMax={authNameMax} />
+          </>
+        )}
+        {voiceEnabled && (
+          <>
+            <Separator />
+            <VoiceStatusItem state={voiceState || "idle"} />
+          </>
+        )}
+        <Separator />
+        <ElapsedTimeItem time={elapsed} />
       </Box>
     </Box>
   );
