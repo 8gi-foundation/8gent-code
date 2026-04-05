@@ -24,6 +24,16 @@ try {
   if (existsSync(helper)) chmodSync(helper, 0o755);
 } catch { /* non-fatal */ }
 
+// ENXIO (-6) is thrown by node-pty's libuv read loop when the PTY master closes
+// after the shell exits. It's not recoverable — just swallow it so the TUI doesn't crash.
+if (!(process as any).__ptyEnxioHandled) {
+  (process as any).__ptyEnxioHandled = true;
+  process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
+    if (err.code === "ENXIO" || err.errno === -6) return; // PTY master closed — expected
+    throw err; // re-throw anything else
+  });
+}
+
 // Try shells in order until one exists
 function resolveShell(): string {
   const { existsSync } = _require("fs") as typeof import("fs");
