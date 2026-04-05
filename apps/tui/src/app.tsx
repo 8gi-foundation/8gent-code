@@ -3098,9 +3098,10 @@ export function App({
 						);
 					} else if (args[0] === "status") {
 						const setupInfo = voice.setupStatus;
+						const backendLabel = voiceChat.backend ? ` [${voiceChat.backend}]` : "";
 						const voiceChatStatus = voiceChat.isActive
-							? `\nVoice Chat: Active (${voiceChat.state})`
-							: "\nVoice Chat: Inactive";
+							? `\nVoice Chat: Active (${voiceChat.state})${backendLabel}`
+							: `\nVoice Chat: Inactive${backendLabel}`;
 						const status = voice.isAvailable
 							? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
 							: `Voice: Not available — ${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"}`;
