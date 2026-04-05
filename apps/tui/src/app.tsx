@@ -243,30 +243,64 @@ function loadProviderSettings(): { provider: string; model: string } {
 	return { provider: "ollama", model: "" };
 }
 
-/** Query Ollama for a sensible default chat model (skip embeddings). */
-function detectDefaultModel(): string {
-	try {
-		const { execSync } = require("child_process");
-		const raw = execSync("curl -s http://localhost:11434/api/tags", {
-			timeout: 3000,
-		}).toString();
-		const data = JSON.parse(raw);
-		const allModels = (data.models || [])
-			.map((m: any) => String(m.name ?? "").trim())
-			.filter(Boolean);
-		// Only consider non-embedding models — return empty string if none available
-		const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
-		return chatModels.length > 0 ? pickBestChatModel(chatModels) : "";
-	} catch {
-		return "";
+/**
+ * Probe all local providers at startup and return the best available chat model + provider.
+ * Priority: LM Studio → Ollama → Apfel (Apple Intelligence) → empty
+ * Embedding-only providers are skipped.
+ */
+function detectBestLocalProvider(): { provider: string; model: string } {
+	const { execSync } = require("child_process");
+
+	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
+		try {
+			const raw = execSync(`curl -s --max-time 2 "${url}"`, { timeout: 3000 }).toString();
+			const data = JSON.parse(raw);
+			const all = extract(data).map((s: string) => s.trim()).filter(Boolean);
+			return all.filter((id: string) => !isLikelyEmbeddingModelId(id));
+		} catch {
+			return [];
+		}
 	}
+
+	// 1. LM Studio
+	const lmModels = fetchChatModels(
+		"http://localhost:1234/v1/models",
+		(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+	);
+	if (lmModels.length > 0) {
+		return { provider: "lmstudio", model: pickBestChatModel(lmModels) };
+	}
+
+	// 2. Ollama
+	const ollamaModels = fetchChatModels(
+		"http://localhost:11434/api/tags",
+		(d) => (d.models || []).map((m: any) => String(m.name ?? "")),
+	);
+	if (ollamaModels.length > 0) {
+		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
+	}
+
+	// 3. Apfel (Apple Intelligence via localhost:11434 compatible endpoint)
+	const apfelModels = fetchChatModels(
+		"http://localhost:6660/v1/models",
+		(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+	);
+	if (apfelModels.length > 0) {
+		return { provider: "ollama", model: pickBestChatModel(apfelModels) };
+	}
+
+	return { provider: "ollama", model: "" };
 }
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
-// If no model saved, detect from what's actually available
+// If no saved provider/model, auto-detect the best available local provider
 if (!_savedProviderSettings.model) {
-	_savedProviderSettings.model = detectDefaultModel();
+	const detected = detectBestLocalProvider();
+	if (detected.model) {
+		_savedProviderSettings.provider = detected.provider;
+		_savedProviderSettings.model = detected.model;
+	}
 }
 
 /** Merge saved ~/.8gent/providers.json with optional CLI --provider / --model. */
@@ -284,7 +318,7 @@ function computeCliOverrides(
 	if (cliModelTrim) model = cliModelTrim;
 	else if (providerSwitchedByCli) model = "";
 	else model = savedM;
-	if (!model && provider === "ollama") model = detectDefaultModel();
+	if (!model) { const d = detectBestLocalProvider(); model = d.model; }
 	return { provider, model };
 }
 
