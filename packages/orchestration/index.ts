@@ -838,3 +838,6 @@ export {
 
 // Role Registry — role-based runner configs for orchestrator, engineer, qa
 export { ROLE_REGISTRY, getRunnerConfig, type RunnerConfig } from "./role-registry.js";
+
+// TaskDispatcher — atomic task dispatch with claimed map + state machine
+export { TaskDispatcher, globalDispatcher, type DispatchedTask, type TaskState } from "./task-dispatcher.js";
