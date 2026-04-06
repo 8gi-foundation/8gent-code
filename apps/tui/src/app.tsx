@@ -4669,13 +4669,14 @@ export function App({
 					);
 				}
 				return (
-					<Stack minHeight={0} flexGrow={1}>
+					<Box flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
 						<MessageList
 							messages={messages}
 							animateTyping={showAnimations}
 							showAnimations={showAnimations}
 							soundEnabled={soundEnabled}
 							contentWidth={chatContentWidth}
+							maxVisible={Math.max(5, viewport.height - 10)}
 						/>
 						{isProcessing && (
 							<ActivityMonitor
@@ -4686,7 +4687,7 @@ export function App({
 								showAnimations={showAnimations}
 							/>
 						)}
-					</Stack>
+					</Box>
 				);
 		}
 	};
@@ -4715,7 +4716,7 @@ export function App({
 						<AppText color="cyan">│</AppText>
 					</Box>
 					{/* Main content (chat / kanban / etc.) or process detail */}
-					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0}>
+					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0} overflow="hidden">
 						{processPanel.detailTaskId &&
 						processPanel.tasks.find(
 							(t) => t.id === processPanel.detailTaskId,
