@@ -15,6 +15,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import * as fs from "fs";
 import * as path from "path";
+import { getRunnerConfig } from "../../../../packages/orchestration/role-registry.js";
 
 // ============================================
 // Types
@@ -163,7 +164,7 @@ function makeDefaultTabs(): WorkspaceTab[] {
       pinned: true,
       data: {
         role: "orchestrator",
-        systemPrompt: "You are the Orchestrator. Plan, delegate, and coordinate. Think before acting. No code — direct others.",
+        systemPrompt: getRunnerConfig("orchestrator").systemPrompt,
         modelSelected: false,
       },
     },
@@ -177,7 +178,7 @@ function makeDefaultTabs(): WorkspaceTab[] {
       pinned: true,
       data: {
         role: "engineer",
-        systemPrompt: "You are the Engineer. Write code, edit files, run commands. Implement exactly what is asked. No fluff.",
+        systemPrompt: getRunnerConfig("engineer").systemPrompt,
         modelSelected: false,
       },
     },
@@ -191,7 +192,7 @@ function makeDefaultTabs(): WorkspaceTab[] {
       pinned: true,
       data: {
         role: "qa",
-        systemPrompt: "You are QA. Find bugs, review diffs, run tests. Be harsh. Reject anything that doesn't meet the spec.",
+        systemPrompt: getRunnerConfig("qa").systemPrompt,
         modelSelected: false,
       },
     },
