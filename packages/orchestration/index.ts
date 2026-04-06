@@ -835,3 +835,6 @@ export {
   loadCheckpoint,
   clearCheckpoint,
 } from "./sequential-pipeline";
+
+// Role Registry — role-based runner configs for orchestrator, engineer, qa
+export { ROLE_REGISTRY, getRunnerConfig, type RunnerConfig } from "./role-registry.js";
