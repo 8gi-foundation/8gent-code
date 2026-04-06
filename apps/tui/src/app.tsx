@@ -635,6 +635,7 @@ export function App({
 	const [soundEnabled, setSoundEnabled] = useState(false);
 	const [fancyHeader, setFancyHeader] = useState(false);
 	const [showEnhancedStatus, setShowEnhancedStatus] = useState(true);
+	const [ghAuthPromptVisible, setGhAuthPromptVisible] = useState(false);
 
 	// Performance metrics
 	const [lastResponseTime, setLastResponseTime] = useState<
@@ -1109,6 +1110,24 @@ export function App({
 			setViewMode("chat");
 		}
 
+		// GitHub auth gate: Y to login, D to dismiss (only when prompt is visible)
+		if (ghAuthPromptVisible && !key.ctrl && !key.meta) {
+			if (input === "y" || input === "Y") {
+				setGhAuthPromptVisible(false);
+				const ghTab = workspaceTabs.addTab("terminal", "gh auth");
+				const ghTabId = ghTab?.id ?? "terminal-default";
+				setTimeout(() => {
+					const result = writeToTerminal(ghTabId, "gh auth login --web\n");
+					if (result.startsWith("No terminal")) {
+						setTimeout(() => writeToTerminal(ghTabId, "gh auth login --web\n"), 1500);
+					}
+				}, 2500);
+			}
+			if (input === "d" || input === "D") {
+				setGhAuthPromptVisible(false);
+			}
+		}
+
 		// Escape: abort generation if processing, otherwise switch to chat tab or close view
 		if (key.escape) {
 			if (isProcessing && agent) {
@@ -1523,17 +1542,10 @@ export function App({
 			const detected = await OnboardingManager.autoDetect();
 			onboardingManager.applyAutoDetected(detected);
 
-			// Proactively offer gh login if not authenticated
+			// Proactively show deterministic gh auth prompt if not authenticated
+			// (handled as a status-bar gate, not an LLM chat bubble)
 			if (!detected.githubUsername) {
-				setMessages((prev) => [
-					...prev,
-					{
-						id: `gh-auth-notice-${Date.now()}`,
-						role: "assistant" as const,
-						content: "Hey — you're not logged in to GitHub. Want me to log you in now so we can create issues, open PRs, and manage repos directly from here? Just say yes and I'll handle it.",
-						timestamp: new Date(),
-					},
-				]);
+				setGhAuthPromptVisible(true);
 			}
 
 			// Also detect integrations (LM Studio, etc.)
@@ -3961,29 +3973,7 @@ export function App({
 
 		if (!input && !attached) return;
 
-		// Intercept gh auth response — agent can't reliably run interactive CLI
-		const lastMsg = messages[messages.length - 1];
-		const isGhAuthPrompt = lastMsg?.id?.startsWith("gh-auth-notice");
-		const isYes = /^(yes|yeah|yep|sure|ok|go ahead|do it|yup|y)$/i.test(input.trim());
-		if (isGhAuthPrompt && isYes) {
-			setMessages((prev) => [
-				...prev,
-				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
-				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...\n\nSwitching to terminal tab — follow the browser prompt then come back here.", timestamp: new Date() },
-			]);
-			// Open a terminal tab and run gh auth login --web inside the PTY.
-			// Wait 2500ms — login shell sources .zshrc/.zprofile which can be slow.
-			const ghTab = workspaceTabs.addTab("terminal", "gh auth");
-			const ghTabId = ghTab?.id ?? "terminal-default";
-			setTimeout(() => {
-				const result = writeToTerminal(ghTabId, "gh auth login --web\n");
-				if (result.startsWith("No terminal")) {
-					// PTY still not ready — retry once after another 1500ms
-					setTimeout(() => writeToTerminal(ghTabId, "gh auth login --web\n"), 1500);
-				}
-			}, 2500);
-			return;
-		}
+		// (gh auth LLM intercept removed — now handled as a deterministic gate in the UI)
 
 		if (showOnboarding && !input && attached) {
 			addSystemMessage(
@@ -4811,6 +4801,15 @@ export function App({
 							image={imageInput.currentImage}
 							onRemove={imageInput.removeImage}
 						/>
+					</Box>
+				)}
+
+				{/* GitHub auth gate — deterministic prompt, no LLM involved */}
+				{ghAuthPromptVisible && authStatus !== "authenticated" && (
+					<Box paddingX={1} flexShrink={0}>
+						<MutedText>⚠ </MutedText>
+						<AppText color="yellow">GitHub not authenticated</AppText>
+						<MutedText>  [Y] login  [D] dismiss</MutedText>
 					</Box>
 				)}
 
