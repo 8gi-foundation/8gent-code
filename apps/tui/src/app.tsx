@@ -139,6 +139,7 @@ import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { NarratorView } from "./screens/index.js";
 import { TerminalView } from "./screens/TerminalView.js";
+import { writeToTerminal } from "./hooks/useTerminal.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -3968,15 +3969,15 @@ export function App({
 			setMessages((prev) => [
 				...prev,
 				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
-				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...", timestamp: new Date() },
+				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...\n\nSwitching to terminal tab — follow the browser prompt then come back here.", timestamp: new Date() },
 			]);
-			try {
-				// gh auth login --web needs a real TTY — spawn in a new Terminal window
-				require("child_process").exec(
-					`osascript -e 'tell application "Terminal" to do script "gh auth login --web && echo DONE"'`,
-					() => {}
-				);
-			} catch (e) {}
+			// Open a terminal tab and run gh auth login --web inside the PTY
+			const ghTab = workspaceTabs.addTab("terminal", "gh auth");
+			const ghTabId = ghTab?.id ?? "terminal-default";
+			// Give the PTY 900ms to spawn its shell before writing the command
+			setTimeout(() => {
+				writeToTerminal(ghTabId, "gh auth login --web\n");
+			}, 900);
 			return;
 		}
 
