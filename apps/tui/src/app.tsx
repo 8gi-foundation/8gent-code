@@ -1101,14 +1101,11 @@ export function App({
 			}
 		}
 
-		// Shift+Tab: cycle through open tabs
+		// Shift+Tab: always cycle workspace tabs backward (direction -1)
+		// Agent cycling was incorrectly hijacking this — agent focus has no dedicated hotkey yet
 		if (key.shift && key.tab) {
-			if (orchestration.agents.length > 0) {
-				orchestration.cycleAgent();
-			} else {
-				workspaceTabs.cycleTab(1, ["kanban"]);
-				setViewMode("chat");
-			}
+			workspaceTabs.cycleTab(-1, ["kanban"]);
+			setViewMode("chat");
 		}
 
 		// Escape: abort generation if processing, otherwise switch to chat tab or close view
