@@ -3971,13 +3971,17 @@ export function App({
 				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
 				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...\n\nSwitching to terminal tab — follow the browser prompt then come back here.", timestamp: new Date() },
 			]);
-			// Open a terminal tab and run gh auth login --web inside the PTY
+			// Open a terminal tab and run gh auth login --web inside the PTY.
+			// Wait 2500ms — login shell sources .zshrc/.zprofile which can be slow.
 			const ghTab = workspaceTabs.addTab("terminal", "gh auth");
 			const ghTabId = ghTab?.id ?? "terminal-default";
-			// Give the PTY 900ms to spawn its shell before writing the command
 			setTimeout(() => {
-				writeToTerminal(ghTabId, "gh auth login --web\n");
-			}, 900);
+				const result = writeToTerminal(ghTabId, "gh auth login --web\n");
+				if (result.startsWith("No terminal")) {
+					// PTY still not ready — retry once after another 1500ms
+					setTimeout(() => writeToTerminal(ghTabId, "gh auth login --web\n"), 1500);
+				}
+			}, 2500);
 			return;
 		}
 

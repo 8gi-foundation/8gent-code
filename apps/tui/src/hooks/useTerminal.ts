@@ -99,7 +99,7 @@ export function useTerminal(tabId: string, cwd?: string) {
     if (ptyRef.current) return; // already running
 
     const workDir = cwd || process.cwd();
-    const proc = pty.spawn(SHELL, ["-l"], {
+    const proc = pty.spawn(SHELL, ["-i"], {  // -i (interactive) not -l (login) — faster startup
       name: "xterm-256color",
       cols: 120,
       rows: 30,
