@@ -4740,7 +4740,7 @@ export function App({
 										]);
 									}
 								}}
-								height={30}
+								height={Math.max(10, viewport.height - 12)}
 							/>
 						) : (
 							renderMainContent()
@@ -4785,29 +4785,21 @@ export function App({
 
 				{/* Mini kanban removed — full board available via Ctrl+K */}
 
-				{/* Status verb - always visible (width-capped to avoid spilling past frame) */}
-				<Box
-					paddingX={1}
-					marginBottom={1}
-					width={Math.max(20, viewport.width - 4)}
-				>
-					{isProcessing ? (
+				{/* Status verb - only shown while processing (idle hides to recover 2 rows) */}
+				{isProcessing && (
+					<Box
+						paddingX={1}
+						marginBottom={1}
+						width={Math.max(20, viewport.width - 4)}
+					>
 						<AnimatedStatusVerb
 							type={processingStage === "planning" ? "planning" : "executing"}
 							showIcon={true}
 							active={true}
 							maxWidth={Math.max(16, viewport.width - 10)}
 						/>
-					) : (
-						<MutedText>
-							<AppText color="cyan">✦</AppText>{" "}
-							{truncate(
-								"Awaiting your command...",
-								Math.max(12, viewport.width - 14),
-							)}
-						</MutedText>
-					)}
-				</Box>
+					</Box>
+				)}
 
 				{/* Image attachment indicator */}
 				{imageInput.currentImage && (
@@ -4979,19 +4971,21 @@ export function App({
 					gap={1}
 					flexDirection="row"
 					flexWrap="nowrap"
+					flexShrink={0}
+					overflow="hidden"
 				>
 					{compactAgentModeBar ? (
-						<Inline gap={1}>
+						<Box flexDirection="row" overflow="hidden">
 							<AppText color="cyan" bold>{`[${agentMode}]`}</AppText>
 							<MutedText> ^T cycle</MutedText>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
 							)}
-						</Inline>
+						</Box>
 					) : (
-						<Inline gap={0}>
+						<Box flexDirection="row" overflow="hidden">
 							{AGENT_MODES.map((mode) => (
-								<Box key={mode}>
+								<Box key={mode} flexShrink={0}>
 									{agentMode === mode ? (
 										<AppText color="cyan" bold>{`[${mode}]`}</AppText>
 									) : (
@@ -4999,17 +4993,17 @@ export function App({
 									)}
 								</Box>
 							))}
-							<MutedText> ^T mode</MutedText>
+							<Box flexShrink={0}><MutedText> ^T mode</MutedText></Box>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
 							)}
-						</Inline>
+						</Box>
 					)}
 				</Box>
 
 				{showAnimations && (
-					<Box paddingX={1} gap={2}>
-						<MutedText>
+					<Box paddingX={1} gap={2} flexShrink={0} overflow="hidden">
+						<MutedText wrap="truncate-end">
 							{truncate(
 								"^O expand | ^B processes | ^K kanban | ^P predict | ^A anim | ^S sound | ^C exit",
 								Math.max(16, viewport.width - 2),

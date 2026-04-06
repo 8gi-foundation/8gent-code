@@ -11,7 +11,9 @@ export const TUI_AGENT_MODE_COMPACT_BELOW = 78;
 /** Enhanced status bar switches to single-line compact layout below this column count. */
 export const TUI_STATUS_COMPACT_BELOW = 92;
 
-const RESERVED_CHROME = 8;
+/** Columns reserved for TUI chrome: outer border (2) + padding (2) + scroll gutter (2) + slack (2). */
+export const RESERVED_CHROME_COLS = 8;
+const RESERVED_CHROME = RESERVED_CHROME_COLS;
 
 const SIDEBAR_MAX_WIDE = 32;
 const SIDEBAR_MAX_NARROW = 26;
