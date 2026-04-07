@@ -139,6 +139,7 @@ import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { NarratorView } from "./screens/index.js";
 import { TerminalView } from "./screens/TerminalView.js";
+import { writeToTerminal } from "./hooks/useTerminal.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -634,7 +635,6 @@ export function App({
 	const [soundEnabled, setSoundEnabled] = useState(false);
 	const [fancyHeader, setFancyHeader] = useState(false);
 	const [showEnhancedStatus, setShowEnhancedStatus] = useState(true);
-
 	// Performance metrics
 	const [lastResponseTime, setLastResponseTime] = useState<
 		number | undefined
@@ -1101,14 +1101,11 @@ export function App({
 			}
 		}
 
-		// Shift+Tab: cycle through open tabs
+		// Shift+Tab: always cycle workspace tabs backward (direction -1)
+		// Agent cycling was incorrectly hijacking this — agent focus has no dedicated hotkey yet
 		if (key.shift && key.tab) {
-			if (orchestration.agents.length > 0) {
-				orchestration.cycleAgent();
-			} else {
-				workspaceTabs.cycleTab(1, ["kanban"]);
-				setViewMode("chat");
-			}
+			workspaceTabs.cycleTab(-1, ["kanban"]);
+			setViewMode("chat");
 		}
 
 		// Escape: abort generation if processing, otherwise switch to chat tab or close view
@@ -1524,19 +1521,6 @@ export function App({
 			// Auto-detect environment (git config, ollama models, gh auth)
 			const detected = await OnboardingManager.autoDetect();
 			onboardingManager.applyAutoDetected(detected);
-
-			// Proactively offer gh login if not authenticated
-			if (!detected.githubUsername) {
-				setMessages((prev) => [
-					...prev,
-					{
-						id: `gh-auth-notice-${Date.now()}`,
-						role: "assistant" as const,
-						content: "Hey — you're not logged in to GitHub. Want me to log you in now so we can create issues, open PRs, and manage repos directly from here? Just say yes and I'll handle it.",
-						timestamp: new Date(),
-					},
-				]);
-			}
 
 			// Also detect integrations (LM Studio, etc.)
 			await onboardingManager.detectIntegrations();
@@ -3242,7 +3226,7 @@ export function App({
 							addSystemMessage("Opening browser to sign in...");
 							import("../../../packages/auth/cli-auth-server.js").then(
 								({ runCLIAuthFlow }) => {
-									runCLIAuthFlow("https://8gent.world", {
+									runCLIAuthFlow("https://8gent.app", {
 										onServerReady: () => {},
 										onBrowserOpened: () => {},
 										onWaiting: () => {},
@@ -3963,25 +3947,7 @@ export function App({
 
 		if (!input && !attached) return;
 
-		// Intercept gh auth response — agent can't reliably run interactive CLI
-		const lastMsg = messages[messages.length - 1];
-		const isGhAuthPrompt = lastMsg?.id?.startsWith("gh-auth-notice");
-		const isYes = /^(yes|yeah|yep|sure|ok|go ahead|do it|yup|y)$/i.test(input.trim());
-		if (isGhAuthPrompt && isYes) {
-			setMessages((prev) => [
-				...prev,
-				{ id: `user-${Date.now()}`, role: "user" as const, content: input, timestamp: new Date() },
-				{ id: `gh-auth-running-${Date.now()}`, role: "assistant" as const, content: "Opening GitHub login in your browser...", timestamp: new Date() },
-			]);
-			try {
-				// gh auth login --web needs a real TTY — spawn in a new Terminal window
-				require("child_process").exec(
-					`osascript -e 'tell application "Terminal" to do script "gh auth login --web && echo DONE"'`,
-					() => {}
-				);
-			} catch (e) {}
-			return;
-		}
+		// (gh auth LLM intercept removed — now handled as a deterministic gate in the UI)
 
 		if (showOnboarding && !input && attached) {
 			addSystemMessage(
@@ -4667,13 +4633,14 @@ export function App({
 					);
 				}
 				return (
-					<Stack minHeight={0} flexGrow={1}>
+					<Box flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
 						<MessageList
 							messages={messages}
 							animateTyping={showAnimations}
 							showAnimations={showAnimations}
 							soundEnabled={soundEnabled}
 							contentWidth={chatContentWidth}
+							maxVisible={Math.max(5, viewport.height - 10)}
 						/>
 						{isProcessing && (
 							<ActivityMonitor
@@ -4684,27 +4651,33 @@ export function App({
 								showAnimations={showAnimations}
 							/>
 						)}
-					</Stack>
+					</Box>
 				);
 		}
 	};
+
+	const PROCESS_DETAIL_CHROME_ROWS = 10;
 
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 			<FixedFrame>
 				{/* Header */}
-				{fancyHeader ? (
-					<FancyHeader isProcessing={isProcessing} />
-				) : (
-					<Header
-						isProcessing={isProcessing}
-						showAnimations={showAnimations}
-						updateAvailable={updateInfo}
-					/>
-				)}
+				<Box flexShrink={0}>
+					{fancyHeader ? (
+						<FancyHeader isProcessing={isProcessing} />
+					) : (
+						<Header
+							isProcessing={isProcessing}
+							showAnimations={showAnimations}
+							updateAvailable={updateInfo}
+						/>
+					)}
+				</Box>
 
 				{/* Workspace tab bar */}
-				<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+				<Box flexShrink={0}>
+					<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+				</Box>
 
 				{/* Main content area with folder frame */}
 				<Box flexDirection="row" flexGrow={1} minHeight={0}>
@@ -4713,7 +4686,7 @@ export function App({
 						<AppText color="cyan">│</AppText>
 					</Box>
 					{/* Main content (chat / kanban / etc.) or process detail */}
-					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0}>
+					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0} overflow="hidden">
 						{processPanel.detailTaskId &&
 						processPanel.tasks.find(
 							(t) => t.id === processPanel.detailTaskId,
@@ -4740,7 +4713,7 @@ export function App({
 										]);
 									}
 								}}
-								height={30}
+								height={Math.max(10, viewport.height - PROCESS_DETAIL_CHROME_ROWS)}
 							/>
 						) : (
 							renderMainContent()
@@ -4785,33 +4758,25 @@ export function App({
 
 				{/* Mini kanban removed — full board available via Ctrl+K */}
 
-				{/* Status verb - always visible (width-capped to avoid spilling past frame) */}
-				<Box
-					paddingX={1}
-					marginBottom={1}
-					width={Math.max(20, viewport.width - 4)}
-				>
-					{isProcessing ? (
+				{/* Status verb - only shown while processing (idle hides to recover 2 rows) */}
+				{isProcessing && (
+					<Box
+						paddingX={1}
+						flexShrink={0}
+						width={Math.max(20, viewport.width - 4)}
+					>
 						<AnimatedStatusVerb
 							type={processingStage === "planning" ? "planning" : "executing"}
 							showIcon={true}
 							active={true}
 							maxWidth={Math.max(16, viewport.width - 10)}
 						/>
-					) : (
-						<MutedText>
-							<AppText color="cyan">✦</AppText>{" "}
-							{truncate(
-								"Awaiting your command...",
-								Math.max(12, viewport.width - 14),
-							)}
-						</MutedText>
-					)}
-				</Box>
+					</Box>
+				)}
 
 				{/* Image attachment indicator */}
 				{imageInput.currentImage && (
-					<Box paddingX={1}>
+					<Box paddingX={1} flexShrink={0}>
 						<ImageBadge
 							image={imageInput.currentImage}
 							onRemove={imageInput.removeImage}
@@ -4820,12 +4785,12 @@ export function App({
 				)}
 
 				{/* Top separator line */}
-				<Box paddingX={1}>
+				<Box paddingX={1} flexShrink={0}>
 					<Divider />
 				</Box>
 
 				{/* Input section with context window display */}
-				<Box paddingX={1} justifyContent="space-between" alignItems="center">
+				<Box paddingX={1} justifyContent="space-between" alignItems="center" flexShrink={0}>
 					{/* Left: Context used */}
 					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth}>
 						<MutedText>{formatTokens(totalTokens)}</MutedText>
@@ -4868,7 +4833,7 @@ export function App({
 				</Box>
 
 				{/* Bottom separator line */}
-				<Box paddingX={1}>
+				<Box paddingX={1} flexShrink={0}>
 					<Divider />
 				</Box>
 
@@ -4931,6 +4896,7 @@ export function App({
 				)}
 
 				{/* Status bar */}
+				<Box flexShrink={0}>
 				{showEnhancedStatus ? (
 					<EnhancedStatusBar
 						modelName={currentModel}
@@ -4970,6 +4936,7 @@ export function App({
 						soundEnabled={soundEnabled}
 					/>
 				)}
+				</Box>
 
 				{/* Hidden keyboard shortcuts hint */}
 				{/* Agent mode bar — Ctrl+T to cycle */}
@@ -4979,19 +4946,21 @@ export function App({
 					gap={1}
 					flexDirection="row"
 					flexWrap="nowrap"
+					flexShrink={0}
+					overflow="hidden"
 				>
 					{compactAgentModeBar ? (
-						<Inline gap={1}>
-							<AppText color="cyan" bold>{`[${agentMode}]`}</AppText>
-							<MutedText> ^T cycle</MutedText>
+						<Box flexDirection="row" overflow="hidden">
+							<AppText color="cyan" bold wrap="truncate-end">{`[${agentMode}]`}</AppText>
+							<MutedText wrap="truncate-end"> ^T cycle</MutedText>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
 							)}
-						</Inline>
+						</Box>
 					) : (
-						<Inline gap={0}>
+						<Box flexDirection="row" overflow="hidden">
 							{AGENT_MODES.map((mode) => (
-								<Box key={mode}>
+								<Box key={mode} flexShrink={0}>
 									{agentMode === mode ? (
 										<AppText color="cyan" bold>{`[${mode}]`}</AppText>
 									) : (
@@ -4999,17 +4968,17 @@ export function App({
 									)}
 								</Box>
 							))}
-							<MutedText> ^T mode</MutedText>
+							<Box flexShrink={0}><MutedText> ^T mode</MutedText></Box>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
 							)}
-						</Inline>
+						</Box>
 					)}
 				</Box>
 
 				{showAnimations && (
-					<Box paddingX={1} gap={2}>
-						<MutedText>
+					<Box paddingX={1} gap={2} flexShrink={0} overflow="hidden">
+						<MutedText wrap="truncate-end">
 							{truncate(
 								"^O expand | ^B processes | ^K kanban | ^P predict | ^A anim | ^S sound | ^C exit",
 								Math.max(16, viewport.width - 2),
