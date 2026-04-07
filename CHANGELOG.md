@@ -7,6 +7,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.0] - 2026-04-07
+
+### Added
+- **RoleRegistry** - role-based runner configs in `@8gent/orchestration` (#1294)
+- **TaskDispatcher** - atomic task dispatch with claimed map + state machine (#1279)
+
+### Fixed
+- **TUI layout** - status verb row hidden when idle, recovers 2 rows for message list (#1299)
+- **TUI layout** - agent mode bar `Box overflow="hidden"` + `wrap="truncate-end"`, never wraps on narrow terminals (#1295)
+- **TUI layout** - `flexShrink={0}` on all fixed chrome elements: header, tab bar, dividers, input, status bar (#1296)
+- **TUI layout** - `ProcessDetailView` height computed from `viewport.height`, not hardcoded 30 (#1297)
+- **TUI layout** - `HORIZONTAL_CHROME_COLS=4` replaces magic `RESERVED_CHROME=8`, recovers 4 message columns (#1298)
+- Status bar overflow and tool message flood
+- Status bar labels shortened, update banner trimmed
+
 ## [Unreleased]
 
 - feat: ExtensionCrafter — autonomous source-to-extension agent (#1254)
