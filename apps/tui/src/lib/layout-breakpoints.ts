@@ -15,6 +15,14 @@ export const TUI_STATUS_COMPACT_BELOW = 92;
 export const RESERVED_CHROME_COLS = 8;
 const RESERVED_CHROME = RESERVED_CHROME_COLS;
 
+// Horizontal chrome consumed by FixedFrame borders + paddingX={1}:
+//   left border │   = 1
+//   paddingX left  = 1
+//   paddingX right = 1
+//   right border │ = 1
+//   total          = 4
+const HORIZONTAL_CHROME_COLS = 4;
+
 const SIDEBAR_MAX_WIDE = 32;
 const SIDEBAR_MAX_NARROW = 26;
 const SIDEBAR_MIN = 18;
@@ -42,5 +50,5 @@ export function tuiChatContentWidth(
 	viewportWidth: number,
 	sidebarWidth: number,
 ): number {
-	return Math.max(16, viewportWidth - sidebarWidth - RESERVED_CHROME);
+	return Math.max(16, viewportWidth - sidebarWidth - HORIZONTAL_CHROME_COLS);
 }
