@@ -71,6 +71,7 @@ const SINGLETON_TYPES: TabType[] = [
   "kanban",
   "music",
   "projects",
+  "terminal",  // one terminal tab max — reuse, never stack
 ];
 
 const MAX_TABS = 20;
