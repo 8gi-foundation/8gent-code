@@ -15,6 +15,17 @@ import * as path from "path";
 const SHELL = process.env.SHELL || "/bin/zsh";
 const MAX_LINES = 1000;
 
+// node-pty's libuv read loop throws ENXIO (errno -6) when the PTY master fd
+// is closed while a read is still pending. This is expected on tab unmount.
+// Register once at module load — guard prevents double-registration.
+if (!(globalThis as any).__ptyEnxioHandled) {
+  (globalThis as any).__ptyEnxioHandled = true;
+  process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
+    if (err.code === "ENXIO") return; // swallow expected PTY close noise
+    throw err; // re-throw everything else
+  });
+}
+
 // -------------------------------------------------------
 // Global registry: tabId → IPty
 // Used by write_terminal tool (outside React lifecycle)
@@ -88,7 +99,7 @@ export function useTerminal(tabId: string, cwd?: string) {
     if (ptyRef.current) return; // already running
 
     const workDir = cwd || process.cwd();
-    const proc = pty.spawn(SHELL, ["-l"], {
+    const proc = pty.spawn(SHELL, ["-i"], {  // -i (interactive) not -l (login) — faster startup
       name: "xterm-256color",
       cols: 120,
       rows: 30,
@@ -117,9 +128,10 @@ export function useTerminal(tabId: string, cwd?: string) {
     spawn();
     return () => {
       if (ptyRef.current) {
+        const proc = ptyRef.current;
+        ptyRef.current = null;       // null first so onData callbacks are ignored
         _registry.delete(tabId);
-        try { ptyRef.current.kill(); } catch { /* already dead */ }
-        ptyRef.current = null;
+        try { proc.kill(); } catch { /* already dead — ENXIO swallowed above */ }
       }
     };
   }, [tabId, spawn]);

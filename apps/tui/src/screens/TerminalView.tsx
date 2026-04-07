@@ -37,10 +37,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     resize(cols, rows);
   }, [cols, rows, resize]);
 
-  // Handle keyboard input when this view is focused
+  // Handle keyboard input — only active when this terminal tab is visible
   useInput((input, key) => {
-    if (!visible) return;
-
     if (key.escape && onClose) {
       onClose();
       return;
@@ -69,7 +67,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       return;
     }
 
-    if (key.tab) {
+    // Forward plain Tab to PTY for autocomplete; let Shift+Tab fall through for tab cycling
+    if (key.tab && !key.shift) {
       write("\t");
       return;
     }
@@ -78,7 +77,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     if (input && !key.ctrl && !key.meta) {
       setInputBuf((prev) => prev + input);
     }
-  });
+  }, { isActive: visible });
 
   // Show last N lines that fit in the viewport
   const visibleLines = lines.slice(-(rows - 2));
