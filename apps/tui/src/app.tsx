@@ -635,8 +635,6 @@ export function App({
 	const [soundEnabled, setSoundEnabled] = useState(false);
 	const [fancyHeader, setFancyHeader] = useState(false);
 	const [showEnhancedStatus, setShowEnhancedStatus] = useState(true);
-	const [ghAuthPromptVisible, setGhAuthPromptVisible] = useState(false);
-
 	// Performance metrics
 	const [lastResponseTime, setLastResponseTime] = useState<
 		number | undefined
@@ -1110,24 +1108,6 @@ export function App({
 			setViewMode("chat");
 		}
 
-		// GitHub auth gate: Y to login, D to dismiss (only when prompt is visible)
-		if (ghAuthPromptVisible && !key.ctrl && !key.meta) {
-			if (input === "y" || input === "Y") {
-				setGhAuthPromptVisible(false);
-				const ghTab = workspaceTabs.addTab("terminal", "gh auth");
-				const ghTabId = ghTab?.id ?? "terminal-default";
-				setTimeout(() => {
-					const result = writeToTerminal(ghTabId, "gh auth login --web\n");
-					if (result.startsWith("No terminal")) {
-						setTimeout(() => writeToTerminal(ghTabId, "gh auth login --web\n"), 1500);
-					}
-				}, 2500);
-			}
-			if (input === "d" || input === "D") {
-				setGhAuthPromptVisible(false);
-			}
-		}
-
 		// Escape: abort generation if processing, otherwise switch to chat tab or close view
 		if (key.escape) {
 			if (isProcessing && agent) {
@@ -1541,12 +1521,6 @@ export function App({
 			// Auto-detect environment (git config, ollama models, gh auth)
 			const detected = await OnboardingManager.autoDetect();
 			onboardingManager.applyAutoDetected(detected);
-
-			// Proactively show deterministic gh auth prompt if not authenticated
-			// (handled as a status-bar gate, not an LLM chat bubble)
-			if (!detected.githubUsername) {
-				setGhAuthPromptVisible(true);
-			}
 
 			// Also detect integrations (LM Studio, etc.)
 			await onboardingManager.detectIntegrations();
@@ -3252,7 +3226,7 @@ export function App({
 							addSystemMessage("Opening browser to sign in...");
 							import("../../../packages/auth/cli-auth-server.js").then(
 								({ runCLIAuthFlow }) => {
-									runCLIAuthFlow("https://8gent.world", {
+									runCLIAuthFlow("https://8gent.app", {
 										onServerReady: () => {},
 										onBrowserOpened: () => {},
 										onWaiting: () => {},
@@ -4682,22 +4656,28 @@ export function App({
 		}
 	};
 
+	const PROCESS_DETAIL_CHROME_ROWS = 10;
+
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 			<FixedFrame>
 				{/* Header */}
-				{fancyHeader ? (
-					<FancyHeader isProcessing={isProcessing} />
-				) : (
-					<Header
-						isProcessing={isProcessing}
-						showAnimations={showAnimations}
-						updateAvailable={updateInfo}
-					/>
-				)}
+				<Box flexShrink={0}>
+					{fancyHeader ? (
+						<FancyHeader isProcessing={isProcessing} />
+					) : (
+						<Header
+							isProcessing={isProcessing}
+							showAnimations={showAnimations}
+							updateAvailable={updateInfo}
+						/>
+					)}
+				</Box>
 
 				{/* Workspace tab bar */}
-				<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+				<Box flexShrink={0}>
+					<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+				</Box>
 
 				{/* Main content area with folder frame */}
 				<Box flexDirection="row" flexGrow={1} minHeight={0}>
@@ -4733,7 +4713,7 @@ export function App({
 										]);
 									}
 								}}
-								height={Math.max(10, viewport.height - 12)}
+								height={Math.max(10, viewport.height - PROCESS_DETAIL_CHROME_ROWS)}
 							/>
 						) : (
 							renderMainContent()
@@ -4782,7 +4762,7 @@ export function App({
 				{isProcessing && (
 					<Box
 						paddingX={1}
-						marginBottom={1}
+						flexShrink={0}
 						width={Math.max(20, viewport.width - 4)}
 					>
 						<AnimatedStatusVerb
@@ -4796,7 +4776,7 @@ export function App({
 
 				{/* Image attachment indicator */}
 				{imageInput.currentImage && (
-					<Box paddingX={1}>
+					<Box paddingX={1} flexShrink={0}>
 						<ImageBadge
 							image={imageInput.currentImage}
 							onRemove={imageInput.removeImage}
@@ -4804,22 +4784,13 @@ export function App({
 					</Box>
 				)}
 
-				{/* GitHub auth gate — deterministic prompt, no LLM involved */}
-				{ghAuthPromptVisible && authStatus !== "authenticated" && (
-					<Box paddingX={1} flexShrink={0}>
-						<MutedText>⚠ </MutedText>
-						<AppText color="yellow">GitHub not authenticated</AppText>
-						<MutedText>  [Y] login  [D] dismiss</MutedText>
-					</Box>
-				)}
-
 				{/* Top separator line */}
-				<Box paddingX={1}>
+				<Box paddingX={1} flexShrink={0}>
 					<Divider />
 				</Box>
 
 				{/* Input section with context window display */}
-				<Box paddingX={1} justifyContent="space-between" alignItems="center">
+				<Box paddingX={1} justifyContent="space-between" alignItems="center" flexShrink={0}>
 					{/* Left: Context used */}
 					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth}>
 						<MutedText>{formatTokens(totalTokens)}</MutedText>
@@ -4862,7 +4833,7 @@ export function App({
 				</Box>
 
 				{/* Bottom separator line */}
-				<Box paddingX={1}>
+				<Box paddingX={1} flexShrink={0}>
 					<Divider />
 				</Box>
 
@@ -4925,6 +4896,7 @@ export function App({
 				)}
 
 				{/* Status bar */}
+				<Box flexShrink={0}>
 				{showEnhancedStatus ? (
 					<EnhancedStatusBar
 						modelName={currentModel}
@@ -4964,6 +4936,7 @@ export function App({
 						soundEnabled={soundEnabled}
 					/>
 				)}
+				</Box>
 
 				{/* Hidden keyboard shortcuts hint */}
 				{/* Agent mode bar — Ctrl+T to cycle */}
@@ -4978,8 +4951,8 @@ export function App({
 				>
 					{compactAgentModeBar ? (
 						<Box flexDirection="row" overflow="hidden">
-							<AppText color="cyan" bold>{`[${agentMode}]`}</AppText>
-							<MutedText> ^T cycle</MutedText>
+							<AppText color="cyan" bold wrap="truncate-end">{`[${agentMode}]`}</AppText>
+							<MutedText wrap="truncate-end"> ^T cycle</MutedText>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
 							)}
