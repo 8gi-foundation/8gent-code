@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8gent - Usage Analytics</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg-0: #0A0908;
+      --bg-1: #12100E;
+      --bg-2: #1C1A17;
+      --bg-3: #252220;
+      --text-primary: #FAF7F4;
+      --text-secondary: #C8C2BA;
+      --text-tertiary: #8A8078;
+      --border: #2E2A26;
+      --accent: #F07A28;
+      --accent-dim: rgba(240, 122, 40, 0.15);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-0);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: clamp(16px, 4vw, 48px);
+    }
+
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-weight: 700;
+      font-size: clamp(1.5rem, 3vw, 2rem);
+      margin-bottom: 8px;
+    }
+
+    h1 span { color: var(--accent); }
+
+    .subtitle {
+      color: var(--text-tertiary);
+      font-size: 0.875rem;
+      margin-bottom: 32px;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .stat-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .stat-card .label {
+      color: var(--text-tertiary);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .stat-card .value {
+      font-size: 1.75rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-card .delta {
+      font-size: 0.75rem;
+      margin-top: 4px;
+      color: #6BCB77;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    @media (min-width: 960px) {
+      .charts-grid { grid-template-columns: 1fr 1fr; }
+      .charts-grid .full-width { grid-column: 1 / -1; }
+    }
+
+    .chart-panel {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .chart-panel h2 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+    }
+
+    .chart-container {
+      position: relative;
+      width: 100%;
+      max-height: 320px;
+    }
+
+    canvas { max-width: 100%; }
+
+    .table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+
+    th {
+      text-align: left;
+      color: var(--text-tertiary);
+      font-weight: 500;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    .bar-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bar-track {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-3);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+
+    .bar-label {
+      min-width: 36px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Usage Analytics<span>.</span></h1>
+  <p class="subtitle">Session analytics for the last 14 days</p>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="label">Total tokens</div>
+      <div class="value" id="stat-tokens">--</div>
+      <div class="delta" id="stat-tokens-delta"></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Sessions</div>
+      <div class="value" id="stat-sessions">--</div>
+      <div class="delta" id="stat-sessions-delta"></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Avg tokens / session</div>
+      <div class="value" id="stat-avg">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Models used</div>
+      <div class="value" id="stat-models">--</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-panel full-width">
+      <h2>Daily Token Usage</h2>
+      <div class="chart-container">
+        <canvas id="dailyTokensChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-panel">
+      <h2>Model Distribution</h2>
+      <div class="chart-container">
+        <canvas id="modelDistChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-panel">
+      <h2>Tool Usage Frequency</h2>
+      <div class="chart-container">
+        <canvas id="toolUsageChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-panel full-width">
+      <h2>Top Tools - Detail</h2>
+      <div class="table-wrap">
+        <table id="toolTable">
+          <thead>
+            <tr><th>Tool</th><th>Calls</th><th>Distribution</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ------------------------------------------------------------------
+// Mock data - structure matches session-analytics output
+// ------------------------------------------------------------------
+const MOCK_DATA = {
+  period: { start: "2026-03-12", end: "2026-03-25" },
+  summary: {
+    totalTokens: 1_247_830,
+    totalSessions: 94,
+    avgTokensPerSession: 13_274,
+    modelsUsed: 4,
+    tokensDelta: 12.4,
+    sessionsDelta: 8.1
+  },
+  dailyTokens: [
+    { date: "2026-03-12", input: 31200, output: 18400 },
+    { date: "2026-03-13", input: 42500, output: 27100 },
+    { date: "2026-03-14", input: 28900, output: 16300 },
+    { date: "2026-03-15", input: 55100, output: 34700 },
+    { date: "2026-03-16", input: 39800, output: 22600 },
+    { date: "2026-03-17", input: 61400, output: 41200 },
+    { date: "2026-03-18", input: 72300, output: 48900 },
+    { date: "2026-03-19", input: 44600, output: 29100 },
+    { date: "2026-03-20", input: 58200, output: 37800 },
+    { date: "2026-03-21", input: 81000, output: 54300 },
+    { date: "2026-03-22", input: 67500, output: 43200 },
+    { date: "2026-03-23", input: 49800, output: 31400 },
+    { date: "2026-03-24", input: 73100, output: 46500 },
+    { date: "2026-03-25", input: 52400, output: 33800 }
+  ],
+  modelDistribution: [
+    { model: "qwen3.5:32b", sessions: 41, tokens: 548200 },
+    { model: "deepseek-r1:14b", sessions: 26, tokens: 312400 },
+    { model: "mistral-nemo:12b", sessions: 18, tokens: 241600 },
+    { model: "llama3.3:70b", sessions: 9, tokens: 145630 }
+  ],
+  toolUsage: [
+    { tool: "file_read", calls: 482 },
+    { tool: "file_write", calls: 314 },
+    { tool: "bash", calls: 276 },
+    { tool: "grep_search", calls: 198 },
+    { tool: "web_search", calls: 87 },
+    { tool: "memory_query", calls: 64 },
+    { tool: "git_commit", calls: 52 },
+    { tool: "ast_outline", calls: 41 }
+  ]
+};
+
+// ------------------------------------------------------------------
+// Render summary stats
+// ------------------------------------------------------------------
+function formatNum(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return n.toString();
+}
+
+const s = MOCK_DATA.summary;
+document.getElementById("stat-tokens").textContent = formatNum(s.totalTokens);
+document.getElementById("stat-sessions").textContent = s.totalSessions;
+document.getElementById("stat-avg").textContent = formatNum(s.avgTokensPerSession);
+document.getElementById("stat-models").textContent = s.modelsUsed;
+document.getElementById("stat-tokens-delta").textContent = "+" + s.tokensDelta + "% vs prev period";
+document.getElementById("stat-sessions-delta").textContent = "+" + s.sessionsDelta + "% vs prev period";
+
+// ------------------------------------------------------------------
+// Chart.js global config
+// ------------------------------------------------------------------
+Chart.defaults.color = "#C8C2BA";
+Chart.defaults.borderColor = "#2E2A26";
+Chart.defaults.font.family = "Inter, sans-serif";
+Chart.defaults.font.size = 11;
+
+const ACCENT = "#F07A28";
+const ACCENT_DIM = "rgba(240, 122, 40, 0.25)";
+const SECONDARY = "#6BCB77";
+
+// ------------------------------------------------------------------
+// Daily tokens - stacked bar chart
+// ------------------------------------------------------------------
+const dailyLabels = MOCK_DATA.dailyTokens.map(d => d.date.slice(5));
+
+new Chart(document.getElementById("dailyTokensChart"), {
+  type: "bar",
+  data: {
+    labels: dailyLabels,
+    datasets: [
+      {
+        label: "Input tokens",
+        data: MOCK_DATA.dailyTokens.map(d => d.input),
+        backgroundColor: ACCENT,
+        borderRadius: 3
+      },
+      {
+        label: "Output tokens",
+        data: MOCK_DATA.dailyTokens.map(d => d.output),
+        backgroundColor: ACCENT_DIM,
+        borderRadius: 3
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { stacked: true, grid: { display: false } },
+      y: {
+        stacked: true,
+        ticks: { callback: v => formatNum(v) },
+        grid: { color: "#1C1A17" }
+      }
+    },
+    plugins: {
+      legend: { position: "top", labels: { boxWidth: 12, padding: 16 } },
+      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ": " + formatNum(ctx.raw) } }
+    }
+  }
+});
+
+// ------------------------------------------------------------------
+// Model distribution - doughnut chart
+// ------------------------------------------------------------------
+const modelColors = [ACCENT, SECONDARY, "#4D96FF", "#C8C2BA"];
+
+new Chart(document.getElementById("modelDistChart"), {
+  type: "doughnut",
+  data: {
+    labels: MOCK_DATA.modelDistribution.map(m => m.model),
+    datasets: [{
+      data: MOCK_DATA.modelDistribution.map(m => m.tokens),
+      backgroundColor: modelColors,
+      borderWidth: 0,
+      spacing: 2
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: "65%",
+    plugins: {
+      legend: { position: "bottom", labels: { boxWidth: 10, padding: 12 } },
+      tooltip: { callbacks: { label: ctx => ctx.label + ": " + formatNum(ctx.raw) + " tokens" } }
+    }
+  }
+});
+
+// ------------------------------------------------------------------
+// Tool usage - horizontal bar chart
+// ------------------------------------------------------------------
+const toolData = [...MOCK_DATA.toolUsage].sort((a, b) => a.calls - b.calls);
+
+new Chart(document.getElementById("toolUsageChart"), {
+  type: "bar",
+  data: {
+    labels: toolData.map(t => t.tool),
+    datasets: [{
+      data: toolData.map(t => t.calls),
+      backgroundColor: ACCENT,
+      borderRadius: 3,
+      barThickness: 18
+    }]
+  },
+  options: {
+    indexAxis: "y",
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { grid: { color: "#1C1A17" } },
+      y: { grid: { display: false } }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+
+// ------------------------------------------------------------------
+// Tool detail table
+// ------------------------------------------------------------------
+const maxCalls = Math.max(...MOCK_DATA.toolUsage.map(t => t.calls));
+const tbody = document.querySelector("#toolTable tbody");
+
+MOCK_DATA.toolUsage.forEach(t => {
+  const pct = ((t.calls / maxCalls) * 100).toFixed(0);
+  const row = document.createElement("tr");
+  row.innerHTML = `
+    <td><code>${t.tool}</code></td>
+    <td>${t.calls}</td>
+    <td>
+      <div class="bar-cell">
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <span class="bar-label">${pct}%</span>
+      </div>
+    </td>`;
+  tbody.appendChild(row);
+});
+</script>
+</body>
+</html>
