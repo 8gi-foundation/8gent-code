@@ -113,7 +113,7 @@ export function createVault(envFiles?: string[]): CredentialVault {
     },
 
     keys(): string[] {
-      return [...secrets.keys()].sort();
+      return Array.from(secrets.keys()).sort();
     },
 
     inject(input: Record<string, unknown>): Record<string, unknown> {
