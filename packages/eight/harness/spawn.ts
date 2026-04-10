@@ -13,10 +13,22 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+// SEC-S2: Strict persona validation — alphanumeric + hyphens only, no traversal
+const SAFE_PERSONA = /^[a-z0-9][a-z0-9-]{0,30}$/;
+
+function validatePersona(persona: string): string {
+  if (!SAFE_PERSONA.test(persona)) {
+    throw new Error(
+      `Invalid persona "${persona}": must be lowercase alphanumeric/hyphens, 1-31 chars`,
+    );
+  }
+  return persona;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,14 +93,22 @@ interface WorktreeHandle {
 
 async function createWorktree(scope: SpawnScope, taskId: string): Promise<WorktreeHandle> {
   const hash = crypto.randomBytes(4).toString("hex");
-  const persona = scope.persona || "child";
+  const persona = validatePersona(scope.persona || "child");
   const branch = `spawn/${persona}-${hash}`;
   const dir = path.join(scope.projectRoot, WORKTREES_DIR);
   const wtPath = path.join(dir, `${persona}-${hash}`);
 
+  // SEC-S2: Verify worktree path stays inside project root
+  const resolvedWt = path.resolve(wtPath);
+  const resolvedRoot = path.resolve(scope.projectRoot);
+  if (!resolvedWt.startsWith(resolvedRoot + path.sep)) {
+    throw new Error(`Worktree path traversal blocked: "${wtPath}" escapes project root`);
+  }
+
   fs.mkdirSync(dir, { recursive: true });
 
-  await execAsync(`git worktree add "${wtPath}" -b "${branch}"`, {
+  // SEC-S1: Use execFile (no shell) — argument array prevents injection
+  await execFileAsync("git", ["worktree", "add", wtPath, "-b", branch], {
     cwd: scope.projectRoot,
     timeout: 15_000,
   });
@@ -98,14 +118,15 @@ async function createWorktree(scope: SpawnScope, taskId: string): Promise<Worktr
 
 async function removeWorktree(scope: SpawnScope, handle: WorktreeHandle): Promise<void> {
   try {
-    await execAsync(`git worktree remove "${handle.path}" --force`, {
+    // SEC-S1: No shell — argument arrays only
+    await execFileAsync("git", ["worktree", "remove", handle.path, "--force"], {
       cwd: scope.projectRoot,
       timeout: 10_000,
     });
   } catch { /* best-effort */ }
 
   try {
-    await execAsync(`git branch -D "${handle.branch}"`, {
+    await execFileAsync("git", ["branch", "-D", handle.branch], {
       cwd: scope.projectRoot,
       timeout: 5_000,
     });
@@ -114,7 +135,8 @@ async function removeWorktree(scope: SpawnScope, handle: WorktreeHandle): Promis
 
 async function getChangedFiles(wtPath: string): Promise<string[]> {
   try {
-    const { stdout } = await execAsync("git diff --name-only HEAD", {
+    // SEC-S1: No shell — argument array
+    const { stdout } = await execFileAsync("git", ["diff", "--name-only", "HEAD"], {
       cwd: wtPath,
       timeout: 5_000,
     });
@@ -122,6 +144,19 @@ async function getChangedFiles(wtPath: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+// SEC-S6: Validate child result shape — never trust arbitrary JSON from child process
+function validateSpawnOutput(raw: unknown): Record<string, unknown> | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  // Strip __proto__ and constructor to prevent prototype pollution
+  const clean: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+    clean[key] = val;
+  }
+  return clean;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,23 +204,31 @@ export async function spawn(task: SpawnTask, scope: SpawnScope): Promise<SpawnRe
     fs.writeFileSync(taskFile, JSON.stringify({ taskId, ...task }, null, 2));
 
     // 3. Execute child process in the worktree
+    // SEC-S1: Use execFile with argument arrays — NO shell interpolation.
+    // This matches the pattern established by spawnGit() in tools.ts (PR #1 fix).
     const childEnv = { ...process.env, ...scope.env, SPAWN_TASK_ID: taskId };
-    const defaultCmd = `bun run ${path.join(scope.projectRoot, "packages/eight/harness/spawn-child.ts")}`;
-    const cmd = `${scope.env?.SPAWN_CMD || defaultCmd} "${taskFile}"`;
+    const customCmd = scope.env?.SPAWN_CMD;
+    const executable = customCmd || "bun";
+    const execArgs = customCmd
+      ? [taskFile]
+      : ["run", path.join(scope.projectRoot, "packages/eight/harness/spawn-child.ts"), taskFile];
 
-    await execAsync(cmd, {
+    await execFileAsync(executable, execArgs, {
       cwd: handle.path,
       timeout,
       env: childEnv,
+      maxBuffer: 10 * 1024 * 1024, // SEC-S4: 10MB output cap
     });
 
     // 4. Read structured result
     const resultPath = path.join(handle.path, RESULTS_FILE);
     const filesChanged = await getChangedFiles(handle.path);
 
+    // SEC-S6: Validate result shape — child output is untrusted
     let output: Record<string, unknown> | undefined;
     if (fs.existsSync(resultPath)) {
-      output = JSON.parse(fs.readFileSync(resultPath, "utf-8"));
+      const raw = JSON.parse(fs.readFileSync(resultPath, "utf-8"));
+      output = validateSpawnOutput(raw);
     }
 
     return {
