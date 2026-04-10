@@ -24,6 +24,7 @@ import {
   effectiveImportance,
 } from "./types.js";
 import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
+import { safeJsonStringify, safeJsonParse } from "./json-guard.js";
 
 // ── Schema SQL ────────────────────────────────────────────────────────
 
@@ -235,7 +236,7 @@ export class MemoryStore {
     const id = memory.id || generateId("mem");
     const contentText = extractContentText(memory);
     const tags = extractTags(memory);
-    const data = JSON.stringify(memory);
+    const data = safeJsonStringify(memory);
 
     const stmt = this.db.prepare(`
       INSERT INTO memories (id, type, scope, data, content_text, tags, importance, decay_factor,
@@ -306,7 +307,7 @@ export class MemoryStore {
       .prepare("UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?")
       .run(Date.now(), id);
 
-    return JSON.parse(row.data) as Memory;
+    return safeJsonParse<Memory>(row.data);
   }
 
   /**
@@ -378,7 +379,7 @@ export class MemoryStore {
 
     if (!row) return false;
 
-    const current = JSON.parse(row.data) as Memory;
+    const current = safeJsonParse<Memory>(row.data);
     const now = Date.now();
 
     // Create version snapshot
@@ -400,7 +401,7 @@ export class MemoryStore {
          confidence = ?, evidence_count = ?, version = ?, updated_at = ? WHERE id = ?`
       )
       .run(
-        JSON.stringify(merged),
+        safeJsonStringify(merged),
         contentText,
         JSON.stringify(tags),
         merged.importance,
@@ -594,7 +595,7 @@ export class MemoryStore {
       )
       .all(userId, limit) as Array<{ data: string }>;
 
-    return rows.map((row) => JSON.parse(row.data) as Memory);
+    return rows.map((row) => safeJsonParse<Memory>(row.data));
   }
 
   // ── Stats ─────────────────────────────────────────────────────────
@@ -700,7 +701,7 @@ export class MemoryStore {
       }>;
 
       return rows.map((row, index) => ({
-        memory: JSON.parse(row.data) as Memory,
+        memory: safeJsonParse<Memory>(row.data),
         score: 1 / (60 + index + 1), // BM25 rank to RRF score
         matchType: "fts" as const,
       }));
@@ -750,7 +751,7 @@ export class MemoryStore {
 
       if (similarity >= minScore) {
         results.push({
-          memory: JSON.parse(row.data) as Memory,
+          memory: safeJsonParse<Memory>(row.data),
           score: similarity * (0.7 + 0.3 * row.importance),
           matchType: "vector",
         });
@@ -859,7 +860,7 @@ function rowToEntity(row: Record<string, unknown>): Entity {
     type: row.type as EntityType,
     name: row.name as string,
     description: (row.description as string) || undefined,
-    metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+    metadata: row.metadata ? safeJsonParse<Record<string, unknown>>(row.metadata as string) : undefined,
     firstSeen: row.first_seen as number,
     lastSeen: row.last_seen as number,
     mentionCount: row.mention_count as number,
@@ -875,7 +876,7 @@ function rowToRelationship(row: Record<string, unknown>): Relationship {
     targetId: row.target_id as string,
     type: row.type as RelationshipType,
     strength: row.strength as number,
-    metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+    metadata: row.metadata ? safeJsonParse<Record<string, unknown>>(row.metadata as string) : undefined,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   };
