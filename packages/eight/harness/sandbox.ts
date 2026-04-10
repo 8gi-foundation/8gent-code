@@ -22,7 +22,7 @@ export function createSandbox(vault?: CredentialVault): Sandbox {
     async execute(name: string, input: Record<string, unknown>): Promise<string> {
       const handler = tools.get(name);
       if (!handler) {
-        throw new Error(`Unknown tool: ${name}. Available: ${[...tools.keys()].join(", ")}`);
+        throw new Error(`Unknown tool: ${name}. Available: ${Array.from(tools.keys()).join(", ")}`);
       }
 
       // Vault injection: replace $VAULT{KEY} sentinels with actual credentials.
@@ -38,7 +38,7 @@ export function createSandbox(vault?: CredentialVault): Sandbox {
     },
 
     listTools(): string[] {
-      return [...tools.keys()].sort();
+      return Array.from(tools.keys()).sort();
     },
   };
 
