@@ -14,6 +14,16 @@ import { homedir } from "os";
 
 export const LEARNED_SKILLS_DIR = join(homedir(), ".8gent", "learned-skills");
 
+// SEC-K5: Sanitize strings for safe YAML frontmatter embedding
+function yamlSafe(value: string): string {
+  // Strip newlines (prevents field injection), then quote if it contains YAML special chars
+  const oneline = value.replace(/[\r\n]+/g, " ").trim();
+  if (/[:#{}[\]|>&*!%@`]/.test(oneline) || oneline.startsWith("'") || oneline.startsWith('"')) {
+    return `"${oneline.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  return oneline;
+}
+
 export interface CompoundInput {
   /** Short pattern name, e.g. "deploy-nextjs" or "fix-hydration-error" */
   pattern: string;
@@ -51,17 +61,22 @@ export function compoundSkill(input: CompoundInput): string | null {
     .map((s, i) => `${i + 1}. ${s}`)
     .join("\n");
 
+  // SEC-K5: Sanitize all frontmatter values to prevent YAML field injection
+  const safeName = yamlSafe(input.pattern);
+  const safeDesc = yamlSafe(input.description);
+  const safeTools = input.tools.map((t) => t.replace(/[^a-zA-Z0-9_-]/g, "")).join(", ");
+
   const md = `---
-name: ${input.pattern}
-description: ${input.description}
-tools: [${input.tools.join(", ")}]
+name: ${safeName}
+description: ${safeDesc}
+tools: [${safeTools}]
 learned: true
 successes: 1
 created: ${new Date().toISOString()}
 ---
-# ${input.pattern}
+# ${input.pattern.replace(/[\r\n]+/g, " ").trim()}
 
-${input.description}
+${input.description.replace(/[\r\n]{3,}/g, "\n\n").trim()}
 
 ## Steps
 
