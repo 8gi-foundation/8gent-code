@@ -44,7 +44,8 @@ function parseLine(line: string): AuditEntry {
 export function createSession(sessionId?: string): Session {
   const id = sessionId || crypto.randomUUID().slice(0, 12);
   const filePath = path.join(SESSIONS_DIR, `${id}.jsonl`);
-  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  // SEC-H1: Restrict permissions — audit logs may contain sensitive tool results
+  fs.mkdirSync(SESSIONS_DIR, { recursive: true, mode: 0o700 });
 
   // Track last hash in memory for fast appends (rebuilt from file on first use)
   let cachedLastHash: string | null = null;
@@ -77,7 +78,8 @@ export function createSession(sessionId?: string): Session {
       const line = JSON.stringify(entry) + "\n";
 
       // Append-only write. O_APPEND ensures atomicity on POSIX.
-      fs.appendFileSync(filePath, line, { encoding: "utf-8" });
+      // SEC-H1: Owner-only permissions on session files (0o600)
+      fs.appendFileSync(filePath, line, { encoding: "utf-8", mode: 0o600 });
       cachedLastHash = hash;
 
       return hash;
