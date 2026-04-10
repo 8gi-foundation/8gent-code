@@ -45,6 +45,14 @@ function getDbPath(): string {
 
 let _db: Database | null = null;
 
+/** Close and clear the cached DB handle. Required for test isolation. */
+export function resetDb(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+}
+
 export function getDb(): Database {
   if (_db) return _db;
   _db = new Database(getDbPath());
@@ -69,8 +77,37 @@ export function getDb(): Database {
       source TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS evolution_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      value REAL,
+      metadata TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS schema_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_skills_confidence ON learned_skills(confidence DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_type ON evolution_events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_events_subject ON evolution_events(subject);
+    CREATE INDEX IF NOT EXISTS idx_events_session ON evolution_events(session_id);
   `);
+
+  // Seed default schema version if not already set
+  const existing = _db
+    .prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+    .get() as any;
+  if (!existing) {
+    _db.prepare(
+      "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1')",
+    ).run();
+  }
+
   return _db;
 }
 
@@ -97,14 +134,18 @@ export function saveReflection(r: SessionReflection): void {
 
 export function getReflection(sessionId: string): SessionReflection | null {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM reflections WHERE session_id = ?").get(sessionId) as any;
+  const row = db
+    .prepare("SELECT * FROM reflections WHERE session_id = ?")
+    .get(sessionId) as any;
   if (!row) return null;
   return deserializeReflection(row);
 }
 
 export function getRecentReflections(limit: number = 20): SessionReflection[] {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM reflections ORDER BY timestamp DESC LIMIT ?").all(limit) as any[];
+  const rows = db
+    .prepare("SELECT * FROM reflections ORDER BY timestamp DESC LIMIT ?")
+    .all(limit) as any[];
   return rows.map(deserializeReflection);
 }
 
@@ -130,26 +171,40 @@ export function saveSkill(skill: LearnedSkill): void {
     INSERT OR REPLACE INTO learned_skills
     (id, trigger, action, confidence, times_used, last_used, source)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(skill.id, skill.trigger, skill.action, skill.confidence, skill.timesUsed, skill.lastUsed, skill.source);
+  `).run(
+    skill.id,
+    skill.trigger,
+    skill.action,
+    skill.confidence,
+    skill.timesUsed,
+    skill.lastUsed,
+    skill.source,
+  );
 }
 
 export function getSkillById(id: string): LearnedSkill | null {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM learned_skills WHERE id = ?").get(id) as any;
+  const row = db
+    .prepare("SELECT * FROM learned_skills WHERE id = ?")
+    .get(id) as any;
   return row ? deserializeSkill(row) : null;
 }
 
 export function getAllSkills(): LearnedSkill[] {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM learned_skills ORDER BY confidence DESC").all() as any[];
+  const rows = db
+    .prepare("SELECT * FROM learned_skills ORDER BY confidence DESC")
+    .all() as any[];
   return rows.map(deserializeSkill);
 }
 
 export function querySkillsByTrigger(triggerFragment: string): LearnedSkill[] {
   const db = getDb();
-  const rows = db.prepare(
-    "SELECT * FROM learned_skills WHERE LOWER(trigger) LIKE ? ORDER BY confidence DESC",
-  ).all(`%${triggerFragment.toLowerCase()}%`) as any[];
+  const rows = db
+    .prepare(
+      "SELECT * FROM learned_skills WHERE LOWER(trigger) LIKE ? ORDER BY confidence DESC",
+    )
+    .all(`%${triggerFragment.toLowerCase()}%`) as any[];
   return rows.map(deserializeSkill);
 }
 
@@ -161,7 +216,9 @@ export function updateSkillStats(id: string, success: boolean): void {
   const delta = success ? 0.1 : -0.1;
   const newConfidence = Math.max(0, Math.min(1, skill.confidence + delta));
   getDb()
-    .prepare("UPDATE learned_skills SET confidence = ?, times_used = ?, last_used = ? WHERE id = ?")
+    .prepare(
+      "UPDATE learned_skills SET confidence = ?, times_used = ?, last_used = ? WHERE id = ?",
+    )
     .run(newConfidence, newTimesUsed, new Date().toISOString(), id);
 }
 
@@ -175,4 +232,163 @@ function deserializeSkill(row: any): LearnedSkill {
     lastUsed: row.last_used,
     source: row.source,
   };
+}
+
+// ============================================
+// Evolution Events
+// ============================================
+
+type EventType =
+  | "skill_learned"
+  | "skill_used"
+  | "pattern_discovered"
+  | "error_encountered"
+  | "confidence_change";
+
+function generateEventId(): string {
+  return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function recordEvent(event: {
+  sessionId: string;
+  eventType: EventType;
+  subject: string;
+  value?: number;
+  metadata?: Record<string, unknown>;
+}): string {
+  const db = getDb();
+  const id = generateEventId();
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO evolution_events (id, session_id, event_type, subject, value, metadata, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    event.sessionId,
+    event.eventType,
+    event.subject,
+    event.value ?? null,
+    event.metadata ? JSON.stringify(event.metadata) : null,
+    now,
+  );
+  return id;
+}
+
+export function getSkillHistory(
+  skillId: string,
+): Array<{ timestamp: string; confidence: number; sessionId: string }> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT created_at, value, session_id FROM evolution_events
+       WHERE event_type = 'confidence_change' AND subject = ?
+       ORDER BY created_at ASC`,
+    )
+    .all(skillId) as any[];
+  return rows.map((r: any) => ({
+    timestamp: r.created_at,
+    confidence: r.value ?? 0,
+    sessionId: r.session_id,
+  }));
+}
+
+export function getPatternFrequency(pattern: string): {
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+  sessions: string[];
+} {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT created_at, session_id FROM evolution_events
+       WHERE event_type = 'pattern_discovered' AND subject = ?
+       ORDER BY created_at ASC`,
+    )
+    .all(pattern) as any[];
+
+  if (rows.length === 0) {
+    return { firstSeen: "", lastSeen: "", count: 0, sessions: [] };
+  }
+
+  return {
+    firstSeen: rows[0].created_at,
+    lastSeen: rows[rows.length - 1].created_at,
+    count: rows.length,
+    sessions: rows.map((r: any) => r.session_id),
+  };
+}
+
+export function getEvolutionSummary(since: string): {
+  newSkills: number;
+  improvedSkills: number;
+  degradedSkills: number;
+  newPatterns: number;
+  errorRate: number;
+} {
+  const db = getDb();
+
+  const countByType = (type: string): number => {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM evolution_events
+         WHERE event_type = ? AND created_at >= ?`,
+      )
+      .get(type, since) as any;
+    return row?.cnt ?? 0;
+  };
+
+  const newSkills = countByType("skill_learned");
+  const newPatterns = countByType("pattern_discovered");
+
+  // Improved vs degraded: confidence_change events with positive vs negative value
+  const improved = db
+    .prepare(
+      `SELECT COUNT(DISTINCT subject) as cnt FROM evolution_events
+       WHERE event_type = 'confidence_change' AND value > 0 AND created_at >= ?`,
+    )
+    .get(since) as any;
+  const degraded = db
+    .prepare(
+      `SELECT COUNT(DISTINCT subject) as cnt FROM evolution_events
+       WHERE event_type = 'confidence_change' AND value < 0 AND created_at >= ?`,
+    )
+    .get(since) as any;
+
+  // Error rate: errors / total events in period
+  const totalEvents = db
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM evolution_events WHERE created_at >= ?",
+    )
+    .get(since) as any;
+  const errorCount = countByType("error_encountered");
+  const total = totalEvents?.cnt ?? 0;
+  const errorRate = total > 0 ? errorCount / total : 0;
+
+  return {
+    newSkills,
+    improvedSkills: improved?.cnt ?? 0,
+    degradedSkills: degraded?.cnt ?? 0,
+    newPatterns,
+    errorRate,
+  };
+}
+
+// ============================================
+// Schema Versioning
+// ============================================
+
+export function getSchemaVersion(): number {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+    .get() as any;
+  return row ? parseInt(row.value, 10) : 1;
+}
+
+export function setSchemaVersion(version: number): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
+  ).run(String(version));
 }
