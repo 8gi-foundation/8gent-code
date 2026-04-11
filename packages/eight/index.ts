@@ -38,6 +38,9 @@ export { Agent } from "./agent";
 // CLI REPL
 export { startREPL } from "./repl";
 
+// Harness isolation (brain/hands architecture + audit logging)
+export * as harness from "./harness";
+
 // Context engineering (existing file)
 export {
   estimateTokens,
