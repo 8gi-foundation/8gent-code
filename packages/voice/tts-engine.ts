@@ -97,7 +97,7 @@ export class KittenTTSProvider implements TTSProvider {
   private static readonly MODEL = "KittenML/kitten-tts-nano-0.8";
 
   async speak(text: string, options?: TTSSpeakOptions): Promise<TTSProcess> {
-    const voice = options?.voice ?? "Bella";
+    const voice = options?.voice ?? "Bruno";
     const outPath = `/tmp/kitten-out-${Date.now()}.wav`;
 
     // Escape text for Python string literal
