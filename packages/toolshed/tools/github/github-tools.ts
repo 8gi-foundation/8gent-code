@@ -8,6 +8,8 @@
 import { registerTool } from "../../registry/register";
 import type { ExecutionContext } from "../../../types";
 import { execSync } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 
 function run(cmd: string, cwd: string): string {
   try {
@@ -15,6 +17,90 @@ function run(cmd: string, cwd: string): string {
   } catch (err: any) {
     throw new Error(err.stderr?.trim() || err.message);
   }
+}
+
+/**
+ * Pre-push validation gate: verify committed TypeScript files are valid code.
+ * Catches the vessel bot's common failure modes:
+ *   - Markdown written into .tsx files
+ *   - CommonJS module.exports in TypeScript
+ *   - Missing React component default exports in page.tsx/layout.tsx
+ *   - Pages Router patterns (NextApiRequest) in App Router files
+ */
+function validateCommittedCode(cwd: string): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  // Get .ts/.tsx files changed in commits not yet pushed
+  let changedFiles: string[];
+  try {
+    const diff = execSync(
+      "git diff --name-only --diff-filter=ACM HEAD~1 HEAD 2>/dev/null || git diff --name-only --cached",
+      { cwd, encoding: "utf-8", timeout: 10000 }
+    ).trim();
+    changedFiles = diff.split("\n").filter(f => /\.(ts|tsx)$/.test(f));
+  } catch {
+    return { valid: true, errors: [] }; // Can't determine files - allow push
+  }
+
+  if (changedFiles.length === 0) return { valid: true, errors: [] };
+
+  for (const file of changedFiles) {
+    const fullPath = join(cwd, file);
+    if (!existsSync(fullPath)) continue;
+
+    let content: string;
+    try {
+      content = readFileSync(fullPath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const trimmed = content.trim();
+    const basename = file.split("/").pop() || "";
+
+    // Reject: file starts with markdown heading (# Title)
+    if (trimmed.startsWith("# ") || trimmed.startsWith("## ")) {
+      errors.push(`${file}: contains markdown, not TypeScript`);
+      continue;
+    }
+
+    // Reject: CommonJS module.exports in .ts/.tsx
+    if (/\bmodule\.exports\s*=/.test(content)) {
+      errors.push(`${file}: uses CommonJS module.exports — must use ESM export`);
+      continue;
+    }
+
+    // Reject: Pages Router API handler pattern in App Router page files
+    if (/\bNextApiRequest\b/.test(content) || /\bNextApiResponse\b/.test(content)) {
+      errors.push(`${file}: uses Pages Router API types (NextApiRequest) — this is App Router`);
+      continue;
+    }
+
+    // Validate: page.tsx and layout.tsx must have a default export that looks like a component
+    if (basename === "page.tsx" || basename === "layout.tsx") {
+      const hasDefaultExport = /export\s+default\s+(function|class|async\s+function)/.test(content)
+        || /export\s+\{\s*\w+\s+as\s+default\s*\}/.test(content)
+        || /export\s+default\s+\w+/.test(content);
+      if (!hasDefaultExport) {
+        errors.push(`${file}: missing default component export (required for Next.js App Router)`);
+        continue;
+      }
+    }
+
+    // Basic syntax: try to transpile with Bun
+    try {
+      execSync(`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
+        cwd,
+        encoding: "utf-8",
+        timeout: 15000,
+      });
+    } catch (err: any) {
+      const msg = (err.stderr || err.stdout || err.message || "").slice(0, 200);
+      errors.push(`${file}: transpile failed — ${msg}`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 // ── git_status ──────────────────────────────────────
@@ -143,9 +229,18 @@ registerTool({
 }, async (input: unknown, ctx: ExecutionContext) => {
   const { setUpstream } = input as { setUpstream?: boolean };
   const branch = run("git rev-parse --abbrev-ref HEAD", ctx.workingDirectory);
+
+  // Validation gate: reject push if committed code is broken
+  const validation = validateCommittedCode(ctx.workingDirectory);
+  if (!validation.valid) {
+    throw new Error(
+      `Push blocked — committed code has errors:\n${validation.errors.join("\n")}\n\nFix these issues before pushing.`
+    );
+  }
+
   const cmd = setUpstream ? `git push -u origin ${branch}` : "git push";
   const result = run(cmd, ctx.workingDirectory);
-  return { branch, result };
+  return { branch, result, validated: true };
 });
 
 // ── gh_pr_create ────────────────────────────────────
@@ -169,12 +264,21 @@ registerTool({
   const { title, body, base, draft } = input as {
     title: string; body?: string; base?: string; draft?: boolean;
   };
+
+  // Validation gate: reject PR creation if code is broken
+  const validation = validateCommittedCode(ctx.workingDirectory);
+  if (!validation.valid) {
+    throw new Error(
+      `PR blocked — committed code has errors:\n${validation.errors.join("\n")}\n\nFix these issues before creating a PR.`
+    );
+  }
+
   let cmd = `gh pr create --title "${title.replace(/"/g, '\\"')}"`;
   if (body) cmd += ` --body "${body.replace(/"/g, '\\"')}"`;
   if (base) cmd += ` --base ${base}`;
   if (draft) cmd += " --draft";
   const result = run(cmd, ctx.workingDirectory);
-  return { url: result, title };
+  return { url: result, title, validated: true };
 });
 
 // ── gh_pr_list ──────────────────────────────────────
