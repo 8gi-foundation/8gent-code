@@ -26,6 +26,9 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
+// Skill compounding: learned-skills directory
+const LEARNED_DIR = path.join(os.homedir(), ".8gent", "learned-skills");
+
 // ============================================
 // Types
 // ============================================
@@ -188,6 +191,16 @@ export class SkillManager {
 
 		for (const filePath of discoverBundledSkillMdFiles()) {
 			this.tryIngestSkillFile(filePath, true);
+		}
+
+		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
+		if (fs.existsSync(LEARNED_DIR)) {
+			const learnedFiles = fs
+				.readdirSync(LEARNED_DIR)
+				.filter((f) => f.endsWith(".md"));
+			for (const file of learnedFiles) {
+				this.tryIngestSkillFile(path.join(LEARNED_DIR, file), true);
+			}
 		}
 
 		return this.getAllSkills();
@@ -475,6 +488,15 @@ export function getSkillManager(skillsDirectory?: string): SkillManager {
 export function resetSkillManager(): void {
 	skillManagerInstance = null;
 }
+
+// Re-export skill compounding and matching
+export {
+	compoundSkill,
+	listLearnedSkills,
+	LEARNED_SKILLS_DIR,
+} from "./compound.js";
+export type { CompoundInput } from "./compound.js";
+export { matchSkills, formatMatchedSkills } from "./matcher.js";
 
 // ============================================
 // Utility Functions
