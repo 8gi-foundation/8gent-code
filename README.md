@@ -253,8 +253,8 @@ bun run tui
 
 <br />
 
-**Voice chat**<br />
-<sub><code>/voice chat</code> starts a half-duplex conversation loop. Speak, Eight transcribes, thinks, and speaks back. ESC to interrupt mid-speech.</sub>
+**Voice**<br />
+<sub>8 neural AI voices (KittenTTS, free, local) + full-duplex via Moshi on Apple Silicon. Auto-installed during onboarding. <code>/voice chat</code> to start.</sub>
 
 <br />
 
@@ -299,7 +299,7 @@ bun run tui
 
 **Evolution**<br />
 <sub><code>packages/self-autonomy/</code></sub><br />
-<sub>Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, self-improvement DB</sub>
+<sub>Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, skill compounding (tasks become reusable skills), KittenTTS voice onboarding</sub>
 
 </td>
 </tr>
@@ -383,15 +383,32 @@ See [packages/pet/README.md](packages/pet/README.md) for the full bestiary.
 
 <br />
 
-## Voice Chat
+## Voice
 
-Half-duplex voice conversation with Eight. Requires sox and whisper.cpp:
+Two modes: half-duplex voice chat and full-duplex conversation.
+
+**Half-duplex** (`/voice chat`) - listen, transcribe, think, speak, repeat. Requires sox and whisper.cpp:
 
 ```bash
 brew install sox whisper-cpp
 ```
 
-In the TUI, type `/voice chat` to start. Eight listens (sox with silence detection), transcribes (whisper.cpp local or OpenAI cloud fallback), thinks (agent loop), and speaks back (macOS `say`). Press ESC to interrupt mid-speech or exit voice mode.
+**Neural TTS** - 8 local AI voices via KittenTTS (free, no API key). Auto-offered during onboarding:
+
+| Voice | Gender | Character |
+|:------|:-------|:----------|
+| **Bruno** (default) | Male | Warm, authoritative |
+| Bella | Female | Warm, clear |
+| Jasper | Male | Crisp, technical |
+| Luna | Female | Soft, creative |
+| Rosie | Female | Bright, energetic |
+| Hugo | Male | Neutral, steady |
+| Kiki | Female | Light, friendly |
+| Leo | Male | Rich, expressive |
+
+Falls back to macOS `say` (Moira, Daniel, Samantha, Karen, Rishi) if KittenTTS is not installed.
+
+**Full-duplex** - simultaneous listen and speak via Moshi (Kyutai) on Apple Silicon. Requires `pip install moshi`. Backend auto-detected.
 
 <sub>Status bar shows: <strong>VOICE CHAT (listening)</strong> / <strong>SPEAKING</strong> / <strong>THINKING</strong></sub>
 
@@ -488,7 +505,7 @@ packages/
   proactive/     Business agents, opportunity scanner
   ast-index/     Blast radius engine
   tools/         Browser, actuators, filesystem, shell
-  voice/         STT (whisper.cpp) + voice chat loop
+  voice/         STT (whisper.cpp) + TTS (KittenTTS/macOS) + full-duplex (Moshi)
   kernel/        RL fine-tuning pipeline (off by default)
   personality/   Brand voice, "Infinite Gentleman"
   telegram/      Telegram bot portal
@@ -519,18 +536,21 @@ packages/
 
 ### Now
 
-- Memory v1 enhancements: procedural memory and lease-based job queue landed. Contradiction detection, health introspection, and checkpointing in progress.
-- Model shootout iteration: improving autonomous task completion rates after 0/5 in first round.
-- Daemon reliability: 4-strategy retry loop landed.
+- **Harness hardening** - brain/hands isolation, context compression, and sub-agent spawn protocol landed. Security audit on spawn governance in progress (#1409).
+- **Skill compounding** - tasks become reusable skills. Refining quality gate and promotion logic.
+- **Voice mode** - KittenTTS neural voices integrated. Full-duplex Moshi backend working on Apple Silicon. Evaluating PersonaPlex (NVIDIA) for persona-controlled voice.
+- **AST-index expansion** - symbol-level call edges, reachability queries, dead-code detection (#1392-#1394).
 
 </td>
 <td valign="top" width="33%">
 
 ### Next
 
+- **MCP server support** - expose 8gent tools as MCP servers for external agent consumption
+- **Context window compaction** - smarter compression beyond token threshold
+- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation (#1254)
 - [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
-- [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation (off by default)
-- Personal LoRA from session training pairs
+- [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
 
 </td>
 <td valign="top" width="33%">
@@ -538,8 +558,10 @@ packages/
 ### Later
 
 - Desktop client (Tauri 2.0, scaffolded in `apps/clui/`)
-- Multi-tenant control plane
+- Multi-tenant control plane via 8GI gateway
 - Full autonomous issue resolution
+- Personal LoRA from session training pairs
+- 8gent Jr voice vessel (KittenTTS server-side for mobile clients)
 
 </td>
 </tr>

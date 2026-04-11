@@ -43,7 +43,7 @@ export interface UserConfig {
   preferences: {
     voice: {
       enabled: boolean;
-      engine: "system" | "elevenlabs" | null;
+      engine: "system" | "kitten" | "elevenlabs" | null;
       voiceId: string | null;
     };
     model: {
@@ -95,6 +95,8 @@ export type OnboardingStep =
   | "language"
   | "model"
   | "voice"
+  | "voice-services"
+  | "voice-picker"
   | "telegram"
   | "github"
   | "mcps"
@@ -120,6 +122,8 @@ export interface AutoDetected {
   ollamaModels: string[];
   githubUsername: string | null;
   preferredProvider: "ollama" | "lmstudio" | "openrouter" | null;
+  hasPython: boolean;
+  hasKittenTTS: boolean;
 }
 
 // ============================================
@@ -143,7 +147,7 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       return {
         ...user,
         identity: { ...user.identity, name: name || user.identity.name },
-        completedSteps: [...user.completedSteps, "identity", "role", "projects", "model", "language", "voice", "telegram", "github", "mcps"],
+        completedSteps: [...user.completedSteps, "identity", "role", "projects", "model", "language", "telegram", "github", "mcps"],
       };
     },
   },
@@ -177,10 +181,10 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
   },
   // ── Agent Personalization ────────────────────────────────
   {
-    step: "voice" as OnboardingStep,
+    step: "voice",
     question:
       "What should your 8gent be called? (default: Eight)\n\n" +
-      "This is your personal AI — name it whatever you want.\n" +
+      "This is your personal AI - name it whatever you want.\n" +
       "Press Enter for the default, or type a name:",
     processor: (answer, user) => {
       const agentName = answer.trim() || "Eight";
@@ -190,7 +194,7 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
           ...user.preferences,
           voice: {
             ...user.preferences.voice,
-            voiceId: user.preferences.voice?.voiceId ?? "Moira", // Irish voice default
+            voiceId: user.preferences.voice?.voiceId ?? "Bruno",
             agentName,
           } as any,
         },
@@ -199,29 +203,83 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
     },
   },
   {
-    step: "voice" as OnboardingStep,
+    step: "voice-services",
+    question:
+      "Would you like to install AI voice services?\n\n" +
+      "This downloads KittenTTS - a free, local neural text-to-speech engine.\n" +
+      "No API keys needed. Runs entirely on your machine.\n" +
+      "Download size: ~200MB (model + dependencies)\n\n" +
+      "1. Yes, install AI voices (recommended)\n" +
+      "2. No, use system voices only\n\n" +
+      "Choose 1-2:",
+    options: ["1", "2", "yes", "no", "y", "n"],
+    processor: (answer, user) => {
+      const wantsAI = ["1", "yes", "y"].includes(answer.toLowerCase());
+      if (wantsAI) {
+        return {
+          ...user,
+          preferences: {
+            ...user.preferences,
+            voice: {
+              ...user.preferences.voice,
+              enabled: true,
+              engine: "kitten" as any,
+              _pendingInstall: true,
+            } as any,
+          },
+          completedSteps: [...user.completedSteps, "voice-services"],
+        };
+      }
+      return {
+        ...user,
+        preferences: {
+          ...user.preferences,
+          voice: {
+            ...user.preferences.voice,
+            enabled: true,
+            engine: "system" as any,
+          },
+        },
+        completedSteps: [...user.completedSteps, "voice-services"],
+      };
+    },
+  },
+  {
+    step: "voice-picker",
     question:
       "Pick a voice for your agent:\n\n" +
-      "1. Moira (Irish — the default Gentleman)\n" +
-      "2. Daniel (British)\n" +
-      "3. Samantha (American, female)\n" +
-      "4. Karen (Australian, female)\n" +
-      "5. Rishi (Indian)\n" +
-      "6. Reed (American, male)\n" +
-      "7. Custom — upload an audio file to clone your voice\n\n" +
-      "Choose 1-7:",
-    options: ["1", "2", "3", "4", "5", "6", "7"],
+      "  AI Voices (KittenTTS - neural, natural-sounding):\n" +
+      "  1. Bruno   (male, warm & authoritative - recommended)\n" +
+      "  2. Bella   (female, warm & clear)\n" +
+      "  3. Jasper  (male, crisp & technical)\n" +
+      "  4. Luna    (female, soft & creative)\n" +
+      "  5. Rosie   (female, bright & energetic)\n" +
+      "  6. Hugo    (male, neutral & steady)\n" +
+      "  7. Kiki    (female, light & friendly)\n" +
+      "  8. Leo     (male, rich & expressive)\n\n" +
+      "  System Voices (macOS built-in):\n" +
+      "  9.  Moira    (Irish)\n" +
+      "  10. Daniel   (British)\n" +
+      "  11. Samantha (American)\n" +
+      "  12. Karen    (Australian)\n" +
+      "  13. Rishi    (Indian)\n\n" +
+      "Choose 1-13 (default: 1 - Bruno):",
+    options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
     processor: (answer, user) => {
-      const voiceMap: Record<string, string> = {
-        "1": "Moira",
-        "2": "Daniel",
-        "3": "Samantha",
-        "4": "Karen",
-        "5": "Rishi",
-        "6": "Reed",
+      const kittenVoices: Record<string, string> = {
+        "1": "Bruno", "2": "Bella", "3": "Jasper", "4": "Luna",
+        "5": "Rosie", "6": "Hugo", "7": "Kiki", "8": "Leo",
       };
-      const voice = voiceMap[answer] || "Moira";
-      const engine = answer === "7" ? "local-tts" : "system";
+      const systemVoices: Record<string, string> = {
+        "9": "Moira", "10": "Daniel", "11": "Samantha",
+        "12": "Karen", "13": "Rishi",
+      };
+
+      const choice = answer.trim() || "1";
+      const isKitten = choice in kittenVoices;
+      const voice = kittenVoices[choice] || systemVoices[choice] || "Bruno";
+      const engine = isKitten ? "kitten" : "system";
+
       return {
         ...user,
         preferences: {
@@ -230,9 +288,10 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
             ...user.preferences.voice,
             enabled: true,
             engine: engine as any,
-            voiceId: answer === "7" ? null : voice,
+            voiceId: voice,
           },
         },
+        completedSteps: [...user.completedSteps, "voice-picker"],
       };
     },
   },
@@ -245,7 +304,7 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       "- Provider: {provider}\n" +
       "- Agent: {agent_name}\n" +
       "- Voice: {voice}\n\n" +
-      "Ready to begin? (yes/no)",
+      "Ready to begin? (yes/no)\n",
     options: ["yes", "no", "y", "n"],
     processor: (answer, user) => {
       if (["yes", "y", ""].includes(answer.toLowerCase())) {
@@ -291,6 +350,8 @@ export class OnboardingManager {
       ollamaModels: [],
       githubUsername: null,
       preferredProvider: null,
+      hasPython: false,
+      hasKittenTTS: false,
     };
 
     const checks = await Promise.allSettled([
@@ -317,6 +378,14 @@ export class OnboardingManager {
       execAsync("gh auth status 2>&1").then(({ stdout }) => {
         const match = stdout.match(/Logged in to github.com account (\S+)/);
         detected.githubUsername = match?.[1] || null;
+      }),
+      // Python3 available
+      execAsync("python3 --version 2>/dev/null").then(() => {
+        detected.hasPython = true;
+      }),
+      // KittenTTS already installed
+      execAsync("python3 -c \"import kittentts\" 2>/dev/null").then(() => {
+        detected.hasKittenTTS = true;
       }),
     ]);
 
@@ -489,6 +558,84 @@ export class OnboardingManager {
   }
 
   /**
+   * Install KittenTTS - pip install + warm up the model.
+   * Called after user opts in during onboarding.
+   * Returns true if installation succeeded.
+   */
+  async installKittenTTS(
+    onProgress?: (message: string) => void
+  ): Promise<boolean> {
+    onProgress?.("Checking Python...");
+
+    // Verify python3 is available
+    try {
+      await execAsync("python3 --version 2>/dev/null");
+    } catch {
+      onProgress?.("Python 3 not found. Install Python first: https://python.org");
+      return false;
+    }
+
+    // Check if already installed
+    try {
+      await execAsync("python3 -c \"import kittentts\" 2>/dev/null");
+      onProgress?.("KittenTTS already installed.");
+    } catch {
+      // Install kittentts
+      onProgress?.("Installing KittenTTS (this may take a minute)...");
+      try {
+        await execAsync("python3 -m pip install --quiet kittentts 2>&1", { timeout: 120_000 });
+        onProgress?.("KittenTTS installed.");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        onProgress?.(`Install failed: ${msg}`);
+        return false;
+      }
+    }
+
+    // Warm up the model (downloads on first use)
+    onProgress?.("Downloading voice model (first time only)...");
+    try {
+      await execAsync(
+        'python3 -c "from kittentts import KittenTTS; m = KittenTTS(\'KittenML/kitten-tts-nano-0.8\'); m.generate_to_file(\'Hello, I am ready.\', \'/tmp/kitten-warmup.wav\', voice=\'Bruno\')" 2>&1',
+        { timeout: 120_000 }
+      );
+      // Clean up warmup file
+      try { await execAsync("rm /tmp/kitten-warmup.wav 2>/dev/null"); } catch {}
+      onProgress?.("Voice model ready.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onProgress?.(`Model download failed: ${msg}. Voice will download on first use.`);
+      // Not a hard failure - model will download on first actual use
+    }
+
+    // Update config
+    this.user.preferences.voice.engine = "kitten" as any;
+    if (!this.user.preferences.voice.voiceId) {
+      this.user.preferences.voice.voiceId = "Bruno";
+    }
+    this.saveUserConfig();
+    return true;
+  }
+
+  /**
+   * Check if KittenTTS install is pending from onboarding.
+   */
+  hasPendingInstall(): boolean {
+    return !!(this.user.preferences.voice as any)?._pendingInstall;
+  }
+
+  /**
+   * Clear the pending install flag after installation completes.
+   */
+  clearPendingInstall(): void {
+    const voice = this.user.preferences.voice as any;
+    if (voice._pendingInstall) {
+      delete voice._pendingInstall;
+      this.saveUserConfig();
+    }
+  }
+
+  /**
    * Reset onboarding completely
    */
   reset(): void {
@@ -552,13 +699,17 @@ export class OnboardingManager {
     text = text.replace("{style}", this.user.identity.communicationStyle || "concise");
     text = text.replace("{language}", this.user.identity.language || "en");
     text = text.replace("{provider}", this.user.preferences.model.provider || "ollama");
-    text = text.replace("{voice}", this.user.preferences.voice.enabled ? "enabled" : "disabled");
+    const voiceDesc = this.user.preferences.voice.enabled
+      ? `${this.user.preferences.voice.voiceId || "Bruno"} (${this.user.preferences.voice.engine || "system"})`
+      : "disabled";
+    text = text.replace("{voice}", voiceDesc);
     text = text.replace("{telegram}", getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up");
     text = text.replace("{detected_name}", this.user.identity.name || "not detected");
     text = text.replace("{detected_email}", this.user.integrations?.github?.username ? `(via git)` : "not detected");
     text = text.replace("{detected_github}", this.user.integrations.github.username || "not detected");
     text = text.replace("{detected_provider}", this.user.preferences.model.provider || "not detected");
     text = text.replace("{detected_models}", this.user.integrations.ollama.models.slice(0, 3).join(", ") || "none found");
+    text = text.replace("{agent_name}", (this.user.preferences.voice as any)?.agentName || "Eight");
 
     return { ...question, question: text };
   }
