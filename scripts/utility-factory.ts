@@ -151,8 +151,8 @@ Output ONLY the TypeScript code inside a fenced code block like:
   const match = text.match(/```(?:typescript|ts)?\n([\s\S]*?)```/);
   if (match) return match[1].trim();
 
-  // If no fenced block, return raw text - still usable
-  return text.trim();
+  // If no fenced block, the model failed to follow instructions — reject
+  throw new Error("Model output contained no fenced TypeScript code block. Raw text rejected.");
 }
 
 // ============================================
@@ -410,6 +410,24 @@ async function main() {
         await sleep(RATE_LIMIT_MS);
         continue;
       }
+
+      // Syntax gate - verify generated code transpiles before creating branch
+      const tmpValidatePath = `/tmp/.8gent-factory-validate-${spec.name}.ts`;
+      fs.writeFileSync(tmpValidatePath, code, "utf-8");
+      try {
+        execSync(`bun build "${tmpValidatePath}" --no-bundle --outdir /tmp/.8gent-factory-out 2>&1`, {
+          encoding: "utf-8", timeout: 15000,
+        });
+      } catch (syntaxErr: any) {
+        const msg = (syntaxErr.stderr || syntaxErr.stdout || syntaxErr.message || "").slice(0, 300);
+        console.log(`[${spec.name}] SYNTAX REJECTED: ${msg}`);
+        appendLog({ name: spec.name, status: "error", error: `syntax: ${msg}`, timestamp: new Date().toISOString() }, log);
+        errorCount++;
+        try { fs.unlinkSync(tmpValidatePath); } catch {}
+        await sleep(RATE_LIMIT_MS);
+        continue;
+      }
+      try { fs.unlinkSync(tmpValidatePath); } catch {}
 
       const doc = generateQuarantineDoc(spec);
 

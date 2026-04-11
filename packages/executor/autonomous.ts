@@ -19,8 +19,69 @@
 
 import { execSync } from "child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
+import { join, basename } from "path";
 import { executeSecure, executeAndValidate, type ExecutionResult } from "./sandbox";
+
+/**
+ * Validate generated TypeScript files before committing.
+ * Catches: markdown in .tsx, CommonJS, missing default exports, broken syntax.
+ */
+function validateGeneratedFiles(
+  files: Array<{ path: string; content: string }>,
+  workDir: string
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  for (const file of files) {
+    if (!/\.(ts|tsx)$/.test(file.path)) continue;
+
+    const trimmed = file.content.trim();
+    const name = basename(file.path);
+
+    // Reject markdown in code files
+    if (trimmed.startsWith("# ") || trimmed.startsWith("## ")) {
+      errors.push(`${file.path}: contains markdown, not TypeScript`);
+      continue;
+    }
+
+    // Reject CommonJS
+    if (/\bmodule\.exports\s*=/.test(file.content)) {
+      errors.push(`${file.path}: uses CommonJS module.exports — must use ESM`);
+      continue;
+    }
+
+    // Reject Pages Router patterns in App Router files
+    if (/\bNextApiRequest\b/.test(file.content) || /\bNextApiResponse\b/.test(file.content)) {
+      errors.push(`${file.path}: uses Pages Router types — this is App Router`);
+      continue;
+    }
+
+    // page.tsx / layout.tsx must have default component export
+    if (name === "page.tsx" || name === "layout.tsx") {
+      const hasDefault = /export\s+default\s+(function|class|async\s+function)/.test(file.content)
+        || /export\s+default\s+\w+/.test(file.content);
+      if (!hasDefault) {
+        errors.push(`${file.path}: missing default export (required for Next.js App Router)`);
+        continue;
+      }
+    }
+
+    // Try transpile
+    const fullPath = join(workDir, file.path);
+    if (existsSync(fullPath)) {
+      try {
+        execSync(`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
+          cwd: workDir, encoding: "utf-8", timeout: 15000,
+        });
+      } catch (err: any) {
+        const msg = (err.stderr || err.stdout || err.message || "").slice(0, 200);
+        errors.push(`${file.path}: transpile failed — ${msg}`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 
@@ -165,7 +226,18 @@ export async function executeTask(
       }
     }
 
-    // Step 7: Ship it
+    // Step 7: Validate and ship
+    if (!lastError && !dryRun) {
+      // Validate code before committing
+      const validation = validateGeneratedFiles(
+        filesChanged.map(f => ({ path: f, content: readFileSync(join(workDir, f), "utf-8") })),
+        workDir
+      );
+      if (!validation.valid) {
+        lastError = `Code validation failed:\n${validation.errors.join("\n")}`;
+      }
+    }
+
     if (!lastError && !dryRun) {
       // Commit
       execSync(`git add -A && git commit -m "feat: ${task.title}\n\nResolved by Eight autonomously.\nTask: ${task.id}"`, {
@@ -302,17 +374,35 @@ ${context}`;
   const files: Array<{ path: string; content: string }> = [];
   const tests: Array<{ path: string; content: string }> = [];
 
-  const blocks = response.matchAll(/```(?:typescript|ts|javascript|js)\s*\/\/\s*(\S+)\n([\s\S]*?)```/g);
-
-  for (const match of blocks) {
-    const path = match[1].trim();
+  // Try strict format first: ```typescript // path/to/file.ts
+  const strictBlocks = response.matchAll(/```(?:typescript|ts|javascript|js)\s*\/\/\s*(\S+)\n([\s\S]*?)```/g);
+  for (const match of strictBlocks) {
+    const filePath = match[1].trim();
     const content = match[2].trim();
-
-    if (path.includes(".test.")) {
-      tests.push({ path, content });
+    if (filePath.includes(".test.")) {
+      tests.push({ path: filePath, content });
     } else {
-      files.push({ path, content });
+      files.push({ path: filePath, content });
     }
+  }
+
+  // Fallback: try any fenced code block with a file path comment on the first line
+  if (files.length === 0 && tests.length === 0) {
+    const looseBlocks = response.matchAll(/```(?:typescript|ts|javascript|js)?\n(\/\/\s*(\S+\.(?:ts|tsx|js|jsx))\n[\s\S]*?)```/g);
+    for (const match of looseBlocks) {
+      const content = match[1].trim();
+      const filePath = match[2].trim();
+      if (filePath.includes(".test.")) {
+        tests.push({ path: filePath, content });
+      } else {
+        files.push({ path: filePath, content });
+      }
+    }
+  }
+
+  // If still no files extracted, the model output is unparseable
+  if (files.length === 0) {
+    console.warn("[autonomous] model output contained no parseable code blocks");
   }
 
   return { files, tests, explanation: "" };
