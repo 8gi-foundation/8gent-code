@@ -849,6 +849,16 @@ async function main() {
     await new Promise(r => setTimeout(r, 5000));
   }
 
+  // Phase 5: Social Feed Research — browse feeds for patterns to absorb
+  log("\n─── Social Feed Research ──────────────────────────");
+  try {
+    const { runSocialResearch } = await import("./social-feed-research");
+    const research = await runSocialResearch();
+    log(`Social research: ${research.findings.length} findings, ${research.issues.length} issues created`);
+  } catch (err) {
+    log(`Social research failed (non-fatal): ${err}`);
+  }
+
   // Final summary
   log("\n═══════════════════════════════════════════════════");
   log("Nightly Training Complete — Summary");
