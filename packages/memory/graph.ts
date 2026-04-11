@@ -214,64 +214,51 @@ export class KnowledgeGraph {
     properties?: { description?: string; metadata?: Record<string, unknown> }
   ): string {
     const now = Date.now();
-
-    // Try to find existing entity for dedup
-    const existing = this.db
-      .query<EntityRow, [string, string]>(
-        "SELECT * FROM knowledge_entities WHERE type = ? AND name = ?"
-      )
-      .get(type, name);
-
-    if (existing) {
-      // Upsert: bump mention count, update last_seen and optional fields
-      const updatedMeta = properties?.metadata
-        ? JSON.stringify({
-            ...(existing.metadata ? JSON.parse(existing.metadata) : {}),
-            ...properties.metadata,
-          })
-        : existing.metadata;
-
-      this.db
-        .query(
-          `UPDATE knowledge_entities
-           SET mention_count = mention_count + 1,
-               last_seen = ?,
-               description = COALESCE(?, description),
-               metadata = COALESCE(?, metadata),
-               updated_at = ?
-           WHERE id = ?`
-        )
-        .run(
-          now,
-          properties?.description ?? null,
-          updatedMeta,
-          now,
-          existing.id
-        );
-
-      return existing.id;
-    }
-
-    // Insert new entity
     const id = generateId("ent");
+    const metaJson = properties?.metadata
+      ? JSON.stringify(properties.metadata)
+      : null;
+
+    // Atomic upsert via ON CONFLICT -- race-condition-safe.
+    // The UNIQUE(type, name) constraint guarantees one row per (type, name).
     this.db
       .query(
-        `INSERT INTO knowledge_entities (id, type, name, description, metadata, first_seen, last_seen, mention_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+        `INSERT INTO knowledge_entities
+           (id, type, name, description, metadata, first_seen, last_seen, mention_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT(type, name) DO UPDATE SET
+           mention_count = knowledge_entities.mention_count + 1,
+           last_seen     = excluded.last_seen,
+           description   = COALESCE(excluded.description, knowledge_entities.description),
+           metadata      = CASE
+                             WHEN excluded.metadata IS NOT NULL AND knowledge_entities.metadata IS NOT NULL
+                               THEN json_patch(knowledge_entities.metadata, excluded.metadata)
+                             WHEN excluded.metadata IS NOT NULL
+                               THEN excluded.metadata
+                             ELSE knowledge_entities.metadata
+                           END,
+           updated_at    = excluded.updated_at`
       )
       .run(
         id,
         type,
         name,
         properties?.description ?? null,
-        properties?.metadata ? JSON.stringify(properties.metadata) : null,
+        metaJson,
         now,
         now,
         now,
         now
       );
 
-    return id;
+    // Return the actual row ID (may differ from `id` on conflict)
+    const row = this.db
+      .query<{ id: string }, [string, string]>(
+        "SELECT id FROM knowledge_entities WHERE type = ? AND name = ?"
+      )
+      .get(type, name);
+
+    return row!.id;
   }
 
   /**

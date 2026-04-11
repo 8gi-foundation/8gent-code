@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS entities (
   last_seen     INTEGER NOT NULL,
   mention_count INTEGER NOT NULL DEFAULT 1,
   created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
+  updated_at    INTEGER NOT NULL,
+  UNIQUE(type, name)
 );
 
 CREATE TABLE IF NOT EXISTS relationships (
@@ -453,18 +454,34 @@ export class MemoryStore {
   addEntity(entity: Omit<Entity, "id" | "createdAt" | "updatedAt">): string {
     const id = generateId("ent");
     const now = Date.now();
+    const metaJson = entity.metadata ? JSON.stringify(entity.metadata) : null;
 
+    // Atomic upsert via ON CONFLICT -- race-condition-safe.
+    // UNIQUE(type, name) constraint guarantees one row per (type, name).
     this.db
       .prepare(
-        `INSERT INTO entities (id, type, name, description, metadata, first_seen, last_seen, mention_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO entities
+           (id, type, name, description, metadata, first_seen, last_seen, mention_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(type, name) DO UPDATE SET
+           mention_count = entities.mention_count + 1,
+           last_seen     = excluded.last_seen,
+           description   = COALESCE(excluded.description, entities.description),
+           metadata      = CASE
+                             WHEN excluded.metadata IS NOT NULL AND entities.metadata IS NOT NULL
+                               THEN json_patch(entities.metadata, excluded.metadata)
+                             WHEN excluded.metadata IS NOT NULL
+                               THEN excluded.metadata
+                             ELSE entities.metadata
+                           END,
+           updated_at    = excluded.updated_at`
       )
       .run(
         id,
         entity.type,
         entity.name,
         entity.description || null,
-        entity.metadata ? JSON.stringify(entity.metadata) : null,
+        metaJson,
         entity.firstSeen,
         entity.lastSeen,
         entity.mentionCount,
@@ -472,7 +489,12 @@ export class MemoryStore {
         now
       );
 
-    return id;
+    // Return the actual row ID (may differ from `id` on conflict)
+    const row = this.db
+      .prepare("SELECT id FROM entities WHERE type = ? AND name = ?")
+      .get(entity.type, entity.name) as { id: string } | null;
+
+    return row!.id;
   }
 
   getEntity(id: string): Entity | null {
