@@ -170,3 +170,224 @@ export class CompactionEngine {
 
   getFileTracker(): FileTracker { return this.fileTracker; }
 }
+
+// ===========================================================================
+// Proactive Context Compression (Harbor Terminus-2 pattern)
+// Issue: #1405
+//
+// Monitors token usage continuously. When remaining tokens drop below a
+// configurable threshold (default 25%), triggers a multi-stage compression
+// pipeline. Works with local models (Ollama) — no cloud dependency.
+//
+// 3-step summarization: summarize history -> key questions -> synthesize
+// 4-stage fallback:     unwind -> summarize -> simplify -> nuke-to-system
+// ===========================================================================
+
+export type CompressionStage = "none" | "unwind" | "summarize" | "simplify" | "nuke";
+
+export interface ProactiveConfig extends CompactionConfig {
+  /** Trigger when remaining tokens fall below this ratio (0-1, default 0.25) */
+  threshold: number;
+}
+
+export const DEFAULT_PROACTIVE_CONFIG: ProactiveConfig = {
+  ...DEFAULT_COMPACTION_CONFIG,
+  threshold: 0.25,
+};
+
+export interface ProactiveResult extends CompactionResult {
+  stage: CompressionStage;
+}
+
+export class ProactiveCompression extends CompactionEngine {
+  private proactiveConfig: ProactiveConfig;
+
+  constructor(config: Partial<ProactiveConfig> = {}) {
+    const merged = { ...DEFAULT_PROACTIVE_CONFIG, ...config };
+    super(merged);
+    this.proactiveConfig = merged;
+  }
+
+  /** Determine which compression stage is needed based on token pressure. */
+  getStage(messages: Message[], contextWindow?: number): CompressionStage {
+    const cw = contextWindow || this.proactiveConfig.contextWindow || 32768;
+    const used = estimateMessageTokens(messages);
+    const ratio = used / cw;
+
+    if (ratio < (1 - this.proactiveConfig.threshold)) return "none";
+    if (ratio < 0.80) return "unwind";
+    if (ratio < 0.90) return "summarize";
+    if (ratio < 0.97) return "simplify";
+    return "nuke";
+  }
+
+  /** Check proactive threshold instead of simple capacity check. */
+  override shouldCompact(messages: Message[], contextWindow?: number): boolean {
+    if (!this.proactiveConfig.enabled) return false;
+    return this.getStage(messages, contextWindow) !== "none";
+  }
+
+  /**
+   * Run the appropriate compression stage.
+   *
+   * Stages escalate automatically:
+   *   1. unwind    — drop verbose tool results, keep decisions
+   *   2. summarize — 3-step LLM summarization (Terminus-2 pattern)
+   *   3. simplify  — aggressive single-pass LLM summary
+   *   4. nuke      — discard everything, keep only system prompt + last exchange
+   */
+  async compactProactive(
+    messages: Message[],
+    model: LanguageModel,
+    contextWindow?: number,
+  ): Promise<{ messages: Message[]; result: ProactiveResult }> {
+    const stage = this.getStage(messages, contextWindow);
+    const tokensBefore = estimateMessageTokens(messages);
+
+    if (stage === "none") {
+      return {
+        messages,
+        result: {
+          stage: "none", summary: "", tokensBefore, tokensAfter: tokensBefore,
+          messagesRemoved: 0, filesRead: [], filesModified: [],
+        },
+      };
+    }
+
+    // Stage 1: Unwind — drop tool results from older messages
+    if (stage === "unwind") {
+      const unwound = this.stageUnwind(messages);
+      const tokensAfter = estimateMessageTokens(unwound);
+      return {
+        messages: unwound,
+        result: {
+          stage, summary: "Unwound verbose tool results",
+          tokensBefore, tokensAfter,
+          messagesRemoved: messages.length - unwound.length,
+          filesRead: [], filesModified: [],
+        },
+      };
+    }
+
+    // Stage 4: Nuke — no LLM call, just keep system + last exchange
+    if (stage === "nuke") {
+      const nuked = this.stageNuke(messages);
+      const tokensAfter = estimateMessageTokens(nuked);
+      return {
+        messages: nuked,
+        result: {
+          stage, summary: "Context nuked to system prompt — session history discarded",
+          tokensBefore, tokensAfter,
+          messagesRemoved: messages.length - nuked.length,
+          filesRead: Array.from(this.getFileTracker().read),
+          filesModified: Array.from(this.getFileTracker().modified),
+        },
+      };
+    }
+
+    // Stage 3: Simplify — aggressive pre-truncation then LLM summary
+    if (stage === "simplify") {
+      const systemMsg = messages[0];
+      const last4 = messages.slice(-4);
+      const middle = messages.slice(1, -4);
+      const thinned = middle.map(m => ({
+        ...m,
+        content: m.content.length > 500 ? m.content.slice(0, 500) + "...[truncated]" : m.content,
+      }));
+      const simplified = [systemMsg, ...thinned, ...last4];
+      const { messages: compacted, result } = await super.compact(simplified, model, contextWindow);
+      return {
+        messages: compacted,
+        result: { ...result, stage },
+      };
+    }
+
+    // Stage 2: Summarize — 3-step Terminus-2 pattern
+    const { messages: compacted, result } = await this.terminus2Compact(messages, model, contextWindow);
+    return {
+      messages: compacted,
+      result: { ...result, stage },
+    };
+  }
+
+  /**
+   * 3-step Terminus-2 summarization:
+   *   1. Summarize conversation history
+   *   2. Formulate 3 key questions the agent needs answered
+   *   3. Synthesize answers from the summary
+   */
+  private async terminus2Compact(
+    messages: Message[],
+    model: LanguageModel,
+    contextWindow?: number,
+  ): Promise<{ messages: Message[]; result: CompactionResult }> {
+    const tokensBefore = estimateMessageTokens(messages);
+    const systemMsg = messages[0];
+    const recentCount = 8;
+    const recent = messages.slice(-recentCount);
+    const old = messages.slice(1, -recentCount);
+
+    const serialized = old
+      .map(m => `[${m.role}]: ${m.content.slice(0, 1500)}`)
+      .join("\n\n");
+
+    // Step 1: Summarize
+    const { text: historySummary } = await generateText({
+      model,
+      prompt: `Summarize this conversation into a structured checkpoint.\n\n<conversation>\n${serialized}\n</conversation>\n\nFormat:\n## Goal\n## Progress\n## Key Decisions\n## Files Touched\n## Next Steps`,
+      maxOutputTokens: 800,
+    });
+
+    // Step 2: Key questions
+    const { text: questions } = await generateText({
+      model,
+      prompt: `Given this summary, what are the 3 most critical questions the agent must answer to continue?\n\n${historySummary}\n\nList exactly 3 questions.`,
+      maxOutputTokens: 300,
+    });
+
+    // Step 3: Synthesize
+    const { text: answers } = await generateText({
+      model,
+      prompt: `Answer concisely from the session context:\n\n${questions}\n\nContext:\n${historySummary}`,
+      maxOutputTokens: 400,
+    });
+
+    const fullSummary = `${historySummary}\n\n## Key Questions\n${questions}\n\n## Synthesized Answers\n${answers}`;
+    const tracker = this.getFileTracker();
+
+    const summaryMsg: Message = {
+      role: "system",
+      content: `[Proactive Compression — Terminus-2]\n\n${fullSummary}\n\n${tracker.getSummary()}`,
+    };
+
+    const compacted = [systemMsg, summaryMsg, ...recent];
+    const tokensAfter = estimateMessageTokens(compacted);
+
+    return {
+      messages: compacted,
+      result: {
+        summary: fullSummary, tokensBefore, tokensAfter,
+        messagesRemoved: old.length,
+        filesRead: Array.from(tracker.read),
+        filesModified: Array.from(tracker.modified),
+      },
+    };
+  }
+
+  /** Stage 1: Drop tool_result messages from older portion, keep decisions. */
+  private stageUnwind(messages: Message[]): Message[] {
+    return messages.filter((m, i) => {
+      if (i === 0 || i >= messages.length - 10) return true;
+      if (m.role === "tool") return false;
+      if (m.content.startsWith("[tool_result]")) return false;
+      return true;
+    });
+  }
+
+  /** Stage 4: Keep system prompt + last user/assistant exchange. */
+  private stageNuke(messages: Message[]): Message[] {
+    const systemMsg = messages[0];
+    const lastTwo = messages.slice(-2);
+    return [systemMsg, ...lastTwo];
+  }
+}
