@@ -36,7 +36,7 @@ import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orche
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { getExtensionManager } from "../extensions";
-import { CompactionEngine, DEFAULT_COMPACTION_CONFIG, type CompactionResult } from "./compaction";
+import { ProactiveCompression, DEFAULT_PROACTIVE_CONFIG, type ProactiveResult, type CompressionStage } from "./compaction";
 import { privacyGate, forceLocalModel } from "../permissions/privacy-router";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
@@ -108,7 +108,7 @@ export class Agent {
   private abortController: AbortController | null = null;
   private orchestratorBus: OrchestratorBus;
   private toolRegistry: ToolRegistry;
-  private compaction: CompactionEngine;
+  private compaction: ProactiveCompression;
   private recentFilePaths: string[] = [];
 
   constructor(config: AgentConfig) {
@@ -127,7 +127,7 @@ export class Agent {
 
     // Initialize deferred tool registry (allTools flag loads everything upfront)
     this.toolRegistry = new ToolRegistry(config.allTools ?? false);
-    this.compaction = new CompactionEngine();
+    this.compaction = new ProactiveCompression();
 
     // Fire-and-forget AST indexing of working directory for AST-first retrieval
     const cwd = config.workingDirectory || process.cwd();
@@ -898,22 +898,25 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
         this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
       }
 
-      // Context compaction - summarize old messages when approaching context limit
+      // Proactive context compression — Harbor Terminus-2 pattern (#1405)
+      // Monitors token pressure and escalates through 4 stages:
+      //   unwind -> summarize (3-step) -> simplify -> nuke-to-system
       if (this.compaction.shouldCompact(this.messageHistory)) {
         try {
+          const stage = this.compaction.getStage(this.messageHistory);
           const compactModel = createModel(providerConfig);
-          const { messages: compacted, result: compactionResult } = await this.compaction.compact(
+          const { messages: compacted, result: compactionResult } = await this.compaction.compactProactive(
             this.messageHistory,
             compactModel,
           );
           this.messageHistory = compacted;
           console.log(
-            `  [COMPACTION] ${compactionResult.messagesRemoved} messages summarized, ` +
+            `  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
             `${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`
           );
           this.events.onCompaction?.(compactionResult);
         } catch (err) {
-          console.error("  [COMPACTION] Failed:", (err as Error).message);
+          console.error("  [COMPRESSION] Failed:", (err as Error).message);
         }
       }
 
