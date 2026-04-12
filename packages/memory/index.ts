@@ -109,6 +109,7 @@ export { checkpoint, rollback, listCheckpoints } from "./checkpoint.js";
 export { detectContradictions, resolveContradiction, type Contradiction } from "./contradictions.js";
 export { recordProcedure, recordFailure, findProcedures, getTopProcedures, type ProceduralMemory } from "./procedural.js";
 export { enqueue, acquireLease, completeLease, failLease, pendingCount, type Job } from "./queue.js";
+export { lintMemory, lintReportToMarkdown, type LintReport, type OrphanEntity, type StaleMemory, type BrokenReference } from "./lint.js";
 export { WikiGenerator, slugify, type WikiPage, type WikiIndex, type WikiLog } from "./wiki.js";
 
 export type {
