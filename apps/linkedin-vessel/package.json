@@ -1,0 +1,14 @@
+{
+  "name": "@8gi/linkedin-vessel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LinkedIn outreach vessel with HyperAgent self-improvement",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
