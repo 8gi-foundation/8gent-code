@@ -1,0 +1,27 @@
+# 8Gent Bot - Telegram orchestrator
+# The ONLY always-on machine in the fleet.
+# All 8 officer vessels sleep; this routes to them on demand.
+app = "8gi-orchestrator"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT       = "8080"
+  PUBLIC_URL = "https://8gi-orchestrator.fly.dev"
+
+# Secrets set via: fly secrets set KEY=VALUE --app 8gi-orchestrator
+#   TELEGRAM_BOT_TOKEN    (@8gent_bot token)
+#   JAMES_TELEGRAM_CHAT_ID
+
+[http_service]
+  internal_port         = 8080
+  force_https           = true
+  auto_stop_machines    = false
+  auto_start_machines   = true
+  min_machines_running  = 1
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"

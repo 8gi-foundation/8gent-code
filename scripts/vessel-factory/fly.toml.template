@@ -1,0 +1,36 @@
+# 8GI Officer Vessel - fly.toml template
+# Variables replaced by deploy-fleet.sh:
+#   {{FLY_APP}}      e.g. 8gi-rishi-vessel
+#   {{VESSEL_CODE}}  e.g. 8TO
+#   {{VESSEL_NAME}}  e.g. Rishi
+#   {{VESSEL_TITLE}} e.g. Technology Officer
+
+app = "{{FLY_APP}}"
+primary_region = "ams"
+
+[build]
+  dockerfile = "scripts/vessel-factory/Dockerfile"
+
+[env]
+  VESSEL_CODE     = "{{VESSEL_CODE}}"
+  VESSEL_NAME     = "{{VESSEL_NAME}}"
+  VESSEL_TITLE    = "{{VESSEL_TITLE}}"
+  INFERENCE_MODE  = "proxy"
+  MODEL_PROXY_URL = "http://8gi-model-proxy.internal:3200"
+  CONTROL_PLANE_URL = "wss://8gi-board-plane.fly.dev"
+  PORT            = "8080"
+
+# Secrets set separately via deploy-fleet.sh:
+#   VESSEL_SOUL, VESSEL_CATCHPHRASE
+#   TELEGRAM_BOT_TOKEN, JAMES_TELEGRAM_CHAT_ID
+
+[http_service]
+  internal_port         = 8080
+  force_https           = true
+  auto_stop_machines    = true
+  auto_start_machines   = true
+  min_machines_running  = 0
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
