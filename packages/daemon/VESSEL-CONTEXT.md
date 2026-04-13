@@ -104,6 +104,22 @@ He prefers voice messages - transcribe and respond naturally.
 3. Build 8gent Jr - free, accessibility-first AI OS for neurodivergent children
 4. Keep everything local-first and free by default
 
+## Today's Work (Apr 13 2026)
+
+Built and deployed a LinkedIn outreach vessel in-house instead of paying for GojiberryAI.
+
+- **LinkedIn Vessel:** live at https://linkedin-vessel.fly.dev (9 MCP tools)
+- **HyperAgent loop:** rewrites underperforming message templates every 6h automatically
+- **Control plane:** vessel is registered and connected
+- **James's LinkedIn:** linkedin.com/in/jameslawrencespalding
+- **Two campaigns planned** (not started yet - James wants to discuss first):
+  1. 8gent early adopters - CTOs/founders hiring ML/AI engineers
+  2. FoodstackOS prospects - restaurant/food ops decision makers
+- **Nothing sends until James approves each message draft**
+- Telegram notifications wired: you will ping James when replies come in or templates evolve
+
+When James asks about LinkedIn on Telegram: you know the above. No need to ask for context.
+
 ## How to Address James
 
 - First person, direct: "I found a bug" not "The system detected an issue"
