@@ -7,7 +7,25 @@
 
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, release } from "os";
+
+/**
+ * Apple Foundation Model is preferred at the top of every local chain when
+ * the host qualifies (macOS 26+ Tahoe on Apple Silicon with the bridge binary
+ * installed). On-device, zero latency, zero cost, zero telemetry.
+ */
+function appleFoundationAvailable(): boolean {
+  if (process.platform !== "darwin") return false;
+  if (process.arch !== "arm64") return false;
+  const major = parseInt(release().split(".")[0] ?? "0", 10);
+  if (Number.isFinite(major) && major < 25) return false;
+  return existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"));
+}
+
+const APPLE_FOUNDATION_ENTRY: FailoverEntry = {
+  model: "apple-foundation-system",
+  provider: "apple-foundation",
+};
 
 export interface FailoverEntry {
   model: string;
@@ -34,10 +52,14 @@ export class ModelFailover {
       }
     } catch { /* defaults */ }
 
+    const preferAppleFoundation = appleFoundationAvailable();
+    const prefix: FailoverEntry[] = preferAppleFoundation ? [APPLE_FOUNDATION_ENTRY] : [];
+
     // Sensible defaults - free OpenRouter as fallback for local models
     return {
       "eight:latest": {
         models: [
+          ...prefix,
           { model: "eight:latest", provider: "ollama" },
           { model: "qwen3.5:latest", provider: "ollama" },
           { model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter" },
@@ -45,7 +67,16 @@ export class ModelFailover {
       },
       "qwen3.5:latest": {
         models: [
+          ...prefix,
           { model: "qwen3.5:latest", provider: "ollama" },
+          { model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter" },
+        ],
+      },
+      "apple-foundation-system": {
+        models: [
+          APPLE_FOUNDATION_ENTRY,
+          { model: "eight-1.0-q3:14b", provider: "8gent" },
+          { model: "qwen3:14b", provider: "ollama" },
           { model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter" },
         ],
       },

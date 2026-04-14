@@ -96,3 +96,7 @@ docs/branch-audio/
 
 # Session plan dumps
 *-plan-location-*.txt
+
+# Swift Package Manager build artifacts (rebuild with: bun run install:apple-foundation)
+bin/apple-foundation-bridge/.build/
+bin/apple-foundation-bridge/Package.resolved

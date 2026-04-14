@@ -83,7 +83,7 @@ export interface AgentEventCallbacks {
 
 export interface AgentConfig {
   model: string;
-  runtime: "ollama" | "lmstudio" | "openrouter";
+  runtime: "ollama" | "lmstudio" | "openrouter" | "apple-foundation";
   systemPrompt?: string;
   maxTurns?: number;
   workingDirectory?: string;
