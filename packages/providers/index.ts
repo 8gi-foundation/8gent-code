@@ -27,6 +27,7 @@ import { ModelFailover } from "./failover";
 export type ProviderName =
   | "8gent"
   | "ollama"
+  | "apple-foundation"
   | "openrouter"
   | "groq"
   | "grok"
@@ -104,6 +105,24 @@ export interface ProviderSettings {
 // Provider Definitions
 // ============================================
 
+/**
+ * Check if the Apple Foundation Model provider can run on this host.
+ * Requires macOS 26+ (Tahoe) on Apple Silicon with the bridge binary installed
+ * at `~/.8gent/bin/apple-foundation-bridge`. The installer task ships the
+ * compiled Swift bridge; until it runs, this returns false and the provider
+ * stays disabled in the registry.
+ */
+function isAppleFoundationAvailable(): boolean {
+  if (process.platform !== "darwin") return false;
+  if (process.arch !== "arm64") return false;
+  // Darwin 25.x === macOS 26 Tahoe. Apple's `FoundationModels` framework
+  // is only available from macOS 26 onwards.
+  const major = parseInt(os.release().split(".")[0] ?? "0", 10);
+  if (Number.isFinite(major) && major < 25) return false;
+  const bridgePath = path.join(os.homedir(), ".8gent", "bin", "apple-foundation-bridge");
+  return fs.existsSync(bridgePath);
+}
+
 const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
   "8gent": {
     name: "8gent",
@@ -128,6 +147,20 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+  },
+  "apple-foundation": {
+    name: "apple-foundation",
+    displayName: "Apple Foundation Model (On-Device)",
+    baseUrl: "", // IPC, no URL
+    apiKeyEnv: "", // On-device, no key
+    defaultModel: "apple-foundation-system",
+    models: ["apple-foundation-system"],
+    // Auto-enabled only when host platform qualifies AND the bridge binary
+    // has been installed. Resolved at runtime via `isAppleFoundationAvailable()`.
+    enabled: isAppleFoundationAvailable(),
+    supportsTools: false, // v1 - Apple Transcript API not wired yet
+    supportsStreaming: false, // v1 - non-streaming only
+    supportsVision: false,
   },
   openrouter: {
     name: "openrouter",

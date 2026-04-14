@@ -25,6 +25,7 @@
     "pet:kill": "pkill -f LilEight",
     "pet:log": "tail -f ~/.8gent/lil-eight.log",
     "install-wizard": "bun run apps/installer/src/index.tsx",
+    "install:apple-foundation": "bun run scripts/install-apple-foundation.ts",
     "cli": "bun run bin/8gent.ts",
     "dev": "next dev",
     "build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node -e \"const fs=require('fs');const f='dist/cli.js';const c=fs.readFileSync(f,'utf-8');if(!c.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+c);\" && chmod +x dist/cli.js && bash scripts/copy-bundled-skills.sh",
