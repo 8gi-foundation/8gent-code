@@ -3,7 +3,7 @@ export interface RunnerConfig {
   systemPrompt: string
   allowedTools: string[]
   retryPolicy: { maxAttempts: number; backoffMs: number }
-  inferenceMode?: "ollama" | "lmstudio" | "openrouter" | "apfel"
+  inferenceMode?: "ollama" | "lmstudio" | "openrouter" | "apple-foundation"
   model?: string
 }
 
