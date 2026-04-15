@@ -1,17 +1,18 @@
 {
-  "name": "@podjamz/8gent-code",
+  "name": "@8gi-foundation/8gent-code",
   "version": "0.6.0",
   "private": false,
   "description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
   "type": "module",
   "bin": {
-    "8": "./dist/cli.js",
-    "8gent": "./dist/cli.js",
-    "8gent-code": "./dist/cli.js"
+    "8": "./bin/8gent-run.js",
+    "8gent": "./bin/8gent-run.js",
+    "8gent-code": "./bin/8gent-run.js"
   },
   "files": [
     "dist/cli.js",
     "dist/skills",
+    "bin/8gent-run.js",
     "README.md",
     "LICENSE"
   ],
