@@ -47,6 +47,7 @@ export { runCLIAuthFlow, type CLIAuthResult, type CLIAuthCallbacks } from "./cli
 export { getGitHubAuth, createGitHubAuth, extractGitHubUsername, type GitHubAuth, type GitHubUser } from "./github.js";
 export { listRepos, getCurrentRepoInfo, createIssue, listIssues, createPR, listPRs, getCurrentBranch, getDefaultBranch } from "./github-tools.js";
 export type { GitHubRepo, GitHubIssue, GitHubPR, RepoInfo } from "./github-tools.js";
+export { getVesselId, getProxyUrl, isProxyAvailable } from "./proxy-provider.js";
 
 // ============================================
 // AuthManager — Central Auth State Machine
