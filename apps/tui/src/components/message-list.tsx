@@ -1,10 +1,16 @@
 /**
  * 8gent Code - Chat Interface
  *
- * iMessage-style layout:
- * - User messages: right-aligned, yellow bubble
- * - 8gent messages: left-aligned, cyan bubble
- * - Tool calls & system: compact collapsible cards
+ * iMessage-style, alignment-only (no borders):
+ * - User messages: right-aligned, yellow label
+ * - 8gent messages: left-aligned, cyan label
+ * - Tool calls: NEVER rendered in chat — they live in the ^B processes panel.
+ *   The agent's in-flight activity surfaces via the status bar's plan verb.
+ * - System messages: compact centered hints (single line) or blocks (multi-line)
+ *
+ * Overflow protection: long unbreakable runs (paths, URLs, hashes) are
+ * force-broken at wrapWidth before handing to Ink, so nothing can escape
+ * its column.
  */
 
 import React, { useState, useEffect, useRef } from "react";
@@ -15,6 +21,35 @@ import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { useADHDMode, BionicText } from "./bionic-text.js";
 import { AppText, MutedText, Label, Stack } from './primitives/index.js';
+
+/**
+ * Force-break any run of non-whitespace longer than `width` chars.
+ * Ink's wrap="wrap" only splits on whitespace, so long paths / URLs / hashes
+ * can overflow their container. This inserts hard line breaks inside the
+ * offending token so the normal wrap picks it up.
+ */
+function breakLongTokens(text: string, width: number): string {
+  if (width < 4) return text;
+  const hardBreakWidth = Math.max(4, width);
+  return text
+    .split("\n")
+    .map((line) => {
+      const out: string[] = [];
+      for (const token of line.split(/(\s+)/)) {
+        if (!token) continue;
+        if (token.length > hardBreakWidth && !/^\s+$/.test(token)) {
+          for (let i = 0; i < token.length; i += hardBreakWidth) {
+            out.push(token.slice(i, i + hardBreakWidth));
+            if (i + hardBreakWidth < token.length) out.push("\n");
+          }
+        } else {
+          out.push(token);
+        }
+      }
+      return out.join("");
+    })
+    .join("\n");
+}
 
 interface MessageListProps {
   messages: Message[];
@@ -51,43 +86,14 @@ export function MessageList({
     prevCountRef.current = messages.length;
   }, [messages]);
 
-  // Collapse consecutive tool messages — max MAX_CONSECUTIVE_TOOL per run,
-  // remainder replaced with a "… N tool calls" summary line.
-  const MAX_CONSECUTIVE_TOOL = 3;
-  const collapsed: Message[] = [];
-  let toolRun = 0;
-  let toolRunStart = -1;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role === "tool") {
-      if (toolRun === 0) toolRunStart = i;
-      toolRun++;
-      if (toolRun <= MAX_CONSECUTIVE_TOOL) {
-        collapsed.push(m);
-      } else if (toolRun === MAX_CONSECUTIVE_TOOL + 1) {
-        collapsed.push({
-          id: `tool-collapsed-${toolRunStart}`,
-          role: "system" as const,
-          content: `… ${toolRun} tool calls`,
-          timestamp: m.timestamp,
-        } as Message);
-      } else {
-        const last = collapsed[collapsed.length - 1];
-        if (last?.id?.startsWith("tool-collapsed-")) {
-          last.content = `… ${toolRun} tool calls`;
-        }
-      }
-    } else {
-      toolRun = 0;
-      toolRunStart = -1;
-      collapsed.push(m);
-    }
-  }
+  // Tool messages never render in chat — they flow to the ^B processes panel.
+  // The agent's current activity is surfaced via the status bar's plan verb.
+  const chatMessages = messages.filter((m) => m.role !== "tool");
 
   // Only render the most recent messages to prevent scroll jumping.
-  const visibleMessages = collapsed.length > maxVisible
-    ? collapsed.slice(-maxVisible)
-    : collapsed;
+  const visibleMessages = chatMessages.length > maxVisible
+    ? chatMessages.slice(-maxVisible)
+    : chatMessages;
 
   return (
     <Box flexDirection="column" flexGrow={1} minHeight={0}>
@@ -129,11 +135,12 @@ function MessageItem({
   const [showContent, setShowContent] = useState(!isNew);
   const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
-  const bubbleIndent = Math.max(2, Math.min(12, Math.floor(contentWidth * 0.1)));
-  // Outer round border: leave margin vs content column; inner must stay inside border + paddingX + corner slack.
-  const bubbleOuterWidth = Math.max(20, contentWidth - bubbleIndent - 8);
-  const innerColumnWidth = Math.max(12, bubbleOuterWidth - 6);
-  const textWrapWidth = Math.max(8, innerColumnWidth - 2);
+  // Messages occupy up to 78% of the content column, leaving a margin of
+  // empty space on the opposite side so alignment reads clearly (iMessage rule).
+  const maxBubbleWidth = Math.max(16, Math.floor(contentWidth * 0.78));
+  // Text wraps strictly within that width. 2 chars slack keeps us safe from
+  // edge-case character-width quirks.
+  const textWrapWidth = Math.max(8, maxBubbleWidth - 2);
 
   // Play sound on completion for assistant messages
   useCompletionSound(
@@ -149,18 +156,8 @@ function MessageItem({
     }
   }, [isNew]);
 
-  // Tool messages render as compact cards (collapsible)
-  if (message.role === "tool") {
-    const isSuccess = (message as any).toolSuccess !== false;
-    const icon = message.content.startsWith("  ✓") ? "✓" : message.content.startsWith("  ✗") ? "✗" : "→";
-    const color = icon === "✓" ? "green" : icon === "✗" ? "red" : "blue";
-    return (
-      <Box marginBottom={1} paddingLeft={2}>
-        <Text color={color} dimColor>{icon} </Text>
-        <MutedText>{message.content.replace(/^  [✓✗→] /, "").slice(0, 100)}</MutedText>
-      </Box>
-    );
-  }
+  // Tool messages never render in chat (filtered at MessageList level). Guard anyway.
+  if (message.role === "tool") return null;
 
   // System messages render as subtle centered cards
   if (message.role === "system") {
@@ -176,7 +173,6 @@ function MessageItem({
       );
 
     if (isMultiLine) {
-      // Multi-line system messages (e.g. /evidence, /help) render as a full block
       return fadeWrap(
         <Box flexDirection="column" marginBottom={1} paddingLeft={1}>
           <Text dimColor>{'─'.repeat(3)}</Text>
@@ -204,54 +200,44 @@ function MessageItem({
     );
   }
 
-  const bubble = (
-      <Box
-        flexDirection="column"
-        alignItems={isUser ? "flex-end" : "flex-start"}
-        marginBottom={1}
-        width={contentWidth}
-      >
-        {/* Sender label */}
-        <Box>
-          {isUser ? (
-            <MutedText>{formatTime(message.timestamp)} </MutedText>
-          ) : (
-            <Label color="cyan">◆ 8gent </Label>
-          )}
-          {isUser ? (
-            <Label color="yellow">You</Label>
-          ) : (
-            <MutedText>{formatTime(message.timestamp)}</MutedText>
-          )}
-        </Box>
+  // Pre-break long unbreakable tokens so Ink's wrap can't escape the column
+  const safeContent = breakLongTokens(message.content, textWrapWidth);
 
-        {/* Chat bubble */}
-        <Box
-          borderStyle="round"
-          borderColor={isUser ? "yellow" : "cyan"}
-          paddingX={1}
-          paddingY={1}
-          marginLeft={isUser ? bubbleIndent : 0}
-          marginRight={isUser ? 0 : bubbleIndent}
-          flexShrink={1}
-          width={bubbleOuterWidth}
-        >
-          <Box
-            flexShrink={1}
-            flexDirection="column"
-            width={innerColumnWidth}
-          >
-            <MessageContent
-              content={message.content}
-              role={message.role}
-              isNew={isNew}
-              animate={animate}
-              onTypingComplete={() => setTypingComplete(true)}
-              wrapWidth={textWrapWidth}
-            />
-          </Box>
-        </Box>
+  const bubble = (
+    <Box
+      flexDirection="column"
+      alignItems={isUser ? "flex-end" : "flex-start"}
+      marginBottom={1}
+      width={contentWidth}
+    >
+      {/* Sender label — compact header, no border noise */}
+      <Box>
+        {isUser ? (
+          <>
+            <MutedText>{formatTime(message.timestamp)} </MutedText>
+            <Label color="yellow">You</Label>
+          </>
+        ) : (
+          <>
+            <Label color="cyan">{"\u25C6 8gent"}</Label>
+            <MutedText> {formatTime(message.timestamp)}</MutedText>
+          </>
+        )}
       </Box>
+
+      {/* Message body — alignment-only, no border, strict width */}
+      <Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
+        <MessageContent
+          content={safeContent}
+          role={message.role}
+          isNew={isNew}
+          animate={animate}
+          onTypingComplete={() => setTypingComplete(true)}
+          wrapWidth={textWrapWidth}
+          accentColor={isUser ? "yellow" : "cyan"}
+        />
+      </Box>
+    </Box>
   );
 
   return showAnimations ? (
@@ -270,6 +256,7 @@ interface MessageContentProps {
   animate: boolean;
   onTypingComplete: () => void;
   wrapWidth: number;
+  accentColor?: "yellow" | "cyan";
 }
 
 function MessageContent({
@@ -279,6 +266,7 @@ function MessageContent({
   animate,
   onTypingComplete,
   wrapWidth,
+  accentColor,
 }: MessageContentProps) {
   const { enabled: adhdMode } = useADHDMode();
 
@@ -322,9 +310,15 @@ function MessageContent({
     );
   }
 
+  // Tint text in the accent color so user vs assistant reads at a glance,
+  // even without a border. Falls back to theme default when unset.
   return (
     <Box width={wrapWidth}>
-      <AppText wrap="wrap">{content}</AppText>
+      {accentColor ? (
+        <Text color={accentColor} wrap="wrap">{content}</Text>
+      ) : (
+        <AppText wrap="wrap">{content}</AppText>
+      )}
     </Box>
   );
 }
