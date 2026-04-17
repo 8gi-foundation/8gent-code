@@ -1,0 +1,64 @@
+version: 1
+
+# 8gent Code - Auto Mode Preset
+# Middle tier between conservative (ask everything) and infinite (allow everything).
+# Inspired by Claude Code's auto mode (March 2026). Rules-based, no AI classifier.
+# Load with: loadPolicies("packages/permissions/auto-preset.yaml")
+
+policies:
+  # -- Project boundary (replaces OS-level sandboxing with rules) --
+  - name: "auto-project-boundary"
+    action: write_file
+    condition: "path starts_with /etc or path starts_with /usr or path starts_with /var or path starts_with /System or path starts_with /Library"
+    decision: block
+    message: "Auto mode blocks writes outside project directory."
+
+  - name: "auto-allow-project-writes"
+    action: write_file
+    condition: "path starts_with src or path starts_with packages or path starts_with apps or path starts_with lib or path starts_with tests or path starts_with benchmarks"
+    decision: allow
+    message: "Project source writes auto-approved."
+
+  # -- Safe command expansion --
+  - name: "auto-allow-git-workflow"
+    action: run_command
+    condition: "command starts_with git add or command starts_with git commit or command starts_with git checkout or command starts_with git stash or command starts_with git branch"
+    decision: allow
+    message: "Standard git workflow auto-approved."
+
+  - name: "auto-allow-build-tools"
+    action: run_command
+    condition: "command starts_with bun run or command starts_with bun install or command starts_with bun test or command starts_with npm run or command starts_with npm install or command starts_with npm test"
+    decision: allow
+    message: "Build and test commands auto-approved."
+
+  - name: "auto-allow-file-ops"
+    action: run_command
+    condition: "command starts_with mkdir or command starts_with touch or command starts_with cp"
+    decision: allow
+    message: "Non-destructive file operations auto-approved."
+
+  # -- Escalation rules --
+  - name: "auto-block-privilege-escalation"
+    action: run_command
+    condition: "command starts_with sudo or command starts_with su or command starts_with doas"
+    decision: block
+    message: "Auto mode blocks privilege escalation."
+
+  - name: "auto-block-system-services"
+    action: run_command
+    condition: "command starts_with systemctl or command starts_with launchctl or command starts_with service"
+    decision: block
+    message: "Auto mode blocks system service modifications."
+
+  - name: "auto-require-approval-delete"
+    action: run_command
+    condition: "command contains rm -r or command contains rm -f or command contains rmdir"
+    decision: require_approval
+    message: "File deletion requires approval even in auto mode."
+
+  - name: "auto-require-approval-push"
+    action: run_command
+    condition: "command contains git push"
+    decision: require_approval
+    message: "Git push requires approval in auto mode."
