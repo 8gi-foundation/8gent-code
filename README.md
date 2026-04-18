@@ -12,10 +12,10 @@
 
 <p align="center">
   <a href="https://8gentjr.com"><img src="https://img.shields.io/badge/Jr-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Jr Live" /></a>
-  <a href="https://8gentos.com"><img src="https://img.shields.io/badge/OS-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="OS In Dev" /></a>
   <a href="https://github.com/8gi-foundation/8gent-code"><img src="https://img.shields.io/badge/Code-Open_Source-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Code Open Source" /></a>
-  <a href="https://8gent.world"><img src="https://img.shields.io/badge/World-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="World Live" /></a>
-  <a href="https://8gent.games"><img src="https://img.shields.io/badge/Games-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Games Live" /></a>
+  <a href="https://8gentos.com"><img src="https://img.shields.io/badge/OS-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="OS In Dev" /></a>
+  <a href="https://8gent.world"><img src="https://img.shields.io/badge/World-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="World In Dev" /></a>
+  <a href="https://8gent.games"><img src="https://img.shields.io/badge/Games-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="Games In Dev" /></a>
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@
 
 ## The Ecosystem
 
-<p align="center"><sub>6 products &nbsp;·&nbsp; 6 domains &nbsp;·&nbsp; 1 constitution</sub></p>
+<p align="center"><sub>2 shipped &nbsp;·&nbsp; more in development &nbsp;·&nbsp; 1 constitution</sub></p>
 
 <br />
 
@@ -40,29 +40,29 @@
 <tr>
 <td valign="top" width="33%">
 
-**8gent OS** -[8gentos.com](https://8gentos.com)<br />
-<sub>Parent site. Paid product. Revenue engine.</sub>
-
 **8gent Code** -[8gent.dev](https://8gent.dev)<br />
-<sub>Open source developer agent. Free on-ramp. <em>(this repo)</em></sub>
-
-</td>
-<td valign="top" width="33%">
-
-**8gent** -[8gent.app](https://8gent.app)<br />
-<sub>Consumer GUI client for the OS.</sub>
-
-**8gent World** -[8gent.world](https://8gent.world)<br />
-<sub>Ecosystem story, docs, <a href="https://8gent.world/media/decks">14 presentation decks</a>.</sub>
-
-</td>
-<td valign="top" width="33%">
-
-**8gent Games** -[8gent.games](https://8gent.games)<br />
-<sub>Agent simulation playground.</sub>
+<sub>Open source developer agent. Free on-ramp. Shipped. <em>(this repo)</em></sub>
 
 **8gent Jr** -[8gentjr.com](https://8gentjr.com)<br />
-<sub>AI assistant for kids. Accessibility first. Free forever.</sub>
+<sub>AI assistant for kids. Accessibility first. Free forever. Shipped.</sub>
+
+</td>
+<td valign="top" width="33%">
+
+**8gent OS** -[8gentos.com](https://8gentos.com)<br />
+<sub>Paid personal OS. In development.</sub>
+
+**8gent** -[8gent.app](https://8gent.app)<br />
+<sub>Single pane of glass dashboard. In development.</sub>
+
+</td>
+<td valign="top" width="33%">
+
+**8gent World** -[8gent.world](https://8gent.world)<br />
+<sub>Ecosystem story, docs, <a href="https://8gent.world/media/decks">presentation decks</a>. In development.</sub>
+
+**8gent Games** -[8gent.games](https://8gent.games)<br />
+<sub>Agent simulation playground. In development.</sub>
 
 </td>
 </tr>
@@ -150,7 +150,7 @@ npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
-That's it. Ollama runs locally by default - if you don't have it, 8gent will guide you through setup on first launch.
+That's it. 8gent uses an adaptive 11-provider router. Default active provider is `8gent` local (model `eight-1.0-q3:14b`) with `ollama` also enabled by default. Cloud providers (OpenRouter, Groq, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate, Grok) are opt-in via API key. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
 ## Quick Start (Harness Smoke)
 
@@ -166,10 +166,10 @@ bun run cli -- --version
 
 # 3. Verify harness typecheck
 bun run check:harness
-# Expected: exit 0 (or type errors listed — not a crash)
+# Expected: exit 0 (or type errors listed, not a crash)
 ```
 
-If Ollama is not installed, 8gent will prompt you on first run. For offline/CI use:
+If no local model is available, 8gent will guide you through setup on first run or fall back through the adaptive router. For offline/CI use:
 ```bash
 INFERENCE_MODE=proxy bun run cli -- --version
 ```
@@ -223,7 +223,7 @@ bun run tui
 <br />
 
 **Model-agnostic**<br />
-<sub>Auto-selects from best free models on OpenRouter. Runs Qwen 3.5 via Ollama locally. Task router classifies prompts (code / reasoning / simple / creative) and picks the best model automatically.</sub>
+<sub>Adaptive 11-provider router: 8gent local, Ollama, OpenRouter, Groq, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate, Grok. Everything except 8gent/ollama is opt-in via API key. Task router classifies prompts (code, reasoning, simple, creative) and picks the best model automatically.</sub>
 
 <br />
 
@@ -439,7 +439,7 @@ User prompt
 
 ## Benchmarks
 
-<p align="center"><sub>Execution-graded tests across professional domains. All local inference via Ollama.<br />Code compiles and runs against <code>bun:test</code> suites, or it fails. No string matching, no vibes.</sub></p>
+<p align="center"><sub>Execution-graded tests across professional domains. Local inference via the adaptive router (8gent / Ollama defaults).<br />Code compiles and runs against <code>bun:test</code> suites, or it fails. No string matching, no vibes.</sub></p>
 
 <br />
 
@@ -496,7 +496,7 @@ apps/
 packages/
   eight/         Core agent engine (Vercel AI SDK)
   daemon/        Persistent vessel daemon (Fly.io)
-  ai/            Provider abstraction (Ollama, OpenRouter)
+  ai/            Provider abstraction (11-provider adaptive router)
   memory/        SQLite + FTS5 persistent memory
   orchestration/ WorktreePool, macro actions
   permissions/   NemoClaw YAML policy engine
