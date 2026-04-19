@@ -152,6 +152,27 @@ export class MCPClient {
     return this.servers.size > 0;
   }
 
+  /** @deprecated Use listServers() */
+  getRunningServers(): string[] {
+    return this.listServers().map(s => s.name);
+  }
+
+  /** @deprecated Use listServers() for counts, getTools() for merged ToolSet */
+  getServerTools(serverName: string): MCPToolSchema[] {
+    return this.servers.get(serverName)?.tools ?? [];
+  }
+
+  /** @deprecated Use getTools() which returns a ToolSet */
+  listTools(): Array<{ server: string; tool: MCPToolSchema }> {
+    const result: Array<{ server: string; tool: MCPToolSchema }> = [];
+    for (const [name, conn] of this.servers) {
+      for (const tool of conn.tools) {
+        result.push({ server: name, tool });
+      }
+    }
+    return result;
+  }
+
   /**
    * Shutdown all server connections.
    */
