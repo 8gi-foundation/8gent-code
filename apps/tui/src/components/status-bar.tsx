@@ -119,7 +119,10 @@ export function EnhancedStatusBar({
   const branchMax = Math.max(6, Math.min(22, Math.floor(barWidth * 0.16)));
   const authNameMax = Math.max(6, Math.min(16, Math.floor(barWidth * 0.12)));
   const planVerbMax = Math.max(12, Math.floor(barWidth * 0.22));
-  const displayModel = truncate(modelName, modelMax);
+  // Strip provider prefix (e.g. google/gemma-4-26b-a4b -> gemma-4-26b-a4b) before truncation
+  // so hierarchy emphasis lands on the model identity, not the routing path.
+  const modelShortName = modelName.includes("/") ? modelName.split("/").pop()! : modelName;
+  const displayModel = truncate(modelShortName, modelMax);
   const displayBranch = currentBranch ? truncate(currentBranch, branchMax) : null;
 
   const [elapsed, setElapsed] = useState("0:00");
@@ -157,10 +160,16 @@ export function EnhancedStatusBar({
     );
   }
 
-  const tokenMetaShort = truncate(
-    `${elapsed} ${"\u00B7"} ${formatTokens(tokensSaved)} tok`,
-    Math.max(8, Math.min(24, Math.floor(barWidth * 0.16)))
-  );
+  // iOS HIG adapted for Ink:
+  //   - Clarity: Row 1 is stable identity + quiet meta. Row 2 only appears when
+  //     there's an active operation to surface (plan verb). No orphaned perm line.
+  //   - Hierarchy: Model name is the anchor — rendered via Label (bold) so weight
+  //     (not color) carries the emphasis. Everything else defers.
+  //   - Depth: Row 2 is indented under the model anchor to read as a continuation,
+  //     not a separate block. Gives the verb its own breathing room (~60% width).
+  const showPlanRow = planStatus !== "idle";
+  const rowTwoVerbMax = Math.max(24, Math.floor(barWidth * 0.6));
+  const rowTwoIndent = 3; // align under the "▸▸ " glyph + space before model anchor
 
   return (
     <Box
@@ -170,63 +179,63 @@ export function EnhancedStatusBar({
       marginTop={1}
       width={barWidth}
       flexShrink={0}
-      flexDirection="row"
-      justifyContent="space-between"
-      alignItems="center"
+      flexDirection="column"
     >
-      {/* Left: model and agents — flexShrink={0}, no wrap */}
-      <Box flexShrink={0} flexDirection="row" overflow="hidden">
-        <ActiveIndicator active={true} />
-        <MutedText> </MutedText>
-        <ModelStatusItem name={displayModel} />
-        <Separator />
-        <AgentStatusItem running={runningAgents} total={totalAgents} />
+      {/* Row 1: identity (left) + meta + perm (right) — stable, never wraps */}
+      <Box
+        flexDirection="row"
+        justifyContent="space-between"
+        alignItems="center"
+        width="100%"
+      >
+        <Box flexShrink={0} flexDirection="row" overflow="hidden">
+          <ActiveIndicator active={true} />
+          <MutedText> </MutedText>
+          <ModelStatusItem name={displayModel} />
+          <Separator />
+          <AgentStatusItem running={runningAgents} total={totalAgents} />
+        </Box>
+
+        <Box flexShrink={0} flexDirection="row" overflow="hidden">
+          <TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
+          {displayBranch && (
+            <>
+              <Separator />
+              <GitBranchItem branch={displayBranch} hasChanges={hasUncommittedChanges} />
+            </>
+          )}
+          {authStatus && authStatus !== "unknown" && (
+            <>
+              <Separator />
+              <AuthStatusItem status={authStatus} user={authUser} nameMax={authNameMax} />
+            </>
+          )}
+          {voiceEnabled && (
+            <>
+              <Separator />
+              <VoiceStatusItem state={voiceState || "idle"} />
+            </>
+          )}
+          <Separator />
+          <PermissionStatusItem mode={permissionMode} />
+          <Separator />
+          <ElapsedTimeItem time={elapsed} />
+        </Box>
       </Box>
 
-      {/* Center: permissions — shrinks first, hidden when too narrow */}
-      <Box flexShrink={1} marginX={1} minWidth={0} flexDirection="row" overflow="hidden">
-        {planStatus !== "idle" && (
-          <>
-            <PlanStatusItem
-              status={planStatus}
-              completed={planStepsCompleted}
-              total={planStepsTotal}
-              showAnimatedVerb={showAnimations}
-              verbMaxWidth={planVerbMax}
-            />
-            {(planStatus === "planning" || planStatus === "executing") && (
-              <MutedText> ({tokenMetaShort})</MutedText>
-            )}
-            <Separator />
-          </>
-        )}
-        <PermissionStatusItem mode={permissionMode} />
-      </Box>
-
-      {/* Right: savings, branch, auth, voice, time — no wrap */}
-      <Box flexShrink={0} flexDirection="row" overflow="hidden">
-        <TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
-        {displayBranch && (
-          <>
-            <Separator />
-            <GitBranchItem branch={displayBranch} hasChanges={hasUncommittedChanges} />
-          </>
-        )}
-        {authStatus && authStatus !== "unknown" && (
-          <>
-            <Separator />
-            <AuthStatusItem status={authStatus} user={authUser} nameMax={authNameMax} />
-          </>
-        )}
-        {voiceEnabled && (
-          <>
-            <Separator />
-            <VoiceStatusItem state={voiceState || "idle"} />
-          </>
-        )}
-        <Separator />
-        <ElapsedTimeItem time={elapsed} />
-      </Box>
+      {/* Row 2: plan verb — only appears while something is actually running,
+          indented to read as a continuation of the model anchor above */}
+      {showPlanRow && (
+        <Box flexDirection="row" alignItems="center" width="100%" marginLeft={rowTwoIndent}>
+          <PlanStatusItem
+            status={planStatus}
+            completed={planStepsCompleted}
+            total={planStepsTotal}
+            showAnimatedVerb={showAnimations}
+            verbMaxWidth={rowTwoVerbMax}
+          />
+        </Box>
+      )}
     </Box>
   );
 }
@@ -251,7 +260,8 @@ function Separator() {
 }
 
 function ModelStatusItem({ name }: { name: string }) {
-  return <AppText color="cyan">{name}</AppText>;
+  // Primary anchor — bold weight (not size, which TUIs lack) carries the hierarchy
+  return <Label color="cyan">{name}</Label>;
 }
 
 function AgentStatusItem({ running, total }: { running: number; total: number }) {
