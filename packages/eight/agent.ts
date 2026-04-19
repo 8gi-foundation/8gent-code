@@ -35,6 +35,7 @@ import { KernelManager } from "../kernel/manager";
 import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orchestrator-bus";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
+import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { getExtensionManager } from "../extensions";
 import { ProactiveCompression, DEFAULT_PROACTIVE_CONFIG, type ProactiveResult, type CompressionStage } from "./compaction";
 import { privacyGate, forceLocalModel } from "../permissions/privacy-router";
@@ -200,11 +201,22 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Inject deferred tool categories when not loading all tools upfront
     const deferredToolBlock = config.allTools ? "" : "\n\n" + getDeferredToolSegment();
 
+    // Local providers have limited context windows — use a compact prompt that
+    // still includes an honest tool catalog so the model never claims it has
+    // no tools / no internet when it actually does. Closes #1082.
+    const runtimeName = this.config.runtime as string;
+    const isLocalRuntime =
+      runtimeName === "lmstudio" ||
+      runtimeName === "ollama" ||
+      runtimeName === "8gent";
+    const compactLocalPrompt =
+      "You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n" +
+      buildToolCatalogSegment({ concise: true });
+
     this.messageHistory.push({
       role: "system",
-      // Local providers have limited context windows — use minimal system prompt
-      content: (this.config.runtime === "lmstudio" || this.config.runtime === "ollama")
-        ? "You are a coding agent. Use tools to read, write, and run code. Be concise."
+      content: isLocalRuntime
+        ? compactLocalPrompt
         : basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + deferredToolBlock + languageInstruction,
     });
 
@@ -433,10 +445,27 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     const systemPrompt = this.messageHistory.find(m => m.role === "system")?.content;
 
     // Create the AI SDK agent with v2 session callbacks
-    // Local providers have limited context — cap at core tools to avoid "Context size exceeded"
-    const CORE_TOOLS = ["read_file", "write_file", "edit_file", "list_files", "run_command", "git_status", "git_diff", "git_add", "git_commit"];
+    // Local providers have limited context — cap at core tools to avoid "Context size exceeded".
+    // web_search/web_fetch included so local models can answer current-info questions.
+    const CORE_TOOLS = [
+      "read_file", "write_file", "edit_file", "list_files", "run_command",
+      "get_outline", "get_symbol", "search_symbols",
+      "git_status", "git_diff", "git_add", "git_commit",
+      "web_search", "web_fetch",
+    ];
+    const providerName = providerConfig.name as string;
+    const isLocalProvider =
+      providerName === "lmstudio" ||
+      providerName === "ollama" ||
+      providerName === "8gent";
+    // Deferred registry only loads `core` upfront — make sure local providers
+    // get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
+    // web_search won't exist to pass through.
+    if (isLocalProvider) {
+      this.toolRegistry.loadCategory("web");
+      this.toolRegistry.loadCategory("git");
+    }
     const allTools = this.toolRegistry.getTools();
-    const isLocalProvider = providerConfig.name === "lmstudio" || providerConfig.name === "ollama";
     const effectiveTools = isLocalProvider
       ? Object.fromEntries(Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)))
       : allTools;
