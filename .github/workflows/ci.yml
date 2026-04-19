@@ -26,12 +26,12 @@ jobs:
 
       - name: Check for merge conflict markers
         run: |
-          if grep -rn --include='*.ts' --include='*.tsx' -l '<<<<<<<\|=======\|>>>>>>>' \
+          if grep -rn --include='*.ts' --include='*.tsx' -lE '^<<<<<<< |^>>>>>>> ' \
             packages/ apps/ bin/ scripts/ \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git \
             2>/dev/null | grep .; then
             echo "::error::Merge conflict markers found in TypeScript source files"
-            echo "Run: grep -rn --include='*.ts' --include='*.tsx' '<<<<<<<' packages/ apps/ bin/"
+            echo "Run: grep -rnE '^<<<<<<< |^>>>>>>> ' --include='*.ts' --include='*.tsx' packages/ apps/ bin/"
             exit 1
           fi
           echo "Conflict marker check: PASS"
