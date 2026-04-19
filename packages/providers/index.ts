@@ -112,7 +112,7 @@ export interface ProviderSettings {
  * compiled Swift bridge; until it runs, this returns false and the provider
  * stays disabled in the registry.
  */
-function isAppleFoundationAvailable(): boolean {
+export function isAppleFoundationAvailable(): boolean {
   if (process.platform !== "darwin") return false;
   if (process.arch !== "arm64") return false;
   // Darwin 25.x === macOS 26 Tahoe. Apple's `FoundationModels` framework

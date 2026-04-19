@@ -179,7 +179,7 @@ export async function extractTextFromImage(
   // Auto-discover best OCR model if none specified
   if (!model) {
     try {
-      const { findOCRModel } = await import("@8gent/eight/vision-router");
+      const { findOCRModel } = await import("../eight/vision-router");
       const result = await findOCRModel();
       if (result.found && result.model?.provider === "ollama") {
         ocrModel = result.model.model;

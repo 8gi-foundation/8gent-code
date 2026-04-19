@@ -82,6 +82,7 @@ bun run benchmarks/autoresearch/harness.ts   # run harness directly
 | `packages/self-autonomy/` | Evolution, reflection, HyperAgent meta-mutation, persona mutation |
 | `packages/daemon/` | Persistent vessel daemon |
 | `packages/kernel/` | RL fine-tuning pipeline (GRPO, off by default) |
+| `packages/orchestration/role-config.ts` | Role to provider+model assignment (loads/saves ~/.8gent/roles.json) |
 | `docs/HYPERAGENT-SPEC.md` | HyperAgent metacognitive self-modification spec |
 | `docs/MODEL-SHOOTOUT.md` | Local vs cloud model comparison |
 | `docs/KERNEL-FINETUNING.md` | RL fine-tuning architecture |
