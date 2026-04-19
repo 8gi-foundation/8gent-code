@@ -69,3 +69,9 @@ export {
   type AbilityName,
   type BaselineDelta,
 } from "./ability-scorecard";
+
+export {
+  emitSchema,
+  validateAgainstSchema,
+  type EmittedSchema,
+} from "./schema-gen";
