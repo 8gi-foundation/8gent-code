@@ -2,13 +2,14 @@
 
 ## Project
 
-8gent Code - the kernel of the 8gent ecosystem. Open source autonomous coding agent TUI powered by local LLMs (Ollama) or free cloud models (OpenRouter). The free on-ramp to 8gent OS.
+8gent Code - the kernel of the 8gent ecosystem. Open source autonomous coding agent TUI. "Free and local by default" (Principle 2) = adaptive provider routing across local runtimes (Ollama, LM Studio, 8gent localhost) with rate-limit failover to free cloud tiers (OpenRouter `:free`). The free on-ramp to 8gent OS.
 
 - **Domain:** 8gent.dev
 - **Runtime:** Bun
 - **TUI:** Ink v6 (React for CLI)
 - **Monorepo:** `apps/` (tui, clui, dashboard, debugger, demos, installer) + `packages/` (agent, providers, tools, etc.)
-- **Default model:** Ollama (Qwen 3.5 local) or OpenRouter free models (cloud). Task router auto-selects.
+- **Provider model (CRITICAL — do not restate as "Ollama default"):** Out-of-box active provider = `8gent` (localhost, model `eight-1.0-q3:14b`); `ollama` is also enabled. Runtime clients exist for Ollama + LM Studio + OpenRouter (`packages/eight/clients/`). 11 providers wired in the registry (`packages/providers/index.ts`): `8gent`, `ollama`, `openrouter`, `groq`, `grok`, `openai`, `anthropic`, `mistral`, `together`, `fireworks`, `replicate`. Everything except `8gent`/`ollama` is opt-in via API key. Failover chain (`packages/providers/failover.ts`): local 8gent → local Qwen → OpenRouter `:free`. `auto:free` resolves to the best currently-available `:free` model on OpenRouter. Apple Foundation Model is NOT wired (James runs it externally). Cerebras / Chutes / Cohere are NOT wired (candidates to add).
+- **Multi-agent orchestration:** First-class. `packages/daemon/agent-pool.ts` holds up to 10 concurrent sessions. `claude-code/src/tools/AgentTool/forkSubagent.ts` lets a parent spawn children that inherit full context. Sessions carry a `channel` field (`os`, `app`, `telegram`, `discord`, `api`) — extensible for third-party terminal hosts (cmux, etc.).
 - **Deployment:** Eight kernel as persistent daemon on Fly.io Amsterdam ([eight-vessel.fly.dev](https://eight-vessel.fly.dev))
 
 ### Ecosystem
