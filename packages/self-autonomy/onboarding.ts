@@ -307,20 +307,20 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
       "Ready to begin? (yes/no)\n",
     options: ["yes", "no", "y", "n"],
     processor: (answer, user) => {
-      if (["yes", "y", ""].includes(answer.toLowerCase())) {
-        return {
-          ...user,
-          onboardingComplete: true,
-          completedSteps: [...user.completedSteps, "confirmation"],
-          understanding: {
-            ...user.understanding,
-            confidenceScore: calculateConfidence(user),
-            areasUnclear: [],
-            lastUpdated: new Date().toISOString(),
-          },
-        };
-      }
-      return getDefaultUserConfig();
+      // Any answer (including "no") completes onboarding - user can always
+      // reconfigure later with /onboarding. Resetting the entire config here
+      // caused an infinite loop (steps cleared -> questions restart -> 36/6).
+      return {
+        ...user,
+        onboardingComplete: true,
+        completedSteps: [...user.completedSteps, "confirmation"],
+        understanding: {
+          ...user.understanding,
+          confidenceScore: calculateConfidence(user),
+          areasUnclear: [],
+          lastUpdated: new Date().toISOString(),
+        },
+      };
     },
   },
 ];

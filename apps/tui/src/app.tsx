@@ -853,10 +853,10 @@ export function App({
 		};
 	}, [currentProvider]);
 
-	// After LM Studio / Ollama lists load: avoid leaving an embedding model (or stale id) selected
+	// After model list loads: ensure currentModel is valid for the active provider.
+	// If the model isn't in the fetched list (e.g. Ollama model on OpenRouter), auto-select.
 	useEffect(() => {
 		if (modelsLoading || availableModels.length === 0) return;
-		if (currentProvider !== "lmstudio" && currentProvider !== "ollama") return;
 
 		const inList = Boolean(
 			currentModel && availableModels.includes(currentModel),
@@ -1127,6 +1127,11 @@ export function App({
 				const chatTab = workspaceTabs.tabs.find((t) => t.type === "chat");
 				if (chatTab) workspaceTabs.switchTab(chatTab.id);
 			} else if (viewMode !== "chat") {
+				// If escaping from onboarding, also clear onboarding state
+				if (viewMode === "onboarding") {
+					setShowOnboarding(false);
+					onboardingManager.skipAll();
+				}
 				setViewMode("chat");
 			}
 		}
