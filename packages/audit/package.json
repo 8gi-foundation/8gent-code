@@ -1,0 +1,30 @@
+{
+  "name": "@8gent/audit",
+  "version": "0.1.0",
+  "description": "Append-only access audit log for child records (DPIA G7). Tracks who read which record, when, and why.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./index.ts",
+      "types": "./index.ts"
+    },
+    "./store": {
+      "import": "./store.ts",
+      "types": "./store.ts"
+    },
+    "./types": {
+      "import": "./types.ts",
+      "types": "./types.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}
