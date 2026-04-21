@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.3.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v2.0.0" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.8.1-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.8.1" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -32,7 +32,7 @@
 
 ## The Ecosystem
 
-<p align="center"><sub>2 shipped &nbsp;·&nbsp; more in development &nbsp;·&nbsp; 1 constitution</sub></p>
+<p align="center"><sub>2 shipped &nbsp;·&nbsp; 5 in development &nbsp;·&nbsp; 1 constitution</sub></p>
 
 <br />
 
@@ -146,33 +146,22 @@ The 8GI Foundation Discord server is the primary community hub for contributors 
 ## Quick Start
 
 ```bash
-npm install -g @8gi-foundation/8gent-code
+npm install -g @podjamz/8gent-code
 8gent
 ```
 
 That's it. 8gent uses an adaptive 11-provider router. Default active provider is `8gent` local (model `eight-1.0-q3:14b`) with `ollama` also enabled by default. Cloud providers (OpenRouter, Groq, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate, Grok) are opt-in via API key. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
-## Quick Start (Harness Smoke)
+## Quick Start (from source)
 
 ```bash
-# 1. Clone and install
 git clone https://github.com/8gi-foundation/8gent-code.git
 cd 8gent-code
 bun install
-
-# 2. Verify CLI works
-bun run cli -- --version
-# Expected: 0.x.x (8gent Code)
-
-# 3. Verify harness typecheck
-bun run check:harness
-# Expected: exit 0 (or type errors listed, not a crash)
+bun run tui
 ```
 
-If no local model is available, 8gent will guide you through setup on first run or fall back through the adaptive router. For offline/CI use:
-```bash
-INFERENCE_MODE=proxy bun run cli -- --version
-```
+If no local model is available, 8gent will guide you through interactive onboarding on first run. The adaptive provider router tries local 8gent, then Ollama, then OpenRouter free tier.
 
 <br />
 
@@ -196,7 +185,7 @@ No central vendor captures that value.
 
 The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.
 
-Try it: `npm install -g @8gi-foundation/8gent-code && 8gent`
+Try it: `npm install -g @podjamz/8gent-code && 8gent`
 
 ### From source (contributors)
 
@@ -254,7 +243,7 @@ bun run tui
 <br />
 
 **Voice**<br />
-<sub>8 neural AI voices (KittenTTS, free, local) + full-duplex via Moshi on Apple Silicon. Auto-installed during onboarding. <code>/voice chat</code> to start.</sub>
+<sub>macOS TTS voices (Moira, Daniel, Samantha, Karen, Rishi) with KittenTTS neural voices as optional upgrade. Full-duplex Moshi backend scaffolded for Apple Silicon. <code>/voice chat</code> to start.</sub>
 
 <br />
 
@@ -371,6 +360,7 @@ See [packages/pet/README.md](packages/pet/README.md) for the full bestiary.
 
 | Deck | Link |
 |------|------|
+| **Feature Set Audit** | [8gent.world/media/decks/feature-set](https://8gent.world/media/decks/feature-set) |
 | **npm Launch** | [8gent.world/media/decks/npm-launch](https://8gent.world/media/decks/npm-launch) |
 | **Lil Eight Pets** | [8gent.world/media/decks/lil-eight](https://8gent.world/media/decks/lil-eight) |
 | **Companion System** | [8gent.world/media/decks/companion-system](https://8gent.world/media/decks/companion-system) |
@@ -385,30 +375,15 @@ See [packages/pet/README.md](packages/pet/README.md) for the full bestiary.
 
 ## Voice
 
-Two modes: half-duplex voice chat and full-duplex conversation.
-
 **Half-duplex** (`/voice chat`) - listen, transcribe, think, speak, repeat. Requires sox and whisper.cpp:
 
 ```bash
 brew install sox whisper-cpp
 ```
 
-**Neural TTS** - 8 local AI voices via KittenTTS (free, no API key). Auto-offered during onboarding:
+**TTS output** - macOS `say` voices (Moira, Daniel, Samantha, Karen, Rishi) work out of the box. KittenTTS neural voices (8 voices, free, local) are available as an optional upgrade - offered during onboarding.
 
-| Voice | Gender | Character |
-|:------|:-------|:----------|
-| **Bruno** (default) | Male | Warm, authoritative |
-| Bella | Female | Warm, clear |
-| Jasper | Male | Crisp, technical |
-| Luna | Female | Soft, creative |
-| Rosie | Female | Bright, energetic |
-| Hugo | Male | Neutral, steady |
-| Kiki | Female | Light, friendly |
-| Leo | Male | Rich, expressive |
-
-Falls back to macOS `say` (Moira, Daniel, Samantha, Karen, Rishi) if KittenTTS is not installed.
-
-**Full-duplex** - simultaneous listen and speak via Moshi (Kyutai) on Apple Silicon. Requires `pip install moshi`. Backend auto-detected.
+**Full-duplex** (experimental) - simultaneous listen and speak via Moshi (Kyutai) on Apple Silicon. Backend code exists in `packages/voice/backends/moshi-mlx.ts` but requires manual setup (`pip install moshi`).
 
 <sub>Status bar shows: <strong>VOICE CHAT (listening)</strong> / <strong>SPEAKING</strong> / <strong>THINKING</strong></sub>
 
@@ -479,12 +454,12 @@ CATEGORY=battle-test bun run benchmark:loop  # autoresearch loop
 
 ```
 apps/
-  tui/           Ink v6 terminal UI (main interface)
+  tui/           Ink v6 terminal UI (main interface, shipped)
   clui/          Tauri 2.0 desktop overlay (scaffolded)
-  dashboard/     Next.js admin panel
-  debugger/      Session debugger
+  dashboard/     Next.js admin panel (scaffolded)
+  debugger/      Session debugger (scaffolded)
   demos/         Remotion video generation
-  installer/     Interactive install wizard
+  installer/     Interactive install wizard (shipped)
 ```
 
 </td>
@@ -494,26 +469,27 @@ apps/
 
 ```
 packages/
-  eight/         Core agent engine (Vercel AI SDK)
-  daemon/        Persistent vessel daemon (Fly.io)
-  ai/            Provider abstraction (11-provider adaptive router)
-  memory/        SQLite + FTS5 persistent memory
-  orchestration/ WorktreePool, macro actions
-  permissions/   NemoClaw YAML policy engine
-  self-autonomy/ Evolution, reflection, HyperAgent
-  validation/    Self-healing executor
-  proactive/     Business agents, opportunity scanner
-  ast-index/     Blast radius engine
-  tools/         Browser, actuators, filesystem, shell
-  voice/         STT (whisper.cpp) + TTS (KittenTTS/macOS) + full-duplex (Moshi)
-  kernel/        RL fine-tuning pipeline (off by default)
-  personality/   Brand voice, "Infinite Gentleman"
-  telegram/      Telegram bot portal
-  auth/          Clerk auth + GitHub integration
-  db/            Convex reactive database
-  control-plane/ Multi-tenant management
-  board-plane/   Board-level vessel orchestration
-  board-vessel/  Autonomous AI officer blueprint
+  eight/         Core agent engine (Vercel AI SDK) - shipped
+  providers/     11-provider adaptive router + failover - shipped
+  memory/        SQLite + FTS5 persistent memory - shipped
+  orchestration/ WorktreePool, role registry, macro actions - shipped
+  permissions/   NemoClaw YAML policy engine - shipped
+  self-autonomy/ Evolution, reflection, HyperAgent - shipped
+  validation/    Self-healing executor - shipped
+  proactive/     Business agents, opportunity scanner - shipped
+  ast-index/     Blast radius engine - shipped
+  tools/         75 tools: filesystem, shell, git, browser, AST - shipped
+  voice/         STT (whisper.cpp) + TTS (macOS/KittenTTS) - partial
+  kernel/        RL fine-tuning pipeline (off by default) - shipped
+  personality/   Brand voice, "Infinite Gentleman" - shipped
+  pet/           Companion system + dock pet - shipped
+  telegram/      Telegram bot portal - shipped
+  daemon/        Persistent vessel daemon (Fly.io) - partial
+  auth/          Clerk auth + GitHub integration - scaffolded
+  db/            Convex reactive database - scaffolded
+  control-plane/ Multi-tenant management - scaffolded
+  board-plane/   Board-level vessel orchestration - scaffolded
+  board-vessel/  Autonomous AI officer blueprint - scaffolded
 ```
 
 </td>
@@ -536,10 +512,10 @@ packages/
 
 ### Now
 
-- **Harness hardening** - brain/hands isolation, context compression, and sub-agent spawn protocol landed. Security audit on spawn governance in progress (#1409).
-- **Skill compounding** - tasks become reusable skills. Refining quality gate and promotion logic.
-- **Voice mode** - KittenTTS neural voices integrated. Full-duplex Moshi backend working on Apple Silicon. Evaluating PersonaPlex (NVIDIA) for persona-controlled voice.
-- **AST-index expansion** - symbol-level call edges, reachability queries, dead-code detection (#1392-#1394).
+- **Per-tab model routing** - each agent tab (Orchestrator/Engineer/QA) gets its own provider and model, with Apple Foundation as lightweight chat option
+- **Documentation sweep** - aligning all docs, README, and live sites with audited feature set
+- **PR cleanup** - merging 12+ pending PRs with verification
+- **Voice hardening** - KittenTTS integration, full-duplex Moshi backend stabilization
 
 </td>
 <td valign="top" width="33%">
@@ -548,7 +524,7 @@ packages/
 
 - **MCP server support** - expose 8gent tools as MCP servers for external agent consumption
 - **Context window compaction** - smarter compression beyond token threshold
-- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation (#1254)
+- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation
 - [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
 - [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
 
@@ -561,7 +537,7 @@ packages/
 - Multi-tenant control plane via 8GI gateway
 - Full autonomous issue resolution
 - Personal LoRA from session training pairs
-- 8gent Jr voice vessel (KittenTTS server-side for mobile clients)
+- Dead code cleanup (music/DJ package)
 
 </td>
 </tr>
@@ -582,12 +558,12 @@ packages/
 | Command | What it does |
 |:--------|:-------------|
 | `/voice chat` | Start voice conversation mode |
-| `/voice start` | Push-to-talk recording |
 | `/model <name>` | Switch LLM model |
-| `/board` | Kanban task board |
+| `/provider <name>` | Switch LLM provider |
+| `/kanban` | Kanban task board |
 | `/predict` | Confidence-scored step predictions |
-| `/momentum` | Velocity stats |
 | `/evidence` | Session evidence summary |
+| `/router` | Task router + model selection |
 
 </td>
 <td valign="top" width="50%">
@@ -601,11 +577,8 @@ packages/
 | `/auth status` | Check auth state |
 | `/debug` | Session inspector |
 | `/deploy <target>` | Deploy to Vercel/Railway/Fly |
-| `/throughput` | Token throughput stats |
-| `/scorecard` | Ability scorecard metrics |
-| `/soul` | Current persona calibration |
-| `/router` | Task router + model selection |
 | `/music` | Toggle lofi music (ADHD mode) |
+| `/pet` | Companion dock pet |
 | `/rename` | Rename the current session |
 
 </td>
