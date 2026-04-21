@@ -146,7 +146,7 @@ The 8GI Foundation Discord server is the primary community hub for contributors 
 ## Quick Start
 
 ```bash
-npm install -g @podjamz/8gent-code
+npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
@@ -185,7 +185,7 @@ No central vendor captures that value.
 
 The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.
 
-Try it: `npm install -g @podjamz/8gent-code && 8gent`
+Try it: `npm install -g @8gi-foundation/8gent-code && 8gent`
 
 ### From source (contributors)
 
