@@ -8,6 +8,8 @@
 import { bus, type EventName } from "./events";
 import type { AgentPool } from "./agent-pool";
 import { getJobs, addJob, removeJob, type CronJob } from "./cron";
+import { logAccess } from "../audit/index";
+import type { LogAccessInput } from "../audit/types";
 
 export interface GatewayConfig {
   port: number;
@@ -249,6 +251,31 @@ function subscribeToBus(): void {
   }
 }
 
+async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<Response> {
+  if (config.authToken) {
+    const provided = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    if (provided !== config.authToken) {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+  }
+  let body: Partial<LogAccessInput>;
+  try {
+    body = (await req.json()) as Partial<LogAccessInput>;
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
+  const { actor, actorKind, targetTable, targetId, operation, reason, sessionId } = body;
+  if (!actor || !actorKind || !targetTable || !targetId || !operation || !reason) {
+    return Response.json({ error: "missing required field" }, { status: 400 });
+  }
+  try {
+    const id = logAccess({ actor, actorKind, targetTable, targetId, operation, reason, sessionId: sessionId ?? null });
+    return Response.json({ id }, { status: 201 });
+  } catch (err) {
+    return Response.json({ error: (err as Error).message }, { status: 400 });
+  }
+}
+
 export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
   subscribeToBus();
 
@@ -266,6 +293,11 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
           sessions: config.pool.size,
           uptime: process.uptime(),
         });
+      }
+
+      // Access audit log endpoint (DPIA G7). POST-only, metadata only.
+      if (url.pathname === "/audit/access" && req.method === "POST") {
+        return handleAuditAccess(req, config);
       }
 
       return new Response("Eight Daemon - ws://localhost:" + config.port, { status: 200 });
