@@ -109,3 +109,18 @@ export {
 
 // Seeding function
 export { seedDatabase } from './seed';
+
+// DESIGN.md format support (quality gate)
+export {
+  parseDesignMd,
+  lintDesignMd,
+  importDesignMd,
+  exportDesignMd,
+  generateDesignSpec,
+  type DesignMdTokens,
+  type TypographyToken,
+  type DesignMdSection,
+  type ParsedDesignMd,
+  type LintFinding,
+  type LintReport as DesignMdLintReport,
+} from './design-md';

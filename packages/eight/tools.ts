@@ -90,6 +90,13 @@ import {
   listStyles as listDesignStyles,
   listMoods as listDesignMoods,
 } from "../design-systems/index.js";
+import {
+  parseDesignMd,
+  lintDesignMd,
+  importDesignMd,
+  exportDesignMd,
+  generateDesignSpec,
+} from "../design-systems/design-md.js";
 import { createInfiniteRunner, formatInfiniteState, type InfiniteRunner } from "../infinite";
 import {
   browserOpen,
@@ -97,6 +104,18 @@ import {
   browserScreenshot,
   browserTask,
 } from "../tools/browser-use";
+import {
+  BrowserHarness,
+  createBrowserHarness,
+  type BrowserStrategy,
+} from "../browser-harness";
+import {
+  PolymarketClient,
+  TradingEngine,
+  type TradeIntent,
+  type StrategyConfig,
+} from "../trading";
+import { parseMarketArrays } from "../trading/polymarket/types";
 import {
   screenshot as computerScreenshot,
   click as computerClick,
@@ -633,6 +652,53 @@ export class ToolExecutor {
           }
         }
       },
+      // DESIGN.md format tools (design quality gate)
+      {
+        type: "function",
+        function: {
+          name: "lint_design_md",
+          description: "[DESIGN] Validates a DESIGN.md file against the design.md spec. Checks token structure, color validity (hex), typography completeness, component token references, section order, WCAG contrast ratios, and duplicate sections. Returns findings with severity levels. Use this as a quality gate BEFORE shipping any UI - ensures design consistency regardless of which model generated the code.",
+          parameters: {
+            type: "object",
+            properties: {
+              content: { type: "string", description: "Raw DESIGN.md file content (YAML frontmatter + markdown)" },
+              filePath: { type: "string", description: "Path to a DESIGN.md file to read and lint (alternative to content)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "import_design_md",
+          description: "[DESIGN] Imports a DESIGN.md file into the design systems database. Parses YAML tokens (colors, typography, spacing, components) and maps them to the 8gent schema. Once imported, the system is queryable via query_design_system and can be used to enforce design consistency across all UI work. Use this when the user provides a DESIGN.md file or URL.",
+          parameters: {
+            type: "object",
+            properties: {
+              content: { type: "string", description: "Raw DESIGN.md file content" },
+              filePath: { type: "string", description: "Path to a DESIGN.md file to read and import" },
+              style: { type: "string", description: "Override style classification: minimal, bold, playful, elegant, tech, retro, nature, corporate" },
+              mood: { type: "string", description: "Override mood classification: professional, creative, tech, warm, cool, dramatic, calm, energetic" },
+              tags: { type: "array", items: { type: "string" }, description: "Additional tags for searchability" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "export_design_md",
+          description: "[DESIGN] Exports a design system from the database as a DESIGN.md file. Generates YAML frontmatter with color tokens, typography definitions, and component specs, plus markdown sections (Overview, Colors, Typography, Components, Do's and Don'ts). The output conforms to the design.md spec and can be shared with any agent or tool that supports the format.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Design system name or ID to export (e.g., 'claude', 'vercel', 'paws-and-paths')" },
+              asSpec: { type: "boolean", description: "If true, wraps the DESIGN.md in a system-prompt-ready format with instructions for the model to follow the design tokens strictly" }
+            },
+            required: ["name"]
+          }
+        }
+      },
       // Infinite mode
       {
         type: "function",
@@ -683,18 +749,18 @@ export class ToolExecutor {
       },
       // Desktop Computer Use tools (Power #10)
       ...getComputerToolDefs(),
-      // Browser Use tools
+      // Browser Harness tools (CDP-first with fallback chain)
       {
         type: "function",
         function: {
           name: "browser_open",
-          description: "Open a URL in a real browser and return the page state (title, URL, clickable elements). Use for web interaction, form filling, scraping dynamic pages.",
+          description: "Open a URL in a real browser via CDP (Chrome DevTools Protocol). Falls back to browser-use CLI or HTTP fetch. Returns page title, URL, text content, links, and form inputs.",
           parameters: {
             type: "object",
             properties: {
               url: { type: "string", description: "URL to navigate to" },
-              browser: { type: "string", description: "Browser to use (default: chromium). Use 'remote' for cloud browsers." },
-              session: { type: "string", description: "Session ID for persistent browser sessions" }
+              headless: { type: "boolean", description: "Run in headless mode (default: false locally, true on vessels)" },
+              remote_ws_url: { type: "string", description: "Remote CDP WebSocket URL for vessel/cloud browsers" }
             },
             required: ["url"]
           }
@@ -704,11 +770,24 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "browser_state",
-          description: "Get the current browser page state: URL, title, and all clickable/interactive elements with their indices. Use after browser_open to see what you can interact with.",
+          description: "Get the current browser page state: URL, title, text, links, inputs, and all interactive elements with CSS selectors.",
+          parameters: {
+            type: "object",
+            properties: {}
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_click",
+          description: "Click an element by CSS selector (e.g. '#submit', 'button.primary', 'a[href=\"/login\"]') or by {x, y} coordinates.",
           parameters: {
             type: "object",
             properties: {
-              session: { type: "string", description: "Session ID (if using persistent sessions)" }
+              selector: { type: "string", description: "CSS selector of the element to click" },
+              x: { type: "number", description: "X coordinate (use with y instead of selector)" },
+              y: { type: "number", description: "Y coordinate (use with x instead of selector)" }
             }
           }
         }
@@ -716,16 +795,29 @@ export class ToolExecutor {
       {
         type: "function",
         function: {
-          name: "browser_task",
-          description: "Run a complex browser task described in natural language. The browser-use agent will plan and execute multi-step interactions (clicking, typing, navigating) to complete the task.",
+          name: "browser_type",
+          description: "Type text into the focused element, or into a specific element by CSS selector.",
           parameters: {
             type: "object",
             properties: {
-              task: { type: "string", description: "Natural language description of the browser task to perform" },
-              browser: { type: "string", description: "Browser to use (default: chromium). Use 'remote' for cloud browsers." },
-              session: { type: "string", description: "Session ID for persistent browser sessions" }
+              text: { type: "string", description: "Text to type" },
+              selector: { type: "string", description: "CSS selector to focus before typing (optional)" }
             },
-            required: ["task"]
+            required: ["text"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_eval",
+          description: "Execute JavaScript in the browser page context. Returns the evaluated result.",
+          parameters: {
+            type: "object",
+            properties: {
+              expression: { type: "string", description: "JavaScript expression to evaluate" }
+            },
+            required: ["expression"]
           }
         }
       },
@@ -733,12 +825,181 @@ export class ToolExecutor {
         type: "function",
         function: {
           name: "browser_screenshot",
-          description: "Take a screenshot of the current browser page. Returns the file path where the screenshot was saved.",
+          description: "Capture a screenshot of the current browser page. Returns base64 PNG data or saves to a file.",
           parameters: {
             type: "object",
             properties: {
-              path: { type: "string", description: "File path to save screenshot (default: auto-generated)" },
-              session: { type: "string", description: "Session ID (if using persistent sessions)" }
+              path: { type: "string", description: "File path to save screenshot (if omitted, returns base64)" },
+              format: { type: "string", description: "Image format: png (default) or jpeg" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_scroll",
+          description: "Scroll the browser page up or down.",
+          parameters: {
+            type: "object",
+            properties: {
+              direction: { type: "string", description: "Scroll direction: 'up' or 'down' (default: down)" },
+              amount: { type: "number", description: "Pixels to scroll (default: 400)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_elements",
+          description: "Get all interactive elements on the page (links, buttons, inputs, selects) with their CSS selectors, text, and attributes.",
+          parameters: {
+            type: "object",
+            properties: {}
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "browser_close",
+          description: "Close the browser harness connection. Does not kill Chrome - just disconnects the CDP session.",
+          parameters: {
+            type: "object",
+            properties: {}
+          }
+        }
+      },
+
+      // Trading tools (Polymarket)
+      {
+        type: "function",
+        function: {
+          name: "trade_browse",
+          description: "Browse Polymarket prediction markets. Shows trending markets with odds, volume, and liquidity. Use to discover trading opportunities.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query to filter markets (optional)" },
+              limit: { type: "number", description: "Number of markets to return (default: 10)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_market",
+          description: "Get detailed info on a specific Polymarket market - orderbook, spread, volume, odds for each outcome.",
+          parameters: {
+            type: "object",
+            properties: {
+              market_id: { type: "string", description: "Polymarket market ID" }
+            },
+            required: ["market_id"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_opportunities",
+          description: "Find the best trading opportunities on Polymarket based on volume, liquidity, and odds spread. Scored and ranked.",
+          parameters: {
+            type: "object",
+            properties: {
+              limit: { type: "number", description: "Number of opportunities (default: 5)" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_buy",
+          description: "Buy shares on a Polymarket prediction market. Requires market_id, outcome (Yes/No), size (USDC amount). Checks guardrails before execution.",
+          parameters: {
+            type: "object",
+            properties: {
+              market_id: { type: "string", description: "Polymarket market ID" },
+              outcome: { type: "string", description: "Outcome to buy: 'Yes' or 'No'" },
+              size: { type: "number", description: "Amount in USDC to spend" },
+              price: { type: "number", description: "Limit price (0.01-0.99). If omitted, uses current ask." },
+              confidence: { type: "number", description: "Your confidence in this outcome (0-1)" },
+              reasoning: { type: "string", description: "Why you think this trade is good" }
+            },
+            required: ["market_id", "outcome", "size", "confidence", "reasoning"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_sell",
+          description: "Sell shares on a Polymarket prediction market. Requires market_id, outcome (Yes/No), size.",
+          parameters: {
+            type: "object",
+            properties: {
+              market_id: { type: "string", description: "Polymarket market ID" },
+              outcome: { type: "string", description: "Outcome to sell: 'Yes' or 'No'" },
+              size: { type: "number", description: "Number of shares to sell" },
+              price: { type: "number", description: "Limit price (0.01-0.99)" },
+              reasoning: { type: "string", description: "Why selling" }
+            },
+            required: ["market_id", "outcome", "size"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_positions",
+          description: "Show current Polymarket positions and P&L. Requires CLOB API credentials in env.",
+          parameters: {
+            type: "object",
+            properties: {}
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_balance",
+          description: "Get USDC balance on Polymarket. Requires CLOB API credentials in env.",
+          parameters: {
+            type: "object",
+            properties: {}
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_strategy",
+          description: "View or update the trading strategy config: max trade size, max exposure, confidence threshold, edge requirement, autonomous mode, rate limits.",
+          parameters: {
+            type: "object",
+            properties: {
+              max_trade_size: { type: "number", description: "Max USDC per trade" },
+              max_exposure: { type: "number", description: "Max total USDC exposure" },
+              min_confidence: { type: "number", description: "Min confidence to trade (0-1)" },
+              min_edge: { type: "number", description: "Min edge to trade (0-1)" },
+              autonomous: { type: "boolean", description: "Enable autonomous trading mode" },
+              max_trades_per_hour: { type: "number", description: "Max trades per hour" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trade_journal",
+          description: "View the trade journal - history of all trades attempted, executed, and blocked.",
+          parameters: {
+            type: "object",
+            properties: {
+              limit: { type: "number", description: "Number of entries (default: 20)" }
             }
           }
         }
@@ -768,6 +1029,18 @@ export class ToolExecutor {
     vercel_get_env: "network_request",
     vercel_list_domains: "network_request",
     vercel_get_deployment_logs: "network_request",
+    browser_open: "network_request",
+    browser_eval: "run_command",
+    browser_click: "run_command",
+    browser_type: "run_command",
+    browser_screenshot: "read_file",
+    trade_browse: "network_request",
+    trade_market: "network_request",
+    trade_opportunities: "network_request",
+    trade_buy: "network_request",
+    trade_sell: "network_request",
+    trade_positions: "network_request",
+    trade_balance: "network_request",
   };
 
   async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
@@ -978,6 +1251,12 @@ export class ToolExecutor {
         return this.handleSuggestDesign(args.task as string, args.projectType as string | undefined);
       case "query_design_system":
         return this.handleQueryDesignSystem(args);
+      case "lint_design_md":
+        return this.handleLintDesignMd(args.content as string | undefined, args.filePath as string | undefined);
+      case "import_design_md":
+        return this.handleImportDesignMd(args);
+      case "export_design_md":
+        return this.handleExportDesignMd(args.name as string, args.asSpec as boolean | undefined);
 
       // Infinite mode
       case "enable_infinite_mode":
@@ -1021,26 +1300,78 @@ export class ToolExecutor {
       case "desktop_safe_list":
         return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 
-      // Browser Use tools
+      // Browser Harness tools (CDP-first)
       case "browser_open":
         return this.handleBrowserOpen(
           args.url as string,
-          args.browser as string | undefined,
-          args.session as string | undefined
+          args.headless as boolean | undefined,
+          args.remote_ws_url as string | undefined
         );
       case "browser_state":
-        return this.handleBrowserState(args.session as string | undefined);
-      case "browser_task":
-        return this.handleBrowserTask(
-          args.task as string,
-          args.browser as string | undefined,
-          args.session as string | undefined
+        return this.handleBrowserState();
+      case "browser_click":
+        return this.handleBrowserClick(
+          args.selector as string | undefined,
+          args.x as number | undefined,
+          args.y as number | undefined
         );
+      case "browser_type":
+        return this.handleBrowserType(
+          args.text as string,
+          args.selector as string | undefined
+        );
+      case "browser_eval":
+        return this.handleBrowserEval(args.expression as string);
       case "browser_screenshot":
         return this.handleBrowserScreenshot(
           args.path as string | undefined,
-          args.session as string | undefined
+          args.format as string | undefined
         );
+      case "browser_scroll":
+        return this.handleBrowserScroll(
+          args.direction as string | undefined,
+          args.amount as number | undefined
+        );
+      case "browser_elements":
+        return this.handleBrowserElements();
+      case "browser_close":
+        return this.handleBrowserClose();
+
+      // Trading tools (Polymarket)
+      case "trade_browse":
+        return this.handleTradeBrowse(
+          args.query as string | undefined,
+          args.limit as number | undefined
+        );
+      case "trade_market":
+        return this.handleTradeMarket(args.market_id as string);
+      case "trade_opportunities":
+        return this.handleTradeOpportunities(args.limit as number | undefined);
+      case "trade_buy":
+        return this.handleTradeBuy(
+          args.market_id as string,
+          args.outcome as string,
+          args.size as number,
+          args.price as number | undefined,
+          args.confidence as number,
+          args.reasoning as string
+        );
+      case "trade_sell":
+        return this.handleTradeSell(
+          args.market_id as string,
+          args.outcome as string,
+          args.size as number,
+          args.price as number | undefined,
+          args.reasoning as string | undefined
+        );
+      case "trade_positions":
+        return this.handleTradePositions();
+      case "trade_balance":
+        return this.handleTradeBalance();
+      case "trade_strategy":
+        return this.handleTradeStrategy(args as Partial<Record<string, unknown>>);
+      case "trade_journal":
+        return this.handleTradeJournal(args.limit as number | undefined);
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -1256,17 +1587,27 @@ export class ToolExecutor {
       ? filePath
       : path.join(this.workingDirectory, filePath);
 
-    // Design-agent gate: if writing a UI file, check if a design system should be suggested
+    // Design-agent gate: if writing a UI file, enforce design quality
     const uiExtensions = [".tsx", ".jsx", ".css", ".html", ".svelte", ".vue"];
     const ext = path.extname(absolutePath).toLowerCase();
     let designHint = "";
     if (uiExtensions.includes(ext)) {
       try {
+        // Check for DESIGN.md in project root - this is the quality gate
+        const designMdPath = path.join(this.workingDirectory, "DESIGN.md");
+        if (fs.existsSync(designMdPath)) {
+          const designContent = fs.readFileSync(designMdPath, "utf-8");
+          const { tokens } = parseDesignMd(designContent);
+          if (tokens.name && tokens.name !== 'Untitled') {
+            designHint = `\n[Design Gate] Active DESIGN.md: "${tokens.name}". Use these tokens - do not invent colors or fonts. Run lint_design_md to validate.`;
+          }
+        }
+
         const isNewFile = !fs.existsSync(absolutePath);
         if (isNewFile && needsDesignDecision(`create UI file ${path.basename(absolutePath)}`)) {
           const detection = await detectDesignNeed(`create UI component: ${path.basename(absolutePath)}`);
           if (detection.needsDesign) {
-            designHint = `\n[Design Agent] This is a new UI file. Consider using suggest_design or query_design_system to ensure consistent design. Detected: ${detection.reason}`;
+            designHint += `\n[Design Agent] This is a new UI file. Consider using suggest_design or query_design_system to ensure consistent design. Detected: ${detection.reason}`;
           }
         }
       } catch {
@@ -2091,6 +2432,83 @@ export class ToolExecutor {
   }
 
   // ============================================
+  // DESIGN.md Format Tools (Quality Gate)
+  // ============================================
+
+  private async handleLintDesignMd(content?: string, filePath?: string): Promise<string> {
+    try {
+      let mdContent = content;
+      if (!mdContent && filePath) {
+        const fs = await import('fs');
+        mdContent = fs.readFileSync(filePath, 'utf-8');
+      }
+      if (!mdContent) {
+        return JSON.stringify({ error: 'Provide either content or filePath' });
+      }
+
+      const report = lintDesignMd(mdContent);
+      return JSON.stringify({
+        valid: report.valid,
+        summary: report.summary,
+        findings: report.findings,
+        name: report.tokens?.name,
+        hasColors: !!report.tokens?.colors,
+        hasTypography: !!report.tokens?.typography,
+        hasComponents: !!report.tokens?.components,
+        colorCount: report.tokens?.colors ? Object.keys(report.tokens.colors).length : 0,
+        typographyCount: report.tokens?.typography ? Object.keys(report.tokens.typography).length : 0,
+        componentCount: report.tokens?.components ? Object.keys(report.tokens.components).length : 0,
+      }, null, 2);
+    } catch (err) {
+      return `DESIGN.md lint failed: ${err}`;
+    }
+  }
+
+  private async handleImportDesignMd(args: Record<string, unknown>): Promise<string> {
+    try {
+      let mdContent = args.content as string | undefined;
+      if (!mdContent && args.filePath) {
+        const fs = await import('fs');
+        mdContent = fs.readFileSync(args.filePath as string, 'utf-8');
+      }
+      if (!mdContent) {
+        return JSON.stringify({ error: 'Provide either content or filePath' });
+      }
+
+      const result = importDesignMd(mdContent, {
+        style: args.style as any,
+        mood: args.mood as any,
+        tags: args.tags as string[] | undefined,
+      });
+
+      return JSON.stringify({
+        imported: true,
+        id: result.id,
+        name: result.name,
+        findingsCount: result.findings.length,
+        findings: result.findings.slice(0, 10),
+        message: `Design system "${result.name}" imported as "${result.id}". Query it with query_design_system.`,
+      }, null, 2);
+    } catch (err) {
+      return `DESIGN.md import failed: ${err}`;
+    }
+  }
+
+  private async handleExportDesignMd(name: string, asSpec?: boolean): Promise<string> {
+    try {
+      if (asSpec) {
+        const spec = generateDesignSpec(name);
+        return spec || `Design system "${name}" not found in database.`;
+      }
+
+      const md = exportDesignMd(name);
+      return md || `Design system "${name}" not found in database.`;
+    } catch (err) {
+      return `DESIGN.md export failed: ${err}`;
+    }
+  }
+
+  // ============================================
   // Infinite Mode
   // ============================================
 
@@ -2372,49 +2790,527 @@ export class ToolExecutor {
   }
 
   // ============================================
-  // Browser Use Tools
+  // Browser Harness Tools (CDP-first with fallback)
   // ============================================
+
+  private browserHarness: BrowserHarness | null = null;
+
+  private async ensureBrowserHarness(options?: {
+    headless?: boolean;
+    remoteWsUrl?: string;
+  }): Promise<BrowserHarness> {
+    if (this.browserHarness?.ready) return this.browserHarness;
+
+    const harness = new BrowserHarness({
+      headless: options?.headless,
+      remoteWsUrl: options?.remoteWsUrl,
+    });
+    const strategy = await harness.init();
+    this.browserHarness = harness;
+    return harness;
+  }
 
   private async handleBrowserOpen(
     url: string,
-    browser?: string,
-    session?: string
+    headless?: boolean,
+    remoteWsUrl?: string
   ): Promise<string> {
     try {
-      return browserOpen(url, { browser, session });
+      const harness = await this.ensureBrowserHarness({ headless, remoteWsUrl });
+      const page = await harness.navigate(url);
+      const strategy = harness.activeStrategy;
+
+      const lines = [
+        `[strategy: ${strategy}]`,
+        `URL: ${page.url}`,
+        `Title: ${page.title}`,
+      ];
+
+      if (page.links?.length) {
+        lines.push(`\nLinks (${page.links.length}):`);
+        for (const link of page.links.slice(0, 20)) {
+          lines.push(`  [${link.index}] ${link.text} -> ${link.href}`);
+        }
+      }
+
+      if (page.inputs?.length) {
+        lines.push(`\nInputs (${page.inputs.length}):`);
+        for (const input of page.inputs.slice(0, 15)) {
+          lines.push(`  [${input.index}] <${input.tag}> type=${input.type || "text"} name=${input.name || ""} placeholder="${input.placeholder || ""}"`);
+        }
+      }
+
+      if (page.text) {
+        lines.push(`\nPage text (first 2000 chars):\n${page.text.slice(0, 2000)}`);
+      }
+
+      return lines.join("\n");
     } catch (err) {
       return `browser_open failed: ${err}`;
     }
   }
 
-  private async handleBrowserState(session?: string): Promise<string> {
+  private async handleBrowserState(): Promise<string> {
     try {
-      return browserState(session);
+      const harness = await this.ensureBrowserHarness();
+      const page = await harness.readPage();
+      const elements = await harness.getElements();
+
+      const lines = [
+        `[strategy: ${harness.activeStrategy}]`,
+        `URL: ${page.url}`,
+        `Title: ${page.title}`,
+      ];
+
+      if (elements.length) {
+        lines.push(`\nInteractive elements (${elements.length}):`);
+        for (const el of elements.slice(0, 40)) {
+          const desc = [el.tag];
+          if (el.type) desc.push(`type=${el.type}`);
+          if (el.href) desc.push(`href=${el.href}`);
+          if (el.role) desc.push(`role=${el.role}`);
+          lines.push(`  [${el.index}] <${desc.join(" ")}> "${el.text.slice(0, 60)}" -> ${el.selector}`);
+        }
+      }
+
+      if (page.text) {
+        lines.push(`\nPage text (first 2000 chars):\n${page.text.slice(0, 2000)}`);
+      }
+
+      return lines.join("\n");
     } catch (err) {
       return `browser_state failed: ${err}`;
     }
   }
 
-  private async handleBrowserTask(
-    task: string,
-    browser?: string,
-    session?: string
+  private async handleBrowserClick(
+    selector?: string,
+    x?: number,
+    y?: number
   ): Promise<string> {
     try {
-      return browserTask(task, { browser, session });
+      const harness = await this.ensureBrowserHarness();
+      if (selector) {
+        await harness.click(selector);
+        return `Clicked: ${selector}`;
+      }
+      if (x !== undefined && y !== undefined) {
+        await harness.click({ x, y });
+        return `Clicked at (${x}, ${y})`;
+      }
+      return "Error: provide either selector or x,y coordinates";
     } catch (err) {
-      return `browser_task failed: ${err}`;
+      return `browser_click failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserType(text: string, selector?: string): Promise<string> {
+    try {
+      const harness = await this.ensureBrowserHarness();
+      await harness.type(text, selector);
+      return `Typed "${text.slice(0, 50)}${text.length > 50 ? "..." : ""}"${selector ? ` into ${selector}` : ""}`;
+    } catch (err) {
+      return `browser_type failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserEval(expression: string): Promise<string> {
+    try {
+      const harness = await this.ensureBrowserHarness();
+      return await harness.evaluate(expression);
+    } catch (err) {
+      return `browser_eval failed: ${err}`;
     }
   }
 
   private async handleBrowserScreenshot(
     filePath?: string,
-    session?: string
+    format?: string
   ): Promise<string> {
     try {
-      return browserScreenshot(filePath, session);
+      const harness = await this.ensureBrowserHarness();
+      const data = await harness.screenshot({
+        format: format === "jpeg" ? "jpeg" : "png",
+      });
+
+      if (filePath) {
+        const fs = await import("fs");
+        const buffer = Buffer.from(data, "base64");
+        fs.writeFileSync(filePath, buffer);
+        return `Screenshot saved to ${filePath} (${buffer.length} bytes)`;
+      }
+
+      return `data:image/${format || "png"};base64,${data.slice(0, 200)}... (${data.length} chars base64)`;
     } catch (err) {
       return `browser_screenshot failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserScroll(
+    direction?: string,
+    amount?: number
+  ): Promise<string> {
+    try {
+      const harness = await this.ensureBrowserHarness();
+      const dir = direction === "up" ? "up" : "down";
+      await harness.scroll(dir, amount);
+      return `Scrolled ${dir}${amount ? ` ${amount}px` : ""}`;
+    } catch (err) {
+      return `browser_scroll failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserElements(): Promise<string> {
+    try {
+      const harness = await this.ensureBrowserHarness();
+      const elements = await harness.getElements();
+
+      if (!elements.length) {
+        return "No interactive elements found (harness may be in fetch-only mode)";
+      }
+
+      const lines = [`Interactive elements (${elements.length}):`];
+      for (const el of elements) {
+        const desc = [el.tag];
+        if (el.type) desc.push(`type=${el.type}`);
+        if (el.href) desc.push(`href=${el.href}`);
+        lines.push(`  [${el.index}] <${desc.join(" ")}> "${el.text.slice(0, 60)}" -> ${el.selector}`);
+      }
+      return lines.join("\n");
+    } catch (err) {
+      return `browser_elements failed: ${err}`;
+    }
+  }
+
+  private async handleBrowserClose(): Promise<string> {
+    try {
+      if (this.browserHarness) {
+        const strategy = this.browserHarness.activeStrategy;
+        await this.browserHarness.close();
+        this.browserHarness = null;
+        return `Browser harness closed (was using: ${strategy})`;
+      }
+      return "No active browser harness";
+    } catch (err) {
+      return `browser_close failed: ${err}`;
+    }
+  }
+
+  // ============================================
+  // Trading Tools (Polymarket)
+  // ============================================
+
+  private tradingEngine: TradingEngine | null = null;
+  private polyClient: PolymarketClient | null = null;
+
+  private ensureTrading(): { client: PolymarketClient; engine: TradingEngine } {
+    if (!this.polyClient) {
+      this.polyClient = new PolymarketClient();
+    }
+    if (!this.tradingEngine) {
+      this.tradingEngine = new TradingEngine(this.polyClient);
+    }
+    return { client: this.polyClient, engine: this.tradingEngine };
+  }
+
+  private async handleTradeBrowse(query?: string, limit?: number): Promise<string> {
+    try {
+      const { client } = this.ensureTrading();
+      const markets = query
+        ? await client.searchMarkets(query, limit || 10)
+        : await client.getTopMarkets(limit || 10);
+
+      if (!markets.length) {
+        return query ? `No markets found for "${query}"` : "No active markets found";
+      }
+
+      const lines = [`Polymarket Markets${query ? ` matching "${query}"` : " (top by volume)"}:\n`];
+      for (let i = 0; i < markets.length; i++) {
+        lines.push(`[${i + 1}] ${PolymarketClient.formatMarket(markets[i])}`);
+        lines.push(`    ID: ${markets[i].id}`);
+        lines.push("");
+      }
+      return lines.join("\n");
+    } catch (err) {
+      return `trade_browse failed: ${err}`;
+    }
+  }
+
+  private async handleTradeMarket(marketId: string): Promise<string> {
+    try {
+      const { client } = this.ensureTrading();
+      const market = await client.getMarket(marketId);
+
+      const lines = [
+        `--- ${market.question} ---`,
+        `ID: ${market.id}`,
+        `Active: ${market.active} | Closed: ${market.closed}`,
+        `Volume: $${parseFloat(market.volume || "0").toLocaleString()}`,
+        `Liquidity: $${parseFloat(market.liquidity || "0").toLocaleString()}`,
+        "",
+        "Outcomes:",
+      ];
+
+      const { outcomes, prices, tokenIds } = parseMarketArrays(market);
+      for (let i = 0; i < outcomes.length; i++) {
+        const price = prices[i] || 0;
+        lines.push(`  ${outcomes[i]}: ${(price * 100).toFixed(1)}%`);
+
+        // Get orderbook if token IDs available
+        if (tokenIds[i]) {
+          try {
+            const spread = await client.getSpread(tokenIds[i]);
+            lines.push(`    Bid: ${(spread.bid * 100).toFixed(1)}c | Ask: ${(spread.ask * 100).toFixed(1)}c | Spread: ${(spread.spread * 100).toFixed(1)}c`);
+          } catch {}
+        }
+      }
+
+      if (market.description) {
+        lines.push("", `Description: ${market.description.slice(0, 300)}`);
+      }
+
+      return lines.join("\n");
+    } catch (err) {
+      return `trade_market failed: ${err}`;
+    }
+  }
+
+  private async handleTradeOpportunities(limit?: number): Promise<string> {
+    try {
+      const { engine } = this.ensureTrading();
+      const opps = await engine.findOpportunities(limit || 5);
+
+      if (!opps.length) {
+        return "No trading opportunities found";
+      }
+
+      const lines = ["Top Trading Opportunities (scored by volume, liquidity, odds):\n"];
+      for (let i = 0; i < opps.length; i++) {
+        lines.push(`[${i + 1}] Score: ${opps[i].score}/65`);
+        lines.push(`    ${opps[i].formatted}`);
+        lines.push(`    ID: ${opps[i].market.id}`);
+        lines.push("");
+      }
+      return lines.join("\n");
+    } catch (err) {
+      return `trade_opportunities failed: ${err}`;
+    }
+  }
+
+  private async handleTradeBuy(
+    marketId: string,
+    outcome: string,
+    size: number,
+    price: number | undefined,
+    confidence: number,
+    reasoning: string
+  ): Promise<string> {
+    try {
+      const { client, engine } = this.ensureTrading();
+      const market = await client.getMarket(marketId);
+
+      // Resolve price from market if not provided
+      let tradePrice = price;
+      if (!tradePrice) {
+        const { outcomes: outs, prices: prs } = parseMarketArrays(market);
+        const outcomeIdx = outs.findIndex(
+          (o) => o.toLowerCase() === outcome.toLowerCase()
+        );
+        if (outcomeIdx >= 0 && prs[outcomeIdx] !== undefined) {
+          tradePrice = prs[outcomeIdx];
+        } else {
+          return `Cannot determine price for outcome "${outcome}" in this market`;
+        }
+      }
+
+      const intent: TradeIntent = {
+        market,
+        side: "BUY",
+        outcome,
+        price: tradePrice,
+        size,
+        confidence,
+        reasoning,
+      };
+
+      // Check guardrails first
+      const blocked = engine.checkGuardrails(intent);
+      if (blocked) {
+        return `[GUARDRAIL BLOCKED] ${blocked}\n\n${TradingEngine.formatIntent(intent)}`;
+      }
+
+      // In autonomous mode, execute directly
+      if (engine.isAutonomous) {
+        const result = await engine.executeTrade(intent);
+        return TradingEngine.formatResult(result);
+      }
+
+      // Manual mode - show intent for confirmation
+      return [
+        TradingEngine.formatIntent(intent),
+        "",
+        "Guardrails: PASSED",
+        "Mode: MANUAL - trade_buy again with same params to confirm, or adjust.",
+        "To enable autonomous: trade_strategy with autonomous=true",
+      ].join("\n");
+    } catch (err) {
+      return `trade_buy failed: ${err}`;
+    }
+  }
+
+  private async handleTradeSell(
+    marketId: string,
+    outcome: string,
+    size: number,
+    price?: number,
+    reasoning?: string
+  ): Promise<string> {
+    try {
+      const { client, engine } = this.ensureTrading();
+      const market = await client.getMarket(marketId);
+
+      let tradePrice = price;
+      if (!tradePrice) {
+        const { outcomes: outs, prices: prs } = parseMarketArrays(market);
+        const outcomeIdx = outs.findIndex(
+          (o) => o.toLowerCase() === outcome.toLowerCase()
+        );
+        if (outcomeIdx >= 0 && prs[outcomeIdx] !== undefined) {
+          tradePrice = prs[outcomeIdx];
+        } else {
+          return `Cannot determine price for outcome "${outcome}"`;
+        }
+      }
+
+      const intent: TradeIntent = {
+        market,
+        side: "SELL",
+        outcome,
+        price: tradePrice,
+        size,
+        confidence: 0.8,
+        reasoning: reasoning || "Selling position",
+      };
+
+      if (engine.isAutonomous) {
+        const result = await engine.executeTrade(intent);
+        return TradingEngine.formatResult(result);
+      }
+
+      return [
+        TradingEngine.formatIntent(intent),
+        "",
+        "Mode: MANUAL - confirm to execute.",
+      ].join("\n");
+    } catch (err) {
+      return `trade_sell failed: ${err}`;
+    }
+  }
+
+  private async handleTradePositions(): Promise<string> {
+    try {
+      const { client } = this.ensureTrading();
+      if (client.readOnly) {
+        return "Read-only mode - no API credentials configured.\nSet POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_SECRET, POLYMARKET_CLOB_PASSPHRASE in ~/.8gent/.env";
+      }
+      if (!client.authenticated) await client.authenticate();
+      const positions = await client.getPositions();
+
+      if (!positions.length) {
+        return "No open positions";
+      }
+
+      const lines = ["Current Positions:\n"];
+      for (const p of positions) {
+        lines.push(`  Token: ${p.asset.token_id.slice(0, 12)}...`);
+        lines.push(`  Size: ${p.size} | Avg Price: ${p.avgPrice} | Current: ${p.currentPrice}`);
+        lines.push(`  P&L: ${p.pnl}`);
+        lines.push("");
+      }
+      return lines.join("\n");
+    } catch (err) {
+      return `trade_positions failed: ${err}`;
+    }
+  }
+
+  private async handleTradeBalance(): Promise<string> {
+    try {
+      const { client } = this.ensureTrading();
+      if (client.readOnly) {
+        return "Read-only mode - no API credentials configured.\nSet POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_SECRET, POLYMARKET_CLOB_PASSPHRASE in ~/.8gent/.env";
+      }
+      if (!client.authenticated) await client.authenticate();
+      const balance = await client.getBalance();
+      return `USDC Balance: $${balance.toFixed(2)}`;
+    } catch (err) {
+      return `trade_balance failed: ${err}`;
+    }
+  }
+
+  private async handleTradeStrategy(args: Partial<Record<string, unknown>>): Promise<string> {
+    try {
+      const { engine } = this.ensureTrading();
+
+      // If any update params provided, update the strategy
+      const updates: Partial<StrategyConfig> = {};
+      if (args.max_trade_size !== undefined) updates.maxTradeSize = args.max_trade_size as number;
+      if (args.max_exposure !== undefined) updates.maxExposure = args.max_exposure as number;
+      if (args.min_confidence !== undefined) updates.minConfidence = args.min_confidence as number;
+      if (args.min_edge !== undefined) updates.minEdge = args.min_edge as number;
+      if (args.autonomous !== undefined) updates.autonomous = args.autonomous as boolean;
+      if (args.max_trades_per_hour !== undefined) updates.maxTradesPerHour = args.max_trades_per_hour as number;
+
+      if (Object.keys(updates).length > 0) {
+        engine.updateStrategy(updates);
+      }
+
+      const config = engine.config;
+      return [
+        "Trading Strategy:",
+        `  Max trade size:     $${config.maxTradeSize}`,
+        `  Max exposure:       $${config.maxExposure}`,
+        `  Min confidence:     ${(config.minConfidence * 100).toFixed(0)}%`,
+        `  Min edge:           ${(config.minEdge * 100).toFixed(0)}%`,
+        `  Autonomous:         ${config.autonomous ? "YES" : "NO (manual confirmation)"}`,
+        `  Max trades/hour:    ${config.maxTradesPerHour}`,
+        config.categories?.length ? `  Categories:         ${config.categories.join(", ")}` : "",
+        "",
+        Object.keys(updates).length > 0 ? "Strategy updated and saved to ~/.8gent/trading/strategy.json" : "Pass parameters to update.",
+      ].filter(Boolean).join("\n");
+    } catch (err) {
+      return `trade_strategy failed: ${err}`;
+    }
+  }
+
+  private async handleTradeJournal(limit?: number): Promise<string> {
+    try {
+      const { engine } = this.ensureTrading();
+      const journal = engine.getJournal(limit || 20);
+      const summary = engine.getJournalSummary();
+
+      const lines = [
+        "Trade Journal Summary:",
+        `  Total trades: ${summary.totalTrades}`,
+        `  Successful:   ${summary.successful}`,
+        `  Blocked:      ${summary.blocked}`,
+        `  Total spent:  $${summary.totalSpent.toFixed(2)}`,
+        "",
+      ];
+
+      if (journal.length) {
+        lines.push("Recent trades:");
+        for (const t of journal.slice(-10)) {
+          const status = t.success ? "OK" : "BLOCKED";
+          lines.push(`  [${status}] ${t.market} | ${t.side} ${t.outcome} @ ${t.price} | $${t.size} | ${t.timestamp}`);
+          if (t.error) lines.push(`         ${t.error}`);
+        }
+      } else {
+        lines.push("No trades recorded yet.");
+      }
+
+      return lines.join("\n");
+    } catch (err) {
+      return `trade_journal failed: ${err}`;
     }
   }
 }
