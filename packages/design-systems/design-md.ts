@@ -964,10 +964,19 @@ export function generateDesignMd(name: string, options: GenerateOptions = {}): s
   lines.push(`## Elevation & Depth`);
   lines.push('');
   if (isDark) {
-    lines.push(`Depth is achieved through tonal shifts between surface levels. No shadows on dark backgrounds.`);
+    lines.push(`4-level shadow scale using tonal shifts and subtle glow:`);
+    lines.push(`- **Level 0:** No shadow. Flat on surface.`);
+    lines.push(`- **Level 1:** \`shadow-sm\` - subtle lift for cards at rest.`);
+    lines.push(`- **Level 2:** \`shadow-md shadow-primary/5\` - hover state, active cards. Primary-tinted glow.`);
+    lines.push(`- **Level 3:** \`shadow-xl shadow-primary/10\` - modals, popovers, featured cards.`);
   } else {
-    lines.push(`Depth is achieved through subtle borders and tonal shifts. Shadows reserved for modals only.`);
+    lines.push(`4-level shadow scale for progressive depth:`);
+    lines.push(`- **Level 0:** Border only (\`border border-outline-variant\`). Cards at rest.`);
+    lines.push(`- **Level 1:** \`shadow-sm\` - subtle lift on hover.`);
+    lines.push(`- **Level 2:** \`shadow-lg shadow-primary/5\` - active/featured cards, dashboard panels.`);
+    lines.push(`- **Level 3:** \`shadow-xl shadow-primary/10\` - modals, hero preview cards, pricing highlights.`);
   }
+  lines.push(`Use shadows intentionally to create hierarchy. Hero preview cards and featured pricing tiers should use Level 2-3.`);
   lines.push('');
 
   lines.push(`## Shapes`);
@@ -978,11 +987,38 @@ export function generateDesignMd(name: string, options: GenerateOptions = {}): s
   lines.push(`- **Badges:** Full radius for pill shapes.`);
   lines.push('');
 
+  lines.push(`## Motion & Animation`);
+  lines.push('');
+  lines.push(`Every section should animate into view. Use CSS animations for entrance effects:`);
+  lines.push(`- **fade-in-up:** Primary entrance. Elements fade in while sliding up 20px. Duration 0.6s, ease-out.`);
+  lines.push(`- **Stagger children:** Feature cards, pricing tiers, stat blocks - stagger by 100ms using animation-delay.`);
+  lines.push(`- **Hover transitions:** All interactive elements use \`transition-all duration-200\`. Cards lift on hover with shadow increase.`);
+  lines.push(`- **Button hover:** Primary buttons use \`hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5\`. Never just opacity.`);
+  lines.push(`- **Reduced motion:** Wrap animations in \`@media (prefers-reduced-motion: no-preference)\`.`);
+  lines.push('');
+
+  lines.push(`## Effects`);
+  lines.push('');
+  lines.push(`- **Hero gradient:** Use a subtle radial gradient behind the hero. \`bg-gradient-to-b from-primary/5 via-background to-background\` or a radial: \`bg-[radial-gradient(ellipse_at_top,var(--color-primary)/0.08,transparent_70%)]\`.`);
+  lines.push(`- **Section dividers:** Alternate between \`bg-background\` and \`bg-surface\` for visual rhythm.`);
+  lines.push(`- **Glass cards (optional):** For featured elements: \`backdrop-blur-xl bg-surface/80 border border-outline-variant/50\`.`);
+  lines.push(`- **Accent glow:** Hero CTA buttons can use \`shadow-lg shadow-primary/25\` for a colored glow effect.`);
+  lines.push(`- **Text gradient (hero only):** Accent text can use \`bg-gradient-to-r from-primary to-tertiary bg-clip-text text-transparent\` sparingly.`);
+  lines.push('');
+
+  lines.push(`## Icons`);
+  lines.push('');
+  lines.push(`Use inline SVGs or Lucide React icons. NEVER use emoji characters as icons in production UI.`);
+  lines.push(`Icon containers: \`flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary\`.`);
+  lines.push(`If no icon library is available, use single-letter abbreviations in styled containers rather than emoji.`);
+  lines.push('');
+
   lines.push(`## Components`);
   lines.push('');
   lines.push(`Two button variants: Primary (filled) and Secondary (surface fill). Primary reserved for the single most important action per screen.`);
-  lines.push(`Cards use border-based elevation with xl rounding.`);
+  lines.push(`Cards use border-based elevation with xl rounding. On hover: \`hover:border-outline hover:shadow-lg hover:-translate-y-1 transition-all duration-200\`.`);
   lines.push(`Inputs use md rounding with surface background.`);
+  lines.push(`Hero sections: use gradient background, generous vertical padding (\`py-[var(--sp-3xl)]\`), and a preview card with Level 3 shadow.`);
   lines.push('');
 
   lines.push(`## Tailwind v4 Usage`);
@@ -1011,14 +1047,29 @@ export function generateDesignMd(name: string, options: GenerateOptions = {}): s
   lines.push('}');
   lines.push('```');
   lines.push('');
-  lines.push('Then define typography as utility classes in @layer utilities:');
+  lines.push('Then define typography and animations in @layer utilities:');
   lines.push('');
   lines.push('```css');
   lines.push('@layer utilities {');
   lines.push(`  .type-display { font-family: "${fonts.heading}", system-ui, sans-serif; font-size: clamp(36px, 5vw, 56px); font-weight: 800; line-height: 1.1; letter-spacing: -0.03em; }`);
   lines.push(`  .type-headline-lg { font-family: "${fonts.heading}", system-ui, sans-serif; font-size: clamp(28px, 3.5vw, 36px); font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }`);
+  lines.push(`  .type-headline-md { font-family: "${fonts.heading}", system-ui, sans-serif; font-size: clamp(22px, 2.5vw, 28px); font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }`);
   lines.push(`  .type-body-lg { font-family: "${fonts.body}", system-ui, sans-serif; font-size: 18px; font-weight: 400; line-height: 1.7; }`);
+  lines.push(`  .type-body-md { font-family: "${fonts.body}", system-ui, sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; }`);
   lines.push(`  .type-label-lg { font-family: "${fonts.body}", system-ui, sans-serif; font-size: 14px; font-weight: 600; line-height: 1.4; letter-spacing: 0.01em; }`);
+  lines.push(`  .type-label-sm { font-family: "${fonts.body}", system-ui, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.3; letter-spacing: 0.02em; }`);
+  if (fonts.code) {
+    lines.push(`  .type-code { font-family: "${fonts.code}", monospace; font-size: 14px; font-weight: 400; line-height: 1.6; }`);
+  }
+  lines.push(`  .animate-fade-in-up { animation: fadeInUp 0.6s ease-out both; }`);
+  lines.push(`  .animate-delay-100 { animation-delay: 100ms; }`);
+  lines.push(`  .animate-delay-200 { animation-delay: 200ms; }`);
+  lines.push(`  .animate-delay-300 { animation-delay: 300ms; }`);
+  lines.push('}');
+  lines.push('');
+  lines.push('@keyframes fadeInUp {');
+  lines.push('  from { opacity: 0; transform: translateY(20px); }');
+  lines.push('  to { opacity: 1; transform: translateY(0); }');
   lines.push('}');
   lines.push('```');
   lines.push('');
@@ -1043,10 +1094,18 @@ export function generateDesignMd(name: string, options: GenerateOptions = {}): s
   lines.push(`- Do maintain WCAG AA contrast ratios (4.5:1 for normal text)`);
   lines.push(`- Do use the spacing scale strictly - no arbitrary pixel values`);
   lines.push(`- Do use var() when referencing spacing custom properties in arbitrary values`);
+  lines.push(`- Do add \`animate-fade-in-up\` to major sections (hero, features, pricing, CTA)`);
+  lines.push(`- Do stagger child animations with \`animate-delay-100\`, \`animate-delay-200\`, etc.`);
+  lines.push(`- Do use SVG icons or Lucide React - never emoji characters in production UI`);
+  lines.push(`- Do give hero sections a gradient background for depth`);
+  lines.push(`- Do use \`transition-all duration-200\` on all interactive elements`);
+  lines.push(`- Do lift cards on hover: \`hover:-translate-y-1 hover:shadow-lg\``);
   lines.push(`- Don't use more than two accent colors on any single screen`);
   lines.push(`- Don't mix heading and body fonts in the same role`);
   lines.push(`- Don't use px-[--sp-md] - must be px-[var(--sp-md)]`);
   lines.push(`- Don't use arbitrary hex colors like bg-[#6366F1] - use bg-primary`);
+  lines.push(`- Don't leave sections static - every section needs an entrance animation`);
+  lines.push(`- Don't use hover:opacity-90 on buttons - use hover:shadow-lg hover:-translate-y-0.5 instead`);
 
   return lines.join('\n');
 }
