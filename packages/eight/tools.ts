@@ -887,7 +887,7 @@ export class ToolExecutor {
 
       // Shell
       case "run_command":
-        return this.runCommand(args.command as string);
+        return this.runCommand(args.command as string, args.timeout as number | undefined);
 
       // Multi-agent orchestration
       case "spawn_agent":
@@ -1333,7 +1333,7 @@ export class ToolExecutor {
   // Shell Command Execution
   // ============================================
 
-  async runCommand(command: string): Promise<string> {
+  async runCommand(command: string, timeoutSec?: number): Promise<string> {
     const { spawn } = await import("child_process");
 
     const permissionCheck = this.permissionManager.checkPermission(command);
@@ -1376,23 +1376,41 @@ export class ToolExecutor {
       finalCommand = command + ' -y';
     }
 
+    const timeoutMs = Math.min((timeoutSec || 120), 300) * 1000;
+
     return new Promise((resolve) => {
+      let resolved = false;
+      const safeResolve = (value: string) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(value);
+      };
+
       const proc = spawn('sh', ['-c', finalCommand], {
         cwd: this.workingDirectory,
         stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
       });
 
       let stdout = '';
       let stderr = '';
 
-      // SECURITY: Removed stdin auto-answer hack (was sending \n every 1s,
-      // could silently confirm destructive interactive prompts)
+      const killProcessTree = () => {
+        try {
+          process.kill(-proc.pid!, 'SIGTERM');
+          setTimeout(() => {
+            try { process.kill(-proc.pid!, 'SIGKILL'); } catch {}
+          }, 3000);
+        } catch {
+          try { proc.kill('SIGKILL'); } catch {}
+        }
+      };
 
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
       const timeout = setTimeout(() => {
-        proc.kill('SIGTERM');
+        killProcessTree();
 
         this.hookManager.executeHooks("afterCommand", {
           command: finalCommand,
@@ -1403,12 +1421,13 @@ export class ToolExecutor {
           workingDirectory: this.workingDirectory,
         });
 
-        resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`);
-      }, 120000);
+        safeResolve(`TIMEOUT after ${timeoutMs / 1000}s. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`);
+      }, timeoutMs);
+
+      proc.unref();
 
       proc.on('close', (code) => {
         clearTimeout(timeout);
-        // stdinInterval removed (security fix)
 
         this.hookManager.executeHooks("afterCommand", {
           command: finalCommand,
@@ -1420,15 +1439,14 @@ export class ToolExecutor {
         });
 
         if (code === 0) {
-          resolve(stdout || stderr || "Command completed successfully.");
+          safeResolve(stdout || stderr || "Command completed successfully.");
         } else {
-          resolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
+          safeResolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
         }
       });
 
       proc.on('error', (err) => {
         clearTimeout(timeout);
-        // stdinInterval removed (security fix)
 
         this.hookManager.executeHooks("onError", {
           command: finalCommand,
@@ -1436,7 +1454,7 @@ export class ToolExecutor {
           workingDirectory: this.workingDirectory,
         });
 
-        resolve(`Error: ${err.message}`);
+        safeResolve(`Error: ${err.message}`);
       });
     });
   }

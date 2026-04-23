@@ -17,8 +17,8 @@ export { createModel, isProviderAvailable } from "./providers";
 export type { ProviderName, ProviderConfig } from "./providers";
 
 // Tools
-export { agentTools, setToolContext, getToolContext } from "./tools";
-export type { ToolContext, AgentTools } from "./tools";
+export { agentTools, setToolContext, getToolContext, setRuntimeParams, getRuntimeParams, resetRuntimeParams } from "./tools";
+export type { ToolContext, AgentTools, RuntimeParams } from "./tools";
 
 // Agent
 export { createEightAgent, runAgent } from "./agent";
