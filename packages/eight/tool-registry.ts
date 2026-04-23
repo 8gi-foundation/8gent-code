@@ -27,6 +27,9 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools)[]> = {
                   "suggest_spawn", "check_agents", "message_agent", "merge_agent_work"],
   background: ["background_start", "background_status", "background_output"],
   mcp: ["mcp_list_tools", "mcp_call_tool"],
+  design: ["suggest_design", "query_design_system"],
+  self: ["self_inspect", "self_tune", "self_append_context"],
+  memory: ["remember", "recall"],
 };
 
 const CATEGORY_NAMES = Object.keys(TOOL_CATEGORIES);
