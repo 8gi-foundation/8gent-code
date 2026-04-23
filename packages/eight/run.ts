@@ -12,10 +12,13 @@
  *
  * Event shape is a best-effort match for the Claude Code stream-json
  * format: a `{type, subtype, ...}` discriminated union with `session_start`,
- * `assistant`, `tool_use`, `tool_result`, and `session_end` types. If an
- * external harness disagrees with this shape, the chosen shape is logged to
- * stderr so the downstream parser can be adjusted without a round-trip to
- * the agent loop.
+ * `assistant`, `tool_use`, `tool_result`, and `result` types. The terminator
+ * uses `type: "result"` (plus a `session_id` field on both `session_start`
+ * and `result`) so PTY-mode host parsers like Orchestra's
+ * `apps/backend/internal/agents/command_runner.go` detectBlockingEvent
+ * (lines 537-606) recognise completion. If an external harness disagrees
+ * with this shape, the chosen shape is logged to stderr so the downstream
+ * parser can be adjusted without a round-trip to the agent loop.
  */
 import type { AgentEventCallbacks } from "./types";
 
@@ -205,12 +208,16 @@ export async function runRunCommand(argv: string[]): Promise<number> {
   // Goes to stderr so stdout stays clean NDJSON.
   if (opts.outputFormat === "stream-json") {
     process.stderr.write(
-      `[run] stream-json shape: {type, subtype?, ...fields}. ` +
-      `Types: session_start, assistant, tool_use, tool_result, session_end, error.\n`
+      `[run] stream-json shape: {type, subtype?, session_id, ...fields}. ` +
+      `Types: session_start, assistant, tool_use, tool_result, result, error.\n`
     );
   }
 
   const sessionStartedAt = new Date().toISOString();
+  // Stable run id emitted on session_start and on the terminating `result`
+  // event. Orchestra's PTY completion detector trips on either a `result`
+  // type or the presence of a `session_id` field, so we include both.
+  const sessionId = `run-${Date.now()}`;
 
   const isStreamJson = opts.outputFormat === "stream-json";
   const events: AgentEventCallbacks = isStreamJson
@@ -265,6 +272,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
   if (isStreamJson) {
     emit({
       type: "session_start",
+      session_id: sessionId,
       started_at: sessionStartedAt,
       provider,
       model,
@@ -300,8 +308,9 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 
     if (isStreamJson) {
       emit({
-        type: "session_end",
+        type: "result",
         subtype: "ok",
+        session_id: sessionId,
         ended_at: new Date().toISOString(),
         final_text: finalText,
       });
@@ -316,8 +325,9 @@ export async function runRunCommand(argv: string[]): Promise<number> {
     if (isStreamJson) {
       emit({ type: "error", subtype: "agent", message: msg });
       emit({
-        type: "session_end",
+        type: "result",
         subtype: "error",
+        session_id: sessionId,
         ended_at: new Date().toISOString(),
         error: msg,
       });
