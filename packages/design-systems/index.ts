@@ -117,6 +117,7 @@ export {
   importDesignMd,
   exportDesignMd,
   generateDesignSpec,
+  generateDesignMd,
   type DesignMdTokens,
   type TypographyToken,
   type DesignMdSection,

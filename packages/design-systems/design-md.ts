@@ -677,6 +677,402 @@ export function generateDesignSpec(idOrName: string): string | null {
 }
 
 // ============================================
+// Generator - create DESIGN.md from description
+// ============================================
+
+/**
+ * Font pairing presets for different project types.
+ * Each preset is a curated heading + body combination.
+ */
+const FONT_PAIRINGS: Record<string, { heading: string; body: string; code?: string }> = {
+  saas: { heading: 'Cal Sans', body: 'Inter', code: 'JetBrains Mono' },
+  fintech: { heading: 'Inter', body: 'Inter', code: 'IBM Plex Mono' },
+  ai: { heading: 'Inter', body: 'Inter', code: 'JetBrains Mono' },
+  developer: { heading: 'Geist', body: 'Geist', code: 'Geist Mono' },
+  creative: { heading: 'Fraunces', body: 'Inter' },
+  agency: { heading: 'Sora', body: 'Inter' },
+  ecommerce: { heading: 'DM Sans', body: 'DM Sans' },
+  health: { heading: 'Plus Jakarta Sans', body: 'Plus Jakarta Sans' },
+  education: { heading: 'Nunito', body: 'Nunito' },
+  kids: { heading: 'Nunito', body: 'Nunito' },
+  gaming: { heading: 'Space Grotesk', body: 'Inter', code: 'JetBrains Mono' },
+  luxury: { heading: 'Playfair Display', body: 'Inter' },
+  default: { heading: 'Inter', body: 'Inter', code: 'JetBrains Mono' },
+};
+
+/**
+ * Color palette presets for different moods.
+ * Returns hex colors for primary, secondary, tertiary, background, foreground.
+ */
+const COLOR_PRESETS: Record<string, Record<string, string>> = {
+  professional: {
+    primary: '#2563EB', 'on-primary': '#FFFFFF',
+    secondary: '#64748B', 'on-secondary': '#FFFFFF',
+    tertiary: '#10B981', 'on-tertiary': '#FFFFFF',
+    background: '#FFFFFF', 'on-background': '#0F172A',
+    surface: '#F8FAFC', 'on-surface': '#1E293B',
+    'on-surface-variant': '#64748B',
+    'surface-container': '#F1F5F9',
+    outline: '#CBD5E1', 'outline-variant': '#E2E8F0',
+    error: '#EF4444', 'on-error': '#FFFFFF',
+  },
+  warm: {
+    primary: '#C2410C', 'on-primary': '#FFFFFF',
+    secondary: '#92400E', 'on-secondary': '#FFFFFF',
+    tertiary: '#D97706', 'on-tertiary': '#FFFFFF',
+    background: '#FFFDF9', 'on-background': '#1A1612',
+    surface: '#FFF8F0', 'on-surface': '#1A1612',
+    'on-surface-variant': '#5C544A',
+    'surface-container': '#FFF3E8',
+    outline: '#E8E0D6', 'outline-variant': '#F0E8DE',
+    error: '#DC2626', 'on-error': '#FFFFFF',
+  },
+  tech: {
+    primary: '#818CF8', 'on-primary': '#1E1B4B',
+    secondary: '#06B6D4', 'on-secondary': '#FFFFFF',
+    tertiary: '#34D399', 'on-tertiary': '#064E3B',
+    background: '#0A0A0B', 'on-background': '#FAFAFA',
+    surface: '#18181B', 'on-surface': '#E4E4E7',
+    'on-surface-variant': '#A1A1AA',
+    'surface-container': '#27272A',
+    outline: '#3F3F46', 'outline-variant': '#52525B',
+    error: '#F87171', 'on-error': '#000000',
+  },
+  calm: {
+    primary: '#047857', 'on-primary': '#FFFFFF',
+    secondary: '#0891B2', 'on-secondary': '#FFFFFF',
+    tertiary: '#14B8A6', 'on-tertiary': '#FFFFFF',
+    background: '#FFFFFF', 'on-background': '#1E293B',
+    surface: '#F0FDF4', 'on-surface': '#1E293B',
+    'on-surface-variant': '#64748B',
+    'surface-container': '#ECFDF5',
+    outline: '#D1D5DB', 'outline-variant': '#E5E7EB',
+    error: '#DC2626', 'on-error': '#FFFFFF',
+  },
+  energetic: {
+    primary: '#E11D48', 'on-primary': '#FFFFFF',
+    secondary: '#F97316', 'on-secondary': '#FFFFFF',
+    tertiary: '#06B6D4', 'on-tertiary': '#FFFFFF',
+    background: '#FFFFFF', 'on-background': '#0F172A',
+    surface: '#FFF1F2', 'on-surface': '#1E293B',
+    'on-surface-variant': '#64748B',
+    'surface-container': '#FFE4E6',
+    outline: '#E2E8F0', 'outline-variant': '#F1F5F9',
+    error: '#DC2626', 'on-error': '#FFFFFF',
+  },
+  dramatic: {
+    primary: '#F59E0B', 'on-primary': '#000000',
+    secondary: '#EF4444', 'on-secondary': '#FFFFFF',
+    tertiary: '#0EA5E9', 'on-tertiary': '#FFFFFF',
+    background: '#030712', 'on-background': '#F9FAFB',
+    surface: '#111827', 'on-surface': '#E5E7EB',
+    'on-surface-variant': '#9CA3AF',
+    'surface-container': '#1F2937',
+    outline: '#374151', 'outline-variant': '#4B5563',
+    error: '#F87171', 'on-error': '#000000',
+  },
+};
+
+interface GenerateOptions {
+  projectType?: string;
+  mood?: string;
+  style?: string;
+  darkMode?: boolean;
+  description?: string;
+}
+
+/**
+ * Generate a complete DESIGN.md from a project description.
+ * No design background required - the agent describes what they're building
+ * and gets a spec-compliant DESIGN.md back.
+ *
+ * Flow:
+ * 1. Check the DB for a matching design system (by project type or name)
+ * 2. If found, export it as DESIGN.md
+ * 3. If not, generate from presets (color palette + font pairing + spacing)
+ */
+export function generateDesignMd(name: string, options: GenerateOptions = {}): string {
+  const projectType = options.projectType?.toLowerCase() || 'default';
+  const mood = options.mood?.toLowerCase() || inferMoodFromType(projectType);
+  const isDark = options.darkMode ?? (mood === 'tech' || mood === 'dramatic');
+
+  // Try to find a matching design system in the DB first
+  try {
+    initDatabase();
+    const existing = getDesignSystemByName(name.toLowerCase().replace(/\s+/g, '-'));
+    if (existing) {
+      const exported = exportDesignMd(existing.id);
+      if (exported) return exported;
+    }
+  } catch {
+    // DB not initialized, generate from presets
+  }
+
+  // Pick font pairing
+  const fonts = FONT_PAIRINGS[projectType] || FONT_PAIRINGS.default!;
+
+  // Pick color palette
+  const colors = COLOR_PRESETS[mood] || COLOR_PRESETS.professional!;
+
+  // Build DESIGN.md
+  const lines: string[] = ['---'];
+  lines.push(`version: alpha`);
+  lines.push(`name: ${name}`);
+  if (options.description) {
+    lines.push(`description: ${options.description}`);
+  }
+
+  // Colors
+  lines.push(`colors:`);
+  for (const [key, value] of Object.entries(colors)) {
+    lines.push(`  ${key}: "${value}"`);
+  }
+
+  // Typography
+  lines.push(`typography:`);
+  lines.push(`  display:`);
+  lines.push(`    fontFamily: ${fonts.heading}`);
+  lines.push(`    fontSize: 56px`);
+  lines.push(`    fontWeight: 800`);
+  lines.push(`    lineHeight: 1.1`);
+  lines.push(`    letterSpacing: -0.03em`);
+  lines.push(`  headline-lg:`);
+  lines.push(`    fontFamily: ${fonts.heading}`);
+  lines.push(`    fontSize: 36px`);
+  lines.push(`    fontWeight: 700`);
+  lines.push(`    lineHeight: 1.2`);
+  lines.push(`    letterSpacing: -0.02em`);
+  lines.push(`  headline-md:`);
+  lines.push(`    fontFamily: ${fonts.heading}`);
+  lines.push(`    fontSize: 28px`);
+  lines.push(`    fontWeight: 700`);
+  lines.push(`    lineHeight: 1.3`);
+  lines.push(`  body-lg:`);
+  lines.push(`    fontFamily: ${fonts.body}`);
+  lines.push(`    fontSize: 18px`);
+  lines.push(`    fontWeight: 400`);
+  lines.push(`    lineHeight: 1.7`);
+  lines.push(`  body-md:`);
+  lines.push(`    fontFamily: ${fonts.body}`);
+  lines.push(`    fontSize: 16px`);
+  lines.push(`    fontWeight: 400`);
+  lines.push(`    lineHeight: 1.6`);
+  lines.push(`  label-lg:`);
+  lines.push(`    fontFamily: ${fonts.body}`);
+  lines.push(`    fontSize: 14px`);
+  lines.push(`    fontWeight: 600`);
+  lines.push(`    lineHeight: 1.4`);
+  lines.push(`    letterSpacing: 0.01em`);
+  lines.push(`  label-sm:`);
+  lines.push(`    fontFamily: ${fonts.body}`);
+  lines.push(`    fontSize: 12px`);
+  lines.push(`    fontWeight: 500`);
+  lines.push(`    lineHeight: 1.3`);
+  if (fonts.code) {
+    lines.push(`  code:`);
+    lines.push(`    fontFamily: ${fonts.code}`);
+    lines.push(`    fontSize: 14px`);
+    lines.push(`    fontWeight: 400`);
+    lines.push(`    lineHeight: 1.6`);
+  }
+
+  // Rounded
+  lines.push(`rounded:`);
+  lines.push(`  sm: 4px`);
+  lines.push(`  md: 8px`);
+  lines.push(`  lg: 12px`);
+  lines.push(`  xl: 16px`);
+  lines.push(`  2xl: 24px`);
+  lines.push(`  full: 9999px`);
+
+  // Spacing
+  lines.push(`spacing:`);
+  lines.push(`  xs: 4px`);
+  lines.push(`  sm: 8px`);
+  lines.push(`  md: 16px`);
+  lines.push(`  lg: 24px`);
+  lines.push(`  xl: 32px`);
+  lines.push(`  2xl: 48px`);
+  lines.push(`  3xl: 64px`);
+
+  // Components
+  lines.push(`components:`);
+  lines.push(`  button-primary:`);
+  lines.push(`    backgroundColor: "{colors.primary}"`);
+  lines.push(`    textColor: "{colors.on-primary}"`);
+  lines.push(`    typography: "{typography.label-lg}"`);
+  lines.push(`    rounded: "{rounded.lg}"`);
+  lines.push(`    padding: "{spacing.md}"`);
+  lines.push(`  button-secondary:`);
+  lines.push(`    backgroundColor: "{colors.surface-container}"`);
+  lines.push(`    textColor: "{colors.on-surface}"`);
+  lines.push(`    typography: "{typography.label-lg}"`);
+  lines.push(`    rounded: "{rounded.lg}"`);
+  lines.push(`    padding: "{spacing.md}"`);
+  lines.push(`  card:`);
+  lines.push(`    backgroundColor: "{colors.surface}"`);
+  lines.push(`    rounded: "{rounded.xl}"`);
+  lines.push(`    padding: "{spacing.xl}"`);
+  lines.push(`  input-field:`);
+  lines.push(`    backgroundColor: "{colors.surface}"`);
+  lines.push(`    textColor: "{colors.on-surface}"`);
+  lines.push(`    typography: "{typography.body-md}"`);
+  lines.push(`    rounded: "{rounded.md}"`);
+  lines.push(`    padding: "{spacing.sm}"`);
+  lines.push(`  badge:`);
+  lines.push(`    backgroundColor: "{colors.primary}"`);
+  lines.push(`    textColor: "{colors.on-primary}"`);
+  lines.push(`    typography: "{typography.label-sm}"`);
+  lines.push(`    rounded: "{rounded.full}"`);
+  lines.push(`    padding: "{spacing.xs}"`);
+
+  lines.push('---');
+  lines.push('');
+
+  // Markdown prose sections
+  const moodLabel = mood.charAt(0).toUpperCase() + mood.slice(1);
+  const bgType = isDark ? 'dark' : 'light';
+
+  lines.push(`## Overview`);
+  lines.push('');
+  lines.push(`${name} uses a ${moodLabel.toLowerCase()} visual language on a ${bgType} foundation.`);
+  if (options.description) lines.push(options.description);
+  lines.push('');
+
+  lines.push(`## Colors`);
+  lines.push('');
+  lines.push(`- **Primary (${colors.primary}):** Main action color for CTAs, links, and active states.`);
+  lines.push(`- **Secondary (${colors.secondary}):** Supporting interactions and secondary actions.`);
+  if (colors.tertiary) lines.push(`- **Tertiary (${colors.tertiary}):** Accent for highlights and badges.`);
+  lines.push(`- **Background (${colors.background}):** Page background.`);
+  lines.push(`- **On-Background (${colors['on-background']}):** Primary text color.`);
+  lines.push('');
+
+  lines.push(`## Typography`);
+  lines.push('');
+  lines.push(`- **Headings:** ${fonts.heading} at bold/extrabold weights with tight letter-spacing.`);
+  lines.push(`- **Body:** ${fonts.body} at regular weight with generous line heights for readability.`);
+  if (fonts.code) lines.push(`- **Code:** ${fonts.code} at 14px for code blocks and inline snippets.`);
+  lines.push('');
+
+  lines.push(`## Layout & Spacing`);
+  lines.push('');
+  lines.push(`Content maxes at 1200px centered. 12-column grid at desktop, single column below 768px.`);
+  lines.push(`Spacing uses a strict 4px base scale (4, 8, 16, 24, 32, 48, 64).`);
+  lines.push('');
+
+  lines.push(`## Elevation & Depth`);
+  lines.push('');
+  if (isDark) {
+    lines.push(`Depth is achieved through tonal shifts between surface levels. No shadows on dark backgrounds.`);
+  } else {
+    lines.push(`Depth is achieved through subtle borders and tonal shifts. Shadows reserved for modals only.`);
+  }
+  lines.push('');
+
+  lines.push(`## Shapes`);
+  lines.push('');
+  lines.push(`- **Buttons:** 12px radius. Substantial but not pill-shaped.`);
+  lines.push(`- **Cards:** 16px radius for a modern feel.`);
+  lines.push(`- **Inputs:** 8px radius for professional structure.`);
+  lines.push(`- **Badges:** Full radius for pill shapes.`);
+  lines.push('');
+
+  lines.push(`## Components`);
+  lines.push('');
+  lines.push(`Two button variants: Primary (filled) and Secondary (surface fill). Primary reserved for the single most important action per screen.`);
+  lines.push(`Cards use border-based elevation with xl rounding.`);
+  lines.push(`Inputs use md rounding with surface background.`);
+  lines.push('');
+
+  lines.push(`## Tailwind v4 Usage`);
+  lines.push('');
+  lines.push(`### globals.css setup`);
+  lines.push('');
+  lines.push('Register colors and radius in @theme (Tailwind v4 auto-generates utility classes):');
+  lines.push('');
+  lines.push('```css');
+  lines.push('@import "tailwindcss";');
+  lines.push('@theme {');
+  for (const [key, value] of Object.entries(colors)) {
+    lines.push(`  --color-${key}: ${value};`);
+  }
+  lines.push(`  --radius-sm: 4px;`);
+  lines.push(`  --radius-md: 8px;`);
+  lines.push(`  --radius-lg: 12px;`);
+  lines.push(`  --radius-xl: 16px;`);
+  lines.push(`  --radius-2xl: 24px;`);
+  lines.push(`  --radius-full: 9999px;`);
+  lines.push('}');
+  lines.push(':root {');
+  lines.push('  --sp-xs: 4px; --sp-sm: 8px; --sp-md: 16px; --sp-lg: 24px;');
+  lines.push('  --sp-xl: 32px; --sp-2xl: 48px; --sp-3xl: 64px;');
+  lines.push('  --sp-gutter: 24px; --sp-margin: 32px;');
+  lines.push('}');
+  lines.push('```');
+  lines.push('');
+  lines.push('Then define typography as utility classes in @layer utilities:');
+  lines.push('');
+  lines.push('```css');
+  lines.push('@layer utilities {');
+  lines.push(`  .type-display { font-family: "${fonts.heading}", system-ui, sans-serif; font-size: clamp(36px, 5vw, 56px); font-weight: 800; line-height: 1.1; letter-spacing: -0.03em; }`);
+  lines.push(`  .type-headline-lg { font-family: "${fonts.heading}", system-ui, sans-serif; font-size: clamp(28px, 3.5vw, 36px); font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }`);
+  lines.push(`  .type-body-lg { font-family: "${fonts.body}", system-ui, sans-serif; font-size: 18px; font-weight: 400; line-height: 1.7; }`);
+  lines.push(`  .type-label-lg { font-family: "${fonts.body}", system-ui, sans-serif; font-size: 14px; font-weight: 600; line-height: 1.4; letter-spacing: 0.01em; }`);
+  lines.push('}');
+  lines.push('```');
+  lines.push('');
+  lines.push('### Class mapping');
+  lines.push('');
+  lines.push('| Token | Tailwind class | Example |');
+  lines.push('|-------|---------------|---------|');
+  lines.push('| colors.primary | `bg-primary`, `text-primary`, `border-primary` | `<button className="bg-primary text-on-primary">` |');
+  lines.push('| colors.on-surface-variant | `text-on-surface-variant` | `<p className="text-on-surface-variant">` |');
+  lines.push('| colors.surface-container | `bg-surface-container` | `<div className="bg-surface-container">` |');
+  lines.push('| rounded.lg | `rounded-lg` | `<button className="rounded-lg">` |');
+  lines.push('| spacing.md | `px-[var(--sp-md)]` | `<div className="px-[var(--sp-md)]">` |');
+  lines.push('| typography.display | `type-display` | `<h1 className="type-display">` |');
+  lines.push('');
+  lines.push('CRITICAL: spacing uses var() syntax. `px-[var(--sp-md)]` NOT `px-[--sp-md]`.');
+  lines.push('CRITICAL: never use raw hex values. `bg-primary` NOT `bg-[#6366F1]`.');
+  lines.push('');
+
+  lines.push(`## Do's and Don'ts`);
+  lines.push('');
+  lines.push(`- Do use primary color only for the single most important CTA per screen`);
+  lines.push(`- Do maintain WCAG AA contrast ratios (4.5:1 for normal text)`);
+  lines.push(`- Do use the spacing scale strictly - no arbitrary pixel values`);
+  lines.push(`- Do use var() when referencing spacing custom properties in arbitrary values`);
+  lines.push(`- Don't use more than two accent colors on any single screen`);
+  lines.push(`- Don't mix heading and body fonts in the same role`);
+  lines.push(`- Don't use px-[--sp-md] - must be px-[var(--sp-md)]`);
+  lines.push(`- Don't use arbitrary hex colors like bg-[#6366F1] - use bg-primary`);
+
+  return lines.join('\n');
+}
+
+function inferMoodFromType(type: string): string {
+  const moodMap: Record<string, string> = {
+    saas: 'professional',
+    fintech: 'professional',
+    ai: 'tech',
+    developer: 'tech',
+    gaming: 'dramatic',
+    kids: 'energetic',
+    creative: 'energetic',
+    agency: 'dramatic',
+    health: 'calm',
+    wellness: 'calm',
+    education: 'calm',
+    luxury: 'warm',
+    ecommerce: 'professional',
+    food: 'warm',
+    coffee: 'warm',
+  };
+  return moodMap[type] || 'professional';
+}
+
+// ============================================
 // Helpers
 // ============================================
 
