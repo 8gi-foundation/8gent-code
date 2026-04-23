@@ -1638,6 +1638,15 @@ TAILWIND v4 TOKEN MAPPING (CRITICAL - get this wrong and nothing renders):
 - Typography: define as @layer utilities { .type-display { ... } } classes. Use directly: className="type-display".
 - NEVER use arbitrary hex values like bg-[#6366F1]. Always use the token class: bg-primary.
 
+VISUAL QUALITY (CRITICAL - flat pages look amateur):
+- Every section MUST use animate-fade-in-up for entrance animation. Stagger children with animate-delay-100/200/300.
+- Hero sections MUST have a gradient background: bg-gradient-to-b from-primary/5 via-background to-background.
+- Buttons: hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200. NEVER just hover:opacity-90.
+- Cards: hover:-translate-y-1 hover:shadow-lg hover:border-outline transition-all duration-200.
+- Featured/highlight cards (pricing, hero preview): shadow-xl shadow-primary/10.
+- Use SVG icons or Lucide React. NEVER use emoji as icons.
+- CTA buttons get accent glow: shadow-lg shadow-primary/25.
+
 Run lint_design_md after writing to validate.`;
           }
         }
