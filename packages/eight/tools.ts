@@ -96,6 +96,7 @@ import {
   importDesignMd,
   exportDesignMd,
   generateDesignSpec,
+  generateDesignMd,
 } from "../design-systems/design-md.js";
 import { createInfiniteRunner, formatInfiniteState, type InfiniteRunner } from "../infinite";
 import {
@@ -699,6 +700,24 @@ export class ToolExecutor {
           }
         }
       },
+      {
+        type: "function",
+        function: {
+          name: "generate_design_md",
+          description: "[DESIGN] Generates a complete DESIGN.md from a project name and description. Uses curated font pairings (13 presets: SaaS, fintech, AI, developer, creative, agency, etc.), color palettes per mood (professional, warm, tech, calm, energetic, dramatic), proper spacing scales, and component token specs. No design background required - describe what you're building and get a spec-compliant DESIGN.md with expert-level design decisions baked in. If a matching design system exists in the DB, exports that instead.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Project or brand name (e.g., 'FinFlow', 'Launchpad', 'PetPals')" },
+              projectType: { type: "string", description: "Project type for font/color selection: saas, fintech, ai, developer, creative, agency, gaming, kids, health, wellness, education, luxury, ecommerce, food, coffee" },
+              mood: { type: "string", description: "Visual mood: professional, warm, tech, calm, energetic, dramatic" },
+              description: { type: "string", description: "Brief description of what the project is (used in the Overview section)" },
+              darkMode: { type: "boolean", description: "Generate dark mode palette (defaults to true for tech/dramatic moods)" }
+            },
+            required: ["name"]
+          }
+        }
+      },
       // Infinite mode
       {
         type: "function",
@@ -1257,6 +1276,8 @@ export class ToolExecutor {
         return this.handleImportDesignMd(args);
       case "export_design_md":
         return this.handleExportDesignMd(args.name as string, args.asSpec as boolean | undefined);
+      case "generate_design_md":
+        return this.handleGenerateDesignMd(args);
 
       // Infinite mode
       case "enable_infinite_mode":
@@ -1599,7 +1620,25 @@ export class ToolExecutor {
           const designContent = fs.readFileSync(designMdPath, "utf-8");
           const { tokens } = parseDesignMd(designContent);
           if (tokens.name && tokens.name !== 'Untitled') {
-            designHint = `\n[Design Gate] Active DESIGN.md: "${tokens.name}". Use these tokens - do not invent colors or fonts. Run lint_design_md to validate.`;
+            // Build color list for the hint
+            const colorNames = tokens.colors ? Object.keys(tokens.colors).join(', ') : '';
+            const typoNames = tokens.typography ? Object.keys(tokens.typography).join(', ') : '';
+
+            designHint = `\n[Design Gate] Active DESIGN.md: "${tokens.name}". STRICT RULES:
+1. Do NOT invent colors, fonts, or spacing. Every value must come from DESIGN.md tokens.
+2. Colors registered: ${colorNames}
+3. Typography scales: ${typoNames}
+
+TAILWIND v4 TOKEN MAPPING (CRITICAL - get this wrong and nothing renders):
+- Colors in @theme as --color-{name} become utility classes: bg-primary, text-on-primary, border-outline-variant, etc.
+  Dashed names work: text-on-surface-variant, bg-surface-container, bg-secondary-container.
+- Radius in @theme as --radius-{size} become: rounded-sm, rounded-lg, rounded-xl, rounded-2xl, rounded-full.
+- Spacing: put in :root as --sp-{size}, use as px-[var(--sp-md)], py-[var(--sp-lg)], gap-[var(--sp-gutter)], mb-[var(--sp-xl)].
+  DO NOT use px-[--sp-md] (missing var()). DO NOT use px-[--spacing-md] (wrong prefix).
+- Typography: define as @layer utilities { .type-display { ... } } classes. Use directly: className="type-display".
+- NEVER use arbitrary hex values like bg-[#6366F1]. Always use the token class: bg-primary.
+
+Run lint_design_md after writing to validate.`;
           }
         }
 
@@ -2505,6 +2544,43 @@ export class ToolExecutor {
       return md || `Design system "${name}" not found in database.`;
     } catch (err) {
       return `DESIGN.md export failed: ${err}`;
+    }
+  }
+
+  private async handleGenerateDesignMd(args: Record<string, unknown>): Promise<string> {
+    try {
+      const name = args.name as string;
+      if (!name) return JSON.stringify({ error: 'name is required' });
+
+      const md = generateDesignMd(name, {
+        projectType: args.projectType as string | undefined,
+        mood: args.mood as string | undefined,
+        description: args.description as string | undefined,
+        darkMode: args.darkMode as boolean | undefined,
+      });
+
+      // Lint the generated output to verify quality
+      const { parseDesignMd: parse, lintDesignMd: lint } = await import("../design-systems/design-md.js");
+      const parsed = parse(md);
+      const report = lint(md);
+
+      return JSON.stringify({
+        designMd: md,
+        tokenCount: {
+          colors: parsed.tokens.colors ? Object.keys(parsed.tokens.colors).length : 0,
+          typography: parsed.tokens.typography ? Object.keys(parsed.tokens.typography).length : 0,
+          components: parsed.tokens.components ? Object.keys(parsed.tokens.components).length : 0,
+        },
+        lintResult: {
+          valid: report.valid,
+          errorCount: report.summary.errors,
+          warningCount: report.summary.warnings,
+          findings: report.findings.filter((f: { severity: string }) => f.severity === 'error'),
+        },
+        instructions: `Save this as DESIGN.md in the project root. The design gate will auto-enforce these tokens on all UI file writes.`,
+      }, null, 2);
+    } catch (err) {
+      return `DESIGN.md generation failed: ${err}`;
     }
   }
 
