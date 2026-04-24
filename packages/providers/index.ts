@@ -36,7 +36,9 @@ export type ProviderName =
   | "mistral"
   | "together"
   | "fireworks"
-  | "replicate";
+  | "replicate"
+  | "host-cli-primary"
+  | "host-cli-secondary";
 
 export interface ProviderConfig {
   name: ProviderName;
@@ -121,6 +123,49 @@ export function isAppleFoundationAvailable(): boolean {
   if (Number.isFinite(major) && major < 25) return false;
   const bridgePath = path.join(os.homedir(), ".8gent", "bin", "apple-foundation-bridge");
   return fs.existsSync(bridgePath);
+}
+
+/**
+ * Check if a host CLI binary is on PATH and the opt-in env var is set.
+ *
+ * Host-CLI delegation providers are always disabled by default. Enabling
+ * them means the agent will shell out to a user-chosen CLI on the host,
+ * reusing whatever session the user has already authenticated there.
+ * Opt-in only, never automatic.
+ */
+export function isHostCliAvailable(binary: string): boolean {
+  if (process.env.PROVIDERS_ALLOW_HOST_CLI !== "1") return false;
+  if (!binary) return false;
+  const paths = (process.env.PATH || "").split(path.delimiter);
+  for (const dir of paths) {
+    if (!dir) continue;
+    const candidate = path.join(dir, binary);
+    try {
+      if (fs.existsSync(candidate)) return true;
+    } catch { /* ignore */ }
+  }
+  return false;
+}
+
+/**
+ * Resolve the host-CLI binary for a given slot from env. Users choose
+ * which CLI to bind by setting these env vars; no binary name is hardcoded
+ * in the registry.
+ *
+ *   PROVIDERS_HOST_CLI_PRIMARY_BINARY=<name-on-PATH-or-absolute-path>
+ *   PROVIDERS_HOST_CLI_SECONDARY_BINARY=<name-on-PATH-or-absolute-path>
+ *
+ * Returns an empty string when the slot is unbound. A slot with no binary
+ * stays disabled even when `PROVIDERS_ALLOW_HOST_CLI=1`.
+ */
+export function getHostCliBinary(
+  slot: "primary" | "secondary",
+): string {
+  const key =
+    slot === "primary"
+      ? "PROVIDERS_HOST_CLI_PRIMARY_BINARY"
+      : "PROVIDERS_HOST_CLI_SECONDARY_BINARY";
+  return process.env[key]?.trim() || "";
 }
 
 const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
@@ -296,6 +341,34 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     supportsTools: false,
     supportsStreaming: true,
     supportsVision: true,
+  },
+  "host-cli-primary": {
+    name: "host-cli-primary",
+    displayName: "Host CLI (primary slot)",
+    baseUrl: "", // Subprocess, no URL
+    apiKeyEnv: "", // Reuses whatever session the user has on the host binary
+    defaultModel: "host-cli",
+    models: ["host-cli"],
+    // Opt-in: requires PROVIDERS_ALLOW_HOST_CLI=1, a binary bound via
+    // PROVIDERS_HOST_CLI_PRIMARY_BINARY, and that binary on PATH.
+    enabled: isHostCliAvailable(getHostCliBinary("primary")),
+    supportsTools: false, // v1 - text-only. Tool calls and thinking blocks TBD.
+    supportsStreaming: false, // v1 - single completion per invocation.
+    supportsVision: false,
+  },
+  "host-cli-secondary": {
+    name: "host-cli-secondary",
+    displayName: "Host CLI (secondary slot)",
+    baseUrl: "", // Subprocess, no URL
+    apiKeyEnv: "", // Reuses whatever session the user has on the host binary
+    defaultModel: "host-cli",
+    models: ["host-cli"],
+    // Opt-in: requires PROVIDERS_ALLOW_HOST_CLI=1, a binary bound via
+    // PROVIDERS_HOST_CLI_SECONDARY_BINARY, and that binary on PATH.
+    enabled: isHostCliAvailable(getHostCliBinary("secondary")),
+    supportsTools: false,
+    supportsStreaming: false,
+    supportsVision: false,
   },
 };
 
@@ -795,10 +868,21 @@ export const PROVIDER_NAMES: ProviderName[] = [
   "together",
   "fireworks",
   "replicate",
+  "host-cli-primary",
+  "host-cli-secondary",
 ];
 
 export { AuthRotator, type AuthProfile } from "./auth-rotation";
 export { ModelFailover, type FailoverChain, type FailoverEntry } from "./failover";
+export {
+  HostCliClient,
+  checkHostCliAvailability,
+  HostCliUnavailableError,
+  HostCliRateLimitError,
+  type HostCliClientOptions,
+  type HostCliBinarySpec,
+  type HostCliAvailability,
+} from "./host-cli";
 
 export default {
   getProviderManager,
