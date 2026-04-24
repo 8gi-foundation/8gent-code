@@ -97,6 +97,7 @@ OPTIONS:
   --model=<m>    Override model (e.g., --model=qwen3:14b)
   --provider=<p> Override provider (e.g., --provider=ollama)
   --cwd=<dir>    Override working directory
+  --fast         Start in fast mode (use fastest available model)
   --infinite     Enable infinite mode (autonomous until done)
   --pet          Also spawn Lil Eight dock companion (auto with tui)
   --no-pet       Disable dock pet auto-spawn
@@ -187,6 +188,42 @@ async function main() {
   // If just --infinite with no command, launch TUI in infinite mode
   if (args.length === 0 && hasInfiniteFlag) {
     args.push("tui");
+  }
+
+  // Check for --fast flag - start in fast mode (fastest available model)
+  const hasFastFlag = args.includes("--fast");
+  if (hasFastFlag) {
+    const { getModeManager, FAST_MODE_MODELS } = await import("../packages/eight/modes.ts");
+    const mm = getModeManager();
+    mm.enableFastMode("default");
+
+    // Try to find fastest available model and set it
+    let fastModel: string | null = null;
+    for (const candidate of FAST_MODE_MODELS) {
+      if (candidate.provider === "ollama") {
+        try {
+          const resp = await fetch("http://localhost:11434/api/tags");
+          const data = await resp.json() as { models?: Array<{ name: string }> };
+          const available = (data.models || []).map((m: { name: string }) => m.name);
+          if (available.some((m: string) => m.startsWith(candidate.model.split(":")[0]))) {
+            fastModel = candidate.model;
+            console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
+            break;
+          }
+        } catch { continue; }
+      } else {
+        fastModel = candidate.model;
+        console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
+        break;
+      }
+    }
+
+    // Set as model override if found
+    if (fastModel && !args.some(a => a.startsWith("--model="))) {
+      args.push(`--model=${fastModel}`);
+    }
+
+    args = args.filter(a => a !== "--fast");
   }
 
   // Handle --pet / -pet as standalone (same as 8gent pet start)
