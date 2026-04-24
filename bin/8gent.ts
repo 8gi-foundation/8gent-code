@@ -99,6 +99,8 @@ OPTIONS:
   --provider=<p> Override provider (e.g., --provider=ollama)
   --cwd=<dir>    Override working directory
   --fast         Start in fast mode (use fastest available model)
+  --resume       Resume last session (or --resume=<name> for specific)
+  --continue <id>  Resume a specific session by ID or name
   --infinite     Enable infinite mode (autonomous until done)
   --pet          Also spawn Lil Eight dock companion (auto with tui)
   --no-pet       Disable dock pet auto-spawn
@@ -235,6 +237,30 @@ async function main() {
       return;
     }
     // Otherwise it's a flag on another command - handled by tuiCommand
+  }
+
+  // --resume (no arg) = resume last session
+  if (args.includes("--resume") && !args.some(a => a.startsWith("--resume="))) {
+    const { SessionManager } = await import("../packages/eight/session-manager.ts");
+    const sm = new SessionManager();
+    const last = sm.getLast();
+    if (last) {
+      console.log(`Resuming session: ${last.name || last.id} (${last.model}, ${last.messageCount} msgs)`);
+      args = args.filter(a => a !== "--resume");
+      args.unshift("tui", `--resume=${last.name || last.id}`);
+    } else {
+      console.log("No previous sessions found. Starting fresh.");
+      args = args.filter(a => a !== "--resume");
+      args.unshift("tui");
+    }
+  }
+
+  // --continue <id> = resume specific session
+  const continueIdx = args.indexOf("--continue");
+  if (continueIdx !== -1 && args[continueIdx + 1] && !args[continueIdx + 1].startsWith("-")) {
+    const sessionId = args[continueIdx + 1];
+    args = args.filter((_, i) => i !== continueIdx && i !== continueIdx + 1);
+    args.unshift("tui", `--resume=${sessionId}`);
   }
 
   // Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
