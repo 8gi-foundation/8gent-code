@@ -13,6 +13,7 @@ import { startCron, stopCron, getJobs, addJob } from "./cron";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { resolveBestFreeModel } from "./model-resolver";
 import { getDataDir } from "./data-dir";
+import { VesselMesh, type TaskPayload, type TaskResult } from "../orchestration/vessel-mesh";
 
 const PORT = 18789;
 const DATA_DIR = getDataDir();
@@ -78,6 +79,7 @@ const STATE_PATH = `${DATA_DIR}/daemon-state.json`;
 
 let server: ReturnType<typeof startGateway> | null = null;
 let pool: AgentPool | null = null;
+let mesh: VesselMesh | null = null;
 
 /** Save active session IDs to disk so they can be resumed after restart */
 function saveState(): void {
@@ -101,6 +103,10 @@ async function shutdown(signal: string): Promise<void> {
   saveState();
   stopHeartbeat();
   stopCron();
+  if (mesh) {
+    await mesh.stop().catch(() => {});
+    mesh = null;
+  }
   if (server) {
     server.stop();
     server = null;
@@ -181,6 +187,60 @@ async function main(): Promise<void> {
 
   console.log(`[daemon] ready - ws://localhost:${config.port}`);
   console.log(`[daemon] health check: http://localhost:${config.port}/health`);
+
+  // Lotus-Class Compute — peer mesh. OFF by default. Internal-only during spike.
+  if (process.env.GROVE_ENABLED === "1") {
+    const vesselId = process.env.VESSEL_ID || `local-${require("os").hostname()}`;
+    const vesselUrl = process.env.VESSEL_URL || `ws://localhost:${config.port}`;
+    const vesselRegion = process.env.VESSEL_REGION || "local";
+    const vesselName = process.env.VESSEL_NAME || vesselId;
+
+    mesh = new VesselMesh({
+      id: vesselId,
+      name: vesselName,
+      url: vesselUrl,
+      ownerId: process.env.VESSEL_OWNER || "8gi-foundation",
+      capabilities: ["code", "inference", poolConfig.runtime || "ollama"],
+      model: poolConfig.model || DEFAULT_MODEL,
+      region: vesselRegion,
+      startedAt: Date.now(),
+      activeSessions: 0,
+      maxSessions: 10,
+    });
+
+    mesh.onTask(async (task: TaskPayload, from: string): Promise<TaskResult> => {
+      const start = Date.now();
+      if (!pool) {
+        return {
+          status: "failed",
+          output: "",
+          durationMs: Date.now() - start,
+          error: "agent pool unavailable",
+        };
+      }
+      try {
+        const sessionId = `grove_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        pool.createSession(sessionId, "api");
+        const output = await pool.chat(sessionId, task.prompt);
+        pool.destroySession(sessionId);
+        return {
+          status: "completed",
+          output: typeof output === "string" ? output : JSON.stringify(output),
+          durationMs: Date.now() - start,
+        };
+      } catch (err) {
+        return {
+          status: "failed",
+          output: "",
+          durationMs: Date.now() - start,
+          error: String(err),
+        };
+      }
+    });
+
+    await mesh.start();
+    console.log(`[daemon] grove mesh started - vesselId=${vesselId} region=${vesselRegion}`);
+  }
 
   // Graceful shutdown
   process.on("SIGTERM", () => shutdown("SIGTERM"));

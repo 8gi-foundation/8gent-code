@@ -136,21 +136,81 @@ export class VesselMesh {
   }
 
   private async register(): Promise<void> {
-    // For now, use local file fallback if Convex isn't available
-    // The registry will be a Convex table in production
     this.vesselInfo.lastHeartbeat = Date.now();
+    if (!(await this.resolveConvex())) return;
+    try {
+      await this._client.mutation(this._api.vessels.register, {
+        vesselId: this.vesselInfo.id,
+        name: this.vesselInfo.name,
+        url: this.vesselInfo.url,
+        ownerId: this.vesselInfo.ownerId,
+        capabilities: this.vesselInfo.capabilities,
+        model: this.vesselInfo.model,
+        region: this.vesselInfo.region,
+        startedAt: this.vesselInfo.startedAt,
+        activeSessions: this.vesselInfo.activeSessions,
+        maxSessions: this.vesselInfo.maxSessions,
+      });
+    } catch {}
   }
 
   private async unregister(): Promise<void> {
-    // Remove from registry on shutdown
+    if (!(await this.resolveConvex())) return;
+    try {
+      await this._client.mutation(this._api.vessels.unregister, {
+        vesselId: this.vesselInfo.id,
+      });
+    } catch {}
+  }
+
+  private async convexHeartbeat(): Promise<void> {
+    if (!(await this.resolveConvex())) return;
+    try {
+      await this._client.mutation(this._api.vessels.heartbeat, {
+        vesselId: this.vesselInfo.id,
+        activeSessions: this.vesselInfo.activeSessions,
+      });
+    } catch {}
   }
 
   // MARK: - Peer Discovery
 
   async discoverPeers(): Promise<VesselInfo[]> {
-    // Phase 1: manual peer list from config
-    // Phase 2: Convex-backed discovery
-    return Array.from(this.peers.values());
+    if (!(await this.resolveConvex())) return Array.from(this.peers.values());
+    try {
+      const rows = (await this._client.query(this._api.vessels.list, {})) as Array<{
+        vesselId: string;
+        name: string;
+        url: string;
+        ownerId: string;
+        capabilities: string[];
+        model: string;
+        region: string;
+        startedAt: number;
+        lastHeartbeat: number;
+        activeSessions: number;
+        maxSessions: number;
+      }>;
+      for (const row of rows) {
+        if (row.vesselId === this.vesselInfo.id) continue;
+        this.addPeer({
+          id: row.vesselId,
+          name: row.name,
+          url: row.url,
+          ownerId: row.ownerId,
+          capabilities: row.capabilities,
+          model: row.model,
+          region: row.region,
+          startedAt: row.startedAt,
+          lastHeartbeat: row.lastHeartbeat,
+          activeSessions: row.activeSessions,
+          maxSessions: row.maxSessions,
+        });
+      }
+      return Array.from(this.peers.values());
+    } catch {
+      return Array.from(this.peers.values());
+    }
   }
 
   addPeer(vessel: VesselInfo): void {
@@ -428,6 +488,8 @@ export class VesselMesh {
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
       this.vesselInfo.lastHeartbeat = Date.now();
+
+      this.convexHeartbeat().catch(() => {});
 
       // Send heartbeat to all connected peers
       for (const [id, ws] of this.connections) {
