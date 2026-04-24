@@ -55,6 +55,8 @@ export default defineSchema({
     model: v.string(),
     /** Provider (e.g., "ollama", "openrouter"). */
     provider: v.string(),
+    /** Surface/channel that started this session (cli, os, telegram, discord, api). */
+    channel: v.optional(v.string()),
     /** Total input tokens consumed. */
     tokensIn: v.number(),
     /** Total output tokens generated. */
@@ -67,7 +69,8 @@ export default defineSchema({
     ),
   })
     .index("by_userId", ["userId"])
-    .index("by_userId_startedAt", ["userId", "startedAt"]),
+    .index("by_userId_startedAt", ["userId", "startedAt"])
+    .index("by_userId_channel", ["userId", "channel"]),
 
   // ============================================
   // Usage — Daily aggregated usage rollups
