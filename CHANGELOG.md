@@ -7,6 +7,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Grove consent ceremony copy draft** - 3-screen plain-English consent flow (What you share / What you receive / Confirm). Reading grade 9, no em-dashes, no purple/pink/violet, default-decline, signed local-only acknowledgement schema (#1568)
+
+---
+
 ## [0.3.0] - 2026-04-11
 
 ### Added
