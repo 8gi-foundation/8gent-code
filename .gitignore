@@ -88,6 +88,10 @@ apps/lil-eight/build/
 *.mp4
 *.wav
 
+# Deck voiceovers are intentional product deliverables — allow through
+!docs/decks/**/*.wav
+!docs/decks/**/*.mp4
+
 # Archived media/video/audio directories (moved to 8gent-code-archive)
 video-8gent-app/
 smoke-and-fly/
