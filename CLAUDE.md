@@ -246,7 +246,7 @@ The pipeline is **off by default** - set `"training_proxy": { "enabled": true }`
 | **TUI Theme Tokens** | `apps/tui/src/theme/tokens.ts` | Color, spacing, typography tokens for terminal UI |
 | **TUI Semantic Layer** | `apps/tui/src/theme/semantic.ts` | Semantic color mappings (success, error, muted, etc.) |
 | **TUI Primitives** | `apps/tui/src/components/primitives/` | AppText, Badge, Card, Stack, Inline, Divider, StatusDot |
-| **CLUI (Desktop)** | `apps/clui/` | Tauri 2.0 desktop overlay components |
+| **Lil Eight (Desktop)** | `apps/lil-eight/` | Swift AppKit native macOS shell, dock pet + orchestrator surface |
 | **Personality** | `packages/personality/` | Brand voice, "Infinite Gentleman" styling |
 
 ### Design Skills Available
