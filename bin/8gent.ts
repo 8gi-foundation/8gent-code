@@ -55,6 +55,7 @@ COMMANDS:
   auth <sub>                  Authentication (login, logout, status)
   cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
+  mcp-server [--tools=safe]   Start MCP server (expose 8gent tools to external clients)
 
 AGENT COMMANDS:
   agent list                  List active sub-agents
@@ -329,6 +330,12 @@ async function main() {
     case "rpc": {
       const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
       await startRPCServer();
+      break;
+    }
+
+    case "mcp-server": {
+      const { startMCPServer } = await import("../packages/mcp/server.ts");
+      await startMCPServer(restArgs);
       break;
     }
 
