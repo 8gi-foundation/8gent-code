@@ -73,6 +73,8 @@ import {
   createEightAgent,
   createModel,
   setToolContext,
+  setRuntimeParams,
+  getRuntimeParams,
   type EightAgentConfig,
   type ProviderConfig,
   type ProviderName,
@@ -417,7 +419,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       this.messageHistory.push({
         role: "user",
         content:
-          `[PLANNING REQUIRED] Before executing ANY tools, you MUST output your plan as:\nPLAN:\n1. [step]\n2. [step]\n3. [step]\nThen execute each step. Do NOT call tools until you have output the plan.`,
+          `[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute.`,
       });
     } else {
       // Simple / short messages go through without a planning gate
@@ -452,6 +454,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       "get_outline", "get_symbol", "search_symbols",
       "git_status", "git_diff", "git_add", "git_commit",
       "web_search", "web_fetch",
+      "suggest_design", "query_design_system",
+      "self_inspect", "self_tune", "self_append_context",
+      "remember", "recall",
     ];
     const providerName = providerConfig.name as string;
     const isLocalProvider =
@@ -464,16 +469,49 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     if (isLocalProvider) {
       this.toolRegistry.loadCategory("web");
       this.toolRegistry.loadCategory("git");
+      this.toolRegistry.loadCategory("design");
+      this.toolRegistry.loadCategory("self");
+      this.toolRegistry.loadCategory("memory");
     }
     const allTools = this.toolRegistry.getTools();
     const effectiveTools = isLocalProvider
       ? Object.fromEntries(Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)))
       : allTools;
 
+    // ── Populate runtime params for self-awareness tools ──────────
+    const runtimeState = getRuntimeParams();
+    setRuntimeParams({
+      model: providerConfig.model,
+      provider: providerConfig.name,
+      toolCount: Object.keys(effectiveTools).length,
+      loadedCategories: this.toolRegistry.getLoadedCategories(),
+      systemPromptLength: systemPrompt?.length || 0,
+      messageHistoryLength: this.messageHistory.length,
+      stepCount: stepCount,
+      maxSteps: this.config.maxTurns || 30,
+      maxOutputTokens: isLocalProvider ? 4096 : 8192,
+    });
+
+    // Apply any previously tuned params
+    const tunedParams = getRuntimeParams();
+
+    // Inject appended context into instructions
+    let effectiveInstructions = systemPrompt || "";
+    if (tunedParams.appendedContext.length > 0) {
+      effectiveInstructions += "\n\n## Agent Self-Appended Context\n" +
+        tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n");
+    }
+
     const agentConfig: EightAgentConfig = {
       provider: providerConfig,
-      instructions: systemPrompt,
-      maxSteps: this.config.maxTurns || 30,
+      instructions: effectiveInstructions,
+      maxSteps: tunedParams.maxSteps,
+      maxOutputTokens: tunedParams.maxOutputTokens,
+      temperature: tunedParams.temperature,
+      topP: tunedParams.topP,
+      topK: tunedParams.topK,
+      frequencyPenalty: tunedParams.frequencyPenalty,
+      presencePenalty: tunedParams.presencePenalty,
       workingDirectory: this.config.workingDirectory || process.cwd(),
       tools: effectiveTools,
 
@@ -692,6 +730,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
       onStepFinish: async (event: StepFinishEvent) => {
         stepCount++;
+        // Update runtime params so self_inspect shows live step count
+        setRuntimeParams({ stepCount, messageHistoryLength: this.messageHistory.length });
 
         this.events.onStepFinish?.({
           stepNumber: event.stepNumber,
@@ -898,6 +938,35 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       }
 
       this.abortController = null;
+
+      // ── Adaptive recovery: if the model planned but never called tools,
+      // it likely hit the output token limit mid-response. Retry once with
+      // a larger maxOutputTokens so it can fit plan + first tool call.
+      if (
+        isLocalProvider &&
+        stepCount <= 1 &&
+        result.text &&
+        result.text.length > 50 &&
+        !agentConfig.maxOutputTokens // only retry once
+      ) {
+        const hadToolCalls = result.steps?.some((s: any) => s.toolCalls?.length > 0);
+        if (!hadToolCalls) {
+          console.log(`[agent] No tool calls after ${stepCount} step(s) - bumping maxOutputTokens to 8192 and retrying`);
+          agentConfig.maxOutputTokens = 8192;
+          const retryAgent = createEightAgent(agentConfig);
+          this.abortController = new AbortController();
+          const messages2 = this.messageHistory
+            .filter(m => m.role !== "system")
+            .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+          try {
+            result = await retryAgent.generate({ messages: messages2, abortSignal: this.abortController!.signal });
+          } catch (retryErr: any) {
+            if (retryErr?.name === "AbortError") throw retryErr;
+            console.log(`[agent] Retry with larger maxOutputTokens failed: ${retryErr?.message}`);
+          }
+          this.abortController = null;
+        }
+      }
 
       const content = result.text;
 
