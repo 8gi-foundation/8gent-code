@@ -120,6 +120,18 @@ function splitMessage(text: string, maxLen: number = MAX_MESSAGE_LENGTH): string
 
 // ── Main Bot Class ──────────────────────────────────────
 
+/**
+ * Inline-keyboard callback interceptor.
+ * Return true if the callback was handled (routing halts).
+ * Return false to let the default handler run (agent mode).
+ */
+export type CallbackInterceptor = (ctx: {
+  data: string;
+  chatId: string;
+  userId: number;
+  messageId: number;
+}) => Promise<boolean>;
+
 export class TelegramBot {
   private token: string;
   private chatId: string;
@@ -127,8 +139,10 @@ export class TelegramBot {
   private pollOffset: number = 0;
   private pollingInterval: number;
   private abortController: AbortController | null = null;
+  /** Registered callback_query interceptors. First to return true wins. */
+  private callbackInterceptors: CallbackInterceptor[] = [];
 
-  /** Agent mode — processes natural language messages as tasks. */
+  /** Agent mode - processes natural language messages as tasks. */
   public agentMode: TelegramAgentMode;
 
   /** Persistent bot memory — conversations, repos, learnings. */
@@ -435,11 +449,38 @@ export class TelegramBot {
     const chatId = query.message.chat.id;
     if (String(chatId) !== this.chatId) return;
 
-    // Route callback data through agent mode as if it were a message
+    // 1. Let registered interceptors claim the callback first (e.g. Turth).
+    for (const interceptor of this.callbackInterceptors) {
+      try {
+        const handled = await interceptor({
+          data: query.data,
+          chatId: String(chatId),
+          userId: query.from.id,
+          messageId: query.message.message_id,
+        });
+        if (handled) return;
+      } catch (err: any) {
+        console.error(`[8gent-bot] Interceptor error: ${err.message}`);
+      }
+    }
+
+    // 2. Fallback: route callback data through agent mode as if it were a message.
     const response = await this.agentMode.processMessage(query.data, String(chatId));
     if (response) {
       await this.sendMessage(response, { parseMode: "Markdown" });
     }
+  }
+
+  /**
+   * Register a callback_query interceptor. Interceptors run before the
+   * default agent-mode routing and can claim a callback by returning true.
+   */
+  registerCallbackInterceptor(interceptor: CallbackInterceptor): () => void {
+    this.callbackInterceptors.push(interceptor);
+    return () => {
+      const idx = this.callbackInterceptors.indexOf(interceptor);
+      if (idx >= 0) this.callbackInterceptors.splice(idx, 1);
+    };
   }
 
   // ── Utility ─────────────────────────────────────────
