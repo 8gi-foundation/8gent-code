@@ -246,3 +246,5 @@ export function getVault(): SecretVault {
 
 export { KeychainVault, getKeychainVault } from "./keychain";
 export type { KeychainVaultOptions } from "./keychain";
+export { LibsecretVault, getLibsecretVault, getOSVault } from "./libsecret";
+export type { LibsecretVaultOptions } from "./libsecret";
