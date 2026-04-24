@@ -25,6 +25,8 @@ export type { Transport } from "./transport";
 export { bridgeTools, mcpToolKey, parseMcpToolKey } from "./tool-bridge";
 export type { MCPToolSchema } from "./tool-bridge";
 
+export { MCPServer, startMCPServer } from "./server";
+
 // ── Singleton for backward compat ────────────────────────────────
 
 import { MCPClient } from "./client";
