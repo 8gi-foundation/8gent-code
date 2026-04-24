@@ -34,6 +34,7 @@ USAGE:
 
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
+  run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
   doctor                      Check system health (Ollama, models, tools, config)
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
@@ -95,6 +96,7 @@ OPTIONS:
   -v, --version  Show version
   --json         Output as JSON (machine-readable)
   --yes          Auto-approve all prompts (non-interactive)
+  --output-format <fmt>  run-only: 'stream-json' emits one NDJSON event per line.
   --model=<m>    Override model (e.g., --model=qwen3:14b)
   --provider=<p> Override provider (e.g., --provider=ollama)
   --cwd=<dir>    Override working directory
@@ -299,6 +301,12 @@ async function main() {
     case "tui":
       await tuiCommand(restArgs);
       break;
+
+    case "run": {
+      const { runRunCommand } = await import("../packages/eight/run.ts");
+      const code = await runRunCommand(restArgs);
+      process.exit(code);
+    }
 
     case "pet":
       await petCommand(restArgs);

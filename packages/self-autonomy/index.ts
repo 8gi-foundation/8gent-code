@@ -399,7 +399,8 @@ export class SessionMemory {
     this.cwd = workingDirectory;
     this.contextPath = path.join(workingDirectory, ".8gent", "context");
     this.verbose = verbose;
-    this.ensureDirectories();
+    // Lazy init: don't create .8gent/context/ eagerly - it prevents
+    // create-next-app and other scaffolders from running in empty dirs.
   }
 
   private log(message: string): void {
@@ -433,6 +434,7 @@ export class SessionMemory {
   }
 
   saveWorkingContext(context: WorkingContext): void {
+    this.ensureDirectories();
     const contextFile = path.join(this.contextPath, "working.json");
     fs.writeFileSync(contextFile, JSON.stringify(context, null, 2));
     this.log("Saved working context");
