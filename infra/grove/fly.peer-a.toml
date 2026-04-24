@@ -1,0 +1,29 @@
+# Grove Peer A — Lotus-Class Compute spike vessel.
+# Internal-only. Registers in dev Convex (vivid-starfish-296).
+# Pair with peer-b for the 3-peer presence demo (mac + ams + lhr).
+
+app = "grove-peer-a"
+primary_region = "ams"
+
+[build]
+  dockerfile = "infra/grove/Dockerfile.daemon"
+
+[env]
+  GROVE_ENABLED = "1"
+  VESSEL_ID = "grove-peer-a"
+  VESSEL_NAME = "Grove Peer A (Amsterdam)"
+  VESSEL_REGION = "ams"
+  VESSEL_URL = "wss://grove-peer-a.fly.dev"
+  VESSEL_OWNER = "8gi-foundation"
+  CONVEX_URL = "https://vivid-starfish-296.eu-west-1.convex.cloud"
+
+[http_service]
+  internal_port = 18789
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
