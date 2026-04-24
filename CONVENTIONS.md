@@ -184,7 +184,7 @@ Consult the design system before building any UI.
 | TUI Theme Tokens | `apps/tui/src/theme/tokens.ts` |
 | TUI Semantic Layer | `apps/tui/src/theme/semantic.ts` |
 | TUI Primitives | `apps/tui/src/components/primitives/` |
-| CLUI (Desktop) | `apps/clui/` |
+| Lil Eight (Desktop) | `apps/lil-eight/` |
 | Personality | `packages/personality/` |
 
 ---
