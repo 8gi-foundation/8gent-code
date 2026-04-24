@@ -114,19 +114,51 @@ export type HookType =
   | "myNewHook";  // Add here
 ```
 
-### 4. Add a Skill
+### 4. Propose a Bundled Skill
 
-Skills extend agent capabilities. Add to `packages/skills/`:
+Skills extend agent capabilities. They are markdown files with YAML frontmatter, loaded by `packages/skills/index.ts`. The directory structure is:
 
-```typescript
-registerSkill({
-  name: "my-skill",
-  description: "What it does",
-  execute: async (context) => {
-    // Implementation
-  }
-});
 ```
+packages/skills/<slug>/SKILL.md
+```
+
+Example frontmatter:
+
+```yaml
+---
+name: my-skill
+description: One sentence. What it does and when to use it.
+trigger: /my-skill
+aliases: [/my, /ms]
+tools: [bash, read]
+---
+```
+
+See `packages/skills/README.md` for the full format reference and the current bundled inventory.
+
+#### Proposal process
+
+Bundled skills ship to every user on install. That raises the bar.
+
+1. Open a GitHub issue titled `skill-proposal: <slug>`. Describe the problem it solves, who benefits, and why it belongs in the default set rather than a user's personal config.
+2. Draft the `SKILL.md` in a feature branch and open a PR that references the proposal issue.
+3. An 8SO (Karen, security officer) sign-off is required before merge. Every bundled skill is treated as code we distribute, so it must pass the same security review: no prompt-injection patterns, no jailbreak-adjacent instructions, no data-exfiltration defaults, no dependencies that require paid API keys to be useful on install.
+4. Maintainers review for generality. Skills that reference specific people, companies, private repos, or maintainer-only workflows belong in the author's own `~/.8gent/skills/`, not in the bundle.
+
+#### Hard content rules for bundled skills
+
+- Generic only. No named contacts, no proprietary project references, no opinions about specific companies.
+- No em dashes. Use hyphens, colons, commas, or parentheses.
+- No AI vendor or model names in examples. Describe the agent behavior instead.
+- No emojis in code. User-facing output may include them where appropriate.
+- Keep it focused. One clear job per skill, roughly 30 to 120 lines of markdown.
+
+#### What gets rejected
+
+- Jailbreak, god-mode, or prompt-injection skills.
+- Skills that require cloud-only paid services to do anything useful out of the box.
+- Duplicates of existing bundled skills without a clear upgrade path.
+- Skills that are really personal automations dressed up as generic tools.
 
 ### 5. Improve AST Parsing
 
