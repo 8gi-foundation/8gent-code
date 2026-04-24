@@ -19,6 +19,27 @@ interface PendingDeltas {
   toolCalls: number;
 }
 
+/** A remote session available for cross-device resume */
+export interface RemoteSession {
+  id: string;
+  title: string;
+  model: string;
+  channel: string;
+  messageCount: number;
+  workingDirectory: string;
+  lastActiveAt: number;
+  hasCheckpoint: boolean;
+}
+
+/** Restored conversation from a remote checkpoint */
+export interface RestoredConversation {
+  sessionId: string;
+  title: string;
+  messages: Array<{ role: string; content: string }>;
+  model: string;
+  workingDirectory: string;
+}
+
 export class SessionSyncManager {
   private convexSessionId: string | null = null;
   private pending: PendingDeltas = { tokensIn: 0, tokensOut: 0, toolCalls: 0 };
@@ -31,6 +52,7 @@ export class SessionSyncManager {
   private messageCount = 0;
   private sessionModel = "";
   private sessionWorkingDir = "";
+  private channel: string = "cli";
 
   // Lazily resolved — dynamic imports so @8gent/db is optional
   private _client: any = null;
@@ -38,8 +60,9 @@ export class SessionSyncManager {
   private _resolved = false;
   private _resolving: Promise<boolean> | null = null;
 
-  constructor(enabled: boolean = true) {
+  constructor(enabled: boolean = true, channel: string = "cli") {
     this.enabled = enabled;
+    this.channel = channel;
   }
 
   /**
@@ -92,6 +115,7 @@ export class SessionSyncManager {
       const result = await this._client.mutation(this._api.sessions.start, {
         model: model || "unknown",
         provider: provider || "ollama",
+        channel: this.channel,
       });
 
       if (result) {
@@ -276,6 +300,128 @@ export class SessionSyncManager {
 
     this.convexSessionId = null;
     this.started = false;
+  }
+
+  // ============================================
+  // Bi-directional sync — pull from Convex
+  // ============================================
+
+  /**
+   * Pull recent conversations from all surfaces.
+   * Returns conversations started on ANY channel, not just the current one.
+   * Used to show "pick up where you left off" across devices.
+   */
+  async pullRemoteSessions(limit = 10): Promise<RemoteSession[]> {
+    if (!this.enabled || !this.userId) return [];
+
+    try {
+      const available = await this.resolveConvex();
+      if (!available) return [];
+
+      const conversations = await this._client.query(
+        this._api.conversations.getRecent,
+        { userId: this.userId, limit },
+      );
+
+      return conversations.map((c: any) => ({
+        id: c.sessionId,
+        title: c.title,
+        model: c.model,
+        channel: "remote",
+        messageCount: c.messageCount,
+        workingDirectory: c.workingDirectory,
+        lastActiveAt: c.lastActiveAt,
+        hasCheckpoint: !!c.checkpointData,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Restore a conversation from a remote checkpoint.
+   * Downloads the checkpoint data and returns hydrated messages.
+   */
+  async restoreFromRemote(sessionId: string): Promise<RestoredConversation | null> {
+    if (!this.enabled) return null;
+
+    try {
+      const available = await this.resolveConvex();
+      if (!available) return null;
+
+      const conversation = await this._client.query(
+        this._api.conversations.getBySessionId,
+        { sessionId },
+      );
+
+      if (!conversation?.checkpointData) return null;
+
+      const messages = JSON.parse(conversation.checkpointData) as Array<{
+        role: string;
+        content: string;
+      }>;
+
+      return {
+        sessionId: conversation.sessionId,
+        title: conversation.title,
+        messages,
+        model: conversation.model,
+        workingDirectory: conversation.workingDirectory,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check for active sessions on other surfaces.
+   * Used for conflict detection - warn before resuming a session
+   * that's still active on another device.
+   */
+  async checkActiveConflicts(): Promise<Array<{ id: string; channel: string; model: string; startedAt: number }>> {
+    if (!this.enabled || !this.userId) return [];
+
+    try {
+      const available = await this.resolveConvex();
+      if (!available) return [];
+
+      const active = await this._client.query(
+        this._api.sessions.getActiveOnOtherSurfaces,
+        { userId: this.userId, currentChannel: this.channel },
+      );
+
+      return active.map((s: any) => ({
+        id: s._id,
+        channel: s.channel || "unknown",
+        model: s.model,
+        startedAt: s.startedAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Claim a remote session for this surface.
+   * Used when the user explicitly chooses to take over a session from another device.
+   * The original surface will see the session as ended on next sync.
+   */
+  async claimRemoteSession(sessionId: string): Promise<boolean> {
+    if (!this.enabled) return false;
+
+    try {
+      const available = await this.resolveConvex();
+      if (!available) return false;
+
+      const result = await this._client.mutation(
+        this._api.sessions.claim,
+        { sessionId, newChannel: this.channel },
+      );
+
+      return result !== null;
+    } catch {
+      return false;
+    }
   }
 
   /**
