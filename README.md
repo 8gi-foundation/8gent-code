@@ -533,7 +533,7 @@ packages/
 
 ### Later
 
-- Desktop client (Tauri 2.0, scaffolded in `apps/clui/`)
+- Desktop client (Swift AppKit, `apps/lil-eight/`)
 - Multi-tenant control plane via 8GI gateway
 - Full autonomous issue resolution
 - Personal LoRA from session training pairs
