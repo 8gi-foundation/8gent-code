@@ -7,6 +7,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+#### Grove
+- **Zero-log invariant CI guard** — CI step that fails any PR that introduces `fs.write*`, `appendFile*`, `createWriteStream`, DB inserts, or `fs` imports into mesh transport files (`packages/orchestration/vessel-mesh.ts`, future `packages/grove/transport/**`). Closes part of #1569.
+- **Zero-log verification runbook** — `docs/runbooks/grove-zero-log-verify.md`: 5-minute self-test using a marker string, ripgrep over `~/.8gent/`, `/tmp/`, and the daemon log. User-facing.
+- **Mesh-native gateway routing** — daemon WebSocket gateway recognises VesselMessage protocol frames and forwards to mesh handler. Adds `VesselMesh.handleIncomingMessage(rawJson, replyTo)` for incoming peer connections. Closes #1810.
+
+---
+
 ## [0.3.0] - 2026-04-11
 
 ### Added

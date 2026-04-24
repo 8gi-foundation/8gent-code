@@ -78,6 +78,37 @@ jobs:
           fi
           echo "Secrets scan PASS"
 
+      - name: Grove zero-log invariant
+        run: |
+          # Issue #1569: Grove transport MUST NOT persist activations to disk.
+          # Forbids any fs/db write call in mesh transport files.
+          TRANSPORT_FILES="packages/orchestration/vessel-mesh.ts"
+          if [ -d packages/grove/transport ]; then
+            TRANSPORT_FILES="$TRANSPORT_FILES $(find packages/grove/transport -name '*.ts' -not -name '*.test.ts')"
+          fi
+
+          FINDINGS=$(grep -nE \
+            '(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|fs\.write|fs\.append|fsPromises\.write|fsPromises\.append|\.insert\(|\.put\(.*activation|sqlite|better-sqlite|knex|prisma)' \
+            $TRANSPORT_FILES 2>/dev/null \
+            | grep -v 'zero-log:exempt' \
+            | grep -v '// .*allowed' \
+            || true)
+          if [ -n "$FINDINGS" ]; then
+            echo "::error::Zero-log invariant violation in mesh transport"
+            echo "Files MUST NOT write activations to disk. See docs/runbooks/grove-zero-log-verify.md"
+            echo "$FINDINGS"
+            exit 1
+          fi
+
+          # Also forbid fs imports in transport files
+          IMPORTS=$(grep -nE "from\s+['\"](fs|node:fs|fs/promises)['\"]" $TRANSPORT_FILES 2>/dev/null || true)
+          if [ -n "$IMPORTS" ]; then
+            echo "::error::fs import forbidden in mesh transport (zero-log invariant)"
+            echo "$IMPORTS"
+            exit 1
+          fi
+          echo "Zero-log invariant: PASS"
+
       - name: Policy engine integrity
         run: |
           bun -e "
