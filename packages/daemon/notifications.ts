@@ -1,8 +1,9 @@
 /**
- * Notification Dispatcher - Routes Telegram notifications to the right chat.
+ * Notification Dispatcher - Routes notifications to Telegram + macOS native.
  *
- * Primary chat: CEO commands, approvals, completion summaries
- * Dev group (optional): subagent progress, tool calls, verbose logs
+ * Channels:
+ *   - Telegram: primary chat for commands, approvals, completion summaries
+ *   - macOS: native Notification Center via osascript (session complete, approval, error)
  */
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
@@ -16,6 +17,60 @@ export type NotificationType =
   | "daily-summary"
   | "error";
 
+// ── macOS Native Notifications ──────────────────────────────────
+
+const MACOS_NOTIFY_TYPES = new Set<NotificationType>([
+  "task-complete",
+  "task-failed",
+  "approval-needed",
+  "error",
+]);
+
+/**
+ * Send a macOS native notification via osascript.
+ * No dependencies required - uses built-in AppleScript.
+ */
+export async function sendNativeNotification(
+  title: string,
+  message: string,
+  options: { subtitle?: string; sound?: string } = {},
+): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+
+  const sound = options.sound || "Glass";
+  const subtitle = options.subtitle ? ` subtitle "${escapeAppleScript(options.subtitle)}"` : "";
+
+  const script = `display notification "${escapeAppleScript(message)}" with title "${escapeAppleScript(title)}"${subtitle} sound name "${sound}"`;
+
+  try {
+    const proc = Bun.spawn(["osascript", "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    await proc.exited;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function escapeAppleScript(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ");
+}
+
+/**
+ * Map notification types to macOS notification titles and sounds.
+ */
+function nativeNotifyMeta(type: NotificationType): { title: string; sound: string } {
+  switch (type) {
+    case "task-complete": return { title: "8gent - Task Complete", sound: "Glass" };
+    case "task-failed": return { title: "8gent - Task Failed", sound: "Basso" };
+    case "approval-needed": return { title: "8gent - Approval Needed", sound: "Ping" };
+    case "error": return { title: "8gent - Error", sound: "Sosumi" };
+    default: return { title: "8gent", sound: "Glass" };
+  }
+}
+
 export class NotificationDispatcher {
   private token: string;
   private primaryChatId: string;
@@ -28,8 +83,17 @@ export class NotificationDispatcher {
   }
 
   async notify(type: NotificationType, message: string): Promise<void> {
+    // Telegram
     const chatId = this.getChatForType(type);
     await this.send(chatId, message);
+
+    // macOS native notification for key events
+    if (MACOS_NOTIFY_TYPES.has(type)) {
+      const meta = nativeNotifyMeta(type);
+      // Truncate to 200 chars for notification bubble
+      const short = message.length > 200 ? message.slice(0, 197) + "..." : message;
+      sendNativeNotification(meta.title, short, { sound: meta.sound }).catch(() => {});
+    }
   }
 
   async notifyWithKeyboard(
