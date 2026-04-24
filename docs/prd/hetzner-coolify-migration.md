@@ -1,7 +1,7 @@
 # Hetzner + Coolify Migration
 
 Owner: Rishi (8TO). Security review: Karen (8SO).
-Authored: 2026-04-24.
+Authored: 2026-04-24. Revised: 2026-04-24 (v3).
 Branch: `docs/prd/hetzner-coolify-migration`.
 Status: plan only, no live infra touched in this PR.
 Parent tracking issue: (filed after PR open).
@@ -9,9 +9,34 @@ Portal mirror: `https://8gi.org/media/infra/hetzner-migration` (auth-gated, see 
 
 ---
 
+## v3 changelog (2026-04-24)
+
+James provided three non-negotiable corrections that invalidate parts of v2. v3 amends rather than replaces.
+
+1. **Current-state correction.** v2 treated Hetzner as greenfield. Reality: two boxes already linked by WireGuard mesh (33ms). Contabo "Warehouse" (24 GB, 8 used) runs GitLab CE, PostgreSQL, Grafana, Coolify, WireGuard. This is the control plane. Hetzner "Engine" (62 GB, 1.6 used, SSH 2222) runs GitLab Runner, Docker, WireGuard, plus James's personal trading stack (Freqtrade 2026.3, MT5/Wine flagged "needs broker", quant-marketing, Propeding). 60 GB free RAM on Engine is where 8GI compute workloads land. SSH pubkey + Hetzner API key live in `.env` at root of `8gi-governance` repo (lines 62-64 under `# HETZNER CLOUD`, never displayed, file-based injection only per `feedback_no_secrets_in_chat`). Phase 0 no longer installs Coolify, GitLab, or Postgres: it adopts what's already there by creating an `8gi` namespace in existing Coolify, registering Engine as a deployment target, provisioning the first vessel container, and wiring its DB to existing Warehouse Postgres via WireGuard private IPs. Diagrams in §6.1 and §6.2 now show the WireGuard mesh, not Tailscale-as-the-only-option.
+
+2. **Proprietary stack over Outworked.** James's words: "stop mentioning Outworked, its more important to have our proprietary repositories and architecture, the control plane, pane, model proxy, vessels, security g8way, toolshed, toolbelts the whole dream." §16 (ecosystem diagram) and §17 (shared primitives, formerly §15) are rewritten so the proprietary layer (control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts) is centred. Outworked is demoted to a sibling client surface alongside Telegram bot and LinkedIn vessel, not a first-class target. Per `feedback_proprietary_over_outworked`: proprietary is the moat; Outworked is a consumer.
+
+3. **Business model.** New §19 "Business model and revenue path." Seven revenue concepts: licensed g8way deployments, managed vessel hosting, model proxy usage tiers, 8gentjr (stays free forever per constitution, no monetisation proposed), consulting / bespoke deployments, open-core (8gent-code MIT free forever, commercial features paid), data sovereignty proposition for EU. Each tagged short-term (0-6mo) / medium (6-18mo) / long-term (18mo+). Breakeven projection placeholder labelled as such.
+
+v2 content retained; v3 deltas are additive or in-place amendments. No section was deleted.
+
+---
+
 ## 1. Executive summary
 
-James bought a Hetzner server on 2026-04-23 so 8GI can stop renting its backend piecemeal and start owning the stack per Principle 2 ("free and local by default" read as sovereignty at the infra layer, not "one provider"). Today the backend is split across Fly.io (vessel daemon, ~$31.40/mo March, 88% factory burn), Vercel (marketing and portal sites), and hosted SaaS (Convex, Clerk). This plan moves the self-hostable workloads (vessel daemon, Qdrant, Telegram bot server, AgentMail, Outworked backend if ready) to a single Hetzner box orchestrated by Coolify, keeps Convex and Clerk hosted because rebuilding them is out of scope, and keeps Vercel on the table for marketing surfaces until a phase-4 decision. Fly.io gets sunset only after dual-run parity is proven per phase.
+**v3 correction.** James already owns the infra. Two boxes linked by WireGuard mesh (33ms), live well before this PRD was drafted:
+
+- **Contabo "Warehouse"** (24 GB RAM, 8 used): the control plane. GitLab CE self-hosted, PostgreSQL, Grafana, Coolify, WireGuard endpoint.
+- **Hetzner "Engine"** (62 GB RAM, 1.6 used, SSH on 2222): the compute target. GitLab Runner, Docker, WireGuard, plus James's personal trading stack (Freqtrade 2026.3, MT5/Wine flagged "needs broker connection", quant-marketing, Propeding) occupying the 1.6 GB. 60 GB free RAM on Engine is where 8GI compute workloads land.
+
+The migration is therefore not "stand up a fresh box"; it is "move Fly workloads into the existing mesh under the existing Coolify." Phase 0 adopts what is running: create an `8gi` namespace in the existing Coolify, register Engine as a deployment target, provision the first vessel container, point its DB to Warehouse Postgres over WireGuard private IPs, confirm logs flow to existing Grafana. Nothing new is installed at the platform layer.
+
+The proprietary stack is the product. Control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts. These are what 8GI licenses, hosts, and sells. Outworked, Telegram bot, LinkedIn vessel, Discord gateway are sibling client surfaces that ride on top; they do not replace the proprietary layer in the diagram.
+
+Convex and Clerk stay hosted because rebuilding them offers zero user-facing benefit. Vercel stays for marketing until a phase-4 decision. Fly.io sunsets only after dual-run parity is proven. §19 turns self-hosted sovereignty into revenue: licensed g8way, managed vessel hosting, model proxy tiers, open-core commercial features, EU data-sovereignty positioning. 8gentjr stays free forever per constitution.
+
+**Secrets note.** SSH public key and Hetzner API token live in `.env` at root of `8gi-governance` repo, lines 62-64 under `# HETZNER CLOUD`. Never displayed in chat. File-based injection only, per `feedback_no_secrets_in_chat`.
 
 ## 2. Context and motivation
 
@@ -77,7 +102,9 @@ James bought a Hetzner server on 2026-04-23 so 8GI can stop renting its backend 
 
 ## 6. Architecture
 
-### 6.1 Current state
+### 6.1 Current state (v3 corrected)
+
+Two existing boxes in a WireGuard mesh run the platform layer today. Fly is separately hosting 8GI's vessel daemon. 8GI compute work has not yet moved onto the mesh.
 
 ```mermaid
 flowchart LR
@@ -86,16 +113,39 @@ flowchart LR
     GC[8gent Computer]
     TUI[8gent-code TUI]
   end
-  subgraph Fly["Fly.io Amsterdam"]
+
+  subgraph Contabo["Contabo Warehouse (control plane)"]
+    direction TB
+    GL[GitLab CE self-hosted]
+    PG[(PostgreSQL)]
+    GRF[Grafana]
+    COO[Coolify installed]
+    WG1[WireGuard endpoint]
+  end
+
+  subgraph Hetz["Hetzner Engine (compute, 60 GB free)"]
+    direction TB
+    GLR[GitLab Runner]
+    DKR[Docker]
+    WG2[WireGuard endpoint]
+    FRQ[Freqtrade 2026.3<br/>personal trading]
+    MT5[MT5 / Wine<br/>needs broker]
+    QM[quant-marketing]
+    PRP[Propeding]
+  end
+
+  subgraph Fly["Fly.io Amsterdam (still current home for 8GI compute)"]
     V[Vessel daemon<br/>eight-vessel.fly.dev]
     F[Factory VM<br/>batch benchmarks]
     MP1[Model proxy]
   end
+
   subgraph Vercel["Vercel Edge"]
     W[8gent.world]
     P[8gi.org portal]
     D[8gent.dev]
   end
+
   subgraph SaaS["Hosted SaaS"]
     CX[Convex]
     CL[Clerk]
@@ -104,6 +154,7 @@ flowchart LR
   Mac -- wss --> V
   V -- HTTP --> MP1
   F -- HTTP --> MP1
+  WG1 <-- WireGuard mesh<br/>33ms --> WG2
   P -- auth --> CL
   P -- data --> CX
   W -- auth --> CL
@@ -112,13 +163,18 @@ flowchart LR
   classDef fly fill:#161718,stroke:#0891B2,color:#F5F0E8
   classDef vercel fill:#161718,stroke:#5C5751,color:#F5F0E8
   classDef saas fill:#1E2022,stroke:#9A9590,color:#F5F0E8
+  classDef mesh fill:#161718,stroke:#C9A84C,color:#F5F0E8
   class Mac mac
+  class Contabo mesh
+  class Hetz mesh
   class Fly fly
   class Vercel vercel
   class SaaS saas
 ```
 
-### 6.2 Target state
+### 6.2 Target state (v3 corrected)
+
+Warehouse Coolify orchestrates. 8GI compute workloads land primarily on Hetzner Engine. The proprietary layer (control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts) is centred in the diagram. Outworked, Telegram bot, LinkedIn vessel are peripheral client surfaces.
 
 ```mermaid
 flowchart LR
@@ -128,22 +184,39 @@ flowchart LR
     TUI[8gent-code TUI]
   end
 
-  subgraph TS["Tailscale mesh"]
-    direction LR
-    TSM[mesh VPN<br/>private networking]
+  subgraph Contabo["Contabo Warehouse (control plane, orchestrator)"]
+    direction TB
+    COO[Coolify<br/>orchestrates both boxes]
+    GL[GitLab CE]
+    PG[(PostgreSQL<br/>shared DB)]
+    GRF[Grafana<br/>observability]
+    WG1[WireGuard]
   end
 
-  subgraph Hetz["Hetzner (Coolify)"]
+  subgraph Hetz["Hetzner Engine (compute, 8gi namespace)"]
     direction TB
-    CO[Coolify orchestrator<br/>Docker + Caddy TLS]
-    V2[Vessel daemon<br/>lean image]
-    F2[Factory<br/>on-demand]
-    MP2[Model proxy]
-    Q[Qdrant<br/>shared]
-    BOT[Telegram bot<br/>eightgentcodebot]
-    AM[AgentMail]
-    OBS[Loki + Grafana]
-    OW[Outworked backend]
+    WG2[WireGuard]
+    subgraph Proprietary["8GI proprietary stack (centre)"]
+      direction TB
+      CP[Control plane<br/>vessel orchestration<br/>task queue, memory bridge]
+      PANE[Pane<br/>ops surface]
+      MP2[Model proxy / g8way<br/>auth, rate limits, routing]
+      SGW[Security g8way<br/>NemoClaw, COPPA, GDPR]
+      VES[Vessels<br/>isolated agent runtimes]
+      TS[Toolshed<br/>tool + skill catalog]
+      TB[Toolbelts<br/>per-role bundles]
+      FAC[Factory<br/>batch benchmarks]
+    end
+    subgraph Client["Client surfaces (peripheral)"]
+      BOT[Telegram bot]
+      OW[Outworked]
+      LIV[LinkedIn vessel]
+      DIS[Discord gateway]
+    end
+    subgraph Personal["James's personal stack (separate)"]
+      FRQ[Freqtrade]
+      QM[quant-marketing]
+    end
   end
 
   subgraph Vercel["Vercel Edge (phase-4 decision)"]
@@ -157,30 +230,36 @@ flowchart LR
     CL[Clerk]
   end
 
-  Mac --- TSM
-  TSM --- Hetz
+  COO -. deploys to .-> Hetz
+  WG1 <-- WireGuard mesh --> WG2
 
-  Mac -- wss public --> V2
-  V2 --> MP2
-  F2 --> MP2
-  BOT --> V2
-  V2 --> Q
-  OW --> Q
+  Mac -- wss public --> VES
+  VES --> MP2
+  VES --> SGW
+  CP --> VES
+  FAC --> MP2
+  BOT --> CP
+  OW --> CP
+  LIV --> CP
+  DIS --> CP
+  VES --> TS
+  VES --> TB
+  VES -. memory/db over WG .-> PG
+  GRF -. logs over WG .- VES
+  GRF -. logs over WG .- CP
+  GRF -. logs over WG .- MP2
   P -- auth --> CL
   P -- data --> CX
   W -- auth --> CL
-  OBS -. logs .- V2
-  OBS -. logs .- F2
-  OBS -. logs .- BOT
 
   classDef mac fill:#E8E4DC,stroke:#C9A84C,color:#0E0F0F
   classDef hetz fill:#161718,stroke:#C9A84C,color:#F5F0E8
-  classDef ts fill:#1E2022,stroke:#0891B2,color:#F5F0E8
+  classDef contabo fill:#161718,stroke:#C9A84C,color:#F5F0E8
   classDef vercel fill:#161718,stroke:#5C5751,color:#F5F0E8
   classDef saas fill:#1E2022,stroke:#9A9590,color:#F5F0E8
   class Mac mac
   class Hetz hetz
-  class TS ts
+  class Contabo contabo
   class Vercel vercel
   class SaaS saas
 ```
@@ -310,32 +389,34 @@ Karen (8SO) reviews phase 0 completion before any production traffic. Karen sign
 
 ## 8. Phase plan
 
-### Phase 0 - Server hardening + Coolify install
+### Phase 0 - Adopt existing mesh, create 8gi namespace (v3 corrected)
 
-**Goal:** Box exists, is locked down, runs Coolify, no workloads yet.
+**Goal:** Use the existing Warehouse Coolify to run the first 8GI workload on Hetzner Engine. No new platform installs.
+
+v2 assumed this phase included installing Coolify, provisioning Postgres, and standing up a fresh box. All three are already done. Phase 0 is now an adoption phase.
 
 Tasks:
-1. Order Hetzner server per James's spec choice (see §12 open questions).
-2. Install Ubuntu 24.04 LTS, LUKS disk encryption at provision.
-3. `adduser james`, add to sudo, disable root SSH, drop password auth.
-4. ufw default deny, allow 22/80/443, enable.
-5. Install fail2ban with sshd jail.
-6. Install Tailscale, authenticate, set up ACL restricting access to James's Mac + the box.
-7. Bind Coolify dashboard to Tailscale interface only.
-8. Install Coolify v4 LTS via official installer script.
-9. Configure Coolify backup target = Hetzner Storage Box.
-10. Hetzner auto-snapshot enabled weekly.
-11. Karen security review, sign-off required.
+1. Confirm WireGuard mesh health: `wg show` on both Warehouse and Engine, verify 33ms ping, confirm private IPs resolve.
+2. In existing Warehouse Coolify, create a new **project / namespace: `8gi`** (separate from personal projects to keep blast radii distinct).
+3. Register Hetzner Engine as a **deployment target / server** in Coolify (if not already). Verify Coolify can push Docker images to Engine over WireGuard.
+4. Audit the existing Warehouse security surface rather than re-hardening from scratch: confirm `ufw` on both boxes matches documented policy (22/2222 SSH by IP allowlist, 80, 443, WireGuard 51820, Coolify UI bound private-only), confirm SSH key-only auth, confirm `fail2ban` running on Warehouse sshd and Engine sshd:2222.
+5. Review `.env` at root of `8gi-governance` repo (lines 62-64 under `# HETZNER CLOUD`) for SSH pubkey + Hetzner API key presence. Do not read or display values. Karen confirms the keys exist and are not committed anywhere public.
+6. Provision the first vessel container under the `8gi` namespace on Engine (lean image, empty config, not taking traffic yet). This is the pathfinder; it validates that Coolify → WireGuard → Engine deployment works end to end.
+7. Wire the pathfinder vessel's DB config to existing **Warehouse PostgreSQL** over WireGuard private IP. Create a dedicated `8gi_vessel` role with its own schema, not a superuser.
+8. Confirm the pathfinder vessel's stdout/stderr reach existing **Warehouse Grafana** via whatever log shipper is already configured (promtail / vector / journald-forward): verify what is running, do not install a second stack.
+9. Confirm Hetzner auto-snapshot is enabled on Engine and that Warehouse has its own backup cadence (Storage Box or otherwise). Document the existing retention, do not redesign.
+10. Confirm Engine's personal workloads (Freqtrade, MT5/Wine, quant-marketing, Propeding) are in a different Docker network / Coolify project and cannot reach the `8gi` namespace. Flag MT5/Wine "needs broker" status but treat as unrelated to 8GI migration.
+11. Karen security review of adopted posture. Sign-off required before Phase 1 traffic.
 
 **Acceptance criteria:**
-- `nmap` from outside the Tailscale mesh shows only 22/80/443 open.
-- SSH password auth rejected.
-- Tailscale `tailscale ping` from James's Mac to the box succeeds.
-- Coolify UI only reachable via Tailscale IP, not public.
-- Backup target configured, Coolify test backup succeeds.
+- `wg show` healthy on both boxes, private IPs pingable.
+- Coolify UI (on Warehouse) has an `8gi` project with Engine registered as target.
+- Pathfinder vessel deploys successfully, logs reach Grafana, DB reachable from within container to Warehouse Postgres over WireGuard.
+- `nmap` from public internet shows only 22 (Warehouse), 2222 (Engine), 80, 443 open per box. Coolify UI not reachable publicly.
+- Personal trading stack unchanged on Engine; 8gi namespace cannot read its volumes or hit its Docker network.
 - Karen signs off in the parent issue.
 
-**Rollback:** Box is empty. Destroy and reprovision if anything is wrong.
+**Rollback:** Delete the `8gi` Coolify project. Pathfinder container stops. Warehouse + Engine return to pre-migration state with no change to personal workloads.
 
 ### Phase 1 - Vessel migration (dual-run)
 
@@ -604,25 +685,57 @@ Single-box Middle spec (AX41-NVMe, 64GB RAM, 2× 1TB NVMe, 6 cores / 12 threads)
 
 Cloudflare fronting is a zero-cost step (free tier) that should happen before we are forced to, probably at the 10k threshold as a pre-emptive move. Cost: $0. Benefit: edge cache, DDoS absorption, geographic latency smoothing. No lock-in.
 
-## 15. Shared infra primitives
+## 15. Proprietary stack (the moat) and shared infra primitives
 
-Every 8GI product consumes the same six primitives. Keeping them shared instead of per-product is the only way the cost model stays flat.
+**v3 reframe.** v2 listed "shared infra primitives" without separating proprietary 8GI surfaces from generic infra (Redis, cron, file storage). v3 foregrounds the proprietary layer first. Per `feedback_proprietary_over_outworked`: the proprietary stack is what 8GI licenses, hosts, and sells. It is the moat. Everything else is either commodity infra or a peripheral client surface.
+
+### 15.1 Proprietary 8GI layer (centre of the architecture)
+
+| Layer | Where it lives | Repo / status | Role |
+|---|---|---|---|
+| Control plane | Hetzner Engine, `8gi` namespace | `8gi-foundation/8gi-control-plane` (exists) | Vessel orchestration, Discord gateway, task queue, memory bridge |
+| Pane | Hetzner Engine, `8gi` namespace | needs clarification (placeholder) | Likely the ops / operator UI surface. James to confirm scope before we scaffold |
+| Model proxy / g8way | Hetzner Engine, `8gi` namespace | (currently on Fly, migrating phase 1) | Centralised LLM gateway: auth, rate limits, provider routing, failover, billing |
+| Security g8way | Hetzner Engine, `8gi` namespace | extends model proxy | API gateway enforcing NemoClaw policies, COPPA, GDPR at the API layer |
+| Vessels | Hetzner Engine, `8gi` namespace | `8gi-foundation/8gent-vessel` (exists) | Isolated agent runtimes, lean image, agent-pool N=10 per daemon |
+| Toolshed | shared catalog + on-Mac skill | existing Toolshed skill doc | Catalog of tools, skills, MCPs, capabilities consumable by any agent |
+| Toolbelts | runtime config per agent role | concept in development | Bundled tool subsets that ship with a given agent role (coder, researcher, etc.) |
+
+The control plane, model proxy / g8way, security g8way, and vessels all sit in the `8gi` Coolify namespace on Hetzner Engine. The pane and toolshed have UI components that may render via Vercel marketing surfaces or on-Mac, but their authority lives server-side. This layer is what revenue derives from (see §19).
+
+### 15.2 Client surfaces (peripheral, ride on top)
+
+Outworked is one of several client surfaces. None are the moat.
+
+| Client surface | Role | Host |
+|---|---|---|
+| Outworked (Mission Control) | Operator dashboard / visualisation | Hetzner Engine `8gi` namespace (was Next.js on Vercel pre-mesh) |
+| Telegram bot (`@eightgentcodebot`) | Chat surface for vessels | Hetzner Engine `8gi` namespace |
+| LinkedIn vessel | Outbound / monitoring surface | Hetzner Engine `8gi` namespace |
+| Discord gateway | Community + board channel surface | Part of control plane |
+| 8gent-code CLI / TUI | Local developer surface | User's Mac (local-only by default) |
+
+If Outworked is referenced more than once per architectural diagram or section, rebalance the narrative.
+
+### 15.3 Shared commodity primitives
 
 | Primitive | Where it lives | Shared vs per-product |
 |---|---|---|
 | Auth | Clerk (hosted) | Shared org, per-product application within Clerk |
-| Database | Convex (hosted) | One deployment per product for isolation (Jr separate from adult per §13.1) |
-| Voice TTS | KittenTTS on Hetzner | Shared CPU pool, per-product queue |
+| Database (OLTP) | PostgreSQL on Contabo Warehouse (over WireGuard) | Per-product schema within shared DB |
+| Database (realtime) | Convex (hosted) | One deployment per product for isolation (Jr separate from adult per §13.1) |
+| Voice TTS | KittenTTS on Hetzner Engine | Shared CPU pool, per-product queue |
 | File storage | Hetzner Storage Box S3 + optional Cloudflare R2 | Shared bucket with per-product prefix |
-| Cron | Coolify cron containers | Shared runner, per-product job definitions |
+| Cron | Coolify cron containers (Warehouse) | Shared runner, per-product job definitions |
 | Queue | Redis on Coolify (phase 2) | Shared instance, per-product namespace |
-| Observability | Loki + Grafana on Hetzner | Shared stack, per-product log streams |
+| Observability | Grafana on Contabo Warehouse (already running) | Shared stack, per-product log streams |
+| CI/CD | GitLab CE on Warehouse + GitLab Runner on Engine (already running) | Per-repo pipelines |
 
-SOPS for infra-as-code secrets. Coolify env vars per product. Per Karen's §7 security spec, no primitive runs outside this matrix without a security review.
+SOPS for infra-as-code secrets. Coolify env vars per product. Per Karen's §7 security spec, no primitive runs outside this matrix without a security review. Coolify / GitLab CE / Postgres / Grafana are adopted, not installed.
 
-## 16. Top-level ecosystem diagram
+## 16. Top-level ecosystem diagram (v3, proprietary-centric)
 
-One picture showing every product, every shared primitive, Hetzner as the container for the backend, and hosted SaaS as external boxes. This is the canonical architecture slide.
+One picture showing the proprietary 8GI stack at the centre, client surfaces around it, shared primitives feeding in, hosted SaaS as external boxes. This is the canonical architecture slide.
 
 ```mermaid
 flowchart TB
@@ -630,6 +743,7 @@ flowchart TB
     Kid[Neurodivergent kids<br/>8gentjr]
     Dev[Developers<br/>8gent-code CLI]
     OSUser["OS tenants<br/>{user}.8gentOS.com"]
+    Operator[Operators<br/>James + circle]
     Visitor[Public visitors<br/>marketing sites]
   end
 
@@ -650,32 +764,52 @@ flowchart TB
     Convex[Convex<br/>realtime DB]
   end
 
-  subgraph Hetzner["Hetzner AX41-NVMe (Falkenstein, EU)"]
-    subgraph Caddy["Caddy reverse proxy + TLS"]
-      CA[on-demand TLS<br/>wildcard *.8gentOS.com]
+  subgraph Contabo["Contabo Warehouse (control plane box)"]
+    COO[Coolify orchestrator]
+    GL[GitLab CE]
+    PG[(PostgreSQL)]
+    GRF[Grafana]
+  end
+
+  subgraph Engine["Hetzner Engine (compute, 8gi namespace)"]
+
+    subgraph Proprietary["8GI proprietary stack (the moat)"]
+      direction TB
+      SGW[Security g8way<br/>NemoClaw, COPPA, GDPR]
+      MPX[Model proxy / g8way<br/>auth, routing, billing]
+      CP[Control plane<br/>orchestration, task queue, memory]
+      VES[Vessels<br/>isolated agent runtimes]
+      PANE[Pane<br/>operator surface]
+      TSHD[Toolshed<br/>catalog]
+      TBLT[Toolbelts<br/>per-role bundles]
+      FAC[Factory<br/>benchmarks]
     end
 
-    subgraph Apps["Product apps"]
+    subgraph Client["Client surfaces (ride on top)"]
+      direction TB
+      OW[Outworked<br/>Mission Control]
+      TG[Telegram bot<br/>eightgentcodebot]
+      LIV[LinkedIn vessel]
+      DIS[Discord gateway]
+    end
+
+    subgraph Product["Product backends"]
+      direction TB
       JR[8gentjr backend<br/>COPPA isolated]
       OS[8gent-OS Next.js<br/>multi-tenant]
       GW[8gent-app gateway]
-      VES[8gent-code vessel daemon<br/>agent-pool N=10]
-      FAC[Factory / benchmarks]
-      CP[8gi-control-plane<br/>Discord gateway]
-      TG[Telegram bot server]
     end
 
-    subgraph Prim["Shared primitives"]
+    subgraph Prim["Commodity primitives"]
       TTS[KittenTTS pool]
-      Q[Qdrant shared indexes]
+      Q[Qdrant indexes]
       R[Redis queue]
       CR[Cron runner]
-      LG[Loki + Grafana]
     end
 
     subgraph Store["Storage"]
-      NVMe[2 x 1TB NVMe<br/>per-user SQLite + FTS5]
-      SB[Hetzner Storage Box<br/>backups + S3 assets]
+      NVMe[Local NVMe<br/>per-user SQLite + FTS5]
+      SB[Storage Box<br/>backups + S3 assets]
     end
   end
 
@@ -688,33 +822,168 @@ flowchart TB
   Kid --> CF
   Dev --> CLI
   OSUser --> CF
+  Operator --> CF
   Visitor --> CF
 
   CF --> Vercel
-  CF --> CA
+  CF --> SGW
 
-  CA --> JR
-  CA --> OS
-  CA --> GW
-  CA --> VES
-  CA --> CP
-  CA --> TG
+  SGW --> MPX
+  SGW --> CP
+  CP --> VES
+  VES --> TSHD
+  VES --> TBLT
+  CP --> PANE
+  VES --> FAC
 
-  Apps --> Clerk
-  Apps --> Convex
-  Apps --> Prim
+  OW --> CP
+  TG --> CP
+  LIV --> CP
+  DIS --> CP
+
+  JR --> CP
+  OS --> CP
+  GW --> CP
+
+  Proprietary --> Prim
+  Product --> Prim
   Prim --> Store
+  Proprietary -. CI/CD .- GL
+  Proprietary -. logs over WG .- GRF
+  Proprietary -. OLTP over WG .- PG
+  COO -. deploys .-> Engine
+
+  JR --> Clerk
+  JR --> Convex
+  OS --> Clerk
+  OS --> Convex
 
   CLI -. opt-in wss .-> VES
   LE --- GC
   GC -. sync .-> Convex
 ```
 
-## 17. References
+## 17. Risk register companion (v3 note)
+
+No v3 changes to the v2 risk register in §10. The v3 delta is that "Coolify install fails" and "Postgres provisioning blocks phase 0" are no longer risks (both already running). New low-probability risks added informally:
+
+- **Personal trading stack resource contention on Engine.** Freqtrade, MT5/Wine (needs broker), quant-marketing, Propeding share the box with 8GI workloads. Mitigation: separate Docker network, per-project Coolify namespace, `cgroups` CPU quota if contention appears. Likelihood low (1.6 GB of 62 GB used today), impact medium if it spikes.
+- **WireGuard mesh flap.** 33ms link is healthy today, but any WireGuard outage takes Grafana observability and Warehouse-side Postgres off the table for Engine workloads. Mitigation: health-check alert from Grafana into Telegram, fallback DB connection string that can point Engine-local if the mesh drops for more than N minutes (phase 2 work, not day one).
+- **GitLab Runner backlog.** Engine runs GitLab Runner for CI. If 8GI CI volume grows past ~4 parallel jobs, personal-stack rebuilds will queue. Mitigation: scale to N runners with Coolify, or shard runners between boxes. Defer until observed.
+
+## 18. Business model and revenue path
+
+James, 2026-04-24: "the business model needs to also make sense." Self-hosting sovereignty is a cost-discipline move, not a revenue source. This section is the revenue argument the plan rests on. Placeholder numbers are explicitly labelled; no fabrication.
+
+**Tag key:** [ST] short-term 0-6mo, [MT] medium 6-18mo, [LT] long-term 18mo+.
+
+### 18.1 Licensed g8way deployments [MT / LT]
+
+- **Target customer:** enterprise companies (50-500 staff in [MT], 500+ in [LT]) that want their own AI OS, cannot use a US-hosted agent (EU data residency, sovereign cloud requirement, regulated industry), and have in-house DevOps to run it.
+- **Value prop:** deploy the proprietary g8way + control plane + vessels inside their own cloud or on-prem. Own the data. One vendor (8GI) for the full stack instead of stitching LLM providers + MLOps + observability separately.
+- **Pricing direction (order of magnitude, placeholder):** annual licence in the low five figures per deployment at [MT], scaling to mid-five / low-six at [LT] with enterprise SLAs and support. Price separately from any model tokens consumed. James to confirm target segment before firming numbers.
+- **Delivery:** Docker Compose bundle + Terraform for cloud targets + runbook. Managed update channel.
+- **Risk / competitor:** LangChain / LangSmith Enterprise, Vercel AI SDK on Vercel Enterprise, self-hosted OpenWebUI. Differentiation is the proprietary control plane and the g8way as a single auth + billing + policy surface, not a bag of LLM libraries.
+
+### 18.2 Managed vessel hosting [ST / MT]
+
+- **Target customer:** solo developers and small teams that want 8gent-code-as-a-service without running their own box. Especially EU customers who cannot use US-hosted coding agents.
+- **Value prop:** "your own vessel, Irish-hosted, GDPR-clean, one endpoint." Keeps Principle 2 (local-first) for the CLI while offering a paid opt-in for cross-device sessions, longer context, shared knowledge indexes.
+- **Pricing direction (placeholder):** €10-30/mo per seat depending on tier. Usage-based add-on for heavy inference.
+- **Delivery:** existing vessel daemon running on Hetzner Engine, Clerk-gated, per-tenant namespace.
+- **Risk / competitor:** Cursor, GitHub Copilot Workspace, Claude Code Cloud (Anthropic Managed Agents). These are all US-hosted. Our angle is sovereignty + local-first default.
+- **Shortest time-to-revenue.** Infrastructure already exists (Fly today, Hetzner post-migration). Clerk + Convex already wired. Billing integration is the gap. 8-12 weeks to first paying seat with focused work. Flagged as the likely shortest path to revenue.
+
+### 18.3 Model proxy usage tiers [ST]
+
+- **Target customer:** same audience as managed vessels, plus third-party app builders who want a European-hosted LLM gateway.
+- **Value prop:** free tier (capped) for first-touch; paid tier charges a margin over direct provider cost but bundles failover (already wired: local 8gent → local Qwen → OpenRouter `:free`), observability, rate limiting, and billing. Saves the customer from implementing provider fallback themselves.
+- **Pricing direction (placeholder):** free tier ~10k tokens/day. Paid tier ~10-20% margin over provider pass-through. Higher tier adds SLA, priority routing, custom failover policies.
+- **Delivery:** existing model proxy container, plus a Stripe integration and a metering table in Warehouse Postgres.
+- **Risk / competitor:** OpenRouter itself, Portkey, LiteLLM-as-a-service, Anthropic direct. Our differentiators: EU host, integrates directly with 8GI vessels + control plane, failover including local providers (8gent, Ollama) which none of the cloud proxies can do.
+
+### 18.4 8gentjr, stays free forever [N/A]
+
+**No monetisation proposed.** Per constitution + `project_product_readiness.md`, 8gentjr is free for neurodivergent kids. Funded by:
+- Donations / grants (to be pursued when the Foundation CLG is live)
+- Parent company cross-subsidy: revenue from §18.1, §18.2, §18.3 covers Jr's infra line item (projected <€50/mo delta at 10k kids per §13.1).
+
+Do not propose plans that monetise Jr under any label. This is a hard guardrail.
+
+### 18.5 Consulting / bespoke deployments [ST / MT]
+
+- **Target customer:** firms that want 8gent-code or the g8way adopted internally. Could be an enterprise pilot before §18.1, or standalone for orgs that want hand-holding.
+- **Value prop:** 8GI implements + trains the customer's team + stays on retainer for first quarter.
+- **Pricing direction (placeholder):** day-rate consulting at the top of James's current market rate; project engagements in the low-to-mid five figures. Not the core business, but pays for capacity while the product revenue ramps.
+- **Delivery:** James + subcontracted engineers. Output is a working deployment + recorded runbooks.
+- **Risk / competitor:** anyone with AI-engineering-consultancy services. Differentiation is the 8GI stack itself; we are selling implementation of our product, not generic consultancy.
+
+### 18.6 Open-core [ST foundation; MT revenue]
+
+- **Structure:** 8gent-code stays Apache 2.0 / MIT, free forever. Commercial features live in a separate package / namespace:
+  - **Free (open-core):** CLI, TUI, local vessel, basic skills, local providers (8gent, Ollama), local memory.
+  - **Paid (commercial features):** multi-tenant control plane, g8way SSO + audit, enterprise SLAs, priority support, advanced observability dashboards, soldered Clerk org / Convex deployment.
+- **Why this works:** the free tier drives adoption and community; the paid tier monetises customers who need org-scale features the community tier does not address. Pattern proven by GitLab, Sentry, Plausible.
+- **Pricing direction (placeholder):** tiered seat pricing on the commercial side; free side stays zero.
+- **Delivery:** feature flags already partially wired in the agent code. Paid features gated behind Clerk org plan.
+- **Risk / competitor:** community backlash if the split is seen as predatory. Mitigation: never regress a free feature; commercial features are net-new org-scale capabilities, not gatekeeping of core UX.
+
+### 18.7 Data sovereignty proposition [MT / LT]
+
+- **Target customer:** European enterprise, European government / public sector, regulated verticals (health, education, finance) that cannot use US cloud agents for data-residency reasons.
+- **Value prop:** Irish-resident founder + European-hosted infra (Hetzner EU, Contabo EU, WireGuard private mesh) + EU AI Act alignment + GDPR-native + no US CLOUD Act exposure. Sold explicitly on this narrative, not as a secondary bullet.
+- **Pricing direction (placeholder):** premium over §18.1 or §18.2 baseline. Sovereignty tier adds a certification-ready compliance pack (DPIA, DPA, SCCs where applicable, audit log retention).
+- **Delivery:** reuses §18.1 / §18.2 stack, packaged with the compliance artifacts and a signed data residency commitment.
+- **Risk / competitor:** OVHcloud, Scaleway, Mistral-Enterprise. Differentiation: we are vertical (AI OS + agent stack), they are horizontal (cloud infra). Our pitch is to customers already building on agents who need sovereign hosting.
+
+### 18.8 Breakeven projection (placeholder; James to confirm numbers)
+
+**Goal:** at what revenue does 8GI cover its own infra + 1 full-time?
+
+Placeholder monthly cost stack (all figures labelled placeholder, James to confirm):
+
+| Line item | Monthly | Notes |
+|---|---|---|
+| Contabo Warehouse | placeholder (~€30-40) | already paying |
+| Hetzner Engine | placeholder (~€40-50) | already paying |
+| Convex | placeholder | existing plan |
+| Clerk | placeholder | existing plan |
+| Domain renewals (averaged) | placeholder (~€20-40) | 12-18 domains |
+| OpenRouter / provider credits | placeholder | usage-based, variable |
+| Vercel | placeholder | marketing sites |
+| 1 full-time engineer (Dublin, fully loaded) | placeholder (~€6-8k) | salary + PRSI + pension + overhead |
+| Accounting / compliance (CLG + LTD) | placeholder (~€300-500) | spread across year |
+| **Total placeholder monthly burn** | **~€7-9k (placeholder)** | |
+
+**Revenue needed:** monthly burn divided by gross margin. At ~70% gross margin (managed vessel + proxy tiers have compute cost baked in), revenue target ~€10-13k/mo (placeholder) to break even.
+
+**Path to revenue target (placeholder):**
+- 200-300 paid managed vessel seats at ~€20/mo average = €4-6k/mo.
+- 2-3 licensed g8way deployments at ~€1.5-2k/mo each (annualised) = €3-6k/mo.
+- Model proxy margin + consulting = €1-3k/mo.
+
+All numbers are placeholders requiring James to pressure-test pricing, addressable market, and the salary line. The structural point holds: three revenue legs (managed vessels, licensed g8way, proxy tiers) are enough to cover a modest burn without 8gentjr ever being monetised.
+
+### 18.9 Shortest time-to-revenue
+
+**Managed vessel hosting (§18.2).** Rationale:
+- Infrastructure exists (Fly now, Hetzner Engine post-migration).
+- Clerk auth + Convex backend already wired.
+- Vessel daemon already ships with session isolation and agent-pool.
+- Gap: Stripe billing + metering + per-tier rate-limiting at the proxy. Estimated 8-12 weeks of focused work.
+- Contrast with §18.1 licensed g8way: needs Terraform, runbook, SLA contract, enterprise sales cycle, 6-12 months.
+
+If James wants a first euro in the door fastest, §18.2 is the lane to build.
+
+## 19. Full ecosystem scope note (v3)
+
+See §12 (unchanged). v3 did not alter the repo-level classification. The v3 change is that the proprietary stack (control plane, pane, model proxy, vessels, security g8way, toolshed, toolbelts) is foregrounded in §15, §16, and §18 as the revenue-generating layer. Outworked was removed from "first-class" status and listed as a sibling client surface in §15.2.
+
+## 20. References
 
 - `docs/prd/8gent-computer/architecture.md` - on-device app, informs package reuse patterns.
 - `docs/prd/8gent-computer/security.md` - Karen's security spec, inherited principles.
 - `docs/specs/DAEMON-PROTOCOL.md` - WS protocol, unchanged by this migration.
-- Memory: `project_hetzner_infra.md`, `project_fly_architecture.md`, `project_8gent_architecture.md`, `project_8gi_org.md`, `project_8gent_bot_handle.md`, `project_eight_vs_lil_eight.md`, `project_8gentos_infra_architecture.md`.
+- Memory: `project_infra_real_state.md` (v3 ground truth), `feedback_proprietary_over_outworked.md` (v3 narrative), `project_hetzner_infra.md`, `project_fly_architecture.md`, `project_8gent_architecture.md`, `project_8gi_org.md`, `project_8gent_bot_handle.md`, `project_eight_vs_lil_eight.md`, `project_8gentos_infra_architecture.md`, `project_product_readiness.md`.
 - Portal: `https://8gi.org/media/infra/hetzner-migration` (auth-gated).
 - Parent tracking issue: `8gi-foundation/8gent-code#1785`. Child phases: #1786 #1787 #1788 #1789 #1790.
