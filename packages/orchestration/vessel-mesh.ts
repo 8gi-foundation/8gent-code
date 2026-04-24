@@ -483,6 +483,112 @@ export class VesselMesh {
     this.taskHandler = handler;
   }
 
+  /**
+   * Handle a mesh message that arrived on an INCOMING socket (gateway-routed).
+   * Unlike handleMessage(), responses are sent back on the same socket the
+   * message arrived on, not looked up in this.connections (which only tracks
+   * outgoing peer connections).
+   *
+   * Per-peer auth: every type except `capability-query` requires the sender's
+   * vesselId to be in the peers map within the 90s heartbeat window. The
+   * capability-query type is exempt because it's how peers introduce
+   * themselves before being added to the registry.
+   */
+  handleIncomingMessage(rawJson: string, replyTo: { send(s: string): void }): void {
+    let msg: VesselMessage;
+    try {
+      msg = JSON.parse(rawJson) as VesselMessage;
+    } catch {
+      return;
+    }
+
+    if (!msg || typeof msg !== "object" || !msg.from || !msg.type) return;
+
+    // Per-peer auth (capability-query exempt — that's the introduction)
+    if (msg.type !== "capability-query") {
+      const peer = this.peers.get(msg.from);
+      if (!peer) return;
+      if (Date.now() - peer.lastHeartbeat > 90_000) return;
+    }
+
+    const reply = (out: VesselMessage) => {
+      try { replyTo.send(JSON.stringify(out)); } catch {}
+    };
+
+    if (msg.type === "capability-query") {
+      const peerInfo = msg.payload?.vesselInfo as VesselInfo | undefined;
+      if (peerInfo) this.addPeer(peerInfo);
+      reply({
+        id: this.genId(),
+        from: this.vesselInfo.id,
+        to: msg.from,
+        type: "capability-response",
+        payload: { vesselInfo: this.vesselInfo },
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    if (msg.type === "capability-response") {
+      const peerInfo = msg.payload?.vesselInfo as VesselInfo | undefined;
+      if (peerInfo) this.addPeer(peerInfo);
+      return;
+    }
+
+    if (msg.type === "heartbeat") {
+      const peer = this.peers.get(msg.from);
+      if (peer) {
+        peer.lastHeartbeat = Date.now();
+        if (typeof msg.payload?.activeSessions === "number") {
+          peer.activeSessions = msg.payload.activeSessions;
+        }
+      }
+      return;
+    }
+
+    if (msg.type === "task" && this.taskHandler) {
+      const task = msg.payload as unknown as TaskPayload & { correlationId?: string };
+      const start = Date.now();
+      this.taskHandler(task, msg.from)
+        .then((result) => {
+          reply({
+            id: this.genId(),
+            from: this.vesselInfo.id,
+            to: msg.from,
+            type: "result",
+            payload: result as unknown as Record<string, unknown>,
+            correlationId: task.correlationId,
+            timestamp: Date.now(),
+          });
+        })
+        .catch((err) => {
+          reply({
+            id: this.genId(),
+            from: this.vesselInfo.id,
+            to: msg.from,
+            type: "result",
+            payload: {
+              status: "failed",
+              output: "",
+              durationMs: Date.now() - start,
+              error: String(err),
+            },
+            correlationId: task.correlationId,
+            timestamp: Date.now(),
+          });
+        });
+      return;
+    }
+
+    if (msg.type === "result" && msg.correlationId) {
+      const pending = this.pendingRequests.get(msg.correlationId);
+      if (pending) pending.resolve(msg);
+      return;
+    }
+
+    this.messageHandler?.(msg);
+  }
+
   // MARK: - Heartbeat & Discovery
 
   private startHeartbeat(): void {

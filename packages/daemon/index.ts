@@ -152,43 +152,10 @@ async function main(): Promise<void> {
   // Create the agent pool - manages Agent instances per session
   pool = new AgentPool(poolConfig);
 
-  // Start WebSocket gateway with agent pool
-  server = startGateway({
-    port: config.port,
-    authToken: config.authToken,
-    pool,
-  });
-
-  // Start heartbeat
-  startHeartbeat({
-    intervalMs: config.heartbeatIntervalMs,
-    enabled: config.heartbeatEnabled,
-  });
-
-  // Start cron scheduler
-  await startCron();
-
-  // Auto-register daily CEO summary if not present
-  const existingJobs = getJobs();
-  if (!existingJobs.find((j: any) => j.id === "daily-ceo-summary")) {
-    addJob({
-      id: "daily-ceo-summary",
-      name: "CEO Daily Summary",
-      expression: "0 9 * * *",
-      type: "agent-prompt",
-      payload: "Generate a brief daily summary: list completed tasks, open PRs, and any pending work from the task registry at ~/.8gent/tasks.json",
-      enabled: true,
-      lastRun: null,
-      nextRun: null,
-      recurring: true,
-    });
-    console.log("[daemon] registered daily CEO summary cron (9 AM)");
-  }
-
-  console.log(`[daemon] ready - ws://localhost:${config.port}`);
-  console.log(`[daemon] health check: http://localhost:${config.port}/health`);
-
-  // Lotus-Class Compute — peer mesh. OFF by default. Internal-only during spike.
+  // Lotus-Class Compute — set up the mesh BEFORE the gateway so the gateway
+  // can route incoming mesh-protocol messages to mesh.handleIncomingMessage().
+  // Mesh start (registry + heartbeat) still happens later, but the handler
+  // and onTask wiring need to exist before we accept any peer connections.
   if (process.env.GROVE_ENABLED === "1") {
     const vesselId = process.env.VESSEL_ID || `local-${require("os").hostname()}`;
     const vesselUrl = process.env.VESSEL_URL || `ws://localhost:${config.port}`;
@@ -237,9 +204,50 @@ async function main(): Promise<void> {
         };
       }
     });
+  }
 
+  // Start WebSocket gateway with agent pool (and mesh, if grove is enabled)
+  server = startGateway({
+    port: config.port,
+    authToken: config.authToken,
+    pool,
+    mesh,
+  });
+
+  // Start heartbeat
+  startHeartbeat({
+    intervalMs: config.heartbeatIntervalMs,
+    enabled: config.heartbeatEnabled,
+  });
+
+  // Start cron scheduler
+  await startCron();
+
+  // Auto-register daily CEO summary if not present
+  const existingJobs = getJobs();
+  if (!existingJobs.find((j: any) => j.id === "daily-ceo-summary")) {
+    addJob({
+      id: "daily-ceo-summary",
+      name: "CEO Daily Summary",
+      expression: "0 9 * * *",
+      type: "agent-prompt",
+      payload: "Generate a brief daily summary: list completed tasks, open PRs, and any pending work from the task registry at ~/.8gent/tasks.json",
+      enabled: true,
+      lastRun: null,
+      nextRun: null,
+      recurring: true,
+    });
+    console.log("[daemon] registered daily CEO summary cron (9 AM)");
+  }
+
+  console.log(`[daemon] ready - ws://localhost:${config.port}`);
+  console.log(`[daemon] health check: http://localhost:${config.port}/health`);
+
+  // Start mesh registry + discovery + heartbeat (mesh handler is already
+  // wired into the gateway above).
+  if (mesh) {
     await mesh.start();
-    console.log(`[daemon] grove mesh started - vesselId=${vesselId} region=${vesselRegion}`);
+    console.log(`[daemon] grove mesh started - vesselId=${mesh.getInfo().id} region=${mesh.getInfo().region}`);
   }
 
   // Graceful shutdown

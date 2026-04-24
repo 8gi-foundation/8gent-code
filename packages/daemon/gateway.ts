@@ -10,12 +10,25 @@ import type { AgentPool } from "./agent-pool";
 import { getJobs, addJob, removeJob, type CronJob } from "./cron";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import type { VesselMesh } from "../orchestration/vessel-mesh";
 
 export interface GatewayConfig {
   port: number;
   authToken: string | null; // null = no auth required
   pool: AgentPool;
+  /** Optional mesh handle. When present, the gateway routes mesh-protocol
+   *  messages (task, result, capability-query, capability-response,
+   *  heartbeat) to mesh.handleIncomingMessage(). */
+  mesh?: VesselMesh | null;
 }
+
+const MESH_TYPES = new Set([
+  "task",
+  "result",
+  "capability-query",
+  "capability-response",
+  "heartbeat",
+]);
 
 interface ClientState {
   id: string;
@@ -85,6 +98,19 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
     msg = JSON.parse(raw);
   } catch {
     send(ws, { type: "error", message: "invalid JSON" });
+    return;
+  }
+
+  // Mesh-protocol routing. Mesh messages carry `from` and use one of the
+  // VesselMessage types. Forward them to the mesh, which performs per-peer
+  // auth (registry membership + heartbeat freshness) and replies on the
+  // same socket. Returns silently when no mesh is wired (single-vessel mode).
+  if (
+    config.mesh &&
+    typeof (msg as any).from === "string" &&
+    MESH_TYPES.has((msg as any).type)
+  ) {
+    config.mesh.handleIncomingMessage(raw, ws);
     return;
   }
 
