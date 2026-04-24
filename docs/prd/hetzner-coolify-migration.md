@@ -1,11 +1,27 @@
 # Hetzner + Coolify Migration
 
 Owner: Rishi (8TO). Security review: Karen (8SO).
-Authored: 2026-04-24. Revised: 2026-04-24 (v3).
+Authored: 2026-04-24. Revised: 2026-04-24 (v3, v4).
 Branch: `docs/prd/hetzner-coolify-migration`.
 Status: plan only, no live infra touched in this PR.
 Parent tracking issue: (filed after PR open).
 Portal mirror: `https://8gi.org/media/infra/hetzner-migration` (auth-gated, see 8gi-org PR `feat/media-infra-hetzner-migration`).
+
+---
+
+## v4 changelog (2026-04-24)
+
+James caught four client-surface framing errors in v3. v4 amends in place. v3 content retained; corrections are additive.
+
+1. **8gentOS is the PRIMARY client surface, not a backend product.** v3 listed `{user}.8gentOS.com` only in §13.3 as a "per-user subdomain product" and omitted it entirely from §6.2 target-state diagram, §15.2 client-surface table, and §16 ecosystem diagram. Per `feedback_8gentos_primary_surface`, 8gentOS leads every client-surface list. Order is: 8gentOS web at `{user}.8gentOS.com` → 8gent Computer (Mac-native) → 8gentjr → TUI → Telegram bot → Discord gateway → CLI / utility bots. Diagrams in §6.2 and §16 redrawn with 8gentOS centred. §15.2 table reordered with 8gentOS first.
+
+2. **Outworked is third-party, dropped from 8GI architecture.** Per `feedback_outworked_is_third_party`, Outworked is someone else's product. v3 listed it as a 8GI client surface in §3.1, §5, §6.2, §8 Phase 2, §11, §15.2, §16. v4 strikes Outworked from all 8GI architecture diagrams, ecosystem maps, product lists, cost analyses, and Phase 2 deliverables. One footnote remains in §15.2 marking it as "external desktop app James uses that reads the 8GI agent-mail bus" so anyone reading old context understands the demotion.
+
+3. **LinkedIn vessel is internal automation, not a client surface.** Code inspection of `8gent-code/apps/linkedin-vessel/` confirms it is a scheduled Fly.io worker for James's own LinkedIn outreach (li_at cookie, 20 conn-requests/day, HyperAgent template self-rewrite every 6h). It is an internal automation worker on the agent-mail / control-plane bus, not a user-facing surface. v4 moves it from "client surfaces" to a new "internal automation services" sub-list in §15 and removes it from the primary client-surface bar in §6.2 + §16.
+
+4. **8gentOS user-extensibility scaling factor (was missing).** §13.3 covered Next.js tenant routing only. It missed the actual product: every 8gentOS instance is fully extensible (mini-apps, user-authored skills, slash commands, generated content, optional skill-marketplace publishing). Scaling 8gentOS is NOT "host N Next.js sites" but "host N user-extensible OS instances where storage + compute grow with each user's authored skills + apps + content." §13.3 expanded with: per-tenant code-execution sandbox, per-tenant storage-growth projection, skill authoring + marketplace flow, compute amplification factor.
+
+v3 content retained. v4 is corrections + additions only.
 
 ---
 
@@ -32,7 +48,7 @@ v2 content retained; v3 deltas are additive or in-place amendments. No section w
 
 The migration is therefore not "stand up a fresh box"; it is "move Fly workloads into the existing mesh under the existing Coolify." Phase 0 adopts what is running: create an `8gi` namespace in the existing Coolify, register Engine as a deployment target, provision the first vessel container, point its DB to Warehouse Postgres over WireGuard private IPs, confirm logs flow to existing Grafana. Nothing new is installed at the platform layer.
 
-The proprietary stack is the product. Control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts. These are what 8GI licenses, hosts, and sells. Outworked, Telegram bot, LinkedIn vessel, Discord gateway are sibling client surfaces that ride on top; they do not replace the proprietary layer in the diagram.
+The proprietary stack is the product. Control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts. These are what 8GI licenses, hosts, and sells. Client surfaces ride on top in this order, primary first: **8gentOS at `{user}.8gentOS.com`** (the user's web home base), 8gent Computer (Mac-native), 8gentjr (kids product), TUI (8gent-code terminal), Telegram bot (`@eightgentcodebot`), Discord gateway (community), CLI / utility bots. LinkedIn vessel is an internal automation worker on the agent-mail bus, not a user-facing surface (see §15.2). Outworked is third-party, not a 8GI surface.
 
 Convex and Clerk stay hosted because rebuilding them offers zero user-facing benefit. Vercel stays for marketing until a phase-4 decision. Fly.io sunsets only after dual-run parity is proven. §19 turns self-hosted sovereignty into revenue: licensed g8way, managed vessel hosting, model proxy tiers, open-core commercial features, EU data-sovereignty positioning. 8gentjr stays free forever per constitution.
 
@@ -54,8 +70,9 @@ Convex and Clerk stay hosted because rebuilding them offers zero user-facing ben
 - Qdrant local container (server-side, separate from the per-install on-device Qdrant in Karen's spec).
 - Telegram bot server for `@eightgentcodebot` (bridge to local + cloud vessels).
 - AgentMail backend infrastructure (if James confirms it is ready to leave current host).
-- Outworked backend, if not already dependent on Vercel-specific primitives.
 - Observability: Loki + Grafana stack as a Coolify service.
+
+_(v4: Outworked removed from in-scope. It is a third-party desktop app, not a 8GI workload. See §15.2 footnote.)_
 - Backups: Hetzner Storage Box nightly snapshot, plus Coolify's own backup per service.
 
 ### 3.2 Hosted SaaS that stays (with justification)
@@ -89,8 +106,9 @@ Convex and Clerk stay hosted because rebuilding them offers zero user-facing ben
 | Qdrant (shared / server) | Not deployed yet | Hetzner / Coolify | New in phase 2 |
 | Telegram bot server (`@eightgentcodebot`) | Not deployed yet | Hetzner / Coolify | New in phase 2, references `project_8gent_bot_handle.md` |
 | AgentMail server | Placeholder - James to confirm | Hetzner / Coolify | Phase 2 |
-| Outworked backend | Placeholder - James to confirm | Hetzner / Coolify (or keep, TBD) | Phase 2-3 |
 | Observability (Loki + Grafana) | None | Hetzner / Coolify | Phase 2 |
+| 8gentOS multi-tenant Next.js | Not deployed | Hetzner / Coolify | New, primary client surface, see §13.3 |
+| LinkedIn vessel (internal worker) | Fly.io | Hetzner / Coolify (phase 2) | Internal automation, scheduled outreach, NOT a user-facing client surface |
 | 8gi.org portal | Vercel | Vercel (phase 4 decision) | Keep for now |
 | 8gent.world | Vercel | Vercel (phase 4 decision) | Keep for now |
 | 8gent.dev | Vercel | Vercel (phase 4 decision) | Keep for now |
@@ -172,15 +190,22 @@ flowchart LR
   class SaaS saas
 ```
 
-### 6.2 Target state (v3 corrected)
+### 6.2 Target state (v3 corrected, v4 client-surface fix)
 
-Warehouse Coolify orchestrates. 8GI compute workloads land primarily on Hetzner Engine. The proprietary layer (control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts) is centred in the diagram. Outworked, Telegram bot, LinkedIn vessel are peripheral client surfaces.
+Warehouse Coolify orchestrates. 8GI compute workloads land primarily on Hetzner Engine. The proprietary layer (control plane, pane, model proxy / g8way, vessels, security g8way, toolshed, toolbelts) is centred. Client surfaces ride on top in priority order: **8gentOS web at `{user}.8gentOS.com`** (primary), 8gent Computer (Mac-native), 8gentjr, TUI, Telegram bot, Discord gateway. Outworked is **not** drawn — third-party. LinkedIn vessel is drawn as an internal automation worker, not a user-facing surface.
 
 ```mermaid
 flowchart LR
-  subgraph Mac["James's Mac (unchanged)"]
+  subgraph Users["End users"]
+    direction TB
+    OSU["8gentOS tenants<br/>{user}.8gentOS.com<br/>PRIMARY surface"]
+    JR[8gentjr<br/>neurodivergent kids]
+    DEV[Developers<br/>TUI / CLI]
+  end
+
+  subgraph Mac["User devices"]
+    GC[8gent Computer<br/>Mac-native]
     LE[Lil Eight]
-    GC[8gent Computer]
     TUI[8gent-code TUI]
   end
 
@@ -196,22 +221,28 @@ flowchart LR
   subgraph Hetz["Hetzner Engine (compute, 8gi namespace)"]
     direction TB
     WG2[WireGuard]
-    subgraph Proprietary["8GI proprietary stack (centre)"]
+    subgraph ClientSurfaces["Client surfaces (priority order)"]
+      direction TB
+      OS[8gentOS Next.js<br/>multi-tenant + extensible<br/>per-user mini-apps + skills]
+      JRB[8gentjr backend<br/>COPPA isolated]
+      BOT[Telegram bot<br/>companion channel]
+      DIS[Discord gateway<br/>community channel]
+    end
+    subgraph Proprietary["8GI proprietary stack (the moat)"]
       direction TB
       CP[Control plane<br/>vessel orchestration<br/>task queue, memory bridge]
       PANE[Pane<br/>ops surface]
       MP2[Model proxy / g8way<br/>auth, rate limits, routing]
       SGW[Security g8way<br/>NemoClaw, COPPA, GDPR]
       VES[Vessels<br/>isolated agent runtimes]
-      TS[Toolshed<br/>tool + skill catalog]
+      SBOX[Per-tenant skill sandbox<br/>user-authored code execution]
+      TS[Toolshed<br/>tool + skill catalog<br/>+ marketplace]
       TB[Toolbelts<br/>per-role bundles]
       FAC[Factory<br/>batch benchmarks]
     end
-    subgraph Client["Client surfaces (peripheral)"]
-      BOT[Telegram bot]
-      OW[Outworked]
-      LIV[LinkedIn vessel]
-      DIS[Discord gateway]
+    subgraph Internal["Internal automation (not user-facing)"]
+      LIV[linkedin-vessel<br/>scheduled outreach worker<br/>James's account, 20 conn/day]
+      AMW[agent-mail bus<br/>officer routing]
     end
     subgraph Personal["James's personal stack (separate)"]
       FRQ[Freqtrade]
@@ -233,30 +264,48 @@ flowchart LR
   COO -. deploys to .-> Hetz
   WG1 <-- WireGuard mesh --> WG2
 
-  Mac -- wss public --> VES
-  VES --> MP2
-  VES --> SGW
-  CP --> VES
-  FAC --> MP2
+  OSU -- HTTPS --> OS
+  JR --> JRB
+  DEV --> TUI
+  TUI -- wss opt-in --> VES
+  GC -. local-first .- LE
+
+  OS --> SGW
+  JRB --> SGW
   BOT --> CP
-  OW --> CP
-  LIV --> CP
   DIS --> CP
+  OS --> SBOX
+  SBOX --> VES
+  SGW --> MP2
+  SGW --> CP
+  CP --> VES
   VES --> TS
   VES --> TB
+  FAC --> MP2
+
+  LIV --> CP
+  AMW --> CP
+
   VES -. memory/db over WG .-> PG
+  OS -. tenant data .-> CX
+  OS -- auth --> CL
+  JRB -- auth --> CL
+  JRB -. data .-> CX
   GRF -. logs over WG .- VES
   GRF -. logs over WG .- CP
   GRF -. logs over WG .- MP2
+  GRF -. logs over WG .- OS
   P -- auth --> CL
   P -- data --> CX
   W -- auth --> CL
 
+  classDef users fill:#E8E4DC,stroke:#C9A84C,color:#0E0F0F
   classDef mac fill:#E8E4DC,stroke:#C9A84C,color:#0E0F0F
   classDef hetz fill:#161718,stroke:#C9A84C,color:#F5F0E8
   classDef contabo fill:#161718,stroke:#C9A84C,color:#F5F0E8
   classDef vercel fill:#161718,stroke:#5C5751,color:#F5F0E8
   classDef saas fill:#1E2022,stroke:#9A9590,color:#F5F0E8
+  class Users users
   class Mac mac
   class Hetz hetz
   class Contabo contabo
@@ -284,7 +333,7 @@ gantt
   section Phase 2 Services
   Qdrant + volumes                 :p2a, after p1c, 2d
   Telegram bot server              :p2b, after p2a, 3d
-  AgentMail + Outworked (if ready) :p2c, after p2b, 4d
+  AgentMail + 8gentOS pathfinder + linkedin-vessel :p2c, after p2b, 4d
   Observability stack              :p2d, after p2a, 2d
 
   section Phase 3 Cutover
@@ -440,24 +489,26 @@ Tasks:
 
 **Rollback:** Flip `VESSEL_URL` back to Fly. Leave Hetzner vessel running for debugging. No user impact since Fly is still live.
 
-### Phase 2 - Qdrant, bot server, AgentMail, Outworked, observability
+### Phase 2 - Qdrant, bot server, AgentMail, 8gentOS pathfinder, linkedin-vessel migration, observability (v4)
 
-**Goal:** Services that do not exist on Fly today stand up on Hetzner fresh, cleanly.
+**Goal:** Services that do not exist on Fly today stand up on Hetzner fresh, cleanly. v4: replaced "Outworked backend" task with "8gentOS pathfinder tenant" + "linkedin-vessel migration". Outworked is third-party and out of scope.
 
 Tasks:
 1. Coolify application: Qdrant (bundled binary or official image), LUKS-mounted data volume, bound 127.0.0.1 only inside container network.
 2. Coolify application: Telegram bot server. Webhook target = `https://bot.8gent.app/webhook/<secret>`. References `project_8gent_bot_handle.md` for canonical handle.
 3. Coolify application: AgentMail server (if James confirms readiness; otherwise defer to phase 2b).
-4. Coolify application: Outworked backend (if confirmed ready and no Vercel-only primitives).
-5. Coolify application: Loki + Grafana + Promtail stack. Scrape logs from all Coolify containers.
-6. Configure Coolify backup for each stateful service volume.
+4. Coolify application: **8gentOS pathfinder tenant.** Multi-tenant Next.js shell, Caddy on-demand TLS for `*.8gentOS.com`, one test tenant `james.8gentOS.com`. Validates wildcard TLS + Convex tenant lookup + Next.js middleware Host-header split (full flow detailed in §13.3). This is the primary client surface; pathfinder de-risks it before paid tenants.
+5. Coolify application: **linkedin-vessel migration** from Fly to Hetzner Engine. Internal automation worker (NOT a user surface), `apps/linkedin-vessel/` source, persistent volume at `/data/.8gent/linkedin.db`, Fly secrets re-imported as Coolify env vars (`LINKEDIN_SESSION_COOKIE`, `LINKEDIN_JSESSIONID`, optional `CRUNCHBASE_API_KEY`). Daily limits unchanged: 20 connection requests, 50 messages, 80 profile views. HyperAgent reflection loop continues every 6h.
+6. Coolify application: Loki + Grafana + Promtail stack. Scrape logs from all Coolify containers.
+7. Configure Coolify backup for each stateful service volume.
 
 **Acceptance criteria:**
 - Qdrant reachable from vessel container, rejects external connections.
 - Telegram webhook delivers test message end-to-end: `@eightgentcodebot /ping` returns `pong` from vessel.
 - AgentMail sends and receives one test message (if in scope).
-- Outworked backend health check returns 200 (if in scope).
-- Grafana shows logs from vessel, factory, bot within 60 seconds of emission.
+- `https://james.8gentOS.com` returns the OS shell, Caddy issues cert via on-demand TLS, Convex tenant lookup succeeds. Sandbox runtime smoke-test executes a trivial user-authored skill in isolation.
+- linkedin-vessel `/health` returns 200 from Hetzner endpoint, manifest reachable, control-plane WS reconnect succeeds, daily-limit counters reset cleanly across the migration boundary.
+- Grafana shows logs from vessel, factory, bot, 8gentOS, linkedin-vessel within 60 seconds of emission.
 
 **Rollback:** Each service independently rollback-able via Coolify "redeploy previous version". Nothing depends on these yet except the bot, which has no production traffic until phase 3.
 
@@ -543,7 +594,7 @@ Hetzner spec scenarios (for James to choose from):
 - **Savings:** Fly.io elimination (~$31.40/mo). Factory runs at zero marginal cost on owned hardware instead of $27.64/mo burst.
 - **New cost:** Hetzner rental (€20-50/mo depending on spec).
 - **Net delta at Middle spec:** roughly break-even to -€10/mo savings after euro/dollar conversion.
-- **Real win:** not the dollars, it is capability. Same monthly gets a box that can host factory + Qdrant + bot + AgentMail + Outworked + observability, vs Fly's per-app cost scaling.
+- **Real win:** not the dollars, it is capability. Same monthly gets a box that can host factory + Qdrant + bot + AgentMail + 8gentOS multi-tenant + linkedin-vessel + observability, vs Fly's per-app cost scaling.
 - **Breakeven month:** month 1 if new services (Qdrant, bot, AgentMail) would otherwise have been deployed to Fly at $10-20/mo each. Month 3-4 if we are strictly comparing like-for-like vessel hosting.
 
 ### 9.5 One-time costs
@@ -575,7 +626,7 @@ Hetzner spec scenarios (for James to choose from):
 1. **Server spec.** Light / Middle / Heavy per §9.2. Recommend Middle (AX41-NVMe).
 2. **Datacenter.** Falkenstein (DE) / Helsinki (FI) / Ashburn (US). Recommend Falkenstein for EU sovereignty narrative + low latency from Dublin.
 3. **AgentMail migration readiness.** Is AgentMail on Fly / Vercel / somewhere, and is James ready to move it in phase 2?
-4. **Outworked backend readiness.** Same question. Where does it live today, and is it Vercel-bound?
+4. **8gentOS pathfinder tenant scope.** Is `james.8gentOS.com` the right pathfinder tenant, or do we want a "demo" / "staging" slug instead? Affects Phase 2 task 4. _(v4 replacement for prior Outworked question.)_
 5. **Vessel domain naming during dual-run.** `vessel-hetz.8gent.app` vs `v2.8gent.app` vs keep `vessel.8gent.app` and flip DNS hard. Recommend named hostname during dual-run.
 6. **Coolify authentication.** Clerk SSO for Coolify dashboard (via OIDC) vs admin user + 2FA. Recommend admin user + 2FA in v1, Clerk OIDC later.
 7. **Backup retention.** 7/4/3 (daily/weekly/monthly) vs something cheaper. Recommend 7/4/3.
@@ -650,7 +701,9 @@ Two deployment modes per user:
 
 Local-only users cost €0.
 
-### 13.3 8gent-OS (per-user subdomain product)
+### 13.3 8gent-OS (PRIMARY client surface, per-user extensible OS)
+
+**v4 reframe.** v3 treated 8gent-OS as a multi-tenant Next.js host. That undersells it. Per `feedback_8gentos_primary_surface`, every user's 8gentOS instance is **fully extensible by that user**, like James's Myresumeportfolio prototype. Each user can create mini-apps, author skills + slash commands, generate content (canvases, decks, journals, audio episodes), persist these as private artefacts, and optionally publish skills/apps to a future shared marketplace. Scaling 8gent-OS is therefore NOT just "host N Next.js sites for N users." It is "host N user-extensible OS instances where storage + compute grow with each user's authored skills + apps + content."
 
 Multi-tenant Next.js on Coolify. Each user gets `{user}.8gentOS.com`.
 
@@ -670,7 +723,75 @@ Recommend Caddy on-demand with a hint endpoint (Caddy's `ask` directive) that ve
 
 **Convex boundary.** Per locked decision, Convex stays hosted. Tenant records live in Convex. The Next.js layer runs on Hetzner and reads Convex from server components. Row-level auth is Clerk JWT with `orgId` matching the tenant's Convex tenant ID.
 
-**Performance budget.** Next.js Node server at roughly 150-300 req/s per core on routes with Convex round-trips (projection: assumes cached Convex query paths, cold paths are slower). AX41-NVMe 12-thread CPU gives ~1800-3600 req/s theoretical single-box ceiling before we saturate. Translated to users: at 10k tenants × 0.3% concurrent × 5 req/active-session/sec = ~150 req/s total load. Fits. At 100k tenants, same concurrency ratio = 1500 req/s, tight on one box, time for a second Hetzner box behind a Caddy load balancer.
+**Performance budget.** Next.js Node server at roughly 150-300 req/s per core on routes with Convex round-trips (projection: assumes cached Convex query paths, cold paths are slower). AX41-NVMe 12-thread CPU gives ~1800-3600 req/s theoretical single-box ceiling before we saturate. Translated to users: at 10k tenants × 0.3% concurrent × 5 req/active-session/sec = ~150 req/s total load. Fits. At 100k tenants, same concurrency ratio = 1500 req/s, tight on one box, time for a second Hetzner box behind a Caddy load balancer. Note: the Next.js req/s budget is the *static* surface. The user-extensibility load described below is additive and dominates at active-creator scale.
+
+#### 13.3.1 Per-tenant code execution sandbox (v4)
+
+When a user authors a skill or mini-app inside their OS and runs it, the code must execute somewhere with isolation. Three options evaluated:
+
+| Option | Isolation | Cold start | Ops cost | Verdict |
+|---|---|---|---|---|
+| **Shared Bun runtime in vessel** | weak (process boundary, capability-based) | none, hot | low | OK for trusted user-authored skills, NOT for runtime-arbitrary code |
+| **Coolify per-tenant function container** | strong (container) | seconds | high (one container per tenant) | overkill at small scale, viable at managed-tier paid users |
+| **Vercel-Sandbox-style microVM (Firecracker / gVisor)** | strongest (microVM) | ~250-500ms | medium (one host process per active sandbox) | best fit for arbitrary user-authored code at scale |
+
+**Recommendation (projection, not committed):** start with capability-restricted shared Bun runtime inside the vessel for the 8gentOS pathfinder tenant. Skills run as Bun workers with a NemoClaw policy ringfence (no fs writes outside `~/.8gentos/{tenantId}/`, no network outside an allow-list, no native modules). When James greenlights paid managed-tier 8gentOS, add a Firecracker microVM tier behind the same skill API. Do NOT build the microVM tier yet; the shared runtime ships first behind the same interface so the upgrade is transparent.
+
+**Resource accounting per skill execution.** Cap each skill run at: 256MB RAM, 30s wallclock, 100MB disk write, no outbound network unless declared in skill manifest. Exceeded caps abort the run and log to the tenant's audit feed. These caps are the v1 envelope; revisit if usage data shows them too tight.
+
+#### 13.3.2 Per-tenant storage growth (v4)
+
+A passive user (logs in, reads dashboards) is roughly 5-20MB/mo, mirroring the 8gentjr storage envelope. An **active creator** user (authors skills, generates content, runs scheduled jobs) is dominated by the artefacts they produce, not by their session metadata. Order of magnitude per active-creator user per month (projection, James's own Myresumeportfolio is the reference instance):
+
+| Artefact class | Typical size per item | Items per active-creator per month (projection) | Subtotal |
+|---|---|---|---|
+| Authored skills + slash commands | 5-50KB each | 5-15 | ~0.5MB |
+| Mini-apps (Next.js page + handlers) | 50-300KB each | 1-5 | ~1MB |
+| Generated text / deck / canvas content | 50KB-2MB each | 20-100 | ~50-200MB |
+| Generated audio (KittenTTS, ~50KB/min) | ~3MB / hour | 1-10 hours | ~3-30MB |
+| Generated images / canvases (PNG/SVG) | 100KB-2MB each | 10-50 | ~5-100MB |
+| Conversation + journal logs | 5-20MB total | flat-ish | ~10MB |
+| Skill execution audit logs | ~5KB / run | 50-500 runs | ~0.25-2.5MB |
+| **Active-creator total per month** | | | **~70-350MB / month** |
+
+That is roughly **20× the passive user envelope** and is the line that actually drives storage planning.
+
+Projection at 10k tenants with mixed profile (assume 70% passive at 12MB/mo, 25% light-creator at 100MB/mo, 5% heavy-creator at 350MB/mo): 7000 × 12 + 2500 × 100 + 500 × 350 = 84GB + 250GB + 175GB = **~510GB/mo of net growth**. Annualised ~6TB/year of tenant artefact storage. That exceeds AX41-NVMe's 2× 1TB. Mitigation: hot data on NVMe (last 30 days), cold data on Hetzner Storage Box S3-compatible (older), referenced by URL from Convex tenant records. Per `§14`, hit object-storage tier proactively at the 10k threshold rather than reactively.
+
+(Numbers above are explicitly **projections** anchored on James's Myresumeportfolio prototype as the reference; not measured at scale.)
+
+#### 13.3.3 Skill authoring + sharing flow (v4)
+
+```
+User in their 8gentOS at {user}.8gentOS.com
+   1. Opens the "Author skill" surface (analogue to Claude Code's .claude/skills/)
+   2. Writes / edits skill markdown + handler code in-tenant
+   3. Skill stored privately at /tenants/{tenantId}/skills/{skillId}
+   4. Test-run inside per-tenant sandbox (§13.3.1 caps)
+   5. (Optional) Publish to 8GI shared marketplace
+        → metadata + signed source written to a marketplace registry (Convex collection)
+        → review queue (manual at first, automated NemoClaw lint later)
+        → on approval, becomes installable by any tenant
+   6. Other tenants browse marketplace, click install
+        → skill copied to their /tenants/{theirId}/skills/, executes in their own sandbox
+```
+
+**v1 scope:** steps 1-4. Marketplace (steps 5-6) is deferred — the storage + review pipeline is non-trivial and shipping it before the OS itself has paying tenants is out-of-order. v1 still designs the on-disk path so the marketplace bolts on without migration.
+
+**Provenance + safety.** Marketplace skills sign their source with the publishing tenant's key. NemoClaw policy lints the manifest at install time (declared network destinations, fs paths, capabilities) and presents a permission prompt to the installing user.
+
+#### 13.3.4 Compute amplification factor (v4)
+
+A passive user does ~5 req/sec of session activity at peak. An active creator with 50 custom skills running on schedules behaves very differently. Worked example, projection:
+
+- 50 skills × 4 runs/day average = 200 sandbox executions per day per heavy-creator user.
+- Each execution: ~250ms-30s wallclock, average ~3s, average 80MB peak RAM.
+- Heavy-creator daily compute = 600s of single-core CPU + 80MB-seconds × 200 ≈ 16 core-minutes/day + 16GB-seconds of RAM weight.
+- A single AX41-NVMe core delivers 86,400 core-seconds/day. A core can therefore absorb ~90 heavy-creator users worth of scheduled skill runs per day, before considering bursty contention.
+
+**Implication.** At the 10k-tenant threshold from §14 with 5% heavy-creator share = 500 heavy-creator users → ~5.5 saturated cores of skill runtime, on top of Next.js routing. AX41-NVMe has 6 cores usable. **This means heavy-creator scheduled-skill workload alone consumes the box at 10k tenants, with no Next.js or vessel overhead left.** Mitigation: dedicate a second Hetzner box for skill sandboxes once heavy-creator share crosses a threshold (~200 users in projection) and route execution there over WireGuard. §14 expansion path updated to reflect this.
+
+**This is the scaling factor v3 missed.** 8gentOS scaling is dominated by user-authored skill execution at the active-creator tail, not by passive request volume. The plan must absorb this; numbers above are projections to be validated against the pathfinder tenant in Phase 2.
 
 ## 14. Scale thresholds and expansion path
 
@@ -680,7 +801,7 @@ Single-box Middle spec (AX41-NVMe, 64GB RAM, 2× 1TB NVMe, 6 cores / 12 threads)
 |---|---|---|
 | 100 | Nothing. Box idle, well under 10% utilisation across all products. | None |
 | 1,000 | Nothing critical. Jr TTS queue may show 50-100ms extra latency at peak (projection: 2.5% concurrency, KittenTTS CPU-bound). | Batch KittenTTS requests per tenant, keep one box |
-| 10,000 | RAM pressure on 8gent-OS + vessel sessions combined (projection: 48GB working set ceiling reached at 10% duty shared vessel + 3% OS concurrent). NVMe has ~40% headroom. | Second Hetzner AX41 behind Caddy load balancer. Partition: Box A = public apps (Jr, OS, marketing-adjacent), Box B = shared vessel + factory + observability. Tailscale mesh between boxes. |
+| 10,000 | (v4 update) Heavy-creator scheduled-skill execution saturates the box before raw RAM does (projection §13.3.4: 5% heavy-creator share × 50 scheduled skills × 4 runs/day = ~5.5 saturated cores). NVMe also pressure from artefact growth (projection §13.3.2: ~510GB/mo across 10k tenants). | Second Hetzner box dedicated to **per-tenant skill sandboxes** (Box B), accessed by Next.js on Box A over WireGuard. Object-storage tier (Hetzner Storage Box S3 / Cloudflare R2) for tenant artefacts older than 30 days. Cloudflare front (free tier) for edge cache + DDoS. Convex tier review. |
 | 100,000 | NVMe fills (projection: 100k × 50MB memory stores = 5TB, single box has 2TB). Bandwidth begins to matter for asset delivery. | Object storage tier (Cloudflare R2 or Hetzner Storage Box S3-compatible) for memory snapshots and AAC/video assets. Cloudflare fronts all public traffic for edge caching and DDoS. Third Hetzner box if compute also saturates. Convex tier bump. |
 
 Cloudflare fronting is a zero-cost step (free tier) that should happen before we are forced to, probably at the 10k threshold as a pre-emptive move. Cost: $0. Benefit: edge cache, DDoS absorption, geographic latency smoothing. No lock-in.
@@ -703,21 +824,37 @@ Cloudflare fronting is a zero-cost step (free tier) that should happen before we
 
 The control plane, model proxy / g8way, security g8way, and vessels all sit in the `8gi` Coolify namespace on Hetzner Engine. The pane and toolshed have UI components that may render via Vercel marketing surfaces or on-Mac, but their authority lives server-side. This layer is what revenue derives from (see §19).
 
-### 15.2 Client surfaces (peripheral, ride on top)
+### 15.2 Client surfaces (priority order, v4)
 
-Outworked is one of several client surfaces. None are the moat.
+**v4 reframe.** v3 listed Outworked + LinkedIn vessel as user-facing client surfaces. Both were wrong. Outworked is third-party (`feedback_outworked_is_third_party`). LinkedIn vessel is internal automation, not a user surface. v4 removes Outworked entirely from the 8GI surface inventory and moves linkedin-vessel to §15.4 internal automation.
 
-| Client surface | Role | Host |
-|---|---|---|
-| Outworked (Mission Control) | Operator dashboard / visualisation | Hetzner Engine `8gi` namespace (was Next.js on Vercel pre-mesh) |
-| Telegram bot (`@eightgentcodebot`) | Chat surface for vessels | Hetzner Engine `8gi` namespace |
-| LinkedIn vessel | Outbound / monitoring surface | Hetzner Engine `8gi` namespace |
-| Discord gateway | Community + board channel surface | Part of control plane |
-| 8gent-code CLI / TUI | Local developer surface | User's Mac (local-only by default) |
+Client surfaces in priority order, top is the primary product:
 
-If Outworked is referenced more than once per architectural diagram or section, rebalance the narrative.
+| # | Client surface | Role | Host |
+|---|---|---|---|
+| 1 | **8gentOS** at `{user}.8gentOS.com` | **Primary user surface.** Per-user web OS, fully extensible (mini-apps, skills, content, marketplace). See §13.3. | Hetzner Engine `8gi` namespace, multi-tenant Next.js + per-tenant sandbox |
+| 2 | 8gent Computer (Mac-native) | On-device companion to 8gentOS, local-first | User's Mac |
+| 3 | 8gentjr | Free product for neurodivergent kids, separate audience same family | Hetzner Engine `8gi` namespace, COPPA-isolated |
+| 4 | 8gent-code TUI | Power-user terminal surface | User's Mac (local-only by default; opt-in cloud vessel) |
+| 5 | Telegram bot (`@eightgentcodebot`) | Companion chat channel into the OS | Hetzner Engine `8gi` namespace |
+| 6 | Discord gateway | Community + board channel surface | Part of control plane |
+| 7 | CLI + utility bots | Power-user / automation channels | Per-utility, mostly Hetzner Engine |
 
-### 15.3 Shared commodity primitives
+**Footnote on Outworked.** Outworked is a third-party desktop app James personally uses to interact with his AI officers via the agent-mail bus (`~/.claude/agent-mail.db`). The agent-mail bus is 8GI-owned; Outworked is one of multiple readers/writers of that bus. Outworked is **not** a 8GI client surface, **not** in any 8GI cost analysis, **not** in any 8GI revenue projection, **not** in any 8GI architectural diagram beyond this footnote.
+
+### 15.3 Internal automation services (not user-facing)
+
+These are automation workers that run on the agent-mail / control-plane bus on James's behalf. They are not part of the client-surface inventory — no end user logs into them.
+
+| Service | Role | Host | Source |
+|---|---|---|---|
+| **linkedin-vessel** | Scheduled LinkedIn outreach for James's account. 20 conn-requests/day, 50 messages/day, 80 profile views/day. HyperAgent self-rewrite loop every 6h. Voyager API + li_at cookie auth. | Hetzner Engine `8gi` namespace post Phase 2 (Fly today) | `apps/linkedin-vessel/` |
+| **agent-mail bus** | Async messaging across officers + sessions. Read by 8GI surfaces and (separately) by James's third-party Outworked desktop client. | Hetzner Engine + `~/.claude/agent-mail.db` mirror | `~/.claude/bin/agent-mail` |
+| **cron runners** | Scheduled jobs (TradingView morning brief, social posting, daily-brief, autoresearch loop) | Coolify cron containers (Warehouse) | Various |
+
+linkedin-vessel was previously listed under "client surfaces" in v3. Code inspection (`apps/linkedin-vessel/VESSEL-CONTEXT.md` lines 17-26) confirms it executes outbound automation, not user interaction. Reclassified.
+
+### 15.4 Shared commodity primitives (renumbered from v3 §15.3)
 
 | Primitive | Where it lives | Shared vs per-product |
 |---|---|---|
@@ -733,17 +870,18 @@ If Outworked is referenced more than once per architectural diagram or section, 
 
 SOPS for infra-as-code secrets. Coolify env vars per product. Per Karen's §7 security spec, no primitive runs outside this matrix without a security review. Coolify / GitLab CE / Postgres / Grafana are adopted, not installed.
 
-## 16. Top-level ecosystem diagram (v3, proprietary-centric)
+## 16. Top-level ecosystem diagram (v4, 8gentOS-led, proprietary-centric)
 
-One picture showing the proprietary 8GI stack at the centre, client surfaces around it, shared primitives feeding in, hosted SaaS as external boxes. This is the canonical architecture slide.
+**v4 changes:** 8gentOS leads the client-surface row (primary product). Outworked removed. linkedin-vessel moved to internal-automation. Per-tenant skill sandbox added inside the proprietary subgraph. User-extensibility loop shown explicitly (user authors skill → sandbox executes → optional marketplace publish).
 
 ```mermaid
 flowchart TB
-  subgraph Users["Users"]
-    Kid[Neurodivergent kids<br/>8gentjr]
-    Dev[Developers<br/>8gent-code CLI]
-    OSUser["OS tenants<br/>{user}.8gentOS.com"]
-    Operator[Operators<br/>James + circle]
+  subgraph Users["Users (priority order)"]
+    OSUser["8gentOS tenants<br/>{user}.8gentOS.com<br/>PRIMARY"]
+    GCUser[8gent Computer<br/>Mac-native users]
+    Kid[8gentjr<br/>neurodivergent kids]
+    Dev[Developers<br/>8gent-code TUI]
+    Operator[Operators<br/>James + circle<br/>via Telegram + Discord]
     Visitor[Public visitors<br/>marketing sites]
   end
 
@@ -761,7 +899,7 @@ flowchart TB
 
   subgraph SaaS["Hosted SaaS"]
     Clerk[Clerk<br/>auth]
-    Convex[Convex<br/>realtime DB]
+    Convex[Convex<br/>realtime DB + tenant records]
   end
 
   subgraph Contabo["Contabo Warehouse (control plane box)"]
@@ -773,43 +911,45 @@ flowchart TB
 
   subgraph Engine["Hetzner Engine (compute, 8gi namespace)"]
 
+    subgraph ClientBackends["Client-surface backends (priority order)"]
+      direction TB
+      OS["8gentOS Next.js<br/>multi-tenant + extensible<br/>PRIMARY"]
+      JR[8gentjr backend<br/>COPPA isolated]
+      TG[Telegram bot<br/>eightgentcodebot]
+      DIS[Discord gateway]
+      GW[8gent-app gateway]
+    end
+
     subgraph Proprietary["8GI proprietary stack (the moat)"]
       direction TB
       SGW[Security g8way<br/>NemoClaw, COPPA, GDPR]
       MPX[Model proxy / g8way<br/>auth, routing, billing]
       CP[Control plane<br/>orchestration, task queue, memory]
       VES[Vessels<br/>isolated agent runtimes]
+      SBOX[Per-tenant skill sandbox<br/>user-authored code execution]
+      MKT[Skill marketplace<br/>deferred, design-only]
       PANE[Pane<br/>operator surface]
       TSHD[Toolshed<br/>catalog]
       TBLT[Toolbelts<br/>per-role bundles]
       FAC[Factory<br/>benchmarks]
     end
 
-    subgraph Client["Client surfaces (ride on top)"]
+    subgraph Internal["Internal automation (not user-facing)"]
       direction TB
-      OW[Outworked<br/>Mission Control]
-      TG[Telegram bot<br/>eightgentcodebot]
-      LIV[LinkedIn vessel]
-      DIS[Discord gateway]
-    end
-
-    subgraph Product["Product backends"]
-      direction TB
-      JR[8gentjr backend<br/>COPPA isolated]
-      OS[8gent-OS Next.js<br/>multi-tenant]
-      GW[8gent-app gateway]
+      LIV[linkedin-vessel<br/>James's outreach worker]
+      AMW[agent-mail bus]
+      CRON[Cron runners]
     end
 
     subgraph Prim["Commodity primitives"]
       TTS[KittenTTS pool]
       Q[Qdrant indexes]
       R[Redis queue]
-      CR[Cron runner]
     end
 
     subgraph Store["Storage"]
-      NVMe[Local NVMe<br/>per-user SQLite + FTS5]
-      SB[Storage Box<br/>backups + S3 assets]
+      NVMe[Local NVMe<br/>per-tenant artefacts + SQLite + FTS5]
+      SB[Storage Box / R2<br/>cold artefacts + backups]
     end
   end
 
@@ -819,10 +959,12 @@ flowchart TB
     GC[8gent Computer]
   end
 
+  OSUser --> CF
+  GCUser --> GC
   Kid --> CF
   Dev --> CLI
-  OSUser --> CF
-  Operator --> CF
+  Operator --> TG
+  Operator --> DIS
   Visitor --> CF
 
   CF --> Vercel
@@ -836,17 +978,23 @@ flowchart TB
   CP --> PANE
   VES --> FAC
 
-  OW --> CP
+  OS --> SGW
+  JR --> SGW
   TG --> CP
-  LIV --> CP
   DIS --> CP
-
-  JR --> CP
-  OS --> CP
   GW --> CP
 
+  OS --> SBOX
+  SBOX --> VES
+  SBOX -. publish .-> MKT
+  MKT -. install .-> OS
+
+  LIV --> CP
+  AMW --> CP
+  CRON --> CP
+
   Proprietary --> Prim
-  Product --> Prim
+  ClientBackends --> Prim
   Prim --> Store
   Proprietary -. CI/CD .- GL
   Proprietary -. logs over WG .- GRF
@@ -975,9 +1123,37 @@ All numbers are placeholders requiring James to pressure-test pricing, addressab
 
 If James wants a first euro in the door fastest, §18.2 is the lane to build.
 
-## 19. Full ecosystem scope note (v3)
+## 19. Full ecosystem scope note (v3, v4)
 
-See §12 (unchanged). v3 did not alter the repo-level classification. The v3 change is that the proprietary stack (control plane, pane, model proxy, vessels, security g8way, toolshed, toolbelts) is foregrounded in §15, §16, and §18 as the revenue-generating layer. Outworked was removed from "first-class" status and listed as a sibling client surface in §15.2.
+See §12 (unchanged at repo-classification level). v3 foregrounded the proprietary stack as the revenue layer. **v4 corrects four client-surface framing errors:**
+
+1. **8gentOS at `{user}.8gentOS.com`** is now drawn as the PRIMARY client surface in §6.2 + §16, leading the priority list in §15.2. v3 omitted it from the diagrams.
+2. **Outworked is removed** from §3.1, §5, §6.2 diagram, §8 Phase 2, §11, §15, and §16. It is third-party (`feedback_outworked_is_third_party`) and gets one footnote in §15.2 for clarity.
+3. **linkedin-vessel** was reclassified from "client surface" to "internal automation service" in §15.3. Code inspection of `apps/linkedin-vessel/` confirmed it is a scheduled outreach worker for James's account, not a user-facing surface.
+4. **8gentOS user-extensibility** scaling factor added in §13.3.1-13.3.4: per-tenant code-execution sandbox, per-tenant artefact storage growth, skill authoring + marketplace flow, compute amplification factor. §14 expansion path updated to reflect skill-runtime saturation as the dominant 10k-tenant constraint, not raw RAM.
+
+## v4 affected chunks (re-narration list for media agent)
+
+For the media agent re-narrating audio: re-narrate ONLY the chunks below. Untouched v3 chunks remain valid. Each entry maps to the existing chunk filename in `/tmp/hetzner-v3-chunks/`.
+
+| Chunk file | Section | Reason for re-narration |
+|---|---|---|
+| `chunk-01-hetzner-coolify-migration-prd-v3-header.txt` | header (revised line) | v4 added to "Revised:" list |
+| `chunk-02-v3-changelog-2026-04-24.txt` | changelog | v4 changelog block prepended |
+| `chunk-03-1-executive-summary.txt` | §1 | client-surface paragraph rewritten to lead with 8gentOS, drop Outworked, reclassify linkedin-vessel |
+| `chunk-05-3-scope.txt` | §3.1 | Outworked struck from in-scope list |
+| `chunk-07-5-service-inventory.txt` | §5 | Outworked row removed; 8gentOS + linkedin-vessel rows added |
+| `chunk-10-6-architecture-62-target-state-v3-corrected.txt` | §6.2 | full diagram redrawn (8gentOS centred, Outworked dropped, linkedin-vessel reclassified) |
+| `chunk-17-8-phase-plan-phase-2---qdrant-bot-server-agentmail-outworked.txt` | §8 Phase 2 | section heading + tasks rewritten: Outworked replaced with 8gentOS pathfinder + linkedin-vessel migration |
+| `chunk-27-11-open-questions-for-james.txt` | §11 | Outworked-readiness question replaced with 8gentOS pathfinder-tenant question |
+| `chunk-32-13-per-product-scaling-133-8gent-os-per-user-subdomain-produ.txt` | §13.3 | reframed as primary surface; new sub-sections §13.3.1-13.3.4 (sandbox, storage, marketplace flow, amplification) |
+| `chunk-33-14-scale-thresholds-and-expansion-path.txt` | §14 | 10k-tenant row rewritten: skill-runtime saturation is the binding constraint |
+| `chunk-36-15-proprietary-stack-the-moat-and-shared-infra-primitives.txt` | §15.2 | client-surface table reordered (8gentOS first), Outworked removed, footnote added |
+| `chunk-37-15-proprietary-stack-the-moat-and-shared-infra-primitives.txt` | §15.3 (was 15.3 commodity) | new §15.3 internal automation services inserted; old commodity primitives renumbered to §15.4 |
+| `chunk-38-16-top-level-ecosystem-diagram-v3-proprietary-centric.txt` | §16 | full ecosystem mermaid redrawn |
+| `chunk-50-19-full-ecosystem-scope-note-v3.txt` | §19 | rewritten to summarise v4 corrections |
+
+Untouched chunks (NOT re-narrated): chunks 04, 06, 08, 09, 11, 12, 13, 14, 15, 16, 18, 19, 20-26, 28, 29, 30, 31, 34, 35, 39-49, 51.
 
 ## 20. References
 
