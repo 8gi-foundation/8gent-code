@@ -33,12 +33,18 @@ Uses the `youtube_transcript_api` CLI (installed via `pipx install youtube-trans
    - Already-bare 11-char ID -> use as-is
    - Safe extractor: `echo "$URL" | grep -oE '[A-Za-z0-9_-]{11}' | head -1`
 
-2. **Fetch the transcript.** Default to plain text for summarization:
+2. **Fetch the transcript.** Default to plain text for summarization. Capture stdout so you can inspect it before using it:
    ```bash
-   youtube_transcript_api <VIDEO_ID> --format text
+   OUT=$(youtube_transcript_api <VIDEO_ID> --format text 2>&1)
    ```
 
-3. **Present back to the user.** Default: a 3-5 bullet summary plus 1-2 direct quotes. Offer the raw transcript on request. Don't dump the whole thing unsolicited.
+3. **Check for silent failure.** The CLI exits 0 even when the fetch fails, so exit code is not enough. Treat any of these as a failure and do NOT pass the output downstream:
+   - `OUT` is empty or whitespace-only.
+   - `OUT` matches `no transcripts` / `could not retrieve` / `TranscriptsDisabled` / `NoTranscriptFound` / `VideoUnavailable` (case-insensitive).
+
+   On failure: surface a clear message to the user and move to the fallback chain below. Never let an empty string propagate to a chained skill as if it were a successful transcript.
+
+4. **Present back to the user.** Default: a 3-5 bullet summary plus 1-2 direct quotes. Offer the raw transcript on request. Don't dump the whole thing unsolicited.
 
 ## Flags
 
@@ -53,6 +59,8 @@ Uses the `youtube_transcript_api` CLI (installed via `pipx install youtube-trans
 | `--exclude-generated` | Only manual (human) captions. |
 
 ## Fallback chain
+
+Triggered by the failure check in step 3, NOT by exit code (the CLI exits 0 on failure).
 
 1. `youtube_transcript_api <ID> --format text` is the primary.
 2. On failure: `--list-transcripts` to see what languages are actually available, retry with those codes.
