@@ -7,6 +7,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Corrupted identifiers in `packages/tools/`** — `structured-log.ts` referenced `this.current位` (CJK garbage from a bad merge) instead of `this.currentLevel`. `test-runner.ts` returned `total意图` instead of `totalDuration`. Both were causing `tsc --noEmit` to fail on main, blocking CI on every open PR. First payment toward the broader typecheck cleanup tracked separately.
+
+---
+
 ## [0.3.0] - 2026-04-11
 
 ### Added
