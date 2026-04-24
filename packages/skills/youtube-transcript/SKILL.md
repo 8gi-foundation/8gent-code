@@ -44,8 +44,10 @@ Uses the `youtube_transcript_api` CLI (installed via `pipx install youtube-trans
 
 | Flag | When to use |
 |------|-------------|
-| `--format text` | Summarization (default). |
-| `--format srt` | User wants timestamps for citations. |
+| `--format text` | Summarization (default). Plain text, one block. |
+| `--format pretty` | Human-readable preview with line breaks per caption segment. Good for skim-reading before summarising. |
+| `--format srt` | User wants timestamps for citations. SubRip subtitle format. |
+| `--format webvtt` | Embedding captions in HTML5 `<video>` or uploading to a player that expects WebVTT. |
 | `--format json` | Need structured data for a downstream tool. |
 | `--list-transcripts` | Check available languages before fetching. |
 | `--languages en es fr` | Priority order of language tracks. |
