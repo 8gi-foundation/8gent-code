@@ -501,11 +501,220 @@ Hetzner spec scenarios (for James to choose from):
 8. **Fly sunset trigger.** Time-based (14 days after DNS flip) vs metric-based (error rate < threshold for N days). Recommend time-based, simpler.
 9. **Phase 4 Vercel decision cadence.** Review once at end of phase 3 vs quarterly review. Recommend once at end of phase 3 then drop if staying on Vercel.
 
-## 12. References
+## 12. Full ecosystem scope
+
+v1 of this PRD planned around the self-hostable backend. v2 expands scope to the entire 8GI repo fleet so James has one picture of what runs where, and one plan for growth. Classification uses four buckets:
+
+- **HETZNER** - backend workload moves to the owned box under Coolify.
+- **VERCEL** - marketing or docs site, low traffic, image-heavy, stays on Vercel until phase 4 review.
+- **HOSTED SAAS** - app code in the repo, data/auth stays on the provider (Convex, Clerk).
+- **CLIENT** - library, skill, CLI, SDK. No hosting concern. Lives on the user's machine or npm.
+
+Source: `gh repo list 8gi-foundation --limit 100 --json name,description,pushedAt` on 2026-04-24. 15 repos enumerated.
+
+| Repo | Public | Bucket | Target | Notes |
+|---|---|---|---|---|
+| `8gent-code` | yes | CLIENT + HETZNER | user machine + Hetzner vessel | CLI is client; shared vessel daemon migrates per §5 |
+| `8gentjr` | yes | HETZNER | Hetzner (EU, COPPA-isolated) | See §13.1 |
+| `8gent-OS` | no | HETZNER | Hetzner Next.js tenants behind Caddy | See §13.3. Convex + Clerk stay hosted |
+| `8gent-app` | no | HETZNER | Hetzner (app gateway for Jr + OS) | Becomes shared auth/session entry to Hetzner services |
+| `8gent-vessel` | no | HETZNER | Hetzner / Coolify | Daemon image source; already in phase 1 |
+| `8gi-control-plane` | no | HETZNER | Hetzner | Board vessel orchestration, Discord gateway, task queue, memory bridge |
+| `8gent-telegram-app` | no | HETZNER | Hetzner | Webhook endpoint behind Caddy, shares bot server from §5 |
+| `8gent-games` | no | HETZNER | Hetzner (phase 2+) | Sim world backend, not shipped yet, deferred |
+| `8gent-dev` | yes | VERCEL | Vercel | Marketing / docs for 8gent.dev, low traffic, edge CDN wins |
+| `8gent-world` | no | VERCEL | Vercel | Same as above for 8gent.world |
+| `8gi-org` | no | VERCEL | Vercel | Inner-circle portal, Clerk-gated; Vercel phase 4 review |
+| `8gi-governance` | no | VERCEL | Vercel | Governance site, same posture as 8gi-org |
+| `8gent` (gateway) | yes | VERCEL | Vercel | Marketing-class landing for 8gent.app gateway; backend logic lives in `8gent-app` |
+| `Skills` | yes | CLIENT | npm / git | Claude Code skills, no hosting |
+| `8gi-setup` | no | CLIENT | git | Circle member setup script, ships on-device |
+
+Totals: 8 HETZNER, 5 VERCEL, 2 CLIENT, 0 HOSTED-SAAS-only (Convex and Clerk are consumed by the HETZNER apps above, not standalone repos).
+
+## 13. Per-product scaling
+
+No fabricated usage numbers in this section. Every throughput or storage figure is flagged as a projection with its assumption.
+
+### 13.1 8gentjr (shipped, free for neurodivergent kids)
+
+Backend surface area per active child: conversation session (Convex), AAC board state (Convex), food + symptom journal (Convex), KittenTTS voice out (Hetzner compute), optional video / AAC asset fetch (object storage).
+
+**Compute envelope (projection: KittenTTS on CPU, no GPU).** KittenTTS runs on CPU, ~250ms first-token latency on a modern x86 core for a ~20-word utterance. One AX41-NVMe core can serve roughly 4 concurrent synthesis jobs before queueing shows in user-perceived latency. Projection: AX41-NVMe (6 cores usable after headroom for vessel + bot + Coolify) serves ~24 concurrent TTS jobs. Assuming a child triggers voice ~1x per 15s during active use, that is ~360 active children at once on a single box before TTS becomes the bottleneck. At 10k registered kids with 2.5% concurrency (projection: consumer SaaS benchmark, assumes off-peak batching), peak concurrency ~250, fits.
+
+**Storage envelope (projection: text logs + small AAC state).** Per-child per-month: conversation tokens + journal entries + AAC state. Rough order of magnitude: 5-20MB/mo in Convex (text, structured). Video/AAC assets are shared, not per-child, so they sit in object storage once (S3-compatible on Hetzner Storage Box or Cloudflare R2), ~1-5GB total catalog. 10k kids × 12MB × 12 months = 1.44TB/yr. Convex stays hosted per locked decision; the 1.44TB/yr projection is the Convex line item scaling curve, not a Hetzner disk line.
+
+**COPPA posture.** Kids' data sits in isolated containers behind a distinct Caddy virtual host (`jr.hetzner.internal`) with a separate Coolify project, separate env bundle, separate volume mount, separate backup namespace. Falkenstein DE region (see open question #2) satisfies EU data residency for the Irish founder's default posture and covers COPPA via stricter GDPR child-data rules. Right-to-forget: scripted Convex record delete + S3 asset purge, documented in runbook (Phase 2 deliverable).
+
+**Zero-monetisation funding.** Infra cost must stay flat or sub-linear with users. KittenTTS has zero marginal cost. Convex scales linearly but slowly at current rates. Object storage is effectively flat after initial catalog upload. Bandwidth is the risk: if video asset fetches spike, Cloudflare fronting (free tier) caches at the edge. Projection: at 10k kids, Jr adds roughly +€0 Hetzner fixed and +$20-50/mo Convex delta (assumes existing Convex plan has headroom; if not, bump one tier).
+
+**Blast radius.** Isolation from adult data is enforced at three layers: separate Coolify project, separate Convex deployment if James agrees (new open question below), separate Clerk application. A compromise of one adult service cannot reach Jr data.
+
+### 13.2 8gent-code (open source agent, shared vessel is opt-in)
+
+Two deployment modes per user:
+- **Local-only** (default, Principle 2). User's Mac runs 8gent, Lil Eight, 8gent Computer. Zero Hetzner load.
+- **Shared vessel** (opt-in). User connects their CLI to `vessel.8gent.app` (Hetzner) for cloud compute, longer context, cross-device sessions.
+
+**Vessel capacity (projection: lean image, 4GB RAM per concurrent session upper bound).** AX41-NVMe has 64GB RAM. Reserving 16GB for Coolify + Qdrant + observability + factory headroom leaves 48GB for vessel sessions. At 4GB per active session (projection: lean vessel image, local model off-box via proxy), that is ~12 concurrent heavy sessions. Most sessions are bursty, not continuous: if average duty cycle is 10% (projection: CLI use pattern, 90% thinking), 120 connected users share 12 active slots. Projection: single box holds ~500 connected users at 10% duty, ~120 at heavy continuous use.
+
+**Daemon fleet model.** v1: one daemon, multi-session via `packages/daemon/agent-pool.ts` (already holds up to 10 concurrent). At growth: horizontal scale by running N daemon containers behind Caddy with session affinity on the `channel` field (protocol already supports it per `docs/specs/DAEMON-PROTOCOL.md`). Per-user daemon isolation is possible later (one container per paid tier user) but not in v1 scope.
+
+**Memory persistence at scale.** `packages/memory/store.ts` uses per-user SQLite + FTS5. Per-user DB is fine at 10k users on a single NVMe box (10k × 50MB average = 500GB; AX41-NVMe has 2× 1TB NVMe, one of which is the root). Projection: at 100k users, we hit NVMe pressure and move memory stores to a dedicated second box with NFS or object-store backed SQLite snapshots. Planned expansion, not a blocker.
+
+**Cost per user (projection; assumes Middle spec at €45/mo fully loaded, vessel shares the box with Jr + OS).**
+- At 100 connected users: ~€0.45/user/mo amortised.
+- At 1,000 connected users: ~€0.045/user/mo amortised.
+- At 10,000 connected users: requires second box (RAM ceiling at 10% duty hits). ~€0.009/user/mo on two boxes (€90/mo / 10k).
+
+Local-only users cost €0.
+
+### 13.3 8gent-OS (per-user subdomain product)
+
+Multi-tenant Next.js on Coolify. Each user gets `{user}.8gentOS.com`.
+
+**Wildcard domain + TLS.** Two routes considered:
+- **Let's Encrypt DNS-01 with wildcard cert** for `*.8gentOS.com`. Single cert, pre-issued, low latency for new signups. Requires DNS API credentials in Coolify env.
+- **Caddy on-demand TLS.** Caddy issues per-subdomain cert on first request (HTTP-01). Slower first hit for a new user, simpler ops, no DNS API credentials on the box.
+
+Recommend Caddy on-demand with a hint endpoint (Caddy's `ask` directive) that verifies the subdomain belongs to a real tenant in Convex before issuing. This avoids cert-exhaustion attacks from random `*.8gentOS.com` probes.
+
+**Subdomain provisioning flow.**
+1. User signs up on `8gentOS.com` via Clerk.
+2. Clerk webhook hits Hetzner endpoint (`/api/tenant/create`).
+3. Endpoint writes tenant record to Convex (tenant ID, subdomain slug, owner user ID, plan).
+4. DNS stays wildcard A record pointing at Hetzner. No per-tenant DNS change.
+5. First request to `{slug}.8gentOS.com` hits Caddy on-demand TLS, Caddy asks the verify endpoint, endpoint confirms tenant exists in Convex, cert issued and cached.
+6. Next.js middleware reads `Host` header, splits off subdomain, looks up tenant, sets tenant context for the request.
+
+**Convex boundary.** Per locked decision, Convex stays hosted. Tenant records live in Convex. The Next.js layer runs on Hetzner and reads Convex from server components. Row-level auth is Clerk JWT with `orgId` matching the tenant's Convex tenant ID.
+
+**Performance budget.** Next.js Node server at roughly 150-300 req/s per core on routes with Convex round-trips (projection: assumes cached Convex query paths, cold paths are slower). AX41-NVMe 12-thread CPU gives ~1800-3600 req/s theoretical single-box ceiling before we saturate. Translated to users: at 10k tenants × 0.3% concurrent × 5 req/active-session/sec = ~150 req/s total load. Fits. At 100k tenants, same concurrency ratio = 1500 req/s, tight on one box, time for a second Hetzner box behind a Caddy load balancer.
+
+## 14. Scale thresholds and expansion path
+
+Single-box Middle spec (AX41-NVMe, 64GB RAM, 2× 1TB NVMe, 6 cores / 12 threads). Thresholds are projections; assumptions listed per row.
+
+| Users | First thing to break | Next expansion step |
+|---|---|---|
+| 100 | Nothing. Box idle, well under 10% utilisation across all products. | None |
+| 1,000 | Nothing critical. Jr TTS queue may show 50-100ms extra latency at peak (projection: 2.5% concurrency, KittenTTS CPU-bound). | Batch KittenTTS requests per tenant, keep one box |
+| 10,000 | RAM pressure on 8gent-OS + vessel sessions combined (projection: 48GB working set ceiling reached at 10% duty shared vessel + 3% OS concurrent). NVMe has ~40% headroom. | Second Hetzner AX41 behind Caddy load balancer. Partition: Box A = public apps (Jr, OS, marketing-adjacent), Box B = shared vessel + factory + observability. Tailscale mesh between boxes. |
+| 100,000 | NVMe fills (projection: 100k × 50MB memory stores = 5TB, single box has 2TB). Bandwidth begins to matter for asset delivery. | Object storage tier (Cloudflare R2 or Hetzner Storage Box S3-compatible) for memory snapshots and AAC/video assets. Cloudflare fronts all public traffic for edge caching and DDoS. Third Hetzner box if compute also saturates. Convex tier bump. |
+
+Cloudflare fronting is a zero-cost step (free tier) that should happen before we are forced to, probably at the 10k threshold as a pre-emptive move. Cost: $0. Benefit: edge cache, DDoS absorption, geographic latency smoothing. No lock-in.
+
+## 15. Shared infra primitives
+
+Every 8GI product consumes the same six primitives. Keeping them shared instead of per-product is the only way the cost model stays flat.
+
+| Primitive | Where it lives | Shared vs per-product |
+|---|---|---|
+| Auth | Clerk (hosted) | Shared org, per-product application within Clerk |
+| Database | Convex (hosted) | One deployment per product for isolation (Jr separate from adult per §13.1) |
+| Voice TTS | KittenTTS on Hetzner | Shared CPU pool, per-product queue |
+| File storage | Hetzner Storage Box S3 + optional Cloudflare R2 | Shared bucket with per-product prefix |
+| Cron | Coolify cron containers | Shared runner, per-product job definitions |
+| Queue | Redis on Coolify (phase 2) | Shared instance, per-product namespace |
+| Observability | Loki + Grafana on Hetzner | Shared stack, per-product log streams |
+
+SOPS for infra-as-code secrets. Coolify env vars per product. Per Karen's §7 security spec, no primitive runs outside this matrix without a security review.
+
+## 16. Top-level ecosystem diagram
+
+One picture showing every product, every shared primitive, Hetzner as the container for the backend, and hosted SaaS as external boxes. This is the canonical architecture slide.
+
+```mermaid
+flowchart TB
+  subgraph Users["Users"]
+    Kid[Neurodivergent kids<br/>8gentjr]
+    Dev[Developers<br/>8gent-code CLI]
+    OSUser["OS tenants<br/>{user}.8gentOS.com"]
+    Visitor[Public visitors<br/>marketing sites]
+  end
+
+  subgraph Edge["Cloudflare (free tier, phase 2+)"]
+    CF[Edge cache + DDoS]
+  end
+
+  subgraph Vercel["Vercel (marketing + docs)"]
+    VD[8gent.dev]
+    VW[8gent.world]
+    VG[8gi.org portal]
+    VGov[8gi-governance]
+    VApp[8gent.app landing]
+  end
+
+  subgraph SaaS["Hosted SaaS"]
+    Clerk[Clerk<br/>auth]
+    Convex[Convex<br/>realtime DB]
+  end
+
+  subgraph Hetzner["Hetzner AX41-NVMe (Falkenstein, EU)"]
+    subgraph Caddy["Caddy reverse proxy + TLS"]
+      CA[on-demand TLS<br/>wildcard *.8gentOS.com]
+    end
+
+    subgraph Apps["Product apps"]
+      JR[8gentjr backend<br/>COPPA isolated]
+      OS[8gent-OS Next.js<br/>multi-tenant]
+      GW[8gent-app gateway]
+      VES[8gent-code vessel daemon<br/>agent-pool N=10]
+      FAC[Factory / benchmarks]
+      CP[8gi-control-plane<br/>Discord gateway]
+      TG[Telegram bot server]
+    end
+
+    subgraph Prim["Shared primitives"]
+      TTS[KittenTTS pool]
+      Q[Qdrant shared indexes]
+      R[Redis queue]
+      CR[Cron runner]
+      LG[Loki + Grafana]
+    end
+
+    subgraph Store["Storage"]
+      NVMe[2 x 1TB NVMe<br/>per-user SQLite + FTS5]
+      SB[Hetzner Storage Box<br/>backups + S3 assets]
+    end
+  end
+
+  subgraph Mac["User machines"]
+    CLI[8gent-code TUI]
+    LE[Lil Eight]
+    GC[8gent Computer]
+  end
+
+  Kid --> CF
+  Dev --> CLI
+  OSUser --> CF
+  Visitor --> CF
+
+  CF --> Vercel
+  CF --> CA
+
+  CA --> JR
+  CA --> OS
+  CA --> GW
+  CA --> VES
+  CA --> CP
+  CA --> TG
+
+  Apps --> Clerk
+  Apps --> Convex
+  Apps --> Prim
+  Prim --> Store
+
+  CLI -. opt-in wss .-> VES
+  LE --- GC
+  GC -. sync .-> Convex
+```
+
+## 17. References
 
 - `docs/prd/8gent-computer/architecture.md` - on-device app, informs package reuse patterns.
 - `docs/prd/8gent-computer/security.md` - Karen's security spec, inherited principles.
 - `docs/specs/DAEMON-PROTOCOL.md` - WS protocol, unchanged by this migration.
-- Memory: `project_hetzner_infra.md`, `project_fly_architecture.md`, `project_8gent_architecture.md`, `project_8gi_org.md`, `project_8gent_bot_handle.md`, `project_eight_vs_lil_eight.md`.
+- Memory: `project_hetzner_infra.md`, `project_fly_architecture.md`, `project_8gent_architecture.md`, `project_8gi_org.md`, `project_8gent_bot_handle.md`, `project_eight_vs_lil_eight.md`, `project_8gentos_infra_architecture.md`.
 - Portal: `https://8gi.org/media/infra/hetzner-migration` (auth-gated).
-- Parent tracking issue: filed against `8gi-foundation/8gent-code`.
+- Parent tracking issue: `8gi-foundation/8gent-code#1785`. Child phases: #1786 #1787 #1788 #1789 #1790.
