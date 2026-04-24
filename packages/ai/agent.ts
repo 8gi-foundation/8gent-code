@@ -25,6 +25,14 @@ export interface EightAgentConfig {
   workingDirectory?: string;
   /** Tools to use (default: all agentTools) */
   tools?: ToolSet;
+  /** Max output tokens per step (default: 4096 for local, unlimited for cloud) */
+  maxOutputTokens?: number;
+  /** Generation parameters (tunable by the agent via self_tune) */
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
   /** Callback for each step */
   onStepFinish?: (event: StepFinishEvent) => void | Promise<void>;
   /** Callback for tool call start */
@@ -137,7 +145,17 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
     model,
     instructions: config.instructions,
     // Cap response size for local providers to keep within their context window
-    ...(isLocalProvider ? { maxOutputTokens: 1024 } : {}),
+    ...(config.maxOutputTokens
+      ? { maxOutputTokens: config.maxOutputTokens }
+      : isLocalProvider
+        ? { maxOutputTokens: 4096 }
+        : {}),
+    // Generation params (tunable via self_tune)
+    ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+    ...(config.topP !== undefined ? { topP: config.topP } : {}),
+    ...(config.topK !== undefined ? { topK: config.topK } : {}),
+    ...(config.frequencyPenalty !== undefined ? { frequencyPenalty: config.frequencyPenalty } : {}),
+    ...(config.presencePenalty !== undefined ? { presencePenalty: config.presencePenalty } : {}),
     tools,
     stopWhen: stepCountIs(config.maxSteps || 30),
 
