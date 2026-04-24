@@ -194,4 +194,35 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_userId_lastActiveAt", ["userId", "lastActiveAt"])
     .index("by_sessionId", ["sessionId"]),
+
+  // ============================================
+  // Vessels — Lotus-Class Compute peer registry
+  // ============================================
+  vessels: defineTable({
+    /** Stable vessel identifier (e.g., "local-james-mac", "fly-ams-eight-vessel"). */
+    vesselId: v.string(),
+    /** Human-readable name. */
+    name: v.string(),
+    /** WebSocket endpoint for peer-to-peer messaging (e.g., "wss://eight-vessel.fly.dev"). */
+    url: v.string(),
+    /** Owner identifier (Clerk user ID or "8gi-foundation" for shared vessels). */
+    ownerId: v.string(),
+    /** Capability tags (e.g., ["code", "inference", "ollama"]). */
+    capabilities: v.array(v.string()),
+    /** Active model on this vessel. */
+    model: v.string(),
+    /** Fly.io region or "local". */
+    region: v.string(),
+    /** Vessel boot timestamp (Unix ms). */
+    startedAt: v.number(),
+    /** Last heartbeat timestamp (Unix ms). Stale > 90s = pruned by readers. */
+    lastHeartbeat: v.number(),
+    /** Current active session count. */
+    activeSessions: v.number(),
+    /** Max concurrent sessions this vessel supports. */
+    maxSessions: v.number(),
+  })
+    .index("by_vesselId", ["vesselId"])
+    .index("by_ownerId", ["ownerId"])
+    .index("by_lastHeartbeat", ["lastHeartbeat"]),
 });
