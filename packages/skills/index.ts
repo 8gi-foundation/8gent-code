@@ -492,11 +492,26 @@ export function resetSkillManager(): void {
 // Re-export skill compounding and matching
 export {
 	compoundSkill,
+	compoundSkillWithExperiment,
 	listLearnedSkills,
 	LEARNED_SKILLS_DIR,
 } from "./compound.js";
 export type { CompoundInput } from "./compound.js";
 export { matchSkills, formatMatchedSkills } from "./matcher.js";
+export {
+	runExperiment,
+	experimentsEnabled,
+	validateSpec,
+	getExperimentHistory,
+	setExperimentMemorySink,
+	EXPERIMENTS_DIR,
+} from "./experiment.js";
+export type {
+	ExperimentSpec,
+	ExperimentRecord,
+	Measurement,
+	MemorySink,
+} from "./experiment.js";
 
 // ============================================
 // Utility Functions

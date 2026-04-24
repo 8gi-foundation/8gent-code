@@ -669,6 +669,20 @@ export { reflect, type SessionData } from "./reflection.js";
 export { learnSkill, getRelevantSkills, reinforceSkill, buildSkillsContext } from "./learned-skills.js";
 export type { LearnedSkill, SessionReflection } from "./evolution-db.js";
 
+// Re-export skill-as-experiment loop (issue #1792)
+export { compoundSkillWithExperiment } from "../skills/compound.js";
+export {
+  runExperiment,
+  experimentsEnabled,
+  getExperimentHistory,
+  setExperimentMemorySink,
+} from "../skills/experiment.js";
+export type {
+  ExperimentSpec,
+  ExperimentRecord,
+  Measurement,
+} from "../skills/experiment.js";
+
 export default {
   SelfAutonomy,
   AutoGit,
