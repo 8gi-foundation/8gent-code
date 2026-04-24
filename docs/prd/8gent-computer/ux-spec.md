@@ -16,12 +16,16 @@ RFC for James. Do not build yet. This is the UX contract against which the Swift
 
 ## 0. Headline verdict
 
-**Go with caveats.** The seven surfaces hold together if we keep the menubar as the only always-on foreground and reserve every other surface behind an explicit user intent. Two calls are judgment, not research:
+**Go with caveats.** The seven surfaces hold together if we keep the menubar as the only always-on foreground and reserve every other surface behind an explicit user intent.
+
+Two decisions locked by James on 2026-04-24 (override prior v1 draft):
+
+- **Theme inheritance, not Match System.** Default theme is inherited from 8gentOS (`8gi-foundation/8gent-OS`) and the AI James OS parent (`~/Myresumeportfolio/`), governed by `BRAND.md`. Default on first launch is **dark** (8gentOS developer default), not the macOS system appearance. Tokens, typography, palette, and component grammar pull from the same source-of-truth as 8gentOS. The light/dark toggle still exists and persists. Detail in section 3.5.
+- **Floating window is draggable, not dock-anchored.** When the main window is closed, the compact 8gent Computer surface is a free-floating window the user can drag anywhere on screen, persisted across launches and per-display. Detail in section 11.6. Dock presence remains (`LSUIElement = false`); see section 11.4.
+
+One remaining judgment call, flagged inline:
 
 - The consent sheet is a *sheet attached to the foreground window*, never a floating alert and never a system-level notification. Non-focus-stealing policy holds except for the single consent modal tied to an action the user just initiated.
-- Light mode is the default on first launch. Dark is the brand default for developer products, but a macOS user's `NSApplication.effectiveAppearance` should win on install. The first toggle click switches the brand-correct dark theme on and persists.
-
-Both are flagged as judgment calls inside their sections.
 
 ## 1. Core problem, constraint, non-goals
 
@@ -35,7 +39,7 @@ Both are flagged as judgment calls inside their sections.
   - Localization. English only in v1. Copy strings are isolated for later extraction.
   - Touch Bar. Intel Macs with Touch Bar are Phase 2 hardware targets at best.
 
-## 2. Surface inventory (the seven)
+## 2. Surface inventory (the seven, plus a floating compact view)
 
 | # | Surface                           | Persistence                          | Summoned how                                   |
 |---|-----------------------------------|--------------------------------------|------------------------------------------------|
@@ -46,8 +50,9 @@ Both are flagged as judgment calls inside their sections.
 | 5 | Session manager                   | Pane inside main window              | Sidebar item in main window                    |
 | 6 | In-app browser tab                | Tab inside Session pane              | Agent opens a URL, or user clicks a URL there  |
 | 7 | Settings                          | Pane inside main window              | Sidebar item, or Cmd+Comma                     |
+| 8 | Floating compact window (new)     | Shown when main window is closed     | Auto when main window closes; repositionable and persisted per-display |
 
-Surfaces 4, 5, 6, 7 are panes inside the single main window (surface 2), not separate windows. Surface 3 (consent) is a sheet attached to the currently focused window, or to a minimal consent host window if no window is open.
+Surfaces 4, 5, 6, 7 are panes inside the single main window (surface 2), not separate windows. Surface 3 (consent) is a sheet attached to the currently focused window, or to a minimal consent host window if no window is open. Surface 8 (floating window) is detailed in section 11.6.
 
 ## 3. Shared visual system
 
@@ -90,12 +95,32 @@ Status colours never appear alone. Every status colour pairs with a text label a
 
 8pt base grid. Sidebar widths on main window: 240pt. Detail pane widths: 360pt. Sheet width: 520pt. All values mirror the abilities 3D spec for consistency across products.
 
-### 3.5 Light/dark defaults
+### 3.5 Theme inheritance and defaults
 
-- On first launch, respect `NSApplication.effectiveAppearance`. If system is dark, app is dark. If light, app is light.
-- A visible theme toggle lives in Settings under Appearance. Also accessible via View menu > Theme > Light/Dark/Match System.
-- Persisted in `~/.8gent/config.json` under `app.theme`.
-- **Judgment call, not research-backed**: first-launch default is Match System, not the brand dark default. Reason: we want a new user's first look to feel native to their Mac. Brand identity takes over on the second click if they prefer dark.
+**Locked 2026-04-24 (James).** 8gent Computer does not default to Match System. It is a member of the 8gent ecosystem and inherits its theme from the same source-of-truth as 8gentOS and the AI James OS parent.
+
+**Source-of-truth precedence:**
+
+1. `BRAND.md` at the root of this repo (`/Users/jamesspalding/8gent-code/BRAND.md`). Typography (Fraunces 800 wordmark, Fraunces 700 headings, Inter 400-600 body, JetBrains Mono code). Palette (warm only, banned hues 270-350). Accent `#E8610A` light / `#F07A28` dark.
+2. `8gi-foundation/8gent-OS` (the Next.js per-user OS at `{user}.8gentOS.com`). The same CSS token names used there (`--bg-0..3`, `--text-primary/secondary/tertiary`, `--border`, `--accent`, `--heartbeat-*`) are the token names used here. The Swift implementation reads the same token-name contract and maps to native colours.
+3. `~/Myresumeportfolio/` (AI James OS parent). Cross-checked so that a user moving between the native app and the parent web surfaces does not feel a brand drop.
+
+Component grammar (button shapes, sidebar widths 240pt, sheet widths 520pt, 8pt spacing grid, 200ms ease-out motion) tracks 8gentOS. A user moving between `{user}.8gentOS.com` in a browser tab and the native 8gent Computer window should feel continuity, not translation.
+
+**Defaults:**
+
+- **First-launch theme: dark.** Matches the 8gentOS developer default per `BRAND.md` § Default Themes.
+- `NSApplication.effectiveAppearance` is **not** used to pick the default. The app is brand-themed, not system-themed. This is a deliberate departure from typical macOS etiquette in exchange for ecosystem consistency with 8gentOS.
+- `prefers-color-scheme` is respected only where a web sub-view renders its own theme (the in-app browser tab, surface 6), per section 9.5.
+
+**User override:**
+
+- A visible theme toggle lives in Settings under Appearance. Values in v1: Dark (default), Light. No Match-System value in v1.
+- Also reachable via View menu > Theme > Dark / Light.
+- Persisted in `~/.8gent/config.json` under `app.theme`. If the key is missing on launch, the app falls back to Dark.
+- The toggle is mirrored in a compact form in the floating window (section 11.6) so it can be flipped without opening Settings. The ADHD-mode toggle lives next to it, same placement, per the accessibility-primitives standard.
+
+**Consequence for the architecture doc:** the Swift implementation must import token names from a shared source. The shared-tokens package lives at `packages/brand-tokens/` (new, Phase 1 infra), generated from `BRAND.md`, consumed by both the Next.js 8gentOS app and the Swift app. Drift between 8gentOS and 8gent Computer is a P1 bug.
 
 ### 3.6 ADHD mode
 
@@ -687,9 +712,11 @@ Focus-steal audit log: every time the app pulls focus, a row is written to `~/.8
 
 ### 11.4 LSUIElement and Dock presence
 
-**Proposal: LSUIElement = false.** The app shows in the Dock. Users expect Cmd-Tab to include apps they have open. The menu-bar item is additive, not a replacement. This differs from Lil Eight (which is LSUIElement = true because it is a companion, not a workspace).
+**Locked 2026-04-24: LSUIElement = false.** The app shows in the Dock, and the status-bar item stays. Dock presence + menu-bar item + a free-floating compact window (section 11.6) are the three always-on surfaces when the main window is closed.
 
-Judgment call: **James will push back on this.** Lil Eight is menu-bar-only by design. 8gent Computer is a workspace with a main window, so Dock presence is the macOS-native choice. If James prefers menu-bar-only I can flip it; the main window still works, the Dock just disappears.
+Users expect Cmd-Tab to include apps they have open. The menu-bar item is additive, not a replacement. The floating window is the "summoned" compact view; it coexists with the Dock icon and positions independently of both Dock and menu-bar.
+
+This differs from Lil Eight (LSUIElement = true, menu-bar-only companion). 8gent Computer is a workspace.
 
 ### 11.5 Keyboard shortcut summary
 
@@ -711,14 +738,101 @@ Judgment call: **James will push back on this.** Lil Eight is menu-bar-only by d
 | Cmd+D             | Deny (in consent sheet)                             |
 | Cmd+Shift+A       | Allow once (in consent sheet, double-modifier)      |
 
+### 11.6 Draggable floating window
+
+**Locked 2026-04-24 (James).** When the main window is closed, 8gent Computer still shows a compact floating window so the user has a persistent visual handle on the agent beyond the menu-bar dot. The window is not dock-anchored, not menu-bar-anchored, not screen-edge-anchored. The user places it wherever they want and it stays there.
+
+#### 11.6.1 Purpose
+
+A glanceable surface: heartbeat, session count, quick-summon, theme and ADHD-mode toggles. It replaces the old "popover anchored to the status item" as the primary quick-glance surface. The status-item popover (section 4.2) remains for users who want a menu-bar-first flow, but the floating window is the canonical compact view.
+
+#### 11.6.2 Layout
+
+- Window type: `NSWindow` with `styleMask = [.borderless, .nonactivatingPanel]` subclass, floating level (`.floating` via `level = NSWindow.Level.floating`). Does not activate on click (agent status stays peripheral, does not steal focus).
+- Size: 280pt wide x 180pt tall. Fixed in v1. Corner radius 14pt to match 8gentOS panel grammar.
+- Content: top strip with the 8 glyph + heartbeat dot + "Daemon: {state}" text. Middle row "{n} sessions" with a small New session button. Bottom row: theme toggle (sun/moon icon), ADHD-mode toggle (label), Open main window button.
+- Background: `--bg-1` with a 1pt `--border` hairline. Drop shadow: subtle, 8pt blur, 4pt y-offset, 12% opacity. Respects light/dark per section 3.5.
+
+#### 11.6.3 Dragging
+
+- Entire window body is a drag region (macOS pattern: override `mouseDownCanMoveWindow = true` on the root view). The user can grab anywhere that is not a button.
+- No titlebar. The 8 glyph doubles as the visual "grab handle" for accessibility hint purposes only; dragging works from any background pixel.
+- Cursor hint on hover over non-interactive area: `openHand` on enter, `closedHand` during drag.
+
+#### 11.6.4 Bounds enforcement
+
+- Minimum on-screen: **at least 50% of the window's rect must remain inside the visibleFrame of some display** at all times. Enforced on drag-end and on display-configuration change (`NSApplication.didChangeScreenParametersNotification`).
+- If a drag would leave less than 50% visible, the window springs back to the nearest legal position on mouse-up (200ms ease-out, or instant in reduced-motion).
+- Menu-bar safe zone: never allow the window's top edge to sit under the menu bar. The visibleFrame already accounts for this on macOS, so the 50% rule inherits it.
+- Notch handling (MacBook Pro 14 / 16): `NSScreen.auxiliaryTopLeftArea` / `auxiliaryTopRightArea` are treated as unsafe; the window cannot overlap them.
+
+#### 11.6.5 Snap-to-edge decision
+
+**Decision: no edge-snapping.** The window drags freely and stays exactly where the user drops it. Sub-pixel `CGPoint` stored verbatim.
+
+Reason: snap-to-edge is a BetterTouchTool / Rectangle mental model, not a macOS-native one. The only macOS-native floating-panel pattern (Finder-spring-loaded folders aside) that snaps is the Stage Manager strip, and users who use Stage Manager already have their own placement discipline. Adding snap in v1 introduces a second coordinate system (logical snap-zones vs actual pixels) that trips up multi-monitor and VoiceOver narration ("window moved to left edge" is less honest than "window at x=44").
+
+If we ever add snapping it should be opt-in under Settings > Appearance > Floating window > "Snap to screen edges", default off.
+
+#### 11.6.6 Persistence
+
+- Key: `~/.8gent/config.json` under `app.floatingWindow`.
+- Schema: `{ visible: bool, position: { displayId: string, x: number, y: number }[] }`. One position entry per display the user has placed it on; the app remembers per display.
+- `displayId` is the `NSScreen.deviceDescription["NSScreenNumber"]` value (stable across launches on the same hardware, regenerated if the user plugs in different monitors).
+- On launch:
+  1. Read `app.floatingWindow`.
+  2. For the currently active display (`NSScreen.main`), look up its entry. If found and the saved position passes the 50%-visible rule against the current visibleFrame, place there.
+  3. If no entry for this display, default to bottom-right corner of the primary display, 24pt offset from the right and bottom visibleFrame edges.
+  4. If the entry exists but the display is now unplugged, keep the entry in storage (do not purge) and use the fallback default for the current display.
+- On every drag-end, update the entry for the current display only. The user moving the window on display A does not affect the memorised position for display B.
+
+#### 11.6.7 Multi-monitor
+
+- The window is always on one display at a time (the display containing its centre point).
+- If the user drags across displays, the active-display entry updates to the new display at drop.
+- Display hot-plug: `NSApplication.didChangeScreenParametersNotification` fires the 50%-visible rule on the current position; if the active display is gone, the window migrates to the new primary display's saved entry or the fallback default.
+
+#### 11.6.8 Show/hide lifecycle
+
+- The floating window is shown when: main window is not visible AND the app is running. It is hidden when: main window is visible, user dismisses via its close button, or user quits.
+- Close button (a small "x" in the top-right of the floating window, shown on hover only so the chrome stays clean) hides the window for this session and sets `app.floatingWindow.visible = false`. To bring it back, the user uses the menu-bar item > Show floating window, or Settings > Appearance > Floating window > Visible.
+- Global hotkey Cmd+Shift+8 opens the main window; it does not toggle the floating window.
+
+#### 11.6.9 Accessibility
+
+- Window `accessibilityRole = .window`, `accessibilitySubrole = .floatingWindow`, `accessibilityLabel = "8gent Computer floating window"`.
+- Because the window is borderless, an explicit `accessibilityTitle = "8gent Computer"` is set.
+- VoiceOver can focus the window via Cmd+F1 or VO+M and cycle its controls: heartbeat status, sessions count, New session, theme toggle, ADHD toggle, Open main window, Close.
+- Dragging via keyboard: VO+Shift+drag is not supported natively on borderless windows. We add a menu command under Window > Move floating window > Top-left / Top-right / Bottom-left / Bottom-right / Centre, so keyboard-only users can reposition without a mouse. These four corner presets respect the 50% rule trivially (they are legal positions on any visibleFrame).
+- `prefers-reduced-motion`: spring-back animation becomes instant. Drag itself is untouched (user input is not animation).
+- ADHD mode: the heartbeat dot does not animate regardless of state. The window's drop-shadow is reduced to 4pt blur / 6% opacity to lower visual noise.
+- Colour usage follows section 3.1. The theme and ADHD toggles render the same way they do in Settings.
+
+#### 11.6.10 Copy notes
+
+- "Daemon: OK" / "Daemon: reconnecting" / "Daemon: offline" (top strip)
+- "{n} sessions" or "No sessions" (middle row)
+- New session (button)
+- Light / Dark (theme toggle label; icon sun/moon)
+- ADHD mode (toggle label)
+- Open main window (button)
+- Close (button, tooltip "Hide floating window. Reopen from the menu bar.")
+- Move floating window > Top-left / Top-right / Bottom-left / Bottom-right / Centre (Window menu submenu)
+
 ## 12. Open questions (James to decide)
 
+**Resolved 2026-04-24:**
+
+- ~~First-launch theme~~: **dark, inherited from 8gentOS** (see section 3.5).
+- ~~LSUIElement~~: **false, Dock presence + floating window + menu bar** (see sections 11.4 and 11.6).
+- ~~Floating surface placement~~: **draggable, not anchored, no snap-to-edge** (see section 11.6).
+
+**Still open:**
+
 1. **Global hotkey**. Cmd+Shift+8 proposed. Acceptable, or prefer Cmd+Shift+E (for "eight")? Cmd+Shift+E collides with Finder (Eject) when a volume is selected. Cmd+Shift+8 is safer.
-2. **LSUIElement**. Dock presence (proposed true), or menu-bar-only (Lil Eight parity)?
-3. **ADHD mode**. Any additional reductions I should bake in beyond motion, streaming, grids, and badges?
-4. **Consent sheet default focus**. Proposed default = Deny. Acceptable, or should default = Allow once for friction-sensitive tasks?
-5. **Browser theming**. Do we force a dark-mode hint on web pages (via CSS injection) when app is in dark, or let pages render their own theme? Proposed: let pages render their own.
-6. **First-launch theme**. Match System on install (my proposal), or 8gent dark default (brand default)? I am flagging this because it is a brand-vs-user-fit tension.
+2. **ADHD mode**. Any additional reductions I should bake in beyond motion, streaming, grids, and badges?
+3. **Consent sheet default focus**. Proposed default = Deny. Acceptable, or should default = Allow once for friction-sensitive tasks?
+4. **Browser theming**. Do we force a dark-mode hint on web pages (via CSS injection) when app is in dark, or let pages render their own theme? Proposed: let pages render their own.
 
 ## 13. Non-scope for this spec
 
@@ -731,8 +845,9 @@ Judgment call: **James will push back on this.** Lil Eight is menu-bar-only by d
 
 ## 14. Next steps (from this spec)
 
-1. Merge this spec as a reference (do not merge until James reviews the six open questions).
-2. Pair with Karen on the consent sheet wording once the TCC entitlements table is final; the exact action names ("Screenshot", "Keyboard", "Mouse", "Clipboard read") should match her table.
-3. Pair with Zara on copy strings in section 4.6 through 10.6 before Phase 1 code lands.
-4. Once Rishi confirms Phase 1 scope = menubar only, I scope the Phase 1 UX implementation notes as a child ticket.
-5. No Swift code is written against this spec until the six open questions are resolved.
+1. Merge this revision as the canonical v1.1 reference once James confirms no further changes on the four remaining open questions.
+2. Stand up `packages/brand-tokens/` (section 3.5) and wire it into both the Next.js 8gentOS app and the Swift 8gent Computer project. Shared-tokens drift is now a P1 concern.
+3. Pair with Karen on the consent sheet wording once the TCC entitlements table is final; the exact action names ("Screenshot", "Keyboard", "Mouse", "Clipboard read") should match her table.
+4. Pair with Zara on copy strings in section 4.6 through 10.6 and the new 11.6.10 before Phase 1 code lands.
+5. Once Rishi confirms Phase 1 scope = menubar + floating window, I scope the Phase 1 UX implementation notes as a child ticket.
+6. No Swift code is written against this spec until the four remaining open questions are resolved.
