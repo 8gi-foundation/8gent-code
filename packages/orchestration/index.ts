@@ -841,3 +841,7 @@ export { ROLE_REGISTRY, getRunnerConfig, type RunnerConfig } from "./role-regist
 
 // TaskDispatcher — atomic task dispatch with claimed map + state machine
 export { TaskDispatcher, globalDispatcher, type DispatchedTask, type TaskState } from "./task-dispatcher.js";
+
+// Vessel Mesh — P2P communication between remote vessels
+export { VesselMesh } from "./vessel-mesh";
+export type { VesselInfo, VesselMessage, TaskPayload, TaskResult } from "./vessel-mesh";

@@ -42,6 +42,20 @@ export const getById = query({
 });
 
 /**
+ * Get a conversation by its local session ID.
+ * Used for cross-device restore - fetch checkpoint data from a remote session.
+ */
+export const getBySessionId = query({
+  args: { sessionId: v.string() },
+  handler: async (ctx, { sessionId }) => {
+    return await ctx.db
+      .query("conversations")
+      .withIndex("by_sessionId", (q) => q.eq("sessionId", sessionId))
+      .unique();
+  },
+});
+
+/**
  * Search conversations by title/summary text.
  */
 export const search = query({

@@ -86,6 +86,7 @@ import {
 	SelectInput,
 	type SelectOption,
 } from "./components/select-input.js";
+import { ShortcutDock } from "./components/shortcut-dock.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
@@ -852,10 +853,10 @@ export function App({
 		};
 	}, [currentProvider]);
 
-	// After LM Studio / Ollama lists load: avoid leaving an embedding model (or stale id) selected
+	// After model list loads: ensure currentModel is valid for the active provider.
+	// If the model isn't in the fetched list (e.g. Ollama model on OpenRouter), auto-select.
 	useEffect(() => {
 		if (modelsLoading || availableModels.length === 0) return;
-		if (currentProvider !== "lmstudio" && currentProvider !== "ollama") return;
 
 		const inList = Boolean(
 			currentModel && availableModels.includes(currentModel),
@@ -1126,6 +1127,11 @@ export function App({
 				const chatTab = workspaceTabs.tabs.find((t) => t.type === "chat");
 				if (chatTab) workspaceTabs.switchTab(chatTab.id);
 			} else if (viewMode !== "chat") {
+				// If escaping from onboarding, also clear onboarding state
+				if (viewMode === "onboarding") {
+					setShowOnboarding(false);
+					onboardingManager.skipAll();
+				}
 				setViewMode("chat");
 			}
 		}
@@ -4938,53 +4944,55 @@ export function App({
 				)}
 				</Box>
 
-				{/* Hidden keyboard shortcuts hint */}
-				{/* Agent mode bar — Ctrl+T to cycle */}
+				{/* Agent mode — iOS segmented control.
+				    Active: ◆ + bold brand color. Inactive: ○ + muted. Dot carries state,
+				    label gives semantics, hint defers to the right edge. */}
 				<Box
 					paddingX={1}
 					marginTop={1}
-					gap={1}
 					flexDirection="row"
-					flexWrap="nowrap"
+					justifyContent="space-between"
+					alignItems="center"
 					flexShrink={0}
 					overflow="hidden"
 				>
 					{compactAgentModeBar ? (
-						<Box flexDirection="row" overflow="hidden">
-							<AppText color="cyan" bold wrap="truncate-end">{`[${agentMode}]`}</AppText>
-							<MutedText wrap="truncate-end"> ^T cycle</MutedText>
+						<Box flexDirection="row" overflow="hidden" flexShrink={1}>
+							<AppText color="cyan" bold wrap="truncate-end">{`\u25C6 ${agentMode}`}</AppText>
+							<MutedText wrap="truncate-end">{"   \u2303T cycle"}</MutedText>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
 							)}
 						</Box>
 					) : (
-						<Box flexDirection="row" overflow="hidden">
-							{AGENT_MODES.map((mode) => (
-								<Box key={mode} flexShrink={0}>
-									{agentMode === mode ? (
-										<AppText color="cyan" bold>{`[${mode}]`}</AppText>
-									) : (
-										<MutedText>{` ${mode} `}</MutedText>
-									)}
-								</Box>
-							))}
-							<Box flexShrink={0}><MutedText> ^T mode</MutedText></Box>
-							{!processPanel.sidebarOpen && (
-								<ProcessBadge counts={processPanel.taskCounts} />
-							)}
-						</Box>
+						<>
+							<Box flexDirection="row" overflow="hidden" flexShrink={1}>
+								{AGENT_MODES.map((mode, idx) => {
+									const isActive = agentMode === mode;
+									return (
+										<Box key={mode} flexShrink={0} flexDirection="row">
+											{idx > 0 && <MutedText>{"   "}</MutedText>}
+											{isActive ? (
+												<AppText color="cyan" bold>{`\u25C6 ${mode}`}</AppText>
+											) : (
+												<MutedText>{`\u25CB ${mode}`}</MutedText>
+											)}
+										</Box>
+									);
+								})}
+							</Box>
+							<Box flexDirection="row" flexShrink={0}>
+								<MutedText>{"\u2303T mode"}</MutedText>
+								{!processPanel.sidebarOpen && (
+									<ProcessBadge counts={processPanel.taskCounts} />
+								)}
+							</Box>
+						</>
 					)}
 				</Box>
 
 				{showAnimations && (
-					<Box paddingX={1} gap={2} flexShrink={0} overflow="hidden">
-						<MutedText wrap="truncate-end">
-							{truncate(
-								"^O expand | ^B processes | ^K kanban | ^P predict | ^A anim | ^S sound | ^C exit",
-								Math.max(16, viewport.width - 2),
-							)}
-						</MutedText>
-					</Box>
+					<ShortcutDock viewportWidth={viewport.width} />
 				)}
 			</FixedFrame>
 		</ADHDModeContext.Provider>

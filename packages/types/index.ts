@@ -2,6 +2,8 @@
  * 8gent Code - Core Type Definitions
  */
 
+export * from "./tool-result.js";
+
 // ============================================
 // Tool System
 // ============================================

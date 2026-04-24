@@ -205,6 +205,7 @@ function printHelp(): void {
   /quit       - Exit 8gent
 
 \x1b[33mModel:\x1b[0m
+  /fast               - Toggle fast mode (switch to fastest available model)
   /model              - Show current model and provider
   /model <name>       - Switch model (e.g., /model qwen3:14b)
   /models             - List available models
@@ -380,12 +381,64 @@ function handlePlannerCommands(trimmed: string): boolean {
 }
 
 async function handleModelCommands(trimmed: string, agent: Agent): Promise<boolean> {
+  if (trimmed === "/fast") {
+    const { getModeManager, FAST_MODE_MODELS } = await import("./modes.js");
+    const { getProviderManager } = await import("../providers/index.js");
+    const mm = getModeManager();
+    const pm = getProviderManager();
+    const currentModel = agent.getModel();
+
+    const nowFast = mm.toggleFastMode(currentModel);
+    if (nowFast) {
+      // Find fastest available model
+      let fastModel: typeof FAST_MODE_MODELS[0] | null = null;
+      for (const candidate of FAST_MODE_MODELS) {
+        if (candidate.provider === "ollama") {
+          try {
+            const resp = await fetch("http://localhost:11434/api/tags");
+            const data = await resp.json() as { models?: Array<{ name: string }> };
+            const available = (data.models || []).map((m: { name: string }) => m.name);
+            if (available.some((m: string) => m.startsWith(candidate.model.split(":")[0]))) {
+              fastModel = candidate;
+              break;
+            }
+          } catch { continue; }
+        } else {
+          fastModel = candidate;
+          break;
+        }
+      }
+
+      if (fastModel) {
+        pm.setActiveModel(fastModel.model);
+        agent.setModel(fastModel.model);
+        console.log(`\x1b[33mFast mode ON\x1b[0m - ${fastModel.label}`);
+        console.log(`Previous model saved: \x1b[2m${currentModel}\x1b[0m`);
+      } else {
+        console.log("\x1b[33mFast mode ON\x1b[0m - no fast model found, keeping current model");
+      }
+    } else {
+      const prev = mm.previousModel;
+      if (prev) {
+        pm.setActiveModel(prev);
+        agent.setModel(prev);
+        console.log(`\x1b[36mFast mode OFF\x1b[0m - restored: ${prev}`);
+      } else {
+        console.log(`\x1b[36mFast mode OFF\x1b[0m`);
+      }
+    }
+    return true;
+  }
+
   if (trimmed === "/model") {
     const { getProviderManager } = await import("../providers/index.js");
+    const { getModeManager } = await import("./modes.js");
     const pm = getProviderManager();
     const p = pm.getActiveProvider();
+    const mm = getModeManager();
     console.log(`Provider: \x1b[33m${p.displayName}\x1b[0m`);
     console.log(`Model:    \x1b[36m${pm.getActiveModel()}\x1b[0m`);
+    if (mm.fastMode) console.log(`Fast:     \x1b[33mON\x1b[0m`);
     return true;
   }
 

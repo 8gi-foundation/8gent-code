@@ -28,6 +28,62 @@ export function getToolContext(): ToolContext {
   return _ctx;
 }
 
+// ── Mutable Runtime State (self-tunable by the agent) ────────────────
+// The agent can inspect and modify these via self_inspect / self_tune tools.
+// Changes take effect on the next agent step or adaptive retry.
+
+export interface RuntimeParams {
+  temperature: number;
+  topP: number;
+  topK: number;
+  maxOutputTokens: number;
+  maxSteps: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+  // Read-only introspection (set by the agent orchestrator, not tunable by the model)
+  model: string;
+  provider: string;
+  toolCount: number;
+  loadedCategories: string[];
+  systemPromptLength: number;
+  messageHistoryLength: number;
+  stepCount: number;
+  // Appendable context
+  appendedContext: string[];
+}
+
+const DEFAULT_RUNTIME: RuntimeParams = {
+  temperature: 0.7,
+  topP: 0.9,
+  topK: 40,
+  maxOutputTokens: 4096,
+  maxSteps: 30,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+  model: "unknown",
+  provider: "unknown",
+  toolCount: 0,
+  loadedCategories: [],
+  systemPromptLength: 0,
+  messageHistoryLength: 0,
+  stepCount: 0,
+  appendedContext: [],
+};
+
+let _runtime: RuntimeParams = { ...DEFAULT_RUNTIME };
+
+export function setRuntimeParams(params: Partial<RuntimeParams>): void {
+  Object.assign(_runtime, params);
+}
+
+export function getRuntimeParams(): RuntimeParams {
+  return _runtime;
+}
+
+export function resetRuntimeParams(): void {
+  _runtime = { ...DEFAULT_RUNTIME };
+}
+
 function resolvePath(p: string): string {
   return path.isAbsolute(p) ? p : path.join(_ctx.workingDirectory, p);
 }
@@ -344,7 +400,7 @@ const ghIssueCreate = tool({
 // ============================================
 
 const runCommand = tool({
-  description: "Run a shell command",
+  description: "Run a shell command. Default timeout: 120s. For dev servers or long-running processes, they auto-promote to background tasks after 10s.",
   inputSchema: z.object({
     command: z.string().describe("Command to run"),
   }),
@@ -807,29 +863,33 @@ async function runShellCommand(command: string): Promise<string> {
     const proc = spawn("sh", ["-c", finalCommand], {
       cwd: _ctx.workingDirectory,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     let stdout = "";
     let stderr = "";
     let settled = false;
 
-    const stdinInterval = setInterval(() => {
-      try { proc.stdin.write("\n"); } catch {}
-    }, 1000);
+    const killProcessTree = () => {
+      try {
+        process.kill(-proc.pid!, "SIGTERM");
+        setTimeout(() => {
+          try { process.kill(-proc.pid!, "SIGKILL"); } catch {}
+        }, 3000);
+      } catch {
+        try { proc.kill("SIGKILL"); } catch {}
+      }
+    };
 
     proc.stdout.on("data", (data) => { stdout += data.toString(); });
     proc.stderr.on("data", (data) => { stderr += data.toString(); });
 
     // Auto-promote to background task if still running after 10s.
-    // Any long-running process (dev servers, watchers, etc.) gets promoted
-    // so the agent isn't blocked for the full 2-minute timeout.
     const autoPromoteTimeout = setTimeout(async () => {
       if (settled) return;
       settled = true;
-      clearInterval(stdinInterval);
       clearTimeout(timeout);
 
-      // Hand the running process off to the background task manager
       try {
         const { getBackgroundTaskManager } = await import("../tools/background");
         const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
@@ -842,15 +902,14 @@ async function runShellCommand(command: string): Promise<string> {
 
         const partialOutput = (stdout + stderr).trim().slice(-500);
         resolve(
-          `[STILL RUNNING — promoted to background task]\n` +
+          `[STILL RUNNING - promoted to background task]\n` +
           `Task ID: ${taskId}\n` +
           `The command didn't exit within 10s, so it was moved to a background task.\n` +
           `Use background_status("${taskId}") or background_output("${taskId}") to check on it.\n` +
           (partialOutput ? `\nPartial output so far:\n${partialOutput}` : "")
         );
       } catch {
-        // Fallback: just kill it
-        proc.kill("SIGTERM");
+        killProcessTree();
         resolve(`TIMEOUT: Command still running after 10s. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`);
       }
     }, 10000);
@@ -858,9 +917,8 @@ async function runShellCommand(command: string): Promise<string> {
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
-      clearInterval(stdinInterval);
       clearTimeout(autoPromoteTimeout);
-      proc.kill("SIGTERM");
+      killProcessTree();
       hookManager.executeHooks("afterCommand", {
         command: finalCommand, exitCode: -1, stdout, stderr: stderr + "\nTIMEOUT",
         duration: Date.now() - startTime, workingDirectory: _ctx.workingDirectory,
@@ -868,12 +926,13 @@ async function runShellCommand(command: string): Promise<string> {
       resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`);
     }, 120000);
 
+    proc.unref();
+
     proc.on("close", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       clearTimeout(autoPromoteTimeout);
-      clearInterval(stdinInterval);
       hookManager.executeHooks("afterCommand", {
         command: finalCommand, exitCode: code ?? 0, stdout, stderr,
         duration: Date.now() - startTime, workingDirectory: _ctx.workingDirectory,
@@ -886,7 +945,6 @@ async function runShellCommand(command: string): Promise<string> {
       settled = true;
       clearTimeout(timeout);
       clearTimeout(autoPromoteTimeout);
-      clearInterval(stdinInterval);
       hookManager.executeHooks("onError", {
         command: finalCommand, error: err.message, workingDirectory: _ctx.workingDirectory,
       });
@@ -1294,6 +1352,250 @@ const writeTerminalTool = tool({
   },
 });
 
+// ── Self-Awareness Tools ─────────────────────────────────────────────
+
+const selfInspect = tool({
+  description:
+    "[SELF] Inspect your own runtime parameters: model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, and any appended context. Use this when you need to understand your own configuration or diagnose why something isn't working.",
+  parameters: z.object({}),
+  execute: async () => {
+    const p = getRuntimeParams();
+    return {
+      tunable: {
+        temperature: p.temperature,
+        topP: p.topP,
+        topK: p.topK,
+        maxOutputTokens: p.maxOutputTokens,
+        maxSteps: p.maxSteps,
+        frequencyPenalty: p.frequencyPenalty,
+        presencePenalty: p.presencePenalty,
+      },
+      readOnly: {
+        model: p.model,
+        provider: p.provider,
+        toolCount: p.toolCount,
+        loadedCategories: p.loadedCategories,
+        systemPromptLength: p.systemPromptLength,
+        messageHistoryLength: p.messageHistoryLength,
+        stepCount: p.stepCount,
+      },
+      appendedContextCount: p.appendedContext.length,
+      appendedContext: p.appendedContext.length > 0
+        ? p.appendedContext.map((c, i) => `[${i}] ${c.slice(0, 80)}${c.length > 80 ? "..." : ""}`)
+        : [],
+    };
+  },
+});
+
+const TUNABLE_KEYS = ["temperature", "topP", "topK", "maxOutputTokens", "maxSteps", "frequencyPenalty", "presencePenalty"] as const;
+
+const selfTune = tool({
+  description:
+    "[SELF] Adjust your own runtime parameters. Tunable: temperature (0-2), topP (0-1), topK (1-100), maxOutputTokens (256-16384), maxSteps (1-100), frequencyPenalty (-2 to 2), presencePenalty (-2 to 2). Changes take effect on the next step or retry. Use when: output is truncated (bump maxOutputTokens), responses are too deterministic (raise temperature), or you're stuck in loops (adjust penalties).",
+  parameters: z.object({
+    parameter: z.string().describe("Parameter name: temperature, topP, topK, maxOutputTokens, maxSteps, frequencyPenalty, presencePenalty"),
+    value: z.number().describe("New value for the parameter"),
+    reason: z.string().describe("Why you're making this change - logged for introspection"),
+  }),
+  execute: async ({ parameter, value, reason }) => {
+    if (!TUNABLE_KEYS.includes(parameter as any)) {
+      return { error: `Cannot tune "${parameter}". Tunable: ${TUNABLE_KEYS.join(", ")}` };
+    }
+    const bounds: Record<string, [number, number]> = {
+      temperature: [0, 2],
+      topP: [0, 1],
+      topK: [1, 100],
+      maxOutputTokens: [256, 16384],
+      maxSteps: [1, 100],
+      frequencyPenalty: [-2, 2],
+      presencePenalty: [-2, 2],
+    };
+    const [min, max] = bounds[parameter] || [0, Infinity];
+    const clamped = Math.max(min, Math.min(max, value));
+    const prev = (getRuntimeParams() as any)[parameter];
+    setRuntimeParams({ [parameter]: clamped } as any);
+    console.log(`[SELF-TUNE] ${parameter}: ${prev} -> ${clamped} (reason: ${reason})`);
+    return { parameter, previous: prev, current: clamped, reason, clamped: clamped !== value };
+  },
+});
+
+const selfAppendContext = tool({
+  description:
+    "[SELF] Append additional context or instructions to your own system prompt for this session. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
+  parameters: z.object({
+    context: z.string().describe("Text to append to your system prompt (max 500 chars)"),
+    reason: z.string().describe("Why this context is important for future steps"),
+  }),
+  execute: async ({ context, reason }) => {
+    const p = getRuntimeParams();
+    if (p.appendedContext.length >= 10) {
+      return { error: "Max 10 context appends per session reached. Consolidate existing context instead." };
+    }
+    const trimmed = context.slice(0, 500);
+    p.appendedContext.push(trimmed);
+    setRuntimeParams({ appendedContext: p.appendedContext });
+    console.log(`[SELF-CONTEXT] Appended ${trimmed.length} chars (reason: ${reason})`);
+    return { appended: true, index: p.appendedContext.length - 1, length: trimmed.length, totalAppends: p.appendedContext.length };
+  },
+});
+
+// ── Memory Tools (AI SDK surface) ────────────────────────────────────
+
+const rememberTool = tool({
+  description:
+    "[MEMORY] Save a fact to memory. Layers: 'session' (temporary, current session only), 'project' (persisted in .8gent/ for this repo), 'global' (persisted in ~/.8gent/ across projects). Keep facts concise and searchable. Pair with recall to retrieve later.",
+  parameters: z.object({
+    fact: z.string().describe("The fact to remember"),
+    layer: z.enum(["session", "project", "global"]).describe("Memory layer"),
+  }),
+  execute: async ({ fact, layer }) => {
+    try {
+      const { getMemoryManager } = await import("../memory");
+      const mm = getMemoryManager(_ctx.workingDirectory);
+      await mm.remember(fact, layer);
+      return { stored: true, fact: fact.slice(0, 80), layer };
+    } catch (err) {
+      return { stored: false, error: String(err) };
+    }
+  },
+});
+
+const recallTool = tool({
+  description:
+    "[MEMORY] Search memory for relevant facts. Uses full-text search across all layers. Returns matching memories ranked by relevance.",
+  parameters: z.object({
+    query: z.string().describe("Search query"),
+    limit: z.number().optional().describe("Max results (default: 5)"),
+  }),
+  execute: async ({ query, limit }) => {
+    try {
+      const { getMemoryManager } = await import("../memory");
+      const mm = getMemoryManager(_ctx.workingDirectory);
+      const results = await mm.recall(query, limit || 5);
+      return { query, count: results.length, memories: results };
+    } catch (err) {
+      return { query, count: 0, memories: [], error: String(err) };
+    }
+  },
+});
+
+// ── Design Tools ─────────────────────────────────────────────────────
+
+const suggestDesign = tool({
+  description:
+    "[DESIGN] Returns design system recommendations (color palettes, typography, component libraries) matched to your task. Use BEFORE writing any UI code. Follow up with query_design_system for specific tokens.",
+  parameters: z.object({
+    task: z.string().describe("Description of the UI task or project"),
+    projectType: z
+      .string()
+      .optional()
+      .describe("Project type hint: ai, saas, portfolio, ecommerce, dashboard, landing-page, etc."),
+  }),
+  execute: async ({ task, projectType }) => {
+    const { detectDesignNeed, suggestDesignSystems, getAvailableDesignSystems } = await import(
+      "../design-agent/index.js"
+    );
+    const detection = await detectDesignNeed(task);
+    if (!detection.needsDesign) {
+      return { needsDesign: false, reason: detection.reason };
+    }
+    const suggestions = await suggestDesignSystems(detection);
+    let dbSuggestions: any[] = [];
+    if (projectType) {
+      try {
+        const { initDatabase, suggestForProject } = await import("../design-systems/index.js");
+        initDatabase();
+        dbSuggestions = suggestForProject(projectType, { maxResults: 3 }).map((s: any) => ({
+          name: s.system.system.name,
+          style: s.system.system.style,
+          mood: s.system.system.mood,
+          score: s.score,
+          reasoning: s.reasoning,
+        }));
+      } catch {}
+    }
+    return {
+      needsDesign: true,
+      confidence: detection.confidence,
+      projectType: detection.projectType,
+      categories: detection.suggestedCategories,
+      frameworkSuggestions: suggestions.suggestions.slice(0, 3).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        reasoning: s.reasoning,
+        score: s.score,
+        stack: s.stack,
+        installCommands: s.installCommands,
+      })),
+      designSystemSuggestions: dbSuggestions,
+      availableSystems: getAvailableDesignSystems().map((s: any) => s.name),
+    };
+  },
+});
+
+const queryDesignSystem = tool({
+  description:
+    "[DESIGN] Returns design system data from curated SQLite DB - palettes, typography, components. Outputs summary, CSS variables, Tailwind config, or hex palette.",
+  parameters: z.object({
+    query: z.string().optional().describe("Search query (e.g., 'minimal dark', 'claude', 'cyberpunk')"),
+    style: z.string().optional().describe("Filter by style: minimal, bold, playful, elegant, tech, retro"),
+    mood: z.string().optional().describe("Filter by mood: professional, creative, tech, warm, cool"),
+    output: z
+      .string()
+      .optional()
+      .describe("Output format: summary (default), css, tailwind, hex"),
+  }),
+  execute: async ({ query, style, mood, output: outputFormat }) => {
+    const {
+      initDatabase,
+      search,
+      getComplete,
+      findByStyle,
+      findByMood,
+      generateCssVariables,
+      generateTailwindConfig,
+      getHexPalette,
+      listAll,
+    } = await import("../design-systems/index.js");
+    initDatabase();
+    const fmt = outputFormat || "summary";
+
+    if (query) {
+      const complete = getComplete(query);
+      if (complete) {
+        if (fmt === "css") return generateCssVariables(complete.system.id) || "No palette for CSS.";
+        if (fmt === "tailwind") return generateTailwindConfig(complete.system.id) || "No palette for Tailwind.";
+        if (fmt === "hex") return getHexPalette(complete.system.id) || "No palette.";
+        return {
+          name: complete.system.name,
+          style: complete.system.style,
+          mood: complete.system.mood,
+          description: complete.system.description,
+          colors: complete.parsedColors,
+          typography: complete.parsedTypography,
+          tags: complete.tags,
+        };
+      }
+      const results = search(query);
+      return { query, results: results.map((s: any) => ({ id: s.id, name: s.name, style: s.style, mood: s.mood })) };
+    }
+
+    if (style) {
+      const results = findByStyle(style as any);
+      return { style, results: results.map((s: any) => ({ id: s.id, name: s.name, mood: s.mood })) };
+    }
+
+    if (mood) {
+      const results = findByMood(mood as any);
+      return { mood, results: results.map((s: any) => ({ id: s.id, name: s.name, style: s.style })) };
+    }
+
+    const all = listAll();
+    return { total: all.length, systems: all.map((s: any) => ({ id: s.id, name: s.name, style: s.style })) };
+  },
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -1381,6 +1683,19 @@ export const agentTools = {
   check_agents,
   message_agent,
   merge_agent_work,
+
+  // Design
+  suggest_design: suggestDesign,
+  query_design_system: queryDesignSystem,
+
+  // Self-awareness
+  self_inspect: selfInspect,
+  self_tune: selfTune,
+  self_append_context: selfAppendContext,
+
+  // Memory
+  remember: rememberTool,
+  recall: recallTool,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;
