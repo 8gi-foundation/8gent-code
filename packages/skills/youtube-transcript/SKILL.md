@@ -61,9 +61,16 @@ Uses the `youtube_transcript_api` CLI (installed via `pipx install youtube-trans
 
 ## Install check
 
+Resolve the binary via PATH rather than assuming a single absolute path. Both homebrew and pipx install layouts are valid:
+
+- Homebrew: `/opt/homebrew/bin/youtube_transcript_api`
+- pipx (default): `~/.local/bin/youtube_transcript_api`
+
 ```bash
-which youtube_transcript_api || pipx install youtube-transcript-api
+command -v youtube_transcript_api || pipx install youtube-transcript-api
 ```
+
+All `youtube_transcript_api ...` invocations in this skill assume the binary is on `PATH`. Do not hardcode `/opt/homebrew/bin/...`; resolve with `command -v` (or `which`) at runtime so the skill works across brew and pipx installs.
 
 ## Caveats
 
