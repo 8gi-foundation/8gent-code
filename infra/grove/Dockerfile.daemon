@@ -2,18 +2,17 @@
 # Runs packages/daemon/index.ts with GROVE_ENABLED=1 set in fly.toml env.
 # Listens on port 18789 (WebSocket gateway), exposes /health for Fly checks.
 
-FROM oven/bun:1 AS deps
+FROM oven/bun:1
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json bun.lock* ./
-RUN bun install --production || bun install
 
-FROM oven/bun:1-slim AS base
-WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json tsconfig.json ./
+# Copy workspace manifests + lockfile first so install picks up convex etc.
+COPY package.json bun.lock* tsconfig.json ./
 COPY packages/ packages/
+COPY benchmarks/ benchmarks/
+
+# Install with workspaces visible (so packages/db/convex resolves).
+RUN bun install --no-save || bun install
 
 RUN mkdir -p /root/.8gent/sessions /tmp/8gent-work
 
