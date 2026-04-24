@@ -80,6 +80,27 @@ export const getByDateRange = query({
   },
 });
 
+/**
+ * Get active sessions on OTHER surfaces (for cross-device sync).
+ * Returns sessions that are open (no endedAt) and started on a different channel.
+ */
+export const getActiveOnOtherSurfaces = query({
+  args: {
+    userId: v.id("users"),
+    currentChannel: v.string(),
+  },
+  handler: async (ctx, { userId, currentChannel }) => {
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .collect();
+
+    return sessions.filter(
+      (s) => s.endedAt === undefined && s.channel !== currentChannel,
+    );
+  },
+});
+
 // ============================================
 // Mutations
 // ============================================
@@ -95,13 +116,15 @@ export const start = mutation({
     userId: v.id("users"),
     model: v.string(),
     provider: v.string(),
+    channel: v.optional(v.string()),
   },
-  handler: async (ctx, { userId, model, provider }) => {
+  handler: async (ctx, { userId, model, provider, channel }) => {
     const sessionId = await ctx.db.insert("sessions", {
       userId,
       startedAt: Date.now(),
       model,
       provider,
+      channel: channel || "cli",
       tokensIn: 0,
       tokensOut: 0,
       toolCalls: 0,
@@ -158,6 +181,28 @@ export const updateCounts = mutation({
       tokensIn: session.tokensIn + tokensInDelta,
       tokensOut: session.tokensOut + tokensOutDelta,
       toolCalls: session.toolCalls + toolCallsDelta,
+    });
+
+    return sessionId;
+  },
+});
+
+/**
+ * Claim a session from another surface.
+ * Updates the channel to the claiming surface, used for cross-device handoff.
+ * Only works if the session is still open (no endedAt).
+ */
+export const claim = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    newChannel: v.string(),
+  },
+  handler: async (ctx, { sessionId, newChannel }) => {
+    const session = await ctx.db.get(sessionId);
+    if (!session || session.endedAt !== undefined) return null;
+
+    await ctx.db.patch(sessionId, {
+      channel: newChannel,
     });
 
     return sessionId;
