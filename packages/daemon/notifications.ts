@@ -1,9 +1,10 @@
 /**
- * Notification Dispatcher - Routes notifications to Telegram + macOS native.
+ * Notification Dispatcher - Routes notifications to Telegram + macOS + Email.
  *
  * Channels:
  *   - Telegram: primary chat for commands, approvals, completion summaries
  *   - macOS: native Notification Center via osascript (session complete, approval, error)
+ *   - Email: Resend API for session complete, approval, daily summary, errors
  */
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
@@ -71,6 +72,70 @@ function nativeNotifyMeta(type: NotificationType): { title: string; sound: strin
   }
 }
 
+// ── Email Notifications (Resend API) ────────────────────────────
+
+const EMAIL_NOTIFY_TYPES = new Set<NotificationType>([
+  "task-complete",
+  "task-failed",
+  "approval-needed",
+  "daily-summary",
+  "error",
+]);
+
+interface EmailConfig {
+  apiKey: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Send an email notification via Resend API.
+ * Config comes from env: RESEND_API_KEY, EIGHT_EMAIL_FROM, EIGHT_EMAIL_TO
+ */
+export async function sendEmailNotification(
+  config: EmailConfig,
+  subject: string,
+  body: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        from: config.from,
+        to: [config.to],
+        subject,
+        text: body,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function emailSubject(type: NotificationType): string {
+  switch (type) {
+    case "task-complete": return "8gent - Task Complete";
+    case "task-failed": return "8gent - Task Failed";
+    case "approval-needed": return "8gent - Approval Needed";
+    case "daily-summary": return "8gent - Daily Summary";
+    case "error": return "8gent - Error";
+    default: return "8gent Notification";
+  }
+}
+
+function getEmailConfig(): EmailConfig | null {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.EIGHT_EMAIL_FROM || "8gent <notifications@8gent.dev>";
+  const to = process.env.EIGHT_EMAIL_TO;
+  if (!apiKey || !to) return null;
+  return { apiKey, from, to };
+}
+
 export class NotificationDispatcher {
   private token: string;
   private primaryChatId: string;
@@ -90,9 +155,16 @@ export class NotificationDispatcher {
     // macOS native notification for key events
     if (MACOS_NOTIFY_TYPES.has(type)) {
       const meta = nativeNotifyMeta(type);
-      // Truncate to 200 chars for notification bubble
       const short = message.length > 200 ? message.slice(0, 197) + "..." : message;
       sendNativeNotification(meta.title, short, { sound: meta.sound }).catch(() => {});
+    }
+
+    // Email (if configured)
+    if (EMAIL_NOTIFY_TYPES.has(type)) {
+      const emailCfg = getEmailConfig();
+      if (emailCfg) {
+        sendEmailNotification(emailCfg, emailSubject(type), message).catch(() => {});
+      }
     }
   }
 
