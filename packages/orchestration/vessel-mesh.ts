@@ -128,8 +128,10 @@ export class VesselMesh {
       this._client = getConvexClient();
       this._api = api;
       this._resolved = true;
+      console.log(`[grove] convex resolved url=${process.env.CONVEX_URL || "(none)"}`);
       return true;
-    } catch {
+    } catch (err) {
+      console.error("[grove] resolveConvex failed:", err);
       this._resolved = true;
       return false;
     }
@@ -151,7 +153,10 @@ export class VesselMesh {
         activeSessions: this.vesselInfo.activeSessions,
         maxSessions: this.vesselInfo.maxSessions,
       });
-    } catch {}
+      console.log(`[grove] registered vesselId=${this.vesselInfo.id}`);
+    } catch (err) {
+      console.error("[grove] register failed:", err);
+    }
   }
 
   private async unregister(): Promise<void> {
