@@ -31,6 +31,12 @@ const CLUSTERS: Cluster[] = [
 	},
 	{
 		items: [
+			{ key: "G", label: "bg this" },
+			{ key: "J", label: "jobs" },
+		],
+	},
+	{
+		items: [
 			{ key: "A", label: "anim" },
 			{ key: "S", label: "sound" },
 		],
