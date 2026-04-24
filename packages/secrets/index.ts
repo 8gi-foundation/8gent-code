@@ -243,3 +243,6 @@ export function getVault(): SecretVault {
   }
   return _vault;
 }
+
+export { KeychainVault, getKeychainVault } from "./keychain";
+export type { KeychainVaultOptions } from "./keychain";
