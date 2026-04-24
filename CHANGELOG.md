@@ -7,6 +7,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Grove Byzantine defence design draft** — `docs/specs/GROVE-BYZANTINE-DEFENSE.md`. Two-tier model: Tier 1 logit-hash spot-check (5% sampled, k=2, default-on for any external pod), Tier 2 full k-of-n consensus (k=3, opt-in via `verify: true` per request). Slashing mechanics, cost analysis, reference impl outline, test harness sketch. Partial #1567. No code yet — board to confirm defaults before implementation.
+
+---
+
 ## [0.3.0] - 2026-04-11
 
 ### Added
