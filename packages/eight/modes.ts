@@ -80,9 +80,26 @@ function loadCustomModes(filePath: string): Record<string, AgentMode> {
   return result;
 }
 
+/**
+ * Fast mode model tiers - ordered by speed.
+ * When fast mode is active, the agent switches to the fastest available model.
+ * Tier 1: local small models (lowest latency)
+ * Tier 2: free cloud fast models (low latency, no cost)
+ */
+export const FAST_MODE_MODELS: Array<{ model: string; provider: string; label: string }> = [
+  { model: "qwen3:1.7b", provider: "ollama", label: "Qwen 3 1.7B (local)" },
+  { model: "qwen3:4b", provider: "ollama", label: "Qwen 3 4B (local)" },
+  { model: "llama3.2:3b", provider: "ollama", label: "Llama 3.2 3B (local)" },
+  { model: "gemma3:4b", provider: "ollama", label: "Gemma 3 4B (local)" },
+  { model: "google/gemini-2.5-flash:free", provider: "openrouter", label: "Gemini Flash (free)" },
+  { model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter", label: "Llama 3 8B (free)" },
+];
+
 export class ModeManager {
   private modes: Record<string, AgentMode>;
   private active: string = "code";
+  private _fastMode: boolean = false;
+  private _previousModel: string | null = null;
 
   constructor(customModesPath?: string) {
     const modesPath = customModesPath || path.join(
@@ -99,6 +116,33 @@ export class ModeManager {
   listModes(): AgentMode[] { return Object.values(this.modes); }
   getActiveMode(): AgentMode { return this.modes[this.active] || BUILT_IN_MODES.code; }
   getActiveModeKey(): string { return this.active; }
+
+  get fastMode(): boolean { return this._fastMode; }
+  get previousModel(): string | null { return this._previousModel; }
+
+  enableFastMode(currentModel: string): void {
+    if (!this._fastMode) {
+      this._previousModel = currentModel;
+    }
+    this._fastMode = true;
+  }
+
+  disableFastMode(): string | null {
+    this._fastMode = false;
+    const prev = this._previousModel;
+    this._previousModel = null;
+    return prev;
+  }
+
+  toggleFastMode(currentModel: string): boolean {
+    if (this._fastMode) {
+      this.disableFastMode();
+      return false;
+    } else {
+      this.enableFastMode(currentModel);
+      return true;
+    }
+  }
 
   setActiveMode(name: string): boolean {
     const key = name.toLowerCase();

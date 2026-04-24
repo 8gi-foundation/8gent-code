@@ -35,6 +35,7 @@ import { KernelManager } from "../kernel/manager";
 import { getOrchestratorBus, type OrchestratorBus } from "../orchestration/orchestrator-bus";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
+import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { getExtensionManager } from "../extensions";
 import { ProactiveCompression, DEFAULT_PROACTIVE_CONFIG, type ProactiveResult, type CompressionStage } from "./compaction";
 import { privacyGate, forceLocalModel } from "../permissions/privacy-router";
@@ -72,6 +73,8 @@ import {
   createEightAgent,
   createModel,
   setToolContext,
+  setRuntimeParams,
+  getRuntimeParams,
   type EightAgentConfig,
   type ProviderConfig,
   type ProviderName,
@@ -200,11 +203,22 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     // Inject deferred tool categories when not loading all tools upfront
     const deferredToolBlock = config.allTools ? "" : "\n\n" + getDeferredToolSegment();
 
+    // Local providers have limited context windows — use a compact prompt that
+    // still includes an honest tool catalog so the model never claims it has
+    // no tools / no internet when it actually does. Closes #1082.
+    const runtimeName = this.config.runtime as string;
+    const isLocalRuntime =
+      runtimeName === "lmstudio" ||
+      runtimeName === "ollama" ||
+      runtimeName === "8gent";
+    const compactLocalPrompt =
+      "You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n" +
+      buildToolCatalogSegment({ concise: true });
+
     this.messageHistory.push({
       role: "system",
-      // Local providers have limited context windows — use minimal system prompt
-      content: (this.config.runtime === "lmstudio" || this.config.runtime === "ollama")
-        ? "You are a coding agent. Use tools to read, write, and run code. Be concise."
+      content: isLocalRuntime
+        ? compactLocalPrompt
         : basePrompt + vesselContext + userContextBlock + personalityBlock + orchestratorBlock + deferredToolBlock + languageInstruction,
     });
 
@@ -405,7 +419,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       this.messageHistory.push({
         role: "user",
         content:
-          `[PLANNING REQUIRED] Before executing ANY tools, you MUST output your plan as:\nPLAN:\n1. [step]\n2. [step]\n3. [step]\nThen execute each step. Do NOT call tools until you have output the plan.`,
+          `[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute.`,
       });
     } else {
       // Simple / short messages go through without a planning gate
@@ -433,18 +447,71 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     const systemPrompt = this.messageHistory.find(m => m.role === "system")?.content;
 
     // Create the AI SDK agent with v2 session callbacks
-    // Local providers have limited context — cap at core tools to avoid "Context size exceeded"
-    const CORE_TOOLS = ["read_file", "write_file", "edit_file", "list_files", "run_command", "git_status", "git_diff", "git_add", "git_commit"];
+    // Local providers have limited context — cap at core tools to avoid "Context size exceeded".
+    // web_search/web_fetch included so local models can answer current-info questions.
+    const CORE_TOOLS = [
+      "read_file", "write_file", "edit_file", "list_files", "run_command",
+      "get_outline", "get_symbol", "search_symbols",
+      "git_status", "git_diff", "git_add", "git_commit",
+      "web_search", "web_fetch",
+      "suggest_design", "query_design_system",
+      "self_inspect", "self_tune", "self_append_context",
+      "remember", "recall",
+    ];
+    const providerName = providerConfig.name as string;
+    const isLocalProvider =
+      providerName === "lmstudio" ||
+      providerName === "ollama" ||
+      providerName === "8gent";
+    // Deferred registry only loads `core` upfront — make sure local providers
+    // get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
+    // web_search won't exist to pass through.
+    if (isLocalProvider) {
+      this.toolRegistry.loadCategory("web");
+      this.toolRegistry.loadCategory("git");
+      this.toolRegistry.loadCategory("design");
+      this.toolRegistry.loadCategory("self");
+      this.toolRegistry.loadCategory("memory");
+    }
     const allTools = this.toolRegistry.getTools();
-    const isLocalProvider = providerConfig.name === "lmstudio" || providerConfig.name === "ollama";
     const effectiveTools = isLocalProvider
       ? Object.fromEntries(Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)))
       : allTools;
 
+    // ── Populate runtime params for self-awareness tools ──────────
+    const runtimeState = getRuntimeParams();
+    setRuntimeParams({
+      model: providerConfig.model,
+      provider: providerConfig.name,
+      toolCount: Object.keys(effectiveTools).length,
+      loadedCategories: this.toolRegistry.getLoadedCategories(),
+      systemPromptLength: systemPrompt?.length || 0,
+      messageHistoryLength: this.messageHistory.length,
+      stepCount: stepCount,
+      maxSteps: this.config.maxTurns || 30,
+      maxOutputTokens: isLocalProvider ? 4096 : 8192,
+    });
+
+    // Apply any previously tuned params
+    const tunedParams = getRuntimeParams();
+
+    // Inject appended context into instructions
+    let effectiveInstructions = systemPrompt || "";
+    if (tunedParams.appendedContext.length > 0) {
+      effectiveInstructions += "\n\n## Agent Self-Appended Context\n" +
+        tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n");
+    }
+
     const agentConfig: EightAgentConfig = {
       provider: providerConfig,
-      instructions: systemPrompt,
-      maxSteps: this.config.maxTurns || 30,
+      instructions: effectiveInstructions,
+      maxSteps: tunedParams.maxSteps,
+      maxOutputTokens: tunedParams.maxOutputTokens,
+      temperature: tunedParams.temperature,
+      topP: tunedParams.topP,
+      topK: tunedParams.topK,
+      frequencyPenalty: tunedParams.frequencyPenalty,
+      presencePenalty: tunedParams.presencePenalty,
       workingDirectory: this.config.workingDirectory || process.cwd(),
       tools: effectiveTools,
 
@@ -663,6 +730,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
       onStepFinish: async (event: StepFinishEvent) => {
         stepCount++;
+        // Update runtime params so self_inspect shows live step count
+        setRuntimeParams({ stepCount, messageHistoryLength: this.messageHistory.length });
 
         this.events.onStepFinish?.({
           stepNumber: event.stepNumber,
@@ -869,6 +938,35 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
       }
 
       this.abortController = null;
+
+      // ── Adaptive recovery: if the model planned but never called tools,
+      // it likely hit the output token limit mid-response. Retry once with
+      // a larger maxOutputTokens so it can fit plan + first tool call.
+      if (
+        isLocalProvider &&
+        stepCount <= 1 &&
+        result.text &&
+        result.text.length > 50 &&
+        !agentConfig.maxOutputTokens // only retry once
+      ) {
+        const hadToolCalls = result.steps?.some((s: any) => s.toolCalls?.length > 0);
+        if (!hadToolCalls) {
+          console.log(`[agent] No tool calls after ${stepCount} step(s) - bumping maxOutputTokens to 8192 and retrying`);
+          agentConfig.maxOutputTokens = 8192;
+          const retryAgent = createEightAgent(agentConfig);
+          this.abortController = new AbortController();
+          const messages2 = this.messageHistory
+            .filter(m => m.role !== "system")
+            .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+          try {
+            result = await retryAgent.generate({ messages: messages2, abortSignal: this.abortController!.signal });
+          } catch (retryErr: any) {
+            if (retryErr?.name === "AbortError") throw retryErr;
+            console.log(`[agent] Retry with larger maxOutputTokens failed: ${retryErr?.message}`);
+          }
+          this.abortController = null;
+        }
+      }
 
       const content = result.text;
 

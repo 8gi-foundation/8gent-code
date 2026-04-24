@@ -30,9 +30,11 @@ import {
   readImage,
   describeImage,
 } from "../tools/image";
-// PDF tools - lazy loaded to avoid DOMMatrix issues
-const readPdf = async (p: string) => { throw new Error("PDF support coming soon"); };
-const readPdfPage = async (p: string, n: number) => { throw new Error("PDF support coming soon"); };
+import {
+  readPdf,
+  readPdfPage,
+  searchPdf,
+} from "../tools/pdf";
 import {
   readNotebook,
   editCell,
@@ -504,6 +506,52 @@ export class ToolExecutor {
           }
         }
       },
+      // PDF tools
+      {
+        type: "function",
+        function: {
+          name: "read_pdf",
+          description: "[FILE] Reads a PDF file and returns extracted text content, page count, and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the PDF file" }
+            },
+            required: ["path"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "read_pdf_page",
+          description: "[FILE] Reads a specific page from a PDF file and returns its text content. Use when you only need content from certain pages of a large PDF, or when the full PDF text was truncated. Page numbers start at 1.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the PDF file" },
+              pageNum: { type: "number", description: "Page number to read (1-based)" }
+            },
+            required: ["path", "pageNum"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_pdf",
+          description: "[FILE] Searches for text within a PDF file and returns matching positions with surrounding context. Use when you need to find specific content, keywords, or phrases in a PDF without reading the entire document.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the PDF file" },
+              query: { type: "string", description: "Text to search for" },
+              caseSensitive: { type: "boolean", description: "Case-sensitive search (default: false)" }
+            },
+            required: ["path", "query"]
+          }
+        }
+      },
       // Vercel deployment tools
       {
         type: "function",
@@ -887,7 +935,7 @@ export class ToolExecutor {
 
       // Shell
       case "run_command":
-        return this.runCommand(args.command as string);
+        return this.runCommand(args.command as string, args.timeout as number | undefined);
 
       // Multi-agent orchestration
       case "spawn_agent":
@@ -913,6 +961,8 @@ export class ToolExecutor {
         return this.handleReadPdf(args.path as string);
       case "read_pdf_page":
         return this.handleReadPdfPage(args.path as string, args.pageNum as number);
+      case "search_pdf":
+        return this.handleSearchPdf(args.path as string, args.query as string, args.caseSensitive as boolean | undefined);
 
       // Notebook tools
       case "read_notebook":
@@ -1333,7 +1383,7 @@ export class ToolExecutor {
   // Shell Command Execution
   // ============================================
 
-  async runCommand(command: string): Promise<string> {
+  async runCommand(command: string, timeoutSec?: number): Promise<string> {
     const { spawn } = await import("child_process");
 
     const permissionCheck = this.permissionManager.checkPermission(command);
@@ -1376,23 +1426,41 @@ export class ToolExecutor {
       finalCommand = command + ' -y';
     }
 
+    const timeoutMs = Math.min((timeoutSec || 120), 300) * 1000;
+
     return new Promise((resolve) => {
+      let resolved = false;
+      const safeResolve = (value: string) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(value);
+      };
+
       const proc = spawn('sh', ['-c', finalCommand], {
         cwd: this.workingDirectory,
         stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
       });
 
       let stdout = '';
       let stderr = '';
 
-      // SECURITY: Removed stdin auto-answer hack (was sending \n every 1s,
-      // could silently confirm destructive interactive prompts)
+      const killProcessTree = () => {
+        try {
+          process.kill(-proc.pid!, 'SIGTERM');
+          setTimeout(() => {
+            try { process.kill(-proc.pid!, 'SIGKILL'); } catch {}
+          }, 3000);
+        } catch {
+          try { proc.kill('SIGKILL'); } catch {}
+        }
+      };
 
       proc.stdout.on('data', (data) => { stdout += data.toString(); });
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
       const timeout = setTimeout(() => {
-        proc.kill('SIGTERM');
+        killProcessTree();
 
         this.hookManager.executeHooks("afterCommand", {
           command: finalCommand,
@@ -1403,12 +1471,13 @@ export class ToolExecutor {
           workingDirectory: this.workingDirectory,
         });
 
-        resolve(`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`);
-      }, 120000);
+        safeResolve(`TIMEOUT after ${timeoutMs / 1000}s. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`);
+      }, timeoutMs);
+
+      proc.unref();
 
       proc.on('close', (code) => {
         clearTimeout(timeout);
-        // stdinInterval removed (security fix)
 
         this.hookManager.executeHooks("afterCommand", {
           command: finalCommand,
@@ -1420,15 +1489,14 @@ export class ToolExecutor {
         });
 
         if (code === 0) {
-          resolve(stdout || stderr || "Command completed successfully.");
+          safeResolve(stdout || stderr || "Command completed successfully.");
         } else {
-          resolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
+          safeResolve(`Exit code ${code}:\n${stdout}\n${stderr}`);
         }
       });
 
       proc.on('error', (err) => {
         clearTimeout(timeout);
-        // stdinInterval removed (security fix)
 
         this.hookManager.executeHooks("onError", {
           command: finalCommand,
@@ -1436,7 +1504,7 @@ export class ToolExecutor {
           workingDirectory: this.workingDirectory,
         });
 
-        resolve(`Error: ${err.message}`);
+        safeResolve(`Error: ${err.message}`);
       });
     });
   }
@@ -1554,6 +1622,24 @@ export class ToolExecutor {
       }, null, 2);
     } catch (err) {
       return `Error reading PDF page: ${err}`;
+    }
+  }
+
+  private async handleSearchPdf(pdfPath: string, query: string, caseSensitive?: boolean): Promise<string> {
+    const absolutePath = path.isAbsolute(pdfPath)
+      ? pdfPath
+      : path.join(this.workingDirectory, pdfPath);
+
+    try {
+      const results = await searchPdf(absolutePath, query, caseSensitive ?? false);
+      return JSON.stringify({
+        path: results.path,
+        query: results.query,
+        totalMatches: results.totalMatches,
+        matches: results.matches.slice(0, 20),
+      }, null, 2);
+    } catch (err) {
+      return `Error searching PDF: ${err}`;
     }
   }
 

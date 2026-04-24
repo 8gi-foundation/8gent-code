@@ -1,6 +1,6 @@
 {
   "name": "@8gi-foundation/8gent-code",
-  "version": "0.6.0",
+  "version": "0.9.1",
   "private": false,
   "description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
   "type": "module",
@@ -43,15 +43,13 @@
     "benchmark:category": "bun run benchmarks/runner.ts --category",
     "benchmark:single": "bun run benchmarks/runner.ts --bench",
     "benchmark:swebench": "bun run benchmarks/swebench/run.ts",
+    "audit": "bun run packages/audit/cli.ts",
     "demo": "bun run scripts/demo-savings.ts",
     "harness": "bun run packages/harness-cli/index.ts",
     "harness:run": "bun run packages/harness-cli/index.ts run",
     "harness:sessions": "bun run packages/harness-cli/index.ts sessions",
     "harness:inspect": "bun run packages/harness-cli/index.ts inspect",
     "harness:doctor": "bun run packages/harness-cli/index.ts doctor",
-    "demos:studio": "cd apps/demos && bun run studio",
-    "demos:render": "cd apps/demos && bun run render:all",
-    "demos:media": "cd apps/demos && bun run media",
     "debug": "bun run bin/debug.ts"
   },
   "workspaces": [

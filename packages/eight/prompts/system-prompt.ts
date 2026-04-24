@@ -15,6 +15,7 @@ import {
 } from "./soul-layers";
 import { loadInstructions } from "../instruction-loader";
 import { getRepoMapper } from "../../repo-context";
+import { TOOL_CATEGORIES } from "../tool-registry";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -111,6 +112,88 @@ Before ANY task:
 - file_exists, test_result, git_commit, command_output
 - Confidence scoring: 0-100% based on evidence weight
 </thinking_block>`;
+
+// ============================================
+// Tool Catalog (closes #1082 — bootstrap segment)
+// ============================================
+
+/**
+ * Short human label per category. Single source of truth for what each
+ * category is FOR — kept here so the model gets action-oriented hints,
+ * not just raw tool names.
+ */
+const TOOL_CATEGORY_DESCRIPTIONS: Record<string, string> = {
+  core: "Read, write, and run. File I/O, shell, code structure (outline/symbol/search).",
+  git: "Branching, staging, diffing, committing, pushing. Full local git.",
+  github: "PRs and issues via `gh`. List, create, view, manage.",
+  web: "HTTP fetch + web search. USE THIS when you need current info, docs, or external data.",
+  notes: "Persist short notes to disk for later recall.",
+  terminal: "Write into the user's live terminal session.",
+  lsp: "Language-server queries: definitions, references, hover, diagnostics.",
+  media: "Images, PDFs, Jupyter notebooks — read and edit.",
+  orchestration: "Spawn and coordinate sub-agents. Delegate, message, merge work.",
+  background: "Start long-running background tasks and stream their output.",
+  mcp: "List and call tools from connected MCP servers.",
+};
+
+export interface ToolCatalogOptions {
+  /** When true, emit category names + tool names only (skip descriptions). */
+  concise?: boolean;
+  /** When true, tell the model to call discover_tools before using a category. */
+  deferred?: boolean;
+}
+
+/**
+ * Build the tool-inventory segment the model sees at system-prompt time.
+ * Closes #1082 (structured, honest, versioned tool/policy/skills snapshot).
+ *
+ * Source of truth is `TOOL_CATEGORIES` in tool-registry.ts — so adding a
+ * new tool to the registry flows into the prompt automatically.
+ */
+export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
+  const { concise = false, deferred = false } = opts;
+  const lines: string[] = ["## TOOLS YOU HAVE"];
+
+  if (deferred) {
+    lines.push(
+      "",
+      "Core tools (file, shell, code exploration) are already loaded.",
+      "To use a tool from another category, call `discover_tools` first with the category name.",
+    );
+  } else {
+    lines.push(
+      "",
+      "These tools are available right now. Call them directly — do not say you cannot do something until you have tried the relevant tool.",
+    );
+  }
+  lines.push("");
+
+  for (const [category, toolNames] of Object.entries(TOOL_CATEGORIES)) {
+    if (!toolNames || toolNames.length === 0) continue;
+    const desc = TOOL_CATEGORY_DESCRIPTIONS[category] ?? "";
+    if (concise) {
+      lines.push(`- **${category}**: ${toolNames.join(", ")}`);
+    } else {
+      lines.push(`### ${category}`);
+      if (desc) lines.push(desc);
+      lines.push(toolNames.map((t) => `\`${t}\``).join(", "));
+      lines.push("");
+    }
+  }
+
+  lines.push(
+    "",
+    "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access — you do.**",
+  );
+
+  return lines.join("\n");
+}
+
+/**
+ * Stable snapshot used by `getFullSystemPrompt` / `buildTieredSystemPrompt`.
+ * Kept as an eagerly-evaluated constant so the composition stays synchronous.
+ */
+export const TOOL_CATALOG_SEGMENT = buildToolCatalogSegment();
 
 export const TOOL_PATTERNS_SEGMENT = `## TOOL PATTERNS
 
@@ -312,6 +395,7 @@ export function getFullSystemPrompt(): string {
     process.env.EIGHT_VESSEL_CONTEXT || "",
     instructionSegment,
     ARCHITECTURE_SEGMENT,
+    TOOL_CATALOG_SEGMENT,
     BMAD_SEGMENT,
     THINKING_PATTERNS_SEGMENT,
     SWE_PATTERNS_SEGMENT,
@@ -343,6 +427,7 @@ export function buildTieredSystemPrompt(
     composeSoulPrompt(tier, userContext),
     instructionSegment,
     ARCHITECTURE_SEGMENT,
+    TOOL_CATALOG_SEGMENT,
     BMAD_SEGMENT,
     THINKING_PATTERNS_SEGMENT,
     SWE_PATTERNS_SEGMENT,
@@ -524,6 +609,7 @@ ${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
     composeSoulPrompt(tier, userContext),
     contextSection,
     instructionSegment,
+    TOOL_CATALOG_SEGMENT,
     BMAD_SEGMENT,
     TOOL_PATTERNS_SEGMENT,
     DESIGN_FIRST_SEGMENT,

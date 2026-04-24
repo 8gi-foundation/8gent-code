@@ -9,7 +9,7 @@
 import * as path from "path";
 import * as fs from "fs";
 
-const VERSION = "0.6.0";
+const VERSION = "0.9.1";
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -34,6 +34,7 @@ USAGE:
 
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
+  run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
   doctor                      Check system health (Ollama, models, tools, config)
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
@@ -55,6 +56,7 @@ COMMANDS:
   auth <sub>                  Authentication (login, logout, status)
   cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
+  mcp-server [--tools=safe]   Start MCP server (expose 8gent tools to external clients)
 
 AGENT COMMANDS:
   agent list                  List active sub-agents
@@ -94,9 +96,13 @@ OPTIONS:
   -v, --version  Show version
   --json         Output as JSON (machine-readable)
   --yes          Auto-approve all prompts (non-interactive)
+  --output-format <fmt>  run-only: 'stream-json' emits one NDJSON event per line.
   --model=<m>    Override model (e.g., --model=qwen3:14b)
   --provider=<p> Override provider (e.g., --provider=ollama)
   --cwd=<dir>    Override working directory
+  --fast         Start in fast mode (use fastest available model)
+  --resume       Resume last session (or --resume=<name> for specific)
+  --continue <id>  Resume a specific session by ID or name
   --infinite     Enable infinite mode (autonomous until done)
   --pet          Also spawn Lil Eight dock companion (auto with tui)
   --no-pet       Disable dock pet auto-spawn
@@ -189,6 +195,42 @@ async function main() {
     args.push("tui");
   }
 
+  // Check for --fast flag - start in fast mode (fastest available model)
+  const hasFastFlag = args.includes("--fast");
+  if (hasFastFlag) {
+    const { getModeManager, FAST_MODE_MODELS } = await import("../packages/eight/modes.ts");
+    const mm = getModeManager();
+    mm.enableFastMode("default");
+
+    // Try to find fastest available model and set it
+    let fastModel: string | null = null;
+    for (const candidate of FAST_MODE_MODELS) {
+      if (candidate.provider === "ollama") {
+        try {
+          const resp = await fetch("http://localhost:11434/api/tags");
+          const data = await resp.json() as { models?: Array<{ name: string }> };
+          const available = (data.models || []).map((m: { name: string }) => m.name);
+          if (available.some((m: string) => m.startsWith(candidate.model.split(":")[0]))) {
+            fastModel = candidate.model;
+            console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
+            break;
+          }
+        } catch { continue; }
+      } else {
+        fastModel = candidate.model;
+        console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
+        break;
+      }
+    }
+
+    // Set as model override if found
+    if (fastModel && !args.some(a => a.startsWith("--model="))) {
+      args.push(`--model=${fastModel}`);
+    }
+
+    args = args.filter(a => a !== "--fast");
+  }
+
   // Handle --pet / -pet as standalone (same as 8gent pet start)
   if (args.includes("--pet") || args.includes("-pet")) {
     const filtered = args.filter(a => a !== "--pet" && a !== "-pet");
@@ -197,6 +239,30 @@ async function main() {
       return;
     }
     // Otherwise it's a flag on another command - handled by tuiCommand
+  }
+
+  // --resume (no arg) = resume last session
+  if (args.includes("--resume") && !args.some(a => a.startsWith("--resume="))) {
+    const { SessionManager } = await import("../packages/eight/session-manager.ts");
+    const sm = new SessionManager();
+    const last = sm.getLast();
+    if (last) {
+      console.log(`Resuming session: ${last.name || last.id} (${last.model}, ${last.messageCount} msgs)`);
+      args = args.filter(a => a !== "--resume");
+      args.unshift("tui", `--resume=${last.name || last.id}`);
+    } else {
+      console.log("No previous sessions found. Starting fresh.");
+      args = args.filter(a => a !== "--resume");
+      args.unshift("tui");
+    }
+  }
+
+  // --continue <id> = resume specific session
+  const continueIdx = args.indexOf("--continue");
+  if (continueIdx !== -1 && args[continueIdx + 1] && !args[continueIdx + 1].startsWith("-")) {
+    const sessionId = args[continueIdx + 1];
+    args = args.filter((_, i) => i !== continueIdx && i !== continueIdx + 1);
+    args.unshift("tui", `--resume=${sessionId}`);
   }
 
   // Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
@@ -235,6 +301,12 @@ async function main() {
     case "tui":
       await tuiCommand(restArgs);
       break;
+
+    case "run": {
+      const { runRunCommand } = await import("../packages/eight/run.ts");
+      const code = await runRunCommand(restArgs);
+      process.exit(code);
+    }
 
     case "pet":
       await petCommand(restArgs);
@@ -292,6 +364,12 @@ async function main() {
     case "rpc": {
       const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
       await startRPCServer();
+      break;
+    }
+
+    case "mcp-server": {
+      const { startMCPServer } = await import("../packages/mcp/server.ts");
+      await startMCPServer(restArgs);
       break;
     }
 
