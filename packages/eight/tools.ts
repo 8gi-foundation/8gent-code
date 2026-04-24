@@ -30,9 +30,11 @@ import {
   readImage,
   describeImage,
 } from "../tools/image";
-// PDF tools - lazy loaded to avoid DOMMatrix issues
-const readPdf = async (p: string) => { throw new Error("PDF support coming soon"); };
-const readPdfPage = async (p: string, n: number) => { throw new Error("PDF support coming soon"); };
+import {
+  readPdf,
+  readPdfPage,
+  searchPdf,
+} from "../tools/pdf";
 import {
   readNotebook,
   editCell,
@@ -504,6 +506,52 @@ export class ToolExecutor {
           }
         }
       },
+      // PDF tools
+      {
+        type: "function",
+        function: {
+          name: "read_pdf",
+          description: "[FILE] Reads a PDF file and returns extracted text content, page count, and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the PDF file" }
+            },
+            required: ["path"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "read_pdf_page",
+          description: "[FILE] Reads a specific page from a PDF file and returns its text content. Use when you only need content from certain pages of a large PDF, or when the full PDF text was truncated. Page numbers start at 1.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the PDF file" },
+              pageNum: { type: "number", description: "Page number to read (1-based)" }
+            },
+            required: ["path", "pageNum"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_pdf",
+          description: "[FILE] Searches for text within a PDF file and returns matching positions with surrounding context. Use when you need to find specific content, keywords, or phrases in a PDF without reading the entire document.",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the PDF file" },
+              query: { type: "string", description: "Text to search for" },
+              caseSensitive: { type: "boolean", description: "Case-sensitive search (default: false)" }
+            },
+            required: ["path", "query"]
+          }
+        }
+      },
       // Vercel deployment tools
       {
         type: "function",
@@ -913,6 +961,8 @@ export class ToolExecutor {
         return this.handleReadPdf(args.path as string);
       case "read_pdf_page":
         return this.handleReadPdfPage(args.path as string, args.pageNum as number);
+      case "search_pdf":
+        return this.handleSearchPdf(args.path as string, args.query as string, args.caseSensitive as boolean | undefined);
 
       // Notebook tools
       case "read_notebook":
@@ -1554,6 +1604,24 @@ export class ToolExecutor {
       }, null, 2);
     } catch (err) {
       return `Error reading PDF page: ${err}`;
+    }
+  }
+
+  private async handleSearchPdf(pdfPath: string, query: string, caseSensitive?: boolean): Promise<string> {
+    const absolutePath = path.isAbsolute(pdfPath)
+      ? pdfPath
+      : path.join(this.workingDirectory, pdfPath);
+
+    try {
+      const results = await searchPdf(absolutePath, query, caseSensitive ?? false);
+      return JSON.stringify({
+        path: results.path,
+        query: results.query,
+        totalMatches: results.totalMatches,
+        matches: results.matches.slice(0, 20),
+      }, null, 2);
+    } catch (err) {
+      return `Error searching PDF: ${err}`;
     }
   }
 
