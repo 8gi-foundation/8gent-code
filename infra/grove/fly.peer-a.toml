@@ -5,9 +5,6 @@
 app = "grove-peer-a"
 primary_region = "ams"
 
-[build]
-  dockerfile = "infra/grove/Dockerfile.daemon"
-
 [env]
   GROVE_ENABLED = "1"
   VESSEL_ID = "grove-peer-a"
