@@ -1,0 +1,50 @@
+{
+  "category": "computer-use",
+  "version": "1",
+  "description": "Vision-bearing tasks shaped like a 8gent Computer session: parse a screenshot, plan a click, describe an accessibility tree.",
+  "tasks": [
+    {
+      "id": "CU001",
+      "title": "Screenshot identification",
+      "kind": "vision",
+      "fixture": "fixtures/red-square.png",
+      "prompt": "What primary colour fills this image? Answer with one word.",
+      "expectedKeywords": ["red"],
+      "passKeywordCount": 1
+    },
+    {
+      "id": "CU002",
+      "title": "Click target reasoning",
+      "kind": "vision",
+      "fixture": "fixtures/button-stub.png",
+      "prompt": "You see a UI mock with a single button labelled 'Submit'. Where on the screen would a user click? Reply with the rough region: top, middle, or bottom.",
+      "expectedKeywords": ["middle", "centre", "center"],
+      "passKeywordCount": 1
+    },
+    {
+      "id": "CU003",
+      "title": "Accessibility tree parsing",
+      "kind": "tool",
+      "prompt": "Given this accessibility tree, list the buttons:\n[\n  {role: 'document', children: [\n    {role: 'heading', name: 'Settings'},\n    {role: 'button', name: 'Save'},\n    {role: 'textbox', name: 'Email'},\n    {role: 'button', name: 'Cancel'}\n  ]}\n]\nReply with a comma-separated list of button names.",
+      "expectedKeywords": ["Save", "Cancel"],
+      "passKeywordCount": 2
+    },
+    {
+      "id": "CU004",
+      "title": "Short conversational reply (chat tier)",
+      "kind": "chat",
+      "prompt": "User just said: 'open the messages app'. Reply with one short confirmation sentence. No tool calls.",
+      "expectedKeywords": ["open", "messag"],
+      "passKeywordCount": 1
+    },
+    {
+      "id": "CU005",
+      "title": "Plan-from-screenshot",
+      "kind": "vision",
+      "fixture": "fixtures/red-square.png",
+      "prompt": "You see this screen. The user said 'find the search bar'. Write the next single action as a JSON object with fields {action, target}. If no search bar is visible, action should be 'report' with target 'no-search-bar-found'.",
+      "expectedKeywords": ["action", "target", "report"],
+      "passKeywordCount": 2
+    }
+  ]
+}
