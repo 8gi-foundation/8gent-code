@@ -17,6 +17,34 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { join } from "path";
 import { LEARNED_SKILLS_DIR } from "./compound.js";
 
+/**
+ * Execute a shell-command string and return its exit code plus stderr.
+ * Surfaced as a module-level binding so tests can stub it without spawning real processes.
+ * Uses `Bun.spawnSync` when available, falls back to node:child_process for portability.
+ */
+export let runShellTest: (cmd: string) => { exitCode: number; stderr: string } = (cmd) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bun = (globalThis as any).Bun as { spawnSync?: Function } | undefined;
+  if (bun && typeof bun.spawnSync === "function") {
+    const proc = bun.spawnSync(["sh", "-c", cmd], { stdout: "pipe", stderr: "pipe" });
+    const stderr =
+      proc.stderr && typeof proc.stderr.toString === "function"
+        ? proc.stderr.toString()
+        : "";
+    return { exitCode: typeof proc.exitCode === "number" ? proc.exitCode : 1, stderr };
+  }
+  // node fallback
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { spawnSync } = require("child_process") as typeof import("child_process");
+  const result = spawnSync("sh", ["-c", cmd], { encoding: "utf-8" });
+  return { exitCode: result.status ?? 1, stderr: result.stderr ?? "" };
+};
+
+/** Test hook: replace the shell runner. */
+export function setShellTestRunner(fn: typeof runShellTest): void {
+  runShellTest = fn;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────
 
 /** A single measurement. A number or a boolean. Booleans coerce to 1/0. */
@@ -118,13 +146,19 @@ export async function runExperiment(
       record.measurement = await spec.test();
       record.passed = evaluateMetric(record.measurement, spec.metric);
     } else {
-      // Shell-command test: operator replays later. We cannot measure here, so
-      // a predicate metric must have been provided. Treat the shell-string as
-      // a descriptor only and fail open (passed = false) unless the predicate
-      // was already called with a prefilled measurement upstream.
-      record.measurement = null;
-      record.passed = false;
-      record.error = "shell-command tests must be replayed by operator";
+      // Shell-command test: execute the command, exit code 0 → pass (measurement = 1),
+      // nonzero → fail (measurement = 0). Exit code is the source of truth. If a
+      // predicate metric is also supplied, it runs against the boolean-coerced
+      // measurement and must also pass. validateSpec rejects numeric thresholds
+      // against shell tests, so by here `metric` is always a predicate.
+      const { exitCode, stderr } = runShellTest(spec.test);
+      record.measurement = exitCode === 0 ? 1 : 0;
+      const exitPassed = exitCode === 0;
+      const metricPassed = evaluateMetric(record.measurement, spec.metric);
+      record.passed = exitPassed && metricPassed;
+      if (exitCode !== 0 && stderr) {
+        record.error = stderr.slice(0, 500);
+      }
     }
   } catch (e) {
     record.error = e instanceof Error ? e.message : String(e);
