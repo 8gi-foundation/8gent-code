@@ -129,6 +129,8 @@ import {
 	logToolStart,
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
+import * as bgPool from "./lib/background-pool.js";
+import { BackgroundPanel } from "./components/background-panel.js";
 import type { SlashCommand } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
@@ -471,6 +473,15 @@ export function App({
 	]);
 	const [isProcessingRaw, setIsProcessingRaw] = useState(false);
 	const processingTabIdRef = useRef<string | null>(null);
+
+	// Background task pool (Ctrl+G to background current, Ctrl+J to open panel)
+	const [bgPanelOpen, setBgPanelOpen] = useState(false);
+	const [bgTasks, setBgTasks] = useState<bgPool.BgTask[]>(() => bgPool.list());
+	const [bgBanner, setBgBanner] = useState<string | null>(null);
+	const [bgRunning, setBgRunning] = useState(0);
+	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
+	const foregroundLabelRef = useRef<string>("");
+
 	const [processingStage, setProcessingStage] =
 		useState<ProcessingStage>("planning");
 	const [status, setStatus] = useState<AppStatus>("idle");
@@ -689,6 +700,24 @@ export function App({
 		},
 		[activeTabId],
 	);
+
+	// Background pool subscription: snapshot tasks + surface non-modal banner on settle
+	useEffect(() => {
+		const unsub = bgPool.onChange((task) => {
+			setBgTasks(bgPool.list());
+			setBgRunning(bgPool.runningCount());
+			if (task.status === "done" || task.status === "error") {
+				setBgBanner(
+					task.status === "done"
+						? `Background task complete: ${task.label}. Ctrl+J to review.`
+						: `Background task failed: ${task.label}. Ctrl+J to review.`,
+				);
+			}
+		});
+		return () => {
+			unsub();
+		};
+	}, []);
 
 	// Per-tab message sync: save current tab's messages, load new tab's messages on switch
 	const prevTabIdRef = useRef(activeTabId);
@@ -1066,7 +1095,7 @@ export function App({
 			setViewMode((prev) => (prev === "predict" ? "chat" : "predict"));
 		}
 
-		// Toggle expanded view with Ctrl+O (like Claude Code)
+		// Toggle expanded view with Ctrl+O (familiar zoom shortcut from peer terminal agents)
 		if (key.ctrl && input === "o") {
 			setExpandedView((prev) => !prev);
 		}
@@ -1074,6 +1103,33 @@ export function App({
 		// Toggle process panel
 		if (key.ctrl && input === "b") {
 			processPanel.toggleSidebar();
+		}
+
+		// Ctrl+G: background the current foreground task (send to pool).
+		// The agent.chat() Promise keeps running; we detach the UI.
+		if (key.ctrl && input === "g") {
+			const promise = foregroundPromiseRef.current;
+			if (promise && isProcessingRaw) {
+				const label = foregroundLabelRef.current || "background task";
+				bgPool.track(label, promise);
+				foregroundPromiseRef.current = null;
+				foregroundLabelRef.current = "";
+				addSystemMessage(
+					`Sent to background: "${label}". Ctrl+J to review. Starting fresh foreground.`,
+				);
+				setIsProcessing(false);
+				setActiveTool(null);
+				agentRunningRef.current = false;
+				setStatus("idle");
+			} else {
+				addSystemMessage("No foreground task running to background.");
+			}
+		}
+
+		// Ctrl+J: toggle background jobs panel. Dismiss banner on open.
+		if (key.ctrl && input === "j") {
+			setBgPanelOpen((prev) => !prev);
+			setBgBanner(null);
 		}
 
 		// Ctrl+T: new chat tab
@@ -4166,11 +4222,31 @@ export function App({
 					const modePrefix =
 						agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
-					const reply = await agent.chat(
+					// Capture the in-flight chat promise + label so Ctrl+G can
+					// hand this task to the background pool without interrupting it.
+					const chatPromise = agent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,
 						img?.mimeType,
 					);
+					foregroundPromiseRef.current = chatPromise;
+					foregroundLabelRef.current = messageForAgent.trim().slice(0, 80);
+					let reply: string;
+					try {
+						reply = await chatPromise;
+					} catch (err) {
+						// If backgrounded mid-flight, swallow: the pool surfaces errors.
+						if (foregroundPromiseRef.current !== chatPromise) return;
+						throw err;
+					}
+					// If the user pressed Ctrl+G while this was in flight, the
+					// background pool has taken ownership. Don't also stamp the
+					// result onto the (now-stale) foreground tab.
+					if (foregroundPromiseRef.current !== chatPromise) {
+						return;
+					}
+					foregroundPromiseRef.current = null;
+					foregroundLabelRef.current = "";
 					setMessages((prev) => {
 						const trimmed = (reply ?? "").trim();
 						if (!trimmed) {
@@ -4760,6 +4836,18 @@ export function App({
 							onUnfocus={processPanel.focusInput}
 						/>
 					)}
+
+					{/* Right: background jobs panel (Ctrl+J) */}
+					{bgPanelOpen && (
+						<BackgroundPanel
+							tasks={bgTasks}
+							onClose={() => {
+								setBgPanelOpen(false);
+								setBgBanner(null);
+							}}
+							width={Math.min(48, Math.max(36, processSidebarWidth))}
+						/>
+					)}
 				</Box>
 
 				{/* Mini kanban removed — full board available via Ctrl+K */}
@@ -4787,6 +4875,14 @@ export function App({
 							image={imageInput.currentImage}
 							onRemove={imageInput.removeImage}
 						/>
+					</Box>
+				)}
+
+				{/* Background task completion banner (non-modal, no animation) */}
+				{bgBanner && (
+					<Box paddingX={1} flexShrink={0}>
+						<AppText color="cyan">[bg] </AppText>
+						<AppText>{bgBanner}</AppText>
 					</Box>
 				)}
 
@@ -4906,7 +5002,7 @@ export function App({
 				{showEnhancedStatus ? (
 					<EnhancedStatusBar
 						modelName={currentModel}
-						runningAgents={isProcessing ? 1 : 0}
+						runningAgents={(isProcessing ? 1 : 0) + bgRunning}
 						totalAgents={1}
 						permissionMode={infiniteModeActive ? "infinite" : "ask"}
 						tokensSaved={totalTokens}
