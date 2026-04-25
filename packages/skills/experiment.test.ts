@@ -22,6 +22,7 @@ import {
   getExperimentHistory,
   runExperiment,
   setExperimentMemorySink,
+  setShellTestRunner,
   validateSpec,
   type ExperimentRecord,
 } from "./experiment.js";
@@ -129,6 +130,45 @@ describe("runExperiment", () => {
 
     expect(record.passed).toBe(false);
     expect(record.rolledBack).toBe(true);
+    expect(record.error).toContain("boom");
+    expect(existsSync(skillPath)).toBe(false);
+  });
+
+  it("keeps the skill when a shell-command test exits 0 (issue #1818)", async () => {
+    const slug = uniqueSlug();
+    const skillPath = join(LEARNED_SKILLS_DIR, `${slug}.md`);
+    writeFileSync(skillPath, "---\nname: test\n---\nbody\n");
+
+    setShellTestRunner(() => ({ exitCode: 0, stderr: "" }));
+
+    const record = await runExperiment(skillPath, {
+      hypothesis: "Shell check passes.",
+      test: "true",
+      metric: (m) => m === 1,
+    });
+
+    expect(record.passed).toBe(true);
+    expect(record.rolledBack).toBe(false);
+    expect(record.measurement).toBe(1);
+    expect(existsSync(skillPath)).toBe(true);
+  });
+
+  it("rolls back the skill when a shell-command test exits nonzero (issue #1818)", async () => {
+    const slug = uniqueSlug();
+    const skillPath = join(LEARNED_SKILLS_DIR, `${slug}.md`);
+    writeFileSync(skillPath, "---\nname: test\n---\nbody\n");
+
+    setShellTestRunner(() => ({ exitCode: 2, stderr: "boom" }));
+
+    const record = await runExperiment(skillPath, {
+      hypothesis: "Shell check fails.",
+      test: "false",
+      metric: (m) => m === 1,
+    });
+
+    expect(record.passed).toBe(false);
+    expect(record.rolledBack).toBe(true);
+    expect(record.measurement).toBe(0);
     expect(record.error).toContain("boom");
     expect(existsSync(skillPath)).toBe(false);
   });
