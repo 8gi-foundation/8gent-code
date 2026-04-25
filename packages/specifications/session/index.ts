@@ -28,7 +28,7 @@ export interface AgentInfo {
   /** Model identifier. e.g. 'openai/gpt-4.1-mini' */
   model: string;
   /** Which LLM backend served the model */
-  runtime: "ollama" | "lmstudio" | "openrouter";
+  runtime: "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek";
   /** Maximum agentic loop iterations (v1 vocabulary) */
   maxTurns?: number;
   /** Maximum steps (v2 vocabulary, maps to AI SDK stopWhen) */

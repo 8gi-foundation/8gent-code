@@ -28,6 +28,8 @@ export type ProviderName =
   | "8gent"
   | "ollama"
   | "apple-foundation"
+  | "apfel"
+  | "deepseek"
   | "openrouter"
   | "groq"
   | "grok"
@@ -175,7 +177,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     baseUrl: "http://localhost:11434",
     apiKeyEnv: "", // Local — no API key needed
     defaultModel: "eight-1.0-q3:14b",
-    models: ["eight-1.0-q3:14b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
+    models: ["eight-1.0-q3:14b", "qwen3.6:27b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
     enabled: true,
     supportsTools: true,
     supportsStreaming: true,
@@ -187,7 +189,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     baseUrl: "http://localhost:11434",
     apiKeyEnv: "", // No API key needed
     defaultModel: "qwen3.5:latest",
-    models: ["qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1"],
+    models: ["qwen3.6:27b", "qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1"],
     enabled: true,
     supportsTools: true,
     supportsStreaming: true,
@@ -205,6 +207,34 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     enabled: isAppleFoundationAvailable(),
     supportsTools: false, // v1 - Apple Transcript API not wired yet
     supportsStreaming: false, // v1 - non-streaming only
+    supportsVision: false,
+  },
+  apfel: {
+    name: "apfel",
+    displayName: "apfel (Apple Foundation HTTP)",
+    // Default port collides with Ollama. Recommended override: 11500.
+    baseUrl: process.env.APFEL_BASE_URL || "http://localhost:11434/v1",
+    apiKeyEnv: "", // Local, no key
+    defaultModel: "apple-foundation-system",
+    models: ["apple-foundation-system"],
+    // Auto-enabled when the host qualifies. Apfel runs as a local HTTP service
+    // so the bridge binary check is not required, but Apple Silicon + macOS 26
+    // still gate it the same way.
+    enabled: isAppleFoundationAvailable(),
+    supportsTools: false,
+    supportsStreaming: true,
+    supportsVision: false,
+  },
+  deepseek: {
+    name: "deepseek",
+    displayName: "DeepSeek (Cloud)",
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    defaultModel: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    enabled: false,
+    supportsTools: true,
+    supportsStreaming: true,
     supportsVision: false,
   },
   openrouter: {

@@ -7,6 +7,8 @@ import { OllamaClient } from "./ollama";
 import { LMStudioClient } from "./lmstudio";
 import { OpenRouterClient } from "./openrouter";
 import { AppleFoundationClient } from "./apple-foundation";
+import { ApfelClient } from "./apfel";
+import { DeepSeekClient } from "./deepseek";
 import {
   loadRoleConfig,
   type RoleModelAssignment,
@@ -18,6 +20,8 @@ export { OllamaClient } from "./ollama";
 export { LMStudioClient } from "./lmstudio";
 export { OpenRouterClient } from "./openrouter";
 export { AppleFoundationClient } from "./apple-foundation";
+export { ApfelClient } from "./apfel";
+export { DeepSeekClient } from "./deepseek";
 
 /**
  * Thrown by `createClientForRole` when a role's configured provider is
@@ -42,6 +46,10 @@ function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
   switch (provider) {
     case "apple-foundation":
       return "apple-foundation";
+    case "apfel":
+      return "apfel";
+    case "deepseek":
+      return "deepseek";
     case "ollama":
     case "8gent":
       return "ollama"; // 8gent runs on the local ollama server today
@@ -71,6 +79,11 @@ export function createClient(config: AgentConfig): LLMClient {
     return new LMStudioClient(config.model);
   } else if (config.runtime === "apple-foundation") {
     return new AppleFoundationClient(config.model);
+  } else if (config.runtime === "apfel") {
+    return new ApfelClient(config.model);
+  } else if (config.runtime === "deepseek") {
+    const apiKey = config.apiKey || process.env.DEEPSEEK_API_KEY || "";
+    return new DeepSeekClient(config.model, apiKey);
   } else {
     return new OllamaClient(config.model);
   }
