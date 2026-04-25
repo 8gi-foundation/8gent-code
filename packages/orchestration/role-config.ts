@@ -59,7 +59,7 @@ export function defaultRoleConfig(): RoleConfig {
 
   let assignment: RoleModelAssignment;
   if (isDarwinArm && isAppleFoundationAvailable()) {
-    assignment = { provider: "apple-foundation", model: "apple-foundation-system" };
+    assignment = { provider: "apple-foundation", model: "apple-foundationmodel" };
   } else if (isDarwinArm) {
     assignment = { provider: "8gent", model: "eight-1.0-q3:14b" };
   } else {

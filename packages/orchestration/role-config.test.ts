@@ -69,7 +69,7 @@ describe("defaultRoleConfig", () => {
     if (bridgeExists) {
       // On a host where the bridge really is installed, apple-foundation wins.
       expect(cfg.orchestrator.provider).toBe("apple-foundation");
-      expect(cfg.orchestrator.model).toBe("apple-foundation-system");
+      expect(cfg.orchestrator.model).toBe("apple-foundationmodel");
     } else {
       expect(cfg.orchestrator.provider).toBe("8gent");
       expect(cfg.orchestrator.model).toBe("eight-1.0-q3:14b");
