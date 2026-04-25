@@ -2,7 +2,7 @@
  * DeepSeek client.
  *
  * Heavy cloud fallback for the failover chain. Direct API at
- * `https://api.deepseek.com/v1` (OpenAI-compatible). DeepSeek V4-Flash is the
+ * `https://api.deepseek.com/v1` (Chat Completions API style). DeepSeek V4-Flash is the
  * routine fallback. V4-Pro is flagged-only (set `DEEPSEEK_USE_PRO=1`) to keep
  * the default tier predictable.
  *

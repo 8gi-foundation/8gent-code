@@ -1,14 +1,14 @@
 /**
  * apfel client.
  *
- * apfel exposes Apple Foundation chat at an OpenAI-compatible Chat Completions
+ * apfel exposes Apple Foundation chat at a Chat Completions API style
  * endpoint on `localhost`. Apple Silicon + macOS 26 Tahoe only. No vision.
  *
  * Default base URL is `http://localhost:11434/v1` which collides with the
  * Ollama default port. Run apfel on a different port (e.g. 11500) when
  * Ollama is also running. See `docs/MODELS.md` for the recommended split.
  *
- * v1: non-streaming + streaming over the OpenAI SSE shape, no tool calling,
+ * v1: non-streaming + streaming over the SSE shape, no tool calling,
  * no vision. Vision-bearing prompts are rejected up-front with a clear error.
  */
 

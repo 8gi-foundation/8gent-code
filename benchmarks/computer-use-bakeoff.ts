@@ -11,7 +11,7 @@
  * `passKeywordCount` of the listed keywords appear (case-insensitive).
  *
  * If a tier in the chain is unreachable the harness records the failover
- * event and falls through automatically — that's the whole point.
+ * event and falls through automatically (that's the whole point).
  *
  * Headless invocation:
  *
