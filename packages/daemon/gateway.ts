@@ -10,6 +10,7 @@ import type { AgentPool } from "./agent-pool";
 import { getJobs, addJob, removeJob, type CronJob } from "./cron";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import { handleComputerOpen, handleComputerMessage, handleComputerClose, type ComputerWS } from "./routes/computer";
 
 export interface GatewayConfig {
   port: number;
@@ -19,9 +20,11 @@ export interface GatewayConfig {
 
 interface ClientState {
   id: string;
-  channel: string; // "os", "telegram", "discord", "api"
+  channel: string; // "os", "telegram", "discord", "api", "computer"
   sessionId: string | null;
   authenticated: boolean;
+  /** Marks a connection upgraded on the /computer route. */
+  isComputerRoute?: boolean;
 }
 
 type InboundMessage =
@@ -70,6 +73,9 @@ function send(ws: any, msg: OutboundMessage): void {
 
 function broadcastToSession(sessionId: string, event: EventName, payload: unknown): void {
   for (const [ws, state] of clients) {
+    // Computer-route clients use the v1.1 protocol envelope; the legacy v1.0
+    // broadcast skips them so they only see the typed StreamEvent stream.
+    if (state.isComputerRoute) continue;
     if (state.sessionId === sessionId && state.authenticated) {
       send(ws, { type: "event", event, payload });
     }
@@ -279,20 +285,47 @@ async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<R
 export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
   subscribeToBus();
 
+  // v0: the computer channel is loopback-only. We keep the global bind unchanged
+  // (other channels still listen on 0.0.0.0) and reject non-loopback peers on
+  // the /computer route. Set DAEMON_HOSTNAME=127.0.0.1 to lock everything down.
+  const hostname = process.env.DAEMON_HOSTNAME || "0.0.0.0";
+
   const server = Bun.serve({
     port: config.port,
-    hostname: "0.0.0.0",
+    hostname,
     fetch(req, server) {
+      const url = new URL(req.url);
+
+      // Tag computer-route upgrades so the websocket open handler can branch.
+      if (url.pathname === "/computer") {
+        const peer = (server as unknown as { requestIP?: (r: Request) => { address?: string } | null })
+          .requestIP?.(req);
+        const ip = peer?.address ?? "";
+        const loopback = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+        if (!loopback) {
+          return new Response("forbidden: computer channel is loopback-only in v0", { status: 403 });
+        }
+        // Bun's upgrade typings vary across versions; cast the data option.
+        if ((server.upgrade as (r: Request, opts?: any) => boolean)(req, { data: { route: "computer" } })) {
+          return undefined;
+        }
+        return new Response("WebSocket upgrade required", { status: 426 });
+      }
+
       if (server.upgrade(req)) return undefined;
 
       // Health check endpoint
-      const url = new URL(req.url);
       if (url.pathname === "/health") {
         return Response.json({
           status: "ok",
           sessions: config.pool.size,
           uptime: process.uptime(),
         });
+      }
+
+      // Per-channel pool status for the ops dashboard.
+      if (url.pathname === "/ops/agent-pool/status") {
+        return Response.json(config.pool.getStatus());
       }
 
       // Access audit log endpoint (DPIA G7). POST-only, metadata only.
@@ -305,22 +338,37 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
     websocket: {
       open(ws) {
         const id = `c_${nextClientId++}`;
-        clients.set(ws, {
+        const data = (ws as unknown as { data?: { route?: string } }).data;
+        const isComputer = data?.route === "computer";
+        const state: ClientState = {
           id,
-          channel: "api",
+          channel: isComputer ? "computer" : "api",
           sessionId: null,
           authenticated: !config.authToken,
-        });
-        console.log(`[gateway] client ${id} connected`);
+          isComputerRoute: isComputer,
+        };
+        clients.set(ws, state);
+        console.log(`[gateway] client ${id} connected${isComputer ? " (computer)" : ""}`);
+        if (isComputer) {
+          handleComputerOpen(ws as unknown as ComputerWS, config.pool, state);
+        }
       },
       message(ws, raw) {
-        handleMessage(ws, config, typeof raw === "string" ? raw : new TextDecoder().decode(raw));
+        const state = clients.get(ws);
+        const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+        if (state?.isComputerRoute) {
+          handleComputerMessage(ws as unknown as ComputerWS, config.pool, state, text);
+          return;
+        }
+        handleMessage(ws, config, text);
       },
       close(ws) {
         const state = clients.get(ws);
         if (state) {
           console.log(`[gateway] client ${state.id} disconnected`);
-          if (state.sessionId) {
+          if (state.isComputerRoute) {
+            handleComputerClose(config.pool, state);
+          } else if (state.sessionId) {
             bus.emit("session:end", { sessionId: state.sessionId, reason: "client-disconnect" });
           }
         }
@@ -329,6 +377,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
     },
   });
 
-  console.log(`[gateway] WebSocket server listening on ws://localhost:${config.port}`);
+  console.log(`[gateway] WebSocket server listening on ws://${hostname}:${config.port}`);
+  console.log(`[gateway] computer channel: ws://${hostname}:${config.port}/computer`);
   return server;
 }
