@@ -100,12 +100,12 @@ export function DesignSelector({
       }
 
       // Arrow key navigation
-      if (key.downArrow || input === "j") {
+      if (key.downArrow || (input === "j" && !key.ctrl)) {
         setSelectedIndex((prev) => (prev + 1) % options.length);
         return;
       }
 
-      if (key.upArrow || input === "k") {
+      if (key.upArrow || (input === "k" && !key.ctrl)) {
         setSelectedIndex((prev) => (prev - 1 + options.length) % options.length);
         return;
       }
