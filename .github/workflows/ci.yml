@@ -182,3 +182,22 @@ jobs:
           echo "CLI smoke: PASS"
         env:
           INFERENCE_MODE: offline
+
+  swift:
+    name: 8gent Computer (Swift)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Build Swift package
+        working-directory: apps/8gent-computer
+        run: swift build -c release
+      - name: Headless smoke test
+        working-directory: apps/8gent-computer
+        run: |
+          OUTPUT=$(swift run -c release 8gent-computer --headless --intent "ci-smoke")
+          echo "Headless output: $OUTPUT"
+          echo "$OUTPUT" | grep -q '"status":"noop"' || (echo "::error::headless status missing" && exit 1)
+          echo "$OUTPUT" | grep -q '"headless_phase":"scaffold"' || (echo "::error::headless_phase missing" && exit 1)
+          echo "Swift smoke: PASS"
