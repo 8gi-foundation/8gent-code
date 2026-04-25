@@ -387,6 +387,47 @@ function evaluateClauseParsed(clause: ParsedClause, context: PolicyContext): boo
 }
 
 // ============================================
+// COPPA hard-deny (not overridable by YAML)
+// ============================================
+
+/**
+ * Actions that are gated by age. Email and address issuance for any account
+ * flagged as 8gent Jr or under 13 is a hard deny - no YAML rule can lift it.
+ * See PRD: docs/specs/PRD-AGENT-MESSAGING-AND-EMAIL.md (Security considerations).
+ */
+const COPPA_GATED_ACTIONS = new Set<string>([
+  "email_send",
+  "email_receive",
+  "issue_email_address",
+]);
+
+/**
+ * COPPA gate. Returns a block decision if the context indicates a child
+ * account, otherwise null (continue with normal policy eval).
+ *
+ * Triggers on:
+ *   - context.product === "8gentjr"
+ *   - context.account_age_verified_13_plus !== true (default deny without proof)
+ */
+function coppaGate(action: string, context: PolicyContext): PolicyDecision | null {
+  if (!COPPA_GATED_ACTIONS.has(action)) return null;
+
+  const isJr = context.product === "8gentjr";
+  const ageProven = context.account_age_verified_13_plus === true;
+
+  if (isJr || !ageProven) {
+    return {
+      allowed: false,
+      reason:
+        "[coppa-hard-deny] Email actions require a verified-13-plus account. " +
+        "8gent Jr accounts are blocked unconditionally.",
+    };
+  }
+
+  return null;
+}
+
+// ============================================
 // Core Evaluator
 // ============================================
 
@@ -394,6 +435,7 @@ function evaluateClauseParsed(clause: ParsedClause, context: PolicyContext): boo
  * Evaluate all loaded policies for a given action + context.
  *
  * Evaluation order (blocks take priority over allows):
+ *   0. COPPA hard-deny - email/address-issuance for child accounts (not YAML-overridable)
  *   1. Disabled rules skipped
  *   2. "block" rules checked first - if matched, hard deny (no override possible)
  *   3. "require_approval" rules checked - if matched, soft deny
@@ -404,6 +446,9 @@ export function evaluatePolicy(
   action: PolicyActionType | string,
   context: PolicyContext
 ): PolicyDecision {
+  const coppa = coppaGate(action, context);
+  if (coppa) return coppa;
+
   if (!_loaded) loadPolicies();
 
   const agentId = context.agentId as string | undefined;
