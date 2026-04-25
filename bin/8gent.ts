@@ -1190,7 +1190,14 @@ async function chatCommand(args: string[]) {
 
     const agent = new Agent({
       model: resolvedModel,
-      runtime: provider || "ollama",
+      runtime: (provider as
+        | "ollama"
+        | "lmstudio"
+        | "openrouter"
+        | "apple-foundation"
+        | "apfel"
+        | "deepseek"
+        | undefined) || "ollama",
       workingDirectory: cwd,
       maxTurns: 30,
     });
