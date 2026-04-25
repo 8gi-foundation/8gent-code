@@ -130,13 +130,13 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
     }
 
     if (isGallery) {
-      if (key.leftArrow || input === "h") {
+      if (key.leftArrow || (input === "h" && !key.ctrl)) {
         setCurrentIndex(i => (i - 1 + ANIMATIONS.length) % ANIMATIONS.length);
-      } else if (key.rightArrow || input === "l") {
+      } else if (key.rightArrow || (input === "l" && !key.ctrl)) {
         setCurrentIndex(i => (i + 1) % ANIMATIONS.length);
-      } else if (key.upArrow || input === "k") {
+      } else if (key.upArrow || (input === "k" && !key.ctrl)) {
         setCurrentIndex(i => Math.max(0, i - 1));
-      } else if (key.downArrow || input === "j") {
+      } else if (key.downArrow || (input === "j" && !key.ctrl)) {
         setCurrentIndex(i => Math.min(ANIMATIONS.length - 1, i + 1));
       }
     }
