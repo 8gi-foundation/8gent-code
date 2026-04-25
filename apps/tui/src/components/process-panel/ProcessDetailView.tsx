@@ -65,7 +65,7 @@ export function ProcessDetailView({
         });
         return;
       }
-      if (input === "G" || input === "g") {
+      if ((input === "G" || input === "g") && !key.ctrl) {
         // Jump to bottom
         setScrollOffset(Math.max(0, lines.length - viewportHeight));
         setAutoScroll(true);
