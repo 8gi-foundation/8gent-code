@@ -128,7 +128,7 @@ export class ModelFailover {
    * brain) → DeepSeek V4-Flash (heavy cloud) → OpenRouter `:free` (last resort).
    *
    * Apfel handles short conversational replies (no vision). The agent is
-   * responsible for routing vision-bearing prompts past the chat tier — see
+   * responsible for routing vision-bearing prompts past the chat tier (see
    * `vision-router.ts`. If apfel is asked for a vision prompt, it will throw
    * and the chain falls through to Qwen.
    */

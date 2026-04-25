@@ -41,7 +41,7 @@ export interface ModelEntry {
 }
 
 export const MODELS: ModelEntry[] = [
-  // Chat tier — Apple Foundation via apfel.
+  // Chat tier: Apple Foundation via apfel.
   {
     id: "apple-foundation-system",
     label: "Apple Foundation (apfel)",
@@ -54,7 +54,7 @@ export const MODELS: ModelEntry[] = [
       "avoid colliding with Ollama on 11434.",
   },
 
-  // Vision/tool tier — Qwen 3.6-27B (DEFAULT for the computer channel).
+  // Vision/tool tier: Qwen 3.6-27B (DEFAULT for the computer channel).
   {
     id: "qwen3.6:27b",
     label: "Qwen 3.6-27B (vision/tool, default)",
@@ -69,7 +69,7 @@ export const MODELS: ModelEntry[] = [
       "24 GB VRAM or 32 GB unified memory recommended.",
   },
 
-  // Heavy cloud fallback — DeepSeek V4-Flash.
+  // Heavy cloud fallback: DeepSeek V4-Flash.
   {
     id: "deepseek-v4-flash",
     label: "DeepSeek V4-Flash",
@@ -90,7 +90,7 @@ export const MODELS: ModelEntry[] = [
       "tier predictable.",
   },
 
-  // Existing local default for the text channel — kept for back-compat.
+  // Existing local default for the text channel: kept for back-compat.
   {
     id: "eight-1.0-q3:14b",
     label: "8gent 1.0 Q3 (14B)",
