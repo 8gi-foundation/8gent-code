@@ -2,7 +2,8 @@
  * 8gent Code - Permission System
  *
  * Security layer that controls what commands and actions the agent can execute.
- * Inspired by Claude Code's permission system with dangerous command detection.
+ * Implements dangerous command detection, deny-by-default policies, and
+ * interactive human-in-the-loop approval for scoped capabilities.
  */
 
 import * as fs from "fs";
@@ -1027,3 +1028,22 @@ export function isInfiniteMode(): boolean {
 export { ToolG8 } from "./toolg8.js";
 export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS } from "./policy-engine.js";
 export { privacyGate, isSensitiveContext, forceLocalModel } from "./privacy-router.js";
+
+// ============================================
+// Re-exports: Turth (interactive scoped approval)
+// ============================================
+
+export {
+  requestApproval,
+  registerPromptSurface,
+  isInteractiveEnabled,
+} from "./turth.js";
+export type { TurthRequest, PromptSurface } from "./turth.js";
+export type { ApprovalScope } from "./user-policy.js";
+export {
+  checkCapability,
+  recordDecision,
+  clearSession as clearTurthSession,
+  getAuditLogPath as getTurthAuditLogPath,
+  getUserPolicyPath as getTurthUserPolicyPath,
+} from "./user-policy.js";
