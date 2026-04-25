@@ -5,11 +5,11 @@
  * The vessel acts as conductor - it doesn't care which agent does the work,
  * just that the interface is consistent.
  *
- * Supported agents:
- * - Claude Code CLI (claude)
- * - OpenAI Codex CLI (codex)
- * - OpenCode CLI (opencode)
- * - Generic CLI (any command-line tool)
+ * Supported adapter types (vendor-neutral labels):
+ * - host-cli-primary: first host CLI on PATH
+ * - host-cli-secondary: second host CLI on PATH
+ * - host-cli-tertiary: third host CLI on PATH (open source CLI)
+ * - eight: 8gent self adapter
  *
  * Each adapter:
  * 1. Checks if the agent is available on the system
@@ -151,11 +151,11 @@ function spawnWithTimeout(
   };
 }
 
-// ── Claude Code Adapter ─────────────────────────────────────────
+// ── Host CLI Primary Adapter ────────────────────────────────────
 
-export const claudeCodeAdapter: AgentAdapter = {
-  name: "claude-code",
-  label: "Claude Code CLI",
+export const hostCliPrimaryAdapter: AgentAdapter = {
+  name: "host-cli-primary",
+  label: "Host CLI (primary)",
 
   async isAvailable(): Promise<boolean> {
     return commandExists("claude");
@@ -167,15 +167,15 @@ export const claudeCodeAdapter: AgentAdapter = {
     if (options.model) args.push("--model", options.model);
     args.push(task);
 
-    return spawnWithTimeout("claude", args, options, "claude-code");
+    return spawnWithTimeout("claude", args, options, "host-cli-primary");
   },
 };
 
-// ── OpenAI Codex Adapter ────────────────────────────────────────
+// ── Host CLI Secondary Adapter ──────────────────────────────────
 
-export const codexAdapter: AgentAdapter = {
-  name: "codex",
-  label: "OpenAI Codex CLI",
+export const hostCliSecondaryAdapter: AgentAdapter = {
+  name: "host-cli-secondary",
+  label: "Host CLI (secondary)",
 
   async isAvailable(): Promise<boolean> {
     return commandExists("codex");
@@ -187,15 +187,15 @@ export const codexAdapter: AgentAdapter = {
     if (options.model) args.push("--model", options.model);
     args.push(task);
 
-    return spawnWithTimeout("codex", args, options, "codex");
+    return spawnWithTimeout("codex", args, options, "host-cli-secondary");
   },
 };
 
-// ── OpenCode Adapter ────────────────────────────────────────────
+// ── Host CLI Tertiary Adapter ───────────────────────────────────
 
-export const openCodeAdapter: AgentAdapter = {
-  name: "opencode",
-  label: "OpenCode CLI",
+export const hostCliTertiaryAdapter: AgentAdapter = {
+  name: "host-cli-tertiary",
+  label: "Host CLI (tertiary)",
 
   async isAvailable(): Promise<boolean> {
     return commandExists("opencode");
@@ -203,7 +203,7 @@ export const openCodeAdapter: AgentAdapter = {
 
   spawn(task: string, options: AgentSpawnOptions = {}): AgentHandle {
     const args = ["--non-interactive", task];
-    return spawnWithTimeout("opencode", args, options, "opencode");
+    return spawnWithTimeout("opencode", args, options, "host-cli-tertiary");
   },
 };
 
@@ -234,10 +234,37 @@ export const eightAdapter: AgentAdapter = {
 
 const ADAPTERS: AgentAdapter[] = [
   eightAdapter,
-  claudeCodeAdapter,
-  codexAdapter,
-  openCodeAdapter,
+  hostCliPrimaryAdapter,
+  hostCliSecondaryAdapter,
+  hostCliTertiaryAdapter,
 ];
+
+// ── Backward-compatibility shim ─────────────────────────────────
+// Old adapter-type strings are still accepted by getAdapter() so any
+// in-flight orchestration sessions or persisted records that reference
+// the legacy labels keep resolving. New code should use the generic names.
+const LEGACY_ADAPTER_NAMES: Record<string, string> = {
+  "claude-code": "host-cli-primary",
+  "codex": "host-cli-secondary",
+  "opencode": "host-cli-tertiary",
+};
+
+/**
+ * Map a legacy vendor-named adapter label to its current generic equivalent.
+ * Returns the input unchanged if it is already a current label.
+ */
+export function migrateAdapterName(name: string): string {
+  return LEGACY_ADAPTER_NAMES[name] ?? name;
+}
+
+// Deprecated aliases. Kept so external imports do not break during rollout.
+// New code should import the host-cli-* adapters directly.
+/** @deprecated use hostCliPrimaryAdapter */
+export const claudeCodeAdapter = hostCliPrimaryAdapter;
+/** @deprecated use hostCliSecondaryAdapter */
+export const codexAdapter = hostCliSecondaryAdapter;
+/** @deprecated use hostCliTertiaryAdapter */
+export const openCodeAdapter = hostCliTertiaryAdapter;
 
 /**
  * Get all registered agent adapters.
@@ -247,10 +274,12 @@ export function getAdapters(): AgentAdapter[] {
 }
 
 /**
- * Get a specific adapter by name.
+ * Get a specific adapter by name. Accepts both current generic labels and
+ * legacy vendor-named labels (which are migrated transparently).
  */
 export function getAdapter(name: string): AgentAdapter | null {
-  return ADAPTERS.find((a) => a.name === name) || null;
+  const normalized = migrateAdapterName(name);
+  return ADAPTERS.find((a) => a.name === normalized) || null;
 }
 
 /**
@@ -269,7 +298,7 @@ export async function discoverAgents(): Promise<Array<{ name: string; label: str
 
 /**
  * Spawn the best available agent for a task.
- * Preference order: 8gent (self) > Claude Code > Codex > OpenCode
+ * Preference order: 8gent (self) > host-cli-primary > host-cli-secondary > host-cli-tertiary
  */
 export async function spawnBestAgent(
   task: string,

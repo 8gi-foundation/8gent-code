@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 /**
- * Claude Code Mesh Hook
+ * Host CLI Mesh Hook
  *
- * Auto-registers Claude Code sessions with the Agent Mesh.
- * Install as a Claude Code hook to enable inter-session communication.
+ * Auto-registers host CLI sessions with the Agent Mesh.
+ * Install as a host CLI hook to enable inter-session communication.
  *
- * Usage in .claude/settings.json:
+ * Usage (host CLI settings.json):
  * {
  *   "hooks": {
  *     "SessionStart": [{
@@ -29,10 +29,10 @@ const MY_STATE = join(STATE_DIR, `hook-${process.ppid}.json`)
 const command = process.argv[2] || "register"
 
 if (command === "register") {
-  // Register this Claude Code session
+  // Register this host CLI session
   const mesh = joinMesh({
-    type: "claude-code",
-    name: `claude-${process.ppid}`,
+    type: "host-cli-primary",
+    name: `host-cli-${process.ppid}`,
     capabilities: ["code", "edit", "bash", "search"],
     channel: "terminal",
   })
@@ -42,7 +42,7 @@ if (command === "register") {
   writeFileSync(MY_STATE, JSON.stringify({ agentId: mesh.agentId, pid: process.ppid }))
 
   // Announce arrival
-  mesh.broadcast("event", `Claude Code session started in ${process.cwd()}`)
+  mesh.broadcast("event", `Host CLI session started in ${process.cwd()}`)
 
   console.log(`[mesh-hook] Registered as ${mesh.agentId}`)
 } else if (command === "deregister") {
