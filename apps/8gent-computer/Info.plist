@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>8gent Computer</string>
+    <key>CFBundleExecutable</key>
+    <string>8gentComputer</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.8gi.computer</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>8gent Computer</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Apache 2.0. (c) 8GI Foundation.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>8gent Computer drives other Mac apps on your behalf when you ask it to.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
