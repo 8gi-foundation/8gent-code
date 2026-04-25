@@ -113,3 +113,63 @@ policies:
     condition: "path contains package.json or path contains tsconfig or path contains CLAUDE.md"
     decision: require_approval
     message: "Deleting project config files requires confirmation."
+
+  # ── Inter-agent messaging (Agent Mail + peers-mcp) ───────────────────────────
+
+  - name: "agent-mail-cross-user-block"
+    action: agent_mail_send
+    condition: "cross_user equals true"
+    decision: block
+    message: "Cross-user agent mail is blocked. Same-user only in v1."
+
+  - name: "agent-mail-cross-channel-approval"
+    action: agent_mail_send
+    condition: "cross_channel equals true"
+    decision: require_approval
+    message: "Cross-channel agent mail (os to telegram, etc.) requires user confirmation."
+
+  - name: "agent-mail-read-other-user-block"
+    action: agent_mail_read
+    condition: "cross_user equals true"
+    decision: block
+    message: "Reading another user's mailbox is blocked."
+
+  - name: "peers-cross-user-block"
+    action: peers_send
+    condition: "cross_user equals true"
+    decision: block
+    message: "Peer messages across user boundaries are blocked. Same-user only in v1."
+
+  # ── Email (v1: review-before-send only, deny-by-default for outbound) ────────
+
+  - name: "email-send-rate-limit"
+    action: email_send
+    condition: "hourly_limit_exceeded equals true"
+    decision: block
+    message: "Outbound rate limit hit (50 per user per hour). Try again later."
+
+  - name: "email-send-bulk-approval"
+    action: email_send
+    condition: "bulk equals true"
+    decision: require_approval
+    message: "Bulk email send requires explicit user approval."
+
+  - name: "email-send-new-recipient-quarantine"
+    action: email_send
+    condition: "new_recipient_count_today_exceeded equals true"
+    decision: block
+    message: "Quarantine: user is sending to too many new recipients today. Manual review required."
+
+  - name: "email-receive-high-spam-block"
+    action: email_receive
+    condition: "spam_band equals high"
+    decision: block
+    message: "Inbound message has high spam score; routed to quarantine, not agent context."
+
+  # ── Email address issuance (deny-by-default; explicit reservation only) ──────
+
+  - name: "issue-email-reserved-name-block"
+    action: issue_email_address
+    condition: "username in [admin, root, billing, board, security, abuse, postmaster, legal, solomon, 8eo, 8to, 8po, 8do, 8so, 8co, 8mo, 8go]"
+    decision: block
+    message: "Reserved username cannot be issued."

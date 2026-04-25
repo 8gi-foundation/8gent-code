@@ -25,7 +25,14 @@ export type PolicyActionType =
   | "git_commit"
   | "network_request"
   | "env_access"
-  | "secret_write";
+  | "secret_write"
+  | "agent_mail_send"
+  | "agent_mail_read"
+  | "peers_send"
+  | "peers_subscribe"
+  | "email_send"
+  | "email_receive"
+  | "issue_email_address";
 
 /** What the policy engine decides */
 export type PolicyDecision =
