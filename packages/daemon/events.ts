@@ -9,7 +9,7 @@ export interface DaemonEvents {
   "tool:start": { sessionId: string; tool: string; input: unknown };
   "tool:result": { sessionId: string; tool: string; output: unknown; durationMs: number };
   "agent:thinking": { sessionId: string };
-  "agent:stream": { sessionId: string; chunk: string };
+  "agent:stream": { sessionId: string; chunk: string; final?: boolean };
   "agent:error": { sessionId: string; error: string };
   "memory:saved": { sessionId: string; key: string };
   "approval:required": { sessionId: string; tool: string; input: unknown; requestId: string };
