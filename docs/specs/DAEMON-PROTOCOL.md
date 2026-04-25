@@ -1,15 +1,19 @@
-# Daemon Protocol v1.0
+# Daemon Protocol v1.1
 
 WebSocket protocol for external clients connecting to the Eight daemon.
 
-This is the contract between the brain (8gent Code daemon) and the interfaces (8gent.app, 8gent OS, Telegram, etc.).
+This is the contract between the brain (8gent Code daemon) and the interfaces (8gent.app, 8gent OS, Telegram, the 8gent Computer NSPanel, etc.).
+
+Protocol version is carried explicitly on every server-to-client frame as `"protocol_version": 1`. Clients must reject frames whose `protocol_version` they do not support.
 
 ---
 
 ## Connection
 
-**Endpoint:** `ws://localhost:18789`
+**Default endpoint:** `ws://localhost:18789` (multiplexed gateway)
+**Computer-channel endpoint:** `ws://localhost:18789/computer` (dedicated route, loopback-only in v0)
 **Health check:** `GET http://localhost:18789/health`
+**Pool status (per channel):** `GET http://localhost:18789/ops/agent-pool/status`
 
 The daemon uses Bun's native WebSocket server. Messages are JSON-encoded strings.
 
@@ -52,9 +56,18 @@ Client -> { "type": "session:create", "channel": "os" }
 Server -> { "type": "session:created", "sessionId": "s_abc123_xyz" }
 ```
 
-**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`
+**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`
 
-The channel tag is metadata for routing and analytics. It does not change behavior.
+The channel tag is metadata for routing, concurrency caps, and analytics.
+
+**Per-channel limits** (override via env):
+
+| Channel | Concurrency cap | Idle timeout | Notes |
+|---------|-----------------|--------------|-------|
+| `computer` | 3 (`MAX_COMPUTER_SESSIONS`) | 10 min | Loopback-only in v0 |
+| `telegram` | unlimited (within global cap) | never evicted | Sandbox-style persistence |
+| `delegation` | unlimited | never evicted | Sub-agent fan-out |
+| other | global cap (10) | 30 min | |
 
 ### Resume Session
 
@@ -288,8 +301,84 @@ ws.onmessage = (event) => {
 };
 ```
 
+## Computer Channel (`/computer`)
+
+The 8gent Computer surface (voice-first ambient agent) connects on a dedicated route so it gets its own session pool, idle behavior, and event taxonomy that does not have to share the multiplexed root socket.
+
+### Connect
+
+```
+GET /computer  HTTP/1.1
+Upgrade: websocket
+```
+
+The daemon rejects non-loopback peers on this route in v0 (`HTTP 403`). Set `DAEMON_HOSTNAME=127.0.0.1` to additionally lock the listener bind.
+
+On connect, the daemon auto-creates a session and emits an ack:
+
+```json
+{
+  "protocol_version": 1,
+  "type": "ack",
+  "payload": { "type": "session:created", "sessionId": "s_lzf8x9_ab12c3", "channel": "computer" }
+}
+```
+
+### Inbound messages (client -> daemon)
+
+```json
+{ "type": "intent", "text": "screenshot my desktop and tell me what's open" }
+{ "type": "approval:response", "requestId": "r_xyz", "approved": true }
+{ "type": "session:destroy" }
+{ "type": "ping" }
+```
+
+### Streaming event taxonomy (daemon -> client)
+
+Every event frame is wrapped:
+
+```json
+{ "protocol_version": 1, "type": "event", "event": { "kind": "...", ... } }
+```
+
+**Event kinds:**
+
+| Kind | Shape | Description |
+|------|-------|-------------|
+| `token` | `{ kind, sessionId, chunk, final? }` | Streaming text. `final: true` marks the last chunk of a turn. |
+| `tool_call` | `{ kind, sessionId, tool, input, callId }` | Tool invocation started. `callId` pairs with the matching `tool_result`. |
+| `tool_result` | `{ kind, sessionId, tool, output, callId, durationMs }` | Tool finished. |
+| `approval_required` | `{ kind, sessionId, tool, input, requestId, reason? }` | NemoClaw `require_approval` hit. Client must reply with `approval:response`. |
+| `error` | `{ kind, sessionId, error, recoverable? }` | Per-turn error. Connection stays open unless `recoverable: false`. |
+| `done` | `{ kind, sessionId, reason }` | Turn or session ended. `reason` is one of `turn-complete`, `client-disconnect`, `client-destroy`, `idle-timeout`, `channel-cap-evict`. |
+
+**Backpressure:** the protocol is JSON-only for control and text events. Binary frames are reserved for future PNG payloads (e.g. inline screenshots). Today, screenshots are returned as filesystem paths inside `tool_result.output` so the client can read them without flooding the WS buffer.
+
+**Approval flow:**
+
+```
+daemon -> { "type":"event", "event": { "kind":"approval_required", "tool":"desktop_click", "requestId":"r_42", ... } }
+client -> { "type":"approval:response", "requestId":"r_42", "approved":true }
+daemon -> { "type":"event", "event": { "kind":"tool_call", ... } }
+```
+
+### NemoClaw policy (no bypass)
+
+Every `desktop_*` tool call goes through `evaluatePolicy("desktop_use", ctx)` in `packages/permissions/policy-engine.ts`. The first `click`, `type`, `press`, `drag`, or `clipboard_set` of a session triggers `approval_required`. Read-only actions (`screenshot`, `window_list`, `display_list`, `hover`, `scroll`, `clipboard_get`, `list_processes`, `suggest_quit`, `safe_list`) are allowed without prompt. Dangerous key combinations (`cmd+q`, `alt+f4`, `ctrl+alt+delete`, `cmd+shift+q`) are hard-blocked.
+
+The headless CLI uses the same path; the policy gate is **never** bypassed.
+
+### Smoke test
+
+```bash
+bun run packages/daemon/scripts/smoke-computer-channel.ts
+```
+
+The script boots a stripped-down gateway against a mock pool, connects to `/computer`, sends one intent, and asserts the event ordering: `tool_call` -> `tool_result` -> `token{final:true}` -> `done`.
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | 2026-04-25 | Add `computer` channel, dedicated `/computer` route, streaming event taxonomy (`token`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`), `protocol_version: 1` on every frame, `/ops/agent-pool/status` endpoint. |
 | 1.0 | 2026-03-22 | Initial protocol - sessions, prompts, events, cron, health |
