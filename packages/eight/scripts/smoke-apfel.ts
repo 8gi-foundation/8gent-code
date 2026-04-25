@@ -16,7 +16,7 @@ import { ApfelClient } from "../clients/apfel";
 async function main() {
   const args = new Set(process.argv.slice(2));
 
-  const client = new ApfelClient("apple-foundation-system");
+  const client = new ApfelClient("apple-foundationmodel");
   const baseUrl = process.env.APFEL_BASE_URL || "http://localhost:11434/v1";
   console.log(`[smoke-apfel] base_url=${baseUrl}`);
 
