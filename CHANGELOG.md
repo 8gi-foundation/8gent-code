@@ -11,6 +11,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **8gent Computer Phase 2 scaffold** - new `apps/8gent-computer/` Swift package. NSApplication accessory shell, Cmd+Opt+Space global hotkey via NSEvent monitors (no Accessibility prompt), glass NSPanel anchored 80px from the bottom, static AudioWaveView placeholder, headless CLI `--headless --intent "..."` emitting structured JSON. macOS CI job builds the Swift target and runs the headless smoke (#1857, #1858, #1859)
 - **Grove consent ceremony copy draft** - 3-screen plain-English consent flow (What you share / What you receive / Confirm). Reading grade 9, no em-dashes, no purple/pink/violet, default-decline, signed local-only acknowledgement schema (#1568)
 
 ---
