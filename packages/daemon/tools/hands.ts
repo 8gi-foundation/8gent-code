@@ -3,7 +3,7 @@
  *
  * The agent already has `desktop_*` tools wired into packages/computer (used by
  * apps/lil-eight). This module is the daemon-side surface that mounts the same
- * tool family for the new computer channel: it exposes the OpenAI-style tool
+ * tool family for the new computer channel: it exposes the standard tool-call
  * definitions, an executor, and a NemoClaw policy gate so every call goes
  * through default-policies.yaml (`desktop_use` rules).
  *
