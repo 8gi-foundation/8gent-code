@@ -35,6 +35,13 @@ export interface CompoundInput {
   tools: string[];
   /** Freeform context: repo name, file paths, technology stack */
   context?: string;
+  /**
+   * Optional experiment spec (issue #1792). When SKILLS_EXPERIMENTS=1 and this
+   * field is set, `compoundSkill` runs the experiment after writing the skill,
+   * auto-rolls back on failure, and records the outcome to the experiment ledger.
+   * See packages/skills/experiment.ts.
+   */
+  experiment?: import("./experiment.js").ExperimentSpec;
 }
 
 /**
@@ -103,6 +110,35 @@ function bumpConfidence(filePath: string): void {
 export function listLearnedSkills(): string[] {
   if (!existsSync(LEARNED_SKILLS_DIR)) return [];
   return readdirSync(LEARNED_SKILLS_DIR)
-    .filter((f) => f.endsWith(".md"))
+    .filter((f) => f.endsWith(".md") && !f.startsWith("."))
     .map((f) => join(LEARNED_SKILLS_DIR, f));
+}
+
+/**
+ * Experiment-aware variant of `compoundSkill` (issue #1792).
+ *
+ * - If `input.experiment` is absent, behaves exactly like `compoundSkill`.
+ * - If the env flag `SKILLS_EXPERIMENTS=1` is not set, behaves exactly like
+ *   `compoundSkill` (the experiment is ignored, preserving existing defaults).
+ * - Otherwise writes the skill, runs the experiment, and rolls back on failure.
+ *
+ * Returns `{ path, record }`:
+ *   - `path` is the learned-skill file path when kept, or `null` on rollback or dedup.
+ *   - `record` is the ExperimentRecord when an experiment ran, or `null` otherwise.
+ */
+export async function compoundSkillWithExperiment(
+  input: CompoundInput,
+): Promise<{
+  path: string | null;
+  record: import("./experiment.js").ExperimentRecord | null;
+}> {
+  const path = compoundSkill(input);
+  const { experimentsEnabled, runExperiment } = await import("./experiment.js");
+
+  if (!path || !input.experiment || !experimentsEnabled()) {
+    return { path, record: null };
+  }
+
+  const record = await runExperiment(path, input.experiment);
+  return { path: record.rolledBack ? null : path, record };
 }
