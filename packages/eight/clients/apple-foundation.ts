@@ -56,7 +56,7 @@ export class AppleFoundationClient implements LLMClient {
   private stdoutBuffer = "";
 
   constructor(model: string, bridgePath?: string) {
-    this.model = model || "apple-foundation-system";
+    this.model = model || "apple-foundationmodel";
     this.bridgePath = resolveBridgePath(bridgePath);
   }
 

@@ -55,7 +55,7 @@ export class ApfelClient implements LLMClient {
   private model: string;
 
   constructor(model: string, baseUrl?: string) {
-    this.model = model || "apple-foundation-system";
+    this.model = model || "apple-foundationmodel";
     this.baseUrl = resolveBaseUrl(baseUrl);
   }
 
