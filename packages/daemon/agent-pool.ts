@@ -37,6 +37,23 @@ const DEFAULT_RUNTIME = "ollama" as const;
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+/** Known session channels. Add new entries here when wiring a new surface. */
+export const KNOWN_CHANNELS = ["os", "app", "telegram", "discord", "api", "delegation", "computer"] as const;
+export type Channel = typeof KNOWN_CHANNELS[number];
+
+/** Per-channel concurrency caps. Falls back to MAX_SESSIONS when unset. */
+const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
+  computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
+};
+
+/** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
+const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
+  computer: 10 * 60 * 1000, // 10 minutes
+};
+
+/** Channels that should never be evicted by the idle reaper. */
+const NEVER_EVICT: ReadonlySet<string> = new Set(["telegram", "delegation"]);
+
 export class AgentPool {
   private sessions = new Map<string, SessionEntry>();
   private config: PoolConfig;
@@ -55,14 +72,34 @@ export class AgentPool {
     this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
   }
 
-  /** Remove sessions that have been idle for longer than IDLE_TIMEOUT_MS */
+  /** Idle timeout for a given channel (defaults to IDLE_TIMEOUT_MS). */
+  private idleTimeoutFor(channel: string): number {
+    return CHANNEL_IDLE_TIMEOUTS[channel as Channel] ?? IDLE_TIMEOUT_MS;
+  }
+
+  /** Concurrency cap for a given channel (or MAX_SESSIONS if unset). */
+  private capFor(channel: string): number {
+    return CHANNEL_CAPS[channel as Channel] ?? MAX_SESSIONS;
+  }
+
+  /** Count active sessions on a channel. */
+  private countOn(channel: string): number {
+    let n = 0;
+    for (const entry of this.sessions.values()) {
+      if (entry.channel === channel) n++;
+    }
+    return n;
+  }
+
+  /** Remove sessions that have been idle for longer than their channel's idle timeout. */
   private cleanupIdleSessions(): void {
     const now = Date.now();
     for (const [id, entry] of this.sessions) {
-      // Never evict telegram sessions - they persist like NemoClaw sandboxes
-      if (entry.channel === "telegram" || entry.channel === "delegation") continue;
-      if (!entry.busy && (now - entry.lastActiveAt) > IDLE_TIMEOUT_MS) {
-        console.log(`[agent-pool] evicting idle session ${id} (idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`);
+      // Never evict persistent channels (telegram, delegation)
+      if (NEVER_EVICT.has(entry.channel)) continue;
+      const timeout = this.idleTimeoutFor(entry.channel);
+      if (!entry.busy && (now - entry.lastActiveAt) > timeout) {
+        console.log(`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`);
         this.sessions.delete(id);
         bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
       }
@@ -71,11 +108,31 @@ export class AgentPool {
 
   /** Create a new session with its own Agent instance */
   createSession(sessionId: string, channel: string, overrides?: { maxTurns?: number }): void {
-    if (this.sessions.size >= MAX_SESSIONS) {
-      // Evict oldest idle session
+    // Per-channel cap: evict oldest idle session on the same channel first.
+    const cap = this.capFor(channel);
+    if (this.countOn(channel) >= cap) {
       let oldestId: string | null = null;
       let oldestTime = Infinity;
       for (const [id, entry] of this.sessions) {
+        if (entry.channel !== channel) continue;
+        if (NEVER_EVICT.has(entry.channel)) continue;
+        if (!entry.busy && entry.createdAt < oldestTime) {
+          oldestTime = entry.createdAt;
+          oldestId = id;
+        }
+      }
+      if (oldestId) {
+        this.destroySession(oldestId);
+        bus.emit("session:end", { sessionId: oldestId, reason: "channel-cap-evict" });
+      }
+    }
+
+    // Global cap as belt-and-braces: evict oldest idle (any channel).
+    if (this.sessions.size >= MAX_SESSIONS) {
+      let oldestId: string | null = null;
+      let oldestTime = Infinity;
+      for (const [id, entry] of this.sessions) {
+        if (NEVER_EVICT.has(entry.channel)) continue;
         if (!entry.busy && entry.createdAt < oldestTime) {
           oldestTime = entry.createdAt;
           oldestId = id;
@@ -195,6 +252,31 @@ export class AgentPool {
   /** Get count of active sessions */
   get size(): number {
     return this.sessions.size;
+  }
+
+  /** Per-channel breakdown for the ops dashboard. */
+  getStatus(): {
+    total: number;
+    globalCap: number;
+    channels: Array<{ channel: string; active: number; cap: number; idleTimeoutMs: number }>;
+  } {
+    const counts = new Map<string, number>();
+    for (const entry of this.sessions.values()) {
+      counts.set(entry.channel, (counts.get(entry.channel) ?? 0) + 1);
+    }
+    // Always surface known channels even when zero so the dashboard is stable.
+    const seen = new Set<string>(KNOWN_CHANNELS);
+    for (const k of counts.keys()) seen.add(k);
+    const channels: Array<{ channel: string; active: number; cap: number; idleTimeoutMs: number }> = [];
+    for (const ch of seen) {
+      channels.push({
+        channel: ch,
+        active: counts.get(ch) ?? 0,
+        cap: this.capFor(ch),
+        idleTimeoutMs: this.idleTimeoutFor(ch),
+      });
+    }
+    return { total: this.sessions.size, globalCap: MAX_SESSIONS, channels };
   }
 
   /** Return metadata for all active sessions (for state persistence) */
