@@ -43,7 +43,7 @@ export interface ModelEntry {
 export const MODELS: ModelEntry[] = [
   // Chat tier: Apple Foundation via apfel.
   {
-    id: "apple-foundation-system",
+    id: "apple-foundationmodel",
     label: "Apple Foundation (apfel)",
     provider: "apfel",
     context: 8192,

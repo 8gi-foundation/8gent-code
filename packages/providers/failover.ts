@@ -28,12 +28,12 @@ function appleFoundationAvailable(): boolean {
 }
 
 const APPLE_FOUNDATION_ENTRY: FailoverEntry = {
-  model: "apple-foundation-system",
+  model: "apple-foundationmodel",
   provider: "apple-foundation",
 };
 
 const APFEL_ENTRY: FailoverEntry = {
-  model: "apple-foundation-system",
+  model: "apple-foundationmodel",
   provider: "apfel",
 };
 
@@ -112,7 +112,7 @@ export class ModelFailover {
           { model: "meta-llama/llama-3-8b-instruct:free", provider: "openrouter" },
         ],
       },
-      "apple-foundation-system": {
+      "apple-foundationmodel": {
         models: [
           APPLE_FOUNDATION_ENTRY,
           { model: "eight-1.0-q3:14b", provider: "8gent" },
@@ -142,7 +142,7 @@ export class ModelFailover {
 
     return {
       "qwen3.6:27b": { models: computerChain },
-      "apple-foundation-system": { models: computerChain },
+      "apple-foundationmodel": { models: computerChain },
       "deepseek-v4-flash": {
         models: [
           { model: "deepseek-v4-flash", provider: "deepseek" },

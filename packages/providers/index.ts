@@ -200,8 +200,8 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     displayName: "Apple Foundation Model (On-Device)",
     baseUrl: "", // IPC, no URL
     apiKeyEnv: "", // On-device, no key
-    defaultModel: "apple-foundation-system",
-    models: ["apple-foundation-system"],
+    defaultModel: "apple-foundationmodel",
+    models: ["apple-foundationmodel"],
     // Auto-enabled only when host platform qualifies AND the bridge binary
     // has been installed. Resolved at runtime via `isAppleFoundationAvailable()`.
     enabled: isAppleFoundationAvailable(),
@@ -215,8 +215,8 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
     // Default port collides with Ollama. Recommended override: 11500.
     baseUrl: process.env.APFEL_BASE_URL || "http://localhost:11434/v1",
     apiKeyEnv: "", // Local, no key
-    defaultModel: "apple-foundation-system",
-    models: ["apple-foundation-system"],
+    defaultModel: "apple-foundationmodel",
+    models: ["apple-foundationmodel"],
     // Auto-enabled when the host qualifies. Apfel runs as a local HTTP service
     // so the bridge binary check is not required, but Apple Silicon + macOS 26
     // still gate it the same way.

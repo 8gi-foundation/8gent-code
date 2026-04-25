@@ -36,7 +36,7 @@ assert(
 );
 
 // Mark apfel down → expect Qwen.
-fo.markDown("apple-foundation-system", "apfel");
+fo.markDown("apple-foundationmodel", "apfel");
 const tier2 = fo.resolve("qwen3.6:27b", "computer");
 console.log(`[smoke-failover] computer tier 2: ${tier2.provider}/${tier2.model}`);
 assert(tier2.provider === "ollama" && tier2.model === "qwen3.6:27b", "tier 2 should be Qwen");
