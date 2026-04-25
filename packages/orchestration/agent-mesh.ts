@@ -2,9 +2,9 @@
  * Agent Mesh - Universal inter-agent communication for all coding agents
  *
  * Any process on the machine can join the mesh:
- * - Claude Code sessions (via hook)
+ * - Host CLI sessions (via hook)
  * - 8gent Code instances (native)
- * - OpenCode, Cursor, Codex, etc. (via lightweight adapter)
+ * - Other CLI agents (via lightweight adapter)
  * - Lil Eight dock pet (observer + orchestrator)
  *
  * Uses filesystem-based IPC (no daemon required):
@@ -21,9 +21,33 @@ import { homedir } from "os"
 
 // MARK: - Types
 
+/**
+ * Adapter-type label for a mesh participant.
+ *
+ * Generic, vendor-neutral identifiers. The mesh does not name external
+ * vendors; it only describes the role each adapter plays.
+ *
+ * - host-cli-primary / -secondary / -tertiary / -quaternary: external host CLIs
+ * - eight: 8gent Code itself
+ * - lil-eight: 8gent dock pet observer
+ * - custom: user-supplied adapter
+ *
+ * Legacy values ("claude-code", "codex", "opencode", "cursor") read from
+ * persisted registry files are accepted at read time via
+ * `normalizeMeshAgentType()` and mapped to their generic equivalents.
+ */
+export type MeshAgentType =
+  | "host-cli-primary"
+  | "host-cli-secondary"
+  | "host-cli-tertiary"
+  | "host-cli-quaternary"
+  | "eight"
+  | "lil-eight"
+  | "custom"
+
 export interface MeshAgent {
   id: string
-  type: "claude-code" | "eight" | "opencode" | "cursor" | "codex" | "lil-eight" | "custom"
+  type: MeshAgentType
   name: string
   pid: number
   cwd: string
@@ -32,6 +56,36 @@ export interface MeshAgent {
   capabilities: string[] // e.g. ["code", "computer-use", "browser", "orchestrate"]
   model?: string
   channel?: string // e.g. "terminal", "gui", "telegram"
+}
+
+// ── Backward-compatibility shim ─────────────────────────────────
+// Maps legacy vendor-named adapter-type strings (as persisted in
+// ~/.8gent/mesh/registry.json by older sessions) to the current
+// generic labels. Applied at read time so in-flight sessions keep working.
+const LEGACY_MESH_AGENT_TYPES: Record<string, MeshAgentType> = {
+  "claude-code": "host-cli-primary",
+  "codex": "host-cli-secondary",
+  "opencode": "host-cli-tertiary",
+  "cursor": "host-cli-quaternary",
+}
+
+/**
+ * Normalize a mesh-agent type string. Accepts both current generic labels
+ * and legacy vendor-named labels for backward compatibility.
+ */
+export function normalizeMeshAgentType(raw: string): MeshAgentType {
+  if (raw in LEGACY_MESH_AGENT_TYPES) return LEGACY_MESH_AGENT_TYPES[raw]
+  // Accept current labels as-is. Anything unknown falls through to "custom".
+  const known: MeshAgentType[] = [
+    "host-cli-primary",
+    "host-cli-secondary",
+    "host-cli-tertiary",
+    "host-cli-quaternary",
+    "eight",
+    "lil-eight",
+    "custom",
+  ]
+  return (known as string[]).includes(raw) ? (raw as MeshAgentType) : "custom"
 }
 
 export interface MeshMessage {
@@ -298,7 +352,15 @@ export class AgentMesh {
 
   private readRegistry(): Record<string, MeshAgent> {
     try {
-      return JSON.parse(readFileSync(REGISTRY_PATH, "utf-8"))
+      const raw = JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Record<string, MeshAgent>
+      // Migrate legacy vendor-named adapter-type labels at read time.
+      for (const id of Object.keys(raw)) {
+        const entry = raw[id]
+        if (entry && typeof entry.type === "string") {
+          entry.type = normalizeMeshAgentType(entry.type as string)
+        }
+      }
+      return raw
     } catch {
       return {}
     }
