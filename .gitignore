@@ -71,6 +71,7 @@ docs/branch-audio/*.aiff
 # UI sample outputs (artifacts belong in 8gent-world, not the harness)
 benchmarks/ui-samples/
 benchmarks/artifacts/
+benchmarks/results/
 
 # Ecosystem media (canonical: 8gent-world public/media)
 /media/
