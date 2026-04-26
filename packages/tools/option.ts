@@ -165,4 +165,5 @@ function isNone<T>(option: Option<T>): option is None {
   return option.isNone();
 }
 
-export { Some, None, Option, some, none, fromNullable, isSome, isNone };
+export { Some, None, some, none, fromNullable, isSome, isNone };
+export type { Option };

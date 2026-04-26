@@ -68,7 +68,7 @@ export interface StepExecutionResult {
 // ============================================
 
 export class EvidenceCollector {
-  private config: EvidenceCollectorConfig;
+  private config: Required<EvidenceCollectorConfig>;
 
   constructor(config: EvidenceCollectorConfig = {}) {
     this.config = {

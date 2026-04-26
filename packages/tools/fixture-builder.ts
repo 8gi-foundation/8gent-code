@@ -30,13 +30,13 @@ export class FixtureBuilder<T> {
     return Array.from({ length: count }, () => this.build(overrides));
   }
 
-  private constructor(private defaults: T) {}
+  constructor(private defaults: T) {}
 }
 
-function merge<T>(a: T, b: Partial<T>): T {
+function merge<T>(a: T, b: Partial<T> | undefined): T {
   if (b === undefined) return a;
   if (typeof a !== 'object' || a === null) return { ...a, ...b };
-  if (Array.isArray(a)) return [...a, ...(b as any)];
+  if (Array.isArray(a)) return [...a, ...(b as any)] as T;
   const result = { ...a, ...b };
   for (const key in result) {
     if (result[key] && typeof result[key] === 'object' && !Array.isArray(result[key])) {

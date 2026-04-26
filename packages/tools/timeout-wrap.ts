@@ -37,9 +37,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message?: string): Prom
  * @returns A promise that resolves when any of the input promises resolve, or rejects with a TimeoutError.
  */
 function raceWithTimeout<T>(promises: Promise<T>[], ms: number): Promise<T> {
-  return Promise.race([
+  return Promise.race<T>([
     ...promises,
-    new Promise((_, reject) => {
+    new Promise<T>((_, reject) => {
       setTimeout(() => {
         reject(new TimeoutError('Timeout'));
       }, ms);

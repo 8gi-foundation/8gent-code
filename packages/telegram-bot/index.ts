@@ -275,7 +275,7 @@ export class TelegramBot {
       // Buffer-based photo via FormData
       const formData = new FormData();
       formData.append("chat_id", this.chatId);
-      formData.append("photo", new Blob([photo]), "image.png");
+      formData.append("photo", new Blob([new Uint8Array(photo)]), "image.png");
       if (caption) {
         formData.append("caption", caption);
         formData.append("parse_mode", "Markdown");

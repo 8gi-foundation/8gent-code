@@ -196,7 +196,7 @@ export class Planner {
   /**
    * Identify relevant tools for a task
    */
-  private identifyRelevantTools(task: string, registry: Map<string, Tool>): string[] {
+  private identifyRelevantTools(task: string, _registry: unknown): string[] {
     const tools: string[] = [];
     const taskLower = task.toLowerCase();
 

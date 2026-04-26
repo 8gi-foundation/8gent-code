@@ -494,20 +494,20 @@ export default {
 // Entrepreneurship ability re-exports
 // ============================================
 
-export type { Opportunity } from "./opportunity-scanner.ts";
+export type { Opportunity } from "./opportunity-scanner";
 export {
   scanGitHubIssues,
   scanGitHubDiscussions,
   scanContributingSection,
   scanCodeTodos,
   scanLocalBacklog,
-} from "./opportunity-scanner.ts";
-export type { MatchResult } from "./capability-matcher.ts";
+} from "./opportunity-scanner";
+export type { MatchResult } from "./capability-matcher";
 export {
   evaluateOpportunity,
   evaluateAll,
   DEFAULT_CAPABILITIES,
-} from "./capability-matcher.ts";
+} from "./capability-matcher";
 export {
   trackOpportunity,
   trackAll,
@@ -516,56 +516,56 @@ export {
   pruneByStatus,
   getPipelineSummary,
   getTopOpportunities,
-} from "./work-tracker.ts";
+} from "./work-tracker";
 
 // Revenue engine
-export type { RevenueStream } from "./revenue-engine.ts";
+export type { RevenueStream } from "./revenue-engine";
 export {
   identifyRevenueStreams,
   trackRevenue,
   advanceStreamStatus,
   getRevenueReport,
-} from "./revenue-engine.ts";
+} from "./revenue-engine";
 
 // Deliverable generator
-export type { Deliverable } from "./deliverable-generator.ts";
+export type { Deliverable } from "./deliverable-generator";
 export {
   planDeliverable,
   estimateEffort,
   advanceDeliverable,
   isActionable,
-} from "./deliverable-generator.ts";
+} from "./deliverable-generator";
 
 // Client outreach
 export {
   composeResponse,
   composePRDescription,
   composeProactiveOutreach,
-} from "./client-outreach.ts";
+} from "./client-outreach";
 
 // Content packaging (data-backed hook optimization)
-export type { PackagingScore, RuleScore, PackagingRuleName, FormulaName, Grade, PackagingRule, AuditReport } from "./content-packaging.ts";
+export type { PackagingScore, RuleScore, PackagingRuleName, FormulaName, Grade, PackagingRule, AuditReport } from "./content-packaging";
 export {
   scoreHook,
   diagnoseHook,
   applyFormula,
   repackage,
   auditBatch,
-} from "./content-packaging.ts";
+} from "./content-packaging";
 
 // ============================================
 // Auto-Research ability
 // ============================================
 
-export { research } from "./autoresearch.ts";
-export type { ResearchOptions, ResearchReport, ResearchSource, ResearchPattern } from "./research-types.ts";
+export { research } from "./autoresearch";
+export type { ResearchOptions, ResearchReport, ResearchSource, ResearchPattern } from "./research-types";
 
 // ============================================
 // Business agent system
 // ============================================
 
 // Business agent system
-export type { BusinessAgentRole, ScopingPhase, BusinessScope, AgentOutput } from "./business-agents.ts";
+export type { BusinessAgentRole, ScopingPhase, BusinessScope, AgentOutput } from "./business-agents";
 export {
   BUSINESS_AGENTS,
   SCOPING_PHASES,
@@ -573,4 +573,4 @@ export {
   getAgentPrompt,
   getPhaseAgents,
   getCollaborators,
-} from "./business-agents.ts";
+} from "./business-agents";

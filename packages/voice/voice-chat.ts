@@ -307,7 +307,7 @@ export class VoiceChatLoop {
         // Try cloud fallback
         const { transcribeCloud, isCloudAvailable } = await import("./cloud-transcriber.js");
         if (isCloudAvailable()) {
-          const result = await transcribeCloud(wavPath, { language: "en" });
+          const result = await transcribeCloud(wavPath, { apiKey: process.env.OPENAI_API_KEY ?? "", language: "en" });
           if (result?.text) {
             this.engine.emit("final-transcript", result);
             return result.text.trim() || null;

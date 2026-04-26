@@ -275,6 +275,76 @@ export class InMemoryTenantStore implements TenantStore {
 }
 
 // ============================================
+// Synchronous in-memory wrappers for the ControlPlane facade.
+// Use these only from non-serverless paths (tests, dev server). Production
+// paths should hold a TenantStore via createTenantStore() + Convex.
+// ============================================
+
+const _syncStore = new Map<string, TenantConfig>();
+const _syncSubdomainIndex = new Map<string, string>();
+
+export function createTenant(
+  userId: string,
+  clerkId: string,
+  subdomain: string,
+  plan: PlanTier = "free",
+): TenantConfig {
+  validateSubdomain(subdomain);
+  if (_syncSubdomainIndex.has(subdomain)) {
+    throw new Error(`Subdomain "${subdomain}" is already taken`);
+  }
+  const planDef = PLAN_DEFINITIONS[plan];
+  const tenant: TenantConfig = {
+    tenantId: userId,
+    clerkId,
+    subdomain,
+    plan,
+    limits: planDef.limits,
+    features: planDef.features,
+    createdAt: Date.now(),
+  };
+  _syncStore.set(userId, tenant);
+  _syncSubdomainIndex.set(subdomain, userId);
+  return tenant;
+}
+
+export function getTenantBySubdomain(subdomain: string): TenantConfig | null {
+  const id = _syncSubdomainIndex.get(subdomain);
+  return id ? _syncStore.get(id) ?? null : null;
+}
+
+export function getTenantById(tenantId: string): TenantConfig | null {
+  return _syncStore.get(tenantId) ?? null;
+}
+
+export function listTenants(planFilter?: PlanTier): TenantConfig[] {
+  const all = Array.from(_syncStore.values());
+  return planFilter ? all.filter((t) => t.plan === planFilter) : all;
+}
+
+export function updateTenantPlan(tenantId: string, newPlan: PlanTier): TenantConfig {
+  const tenant = _syncStore.get(tenantId);
+  if (!tenant) throw new Error(`Tenant "${tenantId}" not found`);
+  const planDef = PLAN_DEFINITIONS[newPlan];
+  const updated: TenantConfig = {
+    ...tenant,
+    plan: newPlan,
+    limits: planDef.limits,
+    features: planDef.features,
+  };
+  _syncStore.set(tenantId, updated);
+  return updated;
+}
+
+export function deleteTenant(tenantId: string): boolean {
+  const tenant = _syncStore.get(tenantId);
+  if (!tenant) return false;
+  _syncSubdomainIndex.delete(tenant.subdomain);
+  _syncStore.delete(tenantId);
+  return true;
+}
+
+// ============================================
 // Factory — picks backend based on environment
 // ============================================
 

@@ -29,7 +29,7 @@ function getStripe(): Stripe {
       );
     }
     _stripe = new Stripe(key, {
-      apiVersion: "2025-03-31.basil",
+      apiVersion: "2025-03-31.basil" as Stripe.LatestApiVersion,
       typescript: true,
     });
   }

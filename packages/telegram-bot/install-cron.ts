@@ -32,9 +32,8 @@ async function setCrontab(content: string): Promise<void> {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const writer = proc.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(content));
-  await writer.close();
+  proc.stdin.write(new TextEncoder().encode(content));
+  proc.stdin.end();
   await proc.exited;
 }
 
