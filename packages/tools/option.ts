@@ -76,7 +76,7 @@ class None {
 	}
 
 	/**
-	 * Applies a function that returns an Option to the值 and returns the result.
+	 * Applies a function that returns an Option to the value and returns the result.
 	 * @param f The function to apply.
 	 * @returns The resulting Option.
 	 */
