@@ -7,6 +7,12 @@
 
 import { EventEmitter } from "node:events";
 import { AutoGit, SelfAutonomy, SelfHeal, SessionMemory } from "./index";
+import {
+	recordIterationOutcome,
+	reflectOnIterations,
+	type IterationResultLike,
+} from "./improvement-loop";
+import type { SessionReflection } from "./evolution-db";
 
 // ============================================
 // Types
@@ -336,6 +342,55 @@ export class HeartbeatAgents extends EventEmitter {
 				modification: mod,
 			});
 			this.status.modify.pendingFixes = this.pendingModifications.length;
+		}
+	}
+
+	// ============================================
+	// Self-improvement loop hooks
+	// ============================================
+
+	/**
+	 * Called between benchmark iterations. Persists outcome diff, then reflects
+	 * on cumulative history. Reuses existing reflection.ts via improvement-loop.
+	 *
+	 * Returns the reflection so callers can inspect or surface it. Errors are
+	 * swallowed - the loop must keep moving.
+	 */
+	betweenIterations(input: {
+		sessionId: string;
+		before: IterationResultLike | null;
+		after: IterationResultLike;
+		history: IterationResultLike[];
+		mutations: string[];
+		passThreshold?: number;
+	}): SessionReflection | null {
+		try {
+			const outcome = recordIterationOutcome(
+				input.before,
+				input.after,
+				input.sessionId,
+				input.passThreshold ?? 80,
+			);
+
+			this.log(
+				"reflect",
+				`Iteration ${input.after.iteration}: ` +
+					`${outcome.improvements} improved, ${outcome.regressions} regressed, ` +
+					`${outcome.skillIds.length} skills learned`,
+			);
+			this.emit("iteration:recorded", outcome);
+
+			const reflection = reflectOnIterations({
+				sessionId: input.sessionId,
+				history: input.history,
+				mutations: input.mutations,
+			});
+
+			this.emit("reflection:complete", reflection);
+			return reflection;
+		} catch (err) {
+			this.log("reflect", `Reflection failed: ${(err as Error).message}`);
+			return null;
 		}
 	}
 
