@@ -11,6 +11,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **CI test suite green** - scoped `bun test` to `packages/` and `apps/` only, excluding `benchmarks/` autoresearch-loop validators that depend on dynamically-generated code in `benchmarks/autoresearch/work/` (which only exists at benchmark runtime, not in CI). Restored 241 pass / 10 skip / 0 fail from 243 pass / 21 skip / 439 fail / 16 errors. Added `test:benchmarks` script for running them explicitly when the work dir is populated. CI uses `bun run test` to honor the package.json scope.
 - **Corrupted identifiers in `packages/tools/`** - `structured-log.ts` referenced `this.current位` (CJK garbage from a bad merge) instead of `this.currentLevel`. `test-runner.ts` returned `total意图` instead of `totalDuration`. Both were causing `tsc --noEmit` to fail on main, blocking CI on every open PR. First payment toward the broader typecheck cleanup tracked in #1816.
 
 ### Added
