@@ -412,6 +412,35 @@ User prompt
 
 <br />
 
+## Production Vessel
+
+The kernel ships as a long-running daemon. Two production environments coexist today; neither is the canonical "the vessel" yet.
+
+| Environment | Endpoint | Host | Notes |
+|:------------|:---------|:-----|:------|
+| **Hetzner (single-tenant prod)** | `wss://james.8gentos.com` | Hetzner cax21, Falkenstein | Caddy reverse proxy + Let's Encrypt in front of a Bun daemon on port 18789. Single tenant in v0. |
+| **Fly.io (legacy)** | `wss://eight-vessel.fly.dev` | Fly.io Amsterdam | Pre-Hetzner deployment. Stays online while the Hetzner stack is hardened. |
+
+The two deployments run in parallel. Fly.io retires only after the Hetzner stack is stable and chosen, never as part of the build plan.
+
+**Stack (Hetzner):**
+
+- Hetzner cax21 in Falkenstein
+- Caddy reverse proxy with automatic Let's Encrypt
+- Bun daemon listening on `127.0.0.1:18789`
+- Caddy basic-auth gates every path except `GET /health`; clients send `Authorization: Basic ...` on the WebSocket upgrade
+- Credentials are environment-injected as `BASIC_AUTH_USER` / `BASIC_AUTH_PASS`; never committed and never echoed in logs
+
+**Roadmap:** multi-tenant scaffolding (`<other>.8gentos.com` per user) is the next milestone. Until then, Hetzner serves a single tenant.
+
+**Internal testing guide:** `8gi-foundation/8gi-governance/docs/runbooks/2026-04-27-james-8gentos-com-testing.md` (private repo; access gated to 8GI members).
+
+<br />
+
+---
+
+<br />
+
 ## Benchmarks
 
 <p align="center"><sub>Execution-graded tests across professional domains. Local inference via the adaptive router (8gent / Ollama defaults).<br />Code compiles and runs against <code>bun:test</code> suites, or it fails. No string matching, no vibes.</sub></p>
