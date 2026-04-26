@@ -407,7 +407,7 @@ end repeat`;
 		if (!cli) {
 			return {
 				ok: false,
-				error: "drag requires cliclick; install via \"brew install cliclick\"",
+				error: 'drag requires cliclick; install via "brew install cliclick"',
 			};
 		}
 		// dd: drag-down (start), dm: drag-move (waypoint), du: drag-up (end)
