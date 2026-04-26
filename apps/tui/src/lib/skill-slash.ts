@@ -1,15 +1,10 @@
-import {
-	getSkillManager,
-	parseSkillCommand,
-} from "../../../../packages/skills/index.js";
+import { getSkillManager, parseSkillCommand } from "../../../../packages/skills/index.js";
 
 /**
  * If input is `/skillname ...` and matches a loaded skill, expand to the skill prompt
  * (same behavior as packages/eight/repl handleSkillInvocation). Unknown slashes pass through.
  */
-export async function expandSkillSlashCommand(
-	message: string,
-): Promise<string> {
+export async function expandSkillSlashCommand(message: string): Promise<string> {
 	const t = message.trim();
 	if (!t.startsWith("/")) return message;
 	const skillCmd = parseSkillCommand(t);

@@ -1,12 +1,12 @@
 import type { BenchmarkDefinition } from "../../types";
 
 export const bugFixingBenchmarks: BenchmarkDefinition[] = [
-  {
-    id: "BF001",
-    category: "bug-fixing",
-    title: "Race Condition in Shared Counter",
-    difficulty: "hard",
-    prompt: `Fix the race condition in this shared counter implementation. Multiple concurrent operations must produce correct results.
+	{
+		id: "BF001",
+		category: "bug-fixing",
+		title: "Race Condition in Shared Counter",
+		difficulty: "hard",
+		prompt: `Fix the race condition in this shared counter implementation. Multiple concurrent operations must produce correct results.
 
 \`\`\`typescript
 class SharedCounter {
@@ -36,18 +36,28 @@ Requirements:
 2. Multiple independent counters must not interfere
 3. Lock must always be released, even if operation throws
 4. Provide the full corrected class as a single code block.`,
-    keywords: ["lock", "mutex", "await", "release", "finally", "class", "increment", "decrement", "Promise"],
-    keywordThreshold: 5,
-    testExecution: true,
-    testFile: "autoresearch/tests/BF001-race-condition.test.ts",
-    timeoutMs: 15000,
-  },
-  {
-    id: "BF002",
-    category: "bug-fixing",
-    title: "Memory Leak in Event Handler",
-    difficulty: "medium",
-    prompt: `Fix the memory leak in this event emitter wrapper. Handlers accumulate and are never cleaned up on destroy.
+		keywords: [
+			"lock",
+			"mutex",
+			"await",
+			"release",
+			"finally",
+			"class",
+			"increment",
+			"decrement",
+			"Promise",
+		],
+		keywordThreshold: 5,
+		testExecution: true,
+		testFile: "autoresearch/tests/BF001-race-condition.test.ts",
+		timeoutMs: 15000,
+	},
+	{
+		id: "BF002",
+		category: "bug-fixing",
+		title: "Memory Leak in Event Handler",
+		difficulty: "medium",
+		prompt: `Fix the memory leak in this event emitter wrapper. Handlers accumulate and are never cleaned up on destroy.
 
 \`\`\`typescript
 class JsonEventEmitter {
@@ -74,18 +84,18 @@ Requirements:
 2. After destroy, emit() must be a no-op (no errors, no calls)
 3. 1000 create/destroy cycles must not leak memory (handlers always cleaned)
 4. Provide the full corrected class as a single code block.`,
-    keywords: ["destroy", "clear", "delete", "handlers", "Map", "Set", "emit", "class"],
-    keywordThreshold: 4,
-    testExecution: true,
-    testFile: "autoresearch/tests/BF002-memory-leak.test.ts",
-    timeoutMs: 15000,
-  },
-  {
-    id: "BF003",
-    category: "bug-fixing",
-    title: "Null Reference in Data Pipeline",
-    difficulty: "easy",
-    prompt: `Fix the null reference errors in this data processing pipeline. It crashes on null/undefined inputs.
+		keywords: ["destroy", "clear", "delete", "handlers", "Map", "Set", "emit", "class"],
+		keywordThreshold: 4,
+		testExecution: true,
+		testFile: "autoresearch/tests/BF002-memory-leak.test.ts",
+		timeoutMs: 15000,
+	},
+	{
+		id: "BF003",
+		category: "bug-fixing",
+		title: "Null Reference in Data Pipeline",
+		difficulty: "easy",
+		prompt: `Fix the null reference errors in this data processing pipeline. It crashes on null/undefined inputs.
 
 \`\`\`typescript
 interface DataRecord {
@@ -118,10 +128,20 @@ Requirements:
 2. Missing/null fields must not throw — handle optional email and metadata gracefully
 3. Valid records must still normalize correctly (trim, lowercase id/email)
 4. Provide the full corrected function as a single code block.`,
-    keywords: ["null", "undefined", "optional", "trim", "toLowerCase", "errors", "valid", "if", "return"],
-    keywordThreshold: 5,
-    testExecution: true,
-    testFile: "autoresearch/tests/BF003-null-check.test.ts",
-    timeoutMs: 10000,
-  },
+		keywords: [
+			"null",
+			"undefined",
+			"optional",
+			"trim",
+			"toLowerCase",
+			"errors",
+			"valid",
+			"if",
+			"return",
+		],
+		keywordThreshold: 5,
+		testExecution: true,
+		testFile: "autoresearch/tests/BF003-null-check.test.ts",
+		timeoutMs: 10000,
+	},
 ];

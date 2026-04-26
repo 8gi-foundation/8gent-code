@@ -15,9 +15,17 @@
  * Protocol: JSON files, FIFO consumption, heartbeat-based liveness
  */
 
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync, existsSync, statSync } from "fs"
-import { join } from "path"
-import { homedir } from "os"
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // MARK: - Types
 
@@ -37,25 +45,25 @@ import { homedir } from "os"
  * `normalizeMeshAgentType()` and mapped to their generic equivalents.
  */
 export type MeshAgentType =
-  | "host-cli-primary"
-  | "host-cli-secondary"
-  | "host-cli-tertiary"
-  | "host-cli-quaternary"
-  | "eight"
-  | "lil-eight"
-  | "custom"
+	| "host-cli-primary"
+	| "host-cli-secondary"
+	| "host-cli-tertiary"
+	| "host-cli-quaternary"
+	| "eight"
+	| "lil-eight"
+	| "custom";
 
 export interface MeshAgent {
-  id: string
-  type: MeshAgentType
-  name: string
-  pid: number
-  cwd: string
-  startedAt: number
-  lastHeartbeat: number
-  capabilities: string[] // e.g. ["code", "computer-use", "browser", "orchestrate"]
-  model?: string
-  channel?: string // e.g. "terminal", "gui", "telegram"
+	id: string;
+	type: MeshAgentType;
+	name: string;
+	pid: number;
+	cwd: string;
+	startedAt: number;
+	lastHeartbeat: number;
+	capabilities: string[]; // e.g. ["code", "computer-use", "browser", "orchestrate"]
+	model?: string;
+	channel?: string; // e.g. "terminal", "gui", "telegram"
 }
 
 // ── Backward-compatibility shim ─────────────────────────────────
@@ -63,381 +71,406 @@ export interface MeshAgent {
 // ~/.8gent/mesh/registry.json by older sessions) to the current
 // generic labels. Applied at read time so in-flight sessions keep working.
 const LEGACY_MESH_AGENT_TYPES: Record<string, MeshAgentType> = {
-  "claude-code": "host-cli-primary",
-  "codex": "host-cli-secondary",
-  "opencode": "host-cli-tertiary",
-  "cursor": "host-cli-quaternary",
-}
+	"claude-code": "host-cli-primary",
+	codex: "host-cli-secondary",
+	opencode: "host-cli-tertiary",
+	cursor: "host-cli-quaternary",
+};
 
 /**
  * Normalize a mesh-agent type string. Accepts both current generic labels
  * and legacy vendor-named labels for backward compatibility.
  */
 export function normalizeMeshAgentType(raw: string): MeshAgentType {
-  if (raw in LEGACY_MESH_AGENT_TYPES) return LEGACY_MESH_AGENT_TYPES[raw]
-  // Accept current labels as-is. Anything unknown falls through to "custom".
-  const known: MeshAgentType[] = [
-    "host-cli-primary",
-    "host-cli-secondary",
-    "host-cli-tertiary",
-    "host-cli-quaternary",
-    "eight",
-    "lil-eight",
-    "custom",
-  ]
-  return (known as string[]).includes(raw) ? (raw as MeshAgentType) : "custom"
+	if (raw in LEGACY_MESH_AGENT_TYPES) return LEGACY_MESH_AGENT_TYPES[raw];
+	// Accept current labels as-is. Anything unknown falls through to "custom".
+	const known: MeshAgentType[] = [
+		"host-cli-primary",
+		"host-cli-secondary",
+		"host-cli-tertiary",
+		"host-cli-quaternary",
+		"eight",
+		"lil-eight",
+		"custom",
+	];
+	return (known as string[]).includes(raw) ? (raw as MeshAgentType) : "custom";
 }
 
 export interface MeshMessage {
-  id: string
-  from: string // agentId
-  to: string // agentId or "broadcast"
-  type: "chat" | "task" | "status" | "request" | "response" | "event"
-  content: string
-  metadata?: Record<string, unknown>
-  timestamp: number
-  read?: boolean
+	id: string;
+	from: string; // agentId
+	to: string; // agentId or "broadcast"
+	type: "chat" | "task" | "status" | "request" | "response" | "event";
+	content: string;
+	metadata?: Record<string, unknown>;
+	timestamp: number;
+	read?: boolean;
 }
 
 // MARK: - Mesh Node
 
-const MESH_DIR = join(homedir(), ".8gent", "mesh")
-const REGISTRY_PATH = join(MESH_DIR, "registry.json")
-const MESSAGES_DIR = join(MESH_DIR, "messages")
-const BROADCAST_DIR = join(MESH_DIR, "broadcast")
-const STALE_THRESHOLD_MS = 60_000 // 60s without heartbeat = stale
+const MESH_DIR = join(homedir(), ".8gent", "mesh");
+const REGISTRY_PATH = join(MESH_DIR, "registry.json");
+const MESSAGES_DIR = join(MESH_DIR, "messages");
+const BROADCAST_DIR = join(MESH_DIR, "broadcast");
+const STALE_THRESHOLD_MS = 60_000; // 60s without heartbeat = stale
 
 export class AgentMesh {
-  readonly agentId: string
-  private agent: MeshAgent
-  private heartbeatInterval?: ReturnType<typeof setInterval>
-  private watchInterval?: ReturnType<typeof setInterval>
-  private onMessage?: (msg: MeshMessage) => void
-  private onPeerJoin?: (agent: MeshAgent) => void
-  private onPeerLeave?: (agentId: string) => void
-  private knownPeers = new Set<string>()
+	readonly agentId: string;
+	private agent: MeshAgent;
+	private heartbeatInterval?: ReturnType<typeof setInterval>;
+	private watchInterval?: ReturnType<typeof setInterval>;
+	private onMessage?: (msg: MeshMessage) => void;
+	private onPeerJoin?: (agent: MeshAgent) => void;
+	private onPeerLeave?: (agentId: string) => void;
+	private knownPeers = new Set<string>();
 
-  constructor(agent: Omit<MeshAgent, "id" | "lastHeartbeat" | "startedAt">) {
-    this.agentId = `${agent.type}-${agent.pid}-${Date.now().toString(36)}`
-    this.agent = {
-      ...agent,
-      id: this.agentId,
-      startedAt: Date.now(),
-      lastHeartbeat: Date.now(),
-    }
+	constructor(agent: Omit<MeshAgent, "id" | "lastHeartbeat" | "startedAt">) {
+		this.agentId = `${agent.type}-${agent.pid}-${Date.now().toString(36)}`;
+		this.agent = {
+			...agent,
+			id: this.agentId,
+			startedAt: Date.now(),
+			lastHeartbeat: Date.now(),
+		};
 
-    // Ensure directories
-    mkdirSync(MESH_DIR, { recursive: true })
-    mkdirSync(MESSAGES_DIR, { recursive: true })
-    mkdirSync(BROADCAST_DIR, { recursive: true })
-    mkdirSync(join(MESSAGES_DIR, this.agentId), { recursive: true })
-  }
+		// Ensure directories
+		mkdirSync(MESH_DIR, { recursive: true });
+		mkdirSync(MESSAGES_DIR, { recursive: true });
+		mkdirSync(BROADCAST_DIR, { recursive: true });
+		mkdirSync(join(MESSAGES_DIR, this.agentId), { recursive: true });
+	}
 
-  // MARK: - Lifecycle
+	// MARK: - Lifecycle
 
-  join(): void {
-    this.register()
-    this.startHeartbeat()
-    this.startWatching()
-    console.log(`[mesh] Joined as ${this.agentId} (${this.agent.type}/${this.agent.name})`)
-  }
+	join(): void {
+		this.register();
+		this.startHeartbeat();
+		this.startWatching();
+		console.log(`[mesh] Joined as ${this.agentId} (${this.agent.type}/${this.agent.name})`);
+	}
 
-  leave(): void {
-    this.heartbeatInterval && clearInterval(this.heartbeatInterval)
-    this.watchInterval && clearInterval(this.watchInterval)
-    this.unregister()
-    console.log(`[mesh] Left mesh: ${this.agentId}`)
-  }
+	leave(): void {
+		this.heartbeatInterval && clearInterval(this.heartbeatInterval);
+		this.watchInterval && clearInterval(this.watchInterval);
+		this.unregister();
+		console.log(`[mesh] Left mesh: ${this.agentId}`);
+	}
 
-  // MARK: - Registry
+	// MARK: - Registry
 
-  private register(): void {
-    const registry = this.readRegistry()
-    registry[this.agentId] = this.agent
-    this.writeRegistry(registry)
-  }
+	private register(): void {
+		const registry = this.readRegistry();
+		registry[this.agentId] = this.agent;
+		this.writeRegistry(registry);
+	}
 
-  private unregister(): void {
-    const registry = this.readRegistry()
-    delete registry[this.agentId]
-    this.writeRegistry(registry)
-  }
+	private unregister(): void {
+		const registry = this.readRegistry();
+		delete registry[this.agentId];
+		this.writeRegistry(registry);
+	}
 
-  private startHeartbeat(): void {
-    this.heartbeatInterval = setInterval(() => {
-      const registry = this.readRegistry()
-      if (registry[this.agentId]) {
-        registry[this.agentId].lastHeartbeat = Date.now()
-        this.writeRegistry(registry)
-      }
-      this.cleanStaleAgents(registry)
-    }, 10_000) // heartbeat every 10s
-  }
+	private startHeartbeat(): void {
+		this.heartbeatInterval = setInterval(() => {
+			const registry = this.readRegistry();
+			if (registry[this.agentId]) {
+				registry[this.agentId].lastHeartbeat = Date.now();
+				this.writeRegistry(registry);
+			}
+			this.cleanStaleAgents(registry);
+		}, 10_000); // heartbeat every 10s
+	}
 
-  private cleanStaleAgents(registry: Record<string, MeshAgent>): void {
-    const now = Date.now()
-    let changed = false
-    for (const [id, agent] of Object.entries(registry)) {
-      if (id === this.agentId) continue
-      if (now - agent.lastHeartbeat > STALE_THRESHOLD_MS) {
-        // Check if process is actually dead
-        if (!this.isProcessAlive(agent.pid)) {
-          delete registry[id]
-          changed = true
-          this.onPeerLeave?.(id)
-          this.knownPeers.delete(id)
-          console.log(`[mesh] Cleaned stale agent: ${id} (pid ${agent.pid} dead)`)
-        }
-      }
-    }
-    if (changed) this.writeRegistry(registry)
-  }
+	private cleanStaleAgents(registry: Record<string, MeshAgent>): void {
+		const now = Date.now();
+		let changed = false;
+		for (const [id, agent] of Object.entries(registry)) {
+			if (id === this.agentId) continue;
+			if (now - agent.lastHeartbeat > STALE_THRESHOLD_MS) {
+				// Check if process is actually dead
+				if (!this.isProcessAlive(agent.pid)) {
+					delete registry[id];
+					changed = true;
+					this.onPeerLeave?.(id);
+					this.knownPeers.delete(id);
+					console.log(`[mesh] Cleaned stale agent: ${id} (pid ${agent.pid} dead)`);
+				}
+			}
+		}
+		if (changed) this.writeRegistry(registry);
+	}
 
-  private isProcessAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0) // signal 0 = check existence
-      return true
-    } catch {
-      return false
-    }
-  }
+	private isProcessAlive(pid: number): boolean {
+		try {
+			process.kill(pid, 0); // signal 0 = check existence
+			return true;
+		} catch {
+			return false;
+		}
+	}
 
-  // MARK: - Peer Discovery
+	// MARK: - Peer Discovery
 
-  listPeers(): MeshAgent[] {
-    const registry = this.readRegistry()
-    return Object.values(registry).filter(a => a.id !== this.agentId)
-  }
+	listPeers(): MeshAgent[] {
+		const registry = this.readRegistry();
+		return Object.values(registry).filter((a) => a.id !== this.agentId);
+	}
 
-  listAllAgents(): MeshAgent[] {
-    return Object.values(this.readRegistry())
-  }
+	listAllAgents(): MeshAgent[] {
+		return Object.values(this.readRegistry());
+	}
 
-  getPeer(agentId: string): MeshAgent | undefined {
-    return this.readRegistry()[agentId]
-  }
+	getPeer(agentId: string): MeshAgent | undefined {
+		return this.readRegistry()[agentId];
+	}
 
-  findByType(type: MeshAgent["type"]): MeshAgent[] {
-    return this.listPeers().filter(a => a.type === type)
-  }
+	findByType(type: MeshAgent["type"]): MeshAgent[] {
+		return this.listPeers().filter((a) => a.type === type);
+	}
 
-  findByCapability(cap: string): MeshAgent[] {
-    return this.listPeers().filter(a => a.capabilities.includes(cap))
-  }
+	findByCapability(cap: string): MeshAgent[] {
+		return this.listPeers().filter((a) => a.capabilities.includes(cap));
+	}
 
-  // MARK: - Messaging
+	// MARK: - Messaging
 
-  send(to: string, type: MeshMessage["type"], content: string, metadata?: Record<string, unknown>): void {
-    const msg: MeshMessage = {
-      id: `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      from: this.agentId,
-      to,
-      type,
-      content,
-      metadata,
-      timestamp: Date.now(),
-    }
+	send(
+		to: string,
+		type: MeshMessage["type"],
+		content: string,
+		metadata?: Record<string, unknown>,
+	): void {
+		const msg: MeshMessage = {
+			id: `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+			from: this.agentId,
+			to,
+			type,
+			content,
+			metadata,
+			timestamp: Date.now(),
+		};
 
-    if (to === "broadcast") {
-      // Write to broadcast dir
-      writeFileSync(join(BROADCAST_DIR, `${msg.id}.json`), JSON.stringify(msg, null, 2))
-    } else {
-      // Write to target agent's inbox
-      const inbox = join(MESSAGES_DIR, to)
-      mkdirSync(inbox, { recursive: true })
-      writeFileSync(join(inbox, `${msg.id}.json`), JSON.stringify(msg, null, 2))
-    }
-  }
+		if (to === "broadcast") {
+			// Write to broadcast dir
+			writeFileSync(join(BROADCAST_DIR, `${msg.id}.json`), JSON.stringify(msg, null, 2));
+		} else {
+			// Write to target agent's inbox
+			const inbox = join(MESSAGES_DIR, to);
+			mkdirSync(inbox, { recursive: true });
+			writeFileSync(join(inbox, `${msg.id}.json`), JSON.stringify(msg, null, 2));
+		}
+	}
 
-  broadcast(type: MeshMessage["type"], content: string, metadata?: Record<string, unknown>): void {
-    this.send("broadcast", type, content, metadata)
-  }
+	broadcast(type: MeshMessage["type"], content: string, metadata?: Record<string, unknown>): void {
+		this.send("broadcast", type, content, metadata);
+	}
 
-  // Read and consume messages from own inbox
-  consume(): MeshMessage[] {
-    const inbox = join(MESSAGES_DIR, this.agentId)
-    if (!existsSync(inbox)) return []
+	// Read and consume messages from own inbox
+	consume(): MeshMessage[] {
+		const inbox = join(MESSAGES_DIR, this.agentId);
+		if (!existsSync(inbox)) return [];
 
-    const messages: MeshMessage[] = []
-    const files = readdirSync(inbox).filter(f => f.endsWith(".json")).sort()
+		const messages: MeshMessage[] = [];
+		const files = readdirSync(inbox)
+			.filter((f) => f.endsWith(".json"))
+			.sort();
 
-    for (const file of files) {
-      try {
-        const path = join(inbox, file)
-        const msg = JSON.parse(readFileSync(path, "utf-8")) as MeshMessage
-        messages.push(msg)
-        unlinkSync(path) // consume = delete
-      } catch {}
-    }
+		for (const file of files) {
+			try {
+				const path = join(inbox, file);
+				const msg = JSON.parse(readFileSync(path, "utf-8")) as MeshMessage;
+				messages.push(msg);
+				unlinkSync(path); // consume = delete
+			} catch {}
+		}
 
-    return messages
-  }
+		return messages;
+	}
 
-  // Peek without consuming
-  peek(): MeshMessage[] {
-    const inbox = join(MESSAGES_DIR, this.agentId)
-    if (!existsSync(inbox)) return []
+	// Peek without consuming
+	peek(): MeshMessage[] {
+		const inbox = join(MESSAGES_DIR, this.agentId);
+		if (!existsSync(inbox)) return [];
 
-    return readdirSync(inbox)
-      .filter(f => f.endsWith(".json"))
-      .sort()
-      .map(f => {
-        try {
-          return JSON.parse(readFileSync(join(inbox, f), "utf-8")) as MeshMessage
-        } catch { return null }
-      })
-      .filter(Boolean) as MeshMessage[]
-  }
+		return readdirSync(inbox)
+			.filter((f) => f.endsWith(".json"))
+			.sort()
+			.map((f) => {
+				try {
+					return JSON.parse(readFileSync(join(inbox, f), "utf-8")) as MeshMessage;
+				} catch {
+					return null;
+				}
+			})
+			.filter(Boolean) as MeshMessage[];
+	}
 
-  // Read broadcast messages (non-destructive, returns since timestamp)
-  readBroadcasts(since: number = 0): MeshMessage[] {
-    if (!existsSync(BROADCAST_DIR)) return []
+	// Read broadcast messages (non-destructive, returns since timestamp)
+	readBroadcasts(since = 0): MeshMessage[] {
+		if (!existsSync(BROADCAST_DIR)) return [];
 
-    return readdirSync(BROADCAST_DIR)
-      .filter(f => f.endsWith(".json"))
-      .map(f => {
-        try {
-          const msg = JSON.parse(readFileSync(join(BROADCAST_DIR, f), "utf-8")) as MeshMessage
-          return msg.timestamp > since ? msg : null
-        } catch { return null }
-      })
-      .filter(Boolean) as MeshMessage[]
-  }
+		return readdirSync(BROADCAST_DIR)
+			.filter((f) => f.endsWith(".json"))
+			.map((f) => {
+				try {
+					const msg = JSON.parse(readFileSync(join(BROADCAST_DIR, f), "utf-8")) as MeshMessage;
+					return msg.timestamp > since ? msg : null;
+				} catch {
+					return null;
+				}
+			})
+			.filter(Boolean) as MeshMessage[];
+	}
 
-  // MARK: - Watch for changes
+	// MARK: - Watch for changes
 
-  onMessageReceived(handler: (msg: MeshMessage) => void): void {
-    this.onMessage = handler
-  }
+	onMessageReceived(handler: (msg: MeshMessage) => void): void {
+		this.onMessage = handler;
+	}
 
-  onPeerJoined(handler: (agent: MeshAgent) => void): void {
-    this.onPeerJoin = handler
-  }
+	onPeerJoined(handler: (agent: MeshAgent) => void): void {
+		this.onPeerJoin = handler;
+	}
 
-  onPeerLeft(handler: (agentId: string) => void): void {
-    this.onPeerLeave = handler
-  }
+	onPeerLeft(handler: (agentId: string) => void): void {
+		this.onPeerLeave = handler;
+	}
 
-  private startWatching(): void {
-    // Initialize known peers
-    for (const peer of this.listPeers()) {
-      this.knownPeers.add(peer.id)
-    }
+	private startWatching(): void {
+		// Initialize known peers
+		for (const peer of this.listPeers()) {
+			this.knownPeers.add(peer.id);
+		}
 
-    this.watchInterval = setInterval(() => {
-      // Check for new messages
-      const msgs = this.consume()
-      for (const msg of msgs) {
-        this.onMessage?.(msg)
-      }
+		this.watchInterval = setInterval(() => {
+			// Check for new messages
+			const msgs = this.consume();
+			for (const msg of msgs) {
+				this.onMessage?.(msg);
+			}
 
-      // Check for peer changes
-      const currentPeers = new Set(this.listPeers().map(p => p.id))
-      for (const id of currentPeers) {
-        if (!this.knownPeers.has(id)) {
-          this.knownPeers.add(id)
-          this.onPeerJoin?.(this.getPeer(id)!)
-        }
-      }
-      for (const id of this.knownPeers) {
-        if (!currentPeers.has(id)) {
-          this.knownPeers.delete(id)
-          this.onPeerLeave?.(id)
-        }
-      }
-    }, 2_000) // poll every 2s
-  }
+			// Check for peer changes
+			const currentPeers = new Set(this.listPeers().map((p) => p.id));
+			for (const id of currentPeers) {
+				if (!this.knownPeers.has(id)) {
+					this.knownPeers.add(id);
+					this.onPeerJoin?.(this.getPeer(id)!);
+				}
+			}
+			for (const id of this.knownPeers) {
+				if (!currentPeers.has(id)) {
+					this.knownPeers.delete(id);
+					this.onPeerLeave?.(id);
+				}
+			}
+		}, 2_000); // poll every 2s
+	}
 
-  // MARK: - File I/O
+	// MARK: - File I/O
 
-  private readRegistry(): Record<string, MeshAgent> {
-    try {
-      const raw = JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Record<string, MeshAgent>
-      // Migrate legacy vendor-named adapter-type labels at read time.
-      for (const id of Object.keys(raw)) {
-        const entry = raw[id]
-        if (entry && typeof entry.type === "string") {
-          entry.type = normalizeMeshAgentType(entry.type as string)
-        }
-      }
-      return raw
-    } catch {
-      return {}
-    }
-  }
+	private readRegistry(): Record<string, MeshAgent> {
+		try {
+			const raw = JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Record<string, MeshAgent>;
+			// Migrate legacy vendor-named adapter-type labels at read time.
+			for (const id of Object.keys(raw)) {
+				const entry = raw[id];
+				if (entry && typeof entry.type === "string") {
+					entry.type = normalizeMeshAgentType(entry.type as string);
+				}
+			}
+			return raw;
+		} catch {
+			return {};
+		}
+	}
 
-  private writeRegistry(registry: Record<string, MeshAgent>): void {
-    writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2))
-  }
+	private writeRegistry(registry: Record<string, MeshAgent>): void {
+		writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+	}
 
-  // MARK: - Convenience
+	// MARK: - Convenience
 
-  /** Ask a specific agent to do something and wait for response */
-  async request(to: string, content: string, timeoutMs: number = 30_000): Promise<MeshMessage | null> {
-    const requestId = `req-${Date.now().toString(36)}`
-    this.send(to, "request", content, { requestId })
+	/** Ask a specific agent to do something and wait for response */
+	async request(to: string, content: string, timeoutMs = 30_000): Promise<MeshMessage | null> {
+		const requestId = `req-${Date.now().toString(36)}`;
+		this.send(to, "request", content, { requestId });
 
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      const msgs = this.peek()
-      const response = msgs.find(m => m.type === "response" && m.metadata?.requestId === requestId)
-      if (response) {
-        // Consume it
-        const inbox = join(MESSAGES_DIR, this.agentId)
-        const files = readdirSync(inbox).filter(f => f.endsWith(".json"))
-        for (const f of files) {
-          try {
-            const msg = JSON.parse(readFileSync(join(inbox, f), "utf-8"))
-            if (msg.id === response.id) {
-              unlinkSync(join(inbox, f))
-              break
-            }
-          } catch {}
-        }
-        return response
-      }
-      await new Promise(r => setTimeout(r, 500))
-    }
-    return null
-  }
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			const msgs = this.peek();
+			const response = msgs.find(
+				(m) => m.type === "response" && m.metadata?.requestId === requestId,
+			);
+			if (response) {
+				// Consume it
+				const inbox = join(MESSAGES_DIR, this.agentId);
+				const files = readdirSync(inbox).filter((f) => f.endsWith(".json"));
+				for (const f of files) {
+					try {
+						const msg = JSON.parse(readFileSync(join(inbox, f), "utf-8"));
+						if (msg.id === response.id) {
+							unlinkSync(join(inbox, f));
+							break;
+						}
+					} catch {}
+				}
+				return response;
+			}
+			await new Promise((r) => setTimeout(r, 500));
+		}
+		return null;
+	}
 
-  /** Get mesh status summary */
-  status(): { agents: number; types: Record<string, number>; messages: number } {
-    const agents = this.listAllAgents()
-    const types: Record<string, number> = {}
-    for (const a of agents) {
-      types[a.type] = (types[a.type] || 0) + 1
-    }
-    const inbox = join(MESSAGES_DIR, this.agentId)
-    const messages = existsSync(inbox) ? readdirSync(inbox).filter(f => f.endsWith(".json")).length : 0
-    return { agents: agents.length, types, messages }
-  }
+	/** Get mesh status summary */
+	status(): {
+		agents: number;
+		types: Record<string, number>;
+		messages: number;
+	} {
+		const agents = this.listAllAgents();
+		const types: Record<string, number> = {};
+		for (const a of agents) {
+			types[a.type] = (types[a.type] || 0) + 1;
+		}
+		const inbox = join(MESSAGES_DIR, this.agentId);
+		const messages = existsSync(inbox)
+			? readdirSync(inbox).filter((f) => f.endsWith(".json")).length
+			: 0;
+		return { agents: agents.length, types, messages };
+	}
 }
 
 // MARK: - Quick Join (one-liner for any agent)
 
 export function joinMesh(opts: {
-  type: MeshAgent["type"]
-  name: string
-  capabilities?: string[]
-  model?: string
-  channel?: string
+	type: MeshAgent["type"];
+	name: string;
+	capabilities?: string[];
+	model?: string;
+	channel?: string;
 }): AgentMesh {
-  const mesh = new AgentMesh({
-    type: opts.type,
-    name: opts.name,
-    pid: process.pid,
-    cwd: process.cwd(),
-    capabilities: opts.capabilities || ["code"],
-    model: opts.model,
-    channel: opts.channel || "terminal",
-  })
-  mesh.join()
+	const mesh = new AgentMesh({
+		type: opts.type,
+		name: opts.name,
+		pid: process.pid,
+		cwd: process.cwd(),
+		capabilities: opts.capabilities || ["code"],
+		model: opts.model,
+		channel: opts.channel || "terminal",
+	});
+	mesh.join();
 
-  // Clean exit
-  process.on("exit", () => mesh.leave())
-  process.on("SIGINT", () => { mesh.leave(); process.exit(0) })
-  process.on("SIGTERM", () => { mesh.leave(); process.exit(0) })
+	// Clean exit
+	process.on("exit", () => mesh.leave());
+	process.on("SIGINT", () => {
+		mesh.leave();
+		process.exit(0);
+	});
+	process.on("SIGTERM", () => {
+		mesh.leave();
+		process.exit(0);
+	});
 
-  return mesh
+	return mesh;
 }

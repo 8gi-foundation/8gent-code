@@ -17,19 +17,19 @@ import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 
 import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
+	ApiFromModules,
+	FilterApi,
+	FunctionReference,
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  admin: typeof admin;
-  conversations: typeof conversations;
-  preferences: typeof preferences;
-  sessions: typeof sessions;
-  tenants: typeof tenants;
-  usage: typeof usage;
-  users: typeof users;
+	admin: typeof admin;
+	conversations: typeof conversations;
+	preferences: typeof preferences;
+	sessions: typeof sessions;
+	tenants: typeof tenants;
+	usage: typeof usage;
+	users: typeof users;
 }>;
 
 /**
@@ -41,8 +41,8 @@ declare const fullApi: ApiFromModules<{
  * ```
  */
 export declare const api: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "public">
+	typeof fullApi,
+	FunctionReference<any, "public">
 >;
 
 /**
@@ -54,8 +54,8 @@ export declare const api: FilterApi<
  * ```
  */
 export declare const internal: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "internal">
+	typeof fullApi,
+	FunctionReference<any, "internal">
 >;
 
 export declare const components: {};

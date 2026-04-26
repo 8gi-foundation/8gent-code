@@ -10,13 +10,13 @@
 const DEFAULT_CONCURRENCY = 4;
 
 function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  const reason = signal.reason;
-  if (reason instanceof Error) throw reason;
-  throw new DOMException(
-    typeof reason === "string" ? reason : "The operation was aborted",
-    "AbortError"
-  );
+	if (!signal?.aborted) return;
+	const reason = signal.reason;
+	if (reason instanceof Error) throw reason;
+	throw new DOMException(
+		typeof reason === "string" ? reason : "The operation was aborted",
+		"AbortError",
+	);
 }
 
 /**
@@ -24,27 +24,27 @@ function throwIfAborted(signal?: AbortSignal): void {
  * the shared index so workers never duplicate effort.
  */
 async function runPool<T, R>(
-  items: readonly T[],
-  fn: (item: T, index: number, signal?: AbortSignal) => Promise<R>,
-  concurrency: number,
-  signal?: AbortSignal
+	items: readonly T[],
+	fn: (item: T, index: number, signal?: AbortSignal) => Promise<R>,
+	concurrency: number,
+	signal?: AbortSignal,
 ): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
+	const results: R[] = new Array(items.length);
+	let next = 0;
 
-  async function worker(): Promise<void> {
-    while (true) {
-      throwIfAborted(signal);
-      const index = next++;
-      if (index >= items.length) return;
-      results[index] = await fn(items[index], index, signal);
-      throwIfAborted(signal);
-    }
-  }
+	async function worker(): Promise<void> {
+		while (true) {
+			throwIfAborted(signal);
+			const index = next++;
+			if (index >= items.length) return;
+			results[index] = await fn(items[index], index, signal);
+			throwIfAborted(signal);
+		}
+	}
 
-  const workers = Array.from({ length: Math.min(concurrency, items.length || 1) }, worker);
-  await Promise.all(workers);
-  return results;
+	const workers = Array.from({ length: Math.min(concurrency, items.length || 1) }, worker);
+	await Promise.all(workers);
+	return results;
 }
 
 /**
@@ -57,14 +57,14 @@ async function runPool<T, R>(
  * @param signal     Optional AbortSignal for cancellation.
  */
 export async function parallelMap<T, R>(
-  items: readonly T[],
-  fn: (item: T, index: number, signal?: AbortSignal) => Promise<R>,
-  concurrency: number = DEFAULT_CONCURRENCY,
-  signal?: AbortSignal
+	items: readonly T[],
+	fn: (item: T, index: number, signal?: AbortSignal) => Promise<R>,
+	concurrency: number = DEFAULT_CONCURRENCY,
+	signal?: AbortSignal,
 ): Promise<R[]> {
-  if (items.length === 0) return [];
-  throwIfAborted(signal);
-  return runPool(items, fn, concurrency, signal);
+	if (items.length === 0) return [];
+	throwIfAborted(signal);
+	return runPool(items, fn, concurrency, signal);
 }
 
 /**
@@ -77,15 +77,15 @@ export async function parallelMap<T, R>(
  * @param signal     Optional AbortSignal for cancellation.
  */
 export async function parallelFilter<T>(
-  items: readonly T[],
-  fn: (item: T, index: number, signal?: AbortSignal) => Promise<boolean>,
-  concurrency: number = DEFAULT_CONCURRENCY,
-  signal?: AbortSignal
+	items: readonly T[],
+	fn: (item: T, index: number, signal?: AbortSignal) => Promise<boolean>,
+	concurrency: number = DEFAULT_CONCURRENCY,
+	signal?: AbortSignal,
 ): Promise<T[]> {
-  if (items.length === 0) return [];
-  throwIfAborted(signal);
-  const flags = await runPool(items, fn, concurrency, signal);
-  return items.filter((_, i) => flags[i]);
+	if (items.length === 0) return [];
+	throwIfAborted(signal);
+	const flags = await runPool(items, fn, concurrency, signal);
+	return items.filter((_, i) => flags[i]);
 }
 
 /**
@@ -98,14 +98,14 @@ export async function parallelFilter<T>(
  * @param signal     Optional AbortSignal for cancellation.
  */
 export async function parallelForEach<T>(
-  items: readonly T[],
-  fn: (item: T, index: number, signal?: AbortSignal) => Promise<void>,
-  concurrency: number = DEFAULT_CONCURRENCY,
-  signal?: AbortSignal
+	items: readonly T[],
+	fn: (item: T, index: number, signal?: AbortSignal) => Promise<void>,
+	concurrency: number = DEFAULT_CONCURRENCY,
+	signal?: AbortSignal,
 ): Promise<void> {
-  if (items.length === 0) return;
-  throwIfAborted(signal);
-  await runPool(items, fn, concurrency, signal);
+	if (items.length === 0) return;
+	throwIfAborted(signal);
+	await runPool(items, fn, concurrency, signal);
 }
 
 /**
@@ -123,51 +123,51 @@ export async function parallelForEach<T>(
  * @param signal     Optional AbortSignal for cancellation.
  */
 export async function parallelReduce<T, R>(
-  items: readonly T[],
-  fn: (accumulator: R, item: T, index: number, signal?: AbortSignal) => Promise<R>,
-  init: R,
-  concurrency: number = DEFAULT_CONCURRENCY,
-  signal?: AbortSignal
+	items: readonly T[],
+	fn: (accumulator: R, item: T, index: number, signal?: AbortSignal) => Promise<R>,
+	init: R,
+	concurrency: number = DEFAULT_CONCURRENCY,
+	signal?: AbortSignal,
 ): Promise<R> {
-  if (items.length === 0) return init;
-  throwIfAborted(signal);
+	if (items.length === 0) return init;
+	throwIfAborted(signal);
 
-  // Sequential path - safe for non-associative reducers.
-  if (concurrency === 1) {
-    let acc = init;
-    for (let i = 0; i < items.length; i++) {
-      throwIfAborted(signal);
-      acc = await fn(acc, items[i], i, signal);
-    }
-    return acc;
-  }
+	// Sequential path - safe for non-associative reducers.
+	if (concurrency === 1) {
+		let acc = init;
+		for (let i = 0; i < items.length; i++) {
+			throwIfAborted(signal);
+			acc = await fn(acc, items[i], i, signal);
+		}
+		return acc;
+	}
 
-  // Parallel path - process chunks then reduce intermediates.
-  const chunkSize = Math.ceil(items.length / concurrency);
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += chunkSize) {
-    chunks.push(items.slice(i, i + chunkSize) as T[]);
-  }
+	// Parallel path - process chunks then reduce intermediates.
+	const chunkSize = Math.ceil(items.length / concurrency);
+	const chunks: T[][] = [];
+	for (let i = 0; i < items.length; i += chunkSize) {
+		chunks.push(items.slice(i, i + chunkSize) as T[]);
+	}
 
-  const partials = await parallelMap(
-    chunks,
-    async (chunk, _ci, sig) => {
-      let acc = init;
-      for (let i = 0; i < chunk.length; i++) {
-        throwIfAborted(sig);
-        acc = await fn(acc, chunk[i], i, sig);
-      }
-      return acc;
-    },
-    concurrency,
-    signal
-  );
+	const partials = await parallelMap(
+		chunks,
+		async (chunk, _ci, sig) => {
+			let acc = init;
+			for (let i = 0; i < chunk.length; i++) {
+				throwIfAborted(sig);
+				acc = await fn(acc, chunk[i], i, sig);
+			}
+			return acc;
+		},
+		concurrency,
+		signal,
+	);
 
-  // Merge partial results sequentially (generic merge via fn with init).
-  let result = init;
-  for (const partial of partials) {
-    throwIfAborted(signal);
-    result = await fn(result, partial as unknown as T, 0, signal);
-  }
-  return result;
+	// Merge partial results sequentially (generic merge via fn with init).
+	let result = init;
+	for (const partial of partials) {
+		throwIfAborted(signal);
+		result = await fn(result, partial as unknown as T, 0, signal);
+	}
+	return result;
 }

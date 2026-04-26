@@ -11,24 +11,24 @@ export type IsolationLevel = "process" | "tempdir" | "docker" | "microvm";
 
 /** Options for a sandboxed execution */
 export interface SandboxOptions {
-  /** Timeout in ms. Default: 30000 */
-  timeout?: number;
-  /** Force a specific isolation level. Default: auto-detect best available */
-  isolation?: IsolationLevel;
-  /** Allow network access inside sandbox. Default: false */
-  allowNetwork?: boolean;
-  /** Working directory inside sandbox. Default: auto-created temp dir */
-  workDir?: string;
-  /** Extra environment variables to inject. All others are stripped. */
-  env?: Record<string, string>;
+	/** Timeout in ms. Default: 30000 */
+	timeout?: number;
+	/** Force a specific isolation level. Default: auto-detect best available */
+	isolation?: IsolationLevel;
+	/** Allow network access inside sandbox. Default: false */
+	allowNetwork?: boolean;
+	/** Working directory inside sandbox. Default: auto-created temp dir */
+	workDir?: string;
+	/** Extra environment variables to inject. All others are stripped. */
+	env?: Record<string, string>;
 }
 
 /** Result from a sandboxed execution */
 export interface SandboxResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  timedOut: boolean;
-  isolation: IsolationLevel;
-  durationMs: number;
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+	timedOut: boolean;
+	isolation: IsolationLevel;
+	durationMs: number;
 }
