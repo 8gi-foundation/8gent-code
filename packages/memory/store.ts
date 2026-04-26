@@ -174,7 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_versions_memory ON memory_versions(memory_id, ver
 // ── MemoryStore ───────────────────────────────────────────────────────
 
 export class MemoryStore {
-  private db: Database;
+  db: Database;
   private embeddingProvider: EmbeddingProvider | null;
 
   constructor(dbPath: string, embeddingProvider?: EmbeddingProvider) {
@@ -506,7 +506,7 @@ export class MemoryStore {
 
   findEntities(query: { type?: EntityType; name?: string; limit?: number }): Entity[] {
     let sql = "SELECT * FROM entities WHERE 1=1";
-    const params: unknown[] = [];
+    const params: import("bun:sqlite").SQLQueryBindings[] = [];
 
     if (query.type) {
       sql += " AND type = ?";
@@ -696,7 +696,7 @@ export class MemoryStore {
       WHERE memories_fts MATCH ?
         AND m.deleted_at IS NULL
     `;
-    const params: unknown[] = [ftsQuery];
+    const params: import("bun:sqlite").SQLQueryBindings[] = [ftsQuery];
 
     if (options.types && options.types.length > 0) {
       sql += ` AND m.type IN (${options.types.map(() => "?").join(",")})`;
@@ -742,7 +742,7 @@ export class MemoryStore {
       JOIN memories m ON m.id = e.memory_id
       WHERE m.deleted_at IS NULL
     `;
-    const params: unknown[] = [];
+    const params: import("bun:sqlite").SQLQueryBindings[] = [];
 
     if (options.types && options.types.length > 0) {
       sql += ` AND m.type IN (${options.types.map(() => "?").join(",")})`;
