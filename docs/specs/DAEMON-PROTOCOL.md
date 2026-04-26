@@ -10,10 +10,33 @@ Protocol version is carried explicitly on every server-to-client frame as `"prot
 
 ## Connection
 
-**Default endpoint:** `ws://localhost:18789` (multiplexed gateway)
-**Computer-channel endpoint:** `ws://localhost:18789/computer` (dedicated route, loopback-only in v0)
-**Health check:** `GET http://localhost:18789/health`
-**Pool status (per channel):** `GET http://localhost:18789/ops/agent-pool/status`
+The daemon listens on port `18789`. The same protocol is served on the local-dev socket and the production socket; only the transport (plain WS vs. TLS-terminated WSS behind a reverse proxy) differs.
+
+### Local dev
+
+- **Multiplexed gateway:** `ws://localhost:18789`
+- **Computer-channel endpoint:** `ws://localhost:18789/computer` (dedicated route, loopback-only in v0)
+- **Health check:** `GET http://localhost:18789/health`
+- **Pool status (per channel):** `GET http://localhost:18789/ops/agent-pool/status`
+
+### Production (Hetzner cax21, Falkenstein)
+
+- **Multiplexed gateway:** `wss://james.8gentos.com`
+- **Computer-channel endpoint:** `wss://james.8gentos.com/computer`
+- **Health check:** `GET https://james.8gentos.com/health` (the only path open without auth)
+- **Pool status:** `GET https://james.8gentos.com/ops/agent-pool/status` (auth required)
+
+In production a Caddy reverse proxy with Let's Encrypt sits in front of the Bun daemon. Caddy basic-auth gates every path except `/health` in v0. Clients pass an `Authorization: Basic ...` header on the WebSocket upgrade request:
+
+```http
+GET / HTTP/1.1
+Host: james.8gentos.com
+Upgrade: websocket
+Connection: Upgrade
+Authorization: Basic <base64(BASIC_AUTH_USER:BASIC_AUTH_PASS)>
+```
+
+Credentials are environment-injected (`BASIC_AUTH_USER`, `BASIC_AUTH_PASS`) and must never be committed to source. The basic-auth gate is a v0 measure and will be replaced by token-bound auth (see the `Authentication` section below) once multi-tenant rollout begins.
 
 The daemon uses Bun's native WebSocket server. Messages are JSON-encoded strings.
 
