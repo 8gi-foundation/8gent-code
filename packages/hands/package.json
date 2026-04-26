@@ -1,8 +1,8 @@
 {
 	"name": "@8gent/hands",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
-	"description": "Placeholder for 8gent-hands: fork of trycua/cua adapted for the 8gent Computer Mac agent. Scaffold only. See #1755 and parent PRD #1746.",
+	"description": "macOS desktop driver for the 8gent Computer agent. Real screencapture + cliclick/osascript bridge. Closes #1908.",
 	"main": "index.ts",
 	"types": "index.ts",
 	"type": "module",
