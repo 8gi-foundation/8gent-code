@@ -1,14 +1,14 @@
 {
-  "name": "@8gi-foundation/8gent-bot",
-  "version": "2.0.0",
-  "description": "8Gent Telegram orchestrator - routes messages to all 8 officer vessels",
-  "main": "src/index.ts",
-  "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun run --hot src/index.ts"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "@types/bun": "latest"
-  }
+	"name": "@8gi-foundation/8gent-bot",
+	"version": "2.0.0",
+	"description": "8Gent Telegram orchestrator - routes messages to all 8 officer vessels",
+	"main": "src/index.ts",
+	"scripts": {
+		"start": "bun run src/index.ts",
+		"dev": "bun run --hot src/index.ts"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
 }

@@ -14,21 +14,21 @@
 import { randomBytes } from "crypto";
 
 export interface CLIAuthResult {
-  success: boolean;
-  token?: string;
-  userId?: string;
-  email?: string;
-  displayName?: string;
-  error?: string;
+	success: boolean;
+	token?: string;
+	userId?: string;
+	email?: string;
+	displayName?: string;
+	error?: string;
 }
 
 export interface CLIAuthCallbacks {
-  onServerReady?: (url: string, port: number) => void;
-  onBrowserOpened?: () => void;
-  onWaiting?: () => void;
-  onTokenReceived?: (result: CLIAuthResult) => void;
-  onError?: (error: string) => void;
-  onTimeout?: () => void;
+	onServerReady?: (url: string, port: number) => void;
+	onBrowserOpened?: () => void;
+	onWaiting?: () => void;
+	onTokenReceived?: (result: CLIAuthResult) => void;
+	onError?: (error: string) => void;
+	onTimeout?: () => void;
 }
 
 /**
@@ -39,119 +39,128 @@ export interface CLIAuthCallbacks {
  * - Return token
  */
 export async function runCLIAuthFlow(
-  webBaseUrl: string = "https://8gent.app",
-  callbacks?: CLIAuthCallbacks,
-  timeoutMs: number = 5 * 60 * 1000, // 5 min
+	webBaseUrl: string = "https://8gent.app",
+	callbacks?: CLIAuthCallbacks,
+	timeoutMs: number = 5 * 60 * 1000, // 5 min
 ): Promise<CLIAuthResult> {
-  const state = randomBytes(16).toString("hex");
-  let resolved = false;
+	const state = randomBytes(16).toString("hex");
+	let resolved = false;
 
-  return new Promise<CLIAuthResult>((resolve) => {
-    // Start local HTTP server
-    const server = Bun.serve({
-      port: 0, // random available port
-      async fetch(req) {
-        const url = new URL(req.url);
+	return new Promise<CLIAuthResult>((resolve) => {
+		// Start local HTTP server
+		const server = Bun.serve({
+			port: 0, // random available port
+			async fetch(req) {
+				const url = new URL(req.url);
 
-        // CORS preflight
-        if (req.method === "OPTIONS") {
-          return new Response(null, {
-            status: 204,
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "POST, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type",
-            },
-          });
-        }
+				// CORS preflight
+				if (req.method === "OPTIONS") {
+					return new Response(null, {
+						status: 204,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "POST, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+						},
+					});
+				}
 
-        // Auth callback from browser
-        if (url.pathname === "/callback" && req.method === "POST") {
-          try {
-            const body = await req.json() as {
-              token?: string;
-              userId?: string;
-              email?: string;
-              displayName?: string;
-              state?: string;
-            };
+				// Auth callback from browser
+				if (url.pathname === "/callback" && req.method === "POST") {
+					try {
+						const body = (await req.json()) as {
+							token?: string;
+							userId?: string;
+							email?: string;
+							displayName?: string;
+							state?: string;
+						};
 
-            // Verify state to prevent CSRF
-            if (body.state !== state) {
-              return new Response(JSON.stringify({ error: "Invalid state" }), {
-                status: 400,
-                headers: {
-                  "Content-Type": "application/json",
-                  "Access-Control-Allow-Origin": "*",
-                },
-              });
-            }
+						// Verify state to prevent CSRF
+						if (body.state !== state) {
+							return new Response(JSON.stringify({ error: "Invalid state" }), {
+								status: 400,
+								headers: {
+									"Content-Type": "application/json",
+									"Access-Control-Allow-Origin": "*",
+								},
+							});
+						}
 
-            const result: CLIAuthResult = {
-              success: true,
-              token: body.token,
-              userId: body.userId,
-              email: body.email,
-              displayName: body.displayName,
-            };
+						const result: CLIAuthResult = {
+							success: true,
+							token: body.token,
+							userId: body.userId,
+							email: body.email,
+							displayName: body.displayName,
+						};
 
-            resolved = true;
-            callbacks?.onTokenReceived?.(result);
+						resolved = true;
+						callbacks?.onTokenReceived?.(result);
 
-            // Close server after short delay (let response complete)
-            setTimeout(() => {
-              server.stop();
-              resolve(result);
-            }, 500);
+						// Close server after short delay (let response complete)
+						setTimeout(() => {
+							server.stop();
+							resolve(result);
+						}, 500);
 
-            return new Response(
-              JSON.stringify({ ok: true, message: "Authentication successful. You can close this tab." }),
-              {
-                status: 200,
-                headers: {
-                  "Content-Type": "application/json",
-                  "Access-Control-Allow-Origin": "*",
-                },
-              },
-            );
-          } catch {
-            return new Response(JSON.stringify({ error: "Invalid request" }), {
-              status: 400,
-              headers: {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-              },
-            });
-          }
-        }
+						return new Response(
+							JSON.stringify({
+								ok: true,
+								message: "Authentication successful. You can close this tab.",
+							}),
+							{
+								status: 200,
+								headers: {
+									"Content-Type": "application/json",
+									"Access-Control-Allow-Origin": "*",
+								},
+							},
+						);
+					} catch {
+						return new Response(JSON.stringify({ error: "Invalid request" }), {
+							status: 400,
+							headers: {
+								"Content-Type": "application/json",
+								"Access-Control-Allow-Origin": "*",
+							},
+						});
+					}
+				}
 
-        return new Response("Not found", { status: 404 });
-      },
-    });
+				return new Response("Not found", { status: 404 });
+			},
+		});
 
-    const port = server.port;
-    const authUrl = `${webBaseUrl}/auth/cli?port=${port}&state=${state}`;
+		const port = server.port;
+		const authUrl = `${webBaseUrl}/auth/cli?port=${port}&state=${state}`;
 
-    callbacks?.onServerReady?.(authUrl, port ?? 0);
+		callbacks?.onServerReady?.(authUrl, port ?? 0);
 
-    // Auto-open browser
-    try {
-      const proc = Bun.spawn(["open", authUrl], { stdout: "ignore", stderr: "ignore" });
-      proc.exited.then(() => callbacks?.onBrowserOpened?.());
-    } catch {
-      // If open fails, user can manually visit the URL
-    }
+		// Auto-open browser
+		try {
+			const proc = Bun.spawn(["open", authUrl], {
+				stdout: "ignore",
+				stderr: "ignore",
+			});
+			proc.exited.then(() => callbacks?.onBrowserOpened?.());
+		} catch {
+			// If open fails, user can manually visit the URL
+		}
 
-    callbacks?.onWaiting?.();
+		callbacks?.onWaiting?.();
 
-    // Timeout
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        server.stop();
-        callbacks?.onTimeout?.();
-        resolve({ success: false, error: "Authentication timed out. Please try again." });
-      }
-    }, timeoutMs);
-  });
+		// Timeout
+		setTimeout(() => {
+			if (!resolved) {
+				resolved = true;
+				server.stop();
+				callbacks?.onTimeout?.();
+				resolve({
+					success: false,
+					error: "Authentication timed out. Please try again.",
+				});
+			}
+		}, timeoutMs);
+	});
 }

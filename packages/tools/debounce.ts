@@ -6,56 +6,56 @@
  * @returns Debounced function with .cancel() method
  */
 function debounce<TArgs, TReturn>(
-  fn: (...args: TArgs[]) => TReturn,
-  delayMs: number,
-  options: { trailing?: boolean; leading?: boolean } = {}
+	fn: (...args: TArgs[]) => TReturn,
+	delayMs: number,
+	options: { trailing?: boolean; leading?: boolean } = {},
 ): (...args: TArgs[]) => Promise<TReturn> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
-  let lastArgs: TArgs[] | null = null
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+	let lastArgs: TArgs[] | null = null;
 
-  const wrapped = (...args: TArgs[]): Promise<TReturn> => {
-    return new Promise<TReturn>((resolve, reject) => {
-      let isCancelled = false
-      const cancel = () => {
-        isCancelled = true
-        if (timeoutId !== null) {
-          clearTimeout(timeoutId)
-          timeoutId = null
-        }
-        reject('cancelled')
-      }
+	const wrapped = (...args: TArgs[]): Promise<TReturn> => {
+		return new Promise<TReturn>((resolve, reject) => {
+			let isCancelled = false;
+			const cancel = () => {
+				isCancelled = true;
+				if (timeoutId !== null) {
+					clearTimeout(timeoutId);
+					timeoutId = null;
+				}
+				reject("cancelled");
+			};
 
-      if (timeoutId !== null) clearTimeout(timeoutId)
-      lastArgs = args
+			if (timeoutId !== null) clearTimeout(timeoutId);
+			lastArgs = args;
 
-      const execute = () => {
-        if (isCancelled || lastArgs === null) return
-        try {
-          resolve(fn(...lastArgs))
-        } catch (e) {
-          reject(e)
-        }
-        lastArgs = null
-      }
+			const execute = () => {
+				if (isCancelled || lastArgs === null) return;
+				try {
+					resolve(fn(...lastArgs));
+				} catch (e) {
+					reject(e);
+				}
+				lastArgs = null;
+			};
 
-      if (options.leading) execute()
+			if (options.leading) execute();
 
-      if (options.trailing) {
-        timeoutId = setTimeout(() => {
-          if (!isCancelled && lastArgs !== null) execute()
-        }, delayMs)
-      }
-    })
-  }
+			if (options.trailing) {
+				timeoutId = setTimeout(() => {
+					if (!isCancelled && lastArgs !== null) execute();
+				}, delayMs);
+			}
+		});
+	};
 
-  wrapped.cancel = () => {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId)
-      timeoutId = null
-    }
-  }
+	wrapped.cancel = () => {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId);
+			timeoutId = null;
+		}
+	};
 
-  return wrapped
+	return wrapped;
 }
 
 /**
@@ -65,48 +65,51 @@ function debounce<TArgs, TReturn>(
  * @returns Throttled function with .cancel() method
  */
 function throttle<TArgs, TReturn>(
-  fn: (...args: TArgs[]) => TReturn,
-  intervalMs: number
+	fn: (...args: TArgs[]) => TReturn,
+	intervalMs: number,
 ): (...args: TArgs[]) => Promise<TReturn> {
-  let lastExecuted: number | null = null
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
+	let lastExecuted: number | null = null;
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  const wrapped = (...args: TArgs[]): Promise<TReturn> => {
-    return new Promise<TReturn>((resolve, reject) => {
-      let isCancelled = false
-      const cancel = () => {
-        isCancelled = true
-        if (timeoutId !== null) {
-          clearTimeout(timeoutId)
-          timeoutId = null
-        }
-        reject('cancelled')
-      }
+	const wrapped = (...args: TArgs[]): Promise<TReturn> => {
+		return new Promise<TReturn>((resolve, reject) => {
+			let isCancelled = false;
+			const cancel = () => {
+				isCancelled = true;
+				if (timeoutId !== null) {
+					clearTimeout(timeoutId);
+					timeoutId = null;
+				}
+				reject("cancelled");
+			};
 
-      const now = performance.now()
-      if (lastExecuted === null || now - lastExecuted >= intervalMs) {
-        try {
-          resolve(fn(...args))
-          lastExecuted = now
-        } catch (e) {
-          reject(e)
-        }
-      } else {
-        timeoutId = setTimeout(() => {
-          if (!isCancelled) wrapped(...args)
-        }, intervalMs - (now - lastExecuted!))
-      }
-    })
-  }
+			const now = performance.now();
+			if (lastExecuted === null || now - lastExecuted >= intervalMs) {
+				try {
+					resolve(fn(...args));
+					lastExecuted = now;
+				} catch (e) {
+					reject(e);
+				}
+			} else {
+				timeoutId = setTimeout(
+					() => {
+						if (!isCancelled) wrapped(...args);
+					},
+					intervalMs - (now - lastExecuted!),
+				);
+			}
+		});
+	};
 
-  wrapped.cancel = () => {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId)
-      timeoutId = null
-    }
-  }
+	wrapped.cancel = () => {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId);
+			timeoutId = null;
+		}
+	};
 
-  return wrapped
+	return wrapped;
 }
 
-export { debounce, throttle }
+export { debounce, throttle };

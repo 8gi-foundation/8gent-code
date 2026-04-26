@@ -16,10 +16,7 @@ export const Inline: React.FC<InlineProps> = ({
 	return (
 		<Box flexDirection="row" {...props}>
 			{items.map((child, index) => (
-				<Box
-					key={index}
-					marginRight={index < items.length - 1 ? gap : 0}
-				>
+				<Box key={index} marginRight={index < items.length - 1 ? gap : 0}>
 					{child}
 				</Box>
 			))}

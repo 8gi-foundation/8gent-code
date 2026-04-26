@@ -92,114 +92,114 @@ CREATE INDEX IF NOT EXISTS idx_style_tags_tag ON style_tags(tag);
 
 // TypeScript types for the schema
 export interface DesignSystem {
-  id: string;
-  name: string;
-  label: string;
-  description: string | null;
-  style: DesignStyle;
-  mood: DesignMood;
-  colors_json: string;
-  typography_json: string;
-  created_at: string;
-  updated_at: string;
+	id: string;
+	name: string;
+	label: string;
+	description: string | null;
+	style: DesignStyle;
+	mood: DesignMood;
+	colors_json: string;
+	typography_json: string;
+	created_at: string;
+	updated_at: string;
 }
 
 export interface ColorPalette {
-  id: number;
-  system_id: string;
-  name: string;
-  primary_hsl: string;
-  primary_foreground_hsl: string;
-  secondary_hsl: string;
-  secondary_foreground_hsl: string;
-  accent_hsl: string;
-  accent_foreground_hsl: string;
-  background_hsl: string;
-  foreground_hsl: string;
-  muted_hsl: string;
-  muted_foreground_hsl: string;
-  card_hsl: string;
-  card_foreground_hsl: string;
-  border_hsl: string;
-  ring_hsl: string;
+	id: number;
+	system_id: string;
+	name: string;
+	primary_hsl: string;
+	primary_foreground_hsl: string;
+	secondary_hsl: string;
+	secondary_foreground_hsl: string;
+	accent_hsl: string;
+	accent_foreground_hsl: string;
+	background_hsl: string;
+	foreground_hsl: string;
+	muted_hsl: string;
+	muted_foreground_hsl: string;
+	card_hsl: string;
+	card_foreground_hsl: string;
+	border_hsl: string;
+	ring_hsl: string;
 }
 
 export interface Typography {
-  id: number;
-  system_id: string;
-  font_family: string;
-  heading_font: string;
-  font_category: FontCategory;
-  heading_sizes_json: string | null;
-  body_size: string;
-  line_height: string;
-  letter_spacing: string;
+	id: number;
+	system_id: string;
+	font_family: string;
+	heading_font: string;
+	font_category: FontCategory;
+	heading_sizes_json: string | null;
+	body_size: string;
+	line_height: string;
+	letter_spacing: string;
 }
 
 export interface Component {
-  id: number;
-  system_id: string;
-  component_type: string;
-  variant: string;
-  tailwind_classes: string;
-  css_overrides: string | null;
-  description: string | null;
+	id: number;
+	system_id: string;
+	component_type: string;
+	variant: string;
+	tailwind_classes: string;
+	css_overrides: string | null;
+	description: string | null;
 }
 
 export interface StyleTag {
-  id: number;
-  system_id: string;
-  tag: string;
+	id: number;
+	system_id: string;
+	tag: string;
 }
 
 export type DesignStyle =
-  | 'minimal'
-  | 'bold'
-  | 'playful'
-  | 'elegant'
-  | 'tech'
-  | 'retro'
-  | 'nature'
-  | 'corporate';
+	| "minimal"
+	| "bold"
+	| "playful"
+	| "elegant"
+	| "tech"
+	| "retro"
+	| "nature"
+	| "corporate";
 
 export type DesignMood =
-  | 'professional'
-  | 'creative'
-  | 'tech'
-  | 'warm'
-  | 'cool'
-  | 'dramatic'
-  | 'calm'
-  | 'energetic';
+	| "professional"
+	| "creative"
+	| "tech"
+	| "warm"
+	| "cool"
+	| "dramatic"
+	| "calm"
+	| "energetic";
 
 export type FontCategory =
-  | 'sans-serif'
-  | 'serif'
-  | 'monospace'
-  | 'display'
-  | 'cursive';
+	| "sans-serif"
+	| "serif"
+	| "monospace"
+	| "display"
+	| "cursive";
 
 // Parsed color object
 export interface ParsedColors {
-  background: string;
-  foreground: string;
-  primary: string;
-  primaryForeground: string;
-  secondary: string;
-  secondaryForeground: string;
-  accent: string;
-  accentForeground: string;
-  muted: string;
-  mutedForeground: string;
-  card: string;
-  cardForeground: string;
-  border: string;
-  ring: string;
+	background: string;
+	foreground: string;
+	primary: string;
+	primaryForeground: string;
+	secondary: string;
+	secondaryForeground: string;
+	accent: string;
+	accentForeground: string;
+	muted: string;
+	mutedForeground: string;
+	card: string;
+	cardForeground: string;
+	border: string;
+	ring: string;
 }
 
 // Parsed typography object
 export interface ParsedTypography {
-  fontFamily: string;
-  headingFont: string;
-  category: FontCategory;
+	fontFamily: string;
+	headingFont: string;
+	category: FontCategory;
 }

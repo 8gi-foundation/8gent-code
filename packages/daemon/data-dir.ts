@@ -20,11 +20,11 @@ import * as fs from "fs";
  * Creates the directory if it doesn't exist.
  */
 export function getDataDir(): string {
-  const dir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return dir;
+	const dir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+	if (!fs.existsSync(dir)) {
+		fs.mkdirSync(dir, { recursive: true });
+	}
+	return dir;
 }
 
 /**
@@ -32,9 +32,9 @@ export function getDataDir(): string {
  * Creates it if it doesn't exist.
  */
 export function getDataSubDir(...segments: string[]): string {
-  const dir = path.join(getDataDir(), ...segments);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return dir;
+	const dir = path.join(getDataDir(), ...segments);
+	if (!fs.existsSync(dir)) {
+		fs.mkdirSync(dir, { recursive: true });
+	}
+	return dir;
 }

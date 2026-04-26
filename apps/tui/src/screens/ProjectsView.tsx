@@ -17,7 +17,14 @@ import {
 	Badge,
 } from "../components/primitives/index.js";
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync } from "fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	statSync,
+	readFileSync,
+	writeFileSync,
+} from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
 
@@ -67,9 +74,7 @@ const MAX_DEPTH = 1;
 
 function isProjectDir(dirPath: string): boolean {
 	try {
-		return PROJECT_MARKERS.some((marker) =>
-			existsSync(join(dirPath, marker))
-		);
+		return PROJECT_MARKERS.some((marker) => existsSync(join(dirPath, marker)));
 	} catch {
 		return false;
 	}
@@ -91,10 +96,13 @@ function getProjectName(dirPath: string): string {
 function getGitBranch(dirPath: string): string | undefined {
 	try {
 		if (!existsSync(join(dirPath, ".git"))) return undefined;
-		const result = execSync(`git -C "${dirPath}" branch --show-current 2>/dev/null`, {
-			encoding: "utf8",
-			timeout: 2000,
-		});
+		const result = execSync(
+			`git -C "${dirPath}" branch --show-current 2>/dev/null`,
+			{
+				encoding: "utf8",
+				timeout: 2000,
+			},
+		);
 		return result.trim() || undefined;
 	} catch {
 		return undefined;
@@ -183,7 +191,10 @@ function saveSavedProjects(projects: SavedProject[]): void {
 	}
 }
 
-function mergeProjects(scanned: ProjectEntry[], saved: SavedProject[]): ProjectEntry[] {
+function mergeProjects(
+	scanned: ProjectEntry[],
+	saved: SavedProject[],
+): ProjectEntry[] {
 	const paths = new Set(scanned.map((p) => p.path));
 	const extra: ProjectEntry[] = [];
 
@@ -322,7 +333,7 @@ export function ProjectsView({
 				onClose();
 			}
 		},
-		{ isActive: visible }
+		{ isActive: visible },
 	);
 
 	if (!visible) return null;
@@ -333,9 +344,7 @@ export function ProjectsView({
 			{/* Header */}
 			<Inline gap={1}>
 				<Heading>Projects</Heading>
-				{!isLoading && (
-					<MutedText>({projects.length} found)</MutedText>
-				)}
+				{!isLoading && <MutedText>({projects.length} found)</MutedText>}
 				{isLoading && <MutedText>scanning...</MutedText>}
 			</Inline>
 
@@ -359,9 +368,7 @@ export function ProjectsView({
 			)}
 
 			{/* Status message */}
-			{statusMsg && !addMode && (
-				<MutedText>{statusMsg}</MutedText>
-			)}
+			{statusMsg && !addMode && <MutedText>{statusMsg}</MutedText>}
 
 			{/* Project list */}
 			{isLoading ? (
@@ -388,18 +395,14 @@ export function ProjectsView({
 										<Text color="cyan" bold>
 											{isSelected ? "›" : " "}
 										</Text>
-										<AppText bold={isSelected}>
-											{proj.name}
-										</AppText>
-										{isCurrent && (
-											<Badge label="HERE" color="green" />
-										)}
+										<AppText bold={isSelected}>{proj.name}</AppText>
+										{isCurrent && <Badge label="HERE" color="green" />}
 										{proj.has8gent && (
 											<Badge label="8gent" color="magenta" variant="outline" />
 										)}
 										{proj.gitBranch && (
 											<Text color="blue" dimColor>
-												 {proj.gitBranch}
+												{proj.gitBranch}
 											</Text>
 										)}
 									</Inline>
@@ -407,9 +410,7 @@ export function ProjectsView({
 									{/* Row 2: path + last modified */}
 									<Inline gap={1}>
 										<Text>{"  "}</Text>
-										<MutedText>
-											{proj.path}
-										</MutedText>
+										<MutedText>{proj.path}</MutedText>
 										<MutedText>
 											· {formatRelativeTime(proj.lastModified)}
 										</MutedText>

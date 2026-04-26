@@ -9,9 +9,9 @@
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import {
-  type AuthConfig,
-  type TokenPayload,
-  DEFAULT_AUTH_CONFIG,
+	type AuthConfig,
+	type TokenPayload,
+	DEFAULT_AUTH_CONFIG,
 } from "./types.js";
 
 // ============================================
@@ -23,43 +23,38 @@ import {
  * Env vars take precedence over defaults.
  */
 export function resolveAuthConfig(overrides?: Partial<AuthConfig>): AuthConfig {
-  return {
-    ...DEFAULT_AUTH_CONFIG,
-    clerkPublishableKey:
-      overrides?.clerkPublishableKey ||
-      process.env.CLERK_PUBLISHABLE_KEY ||
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-      DEFAULT_AUTH_CONFIG.clerkPublishableKey,
-    clerkSecretKey:
-      overrides?.clerkSecretKey ||
-      process.env.CLERK_SECRET_KEY ||
-      undefined,
-    clerkFrontendApi:
-      overrides?.clerkFrontendApi ||
-      process.env.CLERK_FRONTEND_API ||
-      DEFAULT_AUTH_CONFIG.clerkFrontendApi,
-    oauthClientId:
-      overrides?.oauthClientId ||
-      process.env.EIGHT_OAUTH_CLIENT_ID ||
-      DEFAULT_AUTH_CONFIG.oauthClientId,
-    deviceAuthEndpoint:
-      overrides?.deviceAuthEndpoint ||
-      process.env.EIGHT_DEVICE_AUTH_ENDPOINT ||
-      DEFAULT_AUTH_CONFIG.deviceAuthEndpoint,
-    deviceTokenEndpoint:
-      overrides?.deviceTokenEndpoint ||
-      process.env.EIGHT_DEVICE_TOKEN_ENDPOINT ||
-      DEFAULT_AUTH_CONFIG.deviceTokenEndpoint,
-    convexUrl:
-      overrides?.convexUrl ||
-      process.env.CONVEX_URL ||
-      undefined,
-    refreshBufferMs:
-      overrides?.refreshBufferMs ?? DEFAULT_AUTH_CONFIG.refreshBufferMs,
-    deviceFlowTimeoutMs:
-      overrides?.deviceFlowTimeoutMs ?? DEFAULT_AUTH_CONFIG.deviceFlowTimeoutMs,
-    ...overrides,
-  };
+	return {
+		...DEFAULT_AUTH_CONFIG,
+		clerkPublishableKey:
+			overrides?.clerkPublishableKey ||
+			process.env.CLERK_PUBLISHABLE_KEY ||
+			process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+			DEFAULT_AUTH_CONFIG.clerkPublishableKey,
+		clerkSecretKey:
+			overrides?.clerkSecretKey || process.env.CLERK_SECRET_KEY || undefined,
+		clerkFrontendApi:
+			overrides?.clerkFrontendApi ||
+			process.env.CLERK_FRONTEND_API ||
+			DEFAULT_AUTH_CONFIG.clerkFrontendApi,
+		oauthClientId:
+			overrides?.oauthClientId ||
+			process.env.EIGHT_OAUTH_CLIENT_ID ||
+			DEFAULT_AUTH_CONFIG.oauthClientId,
+		deviceAuthEndpoint:
+			overrides?.deviceAuthEndpoint ||
+			process.env.EIGHT_DEVICE_AUTH_ENDPOINT ||
+			DEFAULT_AUTH_CONFIG.deviceAuthEndpoint,
+		deviceTokenEndpoint:
+			overrides?.deviceTokenEndpoint ||
+			process.env.EIGHT_DEVICE_TOKEN_ENDPOINT ||
+			DEFAULT_AUTH_CONFIG.deviceTokenEndpoint,
+		convexUrl: overrides?.convexUrl || process.env.CONVEX_URL || undefined,
+		refreshBufferMs:
+			overrides?.refreshBufferMs ?? DEFAULT_AUTH_CONFIG.refreshBufferMs,
+		deviceFlowTimeoutMs:
+			overrides?.deviceFlowTimeoutMs ?? DEFAULT_AUTH_CONFIG.deviceFlowTimeoutMs,
+		...overrides,
+	};
 }
 
 // ============================================
@@ -71,18 +66,18 @@ export function resolveAuthConfig(overrides?: Partial<AuthConfig>): AuthConfig {
  * For actual validation, use `validateToken()`.
  */
 export function decodeJwt(token: string): TokenPayload | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
+	try {
+		const parts = token.split(".");
+		if (parts.length !== 3) return null;
 
-    const payload = parts[1];
-    // Base64url decode
-    const padded = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const decoded = atob(padded);
-    return JSON.parse(decoded) as TokenPayload;
-  } catch {
-    return null;
-  }
+		const payload = parts[1];
+		// Base64url decode
+		const padded = payload.replace(/-/g, "+").replace(/_/g, "/");
+		const decoded = atob(padded);
+		return JSON.parse(decoded) as TokenPayload;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -93,11 +88,11 @@ export function decodeJwt(token: string): TokenPayload | null {
  * @returns true if expired or unparseable
  */
 export function isTokenExpired(token: string, bufferMs = 0): boolean {
-  const payload = decodeJwt(token);
-  if (!payload?.exp) return true;
+	const payload = decodeJwt(token);
+	if (!payload?.exp) return true;
 
-  const expiresAtMs = payload.exp * 1000;
-  return Date.now() >= expiresAtMs - bufferMs;
+	const expiresAtMs = payload.exp * 1000;
+	return Date.now() >= expiresAtMs - bufferMs;
 }
 
 /**
@@ -105,9 +100,9 @@ export function isTokenExpired(token: string, bufferMs = 0): boolean {
  * Returns 0 if the token is unparseable.
  */
 export function getTokenExpiry(token: string): number {
-  const payload = decodeJwt(token);
-  if (!payload?.exp) return 0;
-  return payload.exp * 1000;
+	const payload = decodeJwt(token);
+	if (!payload?.exp) return 0;
+	return payload.exp * 1000;
 }
 
 // ============================================
@@ -122,17 +117,19 @@ export function getTokenExpiry(token: string): number {
 let jwksInstance: ReturnType<typeof createRemoteJWKSet> | null = null;
 let jwksUrl: string | null = null;
 
-function getJWKS(clerkFrontendApi: string): ReturnType<typeof createRemoteJWKSet> {
-  const url = `${clerkFrontendApi}/.well-known/jwks.json`;
+function getJWKS(
+	clerkFrontendApi: string,
+): ReturnType<typeof createRemoteJWKSet> {
+	const url = `${clerkFrontendApi}/.well-known/jwks.json`;
 
-  // Recreate if the URL changed (different config)
-  if (jwksInstance && jwksUrl === url) {
-    return jwksInstance;
-  }
+	// Recreate if the URL changed (different config)
+	if (jwksInstance && jwksUrl === url) {
+		return jwksInstance;
+	}
 
-  jwksInstance = createRemoteJWKSet(new URL(url));
-  jwksUrl = url;
-  return jwksInstance;
+	jwksInstance = createRemoteJWKSet(new URL(url));
+	jwksUrl = url;
+	return jwksInstance;
 }
 
 /**
@@ -147,33 +144,39 @@ function getJWKS(clerkFrontendApi: string): ReturnType<typeof createRemoteJWKSet
  * @returns The decoded payload if valid, null if invalid
  */
 export async function validateToken(
-  token: string,
-  config: AuthConfig,
+	token: string,
+	config: AuthConfig,
 ): Promise<TokenPayload | null> {
-  try {
-    // Quick client-side expiry check before hitting the network
-    if (isTokenExpired(token)) return null;
+	try {
+		// Quick client-side expiry check before hitting the network
+		if (isTokenExpired(token)) return null;
 
-    const JWKS = getJWKS(config.clerkFrontendApi);
+		const JWKS = getJWKS(config.clerkFrontendApi);
 
-    const { payload } = await jwtVerify(token, JWKS, {
-      // Clerk JWTs use RS256
-      algorithms: ["RS256"],
-    });
+		const { payload } = await jwtVerify(token, JWKS, {
+			// Clerk JWTs use RS256
+			algorithms: ["RS256"],
+		});
 
-    // Map the verified jose payload to our TokenPayload type
-    return {
-      sub: payload.sub ?? "",
-      email: (payload as Record<string, unknown>).email as string ?? "",
-      iat: payload.iat ?? 0,
-      exp: payload.exp ?? 0,
-      iss: payload.iss ?? "",
-      aud: typeof payload.aud === "string" ? payload.aud : Array.isArray(payload.aud) ? payload.aud[0] ?? "" : "",
-      metadata: (payload as Record<string, unknown>).metadata as TokenPayload["metadata"],
-    };
-  } catch {
-    return null;
-  }
+		// Map the verified jose payload to our TokenPayload type
+		return {
+			sub: payload.sub ?? "",
+			email: ((payload as Record<string, unknown>).email as string) ?? "",
+			iat: payload.iat ?? 0,
+			exp: payload.exp ?? 0,
+			iss: payload.iss ?? "",
+			aud:
+				typeof payload.aud === "string"
+					? payload.aud
+					: Array.isArray(payload.aud)
+						? (payload.aud[0] ?? "")
+						: "",
+			metadata: (payload as Record<string, unknown>)
+				.metadata as TokenPayload["metadata"],
+		};
+	} catch {
+		return null;
+	}
 }
 
 // ============================================
@@ -185,18 +188,18 @@ export async function validateToken(
  * Used to populate AuthUser from the token without a network call.
  */
 export function extractUserFromToken(payload: TokenPayload): {
-  clerkId: string;
-  email: string;
-  githubUsername: string;
-  displayName: string;
-  avatar: string;
+	clerkId: string;
+	email: string;
+	githubUsername: string;
+	displayName: string;
+	avatar: string;
 } {
-  return {
-    clerkId: payload.sub,
-    email: payload.email || "",
-    githubUsername: payload.metadata?.githubUsername || "",
-    displayName:
-      payload.metadata?.displayName || payload.email?.split("@")[0] || "",
-    avatar: payload.metadata?.avatar || "",
-  };
+	return {
+		clerkId: payload.sub,
+		email: payload.email || "",
+		githubUsername: payload.metadata?.githubUsername || "",
+		displayName:
+			payload.metadata?.displayName || payload.email?.split("@")[0] || "",
+		avatar: payload.metadata?.avatar || "",
+	};
 }

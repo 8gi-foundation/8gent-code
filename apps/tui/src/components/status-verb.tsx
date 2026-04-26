@@ -12,7 +12,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
-import { MutedText, Inline } from './primitives/index.js';
+import { MutedText, Inline } from "./primitives/index.js";
 import { truncate } from "../lib/index.js";
 
 // Import from personality package (relative path for monorepo)
@@ -23,66 +23,66 @@ import { truncate } from "../lib/index.js";
 // ============================================
 
 const THINKING_VERBS = [
-  // Gentleman/Refined
-  "Contemplating...",
-  "Deliberating...",
-  "Musing...",
-  "Pondering elegantly...",
-  "Ruminating...",
-  "Considering the possibilities...",
+	// Gentleman/Refined
+	"Contemplating...",
+	"Deliberating...",
+	"Musing...",
+	"Pondering elegantly...",
+	"Ruminating...",
+	"Considering the possibilities...",
 
-  // Infinity/8 themed (core brand)
-  "Looping infinitely...",
-  "Recursing gracefully...",
-  "Iterating endlessly...",
-  "Spiraling inward...",
-  "Transcending limits...",
-  "Calculating to infinity...",
+	// Infinity/8 themed (core brand)
+	"Looping infinitely...",
+	"Recursing gracefully...",
+	"Iterating endlessly...",
+	"Spiraling inward...",
+	"Transcending limits...",
+	"Calculating to infinity...",
 
-  // Coder wit
-  "Adjusting monocle...",
-  "Polishing algorithms...",
-  "Brewing logic...",
-  "Refactoring reality...",
-  "Compiling thoughts...",
-  "Debugging the universe...",
-  "Optimizing existence...",
+	// Coder wit
+	"Adjusting monocle...",
+	"Polishing algorithms...",
+	"Brewing logic...",
+	"Refactoring reality...",
+	"Compiling thoughts...",
+	"Debugging the universe...",
+	"Optimizing existence...",
 
-  // Agent swagger
-  "Orchestrating...",
-  "Deploying brilliance...",
-  "Architecting solutions...",
-  "Engineering elegance...",
-  "Crafting perfection...",
-  "Conducting the symphony...",
+	// Agent swagger
+	"Orchestrating...",
+	"Deploying brilliance...",
+	"Architecting solutions...",
+	"Engineering elegance...",
+	"Crafting perfection...",
+	"Conducting the symphony...",
 ];
 
 const EXECUTING_VERBS = [
-  "Executing with precision...",
-  "Making it happen...",
-  "Wielding tools...",
-  "Operating gracefully...",
-  "Performing magic...",
-  "Manifesting code...",
-  "Applying changes...",
-  "Transforming reality...",
-  "Implementing elegantly...",
-  "Enacting the plan...",
-  "Unleashing capability...",
-  "Delivering results...",
+	"Executing with precision...",
+	"Making it happen...",
+	"Wielding tools...",
+	"Operating gracefully...",
+	"Performing magic...",
+	"Manifesting code...",
+	"Applying changes...",
+	"Transforming reality...",
+	"Implementing elegantly...",
+	"Enacting the plan...",
+	"Unleashing capability...",
+	"Delivering results...",
 ];
 
 const PLANNING_VERBS = [
-  "Scheming brilliantly...",
-  "Strategizing...",
-  "Plotting the course...",
-  "Mapping infinity...",
-  "Charting the path...",
-  "Devising approach...",
-  "Formulating strategy...",
-  "Designing the blueprint...",
-  "Architecting the plan...",
-  "Calculating trajectories...",
+	"Scheming brilliantly...",
+	"Strategizing...",
+	"Plotting the course...",
+	"Mapping infinity...",
+	"Charting the path...",
+	"Devising approach...",
+	"Formulating strategy...",
+	"Designing the blueprint...",
+	"Architecting the plan...",
+	"Calculating trajectories...",
 ];
 
 // ============================================
@@ -92,33 +92,33 @@ const PLANNING_VERBS = [
 export type StatusVerbType = "thinking" | "executing" | "planning";
 
 export interface AnimatedStatusVerbProps {
-  /** Type of verbs to cycle through */
-  type: StatusVerbType;
-  /** Show star icon prefix */
-  showIcon?: boolean;
-  /** Icon character to use (default: star) */
-  icon?: string;
-  /** Custom color (default: yellow) */
-  color?: string;
-  /** Interval between verb changes in ms (default: 2000-3000) */
-  intervalMs?: number;
-  /** Whether animation is active */
-  active?: boolean;
-  /** Max visible characters for the verb (icon + space reserved when showIcon). */
-  maxWidth?: number;
+	/** Type of verbs to cycle through */
+	type: StatusVerbType;
+	/** Show star icon prefix */
+	showIcon?: boolean;
+	/** Icon character to use (default: star) */
+	icon?: string;
+	/** Custom color (default: yellow) */
+	color?: string;
+	/** Interval between verb changes in ms (default: 2000-3000) */
+	intervalMs?: number;
+	/** Whether animation is active */
+	active?: boolean;
+	/** Max visible characters for the verb (icon + space reserved when showIcon). */
+	maxWidth?: number;
 }
 
 export interface StatusLineProps {
-  /** Type of verbs to cycle through */
-  type: StatusVerbType;
-  /** Elapsed time string */
-  elapsed?: string;
-  /** Token count string */
-  tokens?: string;
-  /** Show thinking/executing label */
-  showLabel?: boolean;
-  /** Whether animation is active */
-  active?: boolean;
+	/** Type of verbs to cycle through */
+	type: StatusVerbType;
+	/** Elapsed time string */
+	elapsed?: string;
+	/** Token count string */
+	tokens?: string;
+	/** Show thinking/executing label */
+	showLabel?: boolean;
+	/** Whether animation is active */
+	active?: boolean;
 }
 
 // ============================================
@@ -126,34 +126,34 @@ export interface StatusLineProps {
 // ============================================
 
 function getVerbsForType(type: StatusVerbType): string[] {
-  switch (type) {
-    case "thinking":
-      return THINKING_VERBS;
-    case "executing":
-      return EXECUTING_VERBS;
-    case "planning":
-      return PLANNING_VERBS;
-    default:
-      return THINKING_VERBS;
-  }
+	switch (type) {
+		case "thinking":
+			return THINKING_VERBS;
+		case "executing":
+			return EXECUTING_VERBS;
+		case "planning":
+			return PLANNING_VERBS;
+		default:
+			return THINKING_VERBS;
+	}
 }
 
 function getRandomVerb(type: StatusVerbType): string {
-  const verbs = getVerbsForType(type);
-  return verbs[Math.floor(Math.random() * verbs.length)];
+	const verbs = getVerbsForType(type);
+	return verbs[Math.floor(Math.random() * verbs.length)];
 }
 
 function getNextVerb(type: StatusVerbType, current: string): string {
-  const verbs = getVerbsForType(type);
-  let next = current;
-  let attempts = 0;
+	const verbs = getVerbsForType(type);
+	let next = current;
+	let attempts = 0;
 
-  while (next === current && attempts < 10) {
-    next = verbs[Math.floor(Math.random() * verbs.length)];
-    attempts++;
-  }
+	while (next === current && attempts < 10) {
+		next = verbs[Math.floor(Math.random() * verbs.length)];
+		attempts++;
+	}
 
-  return next;
+	return next;
 }
 
 // ============================================
@@ -161,53 +161,53 @@ function getNextVerb(type: StatusVerbType, current: string): string {
 // ============================================
 
 export function AnimatedStatusVerb({
-  type,
-  showIcon = true,
-  icon = "\u2726", // Star character
-  color = "yellow",
-  intervalMs = 2000,
-  active = true,
-  maxWidth,
+	type,
+	showIcon = true,
+	icon = "\u2726", // Star character
+	color = "yellow",
+	intervalMs = 2000,
+	active = true,
+	maxWidth,
 }: AnimatedStatusVerbProps) {
-  const [verb, setVerb] = useState(getRandomVerb(type));
+	const [verb, setVerb] = useState(getRandomVerb(type));
 
-  useEffect(() => {
-    if (!active) return;
+	useEffect(() => {
+		if (!active) return;
 
-    // Change verb at random intervals (intervalMs to intervalMs + 1000)
-    const scheduleNext = () => {
-      const delay = intervalMs + Math.random() * 1000;
-      return setTimeout(() => {
-        setVerb((prev) => getNextVerb(type, prev));
-        timeoutId = scheduleNext();
-      }, delay);
-    };
+		// Change verb at random intervals (intervalMs to intervalMs + 1000)
+		const scheduleNext = () => {
+			const delay = intervalMs + Math.random() * 1000;
+			return setTimeout(() => {
+				setVerb((prev) => getNextVerb(type, prev));
+				timeoutId = scheduleNext();
+			}, delay);
+		};
 
-    let timeoutId = scheduleNext();
+		let timeoutId = scheduleNext();
 
-    return () => clearTimeout(timeoutId);
-  }, [type, intervalMs, active]);
+		return () => clearTimeout(timeoutId);
+	}, [type, intervalMs, active]);
 
-  // Reset verb when type changes
-  useEffect(() => {
-    setVerb(getRandomVerb(type));
-  }, [type]);
+	// Reset verb when type changes
+	useEffect(() => {
+		setVerb(getRandomVerb(type));
+	}, [type]);
 
-  if (!active) {
-    return null;
-  }
+	if (!active) {
+		return null;
+	}
 
-  const prefixCols = showIcon ? 3 : 0;
-  const verbMax =
-    maxWidth != null ? Math.max(4, maxWidth - prefixCols) : undefined;
-  const verbShown = verbMax != null ? truncate(verb, verbMax) : verb;
+	const prefixCols = showIcon ? 3 : 0;
+	const verbMax =
+		maxWidth != null ? Math.max(4, maxWidth - prefixCols) : undefined;
+	const verbShown = verbMax != null ? truncate(verb, verbMax) : verb;
 
-  return (
-    <Text color={color as any}>
-      {showIcon && <Text>{icon} </Text>}
-      {verbShown}
-    </Text>
-  );
+	return (
+		<Text color={color as any}>
+			{showIcon && <Text>{icon} </Text>}
+			{verbShown}
+		</Text>
+	);
 }
 
 // ============================================
@@ -215,58 +215,58 @@ export function AnimatedStatusVerb({
 // ============================================
 
 export function StatusLine({
-  type,
-  elapsed,
-  tokens,
-  showLabel = true,
-  active = true,
+	type,
+	elapsed,
+	tokens,
+	showLabel = true,
+	active = true,
 }: StatusLineProps) {
-  const [verb, setVerb] = useState(getRandomVerb(type));
+	const [verb, setVerb] = useState(getRandomVerb(type));
 
-  useEffect(() => {
-    if (!active) return;
+	useEffect(() => {
+		if (!active) return;
 
-    const scheduleNext = () => {
-      const delay = 2000 + Math.random() * 1000;
-      return setTimeout(() => {
-        setVerb((prev) => getNextVerb(type, prev));
-        timeoutId = scheduleNext();
-      }, delay);
-    };
+		const scheduleNext = () => {
+			const delay = 2000 + Math.random() * 1000;
+			return setTimeout(() => {
+				setVerb((prev) => getNextVerb(type, prev));
+				timeoutId = scheduleNext();
+			}, delay);
+		};
 
-    let timeoutId = scheduleNext();
+		let timeoutId = scheduleNext();
 
-    return () => clearTimeout(timeoutId);
-  }, [type, active]);
+		return () => clearTimeout(timeoutId);
+	}, [type, active]);
 
-  useEffect(() => {
-    setVerb(getRandomVerb(type));
-  }, [type]);
+	useEffect(() => {
+		setVerb(getRandomVerb(type));
+	}, [type]);
 
-  if (!active) {
-    return null;
-  }
+	if (!active) {
+		return null;
+	}
 
-  // Format: "star Deliberating... (2m 34s . 1.2k tokens . thinking)"
-  return (
-    <Inline>
-      <Text color="yellow">
-        <Text>{"\u2726"} </Text>
-        {verb}
-      </Text>
-      {(elapsed || tokens || showLabel) && (
-        <MutedText>
-          {" ("}
-          {elapsed && <Text>{elapsed}</Text>}
-          {elapsed && (tokens || showLabel) && <Text> {"\u00B7"} </Text>}
-          {tokens && <Text>{tokens} tokens</Text>}
-          {tokens && showLabel && <Text> {"\u00B7"} </Text>}
-          {showLabel && <Text>{type}</Text>}
-          {")"}
-        </MutedText>
-      )}
-    </Inline>
-  );
+	// Format: "star Deliberating... (2m 34s . 1.2k tokens . thinking)"
+	return (
+		<Inline>
+			<Text color="yellow">
+				<Text>{"\u2726"} </Text>
+				{verb}
+			</Text>
+			{(elapsed || tokens || showLabel) && (
+				<MutedText>
+					{" ("}
+					{elapsed && <Text>{elapsed}</Text>}
+					{elapsed && (tokens || showLabel) && <Text> {"\u00B7"} </Text>}
+					{tokens && <Text>{tokens} tokens</Text>}
+					{tokens && showLabel && <Text> {"\u00B7"} </Text>}
+					{showLabel && <Text>{type}</Text>}
+					{")"}
+				</MutedText>
+			)}
+		</Inline>
+	);
 }
 
 // ============================================
@@ -274,40 +274,40 @@ export function StatusLine({
 // ============================================
 
 export function useStatusVerb(type: StatusVerbType, intervalMs: number = 2000) {
-  const [verb, setVerb] = useState(getRandomVerb(type));
-  const [isActive, setIsActive] = useState(false);
+	const [verb, setVerb] = useState(getRandomVerb(type));
+	const [isActive, setIsActive] = useState(false);
 
-  const start = useCallback(() => {
-    setIsActive(true);
-    setVerb(getRandomVerb(type));
-  }, [type]);
+	const start = useCallback(() => {
+		setIsActive(true);
+		setVerb(getRandomVerb(type));
+	}, [type]);
 
-  const stop = useCallback(() => {
-    setIsActive(false);
-  }, []);
+	const stop = useCallback(() => {
+		setIsActive(false);
+	}, []);
 
-  useEffect(() => {
-    if (!isActive) return;
+	useEffect(() => {
+		if (!isActive) return;
 
-    const scheduleNext = () => {
-      const delay = intervalMs + Math.random() * 1000;
-      return setTimeout(() => {
-        setVerb((prev) => getNextVerb(type, prev));
-        timeoutId = scheduleNext();
-      }, delay);
-    };
+		const scheduleNext = () => {
+			const delay = intervalMs + Math.random() * 1000;
+			return setTimeout(() => {
+				setVerb((prev) => getNextVerb(type, prev));
+				timeoutId = scheduleNext();
+			}, delay);
+		};
 
-    let timeoutId = scheduleNext();
+		let timeoutId = scheduleNext();
 
-    return () => clearTimeout(timeoutId);
-  }, [type, intervalMs, isActive]);
+		return () => clearTimeout(timeoutId);
+	}, [type, intervalMs, isActive]);
 
-  return {
-    verb,
-    isActive,
-    start,
-    stop,
-  };
+	return {
+		verb,
+		isActive,
+		start,
+		stop,
+	};
 }
 
 // ============================================
@@ -315,33 +315,29 @@ export function useStatusVerb(type: StatusVerbType, intervalMs: number = 2000) {
 // ============================================
 
 export function InlineStatus({
-  type,
-  active = true,
+	type,
+	active = true,
 }: {
-  type: StatusVerbType;
-  active?: boolean;
+	type: StatusVerbType;
+	active?: boolean;
 }) {
-  const [verb, setVerb] = useState(getRandomVerb(type));
+	const [verb, setVerb] = useState(getRandomVerb(type));
 
-  useEffect(() => {
-    if (!active) return;
+	useEffect(() => {
+		if (!active) return;
 
-    const interval = setInterval(() => {
-      setVerb((prev) => getNextVerb(type, prev));
-    }, 2500);
+		const interval = setInterval(() => {
+			setVerb((prev) => getNextVerb(type, prev));
+		}, 2500);
 
-    return () => clearInterval(interval);
-  }, [type, active]);
+		return () => clearInterval(interval);
+	}, [type, active]);
 
-  if (!active) {
-    return <MutedText>Idle</MutedText>;
-  }
+	if (!active) {
+		return <MutedText>Idle</MutedText>;
+	}
 
-  return (
-    <MutedText color="yellow">
-      {verb.replace("...", "")}
-    </MutedText>
-  );
+	return <MutedText color="yellow">{verb.replace("...", "")}</MutedText>;
 }
 
 export default AnimatedStatusVerb;

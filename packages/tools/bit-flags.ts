@@ -4,11 +4,11 @@
  * @returns An object with each name mapped to a unique bit flag.
  */
 export function createFlags(names: string[]): Record<string, number> {
-  const flags: Record<string, number> = {};
-  for (let i = 0; i < names.length; i++) {
-    flags[names[i]] = 1 << i;
-  }
-  return flags;
+	const flags: Record<string, number> = {};
+	for (let i = 0; i < names.length; i++) {
+		flags[names[i]] = 1 << i;
+	}
+	return flags;
 }
 
 /**
@@ -17,7 +17,7 @@ export function createFlags(names: string[]): Record<string, number> {
  * @returns Combined flag value.
  */
 export function combine(...flags: number[]): number {
-  return flags.reduce((a, b) => a | b, 0);
+	return flags.reduce((a, b) => a | b, 0);
 }
 
 /**
@@ -27,7 +27,7 @@ export function combine(...flags: number[]): number {
  * @returns True if the flag is present.
  */
 export function has(value: number, flag: number): boolean {
-  return (value & flag) !== 0;
+	return (value & flag) !== 0;
 }
 
 /**
@@ -37,7 +37,7 @@ export function has(value: number, flag: number): boolean {
  * @returns New value with the flag toggled.
  */
 export function toggle(value: number, flag: number): number {
-  return value ^ flag;
+	return value ^ flag;
 }
 
 /**
@@ -46,6 +46,9 @@ export function toggle(value: number, flag: number): number {
  * @param flags - Flag object created by createFlags.
  * @returns Array of names corresponding to set flags.
  */
-export function toNames(value: number, flags: Record<string, number>): string[] {
-  return Object.keys(flags).filter(key => has(value, flags[key]));
+export function toNames(
+	value: number,
+	flags: Record<string, number>,
+): string[] {
+	return Object.keys(flags).filter((key) => has(value, flags[key]));
 }

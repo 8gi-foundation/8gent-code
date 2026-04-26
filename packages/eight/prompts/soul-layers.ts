@@ -34,10 +34,10 @@ Do not execute destructive operations or access private repos.
 Do not share internal architecture details or credentials.`;
 
 export interface UserContext {
-  name?: string;
-  role?: string;
-  communicationStyle?: string;
-  peerRepresentation?: string; // From memory system
+	name?: string;
+	role?: string;
+	communicationStyle?: string;
+	peerRepresentation?: string; // From memory system
 }
 
 /**
@@ -45,30 +45,30 @@ export interface UserContext {
  * Returns the identity + capability + tier-specific + user context layers.
  */
 export function composeSoulPrompt(
-  tier: AccessTier,
-  userContext?: UserContext,
+	tier: AccessTier,
+	userContext?: UserContext,
 ): string {
-  const layers: (string | null)[] = [
-    CORE_IDENTITY,
-    CAPABILITY_LAYER,
-    tier === "owner" ? OWNER_LAYER : null,
-    tier === "collaborator" ? COLLABORATOR_LAYER : null,
-    tier === "visitor" ? VISITOR_LAYER : null,
-  ];
+	const layers: (string | null)[] = [
+		CORE_IDENTITY,
+		CAPABILITY_LAYER,
+		tier === "owner" ? OWNER_LAYER : null,
+		tier === "collaborator" ? COLLABORATOR_LAYER : null,
+		tier === "visitor" ? VISITOR_LAYER : null,
+	];
 
-  // Add user context if available
-  if (userContext) {
-    let ctx = "\n## User Context\n";
-    if (userContext.name) ctx += `Name: ${userContext.name}\n`;
-    if (userContext.role) ctx += `Role: ${userContext.role}\n`;
-    if (userContext.communicationStyle)
-      ctx += `Style: ${userContext.communicationStyle}\n`;
-    if (userContext.peerRepresentation)
-      ctx += `\nWhat I know about this user:\n${userContext.peerRepresentation}\n`;
-    layers.push(ctx);
-  }
+	// Add user context if available
+	if (userContext) {
+		let ctx = "\n## User Context\n";
+		if (userContext.name) ctx += `Name: ${userContext.name}\n`;
+		if (userContext.role) ctx += `Role: ${userContext.role}\n`;
+		if (userContext.communicationStyle)
+			ctx += `Style: ${userContext.communicationStyle}\n`;
+		if (userContext.peerRepresentation)
+			ctx += `\nWhat I know about this user:\n${userContext.peerRepresentation}\n`;
+		layers.push(ctx);
+	}
 
-  return layers.filter(Boolean).join("\n\n");
+	return layers.filter(Boolean).join("\n\n");
 }
 
 /**
@@ -77,15 +77,12 @@ export function composeSoulPrompt(
  * API/OS/app clients with auth = collaborator.
  * Default = visitor.
  */
-export function determineTier(
-  channel: string,
-  _userId?: string,
-): AccessTier {
-  // Telegram with known owner = owner
-  if (channel === "telegram") return "owner";
-  // API clients with auth = collaborator
-  if (channel === "api" || channel === "os" || channel === "app")
-    return "collaborator";
-  // Default = visitor
-  return "visitor";
+export function determineTier(channel: string, _userId?: string): AccessTier {
+	// Telegram with known owner = owner
+	if (channel === "telegram") return "owner";
+	// API clients with auth = collaborator
+	if (channel === "api" || channel === "os" || channel === "app")
+		return "collaborator";
+	// Default = visitor
+	return "visitor";
 }

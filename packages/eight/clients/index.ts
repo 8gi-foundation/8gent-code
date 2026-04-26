@@ -10,9 +10,9 @@ import { AppleFoundationClient } from "./apple-foundation";
 import { ApfelClient } from "./apfel";
 import { DeepSeekClient } from "./deepseek";
 import {
-  loadRoleConfig,
-  type RoleModelAssignment,
-  type RoleName,
+	loadRoleConfig,
+	type RoleModelAssignment,
+	type RoleName,
 } from "../../orchestration/role-config";
 import { getProviderManager, type ProviderName } from "../../providers";
 
@@ -29,12 +29,15 @@ export { DeepSeekClient } from "./deepseek";
  * catch this and prompt the user to install or switch providers.
  */
 export class RoleProviderUnavailableError extends Error {
-  constructor(public role: string, public provider: string) {
-    super(
-      `Provider "${provider}" required for role "${role}" is not available on this host`
-    );
-    this.name = "RoleProviderUnavailableError";
-  }
+	constructor(
+		public role: string,
+		public provider: string,
+	) {
+		super(
+			`Provider "${provider}" required for role "${role}" is not available on this host`,
+		);
+		this.name = "RoleProviderUnavailableError";
+	}
 }
 
 /**
@@ -43,50 +46,50 @@ export class RoleProviderUnavailableError extends Error {
  * the OpenRouter path since those are all OpenAI-compatible HTTP APIs.
  */
 function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
-  switch (provider) {
-    case "apple-foundation":
-      return "apple-foundation";
-    case "apfel":
-      return "apfel";
-    case "deepseek":
-      return "deepseek";
-    case "ollama":
-    case "8gent":
-      return "ollama"; // 8gent runs on the local ollama server today
-    case "openrouter":
-    case "groq":
-    case "grok":
-    case "openai":
-    case "anthropic":
-    case "mistral":
-    case "together":
-    case "fireworks":
-    case "replicate":
-      return "openrouter";
-    default:
-      return "ollama";
-  }
+	switch (provider) {
+		case "apple-foundation":
+			return "apple-foundation";
+		case "apfel":
+			return "apfel";
+		case "deepseek":
+			return "deepseek";
+		case "ollama":
+		case "8gent":
+			return "ollama"; // 8gent runs on the local ollama server today
+		case "openrouter":
+		case "groq":
+		case "grok":
+		case "openai":
+		case "anthropic":
+		case "mistral":
+		case "together":
+		case "fireworks":
+		case "replicate":
+			return "openrouter";
+		default:
+			return "ollama";
+	}
 }
 
 /**
  * Create the appropriate LLM client based on agent config
  */
 export function createClient(config: AgentConfig): LLMClient {
-  if (config.runtime === "openrouter") {
-    const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
-    return new OpenRouterClient(config.model, apiKey);
-  } else if (config.runtime === "lmstudio") {
-    return new LMStudioClient(config.model);
-  } else if (config.runtime === "apple-foundation") {
-    return new AppleFoundationClient(config.model);
-  } else if (config.runtime === "apfel") {
-    return new ApfelClient(config.model);
-  } else if (config.runtime === "deepseek") {
-    const apiKey = config.apiKey || process.env.DEEPSEEK_API_KEY || "";
-    return new DeepSeekClient(config.model, apiKey);
-  } else {
-    return new OllamaClient(config.model);
-  }
+	if (config.runtime === "openrouter") {
+		const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
+		return new OpenRouterClient(config.model, apiKey);
+	} else if (config.runtime === "lmstudio") {
+		return new LMStudioClient(config.model);
+	} else if (config.runtime === "apple-foundation") {
+		return new AppleFoundationClient(config.model);
+	} else if (config.runtime === "apfel") {
+		return new ApfelClient(config.model);
+	} else if (config.runtime === "deepseek") {
+		const apiKey = config.apiKey || process.env.DEEPSEEK_API_KEY || "";
+		return new DeepSeekClient(config.model, apiKey);
+	} else {
+		return new OllamaClient(config.model);
+	}
 }
 
 /**
@@ -99,23 +102,23 @@ export function createClient(config: AgentConfig): LLMClient {
  * wizard rather than silently falling back.
  */
 export function createClientForRole(
-  role: RoleName,
-  override?: Partial<RoleModelAssignment>
+	role: RoleName,
+	override?: Partial<RoleModelAssignment>,
 ): LLMClient {
-  const cfg = loadRoleConfig();
-  const assignment: RoleModelAssignment = { ...cfg[role], ...override };
+	const cfg = loadRoleConfig();
+	const assignment: RoleModelAssignment = { ...cfg[role], ...override };
 
-  const pm = getProviderManager();
-  const providerCfg = pm.getProvider(assignment.provider);
-  if (!providerCfg.enabled) {
-    throw new RoleProviderUnavailableError(role, assignment.provider);
-  }
+	const pm = getProviderManager();
+	const providerCfg = pm.getProvider(assignment.provider);
+	if (!providerCfg.enabled) {
+		throw new RoleProviderUnavailableError(role, assignment.provider);
+	}
 
-  const apiKey = pm.getApiKey(assignment.provider) || undefined;
-  const runtime = runtimeForProvider(assignment.provider);
-  return createClient({
-    runtime,
-    model: assignment.model,
-    apiKey,
-  });
+	const apiKey = pm.getApiKey(assignment.provider) || undefined;
+	const runtime = runtimeForProvider(assignment.provider);
+	return createClient({
+		runtime,
+		model: assignment.model,
+		apiKey,
+	});
 }

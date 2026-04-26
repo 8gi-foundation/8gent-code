@@ -13,13 +13,13 @@
  *   <Text dimColor={theme.text.muted === theme.MUTED}>Subtle note</Text>
  */
 
-import React, { createContext, useContext } from 'react';
-import { semanticTheme } from './semantic.js';
-import type { SemanticTheme } from './semantic.js';
+import React, { createContext, useContext } from "react";
+import { semanticTheme } from "./semantic.js";
+import type { SemanticTheme } from "./semantic.js";
 
 // ---- Re-exports so consumers can do a single import ----
-export * from './tokens.js';
-export * from './semantic.js';
+export * from "./tokens.js";
+export * from "./semantic.js";
 
 // ---- Context ----
 
@@ -30,17 +30,20 @@ export { ThemeContext };
 // ---- Provider ----
 
 export interface ThemeProviderProps {
-  children: React.ReactNode;
-  /** Override the default semantic theme (e.g. for testing). */
-  value?: SemanticTheme;
+	children: React.ReactNode;
+	/** Override the default semantic theme (e.g. for testing). */
+	value?: SemanticTheme;
 }
 
-export function ThemeProvider({ children, value }: ThemeProviderProps): React.ReactElement {
-  return React.createElement(
-    ThemeContext.Provider,
-    { value: value ?? semanticTheme },
-    children,
-  );
+export function ThemeProvider({
+	children,
+	value,
+}: ThemeProviderProps): React.ReactElement {
+	return React.createElement(
+		ThemeContext.Provider,
+		{ value: value ?? semanticTheme },
+		children,
+	);
 }
 
 // ---- Hook ----
@@ -50,5 +53,5 @@ export function ThemeProvider({ children, value }: ThemeProviderProps): React.Re
  * Must be called inside a <ThemeProvider>.
  */
 export function useTheme(): SemanticTheme {
-  return useContext(ThemeContext);
+	return useContext(ThemeContext);
 }

@@ -8,14 +8,13 @@ import type { BenchmarkDefinition } from "../../types";
  */
 
 export const battleTestProBenchmarks: BenchmarkDefinition[] = [
-
-  // ── BT011: Video Production Planner ($2K value) ─────────────────
-  {
-    id: "BT011",
-    category: "battle-test",
-    title: "Video Production Planner — Scene Graph, Timeline, FFmpeg Export",
-    difficulty: "hard",
-    prompt: `Build a video production planning system with timeline management and export tools.
+	// ── BT011: Video Production Planner ($2K value) ─────────────────
+	{
+		id: "BT011",
+		category: "battle-test",
+		title: "Video Production Planner — Scene Graph, Timeline, FFmpeg Export",
+		difficulty: "hard",
+		prompt: `Build a video production planning system with timeline management and export tools.
 
 ## Requirements
 
@@ -60,28 +59,49 @@ Export and reporting utilities:
 - FFmpeg command must include -i, resolution (-s WxH), fps (-r), format, codec if specified
 - estimateFileSize: use bitrate = resolution.w * resolution.h * fps * 0.07 (bytes/sec), multiply by duration in seconds
 - Export all classes, interfaces, and functions`,
-    keywords: [
-      "Scene", "Asset", "Effect", "Timeline", "addScene", "removeScene",
-      "reorderScenes", "getTotalDuration", "getSceneAt", "splitScene",
-      "validate", "toEDL", "ExportConfig", "generateFFmpegCommand",
-      "estimateFileSize", "generateShotList", "duration", "transition",
-      "fade", "dissolve", "cut", "ffmpeg", "resolution", "fps", "codec",
-      "b-roll", "export",
-    ],
-    keywordThreshold: 14,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT011-video.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"Scene",
+			"Asset",
+			"Effect",
+			"Timeline",
+			"addScene",
+			"removeScene",
+			"reorderScenes",
+			"getTotalDuration",
+			"getSceneAt",
+			"splitScene",
+			"validate",
+			"toEDL",
+			"ExportConfig",
+			"generateFFmpegCommand",
+			"estimateFileSize",
+			"generateShotList",
+			"duration",
+			"transition",
+			"fade",
+			"dissolve",
+			"cut",
+			"ffmpeg",
+			"resolution",
+			"fps",
+			"codec",
+			"b-roll",
+			"export",
+		],
+		keywordThreshold: 14,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT011-video.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT012: Music Theory Engine ($1.5K value) ────────────────────
-  {
-    id: "BT012",
-    category: "battle-test",
-    title: "Music Theory Engine — Notes, Chords, Scales, Progressions",
-    difficulty: "hard",
-    prompt: `Build a music theory engine with note manipulation, chord construction, and progression analysis.
+	// ── BT012: Music Theory Engine ($1.5K value) ────────────────────
+	{
+		id: "BT012",
+		category: "battle-test",
+		title: "Music Theory Engine — Notes, Chords, Scales, Progressions",
+		difficulty: "hard",
+		prompt: `Build a music theory engine with note manipulation, chord construction, and progression analysis.
 
 ## Requirements
 
@@ -137,29 +157,53 @@ Chord progression analysis:
 - Chord.fromSymbol must handle: major (no suffix), minor ("m"), diminished ("dim"), augmented ("aug" or "+"), dom7 ("7"), maj7 ("maj7"), min7 ("m7")
 - Nashville numbers: major chords = just number, minor = number + "m"
 - Export all types, constants, classes, and functions`,
-    keywords: [
-      "Note", "Interval", "NOTES", "noteToMidi", "midiToNote", "transpose",
-      "getInterval", "SCALE_PATTERNS", "getScale",
-      "Chord", "getNotes", "invert", "toSymbol", "fromSymbol",
-      "major", "minor", "diminished", "augmented", "dom7", "maj7", "min7",
-      "ChordProgression", "analyze", "romanNumerals", "tensions",
-      "toNashvilleNumbers", "suggest", "pentatonic", "blues",
-      "MIDI", "export",
-    ],
-    keywordThreshold: 15,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT012-music.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"Note",
+			"Interval",
+			"NOTES",
+			"noteToMidi",
+			"midiToNote",
+			"transpose",
+			"getInterval",
+			"SCALE_PATTERNS",
+			"getScale",
+			"Chord",
+			"getNotes",
+			"invert",
+			"toSymbol",
+			"fromSymbol",
+			"major",
+			"minor",
+			"diminished",
+			"augmented",
+			"dom7",
+			"maj7",
+			"min7",
+			"ChordProgression",
+			"analyze",
+			"romanNumerals",
+			"tensions",
+			"toNashvilleNumbers",
+			"suggest",
+			"pentatonic",
+			"blues",
+			"MIDI",
+			"export",
+		],
+		keywordThreshold: 15,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT012-music.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT013: Data Visualization Engine ($1.5K value) ──────────────
-  {
-    id: "BT013",
-    category: "battle-test",
-    title: "Data Visualization Engine — Charts, Scales, Layouts in SVG/ASCII",
-    difficulty: "hard",
-    prompt: `Build a data visualization engine that generates SVG and ASCII charts with proper scales and layouts.
+	// ── BT013: Data Visualization Engine ($1.5K value) ──────────────
+	{
+		id: "BT013",
+		category: "battle-test",
+		title: "Data Visualization Engine — Charts, Scales, Layouts in SVG/ASCII",
+		difficulty: "hard",
+		prompt: `Build a data visualization engine that generates SVG and ASCII charts with proper scales and layouts.
 
 ## Requirements
 
@@ -212,30 +256,53 @@ Layout calculations for positioning chart elements:
 - calculateBounds stdDev must use population standard deviation
 - niceNumbers must return values that extend beyond min/max
 - Export all interfaces, functions`,
-    keywords: [
-      "ChartConfig", "generateSVG", "generateASCII", "calculateBounds",
-      "svg", "rect", "path", "polyline", "title",
-      "linearScale", "logScale", "bandScale", "colorScale", "niceNumbers",
-      "domain", "range", "tick",
-      "calculateBarLayout", "calculatePieLayout", "calculateGridLayout", "calculateAxisTicks",
-      "startAngle", "endAngle", "percentage",
-      "min", "max", "mean", "median", "stdDev",
-      "export",
-    ],
-    keywordThreshold: 14,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT013-dataviz.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"ChartConfig",
+			"generateSVG",
+			"generateASCII",
+			"calculateBounds",
+			"svg",
+			"rect",
+			"path",
+			"polyline",
+			"title",
+			"linearScale",
+			"logScale",
+			"bandScale",
+			"colorScale",
+			"niceNumbers",
+			"domain",
+			"range",
+			"tick",
+			"calculateBarLayout",
+			"calculatePieLayout",
+			"calculateGridLayout",
+			"calculateAxisTicks",
+			"startAngle",
+			"endAngle",
+			"percentage",
+			"min",
+			"max",
+			"mean",
+			"median",
+			"stdDev",
+			"export",
+		],
+		keywordThreshold: 14,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT013-dataviz.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT014: AI Consultancy Report Generator ($2.5K value) ────────
-  {
-    id: "BT014",
-    category: "battle-test",
-    title: "AI Consultancy Report Generator — Assessment, Recommendations, Roadmap",
-    difficulty: "hard",
-    prompt: `Build an AI consultancy report generation system that assesses company readiness, generates recommendations, and creates project roadmaps.
+	// ── BT014: AI Consultancy Report Generator ($2.5K value) ────────
+	{
+		id: "BT014",
+		category: "battle-test",
+		title:
+			"AI Consultancy Report Generator — Assessment, Recommendations, Roadmap",
+		difficulty: "hard",
+		prompt: `Build an AI consultancy report generation system that assesses company readiness, generates recommendations, and creates project roadmaps.
 
 ## Requirements
 
@@ -292,30 +359,54 @@ Project roadmap generation:
 - toMarkdown must include "##" headers for each phase
 - benchmarkAgainstIndustry must handle empty industryData (return 0 percentile)
 - Export all interfaces and functions`,
-    keywords: [
-      "CompanyProfile", "ReadinessReport", "assessAIReadiness",
-      "benchmarkAgainstIndustry", "ComparisonResult", "percentile",
-      "score", "tier", "beginner", "intermediate", "advanced",
-      "strengths", "gaps", "risks", "dataMaturity",
-      "Recommendation", "generateRecommendations", "prioritize",
-      "estimateTotalCost", "ROI", "impact", "effort", "timeline",
-      "Phase", "Milestone", "generateRoadmap", "toGanttData", "toMarkdown",
-      "deliverables", "criteria", "export",
-    ],
-    keywordThreshold: 15,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT014-ai-consulting.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"CompanyProfile",
+			"ReadinessReport",
+			"assessAIReadiness",
+			"benchmarkAgainstIndustry",
+			"ComparisonResult",
+			"percentile",
+			"score",
+			"tier",
+			"beginner",
+			"intermediate",
+			"advanced",
+			"strengths",
+			"gaps",
+			"risks",
+			"dataMaturity",
+			"Recommendation",
+			"generateRecommendations",
+			"prioritize",
+			"estimateTotalCost",
+			"ROI",
+			"impact",
+			"effort",
+			"timeline",
+			"Phase",
+			"Milestone",
+			"generateRoadmap",
+			"toGanttData",
+			"toMarkdown",
+			"deliverables",
+			"criteria",
+			"export",
+		],
+		keywordThreshold: 15,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT014-ai-consulting.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT015: Security Audit Framework ($2K value) ─────────────────
-  {
-    id: "BT015",
-    category: "battle-test",
-    title: "Security Audit Framework — Scanner, Vulnerability DB, Report Generator",
-    difficulty: "hard",
-    prompt: `Build a security audit framework that scans code, dependencies, and configurations for vulnerabilities.
+	// ── BT015: Security Audit Framework ($2K value) ─────────────────
+	{
+		id: "BT015",
+		category: "battle-test",
+		title:
+			"Security Audit Framework — Scanner, Vulnerability DB, Report Generator",
+		difficulty: "hard",
+		prompt: `Build a security audit framework that scans code, dependencies, and configurations for vulnerabilities.
 
 ## Requirements
 
@@ -375,22 +466,48 @@ Security report generation:
 - Remediation priority: critical injection is always #1
 - toMarkdown must include "# Security Audit Report" header
 - Export all interfaces and functions`,
-    keywords: [
-      "scanDependencies", "scanCode", "scanConfig",
-      "DepScanResult", "CodeScanResult", "ConfigScanResult",
-      "Vulnerability", "severity", "critical", "high", "medium", "low",
-      "category", "injection", "auth", "xss", "config", "dependency",
-      "calculateRiskScore", "groupBySeverity", "getRemediationPriority",
-      "cvss", "remediation",
-      "SecurityReport", "generateSecurityReport", "grade", "score",
-      "toMarkdown", "toJSON", "findings", "summary",
-      "eval", "innerHTML", "CORS", "CSP",
-      "export",
-    ],
-    keywordThreshold: 16,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT015-security.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"scanDependencies",
+			"scanCode",
+			"scanConfig",
+			"DepScanResult",
+			"CodeScanResult",
+			"ConfigScanResult",
+			"Vulnerability",
+			"severity",
+			"critical",
+			"high",
+			"medium",
+			"low",
+			"category",
+			"injection",
+			"auth",
+			"xss",
+			"config",
+			"dependency",
+			"calculateRiskScore",
+			"groupBySeverity",
+			"getRemediationPriority",
+			"cvss",
+			"remediation",
+			"SecurityReport",
+			"generateSecurityReport",
+			"grade",
+			"score",
+			"toMarkdown",
+			"toJSON",
+			"findings",
+			"summary",
+			"eval",
+			"innerHTML",
+			"CORS",
+			"CSP",
+			"export",
+		],
+		keywordThreshold: 16,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT015-security.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 ];

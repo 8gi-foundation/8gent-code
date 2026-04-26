@@ -41,18 +41,20 @@ Use the \`suggest_spawn\` tool:
 /**
  * Build the orchestrator context showing active agents.
  */
-export function buildOrchestratorContext(agents: Array<{
-  id: string;
-  name: string;
-  role: string;
-  task: string;
-  status: string;
-}>): string {
-  if (agents.length === 0) return "";
+export function buildOrchestratorContext(
+	agents: Array<{
+		id: string;
+		name: string;
+		role: string;
+		task: string;
+		status: string;
+	}>,
+): string {
+	if (agents.length === 0) return "";
 
-  const lines = ["## ACTIVE AGENTS"];
-  for (const a of agents) {
-    lines.push(`- **${a.name}** (${a.role}): ${a.task} [${a.status}]`);
-  }
-  return lines.join("\n");
+	const lines = ["## ACTIVE AGENTS"];
+	for (const a of agents) {
+		lines.push(`- **${a.name}** (${a.role}): ${a.task} [${a.status}]`);
+	}
+	return lines.join("\n");
 }

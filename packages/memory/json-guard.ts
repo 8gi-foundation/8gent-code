@@ -20,17 +20,17 @@
  * as an object or array, stringify the parsed result instead (unwrap one layer).
  */
 export function safeJsonStringify(value: unknown): string {
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      if (parsed !== null && typeof parsed === "object") {
-        return JSON.stringify(parsed);
-      }
-    } catch {
-      // Not valid JSON — stringify as normal
-    }
-  }
-  return JSON.stringify(value);
+	if (typeof value === "string") {
+		try {
+			const parsed = JSON.parse(value);
+			if (parsed !== null && typeof parsed === "object") {
+				return JSON.stringify(parsed);
+			}
+		} catch {
+			// Not valid JSON — stringify as normal
+		}
+	}
+	return JSON.stringify(value);
 }
 
 /**
@@ -42,26 +42,29 @@ export function safeJsonStringify(value: unknown): string {
  * or when the string is not valid JSON (a plain text value like "hello world").
  */
 export function safeJsonParse<T>(raw: string): T {
-  let result: unknown = JSON.parse(raw);
+	let result: unknown = JSON.parse(raw);
 
-  // Unwrap up to 2 additional layers of string-encoded JSON
-  for (let i = 0; i < 2; i++) {
-    if (typeof result !== "string") break;
-    try {
-      const inner = JSON.parse(result);
-      // If the inner parse produced an object/array, unwrap and continue
-      // If it produced another string, unwrap and continue (might be another layer)
-      // If it produced a primitive (number/boolean/null), keep the string form
-      // to avoid accidentally converting "123" to 123
-      if (inner !== null && (typeof inner === "object" || typeof inner === "string")) {
-        result = inner;
-      } else {
-        break;
-      }
-    } catch {
-      break; // Not valid JSON — stop unwrapping
-    }
-  }
+	// Unwrap up to 2 additional layers of string-encoded JSON
+	for (let i = 0; i < 2; i++) {
+		if (typeof result !== "string") break;
+		try {
+			const inner = JSON.parse(result);
+			// If the inner parse produced an object/array, unwrap and continue
+			// If it produced another string, unwrap and continue (might be another layer)
+			// If it produced a primitive (number/boolean/null), keep the string form
+			// to avoid accidentally converting "123" to 123
+			if (
+				inner !== null &&
+				(typeof inner === "object" || typeof inner === "string")
+			) {
+				result = inner;
+			} else {
+				break;
+			}
+		} catch {
+			break; // Not valid JSON — stop unwrapping
+		}
+	}
 
-  return result as T;
+	return result as T;
 }

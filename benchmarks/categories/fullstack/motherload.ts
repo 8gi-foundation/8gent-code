@@ -1,12 +1,13 @@
 import type { BenchmarkDefinition } from "../../types";
 
 export const motherloadBenchmark: BenchmarkDefinition[] = [
-  {
-    id: "FS-MEGA-001",
-    category: "fullstack",
-    title: "SQLite Design System — Token Engine + Component Registry + Theme + Renderer",
-    difficulty: "hard",
-    prompt: `Build a complete SQLite-backed design system that an AI agent (8gent) can use to generate perfect UI. This is a FULL production system: design tokens, component registry, theme engine, and HTML renderer.
+	{
+		id: "FS-MEGA-001",
+		category: "fullstack",
+		title:
+			"SQLite Design System — Token Engine + Component Registry + Theme + Renderer",
+		difficulty: "hard",
+		prompt: `Build a complete SQLite-backed design system that an AI agent (8gent) can use to generate perfect UI. This is a FULL production system: design tokens, component registry, theme engine, and HTML renderer.
 
 ## Existing System (provided — DO NOT reimplement)
 
@@ -119,32 +120,65 @@ Export \`createDesignSystem(dbPath?)\` function:
 \`\`\`typescript // system.ts
 // your entry point
 \`\`\``,
-    keywords: [
-      // Schema
-      "design_tokens", "components", "component_variants", "themes", "theme_tokens",
-      "CREATE TABLE", "FOREIGN KEY", "UNIQUE", "runMigrations",
-      // Tokens
-      "TokenEngine", "resolve", "is_reference", "circular",
-      "create", "get", "list", "update", "delete",
-      // Components
-      "ComponentRegistry", "register", "addVariant", "getVariant",
-      "props_schema", "default_styles",
-      // Themes
-      "ThemeEngine", "setOverride", "resolveToken", "base_theme",
-      "inheritance", "override",
-      // Renderer
-      "Renderer", "render", "renderToCSS", "style",
-      // System
-      "createDesignSystem", "seed",
-      "#3B82F6", "#0F172A", "Button", "Card",
-      "primary", "secondary", "outline", "ghost",
-      "light", "dark",
-    ],
-    keywordThreshold: 20,
-    testExecution: true,
-    testFile: "autoresearch/tests/FS-MEGA-001-design-system.test.ts",
-    timeoutMs: 30000,
-    multiFile: true,
-    fixtures: ["fixtures/design-db.ts"],
-  },
+		keywords: [
+			// Schema
+			"design_tokens",
+			"components",
+			"component_variants",
+			"themes",
+			"theme_tokens",
+			"CREATE TABLE",
+			"FOREIGN KEY",
+			"UNIQUE",
+			"runMigrations",
+			// Tokens
+			"TokenEngine",
+			"resolve",
+			"is_reference",
+			"circular",
+			"create",
+			"get",
+			"list",
+			"update",
+			"delete",
+			// Components
+			"ComponentRegistry",
+			"register",
+			"addVariant",
+			"getVariant",
+			"props_schema",
+			"default_styles",
+			// Themes
+			"ThemeEngine",
+			"setOverride",
+			"resolveToken",
+			"base_theme",
+			"inheritance",
+			"override",
+			// Renderer
+			"Renderer",
+			"render",
+			"renderToCSS",
+			"style",
+			// System
+			"createDesignSystem",
+			"seed",
+			"#3B82F6",
+			"#0F172A",
+			"Button",
+			"Card",
+			"primary",
+			"secondary",
+			"outline",
+			"ghost",
+			"light",
+			"dark",
+		],
+		keywordThreshold: 20,
+		testExecution: true,
+		testFile: "autoresearch/tests/FS-MEGA-001-design-system.test.ts",
+		timeoutMs: 30000,
+		multiFile: true,
+		fixtures: ["fixtures/design-db.ts"],
+	},
 ];

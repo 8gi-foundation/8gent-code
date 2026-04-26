@@ -9,68 +9,77 @@ import * as fs from "fs";
 import * as path from "path";
 
 export interface ExportMessage {
-  role: string;
-  content: string;
-  timestamp: Date;
+	role: string;
+	content: string;
+	timestamp: Date;
 }
 
 export interface ExportMetadata {
-  sessionId: string;
-  model: string;
-  duration: string;
+	sessionId: string;
+	model: string;
+	duration: string;
 }
 
 function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+	return str
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
 }
 
 function formatContent(content: string): string {
-  // Replace code blocks with styled <pre>
-  let html = escapeHtml(content);
-  html = html.replace(
-    /```(\w*)\n([\s\S]*?)```/g,
-    (_m, _lang, code) =>
-      `<details class="tool-call" open><summary>Code block</summary><pre class="code-block">${code.trim()}</pre></details>`
-  );
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-  // Tool call patterns: lines starting with "Tool:" or similar
-  html = html.replace(
-    /^(Tool|Calling|Executing|Running):?\s+(.+)$/gm,
-    '<details class="tool-call"><summary>$1: $2</summary></details>'
-  );
-  // Newlines to <br>
-  html = html.replace(/\n/g, "<br>");
-  return html;
+	// Replace code blocks with styled <pre>
+	let html = escapeHtml(content);
+	html = html.replace(
+		/```(\w*)\n([\s\S]*?)```/g,
+		(_m, _lang, code) =>
+			`<details class="tool-call" open><summary>Code block</summary><pre class="code-block">${code.trim()}</pre></details>`,
+	);
+	// Inline code
+	html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+	// Tool call patterns: lines starting with "Tool:" or similar
+	html = html.replace(
+		/^(Tool|Calling|Executing|Running):?\s+(.+)$/gm,
+		'<details class="tool-call"><summary>$1: $2</summary></details>',
+	);
+	// Newlines to <br>
+	html = html.replace(/\n/g, "<br>");
+	return html;
 }
 
 export async function exportSession(
-  messages: ExportMessage[],
-  metadata: ExportMetadata
+	messages: ExportMessage[],
+	metadata: ExportMetadata,
 ): Promise<string> {
-  const date = new Date().toLocaleDateString("en-GB", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const msgCount = messages.filter((m) => m.role !== "system").length;
+	const date = new Date().toLocaleDateString("en-GB", {
+		weekday: "long",
+		year: "numeric",
+		month: "long",
+		day: "numeric",
+	});
+	const msgCount = messages.filter((m) => m.role !== "system").length;
 
-  const messageHtml = messages
-    .map((msg) => {
-      const roleClass = msg.role === "user" ? "user" : msg.role === "assistant" ? "assistant" : "system";
-      const time = msg.timestamp instanceof Date
-        ? msg.timestamp.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
-        : "";
-      return `<div class="msg ${roleClass}"><span class="meta">${msg.role} ${time}</span><div class="body">${formatContent(msg.content)}</div></div>`;
-    })
-    .join("\n");
+	const messageHtml = messages
+		.map((msg) => {
+			const roleClass =
+				msg.role === "user"
+					? "user"
+					: msg.role === "assistant"
+						? "assistant"
+						: "system";
+			const time =
+				msg.timestamp instanceof Date
+					? msg.timestamp.toLocaleTimeString("en-GB", {
+							hour: "2-digit",
+							minute: "2-digit",
+						})
+					: "";
+			return `<div class="msg ${roleClass}"><span class="meta">${msg.role} ${time}</span><div class="body">${formatContent(msg.content)}</div></div>`;
+		})
+		.join("\n");
 
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -129,17 +138,17 @@ ${messageHtml}
  * Returns the absolute path of the saved file.
  */
 export async function saveSessionExport(
-  messages: ExportMessage[],
-  metadata: ExportMetadata
+	messages: ExportMessage[],
+	metadata: ExportMetadata,
 ): Promise<string> {
-  const html = await exportSession(messages, metadata);
-  const dir = path.join(
-    process.env.HOME || process.env.USERPROFILE || ".",
-    ".8gent",
-    "exports"
-  );
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${metadata.sessionId}.html`);
-  fs.writeFileSync(filePath, html, "utf-8");
-  return filePath;
+	const html = await exportSession(messages, metadata);
+	const dir = path.join(
+		process.env.HOME || process.env.USERPROFILE || ".",
+		".8gent",
+		"exports",
+	);
+	fs.mkdirSync(dir, { recursive: true });
+	const filePath = path.join(dir, `${metadata.sessionId}.html`);
+	fs.writeFileSync(filePath, html, "utf-8");
+	return filePath;
 }

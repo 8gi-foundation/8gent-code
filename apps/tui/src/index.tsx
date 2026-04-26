@@ -18,13 +18,13 @@ const parsed = parseTuiArgv(argv);
 // Log training proxy status if active
 const trainingProxyUrl = process.env.TRAINING_PROXY_URL;
 if (trainingProxyUrl) {
-  console.log(`\x1b[36mTraining proxy: active (${trainingProxyUrl})\x1b[0m`);
+	console.log(`\x1b[36mTraining proxy: active (${trainingProxyUrl})\x1b[0m`);
 }
 
 const hasInfiniteFlag = parsed.infiniteFlag;
 if (hasInfiniteFlag) {
-  enableInfiniteMode();
-  console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m\n");
+	enableInfiniteMode();
+	console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m\n");
 }
 
 const command = parsed.positional[0] || "repl";
@@ -32,13 +32,13 @@ const passthroughArgs = parsed.positional.slice(1);
 
 // Render the TUI
 render(
-  <App
-    initialCommand={command}
-    args={passthroughArgs}
-    sessionName={parsed.sessionName}
-    sessionResume={parsed.sessionResume}
-    cliProvider={parsed.provider}
-    cliModel={parsed.model}
-    cliAutoApprove={parsed.yes}
-  />,
+	<App
+		initialCommand={command}
+		args={passthroughArgs}
+		sessionName={parsed.sessionName}
+		sessionResume={parsed.sessionResume}
+		cliProvider={parsed.provider}
+		cliModel={parsed.model}
+		cliAutoApprove={parsed.yes}
+	/>,
 );

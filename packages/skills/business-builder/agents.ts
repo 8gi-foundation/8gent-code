@@ -3,21 +3,26 @@
 // strategy blueprint from Phase 1 and produces structured domain output.
 
 export interface AgentDef {
-  id: string;
-  role: string;
-  /** Prompt template. {{idea}} and {{blueprint}} are replaced at runtime. */
-  promptTemplate: string;
-  outputs: string[];
-  collaborates: string[];
+	id: string;
+	role: string;
+	/** Prompt template. {{idea}} and {{blueprint}} are replaced at runtime. */
+	promptTemplate: string;
+	outputs: string[];
+	collaborates: string[];
 }
 
 export const AGENT_DEFS: AgentDef[] = [
-  {
-    id: "strategy",
-    role: "Chief Strategist",
-    outputs: ["Business Model Canvas", "Competitive Intel Report", "Revenue Plan", "Growth Roadmap"],
-    collaborates: ["finance", "product", "marketing"],
-    promptTemplate: `You are the Chief Strategist for a new business. Analyze this idea and produce a master business blueprint.
+	{
+		id: "strategy",
+		role: "Chief Strategist",
+		outputs: [
+			"Business Model Canvas",
+			"Competitive Intel Report",
+			"Revenue Plan",
+			"Growth Roadmap",
+		],
+		collaborates: ["finance", "product", "marketing"],
+		promptTemplate: `You are the Chief Strategist for a new business. Analyze this idea and produce a master business blueprint.
 
 Business Idea: {{idea}}
 
@@ -30,13 +35,18 @@ Produce a structured analysis covering:
 6. Quarterly OKRs for Year 1
 
 Format your response as a structured report. Be specific and actionable. This output feeds all other agents.`,
-  },
-  {
-    id: "operations",
-    role: "Head of Operations",
-    outputs: ["Operations Playbook", "Workflow Diagrams", "Tool Stack Matrix", "Automation Blueprints"],
-    collaborates: ["strategy", "tech", "hr"],
-    promptTemplate: `You are the Head of Operations. Using the strategy below, design the operational backbone.
+	},
+	{
+		id: "operations",
+		role: "Head of Operations",
+		outputs: [
+			"Operations Playbook",
+			"Workflow Diagrams",
+			"Tool Stack Matrix",
+			"Automation Blueprints",
+		],
+		collaborates: ["strategy", "tech", "hr"],
+		promptTemplate: `You are the Head of Operations. Using the strategy below, design the operational backbone.
 
 Business Idea: {{idea}}
 
@@ -51,13 +61,18 @@ Produce:
 5. KPIs to track operational health
 
 Be specific. Name actual tools and workflows.`,
-  },
-  {
-    id: "marketing",
-    role: "Head of Marketing",
-    outputs: ["Brand Guidelines", "Content Strategy", "SEO/AEO Playbook", "Campaign Briefs"],
-    collaborates: ["sales", "product", "strategy"],
-    promptTemplate: `You are the Head of Marketing. Using the strategy below, build the brand and go-to-market plan.
+	},
+	{
+		id: "marketing",
+		role: "Head of Marketing",
+		outputs: [
+			"Brand Guidelines",
+			"Content Strategy",
+			"SEO/AEO Playbook",
+			"Campaign Briefs",
+		],
+		collaborates: ["sales", "product", "strategy"],
+		promptTemplate: `You are the Head of Marketing. Using the strategy below, build the brand and go-to-market plan.
 
 Business Idea: {{idea}}
 
@@ -72,13 +87,18 @@ Produce:
 5. Email sequence outline for lead nurture
 
 Be specific. Include channel recommendations with follower/traffic targets.`,
-  },
-  {
-    id: "sales",
-    role: "Head of Sales",
-    outputs: ["Sales Playbook", "CRM Configuration", "Outreach Sequences", "Pipeline Dashboard"],
-    collaborates: ["marketing", "finance", "customer"],
-    promptTemplate: `You are the Head of Sales. Using the strategy below, design the sales engine.
+	},
+	{
+		id: "sales",
+		role: "Head of Sales",
+		outputs: [
+			"Sales Playbook",
+			"CRM Configuration",
+			"Outreach Sequences",
+			"Pipeline Dashboard",
+		],
+		collaborates: ["marketing", "finance", "customer"],
+		promptTemplate: `You are the Head of Sales. Using the strategy below, design the sales engine.
 
 Business Idea: {{idea}}
 
@@ -93,13 +113,18 @@ Produce:
 5. Monthly/quarterly revenue targets for Year 1
 
 Be specific. Include actual email subject lines and message frameworks.`,
-  },
-  {
-    id: "finance",
-    role: "CFO",
-    outputs: ["Financial Model", "Pricing Matrix", "Cash Flow Projections", "Invoice Templates"],
-    collaborates: ["strategy", "sales", "operations"],
-    promptTemplate: `You are the CFO. Using the strategy below, build the financial foundation.
+	},
+	{
+		id: "finance",
+		role: "CFO",
+		outputs: [
+			"Financial Model",
+			"Pricing Matrix",
+			"Cash Flow Projections",
+			"Invoice Templates",
+		],
+		collaborates: ["strategy", "sales", "operations"],
+		promptTemplate: `You are the CFO. Using the strategy below, build the financial foundation.
 
 Business Idea: {{idea}}
 
@@ -115,13 +140,18 @@ Produce:
 6. Key financial metrics to track
 
 Give realistic numbers. Include best/worst/expected scenarios.`,
-  },
-  {
-    id: "legal",
-    role: "General Counsel",
-    outputs: ["Legal Document Suite", "Compliance Checklist", "Contract Templates", "Risk Assessment"],
-    collaborates: ["operations", "hr", "finance"],
-    promptTemplate: `You are General Counsel. Using the strategy below, map the legal and compliance needs.
+	},
+	{
+		id: "legal",
+		role: "General Counsel",
+		outputs: [
+			"Legal Document Suite",
+			"Compliance Checklist",
+			"Contract Templates",
+			"Risk Assessment",
+		],
+		collaborates: ["operations", "hr", "finance"],
+		promptTemplate: `You are General Counsel. Using the strategy below, map the legal and compliance needs.
 
 Business Idea: {{idea}}
 
@@ -136,13 +166,18 @@ Produce:
 5. Data privacy requirements (GDPR, CCPA if applicable)
 
 Be specific about what documents are needed and why.`,
-  },
-  {
-    id: "hr",
-    role: "Head of People",
-    outputs: ["Org Blueprint", "Job Descriptions", "Onboarding Playbook", "Compensation Framework"],
-    collaborates: ["operations", "legal", "finance"],
-    promptTemplate: `You are the Head of People. Using the strategy below, design the team and culture.
+	},
+	{
+		id: "hr",
+		role: "Head of People",
+		outputs: [
+			"Org Blueprint",
+			"Job Descriptions",
+			"Onboarding Playbook",
+			"Compensation Framework",
+		],
+		collaborates: ["operations", "legal", "finance"],
+		promptTemplate: `You are the Head of People. Using the strategy below, design the team and culture.
 
 Business Idea: {{idea}}
 
@@ -158,13 +193,18 @@ Produce:
 6. Core values and culture statement
 
 Ground compensation in real market data.`,
-  },
-  {
-    id: "product",
-    role: "Head of Product",
-    outputs: ["Product Roadmap", "Feature Specs", "User Personas", "Prioritization Matrix"],
-    collaborates: ["strategy", "tech", "marketing"],
-    promptTemplate: `You are the Head of Product. Using the strategy below, define what gets built.
+	},
+	{
+		id: "product",
+		role: "Head of Product",
+		outputs: [
+			"Product Roadmap",
+			"Feature Specs",
+			"User Personas",
+			"Prioritization Matrix",
+		],
+		collaborates: ["strategy", "tech", "marketing"],
+		promptTemplate: `You are the Head of Product. Using the strategy below, define what gets built.
 
 Business Idea: {{idea}}
 
@@ -179,13 +219,18 @@ Produce:
 5. Success metrics (activation, retention, NPS targets)
 
 Be specific. Name features, not categories.`,
-  },
-  {
-    id: "tech",
-    role: "CTO",
-    outputs: ["Architecture Diagram", "Tech Stack Decision Doc", "Security Playbook", "Infrastructure Plan"],
-    collaborates: ["product", "operations", "strategy"],
-    promptTemplate: `You are the CTO. Using the strategy below, architect the technical foundation.
+	},
+	{
+		id: "tech",
+		role: "CTO",
+		outputs: [
+			"Architecture Diagram",
+			"Tech Stack Decision Doc",
+			"Security Playbook",
+			"Infrastructure Plan",
+		],
+		collaborates: ["product", "operations", "strategy"],
+		promptTemplate: `You are the CTO. Using the strategy below, architect the technical foundation.
 
 Business Idea: {{idea}}
 
@@ -201,13 +246,18 @@ Produce:
 6. Scalability plan (0-100 users, 100-10k, 10k+)
 
 Prioritize open source and cost-effective solutions.`,
-  },
-  {
-    id: "customer",
-    role: "Head of Customer Success",
-    outputs: ["Support Playbook", "Knowledge Base Structure", "Health Score Model", "Retention Strategy"],
-    collaborates: ["sales", "product", "marketing"],
-    promptTemplate: `You are the Head of Customer Success. Using the strategy below, build the retention engine.
+	},
+	{
+		id: "customer",
+		role: "Head of Customer Success",
+		outputs: [
+			"Support Playbook",
+			"Knowledge Base Structure",
+			"Health Score Model",
+			"Retention Strategy",
+		],
+		collaborates: ["sales", "product", "marketing"],
+		promptTemplate: `You are the Head of Customer Success. Using the strategy below, build the retention engine.
 
 Business Idea: {{idea}}
 
@@ -223,7 +273,7 @@ Produce:
 6. Customer advocacy program outline
 
 Focus on retention. CAC is expensive; keep the customers you win.`,
-  },
+	},
 ];
 
-export const AGENT_MAP = new Map(AGENT_DEFS.map(a => [a.id, a]));
+export const AGENT_MAP = new Map(AGENT_DEFS.map((a) => [a.id, a]));

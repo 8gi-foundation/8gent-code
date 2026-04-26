@@ -5,4 +5,10 @@
 
 export { buildBusiness } from "./orchestrator.ts";
 export { AGENT_DEFS, AGENT_MAP } from "./agents.ts";
-export type { BusinessBlueprint, AgentOutput, BusinessIdea, BuildOptions, BuildDepth } from "./types.ts";
+export type {
+	BusinessBlueprint,
+	AgentOutput,
+	BusinessIdea,
+	BuildOptions,
+	BuildDepth,
+} from "./types.ts";

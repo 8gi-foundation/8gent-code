@@ -12,19 +12,23 @@
  */
 
 import { ConvexClient } from "convex/browser";
-import type { FunctionReference, FunctionArgs, FunctionReturnType } from "convex/server";
+import type {
+	FunctionReference,
+	FunctionArgs,
+	FunctionReturnType,
+} from "convex/server";
 
 // ============================================
 // Types
 // ============================================
 
 export interface ConvexClientConfig {
-  /** Convex deployment URL (e.g., "https://xxx.convex.cloud"). */
-  url: string;
-  /** Function that returns the current auth token. */
-  tokenProvider?: () => Promise<string | null>;
-  /** Whether to operate in offline mode (skip all network calls). */
-  offline?: boolean;
+	/** Convex deployment URL (e.g., "https://xxx.convex.cloud"). */
+	url: string;
+	/** Function that returns the current auth token. */
+	tokenProvider?: () => Promise<string | null>;
+	/** Whether to operate in offline mode (skip all network calls). */
+	offline?: boolean;
 }
 
 // ============================================
@@ -41,182 +45,182 @@ export interface ConvexClientConfig {
  * - Automatic reconnection on network errors
  */
 export class ConvexClientWrapper {
-  private client: ConvexClient | null = null;
-  private config: ConvexClientConfig;
-  private connected = false;
-  private mutationQueue: Array<{ fn: any; args: any }> = [];
+	private client: ConvexClient | null = null;
+	private config: ConvexClientConfig;
+	private connected = false;
+	private mutationQueue: Array<{ fn: any; args: any }> = [];
 
-  constructor(config: ConvexClientConfig) {
-    this.config = config;
-  }
+	constructor(config: ConvexClientConfig) {
+		this.config = config;
+	}
 
-  // ---------- Connection ----------
+	// ---------- Connection ----------
 
-  /**
-   * Ensure the client is connected. Called lazily on first operation.
-   */
-  private async ensureConnected(): Promise<ConvexClient | null> {
-    if (this.config.offline) return null;
-    if (this.client && this.connected) return this.client;
+	/**
+	 * Ensure the client is connected. Called lazily on first operation.
+	 */
+	private async ensureConnected(): Promise<ConvexClient | null> {
+		if (this.config.offline) return null;
+		if (this.client && this.connected) return this.client;
 
-    if (!this.config.url) {
-      console.warn(
-        "[8gent/db] No CONVEX_URL configured. Running in offline mode.",
-      );
-      this.config.offline = true;
-      return null;
-    }
+		if (!this.config.url) {
+			console.warn(
+				"[8gent/db] No CONVEX_URL configured. Running in offline mode.",
+			);
+			this.config.offline = true;
+			return null;
+		}
 
-    try {
-      this.client = new ConvexClient(this.config.url);
+		try {
+			this.client = new ConvexClient(this.config.url);
 
-      // Set auth if a token provider is configured
-      if (this.config.tokenProvider) {
-        this.client.setAuth(this.config.tokenProvider);
-      }
+			// Set auth if a token provider is configured
+			if (this.config.tokenProvider) {
+				this.client.setAuth(this.config.tokenProvider);
+			}
 
-      this.connected = true;
+			this.connected = true;
 
-      // Flush queued mutations
-      await this.flushQueue();
+			// Flush queued mutations
+			await this.flushQueue();
 
-      return this.client;
-    } catch (error) {
-      console.warn(
-        `[8gent/db] Failed to connect to Convex: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return null;
-    }
-  }
+			return this.client;
+		} catch (error) {
+			console.warn(
+				`[8gent/db] Failed to connect to Convex: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return null;
+		}
+	}
 
-  // ---------- Query / Mutation ----------
+	// ---------- Query / Mutation ----------
 
-  /**
-   * Execute a Convex query.
-   * Returns null if offline or if the query fails.
-   */
-  async query<F extends FunctionReference<"query">>(
-    fn: F,
-    args: FunctionArgs<F>,
-  ): Promise<FunctionReturnType<F> | null> {
-    const client = await this.ensureConnected();
-    if (!client) return null;
+	/**
+	 * Execute a Convex query.
+	 * Returns null if offline or if the query fails.
+	 */
+	async query<F extends FunctionReference<"query">>(
+		fn: F,
+		args: FunctionArgs<F>,
+	): Promise<FunctionReturnType<F> | null> {
+		const client = await this.ensureConnected();
+		if (!client) return null;
 
-    try {
-      return await client.query(fn, args);
-    } catch (error) {
-      console.warn(
-        `[8gent/db] Query failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return null;
-    }
-  }
+		try {
+			return await client.query(fn, args);
+		} catch (error) {
+			console.warn(
+				`[8gent/db] Query failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return null;
+		}
+	}
 
-  /**
-   * Execute a Convex mutation.
-   * Queues the mutation if offline, executes immediately if connected.
-   */
-  async mutation<F extends FunctionReference<"mutation">>(
-    fn: F,
-    args: FunctionArgs<F>,
-  ): Promise<FunctionReturnType<F> | null> {
-    const client = await this.ensureConnected();
+	/**
+	 * Execute a Convex mutation.
+	 * Queues the mutation if offline, executes immediately if connected.
+	 */
+	async mutation<F extends FunctionReference<"mutation">>(
+		fn: F,
+		args: FunctionArgs<F>,
+	): Promise<FunctionReturnType<F> | null> {
+		const client = await this.ensureConnected();
 
-    if (!client) {
-      // Queue for later
-      this.mutationQueue.push({ fn, args });
-      return null;
-    }
+		if (!client) {
+			// Queue for later
+			this.mutationQueue.push({ fn, args });
+			return null;
+		}
 
-    try {
-      return await client.mutation(fn, args);
-    } catch (error) {
-      console.warn(
-        `[8gent/db] Mutation failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      // Queue failed mutation for retry
-      this.mutationQueue.push({ fn, args });
-      return null;
-    }
-  }
+		try {
+			return await client.mutation(fn, args);
+		} catch (error) {
+			console.warn(
+				`[8gent/db] Mutation failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			// Queue failed mutation for retry
+			this.mutationQueue.push({ fn, args });
+			return null;
+		}
+	}
 
-  // ---------- Auth ----------
+	// ---------- Auth ----------
 
-  /**
-   * Set the auth token provider.
-   * The provider is called before each request to get a fresh token.
-   */
-  setAuth(tokenProvider: () => Promise<string | null>): void {
-    this.config.tokenProvider = tokenProvider;
-    if (this.client) {
-      this.client.setAuth(tokenProvider);
-    }
-  }
+	/**
+	 * Set the auth token provider.
+	 * The provider is called before each request to get a fresh token.
+	 */
+	setAuth(tokenProvider: () => Promise<string | null>): void {
+		this.config.tokenProvider = tokenProvider;
+		if (this.client) {
+			this.client.setAuth(tokenProvider);
+		}
+	}
 
-  /**
-   * Clear auth (switch to anonymous queries).
-   */
-  clearAuth(): void {
-    this.config.tokenProvider = undefined;
-    // ConvexClient doesn't have a clearAuth, so we'd recreate on next call
-    if (this.client) {
-      this.connected = false;
-      this.client = null;
-    }
-  }
+	/**
+	 * Clear auth (switch to anonymous queries).
+	 */
+	clearAuth(): void {
+		this.config.tokenProvider = undefined;
+		// ConvexClient doesn't have a clearAuth, so we'd recreate on next call
+		if (this.client) {
+			this.connected = false;
+			this.client = null;
+		}
+	}
 
-  // ---------- Offline Queue ----------
+	// ---------- Offline Queue ----------
 
-  /**
-   * Flush queued mutations (after reconnecting).
-   */
-  private async flushQueue(): Promise<void> {
-    if (!this.client || this.mutationQueue.length === 0) return;
+	/**
+	 * Flush queued mutations (after reconnecting).
+	 */
+	private async flushQueue(): Promise<void> {
+		if (!this.client || this.mutationQueue.length === 0) return;
 
-    const queue = [...this.mutationQueue];
-    this.mutationQueue = [];
+		const queue = [...this.mutationQueue];
+		this.mutationQueue = [];
 
-    for (const { fn, args } of queue) {
-      try {
-        await this.client.mutation(fn, args);
-      } catch (error) {
-        console.warn(
-          `[8gent/db] Failed to flush queued mutation: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        // Re-queue failed items
-        this.mutationQueue.push({ fn, args });
-      }
-    }
-  }
+		for (const { fn, args } of queue) {
+			try {
+				await this.client.mutation(fn, args);
+			} catch (error) {
+				console.warn(
+					`[8gent/db] Failed to flush queued mutation: ${error instanceof Error ? error.message : String(error)}`,
+				);
+				// Re-queue failed items
+				this.mutationQueue.push({ fn, args });
+			}
+		}
+	}
 
-  /** Get the number of queued mutations. */
-  get queuedMutations(): number {
-    return this.mutationQueue.length;
-  }
+	/** Get the number of queued mutations. */
+	get queuedMutations(): number {
+		return this.mutationQueue.length;
+	}
 
-  // ---------- Lifecycle ----------
+	// ---------- Lifecycle ----------
 
-  /** Check if the client is connected. */
-  get isConnected(): boolean {
-    return this.connected;
-  }
+	/** Check if the client is connected. */
+	get isConnected(): boolean {
+		return this.connected;
+	}
 
-  /** Check if the client is in offline mode. */
-  get isOffline(): boolean {
-    return this.config.offline ?? false;
-  }
+	/** Check if the client is in offline mode. */
+	get isOffline(): boolean {
+		return this.config.offline ?? false;
+	}
 
-  /**
-   * Close the client connection.
-   * Call on app shutdown.
-   */
-  async close(): Promise<void> {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-      this.connected = false;
-    }
-  }
+	/**
+	 * Close the client connection.
+	 * Call on app shutdown.
+	 */
+	async close(): Promise<void> {
+		if (this.client) {
+			await this.client.close();
+			this.client = null;
+			this.connected = false;
+		}
+	}
 }
 
 // ============================================
@@ -234,17 +238,17 @@ let _client: ConvexClientWrapper | null = null;
  * 3. Offline mode (if no URL available)
  */
 export function getConvexClient(
-  config?: Partial<ConvexClientConfig>,
+	config?: Partial<ConvexClientConfig>,
 ): ConvexClientWrapper {
-  if (!_client) {
-    const url = config?.url || process.env.CONVEX_URL || "";
-    _client = new ConvexClientWrapper({
-      url,
-      offline: !url,
-      ...config,
-    });
-  }
-  return _client;
+	if (!_client) {
+		const url = config?.url || process.env.CONVEX_URL || "";
+		_client = new ConvexClientWrapper({
+			url,
+			offline: !url,
+			...config,
+		});
+	}
+	return _client;
 }
 
 /**
@@ -252,14 +256,14 @@ export function getConvexClient(
  * Convenience wrapper that handles the common pattern.
  */
 export async function withConvex<T>(
-  fn: (client: ConvexClientWrapper) => Promise<T>,
+	fn: (client: ConvexClientWrapper) => Promise<T>,
 ): Promise<T | null> {
-  try {
-    const client = getConvexClient();
-    return await fn(client);
-  } catch {
-    return null;
-  }
+	try {
+		const client = getConvexClient();
+		return await fn(client);
+	} catch {
+		return null;
+	}
 }
 
 // Re-export wrapper class only (ConvexClientConfig is already exported above)

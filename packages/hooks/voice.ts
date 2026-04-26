@@ -19,19 +19,19 @@ import { platform } from "os";
 // ============================================
 
 export interface VoiceConfig {
-  enabled: boolean;
-  voice: string;
-  rate: number; // Words per minute
-  maxLength: number; // Max chars to speak
-  fallbackMessage: string;
+	enabled: boolean;
+	voice: string;
+	rate: number; // Words per minute
+	maxLength: number; // Max chars to speak
+	fallbackMessage: string;
 }
 
 const DEFAULT_CONFIG: VoiceConfig = {
-  enabled: false, // OFF by default — enable with /voice on
-  voice: "Daniel", // macOS British male voice - fitting for The Infinite Gentleman
-  rate: 200,
-  maxLength: 350,
-  fallbackMessage: "Task complete. The Infinite Gentleman has delivered.",
+	enabled: false, // OFF by default — enable with /voice on
+	voice: "Daniel", // macOS British male voice - fitting for The Infinite Gentleman
+	rate: 200,
+	maxLength: 350,
+	fallbackMessage: "Task complete. The Infinite Gentleman has delivered.",
 };
 
 // Good voice options:
@@ -45,11 +45,11 @@ const DEFAULT_CONFIG: VoiceConfig = {
 let voiceConfig: VoiceConfig = { ...DEFAULT_CONFIG };
 
 export function configureVoice(config: Partial<VoiceConfig>): void {
-  voiceConfig = { ...voiceConfig, ...config };
+	voiceConfig = { ...voiceConfig, ...config };
 }
 
 export function getVoiceConfig(): VoiceConfig {
-  return { ...voiceConfig };
+	return { ...voiceConfig };
 }
 
 // ============================================
@@ -60,145 +60,147 @@ export function getVoiceConfig(): VoiceConfig {
  * Extract completion message from agent output
  */
 export function extractCompletionMessage(output: string): string | null {
-  // Look for 🎯 COMPLETED: marker
-  const completedMatch = output.match(/🎯\s*COMPLETED:\s*(.+?)(?:\n|$)/i);
-  if (completedMatch) {
-    return completedMatch[1].trim().slice(0, voiceConfig.maxLength);
-  }
+	// Look for 🎯 COMPLETED: marker
+	const completedMatch = output.match(/🎯\s*COMPLETED:\s*(.+?)(?:\n|$)/i);
+	if (completedMatch) {
+		return completedMatch[1].trim().slice(0, voiceConfig.maxLength);
+	}
 
-  // Alternative markers
-  const doneMatch = output.match(/✅\s*DONE:\s*(.+?)(?:\n|$)/i);
-  if (doneMatch) {
-    return doneMatch[1].trim().slice(0, voiceConfig.maxLength);
-  }
+	// Alternative markers
+	const doneMatch = output.match(/✅\s*DONE:\s*(.+?)(?:\n|$)/i);
+	if (doneMatch) {
+		return doneMatch[1].trim().slice(0, voiceConfig.maxLength);
+	}
 
-  const summaryMatch = output.match(/SUMMARY:\s*(.+?)(?:\n|$)/i);
-  if (summaryMatch) {
-    return summaryMatch[1].trim().slice(0, voiceConfig.maxLength);
-  }
+	const summaryMatch = output.match(/SUMMARY:\s*(.+?)(?:\n|$)/i);
+	if (summaryMatch) {
+		return summaryMatch[1].trim().slice(0, voiceConfig.maxLength);
+	}
 
-  return null;
+	return null;
 }
 
 /**
  * Speak text using macOS `say` command
  */
 export async function speak(text: string): Promise<void> {
-  if (!voiceConfig.enabled) return;
+	if (!voiceConfig.enabled) return;
 
-  // Only works on macOS
-  if (platform() !== "darwin") {
-    console.log(`[Voice] ${text}`);
-    return;
-  }
+	// Only works on macOS
+	if (platform() !== "darwin") {
+		console.log(`[Voice] ${text}`);
+		return;
+	}
 
-  return new Promise((resolve, reject) => {
-    const args = [
-      "-v", voiceConfig.voice,
-      "-r", voiceConfig.rate.toString(),
-      text,
-    ];
+	return new Promise((resolve, reject) => {
+		const args = [
+			"-v",
+			voiceConfig.voice,
+			"-r",
+			voiceConfig.rate.toString(),
+			text,
+		];
 
-    const proc = spawn("say", args, {
-      stdio: ["ignore", "ignore", "ignore"],
-    });
+		const proc = spawn("say", args, {
+			stdio: ["ignore", "ignore", "ignore"],
+		});
 
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`say command exited with code ${code}`));
-      }
-    });
+		proc.on("close", (code) => {
+			if (code === 0) {
+				resolve();
+			} else {
+				reject(new Error(`say command exited with code ${code}`));
+			}
+		});
 
-    proc.on("error", (err) => {
-      reject(err);
-    });
-  });
+		proc.on("error", (err) => {
+			reject(err);
+		});
+	});
 }
 
 /**
  * Hook handler for onComplete events
  */
 export async function voiceCompletionHook(context: {
-  result?: string;
-  output?: string;
-  response?: string;
+	result?: string;
+	output?: string;
+	response?: string;
 }): Promise<void> {
-  const output = context.result || context.output || context.response || "";
+	const output = context.result || context.output || context.response || "";
 
-  // Extract completion message
-  let message = extractCompletionMessage(output);
+	// Extract completion message
+	let message = extractCompletionMessage(output);
 
-  // Use fallback if no marker found
-  if (!message) {
-    message = voiceConfig.fallbackMessage;
-  }
+	// Use fallback if no marker found
+	if (!message) {
+		message = voiceConfig.fallbackMessage;
+	}
 
-  // Speak the message
-  try {
-    await speak(message);
-  } catch (err) {
-    // Silent failure - voice is optional
-    console.error("[Voice] Failed to speak:", err);
-  }
+	// Speak the message
+	try {
+		await speak(message);
+	} catch (err) {
+		// Silent failure - voice is optional
+		console.error("[Voice] Failed to speak:", err);
+	}
 }
 
 /**
  * Generate completion message with 8gent personality
  */
 export function generateCompletionVoice(
-  summary: string,
-  branch?: string | null,
-  status?: "committed" | "pushed" | "pr_created" | null,
-  tested?: boolean
+	summary: string,
+	branch?: string | null,
+	status?: "committed" | "pushed" | "pr_created" | null,
+	tested?: boolean,
 ): string {
-  const openers = [
-    "Ah, splendid.",
-    "Another task dispatched.",
-    "The Infinite Gentleman delivers.",
-    "Consider it done.",
-    "Excellence achieved.",
-    "Naturally, it's complete.",
-    "As requested, good sir.",
-    "The deed is done.",
-    "Quite satisfactory.",
-    "Perfection, as always.",
-  ];
+	const openers = [
+		"Ah, splendid.",
+		"Another task dispatched.",
+		"The Infinite Gentleman delivers.",
+		"Consider it done.",
+		"Excellence achieved.",
+		"Naturally, it's complete.",
+		"As requested, good sir.",
+		"The deed is done.",
+		"Quite satisfactory.",
+		"Perfection, as always.",
+	];
 
-  const closers = [
-    "At your service.",
-    "What's next?",
-    "The pleasure was mine.",
-    "Anything else?",
-    "Onwards.",
-    "Until next time.",
-  ];
+	const closers = [
+		"At your service.",
+		"What's next?",
+		"The pleasure was mine.",
+		"Anything else?",
+		"Onwards.",
+		"Until next time.",
+	];
 
-  const opener = openers[Math.floor(Math.random() * openers.length)];
-  const closer = closers[Math.floor(Math.random() * closers.length)];
+	const opener = openers[Math.floor(Math.random() * openers.length)];
+	const closer = closers[Math.floor(Math.random() * closers.length)];
 
-  let message = `${opener} ${summary}`;
+	let message = `${opener} ${summary}`;
 
-  if (branch) {
-    message += ` on ${branch}`;
-  }
+	if (branch) {
+		message += ` on ${branch}`;
+	}
 
-  if (status === "committed") {
-    message += ". Committed.";
-  } else if (status === "pushed") {
-    message += ". Pushed.";
-  } else if (status === "pr_created") {
-    message += ". PR created.";
-  }
+	if (status === "committed") {
+		message += ". Committed.";
+	} else if (status === "pushed") {
+		message += ". Pushed.";
+	} else if (status === "pr_created") {
+		message += ". PR created.";
+	}
 
-  if (tested) {
-    message += " Tested and verified.";
-  }
+	if (tested) {
+		message += " Tested and verified.";
+	}
 
-  message += ` ${closer}`;
+	message += ` ${closer}`;
 
-  return message;
+	return message;
 }
 
 // ============================================
@@ -211,28 +213,28 @@ import { registerHook, type Hook } from "./index.js";
  * Register the voice completion hook
  */
 export function setupVoiceHook(): Hook {
-  return registerHook({
-    type: "onComplete",
-    name: "Voice Completion",
-    description: "Speaks task completion summary using TTS",
-    mode: "function",
-    functionBody: `
+	return registerHook({
+		type: "onComplete",
+		name: "Voice Completion",
+		description: "Speaks task completion summary using TTS",
+		mode: "function",
+		functionBody: `
       const message = extractCompletionMessage(context.result || context.output || "");
       if (message) {
         await speak(message);
       }
     `,
-    enabled: true,
-    async: true,
-    continueOnError: true,
-  });
+		enabled: true,
+		async: true,
+		continueOnError: true,
+	});
 }
 
 /**
  * Test voice output
  */
 export async function testVoice(): Promise<void> {
-  await speak("The Infinite Gentleman is ready to serve.");
+	await speak("The Infinite Gentleman is ready to serve.");
 }
 
 // ============================================
@@ -240,12 +242,12 @@ export async function testVoice(): Promise<void> {
 // ============================================
 
 export default {
-  configureVoice,
-  getVoiceConfig,
-  extractCompletionMessage,
-  speak,
-  voiceCompletionHook,
-  generateCompletionVoice,
-  setupVoiceHook,
-  testVoice,
+	configureVoice,
+	getVoiceConfig,
+	extractCompletionMessage,
+	speak,
+	voiceCompletionHook,
+	generateCompletionVoice,
+	setupVoiceHook,
+	testVoice,
 };

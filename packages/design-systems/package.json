@@ -1,52 +1,49 @@
 {
-  "name": "@8gent/design-systems",
-  "version": "1.0.0",
-  "description": "SQLite-backed design system database extracted from James Spalding's portfolio for 8gent AI queries",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
-  },
-  "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
-    "seed": "tsx seed.ts",
-    "seed:custom": "tsx seed.ts",
-    "test": "vitest",
-    "typecheck": "tsc --noEmit"
-  },
-  "keywords": [
-    "design-system",
-    "themes",
-    "sqlite",
-    "8gent",
-    "ai",
-    "ui",
-    "tailwind",
-    "css"
-  ],
-  "author": "James Spalding",
-  "license": "MIT",
-  "dependencies": {
-    "better-sqlite3": "^11.0.0"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.10",
-    "@types/node": "^20.14.0",
-    "tsup": "^8.1.0",
-    "tsx": "^4.15.0",
-    "typescript": "^5.4.5",
-    "vitest": "^1.6.0"
-  },
-  "peerDependencies": {
-    "typescript": ">=5.0.0"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ]
+	"name": "@8gent/design-systems",
+	"version": "1.0.0",
+	"description": "SQLite-backed design system database extracted from James Spalding's portfolio for 8gent AI queries",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		}
+	},
+	"scripts": {
+		"build": "tsup src/index.ts --format cjs,esm --dts",
+		"dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+		"seed": "tsx seed.ts",
+		"seed:custom": "tsx seed.ts",
+		"test": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": [
+		"design-system",
+		"themes",
+		"sqlite",
+		"8gent",
+		"ai",
+		"ui",
+		"tailwind",
+		"css"
+	],
+	"author": "James Spalding",
+	"license": "MIT",
+	"dependencies": {
+		"better-sqlite3": "^11.0.0"
+	},
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.10",
+		"@types/node": "^20.14.0",
+		"tsup": "^8.1.0",
+		"tsx": "^4.15.0",
+		"typescript": "^5.4.5",
+		"vitest": "^1.6.0"
+	},
+	"peerDependencies": {
+		"typescript": ">=5.0.0"
+	},
+	"files": ["dist", "README.md"]
 }

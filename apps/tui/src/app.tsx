@@ -257,11 +257,18 @@ function loadProviderSettings(): { provider: string; model: string } {
 function detectBestLocalProvider(): { provider: string; model: string } {
 	const { execSync } = require("child_process");
 
-	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
+	function fetchChatModels(
+		url: string,
+		extract: (data: any) => string[],
+	): string[] {
 		try {
-			const raw = execSync(`curl -s --max-time 2 "${url}"`, { timeout: 3000 }).toString();
+			const raw = execSync(`curl -s --max-time 2 "${url}"`, {
+				timeout: 3000,
+			}).toString();
 			const data = JSON.parse(raw);
-			const all = extract(data).map((s: string) => s.trim()).filter(Boolean);
+			const all = extract(data)
+				.map((s: string) => s.trim())
+				.filter(Boolean);
 			return all.filter((id: string) => !isLikelyEmbeddingModelId(id));
 		} catch {
 			return [];
@@ -269,18 +276,16 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	}
 
 	// 1. LM Studio
-	const lmModels = fetchChatModels(
-		"http://localhost:1234/v1/models",
-		(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+	const lmModels = fetchChatModels("http://localhost:1234/v1/models", (d) =>
+		(d.data || []).map((m: any) => String(m.id ?? "")),
 	);
 	if (lmModels.length > 0) {
 		return { provider: "lmstudio", model: pickBestChatModel(lmModels) };
 	}
 
 	// 2. Ollama
-	const ollamaModels = fetchChatModels(
-		"http://localhost:11434/api/tags",
-		(d) => (d.models || []).map((m: any) => String(m.name ?? "")),
+	const ollamaModels = fetchChatModels("http://localhost:11434/api/tags", (d) =>
+		(d.models || []).map((m: any) => String(m.name ?? "")),
 	);
 	if (ollamaModels.length > 0) {
 		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
@@ -288,7 +293,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 
 	// 3. Apfel (Apple Intelligence — macOS 26+, Apple Silicon only)
 	// Run with: apfel --serve --port 11435
-	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
+	const isAppleSilicon =
+		process.arch === "arm64" && process.platform === "darwin";
 	if (isAppleSilicon) {
 		const apfelModels = fetchChatModels(
 			"http://localhost:11435/v1/models",
@@ -328,7 +334,10 @@ function computeCliOverrides(
 	if (cliModelTrim) model = cliModelTrim;
 	else if (providerSwitchedByCli) model = "";
 	else model = savedM;
-	if (!model) { const d = detectBestLocalProvider(); model = d.model; }
+	if (!model) {
+		const d = detectBestLocalProvider();
+		model = d.model;
+	}
 	return { provider, model };
 }
 
@@ -538,10 +547,13 @@ export function App({
 			try {
 				// Run D critic loop: Gemma 4 generates, qwen3:32b critiques, one retry if rejected
 				let response = await agent.chat(clean);
-				const { approved, feedback } = await critiqueResponse(clean, response || "");
+				const { approved, feedback } = await critiqueResponse(
+					clean,
+					response || "",
+				);
 				if (!approved && feedback) {
 					response = await agent.chat(
-						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`
+						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`,
 					);
 				}
 				const cleanResponse = (response || "")
@@ -818,8 +830,13 @@ export function App({
 						const allModels = (data.models || [])
 							.map((m: any) => String(m.name ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
-						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
+						const chatModels = allModels.filter(
+							(id: string) => !isLikelyEmbeddingModelId(id),
+						);
+						if (!cancelled)
+							setAvailableModels(
+								chatModels.length > 0 ? chatModels : allModels,
+							);
 					}
 				} else if (currentProvider === "lmstudio") {
 					// Fetch LM Studio models — filter embedding models at source so they
@@ -830,8 +847,13 @@ export function App({
 						const allModels = (data.data || [])
 							.map((m: any) => String(m.id ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
-						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
+						const chatModels = allModels.filter(
+							(id: string) => !isLikelyEmbeddingModelId(id),
+						);
+						if (!cancelled)
+							setAvailableModels(
+								chatModels.length > 0 ? chatModels : allModels,
+							);
 					}
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
@@ -3220,7 +3242,9 @@ export function App({
 						);
 					} else if (args[0] === "status") {
 						const setupInfo = voice.setupStatus;
-						const backendLabel = voiceChat.backend ? ` [${voiceChat.backend}]` : "";
+						const backendLabel = voiceChat.backend
+							? ` [${voiceChat.backend}]`
+							: "";
 						const voiceChatStatus = voiceChat.isActive
 							? `\nVoice Chat: Active (${voiceChat.state})${backendLabel}`
 							: `\nVoice Chat: Inactive${backendLabel}`;
@@ -3811,7 +3835,10 @@ export function App({
 					} else if (command === ("projects" as any)) {
 						workspaceTabs.addTab("projects");
 					} else if (command === ("terminal" as any)) {
-						workspaceTabs.addTab("terminal", (args as any[])?.[0] || "Terminal");
+						workspaceTabs.addTab(
+							"terminal",
+							(args as any[])?.[0] || "Terminal",
+						);
 					}
 					break;
 			}
@@ -4683,19 +4710,32 @@ export function App({
 				// Voice chat mode: minimal render to avoid Ink repaint collisions
 				// (audio level + timer + message updates all fire simultaneously → ghost text)
 				if (voiceChat.isActive) {
-					const voiceMessages = messages.filter(
-						(m) => m.role === "user" || m.role === "assistant",
-					).slice(-8);
+					const voiceMessages = messages
+						.filter((m) => m.role === "user" || m.role === "assistant")
+						.slice(-8);
 					return (
 						<Stack minHeight={0} flexGrow={1}>
 							<Box paddingX={1} paddingY={1} flexDirection="column" gap={1}>
 								<AppText color="cyan" bold>
-									🎙 Voice Chat — {voiceChat.state === "listening" ? "Listening..." : voiceChat.state === "transcribing" ? "Transcribing..." : voiceChat.state === "speaking" ? "Speaking..." : voiceChat.state === "thinking" ? "Thinking..." : "Ready"}
+									🎙 Voice Chat —{" "}
+									{voiceChat.state === "listening"
+										? "Listening..."
+										: voiceChat.state === "transcribing"
+											? "Transcribing..."
+											: voiceChat.state === "speaking"
+												? "Speaking..."
+												: voiceChat.state === "thinking"
+													? "Thinking..."
+													: "Ready"}
 								</AppText>
 								{voiceMessages.map((m) => (
 									<Box key={m.id} flexDirection="column">
-										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
-										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
+										<MutedText>
+											{m.role === "user" ? "You:" : "Agent:"}
+										</MutedText>
+										<AppText wrap="wrap">
+											{(m.content || "").slice(0, 400)}
+										</AppText>
 									</Box>
 								))}
 							</Box>
@@ -4715,7 +4755,12 @@ export function App({
 					);
 				}
 				return (
-					<Box flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
+					<Box
+						flexDirection="column"
+						flexGrow={1}
+						minHeight={0}
+						overflow="hidden"
+					>
 						<MessageList
 							messages={messages}
 							animateTyping={showAnimations}
@@ -4758,7 +4803,10 @@ export function App({
 
 				{/* Workspace tab bar */}
 				<Box flexShrink={0}>
-					<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+					<TabBar
+						tabs={workspaceTabs.tabs}
+						onSwitch={workspaceTabs.switchTab}
+					/>
 				</Box>
 
 				{/* Main content area with folder frame */}
@@ -4768,7 +4816,13 @@ export function App({
 						<AppText color="cyan">│</AppText>
 					</Box>
 					{/* Main content (chat / kanban / etc.) or process detail */}
-					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0} overflow="hidden">
+					<Box
+						flexDirection="column"
+						flexGrow={1}
+						paddingX={1}
+						minHeight={0}
+						overflow="hidden"
+					>
 						{processPanel.detailTaskId &&
 						processPanel.tasks.find(
 							(t) => t.id === processPanel.detailTaskId,
@@ -4795,7 +4849,10 @@ export function App({
 										]);
 									}
 								}}
-								height={Math.max(10, viewport.height - PROCESS_DETAIL_CHROME_ROWS)}
+								height={Math.max(
+									10,
+									viewport.height - PROCESS_DETAIL_CHROME_ROWS,
+								)}
 							/>
 						) : (
 							renderMainContent()
@@ -4892,7 +4949,12 @@ export function App({
 				</Box>
 
 				{/* Input section with context window display */}
-				<Box paddingX={1} justifyContent="space-between" alignItems="center" flexShrink={0}>
+				<Box
+					paddingX={1}
+					justifyContent="space-between"
+					alignItems="center"
+					flexShrink={0}
+				>
 					{/* Left: Context used */}
 					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth}>
 						<MutedText>{formatTokens(totalTokens)}</MutedText>
@@ -4999,45 +5061,45 @@ export function App({
 
 				{/* Status bar */}
 				<Box flexShrink={0}>
-				{showEnhancedStatus ? (
-					<EnhancedStatusBar
-						modelName={currentModel}
-						runningAgents={(isProcessing ? 1 : 0) + bgRunning}
-						totalAgents={1}
-						permissionMode={infiniteModeActive ? "infinite" : "ask"}
-						tokensSaved={totalTokens}
-						currentBranch={currentBranch}
-						startTime={startTime}
-						planStatus={
-							isProcessing
-								? activeTool
-									? "executing"
-									: "planning"
-								: stepCount > 0
-									? "completed"
-									: "idle"
-						}
-						planStepsCompleted={toolCount}
-						planStepsTotal={stepCount}
-						showAnimations={showAnimations}
-						adhdMode={adhdMode}
-						authStatus={authStatus}
-						authUser={authUser}
-						voiceState={(() => {
-							const raw = voiceChat.isActive ? voiceChat.state : voice.state;
-							return raw === "error" ? "idle" : raw;
-						})()}
-						voiceEnabled={Boolean(voice.isAvailable)}
-						voiceChatActive={voiceChat.isActive}
-					/>
-				) : (
-					<StatusBar
-						tokensSaved={totalTokens}
-						status={status}
-						showAnimations={showAnimations}
-						soundEnabled={soundEnabled}
-					/>
-				)}
+					{showEnhancedStatus ? (
+						<EnhancedStatusBar
+							modelName={currentModel}
+							runningAgents={(isProcessing ? 1 : 0) + bgRunning}
+							totalAgents={1}
+							permissionMode={infiniteModeActive ? "infinite" : "ask"}
+							tokensSaved={totalTokens}
+							currentBranch={currentBranch}
+							startTime={startTime}
+							planStatus={
+								isProcessing
+									? activeTool
+										? "executing"
+										: "planning"
+									: stepCount > 0
+										? "completed"
+										: "idle"
+							}
+							planStepsCompleted={toolCount}
+							planStepsTotal={stepCount}
+							showAnimations={showAnimations}
+							adhdMode={adhdMode}
+							authStatus={authStatus}
+							authUser={authUser}
+							voiceState={(() => {
+								const raw = voiceChat.isActive ? voiceChat.state : voice.state;
+								return raw === "error" ? "idle" : raw;
+							})()}
+							voiceEnabled={Boolean(voice.isAvailable)}
+							voiceChatActive={voiceChat.isActive}
+						/>
+					) : (
+						<StatusBar
+							tokensSaved={totalTokens}
+							status={status}
+							showAnimations={showAnimations}
+							soundEnabled={soundEnabled}
+						/>
+					)}
 				</Box>
 
 				{/* Agent mode — iOS segmented control.
@@ -5054,7 +5116,11 @@ export function App({
 				>
 					{compactAgentModeBar ? (
 						<Box flexDirection="row" overflow="hidden" flexShrink={1}>
-							<AppText color="cyan" bold wrap="truncate-end">{`\u25C6 ${agentMode}`}</AppText>
+							<AppText
+								color="cyan"
+								bold
+								wrap="truncate-end"
+							>{`\u25C6 ${agentMode}`}</AppText>
 							<MutedText wrap="truncate-end">{"   \u2303T cycle"}</MutedText>
 							{!processPanel.sidebarOpen && (
 								<ProcessBadge counts={processPanel.taskCounts} />
@@ -5087,9 +5153,7 @@ export function App({
 					)}
 				</Box>
 
-				{showAnimations && (
-					<ShortcutDock viewportWidth={viewport.width} />
-				)}
+				{showAnimations && <ShortcutDock viewportWidth={viewport.width} />}
 			</FixedFrame>
 		</ADHDModeContext.Provider>
 	);

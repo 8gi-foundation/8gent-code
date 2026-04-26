@@ -10,9 +10,14 @@
  *   pet.start()
  */
 
-import { readFileSync, existsSync } from "fs"
-import { join } from "path"
-import { generateCompanion, registerCompanion, endSession, type Companion } from "./companion.js"
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+import {
+	generateCompanion,
+	registerCompanion,
+	endSession,
+	type Companion,
+} from "./companion.js";
 
 // MARK: - Sprite Data (inline fallback if PNG not available)
 
@@ -20,347 +25,380 @@ import { generateCompanion, registerCompanion, endSession, type Companion } from
 // 0 = transparent, 1 = body, 2 = accent, 3 = highlight, 4 = eye
 // Default palette (overridden by companion system per session)
 const DEFAULT_PALETTE: Record<number, string> = {
-  0: "",           // transparent
-  1: "\x1b[38;2;26;26;46m",    // body dark navy
-  2: "\x1b[38;2;232;97;10m",   // brand orange
-  3: "\x1b[38;2;255;140;66m",  // accent lighter orange
-  4: "\x1b[38;2;232;97;10m",   // eye orange (same as brand)
-}
+	0: "", // transparent
+	1: "\x1b[38;2;26;26;46m", // body dark navy
+	2: "\x1b[38;2;232;97;10m", // brand orange
+	3: "\x1b[38;2;255;140;66m", // accent lighter orange
+	4: "\x1b[38;2;232;97;10m", // eye orange (same as brand)
+};
 
 // Active palette (set by companion)
-let PALETTE: Record<number, string> = { ...DEFAULT_PALETTE }
+let PALETTE: Record<number, string> = { ...DEFAULT_PALETTE };
 
-const RESET = "\x1b[0m"
-const BLOCK_UPPER = "\u2580" // upper half block
-const BLOCK_LOWER = "\u2584" // lower half block
-const BLOCK_FULL = "\u2588"  // full block
+const RESET = "\x1b[0m";
+const BLOCK_UPPER = "\u2580"; // upper half block
+const BLOCK_LOWER = "\u2584"; // lower half block
+const BLOCK_FULL = "\u2588"; // full block
 
 // Inline pixel art for the idle frame (16x16)
 // Each row is 16 pixels
 const SPRITES: Record<string, number[][]> = {
-  idle: [
-    [0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,2,2,2,2,2,2,2,2,0,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-    [0,0,3,3,1,1,1,1,1,1,1,1,3,3,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0],
-    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  ],
-  "walk-right": [
-    [0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,2,2,2,2,2,2,2,2,0,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-    [0,0,3,3,1,1,1,1,1,1,1,1,3,3,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
-    [0,0,0,0,0,2,2,0,2,2,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  ],
-  "walk-left": [
-    [0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,2,2,2,2,2,2,2,2,0,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-    [0,0,3,3,1,1,1,1,1,1,1,1,3,3,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
-    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  ],
-  think: [
-    [0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,2,2,1,1,2,2,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,2,2,2,2,2,2,2,2,0,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-    [0,0,3,3,1,1,1,1,1,1,1,1,3,3,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0],
-    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  ],
-  sleep: [
-    [0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,0,3,0,0],
-    [0,0,0,0,0,0,0,3,3,0,0,0,3,0,0,0],
-    [0,0,0,0,0,1,1,1,1,1,1,0,0,3,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,3,3,1,1,3,3,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,0,2,2,2,2,2,2,2,2,0,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0],
-    [0,0,3,3,1,1,1,1,1,1,1,1,3,3,0,0],
-    [0,0,0,0,1,1,1,0,0,1,1,1,0,0,0,0],
-    [0,0,0,0,2,2,2,0,0,2,2,2,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-  ],
-}
+	idle: [
+		[0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0],
+		[0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+		[0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+	],
+	"walk-right": [
+		[0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0],
+		[0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+		[0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 2, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+	],
+	"walk-left": [
+		[0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0],
+		[0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+		[0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+	],
+	think: [
+		[0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0],
+		[0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+		[0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+	],
+	sleep: [
+		[0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 3, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 3, 0, 0, 0],
+		[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 3, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 3, 3, 1, 1, 3, 3, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0],
+		[0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+		[0, 0, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 3, 0, 0],
+		[0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0],
+		[0, 0, 0, 0, 2, 2, 2, 0, 0, 2, 2, 2, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+	],
+};
 
 // MARK: - ANSI Sprite Renderer
 
 export function renderSpriteToAnsi(sprite: number[][]): string {
-  const lines: string[] = []
+	const lines: string[] = [];
 
-  // Render using half-block characters (2 pixel rows per terminal row)
-  for (let y = 0; y < sprite.length; y += 2) {
-    let line = ""
-    const topRow = sprite[y] || []
-    const bottomRow = sprite[y + 1] || []
+	// Render using half-block characters (2 pixel rows per terminal row)
+	for (let y = 0; y < sprite.length; y += 2) {
+		let line = "";
+		const topRow = sprite[y] || [];
+		const bottomRow = sprite[y + 1] || [];
 
-    for (let x = 0; x < 16; x++) {
-      const top = topRow[x] || 0
-      const bottom = bottomRow[x] || 0
+		for (let x = 0; x < 16; x++) {
+			const top = topRow[x] || 0;
+			const bottom = bottomRow[x] || 0;
 
-      if (top === 0 && bottom === 0) {
-        line += " " // both transparent
-      } else if (top === 0 && bottom !== 0) {
-        line += (PALETTE[bottom] || "") + BLOCK_LOWER + RESET
-      } else if (top !== 0 && bottom === 0) {
-        line += (PALETTE[top] || "") + BLOCK_UPPER + RESET
-      } else if (top === bottom) {
-        line += (PALETTE[top] || "") + BLOCK_FULL + RESET
-      } else {
-        // Different colors: use upper half block with fg=top, bg=bottom
-        const fgTop = PALETTE[top] || ""
-        // Convert fg ANSI to bg by replacing 38; with 48;
-        const bgBottom = (PALETTE[bottom] || "").replace("38;", "48;")
-        line += fgTop + bgBottom + BLOCK_UPPER + RESET
-      }
-    }
-    lines.push(line)
-  }
+			if (top === 0 && bottom === 0) {
+				line += " "; // both transparent
+			} else if (top === 0 && bottom !== 0) {
+				line += (PALETTE[bottom] || "") + BLOCK_LOWER + RESET;
+			} else if (top !== 0 && bottom === 0) {
+				line += (PALETTE[top] || "") + BLOCK_UPPER + RESET;
+			} else if (top === bottom) {
+				line += (PALETTE[top] || "") + BLOCK_FULL + RESET;
+			} else {
+				// Different colors: use upper half block with fg=top, bg=bottom
+				const fgTop = PALETTE[top] || "";
+				// Convert fg ANSI to bg by replacing 38; with 48;
+				const bgBottom = (PALETTE[bottom] || "").replace("38;", "48;");
+				line += fgTop + bgBottom + BLOCK_UPPER + RESET;
+			}
+		}
+		lines.push(line);
+	}
 
-  return lines.join("\n")
+	return lines.join("\n");
 }
 
 // MARK: - Terminal Pet Controller
 
-type PetState = "idle" | "walk-right" | "walk-left" | "think" | "sleep"
+type PetState = "idle" | "walk-right" | "walk-left" | "think" | "sleep";
 
 export class TerminalPet {
-  private state: PetState = "idle"
-  private posX: number = 0
-  private maxX: number = 60
-  private direction: number = 1
-  private frameIndex: number = 0
-  private animTimer: ReturnType<typeof setInterval> | null = null
-  private idleTimer: ReturnType<typeof setInterval> | null = null
-  private idleSeconds: number = 0
-  private label: string = "eight"
-  private visible: boolean = true
-  public companion: Companion | null = null
-  private sessionId: string = ""
+	private state: PetState = "idle";
+	private posX: number = 0;
+	private maxX: number = 60;
+	private direction: number = 1;
+	private frameIndex: number = 0;
+	private animTimer: ReturnType<typeof setInterval> | null = null;
+	private idleTimer: ReturnType<typeof setInterval> | null = null;
+	private idleSeconds: number = 0;
+	private label: string = "eight";
+	private visible: boolean = true;
+	public companion: Companion | null = null;
+	private sessionId: string = "";
 
-  // Callbacks
-  onRender?: (lines: string[], x: number, label: string) => void
+	// Callbacks
+	onRender?: (lines: string[], x: number, label: string) => void;
 
-  constructor(opts?: { label?: string; maxWidth?: number; sessionId?: string; model?: string }) {
-    this.sessionId = opts?.sessionId || opts?.label || `session-${Date.now()}`
-    this.label = opts?.label || "eight"
-    this.maxX = (opts?.maxWidth || process.stdout.columns || 80) - 18
+	constructor(opts?: {
+		label?: string;
+		maxWidth?: number;
+		sessionId?: string;
+		model?: string;
+	}) {
+		this.sessionId = opts?.sessionId || opts?.label || `session-${Date.now()}`;
+		this.label = opts?.label || "eight";
+		this.maxX = (opts?.maxWidth || process.stdout.columns || 80) - 18;
 
-    // Generate companion identity seeded from session
-    this.companion = generateCompanion(this.sessionId)
-    this.label = this.companion.label
+		// Generate companion identity seeded from session
+		this.companion = generateCompanion(this.sessionId);
+		this.label = this.companion.label;
 
-    // Apply companion's color palette to sprites
-    PALETTE = { ...this.companion.ansiPalette }
+		// Apply companion's color palette to sprites
+		PALETTE = { ...this.companion.ansiPalette };
 
-    // Register in collection deck
-    try { registerCompanion(this.sessionId, this.companion, opts?.model) } catch {}
-  }
+		// Register in collection deck
+		try {
+			registerCompanion(this.sessionId, this.companion, opts?.model);
+		} catch {}
+	}
 
-  start() {
-    this.animTimer = setInterval(() => this.tick(), 200)
-    this.idleTimer = setInterval(() => {
-      this.idleSeconds++
-      if (this.idleSeconds > 120 && this.state !== "sleep") {
-        this.setState("sleep")
-      } else if (this.idleSeconds > 60 && this.state === "idle") {
-        this.setState("sleep")
-      }
-    }, 1000)
-    this.scheduleRandomAction()
-  }
+	start() {
+		this.animTimer = setInterval(() => this.tick(), 200);
+		this.idleTimer = setInterval(() => {
+			this.idleSeconds++;
+			if (this.idleSeconds > 120 && this.state !== "sleep") {
+				this.setState("sleep");
+			} else if (this.idleSeconds > 60 && this.state === "idle") {
+				this.setState("sleep");
+			}
+		}, 1000);
+		this.scheduleRandomAction();
+	}
 
-  stop(summary?: string, toolCalls?: number, tokensUsed?: number) {
-    if (this.animTimer) clearInterval(this.animTimer)
-    if (this.idleTimer) clearInterval(this.idleTimer)
-    // Save session end to deck
-    try { endSession(this.sessionId, summary, toolCalls, tokensUsed) } catch {}
-  }
+	stop(summary?: string, toolCalls?: number, tokensUsed?: number) {
+		if (this.animTimer) clearInterval(this.animTimer);
+		if (this.idleTimer) clearInterval(this.idleTimer);
+		// Save session end to deck
+		try {
+			endSession(this.sessionId, summary, toolCalls, tokensUsed);
+		} catch {}
+	}
 
-  setState(state: PetState) {
-    this.state = state
-    this.frameIndex = 0
-    this.idleSeconds = 0
-  }
+	setState(state: PetState) {
+		this.state = state;
+		this.frameIndex = 0;
+		this.idleSeconds = 0;
+	}
 
-  setLabel(label: string) {
-    this.label = label
-  }
+	setLabel(label: string) {
+		this.label = label;
+	}
 
-  // Called by external events (daemon, agent mesh)
-  onEvent(event: string) {
-    this.idleSeconds = 0
-    switch (event) {
-      case "thinking": this.setState("think"); this.label = "thinking..."; break
-      case "tool:start": this.setState("walk-right"); this.label = "working..."; break
-      case "done": this.setState("idle"); this.label = "done!"; break
-      case "error": this.setState("idle"); this.label = "error!"; break
-      default: break
-    }
-  }
+	// Called by external events (daemon, agent mesh)
+	onEvent(event: string) {
+		this.idleSeconds = 0;
+		switch (event) {
+			case "thinking":
+				this.setState("think");
+				this.label = "thinking...";
+				break;
+			case "tool:start":
+				this.setState("walk-right");
+				this.label = "working...";
+				break;
+			case "done":
+				this.setState("idle");
+				this.label = "done!";
+				break;
+			case "error":
+				this.setState("idle");
+				this.label = "error!";
+				break;
+			default:
+				break;
+		}
+	}
 
-  private tick() {
-    if (!this.visible) return
+	private tick() {
+		if (!this.visible) return;
 
-    const sprite = SPRITES[this.state] || SPRITES.idle
-    const rendered = renderSpriteToAnsi(sprite)
-    const lines = rendered.split("\n")
+		const sprite = SPRITES[this.state] || SPRITES.idle;
+		const rendered = renderSpriteToAnsi(sprite);
+		const lines = rendered.split("\n");
 
-    // Movement
-    if (this.state === "walk-right") {
-      this.posX += 1
-      if (this.posX >= this.maxX) {
-        this.posX = this.maxX
-        this.direction = -1
-        this.state = "walk-left"
-      }
-    } else if (this.state === "walk-left") {
-      this.posX -= 1
-      if (this.posX <= 0) {
-        this.posX = 0
-        this.direction = 1
-        this.state = "walk-right"
-      }
-    }
+		// Movement
+		if (this.state === "walk-right") {
+			this.posX += 1;
+			if (this.posX >= this.maxX) {
+				this.posX = this.maxX;
+				this.direction = -1;
+				this.state = "walk-left";
+			}
+		} else if (this.state === "walk-left") {
+			this.posX -= 1;
+			if (this.posX <= 0) {
+				this.posX = 0;
+				this.direction = 1;
+				this.state = "walk-right";
+			}
+		}
 
-    this.onRender?.(lines, this.posX, this.label)
-  }
+		this.onRender?.(lines, this.posX, this.label);
+	}
 
-  private scheduleRandomAction() {
-    const delay = 4000 + Math.random() * 8000
-    setTimeout(() => {
-      if (this.state === "idle" && this.idleSeconds < 60) {
-        this.setState(Math.random() > 0.5 ? "walk-right" : "walk-left")
-      } else if (this.state === "walk-right" || this.state === "walk-left") {
-        this.setState("idle")
-      }
-      this.scheduleRandomAction()
-    }, delay)
-  }
+	private scheduleRandomAction() {
+		const delay = 4000 + Math.random() * 8000;
+		setTimeout(() => {
+			if (this.state === "idle" && this.idleSeconds < 60) {
+				this.setState(Math.random() > 0.5 ? "walk-right" : "walk-left");
+			} else if (this.state === "walk-right" || this.state === "walk-left") {
+				this.setState("idle");
+			}
+			this.scheduleRandomAction();
+		}, delay);
+	}
 
-  // Render a single frame to string (for embedding in TUI)
-  renderFrame(): { lines: string[]; x: number; label: string } {
-    const sprite = SPRITES[this.state] || SPRITES.idle
-    const rendered = renderSpriteToAnsi(sprite)
-    return { lines: rendered.split("\n"), x: this.posX, label: this.label }
-  }
+	// Render a single frame to string (for embedding in TUI)
+	renderFrame(): { lines: string[]; x: number; label: string } {
+		const sprite = SPRITES[this.state] || SPRITES.idle;
+		const rendered = renderSpriteToAnsi(sprite);
+		return { lines: rendered.split("\n"), x: this.posX, label: this.label };
+	}
 
-  // Cross-platform TTS
-  static speak(text: string) {
-    const { spawn } = require("child_process")
-    const platform = process.platform
+	// Cross-platform TTS
+	static speak(text: string) {
+		const { spawn } = require("child_process");
+		const platform = process.platform;
 
-    const cleaned = text.slice(0, 350).replace(/"/g, "'").replace(/`/g, "")
+		const cleaned = text.slice(0, 350).replace(/"/g, "'").replace(/`/g, "");
 
-    if (platform === "darwin") {
-      spawn("say", ["-v", "Ava", "-r", "190", cleaned], { stdio: "ignore" })
-    } else if (platform === "linux") {
-      // Try espeak, then spd-say, then festival
-      const proc = spawn("espeak", [cleaned], { stdio: "ignore" })
-      proc.on("error", () => {
-        spawn("spd-say", [cleaned], { stdio: "ignore" }).on("error", () => {
-          // No TTS available - silent
-        })
-      })
-    } else if (platform === "win32") {
-      // PowerShell TTS
-      spawn("powershell", ["-Command", `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('${cleaned}')`], { stdio: "ignore" })
-    }
-  }
+		if (platform === "darwin") {
+			spawn("say", ["-v", "Ava", "-r", "190", cleaned], { stdio: "ignore" });
+		} else if (platform === "linux") {
+			// Try espeak, then spd-say, then festival
+			const proc = spawn("espeak", [cleaned], { stdio: "ignore" });
+			proc.on("error", () => {
+				spawn("spd-say", [cleaned], { stdio: "ignore" }).on("error", () => {
+					// No TTS available - silent
+				});
+			});
+		} else if (platform === "win32") {
+			// PowerShell TTS
+			spawn(
+				"powershell",
+				[
+					"-Command",
+					`Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('${cleaned}')`,
+				],
+				{ stdio: "ignore" },
+			);
+		}
+	}
 }
 
 // MARK: - Standalone mode (run directly)
 
 if (import.meta.main) {
-  const sessionId = `${process.env.USER || "eight"}-${Date.now()}`
-  const pet = new TerminalPet({ sessionId })
+	const sessionId = `${process.env.USER || "eight"}-${Date.now()}`;
+	const pet = new TerminalPet({ sessionId });
 
-  // Show companion card on spawn
-  console.log("\x1b[36mLil Eight - Terminal Mode\x1b[0m\n")
-  if (pet.companion) {
-    console.log(pet.companion.card)
-    console.log()
-  }
+	// Show companion card on spawn
+	console.log("\x1b[36mLil Eight - Terminal Mode\x1b[0m\n");
+	if (pet.companion) {
+		console.log(pet.companion.card);
+		console.log();
+	}
 
-  // Simple terminal renderer - draws at bottom of screen
-  const rows = process.stdout.rows || 24
-  const petHeight = 8 // 16px / 2 = 8 terminal rows
+	// Simple terminal renderer - draws at bottom of screen
+	const rows = process.stdout.rows || 24;
+	const petHeight = 8; // 16px / 2 = 8 terminal rows
 
-  pet.onRender = (lines, x, label) => {
-    // Save cursor, move to bottom area, draw, restore
-    const startRow = rows - petHeight - 1
-    const padding = " ".repeat(Math.max(0, x))
+	pet.onRender = (lines, x, label) => {
+		// Save cursor, move to bottom area, draw, restore
+		const startRow = rows - petHeight - 1;
+		const padding = " ".repeat(Math.max(0, x));
 
-    process.stdout.write("\x1b[s") // save cursor
-    for (let i = 0; i < lines.length; i++) {
-      process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`)
-    }
-    // Label below
-    const labelPad = " ".repeat(Math.max(0, x + 4))
-    process.stdout.write(`\x1b[${startRow + lines.length};1H\x1b[2K${labelPad}\x1b[2m${label}\x1b[0m`)
-    process.stdout.write("\x1b[u") // restore cursor
-  }
+		process.stdout.write("\x1b[s"); // save cursor
+		for (let i = 0; i < lines.length; i++) {
+			process.stdout.write(
+				`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`,
+			);
+		}
+		// Label below
+		const labelPad = " ".repeat(Math.max(0, x + 4));
+		process.stdout.write(
+			`\x1b[${startRow + lines.length};1H\x1b[2K${labelPad}\x1b[2m${label}\x1b[0m`,
+		);
+		process.stdout.write("\x1b[u"); // restore cursor
+	};
 
-  pet.start()
+	pet.start();
 
-  // Keep alive
-  process.stdin.resume()
-  process.on("SIGINT", () => {
-    pet.stop()
-    // Clear pet area
-    const startRow = rows - petHeight - 1
-    for (let i = 0; i <= petHeight + 1; i++) {
-      process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K`)
-    }
-    process.exit(0)
-  })
+	// Keep alive
+	process.stdin.resume();
+	process.on("SIGINT", () => {
+		pet.stop();
+		// Clear pet area
+		const startRow = rows - petHeight - 1;
+		for (let i = 0; i <= petHeight + 1; i++) {
+			process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K`);
+		}
+		process.exit(0);
+	});
 
-  console.log("Lil Eight is walking... (Ctrl+C to quit)")
+	console.log("Lil Eight is walking... (Ctrl+C to quit)");
 }

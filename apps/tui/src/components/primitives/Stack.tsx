@@ -16,10 +16,7 @@ export const Stack: React.FC<StackProps> = ({
 	return (
 		<Box flexDirection="column" {...props}>
 			{items.map((child, index) => (
-				<Box
-					key={index}
-					marginBottom={index < items.length - 1 ? gap : 0}
-				>
+				<Box key={index} marginBottom={index < items.length - 1 ? gap : 0}>
 					{child}
 				</Box>
 			))}

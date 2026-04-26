@@ -5,28 +5,28 @@
  */
 
 export interface ApiConfig {
-  baseUrl: string;
-  timeout: number;
-  apiKey?: string;
+	baseUrl: string;
+	timeout: number;
+	apiKey?: string;
 }
 
 export interface ApiResponse<T> {
-  data: T;
-  status: number;
-  headers: Record<string, string>;
+	data: T;
+	status: number;
+	headers: Record<string, string>;
 }
 
 export interface User {
-  id: number;
-  name: string;
-  email: string;
+	id: number;
+	name: string;
+	email: string;
 }
 
 export interface Post {
-  id: number;
-  userId: number;
-  title: string;
-  body: string;
+	id: number;
+	userId: number;
+	title: string;
+	body: string;
 }
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";

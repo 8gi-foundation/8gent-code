@@ -9,14 +9,14 @@ import type { BenchmarkDefinition } from "../../types";
  */
 
 export const longHorizonBenchmarks: BenchmarkDefinition[] = [
-
-  // ── LH001: Build a Full Code Review Bot ────────────────────────────
-  {
-    id: "LH001",
-    category: "long-horizon" as any,
-    title: "GitHub PR Review Bot — AST diff, style checks, security scan, comment generation",
-    difficulty: "hard",
-    prompt: `Build a complete GitHub PR code review system in TypeScript (NO external deps).
+	// ── LH001: Build a Full Code Review Bot ────────────────────────────
+	{
+		id: "LH001",
+		category: "long-horizon" as any,
+		title:
+			"GitHub PR Review Bot — AST diff, style checks, security scan, comment generation",
+		difficulty: "hard",
+		prompt: `Build a complete GitHub PR code review system in TypeScript (NO external deps).
 
 ## Files to Create
 
@@ -74,30 +74,51 @@ Generate structured review comments:
 - Security scanner must not false-positive on variable names (e.g. \`const password = getInput()\`)
 - Style checker must respect config overrides
 - Review score must clamp to 0-100 range`,
-    keywords: [
-      "parseDiff", "FileDiff", "Hunk", "Change",
-      "analyzeChanges", "ChangeAnalysis", "complexity",
-      "scanCode", "SecurityIssue", "severity", "critical",
-      "SQL injection", "XSS", "eval", "hardcoded",
-      "checkStyle", "StyleViolation", "maxLineLength",
-      "generateReview", "ReviewReport", "ReviewComment",
-      "blocker", "warning", "suggestion", "praise",
-      "export", "class", "interface",
-    ],
-    keywordThreshold: 18,
-    testExecution: true,
-    testFile: "categories/long-horizon/tests/LH001-review-bot.test.ts",
-    multiFile: true,
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"parseDiff",
+			"FileDiff",
+			"Hunk",
+			"Change",
+			"analyzeChanges",
+			"ChangeAnalysis",
+			"complexity",
+			"scanCode",
+			"SecurityIssue",
+			"severity",
+			"critical",
+			"SQL injection",
+			"XSS",
+			"eval",
+			"hardcoded",
+			"checkStyle",
+			"StyleViolation",
+			"maxLineLength",
+			"generateReview",
+			"ReviewReport",
+			"ReviewComment",
+			"blocker",
+			"warning",
+			"suggestion",
+			"praise",
+			"export",
+			"class",
+			"interface",
+		],
+		keywordThreshold: 18,
+		testExecution: true,
+		testFile: "categories/long-horizon/tests/LH001-review-bot.test.ts",
+		multiFile: true,
+		timeoutMs: 30000,
+	},
 
-  // ── LH002: Build a Database Migration Engine ──────────────────────
-  {
-    id: "LH002",
-    category: "long-horizon" as any,
-    title: "Database Migration Engine — Schema diff, up/down, rollback, dry-run, dependency graph",
-    difficulty: "hard",
-    prompt: `Build a complete database migration engine in TypeScript (NO external deps).
+	// ── LH002: Build a Database Migration Engine ──────────────────────
+	{
+		id: "LH002",
+		category: "long-horizon" as any,
+		title:
+			"Database Migration Engine — Schema diff, up/down, rollback, dry-run, dependency graph",
+		difficulty: "hard",
+		prompt: `Build a complete database migration engine in TypeScript (NO external deps).
 
 ## Files to Create
 
@@ -152,30 +173,53 @@ Track migration state:
 - Dry run must produce identical statement list to real run
 - Rollback plan must not include migrations that weren't applied
 - History must be consistent: up adds, down removes from applied list`,
-    keywords: [
-      "Column", "Table", "Schema", "Index", "Constraint",
-      "diffSchemas", "SchemaDiff", "generateSQL",
-      "Migration", "MigrationManager", "getExecutionOrder",
-      "topological", "dependencies", "getPending", "getRollbackPlan",
-      "MigrationExecutor", "dryRun", "migrate", "rollback",
-      "ExecutionResult", "acquireLock", "releaseLock",
-      "MigrationHistory", "record", "getApplied", "getTimeline",
-      "CREATE TABLE", "ALTER TABLE", "DROP", "export",
-    ],
-    keywordThreshold: 18,
-    testExecution: true,
-    testFile: "categories/long-horizon/tests/LH002-migration-engine.test.ts",
-    multiFile: true,
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"Column",
+			"Table",
+			"Schema",
+			"Index",
+			"Constraint",
+			"diffSchemas",
+			"SchemaDiff",
+			"generateSQL",
+			"Migration",
+			"MigrationManager",
+			"getExecutionOrder",
+			"topological",
+			"dependencies",
+			"getPending",
+			"getRollbackPlan",
+			"MigrationExecutor",
+			"dryRun",
+			"migrate",
+			"rollback",
+			"ExecutionResult",
+			"acquireLock",
+			"releaseLock",
+			"MigrationHistory",
+			"record",
+			"getApplied",
+			"getTimeline",
+			"CREATE TABLE",
+			"ALTER TABLE",
+			"DROP",
+			"export",
+		],
+		keywordThreshold: 18,
+		testExecution: true,
+		testFile: "categories/long-horizon/tests/LH002-migration-engine.test.ts",
+		multiFile: true,
+		timeoutMs: 30000,
+	},
 
-  // ── LH003: Build a Distributed Task Scheduler ─────────────────────
-  {
-    id: "LH003",
-    category: "long-horizon" as any,
-    title: "Distributed Task Scheduler — Cron parser, priority queue, worker pool, circuit breaker",
-    difficulty: "hard",
-    prompt: `Build a production-grade task scheduler in TypeScript (NO external deps).
+	// ── LH003: Build a Distributed Task Scheduler ─────────────────────
+	{
+		id: "LH003",
+		category: "long-horizon" as any,
+		title:
+			"Distributed Task Scheduler — Cron parser, priority queue, worker pool, circuit breaker",
+		difficulty: "hard",
+		prompt: `Build a production-grade task scheduler in TypeScript (NO external deps).
 
 ## Files to Create
 
@@ -245,29 +289,54 @@ Main scheduler orchestrating everything:
 - Circuit breaker state transitions must be atomic
 - Scheduler must handle tasks due at the same time (all get queued)
 - Shutdown must be graceful (finish running, don't start new)`,
-    keywords: [
-      "parseCron", "CronSchedule", "getNextRun", "getNextNRuns",
-      "PriorityQueue", "enqueue", "dequeue", "heap",
-      "WorkerPool", "submit", "drain", "shutdown", "maxWorkers",
-      "CircuitBreaker", "closed", "open", "half-open", "failureThreshold",
-      "CircuitOpenError", "execute", "getState", "getStats",
-      "TaskScheduler", "schedule", "unschedule", "start", "stop",
-      "export", "class", "interface", "async",
-    ],
-    keywordThreshold: 20,
-    testExecution: true,
-    testFile: "categories/long-horizon/tests/LH003-scheduler.test.ts",
-    multiFile: true,
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"parseCron",
+			"CronSchedule",
+			"getNextRun",
+			"getNextNRuns",
+			"PriorityQueue",
+			"enqueue",
+			"dequeue",
+			"heap",
+			"WorkerPool",
+			"submit",
+			"drain",
+			"shutdown",
+			"maxWorkers",
+			"CircuitBreaker",
+			"closed",
+			"open",
+			"half-open",
+			"failureThreshold",
+			"CircuitOpenError",
+			"execute",
+			"getState",
+			"getStats",
+			"TaskScheduler",
+			"schedule",
+			"unschedule",
+			"start",
+			"stop",
+			"export",
+			"class",
+			"interface",
+			"async",
+		],
+		keywordThreshold: 20,
+		testExecution: true,
+		testFile: "categories/long-horizon/tests/LH003-scheduler.test.ts",
+		multiFile: true,
+		timeoutMs: 30000,
+	},
 
-  // ── LH004: Full-Stack API Gateway ─────────────────────────────────
-  {
-    id: "LH004",
-    category: "long-horizon" as any,
-    title: "API Gateway — Request routing, middleware chain, rate limiting, caching, request transformation",
-    difficulty: "hard",
-    prompt: `Build a complete API gateway framework in TypeScript (NO external deps).
+	// ── LH004: Full-Stack API Gateway ─────────────────────────────────
+	{
+		id: "LH004",
+		category: "long-horizon" as any,
+		title:
+			"API Gateway — Request routing, middleware chain, rate limiting, caching, request transformation",
+		difficulty: "hard",
+		prompt: `Build a complete API gateway framework in TypeScript (NO external deps).
 
 ## Files to Create
 
@@ -352,31 +421,57 @@ Main gateway combining everything:
 - Cache must be LRU with proper TTL expiration
 - Request transformer must be immutable (return new object)
 - Gateway must handle concurrent requests safely`,
-    keywords: [
-      "Router", "route", "match", "RouteMatch", "params", "query",
-      "MiddlewarePipeline", "use", "execute", "next", "Middleware",
-      "cors", "logging", "error",
-      "ResponseCache", "CachedResponse", "invalidate", "hitRate",
-      "cacheMiddleware", "LRU", "TTL",
-      "RequestTransformer", "ResponseTransformer", "rewritePath", "addHeader",
-      "APIGateway", "handleRequest", "GatewayRequest", "GatewayResponse",
-      "rateLimitMiddleware", "429",
-      "export", "class", "async",
-    ],
-    keywordThreshold: 20,
-    testExecution: true,
-    testFile: "categories/long-horizon/tests/LH004-api-gateway.test.ts",
-    multiFile: true,
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"Router",
+			"route",
+			"match",
+			"RouteMatch",
+			"params",
+			"query",
+			"MiddlewarePipeline",
+			"use",
+			"execute",
+			"next",
+			"Middleware",
+			"cors",
+			"logging",
+			"error",
+			"ResponseCache",
+			"CachedResponse",
+			"invalidate",
+			"hitRate",
+			"cacheMiddleware",
+			"LRU",
+			"TTL",
+			"RequestTransformer",
+			"ResponseTransformer",
+			"rewritePath",
+			"addHeader",
+			"APIGateway",
+			"handleRequest",
+			"GatewayRequest",
+			"GatewayResponse",
+			"rateLimitMiddleware",
+			"429",
+			"export",
+			"class",
+			"async",
+		],
+		keywordThreshold: 20,
+		testExecution: true,
+		testFile: "categories/long-horizon/tests/LH004-api-gateway.test.ts",
+		multiFile: true,
+		timeoutMs: 30000,
+	},
 
-  // ── LH005: Build a CLI Framework ──────────────────────────────────
-  {
-    id: "LH005",
-    category: "long-horizon" as any,
-    title: "CLI Framework — Arg parser, command registry, help generator, interactive prompts, progress bars",
-    difficulty: "hard",
-    prompt: `Build a complete CLI framework in TypeScript (NO external deps).
+	// ── LH005: Build a CLI Framework ──────────────────────────────────
+	{
+		id: "LH005",
+		category: "long-horizon" as any,
+		title:
+			"CLI Framework — Arg parser, command registry, help generator, interactive prompts, progress bars",
+		difficulty: "hard",
+		prompt: `Build a complete CLI framework in TypeScript (NO external deps).
 
 ## Files to Create
 
@@ -457,20 +552,39 @@ Output formatting utilities:
 - Progress bar ETA must smooth jitter (moving average of last 10 updates)
 - Table must handle multi-line cells and ANSI color codes in width calculation
 - Formatter must handle Unicode characters correctly in width calculation`,
-    keywords: [
-      "parseArgs", "ArgDefinition", "ParsedArgs", "positionals",
-      "CommandRegistry", "register", "dispatch", "CommandDefinition",
-      "subcommands", "Levenshtein",
-      "generateHelp", "generateCommandList",
-      "ProgressBar", "update", "increment", "ETA", "rate",
-      "Spinner", "frame",
-      "table", "colorize", "ANSI", "truncate", "wordWrap",
-      "export", "class", "interface",
-    ],
-    keywordThreshold: 18,
-    testExecution: true,
-    testFile: "categories/long-horizon/tests/LH005-cli-framework.test.ts",
-    multiFile: true,
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"parseArgs",
+			"ArgDefinition",
+			"ParsedArgs",
+			"positionals",
+			"CommandRegistry",
+			"register",
+			"dispatch",
+			"CommandDefinition",
+			"subcommands",
+			"Levenshtein",
+			"generateHelp",
+			"generateCommandList",
+			"ProgressBar",
+			"update",
+			"increment",
+			"ETA",
+			"rate",
+			"Spinner",
+			"frame",
+			"table",
+			"colorize",
+			"ANSI",
+			"truncate",
+			"wordWrap",
+			"export",
+			"class",
+			"interface",
+		],
+		keywordThreshold: 18,
+		testExecution: true,
+		testFile: "categories/long-horizon/tests/LH005-cli-framework.test.ts",
+		multiFile: true,
+		timeoutMs: 30000,
+	},
 ];

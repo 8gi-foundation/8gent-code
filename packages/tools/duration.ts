@@ -4,17 +4,17 @@
  * @returns The duration in milliseconds.
  */
 function parse(str: string): number {
-  let total = 0;
-  const tokens = str.split(/\s+/);
-  for (const token of tokens) {
-    const match = token.match(/^(-?\d+)([ywdhms]+)/);
-    if (!match) continue;
-    const [_, numStr, unit] = match;
-    const num = parseFloat(numStr);
-    const unitValue = units[unit as keyof typeof units] || 0;
-    total += num * unitValue;
-  }
-  return total;
+	let total = 0;
+	const tokens = str.split(/\s+/);
+	for (const token of tokens) {
+		const match = token.match(/^(-?\d+)([ywdhms]+)/);
+		if (!match) continue;
+		const [_, numStr, unit] = match;
+		const num = parseFloat(numStr);
+		const unitValue = units[unit as keyof typeof units] || 0;
+		total += num * unitValue;
+	}
+	return total;
 }
 
 /**
@@ -24,18 +24,18 @@ function parse(str: string): number {
  * @returns The formatted duration string.
  */
 function format(ms: number, precision: number = 0): string {
-  const parts: string[] = [];
-  const unitOrder = ['y', 'w', 'd', 'h', 'm', 's', 'ms'];
-  for (const unit of unitOrder) {
-    const unitValue = units[unit as keyof typeof units];
-    if (unitValue === undefined) continue;
-    const value = ms / unitValue;
-    if (value === 0) continue;
-    const formattedValue = value.toFixed(precision);
-    parts.push(`${formattedValue}${unit}`);
-    ms -= value * unitValue;
-  }
-  return parts.join(' ');
+	const parts: string[] = [];
+	const unitOrder = ["y", "w", "d", "h", "m", "s", "ms"];
+	for (const unit of unitOrder) {
+		const unitValue = units[unit as keyof typeof units];
+		if (unitValue === undefined) continue;
+		const value = ms / unitValue;
+		if (value === 0) continue;
+		const formattedValue = value.toFixed(precision);
+		parts.push(`${formattedValue}${unit}`);
+		ms -= value * unitValue;
+	}
+	return parts.join(" ");
 }
 
 /**
@@ -44,18 +44,18 @@ function format(ms: number, precision: number = 0): string {
  * @returns The humanized string (e.g., '2 hours').
  */
 function humanize(ms: number): string {
-  const unitOrder = ['y', 'w', 'd', 'h', 'm', 's', 'ms'];
-  for (const unit of unitOrder) {
-    const unitValue = units[unit as keyof typeof units];
-    if (unitValue === undefined) continue;
-    const value = Math.floor(ms / unitValue);
-    if (value > 0) {
-      const name = unitNames[unit as keyof typeof unitNames];
-      const plural = value !== 1 ? 's' : '';
-      return `${value} ${name}${plural}`;
-    }
-  }
-  return '0 milliseconds';
+	const unitOrder = ["y", "w", "d", "h", "m", "s", "ms"];
+	for (const unit of unitOrder) {
+		const unitValue = units[unit as keyof typeof units];
+		if (unitValue === undefined) continue;
+		const value = Math.floor(ms / unitValue);
+		if (value > 0) {
+			const name = unitNames[unit as keyof typeof unitNames];
+			const plural = value !== 1 ? "s" : "";
+			return `${value} ${name}${plural}`;
+		}
+	}
+	return "0 milliseconds";
 }
 
 /**
@@ -65,7 +65,7 @@ function humanize(ms: number): string {
  * @returns Sum of the durations.
  */
 function add(ms1: number, ms2: number): number {
-  return ms1 + ms2;
+	return ms1 + ms2;
 }
 
 /**
@@ -75,27 +75,27 @@ function add(ms1: number, ms2: number): number {
  * @returns Difference of the durations.
  */
 function subtract(ms1: number, ms2: number): number {
-  return ms1 - ms2;
+	return ms1 - ms2;
 }
 
 const units = {
-  y: 31536000000,
-  w: 604800000,
-  d: 86400000,
-  h: 3600000,
-  m: 60000,
-  s: 1000,
-  ms: 1,
+	y: 31536000000,
+	w: 604800000,
+	d: 86400000,
+	h: 3600000,
+	m: 60000,
+	s: 1000,
+	ms: 1,
 };
 
 const unitNames = {
-  y: 'year',
-  w: 'week',
-  d: 'day',
-  h: 'hour',
-  m: 'minute',
-  s: 'second',
-  ms: 'millisecond',
+	y: "year",
+	w: "week",
+	d: "day",
+	h: "hour",
+	m: "minute",
+	s: "second",
+	ms: "millisecond",
 };
 
 export { parse, format, humanize, add, subtract };

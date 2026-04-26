@@ -8,10 +8,10 @@
  */
 
 import {
-  composeSoulPrompt,
-  determineTier,
-  type AccessTier,
-  type UserContext,
+	composeSoulPrompt,
+	determineTier,
+	type AccessTier,
+	type UserContext,
 } from "./soul-layers";
 import { loadInstructions } from "../instruction-loader";
 import { getRepoMapper } from "../../repo-context";
@@ -34,34 +34,36 @@ export const IDENTITY_SEGMENT = composeSoulPrompt("owner");
  * Kept for backward compatibility with any direct imports.
  */
 export const USER_CONTEXT_SEGMENT = (userData: {
-  name?: string | null;
-  role?: string | null;
-  communicationStyle?: string | null;
-  language?: string;
-  preferences?: Record<string, unknown>;
+	name?: string | null;
+	role?: string | null;
+	communicationStyle?: string | null;
+	language?: string;
+	preferences?: Record<string, unknown>;
 }) => {
-  const parts: string[] = ["## USER CONTEXT"];
+	const parts: string[] = ["## USER CONTEXT"];
 
-  if (userData.name) {
-    parts.push(`You are working with **${userData.name}**.`);
-  }
-  if (userData.role) {
-    parts.push(`Their role: ${userData.role}.`);
-  }
-  if (userData.communicationStyle) {
-    const styleGuide: Record<string, string> = {
-      concise: "Be brief and direct. Skip explanations unless asked.",
-      detailed: "Explain your reasoning. Teach as you go.",
-      casual: "Keep it friendly and collaborative. We're partners.",
-      formal: "Maintain professional tone. Be precise.",
-    };
-    parts.push(`Communication style: **${userData.communicationStyle}** — ${styleGuide[userData.communicationStyle] || ""}`);
-  }
-  if (userData.language && userData.language !== "en") {
-    parts.push(`Respond in: ${userData.language}`);
-  }
+	if (userData.name) {
+		parts.push(`You are working with **${userData.name}**.`);
+	}
+	if (userData.role) {
+		parts.push(`Their role: ${userData.role}.`);
+	}
+	if (userData.communicationStyle) {
+		const styleGuide: Record<string, string> = {
+			concise: "Be brief and direct. Skip explanations unless asked.",
+			detailed: "Explain your reasoning. Teach as you go.",
+			casual: "Keep it friendly and collaborative. We're partners.",
+			formal: "Maintain professional tone. Be precise.",
+		};
+		parts.push(
+			`Communication style: **${userData.communicationStyle}** — ${styleGuide[userData.communicationStyle] || ""}`,
+		);
+	}
+	if (userData.language && userData.language !== "en") {
+		parts.push(`Respond in: ${userData.language}`);
+	}
 
-  return parts.length > 1 ? parts.join("\n") : "";
+	return parts.length > 1 ? parts.join("\n") : "";
 };
 
 export const ARCHITECTURE_SEGMENT = `## SELF-KNOWLEDGE
@@ -123,24 +125,25 @@ Before ANY task:
  * not just raw tool names.
  */
 const TOOL_CATEGORY_DESCRIPTIONS: Record<string, string> = {
-  core: "Read, write, and run. File I/O, shell, code structure (outline/symbol/search).",
-  git: "Branching, staging, diffing, committing, pushing. Full local git.",
-  github: "PRs and issues via `gh`. List, create, view, manage.",
-  web: "HTTP fetch + web search. USE THIS when you need current info, docs, or external data.",
-  notes: "Persist short notes to disk for later recall.",
-  terminal: "Write into the user's live terminal session.",
-  lsp: "Language-server queries: definitions, references, hover, diagnostics.",
-  media: "Images, PDFs, Jupyter notebooks — read and edit.",
-  orchestration: "Spawn and coordinate sub-agents. Delegate, message, merge work.",
-  background: "Start long-running background tasks and stream their output.",
-  mcp: "List and call tools from connected MCP servers.",
+	core: "Read, write, and run. File I/O, shell, code structure (outline/symbol/search).",
+	git: "Branching, staging, diffing, committing, pushing. Full local git.",
+	github: "PRs and issues via `gh`. List, create, view, manage.",
+	web: "HTTP fetch + web search. USE THIS when you need current info, docs, or external data.",
+	notes: "Persist short notes to disk for later recall.",
+	terminal: "Write into the user's live terminal session.",
+	lsp: "Language-server queries: definitions, references, hover, diagnostics.",
+	media: "Images, PDFs, Jupyter notebooks — read and edit.",
+	orchestration:
+		"Spawn and coordinate sub-agents. Delegate, message, merge work.",
+	background: "Start long-running background tasks and stream their output.",
+	mcp: "List and call tools from connected MCP servers.",
 };
 
 export interface ToolCatalogOptions {
-  /** When true, emit category names + tool names only (skip descriptions). */
-  concise?: boolean;
-  /** When true, tell the model to call discover_tools before using a category. */
-  deferred?: boolean;
+	/** When true, emit category names + tool names only (skip descriptions). */
+	concise?: boolean;
+	/** When true, tell the model to call discover_tools before using a category. */
+	deferred?: boolean;
 }
 
 /**
@@ -151,42 +154,42 @@ export interface ToolCatalogOptions {
  * new tool to the registry flows into the prompt automatically.
  */
 export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
-  const { concise = false, deferred = false } = opts;
-  const lines: string[] = ["## TOOLS YOU HAVE"];
+	const { concise = false, deferred = false } = opts;
+	const lines: string[] = ["## TOOLS YOU HAVE"];
 
-  if (deferred) {
-    lines.push(
-      "",
-      "Core tools (file, shell, code exploration) are already loaded.",
-      "To use a tool from another category, call `discover_tools` first with the category name.",
-    );
-  } else {
-    lines.push(
-      "",
-      "These tools are available right now. Call them directly — do not say you cannot do something until you have tried the relevant tool.",
-    );
-  }
-  lines.push("");
+	if (deferred) {
+		lines.push(
+			"",
+			"Core tools (file, shell, code exploration) are already loaded.",
+			"To use a tool from another category, call `discover_tools` first with the category name.",
+		);
+	} else {
+		lines.push(
+			"",
+			"These tools are available right now. Call them directly — do not say you cannot do something until you have tried the relevant tool.",
+		);
+	}
+	lines.push("");
 
-  for (const [category, toolNames] of Object.entries(TOOL_CATEGORIES)) {
-    if (!toolNames || toolNames.length === 0) continue;
-    const desc = TOOL_CATEGORY_DESCRIPTIONS[category] ?? "";
-    if (concise) {
-      lines.push(`- **${category}**: ${toolNames.join(", ")}`);
-    } else {
-      lines.push(`### ${category}`);
-      if (desc) lines.push(desc);
-      lines.push(toolNames.map((t) => `\`${t}\``).join(", "));
-      lines.push("");
-    }
-  }
+	for (const [category, toolNames] of Object.entries(TOOL_CATEGORIES)) {
+		if (!toolNames || toolNames.length === 0) continue;
+		const desc = TOOL_CATEGORY_DESCRIPTIONS[category] ?? "";
+		if (concise) {
+			lines.push(`- **${category}**: ${toolNames.join(", ")}`);
+		} else {
+			lines.push(`### ${category}`);
+			if (desc) lines.push(desc);
+			lines.push(toolNames.map((t) => `\`${t}\``).join(", "));
+			lines.push("");
+		}
+	}
 
-  lines.push(
-    "",
-    "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access — you do.**",
-  );
+	lines.push(
+		"",
+		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access — you do.**",
+	);
 
-  return lines.join("\n");
+	return lines.join("\n");
 }
 
 /**
@@ -383,28 +386,30 @@ export const RULES_SEGMENT = `## CRITICAL RULES
  */
 /** Build full system prompt lazily (reads env vars at call time, not import time) */
 export function getFullSystemPrompt(): string {
-  // Load project-level instruction files (8GENT.md / AGENTS.md / CLAUDE.md)
-  const instructions = loadInstructions(process.cwd());
-  const instructionSegment = instructions
-    ? `## PROJECT INSTRUCTIONS\n\n${instructions}`
-    : "";
+	// Load project-level instruction files (8GENT.md / AGENTS.md / CLAUDE.md)
+	const instructions = loadInstructions(process.cwd());
+	const instructionSegment = instructions
+		? `## PROJECT INSTRUCTIONS\n\n${instructions}`
+		: "";
 
-  return [
-    composeSoulPrompt("owner"),
-    // Inject vessel context if running as a deployed instance
-    process.env.EIGHT_VESSEL_CONTEXT || "",
-    instructionSegment,
-    ARCHITECTURE_SEGMENT,
-    TOOL_CATALOG_SEGMENT,
-    BMAD_SEGMENT,
-    THINKING_PATTERNS_SEGMENT,
-    SWE_PATTERNS_SEGMENT,
-    TOOL_PATTERNS_SEGMENT,
-    DESIGN_FIRST_SEGMENT,
-    ERROR_RECOVERY_SEGMENT,
-    COMPLETION_SEGMENT,
-    RULES_SEGMENT,
-  ].filter(Boolean).join("\n\n");
+	return [
+		composeSoulPrompt("owner"),
+		// Inject vessel context if running as a deployed instance
+		process.env.EIGHT_VESSEL_CONTEXT || "",
+		instructionSegment,
+		ARCHITECTURE_SEGMENT,
+		TOOL_CATALOG_SEGMENT,
+		BMAD_SEGMENT,
+		THINKING_PATTERNS_SEGMENT,
+		SWE_PATTERNS_SEGMENT,
+		TOOL_PATTERNS_SEGMENT,
+		DESIGN_FIRST_SEGMENT,
+		ERROR_RECOVERY_SEGMENT,
+		COMPLETION_SEGMENT,
+		RULES_SEGMENT,
+	]
+		.filter(Boolean)
+		.join("\n\n");
 }
 
 /** @deprecated Use getFullSystemPrompt() for lazy env var evaluation */
@@ -415,29 +420,31 @@ export const FULL_SYSTEM_PROMPT = getFullSystemPrompt();
  * Includes all tool/coding segments, but identity layer varies by tier.
  */
 export function buildTieredSystemPrompt(
-  tier: AccessTier,
-  userContext?: UserContext,
+	tier: AccessTier,
+	userContext?: UserContext,
 ): string {
-  const instructions = loadInstructions(process.cwd());
-  const instructionSegment = instructions
-    ? `## PROJECT INSTRUCTIONS\n\n${instructions}`
-    : "";
+	const instructions = loadInstructions(process.cwd());
+	const instructionSegment = instructions
+		? `## PROJECT INSTRUCTIONS\n\n${instructions}`
+		: "";
 
-  return [
-    composeSoulPrompt(tier, userContext),
-    instructionSegment,
-    ARCHITECTURE_SEGMENT,
-    TOOL_CATALOG_SEGMENT,
-    BMAD_SEGMENT,
-    THINKING_PATTERNS_SEGMENT,
-    SWE_PATTERNS_SEGMENT,
-    TOOL_PATTERNS_SEGMENT,
-    DESIGN_FIRST_SEGMENT,
-    ERROR_RECOVERY_SEGMENT,
-    GITHUB_AUTH_SEGMENT,
-    COMPLETION_SEGMENT,
-    RULES_SEGMENT,
-  ].filter(Boolean).join("\n\n");
+	return [
+		composeSoulPrompt(tier, userContext),
+		instructionSegment,
+		ARCHITECTURE_SEGMENT,
+		TOOL_CATALOG_SEGMENT,
+		BMAD_SEGMENT,
+		THINKING_PATTERNS_SEGMENT,
+		SWE_PATTERNS_SEGMENT,
+		TOOL_PATTERNS_SEGMENT,
+		DESIGN_FIRST_SEGMENT,
+		ERROR_RECOVERY_SEGMENT,
+		GITHUB_AUTH_SEGMENT,
+		COMPLETION_SEGMENT,
+		RULES_SEGMENT,
+	]
+		.filter(Boolean)
+		.join("\n\n");
 }
 
 /**
@@ -508,16 +515,16 @@ let _repoContextCache: string | null = null;
  * Scans on first call, caches the mapper, re-ranks per query.
  */
 export async function getRepoContext(
-  query: string,
-  rootDir?: string,
-  maxTokens = 4000,
+	query: string,
+	rootDir?: string,
+	maxTokens = 4000,
 ): Promise<string> {
-  try {
-    const mapper = await getRepoMapper(rootDir);
-    return await mapper.getContext(query, maxTokens);
-  } catch {
-    return ""; // graceful fallback - no repo context
-  }
+	try {
+		const mapper = await getRepoMapper(rootDir);
+		return await mapper.getContext(query, maxTokens);
+	} catch {
+		return ""; // graceful fallback - no repo context
+	}
 }
 
 // ============================================
@@ -527,31 +534,33 @@ export async function getRepoContext(
 /**
  * Compress conversation history to essential context
  */
-export function compressContext(messages: Array<{ role: string; content: string }>): string {
-  const essentials: string[] = [];
+export function compressContext(
+	messages: Array<{ role: string; content: string }>,
+): string {
+	const essentials: string[] = [];
 
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      // Keep user messages short
-      essentials.push(`USER: ${msg.content.slice(0, 200)}`);
-    } else if (msg.role === "assistant") {
-      // Extract only tool calls and completions
-      const toolMatch = msg.content.match(/\{"tool":\s*"[^"]+"/g);
-      if (toolMatch) {
-        essentials.push(`TOOLS: ${toolMatch.join(", ")}`);
-      }
-      const completionMatch = msg.content.match(/🎯 COMPLETED:.*/);
-      if (completionMatch) {
-        essentials.push(completionMatch[0]);
-      }
-    } else if (msg.role === "tool") {
-      // Summarize tool results
-      const preview = msg.content.slice(0, 100);
-      essentials.push(`RESULT: ${preview}...`);
-    }
-  }
+	for (const msg of messages) {
+		if (msg.role === "user") {
+			// Keep user messages short
+			essentials.push(`USER: ${msg.content.slice(0, 200)}`);
+		} else if (msg.role === "assistant") {
+			// Extract only tool calls and completions
+			const toolMatch = msg.content.match(/\{"tool":\s*"[^"]+"/g);
+			if (toolMatch) {
+				essentials.push(`TOOLS: ${toolMatch.join(", ")}`);
+			}
+			const completionMatch = msg.content.match(/🎯 COMPLETED:.*/);
+			if (completionMatch) {
+				essentials.push(completionMatch[0]);
+			}
+		} else if (msg.role === "tool") {
+			// Summarize tool results
+			const preview = msg.content.slice(0, 100);
+			essentials.push(`RESULT: ${preview}...`);
+		}
+	}
 
-  return essentials.join("\n");
+	return essentials.join("\n");
 }
 
 /**
@@ -559,80 +568,82 @@ export function compressContext(messages: Array<{ role: string; content: string 
  * Uses soul layers for identity - tier and channel determine access level.
  */
 export function buildContextualPrompt(state: {
-  workingDirectory: string;
-  isGitRepo: boolean;
-  branch?: string;
-  modifiedFiles?: string[];
-  currentPlan?: string;
-  infiniteMode?: boolean;
-  userData?: {
-    name?: string | null;
-    role?: string | null;
-    communicationStyle?: string | null;
-    language?: string;
-  };
-  memoryContext?: string;
-  channel?: string;
-  userId?: string;
+	workingDirectory: string;
+	isGitRepo: boolean;
+	branch?: string;
+	modifiedFiles?: string[];
+	currentPlan?: string;
+	infiniteMode?: boolean;
+	userData?: {
+		name?: string | null;
+		role?: string | null;
+		communicationStyle?: string | null;
+		language?: string;
+	};
+	memoryContext?: string;
+	channel?: string;
+	userId?: string;
 }): string {
-  // Determine access tier from channel
-  const tier = state.channel
-    ? determineTier(state.channel, state.userId)
-    : "owner";
+	// Determine access tier from channel
+	const tier = state.channel
+		? determineTier(state.channel, state.userId)
+		: "owner";
 
-  // Build user context for soul layers
-  const userContext: UserContext | undefined = state.userData
-    ? {
-        name: state.userData.name ?? undefined,
-        role: state.userData.role ?? undefined,
-        communicationStyle:
-          state.userData.communicationStyle ?? undefined,
-        peerRepresentation: state.memoryContext ?? undefined,
-      }
-    : state.memoryContext
-      ? { peerRepresentation: state.memoryContext }
-      : undefined;
+	// Build user context for soul layers
+	const userContext: UserContext | undefined = state.userData
+		? {
+				name: state.userData.name ?? undefined,
+				role: state.userData.role ?? undefined,
+				communicationStyle: state.userData.communicationStyle ?? undefined,
+				peerRepresentation: state.memoryContext ?? undefined,
+			}
+		: state.memoryContext
+			? { peerRepresentation: state.memoryContext }
+			: undefined;
 
-  const contextSection = `## CURRENT CONTEXT
+	const contextSection = `## CURRENT CONTEXT
 - Directory: ${state.workingDirectory}
 - Git: ${state.isGitRepo ? `Yes (${state.branch || "unknown"})` : "No"}
 ${state.modifiedFiles?.length ? `- Modified: ${state.modifiedFiles.slice(0, 5).join(", ")}` : ""}
 ${state.currentPlan ? `- Plan in progress: Yes` : ""}
 ${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
 
-  const instructions = loadInstructions(state.workingDirectory);
-  const instructionSegment = instructions
-    ? `## PROJECT INSTRUCTIONS\n\n${instructions}`
-    : "";
+	const instructions = loadInstructions(state.workingDirectory);
+	const instructionSegment = instructions
+		? `## PROJECT INSTRUCTIONS\n\n${instructions}`
+		: "";
 
-  return [
-    composeSoulPrompt(tier, userContext),
-    contextSection,
-    instructionSegment,
-    TOOL_CATALOG_SEGMENT,
-    BMAD_SEGMENT,
-    TOOL_PATTERNS_SEGMENT,
-    DESIGN_FIRST_SEGMENT,
-    ERROR_RECOVERY_SEGMENT,
-    RULES_SEGMENT,
-  ].filter(Boolean).join("\n\n");
+	return [
+		composeSoulPrompt(tier, userContext),
+		contextSection,
+		instructionSegment,
+		TOOL_CATALOG_SEGMENT,
+		BMAD_SEGMENT,
+		TOOL_PATTERNS_SEGMENT,
+		DESIGN_FIRST_SEGMENT,
+		ERROR_RECOVERY_SEGMENT,
+		RULES_SEGMENT,
+	]
+		.filter(Boolean)
+		.join("\n\n");
 }
 
 /**
  * Get token-efficient prompt for specific task types
  */
-export function getTaskSpecificPrompt(taskType: "explore" | "modify" | "debug" | "test" | "git"): string {
-  const prompts: Record<string, string> = {
-    explore: `Explore codebase. Use: get_outline → search_symbols → get_symbol. Report findings.`,
-    modify: `Modify code. Use: read_file → edit_file → verify. Commit changes.`,
-    debug: `Debug issue. Use: search_symbols → read_file → analyze. Fix and test.`,
-    test: `Run/create tests. Use: run_command → analyze output. Report results.`,
-    git: `Git operations. Use: git_status → git_add → git_commit. Conventional commits.`,
-  };
+export function getTaskSpecificPrompt(
+	taskType: "explore" | "modify" | "debug" | "test" | "git",
+): string {
+	const prompts: Record<string, string> = {
+		explore: `Explore codebase. Use: get_outline → search_symbols → get_symbol. Report findings.`,
+		modify: `Modify code. Use: read_file → edit_file → verify. Commit changes.`,
+		debug: `Debug issue. Use: search_symbols → read_file → analyze. Fix and test.`,
+		test: `Run/create tests. Use: run_command → analyze output. Report results.`,
+		git: `Git operations. Use: git_status → git_add → git_commit. Conventional commits.`,
+	};
 
-  return prompts[taskType] || SUBAGENT_SYSTEM_PROMPT;
+	return prompts[taskType] || SUBAGENT_SYSTEM_PROMPT;
 }
-
 
 // Gap: 3 points on FM001
 
@@ -682,106 +693,6 @@ export const BUG_FIXING_ENHANCED = `
 `;
 
 // Gap: 43 points on FI001
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 export const FEATURE_IMPLEMENTATION_ENHANCED = `
 ## Enhanced Feature Implementation Protocol (Autoresearch-tuned)

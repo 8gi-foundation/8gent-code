@@ -9,9 +9,14 @@ import { join } from "path";
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 const MODEL = process.env.MODEL || "qwen3.5:latest";
-const OUTPUT = join(import.meta.dir, "../benchmarks/ui-samples/8gent-one-landing.html");
+const OUTPUT = join(
+	import.meta.dir,
+	"../benchmarks/ui-samples/8gent-one-landing.html",
+);
 
-mkdirSync(join(import.meta.dir, "../benchmarks/ui-samples"), { recursive: true });
+mkdirSync(join(import.meta.dir, "../benchmarks/ui-samples"), {
+	recursive: true,
+});
 
 const prompt = `You are a world-class frontend developer specializing in hardware product landing pages.
 
@@ -60,26 +65,30 @@ console.log("This may take 3-5 minutes.\n");
 
 const start = Date.now();
 const res = await fetch(OLLAMA_URL, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    model: MODEL,
-    messages: [
-      { role: "system", content: "You are a frontend developer. Output ONLY complete HTML. No explanations. No markdown. Start with <!DOCTYPE html>." },
-      { role: "user", content: prompt },
-    ],
-    stream: false,
-    options: { num_predict: 16384, temperature: 0.4 },
-  }),
-  signal: AbortSignal.timeout(600_000), // 10 minute timeout
+	method: "POST",
+	headers: { "Content-Type": "application/json" },
+	body: JSON.stringify({
+		model: MODEL,
+		messages: [
+			{
+				role: "system",
+				content:
+					"You are a frontend developer. Output ONLY complete HTML. No explanations. No markdown. Start with <!DOCTYPE html>.",
+			},
+			{ role: "user", content: prompt },
+		],
+		stream: false,
+		options: { num_predict: 16384, temperature: 0.4 },
+	}),
+	signal: AbortSignal.timeout(600_000), // 10 minute timeout
 });
 
 if (!res.ok) {
-  console.error(`Ollama error: ${res.status}`);
-  process.exit(1);
+	console.error(`Ollama error: ${res.status}`);
+	process.exit(1);
 }
 
-const data = await res.json() as any;
+const data = (await res.json()) as any;
 let html = data.message?.content || "";
 
 // Clean up if wrapped in markdown

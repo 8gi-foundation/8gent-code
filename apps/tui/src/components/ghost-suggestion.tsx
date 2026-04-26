@@ -16,29 +16,37 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import {
-  useGhostSuggestion,
-  GhostSuggestion,
-  SuggestionSource,
-  getSuggestionSourceLabel,
+	useGhostSuggestion,
+	GhostSuggestion,
+	SuggestionSource,
+	getSuggestionSourceLabel,
 } from "../hooks/use-ghost-suggestion.js";
-import { AppText, MutedText, Label, ShortcutHint, Inline, Stack, Badge } from './primitives/index.js';
+import {
+	AppText,
+	MutedText,
+	Label,
+	ShortcutHint,
+	Inline,
+	Stack,
+	Badge,
+} from "./primitives/index.js";
 
 // ============================================
 // Types
 // ============================================
 
 export interface GhostInputProps {
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: (value: string) => void;
-  placeholder?: string;
-  isProcessing?: boolean;
-  // Ghost suggestion options
-  isGitRepo?: boolean;
-  currentBranch?: string | null;
-  planNextStep?: string | null;
-  recentCommands?: string[];
-  showSourceHint?: boolean;
+	value: string;
+	onChange: (value: string) => void;
+	onSubmit: (value: string) => void;
+	placeholder?: string;
+	isProcessing?: boolean;
+	// Ghost suggestion options
+	isGitRepo?: boolean;
+	currentBranch?: string | null;
+	planNextStep?: string | null;
+	recentCommands?: string[];
+	showSourceHint?: boolean;
 }
 
 // ============================================
@@ -46,86 +54,82 @@ export interface GhostInputProps {
 // ============================================
 
 export function GhostInput({
-  value,
-  onChange,
-  onSubmit,
-  placeholder = "Type a command or ask a question...",
-  isProcessing = false,
-  isGitRepo = false,
-  currentBranch = null,
-  planNextStep = null,
-  recentCommands = [],
-  showSourceHint = true,
+	value,
+	onChange,
+	onSubmit,
+	placeholder = "Type a command or ask a question...",
+	isProcessing = false,
+	isGitRepo = false,
+	currentBranch = null,
+	planNextStep = null,
+	recentCommands = [],
+	showSourceHint = true,
 }: GhostInputProps) {
-  const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
-    isGitRepo,
-    currentBranch,
-    planNextStep,
-    recentCommands,
-  });
+	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
+		isGitRepo,
+		currentBranch,
+		planNextStep,
+		recentCommands,
+	});
 
-  // Handle keyboard input
-  useInput((input, key) => {
-    // Tab to accept suggestion
-    if (key.tab && isVisible && suggestion) {
-      const newValue = accept();
-      onChange(newValue);
-      return;
-    }
+	// Handle keyboard input
+	useInput((input, key) => {
+		// Tab to accept suggestion
+		if (key.tab && isVisible && suggestion) {
+			const newValue = accept();
+			onChange(newValue);
+			return;
+		}
 
-    // Escape to dismiss
-    if (key.escape && isVisible) {
-      dismiss();
-      return;
-    }
-  });
+		// Escape to dismiss
+		if (key.escape && isVisible) {
+			dismiss();
+			return;
+		}
+	});
 
-  if (isProcessing) {
-    return (
-      <Inline>
-        <Text color="cyan">
-          <Spinner type="dots" />
-        </Text>
-        <MutedText> Processing...</MutedText>
-      </Inline>
-    );
-  }
+	if (isProcessing) {
+		return (
+			<Inline>
+				<Text color="cyan">
+					<Spinner type="dots" />
+				</Text>
+				<MutedText> Processing...</MutedText>
+			</Inline>
+		);
+	}
 
-  return (
-    <Stack>
-      <Inline gap={0}>
-        <Label color="cyan">
-          {"\u276F"}{" "}
-        </Label>
-        {/* Main input area with ghost text overlay */}
-        <Box>
-          <AppText>{value}</AppText>
-          {isVisible && suggestion && (
-            <MutedText>
-              {suggestion.text}
-            </MutedText>
-          )}
-          {!value && !isVisible && (
-            <MutedText>
-              {placeholder}
-            </MutedText>
-          )}
-          {/* Cursor indicator */}
-          <Text color="cyan">{"\u2588"}</Text>
-        </Box>
-      </Inline>
+	return (
+		<Stack>
+			<Inline gap={0}>
+				<Label color="cyan">{"\u276F"} </Label>
+				{/* Main input area with ghost text overlay */}
+				<Box>
+					<AppText>{value}</AppText>
+					{isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
+					{!value && !isVisible && <MutedText>{placeholder}</MutedText>}
+					{/* Cursor indicator */}
+					<Text color="cyan">{"\u2588"}</Text>
+				</Box>
+			</Inline>
 
-      {/* Source hint */}
-      {showSourceHint && isVisible && suggestion && (
-        <Inline paddingLeft={2} marginTop={0} gap={0}>
-          <ShortcutHint keys="[Tab]" description={getSuggestionSourceLabel(suggestion.source)} />
-          {suggestion.source === "history" && suggestion.metadata?.frequency ? (
-            <MutedText> (used {Number(suggestion.metadata.frequency)}x)</MutedText>
-          ) : null}
-        </Inline>
-      )}
-    </Stack>
-  );
+			{/* Source hint */}
+			{showSourceHint && isVisible && suggestion && (
+				<Inline paddingLeft={2} marginTop={0} gap={0}>
+					<ShortcutHint
+						keys="[Tab]"
+						description={getSuggestionSourceLabel(suggestion.source)}
+					/>
+					{suggestion.source === "history" && suggestion.metadata?.frequency ? (
+						<MutedText>
+							{" "}
+							(used {Number(suggestion.metadata.frequency)}x)
+						</MutedText>
+					) : null}
+				</Inline>
+			)}
+		</Stack>
+	);
 }
 
 // ============================================
@@ -133,30 +137,26 @@ export function GhostInput({
 // ============================================
 
 export interface GhostTextProps {
-  suggestion: GhostSuggestion | null;
-  animate?: boolean;
+	suggestion: GhostSuggestion | null;
+	animate?: boolean;
 }
 
 export function GhostText({ suggestion, animate = true }: GhostTextProps) {
-  const [opacity, setOpacity] = useState(0);
+	const [opacity, setOpacity] = useState(0);
 
-  useEffect(() => {
-    if (suggestion && animate) {
-      // Fade in effect
-      const timeout = setTimeout(() => setOpacity(1), 50);
-      return () => clearTimeout(timeout);
-    } else {
-      setOpacity(0);
-    }
-  }, [suggestion, animate]);
+	useEffect(() => {
+		if (suggestion && animate) {
+			// Fade in effect
+			const timeout = setTimeout(() => setOpacity(1), 50);
+			return () => clearTimeout(timeout);
+		} else {
+			setOpacity(0);
+		}
+	}, [suggestion, animate]);
 
-  if (!suggestion) return null;
+	if (!suggestion) return null;
 
-  return (
-    <MutedText>
-      {suggestion.text}
-    </MutedText>
-  );
+	return <MutedText>{suggestion.text}</MutedText>;
 }
 
 // ============================================
@@ -164,110 +164,107 @@ export function GhostText({ suggestion, animate = true }: GhostTextProps) {
 // ============================================
 
 export interface GhostCommandInputProps {
-  onSubmit: (input: string) => void;
-  isProcessing: boolean;
-  isGitRepo?: boolean;
-  currentBranch?: string | null;
-  planNextStep?: string | null;
-  recentCommands?: string[];
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
+	isGitRepo?: boolean;
+	currentBranch?: string | null;
+	planNextStep?: string | null;
+	recentCommands?: string[];
 }
 
 export function GhostCommandInput({
-  onSubmit,
-  isProcessing,
-  isGitRepo = false,
-  currentBranch = null,
-  planNextStep = null,
-  recentCommands = [],
+	onSubmit,
+	isProcessing,
+	isGitRepo = false,
+	currentBranch = null,
+	planNextStep = null,
+	recentCommands = [],
 }: GhostCommandInputProps) {
-  const [value, setValue] = useState("");
+	const [value, setValue] = useState("");
 
-  const handleSubmit = useCallback(
-    (input: string) => {
-      if (input.trim()) {
-        onSubmit(input);
-        setValue("");
-      }
-    },
-    [onSubmit]
-  );
+	const handleSubmit = useCallback(
+		(input: string) => {
+			if (input.trim()) {
+				onSubmit(input);
+				setValue("");
+			}
+		},
+		[onSubmit],
+	);
 
-  const handleChange = useCallback((newValue: string) => {
-    setValue(newValue);
-  }, []);
+	const handleChange = useCallback((newValue: string) => {
+		setValue(newValue);
+	}, []);
 
-  const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
-    isGitRepo,
-    currentBranch,
-    planNextStep,
-    recentCommands,
-  });
+	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
+		isGitRepo,
+		currentBranch,
+		planNextStep,
+		recentCommands,
+	});
 
-  // Handle keyboard input for ghost suggestions
-  useInput(
-    (input, key) => {
-      // Tab to accept suggestion
-      if (key.tab && isVisible && suggestion) {
-        const newValue = accept();
-        setValue(newValue);
-        return;
-      }
+	// Handle keyboard input for ghost suggestions
+	useInput(
+		(input, key) => {
+			// Tab to accept suggestion
+			if (key.tab && isVisible && suggestion) {
+				const newValue = accept();
+				setValue(newValue);
+				return;
+			}
 
-      // Escape to dismiss
-      if (key.escape && isVisible) {
-        dismiss();
-        return;
-      }
+			// Escape to dismiss
+			if (key.escape && isVisible) {
+				dismiss();
+				return;
+			}
 
-      // Enter to submit (handled by TextInput)
-    },
-    { isActive: !isProcessing }
-  );
+			// Enter to submit (handled by TextInput)
+		},
+		{ isActive: !isProcessing },
+	);
 
-  if (isProcessing) {
-    return (
-      <Inline paddingX={1}>
-        <Text color="cyan">
-          <Spinner type="dots" />
-        </Text>
-        <MutedText> Processing...</MutedText>
-      </Inline>
-    );
-  }
+	if (isProcessing) {
+		return (
+			<Inline paddingX={1}>
+				<Text color="cyan">
+					<Spinner type="dots" />
+				</Text>
+				<MutedText> Processing...</MutedText>
+			</Inline>
+		);
+	}
 
-  return (
-    <Stack paddingX={1}>
-      <Inline gap={0}>
-        <Label color="cyan">
-          {"\u276F"}{" "}
-        </Label>
-        <Box>
-          <TextInput
-            value={value}
-            onChange={handleChange}
-            onSubmit={handleSubmit}
-            placeholder={isVisible ? "" : "Type a command or ask a question..."}
-          />
-          {/* Ghost text overlay */}
-          {isVisible && suggestion && (
-            <MutedText>
-              {suggestion.text}
-            </MutedText>
-          )}
-        </Box>
-      </Inline>
+	return (
+		<Stack paddingX={1}>
+			<Inline gap={0}>
+				<Label color="cyan">{"\u276F"} </Label>
+				<Box>
+					<TextInput
+						value={value}
+						onChange={handleChange}
+						onSubmit={handleSubmit}
+						placeholder={isVisible ? "" : "Type a command or ask a question..."}
+					/>
+					{/* Ghost text overlay */}
+					{isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
+				</Box>
+			</Inline>
 
-      {/* Tab hint */}
-      {isVisible && suggestion && (
-        <Box paddingLeft={2}>
-          <Inline gap={0}>
-            <ShortcutHint keys="[Tab]" description="to accept" />
-            <MutedText> ({getSuggestionSourceLabel(suggestion.source)})</MutedText>
-          </Inline>
-        </Box>
-      )}
-    </Stack>
-  );
+			{/* Tab hint */}
+			{isVisible && suggestion && (
+				<Box paddingLeft={2}>
+					<Inline gap={0}>
+						<ShortcutHint keys="[Tab]" description="to accept" />
+						<MutedText>
+							{" "}
+							({getSuggestionSourceLabel(suggestion.source)})
+						</MutedText>
+					</Inline>
+				</Box>
+			)}
+		</Stack>
+	);
 }
 
 // ============================================
@@ -275,34 +272,29 @@ export function GhostCommandInput({
 // ============================================
 
 export interface SuggestionPreviewProps {
-  suggestions: GhostSuggestion[];
-  maxItems?: number;
+	suggestions: GhostSuggestion[];
+	maxItems?: number;
 }
 
 export function SuggestionPreview({
-  suggestions,
-  maxItems = 3,
+	suggestions,
+	maxItems = 3,
 }: SuggestionPreviewProps) {
-  if (suggestions.length === 0) return null;
+	if (suggestions.length === 0) return null;
 
-  return (
-    <Stack paddingX={1} marginTop={1}>
-      <MutedText>
-        Suggestions:
-      </MutedText>
-      {suggestions.slice(0, maxItems).map((s, i) => (
-        <Inline key={i} paddingLeft={1} gap={0}>
-          <MutedText>
-            {"\u2022"} {s.text}
-          </MutedText>
-          <MutedText>
-            {" "}
-            ({getSuggestionSourceLabel(s.source)})
-          </MutedText>
-        </Inline>
-      ))}
-    </Stack>
-  );
+	return (
+		<Stack paddingX={1} marginTop={1}>
+			<MutedText>Suggestions:</MutedText>
+			{suggestions.slice(0, maxItems).map((s, i) => (
+				<Inline key={i} paddingLeft={1} gap={0}>
+					<MutedText>
+						{"\u2022"} {s.text}
+					</MutedText>
+					<MutedText> ({getSuggestionSourceLabel(s.source)})</MutedText>
+				</Inline>
+			))}
+		</Stack>
+	);
 }
 
 // ============================================
@@ -310,18 +302,18 @@ export function SuggestionPreview({
 // ============================================
 
 interface SourceIconProps {
-  source: SuggestionSource;
+	source: SuggestionSource;
 }
 
 export function SourceIcon({ source }: SourceIconProps) {
-  const icons: Record<SuggestionSource, { icon: string; color: string }> = {
-    plan: { icon: "\u25B6", color: "green" },    // Play icon for plan
-    history: { icon: "\u21BA", color: "yellow" }, // Cycle icon for history
-    context: { icon: "\u2699", color: "cyan" },   // Gear for context
-    ai: { icon: "\u2605", color: "magenta" },     // Star for AI
-  };
+	const icons: Record<SuggestionSource, { icon: string; color: string }> = {
+		plan: { icon: "\u25B6", color: "green" }, // Play icon for plan
+		history: { icon: "\u21BA", color: "yellow" }, // Cycle icon for history
+		context: { icon: "\u2699", color: "cyan" }, // Gear for context
+		ai: { icon: "\u2605", color: "magenta" }, // Star for AI
+	};
 
-  const { icon, color } = icons[source] || { icon: "?", color: "gray" };
+	const { icon, color } = icons[source] || { icon: "?", color: "gray" };
 
-  return <Text color={color as any}>{icon}</Text>;
+	return <Text color={color as any}>{icon}</Text>;
 }

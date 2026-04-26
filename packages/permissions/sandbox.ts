@@ -15,10 +15,18 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
+import type {
+	IsolationLevel,
+	SandboxOptions,
+	SandboxResult,
+} from "./sandbox-types.js";
 
 // Re-export types for convenience
-export type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
+export type {
+	IsolationLevel,
+	SandboxOptions,
+	SandboxResult,
+} from "./sandbox-types.js";
 
 // ============================================
 // Detection
@@ -26,27 +34,27 @@ export type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-ty
 
 /** Minimal safe env — strip everything, keep only shell essentials */
 function safeEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return {
-    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-    HOME: process.env.HOME ?? os.homedir(),
-    TMPDIR: os.tmpdir(),
-    ...extra,
-  };
+	return {
+		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+		HOME: process.env.HOME ?? os.homedir(),
+		TMPDIR: os.tmpdir(),
+		...extra,
+	};
 }
 
 /** Check if a binary is available on PATH */
 async function hasBinary(bin: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["which", bin], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: safeEnv(),
-    });
-    await proc.exited;
-    return proc.exitCode === 0;
-  } catch {
-    return false;
-  }
+	try {
+		const proc = Bun.spawn(["which", bin], {
+			stdout: "pipe",
+			stderr: "pipe",
+			env: safeEnv(),
+		});
+		await proc.exited;
+		return proc.exitCode === 0;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -54,22 +62,22 @@ async function hasBinary(bin: string): Promise<boolean> {
  * Prefers docker when available, falls back to tempdir, then process.
  */
 export async function detectBestIsolation(): Promise<IsolationLevel> {
-  if (await hasBinary("docker")) {
-    // Verify docker daemon is actually running (not just installed)
-    try {
-      const proc = Bun.spawn(["docker", "info"], {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: safeEnv(),
-      });
-      await proc.exited;
-      if (proc.exitCode === 0) return "docker";
-    } catch {
-      // docker installed but daemon not running — fall through
-    }
-  }
-  // tempdir is always available — it's just process + tmp cleanup
-  return "tempdir";
+	if (await hasBinary("docker")) {
+		// Verify docker daemon is actually running (not just installed)
+		try {
+			const proc = Bun.spawn(["docker", "info"], {
+				stdout: "pipe",
+				stderr: "pipe",
+				env: safeEnv(),
+			});
+			await proc.exited;
+			if (proc.exitCode === 0) return "docker";
+		} catch {
+			// docker installed but daemon not running — fall through
+		}
+	}
+	// tempdir is always available — it's just process + tmp cleanup
+	return "tempdir";
 }
 
 // ============================================
@@ -78,135 +86,151 @@ export async function detectBestIsolation(): Promise<IsolationLevel> {
 
 /** Layer 1+2: process + temp dir isolation */
 async function runInTempdir(
-  command: string,
-  opts: Required<Pick<SandboxOptions, "timeout" | "allowNetwork" | "env">>,
-  workDir?: string,
+	command: string,
+	opts: Required<Pick<SandboxOptions, "timeout" | "allowNetwork" | "env">>,
+	workDir?: string,
 ): Promise<SandboxResult> {
-  const useTmp = !workDir;
-  const tmpDir = useTmp ? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-sandbox-")) : workDir!;
+	const useTmp = !workDir;
+	const tmpDir = useTmp
+		? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-sandbox-"))
+		: workDir!;
 
-  const start = Date.now();
-  let timedOut = false;
-  let stdout = "";
-  let stderr = "";
-  let exitCode = 1;
+	const start = Date.now();
+	let timedOut = false;
+	let stdout = "";
+	let stderr = "";
+	let exitCode = 1;
 
-  try {
-    const proc = Bun.spawn(["sh", "-c", command], {
-      cwd: tmpDir,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: safeEnv(opts.env),
-    });
+	try {
+		const proc = Bun.spawn(["sh", "-c", command], {
+			cwd: tmpDir,
+			stdout: "pipe",
+			stderr: "pipe",
+			env: safeEnv(opts.env),
+		});
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
-    }, opts.timeout);
+		const timer = setTimeout(() => {
+			timedOut = true;
+			proc.kill();
+		}, opts.timeout);
 
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    clearTimeout(timer);
+		const [out, err] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		await proc.exited;
+		clearTimeout(timer);
 
-    stdout = out;
-    stderr = err;
-    exitCode = timedOut ? 124 : (proc.exitCode ?? 1);
-  } finally {
-    if (useTmp) {
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        // best-effort cleanup
-      }
-    }
-  }
+		stdout = out;
+		stderr = err;
+		exitCode = timedOut ? 124 : (proc.exitCode ?? 1);
+	} finally {
+		if (useTmp) {
+			try {
+				fs.rmSync(tmpDir, { recursive: true, force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	}
 
-  return {
-    stdout,
-    stderr,
-    exitCode,
-    timedOut,
-    isolation: workDir ? "process" : "tempdir",
-    durationMs: Date.now() - start,
-  };
+	return {
+		stdout,
+		stderr,
+		exitCode,
+		timedOut,
+		isolation: workDir ? "process" : "tempdir",
+		durationMs: Date.now() - start,
+	};
 }
 
 /** Layer 3: Docker container isolation */
 async function runInDocker(
-  command: string,
-  opts: Required<Pick<SandboxOptions, "timeout" | "allowNetwork" | "env">>,
-  workDir?: string,
+	command: string,
+	opts: Required<Pick<SandboxOptions, "timeout" | "allowNetwork" | "env">>,
+	workDir?: string,
 ): Promise<SandboxResult> {
-  const useTmp = !workDir;
-  const tmpDir = useTmp ? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-docker-")) : workDir!;
+	const useTmp = !workDir;
+	const tmpDir = useTmp
+		? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-docker-"))
+		: workDir!;
 
-  const start = Date.now();
-  let timedOut = false;
+	const start = Date.now();
+	let timedOut = false;
 
-  const networkFlag = opts.allowNetwork ? [] : ["--network", "none"];
-  const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+	const networkFlag = opts.allowNetwork ? [] : ["--network", "none"];
+	const envFlags = Object.entries(opts.env).flatMap(([k, v]) => [
+		"-e",
+		`${k}=${v}`,
+	]);
 
-  const dockerArgs = [
-    "docker", "run", "--rm",
-    ...networkFlag,
-    "--memory", "512m",
-    "--cpus", "1",
-    "--read-only",
-    "--tmpfs", "/tmp",
-    "-v", `${tmpDir}:/work`,
-    "-w", "/work",
-    ...envFlags,
-    "oven/bun:latest",
-    "sh", "-c", command,
-  ];
+	const dockerArgs = [
+		"docker",
+		"run",
+		"--rm",
+		...networkFlag,
+		"--memory",
+		"512m",
+		"--cpus",
+		"1",
+		"--read-only",
+		"--tmpfs",
+		"/tmp",
+		"-v",
+		`${tmpDir}:/work`,
+		"-w",
+		"/work",
+		...envFlags,
+		"oven/bun:latest",
+		"sh",
+		"-c",
+		command,
+	];
 
-  let stdout = "";
-  let stderr = "";
-  let exitCode = 1;
+	let stdout = "";
+	let stderr = "";
+	let exitCode = 1;
 
-  try {
-    const proc = Bun.spawn(dockerArgs, {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: safeEnv(),
-    });
+	try {
+		const proc = Bun.spawn(dockerArgs, {
+			stdout: "pipe",
+			stderr: "pipe",
+			env: safeEnv(),
+		});
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
-    }, opts.timeout);
+		const timer = setTimeout(() => {
+			timedOut = true;
+			proc.kill();
+		}, opts.timeout);
 
-    const [out, err] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    clearTimeout(timer);
+		const [out, err] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		await proc.exited;
+		clearTimeout(timer);
 
-    stdout = out;
-    stderr = err;
-    exitCode = timedOut ? 124 : (proc.exitCode ?? 1);
-  } finally {
-    if (useTmp) {
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        // best-effort cleanup
-      }
-    }
-  }
+		stdout = out;
+		stderr = err;
+		exitCode = timedOut ? 124 : (proc.exitCode ?? 1);
+	} finally {
+		if (useTmp) {
+			try {
+				fs.rmSync(tmpDir, { recursive: true, force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	}
 
-  return {
-    stdout,
-    stderr,
-    exitCode,
-    timedOut,
-    isolation: "docker",
-    durationMs: Date.now() - start,
-  };
+	return {
+		stdout,
+		stderr,
+		exitCode,
+		timedOut,
+		isolation: "docker",
+		durationMs: Date.now() - start,
+	};
 }
 
 // ============================================
@@ -221,25 +245,25 @@ async function runInDocker(
  * console.log(result.stdout); // "2\n"
  */
 export async function runSandboxed(
-  command: string,
-  opts: SandboxOptions = {},
+	command: string,
+	opts: SandboxOptions = {},
 ): Promise<SandboxResult> {
-  const timeout = opts.timeout ?? 30_000;
-  const allowNetwork = opts.allowNetwork ?? false;
-  const env = opts.env ?? {};
-  const isolation = opts.isolation ?? (await detectBestIsolation());
+	const timeout = opts.timeout ?? 30_000;
+	const allowNetwork = opts.allowNetwork ?? false;
+	const env = opts.env ?? {};
+	const isolation = opts.isolation ?? (await detectBestIsolation());
 
-  const resolved = { timeout, allowNetwork, env };
+	const resolved = { timeout, allowNetwork, env };
 
-  if (isolation === "docker") {
-    return runInDocker(command, resolved, opts.workDir);
-  }
+	if (isolation === "docker") {
+		return runInDocker(command, resolved, opts.workDir);
+	}
 
-  // process = explicit process-only (no temp dir creation/cleanup)
-  if (isolation === "process") {
-    return runInTempdir(command, resolved, opts.workDir ?? process.cwd());
-  }
+	// process = explicit process-only (no temp dir creation/cleanup)
+	if (isolation === "process") {
+		return runInTempdir(command, resolved, opts.workDir ?? process.cwd());
+	}
 
-  // tempdir (default) or microvm fallback to tempdir until VMs are supported
-  return runInTempdir(command, resolved, opts.workDir);
+	// tempdir (default) or microvm fallback to tempdir until VMs are supported
+	return runInTempdir(command, resolved, opts.workDir);
 }

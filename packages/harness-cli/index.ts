@@ -66,48 +66,50 @@ EXAMPLES:
 `;
 
 async function main() {
-  const args = process.argv.slice(2);
+	const args = process.argv.slice(2);
 
-  if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
-    console.log(HELP);
-    process.exit(0);
-  }
+	if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
+		console.log(HELP);
+		process.exit(0);
+	}
 
-  const command = args[0];
-  const restArgs = args.slice(1);
+	const command = args[0];
+	const restArgs = args.slice(1);
 
-  try {
-    switch (command) {
-      case "run":
-        await run(restArgs);
-        break;
-      case "sessions":
-        await sessions(restArgs);
-        break;
-      case "inspect":
-        await inspect(restArgs);
-        break;
-      case "tail":
-        await tail(restArgs);
-        break;
-      case "validate":
-        await validate(restArgs);
-        break;
-      case "doctor":
-        await doctor(restArgs);
-        break;
-      default:
-        console.error(`Unknown command: ${command}`);
-        console.log("Run with --help for usage.");
-        process.exit(1);
-    }
-  } catch (err) {
-    console.error(`\n[FATAL] ${err instanceof Error ? err.message : String(err)}`);
-    if (err instanceof Error && err.stack) {
-      console.error(err.stack);
-    }
-    process.exit(1);
-  }
+	try {
+		switch (command) {
+			case "run":
+				await run(restArgs);
+				break;
+			case "sessions":
+				await sessions(restArgs);
+				break;
+			case "inspect":
+				await inspect(restArgs);
+				break;
+			case "tail":
+				await tail(restArgs);
+				break;
+			case "validate":
+				await validate(restArgs);
+				break;
+			case "doctor":
+				await doctor(restArgs);
+				break;
+			default:
+				console.error(`Unknown command: ${command}`);
+				console.log("Run with --help for usage.");
+				process.exit(1);
+		}
+	} catch (err) {
+		console.error(
+			`\n[FATAL] ${err instanceof Error ? err.message : String(err)}`,
+		);
+		if (err instanceof Error && err.stack) {
+			console.error(err.stack);
+		}
+		process.exit(1);
+	}
 }
 
 main();

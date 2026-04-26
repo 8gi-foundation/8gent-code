@@ -30,23 +30,23 @@ import { testGenerationBenchmarks } from "./categories/test-generation/benchmark
 import { documentationBenchmarks } from "./categories/documentation/benchmarks";
 
 export const ALL_BENCHMARKS = [
-  ...fileManipulationBenchmarks,
-  ...multiFileBenchmarks,
-  ...bugFixingBenchmarks,
-  ...featureImplementationBenchmarks,
-  ...codeReviewBenchmarks,
-  ...testGenerationBenchmarks,
-  ...documentationBenchmarks,
+	...fileManipulationBenchmarks,
+	...multiFileBenchmarks,
+	...bugFixingBenchmarks,
+	...featureImplementationBenchmarks,
+	...codeReviewBenchmarks,
+	...testGenerationBenchmarks,
+	...documentationBenchmarks,
 ];
 
 // Benchmark counts by category
 export const BENCHMARK_STATS = {
-  fileManipulation: fileManipulationBenchmarks.length,
-  multiFile: multiFileBenchmarks.length,
-  bugFixing: bugFixingBenchmarks.length,
-  featureImplementation: featureImplementationBenchmarks.length,
-  codeReview: codeReviewBenchmarks.length,
-  testGeneration: testGenerationBenchmarks.length,
-  documentation: documentationBenchmarks.length,
-  total: ALL_BENCHMARKS.length,
+	fileManipulation: fileManipulationBenchmarks.length,
+	multiFile: multiFileBenchmarks.length,
+	bugFixing: bugFixingBenchmarks.length,
+	featureImplementation: featureImplementationBenchmarks.length,
+	codeReview: codeReviewBenchmarks.length,
+	testGeneration: testGenerationBenchmarks.length,
+	documentation: documentationBenchmarks.length,
+	total: ALL_BENCHMARKS.length,
 };

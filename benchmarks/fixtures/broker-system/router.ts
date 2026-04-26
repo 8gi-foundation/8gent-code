@@ -20,55 +20,58 @@
  */
 
 export class TopicRouter {
-  /**
-   * Tests whether a concrete topic matches a pattern.
-   *
-   * @param pattern The pattern string (may contain `*` wildcards).
-   * @param topic   The concrete topic name to test.
-   * @returns true if the topic matches the pattern.
-   */
-  matchPattern(pattern: string, topic: string): boolean {
-    // Exact match — fast path
-    if (pattern === topic) return true;
+	/**
+	 * Tests whether a concrete topic matches a pattern.
+	 *
+	 * @param pattern The pattern string (may contain `*` wildcards).
+	 * @param topic   The concrete topic name to test.
+	 * @returns true if the topic matches the pattern.
+	 */
+	matchPattern(pattern: string, topic: string): boolean {
+		// Exact match — fast path
+		if (pattern === topic) return true;
 
-    // Universal wildcard — matches everything
-    if (pattern === "*") return true;
+		// Universal wildcard — matches everything
+		if (pattern === "*") return true;
 
-    // No wildcard at all — must be exact (already checked above)
-    if (!pattern.includes("*")) return false;
+		// No wildcard at all — must be exact (already checked above)
+		if (!pattern.includes("*")) return false;
 
-    // Wildcard matching: split on `*` and check prefix/suffix
-    const starIndex = pattern.indexOf("*");
-    const prefix = pattern.substring(0, starIndex);
-    const suffix = pattern.substring(starIndex + 1);
+		// Wildcard matching: split on `*` and check prefix/suffix
+		const starIndex = pattern.indexOf("*");
+		const prefix = pattern.substring(0, starIndex);
+		const suffix = pattern.substring(starIndex + 1);
 
-    // The topic must start with the prefix and end with the suffix.
-    // The wildcard `*` replaces one or more characters in between.
-    if (prefix.length + suffix.length > topic.length) return false;
+		// The topic must start with the prefix and end with the suffix.
+		// The wildcard `*` replaces one or more characters in between.
+		if (prefix.length + suffix.length > topic.length) return false;
 
-    const matchesPrefix = topic.startsWith(prefix);
-    const matchesSuffix = suffix === "" || topic.endsWith(suffix);
+		const matchesPrefix = topic.startsWith(prefix);
+		const matchesSuffix = suffix === "" || topic.endsWith(suffix);
 
-    // Ensure the prefix and suffix don't overlap in the topic
-    if (matchesPrefix && matchesSuffix) {
-      const wildcardPart = topic.substring(prefix.length, topic.length - (suffix.length || 0));
-      return wildcardPart.length > 0;
-    }
+		// Ensure the prefix and suffix don't overlap in the topic
+		if (matchesPrefix && matchesSuffix) {
+			const wildcardPart = topic.substring(
+				prefix.length,
+				topic.length - (suffix.length || 0),
+			);
+			return wildcardPart.length > 0;
+		}
 
-    return false;
-  }
+		return false;
+	}
 
-  /**
-   * Filters a list of topics, returning only those that match the pattern.
-   */
-  filterTopics(pattern: string, topics: string[]): string[] {
-    return topics.filter((t) => this.matchPattern(pattern, t));
-  }
+	/**
+	 * Filters a list of topics, returning only those that match the pattern.
+	 */
+	filterTopics(pattern: string, topics: string[]): string[] {
+		return topics.filter((t) => this.matchPattern(pattern, t));
+	}
 
-  /**
-   * Returns all patterns (from a list) that match a given concrete topic.
-   */
-  findMatchingPatterns(topic: string, patterns: string[]): string[] {
-    return patterns.filter((p) => this.matchPattern(p, topic));
-  }
+	/**
+	 * Returns all patterns (from a list) that match a given concrete topic.
+	 */
+	findMatchingPatterns(topic: string, patterns: string[]): string[] {
+		return patterns.filter((p) => this.matchPattern(p, topic));
+	}
 }

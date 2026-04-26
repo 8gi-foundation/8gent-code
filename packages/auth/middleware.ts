@@ -20,17 +20,17 @@ import { getAuthManager } from "./index.js";
  * @throws Error if not authenticated
  */
 export async function requireAuth(feature?: string): Promise<AuthUser> {
-  const manager = getAuthManager();
-  const state = manager.getState();
+	const manager = getAuthManager();
+	const state = manager.getState();
 
-  if (state.state !== "authenticated") {
-    const featureMsg = feature ? ` to use ${feature}` : "";
-    throw new Error(
-      `Authentication required${featureMsg}. Run \`8gent auth login\` to sign in.`,
-    );
-  }
+	if (state.state !== "authenticated") {
+		const featureMsg = feature ? ` to use ${feature}` : "";
+		throw new Error(
+			`Authentication required${featureMsg}. Run \`8gent auth login\` to sign in.`,
+		);
+	}
 
-  return state.user;
+	return state.user;
 }
 
 /**
@@ -43,26 +43,26 @@ export async function requireAuth(feature?: string): Promise<AuthUser> {
  * @throws Error if not authenticated or plan is insufficient
  */
 export async function requirePlan(
-  requiredPlan: UserPlan,
-  feature?: string,
+	requiredPlan: UserPlan,
+	feature?: string,
 ): Promise<AuthUser> {
-  const user = await requireAuth(feature);
+	const user = await requireAuth(feature);
 
-  const planHierarchy: Record<UserPlan, number> = {
-    free: 0,
-    pro: 1,
-    team: 2,
-  };
+	const planHierarchy: Record<UserPlan, number> = {
+		free: 0,
+		pro: 1,
+		team: 2,
+	};
 
-  if (planHierarchy[user.plan] < planHierarchy[requiredPlan]) {
-    const featureMsg = feature ? ` ${feature}` : " this feature";
-    throw new Error(
-      `${requiredPlan} plan or higher required for${featureMsg}. ` +
-        `You are on the ${user.plan} plan. Upgrade at https://8gent.app/pricing`,
-    );
-  }
+	if (planHierarchy[user.plan] < planHierarchy[requiredPlan]) {
+		const featureMsg = feature ? ` ${feature}` : " this feature";
+		throw new Error(
+			`${requiredPlan} plan or higher required for${featureMsg}. ` +
+				`You are on the ${user.plan} plan. Upgrade at https://8gent.app/pricing`,
+		);
+	}
 
-  return user;
+	return user;
 }
 
 // ============================================
@@ -77,31 +77,31 @@ export async function requirePlan(
  * @returns The authenticated user, or null if no valid token
  */
 export async function authenticateRequest(
-  request: Request,
+	request: Request,
 ): Promise<AuthUser | null> {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
+	const authHeader = request.headers.get("Authorization");
+	if (!authHeader?.startsWith("Bearer ")) return null;
 
-  const token = authHeader.slice(7);
-  if (!token) return null;
+	const token = authHeader.slice(7);
+	if (!token) return null;
 
-  // Validate the token using the auth manager's clerk instance
-  const { validateToken } = await import("./clerk.js");
-  const { resolveAuthConfig } = await import("./clerk.js");
-  const config = resolveAuthConfig();
+	// Validate the token using the auth manager's clerk instance
+	const { validateToken } = await import("./clerk.js");
+	const { resolveAuthConfig } = await import("./clerk.js");
+	const config = resolveAuthConfig();
 
-  const payload = await validateToken(token, config);
-  if (!payload) return null;
+	const payload = await validateToken(token, config);
+	if (!payload) return null;
 
-  const { extractUserFromToken } = await import("./clerk.js");
-  const profile = extractUserFromToken(payload);
+	const { extractUserFromToken } = await import("./clerk.js");
+	const profile = extractUserFromToken(payload);
 
-  return {
-    ...profile,
-    plan: "free", // Would need DB lookup for actual plan
-    createdAt: 0,
-    lastActiveAt: Date.now(),
-  };
+	return {
+		...profile,
+		plan: "free", // Would need DB lookup for actual plan
+		createdAt: 0,
+		lastActiveAt: Date.now(),
+	};
 }
 
 // ============================================
@@ -113,26 +113,26 @@ export async function authenticateRequest(
  * Returns a simple { authenticated, user, plan } object.
  */
 export function checkAuth(): {
-  authenticated: boolean;
-  user: AuthUser | null;
-  plan: UserPlan | null;
+	authenticated: boolean;
+	user: AuthUser | null;
+	plan: UserPlan | null;
 } {
-  try {
-    const manager = getAuthManager();
-    const state = manager.getState();
+	try {
+		const manager = getAuthManager();
+		const state = manager.getState();
 
-    if (state.state === "authenticated") {
-      return {
-        authenticated: true,
-        user: state.user,
-        plan: state.user.plan,
-      };
-    }
+		if (state.state === "authenticated") {
+			return {
+				authenticated: true,
+				user: state.user,
+				plan: state.user.plan,
+			};
+		}
 
-    return { authenticated: false, user: null, plan: null };
-  } catch {
-    return { authenticated: false, user: null, plan: null };
-  }
+		return { authenticated: false, user: null, plan: null };
+	} catch {
+		return { authenticated: false, user: null, plan: null };
+	}
 }
 
 /**
@@ -140,14 +140,14 @@ export function checkAuth(): {
  * Returns false if not authenticated.
  */
 export function hasPlan(requiredPlan: UserPlan): boolean {
-  const { authenticated, plan } = checkAuth();
-  if (!authenticated || !plan) return false;
+	const { authenticated, plan } = checkAuth();
+	if (!authenticated || !plan) return false;
 
-  const planHierarchy: Record<UserPlan, number> = {
-    free: 0,
-    pro: 1,
-    team: 2,
-  };
+	const planHierarchy: Record<UserPlan, number> = {
+		free: 0,
+		pro: 1,
+		team: 2,
+	};
 
-  return planHierarchy[plan] >= planHierarchy[requiredPlan];
+	return planHierarchy[plan] >= planHierarchy[requiredPlan];
 }

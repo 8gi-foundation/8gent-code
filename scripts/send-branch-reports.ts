@@ -9,47 +9,57 @@ import { execSync } from "child_process";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-if (!TOKEN || !CHAT_ID) { console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env"); process.exit(1); }
+if (!TOKEN || !CHAT_ID) {
+	console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env");
+	process.exit(1);
+}
 const AUDIO_DIR = join(import.meta.dir, "../docs/branch-audio");
 
 async function send(text: string) {
-  const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: "Markdown", disable_web_page_preview: true }),
-  });
-  const data = await res.json() as any;
-  if (!data.ok) {
-    // Retry without markdown
-    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT_ID, text }),
-    });
-  }
+	const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			chat_id: CHAT_ID,
+			text,
+			parse_mode: "Markdown",
+			disable_web_page_preview: true,
+		}),
+	});
+	const data = (await res.json()) as any;
+	if (!data.ok) {
+		// Retry without markdown
+		await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ chat_id: CHAT_ID, text }),
+		});
+	}
 }
 
 async function sendAudio(filePath: string, caption: string) {
-  // Generate audio with macOS say
-  const wavPath = filePath.replace(".txt", ".aiff");
-  const text = readFileSync(filePath, "utf-8").slice(0, 350); // TTS limit
-  try {
-    execSync(`say -v Ava -o "${wavPath}" "${text.replace(/"/g, '\\"')}"`, { timeout: 30000 });
+	// Generate audio with macOS say
+	const wavPath = filePath.replace(".txt", ".aiff");
+	const text = readFileSync(filePath, "utf-8").slice(0, 350); // TTS limit
+	try {
+		execSync(`say -v Ava -o "${wavPath}" "${text.replace(/"/g, '\\"')}"`, {
+			timeout: 30000,
+		});
 
-    // Send as voice message
-    const form = new FormData();
-    form.append("chat_id", CHAT_ID);
-    form.append("caption", caption);
-    form.append("voice", new Blob([readFileSync(wavPath)]), "voice.aiff");
+		// Send as voice message
+		const form = new FormData();
+		form.append("chat_id", CHAT_ID);
+		form.append("caption", caption);
+		form.append("voice", new Blob([readFileSync(wavPath)]), "voice.aiff");
 
-    await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, {
-      method: "POST",
-      body: form,
-    });
-  } catch (err) {
-    console.log(`Audio failed for ${filePath}, sending text instead`);
-    await send(`🔊 *Audio Report:*\n${text}`);
-  }
+		await fetch(`https://api.telegram.org/bot${TOKEN}/sendVoice`, {
+			method: "POST",
+			body: form,
+		});
+	} catch (err) {
+		console.log(`Audio failed for ${filePath}, sending text instead`);
+		await send(`🔊 *Audio Report:*\n${text}`);
+	}
 }
 
 // Send overview first
@@ -79,7 +89,7 @@ await send(`📋 *14 FEATURE BRANCH REPORTS*
 📊 *7,200+ lines of new code*
 🎯 *Recommended merge order below*`);
 
-await new Promise(r => setTimeout(r, 1000));
+await new Promise((r) => setTimeout(r, 1000));
 
 // Send recommended merge order
 await send(`🔀 *RECOMMENDED MERGE ORDER*
@@ -112,28 +122,35 @@ Needs dedup with existing memory packages first
 *9. worktree-swarm* 🤖
 Most complex — merge last, needs security review`);
 
-await new Promise(r => setTimeout(r, 1000));
+await new Promise((r) => setTimeout(r, 1000));
 
 // Send individual audio reports
-const files = readdirSync(AUDIO_DIR).filter(f => f.endsWith(".txt")).sort();
+const files = readdirSync(AUDIO_DIR)
+	.filter((f) => f.endsWith(".txt"))
+	.sort();
 for (const file of files) {
-  const text = readFileSync(join(AUDIO_DIR, file), "utf-8");
-  const num = file.split("-")[0];
-  const name = file.replace(/^\d+-/, "").replace(".txt", "");
+	const text = readFileSync(join(AUDIO_DIR, file), "utf-8");
+	const num = file.split("-")[0];
+	const name = file.replace(/^\d+-/, "").replace(".txt", "");
 
-  // Send as text (Telegram voice requires opus/ogg format)
-  await send(`🔊 *Branch ${num}: ${name}*\n\n${text}`);
-  await new Promise(r => setTimeout(r, 500));
+	// Send as text (Telegram voice requires opus/ogg format)
+	await send(`🔊 *Branch ${num}: ${name}*\n\n${text}`);
+	await new Promise((r) => setTimeout(r, 500));
 }
 
 // Generate combined audio file
 try {
-  const allText = files.map(f => readFileSync(join(AUDIO_DIR, f), "utf-8")).join("\n\nNext branch.\n\n");
-  const combinedPath = join(AUDIO_DIR, "all-branches-combined.aiff");
-  execSync(`say -v Ava -o "${combinedPath}" "${allText.slice(0, 3000).replace(/"/g, '\\"')}"`, { timeout: 120000 });
-  console.log(`Combined audio saved: ${combinedPath}`);
+	const allText = files
+		.map((f) => readFileSync(join(AUDIO_DIR, f), "utf-8"))
+		.join("\n\nNext branch.\n\n");
+	const combinedPath = join(AUDIO_DIR, "all-branches-combined.aiff");
+	execSync(
+		`say -v Ava -o "${combinedPath}" "${allText.slice(0, 3000).replace(/"/g, '\\"')}"`,
+		{ timeout: 120000 },
+	);
+	console.log(`Combined audio saved: ${combinedPath}`);
 } catch {
-  console.log("Combined audio generation failed (text too long)");
+	console.log("Combined audio generation failed (text too long)");
 }
 
 await send(`✅ *All 14 branch reports sent.*

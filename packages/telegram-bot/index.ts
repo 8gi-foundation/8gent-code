@@ -13,23 +13,23 @@
  */
 
 import type {
-  TelegramBotConfig,
-  TelegramResponse,
-  TelegramUpdate,
-  CompetitionRound,
-  BenchmarkReport,
-  OvernightSummary,
-  AlertSeverity,
-  SendMessageOptions,
-  InlineKeyboardMarkup,
+	TelegramBotConfig,
+	TelegramResponse,
+	TelegramUpdate,
+	CompetitionRound,
+	BenchmarkReport,
+	OvernightSummary,
+	AlertSeverity,
+	SendMessageOptions,
+	InlineKeyboardMarkup,
 } from "./types";
 
 import {
-  formatCompetitionRound,
-  formatBenchmarkReport,
-  formatMorningBrief,
-  formatAlert,
-  formatScoreboard,
+	formatCompetitionRound,
+	formatBenchmarkReport,
+	formatMorningBrief,
+	formatAlert,
+	formatScoreboard,
 } from "./formatters";
 
 import { routeCommand, commands } from "./commands";
@@ -48,74 +48,81 @@ const API_BASE = "https://api.telegram.org/bot";
 const MAX_MESSAGE_LENGTH = 4096;
 
 async function apiCall(
-  token: string,
-  method: string,
-  body?: Record<string, unknown>
+	token: string,
+	method: string,
+	body?: Record<string, unknown>,
 ): Promise<any> {
-  const url = `${API_BASE}${token}/${method}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+	const url = `${API_BASE}${token}/${method}`;
+	const response = await fetch(url, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: body ? JSON.stringify(body) : undefined,
+	});
 
-  const json = (await response.json()) as TelegramResponse;
+	const json = (await response.json()) as TelegramResponse;
 
-  if (!json.ok) {
-    throw new Error(`Telegram API ${method}: ${json.description ?? "Unknown error"} (${json.error_code})`);
-  }
+	if (!json.ok) {
+		throw new Error(
+			`Telegram API ${method}: ${json.description ?? "Unknown error"} (${json.error_code})`,
+		);
+	}
 
-  return json.result;
+	return json.result;
 }
 
 async function apiFormData(
-  token: string,
-  method: string,
-  formData: FormData
+	token: string,
+	method: string,
+	formData: FormData,
 ): Promise<any> {
-  const url = `${API_BASE}${token}/${method}`;
-  const response = await fetch(url, {
-    method: "POST",
-    body: formData,
-  });
+	const url = `${API_BASE}${token}/${method}`;
+	const response = await fetch(url, {
+		method: "POST",
+		body: formData,
+	});
 
-  const json = (await response.json()) as TelegramResponse;
+	const json = (await response.json()) as TelegramResponse;
 
-  if (!json.ok) {
-    throw new Error(`Telegram API ${method}: ${json.description ?? "Unknown error"}`);
-  }
+	if (!json.ok) {
+		throw new Error(
+			`Telegram API ${method}: ${json.description ?? "Unknown error"}`,
+		);
+	}
 
-  return json.result;
+	return json.result;
 }
 
 /**
  * Split a long message into Telegram-safe chunks at line boundaries.
  */
-function splitMessage(text: string, maxLen: number = MAX_MESSAGE_LENGTH): string[] {
-  if (text.length <= maxLen) return [text];
+function splitMessage(
+	text: string,
+	maxLen: number = MAX_MESSAGE_LENGTH,
+): string[] {
+	if (text.length <= maxLen) return [text];
 
-  const chunks: string[] = [];
-  let current = "";
+	const chunks: string[] = [];
+	let current = "";
 
-  for (const line of text.split("\n")) {
-    if (current.length + line.length + 1 > maxLen) {
-      if (current) chunks.push(current);
-      // If a single line exceeds max, force-split it
-      if (line.length > maxLen) {
-        for (let i = 0; i < line.length; i += maxLen) {
-          chunks.push(line.slice(i, i + maxLen));
-        }
-        current = "";
-      } else {
-        current = line;
-      }
-    } else {
-      current += (current ? "\n" : "") + line;
-    }
-  }
-  if (current) chunks.push(current);
+	for (const line of text.split("\n")) {
+		if (current.length + line.length + 1 > maxLen) {
+			if (current) chunks.push(current);
+			// If a single line exceeds max, force-split it
+			if (line.length > maxLen) {
+				for (let i = 0; i < line.length; i += maxLen) {
+					chunks.push(line.slice(i, i + maxLen));
+				}
+				current = "";
+			} else {
+				current = line;
+			}
+		} else {
+			current += (current ? "\n" : "") + line;
+		}
+	}
+	if (current) chunks.push(current);
 
-  return chunks;
+	return chunks;
 }
 
 // ── Main Bot Class ──────────────────────────────────────
@@ -126,390 +133,405 @@ function splitMessage(text: string, maxLen: number = MAX_MESSAGE_LENGTH): string
  * Return false to let the default handler run (agent mode).
  */
 export type CallbackInterceptor = (ctx: {
-  data: string;
-  chatId: string;
-  userId: number;
-  messageId: number;
+	data: string;
+	chatId: string;
+	userId: number;
+	messageId: number;
 }) => Promise<boolean>;
 
 export class TelegramBot {
-  private token: string;
-  private chatId: string;
-  private polling: boolean = false;
-  private pollOffset: number = 0;
-  private pollingInterval: number;
-  private abortController: AbortController | null = null;
-  /** Registered callback_query interceptors. First to return true wins. */
-  private callbackInterceptors: CallbackInterceptor[] = [];
+	private token: string;
+	private chatId: string;
+	private polling: boolean = false;
+	private pollOffset: number = 0;
+	private pollingInterval: number;
+	private abortController: AbortController | null = null;
+	/** Registered callback_query interceptors. First to return true wins. */
+	private callbackInterceptors: CallbackInterceptor[] = [];
 
-  /** Agent mode - processes natural language messages as tasks. */
-  public agentMode: TelegramAgentMode;
+	/** Agent mode - processes natural language messages as tasks. */
+	public agentMode: TelegramAgentMode;
 
-  /** Persistent bot memory — conversations, repos, learnings. */
-  public memory: BotMemory;
+	/** Persistent bot memory — conversations, repos, learnings. */
+	public memory: BotMemory;
 
-  /** Live dashboard instance for real-time competition updates. */
-  public liveDashboard: LiveDashboard;
+	/** Live dashboard instance for real-time competition updates. */
+	public liveDashboard: LiveDashboard;
 
-  constructor(config?: Partial<TelegramBotConfig>) {
-    this.token = config?.token ?? process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_TOKEN;
-    this.chatId = config?.chatId ?? process.env.TELEGRAM_CHAT_ID ?? DEFAULT_CHAT_ID;
-    this.pollingInterval = config?.pollingInterval ?? 30;
+	constructor(config?: Partial<TelegramBotConfig>) {
+		this.token =
+			config?.token ?? process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_TOKEN;
+		this.chatId =
+			config?.chatId ?? process.env.TELEGRAM_CHAT_ID ?? DEFAULT_CHAT_ID;
+		this.pollingInterval = config?.pollingInterval ?? 30;
 
-    this.memory = new BotMemory();
-    this.agentMode = new TelegramAgentMode(this.memory);
-    this.liveDashboard = new LiveDashboard(this.chatId);
-  }
+		this.memory = new BotMemory();
+		this.agentMode = new TelegramAgentMode(this.memory);
+		this.liveDashboard = new LiveDashboard(this.chatId);
+	}
 
-  // ── Core API Methods ────────────────────────────────
+	// ── Core API Methods ────────────────────────────────
 
-  /**
-   * Send a text message with optional parse mode and reply markup.
-   * Automatically splits messages that exceed Telegram's 4096 char limit.
-   * Returns the message_id of the last sent message.
-   */
-  async sendMessage(
-    text: string,
-    options?: SendMessageOptions
-  ): Promise<number> {
-    const parseMode = options?.parseMode ?? "Markdown";
-    const chunks = splitMessage(text);
-    let lastMessageId = 0;
+	/**
+	 * Send a text message with optional parse mode and reply markup.
+	 * Automatically splits messages that exceed Telegram's 4096 char limit.
+	 * Returns the message_id of the last sent message.
+	 */
+	async sendMessage(
+		text: string,
+		options?: SendMessageOptions,
+	): Promise<number> {
+		const parseMode = options?.parseMode ?? "Markdown";
+		const chunks = splitMessage(text);
+		let lastMessageId = 0;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const isLast = i === chunks.length - 1;
+		for (let i = 0; i < chunks.length; i++) {
+			const isLast = i === chunks.length - 1;
 
-      try {
-        const result = await apiCall(this.token, "sendMessage", {
-          chat_id: this.chatId,
-          text: chunks[i],
-          parse_mode: parseMode,
-          reply_markup: isLast ? options?.replyMarkup : undefined,
-          disable_web_page_preview: options?.disablePreview ?? true,
-        });
-        lastMessageId = result.message_id;
-      } catch {
-        // Fallback: try without parse mode (Markdown can fail on special chars)
-        const result = await apiCall(this.token, "sendMessage", {
-          chat_id: this.chatId,
-          text: chunks[i],
-          reply_markup: isLast ? options?.replyMarkup : undefined,
-          disable_web_page_preview: options?.disablePreview ?? true,
-        });
-        lastMessageId = result.message_id;
-      }
-    }
+			try {
+				const result = await apiCall(this.token, "sendMessage", {
+					chat_id: this.chatId,
+					text: chunks[i],
+					parse_mode: parseMode,
+					reply_markup: isLast ? options?.replyMarkup : undefined,
+					disable_web_page_preview: options?.disablePreview ?? true,
+				});
+				lastMessageId = result.message_id;
+			} catch {
+				// Fallback: try without parse mode (Markdown can fail on special chars)
+				const result = await apiCall(this.token, "sendMessage", {
+					chat_id: this.chatId,
+					text: chunks[i],
+					reply_markup: isLast ? options?.replyMarkup : undefined,
+					disable_web_page_preview: options?.disablePreview ?? true,
+				});
+				lastMessageId = result.message_id;
+			}
+		}
 
-    return lastMessageId;
-  }
+		return lastMessageId;
+	}
 
-  /**
-   * Send a message with an inline keyboard.
-   * `buttons` is a 2D array: each inner array is a row of button labels.
-   * Each button's callback_data defaults to the button text (lowercase, spaces replaced with _).
-   */
-  async sendWithKeyboard(
-    text: string,
-    buttons: string[][],
-    options?: { parseMode?: "Markdown" | "HTML" }
-  ): Promise<number> {
-    const inlineKeyboard = buttons.map((row) =>
-      row.map((label) => ({
-        text: label,
-        callback_data: label.toLowerCase().replace(/\s+/g, "_").slice(0, 64),
-      }))
-    );
+	/**
+	 * Send a message with an inline keyboard.
+	 * `buttons` is a 2D array: each inner array is a row of button labels.
+	 * Each button's callback_data defaults to the button text (lowercase, spaces replaced with _).
+	 */
+	async sendWithKeyboard(
+		text: string,
+		buttons: string[][],
+		options?: { parseMode?: "Markdown" | "HTML" },
+	): Promise<number> {
+		const inlineKeyboard = buttons.map((row) =>
+			row.map((label) => ({
+				text: label,
+				callback_data: label.toLowerCase().replace(/\s+/g, "_").slice(0, 64),
+			})),
+		);
 
-    return this.sendMessage(text, {
-      parseMode: options?.parseMode ?? "Markdown",
-      replyMarkup: { inline_keyboard: inlineKeyboard },
-    });
-  }
+		return this.sendMessage(text, {
+			parseMode: options?.parseMode ?? "Markdown",
+			replyMarkup: { inline_keyboard: inlineKeyboard },
+		});
+	}
 
-  /**
-   * Edit an existing message by message ID.
-   * Useful for live-updating dashboards and status messages.
-   */
-  async editMessage(
-    messageId: number,
-    text: string,
-    options?: {
-      parseMode?: "Markdown" | "HTML";
-      replyMarkup?: InlineKeyboardMarkup;
-    }
-  ): Promise<void> {
-    try {
-      await apiCall(this.token, "editMessageText", {
-        chat_id: this.chatId,
-        message_id: messageId,
-        text,
-        parse_mode: options?.parseMode ?? "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: options?.replyMarkup,
-      });
-    } catch (err: any) {
-      // "message is not modified" is expected if content hasn't changed
-      if (!err.message?.includes("message is not modified")) {
-        throw err;
-      }
-    }
-  }
+	/**
+	 * Edit an existing message by message ID.
+	 * Useful for live-updating dashboards and status messages.
+	 */
+	async editMessage(
+		messageId: number,
+		text: string,
+		options?: {
+			parseMode?: "Markdown" | "HTML";
+			replyMarkup?: InlineKeyboardMarkup;
+		},
+	): Promise<void> {
+		try {
+			await apiCall(this.token, "editMessageText", {
+				chat_id: this.chatId,
+				message_id: messageId,
+				text,
+				parse_mode: options?.parseMode ?? "Markdown",
+				disable_web_page_preview: true,
+				reply_markup: options?.replyMarkup,
+			});
+		} catch (err: any) {
+			// "message is not modified" is expected if content hasn't changed
+			if (!err.message?.includes("message is not modified")) {
+				throw err;
+			}
+		}
+	}
 
-  /**
-   * Send a photo with optional caption.
-   * Accepts a URL string or a Buffer.
-   */
-  async sendPhoto(
-    photo: Buffer | string,
-    caption?: string
-  ): Promise<void> {
-    if (typeof photo === "string") {
-      // URL-based photo
-      await apiCall(this.token, "sendPhoto", {
-        chat_id: this.chatId,
-        photo,
-        caption,
-        parse_mode: "Markdown",
-      });
-    } else {
-      // Buffer-based photo via FormData
-      const formData = new FormData();
-      formData.append("chat_id", this.chatId);
-      formData.append("photo", new Blob([new Uint8Array(photo)]), "image.png");
-      if (caption) {
-        formData.append("caption", caption);
-        formData.append("parse_mode", "Markdown");
-      }
-      await apiFormData(this.token, "sendPhoto", formData);
-    }
-  }
+	/**
+	 * Send a photo with optional caption.
+	 * Accepts a URL string or a Buffer.
+	 */
+	async sendPhoto(photo: Buffer | string, caption?: string): Promise<void> {
+		if (typeof photo === "string") {
+			// URL-based photo
+			await apiCall(this.token, "sendPhoto", {
+				chat_id: this.chatId,
+				photo,
+				caption,
+				parse_mode: "Markdown",
+			});
+		} else {
+			// Buffer-based photo via FormData
+			const formData = new FormData();
+			formData.append("chat_id", this.chatId);
+			formData.append("photo", new Blob([new Uint8Array(photo)]), "image.png");
+			if (caption) {
+				formData.append("caption", caption);
+				formData.append("parse_mode", "Markdown");
+			}
+			await apiFormData(this.token, "sendPhoto", formData);
+		}
+	}
 
-  /**
-   * Send a formatted competition round update.
-   */
-  async sendCompetitionUpdate(round: CompetitionRound): Promise<void> {
-    const message = formatCompetitionRound(round);
-    await this.sendMessage(message, { parseMode: "Markdown" });
-  }
+	/**
+	 * Send a formatted competition round update.
+	 */
+	async sendCompetitionUpdate(round: CompetitionRound): Promise<void> {
+		const message = formatCompetitionRound(round);
+		await this.sendMessage(message, { parseMode: "Markdown" });
+	}
 
-  /**
-   * Send a formatted benchmark report.
-   */
-  async sendBenchmarkReport(report: BenchmarkReport): Promise<void> {
-    const message = formatBenchmarkReport(report);
-    await this.sendMessage(message, { parseMode: "Markdown" });
-  }
+	/**
+	 * Send a formatted benchmark report.
+	 */
+	async sendBenchmarkReport(report: BenchmarkReport): Promise<void> {
+		const message = formatBenchmarkReport(report);
+		await this.sendMessage(message, { parseMode: "Markdown" });
+	}
 
-  /**
-   * Send the morning brief — the comprehensive overnight summary.
-   */
-  async sendMorningBrief(summary: OvernightSummary): Promise<void> {
-    const message = formatMorningBrief(summary);
-    await this.sendMessage(message, { parseMode: "Markdown" });
-  }
+	/**
+	 * Send the morning brief — the comprehensive overnight summary.
+	 */
+	async sendMorningBrief(summary: OvernightSummary): Promise<void> {
+		const message = formatMorningBrief(summary);
+		await this.sendMessage(message, { parseMode: "Markdown" });
+	}
 
-  /**
-   * Send an alert with severity-based formatting.
-   */
-  async sendAlert(
-    message: string,
-    severity: AlertSeverity = "info"
-  ): Promise<void> {
-    const formatted = formatAlert(message, severity);
-    await this.sendMessage(formatted, { parseMode: "Markdown" });
-  }
+	/**
+	 * Send an alert with severity-based formatting.
+	 */
+	async sendAlert(
+		message: string,
+		severity: AlertSeverity = "info",
+	): Promise<void> {
+		const formatted = formatAlert(message, severity);
+		await this.sendMessage(formatted, { parseMode: "Markdown" });
+	}
 
-  // ── Polling ─────────────────────────────────────────
+	// ── Polling ─────────────────────────────────────────
 
-  /**
-   * Start long-polling for incoming commands and messages.
-   * Registers bot commands in Telegram's UI and begins the poll loop.
-   * Non-command messages are routed to agent mode for natural language processing.
-   */
-  async startPolling(): Promise<void> {
-    if (this.polling) {
-      console.warn("[8gent-bot] Already polling.");
-      return;
-    }
+	/**
+	 * Start long-polling for incoming commands and messages.
+	 * Registers bot commands in Telegram's UI and begins the poll loop.
+	 * Non-command messages are routed to agent mode for natural language processing.
+	 */
+	async startPolling(): Promise<void> {
+		if (this.polling) {
+			console.warn("[8gent-bot] Already polling.");
+			return;
+		}
 
-    // Verify the token works
-    const me = await apiCall(this.token, "getMe");
-    console.log(`[8gent-bot] Connected as @${me.username} (${me.id})`);
+		// Verify the token works
+		const me = await apiCall(this.token, "getMe");
+		console.log(`[8gent-bot] Connected as @${me.username} (${me.id})`);
 
-    // Register commands in Telegram's menu
-    await apiCall(this.token, "setMyCommands", {
-      commands: commands.map((c) => ({
-        command: c.name,
-        description: c.description,
-      })),
-    });
+		// Register commands in Telegram's menu
+		await apiCall(this.token, "setMyCommands", {
+			commands: commands.map((c) => ({
+				command: c.name,
+				description: c.description,
+			})),
+		});
 
-    this.polling = true;
-    this.abortController = new AbortController();
+		this.polling = true;
+		this.abortController = new AbortController();
 
-    console.log("[8gent-bot] Polling started. Agent mode active. Listening for commands and messages...");
+		console.log(
+			"[8gent-bot] Polling started. Agent mode active. Listening for commands and messages...",
+		);
 
-    while (this.polling) {
-      try {
-        const updates: TelegramUpdate[] = await apiCall(this.token, "getUpdates", {
-          offset: this.pollOffset,
-          timeout: this.pollingInterval,
-          allowed_updates: ["message", "callback_query"],
-        });
+		while (this.polling) {
+			try {
+				const updates: TelegramUpdate[] = await apiCall(
+					this.token,
+					"getUpdates",
+					{
+						offset: this.pollOffset,
+						timeout: this.pollingInterval,
+						allowed_updates: ["message", "callback_query"],
+					},
+				);
 
-        for (const update of updates) {
-          this.pollOffset = update.update_id + 1;
-          this.handleUpdate(update).catch((err) => {
-            console.error(`[8gent-bot] Handler error: ${err.message}`);
-          });
-        }
-      } catch (err: any) {
-        if (!this.polling) break;
-        console.error(`[8gent-bot] Poll error: ${err.message}`);
-        // Back off on error
-        await new Promise((r) => setTimeout(r, 5000));
-      }
-    }
+				for (const update of updates) {
+					this.pollOffset = update.update_id + 1;
+					this.handleUpdate(update).catch((err) => {
+						console.error(`[8gent-bot] Handler error: ${err.message}`);
+					});
+				}
+			} catch (err: any) {
+				if (!this.polling) break;
+				console.error(`[8gent-bot] Poll error: ${err.message}`);
+				// Back off on error
+				await new Promise((r) => setTimeout(r, 5000));
+			}
+		}
 
-    console.log("[8gent-bot] Polling stopped.");
-  }
+		console.log("[8gent-bot] Polling stopped.");
+	}
 
-  /**
-   * Stop the polling loop.
-   */
-  stopPolling(): void {
-    this.polling = false;
-    this.abortController?.abort();
-    this.abortController = null;
-  }
+	/**
+	 * Stop the polling loop.
+	 */
+	stopPolling(): void {
+		this.polling = false;
+		this.abortController?.abort();
+		this.abortController = null;
+	}
 
-  // ── Update Handler ──────────────────────────────────
+	// ── Update Handler ──────────────────────────────────
 
-  private async handleUpdate(update: TelegramUpdate): Promise<void> {
-    // Handle callback queries (inline keyboard button presses)
-    if (update.callback_query) {
-      await this.handleCallbackQuery(update.callback_query);
-      return;
-    }
+	private async handleUpdate(update: TelegramUpdate): Promise<void> {
+		// Handle callback queries (inline keyboard button presses)
+		if (update.callback_query) {
+			await this.handleCallbackQuery(update.callback_query);
+			return;
+		}
 
-    const message = update.message;
-    if (!message?.text) return;
+		const message = update.message;
+		if (!message?.text) return;
 
-    const chatId = message.chat.id;
-    const text = message.text;
+		const chatId = message.chat.id;
+		const text = message.text;
 
-    // Only respond to the configured chat
-    if (String(chatId) !== this.chatId) {
-      console.log(`[8gent-bot] Ignoring message from chat ${chatId}`);
-      return;
-    }
+		// Only respond to the configured chat
+		if (String(chatId) !== this.chatId) {
+			console.log(`[8gent-bot] Ignoring message from chat ${chatId}`);
+			return;
+		}
 
-    // Send typing indicator
-    apiCall(this.token, "sendChatAction", {
-      chat_id: chatId,
-      action: "typing",
-    }).catch(() => {});
+		// Send typing indicator
+		apiCall(this.token, "sendChatAction", {
+			chat_id: chatId,
+			action: "typing",
+		}).catch(() => {});
 
-    // Route to command handler first
-    const handled = await routeCommand(text, chatId, this);
+		// Route to command handler first
+		const handled = await routeCommand(text, chatId, this);
 
-    if (!handled) {
-      if (text.startsWith("/")) {
-        // Unknown slash command
-        await this.sendMessage(
-          `Unknown command: \`${text.split(/\s/)[0]}\`\n\nUse /help for available commands.`,
-          { parseMode: "Markdown" }
-        );
-      } else {
-        // Route non-command messages to agent mode
-        const response = await this.agentMode.processMessage(text, String(chatId));
-        if (response) {
-          await this.sendMessage(response, { parseMode: "Markdown" });
-        }
-      }
-    }
-  }
+		if (!handled) {
+			if (text.startsWith("/")) {
+				// Unknown slash command
+				await this.sendMessage(
+					`Unknown command: \`${text.split(/\s/)[0]}\`\n\nUse /help for available commands.`,
+					{ parseMode: "Markdown" },
+				);
+			} else {
+				// Route non-command messages to agent mode
+				const response = await this.agentMode.processMessage(
+					text,
+					String(chatId),
+				);
+				if (response) {
+					await this.sendMessage(response, { parseMode: "Markdown" });
+				}
+			}
+		}
+	}
 
-  /**
-   * Handle inline keyboard callback queries.
-   */
-  private async handleCallbackQuery(query: {
-    id: string;
-    from: { id: number };
-    message?: { message_id: number; chat: { id: number } };
-    data?: string;
-  }): Promise<void> {
-    // Acknowledge the callback to remove the loading spinner
-    await apiCall(this.token, "answerCallbackQuery", {
-      callback_query_id: query.id,
-    });
+	/**
+	 * Handle inline keyboard callback queries.
+	 */
+	private async handleCallbackQuery(query: {
+		id: string;
+		from: { id: number };
+		message?: { message_id: number; chat: { id: number } };
+		data?: string;
+	}): Promise<void> {
+		// Acknowledge the callback to remove the loading spinner
+		await apiCall(this.token, "answerCallbackQuery", {
+			callback_query_id: query.id,
+		});
 
-    if (!query.data || !query.message) return;
+		if (!query.data || !query.message) return;
 
-    const chatId = query.message.chat.id;
-    if (String(chatId) !== this.chatId) return;
+		const chatId = query.message.chat.id;
+		if (String(chatId) !== this.chatId) return;
 
-    // 1. Let registered interceptors claim the callback first (e.g. Turth).
-    for (const interceptor of this.callbackInterceptors) {
-      try {
-        const handled = await interceptor({
-          data: query.data,
-          chatId: String(chatId),
-          userId: query.from.id,
-          messageId: query.message.message_id,
-        });
-        if (handled) return;
-      } catch (err: any) {
-        console.error(`[8gent-bot] Interceptor error: ${err.message}`);
-      }
-    }
+		// 1. Let registered interceptors claim the callback first (e.g. Turth).
+		for (const interceptor of this.callbackInterceptors) {
+			try {
+				const handled = await interceptor({
+					data: query.data,
+					chatId: String(chatId),
+					userId: query.from.id,
+					messageId: query.message.message_id,
+				});
+				if (handled) return;
+			} catch (err: any) {
+				console.error(`[8gent-bot] Interceptor error: ${err.message}`);
+			}
+		}
 
-    // 2. Fallback: route callback data through agent mode as if it were a message.
-    const response = await this.agentMode.processMessage(query.data, String(chatId));
-    if (response) {
-      await this.sendMessage(response, { parseMode: "Markdown" });
-    }
-  }
+		// 2. Fallback: route callback data through agent mode as if it were a message.
+		const response = await this.agentMode.processMessage(
+			query.data,
+			String(chatId),
+		);
+		if (response) {
+			await this.sendMessage(response, { parseMode: "Markdown" });
+		}
+	}
 
-  /**
-   * Register a callback_query interceptor. Interceptors run before the
-   * default agent-mode routing and can claim a callback by returning true.
-   */
-  registerCallbackInterceptor(interceptor: CallbackInterceptor): () => void {
-    this.callbackInterceptors.push(interceptor);
-    return () => {
-      const idx = this.callbackInterceptors.indexOf(interceptor);
-      if (idx >= 0) this.callbackInterceptors.splice(idx, 1);
-    };
-  }
+	/**
+	 * Register a callback_query interceptor. Interceptors run before the
+	 * default agent-mode routing and can claim a callback by returning true.
+	 */
+	registerCallbackInterceptor(interceptor: CallbackInterceptor): () => void {
+		this.callbackInterceptors.push(interceptor);
+		return () => {
+			const idx = this.callbackInterceptors.indexOf(interceptor);
+			if (idx >= 0) this.callbackInterceptors.splice(idx, 1);
+		};
+	}
 
-  // ── Utility ─────────────────────────────────────────
+	// ── Utility ─────────────────────────────────────────
 
-  /**
-   * Send a raw API request (for advanced use cases).
-   */
-  async api(method: string, body?: Record<string, unknown>): Promise<any> {
-    return apiCall(this.token, method, body);
-  }
+	/**
+	 * Send a raw API request (for advanced use cases).
+	 */
+	async api(method: string, body?: Record<string, unknown>): Promise<any> {
+		return apiCall(this.token, method, body);
+	}
 
-  /**
-   * Get the configured chat ID.
-   */
-  getChatId(): string {
-    return this.chatId;
-  }
+	/**
+	 * Get the configured chat ID.
+	 */
+	getChatId(): string {
+		return this.chatId;
+	}
 
-  /**
-   * Check if the bot token is valid.
-   */
-  async validate(): Promise<{ valid: boolean; username?: string; error?: string }> {
-    try {
-      const me = await apiCall(this.token, "getMe");
-      return { valid: true, username: me.username };
-    } catch (err: any) {
-      return { valid: false, error: err.message };
-    }
-  }
+	/**
+	 * Check if the bot token is valid.
+	 */
+	async validate(): Promise<{
+		valid: boolean;
+		username?: string;
+		error?: string;
+	}> {
+		try {
+			const me = await apiCall(this.token, "getMe");
+			return { valid: true, username: me.username };
+		} catch (err: any) {
+			return { valid: false, error: err.message };
+		}
+	}
 }
 
 // ── Convenience Exports ─────────────────────────────────
@@ -518,53 +540,56 @@ export class TelegramBot {
  * Create a bot instance with default config and send a single message.
  * Useful for scripts and cron jobs.
  */
-export async function quickSend(text: string, parseMode?: "Markdown" | "HTML"): Promise<void> {
-  const bot = new TelegramBot();
-  await bot.sendMessage(text, { parseMode: parseMode ?? "Markdown" });
+export async function quickSend(
+	text: string,
+	parseMode?: "Markdown" | "HTML",
+): Promise<void> {
+	const bot = new TelegramBot();
+	await bot.sendMessage(text, { parseMode: parseMode ?? "Markdown" });
 }
 
 /**
  * Create a bot instance with default config.
  */
 export function createBot(config?: Partial<TelegramBotConfig>): TelegramBot {
-  return new TelegramBot(config);
+	return new TelegramBot(config);
 }
 
 // Re-export types and formatters for consumer convenience
 export type {
-  TelegramBotConfig,
-  CompetitionRound,
-  BenchmarkReport,
-  OvernightSummary,
-  AlertSeverity,
-  SendMessageOptions,
-  BenchmarkScore,
-  TierBreakdown,
-  SystemStatus,
-  AgentAction,
-  AgentActionType,
-  ActionResult,
-  DashboardData,
-  ConversationEntry,
-  RepoEntry,
-  Learning,
-  BotMemoryData,
+	TelegramBotConfig,
+	CompetitionRound,
+	BenchmarkReport,
+	OvernightSummary,
+	AlertSeverity,
+	SendMessageOptions,
+	BenchmarkScore,
+	TierBreakdown,
+	SystemStatus,
+	AgentAction,
+	AgentActionType,
+	ActionResult,
+	DashboardData,
+	ConversationEntry,
+	RepoEntry,
+	Learning,
+	BotMemoryData,
 } from "./types";
 
 export {
-  formatScoreboard,
-  formatCompetitionRound,
-  formatBenchmarkReport,
-  formatMorningBrief,
-  formatTierBreakdown,
-  formatMutationList,
-  formatComparison,
-  formatAlert,
-  formatSystemStatus,
-  sparkline,
-  progressBar,
-  formatDuration,
-  formatTokens,
+	formatScoreboard,
+	formatCompetitionRound,
+	formatBenchmarkReport,
+	formatMorningBrief,
+	formatTierBreakdown,
+	formatMutationList,
+	formatComparison,
+	formatAlert,
+	formatSystemStatus,
+	sparkline,
+	progressBar,
+	formatDuration,
+	formatTokens,
 } from "./formatters";
 
 export { commands, routeCommand } from "./commands";

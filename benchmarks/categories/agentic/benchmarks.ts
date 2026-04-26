@@ -1,13 +1,14 @@
 import type { BenchmarkDefinition } from "../../types";
 
 export const agenticBenchmarks: BenchmarkDefinition[] = [
-  // ── Tool Creation ─────────────────────────────────────────────────
-  {
-    id: "TC001",
-    category: "agentic",
-    title: "Config Parser — Lexer, Parser, Validator, Serializer with AST Roundtrip",
-    difficulty: "hard",
-    prompt: `Build a parser for a Dockerfile-like config language called ".agentfile".
+	// ── Tool Creation ─────────────────────────────────────────────────
+	{
+		id: "TC001",
+		category: "agentic",
+		title:
+			"Config Parser — Lexer, Parser, Validator, Serializer with AST Roundtrip",
+		difficulty: "hard",
+		prompt: `Build a parser for a Dockerfile-like config language called ".agentfile".
 
 ## Requirements
 
@@ -52,25 +53,38 @@ Export a \`serialize(ast: AST): string\` function.
 - Handle variable interpolation with defaults (\`\${VAR:-default}\`)
 - Empty input → empty AST, no crash
 - Comments-only input → valid AST`,
-    keywords: [
-      "Lexer", "Parser", "AST", "Token", "serialize", "parse", "validate",
-      "Directive", "Block", "heredoc", "interpolation", "recursive",
-      "node", "children", "comment", "tokenize",
-    ],
-    keywordThreshold: 8,
-    testExecution: true,
-    testFile: "autoresearch/tests/TC001-config-parser.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"Lexer",
+			"Parser",
+			"AST",
+			"Token",
+			"serialize",
+			"parse",
+			"validate",
+			"Directive",
+			"Block",
+			"heredoc",
+			"interpolation",
+			"recursive",
+			"node",
+			"children",
+			"comment",
+			"tokenize",
+		],
+		keywordThreshold: 8,
+		testExecution: true,
+		testFile: "autoresearch/tests/TC001-config-parser.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── Data Pipeline ─────────────────────────────────────────────────
-  {
-    id: "DP001",
-    category: "agentic",
-    title: "ETL Data Pipeline — CSV Parse, Transform, Join, Aggregate",
-    difficulty: "hard",
-    prompt: `Build an ETL pipeline that processes messy CSV data from three sources: customers, orders, and products.
+	// ── Data Pipeline ─────────────────────────────────────────────────
+	{
+		id: "DP001",
+		category: "agentic",
+		title: "ETL Data Pipeline — CSV Parse, Transform, Join, Aggregate",
+		difficulty: "hard",
+		prompt: `Build an ETL pipeline that processes messy CSV data from three sources: customers, orders, and products.
 
 ## Requirements
 
@@ -116,26 +130,39 @@ The pipeline receives three CSV strings. The data has realistic issues:
 - Malformed CSV rows
 
 The pipeline must handle ALL of these gracefully without crashing.`,
-    keywords: [
-      "parse", "CSV", "transform", "deduplicate", "normalize", "join",
-      "aggregate", "revenue", "quality", "report", "BOM", "ISO",
-      "referential", "integrity", "malformed", "currency",
-    ],
-    keywordThreshold: 8,
-    testExecution: true,
-    testFile: "autoresearch/tests/DP001-etl-pipeline.test.ts",
-    multiFile: true,
-    fixtures: ["fixtures/etl-data.ts"],
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"parse",
+			"CSV",
+			"transform",
+			"deduplicate",
+			"normalize",
+			"join",
+			"aggregate",
+			"revenue",
+			"quality",
+			"report",
+			"BOM",
+			"ISO",
+			"referential",
+			"integrity",
+			"malformed",
+			"currency",
+		],
+		keywordThreshold: 8,
+		testExecution: true,
+		testFile: "autoresearch/tests/DP001-etl-pipeline.test.ts",
+		multiFile: true,
+		fixtures: ["fixtures/etl-data.ts"],
+		timeoutMs: 15000,
+	},
 
-  // ── Reverse Engineering ───────────────────────────────────────────
-  {
-    id: "RE001",
-    category: "agentic",
-    title: "Algorithm Reverse Engineering — Deduce Transform from I/O Pairs",
-    difficulty: "hard",
-    prompt: `You are given 15 input/output pairs from an unknown function that transforms arrays of integers. Study the pairs carefully, deduce the algorithm, and implement it.
+	// ── Reverse Engineering ───────────────────────────────────────────
+	{
+		id: "RE001",
+		category: "agentic",
+		title: "Algorithm Reverse Engineering — Deduce Transform from I/O Pairs",
+		difficulty: "hard",
+		prompt: `You are given 15 input/output pairs from an unknown function that transforms arrays of integers. Study the pairs carefully, deduce the algorithm, and implement it.
 
 ## Training Pairs
 
@@ -161,25 +188,33 @@ Your implementation must:
 2. Generalize to unseen inputs (5 held-out test cases)
 3. Handle edge cases: empty array, single element, all same values
 4. Process an array of 10,000 elements in under 100ms`,
-    keywords: [
-      "transform", "function", "export", "default", "number",
-      "array", "ascending", "descending", "plateau", "consecutive",
-    ],
-    keywordThreshold: 5,
-    testExecution: true,
-    testFile: "autoresearch/tests/RE001-reverse-engineering.test.ts",
-    multiFile: false,
-    fixtures: ["fixtures/re-pairs.ts"],
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"transform",
+			"function",
+			"export",
+			"default",
+			"number",
+			"array",
+			"ascending",
+			"descending",
+			"plateau",
+			"consecutive",
+		],
+		keywordThreshold: 5,
+		testExecution: true,
+		testFile: "autoresearch/tests/RE001-reverse-engineering.test.ts",
+		multiFile: false,
+		fixtures: ["fixtures/re-pairs.ts"],
+		timeoutMs: 15000,
+	},
 
-  // ── Systems Debugging ─────────────────────────────────────────────
-  {
-    id: "SD001",
-    category: "agentic",
-    title: "Multi-Bug Systems Debugging — Find & Fix 3 Subtle Bugs",
-    difficulty: "hard",
-    prompt: `You are given a 4-file event-driven message broker system. It has 3 subtle bugs that need fixing. Find them and fix them WITHOUT breaking existing functionality.
+	// ── Systems Debugging ─────────────────────────────────────────────
+	{
+		id: "SD001",
+		category: "agentic",
+		title: "Multi-Bug Systems Debugging — Find & Fix 3 Subtle Bugs",
+		difficulty: "hard",
+		prompt: `You are given a 4-file event-driven message broker system. It has 3 subtle bugs that need fixing. Find them and fix them WITHOUT breaking existing functionality.
 
 ## The System
 
@@ -212,31 +247,43 @@ Contract: The wildcard "*" matches ZERO or more characters (not one or more).
 Import fixture files using relative imports: \`import { ... } from "./types"\`
 
 The files live in your working directory. Read them from: fixtures/broker-system/`,
-    keywords: [
-      "subscribe", "unsubscribe", "publish", "wildcard", "pattern",
-      "history", "maxHistory", "prune", "concurrent", "lock",
-      "mutex", "broker", "message", "topic", "match",
-    ],
-    keywordThreshold: 8,
-    testExecution: true,
-    testFile: "autoresearch/tests/SD001-systems-debugging.test.ts",
-    multiFile: true,
-    fixtures: [
-      "fixtures/broker-system/types.ts",
-      "fixtures/broker-system/broker.ts",
-      "fixtures/broker-system/history.ts",
-      "fixtures/broker-system/router.ts",
-    ],
-    timeoutMs: 20000,
-  },
+		keywords: [
+			"subscribe",
+			"unsubscribe",
+			"publish",
+			"wildcard",
+			"pattern",
+			"history",
+			"maxHistory",
+			"prune",
+			"concurrent",
+			"lock",
+			"mutex",
+			"broker",
+			"message",
+			"topic",
+			"match",
+		],
+		keywordThreshold: 8,
+		testExecution: true,
+		testFile: "autoresearch/tests/SD001-systems-debugging.test.ts",
+		multiFile: true,
+		fixtures: [
+			"fixtures/broker-system/types.ts",
+			"fixtures/broker-system/broker.ts",
+			"fixtures/broker-system/history.ts",
+			"fixtures/broker-system/router.ts",
+		],
+		timeoutMs: 20000,
+	},
 
-  // ── Architecture ──────────────────────────────────────────────────
-  {
-    id: "AR001",
-    category: "agentic",
-    title: "Plugin System — Dependency Resolution, Lifecycle, Hot-Reload",
-    difficulty: "hard",
-    prompt: `Build a plugin system with dependency resolution, lifecycle management, and hot-reload capability.
+	// ── Architecture ──────────────────────────────────────────────────
+	{
+		id: "AR001",
+		category: "agentic",
+		title: "Plugin System — Dependency Resolution, Lifecycle, Hot-Reload",
+		difficulty: "hard",
+		prompt: `Build a plugin system with dependency resolution, lifecycle management, and hot-reload capability.
 
 ## Requirements
 
@@ -280,25 +327,40 @@ Plugin manager — the main orchestrator:
 - Lazy loading: getPlugin() triggers init chain on demand
 - Hot-reload cascade: reloading D re-inits B, C, A (its dependents)
 - Stop is idempotent (safe to call twice)`,
-    keywords: [
-      "Plugin", "register", "resolve", "topological", "cycle", "circular",
-      "dependency", "lifecycle", "init", "start", "stop", "destroy",
-      "lazy", "reload", "cascade", "provides", "requires", "manifest",
-    ],
-    keywordThreshold: 10,
-    testExecution: true,
-    testFile: "autoresearch/tests/AR001-plugin-system.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"Plugin",
+			"register",
+			"resolve",
+			"topological",
+			"cycle",
+			"circular",
+			"dependency",
+			"lifecycle",
+			"init",
+			"start",
+			"stop",
+			"destroy",
+			"lazy",
+			"reload",
+			"cascade",
+			"provides",
+			"requires",
+			"manifest",
+		],
+		keywordThreshold: 10,
+		testExecution: true,
+		testFile: "autoresearch/tests/AR001-plugin-system.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── Creative Scripting ────────────────────────────────────────────
-  {
-    id: "CB001",
-    category: "agentic",
-    title: "Git Repository Analyzer — Traverse, Extract Stats, Report",
-    difficulty: "hard",
-    prompt: `Build a TypeScript module that analyzes git repositories in a directory tree using a mock filesystem.
+	// ── Creative Scripting ────────────────────────────────────────────
+	{
+		id: "CB001",
+		category: "agentic",
+		title: "Git Repository Analyzer — Traverse, Extract Stats, Report",
+		difficulty: "hard",
+		prompt: `Build a TypeScript module that analyzes git repositories in a directory tree using a mock filesystem.
 
 ## Requirements
 
@@ -341,26 +403,39 @@ class MockFileSystem {
 - Detached HEAD: .git/HEAD contains a hash, not "ref: refs/heads/..."
 - Nested git repos (submodules): skip the inner one
 - Handle git log format: \`commit HASH\\nAuthor: Name <email>\\nDate: date\\n\\n    message\``,
-    keywords: [
-      "traverse", "git", "repository", "commit", "author", "stats",
-      "language", "extension", "submodule", "detached", "HEAD",
-      "report", "JSON", "analyze", "MockFileSystem", "readdir",
-    ],
-    keywordThreshold: 8,
-    testExecution: true,
-    testFile: "autoresearch/tests/CB001-git-analyzer.test.ts",
-    multiFile: true,
-    fixtures: ["fixtures/mock-git.ts"],
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"traverse",
+			"git",
+			"repository",
+			"commit",
+			"author",
+			"stats",
+			"language",
+			"extension",
+			"submodule",
+			"detached",
+			"HEAD",
+			"report",
+			"JSON",
+			"analyze",
+			"MockFileSystem",
+			"readdir",
+		],
+		keywordThreshold: 8,
+		testExecution: true,
+		testFile: "autoresearch/tests/CB001-git-analyzer.test.ts",
+		multiFile: true,
+		fixtures: ["fixtures/mock-git.ts"],
+		timeoutMs: 15000,
+	},
 
-  // ── Constraint Solver ─────────────────────────────────────────────
-  {
-    id: "MR001",
-    category: "agentic",
-    title: "CSP Constraint Solver — Sudoku + Scheduling with AC-3",
-    difficulty: "hard",
-    prompt: `Implement a general-purpose constraint satisfaction problem (CSP) solver, then use it to solve Sudoku puzzles and scheduling problems.
+	// ── Constraint Solver ─────────────────────────────────────────────
+	{
+		id: "MR001",
+		category: "agentic",
+		title: "CSP Constraint Solver — Sudoku + Scheduling with AC-3",
+		difficulty: "hard",
+		prompt: `Implement a general-purpose constraint satisfaction problem (CSP) solver, then use it to solve Sudoku puzzles and scheduling problems.
 
 ## Requirements
 
@@ -407,15 +482,29 @@ Shared utilities: domain copying, constraint graph building, solution validation
 - Hard Sudoku (17 givens): < 2000ms
 - 15-task scheduling: < 5000ms
 - Impossible puzzles must return null quickly, not hang`,
-    keywords: [
-      "CSP", "Variable", "Constraint", "domain", "backtrack", "AC-3",
-      "arc", "consistency", "MCV", "forward", "checking", "Sudoku",
-      "schedule", "solve", "prune", "propagate", "queue",
-    ],
-    keywordThreshold: 9,
-    testExecution: true,
-    testFile: "autoresearch/tests/MR001-constraint-solver.test.ts",
-    multiFile: true,
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"CSP",
+			"Variable",
+			"Constraint",
+			"domain",
+			"backtrack",
+			"AC-3",
+			"arc",
+			"consistency",
+			"MCV",
+			"forward",
+			"checking",
+			"Sudoku",
+			"schedule",
+			"solve",
+			"prune",
+			"propagate",
+			"queue",
+		],
+		keywordThreshold: 9,
+		testExecution: true,
+		testFile: "autoresearch/tests/MR001-constraint-solver.test.ts",
+		multiFile: true,
+		timeoutMs: 30000,
+	},
 ];

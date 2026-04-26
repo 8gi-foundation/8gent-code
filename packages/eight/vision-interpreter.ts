@@ -13,22 +13,28 @@
  * The vision interpreter is a fire-and-forget sub-agent.
  */
 
-import { findVisionModel, findOCRModel, loadVisionConfig, type VisionModel, type VisionTaskType } from "./vision-router";
+import {
+	findVisionModel,
+	findOCRModel,
+	loadVisionConfig,
+	type VisionModel,
+	type VisionTaskType,
+} from "./vision-router";
 
 interface VisionInterpretation {
-  description: string;
-  model: string;
-  provider: string;
-  durationMs: number;
-  free: boolean;
+	description: string;
+	model: string;
+	provider: string;
+	durationMs: number;
+	free: boolean;
 }
 
 interface PendingVision {
-  promise: Promise<VisionInterpretation>;
-  status: "pending" | "done" | "error";
-  result?: VisionInterpretation;
-  error?: string;
-  startedAt: number;
+	promise: Promise<VisionInterpretation>;
+	status: "pending" | "done" | "error";
+	result?: VisionInterpretation;
+	error?: string;
+	startedAt: number;
 }
 
 /**
@@ -36,68 +42,70 @@ interface PendingVision {
  * Works with both Ollama and OpenRouter vision models.
  */
 async function callVisionModel(
-  model: VisionModel,
-  imageBase64: string,
-  mimeType: string,
-  prompt: string,
-  apiKey?: string,
+	model: VisionModel,
+	imageBase64: string,
+	mimeType: string,
+	prompt: string,
+	apiKey?: string,
 ): Promise<string> {
-  const imageUrl = `data:${mimeType};base64,${imageBase64}`;
+	const imageUrl = `data:${mimeType};base64,${imageBase64}`;
 
-  if (model.provider === "ollama") {
-    // Ollama vision API
-    const res = await fetch("http://localhost:11434/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(60000),
-      body: JSON.stringify({
-        model: model.model,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-            images: [imageBase64], // Ollama takes raw base64, no data: prefix
-          },
-        ],
-        stream: false,
-      }),
-    });
+	if (model.provider === "ollama") {
+		// Ollama vision API
+		const res = await fetch("http://localhost:11434/api/chat", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			signal: AbortSignal.timeout(60000),
+			body: JSON.stringify({
+				model: model.model,
+				messages: [
+					{
+						role: "user",
+						content: prompt,
+						images: [imageBase64], // Ollama takes raw base64, no data: prefix
+					},
+				],
+				stream: false,
+			}),
+		});
 
-    if (!res.ok) throw new Error(`Ollama vision error: ${res.statusText}`);
-    const data = await res.json();
-    return data.message?.content || "";
-  } else {
-    // OpenRouter / OpenAI-compatible vision API
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (apiKey) {
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      headers["HTTP-Referer"] = "https://8gent.app";
-      headers["X-Title"] = "8gent-vision";
-    }
+		if (!res.ok) throw new Error(`Ollama vision error: ${res.statusText}`);
+		const data = await res.json();
+		return data.message?.content || "";
+	} else {
+		// OpenRouter / OpenAI-compatible vision API
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+		};
+		if (apiKey) {
+			headers["Authorization"] = `Bearer ${apiKey}`;
+			headers["HTTP-Referer"] = "https://8gent.app";
+			headers["X-Title"] = "8gent-vision";
+		}
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers,
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({
-        model: model.model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: imageUrl } },
-            ],
-          },
-        ],
-        max_tokens: 1024,
-      }),
-    });
+		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers,
+			signal: AbortSignal.timeout(30000),
+			body: JSON.stringify({
+				model: model.model,
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: prompt },
+							{ type: "image_url", image_url: { url: imageUrl } },
+						],
+					},
+				],
+				max_tokens: 1024,
+			}),
+		});
 
-    if (!res.ok) throw new Error(`OpenRouter vision error: ${res.statusText}`);
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "";
-  }
+		if (!res.ok) throw new Error(`OpenRouter vision error: ${res.statusText}`);
+		const data = await res.json();
+		return data.choices?.[0]?.message?.content || "";
+	}
 }
 
 const VISION_PROMPT = `Describe this image in detail for a coding agent. Focus on:
@@ -129,130 +137,140 @@ Return ONLY the extracted text content, no descriptions or commentary.`;
  *   const result = vi.getIfReady(id);  // non-blocking check
  */
 export class VisionInterpreter {
-  private pending = new Map<string, PendingVision>();
-  private apiKey?: string;
-  private onResult?: (id: string, result: VisionInterpretation) => void;
+	private pending = new Map<string, PendingVision>();
+	private apiKey?: string;
+	private onResult?: (id: string, result: VisionInterpretation) => void;
 
-  constructor(options?: { apiKey?: string; onResult?: (id: string, result: VisionInterpretation) => void }) {
-    this.apiKey = options?.apiKey || process.env.OPENROUTER_API_KEY;
-    this.onResult = options?.onResult;
-  }
+	constructor(options?: {
+		apiKey?: string;
+		onResult?: (id: string, result: VisionInterpretation) => void;
+	}) {
+		this.apiKey = options?.apiKey || process.env.OPENROUTER_API_KEY;
+		this.onResult = options?.onResult;
+	}
 
-  /**
-   * Start interpreting an image asynchronously.
-   * Returns an ID to check/wait for the result.
-   *
-   * @param taskType - "general" for scene/UI description, "ocr" for text extraction
-   */
-  interpret(imageBase64: string, mimeType = "image/png", customPrompt?: string, taskType: VisionTaskType = "general"): string {
-    const id = `vision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const startedAt = Date.now();
-    const config = loadVisionConfig();
+	/**
+	 * Start interpreting an image asynchronously.
+	 * Returns an ID to check/wait for the result.
+	 *
+	 * @param taskType - "general" for scene/UI description, "ocr" for text extraction
+	 */
+	interpret(
+		imageBase64: string,
+		mimeType = "image/png",
+		customPrompt?: string,
+		taskType: VisionTaskType = "general",
+	): string {
+		const id = `vision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const startedAt = Date.now();
+		const config = loadVisionConfig();
 
-    const promise = (async (): Promise<VisionInterpretation> => {
-      // Find best model for the task type (respects user config + fallback chain)
-      const finder = taskType === "ocr" ? findOCRModel : findVisionModel;
-      const { found, model, error } = await finder({
-        openRouterApiKey: this.apiKey,
-        ...(taskType !== "ocr" ? { taskType } : {}),
-      } as any);
+		const promise = (async (): Promise<VisionInterpretation> => {
+			// Find best model for the task type (respects user config + fallback chain)
+			const finder = taskType === "ocr" ? findOCRModel : findVisionModel;
+			const { found, model, error } = await finder({
+				openRouterApiKey: this.apiKey,
+				...(taskType !== "ocr" ? { taskType } : {}),
+			} as any);
 
-      if (!found || !model) {
-        throw new Error(error || "No vision model available");
-      }
+			if (!found || !model) {
+				throw new Error(error || "No vision model available");
+			}
 
-      // Select prompt based on task type
-      const defaultPrompt = taskType === "ocr" ? OCR_PROMPT : VISION_PROMPT;
+			// Select prompt based on task type
+			const defaultPrompt = taskType === "ocr" ? OCR_PROMPT : VISION_PROMPT;
 
-      // Call the vision model
-      const description = await callVisionModel(
-        model,
-        imageBase64,
-        mimeType,
-        customPrompt || defaultPrompt,
-        this.apiKey,
-      );
+			// Call the vision model
+			const description = await callVisionModel(
+				model,
+				imageBase64,
+				mimeType,
+				customPrompt || defaultPrompt,
+				this.apiKey,
+			);
 
-      return {
-        description,
-        model: model.model,
-        provider: model.provider,
-        durationMs: Date.now() - startedAt,
-        free: model.free,
-      };
-    })();
+			return {
+				description,
+				model: model.model,
+				provider: model.provider,
+				durationMs: Date.now() - startedAt,
+				free: model.free,
+			};
+		})();
 
-    const entry: PendingVision = { promise, status: "pending", startedAt };
+		const entry: PendingVision = { promise, status: "pending", startedAt };
 
-    // When done, update status and fire callback
-    promise
-      .then((result) => {
-        entry.status = "done";
-        entry.result = result;
-        this.onResult?.(id, result);
-      })
-      .catch((err) => {
-        entry.status = "error";
-        entry.error = err instanceof Error ? err.message : String(err);
-      });
+		// When done, update status and fire callback
+		promise
+			.then((result) => {
+				entry.status = "done";
+				entry.result = result;
+				this.onResult?.(id, result);
+			})
+			.catch((err) => {
+				entry.status = "error";
+				entry.error = err instanceof Error ? err.message : String(err);
+			});
 
-    this.pending.set(id, entry);
-    return id;
-  }
+		this.pending.set(id, entry);
+		return id;
+	}
 
-  /**
-   * Wait for a specific interpretation to complete.
-   * Blocks until result is ready.
-   */
-  async waitFor(id: string): Promise<VisionInterpretation | null> {
-    const entry = this.pending.get(id);
-    if (!entry) return null;
+	/**
+	 * Wait for a specific interpretation to complete.
+	 * Blocks until result is ready.
+	 */
+	async waitFor(id: string): Promise<VisionInterpretation | null> {
+		const entry = this.pending.get(id);
+		if (!entry) return null;
 
-    try {
-      return await entry.promise;
-    } catch {
-      return null;
-    }
-  }
+		try {
+			return await entry.promise;
+		} catch {
+			return null;
+		}
+	}
 
-  /**
-   * Non-blocking check — returns result if ready, null if still pending.
-   */
-  getIfReady(id: string): VisionInterpretation | null {
-    const entry = this.pending.get(id);
-    if (!entry || entry.status !== "done") return null;
-    return entry.result || null;
-  }
+	/**
+	 * Non-blocking check — returns result if ready, null if still pending.
+	 */
+	getIfReady(id: string): VisionInterpretation | null {
+		const entry = this.pending.get(id);
+		if (!entry || entry.status !== "done") return null;
+		return entry.result || null;
+	}
 
-  /**
-   * Check if an interpretation is still running.
-   */
-  isPending(id: string): boolean {
-    const entry = this.pending.get(id);
-    return entry?.status === "pending";
-  }
+	/**
+	 * Check if an interpretation is still running.
+	 */
+	isPending(id: string): boolean {
+		const entry = this.pending.get(id);
+		return entry?.status === "pending";
+	}
 
-  /**
-   * Get status of all pending interpretations.
-   */
-  getStatus(): { pending: number; done: number; error: number } {
-    let pending = 0, done = 0, error = 0;
-    for (const entry of this.pending.values()) {
-      if (entry.status === "pending") pending++;
-      else if (entry.status === "done") done++;
-      else error++;
-    }
-    return { pending, done, error };
-  }
+	/**
+	 * Get status of all pending interpretations.
+	 */
+	getStatus(): { pending: number; done: number; error: number } {
+		let pending = 0,
+			done = 0,
+			error = 0;
+		for (const entry of this.pending.values()) {
+			if (entry.status === "pending") pending++;
+			else if (entry.status === "done") done++;
+			else error++;
+		}
+		return { pending, done, error };
+	}
 
-  /**
-   * Clean up completed entries.
-   */
-  cleanup(): void {
-    for (const [id, entry] of this.pending.entries()) {
-      if (entry.status !== "pending") this.pending.delete(id);
-    }
-  }
+	/**
+	 * Clean up completed entries.
+	 */
+	cleanup(): void {
+		for (const [id, entry] of this.pending.entries()) {
+			if (entry.status !== "pending") this.pending.delete(id);
+		}
+	}
 }
 
 export type { VisionInterpretation, PendingVision };

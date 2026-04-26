@@ -11,20 +11,20 @@ import * as path from "path";
 // ── Types ───────────────────────────────────────────────────────
 
 export interface GameConfig {
-  /** Game title */
-  name: string;
-  /** Output directory */
-  outputDir: string;
-  /** Game engine */
-  engine: "phaser" | "pixi";
-  /** Game type */
-  type: "platformer" | "topdown" | "shooter" | "puzzle";
-  /** Canvas width */
-  width?: number;
-  /** Canvas height */
-  height?: number;
-  /** Path to sprite assets directory */
-  assetsDir?: string;
+	/** Game title */
+	name: string;
+	/** Output directory */
+	outputDir: string;
+	/** Game engine */
+	engine: "phaser" | "pixi";
+	/** Game type */
+	type: "platformer" | "topdown" | "shooter" | "puzzle";
+	/** Canvas width */
+	width?: number;
+	/** Canvas height */
+	height?: number;
+	/** Path to sprite assets directory */
+	assetsDir?: string;
 }
 
 // ── Scaffolder ──────────────────────────────────────────────────
@@ -32,34 +32,38 @@ export interface GameConfig {
 /**
  * Generate a starter game project.
  */
-export function scaffoldGame(config: GameConfig): { files: string[]; entryPoint: string } {
-  const { name, outputDir, engine, type, width = 800, height = 600 } = config;
+export function scaffoldGame(config: GameConfig): {
+	files: string[];
+	entryPoint: string;
+} {
+	const { name, outputDir, engine, type, width = 800, height = 600 } = config;
 
-  fs.mkdirSync(outputDir, { recursive: true });
-  fs.mkdirSync(path.join(outputDir, "assets"), { recursive: true });
+	fs.mkdirSync(outputDir, { recursive: true });
+	fs.mkdirSync(path.join(outputDir, "assets"), { recursive: true });
 
-  const files: string[] = [];
+	const files: string[] = [];
 
-  // package.json
-  const pkg = {
-    name: name.toLowerCase().replace(/\s+/g, "-"),
-    version: "0.1.0",
-    private: true,
-    scripts: {
-      dev: "bun run --hot src/main.ts",
-      build: "bun build src/main.ts --outdir=dist",
-    },
-    dependencies: engine === "phaser"
-      ? { phaser: "^3.80.0" }
-      : { pixi: "^8.0.0" },
-  };
-  const pkgPath = path.join(outputDir, "package.json");
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-  files.push(pkgPath);
+	// package.json
+	const pkg = {
+		name: name.toLowerCase().replace(/\s+/g, "-"),
+		version: "0.1.0",
+		private: true,
+		scripts: {
+			dev: "bun run --hot src/main.ts",
+			build: "bun build src/main.ts --outdir=dist",
+		},
+		dependencies:
+			engine === "phaser" ? { phaser: "^3.80.0" } : { pixi: "^8.0.0" },
+	};
+	const pkgPath = path.join(outputDir, "package.json");
+	fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+	files.push(pkgPath);
 
-  // index.html
-  const htmlPath = path.join(outputDir, "index.html");
-  fs.writeFileSync(htmlPath, `<!DOCTYPE html>
+	// index.html
+	const htmlPath = path.join(outputDir, "index.html");
+	fs.writeFileSync(
+		htmlPath,
+		`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -74,29 +78,36 @@ export function scaffoldGame(config: GameConfig): { files: string[]; entryPoint:
 <body>
   <script type="module" src="src/main.ts"></script>
 </body>
-</html>`);
-  files.push(htmlPath);
+</html>`,
+	);
+	files.push(htmlPath);
 
-  // Main game file
-  fs.mkdirSync(path.join(outputDir, "src"), { recursive: true });
-  const mainPath = path.join(outputDir, "src", "main.ts");
+	// Main game file
+	fs.mkdirSync(path.join(outputDir, "src"), { recursive: true });
+	const mainPath = path.join(outputDir, "src", "main.ts");
 
-  if (engine === "phaser") {
-    fs.writeFileSync(mainPath, generatePhaserMain(name, type, width, height));
-  } else {
-    fs.writeFileSync(mainPath, generatePixiMain(name, type, width, height));
-  }
-  files.push(mainPath);
+	if (engine === "phaser") {
+		fs.writeFileSync(mainPath, generatePhaserMain(name, type, width, height));
+	} else {
+		fs.writeFileSync(mainPath, generatePixiMain(name, type, width, height));
+	}
+	files.push(mainPath);
 
-  return { files, entryPoint: htmlPath };
+	return { files, entryPoint: htmlPath };
 }
 
 // ── Phaser Template ─────────────────────────────────────────────
 
-function generatePhaserMain(name: string, type: string, w: number, h: number): string {
-  const physics = type === "platformer" || type === "shooter" ? "arcade" : "none";
+function generatePhaserMain(
+	name: string,
+	type: string,
+	w: number,
+	h: number,
+): string {
+	const physics =
+		type === "platformer" || type === "shooter" ? "arcade" : "none";
 
-  return `import Phaser from "phaser";
+	return `import Phaser from "phaser";
 
 class GameScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -117,7 +128,7 @@ class GameScene extends Phaser.Scene {
   create() {
     // Create player
     this.player = this.physics.add.sprite(${w / 2}, ${h / 2}, "placeholder");
-    ${type === "platformer" ? 'this.player.setBounce(0.2);\n    this.player.setCollideWorldBounds(true);\n    this.physics.world.gravity.y = 800;' : 'this.player.setCollideWorldBounds(true);'}
+    ${type === "platformer" ? "this.player.setBounce(0.2);\n    this.player.setCollideWorldBounds(true);\n    this.physics.world.gravity.y = 800;" : "this.player.setCollideWorldBounds(true);"}
 
     // Input
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -129,13 +140,15 @@ class GameScene extends Phaser.Scene {
   update() {
     const speed = 200;
     this.player.setVelocityX(0);
-    ${type !== "platformer" ? 'this.player.setVelocityY(0);' : ''}
+    ${type !== "platformer" ? "this.player.setVelocityY(0);" : ""}
 
     if (this.cursors.left.isDown) this.player.setVelocityX(-speed);
     if (this.cursors.right.isDown) this.player.setVelocityX(speed);
-    ${type === "platformer"
-      ? 'if (this.cursors.up.isDown && this.player.body!.touching.down) this.player.setVelocityY(-500);'
-      : 'if (this.cursors.up.isDown) this.player.setVelocityY(-speed);\n    if (this.cursors.down.isDown) this.player.setVelocityY(speed);'}
+    ${
+			type === "platformer"
+				? "if (this.cursors.up.isDown && this.player.body!.touching.down) this.player.setVelocityY(-500);"
+				: "if (this.cursors.up.isDown) this.player.setVelocityY(-speed);\n    if (this.cursors.down.isDown) this.player.setVelocityY(speed);"
+		}
   }
 }
 
@@ -143,7 +156,7 @@ const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: ${w},
   height: ${h},
-  ${physics !== "none" ? `physics: { default: "arcade", arcade: { gravity: { x: 0, y: ${type === "platformer" ? 800 : 0} }, debug: false } },` : ''}
+  ${physics !== "none" ? `physics: { default: "arcade", arcade: { gravity: { x: 0, y: ${type === "platformer" ? 800 : 0} }, debug: false } },` : ""}
   scene: GameScene,
   pixelArt: true,
   backgroundColor: "#1a1a2e",
@@ -155,8 +168,13 @@ new Phaser.Game(config);
 
 // ── Pixi Template ───────────────────────────────────────────────
 
-function generatePixiMain(name: string, _type: string, w: number, h: number): string {
-  return `import { Application, Graphics, Text } from "pixi.js";
+function generatePixiMain(
+	name: string,
+	_type: string,
+	w: number,
+	h: number,
+): string {
+	return `import { Application, Graphics, Text } from "pixi.js";
 
 const app = new Application();
 

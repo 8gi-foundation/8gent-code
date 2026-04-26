@@ -25,9 +25,9 @@ const POSIX_UNSAFE = /[^a-zA-Z0-9@%_\-+=:,./]/;
  * escapeArg("safe123")     // => "safe123"
  */
 export function escapeArg(str: string): string {
-  if (str === "") return "''";
-  if (!POSIX_UNSAFE.test(str)) return str;
-  return "'" + str.replace(/'/g, "'\\''") + "'";
+	if (str === "") return "''";
+	if (!POSIX_UNSAFE.test(str)) return str;
+	return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
 /**
@@ -38,7 +38,7 @@ export function escapeArg(str: string): string {
  * // => ["git", "commit", "-m", "'fix: my bug'"]
  */
 export function escapeArgs(args: string[]): string[] {
-  return args.map(escapeArg);
+	return args.map(escapeArg);
 }
 
 /**
@@ -50,8 +50,8 @@ export function escapeArgs(args: string[]): string[] {
  * // => "git commit -m 'fix: my bug'"
  */
 export function buildCommand(cmd: string, args: string[]): string {
-  const escaped = escapeArgs(args);
-  return [escapeArg(cmd), ...escaped].join(" ");
+	const escaped = escapeArgs(args);
+	return [escapeArg(cmd), ...escaped].join(" ");
 }
 
 /**
@@ -64,13 +64,13 @@ export function buildCommand(cmd: string, args: string[]): string {
  * shellQuote('say "hello" $USER') // => '"say \\"hello\\" \\$USER"'
  */
 export function shellQuote(str: string): string {
-  const escaped = str
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\$/g, "\\$")
-    .replace(/`/g, "\\`")
-    .replace(/!/g, "\\!");
-  return `"${escaped}"`;
+	const escaped = str
+		.replace(/\\/g, "\\\\")
+		.replace(/"/g, '\\"')
+		.replace(/\$/g, "\\$")
+		.replace(/`/g, "\\`")
+		.replace(/!/g, "\\!");
+	return `"${escaped}"`;
 }
 
 type SplitState = "normal" | "single" | "double";
@@ -90,80 +90,82 @@ type SplitState = "normal" | "single" | "double";
  * // => ["echo", "hello world"]
  */
 export function shellSplit(input: string): string[] {
-  const args: string[] = [];
-  let current = "";
-  let state: SplitState = "normal";
-  let i = 0;
+	const args: string[] = [];
+	let current = "";
+	let state: SplitState = "normal";
+	let i = 0;
 
-  while (i < input.length) {
-    const ch = input[i];
+	while (i < input.length) {
+		const ch = input[i];
 
-    if (state === "single") {
-      if (ch === "'") {
-        state = "normal";
-      } else {
-        current += ch;
-      }
-      i++;
-      continue;
-    }
+		if (state === "single") {
+			if (ch === "'") {
+				state = "normal";
+			} else {
+				current += ch;
+			}
+			i++;
+			continue;
+		}
 
-    if (state === "double") {
-      if (ch === '"') {
-        state = "normal";
-        i++;
-        continue;
-      }
-      if (ch === "\\" && i + 1 < input.length) {
-        const next = input[i + 1];
-        // Only these chars are special inside double quotes
-        if ('"\\$`!'.includes(next)) {
-          current += next;
-          i += 2;
-          continue;
-        }
-      }
-      current += ch;
-      i++;
-      continue;
-    }
+		if (state === "double") {
+			if (ch === '"') {
+				state = "normal";
+				i++;
+				continue;
+			}
+			if (ch === "\\" && i + 1 < input.length) {
+				const next = input[i + 1];
+				// Only these chars are special inside double quotes
+				if ('"\\$`!'.includes(next)) {
+					current += next;
+					i += 2;
+					continue;
+				}
+			}
+			current += ch;
+			i++;
+			continue;
+		}
 
-    // state === "normal"
-    if (ch === " " || ch === "\t" || ch === "\n") {
-      if (current.length > 0) {
-        args.push(current);
-        current = "";
-      }
-      i++;
-      continue;
-    }
+		// state === "normal"
+		if (ch === " " || ch === "\t" || ch === "\n") {
+			if (current.length > 0) {
+				args.push(current);
+				current = "";
+			}
+			i++;
+			continue;
+		}
 
-    if (ch === "'") {
-      state = "single";
-      i++;
-      continue;
-    }
+		if (ch === "'") {
+			state = "single";
+			i++;
+			continue;
+		}
 
-    if (ch === '"') {
-      state = "double";
-      i++;
-      continue;
-    }
+		if (ch === '"') {
+			state = "double";
+			i++;
+			continue;
+		}
 
-    if (ch === "\\" && i + 1 < input.length) {
-      current += input[i + 1];
-      i += 2;
-      continue;
-    }
+		if (ch === "\\" && i + 1 < input.length) {
+			current += input[i + 1];
+			i += 2;
+			continue;
+		}
 
-    current += ch;
-    i++;
-  }
+		current += ch;
+		i++;
+	}
 
-  if (state === "single") throw new Error("Unterminated single quote in shell string");
-  if (state === "double") throw new Error("Unterminated double quote in shell string");
+	if (state === "single")
+		throw new Error("Unterminated single quote in shell string");
+	if (state === "double")
+		throw new Error("Unterminated double quote in shell string");
 
-  if (current.length > 0) args.push(current);
+	if (current.length > 0) args.push(current);
 
-  return args;
+	return args;
 }

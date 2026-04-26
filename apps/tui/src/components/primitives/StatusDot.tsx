@@ -7,7 +7,10 @@ export interface StatusDotProps {
 	status: StatusType;
 }
 
-const STATUS_CONFIG: Record<StatusType, { symbol: string; color?: string; dimColor?: boolean }> = {
+const STATUS_CONFIG: Record<
+	StatusType,
+	{ symbol: string; color?: string; dimColor?: boolean }
+> = {
 	success: { symbol: "\u25CF", color: "green" },
 	error: { symbol: "\u25CF", color: "red" },
 	warning: { symbol: "\u25CF", color: "yellow" },
