@@ -6,11 +6,11 @@
  */
 
 export default {
-  providers: [
-    {
-      // Clerk is the sole auth provider for 8gent
-      domain: process.env.CLERK_ISSUER_DOMAIN || "https://clerk.8gent.app",
-      applicationID: "convex",
-    },
-  ],
+	providers: [
+		{
+			// Clerk is the sole auth provider for 8gent
+			domain: process.env.CLERK_ISSUER_DOMAIN || "https://clerk.8gent.app",
+			applicationID: "convex",
+		},
+	],
 };

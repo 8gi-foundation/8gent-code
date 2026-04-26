@@ -1,38 +1,50 @@
 #!/usr/bin/env bun
-import { readFileSync } from "fs";
-import { join } from "path";
-import * as os from "os";
+import { readFileSync } from "node:fs";
+import * as os from "node:os";
+import { join } from "node:path";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-if (!TOKEN || !CHAT_ID) { console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env"); process.exit(1); }
-
-async function send(text: string) {
-  const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: CHAT_ID, text, disable_web_page_preview: true }),
-  });
-  const d = await res.json() as any;
-  console.log(d.ok ? "OK" : `FAIL: ${d.description}`);
+if (!TOKEN || !CHAT_ID) {
+	console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required in .env");
+	process.exit(1);
 }
 
-const file = join(os.homedir(), "Myresumeportfolio/content/daily-posts/2026-03-20/2026-03-20-day1-launch.md");
+async function send(text: string) {
+	const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			chat_id: CHAT_ID,
+			text,
+			disable_web_page_preview: true,
+		}),
+	});
+	const d = (await res.json()) as any;
+	console.log(d.ok ? "OK" : `FAIL: ${d.description}`);
+}
+
+const file = join(
+	os.homedir(),
+	"Myresumeportfolio/content/daily-posts/2026-03-20/2026-03-20-day1-launch.md",
+);
 const raw = readFileSync(file, "utf-8");
 
 // Split by ## headers
 const sections = raw.split(/^## /m).slice(1); // skip title
 
 for (const section of sections) {
-  const lines = section.split("\n");
-  const header = lines[0].trim();
-  const body = lines.slice(1).join("\n").replace(/^---$/m, "").trim();
-  if (!body) continue;
+	const lines = section.split("\n");
+	const header = lines[0].trim();
+	const body = lines.slice(1).join("\n").replace(/^---$/m, "").trim();
+	if (!body) continue;
 
-  await send(`=== ${header.toUpperCase()} ===\n\n${body}`);
-  await new Promise(r => setTimeout(r, 1000));
+	await send(`=== ${header.toUpperCase()} ===\n\n${body}`);
+	await new Promise((r) => setTimeout(r, 1000));
 }
 
-await send("Website review notes:\n\n1. Landing page is solid but missing the origin story (the Claude Code frustration). Consider adding it to the hero.\n2. Remove dollar figures from benchmarking page.\n3. 8gent OS / Jr links - either remove or clearly label 'coming soon'.\n4. Personal LoRA 'Q2 2026' preview note is honest - keep it.\n\nPosts above are ready to publish. Text only, no audio.");
+await send(
+	"Website review notes:\n\n1. Landing page is solid but missing the origin story (the Claude Code frustration). Consider adding it to the hero.\n2. Remove dollar figures from benchmarking page.\n3. 8gent OS / Jr links - either remove or clearly label 'coming soon'.\n4. Personal LoRA 'Q2 2026' preview note is honest - keep it.\n\nPosts above are ready to publish. Text only, no audio.",
+);
 
 console.log("All sent.");

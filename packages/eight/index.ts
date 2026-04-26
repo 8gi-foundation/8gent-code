@@ -18,16 +18,29 @@
 
 // Types
 export type {
-  Message, ToolCall, AgentConfig, LLMResponse, LLMClient,
-  AgentEventCallbacks, AgentToolStartEvent, AgentToolEndEvent, AgentStepEvent,
-  AgentEvidenceEvent, AgentEvidenceSummaryEvent,
+	Message,
+	ToolCall,
+	AgentConfig,
+	LLMResponse,
+	LLMClient,
+	AgentEventCallbacks,
+	AgentToolStartEvent,
+	AgentToolEndEvent,
+	AgentStepEvent,
+	AgentEvidenceEvent,
+	AgentEvidenceSummaryEvent,
 } from "./types";
 
 // System prompt
 export { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 
 // LLM Clients
-export { OllamaClient, LMStudioClient, OpenRouterClient, createClient } from "./clients";
+export {
+	OllamaClient,
+	LMStudioClient,
+	OpenRouterClient,
+	createClient,
+} from "./clients";
 
 // Tool execution
 export { ToolExecutor } from "./tools";
@@ -43,21 +56,21 @@ export * as harness from "./harness";
 
 // Context engineering (existing file)
 export {
-  estimateTokens,
-  createContextWindow,
-  updateContextWindow,
-  hasContextRoom,
-  getContextUsage,
-  compressMessage,
-  compressToolResult,
-  createContextItem,
-  prioritizeContext,
-  selectContextItems,
-  applyPriorityDecay,
-  summarizeConversation,
-  formatContextSummary,
-  generateThinkingBlock,
-  parseThinkingBlock,
+	estimateTokens,
+	createContextWindow,
+	updateContextWindow,
+	hasContextRoom,
+	getContextUsage,
+	compressMessage,
+	compressToolResult,
+	createContextItem,
+	prioritizeContext,
+	selectContextItems,
+	applyPriorityDecay,
+	summarizeConversation,
+	formatContextSummary,
+	generateThinkingBlock,
+	parseThinkingBlock,
 } from "./context-engineering";
 
 // ============================================
@@ -65,50 +78,51 @@ export {
 // ============================================
 
 import { getPermissionManager } from "../permissions";
-import type { AgentConfig } from "./types";
 import { Agent } from "./agent";
 import { startREPL } from "./repl";
+import type { AgentConfig } from "./types";
 
 if (import.meta.main) {
-  let args = process.argv.slice(2);
+	let args = process.argv.slice(2);
 
-  const hasInfiniteFlag = args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
-  if (hasInfiniteFlag) {
-    const permManager = getPermissionManager();
-    permManager.enableInfiniteMode();
-    args = args.filter(a => a !== "--infinite" && a !== "-infinite" && a !== "-i");
-  }
+	const hasInfiniteFlag =
+		args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
+	if (hasInfiniteFlag) {
+		const permManager = getPermissionManager();
+		permManager.enableInfiniteMode();
+		args = args.filter((a) => a !== "--infinite" && a !== "-infinite" && a !== "-i");
+	}
 
-  if (args.length > 0 && args[0] !== "--interactive") {
-    const promptText = args.join(" ");
-    (async () => {
-      const config: AgentConfig = {
-        model: process.env.EIGHGENT_MODEL || "glm-4.7-flash:latest",
-        runtime: "ollama",
-        workingDirectory: process.cwd(),
-        maxTurns: hasInfiniteFlag ? 100 : 30,
-      };
-      const agent = new Agent(config);
-      if (!(await agent.isReady())) {
-        console.error("Ollama is not running");
-        process.exit(1);
-      }
-      if (hasInfiniteFlag) {
-        console.log(`\n∞ Infinite Loop mode enabled - Autonomous until done`);
-      }
-      console.log(`\n🎯 Task: ${promptText}\n`);
-      try {
-        const response = await agent.chat(promptText);
-        console.log(`\n✅ Result:\n${response}`);
-      } catch (err) {
-        console.error(`❌ Error: ${err}`);
-      }
-      process.exit(0);
-    })();
-  } else if (args.length === 0 && hasInfiniteFlag) {
-    console.log(`\n∞ Infinite Loop mode enabled - All permissions bypassed\n`);
-    startREPL();
-  } else {
-    startREPL();
-  }
+	if (args.length > 0 && args[0] !== "--interactive") {
+		const promptText = args.join(" ");
+		(async () => {
+			const config: AgentConfig = {
+				model: process.env.EIGHGENT_MODEL || "glm-4.7-flash:latest",
+				runtime: "ollama",
+				workingDirectory: process.cwd(),
+				maxTurns: hasInfiniteFlag ? 100 : 30,
+			};
+			const agent = new Agent(config);
+			if (!(await agent.isReady())) {
+				console.error("Ollama is not running");
+				process.exit(1);
+			}
+			if (hasInfiniteFlag) {
+				console.log("\n∞ Infinite Loop mode enabled - Autonomous until done");
+			}
+			console.log(`\n🎯 Task: ${promptText}\n`);
+			try {
+				const response = await agent.chat(promptText);
+				console.log(`\n✅ Result:\n${response}`);
+			} catch (err) {
+				console.error(`❌ Error: ${err}`);
+			}
+			process.exit(0);
+		})();
+	} else if (args.length === 0 && hasInfiniteFlag) {
+		console.log("\n∞ Infinite Loop mode enabled - All permissions bypassed\n");
+		startREPL();
+	} else {
+		startREPL();
+	}
 }

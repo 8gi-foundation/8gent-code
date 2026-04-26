@@ -9,14 +9,14 @@
 // ── Types ─────────────────────────────────────────────────────────────
 
 export interface TenantScope {
-  userId: string;
-  organizationId?: string;
-  projectId?: string;
+	userId: string;
+	organizationId?: string;
+	projectId?: string;
 }
 
 export interface TenantClause {
-  sql: string;
-  params: string[];
+	sql: string;
+	params: string[];
 }
 
 // ── Query Scoping ─────────────────────────────────────────────────────
@@ -30,27 +30,27 @@ export interface TenantClause {
  *   db.prepare(`SELECT * FROM memories WHERE deleted_at IS NULL ${sql}`).all(...params);
  */
 export function tenantWhere(scope: TenantScope): TenantClause {
-  const conditions: string[] = [];
-  const params: string[] = [];
+	const conditions: string[] = [];
+	const params: string[] = [];
 
-  // userId is always required - this is the primary isolation boundary
-  conditions.push("AND json_extract(data, '$.userId') = ?");
-  params.push(scope.userId);
+	// userId is always required - this is the primary isolation boundary
+	conditions.push("AND json_extract(data, '$.userId') = ?");
+	params.push(scope.userId);
 
-  if (scope.organizationId) {
-    conditions.push("AND json_extract(data, '$.organizationId') = ?");
-    params.push(scope.organizationId);
-  }
+	if (scope.organizationId) {
+		conditions.push("AND json_extract(data, '$.organizationId') = ?");
+		params.push(scope.organizationId);
+	}
 
-  if (scope.projectId) {
-    conditions.push("AND json_extract(data, '$.projectId') = ?");
-    params.push(scope.projectId);
-  }
+	if (scope.projectId) {
+		conditions.push("AND json_extract(data, '$.projectId') = ?");
+		params.push(scope.projectId);
+	}
 
-  return {
-    sql: conditions.join(" "),
-    params,
-  };
+	return {
+		sql: conditions.join(" "),
+		params,
+	};
 }
 
 // ── Validation ────────────────────────────────────────────────────────
@@ -60,17 +60,17 @@ export function tenantWhere(scope: TenantScope): TenantClause {
  * Use this as a defense-in-depth check after SQL queries.
  */
 export function validateTenant(memory: Record<string, unknown>, scope: TenantScope): boolean {
-  if (memory.userId !== scope.userId) return false;
+	if (memory.userId !== scope.userId) return false;
 
-  if (scope.organizationId && memory.organizationId !== scope.organizationId) {
-    return false;
-  }
+	if (scope.organizationId && memory.organizationId !== scope.organizationId) {
+		return false;
+	}
 
-  if (scope.projectId && memory.projectId !== scope.projectId) {
-    return false;
-  }
+	if (scope.projectId && memory.projectId !== scope.projectId) {
+		return false;
+	}
 
-  return true;
+	return true;
 }
 
 // ── Record Decoration ─────────────────────────────────────────────────
@@ -80,13 +80,13 @@ export function validateTenant(memory: Record<string, unknown>, scope: TenantSco
  * Ensures every memory is tagged with its owner's scope.
  */
 export function applyTenantScope(
-  record: Record<string, unknown>,
-  scope: TenantScope
+	record: Record<string, unknown>,
+	scope: TenantScope,
 ): Record<string, unknown> {
-  return {
-    ...record,
-    userId: scope.userId,
-    ...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
-    ...(scope.projectId ? { projectId: scope.projectId } : {}),
-  };
+	return {
+		...record,
+		userId: scope.userId,
+		...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
+		...(scope.projectId ? { projectId: scope.projectId } : {}),
+	};
 }

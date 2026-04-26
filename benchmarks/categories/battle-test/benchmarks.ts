@@ -9,14 +9,13 @@ import type { BenchmarkDefinition } from "../../types";
  */
 
 export const battleTestBenchmarks: BenchmarkDefinition[] = [
-
-  // ── BT001: SaaS Auth System ($3K value) ──────────────────────────
-  {
-    id: "BT001",
-    category: "battle-test",
-    title: "SaaS Auth System — JWT, Roles, Rate Limiting, Password Reset",
-    difficulty: "hard",
-    prompt: `Build a complete authentication system for a SaaS product.
+	// ── BT001: SaaS Auth System ($3K value) ──────────────────────────
+	{
+		id: "BT001",
+		category: "battle-test",
+		title: "SaaS Auth System — JWT, Roles, Rate Limiting, Password Reset",
+		difficulty: "hard",
+		prompt: `Build a complete authentication system for a SaaS product.
 
 ## Requirements
 
@@ -74,27 +73,43 @@ Interface User: { id: string; email: string; passwordHash: string; role: Role; c
 - Rate limiter must be time-based, not counter-based
 - Password hashing must be async (use PBKDF2 or similar)
 - All functions must be properly exported`,
-    keywords: [
-      "hashPassword", "verifyPassword", "generateToken", "verifyToken",
-      "Role", "Permission", "hasPermission", "RateLimiter",
-      "UserStore", "createUser", "findByEmail", "resetCode",
-      "admin", "editor", "viewer", "billing",
-      "JWT", "hmac", "base64", "crypto", "export",
-    ],
-    keywordThreshold: 12,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT001-auth.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"hashPassword",
+			"verifyPassword",
+			"generateToken",
+			"verifyToken",
+			"Role",
+			"Permission",
+			"hasPermission",
+			"RateLimiter",
+			"UserStore",
+			"createUser",
+			"findByEmail",
+			"resetCode",
+			"admin",
+			"editor",
+			"viewer",
+			"billing",
+			"JWT",
+			"hmac",
+			"base64",
+			"crypto",
+			"export",
+		],
+		keywordThreshold: 12,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT001-auth.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT002: Real-Time Event System ($2K value) ────────────────────
-  {
-    id: "BT002",
-    category: "battle-test",
-    title: "Event-Driven Architecture — Pub/Sub, Dead Letter Queue, Retry, Backpressure",
-    difficulty: "hard",
-    prompt: `Build a production-grade event system for microservice communication.
+	// ── BT002: Real-Time Event System ($2K value) ────────────────────
+	{
+		id: "BT002",
+		category: "battle-test",
+		title: "Event-Driven Architecture — Pub/Sub, Dead Letter Queue, Retry, Backpressure",
+		difficulty: "hard",
+		prompt: `Build a production-grade event system for microservice communication.
 
 ## Requirements
 
@@ -151,27 +166,47 @@ Flow control for high-throughput scenarios:
 - DLQ entries must track attempt count across retries
 - Backpressure must use promises for queue (not polling)
 - Export everything: classes, types, errors`,
-    keywords: [
-      "EventBus", "on", "emit", "once", "off", "priority", "filter",
-      "RetryHandler", "execute", "backoff", "jitter", "maxRetries",
-      "DeadLetterQueue", "enqueue", "dequeue", "retry", "purge",
-      "BackpressureController", "acquire", "release", "concurrent",
-      "Promise", "async", "await", "export",
-    ],
-    keywordThreshold: 14,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT002-events.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"EventBus",
+			"on",
+			"emit",
+			"once",
+			"off",
+			"priority",
+			"filter",
+			"RetryHandler",
+			"execute",
+			"backoff",
+			"jitter",
+			"maxRetries",
+			"DeadLetterQueue",
+			"enqueue",
+			"dequeue",
+			"retry",
+			"purge",
+			"BackpressureController",
+			"acquire",
+			"release",
+			"concurrent",
+			"Promise",
+			"async",
+			"await",
+			"export",
+		],
+		keywordThreshold: 14,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT002-events.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT003: Data Pipeline with Transforms ($1.5K value) ──────────
-  {
-    id: "BT003",
-    category: "battle-test",
-    title: "Data Pipeline — Stream Processing, Schema Validation, Transform Chain",
-    difficulty: "hard",
-    prompt: `Build a typed data pipeline system for ETL-style processing.
+	// ── BT003: Data Pipeline with Transforms ($1.5K value) ──────────
+	{
+		id: "BT003",
+		category: "battle-test",
+		title: "Data Pipeline — Stream Processing, Schema Validation, Transform Chain",
+		difficulty: "hard",
+		prompt: `Build a typed data pipeline system for ETL-style processing.
 
 ## Requirements
 
@@ -217,28 +252,55 @@ Common data transformations:
 - Error paths must use dot notation for nested objects
 - Transforms must not mutate input arrays
 - Export all classes, functions, and the S schema builder`,
-    keywords: [
-      "Pipeline", "from", "map", "filter", "flatMap", "batch", "collect",
-      "reduce", "take", "skip", "tap",
-      "Schema", "validate", "string", "number", "object", "array",
-      "min", "max", "pattern", "email", "integer", "positive",
-      "deduplicate", "groupBy", "sortBy", "pivot", "flatten", "chunk", "zip",
-      "Promise", "async", "export",
-    ],
-    keywordThreshold: 16,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT003-pipeline.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"Pipeline",
+			"from",
+			"map",
+			"filter",
+			"flatMap",
+			"batch",
+			"collect",
+			"reduce",
+			"take",
+			"skip",
+			"tap",
+			"Schema",
+			"validate",
+			"string",
+			"number",
+			"object",
+			"array",
+			"min",
+			"max",
+			"pattern",
+			"email",
+			"integer",
+			"positive",
+			"deduplicate",
+			"groupBy",
+			"sortBy",
+			"pivot",
+			"flatten",
+			"chunk",
+			"zip",
+			"Promise",
+			"async",
+			"export",
+		],
+		keywordThreshold: 16,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT003-pipeline.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT004: CLI Framework ($1K value) ─────────────────────────────
-  {
-    id: "BT004",
-    category: "battle-test",
-    title: "CLI Framework — Command Parser, Help Generator, Flag System, Subcommands",
-    difficulty: "hard",
-    prompt: `Build a CLI framework similar to Commander.js or yargs — from scratch.
+	// ── BT004: CLI Framework ($1K value) ─────────────────────────────
+	{
+		id: "BT004",
+		category: "battle-test",
+		title: "CLI Framework — Command Parser, Help Generator, Flag System, Subcommands",
+		difficulty: "hard",
+		prompt: `Build a CLI framework similar to Commander.js or yargs — from scratch.
 
 ## Requirements
 
@@ -303,27 +365,45 @@ Options:
 - Help must be auto-generated from registered commands
 - Type coercion must happen automatically based on option type
 - Export all classes and functions`,
-    keywords: [
-      "CLI", "Command", "command", "parse", "parseArgs", "argument",
-      "option", "flag", "alias", "action", "subcommand",
-      "help", "generateHelp", "usage", "version",
-      "boolean", "negation", "coercion", "required", "default",
-      "fluent", "chaining", "export",
-    ],
-    keywordThreshold: 12,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT004-cli.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"CLI",
+			"Command",
+			"command",
+			"parse",
+			"parseArgs",
+			"argument",
+			"option",
+			"flag",
+			"alias",
+			"action",
+			"subcommand",
+			"help",
+			"generateHelp",
+			"usage",
+			"version",
+			"boolean",
+			"negation",
+			"coercion",
+			"required",
+			"default",
+			"fluent",
+			"chaining",
+			"export",
+		],
+		keywordThreshold: 12,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT004-cli.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT005: State Machine Engine ($1.5K value) ────────────────────
-  {
-    id: "BT005",
-    category: "battle-test",
-    title: "State Machine — Typed Transitions, Guards, Actions, Nested States",
-    difficulty: "hard",
-    prompt: `Build a state machine engine inspired by XState — from scratch.
+	// ── BT005: State Machine Engine ($1.5K value) ────────────────────
+	{
+		id: "BT005",
+		category: "battle-test",
+		title: "State Machine — Typed Transitions, Guards, Actions, Nested States",
+		difficulty: "hard",
+		prompt: `Build a state machine engine inspired by XState — from scratch.
 
 ## Requirements
 
@@ -383,28 +463,47 @@ Action<T> = { type: string; exec: (context: T, event: any) => T | void }
 - \`assign\` must return a NEW context object (immutable update)
 - Subscribers must be notified after each transition
 - Export everything: createMachine, Interpreter, guards, actions`,
-    keywords: [
-      "createMachine", "Machine", "Interpreter", "transition",
-      "guard", "action", "assign", "entry", "exit",
-      "subscribe", "send", "getState", "getContext",
-      "and", "or", "not", "equals", "greaterThan",
-      "log", "raise", "choose",
-      "nested", "initial", "context", "export",
-    ],
-    keywordThreshold: 14,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT005-state-machine.test.ts",
-    multiFile: true,
-    timeoutMs: 15000,
-  },
+		keywords: [
+			"createMachine",
+			"Machine",
+			"Interpreter",
+			"transition",
+			"guard",
+			"action",
+			"assign",
+			"entry",
+			"exit",
+			"subscribe",
+			"send",
+			"getState",
+			"getContext",
+			"and",
+			"or",
+			"not",
+			"equals",
+			"greaterThan",
+			"log",
+			"raise",
+			"choose",
+			"nested",
+			"initial",
+			"context",
+			"export",
+		],
+		keywordThreshold: 14,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT005-state-machine.test.ts",
+		multiFile: true,
+		timeoutMs: 15000,
+	},
 
-  // ── BT006: Financial Analysis Dashboard ($2K value) ──────────────
-  {
-    id: "BT006",
-    category: "battle-test",
-    title: "Financial Analysis Dashboard — ROI, NPV, IRR, EBITDA, Ratios",
-    difficulty: "hard",
-    prompt: `Build financial analysis tools for a CFO dashboard.
+	// ── BT006: Financial Analysis Dashboard ($2K value) ──────────────
+	{
+		id: "BT006",
+		category: "battle-test",
+		title: "Financial Analysis Dashboard — ROI, NPV, IRR, EBITDA, Ratios",
+		difficulty: "hard",
+		prompt: `Build financial analysis tools for a CFO dashboard.
 
 ## Requirements
 
@@ -453,30 +552,52 @@ Export all functions.
 - All ratio calculations must handle division by zero (return 0 or Infinity as appropriate)
 - analyzeFinancials must return at least 7 ratios
 - Export everything`,
-    keywords: [
-      "ROI", "NPV", "IRR", "EBITDA",
-      "BalanceSheet", "IncomeStatement", "CashFlow", "FinancialStatement", "Ratio",
-      "calculateROI", "calculateNPV", "calculateIRR", "calculateDebtToEquity",
-      "calculateCurrentRatio", "calculateGrossMargin", "calculateNetMargin", "calculateEBITDA",
-      "analyzeFinancials", "formatCurrency", "formatPercentage", "formatFinancialReport",
-      "debt-to-equity", "gross margin", "net margin", "current ratio",
-      "balance sheet", "cash flow", "discount rate", "export",
-    ],
-    keywordThreshold: 14,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT006-financial.test.ts",
-    multiFile: true,
-    fixtures: [],
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"ROI",
+			"NPV",
+			"IRR",
+			"EBITDA",
+			"BalanceSheet",
+			"IncomeStatement",
+			"CashFlow",
+			"FinancialStatement",
+			"Ratio",
+			"calculateROI",
+			"calculateNPV",
+			"calculateIRR",
+			"calculateDebtToEquity",
+			"calculateCurrentRatio",
+			"calculateGrossMargin",
+			"calculateNetMargin",
+			"calculateEBITDA",
+			"analyzeFinancials",
+			"formatCurrency",
+			"formatPercentage",
+			"formatFinancialReport",
+			"debt-to-equity",
+			"gross margin",
+			"net margin",
+			"current ratio",
+			"balance sheet",
+			"cash flow",
+			"discount rate",
+			"export",
+		],
+		keywordThreshold: 14,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT006-financial.test.ts",
+		multiFile: true,
+		fixtures: [],
+		timeoutMs: 30000,
+	},
 
-  // ── BT007: SEO Audit Engine ($1.5K value) ────────────────────────
-  {
-    id: "BT007",
-    category: "battle-test",
-    title: "SEO Audit Engine — Meta Analysis, Scoring, Core Web Vitals, Reporting",
-    difficulty: "hard",
-    prompt: `Build an SEO audit engine that analyzes web pages and generates actionable reports.
+	// ── BT007: SEO Audit Engine ($1.5K value) ────────────────────────
+	{
+		id: "BT007",
+		category: "battle-test",
+		title: "SEO Audit Engine — Meta Analysis, Scoring, Core Web Vitals, Reporting",
+		difficulty: "hard",
+		prompt: `Build an SEO audit engine that analyzes web pages and generates actionable reports.
 
 ## Requirements
 
@@ -533,29 +654,51 @@ Export all functions and interfaces.
 - Grade must follow standard A-F scale
 - keywordDensity must be a function on the returned object
 - Export everything`,
-    keywords: [
-      "analyzeMeta", "analyzeContent", "analyzeLinks",
-      "scoreMeta", "scoreContent", "scoreLinks", "scorePerformance", "overallScore",
-      "generateAuditReport", "AuditReport", "AuditSection", "ScoreResult",
-      "meta", "title tag", "description", "h1", "alt text", "canonical",
-      "keyword density", "Flesch-Kincaid", "Core Web Vitals",
-      "LCP", "FID", "CLS", "internal links", "nofollow", "audit grade", "export",
-    ],
-    keywordThreshold: 13,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT007-seo.test.ts",
-    multiFile: true,
-    fixtures: [],
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"analyzeMeta",
+			"analyzeContent",
+			"analyzeLinks",
+			"scoreMeta",
+			"scoreContent",
+			"scoreLinks",
+			"scorePerformance",
+			"overallScore",
+			"generateAuditReport",
+			"AuditReport",
+			"AuditSection",
+			"ScoreResult",
+			"meta",
+			"title tag",
+			"description",
+			"h1",
+			"alt text",
+			"canonical",
+			"keyword density",
+			"Flesch-Kincaid",
+			"Core Web Vitals",
+			"LCP",
+			"FID",
+			"CLS",
+			"internal links",
+			"nofollow",
+			"audit grade",
+			"export",
+		],
+		keywordThreshold: 13,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT007-seo.test.ts",
+		multiFile: true,
+		fixtures: [],
+		timeoutMs: 30000,
+	},
 
-  // ── BT008: Email Campaign System ($1K value) ─────────────────────
-  {
-    id: "BT008",
-    category: "battle-test",
-    title: "Email Campaign System — Templates, Personalization, A/B Testing, Analytics",
-    difficulty: "hard",
-    prompt: `Build an email campaign system with templating, personalization, and analytics tracking.
+	// ── BT008: Email Campaign System ($1K value) ─────────────────────
+	{
+		id: "BT008",
+		category: "battle-test",
+		title: "Email Campaign System — Templates, Personalization, A/B Testing, Analytics",
+		difficulty: "hard",
+		prompt: `Build an email campaign system with templating, personalization, and analytics tracking.
 
 ## Requirements
 
@@ -609,28 +752,48 @@ Export the CampaignTracker class and CampaignMetrics/CampaignReport interfaces.
 - Rates must handle division by zero (return 0)
 - Timeline must group events by calendar day
 - Export everything`,
-    keywords: [
-      "Template", "render", "renderSubject", "validate", "addSection", "toHTML",
-      "personalize", "generateSubjectVariants", "segmentRecipients",
-      "CampaignTracker", "track", "getMetrics", "getTopPerformers", "generateReport",
-      "template", "A/B test", "open rate", "click rate", "bounce rate",
-      "unsubscribe", "segmentation", "campaign", "recipient", "HTML email", "export",
-    ],
-    keywordThreshold: 13,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT008-email.test.ts",
-    multiFile: true,
-    fixtures: [],
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"Template",
+			"render",
+			"renderSubject",
+			"validate",
+			"addSection",
+			"toHTML",
+			"personalize",
+			"generateSubjectVariants",
+			"segmentRecipients",
+			"CampaignTracker",
+			"track",
+			"getMetrics",
+			"getTopPerformers",
+			"generateReport",
+			"template",
+			"A/B test",
+			"open rate",
+			"click rate",
+			"bounce rate",
+			"unsubscribe",
+			"segmentation",
+			"campaign",
+			"recipient",
+			"HTML email",
+			"export",
+		],
+		keywordThreshold: 13,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT008-email.test.ts",
+		multiFile: true,
+		fixtures: [],
+		timeoutMs: 30000,
+	},
 
-  // ── BT009: CI/CD Pipeline Builder ($2K value) ────────────────────
-  {
-    id: "BT009",
-    category: "battle-test",
-    title: "CI/CD Pipeline Builder — DSL, Dependency Graph, YAML Generation, Dry Run",
-    difficulty: "hard",
-    prompt: `Build a CI/CD pipeline definition DSL with dependency resolution and YAML output.
+	// ── BT009: CI/CD Pipeline Builder ($2K value) ────────────────────
+	{
+		id: "BT009",
+		category: "battle-test",
+		title: "CI/CD Pipeline Builder — DSL, Dependency Graph, YAML Generation, Dry Run",
+		difficulty: "hard",
+		prompt: `Build a CI/CD pipeline definition DSL with dependency resolution and YAML output.
 
 ## Requirements
 
@@ -702,30 +865,49 @@ Export the PipelineRunner class and ExecutionResult interface.
 - Failed dependency → skip downstream stages
 - Duration tracking must use real timestamps (Date.now or performance.now)
 - Export everything`,
-    keywords: [
-      "Pipeline", "Stage", "PipelineRunner",
-      "addStage", "addStep", "dependsOn", "validate",
-      "toYAML", "toJSON", "getDependencyOrder",
-      "clone", "dryRun", "execute", "getStatus", "onStageComplete",
-      "topological sort", "YAML", "artifact", "condition",
-      "parallel", "sequential", "dry run", "CI/CD",
-      "dependency", "circular", "export",
-    ],
-    keywordThreshold: 13,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT009-cicd.test.ts",
-    multiFile: true,
-    fixtures: [],
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"Pipeline",
+			"Stage",
+			"PipelineRunner",
+			"addStage",
+			"addStep",
+			"dependsOn",
+			"validate",
+			"toYAML",
+			"toJSON",
+			"getDependencyOrder",
+			"clone",
+			"dryRun",
+			"execute",
+			"getStatus",
+			"onStageComplete",
+			"topological sort",
+			"YAML",
+			"artifact",
+			"condition",
+			"parallel",
+			"sequential",
+			"dry run",
+			"CI/CD",
+			"dependency",
+			"circular",
+			"export",
+		],
+		keywordThreshold: 13,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT009-cicd.test.ts",
+		multiFile: true,
+		fixtures: [],
+		timeoutMs: 30000,
+	},
 
-  // ── BT010: Design Token System ($1.5K value) ─────────────────────
-  {
-    id: "BT010",
-    category: "battle-test",
-    title: "Design Token System — Tokens, Multi-Format Export, Color/Spacing Scales",
-    difficulty: "hard",
-    prompt: `Build a design token system that defines tokens and exports them to CSS, Tailwind, SCSS, and TypeScript.
+	// ── BT010: Design Token System ($1.5K value) ─────────────────────
+	{
+		id: "BT010",
+		category: "battle-test",
+		title: "Design Token System — Tokens, Multi-Format Export, Color/Spacing Scales",
+		difficulty: "hard",
+		prompt: `Build a design token system that defines tokens and exports them to CSS, Tailwind, SCSS, and TypeScript.
 
 ## Requirements
 
@@ -791,20 +973,41 @@ Export all functions.
 - Typography scale must center on "base" key
 - All generators must return the exact number of steps requested
 - Export everything`,
-    keywords: [
-      "DesignToken", "TokenGroup", "TokenValue",
-      "createToken", "createGroup", "resolveReference", "flattenTokens",
-      "toCSSVariables", "toTailwindConfig", "toSCSSVariables", "toJSON", "toTypeScript",
-      "generateColorScale", "generateSpacingScale", "generateTypographyScale", "generateShadowScale",
-      "design token", "CSS variable", "Tailwind", "SCSS",
-      "color scale", "spacing", "typography", "shadow",
-      "HSL", "reference", "flatten", "export",
-    ],
-    keywordThreshold: 14,
-    testExecution: true,
-    testFile: "categories/battle-test/tests/BT010-design-tokens.test.ts",
-    multiFile: true,
-    fixtures: [],
-    timeoutMs: 30000,
-  },
+		keywords: [
+			"DesignToken",
+			"TokenGroup",
+			"TokenValue",
+			"createToken",
+			"createGroup",
+			"resolveReference",
+			"flattenTokens",
+			"toCSSVariables",
+			"toTailwindConfig",
+			"toSCSSVariables",
+			"toJSON",
+			"toTypeScript",
+			"generateColorScale",
+			"generateSpacingScale",
+			"generateTypographyScale",
+			"generateShadowScale",
+			"design token",
+			"CSS variable",
+			"Tailwind",
+			"SCSS",
+			"color scale",
+			"spacing",
+			"typography",
+			"shadow",
+			"HSL",
+			"reference",
+			"flatten",
+			"export",
+		],
+		keywordThreshold: 14,
+		testExecution: true,
+		testFile: "categories/battle-test/tests/BT010-design-tokens.test.ts",
+		multiFile: true,
+		fixtures: [],
+		timeoutMs: 30000,
+	},
 ];

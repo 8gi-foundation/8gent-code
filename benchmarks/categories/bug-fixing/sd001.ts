@@ -1,12 +1,12 @@
 import type { BenchmarkDefinition } from "../../types";
 
 export const systemsDebuggingBenchmark: BenchmarkDefinition[] = [
-  {
-    id: "SD001",
-    category: "bug-fixing",
-    title: "Systems Debugging — Message Broker with 3 Subtle Bugs",
-    difficulty: "hard",
-    prompt: `You are given a message broker system with pub/sub, message history, and wildcard topic routing. The system has **3 subtle bugs** that cause failures under specific conditions. Your task is to find and fix all bugs while preserving correct behavior.
+	{
+		id: "SD001",
+		category: "bug-fixing",
+		title: "Systems Debugging — Message Broker with 3 Subtle Bugs",
+		difficulty: "hard",
+		prompt: `You are given a message broker system with pub/sub, message history, and wildcard topic routing. The system has **3 subtle bugs** that cause failures under specific conditions. Your task is to find and fix all bugs while preserving correct behavior.
 
 ## System Overview
 
@@ -351,23 +351,40 @@ Output ALL 4 fixed files using these exact markers:
 1. **broker.ts — Race condition**: The read-await-write pattern in subscribe/unsubscribe allows concurrent operations to clobber each other. Fix: ensure the subscriber list is read AFTER the await, not before.
 2. **history.ts — Memory leak**: addMessage() never prunes old messages. Fix: trim the array to maxHistory after pushing.
 3. **router.ts — Off-by-one**: wildcardPart.length > 0 should be >= 0 to match the "zero or more" contract.`,
-    keywords: [
-      "subscribe", "unsubscribe", "publish", "MessageBroker", "LifecycleHook",
-      "onSubscribe", "onUnsubscribe", "copy-on-write", "concurrent",
-      "HistoryStore", "addMessage", "maxHistory", "splice", "slice", "prune",
-      "TopicRouter", "matchPattern", "wildcard", ">=",
-      "Promise", "async", "await",
-    ],
-    keywordThreshold: 12,
-    testExecution: true,
-    testFile: "autoresearch/tests/SD001-systems-debugging.test.ts",
-    timeoutMs: 30000,
-    multiFile: true,
-    fixtures: [
-      "fixtures/broker-system/types.ts",
-      "fixtures/broker-system/broker.ts",
-      "fixtures/broker-system/history.ts",
-      "fixtures/broker-system/router.ts",
-    ],
-  },
+		keywords: [
+			"subscribe",
+			"unsubscribe",
+			"publish",
+			"MessageBroker",
+			"LifecycleHook",
+			"onSubscribe",
+			"onUnsubscribe",
+			"copy-on-write",
+			"concurrent",
+			"HistoryStore",
+			"addMessage",
+			"maxHistory",
+			"splice",
+			"slice",
+			"prune",
+			"TopicRouter",
+			"matchPattern",
+			"wildcard",
+			">=",
+			"Promise",
+			"async",
+			"await",
+		],
+		keywordThreshold: 12,
+		testExecution: true,
+		testFile: "autoresearch/tests/SD001-systems-debugging.test.ts",
+		timeoutMs: 30000,
+		multiFile: true,
+		fixtures: [
+			"fixtures/broker-system/types.ts",
+			"fixtures/broker-system/broker.ts",
+			"fixtures/broker-system/history.ts",
+			"fixtures/broker-system/router.ts",
+		],
+	},
 ];

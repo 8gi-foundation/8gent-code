@@ -17,13 +17,13 @@ import { mutation, query } from "./_generated/server";
  * Returns null if no preferences exist (user should use defaults).
  */
 export const get = query({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    return await ctx.db
-      .query("preferences")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .unique();
-  },
+	args: { userId: v.id("users") },
+	handler: async (ctx, { userId }) => {
+		return await ctx.db
+			.query("preferences")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.unique();
+	},
 });
 
 /**
@@ -31,24 +31,24 @@ export const get = query({
  * Uses Clerk identity from the auth context.
  */
 export const getCurrent = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
+	args: {},
+	handler: async (ctx) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) return null;
 
-    // Find user by Clerk ID
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
-      .unique();
+		// Find user by Clerk ID
+		const user = await ctx.db
+			.query("users")
+			.withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+			.unique();
 
-    if (!user) return null;
+		if (!user) return null;
 
-    return await ctx.db
-      .query("preferences")
-      .withIndex("by_userId", (q) => q.eq("userId", user._id))
-      .unique();
-  },
+		return await ctx.db
+			.query("preferences")
+			.withIndex("by_userId", (q) => q.eq("userId", user._id))
+			.unique();
+	},
 });
 
 /**
@@ -56,20 +56,20 @@ export const getCurrent = query({
  * Used by the TUI to pull preferences after authentication.
  */
 export const getByClerkId = query({
-  args: { clerkId: v.string() },
-  handler: async (ctx, { clerkId }) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
-      .unique();
+	args: { clerkId: v.string() },
+	handler: async (ctx, { clerkId }) => {
+		const user = await ctx.db
+			.query("users")
+			.withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+			.unique();
 
-    if (!user) return null;
+		if (!user) return null;
 
-    return await ctx.db
-      .query("preferences")
-      .withIndex("by_userId", (q) => q.eq("userId", user._id))
-      .unique();
-  },
+		return await ctx.db
+			.query("preferences")
+			.withIndex("by_userId", (q) => q.eq("userId", user._id))
+			.unique();
+	},
 });
 
 // ============================================
@@ -81,41 +81,37 @@ export const getByClerkId = query({
  * Creates a record if one doesn't exist, otherwise replaces all fields.
  */
 export const set = mutation({
-  args: {
-    userId: v.id("users"),
-    defaultModel: v.string(),
-    defaultProvider: v.string(),
-    theme: v.string(),
-    loraStatus: v.union(
-      v.literal("none"),
-      v.literal("training"),
-      v.literal("ready"),
-    ),
-    loraVersion: v.optional(v.string()),
-    customPromptMutations: v.array(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const { userId, ...prefs } = args;
+	args: {
+		userId: v.id("users"),
+		defaultModel: v.string(),
+		defaultProvider: v.string(),
+		theme: v.string(),
+		loraStatus: v.union(v.literal("none"), v.literal("training"), v.literal("ready")),
+		loraVersion: v.optional(v.string()),
+		customPromptMutations: v.array(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const { userId, ...prefs } = args;
 
-    const existing = await ctx.db
-      .query("preferences")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .unique();
+		const existing = await ctx.db
+			.query("preferences")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.unique();
 
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        ...prefs,
-        updatedAt: Date.now(),
-      });
-      return existing._id;
-    }
+		if (existing) {
+			await ctx.db.patch(existing._id, {
+				...prefs,
+				updatedAt: Date.now(),
+			});
+			return existing._id;
+		}
 
-    return await ctx.db.insert("preferences", {
-      userId,
-      ...prefs,
-      updatedAt: Date.now(),
-    });
-  },
+		return await ctx.db.insert("preferences", {
+			userId,
+			...prefs,
+			updatedAt: Date.now(),
+		});
+	},
 });
 
 /**
@@ -124,58 +120,52 @@ export const set = mutation({
  * Creates a record with defaults if one doesn't exist.
  */
 export const merge = mutation({
-  args: {
-    userId: v.id("users"),
-    defaultModel: v.optional(v.string()),
-    defaultProvider: v.optional(v.string()),
-    theme: v.optional(v.string()),
-    loraStatus: v.optional(
-      v.union(
-        v.literal("none"),
-        v.literal("training"),
-        v.literal("ready"),
-      ),
-    ),
-    loraVersion: v.optional(v.string()),
-    customPromptMutations: v.optional(v.array(v.string())),
-    communicationStyle: v.optional(v.string()),
-    language: v.optional(v.string()),
-    gitBranchPrefix: v.optional(v.string()),
-    autonomyThreshold: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const { userId, ...updates } = args;
+	args: {
+		userId: v.id("users"),
+		defaultModel: v.optional(v.string()),
+		defaultProvider: v.optional(v.string()),
+		theme: v.optional(v.string()),
+		loraStatus: v.optional(v.union(v.literal("none"), v.literal("training"), v.literal("ready"))),
+		loraVersion: v.optional(v.string()),
+		customPromptMutations: v.optional(v.array(v.string())),
+		communicationStyle: v.optional(v.string()),
+		language: v.optional(v.string()),
+		gitBranchPrefix: v.optional(v.string()),
+		autonomyThreshold: v.optional(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const { userId, ...updates } = args;
 
-    // Remove undefined values
-    const patch: Record<string, unknown> = { updatedAt: Date.now() };
-    for (const [key, value] of Object.entries(updates)) {
-      if (value !== undefined) {
-        patch[key] = value;
-      }
-    }
+		// Remove undefined values
+		const patch: Record<string, unknown> = { updatedAt: Date.now() };
+		for (const [key, value] of Object.entries(updates)) {
+			if (value !== undefined) {
+				patch[key] = value;
+			}
+		}
 
-    const existing = await ctx.db
-      .query("preferences")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .unique();
+		const existing = await ctx.db
+			.query("preferences")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.unique();
 
-    if (existing) {
-      await ctx.db.patch(existing._id, patch);
-      return existing._id;
-    }
+		if (existing) {
+			await ctx.db.patch(existing._id, patch);
+			return existing._id;
+		}
 
-    // Create with defaults + provided values
-    return await ctx.db.insert("preferences", {
-      userId,
-      defaultModel: "",
-      defaultProvider: "ollama",
-      theme: "default",
-      loraStatus: "none" as const,
-      customPromptMutations: [],
-      ...patch,
-      updatedAt: Date.now(),
-    });
-  },
+		// Create with defaults + provided values
+		return await ctx.db.insert("preferences", {
+			userId,
+			defaultModel: "",
+			defaultProvider: "ollama",
+			theme: "default",
+			loraStatus: "none" as const,
+			customPromptMutations: [],
+			...patch,
+			updatedAt: Date.now(),
+		});
+	},
 });
 
 /**
@@ -183,17 +173,17 @@ export const merge = mutation({
  * Used during account deletion cascade.
  */
 export const remove = mutation({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    const existing = await ctx.db
-      .query("preferences")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .unique();
+	args: { userId: v.id("users") },
+	handler: async (ctx, { userId }) => {
+		const existing = await ctx.db
+			.query("preferences")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.unique();
 
-    if (existing) {
-      await ctx.db.delete(existing._id);
-      return true;
-    }
-    return false;
-  },
+		if (existing) {
+			await ctx.db.delete(existing._id);
+			return true;
+		}
+		return false;
+	},
 });
