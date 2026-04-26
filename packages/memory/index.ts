@@ -162,6 +162,19 @@ export {
 	type WikiIndex,
 	type WikiLog,
 } from "./wiki.js";
+export {
+	ComputerUseTraceStore,
+	defaultTraceDbPath,
+	defaultTracesDir,
+	type TraceOutcome,
+	type PerceptionKind,
+	type TraceStartParams,
+	type TraceCloseParams,
+	type AppendStepParams,
+	type TraceRow,
+	type TraceStepRow,
+	type FullTrace,
+} from "./computer-use-traces.js";
 
 export type {
 	PromotionResult,
