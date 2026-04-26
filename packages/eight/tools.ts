@@ -2126,7 +2126,7 @@ export class ToolExecutor {
             description: complete.system.description,
             colors: complete.parsedColors,
             typography: complete.parsedTypography,
-            components: complete.components.map(c => ({ type: c.type, name: c.name, description: c.description })),
+            components: complete.components.map(c => ({ type: c.component_type, variant: c.variant, description: c.description })),
             tags: complete.tags,
           }, null, 2);
         }
@@ -2222,7 +2222,7 @@ export class ToolExecutor {
     try {
       const memory = getMemoryManager(this.workingDirectory);
       const id = memory.remember(fact, layer, { source: "user:remember" });
-      const stats = memory.getStats();
+      const stats = await memory.getStats();
       return `Remembered (${layer}): "${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}"\nID: ${id}\nMemory stats — session: ${stats.session}, project: ${stats.project}, global: ${stats.global}`;
     } catch (err) {
       return `Failed to remember: ${err}`;
@@ -2232,7 +2232,7 @@ export class ToolExecutor {
   private async handleRecall(query: string, limit?: number): Promise<string> {
     try {
       const memory = getMemoryManager(this.workingDirectory);
-      const results = memory.recall(query, limit ?? 10);
+      const results = await memory.recall(query, limit ?? 10);
 
       if (results.length === 0) {
         return `No memories found matching "${query}".`;

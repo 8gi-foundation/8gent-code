@@ -187,7 +187,7 @@ export default function UserDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    sessions.map((session) => (
+                    sessions.map((session: any) => (
                       <tr
                         key={session._id}
                         className="border-b border-[var(--8gent-border)] hover:bg-[var(--8gent-bg-hover)] transition-colors"
@@ -253,7 +253,7 @@ export default function UserDetailPage() {
                 Usage Summary
               </h3>
               <div className="space-y-2">
-                {usageRecords.slice(-7).map((record) => (
+                {usageRecords.slice(-7).map((record: any) => (
                   <div key={record._id} className="flex items-center justify-between text-xs">
                     <span className="text-[var(--8gent-text-muted)]">{record.date}</span>
                     <span className="text-[var(--8gent-text-secondary)]">
@@ -274,7 +274,7 @@ export default function UserDetailPage() {
               </h3>
               <div className="flex flex-wrap gap-1">
                 {stats.uniqueModels.length > 0 ? (
-                  stats.uniqueModels.map((model) => (
+                  stats.uniqueModels.map((model: any) => (
                     <span
                       key={model}
                       className="rounded bg-[var(--8gent-bg-hover)] px-2 py-0.5 text-xs text-[var(--8gent-accent)]"

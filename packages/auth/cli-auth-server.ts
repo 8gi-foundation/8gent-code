@@ -132,7 +132,7 @@ export async function runCLIAuthFlow(
     const port = server.port;
     const authUrl = `${webBaseUrl}/auth/cli?port=${port}&state=${state}`;
 
-    callbacks?.onServerReady?.(authUrl, port);
+    callbacks?.onServerReady?.(authUrl, port ?? 0);
 
     // Auto-open browser
     try {

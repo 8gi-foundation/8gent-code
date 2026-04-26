@@ -23,6 +23,7 @@ export type Capability =
   | "code"
   | "code.symbol"
   | "code.ast"
+  | "code.diagnostics"
   | "design"
   | "design.component"
   | "design.animation"

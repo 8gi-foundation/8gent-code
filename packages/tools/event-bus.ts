@@ -40,8 +40,8 @@ export class EventBus<EventMap> {
    * @param handler The handler function.
    */
   once<E extends keyof EventMap>(event: E, handler: (data: EventMap[E]) => void): void {
-    const wrappedHandler = (...args: any[]) => {
-      handler(...args);
+    const wrappedHandler = (data: EventMap[E]) => {
+      handler(data);
       this.off(event, wrappedHandler);
     };
     this.on(event, wrappedHandler);
@@ -74,5 +74,3 @@ export class EventBus<EventMap> {
     }
   }
 }
-
-export { EventBus };

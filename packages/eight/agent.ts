@@ -1152,7 +1152,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
     }
   }
 
-  private async collectToolEvidence(event: { toolName: string; args: Record<string, unknown>; result: any }): Promise<Evidence[]> {
+  private async collectToolEvidence(event: { toolName: string; args: Record<string, unknown>; result?: unknown }): Promise<Evidence[]> {
     if ((event.toolName === "write_file" || event.toolName === "edit_file") && event.args.path) {
       return this.evidenceCollector.collectForFileWrite(String(event.args.path));
     }

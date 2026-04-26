@@ -215,7 +215,7 @@ export class MCPServer {
     }
 
     try {
-      const result = await this.executor.executeTool(params.name, params.arguments || {});
+      const result = await this.executor.execute(params.name, params.arguments || {});
       return {
         jsonrpc: "2.0",
         id: req.id!,

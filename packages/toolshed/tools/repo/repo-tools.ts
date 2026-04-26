@@ -190,7 +190,7 @@ registerTool({
     const escaped = pattern.replace(/\*/g, "STAR").replace(/\?/g, "QUEST");
     const cmd = `find . -type f -name "${pattern.split("/").pop()}" | head -${limit}`;
     const output = execSync(cmd, { cwd: ctx.workingDirectory, encoding: "utf-8", timeout: 10000 });
-    const files = output.trim().split("\n").filter(Boolean).filter(f =>
+    const files = output.trim().split("\n").filter(Boolean).filter((f: string) =>
       !f.includes("node_modules") && !f.includes(".git/")
     );
     return { files, count: files.length, truncated: files.length >= limit };
@@ -232,7 +232,7 @@ registerTool({
 
   try {
     const output = execSync(cmd, { cwd: ctx.workingDirectory, encoding: "utf-8", timeout: 15000 });
-    const matches = output.trim().split("\n").filter(Boolean).map(line => {
+    const matches = output.trim().split("\n").filter(Boolean).map((line: string) => {
       const colonIdx = line.indexOf(":");
       const secondColon = line.indexOf(":", colonIdx + 1);
       return {

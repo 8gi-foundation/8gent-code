@@ -896,7 +896,7 @@ async function runShellCommand(command: string): Promise<string> {
         const taskId = taskManager.adoptProcess(finalCommand, proc, stdout, stderr);
 
         hookManager.executeHooks("afterCommand", {
-          command: finalCommand, exitCode: null, stdout, stderr,
+          command: finalCommand, exitCode: undefined, stdout, stderr,
           duration: Date.now() - startTime, workingDirectory: _ctx.workingDirectory,
         });
 
@@ -1147,7 +1147,7 @@ import { getPersona, listPersonas, matchPersona } from "../orchestration/persona
 
 const suggest_spawn = tool({
   description: "Suggest spawning a specialist sub-agent for a specific task. The user will be asked to approve unless auto-spawn is enabled.",
-  parameters: z.object({
+  inputSchema: z.object({
     persona: z.string().describe("Persona ID: winston, larry, curly, mo, or doc"),
     task: z.string().describe("The specific task for this agent"),
     reason: z.string().describe("Why this specialist is needed"),
@@ -1172,7 +1172,7 @@ const suggest_spawn = tool({
 
 const check_agents = tool({
   description: "Check the status of all active sub-agents.",
-  parameters: z.object({}),
+  inputSchema: z.object({}),
   execute: async () => {
     const bus = getOrchestratorBus();
     const agents = bus.getAgents();
@@ -1191,7 +1191,7 @@ const check_agents = tool({
 
 const message_agent = tool({
   description: "Send a message to a specific sub-agent. Used for coordination between orchestrator and specialists.",
-  parameters: z.object({
+  inputSchema: z.object({
     agentId: z.string().describe("The agent ID to message"),
     message: z.string().describe("The message content"),
   }),
@@ -1228,7 +1228,7 @@ const message_agent = tool({
 
 const merge_agent_work = tool({
   description: "Review and merge a sub-agent's worktree changes into the main branch. Only the orchestrator should call this.",
-  parameters: z.object({
+  inputSchema: z.object({
     agentId: z.string().describe("The agent ID whose work to merge"),
     commitMessage: z.string().optional().describe("Custom merge commit message"),
   }),
@@ -1357,7 +1357,7 @@ const writeTerminalTool = tool({
 const selfInspect = tool({
   description:
     "[SELF] Inspect your own runtime parameters: model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, and any appended context. Use this when you need to understand your own configuration or diagnose why something isn't working.",
-  parameters: z.object({}),
+  inputSchema: z.object({}),
   execute: async () => {
     const p = getRuntimeParams();
     return {
@@ -1392,7 +1392,7 @@ const TUNABLE_KEYS = ["temperature", "topP", "topK", "maxOutputTokens", "maxStep
 const selfTune = tool({
   description:
     "[SELF] Adjust your own runtime parameters. Tunable: temperature (0-2), topP (0-1), topK (1-100), maxOutputTokens (256-16384), maxSteps (1-100), frequencyPenalty (-2 to 2), presencePenalty (-2 to 2). Changes take effect on the next step or retry. Use when: output is truncated (bump maxOutputTokens), responses are too deterministic (raise temperature), or you're stuck in loops (adjust penalties).",
-  parameters: z.object({
+  inputSchema: z.object({
     parameter: z.string().describe("Parameter name: temperature, topP, topK, maxOutputTokens, maxSteps, frequencyPenalty, presencePenalty"),
     value: z.number().describe("New value for the parameter"),
     reason: z.string().describe("Why you're making this change - logged for introspection"),
@@ -1422,7 +1422,7 @@ const selfTune = tool({
 const selfAppendContext = tool({
   description:
     "[SELF] Append additional context or instructions to your own system prompt for this session. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
-  parameters: z.object({
+  inputSchema: z.object({
     context: z.string().describe("Text to append to your system prompt (max 500 chars)"),
     reason: z.string().describe("Why this context is important for future steps"),
   }),
@@ -1444,7 +1444,7 @@ const selfAppendContext = tool({
 const rememberTool = tool({
   description:
     "[MEMORY] Save a fact to memory. Layers: 'session' (temporary, current session only), 'project' (persisted in .8gent/ for this repo), 'global' (persisted in ~/.8gent/ across projects). Keep facts concise and searchable. Pair with recall to retrieve later.",
-  parameters: z.object({
+  inputSchema: z.object({
     fact: z.string().describe("The fact to remember"),
     layer: z.enum(["session", "project", "global"]).describe("Memory layer"),
   }),
@@ -1463,7 +1463,7 @@ const rememberTool = tool({
 const recallTool = tool({
   description:
     "[MEMORY] Search memory for relevant facts. Uses full-text search across all layers. Returns matching memories ranked by relevance.",
-  parameters: z.object({
+  inputSchema: z.object({
     query: z.string().describe("Search query"),
     limit: z.number().optional().describe("Max results (default: 5)"),
   }),
@@ -1484,7 +1484,7 @@ const recallTool = tool({
 const suggestDesign = tool({
   description:
     "[DESIGN] Returns design system recommendations (color palettes, typography, component libraries) matched to your task. Use BEFORE writing any UI code. Follow up with query_design_system for specific tokens.",
-  parameters: z.object({
+  inputSchema: z.object({
     task: z.string().describe("Description of the UI task or project"),
     projectType: z
       .string()
@@ -1537,7 +1537,7 @@ const suggestDesign = tool({
 const queryDesignSystem = tool({
   description:
     "[DESIGN] Returns design system data from curated SQLite DB - palettes, typography, components. Outputs summary, CSS variables, Tailwind config, or hex palette.",
-  parameters: z.object({
+  inputSchema: z.object({
     query: z.string().optional().describe("Search query (e.g., 'minimal dark', 'claude', 'cyberpunk')"),
     style: z.string().optional().describe("Filter by style: minimal, bold, playful, elegant, tech, retro"),
     mood: z.string().optional().describe("Filter by mood: professional, creative, tech, warm, cool"),

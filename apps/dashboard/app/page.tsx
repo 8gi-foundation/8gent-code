@@ -24,9 +24,9 @@ export default function DashboardPage() {
 
   // Calculate estimated revenue from plan distribution
   const estimatedRevenue = dashboard
-    ? Object.entries(dashboard.planDistribution).reduce((sum, [tier, count]) => {
+    ? Object.entries(dashboard.planDistribution).reduce((sum: number, [tier, count]) => {
         const plan = PLAN_DEFINITIONS[tier as keyof typeof PLAN_DEFINITIONS];
-        return sum + (plan?.priceMonthly ?? 0) * count;
+        return sum + (plan?.priceMonthly ?? 0) * Number(count);
       }, 0)
     : 0;
 
@@ -166,14 +166,15 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-2">
                   {Object.entries(health.modelDistribution)
-                    .sort(([, a], [, b]) => b - a)
+                    .sort(([, a], [, b]) => Number(b) - Number(a))
                     .slice(0, 8)
                     .map(([model, count]) => {
-                      const total = Object.values(health.modelDistribution).reduce(
-                        (s, v) => s + v,
+                      const total = Object.values(health.modelDistribution).reduce<number>(
+                        (s, v) => s + Number(v),
                         0,
                       );
-                      const pct = total > 0 ? (count / total) * 100 : 0;
+                      const countN = Number(count);
+                      const pct = total > 0 ? (countN / total) * 100 : 0;
                       return (
                         <div key={model}>
                           <div className="flex items-center justify-between text-xs">
@@ -181,7 +182,7 @@ export default function DashboardPage() {
                               {model}
                             </span>
                             <span className="text-[var(--8gent-text-muted)]">
-                              {count} ({pct.toFixed(0)}%)
+                              {countN} ({pct.toFixed(0)}%)
                             </span>
                           </div>
                           <div className="mt-1 h-1.5 w-full rounded-full bg-[var(--8gent-bg-hover)]">
@@ -218,7 +219,7 @@ export default function DashboardPage() {
                       <span className="text-[var(--8gent-text-secondary)] capitalize">
                         {plan}
                       </span>
-                      <span className="text-[var(--8gent-text)]">{count}</span>
+                      <span className="text-[var(--8gent-text)]">{Number(count)}</span>
                     </div>
                   ))}
                 </div>

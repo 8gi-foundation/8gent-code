@@ -72,7 +72,6 @@ export type {
   CoreMemory,
   EpisodicMemory,
   SemanticMemory,
-  ProceduralMemory,
   ProceduralStep,
   WorkingMemory,
   V1MemoryEntry,
@@ -271,6 +270,8 @@ export class MemoryManager {
    * V1 compatible: recall(query, 10) — returns RecallResult[]
    * V2 enhanced:   recall(query, { types, scope, minImportance }) — returns SearchResult[]
    */
+  async recall(query: string, limit: number): Promise<RecallResult[]>;
+  async recall(query: string, options?: SearchOptions): Promise<SearchResult[]>;
   async recall(
     query: string,
     optionsOrLimit?: SearchOptions | number
@@ -1102,7 +1103,7 @@ export class MemoryManager {
   async getGraph(): Promise<KnowledgeGraph> {
     if (this.graph) return this.graph;
     await this.init();
-    this.graph = new KnowledgeGraph(this.projectStore!);
+    this.graph = new KnowledgeGraph(this.projectStore!.db);
     return this.graph;
   }
 
@@ -1118,7 +1119,7 @@ export class MemoryManager {
     result: unknown,
   ): Promise<ExtractionResult | null> {
     try {
-      const extraction = extractFromToolResult(toolName, args, result);
+      const extraction = extractFromToolResult(toolName, args, String(result ?? ""));
       if (!extraction || extraction.entities.length === 0) {
         return null;
       }

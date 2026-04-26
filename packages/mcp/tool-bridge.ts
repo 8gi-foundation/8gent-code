@@ -53,7 +53,7 @@ function jsonSchemaToZod(properties: Record<string, any>, required: string[] = [
         if (prop.properties) {
           field = jsonSchemaToZod(prop.properties, prop.required || []);
         } else {
-          field = z.record(z.any());
+          field = z.record(z.string(), z.any());
         }
         break;
       default:

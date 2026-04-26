@@ -12,7 +12,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getProviderManager, type ProviderName } from "../providers/index.ts";
+import { getProviderManager, type ProviderName } from "../providers/index";
 
 // ============================================
 // Types
