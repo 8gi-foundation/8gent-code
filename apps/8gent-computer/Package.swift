@@ -10,12 +10,20 @@ let package = Package(
         .executable(
             name: "8gent-computer",
             targets: ["EightGentComputerApp"]
+        ),
+        .executable(
+            name: "accessibility-tree-cli",
+            targets: ["AccessibilityTreeCLI"]
         )
     ],
     targets: [
         .executableTarget(
             name: "EightGentComputerApp",
             path: "Sources/EightGentComputerApp"
+        ),
+        .executableTarget(
+            name: "AccessibilityTreeCLI",
+            path: "Sources/AccessibilityTreeCLI"
         )
     ]
 )
