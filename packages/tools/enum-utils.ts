@@ -54,7 +54,7 @@ function parseEnum<T>(enumObj: any, str: string): T {
   if (result === undefined) {
     throw new Error(`Invalid value: ${str}`);
   }
-  return result;
+  return result as T;
 }
 
 export { fromString, values, keys, isEnumValue, parseEnum };

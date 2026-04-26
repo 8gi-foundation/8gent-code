@@ -4,13 +4,14 @@
  * @returns The encoded string.
  */
 export function encode(str: string): string {
-  return str.replace(/[<>&'"]/g, (c) => ({
+  const map: Record<string, string> = {
     '<': '&lt;',
     '>': '&gt;',
     '&': '&amp;',
     "'": '&apos;',
     '"': '&quot;'
-  }[c]));
+  };
+  return str.replace(/[<>&'"]/g, (c) => map[c] ?? c);
 }
 
 /**

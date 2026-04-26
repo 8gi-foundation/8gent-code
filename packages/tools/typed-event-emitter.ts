@@ -3,7 +3,7 @@
  * @template Events - A record of event names to their data types.
  */
 export class TypedEventEmitter<Events extends Record<string, unknown>> {
-  private _map = new Map<string, Function[]>();
+  private _map = new Map<keyof Events, Function[]>();
 
   /**
    * Adds a listener for the specified event.
