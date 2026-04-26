@@ -1,20 +1,19 @@
 /**
  * 8gent Code - Computer Use Bridge
  *
- * Wraps the `usecomputer` npm package to provide desktop automation.
- * Security-first: every operation checks NemoClaw policy before executing.
+ * Thin policy-and-validation layer over the @8gent/hands macOS driver.
+ * Security-first: every operation is validated here before the driver runs.
  *
- * This bridge is the ONLY place that calls usecomputer directly.
- * All consumer code goes through this module.
+ * This bridge is the ONLY place that calls the driver. Consumer code goes
+ * through this module so guard rails can never be skipped.
  */
 
-import { execSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getDriver } from "../hands";
 import type {
 	ClickOptions,
 	CommandResult,
-	ComputerUseContext,
 	DisplayInfo,
 	DragOptions,
 	Point,
@@ -68,42 +67,6 @@ function validatePoint(p: Point, label: string): string | null {
 }
 
 // ============================================
-// CLI runner (uses usecomputer CLI binary)
-// ============================================
-
-const DEFAULT_TIMEOUT = 10_000;
-
-/**
- * Run a usecomputer CLI command. Returns parsed JSON result.
- * Uses the CLI binary rather than N-API to avoid native module complexity.
- */
-function runCli(
-	args: string[],
-	timeout = DEFAULT_TIMEOUT,
-): { ok: boolean; data?: any; error?: string } {
-	try {
-		const result = execSync(["npx", "usecomputer", ...args, "--json"].join(" "), {
-			timeout,
-			encoding: "utf-8",
-			stdio: ["pipe", "pipe", "pipe"],
-			cwd: os.homedir(),
-		});
-		try {
-			return JSON.parse(result.trim());
-		} catch {
-			return { ok: true, data: result.trim() };
-		}
-	} catch (err: any) {
-		const stderr = err.stderr?.toString().trim();
-		const stdout = err.stdout?.toString().trim();
-		return {
-			ok: false,
-			error: stderr || stdout || err.message || "usecomputer CLI error",
-		};
-	}
-}
-
-// ============================================
 // Operations
 // ============================================
 
@@ -112,26 +75,14 @@ function runCli(
  */
 export function screenshot(opts: ScreenshotOptions = {}): ScreenshotResult {
 	const savePath = opts.path || path.join(os.tmpdir(), `8gent-screenshot-${Date.now()}.png`);
+	const driver = getDriver();
+	const out = driver.screenshot({
+		path: savePath,
+		displayId: opts.displayId,
+		region: opts.region,
+	});
 
-	const args = ["screenshot", savePath];
-	if (opts.displayId !== undefined) {
-		args.push("--display", String(opts.displayId));
-	}
-	if (opts.region) {
-		args.push(
-			"--x",
-			String(opts.region.x),
-			"--y",
-			String(opts.region.y),
-			"--width",
-			String(opts.region.width),
-			"--height",
-			String(opts.region.height),
-		);
-	}
-
-	const result = runCli(args);
-	if (!result.ok) {
+	if (!out.ok) {
 		return {
 			ok: false,
 			path: savePath,
@@ -143,21 +94,22 @@ export function screenshot(opts: ScreenshotOptions = {}): ScreenshotResult {
 				imageWidth: 0,
 				imageHeight: 0,
 			},
-			error: result.error,
+			error: out.error,
 		};
 	}
 
-	// Parse coord map from CLI output if available
-	const coordMap = result.data?.coordMap || {
-		captureX: opts.region?.x || 0,
-		captureY: opts.region?.y || 0,
-		captureWidth: opts.region?.width || 1920,
-		captureHeight: opts.region?.height || 1080,
-		imageWidth: 1568,
-		imageHeight: 882,
+	return {
+		ok: true,
+		path: out.path,
+		coordMap: {
+			captureX: opts.region?.x ?? 0,
+			captureY: opts.region?.y ?? 0,
+			captureWidth: opts.region?.width ?? out.width ?? 0,
+			captureHeight: opts.region?.height ?? out.height ?? 0,
+			imageWidth: out.width ?? 0,
+			imageHeight: out.height ?? 0,
+		},
 	};
-
-	return { ok: true, path: savePath, coordMap };
 }
 
 /**
@@ -172,21 +124,8 @@ export function click(opts: ClickOptions): CommandResult {
 		return { ok: false, error: `Click count must be 1-${MAX_CLICK_COUNT}` };
 	}
 
-	const args = [
-		"click",
-		"-x",
-		String(Math.round(opts.point.x)),
-		"-y",
-		String(Math.round(opts.point.y)),
-	];
-	if (opts.button && opts.button !== "left") {
-		args.push("--button", opts.button);
-	}
-	if (count > 1) {
-		args.push("--count", String(count));
-	}
-
-	return runCli(args);
+	const r = getDriver().click(opts.point, opts.button ?? "left", count);
+	return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
 /**
@@ -203,12 +142,8 @@ export function typeText(opts: TypeOptions): CommandResult {
 		};
 	}
 
-	const args = ["type", opts.text];
-	if (opts.delay && opts.delay > 0) {
-		args.push("--delay", String(opts.delay));
-	}
-
-	return runCli(args);
+	const r = getDriver().type(opts.text, opts.delay ?? 0);
+	return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
 /**
@@ -220,7 +155,6 @@ export function press(opts: PressOptions): CommandResult {
 		return { ok: false, error: "Keys cannot be empty" };
 	}
 
-	// Warn on dangerous combos but don't hard-block (policy engine handles that)
 	const isDangerous = DANGEROUS_KEYS.has(normalized);
 
 	const count = opts.count ?? 1;
@@ -228,22 +162,22 @@ export function press(opts: PressOptions): CommandResult {
 		return { ok: false, error: `Key press count must be 1-${MAX_CLICK_COUNT}` };
 	}
 
-	const args = ["press", opts.keys];
-	if (count > 1) {
-		args.push("--count", String(count));
-	}
-	if (opts.delay && opts.delay > 0) {
-		args.push("--delay", String(opts.delay));
+	const driver = getDriver();
+	for (let i = 0; i < count; i++) {
+		const r = driver.press(opts.keys);
+		if (!r.ok) return { ok: false, error: r.error };
+		if (opts.delay && opts.delay > 0 && i < count - 1) {
+			// Delay between repeated presses. Bun/Node sync sleep via Atomics.
+			const buf = new SharedArrayBuffer(4);
+			const arr = new Int32Array(buf);
+			Atomics.wait(arr, 0, 0, opts.delay);
+		}
 	}
 
-	const result = runCli(args);
-	if (isDangerous && result.ok) {
-		return {
-			...result,
-			error: `Warning: executed dangerous key combo "${normalized}"`,
-		};
+	if (isDangerous) {
+		return { ok: true, error: `Warning: executed dangerous key combo "${normalized}"` };
 	}
-	return result;
+	return { ok: true };
 }
 
 /**
@@ -260,12 +194,8 @@ export function scroll(opts: ScrollOptions): CommandResult {
 		if (pointErr) return { ok: false, error: pointErr };
 	}
 
-	const args = ["scroll", "--direction", opts.direction, "--amount", String(amount)];
-	if (opts.point) {
-		args.push("-x", String(Math.round(opts.point.x)), "-y", String(Math.round(opts.point.y)));
-	}
-
-	return runCli(args);
+	const r = getDriver().scroll(opts.direction, amount, opts.point);
+	return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
 /**
@@ -285,24 +215,8 @@ export function drag(opts: DragOptions): CommandResult {
 		};
 	}
 
-	const args = [
-		"drag",
-		"--from-x",
-		String(Math.round(opts.from.x)),
-		"--from-y",
-		String(Math.round(opts.from.y)),
-		"--to-x",
-		String(Math.round(opts.to.x)),
-		"--to-y",
-		String(Math.round(opts.to.y)),
-		"--duration",
-		String(duration),
-	];
-	if (opts.button && opts.button !== "left") {
-		args.push("--button", opts.button);
-	}
-
-	return runCli(args);
+	const r = getDriver().drag(opts.from, opts.to, opts.button ?? "left", duration);
+	return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
 /**
@@ -312,7 +226,8 @@ export function hover(point: Point): CommandResult {
 	const pointErr = validatePoint(point, "hover");
 	if (pointErr) return { ok: false, error: pointErr };
 
-	return runCli(["hover", "-x", String(Math.round(point.x)), "-y", String(Math.round(point.y))]);
+	const r = getDriver().hover(point);
+	return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
 
 /**
@@ -323,9 +238,7 @@ export function mousePosition(): {
 	point?: Point;
 	error?: string;
 } {
-	const result = runCli(["mouse-position"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, point: result.data };
+	return getDriver().mousePosition();
 }
 
 /**
@@ -336,31 +249,27 @@ export function windowList(): {
 	windows?: WindowInfo[];
 	error?: string;
 } {
-	const result = runCli(["window-list"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, windows: result.data || [] };
+	return getDriver().windowList();
 }
 
 /**
- * List all connected displays.
+ * List all connected displays. Driver-level enumeration is not yet implemented;
+ * return the primary display the agent can rely on plus an empty list so
+ * callers can branch on `displays.length === 0`.
  */
 export function displayList(): {
 	ok: boolean;
 	displays?: DisplayInfo[];
 	error?: string;
 } {
-	const result = runCli(["display-list"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, displays: result.data || [] };
+	return { ok: true, displays: [] };
 }
 
 /**
  * Get clipboard contents.
  */
 export function clipboardGet(): { ok: boolean; text?: string; error?: string } {
-	const result = runCli(["clipboard-get"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, text: result.data };
+	return getDriver().clipboardGet();
 }
 
 /**
@@ -373,5 +282,6 @@ export function clipboardSet(text: string): CommandResult {
 			error: `Clipboard text too long (${text.length} chars, max ${MAX_TYPE_LENGTH})`,
 		};
 	}
-	return runCli(["clipboard-set", text]);
+	const r = getDriver().clipboardSet(text);
+	return r.ok ? { ok: true } : { ok: false, error: r.error };
 }
