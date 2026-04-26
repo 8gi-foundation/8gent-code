@@ -74,3 +74,102 @@ export interface ChannelInbound {
 	requestId?: string;
 	approved?: boolean;
 }
+
+// ============================================================
+// Dispatch protocol (issue #1896)
+// ============================================================
+
+/**
+ * Capability tiers a surface can hold for dispatch. Defined here (the
+ * shared types module) so dispatch.ts and permissions/dispatch-policy.ts
+ * can both import it without a runtime cycle.
+ */
+export type DispatchCapability = "read" | "write_basic" | "write_full" | "admin";
+
+/** @deprecated Use DispatchCapability. Retained briefly for in-flight callers. */
+export type DispatchCapabilityWire = DispatchCapability;
+
+/** Inbound message: register a surface for dispatch. */
+export interface DispatchRegisterInbound {
+	type: "dispatch:register";
+	token: string;
+	/** Pre-shared surface_id; daemon validates against token claims. */
+	surface_id?: string;
+}
+
+/** Inbound: send a dispatch envelope. */
+export interface DispatchSendInbound {
+	type: "dispatch:send";
+	dispatch_id: string;
+	originating_channel: DaemonChannel;
+	target_channel: DaemonChannel | "auto";
+	target_surface_id?: string | null;
+	correlation_id: string;
+	replay_to: DaemonChannel[];
+	intent: string;
+	capability_required: DispatchCapabilityWire;
+}
+
+/** Inbound: subscribe (without dispatching) to a correlation_id, e.g. an os web tab listening for replies. */
+export interface DispatchSubscribeInbound {
+	type: "dispatch:subscribe";
+	correlation_id: string;
+}
+
+/** Inbound: ping. */
+export interface DispatchPingInbound {
+	type: "ping";
+}
+
+export type DispatchInbound =
+	| DispatchRegisterInbound
+	| DispatchSendInbound
+	| DispatchSubscribeInbound
+	| DispatchPingInbound;
+
+/** Outbound: registration ack. */
+export interface DispatchRegisteredOutbound {
+	protocol_version: typeof PROTOCOL_VERSION;
+	type: "dispatch:registered";
+	surface_id: string;
+	channel: DaemonChannel;
+	capabilities: DispatchCapabilityWire[];
+}
+
+/** Outbound: dispatch was accepted (or rejected with code). */
+export interface DispatchAckOutbound {
+	protocol_version: typeof PROTOCOL_VERSION;
+	type: "dispatch:ack";
+	dispatch_id: string;
+	correlation_id: string;
+	ok: boolean;
+	error?: string;
+	code?: string;
+	retry_after_ms?: number;
+	session_id?: string;
+	target_channel?: DaemonChannel;
+	target_surface_id?: string | null;
+}
+
+/** Outbound: streamed event for a dispatch. */
+export interface DispatchEventOutbound {
+	protocol_version: typeof PROTOCOL_VERSION;
+	type: "dispatch:event";
+	dispatch_id: string;
+	correlation_id: string;
+	originating_channel: DaemonChannel;
+	target_channel: DaemonChannel;
+	dispatch_source: DaemonChannel;
+	event: {
+		kind: "accepted" | "stream" | "tool_call" | "tool_result" | "error" | "done";
+		[key: string]: unknown;
+	};
+}
+
+/** Outbound: error not tied to a dispatch (auth fail, malformed message). */
+export interface DispatchErrorOutbound {
+	protocol_version: typeof PROTOCOL_VERSION;
+	type: "dispatch:error";
+	error: string;
+	code: string;
+}
