@@ -209,18 +209,17 @@ Chord progression analysis:
 
 ### chart.ts
 Chart generation:
-- \`interface ChartConfig\` — { type: "bar" | "line" | "pie" | "scatter" | "heatmap"; data: number[] | { x: number; y: number }[] | { label: string; value: number }[]; options?: { title?: string; width?: number; height?: number; colors?: string[] } }
-- \`function generateSVG(config: ChartConfig): string\` — returns valid SVG markup string
-  - Must include \`<svg>\` root with width/height attributes
-  - Bar chart: \`<rect>\` elements for each bar
-  - Line chart: \`<polyline>\` or \`<path>\` element
-  - Pie chart: \`<path>\` elements with arc commands (d="M... A...")
-  - Must include a \`<title>\` element if title is provided in options
-- \`function generateASCII(config: ChartConfig): string\` — returns ASCII art chart
-  - Bar chart: horizontal bars using █ characters, with labels
-  - Line chart: uses characters like ·, ─, ╱, ╲ on a grid
-  - Must include axis labels
+- \`interface ChartConfig\` — { type: "bar" | "line" | "pie" | "scatter" | "heatmap"; data: Array<{ label: string; value: number }> | Array<{ x: number; y: number }> | number[]; options?: { title?: string; width?: number; height?: number; colors?: string[] } }
+- \`function generateSVG(config: ChartConfig): string\` — returns valid SVG markup string.
+  - **MUST always include both \`<svg\` (opening) and \`</svg>\` (closing) tags.**
+  - **Bar chart MUST include at least one \`<rect\` element per data point.**
+  - **Pie chart MUST include at least one \`<path\` element per slice.**
+  - **If \`options.title\` is provided, output MUST include both \`<title>\` and the literal title text** (tests check both \`svg.includes("<title>")\` and \`svg.includes("My Chart")\`).
+- \`function generateASCII(config: ChartConfig): string\` — returns ASCII chart string.
+  - **MUST be a non-empty string and must include each data point's \`label\`** (tests assert ascii.includes("A") and ascii.includes("B") for labels A and B).
 - \`function calculateBounds(data: number[]): { min: number; max: number; range: number; mean: number; median: number; stdDev: number }\`
+  - \`range\` = max - min. \`mean\` = sum/n. \`median\` = middle element of sorted array (odd-length).
+  - \`stdDev\` = population standard deviation, must be > 0 for any non-constant input.
 
 ### scale.ts
 Scale functions for mapping data to visual coordinates:
@@ -414,18 +413,21 @@ Security scanning tools:
 - \`interface CodeScanResult\` — { vulnerabilities: Vulnerability[]; linesScanned: number; patterns: { pattern: string; line: number; severity: string }[] }
 - \`interface ConfigScanResult\` — { vulnerabilities: Vulnerability[]; checksPerformed: number; issues: string[] }
 - \`function scanDependencies(packageJson: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }): DepScanResult\`
-  - Check for known risky packages: detect version wildcards ("*"), very old major versions (0.x), known vulnerable names (e.g., packages containing "eval", "exec" in name get flagged)
-  - Flag any dependency with version "*" or "latest" as medium severity
+  - **\`riskyPackages\` is an array of package NAMES (the keys), not version strings.** So for \`{ dependencies: { "some-lib": "*" } }\` → \`riskyPackages: ["some-lib"]\`.
+  - Flag versions equal to \`"*"\` or \`"latest"\` as medium severity and add the package name to \`riskyPackages\`.
+  - **\`scannedCount\` = total deps + devDeps (counts both maps combined).**
+  - **For safe semver versions like "^18.2.0" or "^5.0.0", \`riskyPackages\` MUST be empty.**
 - \`function scanCode(code: string): CodeScanResult\`
-  - Regex checks for common vulnerabilities:
-    - \`eval(\` → critical injection
-    - \`innerHTML\` → high XSS
-    - SQL string concatenation (template literals or string concat near SELECT/INSERT/UPDATE/DELETE) → critical injection
-    - Hardcoded secrets (patterns like password = "...", secret = "...", apiKey = "...", token = "...") → high config
-    - \`console.log\` with sensitive variable names → low info
-  - Returns line numbers where patterns were found
+  - Detect \`eval(\` → push a Vulnerability with \`severity: "critical"\` AND \`category: "injection"\`. Tests look up by \`v.category === "injection"\` and assert severity is "critical".
+  - Detect \`innerHTML\` → push a Vulnerability with \`category: "xss"\`.
+  - Detect hardcoded secrets like \`password = "..."\`, \`apiKey = "..."\`, \`token = "..."\`, \`secret = "..."\` — push at least one Vulnerability per occurrence.
+  - **Each detected pattern MUST also be appended to \`patterns\` with a 1-indexed \`line\` number** (so \`eval\` on line 2 → \`{ pattern: "eval", line: 2, severity: "critical" }\`).
+  - Safe code (no patterns) → \`vulnerabilities: []\` and \`patterns: []\`.
 - \`function scanConfig(config: Record<string, unknown>): ConfigScanResult\`
-  - Checks for: debug: true (medium), cors: "*" or cors.origin: "*" (high), missing CSP headers, weak crypto algorithms ("md5", "sha1"), http:// URLs (medium)
+  - \`debug: true\` → push Vulnerability with title or description containing the word "debug".
+  - \`cors: "*"\` or \`cors.origin: "*"\` → push Vulnerability with \`severity: "high"\`.
+  - \`crypto.algorithm\` equal to \`"md5"\` or \`"sha1"\` → push at least one Vulnerability.
+  - **Safe config (e.g., \`{ port: 443, tls: true }\`) → \`vulnerabilities: []\`.**
 
 ### vulnerability.ts
 Vulnerability management:
