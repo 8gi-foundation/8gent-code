@@ -9,6 +9,14 @@ import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
+import type {
+	DispatchHub,
+	DispatchLedger,
+	DispatchRateLimiter,
+	DispatchRouter,
+	SurfaceRegistry,
+	TokenVerifier,
+} from "./dispatch";
 import { type EventName, bus } from "./events";
 import {
 	type ComputerWS,
@@ -16,11 +24,26 @@ import {
 	handleComputerMessage,
 	handleComputerOpen,
 } from "./routes/computer";
+import {
+	type DispatchWS,
+	handleDispatchClose,
+	handleDispatchMessage,
+	handleDispatchOpen,
+} from "./routes/dispatch";
 
 export interface GatewayConfig {
 	port: number;
 	authToken: string | null; // null = no auth required
 	pool: AgentPool;
+	/** Optional dispatch deps. When omitted, /dispatch route returns 503. */
+	dispatch?: {
+		registry: SurfaceRegistry;
+		router: DispatchRouter;
+		ledger: DispatchLedger;
+		rateLimiter: DispatchRateLimiter;
+		verifier: TokenVerifier;
+		hub: DispatchHub;
+	};
 }
 
 interface ClientState {
@@ -30,6 +53,8 @@ interface ClientState {
 	authenticated: boolean;
 	/** Marks a connection upgraded on the /computer route. */
 	isComputerRoute?: boolean;
+	/** Marks a connection upgraded on the /dispatch route. */
+	isDispatchRoute?: boolean;
 }
 
 type InboundMessage =
@@ -353,6 +378,21 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				return new Response("WebSocket upgrade required", { status: 426 });
 			}
 
+			// /dispatch route - cross-surface remote dispatch.
+			if (url.pathname === "/dispatch") {
+				if (!config.dispatch) {
+					return new Response("dispatch protocol not configured", { status: 503 });
+				}
+				if (
+					(server.upgrade as (r: Request, opts?: any) => boolean)(req, {
+						data: { route: "dispatch" },
+					})
+				) {
+					return undefined;
+				}
+				return new Response("WebSocket upgrade required", { status: 426 });
+			}
+
 			if (server.upgrade(req)) return undefined;
 
 			// Health check endpoint
@@ -383,17 +423,22 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				const id = `c_${nextClientId++}`;
 				const data = (ws as unknown as { data?: { route?: string } }).data;
 				const isComputer = data?.route === "computer";
+				const isDispatch = data?.route === "dispatch";
 				const state: ClientState = {
 					id,
-					channel: isComputer ? "computer" : "api",
+					channel: isComputer ? "computer" : isDispatch ? "dispatch" : "api",
 					sessionId: null,
 					authenticated: !config.authToken,
 					isComputerRoute: isComputer,
+					isDispatchRoute: isDispatch,
 				};
 				clients.set(ws, state);
-				console.log(`[gateway] client ${id} connected${isComputer ? " (computer)" : ""}`);
+				const tag = isComputer ? " (computer)" : isDispatch ? " (dispatch)" : "";
+				console.log(`[gateway] client ${id} connected${tag}`);
 				if (isComputer) {
 					handleComputerOpen(ws as unknown as ComputerWS, config.pool, state);
+				} else if (isDispatch) {
+					handleDispatchOpen(ws as unknown as DispatchWS);
 				}
 			},
 			message(ws, raw) {
@@ -401,6 +446,14 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
 				if (state?.isComputerRoute) {
 					handleComputerMessage(ws as unknown as ComputerWS, config.pool, state, text);
+					return;
+				}
+				if (state?.isDispatchRoute && config.dispatch) {
+					handleDispatchMessage(
+						ws as unknown as DispatchWS,
+						{ pool: config.pool, ...config.dispatch },
+						text,
+					);
 					return;
 				}
 				handleMessage(ws, config, text);
@@ -411,6 +464,11 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					console.log(`[gateway] client ${state.id} disconnected`);
 					if (state.isComputerRoute) {
 						handleComputerClose(config.pool, state);
+					} else if (state.isDispatchRoute && config.dispatch) {
+						handleDispatchClose(ws as unknown as DispatchWS, {
+							pool: config.pool,
+							...config.dispatch,
+						});
 					} else if (state.sessionId) {
 						bus.emit("session:end", {
 							sessionId: state.sessionId,
@@ -425,5 +483,8 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 
 	console.log(`[gateway] WebSocket server listening on ws://${hostname}:${config.port}`);
 	console.log(`[gateway] computer channel: ws://${hostname}:${config.port}/computer`);
+	if (config.dispatch) {
+		console.log(`[gateway] dispatch protocol: ws://${hostname}:${config.port}/dispatch`);
+	}
 	return server;
 }
