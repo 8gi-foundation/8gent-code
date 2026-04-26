@@ -291,7 +291,7 @@ export interface V1RecallResult {
 
 // ── Helper: Generate IDs ──────────────────────────────────────────────
 
-export function generateId(prefix: "mem" | "ent" | "rel" | "ver"): string {
+export function generateId(prefix: "mem" | "ent" | "rel" | "ver" | "trc" | "trs"): string {
 	const bytes = new Uint8Array(6);
 	crypto.getRandomValues(bytes);
 	const hex = Array.from(bytes)
