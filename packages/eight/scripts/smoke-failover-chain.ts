@@ -14,10 +14,10 @@
 import { ModelFailover } from "../../providers/failover";
 
 function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    console.error(`[smoke-failover] ASSERT FAIL: ${message}`);
-    process.exit(1);
-  }
+	if (!condition) {
+		console.error(`[smoke-failover] ASSERT FAIL: ${message}`);
+		process.exit(1);
+	}
 }
 
 const fo = new ModelFailover();
@@ -31,8 +31,8 @@ console.log(`[smoke-failover] text channel default: ${text.provider}/${text.mode
 const tier1 = fo.resolve("qwen3.6:27b", "computer");
 console.log(`[smoke-failover] computer tier 1: ${tier1.provider}/${tier1.model}`);
 assert(
-  tier1.provider === "apfel" || tier1.provider === "ollama",
-  "computer tier 1 should be apfel or ollama",
+	tier1.provider === "apfel" || tier1.provider === "ollama",
+	"computer tier 1 should be apfel or ollama",
 );
 
 // Mark apfel down → expect Qwen.
@@ -58,8 +58,8 @@ fo.markUp("qwen3.6:27b", "ollama");
 const tier2Restored = fo.resolve("qwen3.6:27b", "computer");
 console.log(`[smoke-failover] computer restored: ${tier2Restored.provider}/${tier2Restored.model}`);
 assert(
-  tier2Restored.provider === "ollama" && tier2Restored.model === "qwen3.6:27b",
-  "Qwen should resume primary",
+	tier2Restored.provider === "ollama" && tier2Restored.model === "qwen3.6:27b",
+	"Qwen should resume primary",
 );
 
 // Verify failover events were logged.
@@ -67,5 +67,5 @@ const events = fo.drainEvents();
 console.log(`[smoke-failover] events recorded: ${events.length}`);
 assert(events.length >= 3, "expected at least 3 failover events");
 
-console.log(`[smoke-failover] OK`);
+console.log("[smoke-failover] OK");
 process.exit(0);

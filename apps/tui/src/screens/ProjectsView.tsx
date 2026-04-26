@@ -5,21 +5,21 @@
  * or .8gent/.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useCallback } from "react";
 import {
 	AppText,
-	MutedText,
-	Heading,
-	Stack,
-	Inline,
-	Divider,
 	Badge,
+	Divider,
+	Heading,
+	Inline,
+	MutedText,
+	Stack,
 } from "../components/primitives/index.js";
-import { execSync } from "child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync } from "fs";
-import { join, basename } from "path";
-import { homedir } from "os";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,9 +67,7 @@ const MAX_DEPTH = 1;
 
 function isProjectDir(dirPath: string): boolean {
 	try {
-		return PROJECT_MARKERS.some((marker) =>
-			existsSync(join(dirPath, marker))
-		);
+		return PROJECT_MARKERS.some((marker) => existsSync(join(dirPath, marker)));
 	} catch {
 		return false;
 	}
@@ -322,7 +320,7 @@ export function ProjectsView({
 				onClose();
 			}
 		},
-		{ isActive: visible }
+		{ isActive: visible },
 	);
 
 	if (!visible) return null;
@@ -333,15 +331,11 @@ export function ProjectsView({
 			{/* Header */}
 			<Inline gap={1}>
 				<Heading>Projects</Heading>
-				{!isLoading && (
-					<MutedText>({projects.length} found)</MutedText>
-				)}
+				{!isLoading && <MutedText>({projects.length} found)</MutedText>}
 				{isLoading && <MutedText>scanning...</MutedText>}
 			</Inline>
 
-			<MutedText>
-				↑↓ Navigate · Enter Switch · a Add · d Remove · r Refresh · Esc Close
-			</MutedText>
+			<MutedText>↑↓ Navigate · Enter Switch · a Add · d Remove · r Refresh · Esc Close</MutedText>
 
 			<Divider />
 
@@ -359,9 +353,7 @@ export function ProjectsView({
 			)}
 
 			{/* Status message */}
-			{statusMsg && !addMode && (
-				<MutedText>{statusMsg}</MutedText>
-			)}
+			{statusMsg && !addMode && <MutedText>{statusMsg}</MutedText>}
 
 			{/* Project list */}
 			{isLoading ? (
@@ -388,18 +380,12 @@ export function ProjectsView({
 										<Text color="cyan" bold>
 											{isSelected ? "›" : " "}
 										</Text>
-										<AppText bold={isSelected}>
-											{proj.name}
-										</AppText>
-										{isCurrent && (
-											<Badge label="HERE" color="green" />
-										)}
-										{proj.has8gent && (
-											<Badge label="8gent" color="magenta" variant="outline" />
-										)}
+										<AppText bold={isSelected}>{proj.name}</AppText>
+										{isCurrent && <Badge label="HERE" color="green" />}
+										{proj.has8gent && <Badge label="8gent" color="magenta" variant="outline" />}
 										{proj.gitBranch && (
 											<Text color="blue" dimColor>
-												 {proj.gitBranch}
+												{proj.gitBranch}
 											</Text>
 										)}
 									</Inline>
@@ -407,12 +393,8 @@ export function ProjectsView({
 									{/* Row 2: path + last modified */}
 									<Inline gap={1}>
 										<Text>{"  "}</Text>
-										<MutedText>
-											{proj.path}
-										</MutedText>
-										<MutedText>
-											· {formatRelativeTime(proj.lastModified)}
-										</MutedText>
+										<MutedText>{proj.path}</MutedText>
+										<MutedText>· {formatRelativeTime(proj.lastModified)}</MutedText>
 									</Inline>
 								</Stack>
 							</Box>

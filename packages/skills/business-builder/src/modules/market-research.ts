@@ -1,12 +1,12 @@
-import * as fs from 'fs';
-import { TargetMarketAnalysis } from '../types';
+import * as fs from 'node:fs';
+import type { TargetMarketAnalysis } from '../types';
 
 export class MarketResearchModule {
   private cache = new Map<string, any>();
   
   constructor(
     private dataSources: string[] = [],
-    private outputDir: string = './data/market-research'
+    private outputDir = './data/market-research'
   ) {
     this.initialize();
   }

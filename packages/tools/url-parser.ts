@@ -3,19 +3,26 @@
  * @param url - The URL string to parse.
  * @returns An object containing the URL's components.
  */
-function parseUrl(url: string): { protocol: string; host: string; port?: string; path: string; query: string; hash: string } {
-  const urlObj = new URL(url);
-  const hostParts = urlObj.host.split(':');
-  const host = hostParts[0];
-  const port = hostParts.length > 1 ? hostParts[1] : undefined;
-  return {
-    protocol: urlObj.protocol.replace(':', ''),
-    host,
-    port,
-    path: urlObj.pathname,
-    query: urlObj.search.slice(1),
-    hash: urlObj.hash.slice(1)
-  };
+function parseUrl(url: string): {
+	protocol: string;
+	host: string;
+	port?: string;
+	path: string;
+	query: string;
+	hash: string;
+} {
+	const urlObj = new URL(url);
+	const hostParts = urlObj.host.split(":");
+	const host = hostParts[0];
+	const port = hostParts.length > 1 ? hostParts[1] : undefined;
+	return {
+		protocol: urlObj.protocol.replace(":", ""),
+		host,
+		port,
+		path: urlObj.pathname,
+		query: urlObj.search.slice(1),
+		hash: urlObj.hash.slice(1),
+	};
 }
 
 /**
@@ -23,13 +30,20 @@ function parseUrl(url: string): { protocol: string; host: string; port?: string;
  * @param parts - The URL components to assemble.
  * @returns The assembled URL string.
  */
-function buildUrl(parts: { protocol: string; host: string; port?: string; path: string; query?: string; hash?: string }): string {
-  let url = `${parts.protocol}://${parts.host}`;
-  if (parts.port) url += `:${parts.port}`;
-  url += parts.path;
-  if (parts.query) url += `?${parts.query}`;
-  if (parts.hash) url += `#${parts.hash}`;
-  return url;
+function buildUrl(parts: {
+	protocol: string;
+	host: string;
+	port?: string;
+	path: string;
+	query?: string;
+	hash?: string;
+}): string {
+	let url = `${parts.protocol}://${parts.host}`;
+	if (parts.port) url += `:${parts.port}`;
+	url += parts.path;
+	if (parts.query) url += `?${parts.query}`;
+	if (parts.hash) url += `#${parts.hash}`;
+	return url;
 }
 
 /**
@@ -38,21 +52,21 @@ function buildUrl(parts: { protocol: string; host: string; port?: string; path: 
  * @returns A record of key-value pairs.
  */
 function parseQueryString(qs: string): Record<string, string | string[]> {
-  const params: Record<string, string | string[]> = {};
-  const pairs = qs.split('&');
-  for (const pair of pairs) {
-    const [key, value] = pair.split('=');
-    if (key in params) {
-      if (Array.isArray(params[key])) {
-        (params[key] as string[]).push(value);
-      } else {
-        params[key] = [params[key] as string, value];
-      }
-    } else {
-      params[key] = value;
-    }
-  }
-  return params;
+	const params: Record<string, string | string[]> = {};
+	const pairs = qs.split("&");
+	for (const pair of pairs) {
+		const [key, value] = pair.split("=");
+		if (key in params) {
+			if (Array.isArray(params[key])) {
+				(params[key] as string[]).push(value);
+			} else {
+				params[key] = [params[key] as string, value];
+			}
+		} else {
+			params[key] = value;
+		}
+	}
+	return params;
 }
 
 /**
@@ -61,18 +75,18 @@ function parseQueryString(qs: string): Record<string, string | string[]> {
  * @returns The query string.
  */
 function stringifyQuery(params: Record<string, string | string[]>): string {
-  const entries: string[] = [];
-  for (const key in params) {
-    const value = params[key];
-    if (Array.isArray(value)) {
-      for (const v of value) {
-        entries.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
-      }
-    } else {
-      entries.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
-    }
-  }
-  return entries.join('&');
+	const entries: string[] = [];
+	for (const key in params) {
+		const value = params[key];
+		if (Array.isArray(value)) {
+			for (const v of value) {
+				entries.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
+			}
+		} else {
+			entries.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+		}
+	}
+	return entries.join("&");
 }
 
 /**
@@ -81,16 +95,20 @@ function stringifyQuery(params: Record<string, string | string[]>): string {
  * @param key - The parameter key.
  * @param value - The parameter value.
  */
-function addQueryParam(params: Record<string, string | string[]>, key: string, value: string): void {
-  if (key in params) {
-    if (Array.isArray(params[key])) {
-      (params[key] as string[]).push(value);
-    } else {
-      params[key] = [params[key] as string, value];
-    }
-  } else {
-    params[key] = value;
-  }
+function addQueryParam(
+	params: Record<string, string | string[]>,
+	key: string,
+	value: string,
+): void {
+	if (key in params) {
+		if (Array.isArray(params[key])) {
+			(params[key] as string[]).push(value);
+		} else {
+			params[key] = [params[key] as string, value];
+		}
+	} else {
+		params[key] = value;
+	}
 }
 
 /**
@@ -99,7 +117,7 @@ function addQueryParam(params: Record<string, string | string[]>, key: string, v
  * @param key - The parameter key to remove.
  */
 function removeQueryParam(params: Record<string, string | string[]>, key: string): void {
-  delete params[key];
+	delete params[key];
 }
 
 export { parseUrl, buildUrl, parseQueryString, stringifyQuery, addQueryParam, removeQueryParam };

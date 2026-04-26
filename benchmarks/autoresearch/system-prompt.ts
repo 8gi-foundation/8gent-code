@@ -61,46 +61,44 @@ CRITICAL RULES FOR MULTI-FILE TASKS:
 let mutations: string[] = [];
 
 export function getSystemPrompt(): string {
-  if (mutations.length === 0) return BASE_SYSTEM_PROMPT;
+	if (mutations.length === 0) return BASE_SYSTEM_PROMPT;
 
-  const learnings = mutations
-    .map((m, i) => `${i + 1}. ${m}`)
-    .join("\n");
+	const learnings = mutations.map((m, i) => `${i + 1}. ${m}`).join("\n");
 
-  return `${BASE_SYSTEM_PROMPT}
+	return `${BASE_SYSTEM_PROMPT}
 
 LEARNINGS FROM PREVIOUS ITERATIONS:
 ${learnings}`;
 }
 
 export function addMutation(learning: string): void {
-  // Dedup: skip if we already have this exact learning or a substantially similar one
-  const normalized = learning.toLowerCase().trim();
-  for (const existing of mutations) {
-    if (existing.toLowerCase().trim() === normalized) return;
-    // Same benchmark prefix + high overlap = duplicate
-    const prefix = learning.match(/^\[([^\]]+)\]/)?.[1];
-    const existingPrefix = existing.match(/^\[([^\]]+)\]/)?.[1];
-    if (prefix && prefix === existingPrefix) {
-      // Check word overlap — if >70% same words, skip
-      const words = new Set(normalized.split(/\s+/));
-      const existingWords = new Set(existing.toLowerCase().trim().split(/\s+/));
-      const overlap = [...words].filter((w) => existingWords.has(w)).length;
-      const similarity = overlap / Math.max(words.size, existingWords.size);
-      if (similarity > 0.7) return;
-    }
-  }
-  mutations.push(learning);
+	// Dedup: skip if we already have this exact learning or a substantially similar one
+	const normalized = learning.toLowerCase().trim();
+	for (const existing of mutations) {
+		if (existing.toLowerCase().trim() === normalized) return;
+		// Same benchmark prefix + high overlap = duplicate
+		const prefix = learning.match(/^\[([^\]]+)\]/)?.[1];
+		const existingPrefix = existing.match(/^\[([^\]]+)\]/)?.[1];
+		if (prefix && prefix === existingPrefix) {
+			// Check word overlap — if >70% same words, skip
+			const words = new Set(normalized.split(/\s+/));
+			const existingWords = new Set(existing.toLowerCase().trim().split(/\s+/));
+			const overlap = [...words].filter((w) => existingWords.has(w)).length;
+			const similarity = overlap / Math.max(words.size, existingWords.size);
+			if (similarity > 0.7) return;
+		}
+	}
+	mutations.push(learning);
 }
 
 export function getMutations(): string[] {
-  return [...mutations];
+	return [...mutations];
 }
 
 export function clearMutations(): void {
-  mutations = [];
+	mutations = [];
 }
 
 export function getMutationCount(): number {
-  return mutations.length;
+	return mutations.length;
 }

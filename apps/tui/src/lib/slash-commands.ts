@@ -144,8 +144,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "dj",
 		aliases: ["play", "radio"],
 		description: "DJ Eight - YouTube, radio, produce, mix",
-		usage:
-			"/dj [play|radio|produce|pause|stop|skip|np|vol|loop|queue|dl|bpm|mix]",
+		usage: "/dj [play|radio|produce|pause|stop|skip|np|vol|loop|queue|dl|bpm|mix]",
 	},
 	{
 		name: "pet",

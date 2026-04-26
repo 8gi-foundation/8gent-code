@@ -1,34 +1,66 @@
 # @8gent/hands
 
-Placeholder package. Reserved for the **8gent-hands** fork of
-[`trycua/cua`](https://github.com/trycua/cua) (MIT), adapted for the 8gent
-Computer on-device Mac agent.
+macOS desktop driver for the **8gent Computer** agent. Real, working
+screenshot + click + type + scroll + drag against the live display.
+
+Pattern adapted from [`trycua/cua`](https://github.com/trycua/cua) (MIT) -
+concept only, not a code fork. Roughly 450 lines of TypeScript, no native
+modules, no Swift bridge.
 
 ## Status
 
-Scaffold only. No driver code has been vendored.
+Driver online (#1908). Used by `packages/computer/bridge.ts` which is the
+single place every consumer goes through (NemoClaw policy gate first).
 
-- Parent PRD: [#1746](https://github.com/8gi-foundation/8gent-code/issues/1746)
-- Architecture spike: PR [#1747](https://github.com/8gi-foundation/8gent-code/pull/1747)
-- This scaffold issue: [#1755](https://github.com/8gi-foundation/8gent-code/issues/1755)
+## Backends
 
-## Attribution plan
+| Capability      | Primary                | Fallback                    |
+|-----------------|------------------------|-----------------------------|
+| screenshot      | `screencapture` (built-in) | -                       |
+| click           | `cliclick`             | `osascript` (left only)     |
+| type            | `cliclick`             | `osascript` keystroke       |
+| press combo     | `cliclick`             | `osascript` key code        |
+| scroll          | `osascript` arrow keys | -                           |
+| drag            | `cliclick`             | error (install cliclick)    |
+| hover           | `cliclick`             | error (install cliclick)    |
+| clipboard       | `pbpaste` / `pbcopy`   | -                           |
+| window list     | `osascript`            | -                           |
 
-When cua code lands here, the fork will preserve the upstream MIT license and
-note attribution in a `LICENSE-cua` file plus a `NOTICE` block in this README.
-Nothing is imported yet, so no attribution is required at this stage.
+If `cliclick` is missing the driver continues to work for screenshot, type,
+press, scroll, and clipboard. Drag and hover return a clean error string.
+Install with `brew install cliclick` to unlock the full surface.
 
-## TODO (later PRs, not this one)
+## TCC permissions
 
-- Import a scoped subset of cua's macOS computer-use driver.
-- Bridge to the Swift app via the daemon WebSocket channel on
-  `ws://localhost:18789` (see parent PRD correction comment).
-- Add TCC entitlement handling per Karen's threat model (#1748).
-- Tests against a headless desktop harness.
+`screencapture` requires Screen Recording entitlement. `cliclick` and
+`osascript` keystroke / mouse events require Accessibility. The first call
+will prompt the user; if denied the driver returns `{ ok: false, error }`
+instead of crashing the agent loop.
 
-## Non-goals
+Security review: #1748 (Karen).
+
+## Public API
+
+```ts
+import { getDriver } from "@8gent/hands";
+
+const d = getDriver();
+const shot = d.screenshot();             // -> { ok, path, buffer, width, height }
+d.click({ x: 100, y: 200 });
+d.type("hello world");
+d.press("cmd+s");
+d.scroll("down", 5);
+d.drag({ x: 0, y: 0 }, { x: 100, y: 100 });
+```
+
+The `HandsDriver` interface is the contract `packages/computer/bridge.ts`
+talks to. Swap implementations (Linux, Windows, daemon-over-socket) by
+exporting a different `getDriver()` later.
+
+## Non-goals (this PR)
 
 - Linux / Windows support.
-- Generic browser automation (that lives elsewhere).
-- Any work that requires Screen Recording or Accessibility prompts until the
-  security review in #1748 signs off.
+- Native wheel events (current `scroll` uses arrow keys; tracked as a
+  follow-up - real CGEventCreateScrollWheelEvent needs a tiny ObjC helper).
+- TCC entitlement setup automation - manual one-time prompt for now.
+- Generic browser automation (lives elsewhere).
