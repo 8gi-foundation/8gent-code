@@ -45,6 +45,9 @@ jobs:
       - name: Test
         run: bun test
 
+      - name: Computer-use smoke (Phase 3)
+        run: bun run packages/eight/scripts/computer-use-suite.ts
+
       - name: Build CLI
         run: bun run build
 
