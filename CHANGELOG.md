@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Documentation
+
+- docs: align README + DAEMON-PROTOCOL with live Hetzner vessel (`wss://james.8gentos.com`); add `VESSEL-ABILITIES.md` Production state section.
+
 ### Fixed
 
 - **CI test suite green** - scoped `bun test` to `packages/` and `apps/` only, excluding `benchmarks/` autoresearch-loop validators that depend on dynamically-generated code in `benchmarks/autoresearch/work/` (which only exists at benchmark runtime, not in CI). Restored 241 pass / 10 skip / 0 fail from 243 pass / 21 skip / 439 fail / 16 errors. Added `test:benchmarks` script for running them explicitly when the work dir is populated. CI uses `bun run test` to honor the package.json scope.
