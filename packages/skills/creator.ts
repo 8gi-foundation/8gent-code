@@ -1,29 +1,21 @@
 /**
- * Skill Self-Creation (issue #1911)
+ * Skill self-creation (issue #1904).
  *
- * Closes the loop where 8gent could not author NEW skills mid-session.
- * `createSkill()` accepts a task description, success criteria, and example
- * input/output pairs, then:
- *   1. Generates a SKILL.md body matching the format of existing on-disk skills.
- *   2. Derives matcher keywords (triggers) from the task description.
- *   3. Builds a callable experiment from the examples, scoring how many
- *      success-criteria keywords appear in expected outputs.
- *   4. Runs the experiment via packages/skills/experiment.ts.
- *   5. Persists to .8gent/skills/<slug>/SKILL.md only if the A/B test passes.
+ * v1 is deliberately consent-first:
+ *   1. Draft one focused skill from structured inputs.
+ *   2. Validate the draft with deterministic local checks.
+ *   3. Persist only when the caller passes approved: true.
+ *   4. Write a flat ~/.8gent/skills/<slug>.md file, matching SkillManager's
+ *      user-skill loader.
  *
- * Design constraint: reuses runExperiment as the validation primitive instead
- * of inventing a parallel A/B harness. The "with-skill" arm is the new SKILL.md
- * we just wrote; the "without-skill" baseline is implicit in the score
- * threshold (a passing measurement is one that covers >=50% of criteria).
- *
- * No new dependencies. No em dashes in user-visible strings.
+ * This is not an autonomous mutation engine and does not run generated shell
+ * experiments. Callers should reload SkillManager after persistence so aliases
+ * and slash triggers are registered through the normal path.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { type ExperimentRecord, runExperiment } from "./experiment.js";
-
-// ── Types ─────────────────────────────────────────────────────────────
 
 export interface SkillExample {
 	input: string;
@@ -37,40 +29,58 @@ export interface CreateSkillInput {
 	successCriteria: string[];
 	/** Concrete input/output pairs the skill should be able to handle. */
 	examples: SkillExample[];
-	/** Optional override of skill name (otherwise derived from taskDescription). */
+	/** Optional override of skill name. Otherwise derived from taskDescription. */
 	name?: string;
-	/** Optional tools list. Defaults to a conservative read-only set. */
+	/** Primary slash command. Defaults to /<slug>. */
+	trigger?: string;
+	/** Optional extra slash commands. */
+	aliases?: string[];
+	/** Optional tool allowlist. Defaults to read-only tools. */
 	tools?: string[];
-	/**
-	 * Where to root the persisted skill. Defaults to `<cwd>/.8gent/skills`.
-	 * Tests pass a temp dir.
-	 */
+	/** Where to write user skills. Defaults to ~/.8gent/skills. */
 	skillsRoot?: string;
-	/**
-	 * Override the score threshold (0..1) the experiment must beat to keep
-	 * the skill. Default 0.5 (>=50% of criteria covered by examples).
-	 */
-	threshold?: number;
+	/** Required for durable persistence. Omit for draft/preview only. */
+	approved?: boolean;
+	/** Existing files are rejected unless this is true. */
+	allowOverwrite?: boolean;
 }
 
-export interface CreateSkillResult {
+export interface SkillCreationValidation {
+	passed: boolean;
+	errors: string[];
+	warnings: string[];
+}
+
+export interface SkillDraft {
 	slug: string;
+	fileName: string;
+	filePath: string;
+	markdown: string;
+	validation: SkillCreationValidation;
+}
+
+export interface CreateSkillResult extends SkillDraft {
+	/** Absolute file path when persisted, otherwise null. */
 	path: string | null;
-	abResult: ExperimentRecord;
+	/** True when the caller should reload SkillManager. */
+	requiresReload: boolean;
 }
 
-// ── Slug + tokens ─────────────────────────────────────────────────────
+const DEFAULT_TOOLS = ["read", "grep"];
 
-/** Lowercase, hyphenated, ASCII-only slug. Trimmed to 60 chars. */
-export function slugify(text: string): string {
-	return text
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "")
-		.slice(0, 60);
-}
+const ALLOWED_TOOLS = new Set([
+	"read",
+	"grep",
+	"bash",
+	"git_status",
+	"git_diff",
+	"git_add",
+	"git_commit",
+	"web",
+	"edit",
+	"write",
+]);
 
-/** Tokenise into unique lowercase keyword set. Stopwords filtered. */
 const STOPWORDS = new Set([
 	"the",
 	"and",
@@ -105,6 +115,31 @@ const STOPWORDS = new Set([
 	"before",
 ]);
 
+const BANNED_PATTERNS: Array<[RegExp, string]> = [
+	[
+		/ignore (all )?((previous|prior)( system| developer)?|system|developer) instructions/i,
+		"instruction override",
+	],
+	[
+		/reveal (the )?(system prompt|developer message|hidden instructions|secrets?)/i,
+		"secret extraction",
+	],
+	[/exfiltrat/i, "data exfiltration"],
+	[/jailbreak/i, "jailbreak behavior"],
+	[/bypass (policy|permissions|sandbox|safety)/i, "policy bypass"],
+	[/api[_ -]?key|access[_ -]?token|private[_ -]?key/i, "secret material"],
+];
+
+/** Lowercase, hyphenated, ASCII-only slug. Trimmed to 60 chars. */
+export function slugify(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "")
+		.slice(0, 60);
+}
+
+/** Tokenise into unique lowercase keyword set. Stopwords filtered. */
 export function extractKeywords(text: string, max = 8): string[] {
 	const seen = new Set<string>();
 	const out: string[] = [];
@@ -119,8 +154,6 @@ export function extractKeywords(text: string, max = 8): string[] {
 	return out;
 }
 
-// ── YAML frontmatter safety (mirrors compound.ts yamlSafe) ────────────
-
 function yamlSafe(value: string): string {
 	const oneline = value.replace(/[\r\n]+/g, " ").trim();
 	if (/[:#{}[\]|>&*!%@`]/.test(oneline) || oneline.startsWith("'") || oneline.startsWith('"')) {
@@ -129,41 +162,77 @@ function yamlSafe(value: string): string {
 	return oneline;
 }
 
-// ── SKILL.md body ─────────────────────────────────────────────────────
+function normalizeSlash(value: string): string {
+	const slug = slugify(value.replace(/^\//, ""));
+	return slug ? `/${slug}` : "";
+}
 
-/**
- * Render the skill markdown matching the format used by
- * packages/skills/systematic-debugging/SKILL.md and
- * packages/skills/verification-before-completion/SKILL.md.
- */
+function normalizeTools(tools: string[] | undefined): string[] {
+	const source = tools?.length ? tools : DEFAULT_TOOLS;
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const tool of source) {
+		const normalized = tool.replace(/[^a-zA-Z0-9_-]/g, "");
+		if (!normalized || seen.has(normalized)) continue;
+		seen.add(normalized);
+		out.push(normalized);
+	}
+	return out;
+}
+
+function countBodyLines(markdown: string): number {
+	const body = markdown.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "");
+	return body.split("\n").length;
+}
+
+function scanBanned(text: string): string[] {
+	const hits: string[] = [];
+	for (const [pattern, label] of BANNED_PATTERNS) {
+		if (pattern.test(text)) hits.push(label);
+	}
+	return hits;
+}
+
 export function renderSkillMarkdown(input: CreateSkillInput, slug: string): string {
 	const name = input.name ?? slug;
-	const tools = input.tools ?? ["read", "grep", "bash"];
-	const triggers = extractKeywords(input.taskDescription, 6);
-
-	const safeName = yamlSafe(name);
-	const safeDesc = yamlSafe(input.taskDescription);
-	const safeTools = tools.map((t) => t.replace(/[^a-zA-Z0-9_-]/g, "")).join(", ");
-	const safeTriggers = triggers.map((t) => t.replace(/[^a-z0-9-]/g, "")).join(", ");
+	const trigger = normalizeSlash(input.trigger ?? slug);
+	const aliases = (input.aliases ?? [])
+		.map(normalizeSlash)
+		.filter((alias) => alias && alias !== trigger);
+	const tools = normalizeTools(input.tools);
 
 	const criteriaBlock = input.successCriteria
-		.map((c) => `- ${c.replace(/[\r\n]+/g, " ").trim()}`)
+		.map((criterion) => `- ${criterion.replace(/[\r\n]+/g, " ").trim()}`)
 		.join("\n");
 
 	const examplesBlock = input.examples
-		.map(
-			(e, i) =>
-				`### Example ${i + 1}\n\n**Input:**\n\n\`\`\`\n${e.input.trim()}\n\`\`\`\n\n**Output:**\n\n\`\`\`\n${e.output.trim()}\n\`\`\``,
-		)
+		.map((example, index) => {
+			return [
+				`### Example ${index + 1}`,
+				"",
+				"Input:",
+				"",
+				"```",
+				example.input.trim(),
+				"```",
+				"",
+				"Output:",
+				"",
+				"```",
+				example.output.trim(),
+				"```",
+			].join("\n");
+		})
 		.join("\n\n");
 
-	const title = name.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+	const title = name.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+	const aliasesLine = aliases.length ? `\naliases: [${aliases.join(", ")}]` : "";
 
 	return `---
-name: ${safeName}
-description: ${safeDesc}
-tools: [${safeTools}]
-triggers: [${safeTriggers}]
+name: ${yamlSafe(name)}
+description: ${yamlSafe(input.taskDescription)}
+trigger: ${trigger}${aliasesLine}
+tools: [${tools.join(", ")}]
 created: ${new Date().toISOString()}
 self-authored: true
 ---
@@ -172,111 +241,138 @@ self-authored: true
 
 ${input.taskDescription.replace(/[\r\n]{3,}/g, "\n\n").trim()}
 
-## When to use
+## When To Use
 
 ${criteriaBlock}
+
+## Workflow
+
+1. Read the user's request and match it to the examples.
+2. Apply the reusable workflow described by this skill.
+3. Keep the output focused on the success criteria.
+4. Ask for missing task-specific context only when required.
 
 ## Examples
 
 ${examplesBlock}
 
-## Notes
+## Validation Notes
 
-This skill was authored by 8gent during a session. It survived an A/B validation against its own success criteria before being persisted. If it stops being useful, delete this file.
+This skill was drafted by 8gent and must be user-approved before durable persistence. Delete this file if it stops being useful.
 `;
 }
 
-// ── Experiment scoring ────────────────────────────────────────────────
+export function validateSkillDraft(
+	input: CreateSkillInput,
+	slug: string,
+	markdown: string,
+): SkillCreationValidation {
+	const errors: string[] = [];
+	const warnings: string[] = [];
 
-/**
- * Score the example set against the success criteria. Each criterion is
- * tokenised, and we count it as covered if any token of length >=4 appears
- * in any example input or output. Returns coverage in [0, 1].
- *
- * This is the "with-skill" arm of the A/B test: the skill claims its examples
- * exercise the criteria. If they do not, the skill is not useful and we roll
- * back. The implicit "without-skill" baseline is 0 (no examples, no coverage).
- */
+	if (!input.taskDescription || input.taskDescription.trim().length < 12) {
+		errors.push("taskDescription must be at least 12 characters");
+	}
+	if (!Array.isArray(input.successCriteria) || input.successCriteria.length === 0) {
+		errors.push("at least one successCriteria entry is required");
+	}
+	if (!Array.isArray(input.examples) || input.examples.length === 0) {
+		errors.push("at least one example is required");
+	}
+	if (!slug) errors.push("skill slug could not be derived");
+	if (slug.length > 60) errors.push("skill slug must be 60 characters or fewer");
+
+	const trigger = normalizeSlash(input.trigger ?? slug);
+	if (!trigger) errors.push("primary trigger could not be derived");
+
+	for (const tool of normalizeTools(input.tools)) {
+		if (!ALLOWED_TOOLS.has(tool)) errors.push(`tool is not allowed: ${tool}`);
+	}
+
+	const textForPolicy = [
+		input.taskDescription,
+		...(input.successCriteria ?? []),
+		...(input.examples ?? []).flatMap((example) => [example.input, example.output]),
+	].join("\n");
+	for (const hit of scanBanned(textForPolicy)) {
+		errors.push(`banned content detected: ${hit}`);
+	}
+
+	const lineCount = countBodyLines(markdown);
+	if (lineCount > 160) warnings.push(`skill body is long (${lineCount} lines)`);
+	if (lineCount < 20) warnings.push(`skill body is short (${lineCount} lines)`);
+
+	if (!/^---\n[\s\S]*\n---\n/.test(markdown)) {
+		errors.push("frontmatter block is missing");
+	}
+	if (!/^name:\s+/m.test(markdown)) errors.push("frontmatter missing name");
+	if (!/^description:\s+/m.test(markdown)) {
+		errors.push("frontmatter missing description");
+	}
+	if (!/^trigger:\s+\//m.test(markdown)) errors.push("frontmatter missing slash trigger");
+	if (!/^self-authored:\s+true/m.test(markdown)) {
+		errors.push("frontmatter missing self-authored marker");
+	}
+
+	return { passed: errors.length === 0, errors, warnings };
+}
+
+export function createSkillDraft(input: CreateSkillInput): SkillDraft {
+	const slug = slugify(input.name ?? input.taskDescription);
+	const root = input.skillsRoot ?? join(homedir(), ".8gent", "skills");
+	const fileName = `${slug}.md`;
+	const filePath = join(root, fileName);
+	const markdown = renderSkillMarkdown(input, slug);
+	const validation = validateSkillDraft(input, slug, markdown);
+
+	if (existsSync(filePath) && !input.allowOverwrite) {
+		validation.errors.push(`skill already exists: ${fileName}`);
+		validation.passed = false;
+	}
+
+	return { slug, fileName, filePath, markdown, validation };
+}
+
+export async function createSkill(input: CreateSkillInput): Promise<CreateSkillResult> {
+	const draft = createSkillDraft(input);
+	if (!draft.validation.passed) {
+		return { ...draft, path: null, requiresReload: false };
+	}
+	if (input.approved !== true) {
+		return {
+			...draft,
+			validation: {
+				passed: false,
+				errors: ["explicit approval required before persistence"],
+				warnings: draft.validation.warnings,
+			},
+			path: null,
+			requiresReload: false,
+		};
+	}
+
+	mkdirSync(input.skillsRoot ?? join(homedir(), ".8gent", "skills"), { recursive: true });
+	writeFileSync(draft.filePath, draft.markdown);
+	return { ...draft, path: draft.filePath, requiresReload: true };
+}
+
+/** Deterministic smoke score for examples. Kept for validation dashboards only. */
 export function scoreCoverage(criteria: string[], examples: SkillExample[]): number {
 	if (criteria.length === 0) return 0;
 	const haystack = examples
-		.flatMap((e) => [e.input, e.output])
+		.flatMap((example) => [example.input, example.output])
 		.join(" \n ")
 		.toLowerCase();
 
 	let covered = 0;
-	for (const c of criteria) {
-		const tokens = c
+	for (const criterion of criteria) {
+		const tokens = criterion
 			.toLowerCase()
 			.split(/[^a-z0-9]+/)
-			.filter((t) => t.length >= 4 && !STOPWORDS.has(t));
-		if (tokens.length === 0) {
-			// Criterion has no scoreable tokens. Count as covered to avoid
-			// punishing short criteria like "fast" or "safe".
+			.filter((token) => token.length >= 4 && !STOPWORDS.has(token));
+		if (tokens.length === 0 || tokens.some((token) => haystack.includes(token))) {
 			covered++;
-			continue;
 		}
-		if (tokens.some((t) => haystack.includes(t))) covered++;
 	}
 	return covered / criteria.length;
-}
-
-// ── Main API ──────────────────────────────────────────────────────────
-
-/**
- * Author a new skill from a task description, validate it against its own
- * examples, and persist if it passes.
- *
- * Returns:
- *   - slug: kebab-case identifier
- *   - path: absolute file path if persisted, null if rolled back
- *   - abResult: full ExperimentRecord (always present)
- */
-export async function createSkill(input: CreateSkillInput): Promise<CreateSkillResult> {
-	if (!input.taskDescription || input.taskDescription.trim().length < 4) {
-		throw new Error("createSkill: taskDescription required (>=4 chars)");
-	}
-	if (!Array.isArray(input.successCriteria) || input.successCriteria.length === 0) {
-		throw new Error("createSkill: at least one successCriteria entry required");
-	}
-	if (!Array.isArray(input.examples) || input.examples.length === 0) {
-		throw new Error("createSkill: at least one example required");
-	}
-
-	const slug = slugify(input.name ?? input.taskDescription);
-	if (!slug) throw new Error("createSkill: derived slug is empty");
-
-	const root = input.skillsRoot ?? join(process.cwd(), ".8gent", "skills");
-	const skillDir = join(root, slug);
-	const skillPath = join(skillDir, "SKILL.md");
-
-	// Write skill BEFORE running experiment so runExperiment can roll it back
-	// on failure (it deletes the file path it is given).
-	mkdirSync(skillDir, { recursive: true });
-	writeFileSync(skillPath, renderSkillMarkdown(input, slug));
-
-	const threshold = typeof input.threshold === "number" ? input.threshold : 0.5;
-
-	const abResult = await runExperiment(skillPath, {
-		hypothesis: `Skill "${slug}" examples cover at least ${Math.round(threshold * 100)}% of stated success criteria.`,
-		test: () => scoreCoverage(input.successCriteria, input.examples),
-		metric: threshold,
-	});
-
-	// runExperiment deletes the skill file on failure. But it lives inside
-	// our slug directory, which we should also clean up to avoid empty dirs
-	// hanging around.
-	if (abResult.rolledBack && existsSync(skillDir)) {
-		try {
-			rmSync(skillDir, { recursive: true, force: true });
-		} catch {
-			// best-effort cleanup
-		}
-	}
-
-	return {
-		slug,
-		path: abResult.rolledBack ? null : skillPath,
-		abResult,
-	};
 }
