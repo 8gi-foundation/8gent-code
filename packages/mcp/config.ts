@@ -5,43 +5,49 @@
  * Supports both stdio (command + args) and SSE (url) server configs.
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────
 
 export interface StdioServerConfig {
-  type: "stdio";
-  name: string;
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
+	type: "stdio";
+	name: string;
+	command: string;
+	args?: string[];
+	env?: Record<string, string>;
 }
 
 export interface SSEServerConfig {
-  type: "sse";
-  name: string;
-  url: string;
-  headers?: Record<string, string>;
+	type: "sse";
+	name: string;
+	url: string;
+	headers?: Record<string, string>;
 }
 
 export type ServerConfig = StdioServerConfig | SSEServerConfig;
 
 export interface MCPConfigFile {
-  servers?: Record<string, {
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    url?: string;
-    headers?: Record<string, string>;
-  }>;
-  // Legacy format compat
-  mcpServers?: Record<string, {
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-  }>;
+	servers?: Record<
+		string,
+		{
+			command?: string;
+			args?: string[];
+			env?: Record<string, string>;
+			url?: string;
+			headers?: Record<string, string>;
+		}
+	>;
+	// Legacy format compat
+	mcpServers?: Record<
+		string,
+		{
+			command?: string;
+			args?: string[];
+			env?: Record<string, string>;
+		}
+	>;
 }
 
 // ── Loader ───────────────────────────────────────────────────────
@@ -49,54 +55,57 @@ export interface MCPConfigFile {
 const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".8gent", "mcp.json");
 
 export function loadConfig(configPath?: string): ServerConfig[] {
-  const filePath = configPath || DEFAULT_CONFIG_PATH;
+	const filePath = configPath || DEFAULT_CONFIG_PATH;
 
-  if (!fs.existsSync(filePath)) {
-    return [];
-  }
+	if (!fs.existsSync(filePath)) {
+		return [];
+	}
 
-  try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const parsed: MCPConfigFile = JSON.parse(raw);
-    return parseConfig(parsed);
-  } catch (err) {
-    console.error(`[mcp] Error loading config from ${filePath}: ${err}`);
-    return [];
-  }
+	try {
+		const raw = fs.readFileSync(filePath, "utf-8");
+		const parsed: MCPConfigFile = JSON.parse(raw);
+		return parseConfig(parsed);
+	} catch (err) {
+		console.error(`[mcp] Error loading config from ${filePath}: ${err}`);
+		return [];
+	}
 }
 
 function parseConfig(config: MCPConfigFile): ServerConfig[] {
-  const results: ServerConfig[] = [];
+	const results: ServerConfig[] = [];
 
-  // New format: { servers: { ... } }
-  const servers: Record<string, {
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    url?: string;
-    headers?: Record<string, string>;
-  }> = config.servers || config.mcpServers || {};
+	// New format: { servers: { ... } }
+	const servers: Record<
+		string,
+		{
+			command?: string;
+			args?: string[];
+			env?: Record<string, string>;
+			url?: string;
+			headers?: Record<string, string>;
+		}
+	> = config.servers || config.mcpServers || {};
 
-  for (const [name, entry] of Object.entries(servers)) {
-    if (entry.url) {
-      results.push({
-        type: "sse",
-        name,
-        url: entry.url,
-        headers: entry.headers,
-      } as SSEServerConfig);
-    } else if (entry.command) {
-      results.push({
-        type: "stdio",
-        name,
-        command: entry.command,
-        args: entry.args,
-        env: entry.env,
-      });
-    } else {
-      console.error(`[mcp] Server "${name}" needs either "command" or "url"`);
-    }
-  }
+	for (const [name, entry] of Object.entries(servers)) {
+		if (entry.url) {
+			results.push({
+				type: "sse",
+				name,
+				url: entry.url,
+				headers: entry.headers,
+			} as SSEServerConfig);
+		} else if (entry.command) {
+			results.push({
+				type: "stdio",
+				name,
+				command: entry.command,
+				args: entry.args,
+				env: entry.env,
+			});
+		} else {
+			console.error(`[mcp] Server "${name}" needs either "command" or "url"`);
+		}
+	}
 
-  return results;
+	return results;
 }

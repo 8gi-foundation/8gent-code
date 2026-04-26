@@ -1,12 +1,12 @@
 import type { BenchmarkDefinition } from "../../types";
 
 export const uiDesignBenchmarks: BenchmarkDefinition[] = [
-  {
-    id: "UI001",
-    category: "ui-design",
-    title: "Neumorphic Button Set — Soft Shadows, Pressed States, Disabled",
-    difficulty: "medium",
-    prompt: `Generate a complete HTML page with a set of 4 neumorphic buttons: primary, secondary, pressed/active, and disabled.
+	{
+		id: "UI001",
+		category: "ui-design",
+		title: "Neumorphic Button Set — Soft Shadows, Pressed States, Disabled",
+		difficulty: "medium",
+		prompt: `Generate a complete HTML page with a set of 4 neumorphic buttons: primary, secondary, pressed/active, and disabled.
 
 Requirements:
 1. Background must be a light neutral color (#e0e5ec or similar)
@@ -18,18 +18,29 @@ Requirements:
 7. Use clean, modern sans-serif font
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["box-shadow", "inset", "border-radius", "transition", "hover", "disabled", "rgba", "background-color", "active", "opacity"],
-    keywordThreshold: 6,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI001-neumorphic.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI002",
-    category: "ui-design",
-    title: "Glassmorphism Card Layout — Frosted Glass with Backdrop Blur",
-    difficulty: "hard",
-    prompt: `Generate a complete HTML page showing 3 frosted-glass cards overlapping on a colorful gradient background.
+		keywords: [
+			"box-shadow",
+			"inset",
+			"border-radius",
+			"transition",
+			"hover",
+			"disabled",
+			"rgba",
+			"background-color",
+			"active",
+			"opacity",
+		],
+		keywordThreshold: 6,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI001-neumorphic.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI002",
+		category: "ui-design",
+		title: "Glassmorphism Card Layout — Frosted Glass with Backdrop Blur",
+		difficulty: "hard",
+		prompt: `Generate a complete HTML page showing 3 frosted-glass cards overlapping on a colorful gradient background.
 
 Requirements:
 1. Background must be a vibrant multi-color gradient with colorful shapes/blobs behind the cards
@@ -42,18 +53,30 @@ Requirements:
 8. Use z-index for proper layering
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["backdrop-filter", "blur", "rgba", "gradient", "border", "border-radius", "opacity", "linear-gradient", "position", "z-index", "transparent"],
-    keywordThreshold: 7,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI002-glassmorphism.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI003",
-    category: "ui-design",
-    title: "3D Isometric Dashboard — CSS Transform Perspective Grid",
-    difficulty: "hard",
-    prompt: `Generate a complete HTML page showing an isometric grid of 6 dashboard stat tiles using CSS 3D transforms.
+		keywords: [
+			"backdrop-filter",
+			"blur",
+			"rgba",
+			"gradient",
+			"border",
+			"border-radius",
+			"opacity",
+			"linear-gradient",
+			"position",
+			"z-index",
+			"transparent",
+		],
+		keywordThreshold: 7,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI002-glassmorphism.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI003",
+		category: "ui-design",
+		title: "3D Isometric Dashboard — CSS Transform Perspective Grid",
+		difficulty: "hard",
+		prompt: `Generate a complete HTML page showing an isometric grid of 6 dashboard stat tiles using CSS 3D transforms.
 
 Requirements:
 1. Apply perspective on the container (at least 800px)
@@ -66,18 +89,30 @@ Requirements:
 8. Clean dark or light theme
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["transform", "perspective", "rotateX", "rotateY", "translateZ", "transform-style", "preserve-3d", "transition", "hover", "grid", "box-shadow"],
-    keywordThreshold: 7,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI003-isometric.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI004",
-    category: "ui-design",
-    title: "CSS Animation Showcase — Keyframes, Staggered Timing, Easing",
-    difficulty: "medium",
-    prompt: `Generate a complete HTML page demonstrating 5 distinct CSS animations:
+		keywords: [
+			"transform",
+			"perspective",
+			"rotateX",
+			"rotateY",
+			"translateZ",
+			"transform-style",
+			"preserve-3d",
+			"transition",
+			"hover",
+			"grid",
+			"box-shadow",
+		],
+		keywordThreshold: 7,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI003-isometric.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI004",
+		category: "ui-design",
+		title: "CSS Animation Showcase — Keyframes, Staggered Timing, Easing",
+		difficulty: "medium",
+		prompt: `Generate a complete HTML page demonstrating 5 distinct CSS animations:
 
 1. A loading SPINNER using @keyframes with transform: rotate(360deg)
 2. A PULSING dot/circle using scale() and opacity changes
@@ -94,18 +129,30 @@ Requirements:
 - Clean layout with each animation in its own section with a label
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["@keyframes", "animation", "animation-delay", "cubic-bezier", "transform", "rotate", "scale", "translateX", "opacity", "infinite", "ease"],
-    keywordThreshold: 7,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI004-animations.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI005",
-    category: "ui-design",
-    title: "Skeuomorphic Controls — Realistic Toggle Switch and Rotary Knob",
-    difficulty: "hard",
-    prompt: `Generate a complete HTML page with two skeuomorphic UI controls:
+		keywords: [
+			"@keyframes",
+			"animation",
+			"animation-delay",
+			"cubic-bezier",
+			"transform",
+			"rotate",
+			"scale",
+			"translateX",
+			"opacity",
+			"infinite",
+			"ease",
+		],
+		keywordThreshold: 7,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI004-animations.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI005",
+		category: "ui-design",
+		title: "Skeuomorphic Controls — Realistic Toggle Switch and Rotary Knob",
+		difficulty: "hard",
+		prompt: `Generate a complete HTML page with two skeuomorphic UI controls:
 
 1. TOGGLE SWITCH:
    - Metallic track with layered gradients and inset shadows
@@ -127,18 +174,32 @@ Requirements:
 - Multiple layered gradients for realistic depth
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["radial-gradient", "linear-gradient", "box-shadow", "inset", "border-radius", "50%", "transform", "rotate", "transition", "::before", "::after", "checked", "repeating-linear-gradient"],
-    keywordThreshold: 8,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI005-skeuomorphic.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI006",
-    category: "ui-design",
-    title: "Dark Theme Analytics Dashboard — WCAG Contrast, Charts, Sidebar",
-    difficulty: "medium",
-    prompt: `Generate a complete HTML page for a dark-theme analytics dashboard.
+		keywords: [
+			"radial-gradient",
+			"linear-gradient",
+			"box-shadow",
+			"inset",
+			"border-radius",
+			"50%",
+			"transform",
+			"rotate",
+			"transition",
+			"::before",
+			"::after",
+			"checked",
+			"repeating-linear-gradient",
+		],
+		keywordThreshold: 8,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI005-skeuomorphic.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI006",
+		category: "ui-design",
+		title: "Dark Theme Analytics Dashboard — WCAG Contrast, Charts, Sidebar",
+		difficulty: "medium",
+		prompt: `Generate a complete HTML page for a dark-theme analytics dashboard.
 
 Requirements:
 1. Dark background (#0f0f0f to #1a1a2e range)
@@ -152,18 +213,30 @@ Requirements:
 9. Use flexbox or grid for layout
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["--", "var(", "background-color", "color", "border-radius", "grid", "flex", "box-shadow", "rgba", "hover", "sidebar"],
-    keywordThreshold: 7,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI006-dark-dashboard.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI007",
-    category: "ui-design",
-    title: "Responsive Magazine Layout — CSS Grid Areas, Breakpoints",
-    difficulty: "hard",
-    prompt: `Generate a complete HTML page with a magazine-style layout adapting to 3 breakpoints.
+		keywords: [
+			"--",
+			"var(",
+			"background-color",
+			"color",
+			"border-radius",
+			"grid",
+			"flex",
+			"box-shadow",
+			"rgba",
+			"hover",
+			"sidebar",
+		],
+		keywordThreshold: 7,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI006-dark-dashboard.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI007",
+		category: "ui-design",
+		title: "Responsive Magazine Layout — CSS Grid Areas, Breakpoints",
+		difficulty: "hard",
+		prompt: `Generate a complete HTML page with a magazine-style layout adapting to 3 breakpoints.
 
 Requirements:
 1. DESKTOP (>1024px): 3-column CSS grid with hero article spanning 2 columns and 2 rows, sidebar, and 4 smaller article cards. Use grid-template-areas with named areas.
@@ -176,18 +249,30 @@ Requirements:
 8. At least 5 article/card elements total
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["grid-template-areas", "grid-area", "@media", "grid-template-columns", "aspect-ratio", "-webkit-line-clamp", "gap", "minmax", "1fr", "position", "gradient"],
-    keywordThreshold: 7,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI007-responsive-grid.test.ts",
-    timeoutMs: 10000,
-  },
-  {
-    id: "UI008",
-    category: "ui-design",
-    title: "Interactive Pricing Cards — 3D Tilt, Hover Glow, Feature List",
-    difficulty: "hard",
-    prompt: `Generate a complete HTML page with 3 pricing cards (Basic, Pro, Enterprise).
+		keywords: [
+			"grid-template-areas",
+			"grid-area",
+			"@media",
+			"grid-template-columns",
+			"aspect-ratio",
+			"-webkit-line-clamp",
+			"gap",
+			"minmax",
+			"1fr",
+			"position",
+			"gradient",
+		],
+		keywordThreshold: 7,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI007-responsive-grid.test.ts",
+		timeoutMs: 10000,
+	},
+	{
+		id: "UI008",
+		category: "ui-design",
+		title: "Interactive Pricing Cards — 3D Tilt, Hover Glow, Feature List",
+		difficulty: "hard",
+		prompt: `Generate a complete HTML page with 3 pricing cards (Basic, Pro, Enterprise).
 
 Requirements:
 1. Cards arranged in a row. Pro card is "featured" — slightly larger/elevated with a "Most Popular" badge
@@ -200,10 +285,23 @@ Requirements:
 8. Clean modern design with good typography
 
 Output a SINGLE complete HTML file with embedded CSS in a <style> tag. No external dependencies.`,
-    keywords: ["perspective", "transform", "rotateX", "rotateY", "box-shadow", "transition", "hover", "scale", "linear-gradient", "position", "z-index", "::before"],
-    keywordThreshold: 7,
-    testExecution: true,
-    testFile: "autoresearch/tests/UI008-pricing-cards.test.ts",
-    timeoutMs: 10000,
-  },
+		keywords: [
+			"perspective",
+			"transform",
+			"rotateX",
+			"rotateY",
+			"box-shadow",
+			"transition",
+			"hover",
+			"scale",
+			"linear-gradient",
+			"position",
+			"z-index",
+			"::before",
+		],
+		keywordThreshold: 7,
+		testExecution: true,
+		testFile: "autoresearch/tests/UI008-pricing-cards.test.ts",
+		timeoutMs: 10000,
+	},
 ];

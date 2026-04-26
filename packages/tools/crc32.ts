@@ -4,12 +4,12 @@
  * @returns CRC32 checksum as number.
  */
 export function crc32(data: string | Uint8Array): number {
-  let crc = 0xFFFFFFFF;
-  if (typeof data === 'string') data = new TextEncoder().encode(data);
-  for (let i = 0; i < data.length; i++) {
-    crc = (crc << 8) ^ table[(crc >> 24) & 0xFF] ^ (data[i] << 24);
-  }
-  return crc ^ 0xFFFFFFFF;
+	let crc = 0xffffffff;
+	if (typeof data === "string") data = new TextEncoder().encode(data);
+	for (let i = 0; i < data.length; i++) {
+		crc = (crc << 8) ^ table[(crc >> 24) & 0xff] ^ (data[i] << 24);
+	}
+	return crc ^ 0xffffffff;
 }
 
 /**
@@ -18,7 +18,7 @@ export function crc32(data: string | Uint8Array): number {
  * @returns Hex string representation of CRC32 checksum.
  */
 export function crc32Hex(data: string | Uint8Array): string {
-  return crc32(data).toString(16).padStart(8, '0');
+	return crc32(data).toString(16).padStart(8, "0");
 }
 
 /**
@@ -28,23 +28,23 @@ export function crc32Hex(data: string | Uint8Array): string {
  * @returns Updated CRC value.
  */
 export function update(crc: number, data: Uint8Array): number {
-  for (let i = 0; i < data.length; i++) {
-    crc = (crc << 8) ^ table[(crc >> 24) & 0xFF] ^ (data[i] << 24);
-  }
-  return crc;
+	for (let i = 0; i < data.length; i++) {
+		crc = (crc << 8) ^ table[(crc >> 24) & 0xff] ^ (data[i] << 24);
+	}
+	return crc;
 }
 
 // Precompute CRC32 lookup table
-const polynomial = 0xEDB88320;
+const polynomial = 0xedb88320;
 const table = new Uint32Array(256);
 for (let i = 0; i < 256; i++) {
-  let crc = i << 24;
-  for (let j = 0; j < 8; j++) {
-    if (crc & 0x80000000) {
-      crc = (crc << 1) ^ polynomial;
-    } else {
-      crc <<= 1;
-    }
-  }
-  table[i] = crc & 0xFFFFFFFF;
+	let crc = i << 24;
+	for (let j = 0; j < 8; j++) {
+		if (crc & 0x80000000) {
+			crc = (crc << 1) ^ polynomial;
+		} else {
+			crc <<= 1;
+		}
+	}
+	table[i] = crc & 0xffffffff;
 }

@@ -2,13 +2,13 @@ import type { BenchmarkDefinition } from "../../types";
 import { motherloadBenchmark } from "./motherload";
 
 export const fullstackBenchmarks: BenchmarkDefinition[] = [
-  ...motherloadBenchmark,
-  {
-    id: "FS001",
-    category: "fullstack",
-    title: "REST API with Auth — Register, Login, Protected Routes",
-    difficulty: "hard",
-    prompt: `You are given an existing Database class and an HTTP Router. Build a complete REST API with authentication.
+	...motherloadBenchmark,
+	{
+		id: "FS001",
+		category: "fullstack",
+		title: "REST API with Auth — Register, Login, Protected Routes",
+		difficulty: "hard",
+		prompt: `You are given an existing Database class and an HTTP Router. Build a complete REST API with authentication.
 
 ## Existing System (provided — DO NOT reimplement these)
 
@@ -82,27 +82,40 @@ Use these exact file markers:
 \`\`\`typescript // app.ts
 // your app wiring code here
 \`\`\``,
-    keywords: [
-      "createAuthMiddleware", "requireAuth", "Authorization", "Bearer",
-      "register", "login", "profile", "logout",
-      "hashPassword", "generateToken", "createSession", "getSession",
-      "401", "409", "400",
-      "createApp", "router", "middleware",
-    ],
-    keywordThreshold: 10,
-    testExecution: true,
-    testFile: "autoresearch/tests/FS001-auth-api.test.ts",
-    timeoutMs: 30000,
-    multiFile: true,
-    fixtures: ["fixtures/database.ts", "fixtures/http.ts"],
-  },
+		keywords: [
+			"createAuthMiddleware",
+			"requireAuth",
+			"Authorization",
+			"Bearer",
+			"register",
+			"login",
+			"profile",
+			"logout",
+			"hashPassword",
+			"generateToken",
+			"createSession",
+			"getSession",
+			"401",
+			"409",
+			"400",
+			"createApp",
+			"router",
+			"middleware",
+		],
+		keywordThreshold: 10,
+		testExecution: true,
+		testFile: "autoresearch/tests/FS001-auth-api.test.ts",
+		timeoutMs: 30000,
+		multiFile: true,
+		fixtures: ["fixtures/database.ts", "fixtures/http.ts"],
+	},
 
-  {
-    id: "FS002",
-    category: "fullstack",
-    title: "Task Queue with Workers, Retry, and Dead Letter Queue",
-    difficulty: "hard",
-    prompt: `Build a complete task queue system with worker processing, automatic retries, and a dead letter queue.
+	{
+		id: "FS002",
+		category: "fullstack",
+		title: "Task Queue with Workers, Retry, and Dead Letter Queue",
+		difficulty: "hard",
+		prompt: `Build a complete task queue system with worker processing, automatic retries, and a dead letter queue.
 
 ## Your Task
 
@@ -171,27 +184,44 @@ interface QueueStats {
 \`\`\`typescript // scheduler.ts
 // your scheduler implementation here
 \`\`\``,
-    keywords: [
-      "enqueue", "dequeue", "priority", "pending", "processing", "completed",
-      "failed", "dead", "maxRetries", "attempts", "deadLetterQueue", "DLQ",
-      "Worker", "start", "stop", "processOne", "poll",
-      "createTask", "createBatch", "schedule",
-      "stats", "handler",
-    ],
-    keywordThreshold: 12,
-    testExecution: true,
-    testFile: "autoresearch/tests/FS002-task-queue.test.ts",
-    timeoutMs: 30000,
-    multiFile: true,
-    fixtures: [],
-  },
+		keywords: [
+			"enqueue",
+			"dequeue",
+			"priority",
+			"pending",
+			"processing",
+			"completed",
+			"failed",
+			"dead",
+			"maxRetries",
+			"attempts",
+			"deadLetterQueue",
+			"DLQ",
+			"Worker",
+			"start",
+			"stop",
+			"processOne",
+			"poll",
+			"createTask",
+			"createBatch",
+			"schedule",
+			"stats",
+			"handler",
+		],
+		keywordThreshold: 12,
+		testExecution: true,
+		testFile: "autoresearch/tests/FS002-task-queue.test.ts",
+		timeoutMs: 30000,
+		multiFile: true,
+		fixtures: [],
+	},
 
-  {
-    id: "FS003",
-    category: "fullstack",
-    title: "State Machine Workflow Engine with Saga Compensation",
-    difficulty: "hard",
-    prompt: `Build a state machine workflow engine that supports guarded transitions, side effects, and saga-pattern compensation (undo on failure).
+	{
+		id: "FS003",
+		category: "fullstack",
+		title: "State Machine Workflow Engine with Saga Compensation",
+		difficulty: "hard",
+		prompt: `Build a state machine workflow engine that supports guarded transitions, side effects, and saga-pattern compensation (undo on failure).
 
 ## Your Task
 
@@ -250,18 +280,34 @@ interface MachineDefinition {
 \`\`\`typescript // process.ts
 // your order process here
 \`\`\``,
-    keywords: [
-      "StateMachine", "send", "guard", "action", "transition", "context", "state",
-      "history", "canSend",
-      "WorkflowEngine", "execute", "compensate", "reverse",
-      "createOrderWorkflow", "createOrderSagaSteps",
-      "idle", "validating", "payment", "fulfillment", "completed", "cancelled",
-    ],
-    keywordThreshold: 12,
-    testExecution: true,
-    testFile: "autoresearch/tests/FS003-state-machine.test.ts",
-    timeoutMs: 30000,
-    multiFile: true,
-    fixtures: [],
-  },
+		keywords: [
+			"StateMachine",
+			"send",
+			"guard",
+			"action",
+			"transition",
+			"context",
+			"state",
+			"history",
+			"canSend",
+			"WorkflowEngine",
+			"execute",
+			"compensate",
+			"reverse",
+			"createOrderWorkflow",
+			"createOrderSagaSteps",
+			"idle",
+			"validating",
+			"payment",
+			"fulfillment",
+			"completed",
+			"cancelled",
+		],
+		keywordThreshold: 12,
+		testExecution: true,
+		testFile: "autoresearch/tests/FS003-state-machine.test.ts",
+		timeoutMs: 30000,
+		multiFile: true,
+		fixtures: [],
+	},
 ];

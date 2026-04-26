@@ -17,7 +17,11 @@ export { MCPClient } from "./client";
 export type { MCPToolResult } from "./client";
 
 export { loadConfig } from "./config";
-export type { ServerConfig, StdioServerConfig, SSEServerConfig } from "./config";
+export type {
+	ServerConfig,
+	StdioServerConfig,
+	SSEServerConfig,
+} from "./config";
 
 export { StdioTransport, SSETransport } from "./transport";
 export type { Transport } from "./transport";
@@ -34,17 +38,17 @@ import { MCPClient } from "./client";
 let _instance: MCPClient | null = null;
 
 export function getMCPClient(): MCPClient {
-  if (!_instance) {
-    _instance = new MCPClient();
-  }
-  return _instance;
+	if (!_instance) {
+		_instance = new MCPClient();
+	}
+	return _instance;
 }
 
 export function resetMCPClient(): void {
-  if (_instance) {
-    _instance.close();
-    _instance = null;
-  }
+	if (_instance) {
+		_instance.close();
+		_instance = null;
+	}
 }
 
 // ── Legacy helpers ───────────────────────────────────────────────
@@ -52,18 +56,25 @@ export function resetMCPClient(): void {
 /**
  * Format MCP tool result as string for agent consumption.
  */
-export function formatToolResult(result: { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }): string {
-  const parts: string[] = [];
+export function formatToolResult(result: {
+	content: Array<{
+		type: string;
+		text?: string;
+		data?: string;
+		mimeType?: string;
+	}>;
+}): string {
+	const parts: string[] = [];
 
-  for (const content of result.content) {
-    if (content.type === "text" && content.text) {
-      parts.push(content.text);
-    } else if (content.type === "image" && content.data) {
-      parts.push(`[Image: ${content.mimeType || "image/unknown"}]`);
-    } else if (content.type === "resource") {
-      parts.push(`[Resource: ${JSON.stringify(content)}]`);
-    }
-  }
+	for (const content of result.content) {
+		if (content.type === "text" && content.text) {
+			parts.push(content.text);
+		} else if (content.type === "image" && content.data) {
+			parts.push(`[Image: ${content.mimeType || "image/unknown"}]`);
+		} else if (content.type === "resource") {
+			parts.push(`[Resource: ${JSON.stringify(content)}]`);
+		}
+	}
 
-  return parts.join("\n");
+	return parts.join("\n");
 }

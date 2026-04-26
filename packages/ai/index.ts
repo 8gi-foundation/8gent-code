@@ -17,26 +17,55 @@ export { createModel, isProviderAvailable } from "./providers";
 export type { ProviderName, ProviderConfig } from "./providers";
 
 // Tools
-export { agentTools, setToolContext, getToolContext, setRuntimeParams, getRuntimeParams, resetRuntimeParams } from "./tools";
+export {
+	agentTools,
+	setToolContext,
+	getToolContext,
+	setRuntimeParams,
+	getRuntimeParams,
+	resetRuntimeParams,
+} from "./tools";
 export type { ToolContext, AgentTools, RuntimeParams } from "./tools";
 
 // Agent
 export { createEightAgent, runAgent } from "./agent";
 export type {
-  EightAgentConfig,
-  StepFinishEvent,
-  ToolCallStartEvent,
-  ToolCallFinishEvent,
-  FinishEvent,
+	EightAgentConfig,
+	StepFinishEvent,
+	ToolCallStartEvent,
+	ToolCallFinishEvent,
+	FinishEvent,
 } from "./agent";
 
 // Task Router
-export { TaskRouter, getTaskRouter, loadRouterConfig, saveRouterConfig, recordRouting, getRouterStats } from "./task-router";
-export type { TaskCategory, RouteDecision, ModelSlot, RouterConfig } from "./task-router";
+export {
+	TaskRouter,
+	getTaskRouter,
+	loadRouterConfig,
+	saveRouterConfig,
+	recordRouting,
+	getRouterStats,
+} from "./task-router";
+export type {
+	TaskCategory,
+	RouteDecision,
+	ModelSlot,
+	RouterConfig,
+} from "./task-router";
 
 // Toolshed bridge
 export { registerToolsInToolshed } from "./toolshed-bridge";
 
 // Edge Inference - local embedding + classification, no API key required
-export { embed, batchEmbed, similarity, classify, isEdgeInferenceAvailable } from "./edge-inference";
-export { EmbeddingCache, getEmbeddingCache, cosineSimilarity } from "./embedding-cache";
+export {
+	embed,
+	batchEmbed,
+	similarity,
+	classify,
+	isEdgeInferenceAvailable,
+} from "./edge-inference";
+export {
+	EmbeddingCache,
+	getEmbeddingCache,
+	cosineSimilarity,
+} from "./embedding-cache";

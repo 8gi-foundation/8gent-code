@@ -5,23 +5,23 @@
  */
 
 interface User {
-  id: string;
-  name: string;
-  email: string;
-  age: number;
+	id: string;
+	name: string;
+	email: string;
+	age: number;
 }
 
 export function createUser(name: string, email: string, age: number): User {
-  return {
-    id: crypto.randomUUID(),
-    name,
-    email,
-    age,
-  };
+	return {
+		id: crypto.randomUUID(),
+		name,
+		email,
+		age,
+	};
 }
 
 export function deleteUser(id: string): boolean {
-  // Stub implementation
-  console.log(`Deleting user ${id}`);
-  return true;
+	// Stub implementation
+	console.log(`Deleting user ${id}`);
+	return true;
 }
