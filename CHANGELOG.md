@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Corrupted identifiers in `packages/tools/`** - `structured-log.ts` referenced `this.current位` (CJK garbage from a bad merge) instead of `this.currentLevel`. `test-runner.ts` returned `total意图` instead of `totalDuration`. Both were causing `tsc --noEmit` to fail on main, blocking CI on every open PR. First payment toward the broader typecheck cleanup tracked in #1816.
+
 ### Added
 
 - **8gent Computer Phase 2 scaffold** - new `apps/8gent-computer/` Swift package. NSApplication accessory shell, Cmd+Opt+Space global hotkey via NSEvent monitors (no Accessibility prompt), glass NSPanel anchored 80px from the bottom, static AudioWaveView placeholder, headless CLI `--headless --intent "..."` emitting structured JSON. macOS CI job builds the Swift target and runs the headless smoke (#1857, #1858, #1859)
