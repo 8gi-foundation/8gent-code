@@ -376,9 +376,170 @@ bun run packages/daemon/scripts/smoke-computer-channel.ts
 
 The script boots a stripped-down gateway against a mock pool, connects to `/computer`, sends one intent, and asserts the event ordering: `tool_call` -> `tool_result` -> `token{final:true}` -> `done`.
 
+## Dispatch Protocol (`/dispatch`)
+
+The dispatch protocol is the nervous system of 8gentOS. It lets any 8gent surface (Code TUI, Telegram bot, Discord bot, OS web, Computer panel, mobile, future) target a session on any other surface. The daemon is always the trusted executor; surfaces are observers and originators.
+
+**Endpoint:** `ws://<host>:<port>/dispatch`
+**Issue:** [#1896](https://github.com/8gi-foundation/8gent-code/issues/1896)
+
+### Surface registration
+
+Every surface must register before dispatching. The token is verified against the configured `TokenVerifier` (local HMAC by default; Clerk JWT for the `os`/`app` channels via a composed verifier).
+
+```
+Client -> {
+  "type": "dispatch:register",
+  "token": "<scoped-token>",
+  "surface_id": "tg_bot_main"
+}
+
+Server -> {
+  "protocol_version": 1,
+  "type": "dispatch:registered",
+  "surface_id": "tg_bot_main",
+  "channel": "telegram",
+  "capabilities": ["read", "write_basic"]
+}
+```
+
+The token's claims fully determine the surface's `(user_id, channel, capabilities)`. The daemon intersects claimed capabilities with the channel's default capability table - a token can never grant more than the channel allows.
+
+### Default capability table
+
+| Channel | Default capabilities |
+|---------|----------------------|
+| `computer` (Mac panel, locally authed) | `read`, `write_basic`, `write_full`, `admin` |
+| `os` (Clerk-authed web) | `read`, `write_basic`, `write_full`, `admin` |
+| `app` | `read`, `write_basic`, `write_full` |
+| `telegram` | `read`, `write_basic` (write_full requires second-factor on the originator) |
+| `discord` | `read`, `write_basic` (write_full requires second-factor on the originator) |
+| `delegation` | `read`, `write_basic`, `write_full` |
+| `api` | scope per token grant (caller controls) |
+
+Per-tenant overrides are documented in the user's settings.
+
+### Dispatch send
+
+```
+Client -> {
+  "type": "dispatch:send",
+  "dispatch_id": "<monotonic-per-token>",
+  "originating_channel": "telegram",
+  "target_channel": "computer",
+  "target_surface_id": null,
+  "correlation_id": "c_xyz",
+  "replay_to": ["telegram", "os"],
+  "intent": "screenshot my desktop and tell me what's open",
+  "capability_required": "write_basic"
+}
+
+Server -> {
+  "protocol_version": 1,
+  "type": "dispatch:ack",
+  "dispatch_id": "<...>",
+  "correlation_id": "c_xyz",
+  "ok": true,
+  "session_id": "disp_xyz",
+  "target_channel": "computer",
+  "target_surface_id": null
+}
+```
+
+`target_channel` may be set to `"auto"` to dispatch to the user's most recently active surface, or `target_surface_id` may be set to a specific registered surface_id (cross-tenant dispatch is forbidden).
+
+### Streaming events
+
+The router emits an `accepted` event immediately on success, then bridges agent-pool events into `dispatch:event` frames:
+
+```
+Server -> {
+  "protocol_version": 1,
+  "type": "dispatch:event",
+  "dispatch_id": "<...>",
+  "correlation_id": "c_xyz",
+  "originating_channel": "telegram",
+  "target_channel": "computer",
+  "dispatch_source": "telegram",
+  "event": { "kind": "tool_call", "tool": "desktop_screenshot", "input": {...} }
+}
+```
+
+**Event kinds:** `accepted`, `stream`, `tool_call`, `tool_result`, `error`, `done`. Every event carries the `dispatch_source` field so the trace viewer (#1869) can show full provenance.
+
+### Subscribing to a dispatch from a peer surface
+
+Peer surfaces declared in `replay_to` receive the same events when they subscribe by `correlation_id`:
+
+```
+Client -> { "type": "dispatch:subscribe", "correlation_id": "c_xyz" }
+Server -> { "protocol_version": 1, "type": "dispatch:subscribed", "correlation_id": "c_xyz" }
+```
+
+### Replay protection
+
+The daemon maintains a per-token sliding-window ledger (default 5 min, max 1000 entries). A duplicate `dispatch_id` within the window is rejected:
+
+```
+Server -> {
+  "type": "dispatch:ack",
+  "dispatch_id": "<...>",
+  "correlation_id": "<...>",
+  "ok": false,
+  "code": "replay_detected",
+  "error": "dispatch_id replayed within window"
+}
+```
+
+### Rate limiting
+
+Default 100 dispatches/minute/token, configurable. Rejected dispatches return:
+
+```
+Server -> {
+  "type": "dispatch:ack",
+  "ok": false,
+  "code": "rate_limited",
+  "retry_after_ms": 12345
+}
+```
+
+### Capability + policy denial
+
+```
+Server -> {
+  "type": "dispatch:ack",
+  "ok": false,
+  "code": "capability_denied",
+  "error": "dispatches with capability \"write_full\" from \"telegram\" require second-factor approval"
+}
+```
+
+The originating surface should prompt the user for second-factor approval, then re-dispatch with a fresh `dispatch_id`.
+
+### Audit trail
+
+Every dispatch event flows into `packages/memory/computer-use-traces.ts` with the `dispatch_source` field populated. This is the same ring buffer that the broader trace viewer (#1868/#1869) consumes - dispatch traces appear alongside tool-use and agent-step traces with consistent provenance.
+
+### Authentication for remote surfaces
+
+Local-machine surfaces (Computer panel, lil-eight, local Telegram bridge) use HMAC-signed scoped tokens minted from a per-process secret (`EIGHT_DISPATCH_SECRET`).
+
+Remote surfaces (`os`/`app` web sessions) authenticate via Clerk JWT - the daemon composes a `CompositeTokenVerifier` so a single dispatch listener accepts both schemes.
+
+```ts
+import { CompositeTokenVerifier, LocalTokenVerifier } from "@8gent/daemon/dispatch";
+
+const verifier = new CompositeTokenVerifier([
+  new LocalTokenVerifier(process.env.EIGHT_DISPATCH_SECRET!),
+  new ClerkJWTVerifier({ jwksUri: "..." }),  // app code provides this
+]);
+```
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2026-04-26 | Add remote dispatch protocol (`/dispatch` route). Surface registration, replay protection, rate limiting, capability scoping, fan-out to `replay_to` subscribers, `dispatch_source` in trace records. (#1896) |
 | 1.1 | 2026-04-25 | Add `computer` channel, dedicated `/computer` route, streaming event taxonomy (`token`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`), `protocol_version: 1` on every frame, `/ops/agent-pool/status` endpoint. |
 | 1.0 | 2026-03-22 | Initial protocol - sessions, prompts, events, cron, health |
