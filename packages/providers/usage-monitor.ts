@@ -7,6 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { recordLLM } from "@8gent/telemetry";
 
 interface UsageRecord {
 	date: string; // YYYY-MM-DD
@@ -89,6 +90,42 @@ export class UsageMonitor {
 			(r) => r.date >= cutoff.toISOString().slice(0, 10),
 		);
 		saveState(this.state);
+	}
+
+	/**
+	 * Record token usage with tenant attribution.
+	 *
+	 * Wave 4 GATE: per-tenant telemetry. Mirrors `record()` for budget
+	 * tracking AND emits a structured `llm` event so Vector can ship
+	 * per-tenant token spend off-box to Loki.
+	 */
+	recordWithAttribution(input: {
+		tenantId: string;
+		clerkId?: string;
+		sessionId?: string;
+		channel?: string;
+		provider: string;
+		model: string;
+		promptTokens: number;
+		completionTokens: number;
+		latencyMs: number;
+		streamed?: boolean;
+		usedTools?: boolean;
+	}): void {
+		this.record(input.promptTokens + input.completionTokens);
+		recordLLM({
+			tenantId: input.tenantId,
+			clerkId: input.clerkId,
+			sessionId: input.sessionId,
+			channel: input.channel,
+			provider: input.provider,
+			model: input.model,
+			promptTokens: input.promptTokens,
+			completionTokens: input.completionTokens,
+			latencyMs: input.latencyMs,
+			streamed: input.streamed,
+			usedTools: input.usedTools,
+		});
 	}
 
 	/** Check if we're within budget. Returns { allowed, reason?, usage } */

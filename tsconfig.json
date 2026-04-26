@@ -20,7 +20,8 @@
 			"@8gent/toolshed": ["packages/toolshed/index.ts"],
 			"@8gent/planner": ["packages/planner/index.ts"],
 			"@8gent/workflow": ["packages/workflow/index.ts"],
-			"@8gent/registry": ["packages/registry/index.ts"]
+			"@8gent/registry": ["packages/registry/index.ts"],
+			"@8gent/telemetry": ["packages/telemetry/index.ts"]
 		},
 		"lib": ["dom", "dom.iterable", "esnext"],
 		"allowJs": true,
