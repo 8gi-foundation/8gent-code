@@ -26,6 +26,7 @@ import { grade } from "./execution-grader";
 import { getFewShot } from "./few-shot";
 import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
+import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -699,11 +700,35 @@ async function main(): Promise<void> {
 			timestamp: new Date().toISOString(),
 		};
 
+		const previousIteration =
+			state.history.length > 0 ? state.history[state.history.length - 1] : null;
+
 		state.iteration = iter + 1;
 		state.mutations = getMutations();
 		state.history.push(iterResult);
 		state.lastRunAt = new Date().toISOString();
 		saveState(state);
+
+		// Self-improvement loop: persist outcomes to evolution-db and reflect.
+		// Wrapped in try/catch so a DB hiccup never breaks the benchmark run.
+		try {
+			const cycle = runImprovementCycle({
+				sessionId: `autoresearch-${state.startedAt}`,
+				before: previousIteration,
+				after: iterResult,
+				allHistory: state.history,
+				allMutations: state.mutations,
+				passThreshold: PASS_THRESHOLD,
+			});
+			log(
+				`  🔄 Loop: ${cycle.outcome.improvements} improved, ` +
+					`${cycle.outcome.regressions} regressed, ` +
+					`${cycle.outcome.skillIds.length} skills persisted, ` +
+					`reflection success=${(cycle.reflection.successRate * 100).toFixed(0)}%`,
+			);
+		} catch (err: any) {
+			log(`  ⚠ improvement-loop hook failed: ${err.message}`);
+		}
 
 		// ── Iteration Summary ─────────────────────────────────────────
 		log(`\n  ── Iteration ${iter + 1} Summary ──`);
