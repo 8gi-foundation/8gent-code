@@ -1,0 +1,91 @@
+# 8gent Telemetry — Vector pipeline
+#
+# Ships per-tenant attribution events from the daemon (and any other 8gent
+# process that uses @8gent/telemetry) to Loki. Sinks are intentionally
+# scoped: anything missing tenantId is dropped to a deadletter file
+# instead of polluting Loki with un-attributed traffic.
+#
+# Run:
+#   vector --config packages/telemetry/vector.toml
+#
+# The `file` source is the default in production where the daemon
+# redirects stdout to /var/log/8gent/telemetry.log via systemd. The
+# `stdin` source is for development (pipe the daemon stdout straight in).
+
+# ---------------- sources ----------------
+
+[sources.file_log]
+type = "file"
+include = ["/var/log/8gent/telemetry.log"]
+read_from = "end"
+ignore_older_secs = 86400
+fingerprint.strategy = "checksum"
+
+[sources.stdin_log]
+type = "stdin"
+
+# ---------------- transforms ----------------
+
+# Parse JSON lines — events that fail parse drop to deadletter.
+[transforms.parsed]
+type = "remap"
+inputs = ["file_log", "stdin_log"]
+source = '''
+parsed, err = parse_json(.message)
+if err != null {
+  abort
+}
+. = parsed
+'''
+
+# Gate: every event MUST carry kind + tenantId. No exceptions.
+# Anything missing either is routed to deadletter for triage.
+[transforms.gated]
+type = "route"
+inputs = ["parsed"]
+[transforms.gated.route]
+attributed = '.tenantId != null && .tenantId != "" && (.kind == "llm" || .kind == "vessel" || .kind == "storage")'
+
+# Add Loki labels at the transform layer so each sink stays declarative.
+[transforms.with_labels]
+type = "remap"
+inputs = ["gated.attributed"]
+source = '''
+.labels = {
+  "service": "8gent",
+  "kind": .kind,
+  "tenant": .tenantId,
+  "channel": to_string(.channel || "unknown"),
+  "provider": to_string(.provider || "n/a")
+}
+'''
+
+# ---------------- sinks ----------------
+
+[sinks.loki]
+type = "loki"
+inputs = ["with_labels"]
+endpoint = "${LOKI_ENDPOINT:-http://loki:3100}"
+encoding.codec = "json"
+out_of_order_action = "accept"
+tenant_id = "{{ tenantId }}"
+labels.service = "{{ labels.service }}"
+labels.kind = "{{ labels.kind }}"
+labels.tenant = "{{ labels.tenant }}"
+labels.channel = "{{ labels.channel }}"
+labels.provider = "{{ labels.provider }}"
+
+# Anything that fails the gate (no tenantId, unknown kind) lands here so
+# we can hunt down the un-instrumented call site instead of dropping it
+# silently.
+[sinks.deadletter]
+type = "file"
+inputs = ["gated._unmatched"]
+path = "/var/log/8gent/telemetry-deadletter.log"
+encoding.codec = "json"
+
+# Rolling stdout sink for local development — comment out in prod.
+[sinks.console_dev]
+type = "console"
+inputs = ["with_labels"]
+encoding.codec = "json"

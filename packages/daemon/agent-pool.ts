@@ -30,6 +30,10 @@ interface SessionEntry {
 	lastActiveAt: number;
 	messageCount: number;
 	busy: boolean; // true while agent.chat() is in flight
+	/** Tenant attribution for Wave 4 multi-tenant rollout. */
+	tenantId: string;
+	/** Optional Clerk ID — useful when tenantId is internal. */
+	clerkId?: string;
 }
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
@@ -117,7 +121,11 @@ export class AgentPool {
 	}
 
 	/** Create a new session with its own Agent instance */
-	createSession(sessionId: string, channel: string, overrides?: { maxTurns?: number }): void {
+	createSession(
+		sessionId: string,
+		channel: string,
+		overrides?: { maxTurns?: number; tenantId?: string; clerkId?: string },
+	): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
 		if (this.countOn(channel) >= cap) {
@@ -173,6 +181,10 @@ export class AgentPool {
 		const agent = new Agent(agentConfig);
 
 		const now = Date.now();
+		// Wave 4 GATE: every session must carry a tenantId. Default to
+		// "system" only for legacy callers — production paths must pass
+		// the resolved tenantId explicitly.
+		const tenantId = overrides?.tenantId ?? process.env.EIGHGENT_DEFAULT_TENANT ?? "system";
 		this.sessions.set(sessionId, {
 			agent,
 			channel,
@@ -180,10 +192,12 @@ export class AgentPool {
 			lastActiveAt: now,
 			messageCount: 0,
 			busy: false,
+			tenantId,
+			clerkId: overrides?.clerkId,
 		});
 
 		console.log(
-			`[agent-pool] created session ${sessionId} (channel=${channel}, model=${this.config.model})`,
+			`[agent-pool] created session ${sessionId} (channel=${channel}, tenant=${tenantId}, model=${this.config.model})`,
 		);
 	}
 
@@ -225,12 +239,26 @@ export class AgentPool {
 		entry.lastActiveAt = Date.now();
 		bus.emit("agent:thinking", { sessionId });
 
+		const startMs = Date.now();
 		try {
 			const response = await entry.agent.chat(text);
 
-			// Track token usage (estimate from response length)
-			const estimatedTokens = Math.ceil((text.length + response.length) / 4);
-			usage.record(estimatedTokens);
+			// Track token usage (estimate: ~4 chars/token).
+			const promptTokens = Math.ceil(text.length / 4);
+			const completionTokens = Math.ceil(response.length / 4);
+			// Wave 4 GATE: per-tenant attribution. Mirrors local budget AND
+			// emits an `llm` event for off-box shipping via Vector + Loki.
+			usage.recordWithAttribution({
+				tenantId: entry.tenantId,
+				clerkId: entry.clerkId,
+				sessionId,
+				channel: entry.channel,
+				provider: this.config.runtime,
+				model: this.config.model,
+				promptTokens,
+				completionTokens,
+				latencyMs: Date.now() - startMs,
+			});
 
 			// Emit the full final response (distinct from stream chunks)
 			bus.emit("agent:stream", { sessionId, chunk: response, final: true });
