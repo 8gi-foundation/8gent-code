@@ -9,7 +9,13 @@
 		"8gent": "./bin/8gent-run.js",
 		"8gent-code": "./bin/8gent-run.js"
 	},
-	"files": ["dist/cli.js", "dist/skills", "bin/8gent-run.js", "README.md", "LICENSE"],
+	"files": [
+		"dist/cli.js",
+		"dist/skills",
+		"bin/8gent-run.js",
+		"README.md",
+		"LICENSE"
+	],
 	"scripts": {
 		"start": "bun run packages/eight/index.ts",
 		"agent": "bun run packages/eight/index.ts",
@@ -48,7 +54,10 @@
 		"harness:doctor": "bun run packages/harness-cli/index.ts doctor",
 		"debug": "bun run bin/debug.ts"
 	},
-	"workspaces": ["apps/*", "packages/*"],
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	],
 	"devDependencies": {
 		"@biomejs/biome": "^1.5.0",
 		"@changesets/cli": "^2.30.0",
