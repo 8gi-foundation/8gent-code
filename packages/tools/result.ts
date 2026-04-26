@@ -4,13 +4,13 @@
 type Result<T, E> = Ok<T, E> | Err<T, E>;
 
 interface Ok<T, E> {
-  tag: 'Ok';
-  value: T;
+	tag: "Ok";
+	value: T;
 }
 
 interface Err<T, E> {
-  tag: 'Err';
-  error: E;
+	tag: "Err";
+	error: E;
 }
 
 /**
@@ -19,7 +19,7 @@ interface Err<T, E> {
  * @returns Result<T, never>
  */
 function ok<T, E>(value: T): Result<T, E> {
-  return { tag: 'Ok', value };
+	return { tag: "Ok", value };
 }
 
 /**
@@ -28,7 +28,7 @@ function ok<T, E>(value: T): Result<T, E> {
  * @returns Result<never, E>
  */
 function err<T, E>(error: E): Result<T, E> {
-  return { tag: 'Err', error };
+	return { tag: "Err", error };
 }
 
 /**
@@ -38,10 +38,10 @@ function err<T, E>(error: E): Result<T, E> {
  * @returns New Result with transformed value
  */
 function map<T, E, U>(result: Result<T, E>, f: (value: T) => U): Result<U, E> {
-  if (result.tag === 'Ok') {
-    return ok(f(result.value));
-  }
-  return result;
+	if (result.tag === "Ok") {
+		return ok(f(result.value));
+	}
+	return result;
 }
 
 /**
@@ -51,10 +51,10 @@ function map<T, E, U>(result: Result<T, E>, f: (value: T) => U): Result<U, E> {
  * @returns Chained Result
  */
 function flatMap<T, E, U>(result: Result<T, E>, f: (value: T) => Result<U, E>): Result<U, E> {
-  if (result.tag === 'Ok') {
-    return f(result.value);
-  }
-  return result;
+	if (result.tag === "Ok") {
+		return f(result.value);
+	}
+	return result;
 }
 
 /**
@@ -64,10 +64,10 @@ function flatMap<T, E, U>(result: Result<T, E>, f: (value: T) => Result<U, E>): 
  * @returns New Result with transformed error
  */
 function mapErr<T, E, F>(result: Result<T, E>, f: (error: E) => F): Result<T, F> {
-  if (result.tag === 'Err') {
-    return err(f(result.error));
-  }
-  return result;
+	if (result.tag === "Err") {
+		return err(f(result.error));
+	}
+	return result;
 }
 
 /**
@@ -77,10 +77,10 @@ function mapErr<T, E, F>(result: Result<T, E>, f: (error: E) => F): Result<T, F>
  * @throws If Result is erroneous
  */
 function unwrap<T, E>(result: Result<T, E>): T {
-  if (result.tag === 'Err') {
-    throw new Error('Called unwrap on Err');
-  }
-  return result.value;
+	if (result.tag === "Err") {
+		throw new Error("Called unwrap on Err");
+	}
+	return result.value;
 }
 
 /**
@@ -90,10 +90,10 @@ function unwrap<T, E>(result: Result<T, E>): T {
  * @returns The value or default
  */
 function unwrapOr<T, E>(result: Result<T, E>, defaultValue: T): T {
-  if (result.tag === 'Ok') {
-    return result.value;
-  }
-  return defaultValue;
+	if (result.tag === "Ok") {
+		return result.value;
+	}
+	return defaultValue;
 }
 
 /**
@@ -102,11 +102,14 @@ function unwrapOr<T, E>(result: Result<T, E>, defaultValue: T): T {
  * @param handlers Object with ok and err handlers
  * @returns Result of handler
  */
-function match<T, E, R>(result: Result<T, E>, handlers: { ok: (value: T) => R; err: (error: E) => R }): R {
-  if (result.tag === 'Ok') {
-    return handlers.ok(result.value);
-  }
-  return handlers.err(result.error);
+function match<T, E, R>(
+	result: Result<T, E>,
+	handlers: { ok: (value: T) => R; err: (error: E) => R },
+): R {
+	if (result.tag === "Ok") {
+		return handlers.ok(result.value);
+	}
+	return handlers.err(result.error);
 }
 
 export { ok, err, map, flatMap, mapErr, unwrap, unwrapOr, match };

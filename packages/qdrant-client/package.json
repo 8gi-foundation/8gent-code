@@ -1,25 +1,25 @@
 {
-  "name": "@8gent/qdrant-client",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Thin typed seam around a local-only Qdrant instance for 8gent Computer. Stubs only in v0. See #1756 and parent PRD #1746.",
-  "main": "index.ts",
-  "types": "index.ts",
-  "type": "module",
-  "exports": {
-    ".": {
-      "import": "./index.ts",
-      "types": "./index.ts"
-    },
-    "./types": {
-      "import": "./types.ts",
-      "types": "./types.ts"
-    }
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.0"
-  }
+	"name": "@8gent/qdrant-client",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Thin typed seam around a local-only Qdrant instance for 8gent Computer. Stubs only in v0. See #1756 and parent PRD #1746.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		},
+		"./types": {
+			"import": "./types.ts",
+			"types": "./types.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
 }

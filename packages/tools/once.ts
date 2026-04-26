@@ -4,24 +4,24 @@
  * @returns A function that only executes on the first call.
  */
 function once<T>(fn: () => T): () => T {
-  let called = false;
-  let result: T | undefined;
+	let called = false;
+	let result: T | undefined;
 
-  function wrapped(): T {
-    if (called) {
-      return result as T;
-    }
-    called = true;
-    result = fn();
-    return result;
-  }
+	function wrapped(): T {
+		if (called) {
+			return result as T;
+		}
+		called = true;
+		result = fn();
+		return result;
+	}
 
-  wrapped.reset = () => {
-    called = false;
-    result = undefined;
-  };
+	wrapped.reset = () => {
+		called = false;
+		result = undefined;
+	};
 
-  return wrapped;
+	return wrapped;
 }
 
 /**
@@ -30,24 +30,24 @@ function once<T>(fn: () => T): () => T {
  * @returns A function that returns a promise and only executes on the first call.
  */
 function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
-  let called = false;
-  let result: T | undefined;
+	let called = false;
+	let result: T | undefined;
 
-  async function wrapped(): Promise<T> {
-    if (called) {
-      return Promise.resolve(result as T);
-    }
-    called = true;
-    result = await fn();
-    return result;
-  }
+	async function wrapped(): Promise<T> {
+		if (called) {
+			return Promise.resolve(result as T);
+		}
+		called = true;
+		result = await fn();
+		return result;
+	}
 
-  wrapped.reset = () => {
-    called = false;
-    result = undefined;
-  };
+	wrapped.reset = () => {
+		called = false;
+		result = undefined;
+	};
 
-  return wrapped;
+	return wrapped;
 }
 
 /**
@@ -55,7 +55,7 @@ function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
  * @param onceFn The function returned by once or onceAsync.
  */
 function reset(onceFn: { reset: () => void }): void {
-  onceFn.reset();
+	onceFn.reset();
 }
 
 export { once, onceAsync, reset };

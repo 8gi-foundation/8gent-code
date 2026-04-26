@@ -4,7 +4,7 @@
  * @returns The sum of the array elements.
  */
 function sum(arr: number[]): number {
-  return arr.reduce((a, b) => a + b, 0);
+	return arr.reduce((a, b) => a + b, 0);
 }
 
 /**
@@ -13,7 +13,7 @@ function sum(arr: number[]): number {
  * @returns The mean of the array elements.
  */
 function mean(arr: number[]): number {
-  return sum(arr) / arr.length;
+	return sum(arr) / arr.length;
 }
 
 /**
@@ -22,7 +22,7 @@ function mean(arr: number[]): number {
  * @returns The minimum value.
  */
 function min(arr: number[]): number {
-  return Math.min(...arr);
+	return Math.min(...arr);
 }
 
 /**
@@ -31,7 +31,7 @@ function min(arr: number[]): number {
  * @returns The maximum value.
  */
 function max(arr: number[]): number {
-  return Math.max(...arr);
+	return Math.max(...arr);
 }
 
 /**
@@ -40,7 +40,7 @@ function max(arr: number[]): number {
  * @returns The difference between max and min.
  */
 function range(arr: number[]): number {
-  return max(arr) - min(arr);
+	return max(arr) - min(arr);
 }
 
 /**
@@ -49,13 +49,12 @@ function range(arr: number[]): number {
  * @returns The median value.
  */
 function median(arr: number[]): number {
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 0) {
-    return (sorted[mid - 1] + sorted[mid]) / 2;
-  } else {
-    return sorted[mid];
-  }
+	const sorted = [...arr].sort((a, b) => a - b);
+	const mid = Math.floor(sorted.length / 2);
+	if (sorted.length % 2 === 0) {
+		return (sorted[mid - 1] + sorted[mid]) / 2;
+	}
+	return sorted[mid];
 }
 
 /**
@@ -64,19 +63,19 @@ function median(arr: number[]): number {
  * @returns The most frequent value or undefined.
  */
 function mode(arr: number[]): number | undefined {
-  const counts = new Map<number, number>();
-  let maxCount = 0;
-  let modeValue: number | undefined;
+	const counts = new Map<number, number>();
+	let maxCount = 0;
+	let modeValue: number | undefined;
 
-  for (const num of arr) {
-    counts.set(num, (counts.get(num) || 0) + 1);
-    if (counts.get(num)! > maxCount) {
-      maxCount = counts.get(num)!;
-      modeValue = num;
-    }
-  }
+	for (const num of arr) {
+		counts.set(num, (counts.get(num) || 0) + 1);
+		if (counts.get(num)! > maxCount) {
+			maxCount = counts.get(num)!;
+			modeValue = num;
+		}
+	}
 
-  return maxCount > 0 ? modeValue : undefined;
+	return maxCount > 0 ? modeValue : undefined;
 }
 
 /**
@@ -85,8 +84,8 @@ function mode(arr: number[]): number | undefined {
  * @returns The sample variance.
  */
 function variance(arr: number[]): number {
-  const m = mean(arr);
-  return sum(arr.map(x => Math.pow(x - m, 2))) / (arr.length - 1);
+	const m = mean(arr);
+	return sum(arr.map((x) => (x - m) ** 2)) / (arr.length - 1);
 }
 
 /**
@@ -95,7 +94,7 @@ function variance(arr: number[]): number {
  * @returns The standard deviation.
  */
 function stddev(arr: number[]): number {
-  return Math.sqrt(variance(arr));
+	return Math.sqrt(variance(arr));
 }
 
 /**
@@ -105,19 +104,19 @@ function stddev(arr: number[]): number {
  * @returns The value at the specified percentile.
  */
 function percentile(arr: number[], p: number): number {
-  if (p < 0 || p > 100) {
-    throw new Error('Percentile must be between 0 and 100');
-  }
-  const sorted = [...arr].sort((a, b) => a - b);
-  const n = sorted.length;
-  const index = (n - 1) * (p / 100);
-  const floor = Math.floor(index);
-  const ceil = Math.ceil(index);
-  if (floor === ceil) {
-    return sorted[floor];
-  }
-  const frac = index - floor;
-  return sorted[floor] * (1 - frac) + sorted[ceil] * frac;
+	if (p < 0 || p > 100) {
+		throw new Error("Percentile must be between 0 and 100");
+	}
+	const sorted = [...arr].sort((a, b) => a - b);
+	const n = sorted.length;
+	const index = (n - 1) * (p / 100);
+	const floor = Math.floor(index);
+	const ceil = Math.ceil(index);
+	if (floor === ceil) {
+		return sorted[floor];
+	}
+	const frac = index - floor;
+	return sorted[floor] * (1 - frac) + sorted[ceil] * frac;
 }
 
 /**
@@ -127,31 +126,19 @@ function percentile(arr: number[], p: number): number {
  * @returns An array of { value, count } objects.
  */
 function histogram(arr: number[], bins: number): { value: number; count: number }[] {
-  if (arr.length === 0) return [];
-  const minVal = min(arr);
-  const maxVal = max(arr);
-  const binWidth = (maxVal - minVal) / bins;
-  const result: { value: number; count: number }[] = [];
-  let currentMin = minVal;
-  for (let i = 0; i < bins; i++) {
-    const currentMax = currentMin + binWidth;
-    const count = arr.filter(x => x >= currentMin && x < currentMax).length;
-    result.push({ value: currentMin + binWidth / 2, count });
-    currentMin = currentMax;
-  }
-  return result;
+	if (arr.length === 0) return [];
+	const minVal = min(arr);
+	const maxVal = max(arr);
+	const binWidth = (maxVal - minVal) / bins;
+	const result: { value: number; count: number }[] = [];
+	let currentMin = minVal;
+	for (let i = 0; i < bins; i++) {
+		const currentMax = currentMin + binWidth;
+		const count = arr.filter((x) => x >= currentMin && x < currentMax).length;
+		result.push({ value: currentMin + binWidth / 2, count });
+		currentMin = currentMax;
+	}
+	return result;
 }
 
-export {
-  sum,
-  mean,
-  min,
-  max,
-  range,
-  median,
-  mode,
-  variance,
-  stddev,
-  percentile,
-  histogram
-};
+export { sum, mean, min, max, range, median, mode, variance, stddev, percentile, histogram };

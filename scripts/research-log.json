@@ -1,1845 +1,1130 @@
 [
-  {
-    "timestamp": "2026-03-25T23:41:40.941Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 26,
-    "added": 24,
-    "skipped": 5,
-    "newSpecs": [
-      "editor",
-      "claude-subconscious",
-      "ruflo",
-      "project-nomad",
-      "supermemory",
-      "dexter",
-      "firecrawl",
-      "twenty",
-      "compound-engineering-plugin",
-      "chrome-devtools-mcp",
-      "last30days-skill",
-      "deer-flow",
-      "berriai",
-      "ruview",
-      "fujiwarachoki",
-      "strix",
-      "tradingagents-cn",
-      "claude-linked-output-going",
-      "show-optio-orchestrate-coding",
-      "goodbye-sora",
-      "health-staff-told-stop",
-      "research-pipeline",
-      "research-provenance",
-      "research-integrity"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T00:13:48.631Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T00:43:49.780Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T09:55:15.116Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 3,
-    "skipped": 27,
-    "newSpecs": [
-      "two-studies-compiler-optimisations",
-      "show-robust-llm-extractor",
-      "government-agencies-buy-commercial"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T09:56:37.582Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T10:26:38.571Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T10:56:39.792Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 6,
-    "skipped": 22,
-    "newSpecs": [
-      "supersplat",
-      "dokploy",
-      "cypress",
-      "servers",
-      "agentscope",
-      "chandra"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T11:26:40.581Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 5,
-    "added": 0,
-    "skipped": 8,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T11:56:41.923Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T12:26:43.021Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T12:56:44.090Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T13:26:45.475Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T13:56:46.684Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T14:26:47.763Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T14:56:49.300Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T15:26:50.277Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T15:56:51.543Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T16:26:52.831Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T16:56:53.999Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 20,
-    "added": 0,
-    "skipped": 23,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T17:26:55.028Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 1,
-    "skipped": 24,
-    "newSpecs": [
-      "stripe-projects-provision-and"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T17:56:56.268Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T18:26:57.469Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T18:56:58.594Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T19:26:59.580Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T19:57:00.615Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 1,
-    "skipped": 24,
-    "newSpecs": [
-      "ask-running-legacy-x2f"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T20:27:01.752Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T20:57:03.040Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 1,
-    "skipped": 24,
-    "newSpecs": [
-      "fast-regex-search-indexing"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T21:27:04.188Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T21:57:05.479Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 1,
-    "skipped": 25,
-    "newSpecs": [
-      "dev-browser"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T22:27:06.556Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 1,
-    "skipped": 25,
-    "newSpecs": [
-      "non-messing-diagonal-sorting"
-    ]
-  },
-  {
-    "timestamp": "2026-03-26T22:57:07.687Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T23:27:09.270Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-26T23:57:10.363Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 1,
-    "skipped": 25,
-    "newSpecs": [
-      "chicago-artist-creates-tourism"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T00:27:11.330Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 1,
-    "skipped": 26,
-    "newSpecs": [
-      "judge-blocks-pentagon-effort"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T01:03:43.098Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 4,
-    "added": 0,
-    "skipped": 7,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T01:33:44.071Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T02:03:45.381Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T02:33:46.613Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T03:03:47.530Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T03:33:48.743Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T04:03:49.766Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T04:33:51.012Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T05:03:52.096Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T05:33:53.112Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T06:12:18.289Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T06:52:18.089Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 21,
-    "added": 0,
-    "skipped": 24,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T07:29:03.061Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 1,
-    "skipped": 24,
-    "newSpecs": [
-      "show-minimalist-library-generate"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T07:59:18.187Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 20,
-    "added": 0,
-    "skipped": 23,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T09:05:54.560Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 1,
-    "skipped": 25,
-    "newSpecs": [
-      "864-yugoslavian-domains"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T09:35:55.613Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T10:05:56.671Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 1,
-    "skipped": 25,
-    "newSpecs": [
-      "mcp-server-guide"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T10:35:57.644Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T11:05:58.911Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 29,
-    "added": 18,
-    "skipped": 14,
-    "newSpecs": [
-      "vscode",
-      "langfuse",
-      "playwright-mcp",
-      "nrslib",
-      "fluentui",
-      "grafana",
-      "backstage",
-      "expo",
-      "juice-shop",
-      "openspec",
-      "superset",
-      "steipete",
-      "hacksider",
-      "ai-scientist-v2",
-      "vibevoice",
-      "obra",
-      "freecad",
-      "onyx"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T11:36:00.567Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T12:06:01.808Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T12:36:03.158Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 29,
-    "added": 1,
-    "skipped": 31,
-    "newSpecs": [
-      "understanding-the-runtime-the"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T13:06:04.539Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T13:36:05.773Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T14:06:07.087Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T14:36:08.495Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 1,
-    "skipped": 30,
-    "newSpecs": [
-      "gzip-decompression-250-lines"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T15:06:09.752Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T15:36:11.356Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T16:06:12.806Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T16:36:14.082Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T17:06:15.381Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T17:36:16.780Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 2,
-    "skipped": 32,
-    "newSpecs": [
-      "got-the-blame-for",
-      "embracing-bayesian-methods-clinical"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T18:06:18.093Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T18:36:19.350Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T19:06:20.581Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 33,
-    "added": 2,
-    "skipped": 34,
-    "newSpecs": [
-      "pypi-package-telnyx-has",
-      "telnyx-python-sdk-supply"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T19:36:22.010Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 34,
-    "added": 1,
-    "skipped": 36,
-    "newSpecs": [
-      "nashville-library-launches-memory"
-    ]
-  },
-  {
-    "timestamp": "2026-03-27T20:06:23.311Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 33,
-    "added": 0,
-    "skipped": 36,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T20:36:24.466Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 33,
-    "added": 0,
-    "skipped": 36,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T21:06:25.768Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 33,
-    "added": 0,
-    "skipped": 36,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T21:36:27.166Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 33,
-    "added": 0,
-    "skipped": 36,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T22:06:28.621Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T22:36:29.850Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T23:06:31.163Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-27T23:36:30.439Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T00:06:31.808Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T00:36:33.217Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T01:06:34.530Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T01:36:35.882Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T02:06:37.074Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T02:36:38.202Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 30,
-    "added": 0,
-    "skipped": 33,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T03:06:39.592Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 30,
-    "added": 0,
-    "skipped": 33,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T03:36:40.866Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 30,
-    "added": 0,
-    "skipped": 33,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T04:06:42.038Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 30,
-    "added": 0,
-    "skipped": 33,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T04:36:43.183Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 30,
-    "added": 0,
-    "skipped": 33,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T05:06:44.589Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 30,
-    "added": 0,
-    "skipped": 33,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T05:36:45.875Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 1,
-    "skipped": 34,
-    "newSpecs": [
-      "hard-agents-not-your"
-    ]
-  },
-  {
-    "timestamp": "2026-03-28T06:08:16.057Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 0,
-    "skipped": 35,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T06:38:17.493Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T07:12:45.077Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T07:44:29.265Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 32,
-    "added": 1,
-    "skipped": 34,
-    "newSpecs": [
-      "trust-signals-sparklines-for"
-    ]
-  },
-  {
-    "timestamp": "2026-03-28T08:20:28.721Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T08:58:45.671Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T09:28:46.956Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T09:58:48.175Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T10:28:49.336Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 31,
-    "added": 0,
-    "skipped": 34,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T10:58:50.354Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 7,
-    "skipped": 21,
-    "newSpecs": [
-      "learn-claude-code",
-      "benjitaylor",
-      "open-metadata",
-      "json-render",
-      "cline",
-      "thedotmack",
-      "naming-conventions-practical-guide"
-    ]
-  },
-  {
-    "timestamp": "2026-03-28T11:28:51.380Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T11:58:54.681Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T12:28:55.756Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T12:58:56.879Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T13:28:54.201Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 0,
-    "skipped": 27,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T13:58:55.217Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 1,
-    "skipped": 26,
-    "newSpecs": [
-      "how-implement-the-outbox"
-    ]
-  },
-  {
-    "timestamp": "2026-03-28T14:28:58.283Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T14:58:59.392Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T15:29:00.395Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T15:59:01.576Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 23,
-    "added": 0,
-    "skipped": 26,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T16:29:02.810Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 24,
-    "added": 1,
-    "skipped": 26,
-    "newSpecs": [
-      "going-founder-mode-cancer"
-    ]
-  },
-  {
-    "timestamp": "2026-03-28T16:59:04.193Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-28T17:29:05.331Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 22,
-    "added": 0,
-    "skipped": 25,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T15:30:56.420Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 15,
-    "skipped": 16,
-    "newSpecs": [
-      "freecodecamp",
-      "vas3k",
-      "logto-io",
-      "airi",
-      "humanlayer",
-      "appwrite",
-      "cal-com",
-      "fluxerapp",
-      "luongnv89",
-      "sherlock",
-      "fastfetch",
-      "math-rigor-vital-but",
-      "build123d-python-cad-programming",
-      "spring-boot-done-right",
-      "pretext-typescript-library-for"
-    ]
-  },
-  {
-    "timestamp": "2026-03-30T16:00:57.693Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T16:30:59.239Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 1,
-    "skipped": 30,
-    "newSpecs": [
-      "bitwarden-integrates-with-onecli"
-    ]
-  },
-  {
-    "timestamp": "2026-03-30T17:01:00.681Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T17:31:01.972Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T18:01:03.347Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T18:31:04.639Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T19:01:06.012Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 26,
-    "added": 1,
-    "skipped": 28,
-    "newSpecs": [
-      "fedware-government-apps-that"
-    ]
-  },
-  {
-    "timestamp": "2026-03-30T19:31:07.204Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T20:01:08.630Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 1,
-    "skipped": 30,
-    "newSpecs": [
-      "the-hateful-eight-500"
-    ]
-  },
-  {
-    "timestamp": "2026-03-30T20:31:10.054Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T21:01:11.340Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T21:31:12.623Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 1,
-    "skipped": 30,
-    "newSpecs": [
-      "what-learned-building-100"
-    ]
-  },
-  {
-    "timestamp": "2026-03-30T22:01:13.885Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 28,
-    "added": 0,
-    "skipped": 31,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T22:31:15.292Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 27,
-    "added": 0,
-    "skipped": 30,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T23:01:16.704Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-30T23:31:17.937Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-31T00:01:19.118Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  },
-  {
-    "timestamp": "2026-03-31T00:31:20.496Z",
-    "sources": [
-      "npm",
-      "github-ts",
-      "github-all",
-      "hn"
-    ],
-    "found": 25,
-    "added": 0,
-    "skipped": 28,
-    "newSpecs": []
-  }
+	{
+		"timestamp": "2026-03-25T23:41:40.941Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 26,
+		"added": 24,
+		"skipped": 5,
+		"newSpecs": [
+			"editor",
+			"claude-subconscious",
+			"ruflo",
+			"project-nomad",
+			"supermemory",
+			"dexter",
+			"firecrawl",
+			"twenty",
+			"compound-engineering-plugin",
+			"chrome-devtools-mcp",
+			"last30days-skill",
+			"deer-flow",
+			"berriai",
+			"ruview",
+			"fujiwarachoki",
+			"strix",
+			"tradingagents-cn",
+			"claude-linked-output-going",
+			"show-optio-orchestrate-coding",
+			"goodbye-sora",
+			"health-staff-told-stop",
+			"research-pipeline",
+			"research-provenance",
+			"research-integrity"
+		]
+	},
+	{
+		"timestamp": "2026-03-26T00:13:48.631Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T00:43:49.780Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T09:55:15.116Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 3,
+		"skipped": 27,
+		"newSpecs": [
+			"two-studies-compiler-optimisations",
+			"show-robust-llm-extractor",
+			"government-agencies-buy-commercial"
+		]
+	},
+	{
+		"timestamp": "2026-03-26T09:56:37.582Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T10:26:38.571Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T10:56:39.792Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 6,
+		"skipped": 22,
+		"newSpecs": ["supersplat", "dokploy", "cypress", "servers", "agentscope", "chandra"]
+	},
+	{
+		"timestamp": "2026-03-26T11:26:40.581Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 5,
+		"added": 0,
+		"skipped": 8,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T11:56:41.923Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T12:26:43.021Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T12:56:44.090Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T13:26:45.475Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T13:56:46.684Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T14:26:47.763Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T14:56:49.300Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T15:26:50.277Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T15:56:51.543Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T16:26:52.831Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T16:56:53.999Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 20,
+		"added": 0,
+		"skipped": 23,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T17:26:55.028Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 1,
+		"skipped": 24,
+		"newSpecs": ["stripe-projects-provision-and"]
+	},
+	{
+		"timestamp": "2026-03-26T17:56:56.268Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T18:26:57.469Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T18:56:58.594Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T19:26:59.580Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T19:57:00.615Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 1,
+		"skipped": 24,
+		"newSpecs": ["ask-running-legacy-x2f"]
+	},
+	{
+		"timestamp": "2026-03-26T20:27:01.752Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T20:57:03.040Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 1,
+		"skipped": 24,
+		"newSpecs": ["fast-regex-search-indexing"]
+	},
+	{
+		"timestamp": "2026-03-26T21:27:04.188Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T21:57:05.479Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 1,
+		"skipped": 25,
+		"newSpecs": ["dev-browser"]
+	},
+	{
+		"timestamp": "2026-03-26T22:27:06.556Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 1,
+		"skipped": 25,
+		"newSpecs": ["non-messing-diagonal-sorting"]
+	},
+	{
+		"timestamp": "2026-03-26T22:57:07.687Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T23:27:09.270Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-26T23:57:10.363Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 1,
+		"skipped": 25,
+		"newSpecs": ["chicago-artist-creates-tourism"]
+	},
+	{
+		"timestamp": "2026-03-27T00:27:11.330Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 1,
+		"skipped": 26,
+		"newSpecs": ["judge-blocks-pentagon-effort"]
+	},
+	{
+		"timestamp": "2026-03-27T01:03:43.098Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 4,
+		"added": 0,
+		"skipped": 7,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T01:33:44.071Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T02:03:45.381Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T02:33:46.613Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T03:03:47.530Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T03:33:48.743Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T04:03:49.766Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T04:33:51.012Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T05:03:52.096Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T05:33:53.112Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T06:12:18.289Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T06:52:18.089Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 21,
+		"added": 0,
+		"skipped": 24,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T07:29:03.061Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 1,
+		"skipped": 24,
+		"newSpecs": ["show-minimalist-library-generate"]
+	},
+	{
+		"timestamp": "2026-03-27T07:59:18.187Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 20,
+		"added": 0,
+		"skipped": 23,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T09:05:54.560Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 1,
+		"skipped": 25,
+		"newSpecs": ["864-yugoslavian-domains"]
+	},
+	{
+		"timestamp": "2026-03-27T09:35:55.613Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T10:05:56.671Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 1,
+		"skipped": 25,
+		"newSpecs": ["mcp-server-guide"]
+	},
+	{
+		"timestamp": "2026-03-27T10:35:57.644Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T11:05:58.911Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 29,
+		"added": 18,
+		"skipped": 14,
+		"newSpecs": [
+			"vscode",
+			"langfuse",
+			"playwright-mcp",
+			"nrslib",
+			"fluentui",
+			"grafana",
+			"backstage",
+			"expo",
+			"juice-shop",
+			"openspec",
+			"superset",
+			"steipete",
+			"hacksider",
+			"ai-scientist-v2",
+			"vibevoice",
+			"obra",
+			"freecad",
+			"onyx"
+		]
+	},
+	{
+		"timestamp": "2026-03-27T11:36:00.567Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T12:06:01.808Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T12:36:03.158Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 29,
+		"added": 1,
+		"skipped": 31,
+		"newSpecs": ["understanding-the-runtime-the"]
+	},
+	{
+		"timestamp": "2026-03-27T13:06:04.539Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T13:36:05.773Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T14:06:07.087Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T14:36:08.495Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 1,
+		"skipped": 30,
+		"newSpecs": ["gzip-decompression-250-lines"]
+	},
+	{
+		"timestamp": "2026-03-27T15:06:09.752Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T15:36:11.356Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T16:06:12.806Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T16:36:14.082Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T17:06:15.381Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T17:36:16.780Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 2,
+		"skipped": 32,
+		"newSpecs": ["got-the-blame-for", "embracing-bayesian-methods-clinical"]
+	},
+	{
+		"timestamp": "2026-03-27T18:06:18.093Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T18:36:19.350Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T19:06:20.581Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 33,
+		"added": 2,
+		"skipped": 34,
+		"newSpecs": ["pypi-package-telnyx-has", "telnyx-python-sdk-supply"]
+	},
+	{
+		"timestamp": "2026-03-27T19:36:22.010Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 34,
+		"added": 1,
+		"skipped": 36,
+		"newSpecs": ["nashville-library-launches-memory"]
+	},
+	{
+		"timestamp": "2026-03-27T20:06:23.311Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 33,
+		"added": 0,
+		"skipped": 36,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T20:36:24.466Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 33,
+		"added": 0,
+		"skipped": 36,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T21:06:25.768Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 33,
+		"added": 0,
+		"skipped": 36,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T21:36:27.166Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 33,
+		"added": 0,
+		"skipped": 36,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T22:06:28.621Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T22:36:29.850Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T23:06:31.163Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-27T23:36:30.439Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T00:06:31.808Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T00:36:33.217Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T01:06:34.530Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T01:36:35.882Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T02:06:37.074Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T02:36:38.202Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 30,
+		"added": 0,
+		"skipped": 33,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T03:06:39.592Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 30,
+		"added": 0,
+		"skipped": 33,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T03:36:40.866Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 30,
+		"added": 0,
+		"skipped": 33,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T04:06:42.038Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 30,
+		"added": 0,
+		"skipped": 33,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T04:36:43.183Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 30,
+		"added": 0,
+		"skipped": 33,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T05:06:44.589Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 30,
+		"added": 0,
+		"skipped": 33,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T05:36:45.875Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 1,
+		"skipped": 34,
+		"newSpecs": ["hard-agents-not-your"]
+	},
+	{
+		"timestamp": "2026-03-28T06:08:16.057Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 0,
+		"skipped": 35,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T06:38:17.493Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T07:12:45.077Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T07:44:29.265Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 32,
+		"added": 1,
+		"skipped": 34,
+		"newSpecs": ["trust-signals-sparklines-for"]
+	},
+	{
+		"timestamp": "2026-03-28T08:20:28.721Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T08:58:45.671Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T09:28:46.956Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T09:58:48.175Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T10:28:49.336Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 31,
+		"added": 0,
+		"skipped": 34,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T10:58:50.354Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 7,
+		"skipped": 21,
+		"newSpecs": [
+			"learn-claude-code",
+			"benjitaylor",
+			"open-metadata",
+			"json-render",
+			"cline",
+			"thedotmack",
+			"naming-conventions-practical-guide"
+		]
+	},
+	{
+		"timestamp": "2026-03-28T11:28:51.380Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T11:58:54.681Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T12:28:55.756Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T12:58:56.879Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T13:28:54.201Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 0,
+		"skipped": 27,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T13:58:55.217Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 1,
+		"skipped": 26,
+		"newSpecs": ["how-implement-the-outbox"]
+	},
+	{
+		"timestamp": "2026-03-28T14:28:58.283Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T14:58:59.392Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T15:29:00.395Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T15:59:01.576Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 23,
+		"added": 0,
+		"skipped": 26,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T16:29:02.810Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 24,
+		"added": 1,
+		"skipped": 26,
+		"newSpecs": ["going-founder-mode-cancer"]
+	},
+	{
+		"timestamp": "2026-03-28T16:59:04.193Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-28T17:29:05.331Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 22,
+		"added": 0,
+		"skipped": 25,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T15:30:56.420Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 15,
+		"skipped": 16,
+		"newSpecs": [
+			"freecodecamp",
+			"vas3k",
+			"logto-io",
+			"airi",
+			"humanlayer",
+			"appwrite",
+			"cal-com",
+			"fluxerapp",
+			"luongnv89",
+			"sherlock",
+			"fastfetch",
+			"math-rigor-vital-but",
+			"build123d-python-cad-programming",
+			"spring-boot-done-right",
+			"pretext-typescript-library-for"
+		]
+	},
+	{
+		"timestamp": "2026-03-30T16:00:57.693Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T16:30:59.239Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 1,
+		"skipped": 30,
+		"newSpecs": ["bitwarden-integrates-with-onecli"]
+	},
+	{
+		"timestamp": "2026-03-30T17:01:00.681Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T17:31:01.972Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T18:01:03.347Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T18:31:04.639Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T19:01:06.012Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 26,
+		"added": 1,
+		"skipped": 28,
+		"newSpecs": ["fedware-government-apps-that"]
+	},
+	{
+		"timestamp": "2026-03-30T19:31:07.204Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T20:01:08.630Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 1,
+		"skipped": 30,
+		"newSpecs": ["the-hateful-eight-500"]
+	},
+	{
+		"timestamp": "2026-03-30T20:31:10.054Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T21:01:11.340Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T21:31:12.623Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 1,
+		"skipped": 30,
+		"newSpecs": ["what-learned-building-100"]
+	},
+	{
+		"timestamp": "2026-03-30T22:01:13.885Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 28,
+		"added": 0,
+		"skipped": 31,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T22:31:15.292Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 27,
+		"added": 0,
+		"skipped": 30,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T23:01:16.704Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-30T23:31:17.937Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-31T00:01:19.118Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	},
+	{
+		"timestamp": "2026-03-31T00:31:20.496Z",
+		"sources": ["npm", "github-ts", "github-all", "hn"],
+		"found": 25,
+		"added": 0,
+		"skipped": 28,
+		"newSpecs": []
+	}
 ]

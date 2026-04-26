@@ -10,6 +10,15 @@
  * scaffolder generates game code. ~20 minutes from idea to playable.
  */
 
-export { sliceSpriteSheet, detectGrid, type SliceOptions, type SliceResult } from "./sprite-slicer";
-export { SPRITE_PROMPTS, buildSpritePrompt, type SpritePromptConfig } from "./prompts";
+export {
+	sliceSpriteSheet,
+	detectGrid,
+	type SliceOptions,
+	type SliceResult,
+} from "./sprite-slicer";
+export {
+	SPRITE_PROMPTS,
+	buildSpritePrompt,
+	type SpritePromptConfig,
+} from "./prompts";
 export { scaffoldGame, type GameConfig } from "./scaffold";

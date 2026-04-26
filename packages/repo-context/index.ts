@@ -10,10 +10,12 @@ export { RepoMapper, type FileEntry, type RankedFile } from "./mapper";
 let _instance: InstanceType<typeof import("./mapper").RepoMapper> | null = null;
 
 /** Singleton RepoMapper - scans once per session */
-export async function getRepoMapper(rootDir?: string): Promise<InstanceType<typeof import("./mapper").RepoMapper>> {
-  if (_instance) return _instance;
-  const { RepoMapper } = await import("./mapper");
-  _instance = new RepoMapper();
-  await _instance.scan(rootDir ?? process.cwd());
-  return _instance;
+export async function getRepoMapper(
+	rootDir?: string,
+): Promise<InstanceType<typeof import("./mapper").RepoMapper>> {
+	if (_instance) return _instance;
+	const { RepoMapper } = await import("./mapper");
+	_instance = new RepoMapper();
+	await _instance.scan(rootDir ?? process.cwd());
+	return _instance;
 }

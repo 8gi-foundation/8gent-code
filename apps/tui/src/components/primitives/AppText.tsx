@@ -1,5 +1,5 @@
-import React from "react";
 import { Text, type TextProps } from "ink";
+import type React from "react";
 
 export const AppText: React.FC<TextProps> = ({ children, ...props }) => (
 	<Text {...props}>{children}</Text>

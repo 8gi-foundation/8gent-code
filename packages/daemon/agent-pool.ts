@@ -7,29 +7,29 @@
 
 import { Agent } from "../eight/agent";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
-import { bus } from "./events";
 import { getUsageMonitor } from "../providers/usage-monitor";
+import { bus } from "./events";
 
 export interface PoolConfig {
-  /** Default model to use (e.g. "qwen3.5:14b") */
-  model: string;
-  /** Runtime provider */
-  runtime: "ollama" | "lmstudio" | "openrouter";
-  /** Working directory for agent file operations */
-  workingDirectory: string;
-  /** OpenRouter API key (if runtime is openrouter) */
-  apiKey?: string;
-  /** Max tool-call turns per chat() invocation */
-  maxTurns?: number;
+	/** Default model to use (e.g. "qwen3.5:14b") */
+	model: string;
+	/** Runtime provider */
+	runtime: "ollama" | "lmstudio" | "openrouter";
+	/** Working directory for agent file operations */
+	workingDirectory: string;
+	/** OpenRouter API key (if runtime is openrouter) */
+	apiKey?: string;
+	/** Max tool-call turns per chat() invocation */
+	maxTurns?: number;
 }
 
 interface SessionEntry {
-  agent: Agent;
-  channel: string;
-  createdAt: number;
-  lastActiveAt: number;
-  messageCount: number;
-  busy: boolean; // true while agent.chat() is in flight
+	agent: Agent;
+	channel: string;
+	createdAt: number;
+	lastActiveAt: number;
+	messageCount: number;
+	busy: boolean; // true while agent.chat() is in flight
 }
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
@@ -38,321 +38,366 @@ const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Known session channels. Add new entries here when wiring a new surface. */
-export const KNOWN_CHANNELS = ["os", "app", "telegram", "discord", "api", "delegation", "computer"] as const;
-export type Channel = typeof KNOWN_CHANNELS[number];
+export const KNOWN_CHANNELS = [
+	"os",
+	"app",
+	"telegram",
+	"discord",
+	"api",
+	"delegation",
+	"computer",
+] as const;
+export type Channel = (typeof KNOWN_CHANNELS)[number];
 
 /** Per-channel concurrency caps. Falls back to MAX_SESSIONS when unset. */
 const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
-  computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
+	computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
 };
 
 /** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
 const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
-  computer: 10 * 60 * 1000, // 10 minutes
+	computer: 10 * 60 * 1000, // 10 minutes
 };
 
 /** Channels that should never be evicted by the idle reaper. */
 const NEVER_EVICT: ReadonlySet<string> = new Set(["telegram", "delegation"]);
 
 export class AgentPool {
-  private sessions = new Map<string, SessionEntry>();
-  private config: PoolConfig;
-  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+	private sessions = new Map<string, SessionEntry>();
+	private config: PoolConfig;
+	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(config: Partial<PoolConfig> = {}) {
-    this.config = {
-      model: config.model || DEFAULT_MODEL,
-      runtime: config.runtime || DEFAULT_RUNTIME,
-      workingDirectory: config.workingDirectory || process.cwd(),
-      apiKey: config.apiKey,
-      maxTurns: config.maxTurns || 15, // Hard limit for Telegram - prevents free model loops
-    };
+	constructor(config: Partial<PoolConfig> = {}) {
+		this.config = {
+			model: config.model || DEFAULT_MODEL,
+			runtime: config.runtime || DEFAULT_RUNTIME,
+			workingDirectory: config.workingDirectory || process.cwd(),
+			apiKey: config.apiKey,
+			maxTurns: config.maxTurns || 15, // Hard limit for Telegram - prevents free model loops
+		};
 
-    // Clean up idle sessions every 5 minutes
-    this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
-  }
+		// Clean up idle sessions every 5 minutes
+		this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+	}
 
-  /** Idle timeout for a given channel (defaults to IDLE_TIMEOUT_MS). */
-  private idleTimeoutFor(channel: string): number {
-    return CHANNEL_IDLE_TIMEOUTS[channel as Channel] ?? IDLE_TIMEOUT_MS;
-  }
+	/** Idle timeout for a given channel (defaults to IDLE_TIMEOUT_MS). */
+	private idleTimeoutFor(channel: string): number {
+		return CHANNEL_IDLE_TIMEOUTS[channel as Channel] ?? IDLE_TIMEOUT_MS;
+	}
 
-  /** Concurrency cap for a given channel (or MAX_SESSIONS if unset). */
-  private capFor(channel: string): number {
-    return CHANNEL_CAPS[channel as Channel] ?? MAX_SESSIONS;
-  }
+	/** Concurrency cap for a given channel (or MAX_SESSIONS if unset). */
+	private capFor(channel: string): number {
+		return CHANNEL_CAPS[channel as Channel] ?? MAX_SESSIONS;
+	}
 
-  /** Count active sessions on a channel. */
-  private countOn(channel: string): number {
-    let n = 0;
-    for (const entry of this.sessions.values()) {
-      if (entry.channel === channel) n++;
-    }
-    return n;
-  }
+	/** Count active sessions on a channel. */
+	private countOn(channel: string): number {
+		let n = 0;
+		for (const entry of this.sessions.values()) {
+			if (entry.channel === channel) n++;
+		}
+		return n;
+	}
 
-  /** Remove sessions that have been idle for longer than their channel's idle timeout. */
-  private cleanupIdleSessions(): void {
-    const now = Date.now();
-    for (const [id, entry] of this.sessions) {
-      // Never evict persistent channels (telegram, delegation)
-      if (NEVER_EVICT.has(entry.channel)) continue;
-      const timeout = this.idleTimeoutFor(entry.channel);
-      if (!entry.busy && (now - entry.lastActiveAt) > timeout) {
-        console.log(`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`);
-        this.sessions.delete(id);
-        bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
-      }
-    }
-  }
+	/** Remove sessions that have been idle for longer than their channel's idle timeout. */
+	private cleanupIdleSessions(): void {
+		const now = Date.now();
+		for (const [id, entry] of this.sessions) {
+			// Never evict persistent channels (telegram, delegation)
+			if (NEVER_EVICT.has(entry.channel)) continue;
+			const timeout = this.idleTimeoutFor(entry.channel);
+			if (!entry.busy && now - entry.lastActiveAt > timeout) {
+				console.log(
+					`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`,
+				);
+				this.sessions.delete(id);
+				bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
+			}
+		}
+	}
 
-  /** Create a new session with its own Agent instance */
-  createSession(sessionId: string, channel: string, overrides?: { maxTurns?: number }): void {
-    // Per-channel cap: evict oldest idle session on the same channel first.
-    const cap = this.capFor(channel);
-    if (this.countOn(channel) >= cap) {
-      let oldestId: string | null = null;
-      let oldestTime = Infinity;
-      for (const [id, entry] of this.sessions) {
-        if (entry.channel !== channel) continue;
-        if (NEVER_EVICT.has(entry.channel)) continue;
-        if (!entry.busy && entry.createdAt < oldestTime) {
-          oldestTime = entry.createdAt;
-          oldestId = id;
-        }
-      }
-      if (oldestId) {
-        this.destroySession(oldestId);
-        bus.emit("session:end", { sessionId: oldestId, reason: "channel-cap-evict" });
-      }
-    }
+	/** Create a new session with its own Agent instance */
+	createSession(sessionId: string, channel: string, overrides?: { maxTurns?: number }): void {
+		// Per-channel cap: evict oldest idle session on the same channel first.
+		const cap = this.capFor(channel);
+		if (this.countOn(channel) >= cap) {
+			let oldestId: string | null = null;
+			let oldestTime = Number.POSITIVE_INFINITY;
+			for (const [id, entry] of this.sessions) {
+				if (entry.channel !== channel) continue;
+				if (NEVER_EVICT.has(entry.channel)) continue;
+				if (!entry.busy && entry.createdAt < oldestTime) {
+					oldestTime = entry.createdAt;
+					oldestId = id;
+				}
+			}
+			if (oldestId) {
+				this.destroySession(oldestId);
+				bus.emit("session:end", {
+					sessionId: oldestId,
+					reason: "channel-cap-evict",
+				});
+			}
+		}
 
-    // Global cap as belt-and-braces: evict oldest idle (any channel).
-    if (this.sessions.size >= MAX_SESSIONS) {
-      let oldestId: string | null = null;
-      let oldestTime = Infinity;
-      for (const [id, entry] of this.sessions) {
-        if (NEVER_EVICT.has(entry.channel)) continue;
-        if (!entry.busy && entry.createdAt < oldestTime) {
-          oldestTime = entry.createdAt;
-          oldestId = id;
-        }
-      }
-      if (oldestId) {
-        this.destroySession(oldestId);
-      }
-    }
+		// Global cap as belt-and-braces: evict oldest idle (any channel).
+		if (this.sessions.size >= MAX_SESSIONS) {
+			let oldestId: string | null = null;
+			let oldestTime = Number.POSITIVE_INFINITY;
+			for (const [id, entry] of this.sessions) {
+				if (NEVER_EVICT.has(entry.channel)) continue;
+				if (!entry.busy && entry.createdAt < oldestTime) {
+					oldestTime = entry.createdAt;
+					oldestId = id;
+				}
+			}
+			if (oldestId) {
+				this.destroySession(oldestId);
+			}
+		}
 
-    const events = this.buildEventCallbacks(sessionId);
+		const events = this.buildEventCallbacks(sessionId);
 
-    // Delegation sessions get more tool turns than Telegram chat
-    const maxTurns = overrides?.maxTurns
-      ?? (channel === "delegation" ? 25 : this.config.maxTurns);
+		// Delegation sessions get more tool turns than Telegram chat
+		const maxTurns = overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns);
 
-    const agentConfig: AgentConfig = {
-      model: this.config.model,
-      runtime: this.config.runtime,
-      workingDirectory: this.config.workingDirectory,
-      apiKey: this.config.apiKey,
-      maxTurns,
-      events,
-    };
+		const agentConfig: AgentConfig = {
+			model: this.config.model,
+			runtime: this.config.runtime,
+			workingDirectory: this.config.workingDirectory,
+			apiKey: this.config.apiKey,
+			maxTurns,
+			events,
+		};
 
-    const agent = new Agent(agentConfig);
+		const agent = new Agent(agentConfig);
 
-    const now = Date.now();
-    this.sessions.set(sessionId, {
-      agent,
-      channel,
-      createdAt: now,
-      lastActiveAt: now,
-      messageCount: 0,
-      busy: false,
-    });
+		const now = Date.now();
+		this.sessions.set(sessionId, {
+			agent,
+			channel,
+			createdAt: now,
+			lastActiveAt: now,
+			messageCount: 0,
+			busy: false,
+		});
 
-    console.log(`[agent-pool] created session ${sessionId} (channel=${channel}, model=${this.config.model})`);
-  }
+		console.log(
+			`[agent-pool] created session ${sessionId} (channel=${channel}, model=${this.config.model})`,
+		);
+	}
 
-  /** Send a message to an agent and stream the response via the event bus */
-  async chat(sessionId: string, text: string): Promise<string> {
-    const entry = this.sessions.get(sessionId);
-    if (!entry) {
-      bus.emit("agent:error", { sessionId, error: "session not found" });
-      return "[error] session not found";
-    }
+	/** Send a message to an agent and stream the response via the event bus */
+	async chat(sessionId: string, text: string): Promise<string> {
+		const entry = this.sessions.get(sessionId);
+		if (!entry) {
+			bus.emit("agent:error", { sessionId, error: "session not found" });
+			return "[error] session not found";
+		}
 
-    if (entry.busy) {
-      bus.emit("agent:error", { sessionId, error: "agent is busy processing another message" });
-      return "[error] agent is busy";
-    }
+		if (entry.busy) {
+			bus.emit("agent:error", {
+				sessionId,
+				error: "agent is busy processing another message",
+			});
+			return "[error] agent is busy";
+		}
 
-    // Usage monitor gate - stop burning tokens when limits hit
-    const usage = getUsageMonitor();
-    const budget = usage.check();
-    if (!budget.allowed) {
-      const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
-      bus.emit("agent:error", { sessionId, error: msg });
-      return msg;
-    }
-    const warning = usage.getWarning();
-    if (warning) {
-      bus.emit("agent:stream", { sessionId, chunk: `[usage warning] ${warning}`, final: false });
-    }
+		// Usage monitor gate - stop burning tokens when limits hit
+		const usage = getUsageMonitor();
+		const budget = usage.check();
+		if (!budget.allowed) {
+			const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
+			bus.emit("agent:error", { sessionId, error: msg });
+			return msg;
+		}
+		const warning = usage.getWarning();
+		if (warning) {
+			bus.emit("agent:stream", {
+				sessionId,
+				chunk: `[usage warning] ${warning}`,
+				final: false,
+			});
+		}
 
-    entry.busy = true;
-    entry.messageCount++;
-    entry.lastActiveAt = Date.now();
-    bus.emit("agent:thinking", { sessionId });
+		entry.busy = true;
+		entry.messageCount++;
+		entry.lastActiveAt = Date.now();
+		bus.emit("agent:thinking", { sessionId });
 
-    try {
-      const response = await entry.agent.chat(text);
+		try {
+			const response = await entry.agent.chat(text);
 
-      // Track token usage (estimate from response length)
-      const estimatedTokens = Math.ceil((text.length + response.length) / 4);
-      usage.record(estimatedTokens);
+			// Track token usage (estimate from response length)
+			const estimatedTokens = Math.ceil((text.length + response.length) / 4);
+			usage.record(estimatedTokens);
 
-      // Emit the full final response (distinct from stream chunks)
-      bus.emit("agent:stream", { sessionId, chunk: response, final: true });
+			// Emit the full final response (distinct from stream chunks)
+			bus.emit("agent:stream", { sessionId, chunk: response, final: true });
 
-      return response;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      bus.emit("agent:error", { sessionId, error: errorMsg });
-      return `[error] ${errorMsg}`;
-    } finally {
-      entry.busy = false;
-    }
-  }
+			return response;
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
+			bus.emit("agent:error", { sessionId, error: errorMsg });
+			return `[error] ${errorMsg}`;
+		} finally {
+			entry.busy = false;
+		}
+	}
 
-  /** Destroy a session and its Agent */
-  destroySession(sessionId: string): void {
-    const entry = this.sessions.get(sessionId);
-    if (!entry) return;
+	/** Destroy a session and its Agent */
+	destroySession(sessionId: string): void {
+		const entry = this.sessions.get(sessionId);
+		if (!entry) return;
 
-    this.sessions.delete(sessionId);
-    console.log(`[agent-pool] destroyed session ${sessionId}`);
-  }
+		this.sessions.delete(sessionId);
+		console.log(`[agent-pool] destroyed session ${sessionId}`);
+	}
 
-  /** Check if a session exists */
-  hasSession(sessionId: string): boolean {
-    return this.sessions.has(sessionId);
-  }
+	/** Check if a session exists */
+	hasSession(sessionId: string): boolean {
+		return this.sessions.has(sessionId);
+	}
 
-  /** Get session info */
-  getSessionInfo(sessionId: string): { channel: string; messageCount: number; busy: boolean } | null {
-    const entry = this.sessions.get(sessionId);
-    if (!entry) return null;
-    return {
-      channel: entry.channel,
-      messageCount: entry.messageCount,
-      busy: entry.busy,
-    };
-  }
+	/** Get session info */
+	getSessionInfo(
+		sessionId: string,
+	): { channel: string; messageCount: number; busy: boolean } | null {
+		const entry = this.sessions.get(sessionId);
+		if (!entry) return null;
+		return {
+			channel: entry.channel,
+			messageCount: entry.messageCount,
+			busy: entry.busy,
+		};
+	}
 
-  /** Get count of active sessions */
-  get size(): number {
-    return this.sessions.size;
-  }
+	/** Get count of active sessions */
+	get size(): number {
+		return this.sessions.size;
+	}
 
-  /** Per-channel breakdown for the ops dashboard. */
-  getStatus(): {
-    total: number;
-    globalCap: number;
-    channels: Array<{ channel: string; active: number; cap: number; idleTimeoutMs: number }>;
-  } {
-    const counts = new Map<string, number>();
-    for (const entry of this.sessions.values()) {
-      counts.set(entry.channel, (counts.get(entry.channel) ?? 0) + 1);
-    }
-    // Always surface known channels even when zero so the dashboard is stable.
-    const seen = new Set<string>(KNOWN_CHANNELS);
-    for (const k of counts.keys()) seen.add(k);
-    const channels: Array<{ channel: string; active: number; cap: number; idleTimeoutMs: number }> = [];
-    for (const ch of seen) {
-      channels.push({
-        channel: ch,
-        active: counts.get(ch) ?? 0,
-        cap: this.capFor(ch),
-        idleTimeoutMs: this.idleTimeoutFor(ch),
-      });
-    }
-    return { total: this.sessions.size, globalCap: MAX_SESSIONS, channels };
-  }
+	/** Per-channel breakdown for the ops dashboard. */
+	getStatus(): {
+		total: number;
+		globalCap: number;
+		channels: Array<{
+			channel: string;
+			active: number;
+			cap: number;
+			idleTimeoutMs: number;
+		}>;
+	} {
+		const counts = new Map<string, number>();
+		for (const entry of this.sessions.values()) {
+			counts.set(entry.channel, (counts.get(entry.channel) ?? 0) + 1);
+		}
+		// Always surface known channels even when zero so the dashboard is stable.
+		const seen = new Set<string>(KNOWN_CHANNELS);
+		for (const k of counts.keys()) seen.add(k);
+		const channels: Array<{
+			channel: string;
+			active: number;
+			cap: number;
+			idleTimeoutMs: number;
+		}> = [];
+		for (const ch of seen) {
+			channels.push({
+				channel: ch,
+				active: counts.get(ch) ?? 0,
+				cap: this.capFor(ch),
+				idleTimeoutMs: this.idleTimeoutFor(ch),
+			});
+		}
+		return { total: this.sessions.size, globalCap: MAX_SESSIONS, channels };
+	}
 
-  /** Return metadata for all active sessions (for state persistence) */
-  getActiveSessions(): Array<{ sessionId: string; channel: string; messageCount: number; createdAt: number }> {
-    const result: Array<{ sessionId: string; channel: string; messageCount: number; createdAt: number }> = [];
-    for (const [id, entry] of this.sessions) {
-      result.push({
-        sessionId: id,
-        channel: entry.channel,
-        messageCount: entry.messageCount,
-        createdAt: entry.createdAt,
-      });
-    }
-    return result;
-  }
+	/** Return metadata for all active sessions (for state persistence) */
+	getActiveSessions(): Array<{
+		sessionId: string;
+		channel: string;
+		messageCount: number;
+		createdAt: number;
+	}> {
+		const result: Array<{
+			sessionId: string;
+			channel: string;
+			messageCount: number;
+			createdAt: number;
+		}> = [];
+		for (const [id, entry] of this.sessions) {
+			result.push({
+				sessionId: id,
+				channel: entry.channel,
+				messageCount: entry.messageCount,
+				createdAt: entry.createdAt,
+			});
+		}
+		return result;
+	}
 
-  /** Build event callbacks that bridge Agent events to the daemon EventBus */
-  private buildEventCallbacks(sessionId: string): AgentEventCallbacks {
-    return {
-      onToolStart: (event) => {
-        bus.emit("tool:start", {
-          sessionId,
-          tool: event.toolName,
-          input: event.args,
-        });
-      },
+	/** Build event callbacks that bridge Agent events to the daemon EventBus */
+	private buildEventCallbacks(sessionId: string): AgentEventCallbacks {
+		return {
+			onToolStart: (event) => {
+				bus.emit("tool:start", {
+					sessionId,
+					tool: event.toolName,
+					input: event.args,
+				});
+			},
 
-      onToolEnd: (event) => {
-        bus.emit("tool:result", {
-          sessionId,
-          tool: event.toolName,
-          output: event.resultPreview || "",
-          durationMs: event.durationMs,
-        });
-      },
+			onToolEnd: (event) => {
+				bus.emit("tool:result", {
+					sessionId,
+					tool: event.toolName,
+					output: event.resultPreview || "",
+					durationMs: event.durationMs,
+				});
+			},
 
-      onStepFinish: (event) => {
-        // Emit the assistant's text response as a stream chunk
-        if (event.text) {
-          bus.emit("agent:stream", {
-            sessionId,
-            chunk: event.text,
-          });
-        }
-      },
+			onStepFinish: (event) => {
+				// Emit the assistant's text response as a stream chunk
+				if (event.text) {
+					bus.emit("agent:stream", {
+						sessionId,
+						chunk: event.text,
+					});
+				}
+			},
 
-      onEvidence: (event) => {
-        // Evidence is a validation signal - emit as a memory event
-        bus.emit("memory:saved", {
-          sessionId,
-          key: `evidence:${event.type || "validation"}`,
-        });
-      },
-    };
-  }
+			onEvidence: (event) => {
+				// Evidence is a validation signal - emit as a memory event
+				bus.emit("memory:saved", {
+					sessionId,
+					key: `evidence:${event.type || "validation"}`,
+				});
+			},
+		};
+	}
 }
 
 /** Load pool config from env vars, then ~/.8gent/config.json as fallback */
 export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
-  let fileConfig: Record<string, any> = {};
-  try {
-    const dataDir = process.env.EIGHT_DATA_DIR || `${process.env.HOME}/.8gent`;
-    const configPath = `${dataDir}/config.json`;
-    const file = Bun.file(configPath);
-    if (await file.exists()) {
-      fileConfig = await file.json();
-    }
-  } catch {
-    // No config file - use env vars and defaults
-  }
+	let fileConfig: Record<string, any> = {};
+	try {
+		const dataDir = process.env.EIGHT_DATA_DIR || `${process.env.HOME}/.8gent`;
+		const configPath = `${dataDir}/config.json`;
+		const file = Bun.file(configPath);
+		if (await file.exists()) {
+			fileConfig = await file.json();
+		}
+	} catch {
+		// No config file - use env vars and defaults
+	}
 
-  return {
-    model: process.env.DEFAULT_MODEL || fileConfig?.model || fileConfig?.defaultModel,
-    runtime: (process.env.DEFAULT_RUNTIME || fileConfig?.runtime || fileConfig?.provider) as PoolConfig["runtime"],
-    workingDirectory: fileConfig?.workingDirectory || process.cwd(),
-    apiKey: process.env.OPENROUTER_API_KEY || fileConfig?.apiKey,
-    maxTurns: fileConfig?.maxTurns,
-  };
+	return {
+		model: process.env.DEFAULT_MODEL || fileConfig?.model || fileConfig?.defaultModel,
+		runtime: (process.env.DEFAULT_RUNTIME ||
+			fileConfig?.runtime ||
+			fileConfig?.provider) as PoolConfig["runtime"],
+		workingDirectory: fileConfig?.workingDirectory || process.cwd(),
+		apiKey: process.env.OPENROUTER_API_KEY || fileConfig?.apiKey,
+		maxTurns: fileConfig?.maxTurns,
+	};
 }

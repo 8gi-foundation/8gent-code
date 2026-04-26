@@ -58,7 +58,7 @@ export interface Competitor {
 }
 
 export class JBTD {
-  industry: string = '';
+  industry = '';
   
   jobsToBeDone: Array<{
     customerSegment: string;
@@ -109,7 +109,7 @@ export class JBTD {
   }
 
   executeAnalysis(): string {
-    const analysis = `${this.industry}\n\nJobs to be Done:\n`;
+    let analysis = `${this.industry}\n\nJobs to be Done:\n`;
     this.jobsToBeDone.forEach((job, i) => {
       analysis += `\n${i + 1}. ${job.customerSegment} - ${job.jobDescription}\n   Gaps: ${job.gapsPainPoints.join(', ')}`;
     });
@@ -123,9 +123,9 @@ export class JBTD {
 }
 
 export class BrandVision {
-  name: string = '';
-  missionStatement: string = '';
-  visionStatement: string = '';
+  name = '';
+  missionStatement = '';
+  visionStatement = '';
   values: string[] = [];
   brandVoice: 'authoritative' | 'friendly' | 'witty' | 'professional' | 'casual' = 'professional';
   targetAudienceDemographics: {
