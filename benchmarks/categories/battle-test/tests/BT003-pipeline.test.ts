@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let pipeline: any;
 let schema: any;
@@ -70,10 +69,7 @@ describe("Pipeline", () => {
 
 	it("reduce works", async () => {
 		const P = pipeline.Pipeline || pipeline.default;
-		const sum = await P.from([1, 2, 3, 4]).reduce(
-			(acc: number, x: number) => acc + x,
-			0,
-		);
+		const sum = await P.from([1, 2, 3, 4]).reduce((acc: number, x: number) => acc + x, 0);
 		expect(sum).toBe(10);
 	});
 

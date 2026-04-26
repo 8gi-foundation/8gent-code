@@ -70,12 +70,8 @@ export function UserTable({
 	return (
 		<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)]">
 			<div className="flex items-center justify-between border-b border-[var(--8gent-border)] px-6 py-4">
-				<h3 className="text-sm font-medium text-[var(--8gent-text)]">
-					{title}
-				</h3>
-				<span className="text-xs text-[var(--8gent-text-muted)]">
-					{totalCount} total
-				</span>
+				<h3 className="text-sm font-medium text-[var(--8gent-text)]">{title}</h3>
+				<span className="text-xs text-[var(--8gent-text-muted)]">{totalCount} total</span>
 			</div>
 			<div className="overflow-x-auto">
 				<table className="w-full">
@@ -118,16 +114,9 @@ export function UserTable({
 									className="border-b border-[var(--8gent-border)] transition-colors hover:bg-[var(--8gent-bg-hover)]"
 								>
 									<td className="px-6 py-3">
-										<Link
-											href={`/users/${user._id}`}
-											className="flex items-center gap-3 group"
-										>
+										<Link href={`/users/${user._id}`} className="flex items-center gap-3 group">
 											{user.avatar && (
-												<img
-													src={user.avatar}
-													alt=""
-													className="h-8 w-8 rounded-full"
-												/>
+												<img src={user.avatar} alt="" className="h-8 w-8 rounded-full" />
 											)}
 											<div>
 												<div className="text-sm text-[var(--8gent-text)] group-hover:text-[var(--8gent-accent)]">
@@ -159,9 +148,7 @@ export function UserTable({
 												{user.activeSessionCount}
 											</span>
 										) : (
-											<span className="text-xs text-[var(--8gent-text-muted)]">
-												-
-											</span>
+											<span className="text-xs text-[var(--8gent-text-muted)]">-</span>
 										)}
 									</td>
 									<td className="px-6 py-3 text-sm text-[var(--8gent-text-muted)]">

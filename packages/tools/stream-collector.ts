@@ -1,6 +1,4 @@
-async function drain<T>(
-	source: ReadableStream<T> | AsyncIterable<T>,
-): Promise<T[]> {
+async function drain<T>(source: ReadableStream<T> | AsyncIterable<T>): Promise<T[]> {
 	const chunks: T[] = [];
 	if (Symbol.asyncIterator in source) {
 		for await (const chunk of source as AsyncIterable<T>) {
@@ -21,9 +19,7 @@ async function drain<T>(
 	return chunks;
 }
 
-export async function collectStream<T>(
-	stream: ReadableStream<T> | AsyncIterable<T>,
-): Promise<T[]> {
+export async function collectStream<T>(stream: ReadableStream<T> | AsyncIterable<T>): Promise<T[]> {
 	return drain(stream);
 }
 
@@ -32,10 +28,7 @@ export async function collectString(
 ): Promise<string> {
 	const chunks = await drain(stream);
 	const decoder = new TextDecoder();
-	return (
-		chunks.map((c) => decoder.decode(c, { stream: true })).join("") +
-		decoder.decode()
-	);
+	return chunks.map((c) => decoder.decode(c, { stream: true })).join("") + decoder.decode();
 }
 
 export async function collectBuffer(

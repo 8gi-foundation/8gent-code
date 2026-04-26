@@ -285,8 +285,7 @@ Provide a complete test file.`,
 		name: "Generate Event Emitter Tests",
 		category: "test-generation",
 		difficulty: "medium",
-		description:
-			"Generate tests for an event emitter including async and concurrency",
+		description: "Generate tests for an event emitter including async and concurrency",
 		prompt: `Read fixtures/test-generation/TG003-event-emitter.ts and generate a comprehensive test suite:
 
 Requirements:

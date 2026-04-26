@@ -30,13 +30,7 @@ export function SpawnRequestCard({
 	});
 
 	return (
-		<Box
-			borderStyle="round"
-			borderColor="yellow"
-			paddingX={1}
-			paddingY={0}
-			flexDirection="column"
-		>
+		<Box borderStyle="round" borderColor="yellow" paddingX={1} paddingY={0} flexDirection="column">
 			<Inline>
 				<Text color="yellow" bold>
 					{personaIcon} Spawn Request: {personaName}

@@ -16,11 +16,7 @@ import {
 } from "../../benchmarks/autoresearch/model-router";
 import { type JudgeConfig, JudgeScorer, type ScoreRecord } from "./judge";
 import { type ProxyConfig, type ProxyStatus, TrainingProxy } from "./proxy";
-import {
-	type CheckpointInfo,
-	type TrainingConfig,
-	TrainingOrchestrator,
-} from "./training";
+import { type CheckpointInfo, type TrainingConfig, TrainingOrchestrator } from "./training";
 
 export interface ProductionConfig {
 	proxy: Partial<ProxyConfig>;
@@ -43,13 +39,7 @@ export interface ProductionConfig {
 }
 
 export interface LoopStatus {
-	phase:
-		| "idle"
-		| "collecting"
-		| "scoring"
-		| "training"
-		| "validating"
-		| "promoting";
+	phase: "idle" | "collecting" | "scoring" | "training" | "validating" | "promoting";
 	proxy: ProxyStatus | null;
 	judgeAvailable: boolean;
 	training: {
@@ -127,9 +117,7 @@ export class ProductionLoop {
 		// Phase 2: Verify judge is reachable
 		const judgeUp = await this.judge.isAvailable();
 		if (!judgeUp) {
-			console.warn(
-				"[kernel] Judge model not reachable — scoring disabled until available",
-			);
+			console.warn("[kernel] Judge model not reachable — scoring disabled until available");
 		}
 
 		// Phase 4: Start the scheduling tick (check every 5 minutes)
@@ -171,13 +159,7 @@ export class ProductionLoop {
 		// Score the response
 		let record: ScoreRecord | null = null;
 		try {
-			record = await this.judge.score(
-				sessionId,
-				turnIndex,
-				model,
-				prompt,
-				response,
-			);
+			record = await this.judge.score(sessionId, turnIndex, model, prompt, response);
 		} catch {
 			// Judge unavailable — skip scoring, don't block the session
 			return null;
@@ -242,9 +224,7 @@ export class ProductionLoop {
 		const older = trend.slice(0, -3);
 		const recentAvg = recent.reduce((s, t) => s + t.avg, 0) / recent.length;
 		const olderAvg =
-			older.length > 0
-				? older.reduce((s, t) => s + t.avg, 0) / older.length
-				: recentAvg;
+			older.length > 0 ? older.reduce((s, t) => s + t.avg, 0) / older.length : recentAvg;
 
 		const delta = recentAvg - olderAvg;
 
@@ -322,9 +302,7 @@ export class ProductionLoop {
 
 		// MadMax: train only during sleep or idle
 		// Non-MadMax: train anytime batch is ready
-		const trainingAllowed = this.config.madmaxEnabled
-			? inSleepWindow || isIdle
-			: true;
+		const trainingAllowed = this.config.madmaxEnabled ? inSleepWindow || isIdle : true;
 
 		return {
 			inSleepWindow,

@@ -41,12 +41,7 @@ function makeCommitLog(
 const WEBAPP_COMMITS = Array.from({ length: 50 }, (_, i) => ({
 	hash: `a${String(i).padStart(39, "0")}`,
 	author: i % 3 === 0 ? "Alice" : i % 3 === 1 ? "Bob" : "Carol",
-	email:
-		i % 3 === 0
-			? "alice@dev.com"
-			: i % 3 === 1
-				? "bob@dev.com"
-				: "carol@dev.com",
+	email: i % 3 === 0 ? "alice@dev.com" : i % 3 === 1 ? "bob@dev.com" : "carol@dev.com",
 	date: `Mon Jan ${(i % 28) + 1} 10:${String(i % 60).padStart(2, "0")}:00 2024 +0000`,
 	message: `feat: update component ${i}`,
 }));

@@ -25,26 +25,19 @@ function scoreChatModelCandidate(id: string): number {
 	const s = id.toLowerCase();
 	let score = 10;
 	if (s.startsWith("eight")) score += 500;
-	if (
-		/\b(instruct|chat)\b/.test(s) ||
-		/(?:^|[-_/])(it|instruct)(?:$|[-_/])/i.test(id)
-	) {
+	if (/\b(instruct|chat)\b/.test(s) || /(?:^|[-_/])(it|instruct)(?:$|[-_/])/i.test(id)) {
 		score += 80;
 	}
 	const sizeMatch = s.match(/(\d{1,3})b\b/);
 	if (sizeMatch) score += Math.min(Number.parseInt(sizeMatch[1], 10), 120);
-	if (/\b(0\.5b|1b|2b|3b)\b/.test(s) && !/\b(30|32|70|72)\b/.test(s))
-		score -= 15;
+	if (/\b(0\.5b|1b|2b|3b)\b/.test(s) && !/\b(30|32|70|72)\b/.test(s)) score -= 15;
 	return score;
 }
 
 /**
  * Prefer a non-embedding model; optional `preference` does exact, substring, then fuzzy match.
  */
-export function pickBestChatModel(
-	modelIds: string[],
-	opts?: { preference?: string },
-): string {
+export function pickBestChatModel(modelIds: string[], opts?: { preference?: string }): string {
 	if (modelIds.length === 0) return "";
 	const unique = [...new Set(modelIds.map((x) => x.trim()).filter(Boolean))];
 	const chatOnly = unique.filter((id) => !isLikelyEmbeddingModelId(id));
@@ -60,9 +53,7 @@ export function pickBestChatModel(
 		const sub = pool.find(
 			(id) =>
 				id.toLowerCase().includes(lo) ||
-				lo
-					.replace(/[-_:]/g, "")
-					.includes(id.toLowerCase().replace(/[-_:./]/g, "")),
+				lo.replace(/[-_:]/g, "").includes(id.toLowerCase().replace(/[-_:./]/g, "")),
 		);
 		if (sub) return sub;
 		const norm = (s: string) => s.toLowerCase().replace(/[-_:./]/g, "");
@@ -84,11 +75,9 @@ export function normalizeProviderId(raw?: string): string | undefined {
 	if (!raw?.trim()) return undefined;
 	const x = raw.trim().toLowerCase().replace(/_/g, "-");
 	const compact = x.replace(/-/g, "");
-	if (x === "lmstudio" || x === "lm-studio" || compact === "lmstudio")
-		return "lmstudio";
+	if (x === "lmstudio" || x === "lm-studio" || compact === "lmstudio") return "lmstudio";
 	if (x === "ollama") return "ollama";
-	if (x === "openrouter-free" || compact === "openrouterfree")
-		return "openrouter-free";
+	if (x === "openrouter-free" || compact === "openrouterfree") return "openrouter-free";
 	if (x === "openrouter") return "openrouter";
 	if (x === "groq") return "groq";
 	if (x === "openai") return "openai";

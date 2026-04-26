@@ -24,13 +24,10 @@ export default function DashboardPage() {
 
 	// Calculate estimated revenue from plan distribution
 	const estimatedRevenue = dashboard
-		? Object.entries(dashboard.planDistribution).reduce(
-				(sum: number, [tier, count]) => {
-					const plan = PLAN_DEFINITIONS[tier as keyof typeof PLAN_DEFINITIONS];
-					return sum + (plan?.priceMonthly ?? 0) * Number(count);
-				},
-				0,
-			)
+		? Object.entries(dashboard.planDistribution).reduce((sum: number, [tier, count]) => {
+				const plan = PLAN_DEFINITIONS[tier as keyof typeof PLAN_DEFINITIONS];
+				return sum + (plan?.priceMonthly ?? 0) * Number(count);
+			}, 0)
 		: 0;
 
 	return (
@@ -40,12 +37,8 @@ export default function DashboardPage() {
 				<div className="mx-auto max-w-7xl px-6 py-4">
 					<div className="flex items-center justify-between">
 						<div>
-							<h1 className="text-lg font-bold text-[var(--8gent-text)]">
-								8gent Dashboard
-							</h1>
-							<p className="text-xs text-[var(--8gent-text-muted)]">
-								Admin Control Plane
-							</p>
+							<h1 className="text-lg font-bold text-[var(--8gent-text)]">8gent Dashboard</h1>
+							<p className="text-xs text-[var(--8gent-text-muted)]">Admin Control Plane</p>
 						</div>
 						<nav className="flex gap-4">
 							<a
@@ -69,21 +62,11 @@ export default function DashboardPage() {
 				{/* Stats Cards */}
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 					{isLoading ? (
-						Array.from({ length: 4 }).map((_, i) => (
-							<StatsCardSkeleton key={i} />
-						))
+						Array.from({ length: 4 }).map((_, i) => <StatsCardSkeleton key={i} />)
 					) : (
 						<>
-							<StatsCard
-								value={dashboard.userCount}
-								label="Total Users"
-								icon="U"
-							/>
-							<StatsCard
-								value={dashboard.activeSessionCount}
-								label="Active Sessions"
-								icon="S"
-							/>
+							<StatsCard value={dashboard.userCount} label="Total Users" icon="U" />
+							<StatsCard value={dashboard.activeSessionCount} label="Active Sessions" icon="S" />
 							<StatsCard
 								value={formatTokenCount(dashboard.tokensToday)}
 								label="Tokens Today"
@@ -105,39 +88,24 @@ export default function DashboardPage() {
 				<div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 					{/* Recent Sessions (2/3 width) */}
 					<div className="lg:col-span-2">
-						{isLoading ? (
-							<SessionTableSkeleton />
-						) : (
-							<SessionTable sessions={recentSessions} />
-						)}
+						{isLoading ? <SessionTableSkeleton /> : <SessionTable sessions={recentSessions} />}
 					</div>
 
 					{/* System Health (1/3 width) */}
 					<div className="space-y-4">
 						{/* Health Card */}
 						<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
-							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">
-								System Health
-							</h3>
+							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">System Health</h3>
 							{isLoading ? (
 								<div className="space-y-3 animate-pulse">
 									{Array.from({ length: 4 }).map((_, i) => (
-										<div
-											key={i}
-											className="h-6 rounded bg-[var(--8gent-bg-hover)]"
-										/>
+										<div key={i} className="h-6 rounded bg-[var(--8gent-bg-hover)]" />
 									))}
 								</div>
 							) : (
 								<div className="space-y-3">
-									<HealthRow
-										label="Active Sessions"
-										value={String(health.activeSessions)}
-									/>
-									<HealthRow
-										label="Sessions (1hr)"
-										value={String(health.sessionsLastHour)}
-									/>
+									<HealthRow label="Active Sessions" value={String(health.activeSessions)} />
+									<HealthRow label="Sessions (1hr)" value={String(health.sessionsLastHour)} />
 									<HealthRow
 										label="Error Rate"
 										value={`${(health.errorRate * 100).toFixed(2)}%`}
@@ -176,10 +144,7 @@ export default function DashboardPage() {
 							{isLoading ? (
 								<div className="space-y-2 animate-pulse">
 									{Array.from({ length: 3 }).map((_, i) => (
-										<div
-											key={i}
-											className="h-6 rounded bg-[var(--8gent-bg-hover)]"
-										/>
+										<div key={i} className="h-6 rounded bg-[var(--8gent-bg-hover)]" />
 									))}
 								</div>
 							) : (
@@ -188,9 +153,10 @@ export default function DashboardPage() {
 										.sort(([, a], [, b]) => Number(b) - Number(a))
 										.slice(0, 8)
 										.map(([model, count]) => {
-											const total = Object.values(
-												health.modelDistribution,
-											).reduce<number>((s, v) => s + Number(v), 0);
+											const total = Object.values(health.modelDistribution).reduce<number>(
+												(s, v) => s + Number(v),
+												0,
+											);
 											const countN = Number(count);
 											const pct = total > 0 ? (countN / total) * 100 : 0;
 											return (
@@ -213,9 +179,7 @@ export default function DashboardPage() {
 											);
 										})}
 									{Object.keys(health.modelDistribution).length === 0 && (
-										<p className="text-xs text-[var(--8gent-text-muted)]">
-											No data yet
-										</p>
+										<p className="text-xs text-[var(--8gent-text-muted)]">No data yet</p>
 									)}
 								</div>
 							)}
@@ -229,29 +193,17 @@ export default function DashboardPage() {
 							{isLoading ? (
 								<div className="space-y-2 animate-pulse">
 									{Array.from({ length: 3 }).map((_, i) => (
-										<div
-											key={i}
-											className="h-6 rounded bg-[var(--8gent-bg-hover)]"
-										/>
+										<div key={i} className="h-6 rounded bg-[var(--8gent-bg-hover)]" />
 									))}
 								</div>
 							) : (
 								<div className="space-y-2">
-									{Object.entries(dashboard.planDistribution).map(
-										([plan, count]) => (
-											<div
-												key={plan}
-												className="flex items-center justify-between text-sm"
-											>
-												<span className="text-[var(--8gent-text-secondary)] capitalize">
-													{plan}
-												</span>
-												<span className="text-[var(--8gent-text)]">
-													{Number(count)}
-												</span>
-											</div>
-										),
-									)}
+									{Object.entries(dashboard.planDistribution).map(([plan, count]) => (
+										<div key={plan} className="flex items-center justify-between text-sm">
+											<span className="text-[var(--8gent-text-secondary)] capitalize">{plan}</span>
+											<span className="text-[var(--8gent-text)]">{Number(count)}</span>
+										</div>
+									))}
 								</div>
 							)}
 						</div>

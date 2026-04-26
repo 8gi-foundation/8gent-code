@@ -22,18 +22,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir, release } from "node:os";
 import { join, resolve } from "node:path";
 
-const BRIDGE_SOURCE_DIR = resolve(
-	import.meta.dir,
-	"..",
-	"bin",
-	"apple-foundation-bridge",
-);
-const BUILD_BINARY = join(
-	BRIDGE_SOURCE_DIR,
-	".build",
-	"release",
-	"AppleFoundationBridge",
-);
+const BRIDGE_SOURCE_DIR = resolve(import.meta.dir, "..", "bin", "apple-foundation-bridge");
+const BUILD_BINARY = join(BRIDGE_SOURCE_DIR, ".build", "release", "AppleFoundationBridge");
 const INSTALL_DIR = join(homedir(), ".8gent", "bin");
 const INSTALL_PATH = join(INSTALL_DIR, "apple-foundation-bridge");
 
@@ -48,16 +38,10 @@ function fail(code: number, msg: string): never {
 
 function checkHost(): void {
 	if (process.platform !== "darwin") {
-		fail(
-			1,
-			`Apple Foundation Model requires macOS. Current platform: ${process.platform}`,
-		);
+		fail(1, `Apple Foundation Model requires macOS. Current platform: ${process.platform}`);
 	}
 	if (process.arch !== "arm64") {
-		fail(
-			1,
-			`Apple Foundation Model requires Apple Silicon. Current arch: ${process.arch}`,
-		);
+		fail(1, `Apple Foundation Model requires Apple Silicon. Current arch: ${process.arch}`);
 	}
 	// Darwin 25.x corresponds to macOS 26 Tahoe. Apple's FoundationModels
 	// framework is only available from macOS 26 onwards.
@@ -77,10 +61,7 @@ function checkSwiftToolchain(): void {
 		encoding: "utf8",
 	});
 	if (res.status !== 0) {
-		fail(
-			2,
-			"Swift toolchain not found. Install Xcode Command Line Tools: xcode-select --install",
-		);
+		fail(2, "Swift toolchain not found. Install Xcode Command Line Tools: xcode-select --install");
 	}
 	const firstLine = (res.stdout || "").split("\n")[0] || "swift";
 	log(`swift toolchain: ${firstLine.trim()}`);

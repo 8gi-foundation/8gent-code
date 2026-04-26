@@ -5,14 +5,7 @@
  * All use Bun.spawn for CLI execution. All respect dryRun.
  */
 
-import {
-	type ActuatorConfig,
-	type ActuatorResult,
-	checkTarget,
-	fail,
-	log,
-	ok,
-} from "./types";
+import { type ActuatorConfig, type ActuatorResult, checkTarget, fail, log, ok } from "./types";
 
 /** Run a CLI command via Bun.spawn, capture stdout + stderr */
 async function exec(
@@ -60,11 +53,7 @@ export async function deployToVercel(
 	const result = await exec(["vercel", "--prod", "--yes"], projectDir);
 
 	if (result.exitCode !== 0) {
-		return fail(
-			action,
-			target,
-			`Exit ${result.exitCode}: ${result.stderr || result.stdout}`,
-		);
+		return fail(action, target, `Exit ${result.exitCode}: ${result.stderr || result.stdout}`);
 	}
 
 	return ok(action, target, result.stdout, {
@@ -101,11 +90,7 @@ export async function deployToRailway(
 	const result = await exec(["railway", "up"], projectDir);
 
 	if (result.exitCode !== 0) {
-		return fail(
-			action,
-			target,
-			`Exit ${result.exitCode}: ${result.stderr || result.stdout}`,
-		);
+		return fail(action, target, `Exit ${result.exitCode}: ${result.stderr || result.stdout}`);
 	}
 
 	return ok(action, target, result.stdout, {
@@ -142,11 +127,7 @@ export async function deployToFly(
 	const result = await exec(["fly", "deploy"], projectDir);
 
 	if (result.exitCode !== 0) {
-		return fail(
-			action,
-			target,
-			`Exit ${result.exitCode}: ${result.stderr || result.stdout}`,
-		);
+		return fail(action, target, `Exit ${result.exitCode}: ${result.stderr || result.stdout}`);
 	}
 
 	return ok(action, target, result.stdout, {

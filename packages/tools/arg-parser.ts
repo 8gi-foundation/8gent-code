@@ -72,9 +72,7 @@ export class ArgumentParser {
 					result[flag.name] = value === undefined ? flag.default : value;
 					break;
 				case "number":
-					result[flag.name] = Number.isNaN(Number(value))
-						? flag.default
-						: Number(value);
+					result[flag.name] = Number.isNaN(Number(value)) ? flag.default : Number(value);
 					break;
 				case "boolean":
 					result[flag.name] = value !== undefined ? value : flag.default;
@@ -96,16 +94,11 @@ export class ArgumentParser {
 	 * @returns Formatted help string
 	 */
 	generateHelp(): string {
-		const lines = [
-			`Usage: ${this.programName} [flags] [positional args]`,
-			"",
-			"Flags:",
-		];
+		const lines = [`Usage: ${this.programName} [flags] [positional args]`, "", "Flags:"];
 
 		for (const flag of this.flags) {
 			const alias = flag.alias ? ` (${flag.alias})` : "";
-			const defaultValue =
-				flag.default !== undefined ? ` (default: ${flag.default})` : "";
+			const defaultValue = flag.default !== undefined ? ` (default: ${flag.default})` : "";
 			lines.push(`  --${flag.name}${alias}: ${flag.type}${defaultValue}`);
 		}
 

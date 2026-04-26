@@ -17,12 +17,7 @@ import * as path from "node:path";
 // Types
 // ============================================
 
-export type AgentStatus =
-	| "idle"
-	| "running"
-	| "completed"
-	| "failed"
-	| "cancelled";
+export type AgentStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 
 export interface AgentTask {
 	id: string;
@@ -100,10 +95,7 @@ export class AgentPool extends EventEmitter {
 	/**
 	 * Spawn a new background agent with a task
 	 */
-	async spawnAgent(
-		taskDescription: string,
-		config?: Partial<AgentConfig>,
-	): Promise<SpawnedAgent> {
+	async spawnAgent(taskDescription: string, config?: Partial<AgentConfig>): Promise<SpawnedAgent> {
 		const agentId = this.generateId("agent");
 		const taskId = this.generateId("task");
 
@@ -190,8 +182,7 @@ export class AgentPool extends EventEmitter {
 		} catch (err) {
 			spawnedAgent.status = "failed";
 			spawnedAgent.task.status = "failed";
-			spawnedAgent.task.error =
-				err instanceof Error ? err.message : String(err);
+			spawnedAgent.task.error = err instanceof Error ? err.message : String(err);
 			spawnedAgent.completedAt = new Date();
 			spawnedAgent.task.completedAt = new Date();
 
@@ -292,11 +283,7 @@ export class AgentPool extends EventEmitter {
 	/**
 	 * Send a message to an agent
 	 */
-	sendMessage(
-		fromAgentId: string,
-		toAgentId: string | "broadcast",
-		content: unknown,
-	): void {
+	sendMessage(fromAgentId: string, toAgentId: string | "broadcast", content: unknown): void {
 		const message: AgentMessage = {
 			id: this.generateId("msg"),
 			fromAgent: fromAgentId,
@@ -493,9 +480,7 @@ export class TaskQueue extends EventEmitter {
 
 		while (this.queue.length > 0) {
 			// Find next task with satisfied dependencies
-			const taskIndex = this.queue.findIndex((task) =>
-				this.areDependenciesSatisfied(task),
-			);
+			const taskIndex = this.queue.findIndex((task) => this.areDependenciesSatisfied(task));
 
 			if (taskIndex === -1) break; // No tasks ready
 

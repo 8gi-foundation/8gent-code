@@ -5,28 +5,15 @@
 import { describe, expect, test } from "bun:test";
 
 // Test narrator translation functions (pure, no React)
-import {
-	narratePlan,
-	narrateStep,
-	narrateToolEnd,
-	narrateToolStart,
-} from "../lib/narrator";
+import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "../lib/narrator";
 
 describe("Narrator translations", () => {
 	test("narrateToolStart maps tool names to human language", () => {
-		expect(narrateToolStart("run_command", { command: "bun test" })).toContain(
-			"test",
-		);
-		expect(narrateToolStart("read_file", { path: "/src/app.tsx" })).toContain(
-			"app.tsx",
-		);
-		expect(narrateToolStart("write_file", { path: "/src/index.ts" })).toContain(
-			"index.ts",
-		);
+		expect(narrateToolStart("run_command", { command: "bun test" })).toContain("test");
+		expect(narrateToolStart("read_file", { path: "/src/app.tsx" })).toContain("app.tsx");
+		expect(narrateToolStart("write_file", { path: "/src/index.ts" })).toContain("index.ts");
 		expect(narrateToolStart("list_files", {})).toContain("Exploring");
-		expect(narrateToolStart("web_search", { query: "react hooks" })).toContain(
-			"react hooks",
-		);
+		expect(narrateToolStart("web_search", { query: "react hooks" })).toContain("react hooks");
 		expect(narrateToolStart("unknown_tool", {})).toContain("unknown_tool");
 	});
 
@@ -40,9 +27,7 @@ describe("Narrator translations", () => {
 	});
 
 	test("narratePlan extracts numbered steps", () => {
-		const result = narratePlan(
-			"PLAN: 1) scaffold 2) add routes 3) test 4) commit",
-		);
+		const result = narratePlan("PLAN: 1) scaffold 2) add routes 3) test 4) commit");
 		expect(result).toContain("scaffold");
 		expect(result).toContain("→");
 		expect(result).toContain("test");
@@ -54,9 +39,7 @@ describe("Narrator translations", () => {
 	});
 
 	test("narrateStep strips code blocks", () => {
-		const result = narrateStep(
-			"Here's the fix:\n```ts\nconst x = 1;\n```\nThis should work now.",
-		);
+		const result = narrateStep("Here's the fix:\n```ts\nconst x = 1;\n```\nThis should work now.");
 		expect(result).not.toContain("```");
 		expect(result.length).toBeLessThanOrEqual(120);
 	});

@@ -11,11 +11,7 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { getHookManager } from "../hooks";
 import { getMCPClient } from "../mcp";
-import {
-	formatAgentStatus,
-	getAgentPool,
-	parseSpawnCommand,
-} from "../orchestration";
+import { formatAgentStatus, getAgentPool, parseSpawnCommand } from "../orchestration";
 import { getPermissionManager } from "../permissions";
 import { type RunLogEntry, readRuns } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -23,11 +19,7 @@ import { runTelegramSetup } from "../self-autonomy/onboarding";
 import { getSkillManager, parseSkillCommand } from "../skills";
 import { formatTask, getTaskManager, parseTaskCommand } from "../tasks";
 import { getActiveTelegramBot, startTelegramBot } from "../telegram";
-import {
-	formatTaskOutput,
-	formatTaskStatus,
-	getBackgroundTaskManager,
-} from "../tools/background";
+import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { Agent } from "./agent";
 import type { AgentConfig } from "./types";
 
@@ -394,9 +386,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 		console.log("\n\x1b[36mPredictions:\x1b[0m\n");
 
 		if (ready.length === 0 && !next) {
-			console.log(
-				"  No predictions yet. Start working to generate predictions.",
-			);
+			console.log("  No predictions yet. Start working to generate predictions.");
 		} else {
 			if (next) {
 				console.log(`  \x1b[33m★ Next recommended:\x1b[0m ${next.description}`);
@@ -408,9 +398,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 				console.log("  \x1b[36mReady steps:\x1b[0m");
 				for (const step of ready) {
 					const score = (step.priority * step.confidence).toFixed(1);
-					console.log(
-						`    [${step.category}] ${step.description} (score: ${score})`,
-					);
+					console.log(`    [${step.category}] ${step.description} (score: ${score})`);
 				}
 			}
 		}
@@ -424,9 +412,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 
 		console.log("\n\x1b[36mMomentum:\x1b[0m");
 		console.log(`  Steps completed: \x1b[32m${m.stepsCompleted}\x1b[0m`);
-		console.log(
-			`  Rate: \x1b[33m${m.stepsPerMinute.toFixed(1)} steps/min\x1b[0m`,
-		);
+		console.log(`  Rate: \x1b[33m${m.stepsPerMinute.toFixed(1)} steps/min\x1b[0m`);
 		console.log(`  Streak: \x1b[36m${m.streak}\x1b[0m consecutive`);
 		return true;
 	}
@@ -434,10 +420,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 	return false;
 }
 
-async function handleModelCommands(
-	trimmed: string,
-	agent: Agent,
-): Promise<boolean> {
+async function handleModelCommands(trimmed: string, agent: Agent): Promise<boolean> {
 	if (trimmed === "/fast") {
 		const { getModeManager, FAST_MODE_MODELS } = await import("./modes.js");
 		const { getProviderManager } = await import("../providers/index.js");
@@ -456,14 +439,8 @@ async function handleModelCommands(
 						const data = (await resp.json()) as {
 							models?: Array<{ name: string }>;
 						};
-						const available = (data.models || []).map(
-							(m: { name: string }) => m.name,
-						);
-						if (
-							available.some((m: string) =>
-								m.startsWith(candidate.model.split(":")[0]),
-							)
-						) {
+						const available = (data.models || []).map((m: { name: string }) => m.name);
+						if (available.some((m: string) => m.startsWith(candidate.model.split(":")[0]))) {
 							fastModel = candidate;
 							break;
 						}
@@ -480,9 +457,7 @@ async function handleModelCommands(
 				console.log(`\x1b[33mFast mode ON\x1b[0m - ${fastModel.label}`);
 				console.log(`Previous model saved: \x1b[2m${currentModel}\x1b[0m`);
 			} else {
-				console.log(
-					"\x1b[33mFast mode ON\x1b[0m - no fast model found, keeping current model",
-				);
+				console.log("\x1b[33mFast mode ON\x1b[0m - no fast model found, keeping current model");
 			}
 		} else {
 			const prev = mm.previousModel;
@@ -531,21 +506,15 @@ async function handleModelCommands(
 				const response = await fetch("http://localhost:11434/api/tags");
 				const data = await response.json();
 				for (const model of data.models || []) {
-					const current =
-						model.name === pm.getActiveModel()
-							? " \x1b[32m← current\x1b[0m"
-							: "";
-					console.log(
-						`  - ${model.name} (${(model.size / 1e9).toFixed(1)}GB)${current}`,
-					);
+					const current = model.name === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
+					console.log(`  - ${model.name} (${(model.size / 1e9).toFixed(1)}GB)${current}`);
 				}
 			} catch {
 				console.log("  Could not fetch Ollama models. Is Ollama running?");
 			}
 		} else {
 			for (const model of provider.models) {
-				const current =
-					model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
+				const current = model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
 				console.log(`  - ${model}${current}`);
 			}
 		}
@@ -557,26 +526,20 @@ async function handleModelCommands(
 
 async function handleProviderCommands(trimmed: string): Promise<boolean> {
 	if (trimmed === "/providers") {
-		const { getProviderManager, PROVIDER_NAMES } = await import(
-			"../providers/index.js"
-		);
+		const { getProviderManager, PROVIDER_NAMES } = await import("../providers/index.js");
 		const pm = getProviderManager();
 		const active = pm.getActiveProvider();
 
 		console.log("\n\x1b[36mLLM Providers:\x1b[0m\n");
 		for (const name of PROVIDER_NAMES) {
 			const p = pm.getProvider(name);
-			const hasKey = pm.getApiKey(name)
-				? "\x1b[32m✓ key\x1b[0m"
-				: "\x1b[33m○ no key\x1b[0m";
+			const hasKey = pm.getApiKey(name) ? "\x1b[32m✓ key\x1b[0m" : "\x1b[33m○ no key\x1b[0m";
 			const isActive = p.name === active.name ? " \x1b[36m← active\x1b[0m" : "";
 			const keyInfo = p.name === "ollama" ? "\x1b[32m✓ local\x1b[0m" : hasKey;
 			console.log(`  ${p.displayName.padEnd(20)} ${keyInfo}${isActive}`);
 		}
 		console.log("\n  Use \x1b[36m/provider <name>\x1b[0m to switch");
-		console.log(
-			"  Use \x1b[36m/provider key <api-key>\x1b[0m to set key for current provider\n",
-		);
+		console.log("  Use \x1b[36m/provider key <api-key>\x1b[0m to set key for current provider\n");
 		return true;
 	}
 
@@ -602,8 +565,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 		const p = pm.getActiveProvider();
 		console.log(`\x1b[36mModels for ${p.displayName}:\x1b[0m`);
 		for (const model of p.models) {
-			const current =
-				model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
+			const current = model === pm.getActiveModel() ? " \x1b[32m← current\x1b[0m" : "";
 			console.log(`  - ${model}${current}`);
 		}
 		return true;
@@ -618,9 +580,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 			const pm = getProviderManager();
 			const p = pm.getActiveProvider();
 			if (p.name === "ollama") {
-				console.log(
-					"\x1b[33mOllama doesn't need an API key (it's local)\x1b[0m",
-				);
+				console.log("\x1b[33mOllama doesn't need an API key (it's local)\x1b[0m");
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
@@ -636,9 +596,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 		!trimmed.startsWith("/provider models")
 	) {
 		const providerName = trimmed.slice(10).trim().toLowerCase();
-		const { getProviderManager, PROVIDER_NAMES } = await import(
-			"../providers/index.js"
-		);
+		const { getProviderManager, PROVIDER_NAMES } = await import("../providers/index.js");
 
 		if (!PROVIDER_NAMES.includes(providerName as any)) {
 			console.log(`\x1b[31mUnknown provider: ${providerName}\x1b[0m`);
@@ -662,10 +620,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 	return false;
 }
 
-async function handlePlanCommands(
-	trimmed: string,
-	agent: Agent,
-): Promise<boolean> {
+async function handlePlanCommands(trimmed: string, agent: Agent): Promise<boolean> {
 	if (trimmed.startsWith("/plan ")) {
 		const task = trimmed.slice(6).trim();
 		console.log(`\n\x1b[33mCreating plan for:\x1b[0m ${task}\n`);
@@ -702,11 +657,7 @@ async function handlePlanCommands(
 				// Color code based on content
 				if (line.includes("PASS")) {
 					console.log(`  \x1b[32m${line}\x1b[0m`);
-				} else if (
-					line.includes("FAIL") ||
-					line.includes("ERROR") ||
-					line.includes("FATAL")
-				) {
+				} else if (line.includes("FAIL") || line.includes("ERROR") || line.includes("FATAL")) {
 					console.log(`  \x1b[31m${line}\x1b[0m`);
 				} else if (line.includes("═══") || line.includes("───")) {
 					console.log(`  \x1b[36m${line}\x1b[0m`);
@@ -731,9 +682,7 @@ async function handlePlanCommands(
 
 		// Show cron schedule
 		console.log("\n\x1b[33m── Cron Schedule ──\x1b[0m");
-		console.log(
-			"  Training: 2:00 AM PST daily (lockfile: /tmp/8gent-nightly.lock)",
-		);
+		console.log("  Training: 2:00 AM PST daily (lockfile: /tmp/8gent-nightly.lock)");
 		console.log("  Dreams:   4:00 AM PST daily");
 
 		return true;
@@ -747,9 +696,7 @@ function handleMCPCommands(trimmed: string): boolean {
 		const mcpClient = getMCPClient();
 		const servers = mcpClient.getRunningServers();
 		if (servers.length === 0) {
-			console.log(
-				"\x1b[33mNo MCP servers running.\x1b[0m Configure in ~/.8gent/mcp.json",
-			);
+			console.log("\x1b[33mNo MCP servers running.\x1b[0m Configure in ~/.8gent/mcp.json");
 		} else {
 			console.log("\x1b[36mMCP Servers:\x1b[0m");
 			for (const server of servers) {
@@ -810,8 +757,7 @@ function handleReportSlashCommands(trimmed: string, agent: Agent): boolean {
 			return true;
 		}
 		for (const r of runs) {
-			const st =
-				r.status === "ok" ? "\x1b[32m ok\x1b[0m" : "\x1b[31mfail\x1b[0m";
+			const st = r.status === "ok" ? "\x1b[32m ok\x1b[0m" : "\x1b[31mfail\x1b[0m";
 			const cost = r.cost != null ? `$${r.cost.toFixed(4)}` : "—";
 			const files = [...r.created, ...r.modified].length;
 			console.log(
@@ -824,9 +770,7 @@ function handleReportSlashCommands(trimmed: string, agent: Agent): boolean {
 	if (trimmed === "/reporting") {
 		const current = agent.isReportingEnabled();
 		agent.setReportingEnabled(!current);
-		console.log(
-			`Run logging: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`,
-		);
+		console.log(`Run logging: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`);
 		return true;
 	}
 
@@ -861,9 +805,7 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 	if (trimmed === "/voice on") {
 		const { configureVoice } = await import("../hooks/voice.js");
 		configureVoice({ enabled: true });
-		console.log(
-			"\x1b[32mVoice enabled.\x1b[0m The Infinite Gentleman will speak.",
-		);
+		console.log("\x1b[32mVoice enabled.\x1b[0m The Infinite Gentleman will speak.");
 		return true;
 	}
 
@@ -942,24 +884,14 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 		} else {
 			const { configureVoice } = await import("../hooks/voice.js");
 			configureVoice({ fallbackMessage });
-			console.log(
-				`Fallback message set to: \x1b[36m"${fallbackMessage}"\x1b[0m`,
-			);
+			console.log(`Fallback message set to: \x1b[36m"${fallbackMessage}"\x1b[0m`);
 		}
 		return true;
 	}
 
 	if (trimmed.startsWith("/voice ")) {
 		const voiceName = trimmed.slice(7).trim();
-		const reserved = [
-			"on",
-			"off",
-			"test",
-			"voices",
-			"rate",
-			"maxlength",
-			"fallback",
-		];
+		const reserved = ["on", "off", "test", "voices", "rate", "maxlength", "fallback"];
 		if (voiceName && !reserved.some((r) => voiceName.startsWith(r))) {
 			const { configureVoice } = await import("../hooks/voice.js");
 			configureVoice({ voice: voiceName });
@@ -989,9 +921,7 @@ function handlePersonalCommands(trimmed: string): boolean {
 			console.log(`  Path:            ${loraDir}`);
 			console.log(`  Base version:    ${meta.trainedOnVersion || "unknown"}`);
 			console.log(`  Last trained:    ${meta.lastTrained || "unknown"}`);
-			console.log(
-				`  Auto-retrain:    ${meta.autoRetrain !== false ? "enabled" : "disabled"}`,
-			);
+			console.log(`  Auto-retrain:    ${meta.autoRetrain !== false ? "enabled" : "disabled"}`);
 			console.log("");
 		} catch {
 			console.log("\n\x1b[31mError reading personal LoRA metadata.\x1b[0m\n");
@@ -1000,12 +930,8 @@ function handlePersonalCommands(trimmed: string): boolean {
 	}
 
 	if (trimmed === "/personal train") {
-		console.log(
-			"\n\x1b[33mPersonal LoRA training is not yet implemented.\x1b[0m",
-		);
-		console.log(
-			"  This will fine-tune Eight on your coding style and preferences.\n",
-		);
+		console.log("\n\x1b[33mPersonal LoRA training is not yet implemented.\x1b[0m");
+		console.log("  This will fine-tune Eight on your coding style and preferences.\n");
 		return true;
 	}
 
@@ -1013,9 +939,7 @@ function handlePersonalCommands(trimmed: string): boolean {
 		const loraDir = path.join(os.homedir(), ".8gent", "personal-lora");
 		if (fs.existsSync(loraDir)) {
 			fs.rmSync(loraDir, { recursive: true, force: true });
-			console.log(
-				"\x1b[32mPersonal LoRA reset. Reverted to base Eight.\x1b[0m",
-			);
+			console.log("\x1b[32mPersonal LoRA reset. Reverted to base Eight.\x1b[0m");
 		} else {
 			console.log("No personal LoRA to reset.");
 		}
@@ -1030,9 +954,7 @@ async function handleLanguageCommands(trimmed: string): Promise<boolean> {
 		const { getLanguageManager } = await import("../i18n/index.js");
 		const lm = getLanguageManager();
 		const lang = lm.getActiveLanguage();
-		console.log(
-			`\n\x1b[36mCurrent Language:\x1b[0m ${lang.name} (${lang.nativeName})`,
-		);
+		console.log(`\n\x1b[36mCurrent Language:\x1b[0m ${lang.name} (${lang.nativeName})`);
 		console.log(`  Code: ${lang.code}`);
 		console.log("\n  Use \x1b[36m/language <code>\x1b[0m to change");
 		console.log("  Use \x1b[36m/languages\x1b[0m to see all options\n");
@@ -1048,9 +970,7 @@ async function handleLanguageCommands(trimmed: string): Promise<boolean> {
 		console.log("\n\x1b[36mSupported Languages:\x1b[0m\n");
 		for (const lang of languages) {
 			const marker = lang.code === current ? " \x1b[32m← current\x1b[0m" : "";
-			console.log(
-				`  ${lang.code.padEnd(6)} ${lang.name.padEnd(25)} ${lang.nativeName}${marker}`,
-			);
+			console.log(`  ${lang.code.padEnd(6)} ${lang.name.padEnd(25)} ${lang.nativeName}${marker}`);
 		}
 		console.log("\n  Use \x1b[36m/language <code>\x1b[0m to switch\n");
 		return true;
@@ -1063,9 +983,7 @@ async function handleLanguageCommands(trimmed: string): Promise<boolean> {
 
 		if (lm.setLanguage(code)) {
 			const lang = lm.getActiveLanguage();
-			console.log(
-				`\x1b[32mLanguage set to: ${lang.name} (${lang.nativeName})\x1b[0m`,
-			);
+			console.log(`\x1b[32mLanguage set to: ${lang.name} (${lang.nativeName})\x1b[0m`);
 			console.log(`  8gent will now respond in ${lang.name}.`);
 		} else {
 			console.log(`\x1b[31mUnknown language code: ${code}\x1b[0m`);
@@ -1163,9 +1081,7 @@ function handlePermissionCommands(trimmed: string): boolean {
 		const permManager = getPermissionManager();
 		const current = permManager.getConfig().autoApprove;
 		permManager.setAutoApprove(!current);
-		console.log(
-			`Auto-approve: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`,
-		);
+		console.log(`Auto-approve: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`);
 		return true;
 	}
 
@@ -1181,9 +1097,7 @@ function handleHooksCommands(trimmed: string): boolean {
 			console.log("  No hooks registered. Add hooks to ~/.8gent/hooks.json");
 		}
 		for (const hook of hooks) {
-			const status = hook.enabled
-				? "\x1b[32m[ON]\x1b[0m"
-				: "\x1b[33m[OFF]\x1b[0m";
+			const status = hook.enabled ? "\x1b[32m[ON]\x1b[0m" : "\x1b[33m[OFF]\x1b[0m";
 			console.log(`  ${status} ${hook.name} (${hook.type})`);
 			console.log(`       ID: ${hook.id}`);
 			if (hook.description) {
@@ -1309,15 +1223,10 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			return true;
 		}
 
-		if (
-			spawnedAgent.status === "completed" ||
-			spawnedAgent.status === "failed"
-		) {
+		if (spawnedAgent.status === "completed" || spawnedAgent.status === "failed") {
 			console.log(`\n\x1b[36mAgent ${agentId}:\x1b[0m ${spawnedAgent.status}`);
 			if (spawnedAgent.task.result) {
-				console.log(
-					`\x1b[32mResult:\x1b[0m ${String(spawnedAgent.task.result).slice(0, 500)}`,
-				);
+				console.log(`\x1b[32mResult:\x1b[0m ${String(spawnedAgent.task.result).slice(0, 500)}`);
 			}
 			if (spawnedAgent.task.error) {
 				console.log(`\x1b[31mError:\x1b[0m ${spawnedAgent.task.error}`);
@@ -1356,11 +1265,9 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 	if (trimmed.startsWith("/agent ")) {
 		const agentId = trimmed.slice(7).trim();
 		try {
-			const {
-				getSubAgentManager,
-				formatSubAgentStatus,
-				formatSubAgentEvidence,
-			} = await import("../orchestration/subagent");
+			const { getSubAgentManager, formatSubAgentStatus, formatSubAgentEvidence } = await import(
+				"../orchestration/subagent"
+			);
 			const subAgentMgr = getSubAgentManager();
 			const subAgent = subAgentMgr.getStatus(agentId);
 
@@ -1380,9 +1287,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 					console.log(
 						`  Passed: ${subAgent.validationReport.passedSteps}/${subAgent.validationReport.totalSteps}`,
 					);
-					console.log(
-						`  Evidence: ${subAgent.validationReport.evidence.length} items`,
-					);
+					console.log(`  Evidence: ${subAgent.validationReport.evidence.length} items`);
 				}
 			}
 		} catch (err) {
@@ -1394,9 +1299,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 	if (trimmed === "/evidence") {
 		try {
 			const { getSubAgentManager } = await import("../orchestration/subagent");
-			const { formatEvidence, summarizeEvidence } = await import(
-				"../validation/evidence"
-			);
+			const { formatEvidence, summarizeEvidence } = await import("../validation/evidence");
 			const subAgentMgr = getSubAgentManager();
 			const agents = subAgentMgr.listAgents();
 
@@ -1405,9 +1308,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			let totalEvidence: import("../validation/evidence").Evidence[] = [];
 			for (const agent of agents) {
 				if (agent.evidence.length > 0) {
-					console.log(
-						`\x1b[33m${agent.id}:\x1b[0m ${agent.task.slice(0, 40)}...`,
-					);
+					console.log(`\x1b[33m${agent.id}:\x1b[0m ${agent.task.slice(0, 40)}...`);
 					console.log(formatEvidence(agent.evidence));
 					console.log("");
 					totalEvidence = totalEvidence.concat(agent.evidence);
@@ -1433,11 +1334,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 }
 
 function handleTaskCommands(trimmed: string): boolean {
-	if (
-		trimmed === "/tasks" ||
-		trimmed === "/tasks -v" ||
-		trimmed === "/tasks --verbose"
-	) {
+	if (trimmed === "/tasks" || trimmed === "/tasks -v" || trimmed === "/tasks --verbose") {
 		const taskMgr = getTaskManager();
 		const tasks = taskMgr.listTasks();
 		const stats = taskMgr.getStats();
@@ -1464,9 +1361,7 @@ function handleTaskCommands(trimmed: string): boolean {
 		switch (taskCmd.action) {
 			case "create":
 				if (!taskCmd.subject) {
-					console.log(
-						'\x1b[31mUsage: /task "description" [--priority high] [--tag tag1]\x1b[0m',
-					);
+					console.log('\x1b[31mUsage: /task "description" [--priority high] [--tag tag1]\x1b[0m');
 				} else {
 					const task = taskMgr.createTask(taskCmd.subject, "", {
 						priority: taskCmd.options.priority,
@@ -1538,14 +1433,9 @@ function handleTaskCommands(trimmed: string): boolean {
 
 			case "block":
 				if (!taskCmd.taskId || !taskCmd.options.blockedBy) {
-					console.log(
-						"\x1b[31mUsage: /task:block <task-id> <blocked-by-id>\x1b[0m",
-					);
+					console.log("\x1b[31mUsage: /task:block <task-id> <blocked-by-id>\x1b[0m");
 				} else {
-					const task = taskMgr.blockTask(
-						taskCmd.taskId,
-						taskCmd.options.blockedBy,
-					);
+					const task = taskMgr.blockTask(taskCmd.taskId, taskCmd.options.blockedBy);
 					if (task) {
 						console.log(`\n\x1b[33mTask blocked:\x1b[0m ${formatTask(task)}`);
 					} else {
@@ -1573,9 +1463,7 @@ async function handleTelegramCommands(
 	if (trimmed === "/telegram") {
 		const bot = getActiveTelegramBot();
 		if (bot) {
-			console.log(
-				`\n\x1b[32mTelegram bot: connected\x1b[0m (@${bot.botUsername})`,
-			);
+			console.log(`\n\x1b[32mTelegram bot: connected\x1b[0m (@${bot.botUsername})`);
 		} else if (vault.has("TELEGRAM_BOT_TOKEN")) {
 			console.log("\n\x1b[33mTelegram bot: configured but not running\x1b[0m");
 			console.log("Use \x1b[36m/telegram start\x1b[0m to launch it.");
@@ -1596,9 +1484,7 @@ async function handleTelegramCommands(
 	if (trimmed === "/telegram start") {
 		const existing = getActiveTelegramBot();
 		if (existing) {
-			console.log(
-				`\n\x1b[33mTelegram bot already running\x1b[0m (@${existing.botUsername})`,
-			);
+			console.log(`\n\x1b[33mTelegram bot already running\x1b[0m (@${existing.botUsername})`);
 			return true;
 		}
 
@@ -1617,9 +1503,7 @@ async function handleTelegramCommands(
 			});
 			console.log(`\n\x1b[32mTelegram bot started!\x1b[0m @${bot.botUsername}`);
 		} catch (err: any) {
-			console.error(
-				`\x1b[31mFailed to start Telegram bot: ${err.message}\x1b[0m`,
-			);
+			console.error(`\x1b[31mFailed to start Telegram bot: ${err.message}\x1b[0m`);
 		}
 		return true;
 	}
@@ -1636,9 +1520,7 @@ async function handleTelegramCommands(
 		return true;
 	}
 
-	console.log(
-		"\x1b[31mUnknown telegram command.\x1b[0m Use /help to see options.",
-	);
+	console.log("\x1b[31mUnknown telegram command.\x1b[0m Use /help to see options.");
 	return true;
 }
 
@@ -1651,9 +1533,7 @@ function handleSecretsCommands(trimmed: string): boolean {
 	if (trimmed === "/secrets" || trimmed === "/secrets list") {
 		const keys = vault.list();
 		if (keys.length === 0) {
-			console.log(
-				"\n\x1b[33mVault is empty.\x1b[0m Use /secrets set <key> to add secrets.",
-			);
+			console.log("\n\x1b[33mVault is empty.\x1b[0m Use /secrets set <key> to add secrets.");
 		} else {
 			console.log(`\n\x1b[36mStored secrets (${keys.length}):\x1b[0m`);
 			for (const key of keys) {
@@ -1679,10 +1559,7 @@ function handleSecretsCommands(trimmed: string): boolean {
 	}
 
 	// /secrets delete <key>
-	if (
-		trimmed.startsWith("/secrets delete ") ||
-		trimmed.startsWith("/secrets rm ")
-	) {
+	if (trimmed.startsWith("/secrets delete ") || trimmed.startsWith("/secrets rm ")) {
 		const key = trimmed.replace(/^\/secrets (delete|rm) /, "").trim();
 		if (!key) {
 			console.log("\x1b[31mUsage: /secrets delete <key>\x1b[0m");
@@ -1706,17 +1583,13 @@ function handleSecretsCommands(trimmed: string): boolean {
 		try {
 			const result = vault.migrateFromEnv(envPath);
 			if (result.imported.length > 0) {
-				console.log(
-					`\n\x1b[32mImported ${result.imported.length} secrets:\x1b[0m`,
-				);
+				console.log(`\n\x1b[32mImported ${result.imported.length} secrets:\x1b[0m`);
 				for (const key of result.imported) {
 					console.log(`  \x1b[33m${key}\x1b[0m`);
 				}
 			}
 			if (result.skipped.length > 0) {
-				console.log(
-					`\n\x1b[36mSkipped ${result.skipped.length} (already exist):\x1b[0m`,
-				);
+				console.log(`\n\x1b[36mSkipped ${result.skipped.length} (already exist):\x1b[0m`);
 				for (const key of result.skipped) {
 					console.log(`  ${key}`);
 				}
@@ -1741,21 +1614,12 @@ function handleSecretsCommands(trimmed: string): boolean {
 		return true;
 	}
 
-	console.log(
-		"\x1b[31mUnknown secrets command.\x1b[0m Use /help to see options.",
-	);
+	console.log("\x1b[31mUnknown secrets command.\x1b[0m Use /help to see options.");
 	return true;
 }
 
-async function handleSkillInvocation(
-	trimmed: string,
-	agent: Agent,
-): Promise<boolean> {
-	if (
-		trimmed.startsWith("/") &&
-		!trimmed.startsWith("/model") &&
-		!trimmed.startsWith("/plan")
-	) {
+async function handleSkillInvocation(trimmed: string, agent: Agent): Promise<boolean> {
+	if (trimmed.startsWith("/") && !trimmed.startsWith("/model") && !trimmed.startsWith("/plan")) {
 		const skillCmd = parseSkillCommand(trimmed);
 		if (skillCmd) {
 			try {

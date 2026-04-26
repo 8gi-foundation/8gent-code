@@ -49,10 +49,7 @@ export async function findWhisperBinary(): Promise<string | null> {
 	}
 
 	// Check brew-installed whisper.cpp (may be named whisper-cli in newer versions)
-	for (const brewName of [
-		"/opt/homebrew/bin/whisper-cpp",
-		"/opt/homebrew/bin/whisper-cli",
-	]) {
+	for (const brewName of ["/opt/homebrew/bin/whisper-cpp", "/opt/homebrew/bin/whisper-cli"]) {
 		if (existsSync(brewName)) {
 			return brewName;
 		}
@@ -118,13 +115,7 @@ export async function transcribeLocal(
 	wavPath: string,
 	options: TranscriberOptions,
 ): Promise<TranscriptEvent> {
-	const {
-		binaryPath,
-		modelPath,
-		language = "en",
-		timeoutMs = 30000,
-		threads,
-	} = options;
+	const { binaryPath, modelPath, language = "en", timeoutMs = 30000, threads } = options;
 
 	if (!existsSync(wavPath)) {
 		throw new Error(`WAV file not found: ${wavPath}`);
@@ -179,19 +170,14 @@ export async function transcribeLocal(
 		}, timeoutMs);
 	});
 	const [stdout, stderr] = await Promise.race([
-		Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-		]),
+		Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]),
 		timeoutPromise.then(() => ["", ""] as [string, string]),
 	]);
 
 	const exitCode = await proc.exited;
 
 	if (exitCode !== 0) {
-		throw new Error(
-			`whisper.cpp exited with code ${exitCode}: ${stderr.trim()}`,
-		);
+		throw new Error(`whisper.cpp exited with code ${exitCode}: ${stderr.trim()}`);
 	}
 
 	// Parse output — whisper.cpp outputs transcribed text to stdout

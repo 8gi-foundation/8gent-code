@@ -31,8 +31,7 @@ export class WorktreeMessaging {
 			timestamp: Date.now(),
 		};
 
-		const targets =
-			message.to === "broadcast" ? this.listInboxes() : [message.to];
+		const targets = message.to === "broadcast" ? this.listInboxes() : [message.to];
 
 		for (const target of targets) {
 			const dir = join(this.base, target);

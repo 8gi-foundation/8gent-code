@@ -147,9 +147,7 @@ export class AgentMesh {
 		this.register();
 		this.startHeartbeat();
 		this.startWatching();
-		console.log(
-			`[mesh] Joined as ${this.agentId} (${this.agent.type}/${this.agent.name})`,
-		);
+		console.log(`[mesh] Joined as ${this.agentId} (${this.agent.type}/${this.agent.name})`);
 	}
 
 	leave(): void {
@@ -196,9 +194,7 @@ export class AgentMesh {
 					changed = true;
 					this.onPeerLeave?.(id);
 					this.knownPeers.delete(id);
-					console.log(
-						`[mesh] Cleaned stale agent: ${id} (pid ${agent.pid} dead)`,
-					);
+					console.log(`[mesh] Cleaned stale agent: ${id} (pid ${agent.pid} dead)`);
 				}
 			}
 		}
@@ -257,26 +253,16 @@ export class AgentMesh {
 
 		if (to === "broadcast") {
 			// Write to broadcast dir
-			writeFileSync(
-				join(BROADCAST_DIR, `${msg.id}.json`),
-				JSON.stringify(msg, null, 2),
-			);
+			writeFileSync(join(BROADCAST_DIR, `${msg.id}.json`), JSON.stringify(msg, null, 2));
 		} else {
 			// Write to target agent's inbox
 			const inbox = join(MESSAGES_DIR, to);
 			mkdirSync(inbox, { recursive: true });
-			writeFileSync(
-				join(inbox, `${msg.id}.json`),
-				JSON.stringify(msg, null, 2),
-			);
+			writeFileSync(join(inbox, `${msg.id}.json`), JSON.stringify(msg, null, 2));
 		}
 	}
 
-	broadcast(
-		type: MeshMessage["type"],
-		content: string,
-		metadata?: Record<string, unknown>,
-	): void {
+	broadcast(type: MeshMessage["type"], content: string, metadata?: Record<string, unknown>): void {
 		this.send("broadcast", type, content, metadata);
 	}
 
@@ -312,9 +298,7 @@ export class AgentMesh {
 			.sort()
 			.map((f) => {
 				try {
-					return JSON.parse(
-						readFileSync(join(inbox, f), "utf-8"),
-					) as MeshMessage;
+					return JSON.parse(readFileSync(join(inbox, f), "utf-8")) as MeshMessage;
 				} catch {
 					return null;
 				}
@@ -330,9 +314,7 @@ export class AgentMesh {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => {
 				try {
-					const msg = JSON.parse(
-						readFileSync(join(BROADCAST_DIR, f), "utf-8"),
-					) as MeshMessage;
+					const msg = JSON.parse(readFileSync(join(BROADCAST_DIR, f), "utf-8")) as MeshMessage;
 					return msg.timestamp > since ? msg : null;
 				} catch {
 					return null;
@@ -389,10 +371,7 @@ export class AgentMesh {
 
 	private readRegistry(): Record<string, MeshAgent> {
 		try {
-			const raw = JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Record<
-				string,
-				MeshAgent
-			>;
+			const raw = JSON.parse(readFileSync(REGISTRY_PATH, "utf-8")) as Record<string, MeshAgent>;
 			// Migrate legacy vendor-named adapter-type labels at read time.
 			for (const id of Object.keys(raw)) {
 				const entry = raw[id];
@@ -413,11 +392,7 @@ export class AgentMesh {
 	// MARK: - Convenience
 
 	/** Ask a specific agent to do something and wait for response */
-	async request(
-		to: string,
-		content: string,
-		timeoutMs = 30_000,
-	): Promise<MeshMessage | null> {
+	async request(to: string, content: string, timeoutMs = 30_000): Promise<MeshMessage | null> {
 		const requestId = `req-${Date.now().toString(36)}`;
 		this.send(to, "request", content, { requestId });
 

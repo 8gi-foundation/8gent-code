@@ -8,10 +8,7 @@
  * along for the ride.
  */
 
-import {
-	RoleProviderUnavailableError,
-	createClientForRole,
-} from "../eight/clients";
+import { RoleProviderUnavailableError, createClientForRole } from "../eight/clients";
 import type { AgentConfig } from "../eight/types";
 import { type ProviderName, getProviderManager } from "../providers";
 import { type RoleName, loadRoleConfig } from "./role-config";

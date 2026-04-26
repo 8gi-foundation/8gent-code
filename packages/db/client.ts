@@ -12,11 +12,7 @@
  */
 
 import { ConvexClient } from "convex/browser";
-import type {
-	FunctionArgs,
-	FunctionReference,
-	FunctionReturnType,
-} from "convex/server";
+import type { FunctionArgs, FunctionReference, FunctionReturnType } from "convex/server";
 
 // ============================================
 // Types
@@ -64,9 +60,7 @@ export class ConvexClientWrapper {
 		if (this.client && this.connected) return this.client;
 
 		if (!this.config.url) {
-			console.warn(
-				"[8gent/db] No CONVEX_URL configured. Running in offline mode.",
-			);
+			console.warn("[8gent/db] No CONVEX_URL configured. Running in offline mode.");
 			this.config.offline = true;
 			return null;
 		}
@@ -237,9 +231,7 @@ let _client: ConvexClientWrapper | null = null;
  * 2. CONVEX_URL environment variable
  * 3. Offline mode (if no URL available)
  */
-export function getConvexClient(
-	config?: Partial<ConvexClientConfig>,
-): ConvexClientWrapper {
+export function getConvexClient(config?: Partial<ConvexClientConfig>): ConvexClientWrapper {
 	if (!_client) {
 		const url = config?.url || process.env.CONVEX_URL || "";
 		_client = new ConvexClientWrapper({

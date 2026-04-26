@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
+const WORK_DIR = process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
 let diffParser: any;
@@ -30,9 +29,7 @@ beforeEach(async () => {
 		securityScanner = await import(path.join(WORK_DIR, "security-scanner.ts"));
 	} catch {
 		try {
-			securityScanner = await import(
-				path.join(WORK_DIR, "security-scanner.js")
-			);
+			securityScanner = await import(path.join(WORK_DIR, "security-scanner.js"));
 		} catch {}
 	}
 	try {
@@ -46,9 +43,7 @@ beforeEach(async () => {
 		reviewGenerator = await import(path.join(WORK_DIR, "review-generator.ts"));
 	} catch {
 		try {
-			reviewGenerator = await import(
-				path.join(WORK_DIR, "review-generator.js")
-			);
+			reviewGenerator = await import(path.join(WORK_DIR, "review-generator.js"));
 		} catch {}
 	}
 });
@@ -114,9 +109,7 @@ describe("Diff Parser", () => {
 		expect(file.status).toBe("added");
 		expect(file.hunks?.length).toBeGreaterThanOrEqual(1);
 		// Should have added lines
-		const addedChanges = file.hunks[0].changes.filter(
-			(c: any) => c.type === "add",
-		);
+		const addedChanges = file.hunks[0].changes.filter((c: any) => c.type === "add");
 		expect(addedChanges.length).toBeGreaterThan(0);
 	});
 
@@ -158,8 +151,7 @@ describe("Diff Parser", () => {
 
 describe("AST Analyzer", () => {
 	it("analyzeChanges detects added/removed/modified functions", () => {
-		const fn =
-			astAnalyzer.analyzeChanges || astAnalyzer.default?.analyzeChanges;
+		const fn = astAnalyzer.analyzeChanges || astAnalyzer.default?.analyzeChanges;
 		const before = `
 function foo() { return 1; }
 function bar() { return 2; }
@@ -176,9 +168,7 @@ function baz() { return 3; }
 	});
 
 	it("calculateComplexity counts control flow operators", () => {
-		const fn =
-			astAnalyzer.calculateComplexity ||
-			astAnalyzer.default?.calculateComplexity;
+		const fn = astAnalyzer.calculateComplexity || astAnalyzer.default?.calculateComplexity;
 		const simpleCode = "function simple() { return 1; }";
 		const complexCode = `
 function complex(x: number) {
@@ -307,8 +297,7 @@ function handler() {
 		const violations = fn(code);
 		const consoleViolations = violations.filter(
 			(v: any) =>
-				v.rule?.toLowerCase().includes("console") ||
-				v.message?.toLowerCase().includes("console"),
+				v.rule?.toLowerCase().includes("console") || v.message?.toLowerCase().includes("console"),
 		);
 		expect(consoleViolations.length).toBeGreaterThan(0);
 	});
@@ -320,8 +309,7 @@ function handler() {
 		const withConsole = fn(code, { noConsoleLog: false });
 		const consoleViolations = withConsole.filter(
 			(v: any) =>
-				v.rule?.toLowerCase().includes("console") ||
-				v.message?.toLowerCase().includes("console"),
+				v.rule?.toLowerCase().includes("console") || v.message?.toLowerCase().includes("console"),
 		);
 		expect(consoleViolations.length).toBe(0);
 	});
@@ -332,8 +320,7 @@ function handler() {
 describe("Review Generator", () => {
 	it("generateReview produces summary with correct counts", () => {
 		const parseFn = diffParser.parseDiff || diffParser.default?.parseDiff;
-		const genFn =
-			reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
+		const genFn = reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
 		const diffs = parseFn(`${UNIFIED_DIFF_ADD}\n${UNIFIED_DIFF_MODIFY}`);
 		const report = genFn(diffs);
 		expect(report).toBeDefined();
@@ -349,8 +336,7 @@ describe("Review Generator", () => {
 
 	it("generateReview scores files 0-100", () => {
 		const parseFn = diffParser.parseDiff || diffParser.default?.parseDiff;
-		const genFn =
-			reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
+		const genFn = reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
 		const diffs = parseFn(UNIFIED_DIFF_ADD);
 		const report = genFn(diffs);
 		expect(typeof report.overallScore).toBe("number");
@@ -363,8 +349,7 @@ describe("Review Generator", () => {
 	});
 
 	it("generateReview handles empty diffs", () => {
-		const genFn =
-			reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
+		const genFn = reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
 		const report = genFn([]);
 		expect(report).toBeDefined();
 		expect(Array.isArray(report.files)).toBe(true);

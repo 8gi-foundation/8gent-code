@@ -94,20 +94,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 					$ Terminal
 				</Text>
 				<Text color="gray"> pid:{pid ?? "—"} </Text>
-				<Text color={isRunning ? "green" : "red"}>
-					{isRunning ? "● running" : "○ stopped"}
-				</Text>
+				<Text color={isRunning ? "green" : "red"}>{isRunning ? "● running" : "○ stopped"}</Text>
 				<Text color="gray"> [Esc] back [Ctrl+C] interrupt [Ctrl+D] EOF</Text>
 			</Box>
 
 			{/* Output area */}
-			<Box
-				flexDirection="column"
-				flexGrow={1}
-				paddingX={1}
-				height={rows}
-				overflow="hidden"
-			>
+			<Box flexDirection="column" flexGrow={1} paddingX={1} height={rows} overflow="hidden">
 				{visibleLines.length === 0 ? (
 					<Text color="gray" dimColor>
 						(shell starting…)

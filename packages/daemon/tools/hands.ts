@@ -78,10 +78,7 @@ export const HANDS_TOOL_NAMES = [
 ] as const;
 
 /** Map a tool name to the NemoClaw `desktop_use` action descriptor. */
-function policyActionFor(
-	tool: string,
-	input: Record<string, unknown>,
-): Record<string, unknown> {
+function policyActionFor(tool: string, input: Record<string, unknown>): Record<string, unknown> {
 	switch (tool) {
 		case "desktop_screenshot":
 			return { action: "screenshot" };
@@ -146,8 +143,7 @@ export async function executeHandsTool(
 			input,
 			reason: decision.reason ?? "approval required",
 		});
-		if (!approved)
-			return { ok: false, reason: `[policy] user denied: ${decision.reason}` };
+		if (!approved) return { ok: false, reason: `[policy] user denied: ${decision.reason}` };
 	} else if (!decision.allowed) {
 		return { ok: false, reason: `[policy] ${decision.reason}` };
 	}
@@ -163,10 +159,7 @@ export async function executeHandsTool(
 	}
 }
 
-async function dispatch(
-	tool: string,
-	input: Record<string, unknown>,
-): Promise<unknown> {
+async function dispatch(tool: string, input: Record<string, unknown>): Promise<unknown> {
 	switch (tool) {
 		case "desktop_screenshot":
 			return desktopScreenshot({
@@ -233,18 +226,15 @@ async function dispatch(
 		case "desktop_suggest_quit":
 			return desktopSuggestQuittable();
 		case "desktop_safe_list":
-			if (input.action === "add")
-				return desktopAddToSafeList(String(input.app ?? ""));
-			if (input.action === "remove")
-				return desktopRemoveFromSafeList(String(input.app ?? ""));
+			if (input.action === "add") return desktopAddToSafeList(String(input.app ?? ""));
+			if (input.action === "remove") return desktopRemoveFromSafeList(String(input.app ?? ""));
 			return desktopLoadSafeList();
 		case "desktop_accessibility_tree":
 			// Driver-level a11y tree is not yet exposed in packages/computer; return a
 			// structured stub the agent can reason about until 8gent-hands lands.
 			return {
 				ok: false,
-				error:
-					"accessibility_tree not yet available; use desktop_screenshot + desktop_windows",
+				error: "accessibility_tree not yet available; use desktop_screenshot + desktop_windows",
 			};
 		default:
 			throw new Error(`hands tool not implemented: ${tool}`);

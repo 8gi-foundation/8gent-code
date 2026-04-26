@@ -80,8 +80,7 @@ const MAX_PROCESS_LIST = 50;
 // ============================================
 
 function getSafeListPath(): string {
-	const dataDir =
-		process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+	const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 	return path.join(dataDir, "safe-apps.json");
 }
 
@@ -92,8 +91,7 @@ export function loadSafeList(): string[] {
 	try {
 		const raw = fs.readFileSync(getSafeListPath(), "utf-8");
 		const parsed = JSON.parse(raw);
-		if (Array.isArray(parsed))
-			return parsed.filter((s): s is string => typeof s === "string");
+		if (Array.isArray(parsed)) return parsed.filter((s): s is string => typeof s === "string");
 		return [];
 	} catch {
 		return [];
@@ -116,8 +114,7 @@ export function saveSafeList(apps: string[]): void {
 export function addToSafeList(appName: string): string {
 	const list = loadSafeList();
 	const normalized = appName.trim();
-	if (list.includes(normalized))
-		return `"${normalized}" is already on the safe list`;
+	if (list.includes(normalized)) return `"${normalized}" is already on the safe list`;
 	list.push(normalized);
 	saveSafeList(list);
 	return `Added "${normalized}" to safe list (${list.length} apps protected)`;
@@ -245,10 +242,7 @@ function canQuit(name: string): string | null {
  * Quit a single process by PID.
  * Graceful sends SIGTERM, force sends SIGKILL.
  */
-export function quitProcess(
-	pid: number,
-	strategy: QuitStrategy = "graceful",
-): CommandResult {
+export function quitProcess(pid: number, strategy: QuitStrategy = "graceful"): CommandResult {
 	// Validate PID
 	if (!Number.isInteger(pid) || pid < 1 || pid > 4194304) {
 		return { ok: false, error: `Invalid PID: ${pid}` };
@@ -295,10 +289,7 @@ export function quitProcess(
  * Quit a process by name.
  * Finds the PID first, then terminates.
  */
-export function quitByName(
-	name: string,
-	strategy: QuitStrategy = "graceful",
-): CommandResult {
+export function quitByName(name: string, strategy: QuitStrategy = "graceful"): CommandResult {
 	const blockReason = canQuit(name);
 	if (blockReason) return { ok: false, error: blockReason };
 

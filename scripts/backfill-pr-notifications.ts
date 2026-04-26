@@ -68,10 +68,7 @@ async function sendVoice(text: string, name: string): Promise<void> {
 		execSync(`say -v Ava -o "${aiffPath}" "${text.replace(/"/g, '\\"')}"`, {
 			stdio: "pipe",
 		});
-		execSync(
-			`ffmpeg -y -i "${aiffPath}" -c:a libopus "${oggPath}" 2>/dev/null`,
-			{ stdio: "pipe" },
-		);
+		execSync(`ffmpeg -y -i "${aiffPath}" -c:a libopus "${oggPath}" 2>/dev/null`, { stdio: "pipe" });
 		if (fs.existsSync(oggPath)) {
 			const form = new FormData();
 			form.append("chat_id", TELEGRAM_CHAT_ID);

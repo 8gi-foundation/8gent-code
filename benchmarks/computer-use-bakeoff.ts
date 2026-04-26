@@ -32,10 +32,7 @@ import { LMStudioClient } from "../packages/eight/clients/lmstudio";
 import { OllamaClient } from "../packages/eight/clients/ollama";
 import { OpenRouterClient } from "../packages/eight/clients/openrouter";
 import type { LLMClient, Message } from "../packages/eight/types";
-import {
-	type FailoverEntry,
-	ModelFailover,
-} from "../packages/providers/failover";
+import { type FailoverEntry, ModelFailover } from "../packages/providers/failover";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASKS_FILE = path.join(HERE, "categories/computer-use/tasks.json");
@@ -91,14 +88,10 @@ function clientForEntry(entry: FailoverEntry): LLMClient | null {
 		case "deepseek":
 			try {
 				// Lazy import keeps the harness importable without the key set.
-				const {
-					DeepSeekClient,
-				} = require("../packages/eight/clients/deepseek");
+				const { DeepSeekClient } = require("../packages/eight/clients/deepseek");
 				return new DeepSeekClient(entry.model);
 			} catch (err) {
-				console.warn(
-					`[bakeoff] deepseek client unavailable: ${(err as Error).message}`,
-				);
+				console.warn(`[bakeoff] deepseek client unavailable: ${(err as Error).message}`);
 				return null;
 			}
 		case "openrouter": {
@@ -264,32 +257,19 @@ async function main() {
 		console.error(`[bakeoff] tasks file missing: ${TASKS_FILE}`);
 		process.exit(1);
 	}
-	const tasks = (JSON.parse(fs.readFileSync(TASKS_FILE, "utf-8")) as TasksFile)
-		.tasks;
+	const tasks = (JSON.parse(fs.readFileSync(TASKS_FILE, "utf-8")) as TasksFile).tasks;
 	console.log(`[bakeoff] loaded ${tasks.length} tasks (dry-run=${dryRun})`);
 
 	const results: ChainResult[] = [];
 	if (chainArg === "both" || chainArg === "baseline") {
 		console.log("\n=== baseline (text channel, eight-1.0-q3:14b anchor) ===");
-		const r = await runChain(
-			"baseline",
-			"text",
-			"apple-foundation-system",
-			tasks,
-			dryRun,
-		);
+		const r = await runChain("baseline", "text", "apple-foundation-system", tasks, dryRun);
 		console.log(summary(r));
 		results.push(r);
 	}
 	if (chainArg === "both" || chainArg === "candidate") {
 		console.log("\n=== candidate (computer channel, qwen3.6:27b anchor) ===");
-		const r = await runChain(
-			"candidate",
-			"computer",
-			"qwen3.6:27b",
-			tasks,
-			dryRun,
-		);
+		const r = await runChain("candidate", "computer", "qwen3.6:27b", tasks, dryRun);
 		console.log(summary(r));
 		results.push(r);
 	}
@@ -297,10 +277,7 @@ async function main() {
 	// Emit JSON to a results file for the report.
 	const outFile = path.join(HERE, "results", "computer-use-bakeoff.json");
 	fs.mkdirSync(path.dirname(outFile), { recursive: true });
-	fs.writeFileSync(
-		outFile,
-		JSON.stringify({ ts: Date.now(), dryRun, results }, null, 2),
-	);
+	fs.writeFileSync(outFile, JSON.stringify({ ts: Date.now(), dryRun, results }, null, 2));
 	console.log(`\n[bakeoff] wrote ${outFile}`);
 }
 

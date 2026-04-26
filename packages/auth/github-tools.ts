@@ -89,9 +89,7 @@ export async function listRepos(
  *
  * @param cwd - Working directory (defaults to process.cwd())
  */
-export async function getCurrentRepoInfo(
-	cwd?: string,
-): Promise<RepoInfo | null> {
+export async function getCurrentRepoInfo(cwd?: string): Promise<RepoInfo | null> {
 	const dir = cwd ?? process.cwd();
 
 	// Find .git/config
@@ -118,9 +116,7 @@ export async function getCurrentRepoInfo(
  */
 function parseGitHubRemote(url: string): RepoInfo | null {
 	// HTTPS: https://github.com/owner/repo.git
-	const httpsMatch = url.match(
-		/https?:\/\/github\.com\/([^/]+)\/([^/.]+)(?:\.git)?/,
-	);
+	const httpsMatch = url.match(/https?:\/\/github\.com\/([^/]+)\/([^/.]+)(?:\.git)?/);
 	if (httpsMatch) {
 		return { owner: httpsMatch[1], repo: httpsMatch[2], remote: url };
 	}
@@ -132,9 +128,7 @@ function parseGitHubRemote(url: string): RepoInfo | null {
 	}
 
 	// git://github.com/owner/repo.git
-	const gitMatch = url.match(
-		/git:\/\/github\.com\/([^/]+)\/([^/.]+)(?:\.git)?/,
-	);
+	const gitMatch = url.match(/git:\/\/github\.com\/([^/]+)\/([^/.]+)(?:\.git)?/);
 	if (gitMatch) {
 		return { owner: gitMatch[1], repo: gitMatch[2], remote: url };
 	}
@@ -189,17 +183,14 @@ export async function createIssue(
 	title: string,
 	body: string,
 ): Promise<{ number: number; url: string } | null> {
-	const resp = await fetch(
-		`https://api.github.com/repos/${owner}/${repo}/issues`,
-		{
-			method: "POST",
-			headers: {
-				...githubHeaders(token),
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ title, body }),
+	const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+		method: "POST",
+		headers: {
+			...githubHeaders(token),
+			"Content-Type": "application/json",
 		},
-	);
+		body: JSON.stringify({ title, body }),
+	});
 
 	if (!resp.ok) return null;
 
@@ -223,22 +214,19 @@ export async function createPR(
 	repo: string,
 	opts: { title: string; body: string; head: string; base: string },
 ): Promise<GitHubPR | null> {
-	const resp = await fetch(
-		`https://api.github.com/repos/${owner}/${repo}/pulls`,
-		{
-			method: "POST",
-			headers: {
-				...githubHeaders(token),
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				title: opts.title,
-				body: opts.body,
-				head: opts.head,
-				base: opts.base,
-			}),
+	const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
+		method: "POST",
+		headers: {
+			...githubHeaders(token),
+			"Content-Type": "application/json",
 		},
-	);
+		body: JSON.stringify({
+			title: opts.title,
+			body: opts.body,
+			head: opts.head,
+			base: opts.base,
+		}),
+	});
 
 	if (!resp.ok) return null;
 

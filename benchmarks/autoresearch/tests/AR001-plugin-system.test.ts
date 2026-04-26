@@ -24,21 +24,15 @@ const ResolverClass =
 	resolverMod.Resolver ??
 	resolverMod.DependencyResolver ??
 	resolverMod.PluginResolver;
-const RegistryClass =
-	registryMod.default ?? registryMod.Registry ?? registryMod.PluginRegistry;
-const ManagerClass =
-	managerMod.default ?? managerMod.Manager ?? managerMod.PluginManager;
+const RegistryClass = registryMod.default ?? registryMod.Registry ?? registryMod.PluginRegistry;
+const ManagerClass = managerMod.default ?? managerMod.Manager ?? managerMod.PluginManager;
 
 if (!ResolverClass)
 	throw new Error(
 		"resolver.ts must export Resolver, DependencyResolver, PluginResolver, or default",
 	);
-if (!RegistryClass)
-	throw new Error(
-		"registry.ts must export Registry, PluginRegistry, or default",
-	);
-if (!ManagerClass)
-	throw new Error("manager.ts must export Manager, PluginManager, or default");
+if (!RegistryClass) throw new Error("registry.ts must export Registry, PluginRegistry, or default");
+if (!ManagerClass) throw new Error("manager.ts must export Manager, PluginManager, or default");
 
 // ── Mock Plugin Factory ────────────────────────────────────────────────
 

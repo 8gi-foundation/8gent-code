@@ -6,10 +6,7 @@ export interface ShortcutHintProps {
 	description: string;
 }
 
-export const ShortcutHint: React.FC<ShortcutHintProps> = ({
-	keys,
-	description,
-}) => (
+export const ShortcutHint: React.FC<ShortcutHintProps> = ({ keys, description }) => (
 	<Box>
 		<Text dimColor>{keys}</Text>
 		<Text> </Text>

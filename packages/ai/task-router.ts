@@ -19,11 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateObject } from "ai";
 import { z } from "zod";
-import {
-	type ProviderConfig,
-	type ProviderName,
-	createModel,
-} from "./providers";
+import { type ProviderConfig, type ProviderName, createModel } from "./providers";
 
 // ============================================
 // Types
@@ -137,16 +133,11 @@ function saveStats(stats: RouterStats): void {
 	writeFileSync(ROUTER_STATS_PATH, JSON.stringify(stats, null, 2));
 }
 
-export function recordRouting(
-	category: TaskCategory,
-	model: string,
-	latencyMs: number,
-): void {
+export function recordRouting(category: TaskCategory, model: string, latencyMs: number): void {
 	const stats = loadStats();
 	stats.totalRouted++;
 	stats.byCategory[category] = (stats.byCategory[category] ?? 0) + 1;
-	if (!stats.byModel[model])
-		stats.byModel[model] = { routed: 0, avgLatencyMs: 0 };
+	if (!stats.byModel[model]) stats.byModel[model] = { routed: 0, avgLatencyMs: 0 };
 	const m = stats.byModel[model];
 	m.avgLatencyMs = (m.avgLatencyMs * m.routed + latencyMs) / (m.routed + 1);
 	m.routed++;
@@ -186,9 +177,7 @@ export class TaskRouter {
 	private config: RouterConfig;
 
 	constructor(config?: Partial<RouterConfig>) {
-		this.config = config
-			? { ...loadRouterConfig(), ...config }
-			: loadRouterConfig();
+		this.config = config ? { ...loadRouterConfig(), ...config } : loadRouterConfig();
 	}
 
 	/** Classify a task using the small classifier model */
@@ -241,11 +230,7 @@ export class TaskRouter {
 					model: this.config.defaultModel.model,
 					reasoning: `Low confidence (${classification.confidence.toFixed(2)}) — using default`,
 				};
-				recordRouting(
-					classification.category,
-					decision.model,
-					Date.now() - start,
-				);
+				recordRouting(classification.category, decision.model, Date.now() - start);
 				return decision;
 			}
 
@@ -255,11 +240,7 @@ export class TaskRouter {
 				model: slot.model,
 			};
 
-			recordRouting(
-				classification.category,
-				decision.model,
-				Date.now() - start,
-			);
+			recordRouting(classification.category, decision.model, Date.now() - start);
 			return decision;
 		} catch {
 			// Classification failed — use default
@@ -356,20 +337,14 @@ export class TaskRouter {
 
 			if (eightModels.length > 0) {
 				const best = eightModels[0].name;
-				const small =
-					eightModels.length > 1
-						? eightModels[eightModels.length - 1].name
-						: best;
+				const small = eightModels.length > 1 ? eightModels[eightModels.length - 1].name : best;
 
 				// Big Eight → reasoning, code
 				if (this.config.slots.reasoning.model !== best) {
 					this.config.slots.reasoning = { model: best, provider: "ollama" };
 					changes.push(`reasoning → ${best}`);
 				}
-				if (
-					this.config.slots.code.model !== best &&
-					this.config.slots.code.model !== small
-				) {
+				if (this.config.slots.code.model !== best && this.config.slots.code.model !== small) {
 					this.config.slots.code = { model: small, provider: "ollama" };
 					changes.push(`code → ${small}`);
 				}
@@ -381,10 +356,7 @@ export class TaskRouter {
 			// Find a fast model for simple tasks
 			const fastModels = models
 				.filter(
-					(m) =>
-						m.name.includes("qwen3.5") ||
-						m.name.includes("phi") ||
-						m.name.includes("gemma"),
+					(m) => m.name.includes("qwen3.5") || m.name.includes("phi") || m.name.includes("gemma"),
 				)
 				.sort((a, b) => a.size - b.size);
 

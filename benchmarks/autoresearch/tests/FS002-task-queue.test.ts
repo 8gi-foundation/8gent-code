@@ -14,17 +14,13 @@ const workerMod = await import(`${workDir}/worker.ts`);
 const schedulerMod = await import(`${workDir}/scheduler.ts`);
 
 const QueueClass = queueMod.default ?? queueMod.TaskQueue ?? queueMod.Queue;
-const WorkerClass =
-	workerMod.default ?? workerMod.Worker ?? workerMod.TaskWorker;
-const createTask: Function =
-	schedulerMod.createTask ?? schedulerMod.default?.createTask;
+const WorkerClass = workerMod.default ?? workerMod.Worker ?? workerMod.TaskWorker;
+const createTask: Function = schedulerMod.createTask ?? schedulerMod.default?.createTask;
 const createBatch: Function | undefined = schedulerMod.createBatch;
 const schedule: Function | undefined = schedulerMod.schedule;
 
-if (!QueueClass)
-	throw new Error("queue.ts must export TaskQueue, Queue, or default");
-if (!WorkerClass)
-	throw new Error("worker.ts must export Worker, TaskWorker, or default");
+if (!QueueClass) throw new Error("queue.ts must export TaskQueue, Queue, or default");
+if (!WorkerClass) throw new Error("worker.ts must export Worker, TaskWorker, or default");
 if (!createTask) throw new Error("scheduler.ts must export createTask");
 
 function delay(ms: number) {

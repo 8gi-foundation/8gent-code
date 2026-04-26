@@ -25,12 +25,7 @@ describe("agent-adapters generic labels", () => {
 			.map((a) => a.name)
 			.sort();
 		expect(names).toEqual(
-			[
-				"8gent",
-				"host-cli-primary",
-				"host-cli-secondary",
-				"host-cli-tertiary",
-			].sort(),
+			["8gent", "host-cli-primary", "host-cli-secondary", "host-cli-tertiary"].sort(),
 		);
 	});
 
@@ -56,9 +51,7 @@ describe("agent-adapters legacy migration shim", () => {
 	test("migrateAdapterName passes through current labels untouched", () => {
 		expect(migrateAdapterName("host-cli-primary")).toBe("host-cli-primary");
 		expect(migrateAdapterName("8gent")).toBe("8gent");
-		expect(migrateAdapterName("unknown-future-label")).toBe(
-			"unknown-future-label",
-		);
+		expect(migrateAdapterName("unknown-future-label")).toBe("unknown-future-label");
 	});
 
 	test("getAdapter() accepts legacy names via the shim", () => {

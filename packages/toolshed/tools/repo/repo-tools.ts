@@ -35,9 +35,7 @@ registerTool(
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { depth = 3, dir } = input as { depth?: number; dir?: string };
-		const root = dir
-			? path.join(ctx.workingDirectory, dir)
-			: ctx.workingDirectory;
+		const root = dir ? path.join(ctx.workingDirectory, dir) : ctx.workingDirectory;
 
 		const IGNORE = new Set([
 			"node_modules",
@@ -73,8 +71,7 @@ registerTool(
 
 			for (let i = 0; i < entries.length; i++) {
 				const entry = entries[i];
-				if (entry.name.startsWith(".") && entry.name !== ".env.example")
-					continue;
+				if (entry.name.startsWith(".") && entry.name !== ".env.example") continue;
 				if (IGNORE.has(entry.name)) continue;
 
 				const isLast = i === entries.length - 1;
@@ -84,11 +81,7 @@ registerTool(
 				if (entry.isDirectory()) {
 					dirCount++;
 					tree.push(`${prefix}${connector}${entry.name}/`);
-					walk(
-						path.join(dirPath, entry.name),
-						prefix + childPrefix,
-						currentDepth + 1,
-					);
+					walk(path.join(dirPath, entry.name), prefix + childPrefix, currentDepth + 1);
 				} else {
 					fileCount++;
 					tree.push(`${prefix}${connector}${entry.name}`);
@@ -111,8 +104,7 @@ registerTool(
 registerTool(
 	{
 		name: "project_info",
-		description:
-			"Get project metadata: name, version, dependencies, scripts, language, framework.",
+		description: "Get project metadata: name, version, dependencies, scripts, language, framework.",
 		capabilities: ["repo"],
 		inputSchema: {
 			type: "object",
@@ -148,17 +140,13 @@ registerTool(
 
 			// Detect runtime
 			if (fs.existsSync(path.join(cwd, "bun.lockb"))) info.runtime = "Bun";
-			else if (fs.existsSync(path.join(cwd, "deno.json")))
-				info.runtime = "Deno";
+			else if (fs.existsSync(path.join(cwd, "deno.json"))) info.runtime = "Deno";
 			else info.runtime = "Node.js";
 
 			// Detect package manager
-			if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml")))
-				info.packageManager = "pnpm";
-			else if (fs.existsSync(path.join(cwd, "yarn.lock")))
-				info.packageManager = "yarn";
-			else if (fs.existsSync(path.join(cwd, "bun.lockb")))
-				info.packageManager = "bun";
+			if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) info.packageManager = "pnpm";
+			else if (fs.existsSync(path.join(cwd, "yarn.lock"))) info.packageManager = "yarn";
+			else if (fs.existsSync(path.join(cwd, "bun.lockb"))) info.packageManager = "bun";
 			else info.packageManager = "npm";
 		}
 
@@ -168,11 +156,7 @@ registerTool(
 			if (depth > 2) return;
 			try {
 				for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-					if (
-						entry.name.startsWith(".") ||
-						entry.name === "node_modules" ||
-						entry.name === "dist"
-					)
+					if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist")
 						continue;
 					if (entry.isDirectory()) {
 						countFiles(path.join(dir, entry.name), depth + 1);
@@ -219,8 +203,7 @@ registerTool(
 registerTool(
 	{
 		name: "find_files",
-		description:
-			"Find files matching a glob pattern. Fast recursive search ignoring node_modules.",
+		description: "Find files matching a glob pattern. Fast recursive search ignoring node_modules.",
 		capabilities: ["repo"],
 		inputSchema: {
 			type: "object",
@@ -255,9 +238,7 @@ registerTool(
 				.trim()
 				.split("\n")
 				.filter(Boolean)
-				.filter(
-					(f: string) => !f.includes("node_modules") && !f.includes(".git/"),
-				);
+				.filter((f: string) => !f.includes("node_modules") && !f.includes(".git/"));
 			return { files, count: files.length, truncated: files.length >= limit };
 		} catch {
 			return { files: [], count: 0, truncated: false };

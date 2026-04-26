@@ -12,12 +12,7 @@
  */
 
 import { PLAN_DEFINITIONS } from "./billing";
-import type {
-	PlanLimits,
-	PlanTier,
-	TenantConfig,
-	TenantFeatures,
-} from "./types";
+import type { PlanLimits, PlanTier, TenantConfig, TenantFeatures } from "./types";
 
 // ============================================
 // TenantStore Interface
@@ -34,10 +29,7 @@ export interface TenantStore {
 	getBySubdomain(subdomain: string): Promise<TenantConfig | null>;
 	list(planFilter?: PlanTier): Promise<TenantConfig[]>;
 	updatePlan(tenantId: string, newPlan: PlanTier): Promise<TenantConfig>;
-	updateSubdomain(
-		tenantId: string,
-		newSubdomain: string,
-	): Promise<TenantConfig>;
+	updateSubdomain(tenantId: string, newSubdomain: string): Promise<TenantConfig>;
 	delete(tenantId: string): Promise<boolean>;
 }
 
@@ -175,15 +167,11 @@ export class ConvexTenantStore implements TenantStore {
 		});
 
 		const updated = await this.getById(tenantId);
-		if (!updated)
-			throw new Error(`Tenant "${tenantId}" not found after update`);
+		if (!updated) throw new Error(`Tenant "${tenantId}" not found after update`);
 		return updated;
 	}
 
-	async updateSubdomain(
-		tenantId: string,
-		newSubdomain: string,
-	): Promise<TenantConfig> {
+	async updateSubdomain(tenantId: string, newSubdomain: string): Promise<TenantConfig> {
 		validateSubdomain(newSubdomain);
 
 		await this.client.mutation("tenants:update", {
@@ -192,8 +180,7 @@ export class ConvexTenantStore implements TenantStore {
 		});
 
 		const updated = await this.getById(tenantId);
-		if (!updated)
-			throw new Error(`Tenant "${tenantId}" not found after update`);
+		if (!updated) throw new Error(`Tenant "${tenantId}" not found after update`);
 		return updated;
 	}
 
@@ -274,10 +261,7 @@ export class InMemoryTenantStore implements TenantStore {
 		return updated;
 	}
 
-	async updateSubdomain(
-		tenantId: string,
-		newSubdomain: string,
-	): Promise<TenantConfig> {
+	async updateSubdomain(tenantId: string, newSubdomain: string): Promise<TenantConfig> {
 		const tenant = this.store.get(tenantId);
 		if (!tenant) throw new Error(`Tenant "${tenantId}" not found`);
 
@@ -353,10 +337,7 @@ export function listTenants(planFilter?: PlanTier): TenantConfig[] {
 	return planFilter ? all.filter((t) => t.plan === planFilter) : all;
 }
 
-export function updateTenantPlan(
-	tenantId: string,
-	newPlan: PlanTier,
-): TenantConfig {
+export function updateTenantPlan(tenantId: string, newPlan: PlanTier): TenantConfig {
 	const tenant = _syncStore.get(tenantId);
 	if (!tenant) throw new Error(`Tenant "${tenantId}" not found`);
 	const planDef = PLAN_DEFINITIONS[newPlan];
@@ -429,8 +410,7 @@ export function checkUsageLimits(
 	}
 
 	const tokenWithin =
-		tenant.limits.tokensPerDay === -1 ||
-		currentDailyTokens < tenant.limits.tokensPerDay;
+		tenant.limits.tokensPerDay === -1 || currentDailyTokens < tenant.limits.tokensPerDay;
 
 	const sessionWithin =
 		tenant.limits.maxConcurrentSessions === -1 ||
@@ -462,9 +442,7 @@ export function isFeatureEnabled(
  */
 export function resolveSubdomain(hostname: string): string | null {
 	// Production: username.8gent.app
-	const prodMatch = hostname.match(
-		/^([a-z0-9][a-z0-9-]+[a-z0-9])\.8gent\.app$/,
-	);
+	const prodMatch = hostname.match(/^([a-z0-9][a-z0-9-]+[a-z0-9])\.8gent\.app$/);
 	if (prodMatch) return prodMatch[1];
 
 	// Development: username.localhost

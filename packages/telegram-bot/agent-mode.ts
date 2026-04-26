@@ -22,14 +22,8 @@ import type { ActionResult, AgentAction, AgentActionType } from "./types";
 // ── State paths (same as commands.ts) ───────────────────
 
 const HOME = homedir();
-const LOOP_STATE = join(
-	HOME,
-	"8gent-code/benchmarks/autoresearch/loop-state.json",
-);
-const LEGACY_STATE = join(
-	HOME,
-	"iris-observatory/benchmarks/autoresearch/loop-state.json",
-);
+const LOOP_STATE = join(HOME, "8gent-code/benchmarks/autoresearch/loop-state.json");
+const LEGACY_STATE = join(HOME, "iris-observatory/benchmarks/autoresearch/loop-state.json");
 const CONFIG_FILE = join(HOME, ".8gent/config.json");
 const RUN_PID_FILE = join(HOME, ".8gent/run.pid");
 const KNOWLEDGE_DIR = join(HOME, ".8gent/intelligence");
@@ -65,9 +59,7 @@ const INTENT_MAP: IntentPattern[] = [
 		],
 		action: "search_repos",
 		extractParams: (text: string) => {
-			const match = text.match(
-				/(?:search|find|look\s*up|query)\s+(?:repos?\s+)?(?:for\s+)?(.+)/i,
-			);
+			const match = text.match(/(?:search|find|look\s*up|query)\s+(?:repos?\s+)?(?:for\s+)?(.+)/i);
 			return { query: match?.[1]?.trim() ?? "" };
 		},
 	},
@@ -126,11 +118,7 @@ const INTENT_MAP: IntentPattern[] = [
 // ── Helper: read loop state ─────────────────────────────
 
 function readLoopState(): any | null {
-	const path = existsSync(LOOP_STATE)
-		? LOOP_STATE
-		: existsSync(LEGACY_STATE)
-			? LEGACY_STATE
-			: null;
+	const path = existsSync(LOOP_STATE) ? LOOP_STATE : existsSync(LEGACY_STATE) ? LEGACY_STATE : null;
 	if (!path) return null;
 	try {
 		return JSON.parse(readFileSync(path, "utf-8"));
@@ -274,10 +262,7 @@ export class TelegramAgentMode {
 			};
 		}
 
-		const scriptPath = join(
-			HOME,
-			"8gent-code/benchmarks/autoresearch/harness.ts",
-		);
+		const scriptPath = join(HOME, "8gent-code/benchmarks/autoresearch/harness.ts");
 		if (!existsSync(scriptPath)) {
 			return {
 				success: false,
@@ -319,11 +304,7 @@ export class TelegramAgentMode {
 		const mutations = state?.mutations || [];
 
 		const lines: string[] = [];
-		lines.push(
-			running
-				? "The system is *running*."
-				: "The system is *idle* (no active run).",
-		);
+		lines.push(running ? "The system is *running*." : "The system is *idle* (no active run).");
 		lines.push("");
 
 		if (latest) {
@@ -335,14 +316,10 @@ export class TelegramAgentMode {
 
 			if (state.history.length >= 3) {
 				const recent = state.history.slice(-8).map((h: any) => h.avgScore ?? 0);
-				lines.push(
-					`\nTrend: ${sparkline(recent)} (last ${recent.length} rounds)`,
-				);
+				lines.push(`\nTrend: ${sparkline(recent)} (last ${recent.length} rounds)`);
 			}
 		} else {
-			lines.push(
-				"_No benchmark data yet. Run a benchmark or start the competition._",
-			);
+			lines.push("_No benchmark data yet. Run a benchmark or start the competition._");
 		}
 
 		return {
@@ -359,14 +336,10 @@ export class TelegramAgentMode {
 		const intelligenceRepos: { name: string; snippet: string }[] = [];
 		if (existsSync(KNOWLEDGE_DIR)) {
 			try {
-				const files = readdirSync(KNOWLEDGE_DIR).filter((f) =>
-					f.endsWith(".json"),
-				);
+				const files = readdirSync(KNOWLEDGE_DIR).filter((f) => f.endsWith(".json"));
 				for (const file of files.slice(0, 20)) {
 					try {
-						const data = JSON.parse(
-							readFileSync(join(KNOWLEDGE_DIR, file), "utf-8"),
-						);
+						const data = JSON.parse(readFileSync(join(KNOWLEDGE_DIR, file), "utf-8"));
 						if (
 							!query ||
 							JSON.stringify(data)
@@ -491,8 +464,7 @@ export class TelegramAgentMode {
 		if (isRunActive()) {
 			return {
 				success: false,
-				message:
-					"A run is already active. Stop it first before starting a new competition.",
+				message: "A run is already active. Stop it first before starting a new competition.",
 			};
 		}
 
@@ -500,8 +472,7 @@ export class TelegramAgentMode {
 		if (!existsSync(scriptPath)) {
 			return {
 				success: false,
-				message:
-					"Nightly train script not found. Check `scripts/nightly-train.ts`.",
+				message: "Nightly train script not found. Check `scripts/nightly-train.ts`.",
 			};
 		}
 
@@ -547,10 +518,7 @@ export class TelegramAgentMode {
 		}
 
 		try {
-			const pid = Number.parseInt(
-				readFileSync(RUN_PID_FILE, "utf-8").trim(),
-				10,
-			);
+			const pid = Number.parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
 			process.kill(pid, "SIGTERM");
 
 			try {
@@ -565,10 +533,7 @@ export class TelegramAgentMode {
 				duration = ` Ran for ${formatDuration(elapsed)}.`;
 			}
 
-			this.memory.addLearning(
-				`Process stopped via agent mode (PID: ${pid})`,
-				"agent-mode",
-			);
+			this.memory.addLearning(`Process stopped via agent mode (PID: ${pid})`, "agent-mode");
 
 			return {
 				success: true,
@@ -593,9 +558,7 @@ export class TelegramAgentMode {
 				const lines = [
 					`*Bot Learnings (${learnings.length})*`,
 					"",
-					...learnings
-						.slice(-10)
-						.map((l, i) => `\`${i + 1}.\` ${l.learning} _(${l.source})_`),
+					...learnings.slice(-10).map((l, i) => `\`${i + 1}.\` ${l.learning} _(${l.source})_`),
 				];
 				return { success: true, message: lines.join("\n") };
 			}
@@ -682,9 +645,7 @@ export class TelegramAgentMode {
 			const running = isRunActive();
 			const latest = state?.history?.[state.history.length - 1];
 
-			let status = running
-				? "The competition loop is running."
-				: "No active runs right now.";
+			let status = running ? "The competition loop is running." : "No active runs right now.";
 			if (latest) {
 				status += ` Last score: *${(latest.avgScore ?? 0).toFixed(1)}* avg on iteration #${latest.iteration}.`;
 			}

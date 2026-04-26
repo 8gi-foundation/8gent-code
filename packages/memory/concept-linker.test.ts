@@ -51,10 +51,7 @@ describe("ConceptLinker", () => {
 		const conceptId = graph.addEntity("concept", "authentication");
 		const memoryId = graph.addEntity("file", "auth-module");
 
-		const linked = linker.linkMemoryToConcepts(
-			memoryId,
-			"the authentication module needs work",
-		);
+		const linked = linker.linkMemoryToConcepts(memoryId, "the authentication module needs work");
 
 		expect(linked).toEqual([conceptId]);
 
@@ -70,10 +67,7 @@ describe("ConceptLinker", () => {
 		graph.addEntity("concept", "auth");
 		const memoryId = graph.addEntity("file", "auth-module");
 
-		const linked = linker.linkMemoryToConcepts(
-			memoryId,
-			"the authentication module needs work",
-		);
+		const linked = linker.linkMemoryToConcepts(memoryId, "the authentication module needs work");
 
 		expect(linked).toEqual([]);
 
@@ -87,10 +81,7 @@ describe("ConceptLinker", () => {
 		const conceptId = graph.addEntity("concept", "Docker");
 		const memoryId = graph.addEntity("file", "infra-notes");
 
-		const linked = linker.linkMemoryToConcepts(
-			memoryId,
-			"docker containers are running fine",
-		);
+		const linked = linker.linkMemoryToConcepts(memoryId, "docker containers are running fine");
 
 		expect(linked).toEqual([conceptId]);
 	});
@@ -103,10 +94,7 @@ describe("ConceptLinker", () => {
 		graph.addEntity("concept", "postgres"); // should NOT match
 		const memoryId = graph.addEntity("file", "cache-layer");
 
-		const linked = linker.linkMemoryToConcepts(
-			memoryId,
-			"we use redis for caching session tokens",
-		);
+		const linked = linker.linkMemoryToConcepts(memoryId, "we use redis for caching session tokens");
 
 		expect(linked).toHaveLength(2);
 		expect(linked).toContain(c1);
@@ -120,10 +108,7 @@ describe("ConceptLinker", () => {
 		graph.addEntity("concept", "terraform");
 		const memoryId = graph.addEntity("file", "readme");
 
-		const linked = linker.linkMemoryToConcepts(
-			memoryId,
-			"this is about the database schema",
-		);
+		const linked = linker.linkMemoryToConcepts(memoryId, "this is about the database schema");
 
 		expect(linked).toEqual([]);
 	});
@@ -151,9 +136,7 @@ describe("ConceptLinker", () => {
 		linker.linkMemoryToConcepts(memoryId, "authentication module");
 
 		const rels = graph.getRelationships(memoryId, "outgoing");
-		const relatedToRels = rels.filter(
-			(r) => r.targetId === conceptId && r.type === "related_to",
-		);
+		const relatedToRels = rels.filter((r) => r.targetId === conceptId && r.type === "related_to");
 		expect(relatedToRels).toHaveLength(1);
 	});
 
@@ -164,10 +147,7 @@ describe("ConceptLinker", () => {
 		const nodeId = graph.addEntity("concept", "node.js");
 		const memoryId = graph.addEntity("file", "languages-doc");
 
-		const linked = linker.linkMemoryToConcepts(
-			memoryId,
-			"we support C++ and node.js in our stack",
-		);
+		const linked = linker.linkMemoryToConcepts(memoryId, "we support C++ and node.js in our stack");
 
 		expect(linked).toHaveLength(2);
 		expect(linked).toContain(cppId);

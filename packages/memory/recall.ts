@@ -44,10 +44,7 @@ export class SemanticRecall {
 	 * Returns results sorted by combined FTS + vector score.
 	 * Never throws — returns empty array on failure.
 	 */
-	async recall(
-		query: string,
-		options: RecallOptions = {},
-	): Promise<SearchResult[]> {
+	async recall(query: string, options: RecallOptions = {}): Promise<SearchResult[]> {
 		if (!query.trim()) return [];
 
 		const limit = options.limit ?? 5;
@@ -71,9 +68,7 @@ export class SemanticRecall {
 
 			// Session context re-scoring: boost results that overlap with current session words
 			if (options.sessionContext && options.sessionContext.length > 0) {
-				const contextWords = new Set(
-					options.sessionContext.map((w) => w.toLowerCase()),
-				);
+				const contextWords = new Set(options.sessionContext.map((w) => w.toLowerCase()));
 				for (const r of results) {
 					const memContent = this._extractContent(r.memory).toLowerCase();
 					const memWords = memContent.split(/\s+/).filter((w) => w.length > 2);
@@ -99,10 +94,7 @@ export class SemanticRecall {
 	 * Recall memories and format as plain text for prompt injection.
 	 * Returns empty string if nothing relevant found.
 	 */
-	async recallAsText(
-		query: string,
-		options: RecallOptions = {},
-	): Promise<string> {
+	async recallAsText(query: string, options: RecallOptions = {}): Promise<string> {
 		const results = await this.recall(query, options);
 		if (results.length === 0) return "";
 

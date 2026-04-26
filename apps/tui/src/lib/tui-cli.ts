@@ -15,8 +15,7 @@ export type ParsedTuiCli = {
 };
 
 function takeEqValue(arg: string, prefix: string): string | undefined {
-	if (arg.startsWith(prefix))
-		return arg.slice(prefix.length).trim() || undefined;
+	if (arg.startsWith(prefix)) return arg.slice(prefix.length).trim() || undefined;
 	return undefined;
 }
 

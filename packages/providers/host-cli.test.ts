@@ -1,11 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import {
-	chmodSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -41,17 +35,9 @@ const originalFlag = process.env.PROVIDERS_ALLOW_HOST_CLI;
 // surfaces auth failures on a generic non-zero exit with a stderr hint.
 beforeAll(() => {
 	makeStub(stubDir, "stub-ok", "#!/bin/sh\necho ok\nexit 0\n");
-	makeStub(
-		stubDir,
-		"stub-ratelimit",
-		"#!/bin/sh\necho 'rate limit exceeded' >&2\nexit 7\n",
-	);
+	makeStub(stubDir, "stub-ratelimit", "#!/bin/sh\necho 'rate limit exceeded' >&2\nexit 7\n");
 	makeStub(stubDir, "stub-exec-ok", "#!/bin/sh\necho exec-ok\nexit 0\n");
-	makeStub(
-		stubDir,
-		"stub-auth",
-		"#!/bin/sh\necho 'please run login first' >&2\nexit 2\n",
-	);
+	makeStub(stubDir, "stub-auth", "#!/bin/sh\necho 'please run login first' >&2\nexit 2\n");
 
 	process.env.PATH = `${stubDir}:${originalPath ?? ""}`;
 });
@@ -114,9 +100,9 @@ describe("HostCliClient: primary-style spec (-p prompt, exit 7 rate limit)", () 
 		const client = new HostCliClient({
 			spec: { binary: "stub-ok", rateLimitExitCode: 7 },
 		});
-		await expect(
-			client.chat([{ role: "user", content: "hi" }]),
-		).rejects.toBeInstanceOf(HostCliUnavailableError);
+		await expect(client.chat([{ role: "user", content: "hi" }])).rejects.toBeInstanceOf(
+			HostCliUnavailableError,
+		);
 	});
 
 	it("returns stdout as the assistant message on success", async () => {
@@ -167,9 +153,9 @@ describe("HostCliClient: secondary-style spec (exec subcommand, auth via stderr)
 				buildArgs: (prompt, extra) => ["exec", prompt, ...extra],
 			},
 		});
-		await expect(
-			client.chat([{ role: "user", content: "hello" }]),
-		).rejects.toBeInstanceOf(HostCliUnavailableError);
+		await expect(client.chat([{ role: "user", content: "hello" }])).rejects.toBeInstanceOf(
+			HostCliUnavailableError,
+		);
 	});
 
 	it("availability check is false when flag is missing", () => {

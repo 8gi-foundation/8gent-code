@@ -54,10 +54,7 @@ const ALIGNMENT_CHECKS = [
 
 const MAX_RESPONSE_LENGTH = 1950; // Discord limit with margin
 
-export function validateResponse(
-	response: string,
-	memberCode: string,
-): PolicyResult {
+export function validateResponse(response: string, memberCode: string): PolicyResult {
 	// 1. Empty check
 	if (!response || !response.trim()) {
 		return { pass: false, reason: "Empty response" };

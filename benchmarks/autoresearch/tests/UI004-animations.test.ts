@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";
@@ -31,8 +29,7 @@ describe("UI004 - CSS Animation Showcase", () => {
 	});
 
 	test("each @keyframes has from/to or percentage stops", () => {
-		const keyframeBlocks =
-			css.match(/@keyframes\s+[\w-]+\s*\{[\s\S]*?\}\s*\}/gi) ?? [];
+		const keyframeBlocks = css.match(/@keyframes\s+[\w-]+\s*\{[\s\S]*?\}\s*\}/gi) ?? [];
 		expect(keyframeBlocks.length).toBeGreaterThanOrEqual(1);
 		const allValid = keyframeBlocks.every((block) => {
 			const hasFromTo = /\b(from|to)\s*\{/i.test(block);
@@ -61,19 +58,15 @@ describe("UI004 - CSS Animation Showcase", () => {
 		const timeValues = css.match(/(\d+\.?\d*m?s)/g) ?? [];
 		// We mainly care that animation-delay is used with different values
 		// or that the shorthand animation has different timing
-		expect(
-			delayValues.size >= 3 ||
-				delayMatches.length >= 3 ||
-				animationMatches.length >= 3,
-		).toBe(true);
+		expect(delayValues.size >= 3 || delayMatches.length >= 3 || animationMatches.length >= 3).toBe(
+			true,
+		);
 	});
 
 	test("animation-iteration-count: infinite on 2+ animations", () => {
-		const infiniteInProperty =
-			css.match(/animation-iteration-count\s*:\s*infinite/gi) ?? [];
+		const infiniteInProperty = css.match(/animation-iteration-count\s*:\s*infinite/gi) ?? [];
 		// Also check shorthand — "infinite" keyword in animation shorthand
-		const infiniteInShorthand =
-			css.match(/animation\s*:[^;]*\binfinite\b/gi) ?? [];
+		const infiniteInShorthand = css.match(/animation\s*:[^;]*\binfinite\b/gi) ?? [];
 		const total = infiniteInProperty.length + infiniteInShorthand.length;
 		expect(total).toBeGreaterThanOrEqual(2);
 	});
@@ -85,17 +78,13 @@ describe("UI004 - CSS Animation Showcase", () => {
 
 	test("pulse uses scale() and opacity", () => {
 		// Find a keyframes block named pulse or similar
-		const pulseBlock =
-			css.match(/@keyframes\s+[\w-]*pulse[\w-]*\s*\{[\s\S]*?\}\s*\}/i)?.[0] ??
-			"";
+		const pulseBlock = css.match(/@keyframes\s+[\w-]*pulse[\w-]*\s*\{[\s\S]*?\}\s*\}/i)?.[0] ?? "";
 		// If no explicit pulse block, check globally for scale + opacity in any keyframes
-		const allKeyframes =
-			css.match(/@keyframes\s+[\w-]+\s*\{[\s\S]*?\}\s*\}/gi) ?? [];
+		const allKeyframes = css.match(/@keyframes\s+[\w-]+\s*\{[\s\S]*?\}\s*\}/gi) ?? [];
 
 		let hasScaleAndOpacity = false;
 		if (pulseBlock) {
-			hasScaleAndOpacity =
-				/scale\s*\(/i.test(pulseBlock) && /opacity\s*:/i.test(pulseBlock);
+			hasScaleAndOpacity = /scale\s*\(/i.test(pulseBlock) && /opacity\s*:/i.test(pulseBlock);
 		}
 		if (!hasScaleAndOpacity) {
 			// Check if any keyframe block has both scale and opacity
@@ -107,11 +96,8 @@ describe("UI004 - CSS Animation Showcase", () => {
 	});
 
 	test("slide uses translateX", () => {
-		const allKeyframes =
-			css.match(/@keyframes\s+[\w-]+\s*\{[\s\S]*?\}\s*\}/gi) ?? [];
-		const hasTranslateX = allKeyframes.some((block) =>
-			/translateX\s*\(/i.test(block),
-		);
+		const allKeyframes = css.match(/@keyframes\s+[\w-]+\s*\{[\s\S]*?\}\s*\}/gi) ?? [];
+		const hasTranslateX = allKeyframes.some((block) => /translateX\s*\(/i.test(block));
 		// Also check if translateX is used in any animation-related transform
 		const globalTranslateX = /translateX\s*\(/i.test(css);
 		expect(hasTranslateX || globalTranslateX).toBe(true);

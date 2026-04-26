@@ -19,8 +19,7 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 3. Handles errors with error boundary
 4. Implements ISR with revalidation
 5. Types the fetched data properly`,
-		expectedBehavior:
-			"Page loads with skeleton, data appears, handles errors gracefully",
+		expectedBehavior: "Page loads with skeleton, data appears, handles errors gracefully",
 		fixture: "fixtures/nextjs/NX001-server-fetch.tsx",
 		rubric: {
 			correctness: {
@@ -34,19 +33,11 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 			},
 			codeQuality: {
 				weight: 25,
-				criteria: [
-					"Proper async/await",
-					"Clean component separation",
-					"TypeScript types",
-				],
+				criteria: ["Proper async/await", "Clean component separation", "TypeScript types"],
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Uses fetch cache",
-					"Parallel data fetching",
-					"Minimal client JS",
-				],
+				criteria: ["Uses fetch cache", "Parallel data fetching", "Minimal client JS"],
 			},
 			bestPractices: {
 				weight: 15,
@@ -75,8 +66,7 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 4. Handles errors gracefully
 5. Shows success message
 6. Prevents double submission`,
-		expectedBehavior:
-			"Form submits, shows loading, validates, handles errors/success",
+		expectedBehavior: "Form submits, shows loading, validates, handles errors/success",
 		fixture: "fixtures/nextjs/NX002-server-action-form.tsx",
 		rubric: {
 			correctness: {
@@ -90,19 +80,11 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 			},
 			codeQuality: {
 				weight: 25,
-				criteria: [
-					"Clean action separation",
-					"Proper Zod schema",
-					"TypeScript inference",
-				],
+				criteria: ["Clean action separation", "Proper Zod schema", "TypeScript inference"],
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"No unnecessary re-renders",
-					"Efficient validation",
-					"Progressive enhancement",
-				],
+				criteria: ["No unnecessary re-renders", "Efficient validation", "Progressive enhancement"],
 			},
 			bestPractices: {
 				weight: 15,
@@ -131,8 +113,7 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 4. Passes user info to protected routes
 5. Handles token expiration
 6. Works with edge runtime`,
-		expectedBehavior:
-			"Protected routes redirect without token, work with valid token",
+		expectedBehavior: "Protected routes redirect without token, work with valid token",
 		fixture: "fixtures/nextjs/NX003-auth-middleware.ts",
 		rubric: {
 			correctness: {
@@ -146,27 +127,15 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 			},
 			codeQuality: {
 				weight: 25,
-				criteria: [
-					"Clean middleware logic",
-					"Proper matcher config",
-					"TypeScript types",
-				],
+				criteria: ["Clean middleware logic", "Proper matcher config", "TypeScript types"],
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Edge-compatible code",
-					"Minimal token parsing",
-					"No unnecessary checks",
-				],
+				criteria: ["Edge-compatible code", "Minimal token parsing", "No unnecessary checks"],
 			},
 			bestPractices: {
 				weight: 15,
-				criteria: [
-					"Uses NextRequest/Response",
-					"Proper cookie handling",
-					"Handles edge cases",
-				],
+				criteria: ["Uses NextRequest/Response", "Proper cookie handling", "Handles edge cases"],
 			},
 		},
 		validators: [
@@ -206,32 +175,18 @@ export const nextjsBenchmarks: BenchmarkDefinition[] = [
 			},
 			codeQuality: {
 				weight: 25,
-				criteria: [
-					"Clean slot organization",
-					"Proper folder structure",
-					"TypeScript props",
-				],
+				criteria: ["Clean slot organization", "Proper folder structure", "TypeScript props"],
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Parallel data loading",
-					"Minimal waterfalls",
-					"Streaming enabled",
-				],
+				criteria: ["Parallel data loading", "Minimal waterfalls", "Streaming enabled"],
 			},
 			bestPractices: {
 				weight: 15,
-				criteria: [
-					"Uses @folder convention",
-					"Proper default.tsx",
-					"Accessible layout",
-				],
+				criteria: ["Uses @folder convention", "Proper default.tsx", "Accessible layout"],
 			},
 		},
-		validators: [
-			{ type: "regex", config: { pattern: "@\\w+", files: ["**/layout.tsx"] } },
-		],
+		validators: [{ type: "regex", config: { pattern: "@\\w+", files: ["**/layout.tsx"] } }],
 		expectedTokens: 1200,
 		timeLimit: 240,
 	},

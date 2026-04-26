@@ -80,9 +80,7 @@ export function spawnCLIAgent(
 	const timeout = options.timeout || 5 * 60 * 1000; // 5 minutes
 
 	// Create a temp working directory for isolation
-	const tmpDir = fs.mkdtempSync(
-		path.join(os.tmpdir(), `8gent-cli-${runtime}-`),
-	);
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `8gent-cli-${runtime}-`));
 
 	// Determine the actual cwd: use the project's working directory, not tmp
 	// (tmp is available for scratch if needed, but commands run in project context)
@@ -101,9 +99,7 @@ export function spawnCLIAgent(
 			args = ["-c", task];
 			break;
 		default:
-			throw new Error(
-				`Runtime "${runtime}" should be handled by AgentPool, not spawnCLIAgent`,
-			);
+			throw new Error(`Runtime "${runtime}" should be handled by AgentPool, not spawnCLIAgent`);
 	}
 
 	const startedAt = new Date();

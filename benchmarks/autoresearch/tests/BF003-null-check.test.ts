@@ -13,9 +13,7 @@ const mod = await import(fixturePath);
 const processRecord: Function = mod.default ?? mod.processRecord ?? mod.process;
 
 if (!processRecord || typeof processRecord !== "function") {
-	throw new Error(
-		"Module must export processRecord, process, or default function",
-	);
+	throw new Error("Module must export processRecord, process, or default function");
 }
 
 describe("BF003: Null Check Fix", () => {
@@ -77,8 +75,7 @@ describe("BF003: Null Check Fix", () => {
 			result.errors.some((e: any) =>
 				typeof e === "string"
 					? e.toLowerCase().includes("email")
-					: (e?.message?.toLowerCase().includes("email") ??
-						e?.field === "email"),
+					: (e?.message?.toLowerCase().includes("email") ?? e?.field === "email"),
 			),
 		).toBe(true);
 	});

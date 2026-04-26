@@ -6,8 +6,7 @@
  * 3. Return structured response
  */
 
-const MODEL_PROXY =
-	process.env.MODEL_PROXY_URL ?? "http://8gi-model-proxy.internal:3200";
+const MODEL_PROXY = process.env.MODEL_PROXY_URL ?? "http://8gi-model-proxy.internal:3200";
 const MODEL = process.env.VESSEL_MODEL ?? "auto";
 
 export interface InvokeRequest {
@@ -55,9 +54,7 @@ export async function vesselInvoke(req: InvokeRequest): Promise<InvokeResult> {
 
 	const messages = [
 		{ role: "system", content: systemPrompt },
-		...(req.context
-			? [{ role: "user", content: `Context: ${req.context}` }]
-			: []),
+		...(req.context ? [{ role: "user", content: `Context: ${req.context}` }] : []),
 		{ role: "user", content: req.task },
 	];
 

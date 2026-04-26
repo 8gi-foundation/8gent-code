@@ -92,8 +92,7 @@ export async function classify(
 	text: string,
 	categories: string[],
 ): Promise<{ category: string; confidence: number }> {
-	if (categories.length === 0)
-		throw new Error("classify: categories must not be empty");
+	if (categories.length === 0) throw new Error("classify: categories must not be empty");
 
 	const [textVec, ...categoryVecs] = await batchEmbed([text, ...categories]);
 

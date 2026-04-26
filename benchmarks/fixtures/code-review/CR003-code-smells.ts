@@ -63,11 +63,7 @@ export function processUserData(
 }
 
 // 2. Magic numbers and strings
-export function calculatePrice(
-	basePrice: number,
-	quantity: number,
-	userType: string,
-): number {
+export function calculatePrice(basePrice: number, quantity: number, userType: string): number {
 	let total = basePrice * quantity;
 
 	if (quantity > 10) {
@@ -146,30 +142,22 @@ export function validateOrder(order: Record<string, unknown>): string[] {
 }
 
 // 4. Duplicate code
-export function formatUserForApi(
-	user: Record<string, unknown>,
-): Record<string, unknown> {
+export function formatUserForApi(user: Record<string, unknown>): Record<string, unknown> {
 	return {
 		id: user.id,
 		fullName: `${user.firstName} ${user.lastName}`,
 		email: user.email?.toString().toLowerCase(),
-		createdAt: user.createdAt
-			? new Date(user.createdAt as string).toISOString()
-			: null,
+		createdAt: user.createdAt ? new Date(user.createdAt as string).toISOString() : null,
 		status: user.active ? "active" : "inactive",
 	};
 }
 
-export function formatAdminForApi(
-	admin: Record<string, unknown>,
-): Record<string, unknown> {
+export function formatAdminForApi(admin: Record<string, unknown>): Record<string, unknown> {
 	return {
 		id: admin.id,
 		fullName: `${admin.firstName} ${admin.lastName}`,
 		email: admin.email?.toString().toLowerCase(),
-		createdAt: admin.createdAt
-			? new Date(admin.createdAt as string).toISOString()
-			: null,
+		createdAt: admin.createdAt ? new Date(admin.createdAt as string).toISOString() : null,
 		status: admin.active ? "active" : "inactive",
 		role: admin.role,
 		permissions: admin.permissions,

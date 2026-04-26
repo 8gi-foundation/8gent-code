@@ -15,15 +15,9 @@ const PATTERNS: Array<[RegExp, string]> = [
 	[/gh[ps]_[A-Za-z0-9_]{36,255}/g, "[REDACTED_GITHUB_TOKEN]"],
 	[/github_pat_[A-Za-z0-9_]{22,255}/g, "[REDACTED_GITHUB_PAT]"],
 	// Generic API keys (key=... or key: ...)
-	[
-		/(?<=(?:api[_-]?key|apikey|token|secret)['":\s=]+)[A-Za-z0-9\-_.]{20,}/gi,
-		"[REDACTED_API_KEY]",
-	],
+	[/(?<=(?:api[_-]?key|apikey|token|secret)['":\s=]+)[A-Za-z0-9\-_.]{20,}/gi, "[REDACTED_API_KEY]"],
 	// JWTs (three base64url segments separated by dots)
-	[
-		/eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-		"[REDACTED_JWT]",
-	],
+	[/eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "[REDACTED_JWT]"],
 	// PEM private keys
 	[
 		/-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA )?PRIVATE KEY-----/g,

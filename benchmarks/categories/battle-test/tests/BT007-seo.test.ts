@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let analyzer: any;
 let scorer: any;
@@ -35,33 +34,25 @@ describe("SEO Analyzer", () => {
 	});
 
 	it("analyzeContent returns accurate word count", () => {
-		const analyzeContent =
-			analyzer.analyzeContent || analyzer.default?.analyzeContent;
-		const result = analyzeContent(
-			"The quick brown fox jumps over the lazy dog",
-		);
+		const analyzeContent = analyzer.analyzeContent || analyzer.default?.analyzeContent;
+		const result = analyzeContent("The quick brown fox jumps over the lazy dog");
 		expect(result.wordCount).toBe(9);
 	});
 
 	it("analyzeContent returns reading level as number", () => {
-		const analyzeContent =
-			analyzer.analyzeContent || analyzer.default?.analyzeContent;
-		const result = analyzeContent(
-			"This is a simple sentence. Another simple sentence here.",
-		);
+		const analyzeContent = analyzer.analyzeContent || analyzer.default?.analyzeContent;
+		const result = analyzeContent("This is a simple sentence. Another simple sentence here.");
 		expect(typeof result.readingLevel).toBe("number");
 	});
 
 	it("analyzeContent calculates keyword density", () => {
-		const analyzeContent =
-			analyzer.analyzeContent || analyzer.default?.analyzeContent;
+		const analyzeContent = analyzer.analyzeContent || analyzer.default?.analyzeContent;
 		const result = analyzeContent("test test test other words here", "test");
 		expect(result.keywordDensity).toBeGreaterThan(0);
 	});
 
 	it("analyzeLinks counts internal vs external links", () => {
-		const analyzeLinks =
-			analyzer.analyzeLinks || analyzer.default?.analyzeLinks;
+		const analyzeLinks = analyzer.analyzeLinks || analyzer.default?.analyzeLinks;
 		const html = `<a href="/about">About</a><a href="https://external.com">Ext</a><a href="/contact">Contact</a>`;
 		const result = analyzeLinks(html, "https://mysite.com");
 		expect(result.internal).toBe(2);
@@ -69,16 +60,14 @@ describe("SEO Analyzer", () => {
 	});
 
 	it("analyzeLinks detects nofollow links", () => {
-		const analyzeLinks =
-			analyzer.analyzeLinks || analyzer.default?.analyzeLinks;
+		const analyzeLinks = analyzer.analyzeLinks || analyzer.default?.analyzeLinks;
 		const html = `<a href="https://ext.com" rel="nofollow">Ext</a><a href="/page">Page</a>`;
 		const result = analyzeLinks(html, "https://mysite.com");
 		expect(result.nofollow).toBe(1);
 	});
 
 	it("analyzeContent handles empty string", () => {
-		const analyzeContent =
-			analyzer.analyzeContent || analyzer.default?.analyzeContent;
+		const analyzeContent = analyzer.analyzeContent || analyzer.default?.analyzeContent;
 		const result = analyzeContent("");
 		expect(result.wordCount).toBe(0);
 	});
@@ -124,8 +113,7 @@ describe("SEO Scorer", () => {
 	});
 
 	it("scorePerformance gives high score for good vitals", () => {
-		const scorePerf =
-			scorer.scorePerformance || scorer.default?.scorePerformance;
+		const scorePerf = scorer.scorePerformance || scorer.default?.scorePerformance;
 		const result = scorePerf({ lcp: 1.5, fid: 50, cls: 0.05 });
 		expect(result.score).toBeGreaterThan(70);
 	});
@@ -141,8 +129,7 @@ describe("SEO Scorer", () => {
 
 describe("SEO Reporter", () => {
 	it("generateAuditReport returns report with grade", () => {
-		const genReport =
-			reporter.generateAuditReport || reporter.default?.generateAuditReport;
+		const genReport = reporter.generateAuditReport || reporter.default?.generateAuditReport;
 		const result = genReport({
 			meta: { score: 80 },
 			content: { score: 70 },
@@ -152,8 +139,7 @@ describe("SEO Reporter", () => {
 	});
 
 	it("returns grade A for all high scores", () => {
-		const genReport =
-			reporter.generateAuditReport || reporter.default?.generateAuditReport;
+		const genReport = reporter.generateAuditReport || reporter.default?.generateAuditReport;
 		const result = genReport({
 			meta: { score: 95 },
 			content: { score: 90 },
@@ -163,8 +149,7 @@ describe("SEO Reporter", () => {
 	});
 
 	it("returns grade F for all low scores", () => {
-		const genReport =
-			reporter.generateAuditReport || reporter.default?.generateAuditReport;
+		const genReport = reporter.generateAuditReport || reporter.default?.generateAuditReport;
 		const result = genReport({
 			meta: { score: 10 },
 			content: { score: 5 },

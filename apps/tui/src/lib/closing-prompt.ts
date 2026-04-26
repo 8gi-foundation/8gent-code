@@ -5,9 +5,9 @@
 
 const CLOSING_MARKER = "Where should we steer next";
 
-export function appendClosingQuestionIfNeeded<
-	T extends { role: string; content: string },
->(messages: T[]): T[] {
+export function appendClosingQuestionIfNeeded<T extends { role: string; content: string }>(
+	messages: T[],
+): T[] {
 	let lastAssistantIdx = -1;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		if (messages[i].role === "assistant") {

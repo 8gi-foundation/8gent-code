@@ -73,13 +73,7 @@ export interface DesignAgentState {
 	detection: DetectionResult | null;
 	suggestions: SuggestionResult | null;
 	selectedDesign: DesignSuggestion | null;
-	phase:
-		| "idle"
-		| "detecting"
-		| "suggesting"
-		| "awaiting-choice"
-		| "applying"
-		| "complete";
+	phase: "idle" | "detecting" | "suggesting" | "awaiting-choice" | "applying" | "complete";
 }
 
 export interface DesignAvenue {
@@ -175,9 +169,7 @@ export class DesignAgent extends EventEmitter {
 			};
 		}
 
-		this.log(
-			`Design detected: ${detection.reason} (${Math.round(detection.confidence * 100)}%)`,
-		);
+		this.log(`Design detected: ${detection.reason} (${Math.round(detection.confidence * 100)}%)`);
 
 		// Step 2: Generate suggestions
 		this.state.phase = "suggesting";
@@ -245,10 +237,7 @@ export class DesignAgent extends EventEmitter {
 		}
 
 		// Validate index
-		if (
-			selectedIndex < 0 ||
-			selectedIndex >= this.state.suggestions.suggestions.length
-		) {
+		if (selectedIndex < 0 || selectedIndex >= this.state.suggestions.suggestions.length) {
 			return {
 				success: false,
 				selectedDesign: null,

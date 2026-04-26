@@ -19,13 +19,7 @@ import type { Evidence } from "../validation/evidence";
 // Types
 // ============================================
 
-export type StepStatus =
-	| "pending"
-	| "in_progress"
-	| "validating"
-	| "passed"
-	| "failed"
-	| "skipped";
+export type StepStatus = "pending" | "in_progress" | "validating" | "passed" | "failed" | "skipped";
 
 export interface Step {
 	id: string;
@@ -128,10 +122,7 @@ export class PlanValidateLoop extends EventEmitter {
 
 					// 2. Collect evidence
 					if (this.config.collectEvidence) {
-						const evidence = await evidenceCollector.collectForStep(
-							step,
-							result,
-						);
+						const evidence = await evidenceCollector.collectForStep(step, result);
 						step.evidence = evidence;
 						allEvidence.push(...evidence);
 
@@ -245,10 +236,7 @@ Execute the necessary tools to complete this step. Report what you did and the r
 	/**
 	 * Validate step result against expected outcome
 	 */
-	private async validate(
-		step: Step,
-		evidence: Evidence[],
-	): Promise<ValidationResult> {
+	private async validate(step: Step, evidence: Evidence[]): Promise<ValidationResult> {
 		const mismatches: string[] = [];
 		let totalChecks = 0;
 		let passedChecks = 0;
@@ -275,11 +263,7 @@ Execute the necessary tools to complete this step. Report what you did and the r
 		const commandEvidence = evidence.filter((e) => e.type === "command_output");
 		for (const ev of commandEvidence) {
 			const output = String(ev.data).toLowerCase();
-			if (
-				output.includes("error:") ||
-				output.includes("failed") ||
-				output.includes("exception")
-			) {
+			if (output.includes("error:") || output.includes("failed") || output.includes("exception")) {
 				mismatches.push(`Command had errors: ${ev.description}`);
 			}
 		}
@@ -318,16 +302,12 @@ Execute the necessary tools to complete this step. Report what you did and the r
 	 */
 	private extractKeywords(text: string): string[] {
 		// Extract quoted strings and important nouns
-		const quoted =
-			text.match(/"([^"]+)"/g)?.map((s) => s.replace(/"/g, "")) || [];
+		const quoted = text.match(/"([^"]+)"/g)?.map((s) => s.replace(/"/g, "")) || [];
 		const words = text
 			.split(/\s+/)
 			.filter((w) => w.length > 4)
 			.filter(
-				(w) =>
-					!["should", "would", "could", "with", "that", "this"].includes(
-						w.toLowerCase(),
-					),
+				(w) => !["should", "would", "could", "with", "that", "this"].includes(w.toLowerCase()),
 			);
 
 		return [...quoted, ...words.slice(0, 5)];
@@ -488,14 +468,10 @@ export function formatPlan(plan: Step[]): string {
 
 		const reset = "\x1b[0m";
 
-		lines.push(
-			`  ${statusColor}${statusIcon}${reset} [${step.id}] ${step.action}`,
-		);
+		lines.push(`  ${statusColor}${statusIcon}${reset} [${step.id}] ${step.action}`);
 
 		if (step.status === "passed" && step.evidence?.length) {
-			lines.push(
-				`    └─ \x1b[32m✓\x1b[0m ${step.evidence.length} evidence items`,
-			);
+			lines.push(`    └─ \x1b[32m✓\x1b[0m ${step.evidence.length} evidence items`);
 		}
 
 		if (step.status === "failed" && step.error) {

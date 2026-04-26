@@ -39,10 +39,7 @@ if (command === "register") {
 
 	// Save our mesh ID for deregister
 	mkdirSync(STATE_DIR, { recursive: true });
-	writeFileSync(
-		MY_STATE,
-		JSON.stringify({ agentId: mesh.agentId, pid: process.ppid }),
-	);
+	writeFileSync(MY_STATE, JSON.stringify({ agentId: mesh.agentId, pid: process.ppid }));
 
 	// Announce arrival
 	mesh.broadcast("event", `Host CLI session started in ${process.cwd()}`);

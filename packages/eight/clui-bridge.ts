@@ -26,9 +26,7 @@ const history: Array<{ role: string; content: string }> = [
 
 async function chatStream(prompt: string): Promise<string> {
 	history.push({ role: "user", content: prompt });
-	process.stderr.write(
-		`[bridge] fetching for prompt: "${prompt.substring(0, 30)}"\n`,
-	);
+	process.stderr.write(`[bridge] fetching for prompt: "${prompt.substring(0, 30)}"\n`);
 
 	const res = await fetch(`${ollamaUrl}/api/chat`, {
 		method: "POST",

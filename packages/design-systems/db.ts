@@ -68,9 +68,7 @@ export function closeDatabase(): void {
 // Design Systems CRUD Operations
 // ============================================
 
-export function insertDesignSystem(
-	system: Omit<DesignSystem, "created_at" | "updated_at">,
-): void {
+export function insertDesignSystem(system: Omit<DesignSystem, "created_at" | "updated_at">): void {
 	const stmt = getDatabase().prepare(`
     INSERT OR REPLACE INTO design_systems
     (id, name, label, description, style, mood, colors_json, typography_json)
@@ -90,37 +88,27 @@ export function insertDesignSystem(
 }
 
 export function getDesignSystemById(id: string): DesignSystem | undefined {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM design_systems WHERE id = ?",
-	);
+	const stmt = getDatabase().prepare("SELECT * FROM design_systems WHERE id = ?");
 	return stmt.get(id) as DesignSystem | undefined;
 }
 
 export function getDesignSystemByName(name: string): DesignSystem | undefined {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM design_systems WHERE name = ?",
-	);
+	const stmt = getDatabase().prepare("SELECT * FROM design_systems WHERE name = ?");
 	return stmt.get(name) as DesignSystem | undefined;
 }
 
 export function getAllDesignSystems(): DesignSystem[] {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM design_systems ORDER BY name",
-	);
+	const stmt = getDatabase().prepare("SELECT * FROM design_systems ORDER BY name");
 	return stmt.all() as DesignSystem[];
 }
 
 export function getDesignSystemsByStyle(style: DesignStyle): DesignSystem[] {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM design_systems WHERE style = ?",
-	);
+	const stmt = getDatabase().prepare("SELECT * FROM design_systems WHERE style = ?");
 	return stmt.all(style) as DesignSystem[];
 }
 
 export function getDesignSystemsByMood(mood: DesignMood): DesignSystem[] {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM design_systems WHERE mood = ?",
-	);
+	const stmt = getDatabase().prepare("SELECT * FROM design_systems WHERE mood = ?");
 	return stmt.all(mood) as DesignSystem[];
 }
 
@@ -158,18 +146,12 @@ export function insertColorPalette(palette: Omit<ColorPalette, "id">): number {
 	);
 
 	// bun:sqlite doesn't expose lastInsertRowid on run result the same way
-	const result = getDatabase()
-		.prepare("SELECT last_insert_rowid() as id")
-		.get() as { id: number };
+	const result = getDatabase().prepare("SELECT last_insert_rowid() as id").get() as { id: number };
 	return result.id;
 }
 
-export function getColorPaletteBySystemId(
-	systemId: string,
-): ColorPalette | undefined {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM color_palettes WHERE system_id = ?",
-	);
+export function getColorPaletteBySystemId(systemId: string): ColorPalette | undefined {
+	const stmt = getDatabase().prepare("SELECT * FROM color_palettes WHERE system_id = ?");
 	return stmt.get(systemId) as ColorPalette | undefined;
 }
 
@@ -196,18 +178,12 @@ export function insertTypography(typography: Omit<Typography, "id">): number {
 		typography.letter_spacing,
 	);
 
-	const result = getDatabase()
-		.prepare("SELECT last_insert_rowid() as id")
-		.get() as { id: number };
+	const result = getDatabase().prepare("SELECT last_insert_rowid() as id").get() as { id: number };
 	return result.id;
 }
 
-export function getTypographyBySystemId(
-	systemId: string,
-): Typography | undefined {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM typography WHERE system_id = ?",
-	);
+export function getTypographyBySystemId(systemId: string): Typography | undefined {
+	const stmt = getDatabase().prepare("SELECT * FROM typography WHERE system_id = ?");
 	return stmt.get(systemId) as Typography | undefined;
 }
 
@@ -231,16 +207,12 @@ export function insertComponent(component: Omit<Component, "id">): number {
 		component.description,
 	);
 
-	const result = getDatabase()
-		.prepare("SELECT last_insert_rowid() as id")
-		.get() as { id: number };
+	const result = getDatabase().prepare("SELECT last_insert_rowid() as id").get() as { id: number };
 	return result.id;
 }
 
 export function getComponentsBySystemId(systemId: string): Component[] {
-	const stmt = getDatabase().prepare(
-		"SELECT * FROM components WHERE system_id = ?",
-	);
+	const stmt = getDatabase().prepare("SELECT * FROM components WHERE system_id = ?");
 	return stmt.all(systemId) as Component[];
 }
 
@@ -260,20 +232,14 @@ export function getComponentByType(
 // ============================================
 
 export function insertStyleTag(systemId: string, tag: string): number {
-	const stmt = getDatabase().prepare(
-		"INSERT INTO style_tags (system_id, tag) VALUES (?, ?)",
-	);
+	const stmt = getDatabase().prepare("INSERT INTO style_tags (system_id, tag) VALUES (?, ?)");
 	stmt.run(systemId, tag);
-	const result = getDatabase()
-		.prepare("SELECT last_insert_rowid() as id")
-		.get() as { id: number };
+	const result = getDatabase().prepare("SELECT last_insert_rowid() as id").get() as { id: number };
 	return result.id;
 }
 
 export function getTagsBySystemId(systemId: string): string[] {
-	const stmt = getDatabase().prepare(
-		"SELECT tag FROM style_tags WHERE system_id = ?",
-	);
+	const stmt = getDatabase().prepare("SELECT tag FROM style_tags WHERE system_id = ?");
 	const rows = stmt.all(systemId) as { tag: string }[];
 	return rows.map((r) => r.tag);
 }
@@ -304,14 +270,7 @@ export function searchDesignSystems(query: string): DesignSystem[] {
        OR LOWER(st.tag) LIKE ?
     ORDER BY ds.name
   `);
-	return stmt.all(
-		pattern,
-		pattern,
-		pattern,
-		pattern,
-		pattern,
-		pattern,
-	) as DesignSystem[];
+	return stmt.all(pattern, pattern, pattern, pattern, pattern, pattern) as DesignSystem[];
 }
 
 // ============================================
@@ -366,9 +325,7 @@ export function parseTypographyJson(json: string): ParsedTypography {
 
 export function hslToHex(hsl: string): string {
 	// Parse HSL string like "220 80% 55%"
-	const parts = hsl
-		.split(" ")
-		.map((p) => Number.parseFloat(p.replace("%", "")));
+	const parts = hsl.split(" ").map((p) => Number.parseFloat(p.replace("%", "")));
 	if (parts.length < 3) return "#000000";
 
 	const h = parts[0];
@@ -430,16 +387,12 @@ export function getDatabaseStats(): {
 	const database = getDatabase();
 	return {
 		totalSystems: (
-			database
-				.prepare("SELECT COUNT(*) as count FROM design_systems")
-				.get() as {
+			database.prepare("SELECT COUNT(*) as count FROM design_systems").get() as {
 				count: number;
 			}
 		).count,
 		totalPalettes: (
-			database
-				.prepare("SELECT COUNT(*) as count FROM color_palettes")
-				.get() as {
+			database.prepare("SELECT COUNT(*) as count FROM color_palettes").get() as {
 				count: number;
 			}
 		).count,

@@ -10,13 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import {
-	AppText,
-	Divider,
-	Heading,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Divider, Heading, MutedText, Stack } from "../components/primitives/index.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 
@@ -47,10 +41,7 @@ function loadQuestions(): QuestionEntry[] {
 function saveQuestions(questions: QuestionEntry[]): void {
 	try {
 		if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-		writeFileSync(
-			join(DATA_DIR, "questions.json"),
-			JSON.stringify({ questions }, null, 2),
-		);
+		writeFileSync(join(DATA_DIR, "questions.json"), JSON.stringify({ questions }, null, 2));
 	} catch {}
 }
 
@@ -63,12 +54,7 @@ interface QuestionsViewProps {
 	onClose: () => void;
 }
 
-export function QuestionsView({
-	visible,
-	data,
-	onUpdateData,
-	onClose,
-}: QuestionsViewProps) {
+export function QuestionsView({ visible, data, onUpdateData, onClose }: QuestionsViewProps) {
 	const [questions, setQuestions] = useState<QuestionEntry[]>(() => {
 		const fromFile = loadQuestions();
 		if (fromFile.length > 0) return fromFile;
@@ -147,9 +133,7 @@ export function QuestionsView({
 					if (inputBuffer.trim() && questions[selectedIndex]) {
 						const now = new Date().toISOString();
 						const updated = questions.map((q, i) =>
-							i === selectedIndex
-								? { ...q, answer: inputBuffer.trim(), answeredAt: now }
-								: q,
+							i === selectedIndex ? { ...q, answer: inputBuffer.trim(), answeredAt: now } : q,
 						);
 						updateQuestions(updated);
 					}
@@ -202,8 +186,7 @@ export function QuestionsView({
 			<Box marginBottom={1}>
 				<Heading>Questions</Heading>
 				<MutedText>
-					{"  "}Research later — {unanswered.length} open, {answered.length}{" "}
-					answered
+					{"  "}Research later — {unanswered.length} open, {answered.length} answered
 				</MutedText>
 			</Box>
 
@@ -244,9 +227,7 @@ export function QuestionsView({
 								<Text color={i === selectedIndex ? "cyan" : undefined}>
 									{i === selectedIndex ? ">" : " "}{" "}
 								</Text>
-								<Text color={q.answer ? "green" : "yellow"}>
-									{q.answer ? "[A]" : "[?]"}{" "}
-								</Text>
+								<Text color={q.answer ? "green" : "yellow"}>{q.answer ? "[A]" : "[?]"} </Text>
 								<AppText bold={i === selectedIndex}>{q.question}</AppText>
 								<Box flexGrow={1} />
 								<MutedText>
@@ -274,9 +255,7 @@ export function QuestionsView({
 			<Box marginTop={1}>
 				<Divider />
 			</Box>
-			<MutedText>
-				a=add question r=answer selected d=delete arrows=navigate ESC=back
-			</MutedText>
+			<MutedText>a=add question r=answer selected d=delete arrows=navigate ESC=back</MutedText>
 		</Box>
 	);
 }

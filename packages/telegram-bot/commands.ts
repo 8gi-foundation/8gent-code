@@ -32,14 +32,8 @@ import type {
 // ── State file paths ────────────────────────────────────
 
 const HOME = homedir();
-const LOOP_STATE = join(
-	HOME,
-	"8gent-code/benchmarks/autoresearch/loop-state.json",
-);
-const LEGACY_STATE = join(
-	HOME,
-	"iris-observatory/benchmarks/autoresearch/loop-state.json",
-);
+const LOOP_STATE = join(HOME, "8gent-code/benchmarks/autoresearch/loop-state.json");
+const LEGACY_STATE = join(HOME, "iris-observatory/benchmarks/autoresearch/loop-state.json");
 const NIGHTLY_LOG = join(HOME, ".8gent/nightly.log");
 const CONFIG_FILE = join(HOME, ".8gent/config.json");
 const RUN_PID_FILE = join(HOME, ".8gent/run.pid");
@@ -47,11 +41,7 @@ const RUN_PID_FILE = join(HOME, ".8gent/run.pid");
 // ── State Readers ───────────────────────────────────────
 
 function readLoopState(): any | null {
-	const path = existsSync(LOOP_STATE)
-		? LOOP_STATE
-		: existsSync(LEGACY_STATE)
-			? LEGACY_STATE
-			: null;
+	const path = existsSync(LOOP_STATE) ? LOOP_STATE : existsSync(LEGACY_STATE) ? LEGACY_STATE : null;
 	if (!path) return null;
 	try {
 		return JSON.parse(readFileSync(path, "utf-8"));
@@ -92,11 +82,7 @@ function isRunActive(): boolean {
 
 // ── Command Implementations ─────────────────────────────
 
-async function handleStatus(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleStatus(args: string, chatId: number, bot: any): Promise<void> {
 	const state = readLoopState();
 	const config = readConfig();
 	const running = isRunActive();
@@ -107,9 +93,7 @@ async function handleStatus(
 	const status: SystemStatus = {
 		online: true,
 		model: config?.model || latest?.model || "unknown",
-		uptime: state?.startTime
-			? Date.now() - new Date(state.startTime).getTime()
-			: 0,
+		uptime: state?.startTime ? Date.now() - new Date(state.startTime).getTime() : 0,
 		currentIteration: latest?.iteration ?? 0,
 		isRunning: running,
 		lastActivity: latest?.timestamp || new Date().toISOString(),
@@ -123,11 +107,7 @@ async function handleStatus(
 	await bot.sendMessage(formatSystemStatus(status), { parseMode: "Markdown" });
 }
 
-async function handleScores(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleScores(args: string, chatId: number, bot: any): Promise<void> {
 	const state = readLoopState();
 	if (!state?.history?.length) {
 		await bot.sendMessage(
@@ -163,19 +143,12 @@ async function handleScores(
 	await bot.sendMessage(header + scoreboard + trend, { parseMode: "Markdown" });
 }
 
-async function handleCompare(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleCompare(args: string, chatId: number, bot: any): Promise<void> {
 	const state = readLoopState();
 	if (!state?.history?.length) {
-		await bot.sendMessage(
-			"⚔️ *Compare*\n\n_No benchmark data. Run the loop first._",
-			{
-				parseMode: "Markdown",
-			},
-		);
+		await bot.sendMessage("⚔️ *Compare*\n\n_No benchmark data. Run the loop first._", {
+			parseMode: "Markdown",
+		});
 		return;
 	}
 
@@ -203,11 +176,7 @@ async function handleCompare(
 	await bot.sendMessage(comparison, { parseMode: "Markdown" });
 }
 
-async function handleRound(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleRound(args: string, chatId: number, bot: any): Promise<void> {
 	const state = readLoopState();
 	if (!state?.history?.length) {
 		await bot.sendMessage("🏁 *Round*\n\n_No rounds completed yet._", {
@@ -226,42 +195,35 @@ async function handleRound(
 		: history.find((h: any) => h.iteration === roundNum);
 
 	if (!entry) {
-		await bot.sendMessage(
-			`🏁 Round ${roundNum} not found. Available: 1-${history.length}`,
-			{
-				parseMode: "Markdown",
-			},
-		);
+		await bot.sendMessage(`🏁 Round ${roundNum} not found. Available: 1-${history.length}`, {
+			parseMode: "Markdown",
+		});
 		return;
 	}
 
-	const prevEntry = history.find(
-		(h: any) => h.iteration === entry.iteration - 1,
-	);
+	const prevEntry = history.find((h: any) => h.iteration === entry.iteration - 1);
 
 	// Build CompetitionRound from loop state
-	const scores = Object.entries(entry.scores || {}).map(
-		([id, score]: [string, any]) => {
-			const prevScore = prevEntry?.scores?.[id];
-			return {
-				id,
-				name: id,
-				score: score as number,
-				maxScore: 100,
-				passing: (score as number) >= 70,
-				tier: "basic" as const,
-				previousScore: prevScore as number | undefined,
-				trend:
-					prevScore !== undefined
-						? (((score as number) > prevScore
-								? "up"
-								: (score as number) < prevScore
-									? "down"
-									: "stable") as "up" | "down" | "stable")
-						: undefined,
-			};
-		},
-	);
+	const scores = Object.entries(entry.scores || {}).map(([id, score]: [string, any]) => {
+		const prevScore = prevEntry?.scores?.[id];
+		return {
+			id,
+			name: id,
+			score: score as number,
+			maxScore: 100,
+			passing: (score as number) >= 70,
+			tier: "basic" as const,
+			previousScore: prevScore as number | undefined,
+			trend:
+				prevScore !== undefined
+					? (((score as number) > prevScore
+							? "up"
+							: (score as number) < prevScore
+								? "down"
+								: "stable") as "up" | "down" | "stable")
+					: undefined,
+		};
+	});
 
 	const round: CompetitionRound = {
 		roundNumber: entry.iteration,
@@ -278,9 +240,7 @@ async function handleRound(
 			totalMs: entry.totalDurationMs || 0,
 		},
 		mutations: mutations.slice(0, 10),
-		tokens: entry.totalTokens
-			? { input: 0, output: 0, total: entry.totalTokens }
-			: undefined,
+		tokens: entry.totalTokens ? { input: 0, output: 0, total: entry.totalTokens } : undefined,
 	};
 
 	await bot.sendMessage(formatCompetitionRound(round), {
@@ -288,11 +248,7 @@ async function handleRound(
 	});
 }
 
-async function handleMutations(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleMutations(args: string, chatId: number, bot: any): Promise<void> {
 	const state = readLoopState();
 	const mutations = state?.mutations || [];
 
@@ -301,11 +257,7 @@ async function handleMutations(
 	});
 }
 
-async function handleModel(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleModel(args: string, chatId: number, bot: any): Promise<void> {
 	const config = readConfig();
 	const state = readLoopState();
 	const latest = state?.history?.[state.history.length - 1];
@@ -352,11 +304,7 @@ async function handleModel(
 	await bot.sendMessage(lines.join("\n"), { parseMode: "Markdown" });
 }
 
-async function handleStart(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleStart(args: string, chatId: number, bot: any): Promise<void> {
 	if (isRunActive()) {
 		await bot.sendMessage(
 			"⚠️ *Already Running*\n\nA competition loop is already active. Use `/stop` to end it first.",
@@ -367,12 +315,9 @@ async function handleStart(
 		return;
 	}
 
-	await bot.sendMessage(
-		"🚀 *Starting Competition Loop*\n\n_Launching nightly training run..._",
-		{
-			parseMode: "Markdown",
-		},
-	);
+	await bot.sendMessage("🚀 *Starting Competition Loop*\n\n_Launching nightly training run..._", {
+		parseMode: "Markdown",
+	});
 
 	try {
 		// Launch the nightly train script in background
@@ -406,11 +351,7 @@ async function handleStart(
 	}
 }
 
-async function handleStop(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleStop(args: string, chatId: number, bot: any): Promise<void> {
 	if (!isRunActive()) {
 		await bot.sendMessage("ℹ️ No active run to stop.", {
 			parseMode: "Markdown",
@@ -439,32 +380,20 @@ async function handleStop(
 	}
 }
 
-async function handleIntel(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleIntel(args: string, chatId: number, bot: any): Promise<void> {
 	const intel = new GitHubIntelligence();
 	const digest = intel.getLatestDigest();
 	await bot.sendMessage(digest, { parseMode: "Markdown" });
 }
 
-async function handleRepos(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleRepos(args: string, chatId: number, bot: any): Promise<void> {
 	const limit = Number.parseInt(args.trim(), 10);
 	const intel = new GitHubIntelligence();
 	const list = intel.getTrackedRepos(Number.isNaN(limit) ? 15 : limit);
 	await bot.sendMessage(list, { parseMode: "Markdown" });
 }
 
-async function handleTrending(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleTrending(args: string, chatId: number, bot: any): Promise<void> {
 	await bot.sendMessage("_Running ad-hoc trending scan..._", {
 		parseMode: "Markdown",
 	});
@@ -480,11 +409,7 @@ async function handleTrending(
 	}
 }
 
-async function handleHelp(
-	args: string,
-	chatId: number,
-	bot: any,
-): Promise<void> {
+async function handleHelp(args: string, chatId: number, bot: any): Promise<void> {
 	const lines = [
 		"🤖 *8GENT BOT — Commands*",
 		"────────────────────────────",
@@ -579,11 +504,7 @@ export const commands: CommandDefinition[] = [
  * Route a command string to the appropriate handler.
  * Returns true if a command was matched.
  */
-export async function routeCommand(
-	text: string,
-	chatId: number,
-	bot: any,
-): Promise<boolean> {
+export async function routeCommand(text: string, chatId: number, bot: any): Promise<boolean> {
 	const trimmed = text.trim();
 	if (!trimmed.startsWith("/")) return false;
 

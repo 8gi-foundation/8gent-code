@@ -31,10 +31,7 @@ function tokenize(text: string): Set<string> {
  * Find learned skills relevant to the given task description.
  * Returns top matches sorted by score descending.
  */
-export function matchSkills(
-	taskDescription: string,
-	limit = 3,
-): MatchedSkill[] {
+export function matchSkills(taskDescription: string, limit = 3): MatchedSkill[] {
 	const paths = listLearnedSkills();
 	if (paths.length === 0) return [];
 
@@ -81,16 +78,11 @@ export function matchSkills(
  * Format matched skills as a context block for injection into the agent prompt.
  * Returns empty string if no matches found.
  */
-export function formatMatchedSkills(
-	taskDescription: string,
-	limit = 3,
-): string {
+export function formatMatchedSkills(taskDescription: string, limit = 3): string {
 	const matches = matchSkills(taskDescription, limit);
 	if (matches.length === 0) return "";
 
-	const lines = matches.map(
-		(m) => `- **${m.name}** (${m.successes}x): ${m.description}`,
-	);
+	const lines = matches.map((m) => `- **${m.name}** (${m.successes}x): ${m.description}`);
 
 	return `[Learned Skills]\n${lines.join("\n")}\n[/Learned Skills]`;
 }

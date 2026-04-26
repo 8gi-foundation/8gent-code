@@ -6,12 +6,7 @@
  * all communication goes through the control plane.
  */
 
-import type {
-	BoardTask,
-	PlaneToVessel,
-	VesselStatus,
-	VesselToPlane,
-} from "../board-plane/types";
+import type { BoardTask, PlaneToVessel, VesselStatus, VesselToPlane } from "../board-plane/types";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -59,9 +54,7 @@ export class VesselClient {
 		});
 
 		this.ws.addEventListener("close", (event) => {
-			console.log(
-				`[vessel-client] Disconnected: ${event.code} ${event.reason}`,
-			);
+			console.log(`[vessel-client] Disconnected: ${event.code} ${event.reason}`);
 			this.stopHeartbeat();
 			this.reconnect();
 		});
@@ -105,9 +98,7 @@ export class VesselClient {
 
 	private async handleTask(task: BoardTask): Promise<void> {
 		this.currentTaskId = task.id;
-		console.log(
-			`[vessel-client] Task ${task.id}: ${task.content.slice(0, 80)}`,
-		);
+		console.log(`[vessel-client] Task ${task.id}: ${task.content.slice(0, 80)}`);
 
 		try {
 			const response = await this.onTask(task);
@@ -144,10 +135,7 @@ export class VesselClient {
 	private reconnect(): void {
 		if (this.closed) return;
 		this.reconnectAttempts++;
-		const backoff = Math.min(
-			BASE_BACKOFF_MS * 2 ** (this.reconnectAttempts - 1),
-			MAX_BACKOFF_MS,
-		);
+		const backoff = Math.min(BASE_BACKOFF_MS * 2 ** (this.reconnectAttempts - 1), MAX_BACKOFF_MS);
 		console.log(`[vessel-client] Reconnecting in ${backoff}ms`);
 		setTimeout(() => this.connect(), backoff);
 	}

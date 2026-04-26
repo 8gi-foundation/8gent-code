@@ -76,9 +76,7 @@ function main(): void {
 	}
 	console.error("Usage: audit <tail|query|stats> [flags]");
 	console.error("  tail  --limit N");
-	console.error(
-		"  query --target ID --table NAME --actor ID --since MS --until MS --limit N",
-	);
+	console.error("  query --target ID --table NAME --actor ID --since MS --until MS --limit N");
 	console.error("  stats");
 	process.exit(1);
 }

@@ -160,10 +160,8 @@ export function shellSplit(input: string): string[] {
 		i++;
 	}
 
-	if (state === "single")
-		throw new Error("Unterminated single quote in shell string");
-	if (state === "double")
-		throw new Error("Unterminated double quote in shell string");
+	if (state === "single") throw new Error("Unterminated single quote in shell string");
+	if (state === "double") throw new Error("Unterminated double quote in shell string");
 
 	if (current.length > 0) args.push(current);
 

@@ -50,13 +50,9 @@ export class FileTracker {
 
 	getSummary(): string {
 		const lines: string[] = ["## Files Touched"];
-		if (this.read.size > 0)
-			lines.push("### Read", ...Array.from(this.read).map((f) => `- ${f}`));
+		if (this.read.size > 0) lines.push("### Read", ...Array.from(this.read).map((f) => `- ${f}`));
 		if (this.modified.size > 0)
-			lines.push(
-				"### Modified",
-				...Array.from(this.modified).map((f) => `- ${f}`),
-			);
+			lines.push("### Modified", ...Array.from(this.modified).map((f) => `- ${f}`));
 		return lines.join("\n");
 	}
 }
@@ -72,10 +68,7 @@ function estimateMessageTokens(messages: Message[]): number {
 }
 
 // Extract file paths from tool call JSON in message content
-const READ_RE = [
-	/read_file[^"]*"(?:file_?path|path)":\s*"([^"]+)"/gi,
-	/cat\s+([^\s;|&]+)/gi,
-];
+const READ_RE = [/read_file[^"]*"(?:file_?path|path)":\s*"([^"]+)"/gi, /cat\s+([^\s;|&]+)/gi];
 const WRITE_RE = [
 	/write_file[^"]*"(?:file_?path|path)":\s*"([^"]+)"/gi,
 	/edit_file[^"]*"(?:file_?path|path)":\s*"([^"]+)"/gi,
@@ -87,14 +80,12 @@ function extractFiles(messages: Message[]): FileTracker {
 		for (const pat of READ_RE) {
 			pat.lastIndex = 0;
 			let match: RegExpExecArray | null;
-			while ((match = pat.exec(m.content)) !== null)
-				tracker.trackRead(match[1]);
+			while ((match = pat.exec(m.content)) !== null) tracker.trackRead(match[1]);
 		}
 		for (const pat of WRITE_RE) {
 			pat.lastIndex = 0;
 			let match: RegExpExecArray | null;
-			while ((match = pat.exec(m.content)) !== null)
-				tracker.trackModified(match[1]);
+			while ((match = pat.exec(m.content)) !== null) tracker.trackModified(match[1]);
 		}
 	}
 	return tracker;
@@ -210,12 +201,7 @@ export class CompactionEngine {
 // 4-stage fallback:     unwind -> summarize -> simplify -> nuke-to-system
 // ===========================================================================
 
-export type CompressionStage =
-	| "none"
-	| "unwind"
-	| "summarize"
-	| "simplify"
-	| "nuke";
+export type CompressionStage = "none" | "unwind" | "summarize" | "simplify" | "nuke";
 
 export interface ProactiveConfig extends CompactionConfig {
 	/** Trigger when remaining tokens fall below this ratio (0-1, default 0.25) */
@@ -334,17 +320,10 @@ export class ProactiveCompression extends CompactionEngine {
 			const middle = messages.slice(1, -4);
 			const thinned = middle.map((m) => ({
 				...m,
-				content:
-					m.content.length > 500
-						? `${m.content.slice(0, 500)}...[truncated]`
-						: m.content,
+				content: m.content.length > 500 ? `${m.content.slice(0, 500)}...[truncated]` : m.content,
 			}));
 			const simplified = [systemMsg, ...thinned, ...last4];
-			const { messages: compacted, result } = await super.compact(
-				simplified,
-				model,
-				contextWindow,
-			);
+			const { messages: compacted, result } = await super.compact(simplified, model, contextWindow);
 			return {
 				messages: compacted,
 				result: { ...result, stage },
@@ -380,9 +359,7 @@ export class ProactiveCompression extends CompactionEngine {
 		const recent = messages.slice(-recentCount);
 		const old = messages.slice(1, -recentCount);
 
-		const serialized = old
-			.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`)
-			.join("\n\n");
+		const serialized = old.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`).join("\n\n");
 
 		// Step 1: Summarize
 		const { text: historySummary } = await generateText({

@@ -36,9 +36,7 @@ import {
 	recordDecision,
 } from "./user-policy.js";
 
-function mockSurface(
-	fixed: "once" | "session" | "project" | "always" | "deny",
-) {
+function mockSurface(fixed: "once" | "session" | "project" | "always" | "deny") {
 	let calls = 0;
 	registerPromptSurface(async (_req: TurthRequest) => {
 		calls++;
@@ -162,11 +160,7 @@ describe("Turth audit log", () => {
 
 		const logPath = getAuditLogPath();
 		expect(fs.existsSync(logPath)).toBe(true);
-		const lines = fs
-			.readFileSync(logPath, "utf-8")
-			.trim()
-			.split("\n")
-			.filter(Boolean);
+		const lines = fs.readFileSync(logPath, "utf-8").trim().split("\n").filter(Boolean);
 		expect(lines.length).toBeGreaterThanOrEqual(1);
 		const entry = JSON.parse(lines[lines.length - 1]);
 		expect(entry.capability).toBe(cap);

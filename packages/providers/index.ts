@@ -123,12 +123,7 @@ export function isAppleFoundationAvailable(): boolean {
 	// is only available from macOS 26 onwards.
 	const major = Number.parseInt(os.release().split(".")[0] ?? "0", 10);
 	if (Number.isFinite(major) && major < 25) return false;
-	const bridgePath = path.join(
-		os.homedir(),
-		".8gent",
-		"bin",
-		"apple-foundation-bridge",
-	);
+	const bridgePath = path.join(os.homedir(), ".8gent", "bin", "apple-foundation-bridge");
 	return fs.existsSync(bridgePath);
 }
 
@@ -182,13 +177,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		baseUrl: "http://localhost:11434",
 		apiKeyEnv: "", // Local — no API key needed
 		defaultModel: "eight-1.0-q3:14b",
-		models: [
-			"eight-1.0-q3:14b",
-			"qwen3.6:27b",
-			"qwen3:14b",
-			"qwen3.5:latest",
-			"devstral:latest",
-		],
+		models: ["eight-1.0-q3:14b", "qwen3.6:27b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
 		enabled: true,
 		supportsTools: true,
 		supportsStreaming: true,
@@ -200,13 +189,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		baseUrl: "http://localhost:11434",
 		apiKeyEnv: "", // No API key needed
 		defaultModel: "qwen3.5:latest",
-		models: [
-			"qwen3.6:27b",
-			"qwen3.5:latest",
-			"qwen3:14b",
-			"devstral:latest",
-			"eight:0.1",
-		],
+		models: ["qwen3.6:27b", "qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1"],
 		enabled: true,
 		supportsTools: true,
 		supportsStreaming: true,
@@ -319,11 +302,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		baseUrl: "https://api.anthropic.com/v1",
 		apiKeyEnv: "ANTHROPIC_API_KEY",
 		defaultModel: "claude-3-5-sonnet-20241022",
-		models: [
-			"claude-3-5-sonnet-20241022",
-			"claude-3-opus-20240229",
-			"claude-3-haiku-20240307",
-		],
+		models: ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
 		enabled: false,
 		supportsTools: true,
 		supportsStreaming: true,
@@ -430,8 +409,7 @@ export class ProviderManager {
 	readonly failover: ModelFailover;
 
 	constructor(settingsPath?: string) {
-		this.settingsPath =
-			settingsPath || path.join(os.homedir(), ".8gent", "providers.json");
+		this.settingsPath = settingsPath || path.join(os.homedir(), ".8gent", "providers.json");
 		this.settings = this.loadSettings();
 		this.authRotator = new AuthRotator();
 		this.failover = new ModelFailover();
@@ -548,15 +526,11 @@ export class ProviderManager {
 	}
 
 	listProviders(): ProviderConfig[] {
-		return Object.values(PROVIDER_DEFAULTS).map((p) =>
-			this.getProvider(p.name),
-		);
+		return Object.values(PROVIDER_DEFAULTS).map((p) => this.getProvider(p.name));
 	}
 
 	listEnabledProviders(): ProviderConfig[] {
-		return this.listProviders().filter(
-			(p) => p.enabled || this.getApiKey(p.name),
-		);
+		return this.listProviders().filter((p) => p.enabled || this.getApiKey(p.name));
 	}
 
 	// ============================================
@@ -578,10 +552,7 @@ export class ProviderManager {
 		}
 	}
 
-	private async chatOllama(
-		request: ChatRequest,
-		model: string,
-	): Promise<ChatResponse> {
+	private async chatOllama(request: ChatRequest, model: string): Promise<ChatResponse> {
 		const provider = this.getProvider("ollama");
 
 		const body: Record<string, unknown> = {
@@ -604,9 +575,7 @@ export class ProviderManager {
 		});
 
 		if (!response.ok) {
-			throw new Error(
-				`Ollama error: ${response.status} ${await response.text()}`,
-			);
+			throw new Error(`Ollama error: ${response.status} ${await response.text()}`);
 		}
 
 		const data = await response.json();
@@ -691,14 +660,8 @@ export class ProviderManager {
 			this.authRotator.markRateLimited(provider.name);
 			const fallback = this.failover.resolve(model);
 			if (fallback.model !== model || fallback.provider !== provider.name) {
-				const fallbackProvider = this.getProvider(
-					fallback.provider as ProviderName,
-				);
-				return this.chatOpenAICompatible(
-					fallbackProvider,
-					request,
-					fallback.model,
-				);
+				const fallbackProvider = this.getProvider(fallback.provider as ProviderName);
+				return this.chatOpenAICompatible(fallbackProvider, request, fallback.model);
 			}
 			const errorText = await response.text();
 			throw new Error(`${provider.displayName} rate limited: 429 ${errorText}`);
@@ -706,9 +669,7 @@ export class ProviderManager {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`${provider.displayName} error: ${response.status} ${errorText}`,
-			);
+			throw new Error(`${provider.displayName} error: ${response.status} ${errorText}`);
 		}
 
 		const data = await response.json();
@@ -741,16 +702,11 @@ export class ProviderManager {
 		};
 	}
 
-	private async chatAnthropic(
-		request: ChatRequest,
-		model: string,
-	): Promise<ChatResponse> {
+	private async chatAnthropic(request: ChatRequest, model: string): Promise<ChatResponse> {
 		const provider = this.getProvider("anthropic");
 		const apiKey = this.getApiKey("anthropic");
 		if (!apiKey) {
-			throw new Error(
-				"No API key for Anthropic. Set ANTHROPIC_API_KEY or use /settings",
-			);
+			throw new Error("No API key for Anthropic. Set ANTHROPIC_API_KEY or use /settings");
 		}
 
 		// Convert messages to Anthropic format
@@ -820,8 +776,7 @@ export class ProviderManager {
 				? {
 						promptTokens: data.usage.input_tokens || 0,
 						completionTokens: data.usage.output_tokens || 0,
-						totalTokens:
-							(data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+						totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
 					}
 				: undefined,
 		};
@@ -852,10 +807,7 @@ const FREE_MODEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
  */
 export async function getBestFreeModel(): Promise<string> {
 	// Return cached result if still fresh
-	if (
-		cachedFreeModel &&
-		Date.now() - cachedFreeModel.timestamp < FREE_MODEL_CACHE_TTL
-	) {
+	if (cachedFreeModel && Date.now() - cachedFreeModel.timestamp < FREE_MODEL_CACHE_TTL) {
 		return cachedFreeModel.model;
 	}
 

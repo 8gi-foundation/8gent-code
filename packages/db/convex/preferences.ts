@@ -86,11 +86,7 @@ export const set = mutation({
 		defaultModel: v.string(),
 		defaultProvider: v.string(),
 		theme: v.string(),
-		loraStatus: v.union(
-			v.literal("none"),
-			v.literal("training"),
-			v.literal("ready"),
-		),
+		loraStatus: v.union(v.literal("none"), v.literal("training"), v.literal("ready")),
 		loraVersion: v.optional(v.string()),
 		customPromptMutations: v.array(v.string()),
 	},
@@ -129,9 +125,7 @@ export const merge = mutation({
 		defaultModel: v.optional(v.string()),
 		defaultProvider: v.optional(v.string()),
 		theme: v.optional(v.string()),
-		loraStatus: v.optional(
-			v.union(v.literal("none"), v.literal("training"), v.literal("ready")),
-		),
+		loraStatus: v.optional(v.union(v.literal("none"), v.literal("training"), v.literal("ready"))),
 		loraVersion: v.optional(v.string()),
 		customPromptMutations: v.optional(v.array(v.string())),
 		communicationStyle: v.optional(v.string()),

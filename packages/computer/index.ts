@@ -91,8 +91,7 @@ export function getToolDefinitions(): object[] {
 					properties: {
 						path: {
 							type: "string",
-							description:
-								"File path to save screenshot (auto-generated if omitted)",
+							description: "File path to save screenshot (auto-generated if omitted)",
 						},
 						displayId: {
 							type: "number",
@@ -120,8 +119,7 @@ export function getToolDefinitions(): object[] {
 						},
 						count: {
 							type: "number",
-							description:
-								"Click count, e.g. 2 for double-click (default: 1, max: 5)",
+							description: "Click count, e.g. 2 for double-click (default: 1, max: 5)",
 						},
 						coordMap: {
 							type: "string",
@@ -182,8 +180,7 @@ export function getToolDefinitions(): object[] {
 			type: "function",
 			function: {
 				name: "desktop_scroll",
-				description:
-					"[DESKTOP] Scroll in a direction. Optionally move cursor to a point first.",
+				description: "[DESKTOP] Scroll in a direction. Optionally move cursor to a point first.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -318,8 +315,7 @@ export function getToolDefinitions(): object[] {
 					properties: {
 						name: {
 							type: "string",
-							description:
-								"App name to quit (e.g. 'Slack', 'Spotify', 'Discord')",
+							description: "App name to quit (e.g. 'Slack', 'Spotify', 'Discord')",
 						},
 						pid: {
 							type: "number",

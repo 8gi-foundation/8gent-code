@@ -88,24 +88,21 @@ async function callOpenRouter(
 ): Promise<ApiResult> {
 	const start = performance.now();
 
-	const response = await fetch(
-		"https://openrouter.ai/api/v1/chat/completions",
-		{
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${config.apiKey}`,
-				"HTTP-Referer": "https://8gent.app",
-				"X-Title": "8gent-benchmark-v2",
-			},
-			body: JSON.stringify({
-				model,
-				messages,
-				temperature,
-				max_tokens: 4096,
-			}),
+	const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${config.apiKey}`,
+			"HTTP-Referer": "https://8gent.app",
+			"X-Title": "8gent-benchmark-v2",
 		},
-	);
+		body: JSON.stringify({
+			model,
+			messages,
+			temperature,
+			max_tokens: 4096,
+		}),
+	});
 
 	if (!response.ok) {
 		const body = await response.text();
@@ -132,10 +129,7 @@ async function callOpenRouter(
 /**
  * Try each model in the fallback chain until one succeeds.
  */
-async function callWithFallback(
-	messages: ChatMessage[],
-	temperature: number,
-): Promise<ApiResult> {
+async function callWithFallback(messages: ChatMessage[], temperature: number): Promise<ApiResult> {
 	let lastError: Error | null = null;
 
 	for (const model of config.models) {
@@ -147,9 +141,7 @@ async function callWithFallback(
 		}
 	}
 
-	throw new Error(
-		`All models failed. Last error: ${lastError?.message ?? "unknown"}`,
-	);
+	throw new Error(`All models failed. Last error: ${lastError?.message ?? "unknown"}`);
 }
 
 // ── Logging ─────────────────────────────────────────────────────────
@@ -224,9 +216,7 @@ async function runBenchmark(
 /**
  * Run benchmark at each temperature, return the best result.
  */
-async function sweepTemperatures(
-	benchmark: BenchmarkDefinition,
-): Promise<BenchmarkRun> {
+async function sweepTemperatures(benchmark: BenchmarkDefinition): Promise<BenchmarkRun> {
 	let best: BenchmarkRun | null = null;
 
 	for (const temp of config.temperatures) {
@@ -259,10 +249,7 @@ async function sweepTemperatures(
 /**
  * Analyze a failed or low-scoring benchmark result and derive a learning.
  */
-function deriveMutation(
-	benchmark: BenchmarkDefinition,
-	run: BenchmarkRun,
-): string | null {
+function deriveMutation(benchmark: BenchmarkDefinition, run: BenchmarkRun): string | null {
 	if (run.grade.score >= 80) return null; // good enough
 
 	const failedTests = run.grade.execution?.failedTests ?? 0;
@@ -280,9 +267,7 @@ function deriveMutation(
 			);
 		}
 		if (stderr.includes("timeout") || run.grade.execution.timedOut) {
-			parts.push(
-				"Avoid infinite loops. Use bounded retry counts and timeouts in concurrent code.",
-			);
+			parts.push("Avoid infinite loops. Use bounded retry counts and timeouts in concurrent code.");
 		}
 		if (stderr.includes("null") || stderr.includes("undefined")) {
 			parts.push(
@@ -298,9 +283,7 @@ function deriveMutation(
 
 	// Analyze keyword misses
 	if (missedKw.length > 0 && missedKw.length <= 3) {
-		parts.push(
-			`Include these patterns in ${benchmark.category} tasks: ${missedKw.join(", ")}.`,
-		);
+		parts.push(`Include these patterns in ${benchmark.category} tasks: ${missedKw.join(", ")}.`);
 	}
 
 	// Code extraction failures
@@ -403,9 +386,7 @@ async function main(): Promise<void> {
 
 			appendResult(benchmark, best);
 
-			log(
-				`└─ ✓ Best: score=${best.grade.score} temp=${best.temperature} model=${best.model}`,
-			);
+			log(`└─ ✓ Best: score=${best.grade.score} temp=${best.temperature} model=${best.model}`);
 
 			// Prompt mutation: derive learnings from low scores
 			if (config.mutatePrompt) {
@@ -443,8 +424,7 @@ async function main(): Promise<void> {
 
 	// ── Summary ─────────────────────────────────────────────────────
 
-	const avgScore =
-		results.length > 0 ? Math.round(totalScore / results.length) : 0;
+	const avgScore = results.length > 0 ? Math.round(totalScore / results.length) : 0;
 
 	const passing = results.filter((r) => r.grade.score >= 70).length;
 

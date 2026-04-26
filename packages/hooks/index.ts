@@ -142,10 +142,7 @@ const DEFAULT_YAML_TIMEOUT = 5000;
  * Check if a tool name matches a glob pattern.
  * Supports exact match and "*" wildcard (matches everything).
  */
-function matchesToolName(
-	pattern: string | undefined,
-	toolName: string | undefined,
-): boolean {
+function matchesToolName(pattern: string | undefined, toolName: string | undefined): boolean {
 	if (!pattern || pattern === "*") return true;
 	if (!toolName) return true; // non-tool events always match
 	return pattern === toolName;
@@ -261,8 +258,7 @@ export class HookManager {
 	private yamlHooks: YamlHookConfig[] = [];
 
 	constructor(configPath?: string) {
-		this.configPath =
-			configPath || path.join(os.homedir(), ".8gent", "hooks.json");
+		this.configPath = configPath || path.join(os.homedir(), ".8gent", "hooks.json");
 		this.config = this.loadConfig();
 		this.yamlHooks = this.loadYamlHooks();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -307,20 +303,13 @@ export class HookManager {
 			const valid: YamlHookConfig[] = [];
 			for (const entry of parsed) {
 				if (!entry.event || !entry.command) {
-					console.warn(
-						"[hooks] Skipping invalid YAML hook (missing event or command):",
-						entry,
-					);
+					console.warn("[hooks] Skipping invalid YAML hook (missing event or command):", entry);
 					continue;
 				}
 				if (
-					![
-						"PreToolUse",
-						"PostToolUse",
-						"SessionStart",
-						"SessionEnd",
-						"OnError",
-					].includes(entry.event)
+					!["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "OnError"].includes(
+						entry.event,
+					)
 				) {
 					console.warn(`[hooks] Unknown event "${entry.event}", skipping`);
 					continue;
@@ -329,10 +318,7 @@ export class HookManager {
 					event: entry.event,
 					matcher: entry.matcher || "*",
 					command: entry.command,
-					timeout:
-						typeof entry.timeout === "number"
-							? entry.timeout
-							: DEFAULT_YAML_TIMEOUT,
+					timeout: typeof entry.timeout === "number" ? entry.timeout : DEFAULT_YAML_TIMEOUT,
 				});
 			}
 			return valid;
@@ -358,10 +344,7 @@ export class HookManager {
 	 *
 	 * Hooks that fail or timeout are logged but do not crash the agent.
 	 */
-	async fire(
-		event: YamlHookEvent,
-		payload: Record<string, unknown>,
-	): Promise<YamlHookFireResult> {
+	async fire(event: YamlHookEvent, payload: Record<string, unknown>): Promise<YamlHookFireResult> {
 		const toolName = payload.tool as string | undefined;
 		const matching = this.yamlHooks.filter(
 			(h) => h.event === event && matchesToolName(h.matcher, toolName),
@@ -392,9 +375,7 @@ export class HookManager {
 			});
 
 			if (!result.success) {
-				console.warn(
-					`[hooks] YAML hook failed: ${hook.command} - ${result.error}`,
-				);
+				console.warn(`[hooks] YAML hook failed: ${hook.command} - ${result.error}`);
 				continue;
 			}
 
@@ -406,8 +387,7 @@ export class HookManager {
 			) {
 				blocked = true;
 				blockReason = String(
-					(result.output as Record<string, unknown>).reason ||
-						"Blocked by hook",
+					(result.output as Record<string, unknown>).reason || "Blocked by hook",
 				);
 				break; // First block wins
 			}
@@ -437,10 +417,7 @@ export class HookManager {
 	/**
 	 * Execute all hooks of a given type
 	 */
-	async executeHooks(
-		type: HookType,
-		context: Partial<HookContext> = {},
-	): Promise<HookResult[]> {
+	async executeHooks(type: HookType, context: Partial<HookContext> = {}): Promise<HookResult[]> {
 		if (!this.config.enabled) {
 			return [];
 		}
@@ -462,9 +439,7 @@ export class HookManager {
 
 			// Stop if hook failed and continueOnError is false
 			if (!result.success && !hook.continueOnError) {
-				console.warn(
-					`Hook '${hook.name}' failed and continueOnError=false. Stopping hook chain.`,
-				);
+				console.warn(`Hook '${hook.name}' failed and continueOnError=false. Stopping hook chain.`);
 				break;
 			}
 		}
@@ -515,10 +490,7 @@ export class HookManager {
 	/**
 	 * Execute a shell command hook
 	 */
-	private async executeShellHook(
-		hook: Hook,
-		context: HookContext,
-	): Promise<string> {
+	private async executeShellHook(hook: Hook, context: HookContext): Promise<string> {
 		if (!hook.command) {
 			throw new Error("Shell hook missing command");
 		}
@@ -580,10 +552,7 @@ export class HookManager {
 	/**
 	 * Execute a script file hook
 	 */
-	private async executeScriptHook(
-		hook: Hook,
-		context: HookContext,
-	): Promise<string> {
+	private async executeScriptHook(hook: Hook, context: HookContext): Promise<string> {
 		if (!hook.scriptPath) {
 			throw new Error("Script hook missing scriptPath");
 		}
@@ -671,10 +640,7 @@ export class HookManager {
 	/**
 	 * Execute an inline function hook
 	 */
-	private async executeFunctionHook(
-		hook: Hook,
-		context: HookContext,
-	): Promise<string> {
+	private async executeFunctionHook(hook: Hook, context: HookContext): Promise<string> {
 		if (!hook.functionBody) {
 			throw new Error("Function hook missing functionBody");
 		}

@@ -10,13 +10,10 @@ const fixturePath = process.env.FIXTURE_PATH;
 if (!fixturePath) throw new Error("FIXTURE_PATH env var required");
 
 const mod = await import(fixturePath);
-const validateInput: Function =
-	mod.default ?? mod.validateInput ?? mod.validate;
+const validateInput: Function = mod.default ?? mod.validateInput ?? mod.validate;
 
 if (!validateInput || typeof validateInput !== "function") {
-	throw new Error(
-		"Module must export validateInput, validate, or default function",
-	);
+	throw new Error("Module must export validateInput, validate, or default function");
 }
 
 describe("FM001: Input Validation", () => {
@@ -49,8 +46,7 @@ describe("FM001: Input Validation", () => {
 		expect(result.valid).toBe(false);
 		expect(
 			result.errors.some(
-				(e: any) =>
-					e.field === "name" || (typeof e === "string" && e.includes("name")),
+				(e: any) => e.field === "name" || (typeof e === "string" && e.includes("name")),
 			),
 		).toBe(true);
 	});
@@ -73,8 +69,7 @@ describe("FM001: Input Validation", () => {
 		expect(result.valid).toBe(false);
 		expect(
 			result.errors.some(
-				(e: any) =>
-					e.field === "email" || (typeof e === "string" && e.includes("email")),
+				(e: any) => e.field === "email" || (typeof e === "string" && e.includes("email")),
 			),
 		).toBe(true);
 	});
@@ -97,8 +92,7 @@ describe("FM001: Input Validation", () => {
 		expect(result.valid).toBe(false);
 		expect(
 			result.errors.some(
-				(e: any) =>
-					e.field === "age" || (typeof e === "string" && e.includes("age")),
+				(e: any) => e.field === "age" || (typeof e === "string" && e.includes("age")),
 			),
 		).toBe(true);
 	});
@@ -122,9 +116,7 @@ describe("FM001: Input Validation", () => {
 		expect(result.valid).toBe(false);
 		expect(
 			result.errors.some(
-				(e: any) =>
-					e.field === "password" ||
-					(typeof e === "string" && e.includes("password")),
+				(e: any) => e.field === "password" || (typeof e === "string" && e.includes("password")),
 			),
 		).toBe(true);
 	});

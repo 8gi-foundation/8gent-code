@@ -34,9 +34,7 @@ export class SoxSynth {
 		// Noise burst + sine body
 		const noise = `${path}.noise.wav`;
 		const body = `${path}.body.wav`;
-		execSync(
-			`${SOX} -n -r ${SAMPLE_RATE} ${noise} synth 0.15 noise vol 0.4 fade l 0.001 0.15 0.1`,
-		);
+		execSync(`${SOX} -n -r ${SAMPLE_RATE} ${noise} synth 0.15 noise vol 0.4 fade l 0.001 0.15 0.1`);
 		execSync(
 			`${SOX} -n -r ${SAMPLE_RATE} ${body} synth 0.15 sine 200:120 vol 0.5 fade l 0.001 0.15 0.08`,
 		);
@@ -149,11 +147,7 @@ export class SoxSynth {
 				this.mixAt(outPath, snarePath, barStart + 3 * beatDur);
 				for (let sixteenth = 0; sixteenth < 16; sixteenth++) {
 					if (sixteenth % 2 === 0) {
-						this.mixAt(
-							outPath,
-							hihatPath,
-							barStart + sixteenth * (beatDur / 4),
-						);
+						this.mixAt(outPath, hihatPath, barStart + sixteenth * (beatDur / 4));
 					}
 				}
 			}
@@ -235,8 +229,7 @@ export class SoxSynth {
 			const degreeOffset = bar % degrees.length;
 
 			for (let i = 0; i < 3; i++) {
-				const noteIdx =
-					degrees[(degreeOffset + i) % degrees.length] % notes.length;
+				const noteIdx = degrees[(degreeOffset + i) % degrees.length] % notes.length;
 				const freq = notes[noteIdx];
 				const noteDur = beatDur * 0.8;
 				const noteStart = barStart + [0, 1.5, 2.5][i] * beatDur;
@@ -252,20 +245,14 @@ export class SoxSynth {
 
 		// Add slight delay effect
 		const delayPath = `${outPath}.delay.wav`;
-		execSync(
-			`${SOX} ${outPath} ${delayPath} echo 0.6 0.6 ${Math.round(beatDur * 375)} 0.3`,
-		);
+		execSync(`${SOX} ${outPath} ${delayPath} echo 0.6 0.6 ${Math.round(beatDur * 375)} 0.3`);
 		execSync(`mv ${delayPath} ${outPath}`);
 
 		return outPath;
 	}
 
 	/** Mix a sample into a track at a given time offset */
-	private mixAt(
-		trackPath: string,
-		samplePath: string,
-		offsetSec: number,
-	): void {
+	private mixAt(trackPath: string, samplePath: string, offsetSec: number): void {
 		const tmpPath = `${trackPath}.tmp.wav`;
 		// Pad sample with silence offset, then mix
 		const padded = `${samplePath}.padded.wav`;
@@ -281,20 +268,7 @@ export class SoxSynth {
 
 	/** Get scale frequencies for a given key and octave */
 	private scaleFreqs(key: string, octave: number): number[] {
-		const noteNames = [
-			"C",
-			"C#",
-			"D",
-			"D#",
-			"E",
-			"F",
-			"F#",
-			"G",
-			"G#",
-			"A",
-			"A#",
-			"B",
-		];
+		const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 		const isMinor = key.endsWith("m");
 		const root = key.replace("m", "");
 		const rootIdx = noteNames.indexOf(root);

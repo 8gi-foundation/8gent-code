@@ -19,13 +19,7 @@ export interface Opportunity {
 	labels: string[];
 	estimatedEffort: "trivial" | "small" | "medium" | "large";
 	matchScore: number; // 0-1
-	status:
-		| "found"
-		| "evaluated"
-		| "accepted"
-		| "in-progress"
-		| "delivered"
-		| "rejected";
+	status: "found" | "evaluated" | "accepted" | "in-progress" | "delivered" | "rejected";
 	bountyValue?: string;
 	createdAt: string;
 }
@@ -53,11 +47,7 @@ const EFFORT_SIGNALS: Record<Opportunity["estimatedEffort"], string[]> = {
 function estimateEffort(labels: string[]): Opportunity["estimatedEffort"] {
 	const labelNames = labels.map((l) => l.toLowerCase());
 	for (const effort of ["trivial", "small", "medium", "large"] as const) {
-		if (
-			EFFORT_SIGNALS[effort].some((sig) =>
-				labelNames.some((l) => l.includes(sig)),
-			)
-		) {
+		if (EFFORT_SIGNALS[effort].some((sig) => labelNames.some((l) => l.includes(sig)))) {
 			return effort;
 		}
 	}
@@ -86,10 +76,7 @@ interface GitHubIssue {
  * @param repos - Array of "owner/repo" strings
  * @param token - Optional GitHub PAT for higher rate limits
  */
-export async function scanGitHubIssues(
-	repos: string[],
-	token?: string,
-): Promise<Opportunity[]> {
+export async function scanGitHubIssues(repos: string[], token?: string): Promise<Opportunity[]> {
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github.v3+json",
 		"User-Agent": "8gent-opportunity-scanner",
@@ -250,19 +237,13 @@ export async function scanContributingSection(
 	];
 
 	for (const repo of repos) {
-		for (const filename of [
-			"CONTRIBUTING.md",
-			"CONTRIBUTING",
-			"contributing.md",
-		]) {
+		for (const filename of ["CONTRIBUTING.md", "CONTRIBUTING", "contributing.md"]) {
 			const url = `https://api.github.com/repos/${repo}/contents/${filename}`;
 			try {
 				const res = await fetch(url, { headers });
 				if (!res.ok) continue;
 				const meta = (await res.json()) as { content?: string };
-				const raw = meta.content
-					? Buffer.from(meta.content, "base64").toString()
-					: "";
+				const raw = meta.content ? Buffer.from(meta.content, "base64").toString() : "";
 				if (!raw) continue;
 
 				const matchedPatterns = NEED_PATTERNS.filter((p) => p.test(raw));

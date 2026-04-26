@@ -55,22 +55,8 @@ function drawBody(
 	px(ctx, rightLegX, 13, 2, 2 - Math.abs(legOffset), BODY_COLOR);
 
 	// Feet
-	px(
-		ctx,
-		leftLegX - (legOffset > 0 ? 1 : 0),
-		14 + Math.abs(legOffset),
-		3,
-		1,
-		BRAND_ORANGE,
-	);
-	px(
-		ctx,
-		rightLegX - (legOffset < 0 ? 1 : 0),
-		14 - Math.abs(legOffset),
-		3,
-		1,
-		BRAND_ORANGE,
-	);
+	px(ctx, leftLegX - (legOffset > 0 ? 1 : 0), 14 + Math.abs(legOffset), 3, 1, BRAND_ORANGE);
+	px(ctx, rightLegX - (legOffset < 0 ? 1 : 0), 14 - Math.abs(legOffset), 3, 1, BRAND_ORANGE);
 
 	// Lower body (bottom of the "8")
 	px(ctx, 4, 10, 8, 4, BODY_COLOR);
@@ -175,14 +161,7 @@ function drawSittingBody(ctx: CanvasRenderingContext2D, offsetY: number) {
 }
 
 function drawConfetti(ctx: CanvasRenderingContext2D, frame: number) {
-	const colors = [
-		BRAND_ORANGE,
-		ACCENT,
-		"#FFD700",
-		"#00FF88",
-		"#FF6B6B",
-		"#55BBFF",
-	];
+	const colors = [BRAND_ORANGE, ACCENT, "#FFD700", "#00FF88", "#FF6B6B", "#55BBFF"];
 	const seed = frame * 7;
 	for (let i = 0; i < 8; i++) {
 		const x = ((seed + i * 31) % 14) + 1;
@@ -415,9 +394,7 @@ for (const state of states) {
 	const buffer = canvas.toBuffer("image/png");
 	const outPath = join(outDir, `${state.name}.png`);
 	writeFileSync(outPath, buffer);
-	console.log(
-		`Generated: ${state.name}.png (${state.frames} frames, ${width}x${height})`,
-	);
+	console.log(`Generated: ${state.name}.png (${state.frames} frames, ${width}x${height})`);
 }
 
 // Also generate a combined sprite atlas

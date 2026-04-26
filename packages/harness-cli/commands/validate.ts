@@ -68,9 +68,7 @@ function parseArgs(args: string[]): ValidateOptions {
 
 function resolveSessionPath(sessionId: string): string {
 	if (fs.existsSync(sessionId)) return sessionId;
-	const withExt = sessionId.endsWith(".jsonl")
-		? sessionId
-		: `${sessionId}.jsonl`;
+	const withExt = sessionId.endsWith(".jsonl") ? sessionId : `${sessionId}.jsonl`;
 	const fullPath = path.join(SESSIONS_DIR, withExt);
 	if (fs.existsSync(fullPath)) return fullPath;
 	if (fs.existsSync(SESSIONS_DIR)) {
@@ -118,10 +116,7 @@ interface ValidationResult {
 	};
 }
 
-function collectArtifactRefs(
-	entries: SessionEntry[],
-	sessionEnd: any,
-): string[] {
+function collectArtifactRefs(entries: SessionEntry[], sessionEnd: any): string[] {
 	const refs = new Set<string>();
 
 	for (const p of [
@@ -140,8 +135,7 @@ function collectArtifactRefs(
 		if (typeof raw === "string") {
 			try {
 				const parsed = JSON.parse(raw);
-				if (parsed && typeof parsed === "object")
-					obj = parsed as Record<string, unknown>;
+				if (parsed && typeof parsed === "object") obj = parsed as Record<string, unknown>;
 			} catch {
 				obj = null;
 			}
@@ -250,9 +244,7 @@ export async function validate(args: string[]): Promise<void> {
 
 	// Check 3: Expected substring in output
 	if (opts.expectSubstring) {
-		const found = assistantOutput
-			.toLowerCase()
-			.includes(opts.expectSubstring.toLowerCase());
+		const found = assistantOutput.toLowerCase().includes(opts.expectSubstring.toLowerCase());
 		result.checks.push({
 			name: "output_contains",
 			pass: found,
@@ -266,8 +258,7 @@ export async function validate(args: string[]): Promise<void> {
 	// Check 4: Expected file created
 	if (opts.expectFile) {
 		const fileExists =
-			fs.existsSync(opts.expectFile) ||
-			fs.existsSync(path.resolve(opts.expectFile));
+			fs.existsSync(opts.expectFile) || fs.existsSync(path.resolve(opts.expectFile));
 		result.checks.push({
 			name: "file_created",
 			pass: fileExists,
@@ -284,9 +275,7 @@ export async function validate(args: string[]): Promise<void> {
 		result.checks.push({
 			name: "no_errors",
 			pass: noErrors,
-			message: noErrors
-				? "No errors"
-				: `${errors.length} error(s): ${errors[0]?.slice(0, 100)}`,
+			message: noErrors ? "No errors" : `${errors.length} error(s): ${errors[0]?.slice(0, 100)}`,
 		});
 		if (!noErrors) result.pass = false;
 	}

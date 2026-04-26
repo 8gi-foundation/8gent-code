@@ -6,11 +6,7 @@
  */
 
 import type { Hook, HookContext } from "./index";
-import {
-	getHookManager,
-	registerFunctionHook,
-	registerShellHook,
-} from "./index";
+import { getHookManager, registerFunctionHook, registerShellHook } from "./index";
 
 // ============================================
 // Logging Hooks
@@ -53,8 +49,7 @@ export const errorLoggingHook: Omit<Hook, "id"> = {
 	name: "Error Logger",
 	description: "Logs all errors to ~/.8gent/logs/errors.log",
 	mode: "shell",
-	command:
-		'echo "[$(date -Iseconds)] Error: {error}" >> ~/.8gent/logs/errors.log',
+	command: 'echo "[$(date -Iseconds)] Error: {error}" >> ~/.8gent/logs/errors.log',
 	enabled: false,
 	continueOnError: true,
 };
@@ -93,8 +88,7 @@ export const macosNotificationHook: Omit<Hook, "id"> = {
 	name: "macOS Notification",
 	description: "Shows a macOS notification when task completes",
 	mode: "shell",
-	command:
-		'osascript -e \'display notification "Task completed" with title "8gent Code"\'',
+	command: 'osascript -e \'display notification "Task completed" with title "8gent Code"\'',
 	enabled: false,
 	continueOnError: true,
 	async: true,

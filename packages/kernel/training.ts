@@ -8,13 +8,7 @@
  * - Rollback on regression, promote on improvement
  */
 
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawn } from "bun";
 import type { ScoreRecord } from "./judge";
@@ -107,10 +101,7 @@ export class TrainingOrchestrator {
 		const score = record.scores.overall;
 
 		// Filter: only train on mid-range scores (not trivial, not perfect)
-		if (
-			score < this.config.minScoreThreshold ||
-			score > this.config.maxScoreThreshold
-		) {
+		if (score < this.config.minScoreThreshold || score > this.config.maxScoreThreshold) {
 			return false;
 		}
 
@@ -125,10 +116,7 @@ export class TrainingOrchestrator {
 		this.saveState();
 
 		// Trigger training when batch is full
-		if (
-			this.state.currentBatch.length >= this.config.batchSize &&
-			!this.isTraining
-		) {
+		if (this.state.currentBatch.length >= this.config.batchSize && !this.isTraining) {
 			await this.train();
 			return true;
 		}
@@ -248,11 +236,7 @@ export class TrainingOrchestrator {
 	 */
 	getActiveCheckpoint(): CheckpointInfo | null {
 		if (!this.state.activeCheckpointId) return null;
-		return (
-			this.state.checkpoints.find(
-				(c) => c.id === this.state.activeCheckpointId,
-			) ?? null
-		);
+		return this.state.checkpoints.find((c) => c.id === this.state.activeCheckpointId) ?? null;
 	}
 
 	/**
@@ -284,9 +268,7 @@ export class TrainingOrchestrator {
 		const exitCode = await proc.exited;
 		if (exitCode !== 0) {
 			const stderr = await new Response(proc.stderr).text();
-			throw new Error(
-				`Training proxy failed (exit ${exitCode}): ${stderr.slice(0, 500)}`,
-			);
+			throw new Error(`Training proxy failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
 		}
 	}
 

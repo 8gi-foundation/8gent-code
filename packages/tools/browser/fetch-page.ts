@@ -41,18 +41,13 @@ export async function fetchPage(url: string): Promise<PageResult> {
 	});
 
 	if (!res.ok) {
-		throw new Error(
-			`fetchPage ${res.status} ${res.statusText} — ${normalized}`,
-		);
+		throw new Error(`fetchPage ${res.status} ${res.statusText} — ${normalized}`);
 	}
 
 	const contentType = res.headers.get("content-type") ?? "";
 
 	// Non-HTML: return raw text
-	if (
-		!contentType.includes("text/html") &&
-		!contentType.includes("application/xhtml")
-	) {
+	if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
 		const text = (await res.text()).slice(0, 50_000);
 		const result: PageResult = {
 			title: normalized,

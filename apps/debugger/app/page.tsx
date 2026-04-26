@@ -22,10 +22,7 @@ export default function Home() {
 		if (saved === "light") {
 			setIsDark(false);
 			document.documentElement.classList.remove("dark");
-		} else if (
-			saved === "dark" ||
-			document.documentElement.classList.contains("dark")
-		) {
+		} else if (saved === "dark" || document.documentElement.classList.contains("dark")) {
 			setIsDark(true);
 		} else {
 			// System preference
@@ -76,9 +73,7 @@ export default function Home() {
 				// Auto-select session from URL
 				const urlSessionId = getSessionIdFromURL();
 				if (urlSessionId) {
-					const match = data.find(
-						(s: SessionInfo) => s.sessionId === urlSessionId,
-					);
+					const match = data.find((s: SessionInfo) => s.sessionId === urlSessionId);
 					if (match) setActive(match);
 				}
 			})
@@ -129,14 +124,9 @@ export default function Home() {
 				}}
 			>
 				{/* Logo + View Toggle + Theme */}
-				<div
-					className="px-4 py-3"
-					style={{ borderBottom: "1px solid var(--border)" }}
-				>
+				<div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
 					<div className="flex items-center gap-2">
-						<span className="text-emerald-400 font-mono font-bold text-lg">
-							8gent
-						</span>
+						<span className="text-emerald-400 font-mono font-bold text-lg">8gent</span>
 						<span style={{ color: "var(--muted)" }} className="text-xs">
 							debugger
 						</span>
@@ -154,9 +144,7 @@ export default function Home() {
 							className={`text-[10px] px-2 py-1 rounded ${
 								view === "sessions" ? "bg-emerald-500/20 text-emerald-400" : ""
 							}`}
-							style={
-								view !== "sessions" ? { color: "var(--muted)" } : undefined
-							}
+							style={view !== "sessions" ? { color: "var(--muted)" } : undefined}
 						>
 							Sessions {!loading && `(${sessions.length})`}
 						</button>

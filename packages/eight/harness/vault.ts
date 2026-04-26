@@ -61,11 +61,7 @@ function injectDeep(
 	for (const [key, value] of Object.entries(obj)) {
 		if (typeof value === "string") {
 			result[key] = replaceSentinels(value, secrets);
-		} else if (
-			value !== null &&
-			typeof value === "object" &&
-			!Array.isArray(value)
-		) {
+		} else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
 			result[key] = injectDeep(value as Record<string, unknown>, secrets);
 		} else if (Array.isArray(value)) {
 			result[key] = value.map((item) =>

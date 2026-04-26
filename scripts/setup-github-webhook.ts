@@ -80,9 +80,7 @@ if (!prsChannel) {
 	process.exit(1);
 }
 
-console.log(
-	`\nFound #prs channel: ${prsChannel.id} in guild ${prsChannel.guild_id}`,
-);
+console.log(`\nFound #prs channel: ${prsChannel.id} in guild ${prsChannel.guild_id}`);
 
 // Step 3: Create webhook
 console.log("Creating webhook...");
@@ -103,20 +101,12 @@ console.log(`GitHub-compatible URL: ${webhookUrl}/github`);
 const envKey = "DISCORD_GITHUB_WEBHOOK_URL";
 if (envContent.includes(envKey)) {
 	// Replace existing
-	const updated = envContent.replace(
-		new RegExp(`^${envKey}=.*$`, "m"),
-		`${envKey}=${webhookUrl}`,
-	);
+	const updated = envContent.replace(new RegExp(`^${envKey}=.*$`, "m"), `${envKey}=${webhookUrl}`);
 	writeFileSync(ENV_PATH, updated);
 	console.log(`\nUpdated ${envKey} in .env`);
 } else {
-	appendFileSync(
-		ENV_PATH,
-		`\n# GitHub -> Discord webhook for #prs\n${envKey}=${webhookUrl}\n`,
-	);
+	appendFileSync(ENV_PATH, `\n# GitHub -> Discord webhook for #prs\n${envKey}=${webhookUrl}\n`);
 	console.log(`\nAppended ${envKey} to .env`);
 }
 
-console.log(
-	"\nDone. See scripts/discord-github-bridge.md for GitHub setup instructions.",
-);
+console.log("\nDone. See scripts/discord-github-bridge.md for GitHub setup instructions.");

@@ -210,13 +210,7 @@ function insertTheme(theme: ExtractedTheme): void {
 
 	const components = generateDefaultComponents(theme.name, theme.style);
 
-	insertDesignSystemWithRelations(
-		system,
-		colors,
-		typography,
-		theme.tags,
-		components,
-	);
+	insertDesignSystemWithRelations(system, colors, typography, theme.tags, components);
 }
 
 /**

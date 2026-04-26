@@ -18,10 +18,7 @@ import type { CoreMemory, SemanticMemory } from "./types.js";
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function testDbPath(): string {
-	return join(
-		tmpdir(),
-		`memory-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-	);
+	return join(tmpdir(), `memory-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function makeCoreMem(overrides: Partial<CoreMemory> = {}): CoreMemory {
@@ -49,9 +46,7 @@ function makeCoreMem(overrides: Partial<CoreMemory> = {}): CoreMemory {
 	};
 }
 
-function makeSemanticMem(
-	overrides: Partial<SemanticMemory> = {},
-): SemanticMemory {
+function makeSemanticMem(overrides: Partial<SemanticMemory> = {}): SemanticMemory {
 	const now = Date.now();
 	return {
 		id: `mem_test_${Math.random().toString(36).slice(2, 8)}`,
@@ -113,9 +108,7 @@ describe("forget() — soft delete", () => {
 
 		// Verify via raw SQL that row still exists with deleted_at set
 		const rawDb = new Database(dbPath, { readonly: true });
-		const row = rawDb
-			.prepare("SELECT id, deleted_at FROM memories WHERE id = ?")
-			.get(id) as {
+		const row = rawDb.prepare("SELECT id, deleted_at FROM memories WHERE id = ?").get(id) as {
 			id: string;
 			deleted_at: number | null;
 		} | null;
@@ -181,9 +174,7 @@ describe("forget() — soft delete", () => {
 		// Check memory_versions via raw SQL
 		const rawDb = new Database(dbPath, { readonly: true });
 		const versions = rawDb
-			.prepare(
-				"SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version DESC",
-			)
+			.prepare("SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version DESC")
 			.all(id) as Array<{
 			id: string;
 			memory_id: string;
@@ -264,12 +255,7 @@ describe("update() — versioning", () => {
 		const mem = makeCoreMem({ id: "mem_ver_inc" });
 		store.write(mem);
 
-		store.update(
-			"mem_ver_inc",
-			{ content: "Updated content" },
-			"improve",
-			"agent",
-		);
+		store.update("mem_ver_inc", { content: "Updated content" }, "improve", "agent");
 
 		const updated = store.get("mem_ver_inc");
 		expect(updated).not.toBeNull();
@@ -285,9 +271,7 @@ describe("update() — versioning", () => {
 
 		const rawDb = new Database(dbPath, { readonly: true });
 		const versions = rawDb
-			.prepare(
-				"SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version",
-			)
+			.prepare("SELECT * FROM memory_versions WHERE memory_id = ? ORDER BY version")
 			.all("mem_snap") as Array<{
 			version: number;
 			data_snapshot: string;
@@ -308,24 +292,9 @@ describe("update() — versioning", () => {
 		const mem = makeCoreMem({ id: "mem_multi" });
 		store.write(mem);
 
-		store.update(
-			"mem_multi",
-			{ content: "v2 content" },
-			"second version",
-			"agent",
-		);
-		store.update(
-			"mem_multi",
-			{ content: "v3 content" },
-			"third version",
-			"agent",
-		);
-		store.update(
-			"mem_multi",
-			{ content: "v4 content" },
-			"fourth version",
-			"agent",
-		);
+		store.update("mem_multi", { content: "v2 content" }, "second version", "agent");
+		store.update("mem_multi", { content: "v3 content" }, "third version", "agent");
+		store.update("mem_multi", { content: "v4 content" }, "fourth version", "agent");
 
 		const rawDb = new Database(dbPath, { readonly: true });
 		const versions = rawDb
@@ -377,12 +346,7 @@ describe("update() — versioning", () => {
 		});
 		store.write(mem);
 
-		store.update(
-			"mem_blob",
-			{ content: "Changed content" },
-			"update blob",
-			"system",
-		);
+		store.update("mem_blob", { content: "Changed content" }, "update blob", "system");
 
 		const rawDb = new Database(dbPath, { readonly: true });
 		const row = rawDb
@@ -409,18 +373,11 @@ describe("update() — versioning", () => {
 		const mem = makeCoreMem({ id: "mem_audit" });
 		store.write(mem);
 
-		store.update(
-			"mem_audit",
-			{ content: "Audited" },
-			"quarterly review",
-			"compliance-agent",
-		);
+		store.update("mem_audit", { content: "Audited" }, "quarterly review", "compliance-agent");
 
 		const rawDb = new Database(dbPath, { readonly: true });
 		const row = rawDb
-			.prepare(
-				"SELECT changed_by, change_reason FROM memory_versions WHERE memory_id = ?",
-			)
+			.prepare("SELECT changed_by, change_reason FROM memory_versions WHERE memory_id = ?")
 			.get("mem_audit") as { changed_by: string; change_reason: string } | null;
 		rawDb.close();
 
@@ -430,12 +387,7 @@ describe("update() — versioning", () => {
 	});
 
 	it("returns false for non-existent memory", () => {
-		const result = store.update(
-			"mem_ghost",
-			{ content: "nope" },
-			"test",
-			"agent",
-		);
+		const result = store.update("mem_ghost", { content: "nope" }, "test", "agent");
 		expect(result).toBe(false);
 	});
 
@@ -445,12 +397,7 @@ describe("update() — versioning", () => {
 
 		store.forget("mem_del_upd", "gone");
 
-		const result = store.update(
-			"mem_del_upd",
-			{ content: "revive?" },
-			"attempt",
-			"agent",
-		);
+		const result = store.update("mem_del_upd", { content: "revive?" }, "attempt", "agent");
 		expect(result).toBe(false);
 	});
 
@@ -491,9 +438,7 @@ describe("update() — versioning", () => {
 		store.write(mem);
 
 		const rawDb = new Database(dbPath, { readonly: true });
-		const before = rawDb
-			.prepare("SELECT updated_at FROM memories WHERE id = ?")
-			.get("mem_ts") as {
+		const before = rawDb.prepare("SELECT updated_at FROM memories WHERE id = ?").get("mem_ts") as {
 			updated_at: number;
 		};
 		rawDb.close();
@@ -503,9 +448,7 @@ describe("update() — versioning", () => {
 		store.update("mem_ts", { content: "Updated" }, "ts test", "agent");
 
 		const rawDb2 = new Database(dbPath, { readonly: true });
-		const after = rawDb2
-			.prepare("SELECT updated_at FROM memories WHERE id = ?")
-			.get("mem_ts") as {
+		const after = rawDb2.prepare("SELECT updated_at FROM memories WHERE id = ?").get("mem_ts") as {
 			updated_at: number;
 		};
 		rawDb2.close();
@@ -549,12 +492,7 @@ describe("forget + update interplay", () => {
 		store.forget("mem_preserved", "bye");
 
 		// Update should fail
-		const result = store.update(
-			"mem_preserved",
-			{ content: "revive" },
-			"attempt",
-			"agent",
-		);
+		const result = store.update("mem_preserved", { content: "revive" }, "attempt", "agent");
 		expect(result).toBe(false);
 
 		// But version history still exists

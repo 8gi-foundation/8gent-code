@@ -306,10 +306,7 @@ export class ProactiveInfiniteWorkflow extends EventEmitter {
 /**
  * Create a proactive-infinite workflow
  */
-export function createWorkflow(
-	task: string,
-	config?: WorkflowConfig,
-): ProactiveInfiniteWorkflow {
+export function createWorkflow(task: string, config?: WorkflowConfig): ProactiveInfiniteWorkflow {
 	return new ProactiveInfiniteWorkflow(task, config);
 }
 
@@ -328,18 +325,15 @@ export async function runWorkflow(
 	const workflow = createWorkflow(task, config);
 
 	return new Promise((resolve, reject) => {
-		workflow.on(
-			"question",
-			async (event: { type: "question"; question: ClarifyingQuestion }) => {
-				if (callbacks?.onQuestion) {
-					const answer = await callbacks.onQuestion(event.question);
-					workflow.answerQuestion(answer);
-				} else {
-					// Use default or skip
-					workflow.useDefault();
-				}
-			},
-		);
+		workflow.on("question", async (event: { type: "question"; question: ClarifyingQuestion }) => {
+			if (callbacks?.onQuestion) {
+				const answer = await callbacks.onQuestion(event.question);
+				workflow.answerQuestion(answer);
+			} else {
+				// Use default or skip
+				workflow.useDefault();
+			}
+		});
 
 		workflow.on(
 			"ready",
@@ -349,10 +343,7 @@ export async function runWorkflow(
 				confidence: number;
 			}) => {
 				if (callbacks?.onReady) {
-					const confirmed = await callbacks.onReady(
-						event.refinedTask,
-						event.confidence,
-					);
+					const confirmed = await callbacks.onReady(event.refinedTask, event.confidence);
 					if (confirmed) {
 						workflow.confirmInfinite();
 					} else {
@@ -365,19 +356,13 @@ export async function runWorkflow(
 			},
 		);
 
-		workflow.on(
-			"progress",
-			(event: { type: "progress"; state: InfiniteState }) => {
-				callbacks?.onProgress?.(event.state);
-			},
-		);
+		workflow.on("progress", (event: { type: "progress"; state: InfiniteState }) => {
+			callbacks?.onProgress?.(event.state);
+		});
 
-		workflow.on(
-			"complete",
-			(event: { type: "complete"; state: InfiniteState }) => {
-				resolve(event.state);
-			},
-		);
+		workflow.on("complete", (event: { type: "complete"; state: InfiniteState }) => {
+			resolve(event.state);
+		});
 
 		workflow.on("cancelled", () => {
 			resolve(null);

@@ -58,12 +58,7 @@ export interface SpawnScope {
 	env?: Record<string, string>;
 }
 
-export type SpawnStatus =
-	| "pending"
-	| "running"
-	| "completed"
-	| "failed"
-	| "timeout";
+export type SpawnStatus = "pending" | "running" | "completed" | "failed" | "timeout";
 
 /** Structured result returned by the child. */
 export interface SpawnResult {
@@ -96,10 +91,7 @@ interface WorktreeHandle {
 	branch: string;
 }
 
-async function createWorktree(
-	scope: SpawnScope,
-	taskId: string,
-): Promise<WorktreeHandle> {
+async function createWorktree(scope: SpawnScope, taskId: string): Promise<WorktreeHandle> {
 	const hash = crypto.randomBytes(4).toString("hex");
 	const persona = validatePersona(scope.persona || "child");
 	const branch = `spawn/${persona}-${hash}`;
@@ -110,9 +102,7 @@ async function createWorktree(
 	const resolvedWt = path.resolve(wtPath);
 	const resolvedRoot = path.resolve(scope.projectRoot);
 	if (!resolvedWt.startsWith(resolvedRoot + path.sep)) {
-		throw new Error(
-			`Worktree path traversal blocked: "${wtPath}" escapes project root`,
-		);
+		throw new Error(`Worktree path traversal blocked: "${wtPath}" escapes project root`);
 	}
 
 	fs.mkdirSync(dir, { recursive: true });
@@ -126,10 +116,7 @@ async function createWorktree(
 	return { path: wtPath, branch };
 }
 
-async function removeWorktree(
-	scope: SpawnScope,
-	handle: WorktreeHandle,
-): Promise<void> {
+async function removeWorktree(scope: SpawnScope, handle: WorktreeHandle): Promise<void> {
 	try {
 		// SEC-S1: No shell — argument arrays only
 		await execFileAsync("git", ["worktree", "remove", handle.path, "--force"], {
@@ -153,14 +140,10 @@ async function removeWorktree(
 async function getChangedFiles(wtPath: string): Promise<string[]> {
 	try {
 		// SEC-S1: No shell — argument array
-		const { stdout } = await execFileAsync(
-			"git",
-			["diff", "--name-only", "HEAD"],
-			{
-				cwd: wtPath,
-				timeout: 5_000,
-			},
-		);
+		const { stdout } = await execFileAsync("git", ["diff", "--name-only", "HEAD"], {
+			cwd: wtPath,
+			timeout: 5_000,
+		});
 		return stdout.trim().split("\n").filter(Boolean);
 	} catch {
 		return [];
@@ -168,16 +151,13 @@ async function getChangedFiles(wtPath: string): Promise<string[]> {
 }
 
 // SEC-S6: Validate child result shape — never trust arbitrary JSON from child process
-function validateSpawnOutput(
-	raw: unknown,
-): Record<string, unknown> | undefined {
+function validateSpawnOutput(raw: unknown): Record<string, unknown> | undefined {
 	if (raw === null || raw === undefined) return undefined;
 	if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
 	// Strip __proto__ and constructor to prevent prototype pollution
 	const clean: Record<string, unknown> = {};
 	for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
-		if (key === "__proto__" || key === "constructor" || key === "prototype")
-			continue;
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
 		clean[key] = val;
 	}
 	return clean;
@@ -213,10 +193,7 @@ function validateSpawnOutput(
  * ]);
  * ```
  */
-export async function spawn(
-	task: SpawnTask,
-	scope: SpawnScope,
-): Promise<SpawnResult> {
+export async function spawn(task: SpawnTask, scope: SpawnScope): Promise<SpawnResult> {
 	const taskId = task.id || `spawn-${crypto.randomBytes(4).toString("hex")}`;
 	const timeout = task.timeoutMs ?? 300_000;
 	const start = Date.now();
@@ -238,11 +215,7 @@ export async function spawn(
 		const executable = customCmd || "bun";
 		const execArgs = customCmd
 			? [taskFile]
-			: [
-					"run",
-					path.join(scope.projectRoot, "packages/eight/harness/spawn-child.ts"),
-					taskFile,
-				];
+			: ["run", path.join(scope.projectRoot, "packages/eight/harness/spawn-child.ts"), taskFile];
 
 		await execFileAsync(executable, execArgs, {
 			cwd: handle.path,
@@ -307,10 +280,7 @@ export async function spawnAll(
 		}
 	}
 
-	const workers = Array.from(
-		{ length: Math.min(concurrency, tasks.length) },
-		() => worker(),
-	);
+	const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
 	await Promise.all(workers);
 
 	return results;
@@ -319,10 +289,7 @@ export async function spawnAll(
 /**
  * Clean up a spawn result's worktree. Call after collecting/merging changes.
  */
-export async function collect(
-	result: SpawnResult,
-	scope: SpawnScope,
-): Promise<void> {
+export async function collect(result: SpawnResult, scope: SpawnScope): Promise<void> {
 	if (result.worktreePath && result.branch) {
 		await removeWorktree(scope, {
 			path: result.worktreePath,

@@ -37,13 +37,8 @@ export async function craftExtension(opts: CraftOptions): Promise<CraftResult> {
 	const sourceContext = gatherSourceContext(sourceDir, opts.targetCapability);
 
 	// Pass 1: Analyst
-	const analystResult = await inferenceChat(
-		model,
-		ANALYST_PROMPT,
-		sourceContext,
-	);
-	if (!analystResult.content)
-		throw new Error("ExtensionCrafter: Analyst returned empty");
+	const analystResult = await inferenceChat(model, ANALYST_PROMPT, sourceContext);
+	if (!analystResult.content) throw new Error("ExtensionCrafter: Analyst returned empty");
 
 	// Pass 2: Critic
 	const criticResult = await inferenceChat(
@@ -52,9 +47,7 @@ export async function craftExtension(opts: CraftOptions): Promise<CraftResult> {
 		`SOURCE:\n${sourceContext}\n\nANALYST:\n${analystResult.content}`,
 	);
 	if (criticResult.content.includes("REJECTED")) {
-		throw new Error(
-			`ExtensionCrafter: Critic rejected source.\n${criticResult.content}`,
-		);
+		throw new Error(`ExtensionCrafter: Critic rejected source.\n${criticResult.content}`);
 	}
 
 	// Pass 3: Implementer — generate manifest
@@ -76,10 +69,7 @@ export async function craftExtension(opts: CraftOptions): Promise<CraftResult> {
 	return { manifest, installed: true, path: installPath, warnings };
 }
 
-async function resolveSource(
-	source: string,
-	warnings: string[],
-): Promise<string> {
+async function resolveSource(source: string, warnings: string[]): Promise<string> {
 	const expanded = source.replace(/^~/, os.homedir());
 	if (fs.existsSync(expanded)) return expanded;
 
@@ -99,10 +89,7 @@ async function resolveSource(
 	throw new Error(`ExtensionCrafter: Source not found: ${source}`);
 }
 
-function gatherSourceContext(
-	sourceDir: string,
-	targetCapability?: string,
-): string {
+function gatherSourceContext(sourceDir: string, targetCapability?: string): string {
 	const parts: string[] = [];
 	if (targetCapability) parts.push(`TARGET CAPABILITY: ${targetCapability}\n`);
 
@@ -116,16 +103,12 @@ function gatherSourceContext(
 
 	const pkg = path.join(sourceDir, "package.json");
 	if (fs.existsSync(pkg))
-		parts.push(
-			`package.json:\n${fs.readFileSync(pkg, "utf-8").slice(0, 1000)}`,
-		);
+		parts.push(`package.json:\n${fs.readFileSync(pkg, "utf-8").slice(0, 1000)}`);
 
 	for (const rel of ["index.ts", "index.js", "src/index.ts", "src/index.js"]) {
 		const p = path.join(sourceDir, rel);
 		if (fs.existsSync(p)) {
-			parts.push(
-				`ENTRY (${rel}):\n${fs.readFileSync(p, "utf-8").slice(0, 3000)}`,
-			);
+			parts.push(`ENTRY (${rel}):\n${fs.readFileSync(p, "utf-8").slice(0, 3000)}`);
 			break;
 		}
 	}
@@ -133,11 +116,7 @@ function gatherSourceContext(
 	return parts.join("\n---\n");
 }
 
-function parseManifest(
-	response: string,
-	sourceDir: string,
-	warnings: string[],
-): ExtensionManifest {
+function parseManifest(response: string, sourceDir: string, warnings: string[]): ExtensionManifest {
 	const m = response.match(/```json\n([\s\S]+?)\n```/);
 	if (m) {
 		try {
@@ -159,9 +138,7 @@ function parseManifest(
 			warnings.push("JSON parse failed — using defaults");
 		}
 	}
-	warnings.push(
-		"Manifest derived from defaults — review before production use",
-	);
+	warnings.push("Manifest derived from defaults — review before production use");
 	return {
 		name: path
 			.basename(sourceDir)
@@ -175,23 +152,14 @@ function parseManifest(
 	};
 }
 
-function install(
-	manifest: ExtensionManifest,
-	sourceDir: string,
-	warnings: string[],
-): string {
+function install(manifest: ExtensionManifest, sourceDir: string, warnings: string[]): string {
 	const dest = path.join(EXTENSIONS_DIR, manifest.name);
 	fs.mkdirSync(dest, { recursive: true });
-	fs.writeFileSync(
-		path.join(dest, "8gent-extension.json"),
-		JSON.stringify(manifest, null, 2),
-	);
+	fs.writeFileSync(path.join(dest, "8gent-extension.json"), JSON.stringify(manifest, null, 2));
 	try {
 		execSync(`cp -r "${sourceDir}/." "${dest}/"`, { stdio: "ignore" });
 	} catch {
-		warnings.push(
-			"Source copy failed — manifest written, entry needs manual setup",
-		);
+		warnings.push("Source copy failed — manifest written, entry needs manual setup");
 	}
 	return dest;
 }

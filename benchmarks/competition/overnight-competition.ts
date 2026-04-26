@@ -10,20 +10,10 @@
  *      TELEGRAM_CHAT_ID, MAX_ROUNDS, STOP_HOUR
  */
 
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import type {
-	BenchmarkDefinition,
-	CombinedGradeResult,
-	TokenUsage,
-} from "../types";
+import type { BenchmarkDefinition, CombinedGradeResult, TokenUsage } from "../types";
 
 // ── Import ALL benchmark categories ────────────────────────────────
 
@@ -251,15 +241,11 @@ async function callOllama(
 		}),
 	});
 	if (!response.ok)
-		throw new Error(
-			`Ollama ${response.status}: ${(await response.text()).slice(0, 200)}`,
-		);
+		throw new Error(`Ollama ${response.status}: ${(await response.text()).slice(0, 200)}`);
 	const json = (await response.json()) as any;
 	const usage = json.usage ?? {};
 	const content =
-		json.choices?.[0]?.message?.content ||
-		json.choices?.[0]?.message?.reasoning ||
-		"";
+		json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning || "";
 	return {
 		content,
 		durationMs: Math.round(performance.now() - start),
@@ -271,10 +257,7 @@ async function callOllama(
 	};
 }
 
-async function callClaude(
-	messages: ChatMessage[],
-	temperature: number,
-): Promise<ApiResponse> {
+async function callClaude(messages: ChatMessage[], temperature: number): Promise<ApiResponse> {
 	if (!ANTHROPIC_API_KEY) {
 		log("  [Claude fallback] No ANTHROPIC_API_KEY — using qwen3.5 via Ollama");
 		return callOllama(CLAUDE_FALLBACK_MODEL, messages, temperature);
@@ -284,28 +267,23 @@ async function callClaude(
 	const userMsgs = messages
 		.filter((m) => m.role !== "system")
 		.map((m) => ({ role: m.role, content: m.content }));
-	const response = await fetchWithTimeout(
-		"https://api.anthropic.com/v1/messages",
-		{
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"x-api-key": ANTHROPIC_API_KEY,
-				"anthropic-version": "2023-06-01",
-			},
-			body: JSON.stringify({
-				model: CLAUDE_MODEL,
-				max_tokens: 8192,
-				temperature,
-				system: systemMsg,
-				messages: userMsgs,
-			}),
+	const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"x-api-key": ANTHROPIC_API_KEY,
+			"anthropic-version": "2023-06-01",
 		},
-	);
+		body: JSON.stringify({
+			model: CLAUDE_MODEL,
+			max_tokens: 8192,
+			temperature,
+			system: systemMsg,
+			messages: userMsgs,
+		}),
+	});
 	if (!response.ok)
-		throw new Error(
-			`Anthropic ${response.status}: ${(await response.text()).slice(0, 300)}`,
-		);
+		throw new Error(`Anthropic ${response.status}: ${(await response.text()).slice(0, 300)}`);
 	const json = (await response.json()) as any;
 	const content = json.content?.map((b: any) => b.text).join("\n") ?? "";
 	const usage = json.usage ?? {};
@@ -350,11 +328,7 @@ const EMPTY_GRADE: CombinedGradeResult = {
 	method: "keyword-only",
 };
 
-function emptyResult(
-	benchmarkId: string,
-	model: string,
-	temperature: number,
-): CompetitorResult {
+function emptyResult(benchmarkId: string, model: string, temperature: number): CompetitorResult {
 	return {
 		benchmarkId,
 		score: 0,
@@ -368,19 +342,13 @@ function emptyResult(
 
 // ── Run Competitor on a Single Benchmark ───────────────────────────
 
-async function runEight(
-	benchmark: BenchmarkDefinition,
-): Promise<CompetitorResult> {
+async function runEight(benchmark: BenchmarkDefinition): Promise<CompetitorResult> {
 	let best: CompetitorResult | null = null;
 
 	for (const temp of EIGHT_TEMPERATURES) {
 		try {
 			const messages = buildEightMessages(benchmark);
-			const { content, durationMs, tokenUsage } = await callOllama(
-				EIGHT_MODEL,
-				messages,
-				temp,
-			);
+			const { content, durationMs, tokenUsage } = await callOllama(EIGHT_MODEL, messages, temp);
 			const { code, result } = await grade(content, benchmark);
 
 			const run: CompetitorResult = {
@@ -399,12 +367,7 @@ async function runEight(
 			);
 
 			// Record for experience-based routing
-			recordResult(
-				`ollama/${EIGHT_MODEL}`,
-				benchmark.category,
-				benchmark.id,
-				result.score,
-			);
+			recordResult(`ollama/${EIGHT_MODEL}`, benchmark.category, benchmark.id, result.score);
 
 			if (!best || run.score > best.score) {
 				best = run;
@@ -421,19 +384,14 @@ async function runEight(
 	return best;
 }
 
-async function runClaude(
-	benchmark: BenchmarkDefinition,
-): Promise<CompetitorResult> {
+async function runClaude(benchmark: BenchmarkDefinition): Promise<CompetitorResult> {
 	const claudeModelLabel = ANTHROPIC_API_KEY
 		? `anthropic/${CLAUDE_MODEL}`
 		: `ollama/${CLAUDE_FALLBACK_MODEL}`;
 
 	try {
 		const messages = buildClaudeMessages(benchmark);
-		const { content, durationMs, tokenUsage } = await callClaude(
-			messages,
-			CLAUDE_TEMPERATURE,
-		);
+		const { content, durationMs, tokenUsage } = await callClaude(messages, CLAUDE_TEMPERATURE);
 		const { code, result } = await grade(content, benchmark);
 
 		log(
@@ -441,12 +399,7 @@ async function runClaude(
 		);
 
 		// Record Claude's results too for the experience DB
-		recordResult(
-			claudeModelLabel,
-			benchmark.category,
-			benchmark.id,
-			result.score,
-		);
+		recordResult(claudeModelLabel, benchmark.category, benchmark.id, result.score);
 
 		return {
 			benchmarkId: benchmark.id,
@@ -539,10 +492,7 @@ function analyzeAndMutate(
 
 // ── Run a Full Category Round ──────────────────────────────────────
 
-async function runRound(
-	roundNum: number,
-	category: CategoryRound,
-): Promise<RoundResult> {
+async function runRound(roundNum: number, category: CategoryRound): Promise<RoundResult> {
 	log(`\n${"=".repeat(60)}`);
 	log(`  ROUND ${roundNum}: ${category.name.toUpperCase()} (${category.tier})`);
 	log(`  Benchmarks: ${category.benchmarks.length}`);
@@ -580,9 +530,7 @@ async function runRound(
 		else if (winner === "Claude") claudeWins++;
 		else ties++;
 
-		log(
-			`  RESULT: 8gent=${eightResult.score} vs Claude=${claudeResult.score} => ${winner}`,
-		);
+		log(`  RESULT: 8gent=${eightResult.score} vs Claude=${claudeResult.score} => ${winner}`);
 
 		// If Claude won, analyze and mutate
 		const muts = analyzeAndMutate(benchmark, eightResult, claudeResult);
@@ -602,15 +550,11 @@ async function runRound(
 	// Calculate averages
 	const eightAvg =
 		eightResults.length > 0
-			? Math.round(
-					eightResults.reduce((s, r) => s + r.score, 0) / eightResults.length,
-				)
+			? Math.round(eightResults.reduce((s, r) => s + r.score, 0) / eightResults.length)
 			: 0;
 	const claudeAvg =
 		claudeResults.length > 0
-			? Math.round(
-					claudeResults.reduce((s, r) => s + r.score, 0) / claudeResults.length,
-				)
+			? Math.round(claudeResults.reduce((s, r) => s + r.score, 0) / claudeResults.length)
 			: 0;
 
 	return {
@@ -644,8 +588,7 @@ function formatTelegramRound(
 		const e = roundResult.eightResults[i];
 		const c = roundResult.claudeResults[i];
 		const icon = e.score > c.score ? "✅" : c.score > e.score ? "❌" : "🔶";
-		const winner =
-			e.score > c.score ? "8gent" : c.score > e.score ? "Claude" : "TIE";
+		const winner = e.score > c.score ? "8gent" : c.score > e.score ? "Claude" : "TIE";
 		perBenchmark += `${icon} ${e.benchmarkId}: 8gent ${e.score} vs Claude ${c.score} [${winner}]\n`;
 	}
 
@@ -708,8 +651,7 @@ function saveResults(state: CompetitionState): void {
 					eightModel: e.model,
 					claudeModel: c.model,
 					eightTemp: e.temperature,
-					winner:
-						e.score > c.score ? "8gent" : c.score > e.score ? "Claude" : "TIE",
+					winner: e.score > c.score ? "8gent" : c.score > e.score ? "Claude" : "TIE",
 				};
 			}),
 			mutationsApplied: r.mutationsApplied,
@@ -738,8 +680,7 @@ function identifyPersistentFailures(state: CompetitionState): Array<{
 		for (let i = 0; i < round.eightResults.length; i++) {
 			const e = round.eightResults[i];
 			const c = round.claudeResults[i];
-			if (!scores[e.benchmarkId])
-				scores[e.benchmarkId] = { e: [], c: [], cat: round.category };
+			if (!scores[e.benchmarkId]) scores[e.benchmarkId] = { e: [], c: [], cat: round.category };
 			scores[e.benchmarkId].e.push(e.score);
 			scores[e.benchmarkId].c.push(c.score);
 		}
@@ -790,9 +731,7 @@ function generateFinalReport(state: CompetitionState): void {
 	if (failures.length > 0) {
 		log(`\n  Persistent failures (${failures.length}):`);
 		for (const f of failures)
-			log(
-				`    ⚠ ${f.benchmarkId}: gap=${f.gap} — 8gent=${f.eightAvg} Claude=${f.claudeAvg}`,
-			);
+			log(`    ⚠ ${f.benchmarkId}: gap=${f.gap} — 8gent=${f.eightAvg} Claude=${f.claudeAvg}`);
 		log("\n  GitHub issue suggestions:");
 		for (const f of failures.slice(0, 5)) log(`    ${f.suggestion}`);
 	}
@@ -808,13 +747,8 @@ async function main(): Promise<void> {
 	mkdirSync(COMP_DIR, { recursive: true });
 	mkdirSync(join(ROOT, "autoresearch", "work"), { recursive: true });
 
-	const totalBenchmarks = CATEGORY_ROUNDS.reduce(
-		(s, c) => s + c.benchmarks.length,
-		0,
-	);
-	const claudeLabel = ANTHROPIC_API_KEY
-		? CLAUDE_MODEL
-		: `${CLAUDE_FALLBACK_MODEL} (fallback)`;
+	const totalBenchmarks = CATEGORY_ROUNDS.reduce((s, c) => s + c.benchmarks.length, 0);
+	const claudeLabel = ANTHROPIC_API_KEY ? CLAUDE_MODEL : `${CLAUDE_FALLBACK_MODEL} (fallback)`;
 	log("╔══════════════════════════════════════════════════════════════╗");
 	log("║     8GENT vs CLAUDE CODE — Overnight Competition           ║");
 	log("╠══════════════════════════════════════════════════════════════╣");
@@ -828,9 +762,7 @@ async function main(): Promise<void> {
 	log("╚══════════════════════════════════════════════════════════════╝\n");
 
 	if (!ANTHROPIC_API_KEY) {
-		log(
-			"⚠ No ANTHROPIC_API_KEY — Claude will use qwen3.5 via Ollama as fallback",
-		);
+		log("⚠ No ANTHROPIC_API_KEY — Claude will use qwen3.5 via Ollama as fallback");
 	}
 
 	// Load or initialize state

@@ -13,13 +13,10 @@ if (!fixturePath) throw new Error("FIXTURE_PATH env var required");
 const mod = await import(fixturePath);
 
 // Accept: default export, named SharedCounter, or named FixedCounter
-const CounterClass =
-	mod.default ?? mod.SharedCounter ?? mod.FixedCounter ?? mod.Counter;
+const CounterClass = mod.default ?? mod.SharedCounter ?? mod.FixedCounter ?? mod.Counter;
 
 if (!CounterClass) {
-	throw new Error(
-		"Module must export SharedCounter, FixedCounter, Counter, or default class",
-	);
+	throw new Error("Module must export SharedCounter, FixedCounter, Counter, or default class");
 }
 
 function delay(ms: number) {

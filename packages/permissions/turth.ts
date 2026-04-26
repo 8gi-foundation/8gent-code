@@ -14,11 +14,7 @@
  */
 
 import type { PolicyDecision } from "./types.js";
-import {
-	type ApprovalScope,
-	checkCapability,
-	recordDecision,
-} from "./user-policy.js";
+import { type ApprovalScope, checkCapability, recordDecision } from "./user-policy.js";
 
 export type { ApprovalScope } from "./user-policy.js";
 
@@ -64,9 +60,7 @@ export function isInteractiveEnabled(): boolean {
  *      caller can fall back to the existing interactive prompt path.
  *   4. Surface registered: ask the user, cache per chosen scope, return.
  */
-export async function requestApproval(
-	req: TurthRequest,
-): Promise<PolicyDecision> {
+export async function requestApproval(req: TurthRequest): Promise<PolicyDecision> {
 	if (!isInteractiveEnabled()) {
 		return { allowed: true };
 	}

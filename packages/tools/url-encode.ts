@@ -4,10 +4,7 @@
  * @returns The percent-encoded string.
  */
 export function encode(str: string): string {
-	return encodeURIComponent(str)
-		.replace(/%20/g, "+")
-		.replace(/%5B/g, "[")
-		.replace(/%5D/g, "]");
+	return encodeURIComponent(str).replace(/%20/g, "+").replace(/%5B/g, "[").replace(/%5D/g, "]");
 }
 
 /**

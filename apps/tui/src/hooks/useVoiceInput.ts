@@ -92,16 +92,8 @@ export interface UseVoiceInputReturn {
  * }
  * ```
  */
-export function useVoiceInput(
-	options: UseVoiceInputOptions = {},
-): UseVoiceInputReturn {
-	const {
-		config = {},
-		active = true,
-		onTranscript,
-		onError,
-		onDownloadProgress,
-	} = options;
+export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
+	const { config = {}, active = true, onTranscript, onError, onDownloadProgress } = options;
 
 	// Create engine once, update config via ref
 	const engineRef = useRef<VoiceEngine | null>(null);
@@ -119,8 +111,7 @@ export function useVoiceInput(
 	const [recordingDurationMs, setRecordingDurationMs] = useState(0);
 	const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
 	const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
-	const [downloadingModel, setDownloadingModel] =
-		useState<WhisperModelName | null>(null);
+	const [downloadingModel, setDownloadingModel] = useState<WhisperModelName | null>(null);
 	const [setupStatus, setSetupStatus] = useState<{
 		ready: boolean;
 		missing: string[];
@@ -133,9 +124,7 @@ export function useVoiceInput(
 
 	// Wire up engine events
 	useEffect(() => {
-		const onStateChange = ({
-			to,
-		}: { from: RecordingState; to: RecordingState }) => {
+		const onStateChange = ({ to }: { from: RecordingState; to: RecordingState }) => {
 			setState(to);
 		};
 
@@ -161,10 +150,7 @@ export function useVoiceInput(
 			setPartialTranscript(event.text);
 		};
 
-		const onEngineError = ({
-			code,
-			message,
-		}: { code: VoiceErrorCode; message: string }) => {
+		const onEngineError = ({ code, message }: { code: VoiceErrorCode; message: string }) => {
 			setErrorMessage(message);
 			if (onError) {
 				onError(code, message);

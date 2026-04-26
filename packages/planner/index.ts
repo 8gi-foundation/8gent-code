@@ -93,10 +93,7 @@ export class Planner {
 	/**
 	 * Execute a plan step by step
 	 */
-	async execute(
-		plan: ExecutionPlan,
-		context: ExecutionContext,
-	): Promise<ExecutionPlan> {
+	async execute(plan: ExecutionPlan, context: ExecutionContext): Promise<ExecutionPlan> {
 		plan.status = "executing";
 
 		for (const step of plan.steps) {
@@ -118,11 +115,7 @@ export class Planner {
 				step.status = "completed";
 
 				// Track tokens
-				if (
-					typeof result === "object" &&
-					result !== null &&
-					"tokensSaved" in result
-				) {
+				if (typeof result === "object" && result !== null && "tokensSaved" in result) {
 					step.tokensSaved = (result as { tokensSaved: number }).tokensSaved;
 					plan.tokensSaved += step.tokensSaved;
 				}
@@ -141,10 +134,7 @@ export class Planner {
 	/**
 	 * Gather context for planning using AST-first approach
 	 */
-	private async gatherContext(
-		task: string,
-		context: ExecutionContext,
-	): Promise<PlanningContext> {
+	private async gatherContext(task: string, context: ExecutionContext): Promise<PlanningContext> {
 		const registry = getToolRegistry();
 		const relevantTools = this.identifyRelevantTools(task, registry);
 
@@ -218,20 +208,12 @@ export class Planner {
 		}
 
 		// File tools
-		if (
-			taskLower.includes("file") ||
-			taskLower.includes("read") ||
-			taskLower.includes("write")
-		) {
+		if (taskLower.includes("file") || taskLower.includes("read") || taskLower.includes("write")) {
 			tools.push("get_outline", "get_symbol");
 		}
 
 		// Search tools
-		if (
-			taskLower.includes("find") ||
-			taskLower.includes("search") ||
-			taskLower.includes("where")
-		) {
+		if (taskLower.includes("find") || taskLower.includes("search") || taskLower.includes("where")) {
 			tools.push("search_symbols");
 		}
 
@@ -287,10 +269,7 @@ export class Planner {
 	/**
 	 * Generate steps for code exploration
 	 */
-	private generateExplorationSteps(
-		task: string,
-		ctx: PlanningContext,
-	): PlanStep[] {
+	private generateExplorationSteps(task: string, ctx: PlanningContext): PlanStep[] {
 		return [
 			{
 				id: this.generateId(),
@@ -314,10 +293,7 @@ export class Planner {
 	/**
 	 * Generate steps for code modification
 	 */
-	private generateModificationSteps(
-		task: string,
-		ctx: PlanningContext,
-	): PlanStep[] {
+	private generateModificationSteps(task: string, ctx: PlanningContext): PlanStep[] {
 		const outlineStep: PlanStep = {
 			id: this.generateId(),
 			description: "Get outline of affected files",

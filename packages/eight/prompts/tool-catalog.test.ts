@@ -9,10 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
-import {
-	TOOL_CATALOG_SEGMENT,
-	buildToolCatalogSegment,
-} from "./system-prompt.js";
+import { TOOL_CATALOG_SEGMENT, buildToolCatalogSegment } from "./system-prompt.js";
 
 describe("buildToolCatalogSegment", () => {
 	it("has a clear header", () => {

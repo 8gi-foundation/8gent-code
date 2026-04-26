@@ -90,11 +90,7 @@ import {
 } from "./components/select-input.js";
 import { ShortcutDock } from "./components/shortcut-dock.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
-import {
-	DetailedStatusBar,
-	EnhancedStatusBar,
-	StatusBar,
-} from "./components/status-bar.js";
+import { DetailedStatusBar, EnhancedStatusBar, StatusBar } from "./components/status-bar.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/index.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
@@ -115,12 +111,7 @@ import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
 } from "./lib/layout-breakpoints.js";
-import {
-	narratePlan,
-	narrateStep,
-	narrateToolEnd,
-	narrateToolStart,
-} from "./lib/narrator.js";
+import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
 import {
 	flushSession,
 	initSessionLogger,
@@ -150,22 +141,16 @@ let convexClient: any = null;
 
 async function initAuthSystem() {
 	try {
-		const { getAuthManager, initAuth } = await import(
-			"../../../packages/auth/index.js"
-		);
+		const { getAuthManager, initAuth } = await import("../../../packages/auth/index.js");
 		const state = await initAuth();
 		authManager = getAuthManager();
 
 		// If authenticated, wire up Convex
 		if (state.state === "authenticated") {
 			try {
-				const { getConvexClient } = await import(
-					"../../../packages/db/client.js"
-				);
+				const { getConvexClient } = await import("../../../packages/db/client.js");
 				convexClient = getConvexClient();
-				convexClient.setAuth(
-					async () => authManager?.getAccessToken?.() ?? null,
-				);
+				convexClient.setAuth(async () => authManager?.getAccessToken?.() ?? null);
 			} catch {}
 		}
 
@@ -257,10 +242,7 @@ function loadProviderSettings(): { provider: string; model: string } {
 function detectBestLocalProvider(): { provider: string; model: string } {
 	const { execSync } = require("node:child_process");
 
-	function fetchChatModels(
-		url: string,
-		extract: (data: any) => string[],
-	): string[] {
+	function fetchChatModels(url: string, extract: (data: any) => string[]): string[] {
 		try {
 			const raw = execSync(`curl -s --max-time 2 "${url}"`, {
 				timeout: 3000,
@@ -293,12 +275,10 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 
 	// 3. Apfel (Apple Intelligence — macOS 26+, Apple Silicon only)
 	// Run with: apfel --serve --port 11435
-	const isAppleSilicon =
-		process.arch === "arm64" && process.platform === "darwin";
+	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
 	if (isAppleSilicon) {
-		const apfelModels = fetchChatModels(
-			"http://localhost:11435/v1/models",
-			(d) => (d.data || []).map((m: any) => String(m.id ?? "")),
+		const apfelModels = fetchChatModels("http://localhost:11435/v1/models", (d) =>
+			(d.data || []).map((m: any) => String(m.id ?? "")),
 		);
 		if (apfelModels.length > 0) {
 			return { provider: "apfel", model: pickBestChatModel(apfelModels) };
@@ -377,12 +357,7 @@ export interface Message {
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
-type AgentMode =
-	| "Planning"
-	| "Researching"
-	| "Implementing"
-	| "Testing"
-	| "Debugging";
+type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 const AGENT_MODES: AgentMode[] = [
 	"Planning",
 	"Researching",
@@ -466,8 +441,7 @@ export function App({
 		"\u221E The infinite gentleman awaits.",
 		"Splendid to see you. Where shall we begin?",
 	];
-	const randomGreeting =
-		GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+	const randomGreeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
 
 	// Core state
 	// Per-tab message storage (tab-aware logic wired after workspaceTabs hook below)
@@ -491,8 +465,7 @@ export function App({
 	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
 	const foregroundLabelRef = useRef<string>("");
 
-	const [processingStage, setProcessingStage] =
-		useState<ProcessingStage>("planning");
+	const [processingStage, setProcessingStage] = useState<ProcessingStage>("planning");
 	const [status, setStatus] = useState<AppStatus>("idle");
 
 	// Real-time agent progress (replaces fake simulateProcessing)
@@ -505,9 +478,9 @@ export function App({
 	const [recentCommands, setRecentCommands] = useState<string[]>([]);
 
 	// Auth state (non-blocking)
-	const [authStatus, setAuthStatus] = useState<
-		"unknown" | "anonymous" | "authenticated" | "error"
-	>("unknown");
+	const [authStatus, setAuthStatus] = useState<"unknown" | "anonymous" | "authenticated" | "error">(
+		"unknown",
+	);
 	const [authUser, setAuthUser] = useState<{
 		displayName: string;
 		plan: string;
@@ -547,10 +520,7 @@ export function App({
 			try {
 				// Run D critic loop: Gemma 4 generates, qwen3:32b critiques, one retry if rejected
 				let response = await agent.chat(clean);
-				const { approved, feedback } = await critiqueResponse(
-					clean,
-					response || "",
-				);
+				const { approved, feedback } = await critiqueResponse(clean, response || "");
 				if (!approved && feedback) {
 					response = await agent.chat(
 						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`,
@@ -595,9 +565,7 @@ export function App({
 	useEffect(() => {
 		initAuthSystem()
 			.then((state) => {
-				setAuthStatus(
-					state.state === "authenticated" ? "authenticated" : "anonymous",
-				);
+				setAuthStatus(state.state === "authenticated" ? "authenticated" : "anonymous");
 				if (state.state === "authenticated") {
 					setAuthUser({
 						displayName: state.user.displayName || "User",
@@ -660,9 +628,7 @@ export function App({
 	const [fancyHeader, setFancyHeader] = useState(false);
 	const [showEnhancedStatus, setShowEnhancedStatus] = useState(true);
 	// Performance metrics
-	const [lastResponseTime, setLastResponseTime] = useState<
-		number | undefined
-	>();
+	const [lastResponseTime, setLastResponseTime] = useState<number | undefined>();
 	const [contextSize, setContextSize] = useState<number | undefined>();
 
 	// Context window tracking
@@ -702,8 +668,7 @@ export function App({
 	const activeTabId = workspaceTabs.activeTab?.id || "default";
 
 	// Only show processing state when the active tab is the one that triggered it
-	const isProcessing =
-		isProcessingRaw && processingTabIdRef.current === activeTabId;
+	const isProcessing = isProcessingRaw && processingTabIdRef.current === activeTabId;
 	const setIsProcessing = useCallback(
 		(val: boolean) => {
 			setIsProcessingRaw(val);
@@ -736,11 +701,7 @@ export function App({
 	useEffect(() => {
 		if (prevTabIdRef.current !== activeTabId) {
 			// Log tab switch for session debugger
-			logTabSwitch(
-				prevTabIdRef.current,
-				activeTabId,
-				workspaceTabs.activeTab?.title || "Chat",
-			);
+			logTabSwitch(prevTabIdRef.current, activeTabId, workspaceTabs.activeTab?.title || "Chat");
 
 			// Save outgoing tab's messages
 			setMessagesRaw((currentMsgs) => {
@@ -769,22 +730,19 @@ export function App({
 	}, [activeTabId]);
 
 	// setMessages wrapper that also updates the ref map for current tab
-	const setMessages: React.Dispatch<React.SetStateAction<Message[]>> =
-		useCallback(
-			(action) => {
-				setMessagesRaw((prev) => {
-					const next = typeof action === "function" ? action(prev) : action;
-					tabMessagesRef.current.set(activeTabId, next);
-					return next;
-				});
-			},
-			[activeTabId],
-		);
+	const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = useCallback(
+		(action) => {
+			setMessagesRaw((prev) => {
+				const next = typeof action === "function" ? action(prev) : action;
+				tabMessagesRef.current.set(activeTabId, next);
+				return next;
+			});
+		},
+		[activeTabId],
+	);
 
 	// Infinite mode state (must match packages/permissions, including CLI --infinite)
-	const [infiniteModeActive, setInfiniteModeActive] = useState(() =>
-		isInfiniteMode(),
-	);
+	const [infiniteModeActive, setInfiniteModeActive] = useState(() => isInfiniteMode());
 
 	// Model/Provider state (must be before agent init)
 	const cliModelRequestedRef = useRef((cliModel ?? "").trim());
@@ -831,13 +789,8 @@ export function App({
 						const allModels = (data.models || [])
 							.map((m: any) => String(m.name ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						const chatModels = allModels.filter(
-							(id: string) => !isLikelyEmbeddingModelId(id),
-						);
-						if (!cancelled)
-							setAvailableModels(
-								chatModels.length > 0 ? chatModels : allModels,
-							);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "lmstudio") {
 					// Fetch LM Studio models — filter embedding models at source so they
@@ -848,13 +801,8 @@ export function App({
 						const allModels = (data.data || [])
 							.map((m: any) => String(m.id ?? "").trim())
 							.filter((id: string) => id.length > 0);
-						const chatModels = allModels.filter(
-							(id: string) => !isLikelyEmbeddingModelId(id),
-						);
-						if (!cancelled)
-							setAvailableModels(
-								chatModels.length > 0 ? chatModels : allModels,
-							);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
@@ -870,9 +818,7 @@ export function App({
 							.sort();
 						if (!cancelled)
 							setAvailableModels(
-								freeModels.length > 0
-									? freeModels
-									: ["google/gemini-2.5-flash:free"],
+								freeModels.length > 0 ? freeModels : ["google/gemini-2.5-flash:free"],
 							);
 					}
 				} else if (currentProvider === "openrouter") {
@@ -910,11 +856,8 @@ export function App({
 	useEffect(() => {
 		if (modelsLoading || availableModels.length === 0) return;
 
-		const inList = Boolean(
-			currentModel && availableModels.includes(currentModel),
-		);
-		const bad =
-			!currentModel || !inList || isLikelyEmbeddingModelId(currentModel);
+		const inList = Boolean(currentModel && availableModels.includes(currentModel));
+		const bad = !currentModel || !inList || isLikelyEmbeddingModelId(currentModel);
 
 		if (!bad) return;
 
@@ -987,8 +930,7 @@ export function App({
 	const [agentReady, setAgentReady] = useState(false);
 
 	// Evidence tracking (real-time display)
-	const [evidenceSummary, setEvidenceSummary] =
-		useState<AgentEvidenceSummaryEvent | null>(null);
+	const [evidenceSummary, setEvidenceSummary] = useState<AgentEvidenceSummaryEvent | null>(null);
 
 	// Check for updates on launch (non-blocking)
 	const updateInfo = useUpdateCheck();
@@ -1009,17 +951,10 @@ export function App({
 	// Background process panel
 	const processPanel = useProcessPanel();
 
-	const processSidebarWidth = computeProcessSidebarWidth(
-		processPanel.sidebarOpen,
-		viewport.width,
-	);
-	const chatContentWidth = tuiChatContentWidth(
-		viewport.width,
-		processSidebarWidth,
-	);
+	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
+	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
 	const compactAgentModeBar = viewport.width < TUI_AGENT_MODE_COMPACT_BELOW;
-	const tokenMeterColWidth =
-		viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
+	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
 
 	// Message queue — user can type while agent is working
 	const messageQueueRef = useRef<string[]>([]);
@@ -1029,13 +964,9 @@ export function App({
 	const orchestration = useAgentOrchestration();
 
 	// Onboarding system
-	const [onboardingManager] = useState(
-		() => new OnboardingManager(process.cwd()),
-	);
+	const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
 	const [showOnboarding, setShowOnboarding] = useState(false);
-	const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<
-		string | null
-	>(null);
+	const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<string | null>(null);
 	const [onboardingSteps, setOnboardingSteps] = useState<
 		Array<{
 			question: string;
@@ -1046,8 +977,7 @@ export function App({
 	const [onboardingStepIndex, setOnboardingStepIndex] = useState(0);
 
 	// Animation showcase
-	const [currentAnimation, setCurrentAnimation] =
-		useState<AnimationType>("all");
+	const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
 
 	// Agent mode (Tab to cycle)
 	const [agentMode, setAgentMode] = useState<AgentMode>("Planning");
@@ -1057,16 +987,10 @@ export function App({
 	const [adhdSuggested, setAdhdSuggested] = useState(false);
 
 	// Design agent state
-	const [designAgent] = useState(() =>
-		createDesignAgent({ workingDirectory: process.cwd() }),
-	);
-	const [designSuggestions, setDesignSuggestions] = useState<
-		DesignSuggestion[]
-	>([]);
+	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
+	const [designSuggestions, setDesignSuggestions] = useState<DesignSuggestion[]>([]);
 	const [designIntro, setDesignIntro] = useState<string>("");
-	const [selectedDesign, setSelectedDesign] = useState<DesignSuggestion | null>(
-		null,
-	);
+	const [selectedDesign, setSelectedDesign] = useState<DesignSuggestion | null>(null);
 
 	// Handle keyboard shortcuts
 	useInput((input, key) => {
@@ -1196,10 +1120,7 @@ export function App({
 				setActiveTool(null);
 				agentRunningRef.current = false;
 				addSystemMessage("Generation interrupted.");
-			} else if (
-				imageInput.currentImage &&
-				(viewMode === "chat" || viewMode === "onboarding")
-			) {
+			} else if (imageInput.currentImage && (viewMode === "chat" || viewMode === "onboarding")) {
 				imageInput.removeImage();
 			} else if (activeTabType !== "chat" && viewMode === "chat") {
 				// In a non-chat tab, escape switches back to first chat tab
@@ -1251,10 +1172,7 @@ export function App({
 				let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
 				if (currentProvider === "lmstudio") {
 					runtime = "lmstudio";
-				} else if (
-					currentProvider === "openrouter" ||
-					currentProvider === "openrouter-free"
-				) {
+				} else if (currentProvider === "openrouter" || currentProvider === "openrouter-free") {
 					runtime = "openrouter";
 				}
 
@@ -1302,9 +1220,7 @@ export function App({
 							const narration = narrateToolStart(event.toolName, event.args);
 							setNarratorText(narration);
 							setTvTasks((prev) => [
-								...prev.map((t) =>
-									t.status === "active" ? { ...t, status: "done" as const } : t,
-								),
+								...prev.map((t) => (t.status === "active" ? { ...t, status: "done" as const } : t)),
 								{
 									id: event.toolCallId,
 									title: narration,
@@ -1326,11 +1242,7 @@ export function App({
 						},
 						onToolEnd: (event: AgentToolEndEvent) => {
 							setToolCount((prev) => prev + 1);
-							completeActivity(
-								event.toolCallId,
-								event.success !== false,
-								event.durationMs || 0,
-							);
+							completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
 							// Session logger
 							logToolEnd(
 								event.toolCallId,
@@ -1351,21 +1263,15 @@ export function App({
 								!event.success ||
 								(event.resultPreview?.startsWith("Exit code ") &&
 									!event.resultPreview.startsWith("Exit code 0"));
-							setNarratorText(
-								narrateToolEnd(event.toolName, !isFailure, event.durationMs),
-							);
+							setNarratorText(narrateToolEnd(event.toolName, !isFailure, event.durationMs));
 							setTvTasks((prev) =>
 								prev.map((t) =>
 									t.id === event.toolCallId
 										? {
 												...t,
-												status: isFailure
-													? ("error" as const)
-													: ("done" as const),
+												status: isFailure ? ("error" as const) : ("done" as const),
 												duration: event.durationMs,
-												details: isFailure
-													? event.resultPreview?.slice(0, 120)
-													: undefined,
+												details: isFailure ? event.resultPreview?.slice(0, 120) : undefined,
 											}
 										: t,
 								),
@@ -1377,20 +1283,13 @@ export function App({
 								if (prev.inProgress.length > 0) {
 									// Move in-progress to done
 									const [completed, ...rest] = prev.inProgress;
-									const nextReady =
-										prev.ready.length > 0 ? [prev.ready[0]] : [];
-									const remainingReady = prev.ready.slice(
-										nextReady.length > 0 ? 1 : 0,
-									);
+									const nextReady = prev.ready.length > 0 ? [prev.ready[0]] : [];
+									const remainingReady = prev.ready.slice(nextReady.length > 0 ? 1 : 0);
 									// Pull next from backlog if ready is getting empty
 									const pullFromBacklog =
-										remainingReady.length < 2 && prev.backlog.length > 0
-											? [prev.backlog[0]]
-											: [];
+										remainingReady.length < 2 && prev.backlog.length > 0 ? [prev.backlog[0]] : [];
 									const remainingBacklog =
-										pullFromBacklog.length > 0
-											? prev.backlog.slice(1)
-											: prev.backlog;
+										pullFromBacklog.length > 0 ? prev.backlog.slice(1) : prev.backlog;
 									return {
 										backlog: remainingBacklog,
 										ready: [...remainingReady, ...pullFromBacklog],
@@ -1411,17 +1310,11 @@ export function App({
 								(event.resultPreview?.startsWith("Exit code ") &&
 									!event.resultPreview.startsWith("Exit code 0"));
 							const duration =
-								event.durationMs > 0
-									? ` (${(event.durationMs / 1000).toFixed(1)}s)`
-									: "";
+								event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
 							let content: string;
 							if (isRealFailure && event.resultPreview) {
 								// Show the error message so user knows what happened
-								const errMsg = event.resultPreview
-									.slice(0, 120)
-									.split("\n")
-									.slice(0, 2)
-									.join(" ");
+								const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
 								content = `  ✗ ${errMsg}${duration}`;
 							} else {
 								content = `  ✓${duration}`;
@@ -1472,14 +1365,10 @@ export function App({
 
 							// Parse PLAN: output and populate kanban (uses step text, not the chat transcript)
 							if (event.text?.trim()) {
-								const planMatch = event.text.match(
-									/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i,
-								);
+								const planMatch = event.text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
 								if (planMatch) {
 									const planText = planMatch[1];
-									const stepMatches = planText.match(
-										/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g,
-									);
+									const stepMatches = planText.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
 									if (stepMatches && stepMatches.length > 0) {
 										const steps = stepMatches.map((s, i) => ({
 											id: `plan-${Date.now()}-${i}`,
@@ -1622,9 +1511,7 @@ export function App({
 				const question = onboardingManager.getNextQuestion();
 				if (question) {
 					setCurrentOnboardingQuestion(question.question);
-					setOnboardingSteps([
-						{ question: question.question, status: "active" },
-					]);
+					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
 					// Speak the first question
 					try {
@@ -1684,9 +1571,7 @@ export function App({
 				});
 				const ocrResult = await findOCRModel();
 				const available = visionResult.allAvailable;
-				const ocrAvailable = ocrResult.allAvailable.filter(
-					(m: any) => m.ocrSpecialized,
-				);
+				const ocrAvailable = ocrResult.allAvailable.filter((m: any) => m.ocrSpecialized);
 
 				addSystemMessage(
 					`Vision Settings:\n  Enabled: ${config.enabled ? "yes" : "no"}\n  Provider: ${config.provider}\n  Default model: ${config.defaultModel}\n  OCR model: ${config.ocrModel}\n  Prefer local: ${config.preferLocal ? "yes" : "no"}\n  Timeout: ${config.timeout}ms\n\nActive Vision: ${visionResult.model?.displayName || "none"}\nActive OCR: ${ocrResult.model?.displayName || "none"}\n\nAvailable vision models (${available.length}):\n${
@@ -1720,22 +1605,15 @@ export function App({
 				addSystemMessage("Vision disabled. Images will not be interpreted.");
 			} else if (sub === "local") {
 				saveVisionConfig({ preferLocal: true, provider: "ollama" });
-				addSystemMessage(
-					"Vision set to local-only (Ollama). Free and private.",
-				);
+				addSystemMessage("Vision set to local-only (Ollama). Free and private.");
 			} else if (sub === "cloud" || sub === "openrouter") {
 				saveVisionConfig({ preferLocal: false, provider: "openrouter" });
-				addSystemMessage(
-					"Vision set to cloud (OpenRouter). Includes free models.",
-				);
+				addSystemMessage("Vision set to cloud (OpenRouter). Includes free models.");
 			} else if (sub === "pull") {
 				const recommended = getRecommendedOCRModels();
 				addSystemMessage(
 					`Recommended vision/OCR models to pull:\n\n${recommended
-						.map(
-							(m: any) =>
-								`  ollama pull ${m.model}  — ${m.description} (${m.size})`,
-						)
+						.map((m: any) => `  ollama pull ${m.model}  — ${m.description} (${m.size})`)
 						.join(
 							"\n",
 						)}\n\nGeneral vision (default):\n  ollama pull qwen2.5-vl     — Best general vision + OCR (~5GB)\n  ollama pull minicpm-v       — Mobile-friendly (~5GB)\n  ollama pull llava           — Classic, widely supported (~4GB)\n  ollama pull moondream       — Tiny and fast (~1.7GB)`,
@@ -1839,9 +1717,7 @@ export function App({
 						const chatId = process.env.TELEGRAM_CHAT_ID || "not set";
 						addSystemMessage(
 							`Telegram Bot Status:\n  Token: ${hasToken ? "configured" : "not configured"}\n  Chat ID: ${chatId}\n\n${
-								hasToken
-									? "Bot is running."
-									: "Run /telegram setup to connect a bot."
+								hasToken ? "Bot is running." : "Run /telegram setup to connect a bot."
 							}`,
 						);
 					} else if (sub === "setup") {
@@ -1885,24 +1761,22 @@ export function App({
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
-					import("../../../packages/eight/session-export.js").then(
-						({ saveSessionExport }) => {
-							saveSessionExport(
-								messages.map((m) => ({
-									role: m.role,
-									content: m.content,
-									timestamp: m.timestamp,
-								})),
-								{
-									sessionId: `session-${startTime.getTime()}`,
-									model: currentModel || "unknown",
-									duration: `${mins}m ${secs}s`,
-								},
-							).then((exportPath) => {
-								addSystemMessage(`Session exported to ${exportPath}`);
-							});
-						},
-					);
+					import("../../../packages/eight/session-export.js").then(({ saveSessionExport }) => {
+						saveSessionExport(
+							messages.map((m) => ({
+								role: m.role,
+								content: m.content,
+								timestamp: m.timestamp,
+							})),
+							{
+								sessionId: `session-${startTime.getTime()}`,
+								model: currentModel || "unknown",
+								duration: `${mins}m ${secs}s`,
+							},
+						).then((exportPath) => {
+							addSystemMessage(`Session exported to ${exportPath}`);
+						});
+					});
 					break;
 				}
 
@@ -1937,10 +1811,7 @@ export function App({
 							const restored = history.map((n) => ({
 								id: n.id,
 								role: n.role as "user" | "assistant" | "system",
-								content:
-									typeof n.content === "string"
-										? n.content
-										: JSON.stringify(n.content),
+								content: typeof n.content === "string" ? n.content : JSON.stringify(n.content),
 								timestamp: new Date(n.timestamp),
 							}));
 							setMessages(restored);
@@ -1956,17 +1827,13 @@ export function App({
 
 				case "cron": {
 					void (async () => {
-						const { CronManager } = await import(
-							"../../../packages/cron/index.js"
-						);
+						const { CronManager } = await import("../../../packages/cron/index.js");
 						const mgr = new CronManager();
 						const sub = args[0];
 						if (!sub || sub === "list") {
 							const jobs = mgr.list();
 							if (jobs.length === 0) {
-								addSystemMessage(
-									"No cron jobs. Use: /cron add <name> <schedule> <command>",
-								);
+								addSystemMessage("No cron jobs. Use: /cron add <name> <schedule> <command>");
 							} else {
 								const lines = jobs.map((j: any) => {
 									const s = j.enabled ? "ON" : "OFF";
@@ -1984,9 +1851,7 @@ export function App({
 							addSystemMessage(`Added cron job: ${job.id} (${job.name})`);
 						} else if (sub === "remove" && args[1]) {
 							const ok = mgr.remove(args[1]);
-							addSystemMessage(
-								ok ? `Removed job ${args[1]}` : `Job ${args[1]} not found`,
-							);
+							addSystemMessage(ok ? `Removed job ${args[1]}` : `Job ${args[1]} not found`);
 						} else if (sub === "enable" && args[1]) {
 							mgr.enable(args[1]);
 							addSystemMessage(`Enabled job ${args[1]}`);
@@ -2023,9 +1888,7 @@ export function App({
 					if (infiniteModeActive) {
 						disableInfiniteMode();
 						setInfiniteModeActive(false);
-						addSystemMessage(
-							"∞ INFINITE MODE DISABLED\n" + "Permission checks will resume.",
-						);
+						addSystemMessage("∞ INFINITE MODE DISABLED\n" + "Permission checks will resume.");
 					} else {
 						enableInfiniteMode();
 						setInfiniteModeActive(true);
@@ -2046,9 +1909,7 @@ export function App({
 					const onboardQuestion = onboardingManager.getNextQuestion();
 					if (onboardQuestion) {
 						setCurrentOnboardingQuestion(onboardQuestion.question);
-						addSystemMessage(
-							`∞ Let's get to know each other.\n\n${onboardQuestion.question}`,
-						);
+						addSystemMessage(`∞ Let's get to know each other.\n\n${onboardQuestion.question}`);
 					}
 					break;
 				}
@@ -2070,8 +1931,7 @@ export function App({
 							setShowOnboarding(false);
 							setViewMode("chat");
 							addSystemMessage(
-								"Understood. I'll ask again later.\n" +
-									"(The more I know, the better I serve.)",
+								"Understood. I'll ask again later.\n" + "(The more I know, the better I serve.)",
 							);
 						} else {
 							const nextQ = onboardingManager.skipQuestion();
@@ -2104,11 +1964,8 @@ export function App({
 						} else {
 							const lines = sessions.map((s) => {
 								const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
-								const ago = Math.floor(
-									(Date.now() - new Date(s.lastActiveAt).getTime()) / 60000,
-								);
-								const timeStr =
-									ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+								const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
+								const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
 								return `  ${s.id}  ${label.slice(0, 30).padEnd(30)}  ${s.messageCount} msgs  ${timeStr}`;
 							});
 							addSystemMessage(`Recent sessions:\n${lines.join("\n")}`);
@@ -2178,9 +2035,7 @@ export function App({
 						.getRecentConversations(1)
 						.then((convos) => {
 							if (convos.length === 0 || !convos[0].checkpointData) {
-								addSystemMessage(
-									"No session to continue. Start chatting to create history.",
-								);
+								addSystemMessage("No session to continue. Start chatting to create history.");
 							} else {
 								try {
 									const messages = JSON.parse(convos[0].checkpointData);
@@ -2211,13 +2066,10 @@ export function App({
 							if (convos.length === 0) {
 								addSystemMessage("No previous sessions found.");
 							} else {
-								const lines = [
-									"Recent sessions (reply with number to resume):\n",
-								];
+								const lines = ["Recent sessions (reply with number to resume):\n"];
 								convos.forEach((c: any, i: number) => {
 									const ago = Math.floor((Date.now() - c.lastActiveAt) / 60000);
-									const timeStr =
-										ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+									const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
 									lines.push(
 										`  ${i + 1}. ${c.title.slice(0, 50)} — ${c.model} - ${c.messageCount} msgs - ${timeStr}`,
 									);
@@ -2240,9 +2092,7 @@ export function App({
 					{
 						const history = agent.getMessageHistory();
 						const userMsgs = history.filter((m) => m.role === "user").length;
-						const assistantMsgs = history.filter(
-							(m) => m.role === "assistant",
-						).length;
+						const assistantMsgs = history.filter((m) => m.role === "assistant").length;
 						// Keep system prompt + last 4 messages
 						if (history.length > 5) {
 							const systemMsg = history[0];
@@ -2278,8 +2128,7 @@ export function App({
 							);
 						} else {
 							const lines = orchestration.agents.map(
-								(a) =>
-									`  ${a.icon} ${a.name} (${a.role}) — ${a.status}\n    Task: ${a.task}`,
+								(a) => `  ${a.icon} ${a.name} (${a.role}) — ${a.status}\n    Task: ${a.task}`,
 							);
 							addSystemMessage(
 								`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator) — running\n${lines.join("\n")}`,
@@ -2304,9 +2153,7 @@ export function App({
 							);
 						} else {
 							const found = orchestration.agents.find(
-								(a) =>
-									a.id.includes(killId) ||
-									a.name.toLowerCase() === killId.toLowerCase(),
+								(a) => a.id.includes(killId) || a.name.toLowerCase() === killId.toLowerCase(),
 							);
 							if (found) {
 								orchestration.killAgent(found.id);
@@ -2356,9 +2203,7 @@ export function App({
 						// Toggle text mode
 						const newMode = !adhdMode;
 						setAdhdMode(newMode);
-						addSystemMessage(
-							newMode ? ADHD_MODE_ENABLED_MSG : ADHD_MODE_DISABLED_MSG,
-						);
+						addSystemMessage(newMode ? ADHD_MODE_ENABLED_MSG : ADHD_MODE_DISABLED_MSG);
 						break;
 					}
 
@@ -2432,20 +2277,10 @@ export function App({
 					// Clear cache
 					else if (sub === "clear" || sub === "regenerate" || sub === "regen") {
 						adhdAudio.clearCache();
-						addSystemMessage(
-							"Audio cache cleared. Next play will regenerate fresh tracks.",
-						);
+						addSystemMessage("Audio cache cleared. Next play will regenerate fresh tracks.");
 					}
 					// Soundscapes: lofi, rainsound, whitenoise, ambient, classical
-					else if (
-						[
-							"lofi",
-							"rainsound",
-							"whitenoise",
-							"ambient",
-							"classical",
-						].includes(sub)
-					) {
+					else if (["lofi", "rainsound", "whitenoise", "ambient", "classical"].includes(sub)) {
 						if (!adhdMode) {
 							setAdhdMode(true);
 							addSystemMessage(ADHD_MODE_ENABLED_MSG);
@@ -2492,21 +2327,15 @@ export function App({
 						addSystemMessage(lines.join("\n"));
 					} else if (sub === "on" || sub === "enable") {
 						router.setConfig({ enabled: true });
-						addSystemMessage(
-							"Task router enabled. Messages will be classified and routed.",
-						);
+						addSystemMessage("Task router enabled. Messages will be classified and routed.");
 					} else if (sub === "off" || sub === "disable") {
 						router.setConfig({ enabled: false });
-						addSystemMessage(
-							"Task router disabled. All messages go to default model.",
-						);
+						addSystemMessage("Task router disabled. All messages go to default model.");
 					} else if (sub === "set" && args.length >= 3) {
 						const cat = args[1].toLowerCase() as TaskCategory;
 						const model = args.slice(2).join(" ");
 						if (!["code", "reasoning", "simple", "creative"].includes(cat)) {
-							addSystemMessage(
-								`Unknown category "${cat}". Use: code, reasoning, simple, creative`,
-							);
+							addSystemMessage(`Unknown category "${cat}". Use: code, reasoning, simple, creative`);
 						} else {
 							router.setSlot(cat, {
 								model,
@@ -2537,22 +2366,17 @@ export function App({
 							`Router Stats (${stats.totalRouted} total routes)`,
 							"",
 							"By Category:",
-							...Object.entries(stats.byCategory).map(
-								([k, v]) => `  ${k}: ${v}`,
-							),
+							...Object.entries(stats.byCategory).map(([k, v]) => `  ${k}: ${v}`),
 							"",
 							"By Model:",
 							...Object.entries(stats.byModel).map(
-								([k, v]) =>
-									`  ${k}: ${v.routed} routes, avg ${Math.round(v.avgLatencyMs)}ms`,
+								([k, v]) => `  ${k}: ${v.routed} routes, avg ${Math.round(v.avgLatencyMs)}ms`,
 							),
 						];
 						addSystemMessage(lines.join("\n"));
 					} else if (sub === "classifier" && args.length >= 2) {
 						router.setConfig({ classifierModel: args.slice(1).join(" ") });
-						addSystemMessage(
-							`Classifier model set to ${args.slice(1).join(" ")}`,
-						);
+						addSystemMessage(`Classifier model set to ${args.slice(1).join(" ")}`);
 					} else if (sub === "threshold" && args[1]) {
 						const val = Number.parseFloat(args[1]);
 						if (!Number.isNaN(val)) {
@@ -2567,9 +2391,7 @@ export function App({
 							if (changes.length === 0) {
 								addSystemMessage("No changes — slots already optimal.");
 							} else {
-								addSystemMessage(
-									`Auto-assigned:\n${changes.map((c) => `  ${c}`).join("\n")}`,
-								);
+								addSystemMessage(`Auto-assigned:\n${changes.map((c) => `  ${c}`).join("\n")}`);
 							}
 						});
 					} else {
@@ -2593,20 +2415,13 @@ export function App({
 				case "debug": {
 					// Debug CLI inside TUI — runs bin/debug.ts and shows output
 					const debugCmd = args.length > 0 ? args.join(" ") : "sessions";
-					const debugScript = require("node:path").join(
-						process.cwd(),
-						"bin",
-						"debug.ts",
-					);
+					const debugScript = require("node:path").join(process.cwd(), "bin", "debug.ts");
 					try {
-						const result = Bun.spawnSync(
-							["bun", "run", debugScript, ...debugCmd.split(" ")],
-							{
-								cwd: process.cwd(),
-								env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
-								timeout: 10000,
-							},
-						);
+						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+							cwd: process.cwd(),
+							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
+							timeout: 10000,
+						});
 						const output = result.stdout?.toString()?.trim() || "No output";
 						const stderr = result.stderr?.toString()?.trim();
 						if (stderr && result.exitCode !== 0) {
@@ -2615,9 +2430,7 @@ export function App({
 							addSystemMessage(output.slice(0, 2000));
 						}
 					} catch (err) {
-						addSystemMessage(
-							`Debug failed: ${err instanceof Error ? err.message : String(err)}`,
-						);
+						addSystemMessage(`Debug failed: ${err instanceof Error ? err.message : String(err)}`);
 					}
 					break;
 				}
@@ -2660,9 +2473,7 @@ export function App({
 					else if (musicSub === "gen" && args.length >= 2) {
 						const customPrompt = args.slice(1).join(" ");
 						const cfg = musicAudio.config;
-						addSystemMessage(
-							`🎵 Generating "${customPrompt}" (${cfg.duration}s)...`,
-						);
+						addSystemMessage(`🎵 Generating "${customPrompt}" (${cfg.duration}s)...`);
 
 						// Use ACE-Step API directly for custom prompts
 						fetch(`${cfg.apiUrl}/release_task`, {
@@ -2687,14 +2498,10 @@ export function App({
 							.then((data: any) => {
 								const taskId = data?.data?.task_id;
 								if (!taskId) {
-									addSystemMessage(
-										"Failed to start generation. Is ACE-Step running?",
-									);
+									addSystemMessage("Failed to start generation. Is ACE-Step running?");
 									return;
 								}
-								addSystemMessage(
-									`🎵 Generating... (task ${taskId.slice(0, 8)})`,
-								);
+								addSystemMessage(`🎵 Generating... (task ${taskId.slice(0, 8)})`);
 
 								// Poll for result with progress updates
 								const poll = async () => {
@@ -2707,9 +2514,7 @@ export function App({
 										// Progress update every 10s
 										if (elapsed - lastUpdate >= 10) {
 											lastUpdate = elapsed;
-											addSystemMessage(
-												`🎵 Still generating... ${elapsed}s elapsed`,
-											);
+											addSystemMessage(`🎵 Still generating... ${elapsed}s elapsed`);
 										}
 
 										try {
@@ -2738,9 +2543,7 @@ export function App({
 														"custom.mp3",
 													);
 													await Bun.write(cachePath, buf);
-													addSystemMessage(
-														"Track ready! Playing on loop. /music stop to end.",
-													);
+													addSystemMessage("Track ready! Playing on loop. /music stop to end.");
 													// Play via afplay loop
 													const { spawn } = await import("bun");
 													const loopPlay = () => {
@@ -2757,9 +2560,7 @@ export function App({
 												}
 											}
 											if (job?.status === 2) {
-												addSystemMessage(
-													"Generation failed. Try a different prompt.",
-												);
+												addSystemMessage("Generation failed. Try a different prompt.");
 												return;
 											}
 										} catch {}
@@ -2781,11 +2582,7 @@ export function App({
 					else if (musicSub === "stop" || musicSub === "pause") {
 						musicAudio.stop();
 						addSystemMessage("Music stopped.");
-					} else if (
-						musicSub === "player" ||
-						musicSub === "playlist" ||
-						musicSub === "view"
-					) {
+					} else if (musicSub === "player" || musicSub === "playlist" || musicSub === "view") {
 						setViewMode("music");
 					} else if (musicSub === "config" || musicSub === "settings") {
 						const cfg = musicAudio.config;
@@ -2807,9 +2604,7 @@ export function App({
 						};
 						const configKey = keyMap[key];
 						if (!configKey) {
-							addSystemMessage(
-								"Unknown key. Use: duration, bpm, steps, guidance",
-							);
+							addSystemMessage("Unknown key. Use: duration, bpm, steps, guidance");
 						} else {
 							const numVal = Number(val);
 							if (Number.isNaN(numVal)) {
@@ -2823,13 +2618,9 @@ export function App({
 						}
 					} else if (musicSub === "regen" || musicSub === "clear") {
 						musicAudio.clearCache();
-						addSystemMessage(
-							"Cache cleared. Next play will generate fresh tracks.",
-						);
+						addSystemMessage("Cache cleared. Next play will generate fresh tracks.");
 					} else {
-						addSystemMessage(
-							`Unknown: /music ${musicSub}. Try /music for help.`,
-						);
+						addSystemMessage(`Unknown: /music ${musicSub}. Try /music for help.`);
 					}
 					break;
 				}
@@ -2857,9 +2648,7 @@ export function App({
 								case "stop":
 									dj.stop();
 									try {
-										require("node:child_process").execSync(
-											"pkill -f afplay 2>/dev/null",
-										);
+										require("node:child_process").execSync("pkill -f afplay 2>/dev/null");
 									} catch {}
 									result = "Stopped.";
 									break;
@@ -2909,12 +2698,8 @@ export function App({
 								}
 								case "produce":
 								case "gen": {
-									addSystemMessage(
-										`Producing ${djArgs[0] || "house"} track...`,
-									);
-									const { MusicProducer } = await import(
-										"../../../packages/music/producer.js"
-									);
+									addSystemMessage(`Producing ${djArgs[0] || "house"} track...`);
+									const { MusicProducer } = await import("../../../packages/music/producer.js");
 									const p = new MusicProducer();
 									const t = await p.produce({
 										genre: (djArgs[0] || "house") as any,
@@ -2939,9 +2724,7 @@ export function App({
 					const petSub = args[0]?.toLowerCase() || "start";
 					import("../../../packages/pet/companion.js")
 						.then(async ({ generateCompanion, formatDeckSummary }) => {
-							const { execSync, spawn: spawnProc } = await import(
-								"node:child_process"
-							);
+							const { execSync, spawn: spawnProc } = await import("node:child_process");
 							const fs = await import("node:fs");
 							const path = await import("node:path");
 
@@ -2976,9 +2759,7 @@ export function App({
 											execSync("pkill -f 'Lil.Eight' 2>/dev/null");
 										} catch {}
 										try {
-											execSync(
-												"sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &",
-											);
+											execSync("sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &");
 										} catch {}
 									}
 
@@ -2989,23 +2770,16 @@ export function App({
 											path.join(process.cwd(), "bin/lil-eight.sh"),
 											path.join(__dirname, "../bin/lil-eight.sh"),
 											path.join(__dirname, "../../bin/lil-eight.sh"),
-											path.join(
-												process.env.HOME || "~",
-												"8gent-code/bin/lil-eight.sh",
-											),
+											path.join(process.env.HOME || "~", "8gent-code/bin/lil-eight.sh"),
 										];
-										const lilEightScript = candidates.find((p) =>
-											fs.existsSync(p),
-										);
+										const lilEightScript = candidates.find((p) => fs.existsSync(p));
 										if (lilEightScript) {
 											const pet = spawnProc("bash", [lilEightScript, "start"], {
 												detached: true,
 												stdio: "ignore",
 											});
 											pet.unref();
-											addSystemMessage(
-												`[pet] ${companion.fullName} spawned on Dock`,
-											);
+											addSystemMessage(`[pet] ${companion.fullName} spawned on Dock`);
 										} else {
 											addSystemMessage(
 												`[pet] lil-eight.sh not found. Tried:\n  ${candidates.join("\n  ")}`,
@@ -3013,22 +2787,16 @@ export function App({
 										}
 									} else {
 										// Linux/Windows: terminal pet mode
-										addSystemMessage(
-											`[pet] ${companion.fullName} active (terminal mode)`,
-										);
+										addSystemMessage(`[pet] ${companion.fullName} active (terminal mode)`);
 									}
 									// Show companion card
-									addSystemMessage(
-										companion.card.replace(/\x1b\[[0-9;]*m/g, ""),
-									);
+									addSystemMessage(companion.card.replace(/\x1b\[[0-9;]*m/g, ""));
 									break;
 								}
 								case "stop": {
 									try {
 										execSync("pkill -f 'Lil.Eight' 2>/dev/null");
-										execSync(
-											"sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &",
-										);
+										execSync("sleep 0.5 && pkill -9 -f 'Lil.Eight' 2>/dev/null &");
 										addSystemMessage("[pet] All companions dismissed");
 									} catch {
 										addSystemMessage("[pet] Not running");
@@ -3037,9 +2805,7 @@ export function App({
 								}
 								case "deck":
 								case "collection": {
-									addSystemMessage(
-										formatDeckSummary().replace(/\x1b\[[0-9;]*m/g, ""),
-									);
+									addSystemMessage(formatDeckSummary().replace(/\x1b\[[0-9;]*m/g, ""));
 									break;
 								}
 								case "card": {
@@ -3053,21 +2819,16 @@ export function App({
 									);
 							}
 						})
-						.catch((err: Error) =>
-							addSystemMessage(`Pet error: ${err.message}`),
-						);
+						.catch((err: Error) => addSystemMessage(`Pet error: ${err.message}`));
 					break;
 				}
 
 				case "design": {
 					// Trigger design agent manually
-					const designTask =
-						args.length > 0 ? args.join(" ") : "create a new UI component";
+					const designTask = args.length > 0 ? args.join(" ") : "create a new UI component";
 					designAgent.process(designTask).then((result) => {
 						if (result.needsIntervention && result.suggestions) {
-							setDesignIntro(
-								result.message.split("\n")[0] || "Pick a design direction:",
-							);
+							setDesignIntro(result.message.split("\n")[0] || "Pick a design direction:");
 							setDesignSuggestions(result.suggestions);
 							setViewMode("design");
 						} else {
@@ -3082,9 +2843,7 @@ export function App({
 				case "evidence": {
 					// Show full evidence breakdown
 					if (!agent) {
-						addSystemMessage(
-							"No agent active — evidence requires a running session.",
-						);
+						addSystemMessage("No agent active — evidence requires a running session.");
 						break;
 					}
 					const evidence = agent.getSessionEvidence();
@@ -3129,11 +2888,7 @@ export function App({
 
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
-					if (
-						args[0] === "chat" ||
-						args[0] === "conversation" ||
-						args[0] === "talk"
-					) {
+					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
 						} else {
@@ -3141,11 +2896,7 @@ export function App({
 								addSystemMessage(`Voice chat error: ${err.message}`);
 							});
 						}
-					} else if (
-						args[0] === "record" ||
-						args[0] === "listen" ||
-						args[0] === "stt"
-					) {
+					} else if (args[0] === "record" || args[0] === "listen" || args[0] === "stt") {
 						voice.toggle().catch((err: Error) => {
 							addSystemMessage(`Voice error: ${err.message}`);
 						});
@@ -3156,9 +2907,7 @@ export function App({
 						);
 					} else if (args[0] === "status") {
 						const setupInfo = voice.setupStatus;
-						const backendLabel = voiceChat.backend
-							? ` [${voiceChat.backend}]`
-							: "";
+						const backendLabel = voiceChat.backend ? ` [${voiceChat.backend}]` : "";
 						const voiceChatStatus = voiceChat.isActive
 							? `\nVoice Chat: Active (${voiceChat.state})${backendLabel}`
 							: `\nVoice Chat: Inactive${backendLabel}`;
@@ -3210,9 +2959,7 @@ export function App({
 							}
 							addSystemMessage(lines.join("\n"));
 						} catch (e) {
-							addSystemMessage(
-								`Skills: ${e instanceof Error ? e.message : String(e)}`,
-							);
+							addSystemMessage(`Skills: ${e instanceof Error ? e.message : String(e)}`);
 						}
 					})();
 					break;
@@ -3224,50 +2971,46 @@ export function App({
 						const sub = args[0] || "status";
 						if (sub === "login") {
 							addSystemMessage("Opening browser to sign in...");
-							import("../../../packages/auth/cli-auth-server.js").then(
-								({ runCLIAuthFlow }) => {
-									runCLIAuthFlow("https://8gent.app", {
-										onServerReady: () => {},
-										onBrowserOpened: () => {},
-										onWaiting: () => {},
-										onTokenReceived: (result) => {
-											if (result.success) {
-												setAuthStatus("authenticated");
-												setAuthUser({
-													displayName: result.displayName || "User",
-													plan: "free",
-												});
-												addSystemMessage(
-													`Signed in as ${result.displayName || result.email || "User"}`,
-												);
-
-												// Set up GitHub integration silently (no messages)
-												import("../../../packages/auth/github.js")
-													.then(({ getGitHubAuth }) => {
-														const gh = getGitHubAuth();
-														if (result.token) {
-															gh.storeToken(result.token);
-															gh.configureGhCli(result.token).catch(() => {});
-														}
-														// Silently verify GitHub — no chat message
-														gh.getUser().catch(() => {});
-													})
-													.catch(() => {});
-											}
-										},
-										onTimeout: () => {
+							import("../../../packages/auth/cli-auth-server.js").then(({ runCLIAuthFlow }) => {
+								runCLIAuthFlow("https://8gent.app", {
+									onServerReady: () => {},
+									onBrowserOpened: () => {},
+									onWaiting: () => {},
+									onTokenReceived: (result) => {
+										if (result.success) {
+											setAuthStatus("authenticated");
+											setAuthUser({
+												displayName: result.displayName || "User",
+												plan: "free",
+											});
 											addSystemMessage(
-												"Auth timed out. Try /auth login again.",
+												`Signed in as ${result.displayName || result.email || "User"}`,
 											);
-										},
-										onError: (err) => {
-											addSystemMessage(`Auth error: ${err}`);
-										},
-									}).catch(() => {
-										addSystemMessage("Auth failed. Running in anonymous mode.");
-									});
-								},
-							);
+
+											// Set up GitHub integration silently (no messages)
+											import("../../../packages/auth/github.js")
+												.then(({ getGitHubAuth }) => {
+													const gh = getGitHubAuth();
+													if (result.token) {
+														gh.storeToken(result.token);
+														gh.configureGhCli(result.token).catch(() => {});
+													}
+													// Silently verify GitHub — no chat message
+													gh.getUser().catch(() => {});
+												})
+												.catch(() => {});
+										}
+									},
+									onTimeout: () => {
+										addSystemMessage("Auth timed out. Try /auth login again.");
+									},
+									onError: (err) => {
+										addSystemMessage(`Auth error: ${err}`);
+									},
+								}).catch(() => {
+									addSystemMessage("Auth failed. Running in anonymous mode.");
+								});
+							});
 						} else if (sub === "logout") {
 							authManager?.logout?.();
 							setAuthStatus("anonymous");
@@ -3278,11 +3021,7 @@ export function App({
 							import("../../../packages/auth/github.js")
 								.then(({ getGitHubAuth }) => {
 									const gh = getGitHubAuth();
-									Promise.all([
-										gh.getUser(),
-										gh.isGhCliAvailable(),
-										gh.getToken(),
-									])
+									Promise.all([gh.getUser(), gh.isGhCliAvailable(), gh.getToken()])
 										.then(([user, ghCliAvailable, token]) => {
 											import("../../../packages/auth/github-tools.js").then(
 												({ getCurrentRepoInfo }) => {
@@ -3294,13 +3033,9 @@ export function App({
 															lines.push(`  Name: ${user.name}`);
 															lines.push(`  Profile: ${user.profileUrl}`);
 														}
-														lines.push(
-															`  gh CLI: ${ghCliAvailable ? "Available" : "Not found"}`,
-														);
+														lines.push(`  gh CLI: ${ghCliAvailable ? "Available" : "Not found"}`);
 														if (repoInfo) {
-															lines.push(
-																`  Current repo: ${repoInfo.owner}/${repoInfo.repo}`,
-															);
+															lines.push(`  Current repo: ${repoInfo.owner}/${repoInfo.repo}`);
 														}
 														addSystemMessage(lines.join("\n"));
 													});
@@ -3308,9 +3043,7 @@ export function App({
 											);
 										})
 										.catch(() => {
-											addSystemMessage(
-												"GitHub: Not connected. Run /auth login first.",
-											);
+											addSystemMessage("GitHub: Not connected. Run /auth login first.");
 										});
 								})
 								.catch(() => {
@@ -3325,18 +3058,14 @@ export function App({
 										.then((ghUser) => {
 											addSystemMessage(
 												`Auth Status: ${authStatus}\n${
-													authUser
-														? `User: ${authUser.displayName} (${authUser.plan})\n`
-														: ""
+													authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : ""
 												}${ghUser ? `GitHub: @${ghUser.username}\n` : ""}\nCommands: /auth login, /auth logout, /auth github`,
 											);
 										})
 										.catch(() => {
 											addSystemMessage(
 												`Auth Status: ${authStatus}\n${
-													authUser
-														? `User: ${authUser.displayName} (${authUser.plan})\n`
-														: ""
+													authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : ""
 												}\nCommands: /auth login, /auth logout, /auth github`,
 											);
 										});
@@ -3344,9 +3073,7 @@ export function App({
 								.catch(() => {
 									addSystemMessage(
 										`Auth Status: ${authStatus}\n${
-											authUser
-												? `User: ${authUser.displayName} (${authUser.plan})\n`
-												: ""
+											authUser ? `User: ${authUser.displayName} (${authUser.plan})\n` : ""
 										}\nCommands: /auth login, /auth logout, /auth github`,
 									);
 								});
@@ -3357,9 +3084,7 @@ export function App({
 						const sub = args[0] || "status";
 
 						if (authStatus !== "authenticated") {
-							addSystemMessage(
-								"GitHub: Not authenticated. Run /auth login first.",
-							);
+							addSystemMessage("GitHub: Not authenticated. Run /auth login first.");
 						} else {
 							import("../../../packages/auth/github.js")
 								.then(({ getGitHubAuth }) => {
@@ -3373,161 +3098,119 @@ export function App({
 												return;
 											}
 
-											import("../../../packages/auth/github-tools.js").then(
-												(tools) => {
-													if (sub === "repos") {
+											import("../../../packages/auth/github-tools.js").then((tools) => {
+												if (sub === "repos") {
+													tools
+														.listRepos(token, { perPage: 15 })
+														.then((repos) => {
+															if (repos.length === 0) {
+																addSystemMessage("No repositories found.");
+																return;
+															}
+															const lines = ["Your repositories:"];
+															for (const r of repos) {
+																const badge = r.isPrivate ? "[private]" : "[public]";
+																lines.push(`  ${badge} ${r.fullName}`);
+															}
+															addSystemMessage(lines.join("\n"));
+														})
+														.catch((err: Error) =>
+															addSystemMessage(`GitHub error: ${err.message}`),
+														);
+												} else if (sub === "issues") {
+													tools.getCurrentRepoInfo().then((info) => {
+														if (!info) {
+															addSystemMessage(
+																"Not in a GitHub repository. Navigate to a repo directory first.",
+															);
+															return;
+														}
 														tools
-															.listRepos(token, { perPage: 15 })
-															.then((repos) => {
-																if (repos.length === 0) {
-																	addSystemMessage("No repositories found.");
+															.listIssues(token, info.owner, info.repo)
+															.then((issues) => {
+																if (issues.length === 0) {
+																	addSystemMessage(`No open issues in ${info.owner}/${info.repo}.`);
 																	return;
 																}
-																const lines = ["Your repositories:"];
-																for (const r of repos) {
-																	const badge = r.isPrivate
-																		? "[private]"
-																		: "[public]";
-																	lines.push(`  ${badge} ${r.fullName}`);
+																const lines = [`Open issues in ${info.owner}/${info.repo}:`];
+																for (const i of issues) {
+																	const labels =
+																		i.labels.length > 0 ? ` [${i.labels.join(", ")}]` : "";
+																	lines.push(`  #${i.number} ${i.title}${labels}`);
 																}
 																addSystemMessage(lines.join("\n"));
 															})
 															.catch((err: Error) =>
-																addSystemMessage(
-																	`GitHub error: ${err.message}`,
-																),
+																addSystemMessage(`GitHub error: ${err.message}`),
 															);
-													} else if (sub === "issues") {
-														tools.getCurrentRepoInfo().then((info) => {
-															if (!info) {
+													});
+												} else if (sub === "pr") {
+													tools.getCurrentRepoInfo().then((info) => {
+														if (!info) {
+															addSystemMessage("Not in a GitHub repository.");
+															return;
+														}
+														tools.getCurrentBranch().then((branch) => {
+															if (!branch || branch === "main" || branch === "master") {
 																addSystemMessage(
-																	"Not in a GitHub repository. Navigate to a repo directory first.",
+																	"Switch to a feature branch before creating a PR.",
 																);
 																return;
 															}
 															tools
-																.listIssues(token, info.owner, info.repo)
-																.then((issues) => {
-																	if (issues.length === 0) {
-																		addSystemMessage(
-																			`No open issues in ${info.owner}/${info.repo}.`,
-																		);
-																		return;
-																	}
-																	const lines = [
-																		`Open issues in ${info.owner}/${info.repo}:`,
-																	];
-																	for (const i of issues) {
-																		const labels =
-																			i.labels.length > 0
-																				? ` [${i.labels.join(", ")}]`
-																				: "";
-																		lines.push(
-																			`  #${i.number} ${i.title}${labels}`,
-																		);
-																	}
-																	addSystemMessage(lines.join("\n"));
-																})
-																.catch((err: Error) =>
-																	addSystemMessage(
-																		`GitHub error: ${err.message}`,
-																	),
-																);
-														});
-													} else if (sub === "pr") {
-														tools.getCurrentRepoInfo().then((info) => {
-															if (!info) {
-																addSystemMessage("Not in a GitHub repository.");
-																return;
-															}
-															tools.getCurrentBranch().then((branch) => {
-																if (
-																	!branch ||
-																	branch === "main" ||
-																	branch === "master"
-																) {
-																	addSystemMessage(
-																		"Switch to a feature branch before creating a PR.",
-																	);
-																	return;
-																}
-																tools
-																	.getDefaultBranch(
-																		token,
-																		info.owner,
-																		info.repo,
-																	)
-																	.then((baseBranch) => {
-																		const title =
-																			args.slice(1).join(" ") ||
-																			`PR from ${branch}`;
-																		tools
-																			.createPR(token, info.owner, info.repo, {
-																				title,
-																				body: `Created via 8gent Code from branch \`${branch}\`.`,
-																				head: branch,
-																				base: baseBranch,
-																			})
-																			.then((pr) => {
-																				if (pr) {
-																					addSystemMessage(
-																						`PR #${pr.number} created: ${pr.url}`,
-																					);
-																				} else {
-																					addSystemMessage(
-																						"Failed to create PR. Push your branch first, or a PR may already exist.",
-																					);
-																				}
-																			})
-																			.catch((err: Error) =>
+																.getDefaultBranch(token, info.owner, info.repo)
+																.then((baseBranch) => {
+																	const title = args.slice(1).join(" ") || `PR from ${branch}`;
+																	tools
+																		.createPR(token, info.owner, info.repo, {
+																			title,
+																			body: `Created via 8gent Code from branch \`${branch}\`.`,
+																			head: branch,
+																			base: baseBranch,
+																		})
+																		.then((pr) => {
+																			if (pr) {
+																				addSystemMessage(`PR #${pr.number} created: ${pr.url}`);
+																			} else {
 																				addSystemMessage(
-																					`GitHub error: ${err.message}`,
-																				),
-																			);
-																	});
-															});
+																					"Failed to create PR. Push your branch first, or a PR may already exist.",
+																				);
+																			}
+																		})
+																		.catch((err: Error) =>
+																			addSystemMessage(`GitHub error: ${err.message}`),
+																		);
+																});
 														});
-													} else {
-														// Default: show status
-														Promise.all([
-															gh.getUser(),
-															gh.isGhCliAvailable(),
-															tools.getCurrentRepoInfo(),
-														])
-															.then(([user, ghCli, repoInfo]) => {
-																const lines = ["GitHub Status:"];
-																if (user) {
-																	lines.push(
-																		`  User: @${user.username} (${user.name})`,
-																	);
-																} else {
-																	lines.push("  User: Not connected");
-																}
-																lines.push(
-																	`  gh CLI: ${ghCli ? "Available" : "Not installed"}`,
-																);
-																if (repoInfo) {
-																	lines.push(
-																		`  Repo: ${repoInfo.owner}/${repoInfo.repo}`,
-																	);
-																}
-																lines.push(
-																	"\nCommands: /github issues, /github pr [title], /github repos",
-																);
-																addSystemMessage(lines.join("\n"));
-															})
-															.catch(() =>
-																addSystemMessage(
-																	"Failed to fetch GitHub status.",
-																),
+													});
+												} else {
+													// Default: show status
+													Promise.all([
+														gh.getUser(),
+														gh.isGhCliAvailable(),
+														tools.getCurrentRepoInfo(),
+													])
+														.then(([user, ghCli, repoInfo]) => {
+															const lines = ["GitHub Status:"];
+															if (user) {
+																lines.push(`  User: @${user.username} (${user.name})`);
+															} else {
+																lines.push("  User: Not connected");
+															}
+															lines.push(`  gh CLI: ${ghCli ? "Available" : "Not installed"}`);
+															if (repoInfo) {
+																lines.push(`  Repo: ${repoInfo.owner}/${repoInfo.repo}`);
+															}
+															lines.push(
+																"\nCommands: /github issues, /github pr [title], /github repos",
 															);
-													}
-												},
-											);
+															addSystemMessage(lines.join("\n"));
+														})
+														.catch(() => addSystemMessage("Failed to fetch GitHub status."));
+												}
+											});
 										})
-										.catch(() =>
-											addSystemMessage("GitHub: Failed to get token."),
-										);
+										.catch(() => addSystemMessage("GitHub: Failed to get token."));
 								})
 								.catch(() => addSystemMessage("GitHub module not available."));
 						}
@@ -3545,21 +3228,15 @@ export function App({
 											);
 											return;
 										}
-										addSystemMessage(
-											`Found project ${projectId}. Triggering deploy...`,
-										);
+										addSystemMessage(`Found project ${projectId}. Triggering deploy...`);
 										vercelDeploy(projectId)
 											.then((result) => {
 												addSystemMessage(`Deploy result:\n${result}`);
 											})
-											.catch((err: Error) =>
-												addSystemMessage(`Deploy failed: ${err.message}`),
-											);
+											.catch((err: Error) => addSystemMessage(`Deploy failed: ${err.message}`));
 									})
 									.catch((err: Error) =>
-										addSystemMessage(
-											`Project detection failed: ${err.message}`,
-										),
+										addSystemMessage(`Project detection failed: ${err.message}`),
 									);
 							})
 							.catch(() => addSystemMessage("Vercel tools not available."));
@@ -3575,17 +3252,13 @@ export function App({
 										.then((result: string) => {
 											addSystemMessage(`Vercel Projects:\n${result}`);
 										})
-										.catch((err: Error) =>
-											addSystemMessage(`Failed: ${err.message}`),
-										);
+										.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 								} else if (sub === "status") {
 									vercel
 										.vercelDetectProject()
 										.then((projectId: string | null) => {
 											if (!projectId) {
-												addSystemMessage(
-													"Could not detect project. Use /vercel projects.",
-												);
+												addSystemMessage("Could not detect project. Use /vercel projects.");
 												return;
 											}
 											vercel
@@ -3593,21 +3266,15 @@ export function App({
 												.then((result: string) => {
 													addSystemMessage(`Latest Deployments:\n${result}`);
 												})
-												.catch((err: Error) =>
-													addSystemMessage(`Failed: ${err.message}`),
-												);
+												.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 										})
-										.catch((err: Error) =>
-											addSystemMessage(`Failed: ${err.message}`),
-										);
+										.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 								} else if (sub === "env") {
 									vercel
 										.vercelDetectProject()
 										.then((projectId: string | null) => {
 											if (!projectId) {
-												addSystemMessage(
-													"Could not detect project. Use /vercel projects.",
-												);
+												addSystemMessage("Could not detect project. Use /vercel projects.");
 												return;
 											}
 											vercel
@@ -3615,21 +3282,15 @@ export function App({
 												.then((result: string) => {
 													addSystemMessage(`Environment Variables:\n${result}`);
 												})
-												.catch((err: Error) =>
-													addSystemMessage(`Failed: ${err.message}`),
-												);
+												.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 										})
-										.catch((err: Error) =>
-											addSystemMessage(`Failed: ${err.message}`),
-										);
+										.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 								} else if (sub === "logs") {
 									vercel
 										.vercelDetectProject()
 										.then((projectId: string | null) => {
 											if (!projectId) {
-												addSystemMessage(
-													"Could not detect project. Use /vercel projects.",
-												);
+												addSystemMessage("Could not detect project. Use /vercel projects.");
 												return;
 											}
 											vercel
@@ -3646,25 +3307,17 @@ export function App({
 														.then((logs: string) => {
 															addSystemMessage(`Deployment Logs:\n${logs}`);
 														})
-														.catch((err: Error) =>
-															addSystemMessage(`Failed: ${err.message}`),
-														);
+														.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 												})
-												.catch((err: Error) =>
-													addSystemMessage(`Failed: ${err.message}`),
-												);
+												.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 										})
-										.catch((err: Error) =>
-											addSystemMessage(`Failed: ${err.message}`),
-										);
+										.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 								} else if (sub === "domains") {
 									vercel
 										.vercelDetectProject()
 										.then((projectId: string | null) => {
 											if (!projectId) {
-												addSystemMessage(
-													"Could not detect project. Use /vercel projects.",
-												);
+												addSystemMessage("Could not detect project. Use /vercel projects.");
 												return;
 											}
 											vercel
@@ -3672,13 +3325,9 @@ export function App({
 												.then((result: string) => {
 													addSystemMessage(`Domains:\n${result}`);
 												})
-												.catch((err: Error) =>
-													addSystemMessage(`Failed: ${err.message}`),
-												);
+												.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 										})
-										.catch((err: Error) =>
-											addSystemMessage(`Failed: ${err.message}`),
-										);
+										.catch((err: Error) => addSystemMessage(`Failed: ${err.message}`));
 								} else {
 									addSystemMessage(
 										"Vercel commands:\n" +
@@ -3691,11 +3340,7 @@ export function App({
 									);
 								}
 							})
-							.catch(() =>
-								addSystemMessage(
-									"Vercel tools not available. Check VERCEL_TOKEN.",
-								),
-							);
+							.catch(() => addSystemMessage("Vercel tools not available. Check VERCEL_TOKEN."));
 					}
 					// Handle /model command
 					if (command === ("model" as any)) {
@@ -3714,14 +3359,10 @@ export function App({
 					else if (command === ("provider" as any)) {
 						if (args.length > 0) {
 							const newProvider = args[0].toLowerCase();
-							const provider = availableProviders.find(
-								(p) => p.name === newProvider,
-							);
+							const provider = availableProviders.find((p) => p.name === newProvider);
 							if (provider) {
 								setCurrentProvider(newProvider);
-								addSystemMessage(
-									`Provider switched to: ${provider.displayName}`,
-								);
+								addSystemMessage(`Provider switched to: ${provider.displayName}`);
 							} else {
 								addSystemMessage(
 									`Unknown provider: ${newProvider}\nUse /provider to see available options.`,
@@ -3748,10 +3389,7 @@ export function App({
 					} else if (command === ("projects" as any)) {
 						workspaceTabs.addTab("projects");
 					} else if (command === ("terminal" as any)) {
-						workspaceTabs.addTab(
-							"terminal",
-							(args as any[])?.[0] || "Terminal",
-						);
+						workspaceTabs.addTab("terminal", (args as any[])?.[0] || "Terminal");
 					}
 					break;
 			}
@@ -3853,9 +3491,7 @@ export function App({
 			},
 		);
 
-		return predictions.sort(
-			(a, b) => b.confidence * b.priority - a.confidence * a.priority,
-		);
+		return predictions.sort((a, b) => b.confidence * b.priority - a.confidence * a.priority);
 	}, []);
 
 	// Generate avenues based on input
@@ -3863,11 +3499,7 @@ export function App({
 		const inputLower = input.toLowerCase();
 		const avenues: Avenue[] = [];
 
-		if (
-			inputLower.includes("fix") ||
-			inputLower.includes("bug") ||
-			inputLower.includes("error")
-		) {
+		if (inputLower.includes("fix") || inputLower.includes("bug") || inputLower.includes("error")) {
 			avenues.push({
 				id: `avenue-${Date.now()}-1`,
 				name: "Fix Bug",
@@ -3942,8 +3574,7 @@ export function App({
 
 	// Handle command submission
 	const handleSubmit = async (rawInput: string) => {
-		const { text: afterPaths, image: pastedNow } =
-			imageInput.processInput(rawInput);
+		const { text: afterPaths, image: pastedNow } = imageInput.processInput(rawInput);
 		const attached = pastedNow ?? imageInput.getAttachedImage();
 		const input = afterPaths.trim();
 
@@ -3964,8 +3595,7 @@ export function App({
 			);
 		}
 
-		const bubbleContent =
-			input || (attached ? `[Image: ${attached.filename}]` : "");
+		const bubbleContent = input || (attached ? `[Image: ${attached.filename}]` : "");
 
 		// Handle onboarding answers first
 		if (showOnboarding && !afterPaths.trim().startsWith("/")) {
@@ -3985,9 +3615,7 @@ export function App({
 
 			// Telegram token feedback
 			if (/^\d+:/.test(input.trim())) {
-				addSystemMessage(
-					"Telegram token received. Your bot will activate on next launch.",
-				);
+				addSystemMessage("Telegram token received. Your bot will activate on next launch.");
 				// Speak confirmation
 				try {
 					require("node:child_process").execSync(
@@ -4011,12 +3639,8 @@ export function App({
 					]);
 					// Speak each question aloud during onboarding
 					try {
-						const voice =
-							onboardingManager.getUser()?.preferences?.voice?.voiceId ||
-							"Moira";
-						const firstLine = result.nextQuestion.question
-							.split("\n")[0]
-							.slice(0, 100);
+						const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId || "Moira";
+						const firstLine = result.nextQuestion.question.split("\n")[0].slice(0, 100);
 						require("node:child_process").execSync(
 							`say -v ${voice} "${firstLine.replace(/"/g, "")}"`,
 							{ stdio: "ignore" },
@@ -4069,26 +3693,13 @@ export function App({
 			},
 		]);
 		// Track in session tree
-		sessionTreeRef.current.addMessage(
-			sessionTreeRef.current.tipId,
-			"user",
-			bubbleContent,
-		);
+		sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "user", bubbleContent);
 		// Session logger: user message
-		logMessage(
-			activeTabId,
-			workspaceTabs.activeTab?.title || "Chat",
-			"user",
-			bubbleContent,
-		);
+		logMessage(activeTabId, workspaceTabs.activeTab?.title || "Chat", "user", bubbleContent);
 
 		// Auto-kanban: create a card for this user message
 		const activeTab = workspaceTabs.activeTab;
-		autoKanban.onUserMessage(
-			activeTab?.id || "default",
-			activeTab?.title || "Chat",
-			bubbleContent,
-		);
+		autoKanban.onUserMessage(activeTab?.id || "default", activeTab?.title || "Chat", bubbleContent);
 
 		// If agent is already running, queue this message
 		if (agentRunningRef.current) {
@@ -4158,8 +3769,7 @@ export function App({
 					}
 
 					// Inject agent mode context into the message
-					const modePrefix =
-						agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
+					const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
 					// Capture the in-flight chat promise + label so Ctrl+G can
 					// hand this task to the background pool without interrupting it.
@@ -4204,23 +3814,14 @@ export function App({
 					});
 					// Clear image after sending
 					if (img) imageInput.removeImage();
-					const treePreview =
-						(reply ?? "").trim().slice(0, 160) || "(tools only)";
-					sessionTreeRef.current.addMessage(
-						sessionTreeRef.current.tipId,
-						"assistant",
-						treePreview,
-					);
+					const treePreview = (reply ?? "").trim().slice(0, 160) || "(tools only)";
+					sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "assistant", treePreview);
 					setLastResponseTime(Date.now() - cmdStartTime);
 					setStatus("success");
 					if (soundEnabled) playSound("success");
 				} catch (err) {
 					const errorMsg = err instanceof Error ? err.message : String(err);
-					logError(
-						activeTabId,
-						workspaceTabs.activeTab?.title || "Chat",
-						errorMsg,
-					);
+					logError(activeTabId, workspaceTabs.activeTab?.title || "Chat", errorMsg);
 					setMessages((prev) => [
 						...prev,
 						{
@@ -4297,13 +3898,9 @@ export function App({
 						<NotesView
 							visible={true}
 							data={workspaceTabs.activeTab?.data || {}}
-							onUpdateData={(d) =>
-								workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)
-							}
+							onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
 							onClose={closeTabView}
-							chatTabNames={workspaceTabs
-								.getTabsByType("chat")
-								.map((t) => t.title)}
+							chatTabNames={workspaceTabs.getTabsByType("chat").map((t) => t.title)}
 							onSendToChat={(content) => {
 								// Switch to first chat tab and add as user message
 								const chatTabs = workspaceTabs.getTabsByType("chat");
@@ -4321,9 +3918,7 @@ export function App({
 						<IdeasView
 							visible={true}
 							data={workspaceTabs.activeTab?.data || {}}
-							onUpdateData={(d) =>
-								workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)
-							}
+							onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
 							onClose={closeTabView}
 						/>
 					);
@@ -4332,9 +3927,7 @@ export function App({
 						<BTWView
 							visible={true}
 							data={workspaceTabs.activeTab?.data || {}}
-							onUpdateData={(d) =>
-								workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)
-							}
+							onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
 							onClose={closeTabView}
 						/>
 					);
@@ -4343,9 +3936,7 @@ export function App({
 						<QuestionsView
 							visible={true}
 							data={workspaceTabs.activeTab?.data || {}}
-							onUpdateData={(d) =>
-								workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)
-							}
+							onUpdateData={(d) => workspaceTabs.updateTabData(workspaceTabs.activeTab.id, d)}
 							onClose={closeTabView}
 						/>
 					);
@@ -4412,9 +4003,7 @@ export function App({
 							}}
 							onClose={closeTabView}
 							onGenerate={(prompt) => {
-								addSystemMessage(
-									`Custom gen: "${prompt}" — use /music gen ${prompt}`,
-								);
+								addSystemMessage(`Custom gen: "${prompt}" — use /music gen ${prompt}`);
 								closeTabView();
 							}}
 						/>
@@ -4468,8 +4057,7 @@ export function App({
 							// Move step to in progress
 							setKanbanBoard((prev) => {
 								const step =
-									prev.ready.find((s) => s.id === id) ||
-									prev.backlog.find((s) => s.id === id);
+									prev.ready.find((s) => s.id === id) || prev.backlog.find((s) => s.id === id);
 								if (!step) return prev;
 								return {
 									...prev,
@@ -4509,9 +4097,7 @@ export function App({
 						onSelect={(provider) => {
 							setCurrentProvider(provider);
 							const p = availableProviders.find((pr) => pr.name === provider);
-							addSystemMessage(
-								`Provider switched to: ${p?.displayName || provider}`,
-							);
+							addSystemMessage(`Provider switched to: ${p?.displayName || provider}`);
 							setViewMode("chat");
 						}}
 						onCancel={() => setViewMode("chat")}
@@ -4527,8 +4113,7 @@ export function App({
 						totalSteps={6}
 						userName={onboardingManager.getUser()?.identity?.name || undefined}
 						agentName={
-							(onboardingManager.getUser()?.preferences?.voice as any)
-								?.agentName || undefined
+							(onboardingManager.getUser()?.preferences?.voice as any)?.agentName || undefined
 						}
 					/>
 				);
@@ -4536,10 +4121,7 @@ export function App({
 			case "animations":
 				// Animation showcase/gallery
 				return (
-					<AnimationShowcase
-						animation={currentAnimation}
-						onClose={() => setViewMode("chat")}
-					/>
+					<AnimationShowcase animation={currentAnimation} onClose={() => setViewMode("chat")} />
 				);
 
 			case "design":
@@ -4573,9 +4155,7 @@ export function App({
 							});
 						}}
 						onSkip={() => {
-							addSystemMessage(
-								"Skipping design selection. I'll pick something sensible.",
-							);
+							addSystemMessage("Skipping design selection. I'll pick something sensible.");
 							setViewMode("chat");
 						}}
 						visible={true}
@@ -4608,9 +4188,7 @@ export function App({
 						}}
 						onClose={() => setViewMode("chat")}
 						onGenerate={(prompt) => {
-							addSystemMessage(
-								`Custom gen: "${prompt}" — use /music gen ${prompt}`,
-							);
+							addSystemMessage(`Custom gen: "${prompt}" — use /music gen ${prompt}`);
 							setViewMode("chat");
 						}}
 					/>
@@ -4639,12 +4217,8 @@ export function App({
 								</AppText>
 								{voiceMessages.map((m) => (
 									<Box key={m.id} flexDirection="column">
-										<MutedText>
-											{m.role === "user" ? "You:" : "Agent:"}
-										</MutedText>
-										<AppText wrap="wrap">
-											{(m.content || "").slice(0, 400)}
-										</AppText>
+										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
+										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
 									</Box>
 								))}
 							</Box>
@@ -4664,12 +4238,7 @@ export function App({
 					);
 				}
 				return (
-					<Box
-						flexDirection="column"
-						flexGrow={1}
-						minHeight={0}
-						overflow="hidden"
-					>
+					<Box flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
 						<MessageList
 							messages={messages}
 							animateTyping={showAnimations}
@@ -4712,10 +4281,7 @@ export function App({
 
 				{/* Workspace tab bar */}
 				<Box flexShrink={0}>
-					<TabBar
-						tabs={workspaceTabs.tabs}
-						onSwitch={workspaceTabs.switchTab}
-					/>
+					<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
 				</Box>
 
 				{/* Main content area with folder frame */}
@@ -4725,23 +4291,11 @@ export function App({
 						<AppText color="cyan">│</AppText>
 					</Box>
 					{/* Main content (chat / kanban / etc.) or process detail */}
-					<Box
-						flexDirection="column"
-						flexGrow={1}
-						paddingX={1}
-						minHeight={0}
-						overflow="hidden"
-					>
+					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0} overflow="hidden">
 						{processPanel.detailTaskId &&
-						processPanel.tasks.find(
-							(t) => t.id === processPanel.detailTaskId,
-						) ? (
+						processPanel.tasks.find((t) => t.id === processPanel.detailTaskId) ? (
 							<ProcessDetailView
-								task={
-									processPanel.tasks.find(
-										(t) => t.id === processPanel.detailTaskId,
-									)!
-								}
+								task={processPanel.tasks.find((t) => t.id === processPanel.detailTaskId)!}
 								output={processPanel.detailOutput}
 								onClose={processPanel.closeDetail}
 								onKill={() => {
@@ -4758,10 +4312,7 @@ export function App({
 										]);
 									}
 								}}
-								height={Math.max(
-									10,
-									viewport.height - PROCESS_DETAIL_CHROME_ROWS,
-								)}
+								height={Math.max(10, viewport.height - PROCESS_DETAIL_CHROME_ROWS)}
 							/>
 						) : (
 							renderMainContent()
@@ -4820,11 +4371,7 @@ export function App({
 
 				{/* Status verb - only shown while processing (idle hides to recover 2 rows) */}
 				{isProcessing && (
-					<Box
-						paddingX={1}
-						flexShrink={0}
-						width={Math.max(20, viewport.width - 4)}
-					>
+					<Box paddingX={1} flexShrink={0} width={Math.max(20, viewport.width - 4)}>
 						<AnimatedStatusVerb
 							type={processingStage === "planning" ? "planning" : "executing"}
 							showIcon={true}
@@ -4837,10 +4384,7 @@ export function App({
 				{/* Image attachment indicator */}
 				{imageInput.currentImage && (
 					<Box paddingX={1} flexShrink={0}>
-						<ImageBadge
-							image={imageInput.currentImage}
-							onRemove={imageInput.removeImage}
-						/>
+						<ImageBadge image={imageInput.currentImage} onRemove={imageInput.removeImage} />
 					</Box>
 				)}
 
@@ -4858,12 +4402,7 @@ export function App({
 				</Box>
 
 				{/* Input section with context window display */}
-				<Box
-					paddingX={1}
-					justifyContent="space-between"
-					alignItems="center"
-					flexShrink={0}
-				>
+				<Box paddingX={1} justifyContent="space-between" alignItems="center" flexShrink={0}>
 					{/* Left: Context used */}
 					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth}>
 						<MutedText>{formatTokens(totalTokens)}</MutedText>
@@ -4875,8 +4414,7 @@ export function App({
 							onSubmit={handleSubmit}
 							isProcessing={isProcessing}
 							focused={
-								(viewMode === "chat" && activeTabType === "chat") ||
-								viewMode === "onboarding"
+								(viewMode === "chat" && activeTabType === "chat") || viewMode === "onboarding"
 							}
 							processingStage={processingStage}
 							showAnimations={showAnimations}
@@ -4896,11 +4434,7 @@ export function App({
 					</Box>
 
 					{/* Right: Context max */}
-					<Box
-						minWidth={tokenMeterColWidth}
-						width={tokenMeterColWidth}
-						justifyContent="flex-end"
-					>
+					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth} justifyContent="flex-end">
 						<MutedText>/{formatTokens(contextMax)}</MutedText>
 					</Box>
 				</Box>
@@ -4935,9 +4469,7 @@ export function App({
 							<MutedText>
 								Tokens:{" "}
 								<AppText color="cyan">
-									{totalTokens > 0
-										? `${(totalTokens / 1000).toFixed(1)}k`
-										: "—"}
+									{totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}k` : "—"}
 								</AppText>{" "}
 								· Steps: <AppText color="cyan">{stepCount}</AppText> · Tools:{" "}
 								<AppText color="cyan">{toolCount}</AppText>
@@ -4945,9 +4477,7 @@ export function App({
 							<MutedText>
 								Response time:{" "}
 								<AppText color="yellow">
-									{lastResponseTime
-										? `${(lastResponseTime / 1000).toFixed(1)}s`
-										: "—"}
+									{lastResponseTime ? `${(lastResponseTime / 1000).toFixed(1)}s` : "—"}
 								</AppText>
 							</MutedText>
 							{currentBranch && (
@@ -5025,15 +4555,9 @@ export function App({
 				>
 					{compactAgentModeBar ? (
 						<Box flexDirection="row" overflow="hidden" flexShrink={1}>
-							<AppText
-								color="cyan"
-								bold
-								wrap="truncate-end"
-							>{`\u25C6 ${agentMode}`}</AppText>
+							<AppText color="cyan" bold wrap="truncate-end">{`\u25C6 ${agentMode}`}</AppText>
 							<MutedText wrap="truncate-end">{"   \u2303T cycle"}</MutedText>
-							{!processPanel.sidebarOpen && (
-								<ProcessBadge counts={processPanel.taskCounts} />
-							)}
+							{!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
 						</Box>
 					) : (
 						<>
@@ -5054,9 +4578,7 @@ export function App({
 							</Box>
 							<Box flexDirection="row" flexShrink={0}>
 								<MutedText>{"\u2303T mode"}</MutedText>
-								{!processPanel.sidebarOpen && (
-									<ProcessBadge counts={processPanel.taskCounts} />
-								)}
+								{!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
 							</Box>
 						</>
 					)}

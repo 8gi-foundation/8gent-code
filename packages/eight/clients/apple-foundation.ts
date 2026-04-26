@@ -17,9 +17,7 @@ import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
 
 function flattenContent(content: MessageContent): string {
 	if (typeof content === "string") return content;
-	return content
-		.map((part) => (part.type === "text" ? (part.text ?? "") : ""))
-		.join("");
+	return content.map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("");
 }
 
 interface BridgeRequest {
@@ -41,17 +39,11 @@ interface BridgeResponse {
 	error?: string | null;
 }
 
-const DEFAULT_BRIDGE_PATH = join(
-	homedir(),
-	".8gent",
-	"bin",
-	"apple-foundation-bridge",
-);
+const DEFAULT_BRIDGE_PATH = join(homedir(), ".8gent", "bin", "apple-foundation-bridge");
 
 export function resolveBridgePath(override?: string): string {
 	if (override) return override;
-	if (process.env.APPLE_FOUNDATION_BRIDGE)
-		return process.env.APPLE_FOUNDATION_BRIDGE;
+	if (process.env.APPLE_FOUNDATION_BRIDGE) return process.env.APPLE_FOUNDATION_BRIDGE;
 	return DEFAULT_BRIDGE_PATH;
 }
 
@@ -94,11 +86,7 @@ export class AppleFoundationClient implements LLMClient {
 			}
 		});
 		proc.on("exit", (code, signal) => {
-			this.failPending(
-				new Error(
-					`apple-foundation-bridge exited (code=${code} signal=${signal})`,
-				),
-			);
+			this.failPending(new Error(`apple-foundation-bridge exited (code=${code} signal=${signal})`));
 			this.proc = null;
 		});
 
@@ -126,9 +114,7 @@ export class AppleFoundationClient implements LLMClient {
 			const parsed = JSON.parse(line) as BridgeResponse;
 			pending.resolve(parsed);
 		} catch (err) {
-			pending.reject(
-				new Error(`apple-foundation-bridge returned invalid JSON: ${line}`),
-			);
+			pending.reject(new Error(`apple-foundation-bridge returned invalid JSON: ${line}`));
 		}
 	}
 

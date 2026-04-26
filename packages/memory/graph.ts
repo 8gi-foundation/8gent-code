@@ -215,9 +215,7 @@ export class KnowledgeGraph {
 	): string {
 		const now = Date.now();
 		const id = generateId("ent");
-		const metaJson = properties?.metadata
-			? JSON.stringify(properties.metadata)
-			: null;
+		const metaJson = properties?.metadata ? JSON.stringify(properties.metadata) : null;
 
 		// Atomic upsert via ON CONFLICT -- race-condition-safe.
 		// The UNIQUE(type, name) constraint guarantees one row per (type, name).
@@ -239,17 +237,7 @@ export class KnowledgeGraph {
                            END,
            updated_at    = excluded.updated_at`,
 			)
-			.run(
-				id,
-				type,
-				name,
-				properties?.description ?? null,
-				metaJson,
-				now,
-				now,
-				now,
-				now,
-			);
+			.run(id, type, name, properties?.description ?? null, metaJson, now, now, now, now);
 
 		// Return the actual row ID (may differ from `id` on conflict).
 		// Row is guaranteed to exist because we just INSERTed (or updated on conflict).
@@ -267,9 +255,7 @@ export class KnowledgeGraph {
 	 */
 	getEntity(id: string): Entity | null {
 		const row = this.db
-			.query<EntityRow, [string]>(
-				"SELECT * FROM knowledge_entities WHERE id = ?",
-			)
+			.query<EntityRow, [string]>("SELECT * FROM knowledge_entities WHERE id = ?")
 			.get(id);
 
 		return row ? rowToEntity(row) : null;
@@ -297,8 +283,7 @@ export class KnowledgeGraph {
 			params.push(`%${query.name}%`);
 		}
 
-		const where =
-			conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 		const limit = query.limit ?? 50;
 
 		const rows = this.db
@@ -359,15 +344,7 @@ export class KnowledgeGraph {
 				`INSERT INTO knowledge_relationships (id, source_id, target_id, type, strength, metadata, created_at, updated_at)
          VALUES (?, ?, ?, ?, 0.5, ?, ?, ?)`,
 			)
-			.run(
-				id,
-				fromId,
-				toId,
-				type,
-				metadata ? JSON.stringify(metadata) : null,
-				now,
-				now,
-			);
+			.run(id, fromId, toId, type, metadata ? JSON.stringify(metadata) : null, now, now);
 
 		return id;
 	}
@@ -431,8 +408,7 @@ export class KnowledgeGraph {
 						collectedRelationships.push(rel);
 					}
 					// Queue the neighbor for the next depth level
-					const neighborId =
-						rel.sourceId === nodeId ? rel.targetId : rel.sourceId;
+					const neighborId = rel.sourceId === nodeId ? rel.targetId : rel.sourceId;
 					if (!visitedEntities.has(neighborId)) {
 						nextFrontier.push(neighborId);
 					}
@@ -513,17 +489,12 @@ export class KnowledgeGraph {
 		byType: Record<string, number>;
 	} {
 		const entityCount =
-			this.db
-				.query<{ cnt: number }, []>(
-					"SELECT COUNT(*) as cnt FROM knowledge_entities",
-				)
-				.get()?.cnt ?? 0;
+			this.db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM knowledge_entities").get()
+				?.cnt ?? 0;
 
 		const relationshipCount =
 			this.db
-				.query<{ cnt: number }, []>(
-					"SELECT COUNT(*) as cnt FROM knowledge_relationships",
-				)
+				.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM knowledge_relationships")
 				.get()?.cnt ?? 0;
 
 		const typeRows = this.db

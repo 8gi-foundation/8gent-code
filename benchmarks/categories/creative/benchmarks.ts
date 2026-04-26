@@ -20,8 +20,7 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 3. Rhyme scheme: ABAB for verses, AABB for chorus
 4. Includes emotional progression
 5. 2-3 minutes when sung at normal tempo`,
-		expectedBehavior:
-			"Lyrics follow structure, rhymes work, theme is clear, emotionally engaging",
+		expectedBehavior: "Lyrics follow structure, rhymes work, theme is clear, emotionally engaging",
 		fixture: "fixtures/creative/CR001-lyrics-prompt.txt",
 		rubric: {
 			correctness: {
@@ -43,24 +42,14 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"No filler words",
-					"Every line serves the theme",
-					"Tight, economical lyrics",
-				],
+				criteria: ["No filler words", "Every line serves the theme", "Tight, economical lyrics"],
 			},
 			bestPractices: {
 				weight: 15,
-				criteria: [
-					"Original (not derivative)",
-					"Singable phrasing",
-					"Emotional authenticity",
-				],
+				criteria: ["Original (not derivative)", "Singable phrasing", "Emotional authenticity"],
 			},
 		},
-		validators: [
-			{ type: "llm", config: { rubric: "song_lyrics", model: "gpt-4" } },
-		],
+		validators: [{ type: "llm", config: { rubric: "song_lyrics", model: "gpt-4" } }],
 		expectedTokens: 500,
 		timeLimit: 120,
 	},
@@ -77,8 +66,7 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 4. Has start/stop controls
 5. Allows tempo adjustment
 6. Sounds musical (not random noise)`,
-		expectedBehavior:
-			"Music plays, sounds harmonious, controls work, tempo adjusts",
+		expectedBehavior: "Music plays, sounds harmonious, controls work, tempo adjusts",
 		fixture: "fixtures/creative/CR002-tonejs-template.ts",
 		rubric: {
 			correctness: {
@@ -100,11 +88,7 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Efficient scheduling",
-					"No audio glitches",
-					"Proper resource cleanup",
-				],
+				criteria: ["Efficient scheduling", "No audio glitches", "Proper resource cleanup"],
 			},
 			bestPractices: {
 				weight: 15,
@@ -140,8 +124,7 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 4. Includes animation/movement
 5. Can be saved as PNG
 6. Uses seed for reproducibility`,
-		expectedBehavior:
-			"Art generates, looks visually appealing, animates, saves correctly",
+		expectedBehavior: "Art generates, looks visually appealing, animates, saves correctly",
 		fixture: "fixtures/creative/CR003-p5-template.ts",
 		rubric: {
 			correctness: {
@@ -163,11 +146,7 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Maintains 60fps",
-					"Efficient noise calculations",
-					"No memory leaks",
-				],
+				criteria: ["Maintains 60fps", "Efficient noise calculations", "No memory leaks"],
 			},
 			bestPractices: {
 				weight: 15,
@@ -214,32 +193,18 @@ export const creativeBenchmarks: BenchmarkDefinition[] = [
 			},
 			codeQuality: {
 				weight: 25,
-				criteria: [
-					"Clear structure",
-					"Good headings",
-					"Proper code formatting",
-				],
+				criteria: ["Clear structure", "Good headings", "Proper code formatting"],
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"No redundant explanations",
-					"Concise writing",
-					"Efficient word choice",
-				],
+				criteria: ["No redundant explanations", "Concise writing", "Efficient word choice"],
 			},
 			bestPractices: {
 				weight: 15,
-				criteria: [
-					"SEO-friendly title",
-					"Includes TL;DR",
-					"Has call-to-action",
-				],
+				criteria: ["SEO-friendly title", "Includes TL;DR", "Has call-to-action"],
 			},
 		},
-		validators: [
-			{ type: "llm", config: { rubric: "technical_writing", model: "gpt-4" } },
-		],
+		validators: [{ type: "llm", config: { rubric: "technical_writing", model: "gpt-4" } }],
 		expectedTokens: 1500,
 		timeLimit: 300,
 	},

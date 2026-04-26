@@ -36,9 +36,7 @@ export const SPRITE_PROMPTS = {
 		const size = cfg.frameSize || 64;
 		const view = cfg.view || "side";
 		const bg =
-			cfg.background === "solid-color"
-				? "solid flat color background"
-				: "transparent background";
+			cfg.background === "solid-color" ? "solid flat color background" : "transparent background";
 
 		return `Create a ${style} sprite sheet for a ${cfg.subject}. ${view}-view perspective.
 Grid layout: ${cols} columns x ${rows} rows. Each frame is ${size}x${size} pixels.
@@ -114,32 +112,16 @@ export function buildSpritePrompt(config: SpritePromptConfig): string {
 	const subject = config.subject.toLowerCase();
 
 	// Auto-detect template from subject
-	if (
-		subject.includes("tile") ||
-		subject.includes("terrain") ||
-		subject.includes("environment")
-	) {
+	if (subject.includes("tile") || subject.includes("terrain") || subject.includes("environment")) {
 		return SPRITE_PROMPTS.tileset(config);
 	}
-	if (
-		subject.includes("ui") ||
-		subject.includes("button") ||
-		subject.includes("interface")
-	) {
+	if (subject.includes("ui") || subject.includes("button") || subject.includes("interface")) {
 		return SPRITE_PROMPTS.ui(config);
 	}
-	if (
-		subject.includes("item") ||
-		subject.includes("weapon") ||
-		subject.includes("loot")
-	) {
+	if (subject.includes("item") || subject.includes("weapon") || subject.includes("loot")) {
 		return SPRITE_PROMPTS.items(config);
 	}
-	if (
-		subject.includes("particle") ||
-		subject.includes("effect") ||
-		subject.includes("explosion")
-	) {
+	if (subject.includes("particle") || subject.includes("effect") || subject.includes("explosion")) {
 		return SPRITE_PROMPTS.particles(config);
 	}
 

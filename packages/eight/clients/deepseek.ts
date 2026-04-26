@@ -19,9 +19,7 @@ export const DEEPSEEK_PRO = "deepseek-v4-pro";
 
 function flattenContent(content: MessageContent): string {
 	if (typeof content === "string") return content;
-	return content
-		.map((part) => (part.type === "text" ? (part.text ?? "") : ""))
-		.join("");
+	return content.map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("");
 }
 
 function resolveBaseUrl(explicit?: string): string {
@@ -83,9 +81,7 @@ export class DeepSeekClient implements LLMClient {
 			const errorText = await response.text().catch(() => "");
 			// Strip any echoed key material defensively before surfacing the error.
 			const safeText = errorText.replace(this.apiKey, "[REDACTED]");
-			throw new Error(
-				`DeepSeek error: ${response.status} ${response.statusText} - ${safeText}`,
-			);
+			throw new Error(`DeepSeek error: ${response.status} ${response.statusText} - ${safeText}`);
 		}
 
 		const data = await response.json();
@@ -129,9 +125,7 @@ export class DeepSeekClient implements LLMClient {
 			body: JSON.stringify(body),
 		});
 		if (!response.ok || !response.body) {
-			throw new Error(
-				`DeepSeek stream error: ${response.status} ${response.statusText}`,
-			);
+			throw new Error(`DeepSeek stream error: ${response.status} ${response.statusText}`);
 		}
 
 		const reader = response.body.getReader();

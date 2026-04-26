@@ -21,8 +21,7 @@ function formatSize(bytes: number): string {
 function formatDuration(ms: number): string {
 	if (ms < 1000) return `${ms}ms`;
 	if (ms < 60000) return `${(ms / 1000).toFixed(0)}s`;
-	if (ms < 3600000)
-		return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+	if (ms < 3600000) return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 	return `${Math.floor(ms / 3600000)}h ${Math.floor((ms % 3600000) / 60000)}m`;
 }
 
@@ -51,8 +50,7 @@ export default function SessionList({
 
 	const filtered = useMemo(() => {
 		return sessions.filter((s) => {
-			if (projectFilter && projectName(s.workingDirectory) !== projectFilter)
-				return false;
+			if (projectFilter && projectName(s.workingDirectory) !== projectFilter) return false;
 			if (search) {
 				const q = search.toLowerCase();
 				return (
@@ -91,9 +89,7 @@ export default function SessionList({
 							!projectFilter ? "bg-emerald-500/20 text-emerald-400" : ""
 						}`}
 						style={
-							projectFilter
-								? { background: "var(--surface)", color: "var(--muted)" }
-								: undefined
+							projectFilter ? { background: "var(--surface)", color: "var(--muted)" } : undefined
 						}
 					>
 						All ({sessions.length})
@@ -124,19 +120,15 @@ export default function SessionList({
 						key={session.sessionId}
 						onClick={() => onSelect(session)}
 						className={`w-full text-left px-3 py-2.5 transition-colors ${
-							activeId === session.sessionId
-								? "border-l-2 border-l-emerald-500"
-								: ""
+							activeId === session.sessionId ? "border-l-2 border-l-emerald-500" : ""
 						}`}
 						style={{
 							borderBottom: "1px solid var(--border)",
-							background:
-								activeId === session.sessionId ? "var(--surface)" : undefined,
+							background: activeId === session.sessionId ? "var(--surface)" : undefined,
 						}}
 						onMouseEnter={(e) => {
 							if (activeId !== session.sessionId) {
-								(e.currentTarget as HTMLButtonElement).style.background =
-									"var(--surface-hover)";
+								(e.currentTarget as HTMLButtonElement).style.background = "var(--surface-hover)";
 							}
 						}}
 						onMouseLeave={(e) => {
@@ -147,18 +139,13 @@ export default function SessionList({
 					>
 						<div className="flex items-center justify-between mb-1">
 							<div className="flex items-center gap-1.5">
-								<span
-									className="text-[10px] font-mono"
-									style={{ color: "var(--muted)" }}
-								>
+								<span className="text-[10px] font-mono" style={{ color: "var(--muted)" }}>
 									{session.sessionId.replace("session_", "").slice(0, 12)}
 								</span>
 								{session.completed ? (
 									<span className="text-[9px] text-emerald-500/60">done</span>
 								) : (
-									<span className="text-[9px] text-amber-400/60 animate-pulse">
-										live
-									</span>
+									<span className="text-[9px] text-amber-400/60 animate-pulse">live</span>
 								)}
 							</div>
 							<span className="text-[10px]" style={{ color: "var(--muted)" }}>
@@ -176,26 +163,16 @@ export default function SessionList({
 							)}
 						</p>
 						<div className="flex items-center gap-2 mt-1.5">
-							<span
-								className="text-[10px] truncate"
-								style={{ color: "var(--muted)" }}
-							>
+							<span className="text-[10px] truncate" style={{ color: "var(--muted)" }}>
 								{projectName(session.workingDirectory)}
 							</span>
 							{session.runtime && (
-								<span className="text-[10px] text-cyan-500/50">
-									{session.runtime}
-								</span>
+								<span className="text-[10px] text-cyan-500/50">{session.runtime}</span>
 							)}
 							{session.model && (
-								<span className="text-[10px] text-amber-500/60 truncate">
-									{session.model}
-								</span>
+								<span className="text-[10px] text-amber-500/60 truncate">{session.model}</span>
 							)}
-							<span
-								className="text-[10px] ml-auto"
-								style={{ color: "var(--muted)" }}
-							>
+							<span className="text-[10px] ml-auto" style={{ color: "var(--muted)" }}>
 								{session.durationMs
 									? formatDuration(session.durationMs)
 									: formatSize(session.sizeBytes)}{" "}
@@ -205,10 +182,7 @@ export default function SessionList({
 					</button>
 				))}
 				{filtered.length === 0 && (
-					<div
-						className="p-6 text-center text-sm"
-						style={{ color: "var(--muted)" }}
-					>
+					<div className="p-6 text-center text-sm" style={{ color: "var(--muted)" }}>
 						No sessions found
 					</div>
 				)}

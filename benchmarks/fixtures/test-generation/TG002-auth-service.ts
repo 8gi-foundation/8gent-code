@@ -64,8 +64,7 @@ function hashPassword(password: string, salt: string): string {
 }
 
 function generateToken(length: number): string {
-	const chars =
-		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 	let token = "";
 	for (let i = 0; i < length; i++) {
 		token += chars[Math.floor(Math.random() * chars.length)];
@@ -158,9 +157,7 @@ export function login(
 
 	// Check lockout
 	if (foundUser.lockedUntil && foundUser.lockedUntil > new Date()) {
-		const remainingMinutes = Math.ceil(
-			(foundUser.lockedUntil.getTime() - Date.now()) / 60000,
-		);
+		const remainingMinutes = Math.ceil((foundUser.lockedUntil.getTime() - Date.now()) / 60000);
 		return {
 			success: false,
 			error: `Account locked. Try again in ${remainingMinutes} minutes`,

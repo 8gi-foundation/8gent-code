@@ -20,12 +20,7 @@
  * Issue: #1403
  */
 
-import type {
-	AuditEntry,
-	HarnessAction,
-	HarnessConfig,
-	HarnessRunResult,
-} from "./types";
+import type { AuditEntry, HarnessAction, HarnessConfig, HarnessRunResult } from "./types";
 
 // SEC-H4: Redact vault sentinel patterns from values before logging
 function redactVaultSentinels(obj: unknown): unknown {
@@ -50,9 +45,7 @@ function redactVaultSentinels(obj: unknown): unknown {
  * The `decide` callback receives the full history and returns the next
  * action, or null to signal completion.
  */
-export async function runHarness(
-	config: HarnessConfig,
-): Promise<HarnessRunResult> {
+export async function runHarness(config: HarnessConfig): Promise<HarnessRunResult> {
 	const { session, sandbox, vault, maxSteps, decide } = config;
 
 	// Log session start if this is a fresh session
@@ -121,10 +114,7 @@ export async function runHarness(
 			await session.append("tool_result", {
 				tool: action.tool,
 				success: true,
-				result:
-					result.length > 4096
-						? `${result.slice(0, 4096)}...[truncated]`
-						: result,
+				result: result.length > 4096 ? `${result.slice(0, 4096)}...[truncated]` : result,
 			});
 
 			steps++;

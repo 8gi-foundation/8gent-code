@@ -13,9 +13,7 @@ export interface RetryOptions {
 	onRetry?: (attempt: number, err: unknown) => void;
 }
 
-export type RecoveryResult<T> =
-	| { ok: true; value: T }
-	| { ok: false; error: unknown };
+export type RecoveryResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
 export interface RecoveryStrategy<T = unknown> {
 	handle(err: unknown, fn: () => Promise<T>): Promise<T>;
@@ -30,8 +28,7 @@ export function retry<T>(options: RetryOptions = {}): RecoveryStrategy<T> {
 			for (let i = 1; i < attempts; i++) {
 				if (onRetry) onRetry(i, lastErr);
 				if (delayMs > 0) {
-					const wait =
-						backoff === "exponential" ? delayMs * 2 ** (i - 1) : delayMs;
+					const wait = backoff === "exponential" ? delayMs * 2 ** (i - 1) : delayMs;
 					await new Promise((r) => setTimeout(r, wait));
 				}
 				try {
@@ -46,9 +43,7 @@ export function retry<T>(options: RetryOptions = {}): RecoveryStrategy<T> {
 }
 
 /** On error, call `fallbackFn` and return its result instead. */
-export function fallback<T>(
-	fallbackFn: (err: unknown) => T | Promise<T>,
-): RecoveryStrategy<T> {
+export function fallback<T>(fallbackFn: (err: unknown) => T | Promise<T>): RecoveryStrategy<T> {
 	return {
 		async handle(err) {
 			return fallbackFn(err);

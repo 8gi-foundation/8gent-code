@@ -48,11 +48,7 @@ function formatRelativeTime(timestamp: number): string {
 	return new Date(timestamp).toLocaleDateString();
 }
 
-export function HistoryScreen({
-	conversations,
-	onSelect,
-	onBack,
-}: HistoryScreenProps) {
+export function HistoryScreen({ conversations, onSelect, onBack }: HistoryScreenProps) {
 	const [selectedIndex, setSelectedIndex] = useState(0);
 
 	useInput((input, key) => {
@@ -74,9 +70,7 @@ export function HistoryScreen({
 			<Stack>
 				<Heading>Session History</Heading>
 				<MutedText>No previous sessions found.</MutedText>
-				<MutedText>
-					Start chatting and your sessions will appear here.
-				</MutedText>
+				<MutedText>Start chatting and your sessions will appear here.</MutedText>
 				<MutedText dimColor>Press Escape to go back</MutedText>
 			</Stack>
 		);
@@ -115,8 +109,7 @@ export function HistoryScreen({
 							<Inline>
 								<MutedText>
 									{"    "}
-									{formatRelativeTime(conv.lastActiveAt)} - {conv.model} -{" "}
-									{conv.messageCount} msgs
+									{formatRelativeTime(conv.lastActiveAt)} - {conv.model} - {conv.messageCount} msgs
 									{conv.gitBranch ? ` - ${conv.gitBranch}` : ""}
 								</MutedText>
 							</Inline>

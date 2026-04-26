@@ -24,10 +24,7 @@ export interface ExtensionManifest {
 export interface ExtensionToolDef {
 	name: string;
 	description: string;
-	parameters: Record<
-		string,
-		{ type: string; description?: string; required?: boolean }
-	>;
+	parameters: Record<string, { type: string; description?: string; required?: boolean }>;
 }
 
 export interface LoadedExtension {

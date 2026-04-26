@@ -232,16 +232,8 @@ export function EvidencePanel({
 // Evidence Item Component
 // ============================================
 
-function EvidenceItem({
-	evidence,
-	isSelected,
-	isExpanded,
-}: EvidenceItemProps): React.ReactElement {
-	const icon = evidence.verified ? (
-		<SuccessText>✓</SuccessText>
-	) : (
-		<ErrorText>✗</ErrorText>
-	);
+function EvidenceItem({ evidence, isSelected, isExpanded }: EvidenceItemProps): React.ReactElement {
+	const icon = evidence.verified ? <SuccessText>✓</SuccessText> : <ErrorText>✗</ErrorText>;
 
 	const typeColors: Record<EvidenceType, string> = {
 		file_exists: "cyan",
@@ -341,11 +333,7 @@ function EvidenceDataPreview({
 	data: string | object | boolean;
 }): React.ReactElement {
 	if (typeof data === "boolean") {
-		return data ? (
-			<SuccessText>{String(data)}</SuccessText>
-		) : (
-			<ErrorText>{String(data)}</ErrorText>
-		);
+		return data ? <SuccessText>{String(data)}</SuccessText> : <ErrorText>{String(data)}</ErrorText>;
 	}
 
 	if (typeof data === "string") {
@@ -377,8 +365,7 @@ export function ConfidenceMeter({
 	const filled = Math.round((confidence / 100) * width);
 	const empty = width - filled;
 
-	const color =
-		confidence >= 80 ? "green" : confidence >= 50 ? "yellow" : "red";
+	const color = confidence >= 80 ? "green" : confidence >= 50 ? "yellow" : "red";
 
 	return (
 		<Inline gap={0}>
@@ -395,10 +382,7 @@ export function ConfidenceMeter({
 // Step Panel Component
 // ============================================
 
-export function StepPanel({
-	steps,
-	onStepSelect,
-}: StepPanelProps): React.ReactElement {
+export function StepPanel({ steps, onStepSelect }: StepPanelProps): React.ReactElement {
 	const [selectedIndex, setSelectedIndex] = useState(0);
 
 	useInput((input, key) => {
@@ -481,9 +465,7 @@ export function ValidationReportPanel({
 }: {
 	report: ValidationReport;
 }): React.ReactElement {
-	const [activeTab, setActiveTab] = useState<"steps" | "evidence" | "summary">(
-		"summary",
-	);
+	const [activeTab, setActiveTab] = useState<"steps" | "evidence" | "summary">("summary");
 
 	useInput((input) => {
 		if (input === "1") setActiveTab("summary");
@@ -561,9 +543,7 @@ function SummaryTab({
 
 			<Inline gap={0}>
 				<MutedText>Evidence: </MutedText>
-				<AppText>
-					{report.evidence.filter((e: Evidence) => e.verified).length}
-				</AppText>
+				<AppText>{report.evidence.filter((e: Evidence) => e.verified).length}</AppText>
 				<AppText>/</AppText>
 				<AppText>{report.evidence.length}</AppText>
 				<AppText> verified</AppText>

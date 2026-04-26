@@ -36,11 +36,7 @@ try {
 	if (firstFunc) {
 		console.log("\n─────────────────────────────");
 		console.log(`Source for ${firstFunc.name}:`);
-		const source = getSymbolSource(
-			outline.filePath,
-			firstFunc.startLine,
-			firstFunc.endLine,
-		);
+		const source = getSymbolSource(outline.filePath, firstFunc.startLine, firstFunc.endLine);
 		console.log(`${source.slice(0, 500)}...`);
 	}
 } catch (error) {

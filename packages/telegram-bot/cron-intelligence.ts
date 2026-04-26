@@ -13,9 +13,7 @@ import { GitHubIntelligence } from "./intelligence";
 
 async function main(): Promise<void> {
 	const startTime = Date.now();
-	console.log(
-		`[cron-intel] Starting nightly intelligence run at ${new Date().toISOString()}`,
-	);
+	console.log(`[cron-intel] Starting nightly intelligence run at ${new Date().toISOString()}`);
 
 	const intel = new GitHubIntelligence();
 	const bot = new TelegramBot();

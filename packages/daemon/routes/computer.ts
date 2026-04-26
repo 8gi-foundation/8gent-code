@@ -60,9 +60,7 @@ function sendEvent(ws: ComputerWS, ev: StreamEvent): void {
 
 function sendAck(ws: ComputerWS, payload: unknown): void {
 	try {
-		ws.send(
-			envelope({ protocol_version: PROTOCOL_VERSION, type: "ack", payload }),
-		);
+		ws.send(envelope({ protocol_version: PROTOCOL_VERSION, type: "ack", payload }));
 	} catch {}
 }
 
@@ -271,9 +269,7 @@ export function handleComputerMessage(
 			// Fire-and-forget. Stream events flow back via the bus subscription.
 			pool
 				.chat(sid, text)
-				.then(() =>
-					bus.emit("session:end", { sessionId: sid, reason: "turn-complete" }),
-				)
+				.then(() => bus.emit("session:end", { sessionId: sid, reason: "turn-complete" }))
 				.catch((err) => {
 					bus.emit("agent:error", {
 						sessionId: sid,
@@ -313,18 +309,12 @@ export function handleComputerMessage(
 		}
 
 		default:
-			sendError(
-				ws,
-				`unknown message type: ${(msg as { type?: string }).type ?? "<missing>"}`,
-			);
+			sendError(ws, `unknown message type: ${(msg as { type?: string }).type ?? "<missing>"}`);
 	}
 }
 
 /** Called from gateway.ws.close for /computer connections. */
-export function handleComputerClose(
-	pool: AgentPool,
-	state: ComputerRouteState,
-): void {
+export function handleComputerClose(pool: AgentPool, state: ComputerRouteState): void {
 	if (state.sessionId) {
 		bus.emit("session:end", {
 			sessionId: state.sessionId,

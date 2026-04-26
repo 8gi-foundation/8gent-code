@@ -2,12 +2,7 @@
  * 8gent Toolshed - Tool Registration
  */
 
-import type {
-	Capability,
-	Permission,
-	Tool,
-	ToolRegistration,
-} from "../../types";
+import type { Capability, Permission, Tool, ToolRegistration } from "../../types";
 
 // In-memory registry (will be persisted to disk)
 const tools: Map<string, Tool> = new Map();
@@ -16,10 +11,7 @@ const capabilityIndex: Map<Capability, Set<string>> = new Map();
 /**
  * Register a new tool with the toolshed
  */
-export function registerTool(
-	registration: ToolRegistration,
-	executor: Tool["execute"],
-): void {
+export function registerTool(registration: ToolRegistration, executor: Tool["execute"]): void {
 	const tool: Tool = {
 		...registration,
 		outputSchema: registration.outputSchema || { type: "object" },

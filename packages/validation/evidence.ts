@@ -82,10 +82,7 @@ export class EvidenceCollector {
 	/**
 	 * Collect evidence for a completed step
 	 */
-	async collectForStep(
-		step: Step,
-		result: StepExecutionResult,
-	): Promise<Evidence[]> {
+	async collectForStep(step: Step, result: StepExecutionResult): Promise<Evidence[]> {
 		const evidence: Evidence[] = [];
 
 		// Analyze the step action to determine what evidence to collect
@@ -227,10 +224,7 @@ export class EvidenceCollector {
 	/**
 	 * Collect evidence for command execution
 	 */
-	async collectForCommand(
-		command: string,
-		output: string,
-	): Promise<Evidence[]> {
+	async collectForCommand(command: string, output: string): Promise<Evidence[]> {
 		const evidence: Evidence[] = [];
 
 		// Check for error patterns in output
@@ -326,9 +320,7 @@ export class EvidenceCollector {
 
 			// Count files and directories
 			const files = fs.readdirSync(targetDir);
-			const fileCount = files.filter((f) =>
-				fs.statSync(path.join(targetDir, f)).isFile(),
-			).length;
+			const fileCount = files.filter((f) => fs.statSync(path.join(targetDir, f)).isFile()).length;
 			const dirCount = files.filter((f) =>
 				fs.statSync(path.join(targetDir, f)).isDirectory(),
 			).length;
@@ -418,13 +410,11 @@ export class EvidenceCollector {
 
 		// Match paths with extensions
 		const extensionPaths =
-			text.match(/[\w./\-]+\.(ts|tsx|js|jsx|json|md|css|html|py|go|rs)/gi) ||
-			[];
+			text.match(/[\w./\-]+\.(ts|tsx|js|jsx|json|md|css|html|py|go|rs)/gi) || [];
 		paths.push(...extensionPaths);
 
 		// Match paths starting with common directories
-		const dirPaths =
-			text.match(/(?:src|lib|app|pages|components)\/[\w./\-]+/gi) || [];
+		const dirPaths = text.match(/(?:src|lib|app|pages|components)\/[\w./\-]+/gi) || [];
 		paths.push(...dirPaths);
 
 		// Deduplicate
@@ -556,20 +546,14 @@ export function summarizeEvidence(evidence: Evidence[]): {
 /**
  * Filter evidence by type
  */
-export function filterEvidence(
-	evidence: Evidence[],
-	types: EvidenceType[],
-): Evidence[] {
+export function filterEvidence(evidence: Evidence[], types: EvidenceType[]): Evidence[] {
 	return evidence.filter((e) => types.includes(e.type));
 }
 
 /**
  * Check if all required evidence is verified
  */
-export function isEvidenceSufficient(
-	evidence: Evidence[],
-	requiredTypes: EvidenceType[],
-): boolean {
+export function isEvidenceSufficient(evidence: Evidence[], requiredTypes: EvidenceType[]): boolean {
 	for (const type of requiredTypes) {
 		const typeEvidence = evidence.filter((e) => e.type === type);
 		if (typeEvidence.length === 0 || !typeEvidence.some((e) => e.verified)) {

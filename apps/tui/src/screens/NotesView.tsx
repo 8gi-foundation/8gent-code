@@ -10,13 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import {
-	AppText,
-	Divider,
-	Heading,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Divider, Heading, MutedText, Stack } from "../components/primitives/index.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 
@@ -47,10 +41,7 @@ function loadNotes(): NoteEntry[] {
 function saveNotes(notes: NoteEntry[]): void {
 	try {
 		if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-		writeFileSync(
-			join(DATA_DIR, "notes.json"),
-			JSON.stringify({ notes }, null, 2),
-		);
+		writeFileSync(join(DATA_DIR, "notes.json"), JSON.stringify({ notes }, null, 2));
 	} catch {}
 }
 
@@ -161,10 +152,7 @@ export function NotesView({
 								? {
 										...n,
 										content: inputBuffer,
-										title:
-											inputBuffer.split("\n")[0] ||
-											inputBuffer.split("\\n")[0] ||
-											n.title,
+										title: inputBuffer.split("\n")[0] || inputBuffer.split("\\n")[0] || n.title,
 										updatedAt: new Date().toISOString(),
 									}
 								: n,
@@ -344,9 +332,7 @@ export function NotesView({
 			<Box marginTop={1}>
 				<Divider />
 			</Box>
-			<MutedText>
-				a=add d=delete s=send to chat Enter=view arrows=navigate ESC=back
-			</MutedText>
+			<MutedText>a=add d=delete s=send to chat Enter=view arrows=navigate ESC=back</MutedText>
 		</Box>
 	);
 }

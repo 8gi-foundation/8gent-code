@@ -8,12 +8,7 @@ export interface CardProps extends BoxProps {
 	children: React.ReactNode;
 }
 
-export const Card: React.FC<CardProps> = ({
-	title,
-	borderColor = "blue",
-	children,
-	...props
-}) => (
+export const Card: React.FC<CardProps> = ({ title, borderColor = "blue", children, ...props }) => (
 	<Box
 		flexDirection="column"
 		borderStyle="round"

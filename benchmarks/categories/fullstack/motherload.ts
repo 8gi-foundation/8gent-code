@@ -4,8 +4,7 @@ export const motherloadBenchmark: BenchmarkDefinition[] = [
 	{
 		id: "FS-MEGA-001",
 		category: "fullstack",
-		title:
-			"SQLite Design System — Token Engine + Component Registry + Theme + Renderer",
+		title: "SQLite Design System — Token Engine + Component Registry + Theme + Renderer",
 		difficulty: "hard",
 		prompt: `Build a complete SQLite-backed design system that an AI agent (8gent) can use to generate perfect UI. This is a FULL production system: design tokens, component registry, theme engine, and HTML renderer.
 

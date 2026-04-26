@@ -10,12 +10,7 @@
 //
 // See: docs/prd/8gent-computer/architecture.md (PR #1747), parent PRD #1746.
 
-import type {
-	QdrantClient,
-	QdrantClientOptions,
-	QdrantPoint,
-	QdrantSearchHit,
-} from "./types";
+import type { QdrantClient, QdrantClientOptions, QdrantPoint, QdrantSearchHit } from "./types";
 
 const DEFAULTS: Required<Omit<QdrantClientOptions, "apiKey">> = {
 	host: "127.0.0.1",

@@ -75,9 +75,7 @@ export class CapabilityCatalog {
 		missing: string[];
 	}> {
 		// Resolve required capabilities to canonical IDs
-		const requiredIds = required
-			.map((r) => this.resolve(r)?.id)
-			.filter(Boolean) as string[];
+		const requiredIds = required.map((r) => this.resolve(r)?.id).filter(Boolean) as string[];
 
 		const results = agents.map((agent) => {
 			// Resolve agent capabilities to canonical IDs (dedup)

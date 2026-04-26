@@ -106,17 +106,11 @@ export class LiveDashboard {
 		lines.push("┌─────────────────────────┐");
 		lines.push("│  COMPETITION COMPLETE   │");
 		lines.push("├─────────────────────────┤");
-		lines.push(
-			`│ Rounds: ${String(finalData.totalRounds).padStart(3)}             │`,
-		);
+		lines.push(`│ Rounds: ${String(finalData.totalRounds).padStart(3)}             │`);
 		lines.push(`│ Duration: ${formatDuration(elapsed).padEnd(13)}│`);
 		lines.push("├─────────────────────────┤");
-		lines.push(
-			`│ 8gent: ${finalData.eightAvg.toFixed(1).padStart(5)} avg        │`,
-		);
-		lines.push(
-			`│ Claude: ${finalData.claudeAvg.toFixed(1).padStart(5)} avg       │`,
-		);
+		lines.push(`│ 8gent: ${finalData.eightAvg.toFixed(1).padStart(5)} avg        │`);
+		lines.push(`│ Claude: ${finalData.claudeAvg.toFixed(1).padStart(5)} avg       │`);
 
 		const delta = finalData.eightAvg - finalData.claudeAvg;
 		const verdict =
@@ -176,14 +170,12 @@ export class LiveDashboard {
 					? "declining"
 					: "stable";
 
-		const trendArrow =
-			data.trend === "improving" ? "+" : data.trend === "declining" ? "-" : "=";
+		const trendArrow = data.trend === "improving" ? "+" : data.trend === "declining" ? "-" : "=";
 
 		const bar = progressBar(data.progressPercent, 100);
 		const pct = `${Math.round(data.progressPercent)}%`;
 
-		const trendLine =
-			this.history.length >= 3 ? sparkline(this.history) : "---";
+		const trendLine = this.history.length >= 3 ? sparkline(this.history) : "---";
 
 		const deltaStr =
 			data.recentDelta !== undefined
@@ -201,9 +193,7 @@ export class LiveDashboard {
 		);
 		lines.push("├─────────────────────────┤");
 		lines.push(`│ 8gent:  ${data.eightAvg.toFixed(1).padStart(5)} avg       │`);
-		lines.push(
-			`│ Claude: ${data.claudeAvg.toFixed(1).padStart(5)} avg       │`,
-		);
+		lines.push(`│ Claude: ${data.claudeAvg.toFixed(1).padStart(5)} avg       │`);
 		lines.push(`│ Delta:  ${deltaStr.padStart(5)}   (${trendArrow})     │`);
 		lines.push("├─────────────────────────┤");
 		lines.push(`│ Trend: ${trendLine.padEnd(17)}│`);

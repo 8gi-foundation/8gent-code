@@ -44,10 +44,7 @@ interface MutationHistoryEntry {
 // Persona Mutator
 // ============================================
 
-const FEEDBACK_DIR = join(
-	process.env.HOME || process.env.USERPROFILE || "~",
-	".8gent",
-);
+const FEEDBACK_DIR = join(process.env.HOME || process.env.USERPROFILE || "~", ".8gent");
 const FEEDBACK_PATH = join(FEEDBACK_DIR, "persona-feedback.jsonl");
 
 export class PersonaMutator {
@@ -86,11 +83,7 @@ export class PersonaMutator {
 			}
 
 			// Stop at next heading
-			if (
-				inCalibrationTable &&
-				/^##/.test(trimmed) &&
-				!/Calibration/i.test(trimmed)
-			) {
+			if (inCalibrationTable && /^##/.test(trimmed) && !/Calibration/i.test(trimmed)) {
 				break;
 			}
 
@@ -109,9 +102,7 @@ export class PersonaMutator {
 			if (!headerPassed) continue;
 
 			// Parse table row: | Name | Value% | Description |
-			const match = trimmed.match(
-				/^\|\s*([^|]+?)\s*\|\s*(\d+)%?\s*\|\s*([^|]+?)\s*\|$/,
-			);
+			const match = trimmed.match(/^\|\s*([^|]+?)\s*\|\s*(\d+)%?\s*\|\s*([^|]+?)\s*\|$/);
 			if (match) {
 				params.push({
 					name: match[1].trim().toLowerCase(),
@@ -128,11 +119,7 @@ export class PersonaMutator {
 	/**
 	 * Record user feedback on a persona trait.
 	 */
-	recordFeedback(
-		parameter: string,
-		direction: "up" | "down",
-		reason: string,
-	): void {
+	recordFeedback(parameter: string, direction: "up" | "down", reason: string): void {
 		const entry: FeedbackEntry = {
 			parameter: parameter.toLowerCase(),
 			direction,
@@ -200,10 +187,7 @@ export class PersonaMutator {
 			// Find the row in the calibration table matching this parameter name
 			// Case-insensitive match on the parameter name column
 			const escaped = param.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			const rowPattern = new RegExp(
-				`(\\|\\s*${escaped}\\s*\\|\\s*)\\d+(%\\s*\\|)`,
-				"i",
-			);
+			const rowPattern = new RegExp(`(\\|\\s*${escaped}\\s*\\|\\s*)\\d+(%\\s*\\|)`, "i");
 
 			const match = content.match(rowPattern);
 			if (match) {

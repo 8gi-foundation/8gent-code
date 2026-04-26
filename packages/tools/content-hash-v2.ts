@@ -20,32 +20,19 @@ export interface ManifestDiff {
 
 const DEFAULT_ALGO: HashAlgo = "sha256";
 
-const DEFAULT_IGNORE = [
-	".git",
-	"node_modules",
-	".8gent",
-	"dist",
-	".cache",
-	"*.log",
-];
+const DEFAULT_IGNORE = [".git", "node_modules", ".8gent", "dist", ".cache", "*.log"];
 
 /**
  * Hash arbitrary content (string or Buffer).
  */
-export function contentHash(
-	content: string | Buffer,
-	algo: HashAlgo = DEFAULT_ALGO,
-): string {
+export function contentHash(content: string | Buffer, algo: HashAlgo = DEFAULT_ALGO): string {
 	return createHash(algo).update(content).digest("hex");
 }
 
 /**
  * Hash the content of a single file on disk.
  */
-export function fileContentHash(
-	filePath: string,
-	algo: HashAlgo = DEFAULT_ALGO,
-): string {
+export function fileContentHash(filePath: string, algo: HashAlgo = DEFAULT_ALGO): string {
 	const buf = readFileSync(filePath);
 	return contentHash(buf, algo);
 }
@@ -125,10 +112,7 @@ export function hashManifest(
  * Diff two manifests and return which paths changed, were added, or were removed.
  * Useful for incremental build invalidation - only rebuild what changed.
  */
-export function diffManifests(
-	prev: HashManifest,
-	next: HashManifest,
-): ManifestDiff {
+export function diffManifests(prev: HashManifest, next: HashManifest): ManifestDiff {
 	const prevKeys = new Set(Object.keys(prev));
 	const nextKeys = new Set(Object.keys(next));
 

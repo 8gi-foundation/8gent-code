@@ -37,9 +37,7 @@ interface ApiError {
 	details?: Record<string, unknown>;
 }
 
-type ApiResult<T> =
-	| { success: true; data: T }
-	| { success: false; error: ApiError };
+type ApiResult<T> = { success: true; data: T } | { success: false; error: ApiError };
 
 class HttpError extends Error {
 	constructor(
@@ -98,11 +96,7 @@ async function request<T>(
 
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({}));
-		throw new HttpError(
-			response.status,
-			error.message || "Request failed",
-			error.code,
-		);
+		throw new HttpError(response.status, error.message || "Request failed", error.code);
 	}
 
 	return response.json();
@@ -199,10 +193,4 @@ export async function batch<T>(
 	return results;
 }
 
-export {
-	HttpError,
-	type QueryParams,
-	type PaginatedResponse,
-	type ApiError,
-	type ApiResult,
-};
+export { HttpError, type QueryParams, type PaginatedResponse, type ApiError, type ApiResult };

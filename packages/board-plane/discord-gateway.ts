@@ -29,12 +29,7 @@ export class DiscordGateway {
 	private botUserId = "";
 	private destroyed = false;
 
-	constructor(
-		token: string,
-		label: string,
-		onMessage: MessageHandler,
-		onReady?: ReadyHandler,
-	) {
+	constructor(token: string, label: string, onMessage: MessageHandler, onReady?: ReadyHandler) {
 		this.token = token;
 		this.label = label;
 		this.onMessage = onMessage;
@@ -112,10 +107,7 @@ export class DiscordGateway {
 				// HELLO - start heartbeat, identify or resume
 				const interval = d.heartbeat_interval;
 				this.clearHeartbeat();
-				setTimeout(
-					() => this.send({ op: 1, d: this.lastSequence }),
-					Math.random() * interval,
-				);
+				setTimeout(() => this.send({ op: 1, d: this.lastSequence }), Math.random() * interval);
 				this.heartbeatTimer = setInterval(
 					() => this.send({ op: 1, d: this.lastSequence }),
 					interval,
@@ -191,9 +183,7 @@ export class DiscordGateway {
 				this.sessionId = data.session_id;
 				this.resumeUrl = data.resume_gateway_url;
 				this.botUserId = data.user.id;
-				console.log(
-					`[discord:${this.label}] ready as ${data.user.username} (${this.botUserId})`,
-				);
+				console.log(`[discord:${this.label}] ready as ${data.user.username} (${this.botUserId})`);
 				this.onReady?.(this.botUserId);
 				break;
 			}

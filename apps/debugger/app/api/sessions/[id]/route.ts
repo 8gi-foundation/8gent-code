@@ -7,10 +7,7 @@ export const dynamic = "force-dynamic";
 
 const SESSIONS_DIR = join(homedir(), ".8gent", "sessions");
 
-export async function GET(
-	_request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const { id: sessionId } = await params;
 	const filePath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
 

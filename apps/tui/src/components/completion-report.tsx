@@ -13,10 +13,7 @@ import { Box, Text, useInput } from "ink";
 import Gradient from "ink-gradient";
 import type React from "react";
 import { useEffect, useState } from "react";
-import {
-	formatDuration as formatDurationLib,
-	formatTokens,
-} from "../lib/index.js";
+import { formatDuration as formatDurationLib, formatTokens } from "../lib/index.js";
 import {
 	AppText,
 	Badge,
@@ -186,9 +183,7 @@ export function CompletionReport({
 					>
 						{report.filesCreated.length > 0 && (
 							<Stack marginBottom={1}>
-								<Label color="green">
-									Created ({report.filesCreated.length})
-								</Label>
+								<Label color="green">Created ({report.filesCreated.length})</Label>
 								{report.filesCreated.map((file, i) => (
 									<SuccessText key={i}>
 										{" "}
@@ -199,9 +194,7 @@ export function CompletionReport({
 						)}
 						{report.filesModified.length > 0 && (
 							<Stack>
-								<Label color="yellow">
-									Modified ({report.filesModified.length})
-								</Label>
+								<Label color="yellow">Modified ({report.filesModified.length})</Label>
 								{report.filesModified.map((file, i) => (
 									<WarningText key={i}>
 										{" "}
@@ -236,11 +229,7 @@ export function CompletionReport({
 					hotkey="3"
 				>
 					{report.evidence.map((evidence, i) => (
-						<EvidenceItem
-							key={i}
-							evidence={evidence}
-							isLast={i === report.evidence.length - 1}
-						/>
+						<EvidenceItem key={i} evidence={evidence} isLast={i === report.evidence.length - 1} />
 					))}
 				</CollapsibleSection>
 			)}
@@ -396,10 +385,7 @@ function StepItem({ step }: { step: StepSummary }) {
 	);
 }
 
-function EvidenceItem({
-	evidence,
-	isLast,
-}: { evidence: EvidenceSummary; isLast: boolean }) {
+function EvidenceItem({ evidence, isLast }: { evidence: EvidenceSummary; isLast: boolean }) {
 	const statusConfig = {
 		pass: { color: "green" as const, icon: boxChars.checkmark },
 		fail: { color: "red" as const, icon: boxChars.crossmark },
@@ -440,12 +426,7 @@ function StatsGrid({ report }: { report: CompletionReportData }) {
 		{
 			label: "Confidence",
 			value: `${report.confidence}%`,
-			color:
-				report.confidence >= 80
-					? "green"
-					: report.confidence >= 50
-						? "yellow"
-						: "red",
+			color: report.confidence >= 80 ? "green" : report.confidence >= 50 ? "yellow" : "red",
 		},
 	];
 
@@ -524,12 +505,7 @@ function formatReportAsText(report: CompletionReportData): string {
 	if (report.steps.length > 0) {
 		lines.push("Steps:");
 		for (const step of report.steps) {
-			const icon =
-				step.status === "completed"
-					? "[x]"
-					: step.status === "failed"
-						? "[!]"
-						: "[ ]";
+			const icon = step.status === "completed" ? "[x]" : step.status === "failed" ? "[!]" : "[ ]";
 			lines.push(`  ${step.index}. ${icon} ${step.description}`);
 		}
 		lines.push("");
@@ -546,9 +522,7 @@ function formatReportAsText(report: CompletionReportData): string {
 // Simple Report Display
 // ============================================
 
-export function SimpleCompletionReport({
-	report,
-}: { report: CompletionReportData }) {
+export function SimpleCompletionReport({ report }: { report: CompletionReportData }) {
 	return (
 		<Stack paddingX={1}>
 			<StatusBanner status={report.status} />
@@ -563,9 +537,7 @@ export function SimpleCompletionReport({
 				<MutedText> | Duration: </MutedText>
 				<WarningText>{report.duration}</WarningText>
 				<MutedText> | Confidence: </MutedText>
-				<Text color={report.confidence >= 80 ? "green" : "yellow"}>
-					{report.confidence}%
-				</Text>
+				<Text color={report.confidence >= 80 ? "green" : "yellow"}>{report.confidence}%</Text>
 			</Inline>
 		</Stack>
 	);

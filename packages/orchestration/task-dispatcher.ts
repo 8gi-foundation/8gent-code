@@ -5,13 +5,7 @@
  * State transitions: pending → claimed → running → completed | failed → retrying → pending
  */
 
-export type TaskState =
-	| "pending"
-	| "claimed"
-	| "running"
-	| "completed"
-	| "failed"
-	| "retrying";
+export type TaskState = "pending" | "claimed" | "running" | "completed" | "failed" | "retrying";
 
 export interface DispatchedTask {
 	id: string;
@@ -33,8 +27,7 @@ const STALL_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
 /** Deterministic jitter from task ID — same task always gets same jitter offset */
 function idHash(id: string): number {
 	let h = 0;
-	for (let i = 0; i < id.length; i++)
-		h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+	for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
 	return Math.abs(h);
 }
 
@@ -85,8 +78,7 @@ export class TaskDispatcher {
 		if (!task) return;
 		task.state = "failed";
 		task.error = error;
-		const delay =
-			task.attempts ** 2 * BASE_DELAY_MS + (idHash(taskId) % JITTER_MS);
+		const delay = task.attempts ** 2 * BASE_DELAY_MS + (idHash(taskId) % JITTER_MS);
 		setTimeout(() => {
 			if (task.state === "failed") {
 				task.state = "pending";
@@ -109,11 +101,7 @@ export class TaskDispatcher {
 		const now = Date.now();
 		const released: string[] = [];
 		for (const task of this.tasks.values()) {
-			if (
-				task.state === "claimed" &&
-				task.claimedAt &&
-				now - task.claimedAt > STALL_TIMEOUT_MS
-			) {
+			if (task.state === "claimed" && task.claimedAt && now - task.claimedAt > STALL_TIMEOUT_MS) {
 				task.state = "pending";
 				task.claimedBy = undefined;
 				task.claimedAt = undefined;

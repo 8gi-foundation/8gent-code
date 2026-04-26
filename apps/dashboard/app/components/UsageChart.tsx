@@ -57,10 +57,7 @@ const METRIC_CONFIG: Record<
 	},
 };
 
-export function UsageChart({
-	data,
-	title = "Usage (Last 30 Days)",
-}: UsageChartProps) {
+export function UsageChart({ data, title = "Usage (Last 30 Days)" }: UsageChartProps) {
 	const [metric, setMetric] = useState<MetricKey>("totalTokens");
 	const config = METRIC_CONFIG[metric];
 
@@ -73,9 +70,7 @@ export function UsageChart({
 	return (
 		<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
 			<div className="mb-4 flex items-center justify-between">
-				<h3 className="text-sm font-medium text-[var(--8gent-text)]">
-					{title}
-				</h3>
+				<h3 className="text-sm font-medium text-[var(--8gent-text)]">{title}</h3>
 				<div className="flex gap-1">
 					{(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => (
 						<button
@@ -101,11 +96,7 @@ export function UsageChart({
 								<stop offset="95%" stopColor={config.color} stopOpacity={0} />
 							</linearGradient>
 						</defs>
-						<CartesianGrid
-							strokeDasharray="3 3"
-							stroke="var(--8gent-border)"
-							vertical={false}
-						/>
+						<CartesianGrid strokeDasharray="3 3" stroke="var(--8gent-border)" vertical={false} />
 						<XAxis
 							dataKey="displayDate"
 							tick={{ fill: "var(--8gent-text-muted)", fontSize: 11 }}
@@ -127,10 +118,7 @@ export function UsageChart({
 								color: "var(--8gent-text)",
 								fontSize: "12px",
 							}}
-							formatter={(value: number) => [
-								config.formatter(value),
-								config.label,
-							]}
+							formatter={(value: number) => [config.formatter(value), config.label]}
 							labelFormatter={(label) => `Date: ${label}`}
 						/>
 						<Area

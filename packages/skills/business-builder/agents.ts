@@ -65,12 +65,7 @@ Be specific. Name actual tools and workflows.`,
 	{
 		id: "marketing",
 		role: "Head of Marketing",
-		outputs: [
-			"Brand Guidelines",
-			"Content Strategy",
-			"SEO/AEO Playbook",
-			"Campaign Briefs",
-		],
+		outputs: ["Brand Guidelines", "Content Strategy", "SEO/AEO Playbook", "Campaign Briefs"],
 		collaborates: ["sales", "product", "strategy"],
 		promptTemplate: `You are the Head of Marketing. Using the strategy below, build the brand and go-to-market plan.
 
@@ -91,12 +86,7 @@ Be specific. Include channel recommendations with follower/traffic targets.`,
 	{
 		id: "sales",
 		role: "Head of Sales",
-		outputs: [
-			"Sales Playbook",
-			"CRM Configuration",
-			"Outreach Sequences",
-			"Pipeline Dashboard",
-		],
+		outputs: ["Sales Playbook", "CRM Configuration", "Outreach Sequences", "Pipeline Dashboard"],
 		collaborates: ["marketing", "finance", "customer"],
 		promptTemplate: `You are the Head of Sales. Using the strategy below, design the sales engine.
 
@@ -117,12 +107,7 @@ Be specific. Include actual email subject lines and message frameworks.`,
 	{
 		id: "finance",
 		role: "CFO",
-		outputs: [
-			"Financial Model",
-			"Pricing Matrix",
-			"Cash Flow Projections",
-			"Invoice Templates",
-		],
+		outputs: ["Financial Model", "Pricing Matrix", "Cash Flow Projections", "Invoice Templates"],
 		collaborates: ["strategy", "sales", "operations"],
 		promptTemplate: `You are the CFO. Using the strategy below, build the financial foundation.
 
@@ -170,12 +155,7 @@ Be specific about what documents are needed and why.`,
 	{
 		id: "hr",
 		role: "Head of People",
-		outputs: [
-			"Org Blueprint",
-			"Job Descriptions",
-			"Onboarding Playbook",
-			"Compensation Framework",
-		],
+		outputs: ["Org Blueprint", "Job Descriptions", "Onboarding Playbook", "Compensation Framework"],
 		collaborates: ["operations", "legal", "finance"],
 		promptTemplate: `You are the Head of People. Using the strategy below, design the team and culture.
 
@@ -197,12 +177,7 @@ Ground compensation in real market data.`,
 	{
 		id: "product",
 		role: "Head of Product",
-		outputs: [
-			"Product Roadmap",
-			"Feature Specs",
-			"User Personas",
-			"Prioritization Matrix",
-		],
+		outputs: ["Product Roadmap", "Feature Specs", "User Personas", "Prioritization Matrix"],
 		collaborates: ["strategy", "tech", "marketing"],
 		promptTemplate: `You are the Head of Product. Using the strategy below, define what gets built.
 

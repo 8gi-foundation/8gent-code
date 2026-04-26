@@ -7,12 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import {
-	type RoleConfig,
-	defaultRoleConfig,
-	loadRoleConfig,
-	saveRoleConfig,
-} from "./role-config";
+import { type RoleConfig, defaultRoleConfig, loadRoleConfig, saveRoleConfig } from "./role-config";
 
 let tempDir: string;
 let originalPlatform: PropertyDescriptor | undefined;
@@ -27,8 +22,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	process.env.EIGHT_ROLE_CONFIG_DIR = undefined;
-	if (originalPlatform)
-		Object.defineProperty(process, "platform", originalPlatform);
+	if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
 	if (originalArch) Object.defineProperty(process, "arch", originalArch);
 	try {
 		fs.rmSync(tempDir, { recursive: true, force: true });
@@ -70,12 +64,7 @@ describe("defaultRoleConfig", () => {
 		setPlatform("darwin", "arm64");
 		// isAppleFoundationAvailable() checks ~/.8gent/bin/apple-foundation-bridge
 		// which does not exist in our temp dir setup, so it returns false here.
-		const bridgePath = path.join(
-			os.homedir(),
-			".8gent",
-			"bin",
-			"apple-foundation-bridge",
-		);
+		const bridgePath = path.join(os.homedir(), ".8gent", "bin", "apple-foundation-bridge");
 		const bridgeExists = fs.existsSync(bridgePath);
 		const cfg = defaultRoleConfig();
 		if (bridgeExists) {
@@ -105,10 +94,7 @@ describe("loadRoleConfig", () => {
 
 	test("returns defaults when roles.json fails schema validation", () => {
 		setPlatform("linux", "x64");
-		fs.writeFileSync(
-			path.join(tempDir, "roles.json"),
-			JSON.stringify({ schemaVersion: 999 }),
-		);
+		fs.writeFileSync(path.join(tempDir, "roles.json"), JSON.stringify({ schemaVersion: 999 }));
 		const cfg = loadRoleConfig();
 		expect(cfg).toEqual(defaultRoleConfig());
 	});

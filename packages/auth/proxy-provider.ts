@@ -106,10 +106,7 @@ export async function isProxyAvailable(proxyUrl?: string): Promise<boolean> {
  * Build headers for proxied requests.
  * Returns Authorization + X-Vessel-Id headers.
  */
-export function getProxyHeaders(
-	token: string,
-	vesselId: string,
-): Record<string, string> {
+export function getProxyHeaders(token: string, vesselId: string): Record<string, string> {
 	return {
 		Authorization: `Bearer ${token}`,
 		"X-Vessel-Id": vesselId,

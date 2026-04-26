@@ -40,25 +40,15 @@ export interface FormatNumberOptions {
  * formatNumber(3, { ordinal: true })             // "3rd"
  * formatNumber(1_572_864, { fileSize: true })    // "1.5 MB"
  */
-export function formatNumber(
-	n: number,
-	options: FormatNumberOptions = {},
-): string {
+export function formatNumber(n: number, options: FormatNumberOptions = {}): string {
 	if (!Number.isFinite(n) || Number.isNaN(n)) return "0";
 
 	if (options.fileSize) return formatFileSize(n);
 	if (options.ordinal) return formatOrdinal(n);
-	if (options.compact)
-		return formatCompact(n, options.locale, options.decimals);
-	if (options.percent)
-		return formatPercent(n, options.locale, options.decimals);
+	if (options.compact) return formatCompact(n, options.locale, options.decimals);
+	if (options.percent) return formatPercent(n, options.locale, options.decimals);
 	if (options.currency)
-		return formatCurrency(
-			n,
-			options.currency,
-			options.locale,
-			options.decimals,
-		);
+		return formatCurrency(n, options.currency, options.locale, options.decimals);
 
 	return formatDecimal(n, options.locale, options.decimals);
 }
@@ -72,11 +62,7 @@ export function formatNumber(
  * formatDecimal(1234567.89, "en-US", 2) => "1,234,567.89"
  * formatDecimal(1234567.89, "de-DE", 2) => "1.234.567,89"
  */
-export function formatDecimal(
-	n: number,
-	locale = "en-US",
-	decimals?: number,
-): string {
+export function formatDecimal(n: number, locale = "en-US", decimals?: number): string {
 	const opts: Intl.NumberFormatOptions =
 		decimals !== undefined
 			? { minimumFractionDigits: decimals, maximumFractionDigits: decimals }
@@ -111,11 +97,7 @@ export function formatCurrency(
  * formatPercent(1)                  => "100%"
  * formatPercent(0.1234, "en-US", 2) => "12.34%"
  */
-export function formatPercent(
-	n: number,
-	locale = "en-US",
-	decimals?: number,
-): string {
+export function formatPercent(n: number, locale = "en-US", decimals?: number): string {
 	const opts: Intl.NumberFormatOptions = {
 		style: "percent",
 		...(decimals !== undefined
@@ -131,11 +113,7 @@ export function formatPercent(
  * formatCompact(3_400_000)  => "3.4M"
  * formatCompact(1.5e12)     => "1.5T"
  */
-export function formatCompact(
-	n: number,
-	locale = "en-US",
-	decimals?: number,
-): string {
+export function formatCompact(n: number, locale = "en-US", decimals?: number): string {
 	const opts: Intl.NumberFormatOptions = {
 		notation: "compact",
 		compactDisplay: "short",
@@ -184,7 +162,5 @@ export function formatFileSize(bytes: number, decimals = 1): string {
 		index++;
 	}
 
-	return index === 0
-		? `${Math.round(value)} B`
-		: `${value.toFixed(decimals)} ${units[index]}`;
+	return index === 0 ? `${Math.round(value)} B` : `${value.toFixed(decimals)} ${units[index]}`;
 }

@@ -11,11 +11,7 @@ export class ApiClient {
 		this.config = config;
 	}
 
-	async request<T>(
-		method: HttpMethod,
-		path: string,
-		body?: unknown,
-	): Promise<ApiResponse<T>> {
+	async request<T>(method: HttpMethod, path: string, body?: unknown): Promise<ApiResponse<T>> {
 		const url = `${this.config.baseUrl}${path}`;
 
 		const response = await fetch(url, {

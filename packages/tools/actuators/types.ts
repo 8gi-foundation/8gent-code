@@ -26,9 +26,7 @@ export interface ActuatorConfig {
 }
 
 /** Create a default safe config (dryRun on, no restrictions) */
-export function defaultConfig(
-	overrides?: Partial<ActuatorConfig>,
-): ActuatorConfig {
+export function defaultConfig(overrides?: Partial<ActuatorConfig>): ActuatorConfig {
 	return {
 		dryRun: true,
 		requireConfirmation: false,
@@ -56,11 +54,7 @@ export function ok(
 }
 
 /** Build a failed ActuatorResult */
-export function fail(
-	action: string,
-	target: string,
-	details: string,
-): ActuatorResult {
+export function fail(action: string, target: string, details: string): ActuatorResult {
 	return {
 		success: false,
 		action,
@@ -72,22 +66,14 @@ export function fail(
 }
 
 /** Check if a target is allowed by config. Returns null if OK, error string if not. */
-export function checkTarget(
-	target: string,
-	config: ActuatorConfig,
-): string | null {
+export function checkTarget(target: string, config: ActuatorConfig): string | null {
 	if (config.allowedTargets.length === 0) return null;
 	if (config.allowedTargets.includes(target)) return null;
 	return `Target "${target}" not in allowedTargets: [${config.allowedTargets.join(", ")}]`;
 }
 
 /** Log an actuator action to stderr */
-export function log(
-	action: string,
-	target: string,
-	dryRun: boolean,
-	detail?: string,
-): void {
+export function log(action: string, target: string, dryRun: boolean, detail?: string): void {
 	const prefix = dryRun ? "[DRY RUN]" : "[ACTUATOR]";
 	const msg = detail
 		? `${prefix} ${action} -> ${target}: ${detail}`

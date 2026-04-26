@@ -34,9 +34,7 @@ export const getByGithubUsername = query({
 	handler: async (ctx, { githubUsername }) => {
 		return await ctx.db
 			.query("users")
-			.withIndex("by_githubUsername", (q) =>
-				q.eq("githubUsername", githubUsername),
-			)
+			.withIndex("by_githubUsername", (q) => q.eq("githubUsername", githubUsername))
 			.unique();
 	},
 });

@@ -105,11 +105,7 @@ export class SessionSyncManager {
 	 * Start tracking a session in Convex.
 	 * Fire-and-forget — never blocks the agent loop.
 	 */
-	async startSession(
-		model: string,
-		provider: string,
-		workingDirectory?: string,
-	): Promise<void> {
+	async startSession(model: string, provider: string, workingDirectory?: string): Promise<void> {
 		if (!this.enabled) return;
 
 		try {
@@ -134,11 +130,7 @@ export class SessionSyncManager {
 				}, 10_000);
 
 				// Don't let the timer keep the process alive
-				if (
-					this.flushTimer &&
-					typeof this.flushTimer === "object" &&
-					"unref" in this.flushTimer
-				) {
+				if (this.flushTimer && typeof this.flushTimer === "object" && "unref" in this.flushTimer) {
 					this.flushTimer.unref();
 				}
 			}
@@ -232,10 +224,7 @@ export class SessionSyncManager {
 			await this._client.mutation(this._api.conversations.upsert, {
 				userId: this.userId,
 				sessionId: this.convexSessionId || `local_${Date.now()}`,
-				title:
-					title ||
-					messages.find((m) => m.role === "user")?.content.slice(0, 80) ||
-					"Untitled",
+				title: title || messages.find((m) => m.role === "user")?.content.slice(0, 80) || "Untitled",
 				messageCount: messages.length,
 				model: this.sessionModel || "unknown",
 				workingDirectory: this.sessionWorkingDir,
@@ -250,9 +239,7 @@ export class SessionSyncManager {
 	 * Start periodic checkpoint saving.
 	 * Saves every 60 seconds if there are new messages.
 	 */
-	startCheckpointTimer(
-		getMessages: () => Array<{ role: string; content: string }>,
-	): void {
+	startCheckpointTimer(getMessages: () => Array<{ role: string; content: string }>): void {
 		if (this.checkpointTimer) return;
 
 		this.checkpointTimer = setInterval(() => {
@@ -342,10 +329,10 @@ export class SessionSyncManager {
 			const available = await this.resolveConvex();
 			if (!available) return [];
 
-			const conversations = await this._client.query(
-				this._api.conversations.getRecent,
-				{ userId: this.userId, limit },
-			);
+			const conversations = await this._client.query(this._api.conversations.getRecent, {
+				userId: this.userId,
+				limit,
+			});
 
 			return conversations.map((c: any) => ({
 				id: c.sessionId,
@@ -366,19 +353,16 @@ export class SessionSyncManager {
 	 * Restore a conversation from a remote checkpoint.
 	 * Downloads the checkpoint data and returns hydrated messages.
 	 */
-	async restoreFromRemote(
-		sessionId: string,
-	): Promise<RestoredConversation | null> {
+	async restoreFromRemote(sessionId: string): Promise<RestoredConversation | null> {
 		if (!this.enabled) return null;
 
 		try {
 			const available = await this.resolveConvex();
 			if (!available) return null;
 
-			const conversation = await this._client.query(
-				this._api.conversations.getBySessionId,
-				{ sessionId },
-			);
+			const conversation = await this._client.query(this._api.conversations.getBySessionId, {
+				sessionId,
+			});
 
 			if (!conversation?.checkpointData) return null;
 
@@ -413,10 +397,10 @@ export class SessionSyncManager {
 			const available = await this.resolveConvex();
 			if (!available) return [];
 
-			const active = await this._client.query(
-				this._api.sessions.getActiveOnOtherSurfaces,
-				{ userId: this.userId, currentChannel: this.channel },
-			);
+			const active = await this._client.query(this._api.sessions.getActiveOnOtherSurfaces, {
+				userId: this.userId,
+				currentChannel: this.channel,
+			});
 
 			return active.map((s: any) => ({
 				id: s._id,

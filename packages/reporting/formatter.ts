@@ -210,22 +210,14 @@ export function box(content: string, options: BoxOptions = {}): string {
 			colorize(chars.h.repeat(rightPad), borderColor) +
 			colorize(chars.tr, borderColor);
 	} else {
-		topBorder = colorize(
-			chars.tl + chars.h.repeat(innerWidth) + chars.tr,
-			borderColor,
-		);
+		topBorder = colorize(chars.tl + chars.h.repeat(innerWidth) + chars.tr, borderColor);
 	}
 
 	// Build bottom border
-	const bottomBorder = colorize(
-		chars.bl + chars.h.repeat(innerWidth) + chars.br,
-		borderColor,
-	);
+	const bottomBorder = colorize(chars.bl + chars.h.repeat(innerWidth) + chars.br, borderColor);
 
 	// Build content lines
-	const lines = content
-		.split("\n")
-		.flatMap((line) => wrapText(line, contentWidth));
+	const lines = content.split("\n").flatMap((line) => wrapText(line, contentWidth));
 	const contentLines = lines.map((line) => {
 		const stripped = stripAnsi(line);
 		const padNeeded = contentWidth - stripped.length;
@@ -264,11 +256,7 @@ export interface TableOptions {
 	align?: ("left" | "center" | "right")[];
 }
 
-export function table(
-	headers: string[],
-	rows: string[][],
-	options: TableOptions = {},
-): string {
+export function table(headers: string[], rows: string[][], options: TableOptions = {}): string {
 	const {
 		headerColor = "info",
 		borderColor = "muted",
@@ -281,17 +269,11 @@ export function table(
 		columnWidths ||
 		headers.map((h, i) => {
 			const headerLen = stripAnsi(h).length;
-			const maxRowLen = Math.max(
-				...rows.map((row) => stripAnsi(row[i] || "").length),
-			);
+			const maxRowLen = Math.max(...rows.map((row) => stripAnsi(row[i] || "").length));
 			return Math.max(headerLen, maxRowLen) + 2;
 		});
 
-	const formatCell = (
-		text: string,
-		width: number,
-		alignment: "left" | "center" | "right",
-	) => {
+	const formatCell = (text: string, width: number, alignment: "left" | "center" | "right") => {
 		const stripped = stripAnsi(text);
 		const padNeeded = width - stripped.length;
 		if (padNeeded <= 0) return text;
@@ -312,17 +294,13 @@ export function table(
 	// Top border
 	const topBorder =
 		colorize(boxChars.singleTopLeft, borderColor) +
-		widths
-			.map((w) => h.repeat(w))
-			.join(colorize(boxChars.teeDown, borderColor)) +
+		widths.map((w) => h.repeat(w)).join(colorize(boxChars.teeDown, borderColor)) +
 		colorize(boxChars.singleTopRight, borderColor);
 
 	// Header row
 	const headerRow =
 		v +
-		headers
-			.map((h, i) => colorize(formatCell(h, widths[i], align[i]), headerColor))
-			.join(v) +
+		headers.map((h, i) => colorize(formatCell(h, widths[i], align[i]), headerColor)).join(v) +
 		v;
 
 	// Header separator
@@ -333,10 +311,7 @@ export function table(
 
 	// Data rows
 	const dataRows = rows.map(
-		(row) =>
-			v +
-			row.map((cell, i) => formatCell(cell, widths[i], align[i])).join(v) +
-			v,
+		(row) => v + row.map((cell, i) => formatCell(cell, widths[i], align[i])).join(v) + v,
 	);
 
 	// Bottom border
@@ -345,9 +320,7 @@ export function table(
 		widths.map((w) => h.repeat(w)).join(colorize(boxChars.teeUp, borderColor)) +
 		colorize(boxChars.singleBottomRight, borderColor);
 
-	return [topBorder, headerRow, headerSep, ...dataRows, bottomBorder].join(
-		"\n",
-	);
+	return [topBorder, headerRow, headerSep, ...dataRows, bottomBorder].join("\n");
 }
 
 // ============================================
@@ -361,16 +334,10 @@ export interface ListOptions {
 }
 
 export function list(items: string[], options: ListOptions = {}): string {
-	const {
-		bullet = boxChars.bullet,
-		indent = 2,
-		bulletColor = "info",
-	} = options;
+	const { bullet = boxChars.bullet, indent = 2, bulletColor = "info" } = options;
 
 	const indentStr = " ".repeat(indent);
-	return items
-		.map((item) => `${indentStr}${colorize(bullet, bulletColor)} ${item}`)
-		.join("\n");
+	return items.map((item) => `${indentStr}${colorize(bullet, bulletColor)} ${item}`).join("\n");
 }
 
 export function numberedList(items: string[], startIndex = 1): string {
@@ -401,10 +368,7 @@ export function tree(items: TreeItem[], indent = 0): string {
 			const childPrefix = isLast ? "    " : `${boxChars.treeVertical}   `;
 			const childTree = tree(item.children, indent + 4);
 			lines.push(
-				childTree.replace(
-					/^/gm,
-					prefix + (isLast ? "    " : `${muted(boxChars.treeVertical)}   `),
-				),
+				childTree.replace(/^/gm, prefix + (isLast ? "    " : `${muted(boxChars.treeVertical)}   `)),
 			);
 		}
 	});
@@ -429,11 +393,7 @@ export function statusLine(
 	return `${muted(`${label}:`)} ${colorize(value, valueColor)}`;
 }
 
-export function keyValueLine(
-	key: string,
-	value: string,
-	keyWidth = 20,
-): string {
+export function keyValueLine(key: string, value: string, keyWidth = 20): string {
 	const paddedKey = key.padEnd(keyWidth);
 	return `${muted(paddedKey)} ${value}`;
 }
@@ -481,29 +441,19 @@ export function sectionHeader(text: string, width = 64): string {
 	const leftPad = Math.floor(totalPad / 2);
 	const rightPad = totalPad - leftPad;
 
-	return (
-		muted("=".repeat(leftPad)) +
-		bold(info(padded)) +
-		muted("=".repeat(rightPad))
-	);
+	return muted("=".repeat(leftPad)) + bold(info(padded)) + muted("=".repeat(rightPad));
 }
 
 // ============================================
 // Progress Indicators
 // ============================================
 
-export function progressBar(
-	current: number,
-	total: number,
-	width = 40,
-): string {
+export function progressBar(current: number, total: number, width = 40): string {
 	const percentage = Math.min(100, Math.max(0, (current / total) * 100));
 	const filled = Math.round((width * percentage) / 100);
 	const empty = width - filled;
 
-	const bar =
-		success(boxChars.square.repeat(filled)) +
-		muted(boxChars.emptySquare.repeat(empty));
+	const bar = success(boxChars.square.repeat(filled)) + muted(boxChars.emptySquare.repeat(empty));
 	const pct = `${Math.round(percentage)}%`.padStart(4);
 
 	return `${bar} ${muted(pct)}`;
@@ -529,9 +479,7 @@ export function spinner(frame: number): string {
 // Status Icons
 // ============================================
 
-export function statusIcon(
-	status: "pass" | "fail" | "pending" | "skipped" | "running",
-): string {
+export function statusIcon(status: "pass" | "fail" | "pending" | "skipped" | "running"): string {
 	switch (status) {
 		case "pass":
 			return success(boxChars.checkmark);
@@ -601,11 +549,7 @@ export function wrapText(text: string, maxWidth: number): string[] {
 	return lines;
 }
 
-export function truncate(
-	text: string,
-	maxLength: number,
-	suffix = "...",
-): string {
+export function truncate(text: string, maxLength: number, suffix = "..."): string {
 	const stripped = stripAnsi(text);
 	if (stripped.length <= maxLength) {
 		return text;
@@ -656,7 +600,6 @@ export function formatNumber(num: number): string {
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes}B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-	if (bytes < 1024 * 1024 * 1024)
-		return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
 }

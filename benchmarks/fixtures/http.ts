@@ -20,9 +20,7 @@ export interface HttpResponse {
 	body: any;
 }
 
-export type Handler = (
-	req: HttpRequest,
-) => HttpResponse | Promise<HttpResponse>;
+export type Handler = (req: HttpRequest) => HttpResponse | Promise<HttpResponse>;
 export type Middleware = (
 	req: HttpRequest,
 	next: () => HttpResponse | Promise<HttpResponse>,
@@ -91,16 +89,11 @@ export class Router {
 		const patternParts = pattern.split("/");
 		const actualParts = actual.split("/");
 		if (patternParts.length !== actualParts.length) return false;
-		return patternParts.every(
-			(p, i) => p.startsWith(":") || p === actualParts[i],
-		);
+		return patternParts.every((p, i) => p.startsWith(":") || p === actualParts[i]);
 	}
 
 	/** Extract path params (e.g., /users/:id → { id: "123" }) */
-	static extractParams(
-		pattern: string,
-		actual: string,
-	): Record<string, string> {
+	static extractParams(pattern: string, actual: string): Record<string, string> {
 		const params: Record<string, string> = {};
 		const patternParts = pattern.split("/");
 		const actualParts = actual.split("/");

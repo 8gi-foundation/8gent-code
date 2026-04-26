@@ -85,9 +85,7 @@ export async function buildMemoryContext(
 	return context;
 }
 
-function extractContent(
-	memory: Record<string, unknown> | { [key: string]: any },
-): string {
+function extractContent(memory: Record<string, unknown> | { [key: string]: any }): string {
 	const m = memory as Record<string, string>;
 	return m.content || m.value || m.title || m.description || m.name || "";
 }

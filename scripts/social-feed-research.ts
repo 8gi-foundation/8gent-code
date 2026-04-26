@@ -32,9 +32,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "5486040131";
 const args = process.argv.slice(2);
 const isDryRun = args.includes("--dry-run");
 const isVessel = args.includes("--vessel");
-const maxFindings = Number.parseInt(
-	args.find((_, i, a) => a[i - 1] === "--max") || "20",
-);
+const maxFindings = Number.parseInt(args.find((_, i, a) => a[i - 1] === "--max") || "20");
 
 // Ensure dirs
 fs.mkdirSync(FINDINGS_DIR, { recursive: true });
@@ -260,21 +258,15 @@ function scoreRelevance(text: string): { score: number; keywords: string[] } {
 
 function classifyTarget(keywords: string[]): string {
 	const keywordStr = keywords.join(" ");
-	if (/agent|harness|sandbox|spawn|orchestr/.test(keywordStr))
-		return "8gent-code";
+	if (/agent|harness|sandbox|spawn|orchestr/.test(keywordStr)) return "8gent-code";
 	if (/aac|child|coppa|access|a11y/.test(keywordStr)) return "8gentjr";
-	if (/onboard|growth|retention|activation/.test(keywordStr))
-		return "8gent-world";
-	if (/security|injection|jailbreak|safety|guardrail/.test(keywordStr))
-		return "8gi-governance";
-	if (/model|fine-tune|lora|inference|ollama/.test(keywordStr))
-		return "8gent-code";
+	if (/onboard|growth|retention|activation/.test(keywordStr)) return "8gent-world";
+	if (/security|injection|jailbreak|safety|guardrail/.test(keywordStr)) return "8gi-governance";
+	if (/model|fine-tune|lora|inference|ollama/.test(keywordStr)) return "8gent-code";
 	return "8gent-code";
 }
 
-function estimateEffort(
-	summary: string,
-): "trivial" | "small" | "medium" | "large" {
+function estimateEffort(summary: string): "trivial" | "small" | "medium" | "large" {
 	const len = summary.length;
 	if (len < 200) return "trivial";
 	if (len < 500) return "small";
@@ -290,10 +282,7 @@ async function browseWithPlaywright(): Promise<Finding[]> {
 	log("Using Playwright with existing Chrome profile...");
 
 	// Find Chrome user data directory
-	const chromeProfile = path.join(
-		os.homedir(),
-		"Library/Application Support/Google/Chrome",
-	);
+	const chromeProfile = path.join(os.homedir(), "Library/Application Support/Google/Chrome");
 	if (!fs.existsSync(chromeProfile)) {
 		log("Chrome profile not found — skipping Playwright mode");
 		return [];
@@ -628,16 +617,7 @@ ${finding.url !== finding.source ? `**Link:** ${finding.url}` : ""}
 		// Label might not exist — try without label
 		const retryResult = spawnSync(
 			"gh",
-			[
-				"issue",
-				"create",
-				"--repo",
-				repo,
-				"--title",
-				`research: ${finding.title}`,
-				"--body",
-				body,
-			],
+			["issue", "create", "--repo", repo, "--title", `research: ${finding.title}`, "--body", body],
 			{ encoding: "utf-8", timeout: 15000 },
 		);
 
@@ -647,9 +627,7 @@ ${finding.url !== finding.source ? `**Link:** ${finding.url}` : ""}
 			return url;
 		}
 
-		log(
-			`  Issue creation failed: ${(result.stderr || retryResult.stderr || "").slice(0, 200)}`,
-		);
+		log(`  Issue creation failed: ${(result.stderr || retryResult.stderr || "").slice(0, 200)}`);
 	} catch (err) {
 		log(`  Issue creation error: ${err}`);
 	}
@@ -661,10 +639,7 @@ ${finding.url !== finding.source ? `**Link:** ${finding.url}` : ""}
 // Telegram notification
 // ============================================
 
-async function notifyTelegram(
-	findings: Finding[],
-	issues: string[],
-): Promise<void> {
+async function notifyTelegram(findings: Finding[], issues: string[]): Promise<void> {
 	const token = TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
 	if (!token) return;
 
@@ -676,10 +651,7 @@ async function notifyTelegram(
 		"",
 		...findings
 			.slice(0, 5)
-			.map(
-				(f, i) =>
-					`${i + 1}. [${f.relevanceScore}] ${f.title.slice(0, 50)} → ${f.targetRepo}`,
-			),
+			.map((f, i) => `${i + 1}. [${f.relevanceScore}] ${f.title.slice(0, 50)} → ${f.targetRepo}`),
 		findings.length > 5 ? `...and ${findings.length - 5} more` : "",
 		"",
 		"_Review in GitHub issues when you wake up._",
@@ -705,13 +677,9 @@ async function notifyTelegram(
 function loadPreviousFindings(): Set<string> {
 	const seen = new Set<string>();
 	try {
-		const files = fs
-			.readdirSync(FINDINGS_DIR)
-			.filter((f) => f.endsWith(".json"));
+		const files = fs.readdirSync(FINDINGS_DIR).filter((f) => f.endsWith(".json"));
 		for (const file of files) {
-			const data = JSON.parse(
-				fs.readFileSync(path.join(FINDINGS_DIR, file), "utf-8"),
-			);
+			const data = JSON.parse(fs.readFileSync(path.join(FINDINGS_DIR, file), "utf-8"));
 			if (data.url) seen.add(data.url);
 			if (data.title) seen.add(data.title);
 		}
@@ -721,10 +689,7 @@ function loadPreviousFindings(): Set<string> {
 
 function saveFinding(finding: Finding): void {
 	const id = `${finding.platform}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-	fs.writeFileSync(
-		path.join(FINDINGS_DIR, `${id}.json`),
-		JSON.stringify(finding, null, 2),
-	);
+	fs.writeFileSync(path.join(FINDINGS_DIR, `${id}.json`), JSON.stringify(finding, null, 2));
 }
 
 // ============================================
@@ -754,9 +719,7 @@ export async function runSocialResearch(): Promise<{
 
 	// Phase 2: Dedup against previous runs
 	const seen = loadPreviousFindings();
-	const newFindings = rawFindings.filter(
-		(f) => !seen.has(f.url) && !seen.has(f.title),
-	);
+	const newFindings = rawFindings.filter((f) => !seen.has(f.url) && !seen.has(f.title));
 	log(`Phase 2: ${newFindings.length} new findings after dedup`);
 
 	// Phase 3: Score and rank
@@ -773,9 +736,7 @@ export async function runSocialResearch(): Promise<{
 		if (enriched.jtbd && enriched.jtbd !== "NOT_RELEVANT") {
 			analyzed.push(enriched);
 			saveFinding(enriched);
-			log(
-				`  [${enriched.relevanceScore}] ${enriched.title.slice(0, 50)} → ${enriched.targetRepo}`,
-			);
+			log(`  [${enriched.relevanceScore}] ${enriched.title.slice(0, 50)} → ${enriched.targetRepo}`);
 		}
 		// Rate limit
 		await new Promise((r) => setTimeout(r, 2000));

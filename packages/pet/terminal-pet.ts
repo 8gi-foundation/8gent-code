@@ -12,12 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-	type Companion,
-	endSession,
-	generateCompanion,
-	registerCompanion,
-} from "./companion.js";
+import { type Companion, endSession, generateCompanion, registerCompanion } from "./companion.js";
 
 // MARK: - Sprite Data (inline fallback if PNG not available)
 
@@ -374,9 +369,7 @@ if (import.meta.main) {
 
 		process.stdout.write("\x1b[s"); // save cursor
 		for (let i = 0; i < lines.length; i++) {
-			process.stdout.write(
-				`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`,
-			);
+			process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`);
 		}
 		// Label below
 		const labelPad = " ".repeat(Math.max(0, x + 4));

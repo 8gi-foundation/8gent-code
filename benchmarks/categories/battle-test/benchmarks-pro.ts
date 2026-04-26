@@ -299,8 +299,7 @@ Layout calculations for positioning chart elements:
 	{
 		id: "BT014",
 		category: "battle-test",
-		title:
-			"AI Consultancy Report Generator — Assessment, Recommendations, Roadmap",
+		title: "AI Consultancy Report Generator — Assessment, Recommendations, Roadmap",
 		difficulty: "hard",
 		prompt: `Build an AI consultancy report generation system that assesses company readiness, generates recommendations, and creates project roadmaps.
 
@@ -403,8 +402,7 @@ Project roadmap generation:
 	{
 		id: "BT015",
 		category: "battle-test",
-		title:
-			"Security Audit Framework — Scanner, Vulnerability DB, Report Generator",
+		title: "Security Audit Framework — Scanner, Vulnerability DB, Report Generator",
 		difficulty: "hard",
 		prompt: `Build a security audit framework that scans code, dependencies, and configurations for vulnerabilities.
 

@@ -123,10 +123,7 @@ export interface PreferencesInput {
 }
 
 /** Default preferences for new users. */
-export const DEFAULT_PREFERENCES: Omit<
-	DbPreferences,
-	"_id" | "userId" | "updatedAt"
-> = {
+export const DEFAULT_PREFERENCES: Omit<DbPreferences, "_id" | "userId" | "updatedAt"> = {
 	defaultModel: "",
 	defaultProvider: "ollama",
 	theme: "default",

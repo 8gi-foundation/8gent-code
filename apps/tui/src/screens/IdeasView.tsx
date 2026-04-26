@@ -46,10 +46,7 @@ function loadIdeas(): IdeaEntry[] {
 function saveIdeas(ideas: IdeaEntry[]): void {
 	try {
 		if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-		writeFileSync(
-			join(DATA_DIR, "ideas.json"),
-			JSON.stringify({ ideas }, null, 2),
-		);
+		writeFileSync(join(DATA_DIR, "ideas.json"), JSON.stringify({ ideas }, null, 2));
 	} catch {}
 }
 
@@ -76,12 +73,7 @@ interface IdeasViewProps {
 	onClose: () => void;
 }
 
-export function IdeasView({
-	visible,
-	data,
-	onUpdateData,
-	onClose,
-}: IdeasViewProps) {
+export function IdeasView({ visible, data, onUpdateData, onClose }: IdeasViewProps) {
 	const [ideas, setIdeas] = useState<IdeaEntry[]>(() => {
 		const fromFile = loadIdeas();
 		if (fromFile.length > 0) return fromFile;
@@ -103,9 +95,7 @@ export function IdeasView({
 	);
 
 	// Filtered list
-	const filtered = filterTag
-		? ideas.filter((idea) => idea.tags.includes(filterTag))
-		: ideas;
+	const filtered = filterTag ? ideas.filter((idea) => idea.tags.includes(filterTag)) : ideas;
 
 	// All unique tags
 	const allTags = Array.from(new Set(ideas.flatMap((i) => i.tags))).sort();
@@ -213,11 +203,7 @@ export function IdeasView({
 					const updated = ideas.filter((i) => i.id !== ideaToDelete.id);
 					updateIdeas(updated);
 				}
-			} else if (
-				input === "t" &&
-				filtered.length > 0 &&
-				filtered[selectedIndex]
-			) {
+			} else if (input === "t" && filtered.length > 0 && filtered[selectedIndex]) {
 				// Quick tag add: enter add mode but pre-fill with idea text + space for tag
 				setInputBuffer("");
 				setMode("add");
@@ -308,11 +294,7 @@ export function IdeasView({
 								<Box marginLeft={1}>
 									{idea.tags.map((tag) => (
 										<Box key={tag} marginRight={1}>
-											<Badge
-												label={`#${tag}`}
-												color="magenta"
-												variant="outline"
-											/>
+											<Badge label={`#${tag}`} color="magenta" variant="outline" />
 										</Box>
 									))}
 								</Box>

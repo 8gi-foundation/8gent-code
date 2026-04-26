@@ -55,8 +55,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
 
 		const { default: WebSocket } = await import("ws").catch(() => {
 			throw new Error(
-				"WebSocket package not found. Run: bun add ws\n" +
-					"Or install moshi: pip install moshi",
+				"WebSocket package not found. Run: bun add ws\n" + "Or install moshi: pip install moshi",
 			);
 		});
 
@@ -66,10 +65,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
 		ws.close();
 	}
 
-	private async *_duplexStream(
-		ws: WS,
-		audioIn: AsyncIterable<Buffer>,
-	): AsyncIterable<Buffer> {
+	private async *_duplexStream(ws: WS, audioIn: AsyncIterable<Buffer>): AsyncIterable<Buffer> {
 		const outputQueue: Buffer[] = [];
 		let done = false;
 
@@ -88,10 +84,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
 		await new Promise<void>((resolve, reject) => {
 			ws.on("open", resolve);
 			ws.on("error", reject);
-			setTimeout(
-				() => reject(new Error("Moshi WebSocket connection timeout")),
-				5000,
-			);
+			setTimeout(() => reject(new Error("Moshi WebSocket connection timeout")), 5000);
 		});
 
 		// Send persona prompt if set
@@ -122,8 +115,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
 		if (this._process && !this._process.killed) return;
 
 		// Use MPS (Apple Metal) on Apple Silicon for GPU acceleration, CPU elsewhere
-		const device =
-			process.platform === "darwin" && process.arch === "arm64" ? "mps" : "cpu";
+		const device = process.platform === "darwin" && process.arch === "arm64" ? "mps" : "cpu";
 
 		this._process = spawn(
 			"python3",

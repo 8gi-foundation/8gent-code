@@ -11,13 +11,11 @@
 import { type Task, executeTask } from "../packages/executor/autonomous";
 
 const args = process.argv.slice(2);
-const taskTitle =
-	args.find((_, i, a) => a[i - 1] === "--task") || "Test autonomous execution";
+const taskTitle = args.find((_, i, a) => a[i - 1] === "--task") || "Test autonomous execution";
 const taskDesc = args.find((_, i, a) => a[i - 1] === "--desc") || taskTitle;
 const repoPath = args.find((_, i, a) => a[i - 1] === "--repo") || process.cwd();
 const dryRun = args.includes("--dry-run");
-const model =
-	args.find((_, i, a) => a[i - 1] === "--model") || "devstral:latest";
+const model = args.find((_, i, a) => a[i - 1] === "--model") || "devstral:latest";
 
 const task: Task = {
 	id: `auto-${Date.now()}`,
@@ -41,9 +39,7 @@ console.log(`Success: ${result.success}`);
 console.log(`Attempts: ${result.attempts}`);
 console.log(`Duration: ${(result.durationMs / 1000).toFixed(1)}s`);
 console.log(`Files: ${result.filesChanged.join(", ") || "none"}`);
-console.log(
-	`Tests: ${result.testsPassed} passed, ${result.testsFailed} failed`,
-);
+console.log(`Tests: ${result.testsPassed} passed, ${result.testsFailed} failed`);
 
 if (result.branch) console.log(`Branch: ${result.branch}`);
 if (result.prUrl) console.log(`PR: ${result.prUrl}`);

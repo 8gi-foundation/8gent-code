@@ -22,12 +22,7 @@ const FADE_LEVELS = [
 	{ dimColor: false, color: "white" },
 ];
 
-export function FadeIn({
-	children,
-	duration = 300,
-	delay = 0,
-	onComplete,
-}: FadeInProps) {
+export function FadeIn({ children, duration = 300, delay = 0, onComplete }: FadeInProps) {
 	const [started, setStarted] = useState(false);
 
 	// Handle delay
@@ -62,12 +57,7 @@ interface FadeOutProps {
 	onComplete?: () => void;
 }
 
-export function FadeOut({
-	children,
-	duration = 300,
-	trigger = false,
-	onComplete,
-}: FadeOutProps) {
+export function FadeOut({ children, duration = 300, trigger = false, onComplete }: FadeOutProps) {
 	const [visible, setVisible] = useState(true);
 
 	useEffect(() => {
@@ -93,11 +83,7 @@ interface SlideInProps {
 	direction?: "left" | "right";
 }
 
-export function SlideIn({
-	children,
-	duration = 200,
-	direction = "left",
-}: SlideInProps) {
+export function SlideIn({ children, duration = 200, direction = "left" }: SlideInProps) {
 	const [visibleChars, setVisibleChars] = useState(0);
 	const text = typeof children === "string" ? children : String(children);
 
@@ -154,12 +140,7 @@ interface BlinkProps {
 	times?: number; // Number of blinks, -1 for infinite
 }
 
-export function Blink({
-	children,
-	speed = 500,
-	color = "cyan",
-	times = -1,
-}: BlinkProps) {
+export function Blink({ children, speed = 500, color = "cyan", times = -1 }: BlinkProps) {
 	const [visible, setVisible] = useState(true);
 	const [count, setCount] = useState(0);
 
@@ -188,11 +169,7 @@ interface CascadeFadeProps {
 	itemDuration?: number;
 }
 
-export function CascadeFade({
-	items,
-	delay = 100,
-	itemDuration = 200,
-}: CascadeFadeProps) {
+export function CascadeFade({ items, delay = 100, itemDuration = 200 }: CascadeFadeProps) {
 	return (
 		<Box flexDirection="column">
 			{items.map((item, index) => (
@@ -211,11 +188,7 @@ interface GlowTextProps {
 	speed?: number;
 }
 
-export function GlowText({
-	children,
-	color = "cyan",
-	speed = 200,
-}: GlowTextProps) {
+export function GlowText({ children, color = "cyan", speed = 200 }: GlowTextProps) {
 	const [glowIndex, setGlowIndex] = useState(0);
 	const text = children;
 

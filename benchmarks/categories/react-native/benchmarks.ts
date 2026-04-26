@@ -19,8 +19,7 @@ export const reactNativeBenchmarks: BenchmarkDefinition[] = [
 3. Shows a confirmation before deleting
 4. Animates item removal smoothly
 5. Handles empty state gracefully`,
-		expectedBehavior:
-			"List scrolls smoothly, items can be swiped and deleted with animation",
+		expectedBehavior: "List scrolls smoothly, items can be swiped and deleted with animation",
 		fixture: "fixtures/react-native/RN001-list.tsx",
 		rubric: {
 			correctness: {
@@ -78,8 +77,7 @@ export const reactNativeBenchmarks: BenchmarkDefinition[] = [
 3. Has a handle for grabbing
 4. Includes backdrop that dims based on position
 5. Supports keyboard avoidance`,
-		expectedBehavior:
-			"Sheet snaps to points, drags smoothly, backdrop dims proportionally",
+		expectedBehavior: "Sheet snaps to points, drags smoothly, backdrop dims proportionally",
 		fixture: "fixtures/react-native/RN002-bottom-sheet.tsx",
 		rubric: {
 			correctness: {
@@ -109,11 +107,7 @@ export const reactNativeBenchmarks: BenchmarkDefinition[] = [
 			},
 			bestPractices: {
 				weight: 15,
-				criteria: [
-					"Uses GestureDetector",
-					"Implements proper haptics",
-					"Handles safe areas",
-				],
+				criteria: ["Uses GestureDetector", "Implements proper haptics", "Handles safe areas"],
 			},
 		},
 		validators: [
@@ -132,8 +126,7 @@ export const reactNativeBenchmarks: BenchmarkDefinition[] = [
 		name: "Expo Camera with Permissions",
 		category: "react-native",
 		difficulty: "hard",
-		description:
-			"Implement camera functionality with proper permission handling",
+		description: "Implement camera functionality with proper permission handling",
 		task: `Create an Expo camera screen that:
 1. Requests camera permissions properly
 2. Shows live camera preview
@@ -141,8 +134,7 @@ export const reactNativeBenchmarks: BenchmarkDefinition[] = [
 4. Saves photos to camera roll
 5. Handles permission denied gracefully
 6. Switches between front/back camera`,
-		expectedBehavior:
-			"Camera works, photos save, permissions handled correctly",
+		expectedBehavior: "Camera works, photos save, permissions handled correctly",
 		fixture: "fixtures/react-native/RN003-camera.tsx",
 		rubric: {
 			correctness: {
@@ -164,30 +156,18 @@ export const reactNativeBenchmarks: BenchmarkDefinition[] = [
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Camera unmounts properly",
-					"No memory leaks",
-					"Efficient preview rendering",
-				],
+				criteria: ["Camera unmounts properly", "No memory leaks", "Efficient preview rendering"],
 			},
 			bestPractices: {
 				weight: 15,
-				criteria: [
-					"Uses expo-camera",
-					"Handles background state",
-					"Provides permission rationale",
-				],
+				criteria: ["Uses expo-camera", "Handles background state", "Provides permission rationale"],
 			},
 		},
 		validators: [
 			{
 				type: "ast",
 				config: {
-					mustContain: [
-						"useCameraPermissions",
-						"CameraView",
-						"takePictureAsync",
-					],
+					mustContain: ["useCameraPermissions", "CameraView", "takePictureAsync"],
 				},
 			},
 		],

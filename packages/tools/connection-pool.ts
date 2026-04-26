@@ -51,9 +51,7 @@ export class ConnectionPool<T> {
 		// Try idle connection first
 		const entry = this.entries.find((e) => !e.inUse);
 		if (entry) {
-			const valid = this.config.validate
-				? await this.config.validate(entry.conn)
-				: true;
+			const valid = this.config.validate ? await this.config.validate(entry.conn) : true;
 			if (valid) {
 				entry.inUse = true;
 				entry.lastUsed = Date.now();
@@ -74,9 +72,7 @@ export class ConnectionPool<T> {
 		return new Promise<T>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.waiters = this.waiters.filter((w) => w !== waiter);
-				reject(
-					new Error(`Acquire timeout after ${this.config.acquireTimeout}ms`),
-				);
+				reject(new Error(`Acquire timeout after ${this.config.acquireTimeout}ms`));
 			}, this.config.acquireTimeout);
 
 			const waiter: Waiter<T> = { resolve, reject, timer };

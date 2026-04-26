@@ -242,10 +242,7 @@ export interface FlavoredResponse {
 /**
  * Add personality flavor to a response
  */
-export function flavorResponse(
-	content: string,
-	flavor: FlavoredResponse,
-): string {
+export function flavorResponse(content: string, flavor: FlavoredResponse): string {
 	let result = content;
 
 	if (flavor.prefix) {

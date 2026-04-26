@@ -86,15 +86,11 @@ if (import.meta.main) {
 	let args = process.argv.slice(2);
 
 	const hasInfiniteFlag =
-		args.includes("--infinite") ||
-		args.includes("-infinite") ||
-		args.includes("-i");
+		args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
 	if (hasInfiniteFlag) {
 		const permManager = getPermissionManager();
 		permManager.enableInfiniteMode();
-		args = args.filter(
-			(a) => a !== "--infinite" && a !== "-infinite" && a !== "-i",
-		);
+		args = args.filter((a) => a !== "--infinite" && a !== "-infinite" && a !== "-i");
 	}
 
 	if (args.length > 0 && args[0] !== "--interactive") {

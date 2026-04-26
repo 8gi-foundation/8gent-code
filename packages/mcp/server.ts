@@ -66,9 +66,7 @@ export class MCPServer {
 	private toolFilter: "all" | "safe";
 	private buffer = "";
 
-	constructor(
-		options: { workingDirectory?: string; tools?: "all" | "safe" } = {},
-	) {
+	constructor(options: { workingDirectory?: string; tools?: "all" | "safe" } = {}) {
 		this.executor = new ToolExecutor(options.workingDirectory || process.cwd());
 		this.toolFilter = options.tools || "all";
 	}
@@ -125,9 +123,7 @@ export class MCPServer {
 		process.stdout.write(`${JSON.stringify(response)}\n`);
 	}
 
-	private async handleRequest(
-		req: JSONRPCRequest,
-	): Promise<JSONRPCResponse | null> {
+	private async handleRequest(req: JSONRPCRequest): Promise<JSONRPCResponse | null> {
 		// Notifications (no id) don't get responses
 		if (req.id === undefined) return null;
 
@@ -215,9 +211,7 @@ export class MCPServer {
 	}
 
 	private async handleToolsCall(req: JSONRPCRequest): Promise<JSONRPCResponse> {
-		const params = req.params as
-			| { name: string; arguments?: Record<string, unknown> }
-			| undefined;
+		const params = req.params as { name: string; arguments?: Record<string, unknown> } | undefined;
 		if (!params?.name) {
 			return {
 				jsonrpc: "2.0",
@@ -239,10 +233,7 @@ export class MCPServer {
 		}
 
 		try {
-			const result = await this.executor.execute(
-				params.name,
-				params.arguments || {},
-			);
+			const result = await this.executor.execute(params.name, params.arguments || {});
 			return {
 				jsonrpc: "2.0",
 				id: req.id!,
@@ -250,8 +241,7 @@ export class MCPServer {
 					content: [
 						{
 							type: "text",
-							text:
-								typeof result === "string" ? result : JSON.stringify(result),
+							text: typeof result === "string" ? result : JSON.stringify(result),
 						},
 					],
 				},
@@ -272,9 +262,7 @@ export class MCPServer {
 // ── CLI entry point ─────────────────────────────────────────────
 
 export async function startMCPServer(args: string[] = []): Promise<void> {
-	const tools = args.includes("--tools=safe")
-		? ("safe" as const)
-		: ("all" as const);
+	const tools = args.includes("--tools=safe") ? ("safe" as const) : ("all" as const);
 	const cwd = args.find((a) => a.startsWith("--cwd="))?.slice(6);
 
 	const server = new MCPServer({

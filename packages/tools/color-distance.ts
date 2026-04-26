@@ -38,8 +38,7 @@ export function rgbToLab(color: RGBColor): LabColor {
 	const yn = Y / 1.0;
 	const zn = Z / 1.08883;
 
-	const f = (t: number): number =>
-		t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+	const f = (t: number): number => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
 
 	const fx = f(xn);
 	const fy = f(yn);
@@ -84,10 +83,8 @@ export function deltaECIEDE2000(lab1: LabColor, lab2: LabColor): number {
 	const C1p = Math.sqrt(a1p * a1p + b1 * b1);
 	const C2p = Math.sqrt(a2p * a2p + b2 * b2);
 
-	const h1p =
-		Math.atan2(b1, a1p) * (180 / Math.PI) + (b1 < 0 || a1p < 0 ? 360 : 0);
-	const h2p =
-		Math.atan2(b2, a2p) * (180 / Math.PI) + (b2 < 0 || a2p < 0 ? 360 : 0);
+	const h1p = Math.atan2(b1, a1p) * (180 / Math.PI) + (b1 < 0 || a1p < 0 ? 360 : 0);
+	const h2p = Math.atan2(b2, a2p) * (180 / Math.PI) + (b2 < 0 || a2p < 0 ? 360 : 0);
 
 	const dLp = L2 - L1;
 	const dCp = C2p - C1p;
@@ -126,8 +123,7 @@ export function deltaECIEDE2000(lab1: LabColor, lab2: LabColor): number {
 		0.32 * Math.cos(((3 * Hbarp + 6) * Math.PI) / 180) -
 		0.2 * Math.cos(((4 * Hbarp - 63) * Math.PI) / 180);
 
-	const SL =
-		1 + (0.015 * (Lbarp - 50) ** 2) / Math.sqrt(20 + (Lbarp - 50) ** 2);
+	const SL = 1 + (0.015 * (Lbarp - 50) ** 2) / Math.sqrt(20 + (Lbarp - 50) ** 2);
 	const SC = 1 + 0.045 * Cbarp;
 	const SH = 1 + 0.015 * Cbarp * T;
 
@@ -137,10 +133,7 @@ export function deltaECIEDE2000(lab1: LabColor, lab2: LabColor): number {
 	const RT = -Math.sin((2 * dTheta * Math.PI) / 180) * RC;
 
 	return Math.sqrt(
-		(dLp / SL) ** 2 +
-			(dCp / SC) ** 2 +
-			(dHp / SH) ** 2 +
-			RT * (dCp / SC) * (dHp / SH),
+		(dLp / SL) ** 2 + (dCp / SC) ** 2 + (dHp / SH) ** 2 + RT * (dCp / SC) * (dHp / SH),
 	);
 }
 
@@ -152,16 +145,10 @@ export type DeltaEMethod = "CIE76" | "CIEDE2000";
  * @param color2 - second RGB color
  * @param method - "CIE76" (default) or "CIEDE2000"
  */
-export function deltaE(
-	color1: RGBColor,
-	color2: RGBColor,
-	method: DeltaEMethod = "CIE76",
-): number {
+export function deltaE(color1: RGBColor, color2: RGBColor, method: DeltaEMethod = "CIE76"): number {
 	const lab1 = rgbToLab(color1);
 	const lab2 = rgbToLab(color2);
-	return method === "CIEDE2000"
-		? deltaECIEDE2000(lab1, lab2)
-		: deltaECIE76(lab1, lab2);
+	return method === "CIEDE2000" ? deltaECIEDE2000(lab1, lab2) : deltaECIE76(lab1, lab2);
 }
 
 /**
@@ -185,9 +172,7 @@ export function nearestColor(
 	for (let i = 0; i < palette.length; i++) {
 		const lab = rgbToLab(palette[i]);
 		const dist =
-			method === "CIEDE2000"
-				? deltaECIEDE2000(targetLab, lab)
-				: deltaECIE76(targetLab, lab);
+			method === "CIEDE2000" ? deltaECIEDE2000(targetLab, lab) : deltaECIE76(targetLab, lab);
 		if (dist < bestDist) {
 			bestDist = dist;
 			bestIndex = i;

@@ -44,10 +44,7 @@ interface HarnessResult {
 	} | null;
 }
 
-function runHarness(
-	prompt: string,
-	extraArgs: string[] = [],
-): Promise<HarnessResult> {
+function runHarness(prompt: string, extraArgs: string[] = []): Promise<HarnessResult> {
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
@@ -163,8 +160,7 @@ const tests: TestCase[] = [
 		prompt:
 			"Create a file called hello.txt containing the text 'Hello from 8gent'. Use write_file.",
 		validate: (r) => {
-			if (!r.parsed)
-				return { pass: false, reason: "No JSON output from harness" };
+			if (!r.parsed) return { pass: false, reason: "No JSON output from harness" };
 			const files = listWorkdirFiles(r.parsed.workdir);
 			const hasFile = files.includes("hello.txt");
 			if (!hasFile)
@@ -172,10 +168,7 @@ const tests: TestCase[] = [
 					pass: false,
 					reason: `Expected hello.txt in workdir, found: [${files.join(", ")}]`,
 				};
-			const content = fs.readFileSync(
-				path.join(r.parsed.workdir, "hello.txt"),
-				"utf-8",
-			);
+			const content = fs.readFileSync(path.join(r.parsed.workdir, "hello.txt"), "utf-8");
 			const hasContent = content.toLowerCase().includes("hello");
 			return {
 				pass: hasContent,
@@ -194,18 +187,12 @@ const tests: TestCase[] = [
 		validate: (r) => {
 			if (!r.parsed) return { pass: false, reason: "No JSON output" };
 			const files = listWorkdirFiles(r.parsed.workdir);
-			if (!files.includes("greet.ts"))
-				return { pass: false, reason: "greet.ts not found" };
-			const content = fs.readFileSync(
-				path.join(r.parsed.workdir, "greet.ts"),
-				"utf-8",
-			);
+			if (!files.includes("greet.ts")) return { pass: false, reason: "greet.ts not found" };
+			const content = fs.readFileSync(path.join(r.parsed.workdir, "greet.ts"), "utf-8");
 			const hasEdit = content.includes("hello world");
 			return {
 				pass: hasEdit,
-				reason: hasEdit
-					? "File edited correctly"
-					: `Edit not applied: ${content.slice(0, 200)}`,
+				reason: hasEdit ? "File edited correctly" : `Edit not applied: ${content.slice(0, 200)}`,
 			};
 		},
 	},
@@ -223,16 +210,11 @@ const tests: TestCase[] = [
 					pass: false,
 					reason: `fib.js not found, got: [${files.join(", ")}]`,
 				};
-			const content = fs.readFileSync(
-				path.join(r.parsed.workdir, "fib.js"),
-				"utf-8",
-			);
+			const content = fs.readFileSync(path.join(r.parsed.workdir, "fib.js"), "utf-8");
 			const hasFn = content.includes("fibonacci") || content.includes("fib");
 			return {
 				pass: hasFn,
-				reason: hasFn
-					? "Fibonacci function created"
-					: "File missing fibonacci function",
+				reason: hasFn ? "Fibonacci function created" : "File missing fibonacci function",
 			};
 		},
 	},
@@ -245,12 +227,8 @@ const tests: TestCase[] = [
 		validate: (r) => {
 			if (!r.parsed) return { pass: false, reason: "No JSON output" };
 			const files = listWorkdirFiles(r.parsed.workdir);
-			if (!files.includes("sort.ts"))
-				return { pass: false, reason: "sort.ts not found" };
-			const content = fs.readFileSync(
-				path.join(r.parsed.workdir, "sort.ts"),
-				"utf-8",
-			);
+			if (!files.includes("sort.ts")) return { pass: false, reason: "sort.ts not found" };
+			const content = fs.readFileSync(path.join(r.parsed.workdir, "sort.ts"), "utf-8");
 			const hasFn = content.includes("mergeSort") || content.includes("merge");
 			return {
 				pass: hasFn,
@@ -274,17 +252,11 @@ const tests: TestCase[] = [
 					pass: false,
 					reason: `Expected utils.ts + index.ts, got: [${files.join(", ")}]`,
 				};
-			const indexContent = fs.readFileSync(
-				path.join(r.parsed.workdir, "index.ts"),
-				"utf-8",
-			);
-			const imports =
-				indexContent.includes("import") || indexContent.includes("require");
+			const indexContent = fs.readFileSync(path.join(r.parsed.workdir, "index.ts"), "utf-8");
+			const imports = indexContent.includes("import") || indexContent.includes("require");
 			return {
 				pass: imports,
-				reason: imports
-					? "Both files created with import"
-					: "index.ts missing import",
+				reason: imports ? "Both files created with import" : "index.ts missing import",
 			};
 		},
 	},
@@ -299,14 +271,11 @@ const tests: TestCase[] = [
 			const entries = readSessionEntries(r.parsed.sessionPath);
 			const toolCalls = entries.filter((e) => e.type === "tool_call");
 			const hasOutline = toolCalls.some(
-				(e) =>
-					e.toolCall?.name === "get_outline" ||
-					e.toolCall?.name === "get_file_outline",
+				(e) => e.toolCall?.name === "get_outline" || e.toolCall?.name === "get_file_outline",
 			);
 			const hasWrite = toolCalls.some((e) => e.toolCall?.name === "write_file");
 			// Outline tool might not exist — pass if file was created and outline was attempted OR if tool results show success
-			if (hasWrite && hasOutline)
-				return { pass: true, reason: "write_file + get_outline called" };
+			if (hasWrite && hasOutline) return { pass: true, reason: "write_file + get_outline called" };
 			if (hasWrite)
 				return {
 					pass: true,
@@ -336,10 +305,7 @@ const tests: TestCase[] = [
 					.filter((p: any) => p.type === "text")
 					.map((p: any) => p.text)
 					.join(" ");
-				if (
-					(text + partText).includes("PLAN:") ||
-					(text + partText).includes("Plan:")
-				) {
+				if ((text + partText).includes("PLAN:") || (text + partText).includes("Plan:")) {
 					hasPlan = true;
 				}
 			}
@@ -389,13 +355,10 @@ const tests: TestCase[] = [
 			const toolCalls = entries.filter((e) => e.type === "tool_call");
 			const hasWrite = toolCalls.some((e) => e.toolCall?.name === "write_file");
 			const hasRead = toolCalls.some(
-				(e) =>
-					e.toolCall?.name === "read_file" ||
-					e.toolCall?.name === "get_outline",
+				(e) => e.toolCall?.name === "read_file" || e.toolCall?.name === "get_outline",
 			);
 			const summary = getSessionEnd(entries);
-			const cleanExit =
-				summary && !["error", "timeout", "crash"].includes(summary.exitReason);
+			const cleanExit = summary && !["error", "timeout", "crash"].includes(summary.exitReason);
 			return {
 				pass: hasWrite && cleanExit,
 				reason: `write=${hasWrite}, read-back=${hasRead}, clean-exit=${cleanExit}`,
@@ -413,8 +376,7 @@ const tests: TestCase[] = [
 			const workdir = r.parsed.workdir;
 			const hasGit = fs.existsSync(path.join(workdir, ".git"));
 			const hasReadme = fs.existsSync(path.join(workdir, "README.md"));
-			if (!hasGit)
-				return { pass: false, reason: "No .git directory — git init failed" };
+			if (!hasGit) return { pass: false, reason: "No .git directory — git init failed" };
 			if (!hasReadme) return { pass: false, reason: "README.md not created" };
 			// Check if there's at least one commit
 			let hasCommit = false;
@@ -424,11 +386,7 @@ const tests: TestCase[] = [
 					const head = fs.readFileSync(headPath, "utf-8").trim();
 					// If HEAD points to a ref, check if that ref exists
 					if (head.startsWith("ref: ")) {
-						const refPath = path.join(
-							workdir,
-							".git",
-							head.replace("ref: ", ""),
-						);
+						const refPath = path.join(workdir, ".git", head.replace("ref: ", ""));
 						hasCommit = fs.existsSync(refPath);
 					} else {
 						hasCommit = true; // detached HEAD = has commit
@@ -460,9 +418,7 @@ interface TestResult {
 async function runTests(): Promise<void> {
 	console.log("=".repeat(60));
 	console.log("8gent E2E Test Suite");
-	console.log(
-		`Model: ${model} | Runtime: ${runtime} | Timeout: ${TIMEOUT_MS / 1000}s`,
-	);
+	console.log(`Model: ${model} | Runtime: ${runtime} | Timeout: ${TIMEOUT_MS / 1000}s`);
 	console.log("=".repeat(60));
 	console.log("");
 
@@ -487,9 +443,7 @@ async function runTests(): Promise<void> {
 			});
 
 			const icon = validation.pass ? "PASS" : "FAIL";
-			console.log(
-				`  ${icon} (${(elapsed / 1000).toFixed(1)}s) — ${validation.reason}`,
-			);
+			console.log(`  ${icon} (${(elapsed / 1000).toFixed(1)}s) — ${validation.reason}`);
 		} catch (err) {
 			const elapsed = Date.now() - start;
 			results.push({
@@ -499,9 +453,7 @@ async function runTests(): Promise<void> {
 				durationMs: elapsed,
 				error: String(err),
 			});
-			console.log(
-				`  ERROR (${(elapsed / 1000).toFixed(1)}s) — ${String(err).slice(0, 200)}`,
-			);
+			console.log(`  ERROR (${(elapsed / 1000).toFixed(1)}s) — ${String(err).slice(0, 200)}`);
 		}
 		console.log("");
 	}
@@ -525,9 +477,7 @@ async function runTests(): Promise<void> {
 	}
 
 	console.log("");
-	console.log(
-		`Total: ${passed} passed, ${failed} failed out of ${results.length} tests`,
-	);
+	console.log(`Total: ${passed} passed, ${failed} failed out of ${results.length} tests`);
 	console.log(`Pass rate: ${((passed / results.length) * 100).toFixed(0)}%`);
 	console.log(`Total time: ${(totalTime / 1000).toFixed(1)}s`);
 	console.log("=".repeat(60));

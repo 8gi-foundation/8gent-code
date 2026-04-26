@@ -37,10 +37,7 @@ async function main() {
 	);
 
 	const backend = process.env.QWEN_BACKEND || "ollama";
-	const client =
-		backend === "lmstudio"
-			? new LMStudioClient(QWEN_ID)
-			: new OllamaClient(QWEN_ID);
+	const client = backend === "lmstudio" ? new LMStudioClient(QWEN_ID) : new OllamaClient(QWEN_ID);
 
 	const reachable = await client.isAvailable();
 	if (!reachable) {

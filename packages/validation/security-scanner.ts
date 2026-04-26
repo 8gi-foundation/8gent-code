@@ -73,10 +73,7 @@ const DEFAULT_EXTENSIONS = [
  * Scan a string of content for secrets and vulnerability patterns.
  * Returns all findings with line numbers.
  */
-export function scanContent(
-	content: string,
-	filename = "<buffer>",
-): SecurityFinding[] {
+export function scanContent(content: string, filename = "<buffer>"): SecurityFinding[] {
 	const findings: SecurityFinding[] = [];
 	const lines = content.split("\n");
 
@@ -88,11 +85,7 @@ export function scanContent(
 			const line = content.slice(0, match.index).split("\n").length;
 			const lineText = lines[line - 1]?.trim() ?? "";
 			// Skip if the line is a comment
-			if (
-				lineText.startsWith("//") ||
-				lineText.startsWith("#") ||
-				lineText.startsWith("*")
-			) {
+			if (lineText.startsWith("//") || lineText.startsWith("#") || lineText.startsWith("*")) {
 				continue;
 			}
 			findings.push({
@@ -113,11 +106,7 @@ export function scanContent(
 		while ((match = re.exec(content)) !== null) {
 			const line = content.slice(0, match.index).split("\n").length;
 			const lineText = lines[line - 1]?.trim() ?? "";
-			if (
-				lineText.startsWith("//") ||
-				lineText.startsWith("#") ||
-				lineText.startsWith("*")
-			) {
+			if (lineText.startsWith("//") || lineText.startsWith("#") || lineText.startsWith("*")) {
 				continue;
 			}
 			findings.push({
@@ -150,10 +139,7 @@ export function scanFile(filePath: string): SecurityFinding[] {
 /**
  * Recursively scan a directory. Returns all findings across all files.
  */
-export function scanDirectory(
-	dirPath: string,
-	opts: ScanOptions = {},
-): SecurityFinding[] {
+export function scanDirectory(dirPath: string, opts: ScanOptions = {}): SecurityFinding[] {
 	const ignore = [...DEFAULT_IGNORE, ...(opts.ignore ?? [])];
 	const extensions = opts.extensions ?? DEFAULT_EXTENSIONS;
 	const findings: SecurityFinding[] = [];
@@ -229,7 +215,5 @@ export function summarizeFindings(findings: SecurityFinding[]): ScanSummary {
  * Useful as a pre-commit gate.
  */
 export function hasCriticalFindings(findings: SecurityFinding[]): boolean {
-	return findings.some(
-		(f) => f.severity === "critical" || f.severity === "high",
-	);
+	return findings.some((f) => f.severity === "critical" || f.severity === "high");
 }

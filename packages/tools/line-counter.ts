@@ -115,10 +115,7 @@ function collectFiles(dir: string, ignore: string[], exts: string[]): string[] {
 		const full = join(dir, entry);
 		if (statSync(full).isDirectory()) {
 			results.push(...collectFiles(full, ignore, exts));
-		} else if (
-			exts.length === 0 ||
-			exts.includes(extname(entry).toLowerCase())
-		) {
+		} else if (exts.length === 0 || exts.includes(extname(entry).toLowerCase())) {
 			results.push(full);
 		}
 	}
@@ -135,10 +132,7 @@ function add(acc: ReturnType<typeof empty>, s: LineStats) {
 	acc.total += s.total;
 }
 
-export function countProject(
-	dir: string,
-	options: CountProjectOptions = {},
-): ProjectStats {
+export function countProject(dir: string, options: CountProjectOptions = {}): ProjectStats {
 	const ignore = [...DEFAULT_IGNORE, ...(options.ignore ?? [])];
 	const exts = (options.extensions ?? Object.keys(EXT_TO_LANG)).map((e) =>
 		e.startsWith(".") ? e : `.${e}`,

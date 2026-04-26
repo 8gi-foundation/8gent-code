@@ -119,9 +119,7 @@ function EntryBadge({ type }: { type: string }) {
 	const color = colors[type] || "bg-cyan-500/10 text-cyan-400/60";
 
 	return (
-		<span
-			className={`inline-block text-[10px] font-mono px-1.5 py-0.5 rounded ${color}`}
-		>
+		<span className={`inline-block text-[10px] font-mono px-1.5 py-0.5 rounded ${color}`}>
 			{type}
 		</span>
 	);
@@ -148,20 +146,14 @@ function UsageBadge({ usage }: { usage: SessionEntry["usage"] }) {
 	);
 }
 
-function ContentParts({
-	parts,
-}: { parts: NonNullable<SessionEntry["parts"]> }) {
+function ContentParts({ parts }: { parts: NonNullable<SessionEntry["parts"]> }) {
 	return (
 		<div className="ml-7 mt-1 space-y-1">
 			{parts.map((part, i) => {
 				switch (part.type) {
 					case "text":
 						return (
-							<div
-								key={i}
-								className="text-xs"
-								style={{ color: "var(--foreground)" }}
-							>
+							<div key={i} className="text-xs" style={{ color: "var(--foreground)" }}>
 								{part.text}
 							</div>
 						);
@@ -171,9 +163,7 @@ function ContentParts({
 								key={i}
 								className="text-xs text-amber-400/70 border-l-2 border-amber-500/30 pl-2"
 							>
-								<span className="text-[9px] text-amber-500/50 mr-1">
-									thinking:
-								</span>
+								<span className="text-[9px] text-amber-500/50 mr-1">thinking:</span>
 								{part.text}
 							</div>
 						);
@@ -187,24 +177,19 @@ function ContentParts({
 						return (
 							<div key={i} className="text-[10px] text-purple-400/60">
 								file: {part.mediaType} (
-								{part.data
-									? `${Math.round((part.data.length * 0.75) / 1024)}KB`
-									: "?"}
-								)
+								{part.data ? `${Math.round((part.data.length * 0.75) / 1024)}KB` : "?"})
 							</div>
 						);
 					case "tool-call":
 						return (
 							<div key={i} className="text-[10px] text-cyan-400/60">
-								call: {part.toolName}(
-								{JSON.stringify(part.args || {}).slice(0, 60)})
+								call: {part.toolName}({JSON.stringify(part.args || {}).slice(0, 60)})
 							</div>
 						);
 					case "tool-result":
 						return (
 							<div key={i} className="text-[10px] text-teal-400/60">
-								result: {part.toolName} ={" "}
-								{JSON.stringify(part.result).slice(0, 80)}
+								result: {part.toolName} = {JSON.stringify(part.result).slice(0, 80)}
 							</div>
 						);
 					case "tool-error":
@@ -239,9 +224,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 			}
 			case "assistant_content": {
 				const textParts = (entry.parts || []).filter((p) => p.type === "text");
-				const reasoningParts = (entry.parts || []).filter(
-					(p) => p.type === "reasoning",
-				);
+				const reasoningParts = (entry.parts || []).filter((p) => p.type === "reasoning");
 				const text = textParts
 					.map((p) => p.text)
 					.join(" ")
@@ -260,9 +243,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 			case "turn_end":
 				return `Turn ${entry.turnIndex} → ${entry.reason}${entry.usage?.totalTokens ? ` (${entry.usage.totalTokens} tokens)` : ""}`;
 			case "step_start": {
-				const modelStr = entry.model?.modelId
-					? ` [${entry.model.modelId}]`
-					: "";
+				const modelStr = entry.model?.modelId ? ` [${entry.model.modelId}]` : "";
 				return `Step ${entry.stepNumber}${modelStr}${entry.messageCount ? ` (${entry.messageCount} msgs)` : ""}`;
 			}
 			case "step_end":
@@ -271,17 +252,13 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				return `${entry.hook?.hookType}: ${entry.hook?.hookName} ${entry.hook?.success ? "✓" : "✗"}`;
 			case "error": {
 				const errMsg =
-					typeof entry.error === "string"
-						? entry.error
-						: (entry.error as any)?.message;
-				const recoverable =
-					typeof entry.error === "object" && (entry.error as any)?.recoverable;
+					typeof entry.error === "string" ? entry.error : (entry.error as any)?.message;
+				const recoverable = typeof entry.error === "object" && (entry.error as any)?.recoverable;
 				return `${recoverable ? "[recoverable]" : "[fatal]"} ${errMsg}`;
 			}
 			case "session_end": {
 				const steps = entry.summary?.totalSteps ?? entry.summary?.totalTurns;
-				const tokens =
-					entry.summary?.totalUsage?.totalTokens ?? entry.summary?.totalTokens;
+				const tokens = entry.summary?.totalUsage?.totalTokens ?? entry.summary?.totalTokens;
 				return `${entry.summary?.exitReason} — ${steps} steps, ${entry.summary?.totalToolCalls} tools, ${tokens} tokens`;
 			}
 			default:
@@ -289,9 +266,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 		}
 	}, [entry]);
 
-	const timestamp = entry.timestamp
-		? new Date(entry.timestamp).toLocaleTimeString()
-		: null;
+	const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : null;
 
 	return (
 		<div
@@ -302,8 +277,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 			}}
 			onMouseEnter={(e) => {
 				if (!expanded) {
-					(e.currentTarget as HTMLDivElement).style.background =
-						"var(--surface-hover)";
+					(e.currentTarget as HTMLDivElement).style.background = "var(--surface-hover)";
 				}
 			}}
 			onMouseLeave={(e) => {
@@ -312,14 +286,8 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				}
 			}}
 		>
-			<div
-				className="flex items-start gap-2 cursor-pointer"
-				onClick={() => setExpanded(!expanded)}
-			>
-				<span
-					className="text-[10px] mt-0.5 shrink-0 w-5"
-					style={{ color: "var(--muted)" }}
-				>
+			<div className="flex items-start gap-2 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+				<span className="text-[10px] mt-0.5 shrink-0 w-5" style={{ color: "var(--muted)" }}>
 					{expanded ? "▼" : "▶"}
 				</span>
 				<span
@@ -330,18 +298,12 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				</span>
 				<EntryBadge type={entry.type} />
 				{timestamp && (
-					<span
-						className="text-[10px] shrink-0 mt-0.5"
-						style={{ color: "var(--muted)" }}
-					>
+					<span className="text-[10px] shrink-0 mt-0.5" style={{ color: "var(--muted)" }}>
 						{timestamp}
 					</span>
 				)}
 				{summary && (
-					<span
-						className="text-xs truncate"
-						style={{ color: "var(--foreground)" }}
-					>
+					<span className="text-xs truncate" style={{ color: "var(--foreground)" }}>
 						{summary}
 					</span>
 				)}
@@ -468,10 +430,7 @@ export default function SessionViewer({
 			>
 				<div className="flex items-center justify-between mb-2">
 					<div className="flex items-center gap-3">
-						<h2
-							className="text-sm font-mono"
-							style={{ color: "var(--foreground)" }}
-						>
+						<h2 className="text-sm font-mono" style={{ color: "var(--foreground)" }}>
 							{session.sessionId.replace("session_", "").slice(0, 16)}
 						</h2>
 						{session.workingDirectory && (
@@ -480,9 +439,7 @@ export default function SessionViewer({
 							</span>
 						)}
 						{session.gitBranch && (
-							<span className="text-[10px] text-cyan-500/60 font-mono">
-								{session.gitBranch}
-							</span>
+							<span className="text-[10px] text-cyan-500/60 font-mono">{session.gitBranch}</span>
 						)}
 						{session.runtime && (
 							<span className="text-[10px] text-amber-500/50">
@@ -505,12 +462,10 @@ export default function SessionViewer({
 								border: "1px solid var(--border)",
 							}}
 							onMouseEnter={(e) => {
-								(e.currentTarget as HTMLButtonElement).style.color =
-									"var(--foreground)";
+								(e.currentTarget as HTMLButtonElement).style.color = "var(--foreground)";
 							}}
 							onMouseLeave={(e) => {
-								(e.currentTarget as HTMLButtonElement).style.color =
-									"var(--muted)";
+								(e.currentTarget as HTMLButtonElement).style.color = "var(--muted)";
 							}}
 						>
 							{copiedUrl ? "✓ Copied URL" : "Copy URL"}
@@ -529,29 +484,21 @@ export default function SessionViewer({
 								border: "1px solid var(--border)",
 							}}
 							onMouseEnter={(e) => {
-								(e.currentTarget as HTMLButtonElement).style.color =
-									"var(--foreground)";
+								(e.currentTarget as HTMLButtonElement).style.color = "var(--foreground)";
 							}}
 							onMouseLeave={(e) => {
-								(e.currentTarget as HTMLButtonElement).style.color =
-									"var(--muted)";
+								(e.currentTarget as HTMLButtonElement).style.color = "var(--muted)";
 							}}
 						>
 							{copiedJson ? "✓ Copied JSON" : "Copy as JSON"}
 						</button>
 						{!initialLoaded && (
-							<span className="text-[10px] text-amber-400 animate-pulse">
-								Loading...
-							</span>
+							<span className="text-[10px] text-amber-400 animate-pulse">Loading...</span>
 						)}
 						{initialLoaded && (
 							<span
-								className={`text-[10px] ${
-									!session.completed ? "text-emerald-400" : ""
-								}`}
-								style={
-									session.completed ? { color: "var(--muted)" } : undefined
-								}
+								className={`text-[10px] ${!session.completed ? "text-emerald-400" : ""}`}
+								style={session.completed ? { color: "var(--muted)" } : undefined}
 							>
 								{!session.completed ? "● LIVE" : `○ ${session.exitReason}`}
 							</span>
@@ -570,9 +517,7 @@ export default function SessionViewer({
 							!typeFilter ? "bg-emerald-500/20 text-emerald-400" : ""
 						}`}
 						style={
-							typeFilter
-								? { background: "var(--surface-hover)", color: "var(--muted)" }
-								: undefined
+							typeFilter ? { background: "var(--surface-hover)", color: "var(--muted)" } : undefined
 						}
 					>
 						All
@@ -584,9 +529,7 @@ export default function SessionViewer({
 								key={type}
 								onClick={() => setTypeFilter(type === typeFilter ? null : type)}
 								className={`text-[10px] px-1.5 py-0.5 rounded ${
-									typeFilter === type
-										? "bg-emerald-500/20 text-emerald-400"
-										: ""
+									typeFilter === type ? "bg-emerald-500/20 text-emerald-400" : ""
 								}`}
 								style={
 									typeFilter !== type
@@ -604,16 +547,9 @@ export default function SessionViewer({
 			</div>
 
 			{/* Entries */}
-			<div
-				ref={containerRef}
-				onScroll={handleScroll}
-				className="flex-1 overflow-y-auto"
-			>
+			<div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
 				{filtered.map((entry, i) => (
-					<EntryContent
-						key={`${entry.sequenceNumber ?? i}-${i}`}
-						entry={entry}
-					/>
+					<EntryContent key={`${entry.sequenceNumber ?? i}-${i}`} entry={entry} />
 				))}
 				<div ref={bottomRef} />
 			</div>

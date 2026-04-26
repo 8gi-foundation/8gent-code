@@ -112,10 +112,7 @@ export class AutoGit {
 	/**
 	 * Create a new branch for a task
 	 */
-	createTaskBranch(
-		taskSlug: string,
-		type: "feat" | "fix" | "refactor" | "self" = "feat",
-	): string {
+	createTaskBranch(taskSlug: string, type: "feat" | "fix" | "refactor" | "self" = "feat"): string {
 		const timestamp = Date.now();
 		const branchName = `${this.branchPrefix}${type}-${taskSlug}-${timestamp}`;
 
@@ -202,9 +199,7 @@ export class AutoGit {
 		this.exec("git checkout main");
 
 		// Merge with no-ff
-		const result = this.exec(
-			`git merge ${branchName} --no-ff -m "Merge ${branchName}"`,
-		);
+		const result = this.exec(`git merge ${branchName} --no-ff -m "Merge ${branchName}"`);
 
 		if (result.includes("CONFLICT")) {
 			// Abort merge on conflict
@@ -257,12 +252,7 @@ export class SelfHeal {
 	constructor(workingDirectory: string, verbose = false) {
 		this.cwd = workingDirectory;
 		this.verbose = verbose;
-		this.memoryPath = path.join(
-			workingDirectory,
-			".8gent",
-			"context",
-			"healing.json",
-		);
+		this.memoryPath = path.join(workingDirectory, ".8gent", "context", "healing.json");
 		this.memory = this.loadMemory();
 	}
 
@@ -309,8 +299,7 @@ export class SelfHeal {
 		if (existing) {
 			existing.count++;
 			existing.lastSeen = new Date().toISOString();
-			existing.successRate =
-				(existing.successRate * (existing.count - 1) + 1) / existing.count;
+			existing.successRate = (existing.successRate * (existing.count - 1) + 1) / existing.count;
 		} else {
 			this.memory.patterns[errorPattern] = {
 				count: 1,
@@ -331,8 +320,7 @@ export class SelfHeal {
 		if (existing) {
 			existing.count++;
 			existing.lastSeen = new Date().toISOString();
-			existing.successRate =
-				(existing.successRate * (existing.count - 1)) / existing.count;
+			existing.successRate = (existing.successRate * (existing.count - 1)) / existing.count;
 		}
 		this.saveMemory();
 	}
@@ -355,17 +343,8 @@ export class SelfHeal {
 	/**
 	 * Classify error severity
 	 */
-	classifyError(
-		error: string,
-	): "transient" | "recoverable" | "fixable" | "fatal" {
-		const transientPatterns = [
-			"ETIMEDOUT",
-			"ECONNRESET",
-			"rate limit",
-			"503",
-			"502",
-			"timeout",
-		];
+	classifyError(error: string): "transient" | "recoverable" | "fixable" | "fatal" {
+		const transientPatterns = ["ETIMEDOUT", "ECONNRESET", "rate limit", "503", "502", "timeout"];
 
 		const recoverablePatterns = [
 			"not found",
@@ -375,12 +354,7 @@ export class SelfHeal {
 			"invalid",
 		];
 
-		const fatalPatterns = [
-			"ENOMEM",
-			"disk full",
-			"authentication required",
-			"credential",
-		];
+		const fatalPatterns = ["ENOMEM", "disk full", "authentication required", "credential"];
 
 		const errorLower = error.toLowerCase();
 
@@ -437,8 +411,7 @@ export class SessionMemory {
 				// Check if expired (24h)
 				const started = new Date(context.started);
 				const now = new Date();
-				const hoursDiff =
-					(now.getTime() - started.getTime()) / (1000 * 60 * 60);
+				const hoursDiff = (now.getTime() - started.getTime()) / (1000 * 60 * 60);
 				if (hoursDiff < 24) {
 					this.log("Restored working context");
 					return context;
@@ -492,19 +465,13 @@ export class SelfAutonomy {
 
 		this.git = new AutoGit(this.config.workingDirectory, this.config.verbose);
 		this.heal = new SelfHeal(this.config.workingDirectory, this.config.verbose);
-		this.memory = new SessionMemory(
-			this.config.workingDirectory,
-			this.config.verbose,
-		);
+		this.memory = new SessionMemory(this.config.workingDirectory, this.config.verbose);
 	}
 
 	/**
 	 * Start a new task with automatic branching
 	 */
-	startTask(
-		taskDescription: string,
-		type: "feat" | "fix" | "refactor" = "feat",
-	): void {
+	startTask(taskDescription: string, type: "feat" | "fix" | "refactor" = "feat"): void {
 		if (!this.config.autoGit || !this.git.isGitRepo()) return;
 
 		// Create slug from task

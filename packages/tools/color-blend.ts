@@ -10,13 +10,7 @@ export interface RGBColor {
 	b: number; // 0-255
 }
 
-export type BlendMode =
-	| "normal"
-	| "multiply"
-	| "screen"
-	| "overlay"
-	| "dodge"
-	| "burn";
+export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "dodge" | "burn";
 
 /** Clamp a value to [0, 255]. */
 function clamp(v: number): number {
@@ -34,11 +28,7 @@ function d(v: number): number {
 }
 
 /** Apply a blend function channel-wise. */
-function blendChannel(
-	a: number,
-	b: number,
-	fn: (a: number, b: number) => number,
-): number {
+function blendChannel(a: number, b: number, fn: (a: number, b: number) => number): number {
 	return d(fn(n(a), n(b)));
 }
 
@@ -92,11 +82,7 @@ export function blend(
  * @param steps - number of steps including start and end (min 2)
  * @returns array of RGBColor values from color1 to color2
  */
-export function gradient(
-	color1: RGBColor,
-	color2: RGBColor,
-	steps: number,
-): RGBColor[] {
+export function gradient(color1: RGBColor, color2: RGBColor, steps: number): RGBColor[] {
 	const count = Math.max(2, Math.round(steps));
 	const result: RGBColor[] = [];
 

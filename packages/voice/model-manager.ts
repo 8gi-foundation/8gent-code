@@ -9,11 +9,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-	WHISPER_MODELS,
-	type WhisperModelInfo,
-	type WhisperModelName,
-} from "./types.js";
+import { WHISPER_MODELS, type WhisperModelInfo, type WhisperModelName } from "./types.js";
 
 export interface ModelManagerEvents {
 	"download-start": [{ model: WhisperModelName; size: number }];
@@ -90,9 +86,7 @@ export class WhisperModelManager extends EventEmitter<ModelManagerEvents> {
 	/**
 	 * List all available models with download status.
 	 */
-	listModels(): Array<
-		WhisperModelInfo & { downloaded: boolean; localPath: string }
-	> {
+	listModels(): Array<WhisperModelInfo & { downloaded: boolean; localPath: string }> {
 		return (Object.keys(WHISPER_MODELS) as WhisperModelName[]).map((name) => ({
 			...WHISPER_MODELS[name],
 			downloaded: this.isModelDownloaded(name),
@@ -137,9 +131,7 @@ export class WhisperModelManager extends EventEmitter<ModelManagerEvents> {
 				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 			}
 
-			const contentLength = Number(
-				response.headers.get("content-length") || info.size,
-			);
+			const contentLength = Number(response.headers.get("content-length") || info.size);
 			const reader = response.body?.getReader();
 
 			if (!reader) {

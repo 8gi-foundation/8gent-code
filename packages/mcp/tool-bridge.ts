@@ -91,9 +91,7 @@ export function mcpToolKey(serverName: string, toolName: string): string {
  * Parse a namespaced tool key back into server + tool name.
  * Returns null if the key doesn't match the mcp__*__* pattern.
  */
-export function parseMcpToolKey(
-	key: string,
-): { server: string; tool: string } | null {
+export function parseMcpToolKey(key: string): { server: string; tool: string } | null {
 	const match = key.match(/^mcp__([^_]+)__(.+)$/);
 	if (!match) return null;
 	return { server: match[1], tool: match[2] };

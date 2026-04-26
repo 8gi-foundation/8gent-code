@@ -29,11 +29,7 @@ async function sign(key: string, message: string): Promise<string> {
  * @param signature - The hexadecimal signature to verify.
  * @returns A Promise that resolves to true if the signature is valid, false otherwise.
  */
-async function verify(
-	key: string,
-	message: string,
-	signature: string,
-): Promise<boolean> {
+async function verify(key: string, message: string, signature: string): Promise<boolean> {
 	const expected = await sign(key, message);
 	const expectedBuffer = hexToBuffer(expected);
 	const providedBuffer = hexToBuffer(signature);

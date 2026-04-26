@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let pipeline: any;
 let stage: any;
@@ -106,9 +105,7 @@ describe("Stage", () => {
 		const s = new Stage("deploy");
 		s.addCondition("branch", "main");
 		const condition = s.conditions || s.getConditions();
-		expect(condition.length || Object.keys(condition).length).toBeGreaterThan(
-			0,
-		);
+		expect(condition.length || Object.keys(condition).length).toBeGreaterThan(0);
 	});
 
 	it("clone creates deep copy", () => {

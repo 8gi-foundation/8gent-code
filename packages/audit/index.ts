@@ -22,13 +22,7 @@ import type {
 } from "./types.js";
 
 export { AccessAuditStore };
-export type {
-	AccessEvent,
-	AccessOperation,
-	ActorKind,
-	LogAccessInput,
-	QueryAccessOptions,
-};
+export type { AccessEvent, AccessOperation, ActorKind, LogAccessInput, QueryAccessOptions };
 
 let _shared: AccessAuditStore | null = null;
 let _sharedPath: string | null = null;

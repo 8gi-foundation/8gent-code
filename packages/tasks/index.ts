@@ -24,12 +24,7 @@ import * as path from "node:path";
 // Types
 // ============================================
 
-export type TaskStatus =
-	| "pending"
-	| "in_progress"
-	| "completed"
-	| "blocked"
-	| "cancelled";
+export type TaskStatus = "pending" | "in_progress" | "completed" | "blocked" | "cancelled";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
 export interface Task {
@@ -96,8 +91,7 @@ export class TaskManager extends EventEmitter {
 
 	constructor(storePath?: string) {
 		super();
-		this.storePath =
-			storePath || path.join(os.homedir(), ".8gent", "tasks.json");
+		this.storePath = storePath || path.join(os.homedir(), ".8gent", "tasks.json");
 		this.store = this.loadStore();
 	}
 
@@ -230,15 +224,12 @@ export class TaskManager extends EventEmitter {
 
 		// Apply updates
 		if (updates.subject !== undefined) task.subject = updates.subject;
-		if (updates.description !== undefined)
-			task.description = updates.description;
+		if (updates.description !== undefined) task.description = updates.description;
 		if (updates.priority !== undefined) task.priority = updates.priority;
 		if (updates.owner !== undefined) task.owner = updates.owner;
 		if (updates.dueDate !== undefined) task.dueDate = updates.dueDate;
-		if (updates.estimatedMinutes !== undefined)
-			task.estimatedMinutes = updates.estimatedMinutes;
-		if (updates.actualMinutes !== undefined)
-			task.actualMinutes = updates.actualMinutes;
+		if (updates.estimatedMinutes !== undefined) task.estimatedMinutes = updates.estimatedMinutes;
+		if (updates.actualMinutes !== undefined) task.actualMinutes = updates.actualMinutes;
 		if (updates.tags !== undefined) task.tags = updates.tags;
 		if (updates.metadata !== undefined) {
 			task.metadata = { ...task.metadata, ...updates.metadata };
@@ -394,16 +385,12 @@ export class TaskManager extends EventEmitter {
 
 		if (filter) {
 			if (filter.status) {
-				const statuses = Array.isArray(filter.status)
-					? filter.status
-					: [filter.status];
+				const statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
 				tasks = tasks.filter((t) => statuses.includes(t.status));
 			}
 
 			if (filter.priority) {
-				const priorities = Array.isArray(filter.priority)
-					? filter.priority
-					: [filter.priority];
+				const priorities = Array.isArray(filter.priority) ? filter.priority : [filter.priority];
 				tasks = tasks.filter((t) => priorities.includes(t.priority));
 			}
 
@@ -412,9 +399,7 @@ export class TaskManager extends EventEmitter {
 			}
 
 			if (filter.tags && filter.tags.length > 0) {
-				tasks = tasks.filter((t) =>
-					filter.tags?.some((tag) => t.tags.includes(tag)),
-				);
+				tasks = tasks.filter((t) => filter.tags?.some((tag) => t.tags.includes(tag)));
 			}
 
 			if (filter.parentId !== undefined) {
@@ -591,11 +576,7 @@ export class TaskManager extends EventEmitter {
 		const remaining: Task[] = [];
 
 		for (const task of this.store.tasks) {
-			if (
-				task.status === "completed" &&
-				task.completedAt &&
-				task.completedAt < cutoffStr
-			) {
+			if (task.status === "completed" && task.completedAt && task.completedAt < cutoffStr) {
 				this.store.archivedTasks.push(task);
 				archived++;
 			} else {
@@ -716,8 +697,7 @@ export function formatTask(task: Task, verbose = false): string {
 		if (task.owner) output += ` | Owner: ${task.owner}`;
 		if (task.tags.length > 0) output += `\n   Tags: ${task.tags.join(", ")}`;
 		if (task.description) output += `\n   ${task.description}`;
-		if (task.blockedBy.length > 0)
-			output += `\n   Blocked by: ${task.blockedBy.join(", ")}`;
+		if (task.blockedBy.length > 0) output += `\n   Blocked by: ${task.blockedBy.join(", ")}`;
 	}
 
 	return output;

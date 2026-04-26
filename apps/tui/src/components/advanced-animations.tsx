@@ -59,10 +59,7 @@ export function MatrixRain({
 					speed: 1 + Math.random() * 2,
 					chars: Array(8)
 						.fill(0)
-						.map(
-							() =>
-								MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)],
-						),
+						.map(() => MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)]),
 					length: 4 + Math.floor(Math.random() * 6),
 				});
 			}
@@ -123,11 +120,7 @@ export function MatrixRain({
 						<Text
 							key={x}
 							color={
-								cell.brightness === 3
-									? "white"
-									: cell.brightness === 2
-										? "greenBright"
-										: "green"
+								cell.brightness === 3 ? "white" : cell.brightness === 2 ? "greenBright" : "green"
 							}
 							dimColor={cell.brightness === 1}
 						>
@@ -151,20 +144,9 @@ interface FireEffectProps {
 }
 
 const FIRE_CHARS = " .:-=+*#%@";
-const FIRE_COLORS = [
-	"black",
-	"red",
-	"redBright",
-	"yellow",
-	"yellowBright",
-	"white",
-] as const;
+const FIRE_COLORS = ["black", "red", "redBright", "yellow", "yellowBright", "white"] as const;
 
-export function FireEffect({
-	width = 40,
-	height = 8,
-	intensity = 0.7,
-}: FireEffectProps) {
+export function FireEffect({ width = 40, height = 8, intensity = 0.7 }: FireEffectProps) {
 	const [buffer, setBuffer] = useState<number[][]>(() =>
 		Array(height)
 			.fill(null)
@@ -207,9 +189,7 @@ export function FireEffect({
 				<Box key={y}>
 					{row.map((val, x) => {
 						const charIndex = Math.floor((val / 255) * (FIRE_CHARS.length - 1));
-						const colorIndex = Math.floor(
-							(val / 255) * (FIRE_COLORS.length - 1),
-						);
+						const colorIndex = Math.floor((val / 255) * (FIRE_COLORS.length - 1));
 						return (
 							<Text key={x} color={FIRE_COLORS[colorIndex]}>
 								{FIRE_CHARS[charIndex]}
@@ -232,11 +212,7 @@ interface DNAHelixProps {
 	speed?: number;
 }
 
-export function DNAHelix({
-	width = 30,
-	height = 10,
-	speed = 100,
-}: DNAHelixProps) {
+export function DNAHelix({ width = 30, height = 10, speed = 100 }: DNAHelixProps) {
 	const [phase, setPhase] = useState(0);
 
 	useEffect(() => {
@@ -254,8 +230,7 @@ export function DNAHelix({
 		for (let y = 0; y < height; y++) {
 			const offset = phase + y * 0.5;
 			const x1 = Math.floor((Math.sin(offset) + 1) * (width / 2 - 2)) + 1;
-			const x2 =
-				Math.floor((Math.sin(offset + Math.PI) + 1) * (width / 2 - 2)) + 1;
+			const x2 = Math.floor((Math.sin(offset + Math.PI) + 1) * (width / 2 - 2)) + 1;
 
 			const line: React.ReactNode[] = [];
 			for (let x = 0; x < width; x++) {
@@ -272,11 +247,7 @@ export function DNAHelix({
 							{bases[(baseIndex + 2) % 4]}
 						</Text>,
 					);
-				} else if (
-					x > Math.min(x1, x2) &&
-					x < Math.max(x1, x2) &&
-					Math.abs(x1 - x2) > 2
-				) {
+				} else if (x > Math.min(x1, x2) && x < Math.max(x1, x2) && Math.abs(x1 - x2) > 2) {
 					// Draw connecting line
 					line.push(
 						<Text key={x} dimColor>
@@ -312,12 +283,7 @@ interface Star {
 	z: number;
 }
 
-export function Starfield({
-	width = 50,
-	height = 12,
-	speed = 50,
-	warp = false,
-}: StarfieldProps) {
+export function Starfield({ width = 50, height = 12, speed = 50, warp = false }: StarfieldProps) {
 	const [stars, setStars] = useState<Star[]>(() =>
 		Array(40)
 			.fill(null)
@@ -364,8 +330,7 @@ export function Starfield({
 			const projY = Math.floor(centerY + (star.y / star.z) * 5);
 
 			if (projX >= 0 && projX < width && projY >= 0 && projY < height) {
-				const brightness =
-					star.z < 5 ? "●" : star.z < 10 ? "○" : star.z < 15 ? "·" : ".";
+				const brightness = star.z < 5 ? "●" : star.z < 10 ? "○" : star.z < 15 ? "·" : ".";
 				const color = star.z < 5 ? "white" : star.z < 10 ? "gray" : "gray";
 				g[projY][projX] = { char: brightness, color };
 
@@ -391,11 +356,7 @@ export function Starfield({
 			{grid.map((row, y) => (
 				<Box key={y}>
 					{row.map((cell, x) => (
-						<Text
-							key={x}
-							color={cell.color as any}
-							dimColor={cell.color === "gray"}
-						>
+						<Text key={x} color={cell.color as any} dimColor={cell.color === "gray"}>
 							{cell.char}
 						</Text>
 					))}
@@ -425,11 +386,7 @@ interface Dot {
 	color: string;
 }
 
-export function BouncingDots({
-	width = 40,
-	height = 8,
-	count = 8,
-}: BouncingDotsProps) {
+export function BouncingDots({ width = 40, height = 8, count = 8 }: BouncingDotsProps) {
 	const colors = ["cyan", "magenta", "yellow", "green", "red", "blue"];
 
 	const [dots, setDots] = useState<Dot[]>(() =>
@@ -494,10 +451,7 @@ export function BouncingDots({
 
 			if (cellX >= 0 && cellX < width && cellY >= 0 && cellY < height) {
 				// Braille dot positions
-				const dotBit =
-					subX === 0
-						? [0x01, 0x02, 0x04, 0x40][subY]
-						: [0x08, 0x10, 0x20, 0x80][subY];
+				const dotBit = subX === 0 ? [0x01, 0x02, 0x04, 0x40][subY] : [0x08, 0x10, 0x20, 0x80][subY];
 
 				cells[cellY][cellX].dots |= dotBit;
 				cells[cellY][cellX].color = dot.color;
@@ -534,11 +488,7 @@ interface GlitchTextProps {
 
 const GLITCH_CHARS = "!@#$%^&*()_+-=[]{}|;':\",./<>?\\`~";
 
-export function GlitchText({
-	text,
-	intensity = 0.3,
-	speed = 100,
-}: GlitchTextProps) {
+export function GlitchText({ text, intensity = 0.3, speed = 100 }: GlitchTextProps) {
 	const [glitched, setGlitched] = useState(text);
 	const [offset, setOffset] = useState(0);
 
@@ -549,9 +499,7 @@ export function GlitchText({
 					.split("")
 					.map((char, i) => {
 						if (Math.random() < intensity) {
-							return GLITCH_CHARS[
-								Math.floor(Math.random() * GLITCH_CHARS.length)
-							];
+							return GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
 						}
 						return char;
 					})
@@ -594,22 +542,9 @@ interface Particle {
 }
 
 const CONFETTI_CHARS = ["★", "✦", "✧", "◆", "◇", "●", "○", "■", "□", "▲", "△"];
-const CONFETTI_COLORS = [
-	"red",
-	"yellow",
-	"green",
-	"cyan",
-	"blue",
-	"magenta",
-	"white",
-];
+const CONFETTI_COLORS = ["red", "yellow", "green", "cyan", "blue", "magenta", "white"];
 
-export function Confetti({
-	width = 50,
-	height = 15,
-	duration = 3000,
-	onComplete,
-}: ConfettiProps) {
+export function Confetti({ width = 50, height = 15, duration = 3000, onComplete }: ConfettiProps) {
 	const [particles, setParticles] = useState<Particle[]>(() =>
 		Array(30)
 			.fill(null)
@@ -619,8 +554,7 @@ export function Confetti({
 				vx: (Math.random() - 0.5) * 4,
 				vy: -Math.random() * 3 - 1,
 				char: CONFETTI_CHARS[Math.floor(Math.random() * CONFETTI_CHARS.length)],
-				color:
-					CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+				color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
 			})),
 	);
 	const [active, setActive] = useState(true);
@@ -696,12 +630,7 @@ interface WaveformProps {
 
 const WAVEFORM_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-export function Waveform({
-	width = 30,
-	height = 4,
-	speed = 100,
-	active = true,
-}: WaveformProps) {
+export function Waveform({ width = 30, height = 4, speed = 100, active = true }: WaveformProps) {
 	const [phase, setPhase] = useState(0);
 	const [levels, setLevels] = useState<number[]>(() =>
 		Array(width)
@@ -745,8 +674,7 @@ export function Waveform({
 			{levels.map((level, i) => {
 				const charIndex = Math.floor(level * (WAVEFORM_CHARS.length - 1));
 				const hue = (i / width) * 360;
-				const color =
-					level > 0.7 ? "greenBright" : level > 0.4 ? "green" : "gray";
+				const color = level > 0.7 ? "greenBright" : level > 0.4 ? "green" : "gray";
 				return (
 					<Text key={i} color={color}>
 						{WAVEFORM_CHARS[charIndex]}
@@ -859,19 +787,13 @@ export function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
 		// Top face
 		const topOffset = Math.abs(Math.sin(angle)) * 2;
 		lines.push(`    ${`╭${"─".repeat(cubeSize * 2)}╮`}`);
-		lines.push(
-			`   ${"╱".padStart(2)} ${faceColors.top.repeat(cubeSize)} ${"╱"}│`,
-		);
-		lines.push(
-			`  ${"╱".padStart(2)} ${faceColors.top.repeat(cubeSize)} ${"╱"} │`,
-		);
+		lines.push(`   ${"╱".padStart(2)} ${faceColors.top.repeat(cubeSize)} ${"╱"}│`);
+		lines.push(`  ${"╱".padStart(2)} ${faceColors.top.repeat(cubeSize)} ${"╱"} │`);
 
 		// Front and right faces
 		lines.push(` ├${"─".repeat(cubeSize * 2)}┤ ${faceColors.right} │`);
 		for (let i = 0; i < 3; i++) {
-			lines.push(
-				` │ ${faceColors.front.repeat(cubeSize)} │ ${faceColors.right} │`,
-			);
+			lines.push(` │ ${faceColors.front.repeat(cubeSize)} │ ${faceColors.right} │`);
 		}
 		lines.push(` ╰${"─".repeat(cubeSize * 2)}╯╱`);
 
@@ -960,11 +882,7 @@ interface LoadingAnimationProps {
 	height?: number;
 }
 
-export function LoadingAnimation({
-	type,
-	width,
-	height,
-}: LoadingAnimationProps) {
+export function LoadingAnimation({ type, width, height }: LoadingAnimationProps) {
 	switch (type) {
 		case "matrix":
 			return <MatrixRain width={width} height={height} />;

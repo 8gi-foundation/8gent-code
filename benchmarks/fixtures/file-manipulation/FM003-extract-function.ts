@@ -46,10 +46,7 @@ export function processOrder(order: Order): {
 		}
 	}
 
-	const totalValue = order.items.reduce(
-		(sum, item) => sum + item.price * item.quantity,
-		0,
-	);
+	const totalValue = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 	if (totalValue > 10000) {
 		errors.push("Order value exceeds maximum limit");
 	}

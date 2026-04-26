@@ -53,9 +53,7 @@ export class SnapshotStore<T = unknown> {
 		const snapshot: Snapshot<T> = {
 			id: generateId(),
 			label,
-			state: structuredClone
-				? structuredClone(state)
-				: JSON.parse(JSON.stringify(state)),
+			state: structuredClone ? structuredClone(state) : JSON.parse(JSON.stringify(state)),
 			timestamp: Date.now(),
 		};
 		this.snapshots.push(snapshot);
@@ -123,10 +121,7 @@ export class SnapshotStore<T = unknown> {
 		const changed: DiffResult["changed"] = [];
 
 		for (const key of keysA) {
-			if (
-				keysB.has(key) &&
-				JSON.stringify(flatA[key]) !== JSON.stringify(flatB[key])
-			) {
+			if (keysB.has(key) && JSON.stringify(flatA[key]) !== JSON.stringify(flatB[key])) {
 				changed.push({ key, from: flatA[key], to: flatB[key] });
 			}
 		}

@@ -144,10 +144,9 @@ try {
 		.map((f) => readFileSync(join(AUDIO_DIR, f), "utf-8"))
 		.join("\n\nNext branch.\n\n");
 	const combinedPath = join(AUDIO_DIR, "all-branches-combined.aiff");
-	execSync(
-		`say -v Ava -o "${combinedPath}" "${allText.slice(0, 3000).replace(/"/g, '\\"')}"`,
-		{ timeout: 120000 },
-	);
+	execSync(`say -v Ava -o "${combinedPath}" "${allText.slice(0, 3000).replace(/"/g, '\\"')}"`, {
+		timeout: 120000,
+	});
 	console.log(`Combined audio saved: ${combinedPath}`);
 } catch {
 	console.log("Combined audio generation failed (text too long)");

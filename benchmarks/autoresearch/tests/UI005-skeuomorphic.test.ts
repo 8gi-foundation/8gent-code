@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";

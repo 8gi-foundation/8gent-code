@@ -6,11 +6,7 @@ export interface StackProps extends BoxProps {
 	children: React.ReactNode;
 }
 
-export const Stack: React.FC<StackProps> = ({
-	gap = 0,
-	children,
-	...props
-}) => {
+export const Stack: React.FC<StackProps> = ({ gap = 0, children, ...props }) => {
 	const items = React.Children.toArray(children);
 
 	return (

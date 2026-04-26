@@ -107,8 +107,7 @@ Interface User: { id: string; email: string; passwordHash: string; role: Role; c
 	{
 		id: "BT002",
 		category: "battle-test",
-		title:
-			"Event-Driven Architecture — Pub/Sub, Dead Letter Queue, Retry, Backpressure",
+		title: "Event-Driven Architecture — Pub/Sub, Dead Letter Queue, Retry, Backpressure",
 		difficulty: "hard",
 		prompt: `Build a production-grade event system for microservice communication.
 
@@ -205,8 +204,7 @@ Flow control for high-throughput scenarios:
 	{
 		id: "BT003",
 		category: "battle-test",
-		title:
-			"Data Pipeline — Stream Processing, Schema Validation, Transform Chain",
+		title: "Data Pipeline — Stream Processing, Schema Validation, Transform Chain",
 		difficulty: "hard",
 		prompt: `Build a typed data pipeline system for ETL-style processing.
 
@@ -300,8 +298,7 @@ Common data transformations:
 	{
 		id: "BT004",
 		category: "battle-test",
-		title:
-			"CLI Framework — Command Parser, Help Generator, Flag System, Subcommands",
+		title: "CLI Framework — Command Parser, Help Generator, Flag System, Subcommands",
 		difficulty: "hard",
 		prompt: `Build a CLI framework similar to Commander.js or yargs — from scratch.
 
@@ -598,8 +595,7 @@ Export all functions.
 	{
 		id: "BT007",
 		category: "battle-test",
-		title:
-			"SEO Audit Engine — Meta Analysis, Scoring, Core Web Vitals, Reporting",
+		title: "SEO Audit Engine — Meta Analysis, Scoring, Core Web Vitals, Reporting",
 		difficulty: "hard",
 		prompt: `Build an SEO audit engine that analyzes web pages and generates actionable reports.
 
@@ -700,8 +696,7 @@ Export all functions and interfaces.
 	{
 		id: "BT008",
 		category: "battle-test",
-		title:
-			"Email Campaign System — Templates, Personalization, A/B Testing, Analytics",
+		title: "Email Campaign System — Templates, Personalization, A/B Testing, Analytics",
 		difficulty: "hard",
 		prompt: `Build an email campaign system with templating, personalization, and analytics tracking.
 
@@ -796,8 +791,7 @@ Export the CampaignTracker class and CampaignMetrics/CampaignReport interfaces.
 	{
 		id: "BT009",
 		category: "battle-test",
-		title:
-			"CI/CD Pipeline Builder — DSL, Dependency Graph, YAML Generation, Dry Run",
+		title: "CI/CD Pipeline Builder — DSL, Dependency Graph, YAML Generation, Dry Run",
 		difficulty: "hard",
 		prompt: `Build a CI/CD pipeline definition DSL with dependency resolution and YAML output.
 
@@ -911,8 +905,7 @@ Export the PipelineRunner class and ExecutionResult interface.
 	{
 		id: "BT010",
 		category: "battle-test",
-		title:
-			"Design Token System — Tokens, Multi-Format Export, Color/Spacing Scales",
+		title: "Design Token System — Tokens, Multi-Format Export, Color/Spacing Scales",
 		difficulty: "hard",
 		prompt: `Build a design token system that defines tokens and exports them to CSS, Tailwind, SCSS, and TypeScript.
 

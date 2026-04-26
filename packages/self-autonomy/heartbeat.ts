@@ -140,10 +140,7 @@ export class HeartbeatAgents extends EventEmitter {
 			this.status.git.lastRun = new Date();
 
 			// Auto-commit if there are changes and we're on an 8gent branch
-			if (
-				state.uncommittedFiles.length > 0 &&
-				state.branch.startsWith("8gent/")
-			) {
+			if (state.uncommittedFiles.length > 0 && state.branch.startsWith("8gent/")) {
 				// Group files by type
 				const tsFiles = state.uncommittedFiles.filter(
 					(f) => f.endsWith(".ts") || f.endsWith(".tsx"),
@@ -206,9 +203,7 @@ export class HeartbeatAgents extends EventEmitter {
 
 			// Clean old errors (older than 5 minutes)
 			const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-			this.recentErrors = this.recentErrors.filter(
-				(e) => e.timestamp > fiveMinutesAgo,
-			);
+			this.recentErrors = this.recentErrors.filter((e) => e.timestamp > fiveMinutesAgo);
 			this.status.heal.errorsTracked = this.recentErrors.length;
 
 			// Count error patterns
@@ -265,9 +260,7 @@ export class HeartbeatAgents extends EventEmitter {
 			const context = this.autonomy.memory.getWorkingContext();
 			if (context) {
 				const started = new Date(context.started);
-				this.status.memory.contextAge = Math.floor(
-					(Date.now() - started.getTime()) / 1000,
-				);
+				this.status.memory.contextAge = Math.floor((Date.now() - started.getTime()) / 1000);
 			}
 
 			// Auto-save working context if agent has active state
@@ -357,22 +350,10 @@ export class HeartbeatAgents extends EventEmitter {
 		if (this.running) return;
 		this.running = true;
 
-		this.gitTimer = setInterval(
-			() => this.gitHeartbeat(),
-			this.config.gitInterval,
-		);
-		this.healTimer = setInterval(
-			() => this.healHeartbeat(),
-			this.config.healInterval,
-		);
-		this.memoryTimer = setInterval(
-			() => this.memoryHeartbeat(),
-			this.config.memoryInterval,
-		);
-		this.modifyTimer = setInterval(
-			() => this.modifyHeartbeat(),
-			this.config.modifyInterval,
-		);
+		this.gitTimer = setInterval(() => this.gitHeartbeat(), this.config.gitInterval);
+		this.healTimer = setInterval(() => this.healHeartbeat(), this.config.healInterval);
+		this.memoryTimer = setInterval(() => this.memoryHeartbeat(), this.config.memoryInterval);
+		this.modifyTimer = setInterval(() => this.modifyHeartbeat(), this.config.modifyInterval);
 
 		this.status.git.running = true;
 		this.status.heal.running = true;
@@ -433,10 +414,7 @@ export class HeartbeatAgents extends EventEmitter {
 	/**
 	 * Start a task (creates branch, updates context)
 	 */
-	startTask(
-		description: string,
-		type: "feat" | "fix" | "refactor" = "feat",
-	): void {
+	startTask(description: string, type: "feat" | "fix" | "refactor" = "feat"): void {
 		this.autonomy.startTask(description, type);
 		this.updateContext({ currentTask: description });
 		this.emit("task:started", { description, type });
@@ -461,9 +439,7 @@ export class HeartbeatAgents extends EventEmitter {
 
 let heartbeatInstance: HeartbeatAgents | null = null;
 
-export function getHeartbeatAgents(
-	config?: Partial<HeartbeatConfig>,
-): HeartbeatAgents {
+export function getHeartbeatAgents(config?: Partial<HeartbeatConfig>): HeartbeatAgents {
 	if (!heartbeatInstance) {
 		heartbeatInstance = new HeartbeatAgents(config);
 	}

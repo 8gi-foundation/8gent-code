@@ -94,12 +94,7 @@ function compareObjects(
 	return true;
 }
 
-function _deepEqual(
-	a: unknown,
-	b: unknown,
-	opts: Required<DeepEqualOptions>,
-	seen: Seen,
-): boolean {
+function _deepEqual(a: unknown, b: unknown, opts: Required<DeepEqualOptions>, seen: Seen): boolean {
 	// Custom comparator first
 	const custom = opts.comparator(a, b);
 	if (custom !== undefined) return custom;
@@ -154,12 +149,7 @@ function _deepEqual(
 		}
 
 		// Plain object (including null-prototype objects)
-		return compareObjects(
-			a as Record<string, unknown>,
-			b as Record<string, unknown>,
-			opts,
-			seen,
-		);
+		return compareObjects(a as Record<string, unknown>, b as Record<string, unknown>, opts, seen);
 	} finally {
 		seen.delete(a);
 	}
@@ -177,11 +167,7 @@ const DEFAULTS: Required<DeepEqualOptions> = {
  * @param b - right-hand value
  * @param options - strict/loose mode, custom comparator
  */
-export function deepEqual(
-	a: unknown,
-	b: unknown,
-	options: DeepEqualOptions = {},
-): boolean {
+export function deepEqual(a: unknown, b: unknown, options: DeepEqualOptions = {}): boolean {
 	const opts: Required<DeepEqualOptions> = {
 		strict: options.strict ?? DEFAULTS.strict,
 		comparator: options.comparator ?? DEFAULTS.comparator,
@@ -192,10 +178,6 @@ export function deepEqual(
 /**
  * Returns true if `a` and `b` are NOT deeply structurally equal.
  */
-export function notEqual(
-	a: unknown,
-	b: unknown,
-	options: DeepEqualOptions = {},
-): boolean {
+export function notEqual(a: unknown, b: unknown, options: DeepEqualOptions = {}): boolean {
 	return !deepEqual(a, b, options);
 }

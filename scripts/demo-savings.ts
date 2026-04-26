@@ -8,21 +8,15 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	getSymbolSource,
-	parseTypeScriptFile,
-} from "../packages/ast-index/typescript-parser";
+import { getSymbolSource, parseTypeScriptFile } from "../packages/ast-index/typescript-parser";
 
 const DEMO_FILE =
-	process.argv[2] ||
-	path.join(__dirname, "../packages/ast-index/typescript-parser.ts");
+	process.argv[2] || path.join(__dirname, "../packages/ast-index/typescript-parser.ts");
 
 console.log("╔══════════════════════════════════════════════════════════════╗");
 console.log("║  8gent Code - Token Savings Demo                             ║");
 console.log('║  "Never hit usage caps again"                                ║');
-console.log(
-	"╚══════════════════════════════════════════════════════════════╝\n",
-);
+console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
 // Get file info
 const fileContent = fs.readFileSync(DEMO_FILE, "utf-8");
@@ -31,9 +25,7 @@ const fullFileTokens = Math.ceil(fileSize / 4);
 
 console.log(`📄 File: ${path.basename(DEMO_FILE)}`);
 console.log(`   Size: ${fileSize.toLocaleString()} bytes`);
-console.log(
-	`   Traditional approach: ~${fullFileTokens.toLocaleString()} tokens\n`,
-);
+console.log(`   Traditional approach: ~${fullFileTokens.toLocaleString()} tokens\n`);
 
 // Parse with AST
 console.log("🔍 AST-first approach:\n");
@@ -68,15 +60,9 @@ if (outline.symbols.length > 8) {
 }
 
 // Get a specific symbol
-const targetSymbol = outline.symbols.find(
-	(s) => s.kind === "function" && s.name.length > 5,
-);
+const targetSymbol = outline.symbols.find((s) => s.kind === "function" && s.name.length > 5);
 if (targetSymbol) {
-	const symbolSource = getSymbolSource(
-		DEMO_FILE,
-		targetSymbol.startLine,
-		targetSymbol.endLine,
-	);
+	const symbolSource = getSymbolSource(DEMO_FILE, targetSymbol.startLine, targetSymbol.endLine);
 	const symbolTokens = Math.ceil(symbolSource.length / 4);
 
 	console.log(`   Step 2: get_symbol("${targetSymbol.name}")`);
@@ -87,30 +73,20 @@ if (targetSymbol) {
 	const savings = fullFileTokens - totalAstTokens;
 	const savingsPercent = ((savings / fullFileTokens) * 100).toFixed(1);
 
-	console.log(
-		"╔══════════════════════════════════════════════════════════════╗",
-	);
-	console.log(
-		"║  RESULTS                                                      ║",
-	);
-	console.log(
-		"╠══════════════════════════════════════════════════════════════╣",
-	);
+	console.log("╔══════════════════════════════════════════════════════════════╗");
+	console.log("║  RESULTS                                                      ║");
+	console.log("╠══════════════════════════════════════════════════════════════╣");
 	console.log(
 		`║  Traditional (full read):     ${fullFileTokens.toLocaleString().padStart(8)} tokens            ║`,
 	);
 	console.log(
 		`║  AST-first (outline+symbol):  ${totalAstTokens.toLocaleString().padStart(8)} tokens            ║`,
 	);
-	console.log(
-		"║                               ─────────                       ║",
-	);
+	console.log("║                               ─────────                       ║");
 	console.log(
 		`║  TOKENS SAVED:                ${savings.toLocaleString().padStart(8)} (${savingsPercent}%)          ║`,
 	);
-	console.log(
-		"╚══════════════════════════════════════════════════════════════╝\n",
-	);
+	console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
 	// Cost savings at different rates
 	console.log("💰 Cost savings per 1000 similar operations:\n");
@@ -128,8 +104,6 @@ if (targetSymbol) {
 		console.log(`   ${rate.name.padEnd(18)} $${cost.toFixed(2)} saved`);
 	}
 
-	console.log(
-		"\n🚀 Scale this across a full development session and the savings are massive.",
-	);
+	console.log("\n🚀 Scale this across a full development session and the savings are massive.");
 	console.log("   This is why 8gent Code users never hit usage caps.\n");
 }

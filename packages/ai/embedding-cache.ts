@@ -71,10 +71,7 @@ export class EmbeddingCache {
 	private _load(): void {
 		try {
 			if (existsSync(CACHE_PATH)) {
-				const raw = JSON.parse(readFileSync(CACHE_PATH, "utf-8")) as Record<
-					string,
-					number[]
-				>;
+				const raw = JSON.parse(readFileSync(CACHE_PATH, "utf-8")) as Record<string, number[]>;
 				for (const [k, v] of Object.entries(raw)) {
 					if (this.map.size < MAX_ENTRIES) this.map.set(k, v);
 				}

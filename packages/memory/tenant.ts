@@ -59,10 +59,7 @@ export function tenantWhere(scope: TenantScope): TenantClause {
  * Validate that a memory record belongs to the given tenant before returning it.
  * Use this as a defense-in-depth check after SQL queries.
  */
-export function validateTenant(
-	memory: Record<string, unknown>,
-	scope: TenantScope,
-): boolean {
+export function validateTenant(memory: Record<string, unknown>, scope: TenantScope): boolean {
 	if (memory.userId !== scope.userId) return false;
 
 	if (scope.organizationId && memory.organizationId !== scope.organizationId) {

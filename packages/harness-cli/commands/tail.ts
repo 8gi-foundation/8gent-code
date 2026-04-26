@@ -12,9 +12,7 @@ const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 
 function resolveSessionPath(sessionId: string): string {
 	if (fs.existsSync(sessionId)) return sessionId;
-	const withExt = sessionId.endsWith(".jsonl")
-		? sessionId
-		: `${sessionId}.jsonl`;
+	const withExt = sessionId.endsWith(".jsonl") ? sessionId : `${sessionId}.jsonl`;
 	const fullPath = path.join(SESSIONS_DIR, withExt);
 	if (fs.existsSync(fullPath)) return fullPath;
 	if (fs.existsSync(SESSIONS_DIR)) {
@@ -57,9 +55,7 @@ export async function tail(args: string[]): Promise<void> {
 				if (!line.trim()) continue;
 				try {
 					const entry = JSON.parse(line);
-					const ts = entry.timestamp
-						? new Date(entry.timestamp).toLocaleTimeString()
-						: "??:??";
+					const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "??:??";
 					const type = entry.type;
 
 					let summary = "";

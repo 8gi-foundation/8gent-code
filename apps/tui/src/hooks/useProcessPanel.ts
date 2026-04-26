@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-	TaskInfo,
-	TaskOutput,
-	TaskStatus,
-} from "../../../../packages/tools/background.js";
+import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
 import { getBackgroundTaskManager } from "../../../../packages/tools/background.js";
 import {
 	getActivityLogAsTaskInfos,
@@ -14,9 +10,7 @@ import { useSelection } from "./useSelection.js";
 
 function mergeTasksByRecency(shell: TaskInfo[], agent: TaskInfo[]): TaskInfo[] {
 	const all = [...shell, ...agent];
-	all.sort(
-		(a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
-	);
+	all.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 	return all;
 }
 
@@ -77,9 +71,7 @@ export function useProcessPanel(): ProcessPanelState {
 			setTasks(merged);
 
 			const base = manager.getTaskCounts();
-			const agentRunning = agentTasks.filter(
-				(t) => t.status === "running",
-			).length;
+			const agentRunning = agentTasks.filter((t) => t.status === "running").length;
 			setTaskCounts({
 				...base,
 				running: base.running + agentRunning,
@@ -151,9 +143,7 @@ export function useProcessPanel(): ProcessPanelState {
 		id: string;
 		command: string;
 	} | null => {
-		const task = detailTaskId
-			? tasks.find((t) => t.id === detailTaskId)
-			: selection.selectedItem;
+		const task = detailTaskId ? tasks.find((t) => t.id === detailTaskId) : selection.selectedItem;
 		if (!task || task.status !== "running") return null;
 		if (isAgentProcessTaskId(task.id)) return null;
 

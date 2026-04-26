@@ -8,8 +8,7 @@
 import { vesselInvoke } from "./invoke";
 import { buildManifest } from "./manifest";
 
-const CONTROL_PLANE_URL =
-	process.env.CONTROL_PLANE_URL ?? "wss://8gi-board-plane.fly.dev";
+const CONTROL_PLANE_URL = process.env.CONTROL_PLANE_URL ?? "wss://8gi-board-plane.fly.dev";
 
 let ws: WebSocket | null = null;
 let reconnectDelay = 2000;

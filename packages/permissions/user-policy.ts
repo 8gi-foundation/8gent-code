@@ -46,8 +46,7 @@ interface PersistedPolicy {
 	always: Record<string, boolean>;
 }
 
-const DATA_DIR =
-	process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+const DATA_DIR = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 const USER_POLICY_FILE = path.join(DATA_DIR, "user-policy.json");
 const AUDIT_LOG_FILE = path.join(DATA_DIR, "permissions-audit.jsonl");
 

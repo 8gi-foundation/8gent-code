@@ -49,8 +49,7 @@ export function score(results: TaskResult[], model: string): SWEBenchReport {
 	const errors = results
 		.filter((r) => r.error)
 		.map((r) => ({ task_id: r.task_id, error: r.error! }));
-	const avgDur =
-		total > 0 ? results.reduce((s, r) => s + r.duration_ms, 0) / total : 0;
+	const avgDur = total > 0 ? results.reduce((s, r) => s + r.duration_ms, 0) / total : 0;
 
 	return {
 		timestamp: new Date().toISOString(),
@@ -99,8 +98,7 @@ export function printSummary(report: SWEBenchReport): void {
 	if (report.per_repo.length > 0) {
 		console.log(`  ${c.bold}Per-repo breakdown:${c.reset}`);
 		for (const r of report.per_repo) {
-			const rc =
-				r.pass_rate > 0.3 ? c.green : r.pass_rate > 0 ? c.yellow : c.red;
+			const rc = r.pass_rate > 0.3 ? c.green : r.pass_rate > 0 ? c.yellow : c.red;
 			console.log(
 				`    ${r.repo.padEnd(35)} ${rc}${r.passed}/${r.total}${c.reset} (${(r.pass_rate * 100).toFixed(0)}%)`,
 			);
@@ -108,8 +106,6 @@ export function printSummary(report: SWEBenchReport): void {
 		console.log();
 	}
 	if (report.errors.length > 0)
-		console.log(
-			`  ${c.yellow}${report.errors.length} tasks had errors${c.reset}`,
-		);
+		console.log(`  ${c.yellow}${report.errors.length} tasks had errors${c.reset}`);
 	console.log(`${c.cyan}${"=".repeat(60)}${c.reset}\n`);
 }

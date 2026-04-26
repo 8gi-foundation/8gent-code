@@ -56,36 +56,32 @@ function isAuthorisedUser(userId: number, bot: TelegramBot): boolean {
  * clears the surface registration.
  */
 export function attachTelegramTurthSurface(bot: TelegramBot): () => void {
-	const unregisterInterceptor = bot.registerCallbackInterceptor(
-		async ({ data, userId }) => {
-			// Only intercept callbacks we own.
-			if (!data.startsWith("turth_")) return false;
+	const unregisterInterceptor = bot.registerCallbackInterceptor(async ({ data, userId }) => {
+		// Only intercept callbacks we own.
+		if (!data.startsWith("turth_")) return false;
 
-			// "<token>|<scope>": scope is the second half after the last "|".
-			const pipeIdx = data.lastIndexOf("|");
-			if (pipeIdx < 0) return false;
-			const token = data.slice(0, pipeIdx);
-			const scopeRaw = data.slice(pipeIdx + 1);
+		// "<token>|<scope>": scope is the second half after the last "|".
+		const pipeIdx = data.lastIndexOf("|");
+		if (pipeIdx < 0) return false;
+		const token = data.slice(0, pipeIdx);
+		const scopeRaw = data.slice(pipeIdx + 1);
 
-			const pending = PENDING.get(token);
-			if (!pending) return true; // We own the prefix; swallow even if expired.
+		const pending = PENDING.get(token);
+		if (!pending) return true; // We own the prefix; swallow even if expired.
 
-			if (!isAuthorisedUser(userId, bot)) {
-				console.warn(
-					`[turth] Rejected callback from unauthorised user ${userId} for token ${token}`,
-				);
-				return true;
-			}
-
-			const scope = SCOPE_BUTTONS.find(([, s]) => s === scopeRaw)?.[1];
-			if (!scope) return true;
-
-			clearTimeout(pending.timeout);
-			PENDING.delete(token);
-			pending.resolve(scope);
+		if (!isAuthorisedUser(userId, bot)) {
+			console.warn(`[turth] Rejected callback from unauthorised user ${userId} for token ${token}`);
 			return true;
-		},
-	);
+		}
+
+		const scope = SCOPE_BUTTONS.find(([, s]) => s === scopeRaw)?.[1];
+		if (!scope) return true;
+
+		clearTimeout(pending.timeout);
+		PENDING.delete(token);
+		pending.resolve(scope);
+		return true;
+	});
 
 	registerPromptSurface(async (req: TurthRequest) => {
 		const token = newToken();

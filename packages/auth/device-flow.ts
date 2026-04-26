@@ -54,9 +54,7 @@ export async function executeDeviceFlow(
 	);
 
 	// Step 3: Auto-open browser on macOS
-	await openBrowser(
-		authResponse.verification_uri_complete || authResponse.verification_uri,
-	);
+	await openBrowser(authResponse.verification_uri_complete || authResponse.verification_uri);
 
 	// Step 4: Poll for token
 	const result = await pollForToken(config, authResponse, callbacks);
@@ -84,9 +82,7 @@ async function requestDeviceAuthorization(
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			console.error(
-				`Device authorization failed (${response.status}): ${errorText}`,
-			);
+			console.error(`Device authorization failed (${response.status}): ${errorText}`);
 			return null;
 		}
 
@@ -158,8 +154,7 @@ async function pollForToken(
 ): Promise<DeviceFlowState> {
 	let interval = authResponse.interval * 1000; // Convert to ms
 	const deadline =
-		Date.now() +
-		Math.min(authResponse.expires_in * 1000, config.deviceFlowTimeoutMs);
+		Date.now() + Math.min(authResponse.expires_in * 1000, config.deviceFlowTimeoutMs);
 	let attempts = 0;
 
 	while (Date.now() < deadline) {
@@ -214,9 +209,7 @@ async function pollForToken(
 				default:
 					return {
 						phase: "error",
-						error:
-							errorData.error_description ||
-							`Unknown error: ${errorData.error}`,
+						error: errorData.error_description || `Unknown error: ${errorData.error}`,
 					};
 			}
 		} catch (error) {

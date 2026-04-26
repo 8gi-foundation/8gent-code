@@ -83,10 +83,7 @@ export class ToolLoopDetector {
 			let streak = 1;
 			for (let i = len - 2; i >= 0; i--) {
 				const entry = this.history[i];
-				if (
-					entry.toolName === last.toolName &&
-					entry.argsHash === last.argsHash
-				) {
+				if (entry.toolName === last.toolName && entry.argsHash === last.argsHash) {
 					streak++;
 				} else {
 					break;

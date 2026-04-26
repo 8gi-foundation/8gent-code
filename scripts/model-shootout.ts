@@ -140,14 +140,7 @@ async function waitForVessel(maxWait = 60_000): Promise<boolean> {
 async function setModel(model: string): Promise<void> {
 	console.log(`  Setting model to ${model}...`);
 	const proc = Bun.spawn(
-		[
-			"fly",
-			"secrets",
-			"set",
-			`DEFAULT_MODEL=${model}`,
-			"--app",
-			"eight-vessel",
-		],
+		["fly", "secrets", "set", `DEFAULT_MODEL=${model}`, "--app", "eight-vessel"],
 		{
 			stdout: "pipe",
 			stderr: "pipe",
@@ -163,9 +156,7 @@ async function setModel(model: string): Promise<void> {
 	console.log(`  Vessel ready with ${model}`);
 }
 
-async function runTask(
-	task: string,
-): Promise<ModelResult & { rawResponse: string }> {
+async function runTask(task: string): Promise<ModelResult & { rawResponse: string }> {
 	const ws = new WebSocket(VESSEL_URL);
 	await new Promise<void>((resolve, reject) => {
 		ws.onopen = () => resolve();
@@ -175,10 +166,7 @@ async function runTask(
 
 	// Create session
 	const sessionPromise = new Promise<string>((resolve, reject) => {
-		const timer = setTimeout(
-			() => reject(new Error("session timeout")),
-			15_000,
-		);
+		const timer = setTimeout(() => reject(new Error("session timeout")), 15_000);
 		const handler = (event: MessageEvent) => {
 			const msg = JSON.parse(event.data as string);
 			if (msg.type === "session:created") {
@@ -287,11 +275,7 @@ async function main() {
 			results.push(result);
 
 			const icon =
-				result.status === "success"
-					? "PASS"
-					: result.status === "timeout"
-						? "TIME"
-						: "FAIL";
+				result.status === "success" ? "PASS" : result.status === "timeout" ? "TIME" : "FAIL";
 			console.log(
 				`\n  [${icon}] ${result.toolCalls} tools, ${Math.round(result.durationMs / 1000)}s`,
 			);
@@ -320,12 +304,7 @@ async function main() {
 	console.log("─".repeat(70));
 
 	for (const r of results) {
-		const icon =
-			r.status === "success"
-				? "PASS"
-				: r.status === "timeout"
-					? "TIME"
-					: "FAIL";
+		const icon = r.status === "success" ? "PASS" : r.status === "timeout" ? "TIME" : "FAIL";
 		console.log(
 			`${r.shortName.padEnd(25)} ${r.issueRef.padEnd(20)} ${icon.padEnd(8)} ${String(r.toolCalls).padEnd(6)} ${Math.round(r.durationMs / 1000)}s`,
 		);

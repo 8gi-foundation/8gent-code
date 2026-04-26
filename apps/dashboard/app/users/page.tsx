@@ -36,12 +36,8 @@ export default function UsersPage() {
 				<div className="mx-auto max-w-7xl px-6 py-4">
 					<div className="flex items-center justify-between">
 						<div>
-							<h1 className="text-lg font-bold text-[var(--8gent-text)]">
-								8gent Dashboard
-							</h1>
-							<p className="text-xs text-[var(--8gent-text-muted)]">
-								Admin Control Plane
-							</p>
+							<h1 className="text-lg font-bold text-[var(--8gent-text)]">8gent Dashboard</h1>
+							<p className="text-xs text-[var(--8gent-text-muted)]">Admin Control Plane</p>
 						</div>
 						<nav className="flex gap-4">
 							<a
@@ -65,9 +61,7 @@ export default function UsersPage() {
 				{/* Search and Filter Bar */}
 				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex items-center gap-3">
-						<h2 className="text-lg font-medium text-[var(--8gent-text)]">
-							Users
-						</h2>
+						<h2 className="text-lg font-medium text-[var(--8gent-text)]">Users</h2>
 						{result && (
 							<span className="rounded-full bg-[var(--8gent-bg-hover)] px-2 py-0.5 text-xs text-[var(--8gent-text-muted)]">
 								{result.totalCount}
@@ -128,8 +122,7 @@ export default function UsersPage() {
 									Previous
 								</button>
 								<span className="text-xs text-[var(--8gent-text-muted)]">
-									Showing {offset + 1}-
-									{Math.min(offset + limit, result.totalCount)} of{" "}
+									Showing {offset + 1}-{Math.min(offset + limit, result.totalCount)} of{" "}
 									{result.totalCount}
 								</span>
 								<button

@@ -5,14 +5,7 @@
  * Uses fetch for HTTP APIs, Bun.spawn for CLI tools. All respect dryRun.
  */
 
-import {
-	type ActuatorConfig,
-	type ActuatorResult,
-	checkTarget,
-	fail,
-	log,
-	ok,
-} from "./types";
+import { type ActuatorConfig, type ActuatorResult, checkTarget, fail, log, ok } from "./types";
 
 /**
  * Send a Telegram message via Bot API
@@ -35,11 +28,7 @@ export async function sendTelegram(
 	log(action, target, config.dryRun, `Message (${message.length} chars)`);
 
 	if (config.dryRun) {
-		return ok(
-			action,
-			target,
-			`DRY RUN: would send to Telegram chat ${chatId}:\n${message}`,
-		);
+		return ok(action, target, `DRY RUN: would send to Telegram chat ${chatId}:\n${message}`);
 	}
 
 	const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
@@ -62,11 +51,7 @@ export async function sendTelegram(
 		};
 
 		if (!data.ok) {
-			return fail(
-				action,
-				target,
-				`Telegram API error: ${data.description || "unknown"}`,
-			);
+			return fail(action, target, `Telegram API error: ${data.description || "unknown"}`);
 		}
 
 		return ok(action, target, `Message sent (id: ${data.result?.message_id})`);
@@ -96,15 +81,10 @@ export async function postToGitHubIssue(
 	log(action, target, config.dryRun, `Comment (${comment.length} chars)`);
 
 	if (config.dryRun) {
-		return ok(
-			action,
-			target,
-			`DRY RUN: would comment on ${repo}#${issueNumber}:\n${comment}`,
-			{
-				reversible: true,
-				undoCommand: `gh api repos/${repo}/issues/comments/<id> -X DELETE`,
-			},
-		);
+		return ok(action, target, `DRY RUN: would comment on ${repo}#${issueNumber}:\n${comment}`, {
+			reversible: true,
+			undoCommand: `gh api repos/${repo}/issues/comments/<id> -X DELETE`,
+		});
 	}
 
 	const proc = Bun.spawn(
@@ -127,11 +107,7 @@ export async function postToGitHubIssue(
 	const exitCode = await proc.exited;
 
 	if (exitCode !== 0) {
-		return fail(
-			action,
-			target,
-			`Exit ${exitCode}: ${stderr.trim() || stdout.trim()}`,
-		);
+		return fail(action, target, `Exit ${exitCode}: ${stderr.trim() || stdout.trim()}`);
 	}
 
 	// Extract comment ID from response for undo

@@ -14,8 +14,7 @@ if (!workDir) throw new Error("WORK_DIR env var required");
 
 // Import LLM-generated entry point
 const systemMod = await import(`${workDir}/system.ts`);
-const createDesignSystem: Function =
-	systemMod.default ?? systemMod.createDesignSystem;
+const createDesignSystem: Function = systemMod.default ?? systemMod.createDesignSystem;
 
 if (!createDesignSystem || typeof createDesignSystem !== "function") {
 	throw new Error("system.ts must export createDesignSystem function");
@@ -35,8 +34,7 @@ try {
 	TokenEngineClass = tokensMod.TokenEngine ?? tokensMod.default;
 
 	const componentsMod = await import(`${workDir}/components.ts`);
-	ComponentRegistryClass =
-		componentsMod.ComponentRegistry ?? componentsMod.default;
+	ComponentRegistryClass = componentsMod.ComponentRegistry ?? componentsMod.default;
 
 	const themesMod = await import(`${workDir}/themes.ts`);
 	ThemeEngineClass = themesMod.ThemeEngine ?? themesMod.default;
@@ -73,10 +71,8 @@ describe("FS-MEGA-001: Design System", () => {
 			for (const t of tables) {
 				const exists =
 					db.tableExists?.(t) ??
-					db.query?.(
-						`SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
-						[t],
-					)?.length > 0;
+					db.query?.(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [t])?.length >
+						0;
 				expect(exists).toBeTruthy();
 			}
 		});
@@ -213,11 +209,7 @@ describe("FS-MEGA-001: Design System", () => {
 			// Create a child theme based on dark
 			sys.themes.create("high-contrast", "High contrast dark", "dark");
 			// Dark theme overrides background → #0F172A
-			const bg = sys.themes.resolveToken(
-				"high-contrast",
-				"color",
-				"background",
-			);
+			const bg = sys.themes.resolveToken("high-contrast", "color", "background");
 			expect(bg).toBe("#0F172A");
 		});
 
@@ -225,11 +217,7 @@ describe("FS-MEGA-001: Design System", () => {
 			sys.seed?.();
 			sys.themes.create?.("custom-child", "Custom", "dark");
 			sys.themes.setOverride("custom-child", "color", "background", "#000000");
-			const val = sys.themes.resolveToken(
-				"custom-child",
-				"color",
-				"background",
-			);
+			const val = sys.themes.resolveToken("custom-child", "color", "background");
 			expect(val).toBe("#000000");
 		});
 	});
@@ -261,16 +249,8 @@ describe("FS-MEGA-001: Design System", () => {
 
 		test("render with theme applies theme overrides", () => {
 			sys.seed?.();
-			const lightHtml = sys.renderer.render(
-				"Card",
-				{ children: "Light" },
-				{ theme: "light" },
-			);
-			const darkHtml = sys.renderer.render(
-				"Card",
-				{ children: "Dark" },
-				{ theme: "dark" },
-			);
+			const lightHtml = sys.renderer.render("Card", { children: "Light" }, { theme: "light" });
+			const darkHtml = sys.renderer.render("Card", { children: "Dark" }, { theme: "dark" });
 			// Both should render, and they should differ (dark has different bg)
 			expect(lightHtml).toContain("Light");
 			expect(darkHtml).toContain("Dark");

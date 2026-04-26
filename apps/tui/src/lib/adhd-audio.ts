@@ -22,12 +22,7 @@ import { type Subprocess, spawn } from "bun";
 // Types
 // ============================================
 
-export type ADHDSoundscape =
-	| "lofi"
-	| "rainsound"
-	| "whitenoise"
-	| "ambient"
-	| "classical";
+export type ADHDSoundscape = "lofi" | "rainsound" | "whitenoise" | "ambient" | "classical";
 
 interface SoundscapePreset {
 	prompt: string;
@@ -111,9 +106,7 @@ const CONFIG_PATH = join(CACHE_DIR, "config.json");
 function loadConfig(): ADHDAudioConfig {
 	try {
 		if (existsSync(CONFIG_PATH)) {
-			const raw = JSON.parse(
-				require("node:fs").readFileSync(CONFIG_PATH, "utf-8"),
-			);
+			const raw = JSON.parse(require("node:fs").readFileSync(CONFIG_PATH, "utf-8"));
 			return { ...DEFAULT_CONFIG, ...raw };
 		}
 	} catch {
@@ -125,10 +118,7 @@ function loadConfig(): ADHDAudioConfig {
 function saveConfig(config: ADHDAudioConfig): void {
 	try {
 		if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
-		require("node:fs").writeFileSync(
-			CONFIG_PATH,
-			JSON.stringify(config, null, 2),
-		);
+		require("node:fs").writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 	} catch {
 		/* silent */
 	}
@@ -159,10 +149,8 @@ export class ADHDAudio {
 	/** Update config (merges with existing). Clears cache if duration/bpm changed. */
 	setConfig(overrides: Partial<ADHDAudioConfig>): ADHDAudioConfig {
 		const durationChanged =
-			overrides.duration !== undefined &&
-			overrides.duration !== this._config.duration;
-		const bpmChanged =
-			overrides.bpm !== undefined && overrides.bpm !== this._config.bpm;
+			overrides.duration !== undefined && overrides.duration !== this._config.duration;
+		const bpmChanged = overrides.bpm !== undefined && overrides.bpm !== this._config.bpm;
 		const stepsChanged =
 			overrides.inferenceSteps !== undefined &&
 			overrides.inferenceSteps !== this._config.inferenceSteps;
@@ -171,14 +159,8 @@ export class ADHDAudio {
 
 		// Clamp values
 		this._config.duration = Math.max(5, Math.min(600, this._config.duration));
-		this._config.inferenceSteps = Math.max(
-			1,
-			Math.min(50, this._config.inferenceSteps),
-		);
-		this._config.guidanceScale = Math.max(
-			1,
-			Math.min(15, this._config.guidanceScale),
-		);
+		this._config.inferenceSteps = Math.max(1, Math.min(50, this._config.inferenceSteps));
+		this._config.guidanceScale = Math.max(1, Math.min(15, this._config.guidanceScale));
 		this._config.batchSize = Math.max(1, Math.min(4, this._config.batchSize));
 
 		saveConfig(this._config);
@@ -286,10 +268,7 @@ export class ADHDAudio {
 	onProgress: ((message: string) => void) | null = null;
 
 	/** Poll ACE-Step for task completion */
-	private async pollResult(
-		taskId: string,
-		maxWait = 300000,
-	): Promise<string | null> {
+	private async pollResult(taskId: string, maxWait = 300000): Promise<string | null> {
 		const start = Date.now();
 		const interval = 2000;
 		let lastProgressAt = 0;

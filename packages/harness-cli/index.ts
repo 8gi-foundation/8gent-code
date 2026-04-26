@@ -102,9 +102,7 @@ async function main() {
 				process.exit(1);
 		}
 	} catch (err) {
-		console.error(
-			`\n[FATAL] ${err instanceof Error ? err.message : String(err)}`,
-		);
+		console.error(`\n[FATAL] ${err instanceof Error ? err.message : String(err)}`);
 		if (err instanceof Error && err.stack) {
 			console.error(err.stack);
 		}

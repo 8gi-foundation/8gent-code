@@ -58,9 +58,7 @@ interface FactoryLogEntry {
 
 const args = process.argv.slice(2);
 const isDryRun = args.includes("--dry-run");
-const countArg =
-	args.find((a) => a.startsWith("--count=")) ??
-	args[args.indexOf("--count") + 1];
+const countArg = args.find((a) => a.startsWith("--count=")) ?? args[args.indexOf("--count") + 1];
 const maxCount = countArg
 	? Number.parseInt(String(countArg).replace("--count=", ""), 10)
 	: Number.POSITIVE_INFINITY;
@@ -98,11 +96,10 @@ function branchExists(branchName: string): boolean {
 }
 
 function remoteBranchExists(branchName: string): boolean {
-	const result = spawnSync(
-		"git",
-		["ls-remote", "--heads", "origin", branchName],
-		{ cwd: ROOT, encoding: "utf-8" },
-	);
+	const result = spawnSync("git", ["ls-remote", "--heads", "origin", branchName], {
+		cwd: ROOT,
+		encoding: "utf-8",
+	});
 	return result.stdout.trim().length > 0;
 }
 
@@ -146,9 +143,7 @@ Output ONLY the TypeScript code inside a fenced code block like:
 	clearTimeout(timer);
 
 	if (!response.ok) {
-		throw new Error(
-			`Ollama error: ${response.status} ${await response.text()}`,
-		);
+		throw new Error(`Ollama error: ${response.status} ${await response.text()}`);
 	}
 
 	const data = (await response.json()) as { message?: { content?: string } };
@@ -158,9 +153,7 @@ Output ONLY the TypeScript code inside a fenced code block like:
 	if (match) return match[1].trim();
 
 	// If no fenced block, the model failed to follow instructions — reject
-	throw new Error(
-		"Model output contained no fenced TypeScript code block. Raw text rejected.",
-	);
+	throw new Error("Model output contained no fenced TypeScript code block. Raw text rejected.");
 }
 
 // ============================================
@@ -201,9 +194,7 @@ function securityReview(code: string, name: string): string[] {
 			// Top-level function call - potential side effect
 			// Only flag if it's at indent level 0 (not inside a function)
 			if (!line.startsWith(" ") && !line.startsWith("\t")) {
-				issues.push(
-					`Auto-executing code at module level: "${trimmed.slice(0, 60)}"`,
-				);
+				issues.push(`Auto-executing code at module level: "${trimmed.slice(0, 60)}"`);
 			}
 		}
 	}
@@ -214,10 +205,7 @@ function securityReview(code: string, name: string): string[] {
 	}
 
 	// No process.env mutation (writing to process.env)
-	if (
-		/process\.env\[.*\]\s*=/.test(code) ||
-		/process\.env\.[\w]+\s*=/.test(code)
-	) {
+	if (/process\.env\[.*\]\s*=/.test(code) || /process\.env\.[\w]+\s*=/.test(code)) {
 		issues.push("Mutates process.env - read-only access only");
 	}
 
@@ -233,9 +221,7 @@ function securityReview(code: string, name: string): string[] {
 		!name.includes("exec") &&
 		!name.includes("shell")
 	) {
-		issues.push(
-			"Spawns child processes without being a process management utility",
-		);
+		issues.push("Spawns child processes without being a process management utility");
 	}
 
 	// No network access unless the utility is explicitly about networking
@@ -252,17 +238,13 @@ function securityReview(code: string, name: string): string[] {
 	// Excessive use of `any` type (more than 3 instances)
 	const anyCount = (code.match(/:\s*any\b/g) || []).length;
 	if (anyCount > 3) {
-		issues.push(
-			`Excessive 'any' types (${anyCount} instances) - defeats type safety`,
-		);
+		issues.push(`Excessive 'any' types (${anyCount} instances) - defeats type safety`);
 	}
 
 	// File too long
 	const lineCount = code.split("\n").length;
 	if (lineCount > 250) {
-		issues.push(
-			`Too long (${lineCount} lines) - max 200 for quarantine utilities`,
-		);
+		issues.push(`Too long (${lineCount} lines) - max 200 for quarantine utilities`);
 	}
 
 	return issues;
@@ -368,10 +350,7 @@ ${reqs}
 *Unique value:* Every ability Eight absorbs makes it less dependent on the outside world. This is one more thing the agent handles natively instead of asking for help.`;
 }
 
-async function sendPRNotification(
-	spec: UtilitySpec,
-	prUrl: string,
-): Promise<void> {
+async function sendPRNotification(spec: UtilitySpec, prUrl: string): Promise<void> {
 	const msg = `${generatePitch(spec)}\n\n${prUrl}`;
 	await sendTelegram(msg);
 
@@ -400,10 +379,7 @@ Your call. The PR is in your queue.`;
 		execSync(`say -v Ava -r 170 -o "${aiffPath}" "${escaped}"`, {
 			stdio: "pipe",
 		});
-		execSync(
-			`ffmpeg -y -i "${aiffPath}" -c:a libopus "${oggPath}" 2>/dev/null`,
-			{ stdio: "pipe" },
-		);
+		execSync(`ffmpeg -y -i "${aiffPath}" -c:a libopus "${oggPath}" 2>/dev/null`, { stdio: "pipe" });
 		if (fs.existsSync(oggPath)) {
 			await sendTelegramVoice(oggPath);
 			fs.unlinkSync(aiffPath);
@@ -433,14 +409,10 @@ async function main() {
 	const queue: UtilitySpec[] = JSON.parse(fs.readFileSync(QUEUE_FILE, "utf-8"));
 	const log = loadLog();
 	const processed = new Set(
-		log
-			.filter((e) => e.status === "ok" || e.status === "skipped")
-			.map((e) => e.name),
+		log.filter((e) => e.status === "ok" || e.status === "skipped").map((e) => e.name),
 	);
 
-	const pending = queue
-		.filter((s) => !processed.has(s.name))
-		.slice(0, maxCount);
+	const pending = queue.filter((s) => !processed.has(s.name)).slice(0, maxCount);
 
 	if (pending.length === 0) {
 		console.log("No pending utilities. Queue complete.");
@@ -493,9 +465,7 @@ async function main() {
 			// Security gate - reject unsafe code before creating branch
 			const securityIssues = securityReview(code, spec.name);
 			if (securityIssues.length > 0) {
-				console.log(
-					`[${spec.name}] SECURITY REJECTED: ${securityIssues.join("; ")}`,
-				);
+				console.log(`[${spec.name}] SECURITY REJECTED: ${securityIssues.join("; ")}`);
 				appendLog(
 					{
 						name: spec.name,
@@ -522,12 +492,7 @@ async function main() {
 					},
 				);
 			} catch (syntaxErr: any) {
-				const msg = (
-					syntaxErr.stderr ||
-					syntaxErr.stdout ||
-					syntaxErr.message ||
-					""
-				).slice(0, 300);
+				const msg = (syntaxErr.stderr || syntaxErr.stdout || syntaxErr.message || "").slice(0, 300);
 				console.log(`[${spec.name}] SYNTAX REJECTED: ${msg}`);
 				appendLog(
 					{
@@ -569,10 +534,10 @@ async function main() {
 				cwd: ROOT,
 				stdio: "pipe",
 			});
-			execSync(
-				`git commit -m "feat: ${spec.name} utility\n\n${spec.description}"`,
-				{ cwd: ROOT, stdio: "pipe" },
-			);
+			execSync(`git commit -m "feat: ${spec.name} utility\n\n${spec.description}"`, {
+				cwd: ROOT,
+				stdio: "pipe",
+			});
 
 			// Push
 			execSync(`git push -u origin ${branch}`, { cwd: ROOT, stdio: "pipe" });

@@ -33,9 +33,7 @@ describe("CB001: Git Repository Analyzer", () => {
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
 
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 		expect(repos).toBeTruthy();
 		expect(repos.length).toBe(EXPECTED.repoCount);
 	});
@@ -44,19 +42,15 @@ describe("CB001: Git Repository Analyzer", () => {
 		const { analyze } = await loadModules();
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 
 		const emptyRepo = repos.find(
 			(r: any) =>
-				(r.name ?? r.path ?? "").includes("empty") ||
-				(r.name ?? r.path ?? "") === "empty-project",
+				(r.name ?? r.path ?? "").includes("empty") || (r.name ?? r.path ?? "") === "empty-project",
 		);
 		expect(emptyRepo).toBeTruthy();
 
-		const commits =
-			emptyRepo.commits ?? emptyRepo.commitCount ?? emptyRepo.totalCommits;
+		const commits = emptyRepo.commits ?? emptyRepo.commitCount ?? emptyRepo.totalCommits;
 		expect(commits).toBe(0);
 	});
 
@@ -64,14 +58,10 @@ describe("CB001: Git Repository Analyzer", () => {
 		const { analyze } = await loadModules();
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 
 		for (const [name, expected] of Object.entries(EXPECTED.repos)) {
-			const repo = repos.find((r: any) =>
-				(r.name ?? r.path ?? "").includes(name),
-			);
+			const repo = repos.find((r: any) => (r.name ?? r.path ?? "").includes(name));
 			if (repo) {
 				const commits = repo.commits ?? repo.commitCount ?? repo.totalCommits;
 				expect(commits).toBe(expected.commits);
@@ -83,35 +73,27 @@ describe("CB001: Git Repository Analyzer", () => {
 		const { analyze } = await loadModules();
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 
-		const webapp = repos.find((r: any) =>
-			(r.name ?? r.path ?? "").includes("webapp"),
-		);
+		const webapp = repos.find((r: any) => (r.name ?? r.path ?? "").includes("webapp"));
 		if (webapp) {
 			const authors =
 				webapp.authors ??
 				webapp.authorCount ??
 				webapp.uniqueAuthors ??
 				(webapp.authorList ?? []).length;
-			const count =
-				typeof authors === "number" ? authors : (authors ?? []).length;
+			const count = typeof authors === "number" ? authors : (authors ?? []).length;
 			expect(count).toBe(3); // Alice, Bob, Carol
 		}
 
-		const apiServer = repos.find((r: any) =>
-			(r.name ?? r.path ?? "").includes("api-server"),
-		);
+		const apiServer = repos.find((r: any) => (r.name ?? r.path ?? "").includes("api-server"));
 		if (apiServer) {
 			const authors =
 				apiServer.authors ??
 				apiServer.authorCount ??
 				apiServer.uniqueAuthors ??
 				(apiServer.authorList ?? []).length;
-			const count =
-				typeof authors === "number" ? authors : (authors ?? []).length;
+			const count = typeof authors === "number" ? authors : (authors ?? []).length;
 			expect(count).toBe(2); // Dave, Eve
 		}
 	});
@@ -120,21 +102,13 @@ describe("CB001: Git Repository Analyzer", () => {
 		const { analyze } = await loadModules();
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 
-		const webapp = repos.find((r: any) =>
-			(r.name ?? r.path ?? "").includes("webapp"),
-		);
+		const webapp = repos.find((r: any) => (r.name ?? r.path ?? "").includes("webapp"));
 		if (webapp) {
-			const largest =
-				webapp.largestFile ?? webapp.biggestFile ?? webapp.maxFile;
+			const largest = webapp.largestFile ?? webapp.biggestFile ?? webapp.maxFile;
 			if (largest) {
-				const name =
-					typeof largest === "string"
-						? largest
-						: (largest.name ?? largest.path ?? "");
+				const name = typeof largest === "string" ? largest : (largest.name ?? largest.path ?? "");
 				expect(name).toContain("app.tsx");
 			}
 		}
@@ -144,13 +118,9 @@ describe("CB001: Git Repository Analyzer", () => {
 		const { analyze } = await loadModules();
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 
-		const legacy = repos.find((r: any) =>
-			(r.name ?? r.path ?? "").includes("legacy"),
-		);
+		const legacy = repos.find((r: any) => (r.name ?? r.path ?? "").includes("legacy"));
 		expect(legacy).toBeTruthy();
 
 		// Should still have 15 commits even with detached HEAD
@@ -181,10 +151,7 @@ describe("CB001: Git Repository Analyzer", () => {
 		expect(reportResult).toBeTruthy();
 
 		// Should be a valid JSON structure or object
-		const reportObj =
-			typeof reportResult === "string"
-				? JSON.parse(reportResult)
-				: reportResult;
+		const reportObj = typeof reportResult === "string" ? JSON.parse(reportResult) : reportResult;
 		expect(typeof reportObj).toBe("object");
 	});
 
@@ -194,26 +161,15 @@ describe("CB001: Git Repository Analyzer", () => {
 		const analysisResult = await Promise.resolve(analyze(fs, "/repos"));
 		const reportResult = await Promise.resolve(report(analysisResult));
 
-		const reportObj =
-			typeof reportResult === "string"
-				? JSON.parse(reportResult)
-				: reportResult;
+		const reportObj = typeof reportResult === "string" ? JSON.parse(reportResult) : reportResult;
 
-		const repos =
-			reportObj.repos ?? reportObj.repositories ?? reportObj.results;
+		const repos = reportObj.repos ?? reportObj.repositories ?? reportObj.results;
 		if (Array.isArray(repos) && repos.length >= 2) {
 			// Verify sorted by commits descending
 			for (let i = 1; i < repos.length; i++) {
 				const prevCommits =
-					repos[i - 1].commits ??
-					repos[i - 1].commitCount ??
-					repos[i - 1].totalCommits ??
-					0;
-				const currCommits =
-					repos[i].commits ??
-					repos[i].commitCount ??
-					repos[i].totalCommits ??
-					0;
+					repos[i - 1].commits ?? repos[i - 1].commitCount ?? repos[i - 1].totalCommits ?? 0;
+				const currCommits = repos[i].commits ?? repos[i].commitCount ?? repos[i].totalCommits ?? 0;
 				expect(prevCommits).toBeGreaterThanOrEqual(currCommits);
 			}
 		}
@@ -223,26 +179,17 @@ describe("CB001: Git Repository Analyzer", () => {
 		const { analyze } = await loadModules();
 		const fs = new MockFileSystem();
 		const result = await Promise.resolve(analyze(fs, "/repos"));
-		const repos = Array.isArray(result)
-			? result
-			: (result.repos ?? result.repositories);
+		const repos = Array.isArray(result) ? result : (result.repos ?? result.repositories);
 
-		const webapp = repos.find((r: any) =>
-			(r.name ?? r.path ?? "").includes("webapp"),
-		);
+		const webapp = repos.find((r: any) => (r.name ?? r.path ?? "").includes("webapp"));
 		if (webapp) {
 			const langs =
-				webapp.languages ??
-				webapp.languageBreakdown ??
-				webapp.extensions ??
-				webapp.fileTypes;
+				webapp.languages ?? webapp.languageBreakdown ?? webapp.extensions ?? webapp.fileTypes;
 			if (langs) {
 				const langStr = JSON.stringify(langs).toLowerCase();
 				// Should contain TypeScript files
 				expect(
-					langStr.includes("ts") ||
-						langStr.includes("typescript") ||
-						langStr.includes(".ts"),
+					langStr.includes("ts") || langStr.includes("typescript") || langStr.includes(".ts"),
 				).toBe(true);
 			}
 		}

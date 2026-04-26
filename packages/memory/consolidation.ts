@@ -48,15 +48,11 @@ interface GroupedRow {
  */
 export function ensureConsolidationSchema(db: Database): void {
 	try {
-		db.exec(
-			`ALTER TABLE memories ADD COLUMN consolidation_level TEXT NOT NULL DEFAULT 'raw'`,
-		);
+		db.exec(`ALTER TABLE memories ADD COLUMN consolidation_level TEXT NOT NULL DEFAULT 'raw'`);
 	} catch {
 		// Column already exists - this is expected after first run
 	}
-	db.exec(
-		"CREATE INDEX IF NOT EXISTS idx_memories_consolidation ON memories(consolidation_level)",
-	);
+	db.exec("CREATE INDEX IF NOT EXISTS idx_memories_consolidation ON memories(consolidation_level)");
 }
 
 // ── Main Entry Point ──────────────────────────────────────────────────
@@ -111,13 +107,7 @@ function consolidateDaily(
 		for (const [category, members] of groups) {
 			if (members.length < 3) continue;
 
-			const summaryId = createSummaryMemory(
-				db,
-				members,
-				"daily",
-				category,
-				previousSummary,
-			);
+			const summaryId = createSummaryMemory(db, members, "daily", category, previousSummary);
 			logConsolidation(
 				db,
 				"daily",
@@ -163,13 +153,7 @@ function consolidateWeekly(
 		for (const [category, members] of groups) {
 			if (members.length < 2) continue;
 
-			const summaryId = createSummaryMemory(
-				db,
-				members,
-				"weekly",
-				category,
-				previousSummary,
-			);
+			const summaryId = createSummaryMemory(db, members, "weekly", category, previousSummary);
 			logConsolidation(
 				db,
 				"weekly",
@@ -215,13 +199,7 @@ function consolidateMonthly(
 		for (const [category, members] of groups) {
 			if (members.length < 2) continue;
 
-			const summaryId = createSummaryMemory(
-				db,
-				members,
-				"archetype",
-				category,
-				previousSummary,
-			);
+			const summaryId = createSummaryMemory(db, members, "archetype", category, previousSummary);
 			logConsolidation(
 				db,
 				"monthly",
@@ -331,10 +309,8 @@ function createSummaryMemory(
 	const maxImportance = Math.max(...members.map((m) => m.importance));
 
 	// Use the most common type and scope from the group
-	const representativeType =
-		mostCommon(members.map((m) => m.type)) || "semantic";
-	const representativeScope =
-		mostCommon(members.map((m) => m.scope)) || "project";
+	const representativeType = mostCommon(members.map((m) => m.type)) || "semantic";
+	const representativeScope = mostCommon(members.map((m) => m.scope)) || "project";
 
 	// Build a semantic memory as the summary container
 	const memoryData: Record<string, unknown> = {
@@ -397,16 +373,13 @@ function createSummaryMemory(
 
 // ── Mutation Helpers ──────────────────────────────────────────────────
 
-function markConsolidated(
-	db: Database,
-	ids: string[],
-	level: ConsolidationLevel,
-): void {
+function markConsolidated(db: Database, ids: string[], level: ConsolidationLevel): void {
 	if (ids.length === 0) return;
 	const placeholders = ids.map(() => "?").join(",");
-	db.prepare(
-		`UPDATE memories SET consolidation_level = ? WHERE id IN (${placeholders})`,
-	).run(level, ...ids);
+	db.prepare(`UPDATE memories SET consolidation_level = ? WHERE id IN (${placeholders})`).run(
+		level,
+		...ids,
+	);
 }
 
 function logConsolidation(
@@ -419,15 +392,7 @@ function logConsolidation(
 	db.prepare(`
     INSERT INTO consolidation_log (id, level, source_ids, result_id, status, started_at, completed_at, created_at)
     VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)
-  `).run(
-		generateId("mem"),
-		level,
-		JSON.stringify(sourceIds),
-		resultId,
-		now,
-		now,
-		now,
-	);
+  `).run(generateId("mem"), level, JSON.stringify(sourceIds), resultId, now, now, now);
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────

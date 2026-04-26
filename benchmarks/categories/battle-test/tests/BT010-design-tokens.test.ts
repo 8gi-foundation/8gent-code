@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let tokens: any;
 let transformer: any;
@@ -36,8 +35,7 @@ describe("Design Tokens", () => {
 
 	it("resolveReference resolves {color.primary}", () => {
 		const createToken = tokens.createToken || tokens.default?.createToken;
-		const resolveRef =
-			tokens.resolveReference || tokens.default?.resolveReference;
+		const resolveRef = tokens.resolveReference || tokens.default?.resolveReference;
 		const tokenMap = {
 			"color.primary": createToken("color.primary", "#3b82f6", {
 				type: "color",
@@ -64,9 +62,7 @@ describe("Design Tokens", () => {
 		const createToken = tokens.createToken || tokens.default?.createToken;
 		const createGroup = tokens.createGroup || tokens.default?.createGroup;
 		const flattenTokens = tokens.flattenTokens || tokens.default?.flattenTokens;
-		const inner = createGroup("brand", [
-			createToken("primary", "#3b82f6", { type: "color" }),
-		]);
+		const inner = createGroup("brand", [createToken("primary", "#3b82f6", { type: "color" })]);
 		const outer = createGroup("color", [], [inner]);
 		const flat = flattenTokens(outer);
 		expect(flat["color.brand.primary"]).toBe("#3b82f6");
@@ -75,8 +71,7 @@ describe("Design Tokens", () => {
 
 describe("Token Transformer", () => {
 	it("toCSSVariables outputs --var-name: value format", () => {
-		const toCSSVars =
-			transformer.toCSSVariables || transformer.default?.toCSSVariables;
+		const toCSSVars = transformer.toCSSVariables || transformer.default?.toCSSVariables;
 		const tokenMap = { "color.primary": "#3b82f6", "spacing.sm": "8px" };
 		const result = toCSSVars(tokenMap);
 		expect(result).toContain("--color-primary: #3b82f6");
@@ -84,8 +79,7 @@ describe("Token Transformer", () => {
 	});
 
 	it("toTailwindConfig outputs object structure", () => {
-		const toTailwind =
-			transformer.toTailwindConfig || transformer.default?.toTailwindConfig;
+		const toTailwind = transformer.toTailwindConfig || transformer.default?.toTailwindConfig;
 		const tokenMap = {
 			"color.primary": "#3b82f6",
 			"color.secondary": "#6366f1",
@@ -96,8 +90,7 @@ describe("Token Transformer", () => {
 	});
 
 	it("toSCSSVariables outputs $var-name: value format", () => {
-		const toSCSS =
-			transformer.toSCSSVariables || transformer.default?.toSCSSVariables;
+		const toSCSS = transformer.toSCSSVariables || transformer.default?.toSCSSVariables;
 		const tokenMap = { "color.primary": "#3b82f6" };
 		const result = toSCSS(tokenMap);
 		expect(result).toContain("$color-primary: #3b82f6");
@@ -122,22 +115,19 @@ describe("Token Transformer", () => {
 
 describe("Token Generator", () => {
 	it("generateColorScale returns correct number of steps", () => {
-		const genColor =
-			generator.generateColorScale || generator.default?.generateColorScale;
+		const genColor = generator.generateColorScale || generator.default?.generateColorScale;
 		const scale = genColor("#3b82f6", 10);
 		expect(scale.length).toBe(10);
 	});
 
 	it("generateColorScale includes lighter and darker values", () => {
-		const genColor =
-			generator.generateColorScale || generator.default?.generateColorScale;
+		const genColor = generator.generateColorScale || generator.default?.generateColorScale;
 		const scale = genColor("#3b82f6", 10);
 		expect(scale[0]).not.toBe(scale[9]);
 	});
 
 	it("generateSpacingScale returns array of numbers", () => {
-		const genSpacing =
-			generator.generateSpacingScale || generator.default?.generateSpacingScale;
+		const genSpacing = generator.generateSpacingScale || generator.default?.generateSpacingScale;
 		const scale = genSpacing(4, 8);
 		expect(Array.isArray(scale)).toBe(true);
 		expect(scale.length).toBe(8);
@@ -145,9 +135,7 @@ describe("Token Generator", () => {
 	});
 
 	it("generateTypographyScale returns increasing sizes", () => {
-		const genTypo =
-			generator.generateTypographyScale ||
-			generator.default?.generateTypographyScale;
+		const genTypo = generator.generateTypographyScale || generator.default?.generateTypographyScale;
 		const scale = genTypo(16, 6);
 		expect(scale.length).toBe(6);
 		for (let i = 1; i < scale.length; i++) {
@@ -156,8 +144,7 @@ describe("Token Generator", () => {
 	});
 
 	it("generateShadowScale returns array of shadow strings", () => {
-		const genShadow =
-			generator.generateShadowScale || generator.default?.generateShadowScale;
+		const genShadow = generator.generateShadowScale || generator.default?.generateShadowScale;
 		const scale = genShadow(5);
 		expect(scale.length).toBe(5);
 		scale.forEach((s: any) => expect(typeof s).toBe("string"));

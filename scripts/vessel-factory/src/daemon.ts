@@ -20,8 +20,7 @@ const PORT = Number.parseInt(process.env.PORT ?? "8080");
 const VESSEL_CODE = process.env.VESSEL_CODE ?? "???";
 const VESSEL_NAME = process.env.VESSEL_NAME ?? "Unknown";
 const VESSEL_TITLE = process.env.VESSEL_TITLE ?? "Officer";
-const FLY_APP =
-	process.env.FLY_APP_NAME ?? `${VESSEL_CODE.toLowerCase()}-vessel`;
+const FLY_APP = process.env.FLY_APP_NAME ?? `${VESSEL_CODE.toLowerCase()}-vessel`;
 const PUBLIC_URL = `https://${FLY_APP}.fly.dev`;
 
 // ── HTTP Server ───────────────────────────────────────────────────────────
@@ -68,10 +67,7 @@ const server = Bun.serve({
 			try {
 				body = await req.json();
 			} catch {
-				return Response.json(
-					{ error: "Invalid JSON" },
-					{ status: 400, headers: corsHeaders },
-				);
+				return Response.json({ error: "Invalid JSON" }, { status: 400, headers: corsHeaders });
 			}
 
 			if (!body.task) {

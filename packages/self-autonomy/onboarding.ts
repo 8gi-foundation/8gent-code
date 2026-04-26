@@ -48,13 +48,7 @@ export interface UserConfig {
 		};
 		model: {
 			default: string | null;
-			provider:
-				| "ollama"
-				| "lmstudio"
-				| "openai"
-				| "anthropic"
-				| "openrouter"
-				| null;
+			provider: "ollama" | "lmstudio" | "openai" | "anthropic" | "openrouter" | null;
 			fallbacks: string[];
 			preferLocal: boolean;
 		};
@@ -280,21 +274,7 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			"  12. Karen    (Australian)\n" +
 			"  13. Rishi    (Indian)\n\n" +
 			"Choose 1-13 (default: 1 - Bruno):",
-		options: [
-			"1",
-			"2",
-			"3",
-			"4",
-			"5",
-			"6",
-			"7",
-			"8",
-			"9",
-			"10",
-			"11",
-			"12",
-			"13",
-		],
+		options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
 		processor: (answer, user) => {
 			const kittenVoices: Record<string, string> = {
 				"1": "Bruno",
@@ -374,11 +354,7 @@ export class OnboardingManager {
 
 	constructor(workingDirectory: string = process.cwd()) {
 		// Always use home dir for user config — workingDirectory varies by launch location
-		this.userConfigPath = path.join(
-			process.env.HOME || os.homedir(),
-			".8gent",
-			"user.json",
-		);
+		this.userConfigPath = path.join(process.env.HOME || os.homedir(), ".8gent", "user.json");
 		this.user = this.loadUserConfig();
 	}
 
@@ -399,17 +375,13 @@ export class OnboardingManager {
 
 		const checks = await Promise.allSettled([
 			// Git config name
-			execAsync("git config --global user.name 2>/dev/null").then(
-				({ stdout }) => {
-					detected.name = stdout.trim() || null;
-				},
-			),
+			execAsync("git config --global user.name 2>/dev/null").then(({ stdout }) => {
+				detected.name = stdout.trim() || null;
+			}),
 			// Git config email
-			execAsync("git config --global user.email 2>/dev/null").then(
-				({ stdout }) => {
-					detected.email = stdout.trim() || null;
-				},
-			),
+			execAsync("git config --global user.email 2>/dev/null").then(({ stdout }) => {
+				detected.email = stdout.trim() || null;
+			}),
 			// Ollama models
 			execAsync("ollama list 2>/dev/null").then(({ stdout }) => {
 				detected.ollamaModels = stdout
@@ -450,8 +422,7 @@ export class OnboardingManager {
 		if (detected.preferredProvider) {
 			this.user.preferences.model.provider = detected.preferredProvider;
 			this.user.preferences.model.preferLocal =
-				detected.preferredProvider === "ollama" ||
-				detected.preferredProvider === "lmstudio";
+				detected.preferredProvider === "ollama" || detected.preferredProvider === "lmstudio";
 		}
 		if (detected.ollamaModels.length > 0) {
 			this.user.integrations.ollama = {
@@ -503,17 +474,13 @@ export class OnboardingManager {
 	 * Check if we should ask a clarification question
 	 */
 	shouldAskClarification(): boolean {
-		if (
-			this.user.onboardingComplete &&
-			this.user.understanding.confidenceScore < 0.8
-		) {
+		if (this.user.onboardingComplete && this.user.understanding.confidenceScore < 0.8) {
 			return true;
 		}
 		// Also ask weekly
 		if (this.user.lastPrompted) {
 			const lastPrompt = new Date(this.user.lastPrompted);
-			const daysSince =
-				(Date.now() - lastPrompt.getTime()) / (1000 * 60 * 60 * 24);
+			const daysSince = (Date.now() - lastPrompt.getTime()) / (1000 * 60 * 60 * 24);
 			if (daysSince > 7) {
 				return true;
 			}
@@ -624,18 +591,14 @@ export class OnboardingManager {
 	 * Called after user opts in during onboarding.
 	 * Returns true if installation succeeded.
 	 */
-	async installKittenTTS(
-		onProgress?: (message: string) => void,
-	): Promise<boolean> {
+	async installKittenTTS(onProgress?: (message: string) => void): Promise<boolean> {
 		onProgress?.("Checking Python...");
 
 		// Verify python3 is available
 		try {
 			await execAsync("python3 --version 2>/dev/null");
 		} catch {
-			onProgress?.(
-				"Python 3 not found. Install Python first: https://python.org",
-			);
+			onProgress?.("Python 3 not found. Install Python first: https://python.org");
 			return false;
 		}
 
@@ -672,9 +635,7 @@ export class OnboardingManager {
 			onProgress?.("Voice model ready.");
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			onProgress?.(
-				`Model download failed: ${msg}. Voice will download on first use.`,
-			);
+			onProgress?.(`Model download failed: ${msg}. Voice will download on first use.`);
 			// Not a hard failure - model will download on first actual use
 		}
 
@@ -751,9 +712,7 @@ export class OnboardingManager {
 			// Check GitHub
 			execAsync("gh auth status 2>&1")
 				.then(({ stdout }) => {
-					const usernameMatch = stdout.match(
-						/Logged in to github.com account (\S+)/,
-					);
+					const usernameMatch = stdout.match(/Logged in to github.com account (\S+)/);
 					this.user.integrations.github = {
 						authenticated: true,
 						username: usernameMatch?.[1] || null,
@@ -773,25 +732,14 @@ export class OnboardingManager {
 	/**
 	 * Interpolate user values into question text
 	 */
-	private interpolateQuestion(
-		question: OnboardingQuestion,
-	): OnboardingQuestion {
+	private interpolateQuestion(question: OnboardingQuestion): OnboardingQuestion {
 		let text = question.question;
 		text = text.replace("{name}", this.user.identity.name || "friend");
 		text = text.replace("{role}", this.user.identity.role || "developer");
-		text = text.replace(
-			"{project}",
-			this.user.projects.primary || "your project",
-		);
-		text = text.replace(
-			"{style}",
-			this.user.identity.communicationStyle || "concise",
-		);
+		text = text.replace("{project}", this.user.projects.primary || "your project");
+		text = text.replace("{style}", this.user.identity.communicationStyle || "concise");
 		text = text.replace("{language}", this.user.identity.language || "en");
-		text = text.replace(
-			"{provider}",
-			this.user.preferences.model.provider || "ollama",
-		);
+		text = text.replace("{provider}", this.user.preferences.model.provider || "ollama");
 		const voiceDesc = this.user.preferences.voice.enabled
 			? `${this.user.preferences.voice.voiceId || "Bruno"} (${this.user.preferences.voice.engine || "system"})`
 			: "disabled";
@@ -800,10 +748,7 @@ export class OnboardingManager {
 			"{telegram}",
 			getVault().has("TELEGRAM_BOT_TOKEN") ? "configured" : "not set up",
 		);
-		text = text.replace(
-			"{detected_name}",
-			this.user.identity.name || "not detected",
-		);
+		text = text.replace("{detected_name}", this.user.identity.name || "not detected");
 		text = text.replace(
 			"{detected_email}",
 			this.user.integrations?.github?.username ? "(via git)" : "not detected",
@@ -818,13 +763,9 @@ export class OnboardingManager {
 		);
 		text = text.replace(
 			"{detected_models}",
-			this.user.integrations.ollama.models.slice(0, 3).join(", ") ||
-				"none found",
+			this.user.integrations.ollama.models.slice(0, 3).join(", ") || "none found",
 		);
-		text = text.replace(
-			"{agent_name}",
-			(this.user.preferences.voice as any)?.agentName || "Eight",
-		);
+		text = text.replace("{agent_name}", (this.user.preferences.voice as any)?.agentName || "Eight");
 
 		return { ...question, question: text };
 	}
@@ -916,11 +857,7 @@ function calculateConfidence(user: UserConfig): number {
 	if (user.preferences.voice.enabled !== null) score += 0.05;
 
 	// Integrations: 20%
-	if (
-		user.integrations.ollama.available ||
-		user.integrations.lmstudio.available
-	)
-		score += 0.1;
+	if (user.integrations.ollama.available || user.integrations.lmstudio.available) score += 0.1;
 	if (user.integrations.github.authenticated) score += 0.1;
 
 	// Usage patterns: 20% (learned over time)
@@ -942,11 +879,8 @@ function calculateConfidence(user: UserConfig): number {
  * @param rl - readline interface for stdin input
  * @returns true if setup completed, false if cancelled
  */
-export async function runTelegramSetup(
-	rl: import("readline").Interface,
-): Promise<boolean> {
-	const ask = (q: string): Promise<string> =>
-		new Promise((resolve) => rl.question(q, resolve));
+export async function runTelegramSetup(rl: import("readline").Interface): Promise<boolean> {
+	const ask = (q: string): Promise<string> => new Promise((resolve) => rl.question(q, resolve));
 
 	console.log(`
 \x1b[36m╔══════════════════════════════════════════════════╗
@@ -975,17 +909,13 @@ export async function runTelegramSetup(
 		}
 		console.log(`\x1b[32mToken valid! Bot: @${result.username}\x1b[0m`);
 	} catch {
-		console.log(
-			"\x1b[33mCouldn't validate token (network error). Storing anyway.\x1b[0m",
-		);
+		console.log("\x1b[33mCouldn't validate token (network error). Storing anyway.\x1b[0m");
 	}
 
 	// Store in vault
 	const vault = getVault();
 	vault.set("TELEGRAM_BOT_TOKEN", token);
-	console.log(
-		"\x1b[32mToken encrypted with AES-256-GCM and stored in vault.\x1b[0m",
-	);
+	console.log("\x1b[32mToken encrypted with AES-256-GCM and stored in vault.\x1b[0m");
 	console.log("\x1b[90mYour token is never exposed to the AI.\x1b[0m");
 
 	// Chat ID
@@ -1001,9 +931,7 @@ Leave blank to allow all users.
 	).trim();
 	if (chatId && /^\d+$/.test(chatId)) {
 		vault.set("TELEGRAM_CHAT_ID", chatId);
-		console.log(
-			`\x1b[32mChat ID stored.\x1b[0m Only user ${chatId} can control the bot.`,
-		);
+		console.log(`\x1b[32mChat ID stored.\x1b[0m Only user ${chatId} can control the bot.`);
 	} else if (chatId) {
 		console.log("\x1b[33mInvalid chat ID (must be numeric). Skipped.\x1b[0m");
 	}

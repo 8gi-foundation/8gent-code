@@ -41,10 +41,11 @@ export function createJobTable(db: Database): void {
 export function enqueue(db: Database, type: Job["type"]): string {
 	const id = randomUUID();
 	const now = Date.now();
-	db.run(
-		`INSERT INTO jobs (id, type, status, createdAt) VALUES (?, ?, 'queued', ?)`,
-		[id, type, now],
-	);
+	db.run(`INSERT INTO jobs (id, type, status, createdAt) VALUES (?, ?, 'queued', ?)`, [
+		id,
+		type,
+		now,
+	]);
 	return id;
 }
 
@@ -71,11 +72,7 @@ export function acquireLease(db: Database, workerId: string): Job | null {
 	return job ?? null;
 }
 
-export function completeLease(
-	db: Database,
-	jobId: string,
-	workerId: string,
-): boolean {
+export function completeLease(db: Database, jobId: string, workerId: string): boolean {
 	const now = Date.now();
 	const result = db.run(
 		`UPDATE jobs SET status = 'completed', completedAt = ? WHERE id = ? AND leasedBy = ?`,
@@ -84,12 +81,7 @@ export function completeLease(
 	return result.changes > 0;
 }
 
-export function failLease(
-	db: Database,
-	jobId: string,
-	workerId: string,
-	error: string,
-): boolean {
+export function failLease(db: Database, jobId: string, workerId: string, error: string): boolean {
 	const result = db.run(
 		`UPDATE jobs SET status = 'failed', error = ? WHERE id = ? AND leasedBy = ?`,
 		[error, jobId, workerId],

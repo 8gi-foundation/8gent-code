@@ -79,9 +79,7 @@ export class CurriculumRunner {
 	skipTo(stepId: string): CurriculumStep {
 		const index = this.curriculum.steps.findIndex((s) => s.id === stepId);
 		if (index === -1) {
-			throw new Error(
-				`Step "${stepId}" not found in curriculum "${this.curriculum.id}"`,
-			);
+			throw new Error(`Step "${stepId}" not found in curriculum "${this.curriculum.id}"`);
 		}
 		// Mark all prior steps as completed
 		for (let i = 0; i < index; i++) {
@@ -152,8 +150,7 @@ export class CurriculumRunner {
 const EIGHT_ARCHITECTURE: Curriculum = {
 	id: "8gent-architecture",
 	title: "How Eight Works Internally",
-	description:
-		"A deep dive into 8gent-code's architecture, from CLI entry to tool execution.",
+	description: "A deep dive into 8gent-code's architecture, from CLI entry to tool execution.",
 	targetAudience: "Developers contributing to or extending 8gent-code",
 	totalEstimatedMinutes: 45,
 	steps: [
@@ -204,8 +201,7 @@ const EIGHT_ARCHITECTURE: Curriculum = {
 		{
 			id: "arch-3-tools",
 			title: "Tool System",
-			objective:
-				"Understand how tools are defined, registered, and dispatched.",
+			objective: "Understand how tools are defined, registered, and dispatched.",
 			prerequisites: ["arch-2-agent-loop"],
 			content: [
 				"Tools are defined in `tools.ts` as objects with a name, description, parameters schema, and execute function.",
@@ -226,8 +222,7 @@ const EIGHT_ARCHITECTURE: Curriculum = {
 		{
 			id: "arch-4-providers",
 			title: "LLM Provider Abstraction",
-			objective:
-				"Understand how Eight talks to different LLM backends through the same interface.",
+			objective: "Understand how Eight talks to different LLM backends through the same interface.",
 			prerequisites: ["arch-2-agent-loop"],
 			content: [
 				"Each provider (Ollama, LM Studio, OpenRouter) implements the `LLMClient` interface:",
@@ -249,8 +244,7 @@ const EIGHT_ARCHITECTURE: Curriculum = {
 		{
 			id: "arch-5-self-autonomy",
 			title: "Self-Autonomy and Evolution",
-			objective:
-				"Understand how Eight heals errors, tracks evolution, and learns from sessions.",
+			objective: "Understand how Eight heals errors, tracks evolution, and learns from sessions.",
 			prerequisites: ["arch-3-tools"],
 			content: [
 				"`packages/self-autonomy/` is Eight's self-improvement engine.",
@@ -277,10 +271,8 @@ const EIGHT_ARCHITECTURE: Curriculum = {
 const WRITING_BENCHMARKS: Curriculum = {
 	id: "writing-benchmarks",
 	title: "Writing New Benchmarks for 8gent",
-	description:
-		"How to create, grade, and iterate on benchmarks for the autoresearch system.",
-	targetAudience:
-		"Anyone adding new benchmark categories or individual test cases",
+	description: "How to create, grade, and iterate on benchmarks for the autoresearch system.",
+	targetAudience: "Anyone adding new benchmark categories or individual test cases",
 	totalEstimatedMinutes: 30,
 	steps: [
 		{
@@ -311,8 +303,7 @@ const WRITING_BENCHMARKS: Curriculum = {
 		{
 			id: "bench-2-writing",
 			title: "Writing a New Benchmark",
-			objective:
-				"Be able to create a complete benchmark with prompt, tests, and fixtures.",
+			objective: "Be able to create a complete benchmark with prompt, tests, and fixtures.",
 			prerequisites: ["bench-1-anatomy"],
 			content: [
 				"Steps to create a new benchmark:",
@@ -378,8 +369,7 @@ const WRITING_BENCHMARKS: Curriculum = {
 				"Read `system-prompt.ts` and find the `addMutation()` function.",
 				"Observe how few-shot examples in `few-shot.ts` differ per category.",
 			],
-			verifyUnderstanding:
-				"What is 'mutation interference' and how does the system mitigate it?",
+			verifyUnderstanding: "What is 'mutation interference' and how does the system mitigate it?",
 			estimatedMinutes: 5,
 		},
 	],

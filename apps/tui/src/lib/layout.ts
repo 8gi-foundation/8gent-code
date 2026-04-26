@@ -15,11 +15,7 @@ export function clamp(value: number, min: number, max: number): number {
  * Calculate the width of each column given total width, number of columns,
  * and optional gap between columns. Returns at least 0.
  */
-export function columnWidth(
-	totalWidth: number,
-	columns: number,
-	gap = 0,
-): number {
+export function columnWidth(totalWidth: number, columns: number, gap = 0): number {
 	if (columns <= 0) return 0;
 	if (columns === 1) return Math.max(0, totalWidth);
 	const totalGap = gap * (columns - 1);
@@ -31,12 +27,7 @@ export function columnWidth(
  * a minimum item width, and an optional gap between columns.
  * Returns at least 1 if there are items, 0 if items is 0.
  */
-export function fitColumns(
-	items: number,
-	maxWidth: number,
-	minItemWidth: number,
-	gap = 0,
-): number {
+export function fitColumns(items: number, maxWidth: number, minItemWidth: number, gap = 0): number {
 	if (items <= 0) return 0;
 	if (minItemWidth <= 0) return items;
 	if (maxWidth <= 0) return 1;
@@ -59,10 +50,7 @@ export function fitColumns(
  * Returns an integer array that sums to totalWidth (remainder goes to
  * the first items). Empty weights array returns [].
  */
-export function distributeWidths(
-	totalWidth: number,
-	weights: number[],
-): number[] {
+export function distributeWidths(totalWidth: number, weights: number[]): number[] {
 	if (weights.length === 0) return [];
 	if (totalWidth <= 0) return weights.map(() => 0);
 
@@ -74,9 +62,7 @@ export function distributeWidths(
 		return weights.map((_, i) => base + (i < remainder ? 1 : 0));
 	}
 
-	const rawWidths = weights.map((w) =>
-		Math.floor((Math.max(0, w) / totalWeight) * totalWidth),
-	);
+	const rawWidths = weights.map((w) => Math.floor((Math.max(0, w) / totalWeight) * totalWidth));
 
 	// Distribute remainder to maintain exact total
 	const assigned = rawWidths.reduce((sum, w) => sum + w, 0);

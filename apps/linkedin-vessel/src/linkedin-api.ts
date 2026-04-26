@@ -42,10 +42,7 @@ function getJsessionId(liAt: string): string {
 	return liAt.slice(0, 32);
 }
 
-async function liGet(
-	path: string,
-	params: Record<string, string> = {},
-): Promise<any> {
+async function liGet(path: string, params: Record<string, string> = {}): Promise<any> {
 	const liAt = process.env.LINKEDIN_SESSION_COOKIE;
 	if (!liAt) throw new Error("LINKEDIN_SESSION_COOKIE not set");
 	const jsessionId = getJsessionId(liAt);
@@ -57,9 +54,7 @@ async function liGet(
 	});
 
 	if (res.status === 401 || res.status === 403) {
-		throw new Error(
-			`LinkedIn auth failed (${res.status}) - refresh li_at cookie`,
-		);
+		throw new Error(`LinkedIn auth failed (${res.status}) - refresh li_at cookie`);
 	}
 	if (!res.ok) throw new Error(`LinkedIn API ${res.status}: ${path}`);
 	return res.json();
@@ -80,9 +75,7 @@ async function liPost(path: string, body: unknown): Promise<any> {
 	});
 
 	if (res.status === 401 || res.status === 403) {
-		throw new Error(
-			`LinkedIn auth failed (${res.status}) - refresh li_at cookie`,
-		);
+		throw new Error(`LinkedIn auth failed (${res.status}) - refresh li_at cookie`);
 	}
 	if (!res.ok) throw new Error(`LinkedIn API POST ${res.status}: ${path}`);
 	return res.json();
@@ -99,10 +92,7 @@ export interface SearchCriteria {
 }
 
 export async function searchPeople(criteria: SearchCriteria): Promise<Lead[]> {
-	const keywords = [
-		criteria.keywords,
-		...(criteria.titles || []).map((t) => `"${t}"`),
-	]
+	const keywords = [criteria.keywords, ...(criteria.titles || []).map((t) => `"${t}"`)]
 		.filter(Boolean)
 		.join(" ");
 
@@ -147,8 +137,7 @@ export async function searchPeople(criteria: SearchCriteria): Promise<Lead[]> {
 
 export async function getProfile(publicId: string): Promise<Partial<Lead>> {
 	const data = await liGet(`/identity/profiles/${publicId}`, {
-		decorationId:
-			"com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-86",
+		decorationId: "com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-86",
 	});
 
 	const profile = data?.data || data;

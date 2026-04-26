@@ -89,10 +89,7 @@ export interface PadColumnsOptions {
  * @param rows        2D array - rows[row][col]
  * @param options     Optional alignment and separator config
  */
-export function padColumns(
-	rows: string[][],
-	options: PadColumnsOptions = {},
-): string[] {
+export function padColumns(rows: string[][], options: PadColumnsOptions = {}): string[] {
 	const { separator = "  " } = options;
 
 	if (rows.length === 0) return [];

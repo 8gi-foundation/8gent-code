@@ -46,9 +46,7 @@ async function run(
 	const exitCode = await proc.exited;
 	clearTimeout(timer);
 	if (exitCode !== 0)
-		throw new Error(
-			`${cmd} ${args[0]} failed (${exitCode}): ${stderr.slice(0, 300)}`,
-		);
+		throw new Error(`${cmd} ${args[0]} failed (${exitCode}): ${stderr.slice(0, 300)}`);
 	return stdout;
 }
 
@@ -58,11 +56,7 @@ async function setupRepo(task: SWEBenchTask, workDir: string): Promise<string> {
 	const url = `https://github.com/${task.repo}.git`;
 	await run("git", ["init"], repoDir);
 	await run("git", ["remote", "add", "origin", url], repoDir);
-	await run(
-		"git",
-		["fetch", "--depth", "1", "origin", task.base_commit],
-		repoDir,
-	);
+	await run("git", ["fetch", "--depth", "1", "origin", task.base_commit], repoDir);
 	await run("git", ["checkout", "FETCH_HEAD"], repoDir);
 	return repoDir;
 }
@@ -97,19 +91,16 @@ async function runAgent(
 	const promptFile = path.join(repoDir, ".swebench-prompt.txt");
 	fs.writeFileSync(promptFile, prompt);
 	try {
-		const proc = Bun.spawn(
-			["sh", "-c", `cat ${promptFile} | ${config.agent_cmd} chat --json`],
-			{
-				cwd: repoDir,
-				stdout: "pipe",
-				stderr: "pipe",
-				env: {
-					...process.env,
-					OLLAMA_MODEL: config.model,
-					EIGHT_HEADLESS: "1",
-				},
+		const proc = Bun.spawn(["sh", "-c", `cat ${promptFile} | ${config.agent_cmd} chat --json`], {
+			cwd: repoDir,
+			stdout: "pipe",
+			stderr: "pipe",
+			env: {
+				...process.env,
+				OLLAMA_MODEL: config.model,
+				EIGHT_HEADLESS: "1",
 			},
-		);
+		});
 		const timer = setTimeout(() => proc.kill(), config.timeout_ms);
 		const stdout = await new Response(proc.stdout).text();
 		await proc.exited;
@@ -150,20 +141,13 @@ async function verifyPatch(
 		try {
 			failToPass = JSON.parse(task.FAIL_TO_PASS);
 		} catch {
-			failToPass = task.FAIL_TO_PASS
-				? task.FAIL_TO_PASS.split(",").map((s) => s.trim())
-				: [];
+			failToPass = task.FAIL_TO_PASS ? task.FAIL_TO_PASS.split(",").map((s) => s.trim()) : [];
 		}
 		if (failToPass.length === 0) return true;
 
 		// Run tests (best effort - full SWE-bench uses Docker per-repo)
 		try {
-			await run(
-				"python",
-				["-m", "pytest", ...failToPass, "--tb=short", "-q"],
-				repoDir,
-				60_000,
-			);
+			await run("python", ["-m", "pytest", ...failToPass, "--tb=short", "-q"], repoDir, 60_000);
 			return true;
 		} catch {
 			return false;

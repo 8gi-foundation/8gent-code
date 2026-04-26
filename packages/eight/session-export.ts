@@ -63,11 +63,7 @@ export async function exportSession(
 	const messageHtml = messages
 		.map((msg) => {
 			const roleClass =
-				msg.role === "user"
-					? "user"
-					: msg.role === "assistant"
-						? "assistant"
-						: "system";
+				msg.role === "user" ? "user" : msg.role === "assistant" ? "assistant" : "system";
 			const time =
 				msg.timestamp instanceof Date
 					? msg.timestamp.toLocaleTimeString("en-GB", {
@@ -142,11 +138,7 @@ export async function saveSessionExport(
 	metadata: ExportMetadata,
 ): Promise<string> {
 	const html = await exportSession(messages, metadata);
-	const dir = path.join(
-		process.env.HOME || process.env.USERPROFILE || ".",
-		".8gent",
-		"exports",
-	);
+	const dir = path.join(process.env.HOME || process.env.USERPROFILE || ".", ".8gent", "exports");
 	fs.mkdirSync(dir, { recursive: true });
 	const filePath = path.join(dir, `${metadata.sessionId}.html`);
 	fs.writeFileSync(filePath, html, "utf-8");

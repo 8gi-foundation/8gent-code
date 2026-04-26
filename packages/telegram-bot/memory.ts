@@ -9,12 +9,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type {
-	BotMemoryData,
-	ConversationEntry,
-	Learning,
-	RepoEntry,
-} from "./types";
+import type { BotMemoryData, ConversationEntry, Learning, RepoEntry } from "./types";
 
 const DEFAULT_MEMORY_PATH = join(homedir(), ".8gent", "bot-memory.json");
 const MAX_CONVERSATIONS_PER_CHAT = 200;
@@ -107,11 +102,7 @@ export class BotMemory {
 	/**
 	 * Log a conversation exchange.
 	 */
-	logConversation(
-		chatId: string,
-		userMessage: string,
-		botResponse: string,
-	): void {
+	logConversation(chatId: string, userMessage: string, botResponse: string): void {
 		if (!this.data.conversations[chatId]) {
 			this.data.conversations[chatId] = [];
 		}
@@ -147,10 +138,7 @@ export class BotMemory {
 	 * Get total conversation count across all chats.
 	 */
 	getConversationCount(): number {
-		return Object.values(this.data.conversations).reduce(
-			(sum, entries) => sum + entries.length,
-			0,
-		);
+		return Object.values(this.data.conversations).reduce((sum, entries) => sum + entries.length, 0);
 	}
 
 	// ── Repo Tracking ───────────────────────────────────
@@ -188,9 +176,7 @@ export class BotMemory {
 			repos = repos.filter((r) => (r.score ?? 0) >= filter.minScore!);
 		}
 		if (filter?.category) {
-			repos = repos.filter(
-				(r) => r.category?.toLowerCase() === filter.category?.toLowerCase(),
-			);
+			repos = repos.filter((r) => r.category?.toLowerCase() === filter.category?.toLowerCase());
 		}
 
 		return repos.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
@@ -242,9 +228,7 @@ export class BotMemory {
 
 		const q = query.toLowerCase();
 		return this.data.learnings.filter(
-			(l) =>
-				l.learning.toLowerCase().includes(q) ||
-				l.source.toLowerCase().includes(q),
+			(l) => l.learning.toLowerCase().includes(q) || l.source.toLowerCase().includes(q),
 		);
 	}
 

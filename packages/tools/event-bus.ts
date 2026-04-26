@@ -10,10 +10,7 @@ export class EventBus<EventMap> {
 	 * @param event The event name.
 	 * @param handler The handler function.
 	 */
-	on<E extends keyof EventMap>(
-		event: E,
-		handler: (data: EventMap[E]) => void,
-	): void {
+	on<E extends keyof EventMap>(event: E, handler: (data: EventMap[E]) => void): void {
 		if (!this.handlers.has(event)) {
 			this.handlers.set(event, []);
 		}
@@ -25,10 +22,7 @@ export class EventBus<EventMap> {
 	 * @param event The event name.
 	 * @param handler The handler function.
 	 */
-	off<E extends keyof EventMap>(
-		event: E,
-		handler: (data: EventMap[E]) => void,
-	): void {
+	off<E extends keyof EventMap>(event: E, handler: (data: EventMap[E]) => void): void {
 		const handlers = this.handlers.get(event);
 		if (!handlers) return;
 		const index = handlers.indexOf(handler);
@@ -45,10 +39,7 @@ export class EventBus<EventMap> {
 	 * @param event The event name.
 	 * @param handler The handler function.
 	 */
-	once<E extends keyof EventMap>(
-		event: E,
-		handler: (data: EventMap[E]) => void,
-	): void {
+	once<E extends keyof EventMap>(event: E, handler: (data: EventMap[E]) => void): void {
 		const wrappedHandler = (data: EventMap[E]) => {
 			handler(data);
 			this.off(event, wrappedHandler);
@@ -75,10 +66,7 @@ export class EventBus<EventMap> {
 	 * @param data The data to pass to handlers.
 	 * @returns A promise that resolves when all handlers are done.
 	 */
-	async emitAsync<E extends keyof EventMap>(
-		event: E,
-		data: EventMap[E],
-	): Promise<void> {
+	async emitAsync<E extends keyof EventMap>(event: E, data: EventMap[E]): Promise<void> {
 		const handlers = this.handlers.get(event);
 		if (!handlers) return;
 		for (const handler of handlers) {

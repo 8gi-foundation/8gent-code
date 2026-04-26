@@ -13,23 +13,11 @@ import * as path from "node:path";
 // ── Paths ──────────────────────────────────────────────────────────────
 
 const REPO_ROOT = path.resolve(import.meta.dir, "../..");
-const COMPETITION_STATE = path.join(
-	REPO_ROOT,
-	"benchmarks/competition/competition-state.json",
-);
-const AUTORESEARCH_STATE = path.join(
-	REPO_ROOT,
-	"benchmarks/autoresearch/loop-state.json",
-);
+const COMPETITION_STATE = path.join(REPO_ROOT, "benchmarks/competition/competition-state.json");
+const AUTORESEARCH_STATE = path.join(REPO_ROOT, "benchmarks/autoresearch/loop-state.json");
 const EIGHT_WORLD = path.join(process.env.HOME ?? "~", "8gent-world");
-const BENCHMARKING_PAGE = path.join(
-	EIGHT_WORLD,
-	"src/app/code/benchmarking/page.tsx",
-);
-const BENCHMARK_SCENE = path.join(
-	EIGHT_WORLD,
-	"remotion/scenes/BenchmarkShowcaseScene.tsx",
-);
+const BENCHMARKING_PAGE = path.join(EIGHT_WORLD, "src/app/code/benchmarking/page.tsx");
+const BENCHMARK_SCENE = path.join(EIGHT_WORLD, "remotion/scenes/BenchmarkShowcaseScene.tsx");
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -153,9 +141,7 @@ function buildSummary(): SyncSummary {
 	const date = new Date().toISOString().split("T")[0];
 
 	// Head-to-head results
-	const results = competition?.results
-		? Object.values(competition.results)
-		: [];
+	const results = competition?.results ? Object.values(competition.results) : [];
 	const eightWins = results.filter((r) => r.winner === "8gent").length;
 	const claudeWins = results.filter((r) => r.winner === "claude").length;
 	const ties = results.filter((r) => r.winner === "tie").length;
@@ -183,13 +169,7 @@ function buildSummary(): SyncSummary {
 	}
 
 	// Build tier scores
-	const tierScores: TierScore[] = [
-		"Tier 1",
-		"Tier 2",
-		"Tier 3",
-		"Tier 4",
-		"Tier 5",
-	].map((tier) => {
+	const tierScores: TierScore[] = ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5"].map((tier) => {
 		const data = tierMap.get(tier);
 		if (!data || data.scores.length === 0) {
 			return {
@@ -200,9 +180,7 @@ function buildSummary(): SyncSummary {
 				passing: 0,
 			};
 		}
-		const avg = Math.round(
-			data.scores.reduce((a, b) => a + b, 0) / data.scores.length,
-		);
+		const avg = Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length);
 		const passing = data.scores.filter((s) => s >= 70).length;
 		return {
 			tier,
@@ -229,27 +207,20 @@ function buildSummary(): SyncSummary {
 				if (getTierFromId(id) === tier) latestScores.push(score);
 			}
 			if (firstScores.length > 0 && latestScores.length > 0) {
-				const before = Math.round(
-					firstScores.reduce((a, b) => a + b, 0) / firstScores.length,
-				);
-				const after = Math.round(
-					latestScores.reduce((a, b) => a + b, 0) / latestScores.length,
-				);
+				const before = Math.round(firstScores.reduce((a, b) => a + b, 0) / firstScores.length);
+				const after = Math.round(latestScores.reduce((a, b) => a + b, 0) / latestScores.length);
 				improvements.push({ tier, before, after, delta: after - before });
 			}
 		}
 	}
 
 	// Autoresearch summary
-	const latestHistory =
-		autoresearch?.history?.[autoresearch.history.length - 1];
+	const latestHistory = autoresearch?.history?.[autoresearch.history.length - 1];
 	const autoresearchSummary = {
 		iterations: autoresearch?.iteration ?? 0,
 		mutations: autoresearch?.mutations?.length ?? 0,
 		latestAvg: latestHistory?.avgScore ?? 0,
-		latestPassing: latestHistory
-			? `${latestHistory.passing}/${latestHistory.total}`
-			: "0/0",
+		latestPassing: latestHistory ? `${latestHistory.passing}/${latestHistory.total}` : "0/0",
 	};
 
 	return {
@@ -396,10 +367,7 @@ function createGist(summary: SyncSummary): string | null {
 
 	try {
 		const gistContent = JSON.stringify(summary, null, 2);
-		const tmpFile = path.join(
-			REPO_ROOT,
-			`.8gent/competition-summary-${summary.date}.json`,
-		);
+		const tmpFile = path.join(REPO_ROOT, `.8gent/competition-summary-${summary.date}.json`);
 		fs.mkdirSync(path.dirname(tmpFile), { recursive: true });
 		fs.writeFileSync(tmpFile, gistContent);
 
@@ -430,9 +398,7 @@ function formatSummary(summary: SyncSummary): string {
 	// Tier scores
 	lines.push("  Tier Scores:");
 	for (const t of summary.tierScores) {
-		const bar =
-			"█".repeat(Math.floor(t.score / 5)) +
-			"░".repeat(20 - Math.floor(t.score / 5));
+		const bar = "█".repeat(Math.floor(t.score / 5)) + "░".repeat(20 - Math.floor(t.score / 5));
 		lines.push(
 			`    ${t.tier} (${t.label.padEnd(12)}) ${bar} ${t.score}% (${t.passing}/${t.taskCount} passing)`,
 		);
@@ -486,10 +452,7 @@ async function main() {
 	console.log(formatted);
 
 	// Save raw summary JSON
-	const summaryPath = path.join(
-		REPO_ROOT,
-		`.8gent/competition-summary-${summary.date}.json`,
-	);
+	const summaryPath = path.join(REPO_ROOT, `.8gent/competition-summary-${summary.date}.json`);
 	fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
 	fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
 	console.log(`\nSaved summary: ${summaryPath}`);

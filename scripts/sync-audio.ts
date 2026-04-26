@@ -11,14 +11,7 @@
  */
 
 import { execSync } from "node:child_process";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-	watch,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");

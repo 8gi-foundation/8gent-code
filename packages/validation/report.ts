@@ -147,10 +147,7 @@ export class ValidationReporter {
 	/**
 	 * Calculate overall confidence score
 	 */
-	private calculateConfidence(
-		steps: StepReport[],
-		evidence: Evidence[],
-	): number {
+	private calculateConfidence(steps: StepReport[], evidence: Evidence[]): number {
 		if (steps.length === 0) return 0;
 
 		// Factors that affect confidence:
@@ -159,12 +156,9 @@ export class ValidationReporter {
 		// 3. Absence of critical failures
 		// 4. Quality of evidence (file_exists vs just command_output)
 
-		const passedRatio =
-			steps.filter((s) => s.status === "passed").length / steps.length;
+		const passedRatio = steps.filter((s) => s.status === "passed").length / steps.length;
 		const verifiedRatio =
-			evidence.length > 0
-				? evidence.filter((e) => e.verified).length / evidence.length
-				: 0;
+			evidence.length > 0 ? evidence.filter((e) => e.verified).length / evidence.length : 0;
 
 		// Weight evidence types
 		const evidenceQuality = this.calculateEvidenceQuality(evidence);
@@ -225,11 +219,7 @@ export class ValidationReporter {
 	/**
 	 * Generate human-readable summary
 	 */
-	private generateSummary(
-		steps: StepReport[],
-		evidence: Evidence[],
-		confidence: number,
-	): string {
+	private generateSummary(steps: StepReport[], evidence: Evidence[], confidence: number): string {
 		const passed = steps.filter((s) => s.status === "passed").length;
 		const failed = steps.filter((s) => s.status === "failed").length;
 		const total = steps.length;
@@ -273,33 +263,22 @@ export class ValidationReporter {
 		// Check for failed steps
 		const failedSteps = steps.filter((s) => s.status === "failed");
 		for (const step of failedSteps) {
-			warnings.push(
-				`Step "${step.stepId}" failed: ${step.error || "Unknown error"}`,
-			);
+			warnings.push(`Step "${step.stepId}" failed: ${step.error || "Unknown error"}`);
 		}
 
 		// Check for unverified evidence
 		const unverifiedEvidence = evidence.filter((e) => !e.verified);
 		if (unverifiedEvidence.length > 0) {
-			warnings.push(
-				`${unverifiedEvidence.length} evidence items could not be verified`,
-			);
+			warnings.push(`${unverifiedEvidence.length} evidence items could not be verified`);
 		}
 
 		// Check for missing evidence types
 		const evidenceTypes = new Set(evidence.map((e) => e.type));
-		if (
-			!evidenceTypes.has("file_exists") &&
-			!evidenceTypes.has("file_content")
-		) {
-			suggestions.push(
-				"Consider adding file existence checks for better verification",
-			);
+		if (!evidenceTypes.has("file_exists") && !evidenceTypes.has("file_content")) {
+			suggestions.push("Consider adding file existence checks for better verification");
 		}
 		if (!evidenceTypes.has("test_result")) {
-			suggestions.push(
-				"Running tests would increase confidence in the results",
-			);
+			suggestions.push("Running tests would increase confidence in the results");
 		}
 
 		// Check for error patterns in command output
@@ -310,16 +289,12 @@ export class ValidationReporter {
 				e.data.toLowerCase().includes("error"),
 		);
 		if (errorEvidence.length > 0) {
-			warnings.push(
-				"Some commands produced error output - review the evidence",
-			);
+			warnings.push("Some commands produced error output - review the evidence");
 		}
 
 		// Low evidence count warning
 		if (evidence.length < steps.length) {
-			suggestions.push(
-				"Evidence count is low - consider collecting more proof of success",
-			);
+			suggestions.push("Evidence count is low - consider collecting more proof of success");
 		}
 
 		return { warnings, suggestions };
@@ -328,10 +303,7 @@ export class ValidationReporter {
 	/**
 	 * Format report for terminal display
 	 */
-	formatForDisplay(
-		report: ValidationReport,
-		options?: ReportDisplayOptions,
-	): string {
+	formatForDisplay(report: ValidationReport, options?: ReportDisplayOptions): string {
 		const opts: Required<ReportDisplayOptions> = {
 			showEvidence: options?.showEvidence ?? true,
 			showTimings: options?.showTimings ?? true,
@@ -356,11 +328,7 @@ export class ValidationReporter {
 
 		// Confidence meter
 		const confidenceColor =
-			report.confidence >= 80
-				? "green"
-				: report.confidence >= 50
-					? "yellow"
-					: "red";
+			report.confidence >= 80 ? "green" : report.confidence >= 50 ? "yellow" : "red";
 		const confidenceBar = this.createProgressBar(report.confidence, 30);
 		lines.push(
 			`  Confidence: ${this.colorize(`${report.confidence}%`, confidenceColor, c)} ${confidenceBar}`,
@@ -377,24 +345,17 @@ export class ValidationReporter {
 						? this.colorize("✗", "red", c)
 						: this.colorize("○", "gray", c);
 
-			const timing =
-				opts.showTimings && step.duration ? ` (${step.duration}ms)` : "";
+			const timing = opts.showTimings && step.duration ? ` (${step.duration}ms)` : "";
 
-			lines.push(
-				`  ${statusIcon} [${step.stepId}] ${step.action.slice(0, 50)}${timing}`,
-			);
+			lines.push(`  ${statusIcon} [${step.stepId}] ${step.action.slice(0, 50)}${timing}`);
 
 			if (step.status === "failed" && step.error && !opts.compact) {
-				lines.push(
-					`     └─ ${this.colorize(step.error.slice(0, 60), "red", c)}`,
-				);
+				lines.push(`     └─ ${this.colorize(step.error.slice(0, 60), "red", c)}`);
 			}
 
 			if (opts.showEvidence && step.evidence.length > 0 && !opts.compact) {
 				const verified = step.evidence.filter((e) => e.verified).length;
-				lines.push(
-					`     └─ ${verified}/${step.evidence.length} evidence items verified`,
-				);
+				lines.push(`     └─ ${verified}/${step.evidence.length} evidence items verified`);
 			}
 		}
 		lines.push("");
@@ -408,9 +369,7 @@ export class ValidationReporter {
 				const typeEvidence = report.evidence.filter((e) => e.type === type);
 				const verified = typeEvidence.filter((e) => e.verified).length;
 				const icon =
-					verified === count
-						? this.colorize("✓", "green", c)
-						: this.colorize("◐", "yellow", c);
+					verified === count ? this.colorize("✓", "green", c) : this.colorize("◐", "yellow", c);
 				lines.push(`  ${icon} ${type}: ${verified}/${count} verified`);
 			}
 			lines.push("");
@@ -437,11 +396,7 @@ export class ValidationReporter {
 		// Footer
 		if (opts.showTimings && report.duration) {
 			lines.push(
-				this.colorize(
-					`Total duration: ${(report.duration / 1000).toFixed(1)}s`,
-					"gray",
-					c,
-				),
+				this.colorize(`Total duration: ${(report.duration / 1000).toFixed(1)}s`, "gray", c),
 			);
 		}
 		lines.push(this.colorize("─".repeat(opts.maxWidth!), "gray", c));
@@ -480,8 +435,7 @@ export class ValidationReporter {
 		lines.push("|------|--------|--------|------------|");
 
 		for (const step of report.steps) {
-			const status =
-				step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏭️";
+			const status = step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏭️";
 			lines.push(
 				`| ${step.stepId} | ${step.action.slice(0, 40)}... | ${status} | ${step.confidence}% |`,
 			);

@@ -100,9 +100,7 @@ registerTool(
 		}));
 
 		// Calculate tokens used by outline (rough estimate)
-		const outlineTokens = Math.ceil(
-			JSON.stringify(formattedSymbols).length / 4,
-		);
+		const outlineTokens = Math.ceil(JSON.stringify(formattedSymbols).length / 4);
 		const tokensSaved = Math.max(0, fullFileTokens - outlineTokens);
 
 		return {

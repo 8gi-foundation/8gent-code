@@ -131,14 +131,7 @@ const MODIFIERS: Record<string, number> = {
  * Project type detection patterns
  */
 const PROJECT_PATTERNS: Record<ProjectType, RegExp[]> = {
-	"web-app": [
-		/web\s*app/i,
-		/dashboard/i,
-		/portal/i,
-		/application/i,
-		/saas/i,
-		/admin\s*panel/i,
-	],
+	"web-app": [/web\s*app/i, /dashboard/i, /portal/i, /application/i, /saas/i, /admin\s*panel/i],
 	"landing-page": [
 		/landing\s*page/i,
 		/homepage/i,
@@ -155,12 +148,7 @@ const PROJECT_PATTERNS: Record<ProjectType, RegExp[]> = {
 		/flutter/i,
 		/expo/i,
 	],
-	"component-library": [
-		/component\s*library/i,
-		/design\s*system/i,
-		/ui\s*kit/i,
-		/storybook/i,
-	],
+	"component-library": [/component\s*library/i, /design\s*system/i, /ui\s*kit/i, /storybook/i],
 	"cli-tool": [/cli/i, /command\s*line/i, /terminal/i, /console\s*app/i],
 	api: [/api/i, /rest/i, /graphql/i, /endpoint/i, /backend/i, /server/i],
 	unknown: [],
@@ -289,10 +277,7 @@ export class DesignDecisionDetector extends EventEmitter {
 			const fs = await import("node:fs/promises");
 			const path = await import("node:path");
 
-			const packageJsonPath = path.join(
-				this.config.workingDirectory,
-				"package.json",
-			);
+			const packageJsonPath = path.join(this.config.workingDirectory, "package.json");
 
 			try {
 				const content = await fs.readFile(packageJsonPath, "utf-8");
@@ -327,11 +312,7 @@ export class DesignDecisionDetector extends EventEmitter {
 			}
 
 			// Check for tailwind config
-			const tailwindFiles = [
-				"tailwind.config.js",
-				"tailwind.config.ts",
-				"tailwind.config.mjs",
-			];
+			const tailwindFiles = ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"];
 
 			for (const file of tailwindFiles) {
 				try {
@@ -361,8 +342,7 @@ export class DesignDecisionDetector extends EventEmitter {
 		}
 
 		const triggerList = triggers.filter((t) => !t.startsWith("+")).join(", ");
-		const typeLabel =
-			projectType !== "unknown" ? ` (${projectType.replace("-", " ")})` : "";
+		const typeLabel = projectType !== "unknown" ? ` (${projectType.replace("-", " ")})` : "";
 
 		return `Detected UI/design task${typeLabel}. Triggers: ${triggerList}`;
 	}
@@ -370,19 +350,12 @@ export class DesignDecisionDetector extends EventEmitter {
 	/**
 	 * Suggest design categories to address
 	 */
-	private suggestCategories(
-		task: string,
-		projectType: ProjectType,
-	): DesignCategory[] {
+	private suggestCategories(task: string, projectType: ProjectType): DesignCategory[] {
 		const categories: DesignCategory[] = [];
 		const taskLower = task.toLowerCase();
 
 		// Always suggest component library for UI tasks
-		if (
-			projectType !== "api" &&
-			projectType !== "cli-tool" &&
-			projectType !== "unknown"
-		) {
+		if (projectType !== "api" && projectType !== "cli-tool" && projectType !== "unknown") {
 			categories.push("component-library");
 		}
 
@@ -454,11 +427,7 @@ export class DesignDecisionDetector extends EventEmitter {
 	/**
 	 * Create a positive result
 	 */
-	private createPositiveResult(
-		task: string,
-		reason: string,
-		confidence: number,
-	): DetectionResult {
+	private createPositiveResult(task: string, reason: string, confidence: number): DetectionResult {
 		const projectType = this.detectProjectType(task);
 		return {
 			needsDesign: true,
@@ -519,9 +488,7 @@ export class DesignDecisionDetector extends EventEmitter {
 /**
  * Create a detector instance
  */
-export function createDetector(
-	config?: DetectorConfig,
-): DesignDecisionDetector {
+export function createDetector(config?: DetectorConfig): DesignDecisionDetector {
 	return new DesignDecisionDetector(config);
 }
 

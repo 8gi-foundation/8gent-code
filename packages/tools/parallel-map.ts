@@ -42,10 +42,7 @@ async function runPool<T, R>(
 		}
 	}
 
-	const workers = Array.from(
-		{ length: Math.min(concurrency, items.length || 1) },
-		worker,
-	);
+	const workers = Array.from({ length: Math.min(concurrency, items.length || 1) }, worker);
 	await Promise.all(workers);
 	return results;
 }
@@ -127,12 +124,7 @@ export async function parallelForEach<T>(
  */
 export async function parallelReduce<T, R>(
 	items: readonly T[],
-	fn: (
-		accumulator: R,
-		item: T,
-		index: number,
-		signal?: AbortSignal,
-	) => Promise<R>,
+	fn: (accumulator: R, item: T, index: number, signal?: AbortSignal) => Promise<R>,
 	init: R,
 	concurrency: number = DEFAULT_CONCURRENCY,
 	signal?: AbortSignal,

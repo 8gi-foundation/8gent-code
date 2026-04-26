@@ -35,8 +35,7 @@ export interface SessionData {
  * Extracts reusable patterns, summarises errors, and stores the result.
  */
 export function reflect(sessionData: SessionData): SessionReflection {
-	const { sessionId, toolsUsed, errors, notes, successfulCalls, totalCalls } =
-		sessionData;
+	const { sessionId, toolsUsed, errors, notes, successfulCalls, totalCalls } = sessionData;
 
 	const successRate = totalCalls > 0 ? successfulCalls / totalCalls : 1;
 
@@ -93,36 +92,24 @@ function inferPatterns(tools: string[], errors: string[]): string[] {
 
 	// Tool co-occurrence patterns
 	if (tools.includes("read_file") && tools.includes("edit_file")) {
-		patterns.push(
-			"Read before editing: always read the current file state first",
-		);
+		patterns.push("Read before editing: always read the current file state first");
 	}
 	if (tools.includes("bash") && errors.some((e) => e.includes("not found"))) {
 		patterns.push("Command not found: check PATH or use full binary path");
 	}
-	if (
-		tools.includes("bash") &&
-		tools.includes("read_file") &&
-		tools.length > 4
-	) {
-		patterns.push(
-			"Mixed bash + file tools: prefer dedicated file tools over bash cat/grep",
-		);
+	if (tools.includes("bash") && tools.includes("read_file") && tools.length > 4) {
+		patterns.push("Mixed bash + file tools: prefer dedicated file tools over bash cat/grep");
 	}
 
 	// Error-pattern heuristics
 	if (errors.some((e) => e.includes("ENOENT") || e.includes("no such file"))) {
-		patterns.push(
-			"File not found: verify path exists before reading or writing",
-		);
+		patterns.push("File not found: verify path exists before reading or writing");
 	}
 	if (errors.some((e) => e.includes("TypeScript") || e.includes("TS2"))) {
 		patterns.push("TypeScript error: check types and imports before running");
 	}
 	if (errors.some((e) => e.includes("Cannot find module"))) {
-		patterns.push(
-			"Module resolution error: check package.json exports and tsconfig paths",
-		);
+		patterns.push("Module resolution error: check package.json exports and tsconfig paths");
 	}
 
 	return patterns;

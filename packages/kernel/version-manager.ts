@@ -15,11 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const VERSION_FILE = path.join(os.homedir(), ".8gent", "model-version.json");
-const BASELINE_FILE = path.join(
-	os.homedir(),
-	".8gent",
-	"benchmark-baseline.json",
-);
+const BASELINE_FILE = path.join(os.homedir(), ".8gent", "benchmark-baseline.json");
 
 export interface ModelVersion {
 	major: number;
@@ -161,22 +157,19 @@ CRITERIA:
 Respond with exactly one word: PATCH, MINOR, or NONE. Then a brief reason.`;
 
 	try {
-		const response = await fetch(
-			"https://openrouter.ai/api/v1/chat/completions",
-			{
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${openrouterApiKey}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					model: "google/gemini-2.5-flash:free",
-					messages: [{ role: "user", content: prompt }],
-					max_tokens: 100,
-					temperature: 0,
-				}),
+		const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${openrouterApiKey}`,
+				"Content-Type": "application/json",
 			},
-		);
+			body: JSON.stringify({
+				model: "google/gemini-2.5-flash:free",
+				messages: [{ role: "user", content: prompt }],
+				max_tokens: 100,
+				temperature: 0,
+			}),
+		});
 
 		if (!response.ok) {
 			// Fallback to heuristic
@@ -212,9 +205,7 @@ const PERSONAL_LORA_META = path.join(PERSONAL_LORA_DIR, "meta.json");
  * Checks if the user's personal LoRA was trained on the current Eight version.
  * Returns false if the LoRA needs retraining (version mismatch or missing metadata).
  */
-export function checkPersonalLoraCompatibility(
-	currentVersion: string,
-): boolean {
+export function checkPersonalLoraCompatibility(currentVersion: string): boolean {
 	try {
 		if (!fs.existsSync(PERSONAL_LORA_META)) return false;
 		const meta = JSON.parse(fs.readFileSync(PERSONAL_LORA_META, "utf-8"));

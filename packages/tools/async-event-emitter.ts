@@ -12,9 +12,7 @@ interface HandlerEntry<T> {
 	once: boolean;
 }
 
-export class AsyncEventEmitter<
-	Events extends Record<string, unknown> = Record<string, unknown>,
-> {
+export class AsyncEventEmitter<Events extends Record<string, unknown> = Record<string, unknown>> {
 	private readonly listeners = new Map<keyof Events, HandlerEntry<unknown>[]>();
 	private defaultMode: EmitMode;
 
@@ -27,18 +25,12 @@ export class AsyncEventEmitter<
 		return this;
 	}
 
-	once<K extends keyof Events>(
-		event: K,
-		handler: AsyncHandler<Events[K]>,
-	): this {
+	once<K extends keyof Events>(event: K, handler: AsyncHandler<Events[K]>): this {
 		this.addListener(event, handler, true);
 		return this;
 	}
 
-	off<K extends keyof Events>(
-		event: K,
-		handler: AsyncHandler<Events[K]>,
-	): this {
+	off<K extends keyof Events>(event: K, handler: AsyncHandler<Events[K]>): this {
 		const entries = this.listeners.get(event);
 		if (!entries) return this;
 		const filtered = entries.filter((e) => e.handler !== handler);
@@ -58,20 +50,14 @@ export class AsyncEventEmitter<
 	}
 
 	/** Await all handlers concurrently. Errors propagate via Promise.all. */
-	async emitParallel<K extends keyof Events>(
-		event: K,
-		data: Events[K],
-	): Promise<void> {
+	async emitParallel<K extends keyof Events>(event: K, data: Events[K]): Promise<void> {
 		const entries = this.drainOnce(event);
 		if (!entries.length) return;
 		await Promise.all(entries.map((e) => Promise.resolve(e.handler(data))));
 	}
 
 	/** Await each handler in registration order before calling the next. */
-	async emitSerial<K extends keyof Events>(
-		event: K,
-		data: Events[K],
-	): Promise<void> {
+	async emitSerial<K extends keyof Events>(event: K, data: Events[K]): Promise<void> {
 		const entries = this.drainOnce(event);
 		for (const entry of entries) {
 			await Promise.resolve(entry.handler(data));

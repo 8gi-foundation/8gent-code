@@ -10,12 +10,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-	Entity,
-	EntityType,
-	KnowledgeGraph,
-	Relationship,
-} from "./graph.js";
+import type { Entity, EntityType, KnowledgeGraph, Relationship } from "./graph.js";
 
 // ── Public Types ─────────────────────────────────────────────────────
 
@@ -152,9 +147,7 @@ export class WikiGenerator {
 			sections.push("");
 			for (const mem of memories) {
 				const snippet =
-					mem.content_text.length > 200
-						? `${mem.content_text.slice(0, 200)}...`
-						: mem.content_text;
+					mem.content_text.length > 200 ? `${mem.content_text.slice(0, 200)}...` : mem.content_text;
 				sections.push(`- ${snippet}`);
 			}
 			sections.push("");
@@ -211,15 +204,12 @@ export class WikiGenerator {
 		const pageList: WikiIndex["pages"] = [];
 		const sections: string[] = ["# Wiki Index", ""];
 
-		for (const [type, group] of [...byType.entries()].sort((a, b) =>
-			a[0].localeCompare(b[0]),
-		)) {
+		for (const [type, group] of [...byType.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
 			sections.push(`## ${type}`);
 			sections.push("");
 			for (const entity of group) {
 				const slug = slugify(entity.name);
-				const summary =
-					entity.description ?? this.firstMemorySnippet(entity.name);
+				const summary = entity.description ?? this.firstMemorySnippet(entity.name);
 				sections.push(`- [${entity.name}](${slug}.md) -- ${summary}`);
 				pageList.push({ slug, title: entity.name, type, summary });
 			}

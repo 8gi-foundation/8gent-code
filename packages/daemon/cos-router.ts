@@ -152,10 +152,7 @@ export class CoSRouter {
 					githubIssue: { number: issueNumber, url: issueUrl, repo },
 				});
 
-				await this.notifications.notify(
-					"task-progress",
-					`GitHub issue created: ${issueUrl}`,
-				);
+				await this.notifications.notify("task-progress", `GitHub issue created: ${issueUrl}`);
 			} catch (err) {
 				console.error("[cos-router] failed to create GitHub issue:", err);
 				await this.notifications.notify(
@@ -237,21 +234,14 @@ export class CoSRouter {
 		if (active.length > 0) {
 			msg += "*Active:*\n";
 			for (const t of active) {
-				const icon =
-					t.status === "in-progress"
-						? "+"
-						: t.status === "delegated"
-							? ">"
-							: "-";
+				const icon = t.status === "in-progress" ? "+" : t.status === "delegated" ? ">" : "-";
 				msg += `${icon} \`${t.id}\` [${t.status}] ${t.description.slice(0, 60)}\n`;
 				if (t.githubIssue) msg += `  Issue: ${t.githubIssue.url}\n`;
 			}
 			msg += "\n";
 		}
 
-		const done = recent.filter(
-			(t) => t.status === "done" || t.status === "failed",
-		);
+		const done = recent.filter((t) => t.status === "done" || t.status === "failed");
 		if (done.length > 0) {
 			msg += "*Recent:*\n";
 			for (const t of done.slice(0, 3)) {

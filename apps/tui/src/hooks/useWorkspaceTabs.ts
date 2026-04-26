@@ -102,8 +102,7 @@ function migrateTab(raw: Record<string, unknown>): WorkspaceTab {
 		title: (raw.title as string) || "Untitled",
 		active: Boolean(raw.active),
 		createdAt: (raw.createdAt as string) || now,
-		lastAccessedAt:
-			(raw.lastAccessedAt as string) || (raw.createdAt as string) || now,
+		lastAccessedAt: (raw.lastAccessedAt as string) || (raw.createdAt as string) || now,
 		pinned: Boolean(raw.pinned),
 		badge: typeof raw.badge === "number" ? raw.badge : undefined,
 		data: (raw.data as Record<string, unknown>) || {},
@@ -251,61 +250,51 @@ export function useWorkspaceTabs() {
 	const sortedTabs = useMemo(() => sortTabs(tabs), [tabs]);
 
 	// Computed: current active tab
-	const activeTab = useMemo(
-		() => tabs.find((t) => t.active) || tabs[0],
-		[tabs],
-	);
+	const activeTab = useMemo(() => tabs.find((t) => t.active) || tabs[0], [tabs]);
 
 	// ----------------------------------------
 	// addTab
 	// ----------------------------------------
-	const addTab = useCallback(
-		(type: TabType, title?: string): WorkspaceTab | null => {
-			let newTab: WorkspaceTab | null = null;
+	const addTab = useCallback((type: TabType, title?: string): WorkspaceTab | null => {
+		let newTab: WorkspaceTab | null = null;
 
-			setTabs((prev) => {
-				if (prev.length >= MAX_TABS) return prev;
+		setTabs((prev) => {
+			if (prev.length >= MAX_TABS) return prev;
 
-				// For singleton types, switch to existing instead of creating new
-				if (SINGLETON_TYPES.includes(type)) {
-					const existing = prev.find((t) => t.type === type);
-					if (existing) {
-						const now = new Date().toISOString();
-						return prev.map((t) => ({
-							...t,
-							active: t.id === existing.id,
-							lastAccessedAt: t.id === existing.id ? now : t.lastAccessedAt,
-						}));
-					}
+			// For singleton types, switch to existing instead of creating new
+			if (SINGLETON_TYPES.includes(type)) {
+				const existing = prev.find((t) => t.type === type);
+				if (existing) {
+					const now = new Date().toISOString();
+					return prev.map((t) => ({
+						...t,
+						active: t.id === existing.id,
+						lastAccessedAt: t.id === existing.id ? now : t.lastAccessedAt,
+					}));
 				}
+			}
 
-				const icon = TAB_ICONS.find((i) => i.type === type);
-				const chatCount =
-					type === "chat"
-						? prev.filter((t) => t.type === "chat").length + 1
-						: 0;
-				const defaultTitle =
-					type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
+			const icon = TAB_ICONS.find((i) => i.type === type);
+			const chatCount = type === "chat" ? prev.filter((t) => t.type === "chat").length + 1 : 0;
+			const defaultTitle = type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
 
-				const now = new Date().toISOString();
-				newTab = {
-					id: generateId(type),
-					type,
-					title: title || defaultTitle,
-					active: true,
-					createdAt: now,
-					lastAccessedAt: now,
-					pinned: false,
-					data: {},
-				};
+			const now = new Date().toISOString();
+			newTab = {
+				id: generateId(type),
+				type,
+				title: title || defaultTitle,
+				active: true,
+				createdAt: now,
+				lastAccessedAt: now,
+				pinned: false,
+				data: {},
+			};
 
-				return [...prev.map((t) => ({ ...t, active: false })), newTab];
-			});
+			return [...prev.map((t) => ({ ...t, active: false })), newTab];
+		});
 
-			return newTab;
-		},
-		[],
-	);
+		return newTab;
+	}, []);
 
 	// ----------------------------------------
 	// removeTab
@@ -382,37 +371,33 @@ export function useWorkspaceTabs() {
 	// ----------------------------------------
 	// cycleTab (Shift+Tab)
 	// ----------------------------------------
-	const cycleTab = useCallback(
-		(direction: 1 | -1 = 1, skipTypes?: string[]) => {
-			setTabs((prev) => {
-				const sorted = sortTabs(prev);
-				const activeIdx = sorted.findIndex((t) => t.active);
-				if (activeIdx === -1) return prev;
+	const cycleTab = useCallback((direction: 1 | -1 = 1, skipTypes?: string[]) => {
+		setTabs((prev) => {
+			const sorted = sortTabs(prev);
+			const activeIdx = sorted.findIndex((t) => t.active);
+			if (activeIdx === -1) return prev;
 
-				// Find next tab that isn't in skipTypes, wrapping around
-				let offset = direction;
-				let attempts = 0;
-				while (attempts < sorted.length) {
-					const candidateIdx =
-						(activeIdx + offset + sorted.length) % sorted.length;
-					const candidate = sorted[candidateIdx];
-					if (!skipTypes || !skipTypes.includes(candidate.type)) {
-						const targetId = candidate.id;
-						const now = new Date().toISOString();
-						return prev.map((t) => ({
-							...t,
-							active: t.id === targetId,
-							lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
-						}));
-					}
-					offset += direction;
-					attempts++;
+			// Find next tab that isn't in skipTypes, wrapping around
+			let offset = direction;
+			let attempts = 0;
+			while (attempts < sorted.length) {
+				const candidateIdx = (activeIdx + offset + sorted.length) % sorted.length;
+				const candidate = sorted[candidateIdx];
+				if (!skipTypes || !skipTypes.includes(candidate.type)) {
+					const targetId = candidate.id;
+					const now = new Date().toISOString();
+					return prev.map((t) => ({
+						...t,
+						active: t.id === targetId,
+						lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
+					}));
 				}
-				return prev; // All tabs are skipped types — don't change
-			});
-		},
-		[],
-	);
+				offset += direction;
+				attempts++;
+			}
+			return prev; // All tabs are skipped types — don't change
+		});
+	}, []);
 
 	// ----------------------------------------
 	// renameTab
@@ -425,15 +410,11 @@ export function useWorkspaceTabs() {
 	// pinTab / unpinTab
 	// ----------------------------------------
 	const pinTab = useCallback((tabId: string) => {
-		setTabs((prev) =>
-			prev.map((t) => (t.id === tabId ? { ...t, pinned: true } : t)),
-		);
+		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, pinned: true } : t)));
 	}, []);
 
 	const unpinTab = useCallback((tabId: string) => {
-		setTabs((prev) =>
-			prev.map((t) => (t.id === tabId ? { ...t, pinned: false } : t)),
-		);
+		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, pinned: false } : t)));
 	}, []);
 
 	// ----------------------------------------
@@ -441,9 +422,7 @@ export function useWorkspaceTabs() {
 	// ----------------------------------------
 	const updateBadge = useCallback((tabId: string, count: number) => {
 		setTabs((prev) =>
-			prev.map((t) =>
-				t.id === tabId ? { ...t, badge: count > 0 ? count : undefined } : t,
-			),
+			prev.map((t) => (t.id === tabId ? { ...t, badge: count > 0 ? count : undefined } : t)),
 		);
 	}, []);
 
@@ -460,16 +439,11 @@ export function useWorkspaceTabs() {
 	// ----------------------------------------
 	// updateTabData (backward compat with app.tsx)
 	// ----------------------------------------
-	const updateTabData = useCallback(
-		(tabId: string, data: Record<string, unknown>) => {
-			setTabs((prev) =>
-				prev.map((t) =>
-					t.id === tabId ? { ...t, data: { ...t.data, ...data } } : t,
-				),
-			);
-		},
-		[],
-	);
+	const updateTabData = useCallback((tabId: string, data: Record<string, unknown>) => {
+		setTabs((prev) =>
+			prev.map((t) => (t.id === tabId ? { ...t, data: { ...t.data, ...data } } : t)),
+		);
+	}, []);
 
 	return {
 		tabs: sortedTabs,

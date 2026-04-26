@@ -96,9 +96,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
 	});
 
 	const latencyNote =
-		result.latency_ms > 5000
-			? ` _(${(result.latency_ms / 1000).toFixed(1)}s)_`
-			: "";
+		result.latency_ms > 5000 ? ` _(${(result.latency_ms / 1000).toFixed(1)}s)_` : "";
 
 	const response = `*${route.name} (${route.code}):*\n\n${result.response}${latencyNote}`;
 	await sendMessage(chatId, response);
@@ -134,9 +132,7 @@ const server = Bun.serve({
 		if (url.pathname === "/webhook" && req.method === "POST") {
 			const update = (await req.json()) as TelegramUpdate;
 			// Handle async - don't block the 200 response
-			handleUpdate(update).catch((err) =>
-				console.error("[bot] handleUpdate error:", err),
-			);
+			handleUpdate(update).catch((err) => console.error("[bot] handleUpdate error:", err));
 			return new Response("ok");
 		}
 

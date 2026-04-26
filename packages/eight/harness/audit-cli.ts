@@ -27,15 +27,11 @@ function formatEntry(entry: AuditEntry, index: number): string {
 		case "decision":
 			lines.push(`    tool: ${entry.payload.tool}`);
 			if (entry.payload.reasoning) {
-				lines.push(
-					`    why:  ${String(entry.payload.reasoning).slice(0, 120)}`,
-				);
+				lines.push(`    why:  ${String(entry.payload.reasoning).slice(0, 120)}`);
 			}
 			break;
 		case "tool_result":
-			lines.push(
-				`    tool: ${entry.payload.tool} ${entry.payload.success ? "OK" : "FAIL"}`,
-			);
+			lines.push(`    tool: ${entry.payload.tool} ${entry.payload.success ? "OK" : "FAIL"}`);
 			if (entry.payload.error) {
 				lines.push(`    err:  ${String(entry.payload.error).slice(0, 120)}`);
 			}
@@ -49,9 +45,7 @@ function formatEntry(entry: AuditEntry, index: number): string {
 			lines.push(`    maxSteps: ${entry.payload.maxSteps}`);
 			break;
 		case "session_end":
-			lines.push(
-				`    steps: ${entry.payload.steps}, completed: ${entry.payload.completed}`,
-			);
+			lines.push(`    steps: ${entry.payload.steps}, completed: ${entry.payload.completed}`);
 			break;
 		default:
 			// Generic payload display
@@ -128,13 +122,9 @@ Sessions stored in: ${getSessionsDir()}
 		case "verify": {
 			const brokenAt = await session.verify();
 			if (brokenAt === -1) {
-				console.log(
-					`Session ${sessionId}: chain integrity VALID (${entries.length} entries)`,
-				);
+				console.log(`Session ${sessionId}: chain integrity VALID (${entries.length} entries)`);
 			} else {
-				console.error(
-					`Session ${sessionId}: chain BROKEN at entry #${brokenAt}`,
-				);
+				console.error(`Session ${sessionId}: chain BROKEN at entry #${brokenAt}`);
 				console.error(`Entry: ${JSON.stringify(entries[brokenAt], null, 2)}`);
 				process.exit(1);
 			}
@@ -155,9 +145,7 @@ Sessions stored in: ${getSessionsDir()}
 			console.log(`  Successes:  ${successes.length}`);
 			console.log(`  Failures:   ${failures.length}`);
 			console.log(`  Errors:     ${errors.length}`);
-			console.log(
-				`  Completed:  ${endEntry ? endEntry.payload.completed : "in progress"}`,
-			);
+			console.log(`  Completed:  ${endEntry ? endEntry.payload.completed : "in progress"}`);
 			if (entries.length > 0) {
 				console.log(`  First:      ${entries[0].timestamp}`);
 				console.log(`  Last:       ${entries[entries.length - 1].timestamp}`);

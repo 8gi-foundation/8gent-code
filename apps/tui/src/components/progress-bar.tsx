@@ -84,11 +84,7 @@ export function AnimatedProgressBar({
 		for (let i = 0; i < filledWidth; i++) {
 			const isShimmer = i === shimmerIndex || i === shimmerIndex - 1;
 			filled.push(
-				<Text
-					key={`f${i}`}
-					color={isShimmer ? undefined : barColor}
-					bold={isShimmer}
-				>
+				<Text key={`f${i}`} color={isShimmer ? undefined : barColor} bold={isShimmer}>
 					█
 				</Text>,
 			);
@@ -112,9 +108,7 @@ export function AnimatedProgressBar({
 				<MutedText>[</MutedText>
 				{buildBar()}
 				<MutedText>]</MutedText>
-				{showPercentage && (
-					<Text color={barColor}> {formatPercentage(displayValue, 100)}</Text>
-				)}
+				{showPercentage && <Text color={barColor}> {formatPercentage(displayValue, 100)}</Text>}
 			</Inline>
 		</Box>
 	);
@@ -155,12 +149,7 @@ export function TokenSavingsBar({
 		<Inline gap={1}>
 			<MutedText>Tokens saved:</MutedText>
 			<Label color="green">{formatTokens(displayTokens)}</Label>
-			<AnimatedProgressBar
-				value={percentage}
-				width={width}
-				showPercentage={false}
-				color="green"
-			/>
+			<AnimatedProgressBar value={percentage} width={width} showPercentage={false} color="green" />
 		</Inline>
 	);
 }
@@ -174,11 +163,7 @@ interface SparklineProps {
 
 const SPARK_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-export function Sparkline({
-	values,
-	width = 20,
-	color = "cyan",
-}: SparklineProps) {
+export function Sparkline({ values, width = 20, color = "cyan" }: SparklineProps) {
 	if (values.length === 0) return null;
 
 	const displayValues = values.slice(-width);

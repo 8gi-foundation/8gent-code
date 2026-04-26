@@ -93,8 +93,7 @@ async function main(): Promise<void> {
 	console.log(`${c.cyan}${"=".repeat(60)}${c.reset}\n`);
 	console.log(`  Model:    ${c.bold}${opts.model}${c.reset}`);
 	console.log(`  Timeout:  ${c.dim}${opts.timeout / 1000}s per task${c.reset}`);
-	if (opts.subset)
-		console.log(`  Subset:   ${c.dim}first ${opts.subset} tasks${c.reset}`);
+	if (opts.subset) console.log(`  Subset:   ${c.dim}first ${opts.subset} tasks${c.reset}`);
 
 	if (opts.refresh) await refreshDataset();
 	const tasks = await loadTasks(opts.subset);
@@ -108,9 +107,7 @@ async function main(): Promise<void> {
 		workDir,
 		{ timeout_ms: opts.timeout, model: opts.model },
 		(idx: number, total: number, r: TaskResult) => {
-			const status = r.passed
-				? `${c.green}PASS${c.reset}`
-				: `${c.red}FAIL${c.reset}`;
+			const status = r.passed ? `${c.green}PASS${c.reset}` : `${c.red}FAIL${c.reset}`;
 			const err = r.error ? ` ${c.dim}(${r.error.slice(0, 60)})${c.reset}` : "";
 			const dur = `${c.dim}${(r.duration_ms / 1000).toFixed(1)}s${c.reset}`;
 			console.log(

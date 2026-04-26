@@ -56,8 +56,7 @@ export class MusicProducer {
 		const bpm =
 			config.bpm ||
 			Math.round(
-				genreInfo.bpmRange[0] +
-					Math.random() * (genreInfo.bpmRange[1] - genreInfo.bpmRange[0]),
+				genreInfo.bpmRange[0] + Math.random() * (genreInfo.bpmRange[1] - genreInfo.bpmRange[0]),
 			);
 		const durationSec = config.durationSec || 60;
 		const key = config.key || this.randomKey();
@@ -78,9 +77,7 @@ export class MusicProducer {
 		console.log(
 			`[producer] Producing ${genre} at ${bpm} BPM, key ${key}, ${bars} bars (${durationSec}s)`,
 		);
-		console.log(
-			`[producer] Mood: ${mood}, Layers: ${fullConfig.layers.join(", ")}`,
-		);
+		console.log(`[producer] Mood: ${mood}, Layers: ${fullConfig.layers.join(", ")}`);
 
 		// Strategy 1: Try AI generation via Replicate
 		if (this.replicate.available && durationSec <= 30) {
@@ -261,20 +258,7 @@ export class MusicProducer {
 	}
 
 	private randomKey(): string {
-		const keys = [
-			"Am",
-			"Cm",
-			"Dm",
-			"Em",
-			"Fm",
-			"Gm",
-			"A",
-			"C",
-			"D",
-			"E",
-			"F",
-			"G",
-		];
+		const keys = ["Am", "Cm", "Dm", "Em", "Fm", "Gm", "A", "C", "D", "E", "F", "G"];
 		return keys[Math.floor(Math.random() * keys.length)];
 	}
 }

@@ -54,16 +54,11 @@ function formatTimestamp(ts: number): string {
 	return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function SessionTable({
-	sessions,
-	title = "Recent Sessions",
-}: SessionTableProps) {
+export function SessionTable({ sessions, title = "Recent Sessions" }: SessionTableProps) {
 	return (
 		<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)]">
 			<div className="border-b border-[var(--8gent-border)] px-6 py-4">
-				<h3 className="text-sm font-medium text-[var(--8gent-text)]">
-					{title}
-				</h3>
+				<h3 className="text-sm font-medium text-[var(--8gent-text)]">{title}</h3>
 			</div>
 			<div className="overflow-x-auto">
 				<table className="w-full">
@@ -111,11 +106,7 @@ export function SessionTable({
 									<td className="px-6 py-3">
 										<div className="flex items-center gap-2">
 											{session.userAvatar && (
-												<img
-													src={session.userAvatar}
-													alt=""
-													className="h-6 w-6 rounded-full"
-												/>
+												<img src={session.userAvatar} alt="" className="h-6 w-6 rounded-full" />
 											)}
 											<span className="text-sm text-[var(--8gent-text)]">
 												{session.userDisplayName}

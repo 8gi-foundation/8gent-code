@@ -25,11 +25,7 @@ export interface QdrantSearchHit {
 
 export interface QdrantClient {
 	upsert(collection: string, points: QdrantPoint[]): Promise<void>;
-	search(
-		collection: string,
-		vector: number[],
-		topK: number,
-	): Promise<QdrantSearchHit[]>;
+	search(collection: string, vector: number[], topK: number): Promise<QdrantSearchHit[]>;
 	deleteCollection(name: string): Promise<void>;
 	healthCheck(): Promise<{ ok: boolean; version?: string }>;
 }

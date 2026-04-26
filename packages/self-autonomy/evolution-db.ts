@@ -103,11 +103,7 @@ export function getDb(): Database {
 		.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
 		.get() as any;
 	if (!existing) {
-		_db
-			.prepare(
-				"INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1')",
-			)
-			.run();
+		_db.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1')").run();
 	}
 
 	return _db;
@@ -136,9 +132,7 @@ export function saveReflection(r: SessionReflection): void {
 
 export function getReflection(sessionId: string): SessionReflection | null {
 	const db = getDb();
-	const row = db
-		.prepare("SELECT * FROM reflections WHERE session_id = ?")
-		.get(sessionId) as any;
+	const row = db.prepare("SELECT * FROM reflections WHERE session_id = ?").get(sessionId) as any;
 	if (!row) return null;
 	return deserializeReflection(row);
 }
@@ -186,26 +180,20 @@ export function saveSkill(skill: LearnedSkill): void {
 
 export function getSkillById(id: string): LearnedSkill | null {
 	const db = getDb();
-	const row = db
-		.prepare("SELECT * FROM learned_skills WHERE id = ?")
-		.get(id) as any;
+	const row = db.prepare("SELECT * FROM learned_skills WHERE id = ?").get(id) as any;
 	return row ? deserializeSkill(row) : null;
 }
 
 export function getAllSkills(): LearnedSkill[] {
 	const db = getDb();
-	const rows = db
-		.prepare("SELECT * FROM learned_skills ORDER BY confidence DESC")
-		.all() as any[];
+	const rows = db.prepare("SELECT * FROM learned_skills ORDER BY confidence DESC").all() as any[];
 	return rows.map(deserializeSkill);
 }
 
 export function querySkillsByTrigger(triggerFragment: string): LearnedSkill[] {
 	const db = getDb();
 	const rows = db
-		.prepare(
-			"SELECT * FROM learned_skills WHERE LOWER(trigger) LIKE ? ORDER BY confidence DESC",
-		)
+		.prepare("SELECT * FROM learned_skills WHERE LOWER(trigger) LIKE ? ORDER BY confidence DESC")
 		.all(`%${triggerFragment.toLowerCase()}%`) as any[];
 	return rows.map(deserializeSkill);
 }
@@ -218,9 +206,7 @@ export function updateSkillStats(id: string, success: boolean): void {
 	const delta = success ? 0.1 : -0.1;
 	const newConfidence = Math.max(0, Math.min(1, skill.confidence + delta));
 	getDb()
-		.prepare(
-			"UPDATE learned_skills SET confidence = ?, times_used = ?, last_used = ? WHERE id = ?",
-		)
+		.prepare("UPDATE learned_skills SET confidence = ?, times_used = ?, last_used = ? WHERE id = ?")
 		.run(newConfidence, newTimesUsed, new Date().toISOString(), id);
 }
 
@@ -359,9 +345,7 @@ export function getEvolutionSummary(since: string): {
 
 	// Error rate: errors / total events in period
 	const totalEvents = db
-		.prepare(
-			"SELECT COUNT(*) as cnt FROM evolution_events WHERE created_at >= ?",
-		)
+		.prepare("SELECT COUNT(*) as cnt FROM evolution_events WHERE created_at >= ?")
 		.get(since) as any;
 	const errorCount = countByType("error_encountered");
 	const total = totalEvents?.cnt ?? 0;
@@ -382,15 +366,13 @@ export function getEvolutionSummary(since: string): {
 
 export function getSchemaVersion(): number {
 	const db = getDb();
-	const row = db
-		.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
-		.get() as any;
+	const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'").get() as any;
 	return row ? Number.parseInt(row.value, 10) : 1;
 }
 
 export function setSchemaVersion(version: number): void {
 	const db = getDb();
-	db.prepare(
-		"INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
-	).run(String(version));
+	db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(
+		String(version),
+	);
 }

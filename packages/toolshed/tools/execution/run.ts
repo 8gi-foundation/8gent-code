@@ -31,11 +31,7 @@ interface BuiltinCommand {
 	name: string;
 	summary: string;
 	usage: string;
-	handler: (
-		args: string[],
-		stdin: string,
-		ctx: ExecutionContext,
-	) => CommandResult;
+	handler: (args: string[], stdin: string, ctx: ExecutionContext) => CommandResult;
 }
 
 interface CommandResult {
@@ -97,16 +93,7 @@ registerBuiltin({
 
 		const hasNull = buf.subarray(0, bytesRead).includes(0);
 		const ext = path.extname(absPath).toLowerCase();
-		const imageExts = [
-			".png",
-			".jpg",
-			".jpeg",
-			".gif",
-			".webp",
-			".svg",
-			".ico",
-			".bmp",
-		];
+		const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp"];
 
 		if (hasNull && !allowBinary) {
 			if (imageExts.includes(ext)) {
@@ -149,9 +136,7 @@ registerBuiltin({
 		const showAll = args.includes("-a");
 		const showLong = args.includes("-l");
 		const dirPath = args.find((a) => !a.startsWith("-")) ?? ".";
-		const absDir = path.isAbsolute(dirPath)
-			? dirPath
-			: path.join(ctx.workingDirectory, dirPath);
+		const absDir = path.isAbsolute(dirPath) ? dirPath : path.join(ctx.workingDirectory, dirPath);
 
 		if (!fs.existsSync(absDir)) {
 			return {
@@ -216,9 +201,7 @@ registerBuiltin({
 
 		let input: string;
 		if (file) {
-			const absPath = path.isAbsolute(file)
-				? file
-				: path.join(ctx.workingDirectory, file);
+			const absPath = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
 			if (!fs.existsSync(absPath)) {
 				return {
 					stdout: "",
@@ -265,11 +248,8 @@ registerBuiltin({
 		const file = args.find((a) => !/^\d+$/.test(a) && !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
-			const p = path.isAbsolute(file)
-				? file
-				: path.join(ctx.workingDirectory, file);
-			if (!fs.existsSync(p))
-				return { stdout: "", stderr: `head: ${file}: not found`, exitCode: 1 };
+			const p = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
+			if (!fs.existsSync(p)) return { stdout: "", stderr: `head: ${file}: not found`, exitCode: 1 };
 			input = fs.readFileSync(p, "utf-8");
 		}
 		return {
@@ -289,11 +269,8 @@ registerBuiltin({
 		const file = args.find((a) => !/^\d+$/.test(a) && !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
-			const p = path.isAbsolute(file)
-				? file
-				: path.join(ctx.workingDirectory, file);
-			if (!fs.existsSync(p))
-				return { stdout: "", stderr: `tail: ${file}: not found`, exitCode: 1 };
+			const p = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
+			if (!fs.existsSync(p)) return { stdout: "", stderr: `tail: ${file}: not found`, exitCode: 1 };
 			input = fs.readFileSync(p, "utf-8");
 		}
 		const lines = input.split("\n");
@@ -312,11 +289,8 @@ registerBuiltin({
 		const file = args.find((a) => !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
-			const p = path.isAbsolute(file)
-				? file
-				: path.join(ctx.workingDirectory, file);
-			if (!fs.existsSync(p))
-				return { stdout: "", stderr: `wc: ${file}: not found`, exitCode: 1 };
+			const p = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
+			if (!fs.existsSync(p)) return { stdout: "", stderr: `wc: ${file}: not found`, exitCode: 1 };
 			input = fs.readFileSync(p, "utf-8");
 		}
 
@@ -324,12 +298,9 @@ registerBuiltin({
 		const words = input.split(/\s+/).filter(Boolean).length;
 		const chars = input.length;
 
-		if (flags.includes("-l"))
-			return { stdout: String(lines), stderr: "", exitCode: 0 };
-		if (flags.includes("-w"))
-			return { stdout: String(words), stderr: "", exitCode: 0 };
-		if (flags.includes("-c"))
-			return { stdout: String(chars), stderr: "", exitCode: 0 };
+		if (flags.includes("-l")) return { stdout: String(lines), stderr: "", exitCode: 0 };
+		if (flags.includes("-w")) return { stdout: String(words), stderr: "", exitCode: 0 };
+		if (flags.includes("-c")) return { stdout: String(chars), stderr: "", exitCode: 0 };
 		return { stdout: `${lines} ${words} ${chars}`, stderr: "", exitCode: 0 };
 	},
 });
@@ -346,16 +317,12 @@ registerBuiltin({
 		const file = args.find((a) => !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
-			const p = path.isAbsolute(file)
-				? file
-				: path.join(ctx.workingDirectory, file);
-			if (!fs.existsSync(p))
-				return { stdout: "", stderr: `sort: ${file}: not found`, exitCode: 1 };
+			const p = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
+			if (!fs.existsSync(p)) return { stdout: "", stderr: `sort: ${file}: not found`, exitCode: 1 };
 			input = fs.readFileSync(p, "utf-8");
 		}
 		const lines = input.split("\n").filter(Boolean);
-		if (numeric)
-			lines.sort((a, b) => Number.parseFloat(a) - Number.parseFloat(b));
+		if (numeric) lines.sort((a, b) => Number.parseFloat(a) - Number.parseFloat(b));
 		else lines.sort();
 		if (reverse) lines.reverse();
 		return { stdout: lines.join("\n"), stderr: "", exitCode: 0 };
@@ -371,11 +338,8 @@ registerBuiltin({
 		const file = args.find((a) => !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
-			const p = path.isAbsolute(file)
-				? file
-				: path.join(ctx.workingDirectory, file);
-			if (!fs.existsSync(p))
-				return { stdout: "", stderr: `uniq: ${file}: not found`, exitCode: 1 };
+			const p = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
+			if (!fs.existsSync(p)) return { stdout: "", stderr: `uniq: ${file}: not found`, exitCode: 1 };
 			input = fs.readFileSync(p, "utf-8");
 		}
 		const lines = input.split("\n");
@@ -388,9 +352,7 @@ registerBuiltin({
 			}
 		}
 		const output = result
-			.map((r) =>
-				showCount ? `${String(r.count).padStart(4)} ${r.line}` : r.line,
-			)
+			.map((r) => (showCount ? `${String(r.count).padStart(4)} ${r.line}` : r.line))
 			.join("\n");
 		return { stdout: output, stderr: "", exitCode: 0 };
 	},
@@ -433,9 +395,7 @@ registerBuiltin({
 	handler: (args, _stdin, ctx) => {
 		const dir = args[0] ?? ".";
 		const maxDepth = Number.parseInt(args[1] ?? "3");
-		const absDir = path.isAbsolute(dir)
-			? dir
-			: path.join(ctx.workingDirectory, dir);
+		const absDir = path.isAbsolute(dir) ? dir : path.join(ctx.workingDirectory, dir);
 		const IGNORE = new Set([
 			"node_modules",
 			".git",
@@ -455,12 +415,9 @@ registerBuiltin({
 			} catch {
 				return;
 			}
-			entries = entries.filter(
-				(e) => !e.name.startsWith(".") && !IGNORE.has(e.name),
-			);
+			entries = entries.filter((e) => !e.name.startsWith(".") && !IGNORE.has(e.name));
 			entries.sort((a, b) => {
-				if (a.isDirectory() !== b.isDirectory())
-					return a.isDirectory() ? -1 : 1;
+				if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
 				return a.name.localeCompare(b.name);
 			});
 			for (let i = 0; i < entries.length; i++) {
@@ -469,11 +426,7 @@ registerBuiltin({
 					`${prefix}${isLast ? "└── " : "├── "}${entries[i].name}${entries[i].isDirectory() ? "/" : ""}`,
 				);
 				if (entries[i].isDirectory())
-					walk(
-						path.join(d, entries[i].name),
-						prefix + (isLast ? "    " : "│   "),
-						depth + 1,
-					);
+					walk(path.join(d, entries[i].name), prefix + (isLast ? "    " : "│   "), depth + 1);
 			}
 		}
 		walk(absDir, "", 0);
@@ -485,8 +438,7 @@ registerBuiltin({
 
 registerBuiltin({
 	name: "8gent",
-	summary:
-		"8gent agent control. Subcommands: status, model, skills, outline, history.",
+	summary: "8gent agent control. Subcommands: status, model, skills, outline, history.",
 	usage: "8gent <subcommand> [args]",
 	handler: (args, _stdin, ctx) => {
 		const sub = args[0];
@@ -526,20 +478,13 @@ registerBuiltin({
 				};
 			case "model":
 				return {
-					stdout: args[1]
-						? `model: switching to ${args[1]}`
-						: "model: use callback",
+					stdout: args[1] ? `model: switching to ${args[1]}` : "model: use callback",
 					stderr: "",
 					exitCode: 0,
 				};
 			case "skills":
 				try {
-					const indexPath = path.join(
-						os.homedir(),
-						".8gent",
-						"skills",
-						".index.json",
-					);
+					const indexPath = path.join(os.homedir(), ".8gent", "skills", ".index.json");
 					if (fs.existsSync(indexPath)) {
 						const index = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
 						const lines = [
@@ -551,8 +496,7 @@ registerBuiltin({
 								`  ${skill.name.padEnd(30)} [${skill.category}] ${skill.description.slice(0, 50)}`,
 							);
 						}
-						if (index.skills.length > 30)
-							lines.push(`  ... and ${index.skills.length - 30} more`);
+						if (index.skills.length > 30) lines.push(`  ... and ${index.skills.length - 30} more`);
 						return { stdout: lines.join("\n"), stderr: "", exitCode: 0 };
 					}
 					return {
@@ -743,10 +687,7 @@ function executeSegment(
 
 	// Fall through to shell
 	try {
-		const fullCmd = [
-			command,
-			...args.map((a) => (a.includes(" ") ? `"${a}"` : a)),
-		].join(" ");
+		const fullCmd = [command, ...args.map((a) => (a.includes(" ") ? `"${a}"` : a))].join(" ");
 		const stdout = execSync(fullCmd, {
 			cwd: ctx.workingDirectory,
 			encoding: "utf-8",
@@ -764,10 +705,7 @@ function executeSegment(
 	}
 }
 
-function executeChain(
-	segments: ChainSegment[],
-	ctx: ExecutionContext,
-): CommandResult {
+function executeChain(segments: ChainSegment[], ctx: ExecutionContext): CommandResult {
 	let lastResult: CommandResult = { stdout: "", stderr: "", exitCode: 0 };
 	let stdin = "";
 

@@ -9,8 +9,7 @@ import * as path from "node:path";
 import Database from "better-sqlite3";
 
 const DB_PATH =
-	process.env.EIGHTGENT_DB ||
-	path.join(process.env.HOME || "", ".8gent", "registry.db");
+	process.env.EIGHTGENT_DB || path.join(process.env.HOME || "", ".8gent", "registry.db");
 const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
 let db: Database.Database | null = null;
@@ -92,9 +91,7 @@ export function addPrimitive(primitive: Primitive): void {
 
 export function getPrimitive(id: string): Primitive | null {
 	const db = getDatabase();
-	const row = db
-		.prepare("SELECT * FROM primitives WHERE id = ?")
-		.get(id) as any;
+	const row = db.prepare("SELECT * FROM primitives WHERE id = ?").get(id) as any;
 	if (!row) return null;
 	return rowToPrimitive(row);
 }
@@ -136,9 +133,7 @@ export function searchPrimitives(
 
 export function listPrimitivesByType(type: string): Primitive[] {
 	const db = getDatabase();
-	const rows = db
-		.prepare("SELECT * FROM primitives WHERE type = ?")
-		.all(type) as any[];
+	const rows = db.prepare("SELECT * FROM primitives WHERE type = ?").all(type) as any[];
 	return rows.map(rowToPrimitive);
 }
 

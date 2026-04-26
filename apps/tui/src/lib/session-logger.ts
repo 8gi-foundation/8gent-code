@@ -144,11 +144,7 @@ function getDurationMs(): number {
 // Public API
 // ============================================
 
-export function initSessionLogger(
-	id: string,
-	model: string,
-	provider: string,
-): void {
+export function initSessionLogger(id: string, model: string, provider: string): void {
 	ensureSessionsDir();
 
 	const ts = new Date();
@@ -193,22 +189,13 @@ export function initSessionLogger(
 
 	events.push(startEvent);
 	try {
-		fs.writeFileSync(
-			sessionFilePath,
-			`${JSON.stringify(startEvent)}\n`,
-			"utf-8",
-		);
+		fs.writeFileSync(sessionFilePath, `${JSON.stringify(startEvent)}\n`, "utf-8");
 	} catch {
 		// ignore
 	}
 }
 
-export function logMessage(
-	tabId: string,
-	tabName: string,
-	role: string,
-	content: string,
-): void {
+export function logMessage(tabId: string, tabName: string, role: string, content: string): void {
 	if (!sessionId) return;
 
 	// Set session name from first user message
@@ -335,11 +322,7 @@ export function logError(tabId: string, tabName: string, error: string): void {
 	});
 }
 
-export function logTabSwitch(
-	fromTabId: string,
-	toTabId: string,
-	toTabName: string,
-): void {
+export function logTabSwitch(fromTabId: string, toTabId: string, toTabName: string): void {
 	if (!sessionId) return;
 
 	appendLine({

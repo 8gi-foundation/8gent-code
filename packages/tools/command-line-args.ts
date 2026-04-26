@@ -172,21 +172,13 @@ export function parseArgs(argv: string[], schema: ArgSchema): ParseResult {
 /**
  * Generate a usage help string from the schema.
  */
-export function generateHelp(
-	schema: ArgSchema,
-	programName = "program",
-): string {
-	const lines: string[] = [
-		`Usage: ${programName} [options] [args...]`,
-		"",
-		"Options:",
-	];
+export function generateHelp(schema: ArgSchema, programName = "program"): string {
+	const lines: string[] = [`Usage: ${programName} [options] [args...]`, "", "Options:"];
 
 	for (const [key, def] of Object.entries(schema)) {
 		const flag = def.alias ? `-${def.alias}, --${key}` : `    --${key}`;
 		const typeLabel = def.type !== "boolean" ? ` <${def.type}>` : "";
-		const defaultLabel =
-			def.default !== undefined ? ` (default: ${def.default})` : "";
+		const defaultLabel = def.default !== undefined ? ` (default: ${def.default})` : "";
 		const requiredLabel = def.required ? " [required]" : "";
 		const desc = def.description ?? "";
 		lines.push(`  ${flag}${typeLabel}  ${desc}${defaultLabel}${requiredLabel}`);

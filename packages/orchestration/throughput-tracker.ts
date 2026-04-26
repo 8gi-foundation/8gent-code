@@ -43,14 +43,8 @@ export interface DailyReport {
 	totalDuration: number;
 	avgTps: number;
 	peakTps: number;
-	modelBreakdown: Record<
-		string,
-		{ tokens: number; calls: number; durationMs: number }
-	>;
-	categoryBreakdown: Record<
-		string,
-		{ tokens: number; calls: number; durationMs: number }
-	>;
+	modelBreakdown: Record<string, { tokens: number; calls: number; durationMs: number }>;
+	categoryBreakdown: Record<string, { tokens: number; calls: number; durationMs: number }>;
 }
 
 export interface AgentUtilization {
@@ -68,11 +62,7 @@ const ONE_MINUTE_MS = 60 * 1000;
 const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_HISTORY_HOURS = 24;
-const DEFAULT_PERSIST_FILE = path.join(
-	os.homedir(),
-	".8gent",
-	"throughput.jsonl",
-);
+const DEFAULT_PERSIST_FILE = path.join(os.homedir(), ".8gent", "throughput.jsonl");
 
 // ============================================
 // ThroughputTracker
@@ -176,8 +166,7 @@ export class ThroughputTracker {
 				eventTpsValues.length > 0
 					? eventTpsValues.reduce((a, b) => a + b, 0) / eventTpsValues.length
 					: 0;
-			const peakTps =
-				eventTpsValues.length > 0 ? Math.max(...eventTpsValues) : 0;
+			const peakTps = eventTpsValues.length > 0 ? Math.max(...eventTpsValues) : 0;
 
 			snapshots.push({
 				windowMs: ONE_MINUTE_MS,
@@ -260,10 +249,7 @@ export class ThroughputTracker {
 			result[id] = {
 				tokens: data.tokens,
 				duration: data.durationMs,
-				tps:
-					data.durationMs > 0
-						? round((data.tokens / data.durationMs) * 1000)
-						: 0,
+				tps: data.durationMs > 0 ? round((data.tokens / data.durationMs) * 1000) : 0,
 			};
 		}
 
@@ -335,11 +321,7 @@ export class ThroughputTracker {
 			if (!fs.existsSync(dir)) {
 				fs.mkdirSync(dir, { recursive: true });
 			}
-			fs.appendFileSync(
-				this.persistFile,
-				`${JSON.stringify(event)}\n`,
-				"utf-8",
-			);
+			fs.appendFileSync(this.persistFile, `${JSON.stringify(event)}\n`, "utf-8");
 		} catch {
 			// Silent fail — don't break the caller over persistence
 		}

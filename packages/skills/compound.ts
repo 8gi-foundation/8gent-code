@@ -8,13 +8,7 @@
  * This is the "guild mechanic" — every success teaches the agent.
  */
 
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -24,11 +18,7 @@ export const LEARNED_SKILLS_DIR = join(homedir(), ".8gent", "learned-skills");
 function yamlSafe(value: string): string {
 	// Strip newlines (prevents field injection), then quote if it contains YAML special chars
 	const oneline = value.replace(/[\r\n]+/g, " ").trim();
-	if (
-		/[:#{}[\]|>&*!%@`]/.test(oneline) ||
-		oneline.startsWith("'") ||
-		oneline.startsWith('"')
-	) {
+	if (/[:#{}[\]|>&*!%@`]/.test(oneline) || oneline.startsWith("'") || oneline.startsWith('"')) {
 		return `"${oneline.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 	}
 	return oneline;
@@ -79,9 +69,7 @@ export function compoundSkill(input: CompoundInput): string | null {
 	// SEC-K5: Sanitize all frontmatter values to prevent YAML field injection
 	const safeName = yamlSafe(input.pattern);
 	const safeDesc = yamlSafe(input.description);
-	const safeTools = input.tools
-		.map((t) => t.replace(/[^a-zA-Z0-9_-]/g, ""))
-		.join(", ");
+	const safeTools = input.tools.map((t) => t.replace(/[^a-zA-Z0-9_-]/g, "")).join(", ");
 
 	const md = `---
 name: ${safeName}
@@ -136,9 +124,7 @@ export function listLearnedSkills(): string[] {
  *   - `path` is the learned-skill file path when kept, or `null` on rollback or dedup.
  *   - `record` is the ExperimentRecord when an experiment ran, or `null` otherwise.
  */
-export async function compoundSkillWithExperiment(
-	input: CompoundInput,
-): Promise<{
+export async function compoundSkillWithExperiment(input: CompoundInput): Promise<{
 	path: string | null;
 	record: import("./experiment.js").ExperimentRecord | null;
 }> {

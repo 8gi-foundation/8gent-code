@@ -63,10 +63,7 @@ export class RateLimiter {
 		return true;
 	}
 
-	getStatus(): Record<
-		ActionType,
-		{ used: number; cap: number; remaining: number }
-	> {
+	getStatus(): Record<ActionType, { used: number; cap: number; remaining: number }> {
 		const result = {} as any;
 		for (const [action, cap] of Object.entries(DAILY_CAPS)) {
 			const used = this.getCount(action as ActionType);

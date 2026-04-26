@@ -67,8 +67,5 @@ async function tryOpenRouter(diff: string): Promise<string | null> {
 export async function reviewDiff(diff: string): Promise<string> {
 	if (!diff.trim()) return "No changes to review.";
 	const result = (await tryOllama(diff)) || (await tryOpenRouter(diff));
-	return (
-		result ||
-		"Review unavailable - no Ollama model or OPENROUTER_API_KEY found."
-	);
+	return result || "Review unavailable - no Ollama model or OPENROUTER_API_KEY found.";
 }

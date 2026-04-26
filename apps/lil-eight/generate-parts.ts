@@ -43,19 +43,16 @@ try {
 type Provider = "fal" | "dalle" | "replicate";
 let provider: Provider = "fal";
 if (!FAL_KEY && OPENAI_API_KEY) provider = "dalle";
-else if (!FAL_KEY && !OPENAI_API_KEY && REPLICATE_API_KEY)
-	provider = "replicate";
+else if (!FAL_KEY && !OPENAI_API_KEY && REPLICATE_API_KEY) provider = "replicate";
 else if (!FAL_KEY && !OPENAI_API_KEY && !REPLICATE_API_KEY) {
-	console.error(
-		"No image gen API key found (FAL_KEY, OPENAI_API_KEY, or REPLICATE_API_KEY)",
-	);
+	console.error("No image gen API key found (FAL_KEY, OPENAI_API_KEY, or REPLICATE_API_KEY)");
 	process.exit(1);
 }
 
 // Allow manual override
-const providerArg = process.argv
-	.find((a) => a.startsWith("--provider="))
-	?.split("=")[1] as Provider | undefined;
+const providerArg = process.argv.find((a) => a.startsWith("--provider="))?.split("=")[1] as
+	| Provider
+	| undefined;
 if (providerArg) provider = providerArg;
 
 console.log(`Using provider: ${provider}`);
@@ -233,10 +230,7 @@ const SPECIES_PROMPTS: Record<string, { body: string; head: string }> = {
 const STYLE_PREFIX =
 	"pixel art character, retro game sprite style, clean edges, flat shading, centered on canvas, front-facing, simple design, dark background removed, transparent background, PNG with alpha channel";
 
-async function generatePart(
-	species: string,
-	part: "body" | "head",
-): Promise<Buffer> {
+async function generatePart(species: string, part: "body" | "head"): Promise<Buffer> {
 	const prompts = SPECIES_PROMPTS[species];
 	if (!prompts) throw new Error(`Unknown species: ${species}`);
 
@@ -259,8 +253,7 @@ async function generatePart(
 				enable_safety_checker: false,
 			}),
 		});
-		if (!res.ok)
-			throw new Error(`Fal.ai error (${res.status}): ${await res.text()}`);
+		if (!res.ok) throw new Error(`Fal.ai error (${res.status}): ${await res.text()}`);
 		const data = (await res.json()) as { images: { url: string }[] };
 		if (!data.images?.[0]?.url) throw new Error("No image from Fal.ai");
 		const imgRes = await fetch(data.images[0].url);
@@ -283,8 +276,7 @@ async function generatePart(
 				response_format: "url",
 			}),
 		});
-		if (!res.ok)
-			throw new Error(`DALL-E error (${res.status}): ${await res.text()}`);
+		if (!res.ok) throw new Error(`DALL-E error (${res.status}): ${await res.text()}`);
 		const data = (await res.json()) as { data: { url: string }[] };
 		if (!data.data?.[0]?.url) throw new Error("No image from DALL-E");
 		const imgRes = await fetch(data.data[0].url);
@@ -300,13 +292,11 @@ async function generatePart(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
-				version:
-					"39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+				version: "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
 				input: { prompt: fullPrompt, width: 512, height: 512, num_outputs: 1 },
 			}),
 		});
-		if (!res.ok)
-			throw new Error(`Replicate error (${res.status}): ${await res.text()}`);
+		if (!res.ok) throw new Error(`Replicate error (${res.status}): ${await res.text()}`);
 		const prediction = (await res.json()) as {
 			id: string;
 			urls: { get: string };
@@ -326,8 +316,7 @@ async function generatePart(
 				output = status.output[0];
 				break;
 			}
-			if (status.status === "failed")
-				throw new Error("Replicate prediction failed");
+			if (status.status === "failed") throw new Error("Replicate prediction failed");
 		}
 		if (!output) throw new Error("Replicate timeout");
 		const imgRes = await fetch(output);
@@ -341,10 +330,7 @@ async function generateSpecies(species: string) {
 	const outDir = join(import.meta.dir, "parts", species);
 
 	// Idempotent - skip if parts already exist
-	if (
-		existsSync(join(outDir, "body.png")) &&
-		existsSync(join(outDir, "head.png"))
-	) {
+	if (existsSync(join(outDir, "body.png")) && existsSync(join(outDir, "head.png"))) {
 		console.log(
 			`${species}: parts already exist, skipping (delete parts/${species}/ to regenerate)`,
 		);
@@ -356,15 +342,11 @@ async function generateSpecies(species: string) {
 
 	const bodyBuf = await generatePart(species, "body");
 	writeFileSync(join(outDir, "body.png"), bodyBuf);
-	console.log(
-		`  Saved: parts/${species}/body.png (${(bodyBuf.length / 1024).toFixed(0)} KB)`,
-	);
+	console.log(`  Saved: parts/${species}/body.png (${(bodyBuf.length / 1024).toFixed(0)} KB)`);
 
 	const headBuf = await generatePart(species, "head");
 	writeFileSync(join(outDir, "head.png"), headBuf);
-	console.log(
-		`  Saved: parts/${species}/head.png (${(headBuf.length / 1024).toFixed(0)} KB)`,
-	);
+	console.log(`  Saved: parts/${species}/head.png (${(headBuf.length / 1024).toFixed(0)} KB)`);
 
 	console.log(`Done: ${species}`);
 }
@@ -373,14 +355,10 @@ async function generateSpecies(species: string) {
 const args = process.argv.slice(2);
 const speciesFlag =
 	args.find((a) => a.startsWith("--species="))?.split("=")[1] ||
-	(args.indexOf("--species") >= 0
-		? args[args.indexOf("--species") + 1]
-		: undefined);
+	(args.indexOf("--species") >= 0 ? args[args.indexOf("--species") + 1] : undefined);
 
 if (!speciesFlag) {
-	console.log(
-		"Usage: bun run apps/lil-eight/generate-parts.ts --species Drake",
-	);
+	console.log("Usage: bun run apps/lil-eight/generate-parts.ts --species Drake");
 	console.log("       bun run apps/lil-eight/generate-parts.ts --species all");
 	console.log(`\nAvailable species (${Object.keys(SPECIES_PROMPTS).length}):`);
 	console.log(Object.keys(SPECIES_PROMPTS).join(", "));

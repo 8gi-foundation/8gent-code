@@ -94,9 +94,7 @@ export interface NotebookInfo {
 /**
  * Read a Jupyter notebook and parse its cells
  */
-export async function readNotebook(
-	notebookPath: string,
-): Promise<NotebookInfo> {
+export async function readNotebook(notebookPath: string): Promise<NotebookInfo> {
 	const absolutePath = path.isAbsolute(notebookPath)
 		? notebookPath
 		: path.join(process.cwd(), notebookPath);
@@ -116,18 +114,14 @@ export async function readNotebook(
 	// Parse cells
 	const parsedCells: ParsedCell[] = notebook.cells.map((cell, index) => {
 		// Normalize source to string
-		const source = Array.isArray(cell.source)
-			? cell.source.join("")
-			: cell.source;
+		const source = Array.isArray(cell.source) ? cell.source.join("") : cell.source;
 
 		// Parse outputs
 		const outputs: ParsedOutput[] = (cell.outputs || []).map((output) => {
 			const parsed: ParsedOutput = { type: output.output_type };
 
 			if (output.text) {
-				parsed.text = Array.isArray(output.text)
-					? output.text.join("")
-					: output.text;
+				parsed.text = Array.isArray(output.text) ? output.text.join("") : output.text;
 			}
 
 			if (output.data) {
@@ -172,10 +166,7 @@ export async function readNotebook(
 /**
  * Get a specific cell from a notebook
  */
-export async function getCell(
-	notebookPath: string,
-	cellIndex: number,
-): Promise<ParsedCell> {
+export async function getCell(notebookPath: string, cellIndex: number): Promise<ParsedCell> {
 	const notebook = await readNotebook(notebookPath);
 
 	if (cellIndex < 0 || cellIndex >= notebook.cellCount) {
@@ -215,10 +206,7 @@ async function loadNotebook(notebookPath: string): Promise<{
 /**
  * Save notebook to disk
  */
-async function saveNotebook(
-	absolutePath: string,
-	notebook: Notebook,
-): Promise<void> {
+async function saveNotebook(absolutePath: string, notebook: Notebook): Promise<void> {
 	const content = JSON.stringify(notebook, null, 1);
 	await fs.promises.writeFile(absolutePath, content, "utf-8");
 }
@@ -373,9 +361,7 @@ export async function moveCell(
 	}
 
 	if (toIndex < 0 || toIndex >= notebook.cells.length) {
-		throw new Error(
-			`Invalid toIndex: ${toIndex}. Notebook has ${notebook.cells.length} cells.`,
-		);
+		throw new Error(`Invalid toIndex: ${toIndex}. Notebook has ${notebook.cells.length} cells.`);
 	}
 
 	if (fromIndex === toIndex) {
@@ -565,8 +551,7 @@ export async function getNotebookSummary(notebookPath: string): Promise<{
 
 	const cellSummaries = notebook.cells.map((cell) => {
 		const lines = cell.source.split("\n").length;
-		const preview =
-			cell.source.slice(0, 100) + (cell.source.length > 100 ? "..." : "");
+		const preview = cell.source.slice(0, 100) + (cell.source.length > 100 ? "..." : "");
 
 		return {
 			index: cell.index,

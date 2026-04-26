@@ -6,11 +6,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
-import {
-	type TaskPayload,
-	type TaskResult,
-	VesselMesh,
-} from "../orchestration/vessel-mesh";
+import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { addJob, getJobs, startCron, stopCron } from "./cron";
 import { getDataDir } from "./data-dir";
@@ -48,8 +44,7 @@ async function loadConfig(): Promise<DaemonConfig> {
 		return {
 			port: daemon.port ?? defaults.port,
 			authToken: daemon.authToken ?? defaults.authToken,
-			heartbeatIntervalMs:
-				daemon.heartbeatIntervalMs ?? defaults.heartbeatIntervalMs,
+			heartbeatIntervalMs: daemon.heartbeatIntervalMs ?? defaults.heartbeatIntervalMs,
 			heartbeatEnabled: daemon.heartbeatEnabled ?? defaults.heartbeatEnabled,
 		};
 	} catch {
@@ -141,9 +136,7 @@ async function main(): Promise<void> {
 	// Auto-resolve best free model if requested
 	const modelValue = poolConfig.model || DEFAULT_MODEL;
 	if (modelValue === "auto:free" || modelValue === "auto") {
-		console.log(
-			"[daemon] model=auto:free - resolving best free model from OpenRouter...",
-		);
+		console.log("[daemon] model=auto:free - resolving best free model from OpenRouter...");
 		const resolved = await resolveBestFreeModel(poolConfig.apiKey);
 		poolConfig.model = resolved.id;
 		poolConfig.runtime = "openrouter";
@@ -151,9 +144,7 @@ async function main(): Promise<void> {
 			`[daemon] selected: ${resolved.id} (ctx: ${resolved.contextLength}, free: ${resolved.free})`,
 		);
 	} else {
-		console.log(
-			`[daemon] model=${modelValue} runtime=${poolConfig.runtime || "ollama"}`,
-		);
+		console.log(`[daemon] model=${modelValue} runtime=${poolConfig.runtime || "ollama"}`);
 	}
 
 	// Load vessel context for self-awareness
@@ -211,8 +202,7 @@ async function main(): Promise<void> {
 
 	// Lotus-Class Compute — peer mesh. OFF by default. Internal-only during spike.
 	if (process.env.GROVE_ENABLED === "1") {
-		const vesselId =
-			process.env.VESSEL_ID || `local-${require("node:os").hostname()}`;
+		const vesselId = process.env.VESSEL_ID || `local-${require("node:os").hostname()}`;
 		const vesselUrl = process.env.VESSEL_URL || `ws://localhost:${config.port}`;
 		const vesselRegion = process.env.VESSEL_REGION || "local";
 		const vesselName = process.env.VESSEL_NAME || vesselId;
@@ -230,43 +220,38 @@ async function main(): Promise<void> {
 			maxSessions: 10,
 		});
 
-		mesh.onTask(
-			async (task: TaskPayload, from: string): Promise<TaskResult> => {
-				const start = Date.now();
-				if (!pool) {
-					return {
-						status: "failed",
-						output: "",
-						durationMs: Date.now() - start,
-						error: "agent pool unavailable",
-					};
-				}
-				try {
-					const sessionId = `grove_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-					pool.createSession(sessionId, "api");
-					const output = await pool.chat(sessionId, task.prompt);
-					pool.destroySession(sessionId);
-					return {
-						status: "completed",
-						output:
-							typeof output === "string" ? output : JSON.stringify(output),
-						durationMs: Date.now() - start,
-					};
-				} catch (err) {
-					return {
-						status: "failed",
-						output: "",
-						durationMs: Date.now() - start,
-						error: String(err),
-					};
-				}
-			},
-		);
+		mesh.onTask(async (task: TaskPayload, from: string): Promise<TaskResult> => {
+			const start = Date.now();
+			if (!pool) {
+				return {
+					status: "failed",
+					output: "",
+					durationMs: Date.now() - start,
+					error: "agent pool unavailable",
+				};
+			}
+			try {
+				const sessionId = `grove_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+				pool.createSession(sessionId, "api");
+				const output = await pool.chat(sessionId, task.prompt);
+				pool.destroySession(sessionId);
+				return {
+					status: "completed",
+					output: typeof output === "string" ? output : JSON.stringify(output),
+					durationMs: Date.now() - start,
+				};
+			} catch (err) {
+				return {
+					status: "failed",
+					output: "",
+					durationMs: Date.now() - start,
+					error: String(err),
+				};
+			}
+		});
 
 		await mesh.start();
-		console.log(
-			`[daemon] grove mesh started - vesselId=${vesselId} region=${vesselRegion}`,
-		);
+		console.log(`[daemon] grove mesh started - vesselId=${vesselId} region=${vesselRegion}`);
 	}
 
 	// Graceful shutdown

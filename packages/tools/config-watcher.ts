@@ -78,10 +78,7 @@ export class ConfigWatcher<T = unknown> {
 			candidate = this.loadFile();
 		} catch (err) {
 			// Parse/read error - rollback silently (keep last good)
-			console.error(
-				`config-watcher: parse error in ${this.filePath} - rolling back`,
-				err,
-			);
+			console.error(`config-watcher: parse error in ${this.filePath} - rolling back`, err);
 			return;
 		}
 

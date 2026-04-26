@@ -97,11 +97,8 @@ function mpvIpc(cmd: Record<string, any>): Promise<any> {
 }
 
 const mpvGet = (p: string) =>
-	mpvIpc({ command: ["get_property", p] }).then((v) =>
-		v != null ? String(v) : null,
-	);
-const mpvSet = (p: string, v: any) =>
-	mpvIpc({ command: ["set_property", p, v] });
+	mpvIpc({ command: ["get_property", p] }).then((v) => (v != null ? String(v) : null));
+const mpvSet = (p: string, v: any) => mpvIpc({ command: ["set_property", p, v] });
 
 // ---- Playback State ----
 let mpvProcess: ChildProcess | null = null;
@@ -123,10 +120,7 @@ interface ResumeState {
 function saveResume(title: string, url: string, positionSec: number): void {
 	try {
 		mkdirSync(join(HOME, ".8gent"), { recursive: true });
-		writeFileSync(
-			RESUME_PATH,
-			JSON.stringify({ title, url, positionSec, timestamp: Date.now() }),
-		);
+		writeFileSync(RESUME_PATH, JSON.stringify({ title, url, positionSec, timestamp: Date.now() }));
 	} catch {}
 }
 
@@ -220,13 +214,7 @@ export class DJ {
 
 		mpvProcess = spawn(
 			t.mpv,
-			[
-				"--no-video",
-				"--idle=yes",
-				`--input-ipc-server=${IPC_PATH}`,
-				`--title=${title}`,
-				url,
-			],
+			["--no-video", "--idle=yes", `--input-ipc-server=${IPC_PATH}`, `--title=${title}`, url],
 			{ stdio: "ignore" },
 		);
 		mpvProcess.unref();
@@ -251,11 +239,9 @@ export class DJ {
 		// Direct URL
 		if (query.startsWith("http")) {
 			this.killMpv();
-			mpvProcess = spawn(
-				t.mpv,
-				["--no-video", `--input-ipc-server=${IPC_PATH}`, query],
-				{ stdio: "ignore" },
-			);
+			mpvProcess = spawn(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query], {
+				stdio: "ignore",
+			});
 			mpvProcess.unref();
 			await new Promise((r) => setTimeout(r, 1500));
 			ipcReady = true;
@@ -273,8 +259,7 @@ export class DJ {
 			);
 			const stations = (await res.json()) as any[];
 
-			if (!stations || stations.length === 0)
-				return `No radio stations found for: ${query}`;
+			if (!stations || stations.length === 0) return `No radio stations found for: ${query}`;
 
 			const station = stations[0];
 			const streamUrl = station.url_resolved || station.url;
@@ -282,12 +267,7 @@ export class DJ {
 			this.killMpv();
 			mpvProcess = spawn(
 				t.mpv,
-				[
-					"--no-video",
-					`--input-ipc-server=${IPC_PATH}`,
-					`--title=${station.name}`,
-					streamUrl,
-				],
+				["--no-video", `--input-ipc-server=${IPC_PATH}`, `--title=${station.name}`, streamUrl],
 				{ stdio: "ignore" },
 			);
 			mpvProcess.unref();
@@ -376,10 +356,9 @@ export class DJ {
 
 		try {
 			const outPath = join(MUSIC_DIR, "%(title)s.%(ext)s");
-			execSync(
-				`${t.ytdlp} -x --audio-format mp3 -o "${outPath}" "${url}" 2>&1`,
-				{ timeout: 60000 },
-			);
+			execSync(`${t.ytdlp} -x --audio-format mp3 -o "${outPath}" "${url}" 2>&1`, {
+				timeout: 60000,
+			});
 			return `Downloaded to ${MUSIC_DIR}`;
 		} catch (err) {
 			return `Download failed: ${(err as Error).message}`;
@@ -401,14 +380,11 @@ export class DJ {
 			);
 			// Count onsets and estimate BPM from inter-onset intervals
 			const times =
-				result
-					.match(/pts_time:([0-9.]+)/g)
-					?.map((s) => Number.parseFloat(s.split(":")[1])) || [];
+				result.match(/pts_time:([0-9.]+)/g)?.map((s) => Number.parseFloat(s.split(":")[1])) || [];
 			if (times.length < 4) return "Could not detect BPM (too few onsets).";
 
 			const intervals = times.slice(1).map((t, i) => t - times[i]);
-			const avgInterval =
-				intervals.reduce((a, b) => a + b, 0) / intervals.length;
+			const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
 			const bpm = Math.round(60 / avgInterval);
 
 			return `Estimated BPM: ${bpm}`;
@@ -421,8 +397,7 @@ export class DJ {
 	mix(fileA: string, fileB: string, crossfadeSec = 5): string {
 		const t = detectTools();
 		if (!t.ffmpeg) return "ffmpeg not installed.";
-		if (!existsSync(fileA) || !existsSync(fileB))
-			return "One or both files not found.";
+		if (!existsSync(fileA) || !existsSync(fileB)) return "One or both files not found.";
 
 		const outPath = join(MUSIC_DIR, `mix-${Date.now()}.mp3`);
 		try {

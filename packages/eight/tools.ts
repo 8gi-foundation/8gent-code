@@ -14,10 +14,7 @@ import {
 	indexFolder as astIndexFolder,
 	listRepos as astListRepos,
 } from "../ast-index";
-import {
-	getSymbolSource,
-	parseTypeScriptFile,
-} from "../ast-index/typescript-parser";
+import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -62,11 +59,7 @@ import {
 	suggestForProject as suggestDesignForProject,
 } from "../design-systems/index.js";
 import { type HookManager, getHookManager } from "../hooks";
-import {
-	type InfiniteRunner,
-	createInfiniteRunner,
-	formatInfiniteState,
-} from "../infinite";
+import { type InfiniteRunner, createInfiniteRunner, formatInfiniteState } from "../infinite";
 import {
 	lspDiagnostics,
 	lspDocumentSymbols,
@@ -76,31 +69,13 @@ import {
 } from "../lsp";
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
-import {
-	type PermissionManager,
-	getPermissionManager,
-	isCommandDangerous,
-} from "../permissions";
+import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
 import { ToolG8 } from "../permissions/toolg8.js";
 import type { PolicyActionType } from "../permissions/types.js";
-import {
-	formatTaskOutput,
-	formatTaskStatus,
-	getBackgroundTaskManager,
-} from "../tools/background";
-import {
-	browserOpen,
-	browserScreenshot,
-	browserState,
-	browserTask,
-} from "../tools/browser-use";
+import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
+import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
 import { describeImage, readImage } from "../tools/image";
-import {
-	deleteCell,
-	editCell,
-	insertCell,
-	readNotebook,
-} from "../tools/notebook";
+import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import { RateLimiter } from "../tools/rate-limiter";
 import {
@@ -112,12 +87,7 @@ import {
 	vercelListProjects,
 	vercelSetEnv,
 } from "../tools/vercel";
-import {
-	formatFetchResult,
-	formatSearchResults,
-	webFetch,
-	webSearch,
-} from "../tools/web";
+import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -139,9 +109,7 @@ function safePath(userPath: string, workingDirectory: string): string {
 
 	// Must be inside the working directory
 	if (!normalizedTarget.startsWith(normalizedBase + path.sep)) {
-		throw new Error(
-			`Path traversal blocked: "${userPath}" resolves outside working directory`,
-		);
+		throw new Error(`Path traversal blocked: "${userPath}" resolves outside working directory`);
 	}
 
 	return normalizedTarget;
@@ -174,8 +142,7 @@ function sanitizeShellCommand(command: string): {
 	if (/;/.test(command)) {
 		return {
 			safe: false,
-			reason:
-				"Semicolon command chaining is not allowed. Use separate run_command calls instead",
+			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
 		};
 	}
 
@@ -183,15 +150,13 @@ function sanitizeShellCommand(command: string): {
 	if (/&&/.test(command)) {
 		return {
 			safe: false,
-			reason:
-				"Command chaining with && is not allowed. Use separate run_command calls instead",
+			reason: "Command chaining with && is not allowed. Use separate run_command calls instead",
 		};
 	}
 	if (/\|\|/.test(command)) {
 		return {
 			safe: false,
-			reason:
-				"Command chaining with || is not allowed. Use separate run_command calls instead",
+			reason: "Command chaining with || is not allowed. Use separate run_command calls instead",
 		};
 	}
 
@@ -221,9 +186,7 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			stderr += d.toString();
 		});
 		proc.on("close", (code: number | null) => {
-			resolve(
-				code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`,
-			);
+			resolve(code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`);
 		});
 		proc.on("error", (err: Error) => resolve(`Error: ${err.message}`));
 	});
@@ -299,8 +262,7 @@ export class ToolExecutor {
 						properties: {
 							symbolId: {
 								type: "string",
-								description:
-									"Symbol ID in format 'path/to/file.ts::symbolName'",
+								description: "Symbol ID in format 'path/to/file.ts::symbolName'",
 							},
 						},
 						required: ["symbolId"],
@@ -320,8 +282,7 @@ export class ToolExecutor {
 							kinds: {
 								type: "array",
 								items: { type: "string" },
-								description:
-									"Filter by kinds: function, class, method, variable",
+								description: "Filter by kinds: function, class, method, variable",
 							},
 						},
 						required: ["query"],
@@ -521,14 +482,12 @@ export class ToolExecutor {
 						properties: {
 							task: {
 								type: "string",
-								description:
-									"Task description for the background agent to execute",
+								description: "Task description for the background agent to execute",
 							},
 							runtime: {
 								type: "string",
 								enum: ["8gent", "claude", "shell"],
-								description:
-									"Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)",
+								description: "Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)",
 							},
 							model: {
 								type: "string",
@@ -537,8 +496,7 @@ export class ToolExecutor {
 							},
 							timeout: {
 								type: "number",
-								description:
-									"Timeout in ms (default: 5 min, only for claude/shell)",
+								description: "Timeout in ms (default: 5 min, only for claude/shell)",
 							},
 						},
 						required: ["task"],
@@ -724,8 +682,7 @@ export class ToolExecutor {
 							target: {
 								type: "array",
 								items: { type: "string" },
-								description:
-									"Targets: production, preview, development (default: all)",
+								description: "Targets: production, preview, development (default: all)",
 							},
 						},
 						required: ["projectId", "key", "value"],
@@ -816,8 +773,7 @@ export class ToolExecutor {
 						properties: {
 							query: {
 								type: "string",
-								description:
-									"Search query (e.g., 'minimal dark', 'claude', 'cyberpunk')",
+								description: "Search query (e.g., 'minimal dark', 'claude', 'cyberpunk')",
 							},
 							style: {
 								type: "string",
@@ -854,13 +810,11 @@ export class ToolExecutor {
 							},
 							maxIterations: {
 								type: "number",
-								description:
-									"Maximum iterations before stopping (default: 100)",
+								description: "Maximum iterations before stopping (default: 100)",
 							},
 							maxTimeMs: {
 								type: "number",
-								description:
-									"Maximum time in ms before stopping (default: 30 minutes)",
+								description: "Maximum time in ms before stopping (default: 30 minutes)",
 							},
 						},
 						required: ["task"],
@@ -900,8 +854,7 @@ export class ToolExecutor {
 						properties: {
 							query: {
 								type: "string",
-								description:
-									"Search query - keywords to match against stored memories",
+								description: "Search query - keywords to match against stored memories",
 							},
 							limit: {
 								type: "number",
@@ -927,8 +880,7 @@ export class ToolExecutor {
 							url: { type: "string", description: "URL to navigate to" },
 							browser: {
 								type: "string",
-								description:
-									"Browser to use (default: chromium). Use 'remote' for cloud browsers.",
+								description: "Browser to use (default: chromium). Use 'remote' for cloud browsers.",
 							},
 							session: {
 								type: "string",
@@ -967,13 +919,11 @@ export class ToolExecutor {
 						properties: {
 							task: {
 								type: "string",
-								description:
-									"Natural language description of the browser task to perform",
+								description: "Natural language description of the browser task to perform",
 							},
 							browser: {
 								type: "string",
-								description:
-									"Browser to use (default: chromium). Use 'remote' for cloud browsers.",
+								description: "Browser to use (default: chromium). Use 'remote' for cloud browsers.",
 							},
 							session: {
 								type: "string",
@@ -995,8 +945,7 @@ export class ToolExecutor {
 						properties: {
 							path: {
 								type: "string",
-								description:
-									"File path to save screenshot (default: auto-generated)",
+								description: "File path to save screenshot (default: auto-generated)",
 							},
 							session: {
 								type: "string",
@@ -1033,10 +982,7 @@ export class ToolExecutor {
 		vercel_get_deployment_logs: "network_request",
 	};
 
-	async execute(
-		toolName: string,
-		args: Record<string, unknown>,
-	): Promise<string> {
+	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
 		// Rate limit check - prevents LLM loops from exhausting resources
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
@@ -1053,9 +999,7 @@ export class ToolExecutor {
 				key: args.key as string,
 			});
 			if (!gateResult.allowed) {
-				const alt = gateResult.alternative
-					? ` Alternative: ${gateResult.alternative}`
-					: "";
+				const alt = gateResult.alternative ? ` Alternative: ${gateResult.alternative}` : "";
 				return `[TOOLG8 BLOCKED] ${gateResult.reason}${alt}`;
 			}
 		}
@@ -1094,10 +1038,7 @@ export class ToolExecutor {
 					this.workingDirectory,
 				);
 			case "lsp_document_symbols":
-				return lspDocumentSymbols(
-					args.filePath as string,
-					this.workingDirectory,
-				);
+				return lspDocumentSymbols(args.filePath as string, this.workingDirectory);
 			case "lsp_diagnostics":
 				return lspDiagnostics(args.filePath as string, this.workingDirectory);
 
@@ -1112,11 +1053,7 @@ export class ToolExecutor {
 			}
 			case "edit_file": {
 				const safe = safePath(args.path as string, this.workingDirectory);
-				return this.editFile(
-					safe,
-					args.oldText as string,
-					args.newText as string,
-				);
+				return this.editFile(safe, args.oldText as string, args.newText as string);
 			}
 			case "list_files":
 				return this.listFiles(args.path as string, args.pattern as string);
@@ -1128,23 +1065,14 @@ export class ToolExecutor {
 				return this.runCommand(args.staged ? "git diff --staged" : "git diff");
 			case "git_log": {
 				const count = Math.floor(Math.abs(Number(args.count) || 10));
-				return spawnGit(
-					["log", "--oneline", `-${count}`],
-					this.workingDirectory,
-				);
+				return spawnGit(["log", "--oneline", `-${count}`], this.workingDirectory);
 			}
 			case "git_branch":
 				return spawnGit(["branch", "-a"], this.workingDirectory);
 			case "git_checkout":
-				return spawnGit(
-					["checkout", String(args.branch)],
-					this.workingDirectory,
-				);
+				return spawnGit(["checkout", String(args.branch)], this.workingDirectory);
 			case "git_create_branch":
-				return spawnGit(
-					["checkout", "-b", String(args.branch)],
-					this.workingDirectory,
-				);
+				return spawnGit(["checkout", "-b", String(args.branch)], this.workingDirectory);
 			case "git_add": {
 				const files = String(args.files || ".")
 					.split(/\s+/)
@@ -1152,10 +1080,7 @@ export class ToolExecutor {
 				return spawnGit(["add", ...files], this.workingDirectory);
 			}
 			case "git_commit":
-				return spawnGit(
-					["commit", "-m", String(args.message)],
-					this.workingDirectory,
-				);
+				return spawnGit(["commit", "-m", String(args.message)], this.workingDirectory);
 			case "git_push": {
 				const pushArgs = ["push"];
 				if (args.setUpstream) pushArgs.push("-u", "origin", "HEAD");
@@ -1190,10 +1115,7 @@ export class ToolExecutor {
 
 			// Shell
 			case "run_command":
-				return this.runCommand(
-					args.command as string,
-					args.timeout as number | undefined,
-				);
+				return this.runCommand(args.command as string, args.timeout as number | undefined);
 
 			// Multi-agent orchestration
 			case "spawn_agent":
@@ -1212,19 +1134,13 @@ export class ToolExecutor {
 			case "read_image":
 				return this.handleReadImage(args.path as string);
 			case "describe_image":
-				return this.handleDescribeImage(
-					args.path as string,
-					args.prompt as string | undefined,
-				);
+				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
 
 			// PDF tools
 			case "read_pdf":
 				return this.handleReadPdf(args.path as string);
 			case "read_pdf_page":
-				return this.handleReadPdfPage(
-					args.path as string,
-					args.pageNum as number,
-				);
+				return this.handleReadPdfPage(args.path as string, args.pageNum as number);
 			case "search_pdf":
 				return this.handleSearchPdf(
 					args.path as string,
@@ -1249,17 +1165,11 @@ export class ToolExecutor {
 					args.source as string,
 				);
 			case "notebook_delete_cell":
-				return this.handleNotebookDeleteCell(
-					args.path as string,
-					args.cellIndex as number,
-				);
+				return this.handleNotebookDeleteCell(args.path as string, args.cellIndex as number);
 
 			// Web tools
 			case "web_search":
-				return this.handleWebSearch(
-					args.query as string,
-					args.maxResults as number,
-				);
+				return this.handleWebSearch(args.query as string, args.maxResults as number);
 			case "web_fetch":
 				return this.handleWebFetch(args.url as string);
 
@@ -1267,10 +1177,7 @@ export class ToolExecutor {
 			case "vercel_list_projects":
 				return vercelListProjects();
 			case "vercel_get_deployments":
-				return vercelGetDeployments(
-					args.projectId as string,
-					args.limit as number,
-				);
+				return vercelGetDeployments(args.projectId as string, args.limit as number);
 			case "vercel_deploy":
 				return vercelDeploy(args.projectId as string);
 			case "vercel_set_env":
@@ -1299,17 +1206,11 @@ export class ToolExecutor {
 
 			// Background task tools
 			case "background_start":
-				return this.handleBackgroundStart(
-					args.command as string,
-					args.timeout as number,
-				);
+				return this.handleBackgroundStart(args.command as string, args.timeout as number);
 			case "background_status":
 				return this.handleBackgroundStatus(args.taskId as string);
 			case "background_output":
-				return this.handleBackgroundOutput(
-					args.taskId as string,
-					args.tail as number,
-				);
+				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
 
 			// Design tools
 			case "suggest_design":
@@ -1335,10 +1236,7 @@ export class ToolExecutor {
 					args.layer as "session" | "project" | "global",
 				);
 			case "recall":
-				return this.handleRecall(
-					args.query as string,
-					args.limit as number | undefined,
-				);
+				return this.handleRecall(args.query as string, args.limit as number | undefined);
 
 			// Desktop Computer Use tools (Power #10)
 			case "desktop_screenshot":
@@ -1355,10 +1253,7 @@ export class ToolExecutor {
 					args.coordMap as string | undefined,
 				);
 			case "desktop_type":
-				return this.handleDesktopType(
-					args.text as string,
-					args.delay as number | undefined,
-				);
+				return this.handleDesktopType(args.text as string, args.delay as number | undefined);
 			case "desktop_press":
 				return this.handleDesktopPress(
 					args.keys as string,
@@ -1390,10 +1285,7 @@ export class ToolExecutor {
 			case "desktop_windows":
 				return this.handleDesktopWindows();
 			case "desktop_clipboard":
-				return this.handleDesktopClipboard(
-					args.action as string,
-					args.text as string | undefined,
-				);
+				return this.handleDesktopClipboard(args.action as string, args.text as string | undefined);
 			case "desktop_processes":
 				return this.handleDesktopProcesses(args.sort as string | undefined);
 			case "desktop_quit_app":
@@ -1405,10 +1297,7 @@ export class ToolExecutor {
 			case "desktop_suggest_quit":
 				return this.handleDesktopSuggestQuit();
 			case "desktop_safe_list":
-				return this.handleDesktopSafeList(
-					args.action as string,
-					args.app as string | undefined,
-				);
+				return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 
 			// Browser Use tools
 			case "browser_open":
@@ -1498,21 +1387,14 @@ export class ToolExecutor {
 				return `Symbol '${symbolName}' not found. Available: ${outline.symbols.map((s) => s.name).join(", ")}`;
 			}
 
-			const source = getSymbolSource(
-				absolutePath,
-				symbol.startLine,
-				symbol.endLine,
-			);
+			const source = getSymbolSource(absolutePath, symbol.startLine, symbol.endLine);
 			return `// ${symbol.kind}: ${symbol.name}\n// Lines ${symbol.startLine}-${symbol.endLine}\n\n${source}`;
 		} catch (err) {
 			return `Error: ${err}`;
 		}
 	}
 
-	private async searchSymbols(
-		query: string,
-		kinds?: string[],
-	): Promise<string> {
+	private async searchSymbols(query: string, kinds?: string[]): Promise<string> {
 		const { glob } = await import("glob");
 
 		const files = await glob("**/*.{ts,tsx,js,jsx}", {
@@ -1578,9 +1460,7 @@ export class ToolExecutor {
 		for (const filePath of fileTree) {
 			const outline = astGetFileOutline(this.astRepoId, filePath);
 			if (outline) {
-				const symbolNames = outline.symbols
-					.map((s) => `${s.kind[0]}:${s.name}`)
-					.join(", ");
+				const symbolNames = outline.symbols.map((s) => `${s.kind[0]}:${s.name}`).join(", ");
 				const count = outline.symbols.length;
 				totalSymbols += count;
 				fileEntries.push(`  ${filePath} (${count}) → ${symbolNames}`);
@@ -1624,9 +1504,7 @@ export class ToolExecutor {
 				try {
 					await Promise.race([
 						this.astIndexPromise,
-						new Promise((_, reject) =>
-							setTimeout(() => reject("timeout"), 500),
-						),
+						new Promise((_, reject) => setTimeout(() => reject("timeout"), 500)),
 					]);
 				} catch {
 					// Index not ready yet, proceed without outline
@@ -1648,9 +1526,7 @@ export class ToolExecutor {
 					const directOutline = parseTypeScriptFile(absolutePath);
 					if (directOutline.symbols.length > 0) {
 						const symbolList = directOutline.symbols
-							.map(
-								(s) => `  ${s.kind} ${s.name} (L${s.startLine}-${s.endLine})`,
-							)
+							.map((s) => `  ${s.kind} ${s.name} (L${s.startLine}-${s.endLine})`)
 							.join("\n");
 						outlineHeader = `[AST: This file has ${directOutline.symbols.length} symbols. Use get_symbol to fetch specific ones instead of reading the full file.]\n\nSymbols:\n${symbolList}\n\n---\n\n`;
 					}
@@ -1677,10 +1553,7 @@ export class ToolExecutor {
 		if (uiExtensions.includes(ext)) {
 			try {
 				const isNewFile = !fs.existsSync(absolutePath);
-				if (
-					isNewFile &&
-					needsDesignDecision(`create UI file ${path.basename(absolutePath)}`)
-				) {
+				if (isNewFile && needsDesignDecision(`create UI file ${path.basename(absolutePath)}`)) {
 					const detection = await detectDesignNeed(
 						`create UI component: ${path.basename(absolutePath)}`,
 					);
@@ -1714,11 +1587,7 @@ export class ToolExecutor {
 		return `File written and opened: ${absolutePath}${designHint}`;
 	}
 
-	private async editFile(
-		filePath: string,
-		oldText: string,
-		newText: string,
-	): Promise<string> {
+	private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
 		const absolutePath = path.isAbsolute(filePath)
 			? filePath
 			: path.join(this.workingDirectory, filePath);
@@ -1796,10 +1665,7 @@ export class ToolExecutor {
 
 		let finalCommand = command;
 		if (command.includes("create-next-app") && !command.includes("--yes")) {
-			finalCommand = command.replace(
-				"create-next-app",
-				"create-next-app --yes",
-			);
+			finalCommand = command.replace("create-next-app", "create-next-app --yes");
 		}
 		if (command.includes("npm init") && !command.includes("-y")) {
 			finalCommand = `${command} -y`;
@@ -1915,9 +1781,7 @@ export class ToolExecutor {
 				stderr += d.toString();
 			});
 			proc.on("close", (code: number | null) => {
-				resolve(
-					code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`,
-				);
+				resolve(code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`);
 			});
 			proc.on("error", (err: Error) => resolve(`Error: ${err.message}`));
 		});
@@ -1954,10 +1818,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleDescribeImage(
-		imagePath: string,
-		prompt?: string,
-	): Promise<string> {
+	private async handleDescribeImage(imagePath: string, prompt?: string): Promise<string> {
 		const absolutePath = path.isAbsolute(imagePath)
 			? imagePath
 			: path.join(this.workingDirectory, imagePath);
@@ -2018,10 +1879,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleReadPdfPage(
-		pdfPath: string,
-		pageNum: number,
-	): Promise<string> {
+	private async handleReadPdfPage(pdfPath: string, pageNum: number): Promise<string> {
 		const absolutePath = path.isAbsolute(pdfPath)
 			? pdfPath
 			: path.join(this.workingDirectory, pdfPath);
@@ -2053,11 +1911,7 @@ export class ToolExecutor {
 			: path.join(this.workingDirectory, pdfPath);
 
 		try {
-			const results = await searchPdf(
-				absolutePath,
-				query,
-				caseSensitive ?? false,
-			);
+			const results = await searchPdf(absolutePath, query, caseSensitive ?? false);
 			return JSON.stringify(
 				{
 					path: results.path,
@@ -2089,9 +1943,7 @@ export class ToolExecutor {
 				type: cell.type,
 				executionCount: cell.executionCount,
 				source:
-					cell.source.length > 500
-						? `${cell.source.slice(0, 500)}... [truncated]`
-						: cell.source,
+					cell.source.length > 500 ? `${cell.source.slice(0, 500)}... [truncated]` : cell.source,
 				outputCount: cell.outputs.length,
 				outputs: cell.outputs.slice(0, 3).map((o) => ({
 					type: o.type,
@@ -2144,22 +1996,14 @@ export class ToolExecutor {
 			: path.join(this.workingDirectory, notebookPath);
 
 		try {
-			const result = await insertCell(
-				absolutePath,
-				afterIndex,
-				cellType,
-				source,
-			);
+			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
 			return `Error inserting notebook cell: ${err}`;
 		}
 	}
 
-	private async handleNotebookDeleteCell(
-		notebookPath: string,
-		cellIndex: number,
-	): Promise<string> {
+	private async handleNotebookDeleteCell(notebookPath: string, cellIndex: number): Promise<string> {
 		const absolutePath = path.isAbsolute(notebookPath)
 			? notebookPath
 			: path.join(this.workingDirectory, notebookPath);
@@ -2303,9 +2147,7 @@ export class ToolExecutor {
 
 	private async handleListAgents(): Promise<string> {
 		try {
-			const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import(
-				"../orchestration"
-			);
+			const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import("../orchestration");
 			const pool = getAgentPool();
 			const poolAgents = pool.listAgents();
 			const cliAgentsList = listCLIAgents();
@@ -2378,10 +2220,7 @@ export class ToolExecutor {
 	// Web Tools
 	// ============================================
 
-	private async handleWebSearch(
-		query: string,
-		maxResults?: number,
-	): Promise<string> {
+	private async handleWebSearch(query: string, maxResults?: number): Promise<string> {
 		try {
 			const results = await webSearch(query, { maxResults: maxResults || 10 });
 			return formatSearchResults(results);
@@ -2415,9 +2254,7 @@ export class ToolExecutor {
 			const grouped: Record<string, string[]> = {};
 			for (const { server, tool } of tools) {
 				if (!grouped[server]) grouped[server] = [];
-				grouped[server].push(
-					`  - ${tool.name}: ${tool.description || "No description"}`,
-				);
+				grouped[server].push(`  - ${tool.name}: ${tool.description || "No description"}`);
 			}
 
 			let output = "Available MCP Tools:\n\n";
@@ -2449,10 +2286,7 @@ export class ToolExecutor {
 	// Background Task Tools
 	// ============================================
 
-	private async handleBackgroundStart(
-		command: string,
-		timeout?: number,
-	): Promise<string> {
+	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
 		try {
 			const taskManager = getBackgroundTaskManager(this.workingDirectory);
 			const taskId = taskManager.startTask(command, { timeout });
@@ -2477,10 +2311,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleBackgroundOutput(
-		taskId: string,
-		tail?: number,
-	): Promise<string> {
+	private async handleBackgroundOutput(taskId: string, tail?: number): Promise<string> {
 		try {
 			const taskManager = getBackgroundTaskManager();
 			const status = taskManager.getTaskStatus(taskId);
@@ -2500,10 +2331,7 @@ export class ToolExecutor {
 	// Design Tools
 	// ============================================
 
-	private async handleSuggestDesign(
-		task: string,
-		projectType?: string,
-	): Promise<string> {
+	private async handleSuggestDesign(task: string, projectType?: string): Promise<string> {
 		try {
 			// Step 1: Detect design needs from the task description
 			const detection = await detectDesignNeed(task);
@@ -2577,9 +2405,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleQueryDesignSystem(
-		args: Record<string, unknown>,
-	): Promise<string> {
+	private async handleQueryDesignSystem(args: Record<string, unknown>): Promise<string> {
 		try {
 			initDesignDb();
 
@@ -2605,9 +2431,7 @@ export class ToolExecutor {
 					}
 					if (output === "hex") {
 						const hex = getHexPalette(complete.system.id);
-						return hex
-							? JSON.stringify(hex, null, 2)
-							: "No color palette available.";
+						return hex ? JSON.stringify(hex, null, 2) : "No color palette available.";
 					}
 					// Default: full summary
 					return JSON.stringify(
@@ -2724,9 +2548,7 @@ export class ToolExecutor {
 					console.log(`[infinite] ${formatInfiniteState(state)}`);
 				},
 				onErrorRecovered: (error, state) => {
-					console.log(
-						`[infinite] Recovered from: ${error.message.slice(0, 80)}`,
-					);
+					console.log(`[infinite] Recovered from: ${error.message.slice(0, 80)}`);
 				},
 			});
 
@@ -2790,10 +2612,7 @@ export class ToolExecutor {
 	// Desktop Computer Use Tools (Power #10)
 	// ============================================
 
-	private async handleDesktopScreenshot(
-		savePath?: string,
-		displayId?: number,
-	): Promise<string> {
+	private async handleDesktopScreenshot(savePath?: string, displayId?: number): Promise<string> {
 		try {
 			const result = computerScreenshot({ path: savePath, displayId });
 			if (!result.ok) return `desktop_screenshot failed: ${result.error}`;
@@ -2831,10 +2650,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleDesktopType(
-		text: string,
-		delay?: number,
-	): Promise<string> {
+	private async handleDesktopType(text: string, delay?: number): Promise<string> {
 		try {
 			const result = computerType({ text, delay });
 			if (!result.ok) return `desktop_type failed: ${result.error}`;
@@ -2844,11 +2660,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleDesktopPress(
-		keys: string,
-		count?: number,
-		delay?: number,
-	): Promise<string> {
+	private async handleDesktopPress(keys: string, count?: number, delay?: number): Promise<string> {
 		try {
 			const result = computerPress({ keys, count, delay });
 			if (!result.ok) return `desktop_press failed: ${result.error}`;
@@ -2900,11 +2712,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleDesktopHover(
-		x: number,
-		y: number,
-		coordMap?: string,
-	): Promise<string> {
+	private async handleDesktopHover(x: number, y: number, coordMap?: string): Promise<string> {
 		try {
 			let point = { x, y };
 			if (coordMap) {
@@ -2922,11 +2730,9 @@ export class ToolExecutor {
 		try {
 			const result = computerWindowList();
 			if (!result.ok) return `desktop_windows failed: ${result.error}`;
-			if (!result.windows || result.windows.length === 0)
-				return "No windows found";
+			if (!result.windows || result.windows.length === 0) return "No windows found";
 			const lines = result.windows.map(
-				(w, i) =>
-					`${i + 1}. [${w.app}] "${w.title}" at (${w.x},${w.y}) ${w.width}x${w.height}`,
+				(w, i) => `${i + 1}. [${w.app}] "${w.title}" at (${w.x},${w.y}) ${w.width}x${w.height}`,
 			);
 			return `Open windows (${result.windows.length}):\n${lines.join("\n")}`;
 		} catch (err) {
@@ -2934,10 +2740,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleDesktopClipboard(
-		action: string,
-		text?: string,
-	): Promise<string> {
+	private async handleDesktopClipboard(action: string, text?: string): Promise<string> {
 		try {
 			if (action === "set") {
 				if (!text) return "desktop_clipboard set requires text parameter";
@@ -2959,9 +2762,7 @@ export class ToolExecutor {
 
 	private async handleDesktopProcesses(sort?: string): Promise<string> {
 		try {
-			const processes = computerListProcesses(
-				(sort as "memory" | "cpu" | "name") || "memory",
-			);
+			const processes = computerListProcesses((sort as "memory" | "cpu" | "name") || "memory");
 			if (processes.length === 0) return "No processes found";
 			const lines = processes.map(
 				(p, i) =>
@@ -2979,8 +2780,7 @@ export class ToolExecutor {
 		strategy?: string,
 	): Promise<string> {
 		try {
-			if (!name && !pid)
-				return "desktop_quit_app requires either 'name' or 'pid' parameter";
+			if (!name && !pid) return "desktop_quit_app requires either 'name' or 'pid' parameter";
 			const strat = (strategy as "graceful" | "force") || "graceful";
 
 			if (pid) {
@@ -3012,13 +2812,8 @@ export class ToolExecutor {
 						`${String(i + 1).padStart(2)}. ${p.name.padEnd(25)} ${String(p.memoryMB).padStart(6)} MB  (PID ${p.pid})`,
 				);
 
-			const totalFreeable = apps
-				.slice(0, 15)
-				.reduce((sum, p) => sum + p.memoryMB, 0);
-			const safeNote =
-				safeList.length > 0
-					? `\nSafe list (protected): ${safeList.join(", ")}`
-					: "";
+			const totalFreeable = apps.slice(0, 15).reduce((sum, p) => sum + p.memoryMB, 0);
+			const safeNote = safeList.length > 0 ? `\nSafe list (protected): ${safeList.join(", ")}` : "";
 
 			return `${memLine}\n\nApps that could be quit to free resources:\n${lines.join("\n")}\n\nPotential savings: ~${totalFreeable} MB${safeNote}\n\nUse desktop_quit_app to quit specific apps (requires confirmation).`;
 		} catch (err) {
@@ -3026,10 +2821,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleDesktopSafeList(
-		action: string,
-		app?: string,
-	): Promise<string> {
+	private async handleDesktopSafeList(action: string, app?: string): Promise<string> {
 		try {
 			if (action === "list") {
 				const list = computerLoadSafeList();
@@ -3087,10 +2879,7 @@ export class ToolExecutor {
 		}
 	}
 
-	private async handleBrowserScreenshot(
-		filePath?: string,
-		session?: string,
-	): Promise<string> {
+	private async handleBrowserScreenshot(filePath?: string, session?: string): Promise<string> {
 		try {
 			return browserScreenshot(filePath, session);
 		} catch (err) {

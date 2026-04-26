@@ -9,11 +9,7 @@ export class OpenRouterClient implements LLMClient {
 	private model: string;
 	private apiKey: string;
 
-	constructor(
-		model: string,
-		apiKey: string,
-		baseUrl = "https://openrouter.ai/api/v1",
-	) {
+	constructor(model: string, apiKey: string, baseUrl = "https://openrouter.ai/api/v1") {
 		this.model = model;
 		this.baseUrl = baseUrl;
 		this.apiKey = apiKey;
@@ -45,9 +41,7 @@ export class OpenRouterClient implements LLMClient {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(
-				`OpenRouter error: ${response.statusText} - ${errorText}`,
-			);
+			throw new Error(`OpenRouter error: ${response.statusText} - ${errorText}`);
 		}
 
 		const data = await response.json();

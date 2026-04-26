@@ -23,27 +23,18 @@ const historyMod = await import(`${workDir}/history.ts`);
 const routerMod = await import(`${workDir}/router.ts`);
 
 // Flexibly resolve exports
-const MessageBroker =
-	brokerMod.MessageBroker ?? brokerMod.Broker ?? brokerMod.default;
-const HistoryStore =
-	historyMod.HistoryStore ?? historyMod.History ?? historyMod.default;
-const TopicRouter =
-	routerMod.TopicRouter ?? routerMod.Router ?? routerMod.default;
+const MessageBroker = brokerMod.MessageBroker ?? brokerMod.Broker ?? brokerMod.default;
+const HistoryStore = historyMod.HistoryStore ?? historyMod.History ?? historyMod.default;
+const TopicRouter = routerMod.TopicRouter ?? routerMod.Router ?? routerMod.default;
 
 if (!MessageBroker) {
-	throw new Error(
-		"broker.ts must export MessageBroker, Broker, or default class",
-	);
+	throw new Error("broker.ts must export MessageBroker, Broker, or default class");
 }
 if (!HistoryStore) {
-	throw new Error(
-		"history.ts must export HistoryStore, History, or default class",
-	);
+	throw new Error("history.ts must export HistoryStore, History, or default class");
 }
 if (!TopicRouter) {
-	throw new Error(
-		"router.ts must export TopicRouter, Router, or default class",
-	);
+	throw new Error("router.ts must export TopicRouter, Router, or default class");
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -202,9 +193,7 @@ describe("SD001: Bug 1 — Concurrent Subscribe/Unsubscribe Race", () => {
 			const tmp = await broker.subscribe(topic, () => {});
 			await broker.unsubscribe(tmp.id);
 		});
-		const persistOps = Array.from({ length: 20 }, () =>
-			broker.subscribe(topic, () => {}),
-		);
+		const persistOps = Array.from({ length: 20 }, () => broker.subscribe(topic, () => {}));
 
 		await Promise.all([...tempOps, ...persistOps]);
 
@@ -238,10 +227,7 @@ describe("SD001: Bug 1 — Concurrent Subscribe/Unsubscribe Race", () => {
 		// Publish a message — all 30 should receive it
 		await broker.publish(topic, "test-payload");
 
-		const totalDeliveries = [...deliveryCounts.values()].reduce(
-			(a, b) => a + b,
-			0,
-		);
+		const totalDeliveries = [...deliveryCounts.values()].reduce((a, b) => a + b, 0);
 		expect(totalDeliveries).toBe(30);
 	});
 });

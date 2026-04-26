@@ -25,11 +25,7 @@ export type { LearnedSkill } from "./evolution-db.js";
  * Create and persist a new learned skill.
  * If a skill with the same trigger already exists, bumps its confidence instead.
  */
-export function learnSkill(
-	trigger: string,
-	action: string,
-	source = "manual",
-): LearnedSkill {
+export function learnSkill(trigger: string, action: string, source = "manual"): LearnedSkill {
 	// Check for near-duplicate trigger (exact match)
 	const existing = querySkillsByTrigger(trigger).find(
 		(s) => s.trigger.toLowerCase() === trigger.toLowerCase(),
@@ -59,10 +55,7 @@ export function learnSkill(
  * Retrieve the most relevant learned skills for a given task description.
  * Scores by keyword overlap + confidence. Returns top `limit` results.
  */
-export function getRelevantSkills(
-	taskDescription: string,
-	limit = 5,
-): LearnedSkill[] {
+export function getRelevantSkills(taskDescription: string, limit = 5): LearnedSkill[] {
 	const allSkills = getAllSkills();
 	if (allSkills.length === 0) return [];
 

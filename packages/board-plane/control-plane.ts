@@ -13,12 +13,7 @@ import { DiscordRest } from "./discord-rest";
 import { MemoryBridge } from "./memory-bridge";
 import { TaskQueue } from "./task-queue";
 import { RateLimiter, TaskRouter } from "./task-router";
-import type {
-	BoardTask,
-	ControlPlaneConfig,
-	PlaneToVessel,
-	VesselToPlane,
-} from "./types";
+import type { BoardTask, ControlPlaneConfig, PlaneToVessel, VesselToPlane } from "./types";
 import { VesselHealthMonitor } from "./vessel-health";
 
 interface VesselConnection {
@@ -29,9 +24,7 @@ interface VesselConnection {
 	lastHeartbeat: number;
 }
 
-export async function startControlPlane(
-	config: ControlPlaneConfig,
-): Promise<void> {
+export async function startControlPlane(config: ControlPlaneConfig): Promise<void> {
 	console.log("[control-plane] starting...");
 
 	// 1. Open databases and monitors
@@ -45,14 +38,11 @@ export async function startControlPlane(
 
 	// 2. Recover stale tasks from previous crash
 	const recovered = taskQueue.recoverStaleTasks(config.staleTaskMaxAgeMs);
-	if (recovered > 0)
-		console.log(`[control-plane] recovered ${recovered} stale tasks`);
+	if (recovered > 0) console.log(`[control-plane] recovered ${recovered} stale tasks`);
 
 	// 3. Build member map and token map
 	const memberMap = new Map(config.members.map((m) => [m.code, m]));
-	const tokenMap = new Map(
-		config.members.map((m) => [m.code, m.discordBotToken]),
-	);
+	const tokenMap = new Map(config.members.map((m) => [m.code, m.discordBotToken]));
 
 	// 4. Create REST client and router
 	const rest = new DiscordRest(tokenMap);
@@ -127,9 +117,7 @@ export async function startControlPlane(
 				let msg: VesselToPlane;
 				try {
 					msg = JSON.parse(
-						typeof raw === "string"
-							? raw
-							: new TextDecoder().decode(raw as unknown as ArrayBuffer),
+						typeof raw === "string" ? raw : new TextDecoder().decode(raw as unknown as ArrayBuffer),
 					);
 				} catch {
 					return;
@@ -165,35 +153,20 @@ export async function startControlPlane(
 						// Content policy gate - validate before posting
 						const policy = validateResponse(msg.response, conn.memberCode);
 						if (!policy.pass) {
-							console.warn(
-								`[control-plane] response blocked: ${policy.reason}`,
-							);
+							console.warn(`[control-plane] response blocked: ${policy.reason}`);
 							audit.log("response:blocked", {
 								taskId: msg.taskId,
 								memberCode: conn.memberCode,
 								metadata: { reason: policy.reason },
 							});
-							taskQueue.failTask(
-								msg.taskId,
-								`Content policy: ${policy.reason}`,
-							);
+							taskQueue.failTask(msg.taskId, `Content policy: ${policy.reason}`);
 						} else {
 							const safeResponse = sanitizeResponse(msg.response);
 							taskQueue.completeTask(msg.taskId, safeResponse);
-							const completed = taskQueue
-								.getRecentTasks("", 1)
-								.find((t) => t.id === msg.taskId);
+							const completed = taskQueue.getRecentTasks("", 1).find((t) => t.id === msg.taskId);
 							if (completed) {
-								rest.postMessage(
-									conn.memberCode,
-									completed.channelId,
-									safeResponse,
-								);
-								memory.storeResponse(
-									completed.channelId,
-									conn.memberCode,
-									safeResponse,
-								);
+								rest.postMessage(conn.memberCode, completed.channelId, safeResponse);
+								memory.storeResponse(completed.channelId, conn.memberCode, safeResponse);
 								audit.log("response:posted", {
 									taskId: msg.taskId,
 									memberCode: conn.memberCode,
@@ -209,9 +182,7 @@ export async function startControlPlane(
 					}
 					case "task:failed": {
 						taskQueue.failTask(msg.taskId, msg.error);
-						console.error(
-							`[control-plane] task ${msg.taskId} failed: ${msg.error}`,
-						);
+						console.error(`[control-plane] task ${msg.taskId} failed: ${msg.error}`);
 						// Try next task
 						const next = taskQueue.assignTask(conn.memberCode, conn.vesselId);
 						if (next) sendToVessel(ws, { type: "task:assign", task: next });
@@ -243,8 +214,7 @@ export async function startControlPlane(
 	// 7. Health check loop - recover stale tasks, check vessel health, push to idle vessels
 	const healthInterval = setInterval(() => {
 		const stale = taskQueue.recoverStaleTasks(config.staleTaskMaxAgeMs);
-		if (stale > 0)
-			console.log(`[control-plane] recovered ${stale} stale tasks`);
+		if (stale > 0) console.log(`[control-plane] recovered ${stale} stale tasks`);
 		// Check vessel health
 		const alerts = healthMonitor.check();
 		for (const alert of alerts) console.warn(`[control-plane] ${alert}`);
@@ -276,10 +246,6 @@ export async function startControlPlane(
 	process.on("SIGINT", () => shutdown("SIGINT"));
 
 	const stats = taskQueue.getStats();
-	console.log(
-		`[control-plane] ready - vessel ws://localhost:${config.vesselPort}`,
-	);
-	console.log(
-		`[control-plane] ${config.members.length} members, ${stats.pending} pending tasks`,
-	);
+	console.log(`[control-plane] ready - vessel ws://localhost:${config.vesselPort}`);
+	console.log(`[control-plane] ${config.members.length} members, ${stats.pending} pending tasks`);
 }

@@ -6,11 +6,7 @@ export interface InlineProps extends BoxProps {
 	children: React.ReactNode;
 }
 
-export const Inline: React.FC<InlineProps> = ({
-	gap = 1,
-	children,
-	...props
-}) => {
+export const Inline: React.FC<InlineProps> = ({ gap = 1, children, ...props }) => {
 	const items = React.Children.toArray(children);
 
 	return (

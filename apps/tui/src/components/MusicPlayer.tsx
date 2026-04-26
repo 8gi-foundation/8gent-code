@@ -27,10 +27,7 @@ interface MusicPlayerProps {
 }
 
 // ---- Animated Equalizer ----
-function Equalizer({
-	playing,
-	width = 12,
-}: { playing: boolean; width?: number }) {
+function Equalizer({ playing, width = 12 }: { playing: boolean; width?: number }) {
 	const [bars, setBars] = useState<number[]>(Array(width).fill(0));
 	const frameRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -44,10 +41,7 @@ function Equalizer({
 						const delta = target - v;
 						return Math.max(
 							0,
-							Math.min(
-								8,
-								v + Math.sign(delta) * Math.ceil(Math.abs(delta) * 0.6),
-							),
+							Math.min(8, v + Math.sign(delta) * Math.ceil(Math.abs(delta) * 0.6)),
 						);
 					}),
 				);
@@ -73,10 +67,7 @@ function Equalizer({
 	return (
 		<Box flexDirection="row" gap={0}>
 			{bars.map((level, i) => (
-				<Text
-					key={i}
-					color={level > 5 ? "#F07A28" : level > 2 ? "cyan" : "blue"}
-				>
+				<Text key={i} color={level > 5 ? "#F07A28" : level > 2 ? "cyan" : "blue"}>
 					{BARS[level]}
 				</Text>
 			))}
@@ -150,13 +141,7 @@ export function MusicPlayer({
 			: trackTitle || "---";
 
 	return (
-		<Box
-			flexDirection="column"
-			borderStyle="round"
-			borderColor="blue"
-			paddingX={1}
-			width={width}
-		>
+		<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1} width={width}>
 			{/* Header */}
 			<Box justifyContent="center">
 				<Text bold color="cyan">
@@ -166,10 +151,7 @@ export function MusicPlayer({
 
 			{/* Visualizer */}
 			<Box justifyContent="center" marginY={0}>
-				<Equalizer
-					playing={isPlaying && !isPaused}
-					width={Math.min(NUM_BARS, width - 4)}
-				/>
+				<Equalizer playing={isPlaying && !isPaused} width={Math.min(NUM_BARS, width - 4)} />
 			</Box>
 
 			{/* Track Title */}
@@ -194,11 +176,7 @@ export function MusicPlayer({
 			{/* Progress */}
 			{duration > 0 && (
 				<Box flexDirection="column">
-					<ProgressBar
-						position={position}
-						duration={duration}
-						width={width - 4}
-					/>
+					<ProgressBar position={position} duration={duration} width={width - 4} />
 					<Box justifyContent="space-between">
 						<Text dimColor>{fmt(position)}</Text>
 						<Text dimColor>{fmt(duration)}</Text>

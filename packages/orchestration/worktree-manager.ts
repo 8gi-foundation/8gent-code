@@ -36,11 +36,7 @@ export class WorktreeManager {
 	 * Create an isolated git worktree for a sub-agent.
 	 * Returns the absolute path to the worktree.
 	 */
-	async createWorktree(
-		agentId: string,
-		personaId: string,
-		taskHint?: string,
-	): Promise<string> {
+	async createWorktree(agentId: string, personaId: string, taskHint?: string): Promise<string> {
 		// Ensure worktrees directory exists
 		if (!existsSync(this.worktreesDir)) {
 			mkdirSync(this.worktreesDir, { recursive: true });
@@ -68,9 +64,7 @@ export class WorktreeManager {
 			this.worktrees.set(agentId, info);
 			return worktreePath;
 		} catch (err) {
-			throw new Error(
-				`Failed to create worktree: ${err instanceof Error ? err.message : err}`,
-			);
+			throw new Error(`Failed to create worktree: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -111,10 +105,10 @@ export class WorktreeManager {
 
 		try {
 			// Check if there are any commits on the branch
-			const { stdout: log } = await execAsync(
-				`git log --oneline HEAD..${info.branch}`,
-				{ cwd: this.workingDirectory, timeout: 5000 },
-			);
+			const { stdout: log } = await execAsync(`git log --oneline HEAD..${info.branch}`, {
+				cwd: this.workingDirectory,
+				timeout: 5000,
+			});
 
 			if (!log.trim()) return ""; // No changes
 

@@ -39,20 +39,13 @@ export interface ConversationEntry {
 
 export interface SharedMemoryBus {
 	/** Store a conversation message with source/scope metadata */
-	storeMessage(
-		content: string,
-		role: "user" | "assistant",
-		options: ScopedMemoryOptions,
-	): string;
+	storeMessage(content: string, role: "user" | "assistant", options: ScopedMemoryOptions): string;
 
 	/** Recall recent conversation for a scope */
 	getConversation(scope: string, limit?: number): ConversationEntry[];
 
 	/** Recall cross-scope conversation (e.g., all messages in a channel regardless of member) */
-	getChannelConversation(
-		channelPrefix: string,
-		limit?: number,
-	): ConversationEntry[];
+	getChannelConversation(channelPrefix: string, limit?: number): ConversationEntry[];
 
 	/** Store a semantic memory (fact, preference, decision) */
 	remember(
@@ -208,10 +201,7 @@ export function createSharedMemoryBus(dbPath: string): SharedMemoryBus {
 			}));
 		},
 
-		getChannelConversation(
-			channelPrefix: string,
-			limit = 50,
-		): ConversationEntry[] {
+		getChannelConversation(channelPrefix: string, limit = 50): ConversationEntry[] {
 			const rows = selectByChannel.all(channelPrefix, limit) as Array<{
 				role: string;
 				content: string;
@@ -325,18 +315,15 @@ export function createSharedMemoryBus(dbPath: string): SharedMemoryBus {
 					const raw = r.memory as any;
 					return {
 						id: raw.id,
-						content:
-							raw.content ?? raw.value ?? raw.description ?? raw.title ?? "",
+						content: raw.content ?? raw.value ?? raw.description ?? raw.title ?? "",
 						score: r.score,
 						source: raw.busSource ?? raw.source ?? "",
 						scope: raw.busScope ?? "",
 					};
 				})
 				.filter((m) => {
-					if (options?.scope && m.scope && !m.scope.startsWith(options.scope))
-						return false;
-					if (options?.source && m.source && m.source !== options.source)
-						return false;
+					if (options?.scope && m.scope && !m.scope.startsWith(options.scope)) return false;
+					if (options?.source && m.source && m.source !== options.source) return false;
 					return true;
 				});
 
@@ -363,8 +350,7 @@ let _bus: SharedMemoryBus | null = null;
 
 export function getSharedMemoryBus(dbPath?: string): SharedMemoryBus {
 	if (!_bus) {
-		const resolvedPath =
-			dbPath || path.join(os.homedir(), ".8gent", "memory", "shared-memory.db");
+		const resolvedPath = dbPath || path.join(os.homedir(), ".8gent", "memory", "shared-memory.db");
 		_bus = createSharedMemoryBus(resolvedPath);
 	}
 	return _bus;

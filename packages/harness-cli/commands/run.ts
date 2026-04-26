@@ -85,8 +85,7 @@ function parseArgs(args: string[]): RunOptions {
 	const opts: RunOptions = {
 		prompt: "",
 		model: process.env.EIGHGENT_MODEL || "openai/gpt-4.1-mini",
-		runtime:
-			(process.env.EIGHGENT_RUNTIME as RunOptions["runtime"]) || "openrouter",
+		runtime: (process.env.EIGHGENT_RUNTIME as RunOptions["runtime"]) || "openrouter",
 		maxSteps: 30,
 		workdir: null, // null = auto-create temp dir
 		timeout: 300_000,
@@ -187,12 +186,8 @@ export async function run(args: string[]): Promise<void> {
 			!workdir.startsWith("/tmp")
 		) {
 			console.error(`[SAFETY] Refusing to run inside a git repo: ${workdir}`);
-			console.error(
-				"         8gent writes files — this would overwrite your project.",
-			);
-			console.error(
-				"         Use --workdir /tmp/something or omit --workdir for auto temp dir.",
-			);
+			console.error("         8gent writes files — this would overwrite your project.");
+			console.error("         Use --workdir /tmp/something or omit --workdir for auto temp dir.");
 			process.exit(1);
 		}
 		if (!fs.existsSync(workdir)) {
@@ -230,15 +225,12 @@ export async function run(args: string[]): Promise<void> {
 	}
 
 	const sessionPath = agent.getSessionFilePath();
-	const sessionId =
-		sessionPath.split("/").pop()?.replace(".jsonl", "") ?? "unknown";
+	const sessionId = sessionPath.split("/").pop()?.replace(".jsonl", "") ?? "unknown";
 
 	if (!opts.json) {
 		console.log(`[harness] Session: ${sessionId}`);
 		console.log(`[harness] Model: ${opts.model} (${opts.runtime})`);
-		console.log(
-			`[harness] Working dir: ${workdir}${autoCreated ? " (auto-created)" : ""}`,
-		);
+		console.log(`[harness] Working dir: ${workdir}${autoCreated ? " (auto-created)" : ""}`);
 		console.log(`[harness] Max steps: ${opts.maxSteps}`);
 		console.log(
 			`[harness] Prompt: ${opts.prompt.slice(0, 120)}${opts.prompt.length > 120 ? "..." : ""}`,
@@ -256,10 +248,7 @@ export async function run(args: string[]): Promise<void> {
 
 	try {
 		const timeoutPromise = new Promise<never>((_, reject) => {
-			setTimeout(
-				() => reject(new Error(`Timeout after ${opts.timeout}ms`)),
-				opts.timeout,
-			);
+			setTimeout(() => reject(new Error(`Timeout after ${opts.timeout}ms`)), opts.timeout);
 		});
 
 		result = await Promise.race([agent.chat(opts.prompt), timeoutPromise]);

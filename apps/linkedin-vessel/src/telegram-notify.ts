@@ -10,8 +10,7 @@ const TELEGRAM_API = "https://api.telegram.org/bot";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const CHAT_ID = process.env.JAMES_TELEGRAM_CHAT_ID!;
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE_ID =
-	process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSDxMaL"; // default: Bella
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSDxMaL"; // default: Bella
 
 // ── Text ──────────────────────────────────────────────────────────────
 
@@ -40,21 +39,18 @@ async function generateAudio(text: string): Promise<ArrayBuffer | null> {
 	if (!ELEVENLABS_KEY) return null;
 
 	try {
-		const res = await fetch(
-			`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-			{
-				method: "POST",
-				headers: {
-					"xi-api-key": ELEVENLABS_KEY,
-					"content-type": "application/json",
-				},
-				body: JSON.stringify({
-					text,
-					model_id: "eleven_turbo_v2",
-					voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-				}),
+		const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`, {
+			method: "POST",
+			headers: {
+				"xi-api-key": ELEVENLABS_KEY,
+				"content-type": "application/json",
 			},
-		);
+			body: JSON.stringify({
+				text,
+				model_id: "eleven_turbo_v2",
+				voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+			}),
+		});
 		if (!res.ok) return null;
 		return res.arrayBuffer();
 	} catch {
@@ -75,11 +71,7 @@ export async function tgVoice(text: string): Promise<void> {
 	try {
 		const formData = new FormData();
 		formData.append("chat_id", CHAT_ID);
-		formData.append(
-			"voice",
-			new Blob([audio], { type: "audio/mpeg" }),
-			"message.mp3",
-		);
+		formData.append("voice", new Blob([audio], { type: "audio/mpeg" }), "message.mp3");
 
 		await fetch(`${TELEGRAM_API}${BOT_TOKEN}/sendVoice`, {
 			method: "POST",
@@ -92,10 +84,7 @@ export async function tgVoice(text: string): Promise<void> {
 
 // ── Combined (text + voice) ───────────────────────────────────────────
 
-export async function tgUpdate(
-	textMessage: string,
-	voiceSummary: string,
-): Promise<void> {
+export async function tgUpdate(textMessage: string, voiceSummary: string): Promise<void> {
 	// Send text first (immediate), then voice
 	await tgText(textMessage);
 	await tgVoice(voiceSummary);
@@ -103,10 +92,7 @@ export async function tgUpdate(
 
 // ── Event notifications ───────────────────────────────────────────────
 
-export async function notifyLeadsFound(
-	count: number,
-	criteria: string,
-): Promise<void> {
+export async function notifyLeadsFound(count: number, criteria: string): Promise<void> {
 	await tgUpdate(
 		`*LinkedIn - Leads Found*\n\n${count} leads matching: _${criteria}_\n\nReady to enrich and build outreach sequence. Reply here or go to claude.ai to review.`,
 		`Found ${count} LinkedIn leads for ${criteria}. Ready for your review.`,
@@ -124,20 +110,14 @@ export async function notifyMessageSent(
 	);
 }
 
-export async function notifyReplyReceived(
-	senderName: string,
-	preview: string,
-): Promise<void> {
+export async function notifyReplyReceived(senderName: string, preview: string): Promise<void> {
 	await tgUpdate(
 		`*LinkedIn - Reply Received*\n\n*From:* ${senderName}\n*Preview:* "${preview.slice(0, 150)}"\n\nRespond via claude.ai with the 8GI LinkedIn connector.`,
 		`${senderName} replied on LinkedIn. Check it out.`,
 	);
 }
 
-export async function notifyHyperAgentEvolution(
-	evolved: number,
-	details: string[],
-): Promise<void> {
+export async function notifyHyperAgentEvolution(evolved: number, details: string[]): Promise<void> {
 	if (evolved === 0) return;
 
 	await tgUpdate(

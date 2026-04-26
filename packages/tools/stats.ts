@@ -125,10 +125,7 @@ function percentile(arr: number[], p: number): number {
  * @param bins - The number of bins.
  * @returns An array of { value, count } objects.
  */
-function histogram(
-	arr: number[],
-	bins: number,
-): { value: number; count: number }[] {
+function histogram(arr: number[], bins: number): { value: number; count: number }[] {
 	if (arr.length === 0) return [];
 	const minVal = min(arr);
 	const maxVal = max(arr);
@@ -144,16 +141,4 @@ function histogram(
 	return result;
 }
 
-export {
-	sum,
-	mean,
-	min,
-	max,
-	range,
-	median,
-	mode,
-	variance,
-	stddev,
-	percentile,
-	histogram,
-};
+export { sum, mean, min, max, range, median, mode, variance, stddev, percentile, histogram };

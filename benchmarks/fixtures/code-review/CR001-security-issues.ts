@@ -38,10 +38,7 @@ export function findUsersByQuery(query: string): string[] {
 }
 
 // 4. File handling
-export async function readUserFile(
-	userId: string,
-	filename: string,
-): Promise<string> {
+export async function readUserFile(userId: string, filename: string): Promise<string> {
 	const fs = await import("node:fs/promises");
 	const path = `/data/users/${userId}/${filename}`;
 	return fs.readFile(path, "utf-8");
@@ -79,11 +76,7 @@ export function generateResetToken(email: string): string {
 }
 
 // 7. Logging
-export function logAction(
-	username: string,
-	action: string,
-	details: unknown,
-): void {
+export function logAction(username: string, action: string, details: unknown): void {
 	console.log(`[${new Date().toISOString()}] ${username}: ${action}`, details);
 }
 

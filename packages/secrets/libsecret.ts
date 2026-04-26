@@ -64,10 +64,7 @@ export class LibsecretVault {
 		return true;
 	}
 
-	async useSecret<T>(
-		key: string,
-		callback: (value: string) => Promise<T>,
-	): Promise<T> {
+	async useSecret<T>(key: string, callback: (value: string) => Promise<T>): Promise<T> {
 		const value = await this.get(key);
 		if (value === undefined) {
 			throw new Error(`Secret "${key}" not found in libsecret`);
@@ -105,9 +102,7 @@ export class LibsecretVault {
 		const exitCode = await proc.exited;
 
 		if (exitCode !== 0) {
-			throw new Error(
-				`libsecret write failed for "${account}": ${stderr.trim()}`,
-			);
+			throw new Error(`libsecret write failed for "${account}": ${stderr.trim()}`);
 		}
 	}
 
@@ -125,13 +120,7 @@ export class LibsecretVault {
 	}
 
 	private async deleteEntry(account: string): Promise<void> {
-		await this.runSecretTool([
-			"clear",
-			"service",
-			this.service,
-			"account",
-			account,
-		]);
+		await this.runSecretTool(["clear", "service", this.service, "account", account]);
 	}
 
 	private async readIndex(): Promise<string[]> {
@@ -139,9 +128,7 @@ export class LibsecretVault {
 		if (!raw) return [];
 		try {
 			const parsed = JSON.parse(raw);
-			return Array.isArray(parsed)
-				? parsed.filter((k) => typeof k === "string")
-				: [];
+			return Array.isArray(parsed) ? parsed.filter((k) => typeof k === "string") : [];
 		} catch {
 			return [];
 		}
@@ -193,7 +180,5 @@ export async function getOSVault() {
 	if (process.platform === "linux") {
 		return getLibsecretVault();
 	}
-	throw new Error(
-		`No OS vault available for platform "${process.platform}". Use SecretVault.`,
-	);
+	throw new Error(`No OS vault available for platform "${process.platform}". Use SecretVault.`);
 }

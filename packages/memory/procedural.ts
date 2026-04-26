@@ -58,14 +58,7 @@ export function recordProcedure(
 		const confidence = newSuccess / (newSuccess + existing.fail_count);
 		db.run(
 			"UPDATE procedural_memory SET success_count = ?, confidence = ?, last_used = ?, steps = ?, tools = ? WHERE id = ?",
-			[
-				newSuccess,
-				confidence,
-				now,
-				JSON.stringify(steps),
-				JSON.stringify(tools),
-				existing.id,
-			],
+			[newSuccess, confidence, now, JSON.stringify(steps), JSON.stringify(tools), existing.id],
 		);
 		return existing.id;
 	}
@@ -73,15 +66,7 @@ export function recordProcedure(
 	const id = randomUUIDv7();
 	db.run(
 		"INSERT INTO procedural_memory (id, pattern, steps, tools, context, success_count, fail_count, confidence, last_used, created_at) VALUES (?, ?, ?, ?, ?, 1, 0, 1.0, ?, ?)",
-		[
-			id,
-			pattern,
-			JSON.stringify(steps),
-			JSON.stringify(tools),
-			context,
-			now,
-			now,
-		],
+		[id, pattern, JSON.stringify(steps), JSON.stringify(tools), context, now, now],
 	);
 	return id;
 }
@@ -117,11 +102,7 @@ function rowToMemory(row: Record<string, unknown>): ProceduralMemory {
 	};
 }
 
-export function findProcedures(
-	db: Database,
-	query: string,
-	limit = 5,
-): ProceduralMemory[] {
+export function findProcedures(db: Database, query: string, limit = 5): ProceduralMemory[] {
 	const rows = db
 		.query(
 			"SELECT * FROM procedural_memory WHERE pattern LIKE ? ORDER BY confidence DESC, last_used DESC LIMIT ?",
@@ -132,9 +113,7 @@ export function findProcedures(
 
 export function getTopProcedures(db: Database, limit = 10): ProceduralMemory[] {
 	const rows = db
-		.query(
-			"SELECT * FROM procedural_memory ORDER BY confidence DESC, last_used DESC LIMIT ?",
-		)
+		.query("SELECT * FROM procedural_memory ORDER BY confidence DESC, last_used DESC LIMIT ?")
 		.all(limit) as Record<string, unknown>[];
 	return rows.map(rowToMemory);
 }

@@ -18,12 +18,7 @@ function send(msg: RPCResponse | RPCNotification): void {
 function sendResult(id: number | string, result: unknown): void {
 	send({ jsonrpc: "2.0", id, result });
 }
-function sendError(
-	id: number | string,
-	code: number,
-	message: string,
-	data?: unknown,
-): void {
+function sendError(id: number | string, code: number, message: string, data?: unknown): void {
 	send({ jsonrpc: "2.0", id, error: { code, message, data } });
 }
 function notify(method: string, params: Record<string, unknown>): void {
@@ -32,15 +27,11 @@ function notify(method: string, params: Record<string, unknown>): void {
 
 // ── Method dispatch ───────────────────────────────────────────────
 
-type Handler = (
-	id: number | string,
-	params: Record<string, unknown>,
-) => Promise<void>;
+type Handler = (id: number | string, params: Record<string, unknown>) => Promise<void>;
 
 const methods: Record<string, Handler> = {
 	"session.create": async (id, params) => {
-		const model =
-			(params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
+		const model = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
 		const cwd = (params.cwd as string) || process.cwd();
 		const sessionId = `rpc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -79,20 +70,12 @@ const methods: Record<string, Handler> = {
 		const content = params.content as string;
 
 		if (!sessionId || !content) {
-			return sendError(
-				id,
-				RPC_ERRORS.INVALID_PARAMS,
-				"sessionId and content required",
-			);
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "sessionId and content required");
 		}
 
 		const session = sessions.get(sessionId);
 		if (!session) {
-			return sendError(
-				id,
-				RPC_ERRORS.INVALID_PARAMS,
-				`Unknown session: ${sessionId}`,
-			);
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
 		}
 
 		try {
@@ -110,11 +93,7 @@ const methods: Record<string, Handler> = {
 		const sessionId = params.sessionId as string;
 		const session = sessions.get(sessionId);
 		if (!session) {
-			return sendError(
-				id,
-				RPC_ERRORS.INVALID_PARAMS,
-				`Unknown session: ${sessionId}`,
-			);
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
 		}
 		session.agent.abort();
 		sendResult(id, { ok: true });
@@ -124,11 +103,7 @@ const methods: Record<string, Handler> = {
 		const sessionId = params.sessionId as string;
 		const session = sessions.get(sessionId);
 		if (!session) {
-			return sendError(
-				id,
-				RPC_ERRORS.INVALID_PARAMS,
-				`Unknown session: ${sessionId}`,
-			);
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
 		}
 		await session.agent.cleanup();
 		sessions.delete(sessionId);
@@ -154,20 +129,12 @@ async function handleLine(line: string): Promise<void> {
 	}
 
 	if (parsed.jsonrpc !== "2.0" || !parsed.method || parsed.id == null) {
-		return sendError(
-			parsed.id ?? 0,
-			RPC_ERRORS.INVALID_REQUEST,
-			"Invalid JSON-RPC 2.0 request",
-		);
+		return sendError(parsed.id ?? 0, RPC_ERRORS.INVALID_REQUEST, "Invalid JSON-RPC 2.0 request");
 	}
 
 	const handler = methods[parsed.method];
 	if (!handler) {
-		return sendError(
-			parsed.id,
-			RPC_ERRORS.METHOD_NOT_FOUND,
-			`Unknown method: ${parsed.method}`,
-		);
+		return sendError(parsed.id, RPC_ERRORS.METHOD_NOT_FOUND, `Unknown method: ${parsed.method}`);
 	}
 
 	try {
@@ -189,9 +156,7 @@ export async function startRPCServer(): Promise<void> {
 	console.debug = stderrWrite;
 	// Keep console.error on stderr (already there)
 
-	process.stderr.write(
-		"[8gent-rpc] Server ready. Waiting for JSON-RPC requests on stdin.\n",
-	);
+	process.stderr.write("[8gent-rpc] Server ready. Waiting for JSON-RPC requests on stdin.\n");
 
 	const rl = readline.createInterface({
 		input: process.stdin,

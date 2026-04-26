@@ -48,8 +48,7 @@ function byTiktokenApprox(text: string): number {
 	if (!text) return 0;
 
 	// cl100k_base primary split pattern (simplified)
-	const pattern =
-		/(?:'s|'t|'re|'ve|'m|'ll|'d)|(?:[A-Za-z]+)|(?:[0-9]{1,3})|(?:[^\s\w])/g;
+	const pattern = /(?:'s|'t|'re|'ve|'m|'ll|'d)|(?:[A-Za-z]+)|(?:[0-9]{1,3})|(?:[^\s\w])/g;
 
 	const matches = text.match(pattern);
 	if (!matches) return 0;
@@ -78,10 +77,7 @@ function byTiktokenApprox(text: string): number {
  * @param text   - The text to measure.
  * @param method - Estimation method. Defaults to "tiktoken-approx".
  */
-export function countTokens(
-	text: string,
-	method: TokenMethod = "tiktoken-approx",
-): number {
+export function countTokens(text: string, method: TokenMethod = "tiktoken-approx"): number {
 	if (!text) return 0;
 	switch (method) {
 		case "chars4":

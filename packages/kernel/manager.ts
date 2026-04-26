@@ -9,11 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ScoreRecord } from "./judge";
 import { type LoopStatus, type ProductionConfig, ProductionLoop } from "./loop";
-import {
-	type CollectorStats,
-	PersonalCollector,
-	type TrainingPair,
-} from "./personal-collector";
+import { type CollectorStats, PersonalCollector, type TrainingPair } from "./personal-collector";
 import type { CheckpointInfo } from "./training";
 
 export interface KernelConfig {

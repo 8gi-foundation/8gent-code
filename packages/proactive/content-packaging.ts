@@ -138,44 +138,40 @@ const QUESTION_STARTERS =
 	/^(how|what|why|when|where|who|do|does|can|should|would|could|will|is|are)\b/i;
 const PROOF_PATTERNS =
 	/\b(i studied|i analyzed|i tested|data shows|after \d+|(\d+) out of (\d+))\b/i;
-const PROMISE_PATTERNS =
-	/\b(i'll teach|i'm going to show|learn how to|discover|secrets? to)\b/i;
+const PROMISE_PATTERNS = /\b(i'll teach|i'm going to show|learn how to|discover|secrets? to)\b/i;
 const CONCRETE_PATTERN =
 	/(\$[\d,]+k?|\d+%|\d+[\s-]+(days?|months?|hours?|years?|weeks?)|\d{2,}[\s,]*(followers?|subscribers?|views?|customers?))/i;
 const NUMBER_PATTERN = /\d+/;
 
-const FORMULAS: Record<
-	FormulaName,
-	{ template: string; example: string; avgPerformance: number }
-> = {
-	"if-i-wanted-to": {
-		template: "if i wanted to {topic} in 2026, i'd do this.",
-		example:
-			"if i wanted to get my first 1,000 followers on Threads in 2026, i'd do this.",
-		avgPerformance: 28060,
-	},
-	"heres-how-to": {
-		template: "here's how to {topic} (step by step).",
-		example: "here's how to close your first $10k client (step by step).",
-		avgPerformance: 9200,
-	},
-	"i-did-x-found-y": {
-		template: "I studied how people {topic} and found 7 patterns.",
-		example:
-			"I studied how people get their first 1,000 followers on Threads and found 7 patterns.",
-		avgPerformance: 8100,
-	},
-	"x-things-learned": {
-		template: "5 things I learned from {topic}.",
-		example: "5 things I learned from building a $1M newsletter.",
-		avgPerformance: 7400,
-	},
-	"number-timeframe-outcome": {
-		template: "30 days to {topic} - the exact playbook.",
-		example: "30 days to 10,000 subscribers - the exact playbook.",
-		avgPerformance: 6800,
-	},
-};
+const FORMULAS: Record<FormulaName, { template: string; example: string; avgPerformance: number }> =
+	{
+		"if-i-wanted-to": {
+			template: "if i wanted to {topic} in 2026, i'd do this.",
+			example: "if i wanted to get my first 1,000 followers on Threads in 2026, i'd do this.",
+			avgPerformance: 28060,
+		},
+		"heres-how-to": {
+			template: "here's how to {topic} (step by step).",
+			example: "here's how to close your first $10k client (step by step).",
+			avgPerformance: 9200,
+		},
+		"i-did-x-found-y": {
+			template: "I studied how people {topic} and found 7 patterns.",
+			example:
+				"I studied how people get their first 1,000 followers on Threads and found 7 patterns.",
+			avgPerformance: 8100,
+		},
+		"x-things-learned": {
+			template: "5 things I learned from {topic}.",
+			example: "5 things I learned from building a $1M newsletter.",
+			avgPerformance: 7400,
+		},
+		"number-timeframe-outcome": {
+			template: "30 days to {topic} - the exact playbook.",
+			example: "30 days to 10,000 subscribers - the exact playbook.",
+			avgPerformance: 6800,
+		},
+	};
 
 const FORMULA_DETECTORS: Array<{ name: FormulaName; pattern: RegExp }> = [
 	{ name: "if-i-wanted-to", pattern: /^if i wanted to\b/i },
@@ -219,8 +215,7 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 			};
 		}
 		case "CONCRETE_OVER_ABSTRACT": {
-			const hasConcrete =
-				CONCRETE_PATTERN.test(text) || NUMBER_PATTERN.test(text);
+			const hasConcrete = CONCRETE_PATTERN.test(text) || NUMBER_PATTERN.test(text);
 			const hasAbstract = ABSTRACT_WORDS.some((w) => lower.includes(w));
 			if (hasConcrete && !hasAbstract)
 				return {
@@ -234,8 +229,7 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 					rule: rule.name,
 					score: 5,
 					passed: true,
-					feedback:
-						"Has concrete details but also abstract words. Cut the fluff.",
+					feedback: "Has concrete details but also abstract words. Cut the fluff.",
 				};
 			if (hasAbstract)
 				return {
@@ -248,8 +242,7 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 				rule: rule.name,
 				score: 0,
 				passed: false,
-				feedback:
-					"No concrete specifics found. Add numbers, dollar amounts, or timeframes.",
+				feedback: "No concrete specifics found. Add numbers, dollar amounts, or timeframes.",
 			};
 		}
 		case "PROOF_OVER_PROMISE": {
@@ -267,15 +260,13 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 					rule: rule.name,
 					score: -10,
 					passed: false,
-					feedback:
-						"Promise-based hook. Lead with what you found/tested instead.",
+					feedback: "Promise-based hook. Lead with what you found/tested instead.",
 				};
 			return {
 				rule: rule.name,
 				score: 0,
 				passed: false,
-				feedback:
-					"Neither proof nor promise detected. Consider leading with evidence.",
+				feedback: "Neither proof nor promise detected. Consider leading with evidence.",
 			};
 		}
 		case "PROVEN_FORMULAS": {
@@ -291,15 +282,12 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 				rule: rule.name,
 				score: 0,
 				passed: false,
-				feedback:
-					"Doesn't match a known high-performing formula. Consider restructuring.",
+				feedback: "Doesn't match a known high-performing formula. Consider restructuring.",
 			};
 		}
 		case "FIRST_LINE_IS_DISTRIBUTION": {
-			const hasHookElement =
-				NUMBER_PATTERN.test(first8) || CONCRETE_PATTERN.test(first8);
-			const isGeneric =
-				first8.length > 0 && !hasHookElement && words.length > 2;
+			const hasHookElement = NUMBER_PATTERN.test(first8) || CONCRETE_PATTERN.test(first8);
+			const isGeneric = first8.length > 0 && !hasHookElement && words.length > 2;
 			if (hasHookElement)
 				return {
 					rule: rule.name,
@@ -312,22 +300,19 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 					rule: rule.name,
 					score: -5,
 					passed: false,
-					feedback:
-						"First 8 words are generic. Front-load a number or specific outcome.",
+					feedback: "First 8 words are generic. Front-load a number or specific outcome.",
 				};
 			return {
 				rule: rule.name,
 				score: 0,
 				passed: false,
-				feedback:
-					"Weak opening. Put the most compelling element in the first 8 words.",
+				feedback: "Weak opening. Put the most compelling element in the first 8 words.",
 			};
 		}
 		case "PACKAGING_WEIGHT": {
 			// Meta-rule: not directly scorable, acts as a weight multiplier.
 			// Give a small bonus if other packaging signals are strong (detected via concrete + formula).
-			const hasConcrete =
-				CONCRETE_PATTERN.test(text) || NUMBER_PATTERN.test(text);
+			const hasConcrete = CONCRETE_PATTERN.test(text) || NUMBER_PATTERN.test(text);
 			const hasFormula = FORMULA_DETECTORS.some((f) => f.pattern.test(lower));
 			if (hasConcrete && hasFormula)
 				return {
@@ -340,8 +325,7 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 				rule: rule.name,
 				score: 0,
 				passed: true,
-				feedback:
-					"Packaging = 60% of performance. Invest more time here than on content quality.",
+				feedback: "Packaging = 60% of performance. Invest more time here than on content quality.",
 			};
 		}
 		case "SPECIFICITY_KILLS_VAGUENESS": {
@@ -352,8 +336,7 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 					rule: rule.name,
 					score: -10,
 					passed: false,
-					feedback:
-						"Vague goal detected. Replace with a specific measurable outcome.",
+					feedback: "Vague goal detected. Replace with a specific measurable outcome.",
 				};
 			if (hasSpecific)
 				return {
@@ -366,8 +349,7 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 				rule: rule.name,
 				score: 0,
 				passed: false,
-				feedback:
-					"Add a specific, measurable outcome to replace any vague goals.",
+				feedback: "Add a specific, measurable outcome to replace any vague goals.",
 			};
 		}
 	}
@@ -381,17 +363,12 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 export function scoreHook(text: string): PackagingScore {
 	const breakdown = RULES.map((rule) => evaluateRule(text, rule));
 	const totalWeight = RULES.reduce((sum, r) => sum + r.weight, 0);
-	const weightedSum = breakdown.reduce(
-		(sum, rs, i) => sum + rs.score * RULES[i].weight,
-		0,
-	);
+	const weightedSum = breakdown.reduce((sum, rs, i) => sum + rs.score * RULES[i].weight, 0);
 	// Normalize: max possible weighted score is ~80, min is ~-80. Map to 0-100.
 	const maxPossible = 65;
 	const raw = 50 + (weightedSum / totalWeight) * (50 / 15);
 	const overall = Math.max(0, Math.min(100, Math.round(raw)));
-	const worst = breakdown
-		.filter((r) => !r.passed)
-		.sort((a, b) => a.score - b.score)[0];
+	const worst = breakdown.filter((r) => !r.passed).sort((a, b) => a.score - b.score)[0];
 
 	return {
 		overall,
@@ -403,9 +380,7 @@ export function scoreHook(text: string): PackagingScore {
 
 /** Identify which rules are violated with specific, actionable feedback. */
 export function diagnoseHook(text: string): RuleScore[] {
-	return RULES.map((rule) => evaluateRule(text, rule)).filter(
-		(rs) => !rs.passed,
-	);
+	return RULES.map((rule) => evaluateRule(text, rule)).filter((rs) => !rs.passed);
 }
 
 /** Apply a proven formula to a topic string. Simple interpolation, no AI needed. */
@@ -444,8 +419,7 @@ export function auditBatch(hooks: string[]): AuditReport {
 			if (!rs.passed) violations[rs.rule] = (violations[rs.rule] || 0) + 1;
 		}
 	}
-	const topPattern =
-		Object.entries(violations).sort((a, b) => b[1] - a[1])[0]?.[0] || "none";
+	const topPattern = Object.entries(violations).sort((a, b) => b[1] - a[1])[0]?.[0] || "none";
 
 	return { hooks: scored, summary: { average, best, worst, topPattern } };
 }

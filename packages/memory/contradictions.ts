@@ -133,7 +133,5 @@ function wordOverlap(a: string, b: string): number {
 
 export function resolveContradiction(c: Contradiction): string {
 	// Newer memory wins by default
-	return c.memoryA.createdAt > c.memoryB.createdAt
-		? c.memoryA.id
-		: c.memoryB.id;
+	return c.memoryA.createdAt > c.memoryB.createdAt ? c.memoryA.id : c.memoryB.id;
 }

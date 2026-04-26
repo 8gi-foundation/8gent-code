@@ -121,11 +121,7 @@ export function StepIndicator({ steps, currentStep }: StepIndicatorProps) {
 							</Text>
 						)}
 						{isPending && <MutedText>○</MutedText>}
-						{isCurrent ? (
-							<Label> {step}</Label>
-						) : (
-							<MutedText> {step}</MutedText>
-						)}
+						{isCurrent ? <Label> {step}</Label> : <MutedText> {step}</MutedText>}
 						{index < steps.length - 1 && <MutedText> → </MutedText>}
 					</Box>
 				);

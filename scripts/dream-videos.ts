@@ -27,9 +27,7 @@ const FAL_KEY = process.env.FAL_KEY || "";
 const TEMP_DIR = path.join(os.homedir(), ".8gent", "dreams");
 
 if (!FAL_KEY) {
-	console.error(
-		"FAL_KEY not found in env. Set it in ~/Myresumeportfolio/.env.local",
-	);
+	console.error("FAL_KEY not found in env. Set it in ~/Myresumeportfolio/.env.local");
 	process.exit(1);
 }
 
@@ -72,20 +70,13 @@ function getTodaysLearnings(): string[] {
 	try {
 		const nightlyLog = path.join(os.homedir(), ".8gent", "nightly.log");
 		if (fs.existsSync(nightlyLog)) {
-			const lines = fs
-				.readFileSync(nightlyLog, "utf-8")
-				.split("\n")
-				.filter(Boolean);
-			const summaries = lines
-				.filter((l) => l.includes("Benchmark summary:"))
-				.slice(-3);
+			const lines = fs.readFileSync(nightlyLog, "utf-8").split("\n").filter(Boolean);
+			const summaries = lines.filter((l) => l.includes("Benchmark summary:")).slice(-3);
 			summaries.forEach((s) => {
 				const m = s.match(/Benchmark summary: (.+)/);
 				if (m) learnings.push(`Benchmark run: ${m[1]}`);
 			});
-			const heals = lines
-				.filter((l) => l.includes("[HEAL]") || l.includes("[HYPER]"))
-				.slice(-2);
+			const heals = lines.filter((l) => l.includes("[HEAL]") || l.includes("[HYPER]")).slice(-2);
 			heals.forEach((h) => {
 				const m = h.match(/\] (.+)/);
 				if (m) learnings.push(m[1].trim());
@@ -97,11 +88,7 @@ function getTodaysLearnings(): string[] {
 
 	// 3. Pull last few benchmark learnings
 	try {
-		const learningsLog = path.join(
-			os.homedir(),
-			".8gent",
-			"benchmark-learnings.log",
-		);
+		const learningsLog = path.join(os.homedir(), ".8gent", "benchmark-learnings.log");
 		if (fs.existsSync(learningsLog)) {
 			const content = fs.readFileSync(learningsLog, "utf-8");
 			const blocks = content.split("---").filter(Boolean);
@@ -225,9 +212,7 @@ async function pollForResult(
 					log(`Video ready: ${videoUrl}`);
 					return videoUrl;
 				}
-				log(
-					`Completed but no video URL: ${JSON.stringify(result).slice(0, 300)}`,
-				);
+				log(`Completed but no video URL: ${JSON.stringify(result).slice(0, 300)}`);
 				return null;
 			}
 
@@ -253,10 +238,7 @@ async function pollForResult(
 // Download + Send to Telegram
 // ============================================
 
-async function downloadVideo(
-	url: string,
-	filename: string,
-): Promise<string | null> {
+async function downloadVideo(url: string, filename: string): Promise<string | null> {
 	try {
 		const response = await fetch(url);
 		if (!response.ok) return null;
@@ -264,9 +246,7 @@ async function downloadVideo(
 		const buffer = await response.arrayBuffer();
 		const filePath = path.join(TEMP_DIR, filename);
 		fs.writeFileSync(filePath, Buffer.from(buffer));
-		log(
-			`Downloaded: ${filePath} (${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB)`,
-		);
+		log(`Downloaded: ${filePath} (${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB)`);
 		return filePath;
 	} catch (err) {
 		log(`Download error: ${err}`);
@@ -274,28 +254,18 @@ async function downloadVideo(
 	}
 }
 
-async function sendTelegramVideo(
-	videoPath: string,
-	caption: string,
-): Promise<boolean> {
+async function sendTelegramVideo(videoPath: string, caption: string): Promise<boolean> {
 	try {
 		const formData = new FormData();
 		formData.append("chat_id", CHAT_ID);
-		formData.append(
-			"video",
-			new Blob([fs.readFileSync(videoPath)]),
-			path.basename(videoPath),
-		);
+		formData.append("video", new Blob([fs.readFileSync(videoPath)]), path.basename(videoPath));
 		formData.append("caption", caption.slice(0, 1024)); // Telegram caption limit
 		formData.append("parse_mode", "HTML");
 
-		const response = await fetch(
-			`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo`,
-			{
-				method: "POST",
-				body: formData,
-			},
-		);
+		const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVideo`, {
+			method: "POST",
+			body: formData,
+		});
 
 		const data = (await response.json()) as any;
 		if (data.ok) {
@@ -340,10 +310,7 @@ async function main() {
 		const videoUrl = await generateVideo(dream.prompt);
 
 		if (videoUrl) {
-			const videoPath = await downloadVideo(
-				videoUrl,
-				`dream_${i + 1}_${Date.now()}.mp4`,
-			);
+			const videoPath = await downloadVideo(videoUrl, `dream_${i + 1}_${Date.now()}.mp4`);
 			if (videoPath) {
 				const sent = await sendTelegramVideo(videoPath, dream.caption);
 				if (sent) {

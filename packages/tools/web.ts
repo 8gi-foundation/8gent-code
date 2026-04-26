@@ -65,16 +65,13 @@ export async function webSearch(
 			headers: {
 				"User-Agent":
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-				Accept:
-					"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+				Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 				"Accept-Language": "en-US,en;q=0.5",
 			},
 		});
 
 		if (!response.ok) {
-			throw new Error(
-				`Search failed: ${response.status} ${response.statusText}`,
-			);
+			throw new Error(`Search failed: ${response.status} ${response.statusText}`);
 		}
 
 		const html = await response.text();
@@ -136,10 +133,7 @@ export async function webFetch(
 	try {
 		// Normalize URL
 		let normalizedUrl = url;
-		if (
-			!normalizedUrl.startsWith("http://") &&
-			!normalizedUrl.startsWith("https://")
-		) {
+		if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
 			normalizedUrl = `https://${normalizedUrl}`;
 		}
 
@@ -147,26 +141,20 @@ export async function webFetch(
 			headers: {
 				"User-Agent":
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-				Accept:
-					"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+				Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 				"Accept-Language": "en-US,en;q=0.5",
 			},
 			redirect: "follow",
 		});
 
 		if (!response.ok) {
-			throw new Error(
-				`Fetch failed: ${response.status} ${response.statusText}`,
-			);
+			throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
 		}
 
 		const contentType = response.headers.get("content-type") || "";
 
 		// Handle non-HTML content
-		if (
-			!contentType.includes("text/html") &&
-			!contentType.includes("application/xhtml")
-		) {
+		if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
 			const text = await response.text();
 			return {
 				title: normalizedUrl,
@@ -204,10 +192,7 @@ export async function webFetch(
 
 		// Try to extract title
 		const $ = cheerio.load(html);
-		const title =
-			$("title").text().trim() ||
-			$("h1").first().text().trim() ||
-			normalizedUrl;
+		const title = $("title").text().trim() || $("h1").first().text().trim() || normalizedUrl;
 
 		return {
 			title,
@@ -232,9 +217,7 @@ function htmlToMarkdown(html: string): string {
 	const $ = cheerio.load(html);
 
 	// Remove scripts, styles, and other non-content elements
-	$(
-		"script, style, nav, footer, header, aside, .sidebar, .advertisement, .ad, .ads",
-	).remove();
+	$("script, style, nav, footer, header, aside, .sidebar, .advertisement, .ad, .ads").remove();
 
 	// Convert common elements
 	$("h1").each((_, el) => {

@@ -103,8 +103,7 @@ export function getModelOrder(
 	const domainScores: Record<string, { total: number; count: number }> = {};
 	for (const entry of db.byDomain[domain] ?? []) {
 		if (!availableModels.includes(entry.model)) continue;
-		if (!domainScores[entry.model])
-			domainScores[entry.model] = { total: 0, count: 0 };
+		if (!domainScores[entry.model]) domainScores[entry.model] = { total: 0, count: 0 };
 		domainScores[entry.model].total += entry.score;
 		domainScores[entry.model].count += 1;
 	}
@@ -113,8 +112,7 @@ export function getModelOrder(
 	const benchScores: Record<string, { total: number; count: number }> = {};
 	for (const entry of db.byBenchmark[benchmarkId] ?? []) {
 		if (!availableModels.includes(entry.model)) continue;
-		if (!benchScores[entry.model])
-			benchScores[entry.model] = { total: 0, count: 0 };
+		if (!benchScores[entry.model]) benchScores[entry.model] = { total: 0, count: 0 };
 		benchScores[entry.model].total += entry.score;
 		benchScores[entry.model].count += 1;
 	}
@@ -125,9 +123,7 @@ export function getModelOrder(
 		const domainAvg = domainScores[model]
 			? domainScores[model].total / domainScores[model].count
 			: -1; // untried = -1
-		const benchAvg = benchScores[model]
-			? benchScores[model].total / benchScores[model].count
-			: -1;
+		const benchAvg = benchScores[model] ? benchScores[model].total / benchScores[model].count : -1;
 
 		if (domainAvg === -1 && benchAvg === -1) {
 			// Never tried this model for this domain — give it exploration priority
@@ -138,8 +134,7 @@ export function getModelOrder(
 			const dScore = domainAvg >= 0 ? domainAvg : 0;
 			const bScore = benchAvg >= 0 ? benchAvg : 0;
 			const weights = (benchAvg >= 0 ? 2 : 0) + (domainAvg >= 0 ? 1 : 0);
-			combined[model] =
-				weights > 0 ? (bScore * 2 + dScore) / Math.max(weights, 1) : 0;
+			combined[model] = weights > 0 ? (bScore * 2 + dScore) / Math.max(weights, 1) : 0;
 		}
 	}
 
@@ -174,9 +169,7 @@ export function getExperienceSummary(): string {
 
 		const best = sorted[0];
 		if (best) {
-			lines.push(
-				`  ${domain}: ${best.model} (avg ${best.avg}, ${best.runs} runs)`,
-			);
+			lines.push(`  ${domain}: ${best.model} (avg ${best.avg}, ${best.runs} runs)`);
 		}
 	}
 

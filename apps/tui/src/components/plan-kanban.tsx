@@ -225,24 +225,14 @@ export function PlanKanban({
 					width={columnWidth}
 					color="blue"
 				/>
-				<ColumnHeader
-					title="Ready"
-					count={board.ready.length}
-					width={columnWidth}
-					color="yellow"
-				/>
+				<ColumnHeader title="Ready" count={board.ready.length} width={columnWidth} color="yellow" />
 				<ColumnHeader
 					title="In Progress"
 					count={board.inProgress.length}
 					width={columnWidth}
 					color="cyan"
 				/>
-				<ColumnHeader
-					title="Done"
-					count={board.done.length}
-					width={columnWidth}
-					color="green"
-				/>
+				<ColumnHeader title="Done" count={board.done.length} width={columnWidth} color="green" />
 			</Inline>
 
 			{/* Column Content */}
@@ -285,10 +275,7 @@ export function PlanKanban({
 			<Inline justifyContent="space-between" marginTop={1}>
 				<MutedText>
 					Total:{" "}
-					{board.backlog.length +
-						board.ready.length +
-						board.inProgress.length +
-						board.done.length}{" "}
+					{board.backlog.length + board.ready.length + board.inProgress.length + board.done.length}{" "}
 					steps
 				</MutedText>
 				<MutedText>
@@ -398,13 +385,7 @@ interface KanbanCardProps {
 	width: number;
 }
 
-function KanbanCard({
-	step,
-	isSelected,
-	onSelect,
-	compact,
-	width,
-}: KanbanCardProps) {
+function KanbanCard({ step, isSelected, onSelect, compact, width }: KanbanCardProps) {
 	const categoryColor = categoryColors[step.category] || "blue";
 	const priorityColor = priorityColors[step.priority] || "blue";
 
@@ -419,9 +400,7 @@ function KanbanCard({
 	if (compact) {
 		return (
 			<Inline gap={0} paddingX={1} {...cardStyle}>
-				<AppText color={categoryColor as any}>
-					{getCategoryIcon(step.category)}
-				</AppText>
+				<AppText color={categoryColor as any}>{getCategoryIcon(step.category)}</AppText>
 				<Label> {truncatedDesc}</Label>
 			</Inline>
 		);
@@ -434,11 +413,7 @@ function KanbanCard({
 				<AppText color={categoryColor as any}>
 					{getCategoryIcon(step.category)} {step.category}
 				</AppText>
-				<Badge
-					label={`P${step.priority}`}
-					color={priorityColor as any}
-					variant="outline"
-				/>
+				<Badge label={`P${step.priority}`} color={priorityColor as any} variant="outline" />
 			</Inline>
 
 			{/* Description */}
@@ -527,11 +502,7 @@ function AvenueCard({ avenue, index, isActive, onSelect }: AvenueCardProps) {
 					<AppText color="yellow">[{index}]</AppText>
 					<Label color={categoryColor as any}> {avenue.name}</Label>
 				</Inline>
-				<Badge
-					label={avenue.category}
-					color={categoryColor as any}
-					variant="outline"
-				/>
+				<Badge label={avenue.category} color={categoryColor as any} variant="outline" />
 			</Inline>
 
 			{/* Description */}
@@ -546,8 +517,7 @@ function AvenueCard({ avenue, index, isActive, onSelect }: AvenueCardProps) {
 
 			{/* Steps count */}
 			<MutedText>
-				{avenue.plan.steps.length} steps planned, ~
-				{Math.round(avenue.plan.estimatedTime / 60)}min
+				{avenue.plan.steps.length} steps planned, ~{Math.round(avenue.plan.estimatedTime / 60)}min
 			</MutedText>
 		</Stack>
 	);
@@ -596,12 +566,7 @@ export function PredictedSteps({
 
 			{/* Steps */}
 			{displaySteps.map((step, index) => (
-				<PredictedStepCard
-					key={step.id}
-					step={step}
-					index={index + 1}
-					onAccept={onStepAccept}
-				/>
+				<PredictedStepCard key={step.id} step={step} index={index + 1} onAccept={onStepAccept} />
 			))}
 
 			{steps.length > maxItems && (
@@ -629,10 +594,7 @@ function PredictedStepCard({ step, index, onAccept }: PredictedStepCardProps) {
 	return (
 		<Inline gap={0} paddingX={1} marginBottom={0}>
 			<AppText color="yellow">[{index}]</AppText>
-			<AppText color={categoryColor as any}>
-				{" "}
-				{getCategoryIcon(step.category)}
-			</AppText>
+			<AppText color={categoryColor as any}> {getCategoryIcon(step.category)}</AppText>
 			<Label> {step.description}</Label>
 			<MutedText> {confidenceBar}</MutedText>
 		</Inline>
@@ -692,12 +654,7 @@ export function AutoPlanKanban({
 					width={columnWidth}
 					color="cyan"
 				/>
-				<ColumnHeader
-					title="Done"
-					count={columns.done.length}
-					width={columnWidth}
-					color="green"
-				/>
+				<ColumnHeader title="Done" count={columns.done.length} width={columnWidth} color="green" />
 			</Inline>
 
 			{/* Column Content */}
@@ -758,12 +715,7 @@ interface AutoKanbanColumnProps {
 	compact: boolean;
 }
 
-function AutoKanbanColumn({
-	items,
-	width,
-	maxItems,
-	compact,
-}: AutoKanbanColumnProps) {
+function AutoKanbanColumn({ items, width, maxItems, compact }: AutoKanbanColumnProps) {
 	const displayItems = items.slice(0, maxItems);
 	const hiddenCount = items.length - maxItems;
 
@@ -775,12 +727,7 @@ function AutoKanbanColumn({
 			minHeight={maxItems * (compact ? 2 : 3) + 2}
 		>
 			{displayItems.map((item) => (
-				<AutoKanbanCardView
-					key={item.id}
-					card={item}
-					compact={compact}
-					width={width - 2}
-				/>
+				<AutoKanbanCardView key={item.id} card={item} compact={compact} width={width - 2} />
 			))}
 
 			{items.length === 0 && (
@@ -867,11 +814,7 @@ export interface AutoMiniKanbanProps {
 	width?: number;
 }
 
-export function AutoMiniKanban({
-	columns,
-	stats,
-	width = 60,
-}: AutoMiniKanbanProps) {
+export function AutoMiniKanban({ columns, stats, width = 60 }: AutoMiniKanbanProps) {
 	if (stats.total === 0) {
 		return <MutedText>No tasks</MutedText>;
 	}
@@ -881,33 +824,13 @@ export function AutoMiniKanban({
 	return (
 		<Inline gap={0}>
 			<MutedText>[</MutedText>
-			<AutoMiniColumn
-				items={columns.backlog}
-				label="B"
-				color="blue"
-				width={colWidth}
-			/>
+			<AutoMiniColumn items={columns.backlog} label="B" color="blue" width={colWidth} />
 			<MutedText>|</MutedText>
-			<AutoMiniColumn
-				items={columns.ready}
-				label="R"
-				color="yellow"
-				width={colWidth}
-			/>
+			<AutoMiniColumn items={columns.ready} label="R" color="yellow" width={colWidth} />
 			<MutedText>|</MutedText>
-			<AutoMiniColumn
-				items={columns.inProgress}
-				label="P"
-				color="cyan"
-				width={colWidth}
-			/>
+			<AutoMiniColumn items={columns.inProgress} label="P" color="cyan" width={colWidth} />
 			<MutedText>|</MutedText>
-			<AutoMiniColumn
-				items={columns.done}
-				label="D"
-				color="green"
-				width={colWidth}
-			/>
+			<AutoMiniColumn items={columns.done} label="D" color="green" width={colWidth} />
 			<MutedText>]</MutedText>
 		</Inline>
 	);
@@ -924,10 +847,7 @@ function AutoMiniColumn({
 	color: string;
 	width: number;
 }) {
-	const dots =
-		items.length > 0
-			? "\u25CF".repeat(Math.min(items.length, width - 2))
-			: "\u00B7";
+	const dots = items.length > 0 ? "\u25CF".repeat(Math.min(items.length, width - 2)) : "\u00B7";
 
 	return (
 		<Box width={width}>
@@ -948,10 +868,7 @@ export interface MiniKanbanProps {
 
 export function MiniKanban({ board, width = 60 }: MiniKanbanProps) {
 	const total =
-		board.backlog.length +
-		board.ready.length +
-		board.inProgress.length +
-		board.done.length;
+		board.backlog.length + board.ready.length + board.inProgress.length + board.done.length;
 
 	if (total === 0) {
 		return <MutedText>No planned steps</MutedText>;
@@ -962,26 +879,11 @@ export function MiniKanban({ board, width = 60 }: MiniKanbanProps) {
 	return (
 		<Inline gap={0}>
 			<MutedText>[</MutedText>
-			<MiniColumn
-				items={board.backlog}
-				label="B"
-				color="blue"
-				width={colWidth}
-			/>
+			<MiniColumn items={board.backlog} label="B" color="blue" width={colWidth} />
 			<MutedText>|</MutedText>
-			<MiniColumn
-				items={board.ready}
-				label="R"
-				color="yellow"
-				width={colWidth}
-			/>
+			<MiniColumn items={board.ready} label="R" color="yellow" width={colWidth} />
 			<MutedText>|</MutedText>
-			<MiniColumn
-				items={board.inProgress}
-				label="P"
-				color="cyan"
-				width={colWidth}
-			/>
+			<MiniColumn items={board.inProgress} label="P" color="cyan" width={colWidth} />
 			<MutedText>|</MutedText>
 			<MiniColumn items={board.done} label="D" color="green" width={colWidth} />
 			<MutedText>]</MutedText>
@@ -1000,10 +902,7 @@ function MiniColumn({
 	color: string;
 	width: number;
 }) {
-	const dots =
-		items.length > 0
-			? "\u25CF".repeat(Math.min(items.length, width - 2))
-			: "\u00B7";
+	const dots = items.length > 0 ? "\u25CF".repeat(Math.min(items.length, width - 2)) : "\u00B7";
 
 	return (
 		<Box width={width}>

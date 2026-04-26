@@ -73,9 +73,9 @@ export class PromotionManager {
 			.run(now, now, cutoff, cutoff);
 
 		const retained = (
-			this.db
-				.prepare("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL")
-				.get() as { c: number }
+			this.db.prepare("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL").get() as {
+				c: number;
+			}
 		).c;
 
 		return {
@@ -142,14 +142,10 @@ export class PromotionManager {
 
 	private _ensureColumns(): void {
 		try {
-			const cols = this.db
-				.prepare("PRAGMA table_info(memories)")
-				.all() as Array<{ name: string }>;
+			const cols = this.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
 			const names = new Set(cols.map((c) => c.name));
 			if (!names.has("decay_factor")) {
-				this.db.exec(
-					"ALTER TABLE memories ADD COLUMN decay_factor REAL NOT NULL DEFAULT 1.0",
-				);
+				this.db.exec("ALTER TABLE memories ADD COLUMN decay_factor REAL NOT NULL DEFAULT 1.0");
 			}
 		} catch {
 			// Table not yet created — MemoryStore will handle schema init
@@ -192,17 +188,11 @@ export function boostEvidence(db: Database, memoryId: string): void {
 
 // ── Standalone helpers ────────────────────────────────────────────────
 
-export function isPromoted(
-	accessCount: number,
-	importanceScore: number,
-): boolean {
+export function isPromoted(accessCount: number, importanceScore: number): boolean {
 	return accessCount >= PROMOTE_RECALL_THRESHOLD && importanceScore >= 0.9;
 }
 
-export function daysUntilArchival(
-	lastAccessedMs: number | null,
-	createdAtMs: number,
-): number {
+export function daysUntilArchival(lastAccessedMs: number | null, createdAtMs: number): number {
 	const lastActivity = lastAccessedMs ?? createdAtMs;
 	const remaining = ARCHIVE_MS - (Date.now() - lastActivity);
 	return Math.max(0, Math.ceil(remaining / (24 * 60 * 60 * 1000)));

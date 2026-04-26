@@ -23,10 +23,7 @@ import type {
  * Calculate user growth data points from a list of user creation timestamps.
  * Returns cumulative user count for each day in the period.
  */
-export function calculateUserGrowth(
-	userCreationDates: number[],
-	days = 30,
-): DataPoint[] {
+export function calculateUserGrowth(userCreationDates: number[], days = 30): DataPoint[] {
 	const now = new Date();
 	const result: DataPoint[] = [];
 
@@ -62,9 +59,7 @@ export function calculateUserGrowth(
  * Calculate active session count from a list of sessions.
  * A session is active if it has no endedAt timestamp.
  */
-export function getActiveSessionCount(
-	sessions: Array<{ endedAt?: number }>,
-): number {
+export function getActiveSessionCount(sessions: Array<{ endedAt?: number }>): number {
 	return sessions.filter((s) => s.endedAt === undefined).length;
 }
 
@@ -182,9 +177,7 @@ export function generateUsageReport(
 	const endDateStr = now.toISOString().slice(0, 10);
 
 	// Filter to period
-	const periodRecords = usageRecords.filter(
-		(r) => r.date >= startDateStr && r.date <= endDateStr,
-	);
+	const periodRecords = usageRecords.filter((r) => r.date >= startDateStr && r.date <= endDateStr);
 
 	// Aggregate
 	let totalTokens = 0;
@@ -254,10 +247,7 @@ export function getTopUsers(
 	limit = 10,
 ): UserUsageStats[] {
 	// Aggregate usage per user
-	const userUsage = new Map<
-		string,
-		{ totalTokens: number; totalSessions: number }
-	>();
+	const userUsage = new Map<string, { totalTokens: number; totalSessions: number }>();
 	for (const record of usageRecords) {
 		const existing = userUsage.get(record.userId) ?? {
 			totalTokens: 0,
@@ -308,15 +298,11 @@ export function calculateSystemHealth(
 	const oneHourAgo = now - 60 * 60 * 1000;
 
 	const activeSessions = sessions.filter((s) => s.endedAt === undefined).length;
-	const sessionsLastHour = sessions.filter(
-		(s) => s.startedAt >= oneHourAgo,
-	).length;
+	const sessionsLastHour = sessions.filter((s) => s.startedAt >= oneHourAgo).length;
 
 	// Error rate: sessions that started but never ended and are older than 2 hours
 	const twoHoursAgo = now - 2 * 60 * 60 * 1000;
-	const stale = sessions.filter(
-		(s) => s.endedAt === undefined && s.startedAt < twoHoursAgo,
-	).length;
+	const stale = sessions.filter((s) => s.endedAt === undefined && s.startedAt < twoHoursAgo).length;
 	const totalCompleted = sessions.filter((s) => s.endedAt !== undefined).length;
 	const errorRate = totalCompleted > 0 ? stale / (totalCompleted + stale) : 0;
 
@@ -327,10 +313,8 @@ export function calculateSystemHealth(
 	let completedCount = 0;
 
 	for (const session of sessions) {
-		modelDistribution[session.model] =
-			(modelDistribution[session.model] ?? 0) + 1;
-		providerDistribution[session.provider] =
-			(providerDistribution[session.provider] ?? 0) + 1;
+		modelDistribution[session.model] = (modelDistribution[session.model] ?? 0) + 1;
+		providerDistribution[session.provider] = (providerDistribution[session.provider] ?? 0) + 1;
 
 		if (session.endedAt) {
 			totalDuration += session.endedAt - session.startedAt;
@@ -338,8 +322,7 @@ export function calculateSystemHealth(
 		}
 	}
 
-	const avgSessionDuration =
-		completedCount > 0 ? totalDuration / completedCount : 0;
+	const avgSessionDuration = completedCount > 0 ? totalDuration / completedCount : 0;
 
 	return {
 		activeSessions,

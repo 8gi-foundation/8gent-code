@@ -57,8 +57,7 @@ export class SecretVault {
 	private data: VaultData;
 
 	constructor(vaultPath?: string) {
-		this.vaultPath =
-			vaultPath ?? path.join(os.homedir(), ".8gent", "vault.enc");
+		this.vaultPath = vaultPath ?? path.join(os.homedir(), ".8gent", "vault.enc");
 		this.key = deriveKey();
 		this.data = this.load();
 	}
@@ -139,10 +138,7 @@ export class SecretVault {
 	 *   return res.statusText; // only this goes back to the model
 	 * });
 	 */
-	async useSecret(
-		key: string,
-		callback: (value: string) => Promise<string>,
-	): Promise<string> {
+	async useSecret(key: string, callback: (value: string) => Promise<string>): Promise<string> {
 		const value = this.get(key);
 		if (value === undefined) {
 			throw new Error(`Secret "${key}" not found in vault`);

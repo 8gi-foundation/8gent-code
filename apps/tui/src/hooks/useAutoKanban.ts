@@ -55,11 +55,7 @@ export interface UseAutoKanbanReturn {
 		toolCallId: string,
 		args: Record<string, unknown>,
 	) => void;
-	onTaskComplete: (
-		toolCallId: string,
-		success: boolean,
-		durationMs: number,
-	) => void;
+	onTaskComplete: (toolCallId: string, success: boolean, durationMs: number) => void;
 	onUserMessage: (tabId: string, tabName: string, message: string) => void;
 	clearDone: () => void;
 	clearAll: () => void;
@@ -297,24 +293,21 @@ export function useAutoKanban(): UseAutoKanbanReturn {
 	// ----------------------------------------
 	// onTaskComplete
 	// ----------------------------------------
-	const onTaskComplete = useCallback(
-		(toolCallId: string, success: boolean, durationMs: number) => {
-			setCards((prev) => {
-				return prev.map((c) => {
-					if (c.id === `tool-${toolCallId}`) {
-						return {
-							...c,
-							status: success ? ("done" as const) : ("failed" as const),
-							completedAt: Date.now(),
-							durationMs,
-						};
-					}
-					return c;
-				});
+	const onTaskComplete = useCallback((toolCallId: string, success: boolean, durationMs: number) => {
+		setCards((prev) => {
+			return prev.map((c) => {
+				if (c.id === `tool-${toolCallId}`) {
+					return {
+						...c,
+						status: success ? ("done" as const) : ("failed" as const),
+						completedAt: Date.now(),
+						durationMs,
+					};
+				}
+				return c;
 			});
-		},
-		[],
-	);
+		});
+	}, []);
 
 	// ----------------------------------------
 	// When all sub-tasks for a parent are done, mark parent done
@@ -327,15 +320,10 @@ export function useAutoKanban(): UseAutoKanbanReturn {
 				// This is a parent card — check if all its children are done
 				const children = prev.filter((c) => c.parentId === card.id);
 				if (children.length === 0) return card;
-				const allDone = children.every(
-					(c) => c.status === "done" || c.status === "failed",
-				);
+				const allDone = children.every((c) => c.status === "done" || c.status === "failed");
 				if (allDone) {
 					const anyFailed = children.some((c) => c.status === "failed");
-					const totalDuration = children.reduce(
-						(sum, c) => sum + (c.durationMs || 0),
-						0,
-					);
+					const totalDuration = children.reduce((sum, c) => sum + (c.durationMs || 0), 0);
 					changed = true;
 					return {
 						...card,
@@ -348,17 +336,13 @@ export function useAutoKanban(): UseAutoKanbanReturn {
 			});
 			return changed ? updated : prev;
 		});
-	}, [
-		cards.filter((c) => c.status === "done" || c.status === "failed").length,
-	]);
+	}, [cards.filter((c) => c.status === "done" || c.status === "failed").length]);
 
 	// ----------------------------------------
 	// clearDone / clearAll
 	// ----------------------------------------
 	const clearDone = useCallback(() => {
-		setCards((prev) =>
-			prev.filter((c) => c.status !== "done" && c.status !== "failed"),
-		);
+		setCards((prev) => prev.filter((c) => c.status !== "done" && c.status !== "failed"));
 	}, []);
 
 	const clearAll = useCallback(() => {

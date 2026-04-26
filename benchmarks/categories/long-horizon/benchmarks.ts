@@ -13,8 +13,7 @@ export const longHorizonBenchmarks: BenchmarkDefinition[] = [
 	{
 		id: "LH001",
 		category: "long-horizon" as any,
-		title:
-			"GitHub PR Review Bot — AST diff, style checks, security scan, comment generation",
+		title: "GitHub PR Review Bot — AST diff, style checks, security scan, comment generation",
 		difficulty: "hard",
 		prompt: `Build a complete GitHub PR code review system in TypeScript (NO external deps).
 
@@ -115,8 +114,7 @@ Generate structured review comments:
 	{
 		id: "LH002",
 		category: "long-horizon" as any,
-		title:
-			"Database Migration Engine — Schema diff, up/down, rollback, dry-run, dependency graph",
+		title: "Database Migration Engine — Schema diff, up/down, rollback, dry-run, dependency graph",
 		difficulty: "hard",
 		prompt: `Build a complete database migration engine in TypeScript (NO external deps).
 
@@ -216,8 +214,7 @@ Track migration state:
 	{
 		id: "LH003",
 		category: "long-horizon" as any,
-		title:
-			"Distributed Task Scheduler — Cron parser, priority queue, worker pool, circuit breaker",
+		title: "Distributed Task Scheduler — Cron parser, priority queue, worker pool, circuit breaker",
 		difficulty: "hard",
 		prompt: `Build a production-grade task scheduler in TypeScript (NO external deps).
 

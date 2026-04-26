@@ -79,9 +79,7 @@ export class PerfCounter {
 		const cp: Checkpoint = { name, at, elapsed, delta };
 		this._checkpoints.push(cp);
 		if (this._autoLog) {
-			console.log(
-				`[${this._name}] ${name}: +${fmtMs(delta)} (${fmtMs(elapsed)} total)`,
-			);
+			console.log(`[${this._name}] ${name}: +${fmtMs(delta)} (${fmtMs(elapsed)} total)`);
 		}
 		return this;
 	}

@@ -96,10 +96,7 @@ export class OrchestratorBus extends EventEmitter {
 	/**
 	 * Update an agent's status.
 	 */
-	updateAgentStatus(
-		agentId: string,
-		status: OrchestratedAgent["status"],
-	): void {
+	updateAgentStatus(agentId: string, status: OrchestratedAgent["status"]): void {
 		const agent = this.agents.get(agentId);
 		if (!agent) return;
 
@@ -225,9 +222,7 @@ export class OrchestratorBus extends EventEmitter {
 	 * Get pending spawn requests.
 	 */
 	getPendingSpawns(): SpawnRequest[] {
-		return Array.from(this.pendingSpawns.values()).filter(
-			(s) => s.status === "pending",
-		);
+		return Array.from(this.pendingSpawns.values()).filter((s) => s.status === "pending");
 	}
 
 	// ── Chat Routing ────────────────────────────────────────────

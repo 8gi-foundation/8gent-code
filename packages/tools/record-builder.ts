@@ -65,9 +65,7 @@ export class RecordBuilder<T extends Record<string, unknown>> {
 		if (required && required.length > 0) {
 			const missing = required.filter((k) => !(k in this._data));
 			if (missing.length > 0) {
-				throw new Error(
-					`RecordBuilder: missing required keys: ${missing.map(String).join(", ")}`,
-				);
+				throw new Error(`RecordBuilder: missing required keys: ${missing.map(String).join(", ")}`);
 			}
 		}
 		return { ...this._data };

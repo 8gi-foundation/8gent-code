@@ -75,10 +75,7 @@ function StatCard({
 			className={`border ${c.split(" ")[1]} rounded-lg p-3 animate-fadeIn`}
 			style={{ background: "var(--surface)" }}
 		>
-			<div
-				className="text-[10px] uppercase tracking-wider mb-1"
-				style={{ color: "var(--muted)" }}
-			>
+			<div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--muted)" }}>
 				{label}
 			</div>
 			<div className={`text-2xl font-bold ${c.split(" ")[0]}`}>{value}</div>
@@ -116,9 +113,7 @@ function KanbanColumn({
 	return (
 		<div className="flex-1 min-w-0">
 			<div className="flex items-center gap-1.5 mb-2">
-				<div
-					className={`w-2 h-2 rounded-full ${dotColors[color] || dotColors.zinc}`}
-				/>
+				<div className={`w-2 h-2 rounded-full ${dotColors[color] || dotColors.zinc}`} />
 				<span
 					className="text-[10px] uppercase tracking-wider"
 					style={{ color: "var(--foreground)" }}
@@ -175,10 +170,7 @@ function ProgressBar({
 	};
 
 	return (
-		<div
-			className="w-full rounded-full h-1.5"
-			style={{ background: "var(--surface-hover)" }}
-		>
+		<div className="w-full rounded-full h-1.5" style={{ background: "var(--surface-hover)" }}>
 			<div
 				className={`h-full rounded-full transition-all duration-500 ${barColors[color] || barColors.emerald}`}
 				style={{ width: `${pct}%` }}
@@ -242,19 +234,14 @@ export default function SystemHealth() {
 	}
 
 	const evidenceRate =
-		data.evidence.total > 0
-			? Math.round((data.evidence.verified / data.evidence.total) * 100)
-			: 0;
+		data.evidence.total > 0 ? Math.round((data.evidence.verified / data.evidence.total) * 100) : 0;
 
 	return (
 		<div className="h-full overflow-y-auto p-4 space-y-6">
 			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-3">
-					<h2
-						className="text-sm font-bold"
-						style={{ color: "var(--foreground)" }}
-					>
+					<h2 className="text-sm font-bold" style={{ color: "var(--foreground)" }}>
 						System Health
 					</h2>
 					<span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 animate-pulse">
@@ -298,39 +285,23 @@ export default function SystemHealth() {
 					sub={`${data.momentum.stepsPerMinute.toFixed(1)}/min`}
 					color="blue"
 				/>
-				<StatCard
-					label="Streak"
-					value={data.momentum.streak}
-					sub="consecutive"
-					color="emerald"
-				/>
+				<StatCard label="Streak" value={data.momentum.streak} sub="consecutive" color="emerald" />
 			</div>
 
 			{/* Kanban Board */}
 			<div>
-				<h3
-					className="text-xs uppercase tracking-wider mb-3"
-					style={{ color: "var(--muted)" }}
-				>
+				<h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
 					Proactive Planner — Kanban Board
 				</h3>
 				<div className="flex gap-3">
-					<KanbanColumn
-						title="Backlog"
-						count={data.board.backlog}
-						color="zinc"
-					/>
+					<KanbanColumn title="Backlog" count={data.board.backlog} color="zinc" />
 					<KanbanColumn
 						title="Ready"
 						count={data.board.ready}
 						items={data.board.readyItems}
 						color="amber"
 					/>
-					<KanbanColumn
-						title="In Progress"
-						count={data.board.inProgress}
-						color="cyan"
-					/>
+					<KanbanColumn title="In Progress" count={data.board.inProgress} color="cyan" />
 					<KanbanColumn
 						title="Done"
 						count={data.board.done}
@@ -350,26 +321,18 @@ export default function SystemHealth() {
 						border: "1px solid var(--border)",
 					}}
 				>
-					<h3
-						className="text-xs uppercase tracking-wider mb-3"
-						style={{ color: "var(--muted)" }}
-					>
+					<h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
 						Evidence Collection
 					</h3>
 					<div className="flex items-center gap-4 mb-3">
 						<div>
-							<span className="text-3xl font-bold text-emerald-400">
-								{data.evidence.verified}
-							</span>
+							<span className="text-3xl font-bold text-emerald-400">{data.evidence.verified}</span>
 							<span className="text-lg" style={{ color: "var(--muted)" }}>
 								/{data.evidence.total}
 							</span>
 						</div>
 						<div className="flex-1">
-							<div
-								className="text-[10px] mb-1"
-								style={{ color: "var(--muted)" }}
-							>
+							<div className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>
 								Verification rate: {evidenceRate}%
 							</div>
 							<ProgressBar
@@ -416,10 +379,7 @@ export default function SystemHealth() {
 						border: "1px solid var(--border)",
 					}}
 				>
-					<h3
-						className="text-xs uppercase tracking-wider mb-3"
-						style={{ color: "var(--muted)" }}
-					>
+					<h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
 						AST Index
 					</h3>
 					<div className="flex gap-4 mb-3">
@@ -428,10 +388,7 @@ export default function SystemHealth() {
 								<div
 									className={`w-2 h-2 rounded-full ${lang === "typescript" ? "bg-blue-400" : "bg-yellow-400"}`}
 								/>
-								<span
-									className="text-[10px]"
-									style={{ color: "var(--foreground)" }}
-								>
+								<span className="text-[10px]" style={{ color: "var(--foreground)" }}>
 									{lang}
 								</span>
 								<span className="text-[10px]" style={{ color: "var(--muted)" }}>
@@ -442,10 +399,7 @@ export default function SystemHealth() {
 					</div>
 					{data.ast.topSymbols.length > 0 && (
 						<div className="space-y-1 mt-2">
-							<div
-								className="text-[10px] mb-1"
-								style={{ color: "var(--muted)" }}
-							>
+							<div className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>
 								Notable symbols:
 							</div>
 							{data.ast.topSymbols.slice(0, 6).map((sym, i) => (
@@ -456,10 +410,7 @@ export default function SystemHealth() {
 										{sym.kind}
 									</span>
 									<span style={{ color: "var(--foreground)" }}>{sym.name}</span>
-									<span
-										className="truncate ml-auto"
-										style={{ color: "var(--muted)" }}
-									>
+									<span className="truncate ml-auto" style={{ color: "var(--muted)" }}>
 										{sym.file}
 									</span>
 								</div>
@@ -478,10 +429,7 @@ export default function SystemHealth() {
 						border: "1px solid var(--border)",
 					}}
 				>
-					<h3
-						className="text-xs uppercase tracking-wider mb-3"
-						style={{ color: "var(--muted)" }}
-					>
+					<h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
 						Model Usage
 					</h3>
 					<div className="flex flex-wrap gap-2">
@@ -494,10 +442,7 @@ export default function SystemHealth() {
 									style={{ background: "var(--surface-hover)" }}
 								>
 									<span className="text-[10px] text-amber-400">{model}</span>
-									<span
-										className="text-[10px]"
-										style={{ color: "var(--muted)" }}
-									>
+									<span className="text-[10px]" style={{ color: "var(--muted)" }}>
 										{count} session{count !== 1 ? "s" : ""}
 									</span>
 								</div>
@@ -514,10 +459,7 @@ export default function SystemHealth() {
 					border: "1px solid var(--border)",
 				}}
 			>
-				<h3
-					className="text-xs uppercase tracking-wider mb-3"
-					style={{ color: "var(--muted)" }}
-				>
+				<h3 className="text-xs uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
 					Infrastructure Pillars
 				</h3>
 				<div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -548,10 +490,7 @@ export default function SystemHealth() {
 								className={`w-2 h-2 rounded-full ${pillar.status ? "bg-emerald-400" : "bg-red-400"}`}
 							/>
 							<div>
-								<div
-									className="text-[10px]"
-									style={{ color: "var(--foreground)" }}
-								>
+								<div className="text-[10px]" style={{ color: "var(--foreground)" }}>
 									{pillar.name}
 								</div>
 								<div className="text-[9px]" style={{ color: "var(--muted)" }}>

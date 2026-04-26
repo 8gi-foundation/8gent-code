@@ -7,13 +7,7 @@
  * Collected pairs are stored in .8gent/kernel/training/ as JSONL.
  */
 
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export interface TrainingPair {
@@ -115,9 +109,7 @@ export class PersonalCollector {
 	getPairs(userId?: string): TrainingPair[] {
 		if (!existsSync(this.pairsPath)) return [];
 
-		const lines = readFileSync(this.pairsPath, "utf-8")
-			.split("\n")
-			.filter(Boolean);
+		const lines = readFileSync(this.pairsPath, "utf-8").split("\n").filter(Boolean);
 
 		const pairs = lines
 			.map((line) => {

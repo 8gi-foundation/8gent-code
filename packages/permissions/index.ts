@@ -221,14 +221,7 @@ export const DANGEROUS_COMMAND_RULES: Array<{
 /**
  * Patterns in piped commands that indicate code execution risk.
  */
-const DANGEROUS_PIPE_PATTERNS = [
-	"| sh",
-	"| bash",
-	"| zsh",
-	"|sh",
-	"|bash",
-	"|zsh",
-];
+const DANGEROUS_PIPE_PATTERNS = ["| sh", "| bash", "| zsh", "|sh", "|bash", "|zsh"];
 const DANGEROUS_PIPE_SOURCES = ["curl", "wget"];
 
 /**
@@ -514,8 +507,7 @@ export class PermissionManager {
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
 
 	constructor(configPath?: string) {
-		const dataDir =
-			process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+		const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 		this.configPath = configPath || path.join(dataDir, "permissions.json");
 		this.config = this.loadConfig();
 		this.log = {
@@ -534,9 +526,7 @@ export class PermissionManager {
 		this.infiniteMode = true;
 		this.infiniteModeStartTime = Date.now();
 		this.infiniteModeAuditLog = [];
-		console.log(
-			"\x1b[33m[INF] Infinite Loop mode enabled (expires in 30 minutes)\x1b[0m",
-		);
+		console.log("\x1b[33m[INF] Infinite Loop mode enabled (expires in 30 minutes)\x1b[0m");
 	}
 
 	/**
@@ -558,9 +548,7 @@ export class PermissionManager {
 		if (this.infiniteModeStartTime !== null) {
 			const elapsed = Date.now() - this.infiniteModeStartTime;
 			if (elapsed >= INFINITE_MODE_MAX_DURATION_MS) {
-				console.log(
-					"\x1b[33m[INF] Infinite Loop mode expired after 30 minutes\x1b[0m",
-				);
+				console.log("\x1b[33m[INF] Infinite Loop mode expired after 30 minutes\x1b[0m");
 				this.infiniteMode = false;
 				this.infiniteModeStartTime = null;
 				return false;
@@ -608,10 +596,7 @@ export class PermissionManager {
 
 			// Check if all rule args appear in the command args
 			const allArgsPresent = rule.args.every((ruleArg) =>
-				argsLower.some(
-					(a) =>
-						a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase()),
-				),
+				argsLower.some((a) => a === ruleArg.toLowerCase() || a.startsWith(ruleArg.toLowerCase())),
 			);
 
 			if (allArgsPresent) {
@@ -741,9 +726,7 @@ export class PermissionManager {
 			for (const argPattern of rule.argPatterns) {
 				const allArgsMatch = argPattern.every((requiredArg) => {
 					const reqLower = requiredArg.toLowerCase();
-					return argsLower.some(
-						(a) => a === reqLower || a.startsWith(reqLower),
-					);
+					return argsLower.some((a) => a === reqLower || a.startsWith(reqLower));
 				});
 
 				if (allArgsMatch) {
@@ -842,11 +825,7 @@ export class PermissionManager {
 	/**
 	 * Request permission from the user for a command/action
 	 */
-	async requestPermission(
-		action: string,
-		details: string,
-		command?: string,
-	): Promise<boolean> {
+	async requestPermission(action: string, details: string, command?: string): Promise<boolean> {
 		const request: PermissionRequest = {
 			id: `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
 			action,
@@ -870,9 +849,7 @@ export class PermissionManager {
 					request.approved = false;
 					this.log.requests.push(request);
 					this.log.deniedCount++;
-					console.log(
-						`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`,
-					);
+					console.log(`\x1b[31m[INF] BLOCKED: ${command} - ${blockCheck.reason}\x1b[0m`);
 					return false;
 				}
 			}
@@ -948,11 +925,7 @@ export class PermissionManager {
 	 * Prompt user for permission (Y/n)
 	 * In headless mode: auto-approve safe commands, deny dangerous ones
 	 */
-	private async promptUser(
-		action: string,
-		details: string,
-		command?: string,
-	): Promise<boolean> {
+	private async promptUser(action: string, details: string, command?: string): Promise<boolean> {
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
 			if (command && this.isDangerous(command)) {
@@ -960,15 +933,11 @@ export class PermissionManager {
 				return false;
 			}
 			if (command && this.isPushToMain(command)) {
-				console.log(
-					`[permissions] DENIED (headless, push to main): ${command}`,
-				);
+				console.log(`[permissions] DENIED (headless, push to main): ${command}`);
 				return false;
 			}
 			// Auto-approve non-dangerous commands in headless mode
-			console.log(
-				`[permissions] AUTO-APPROVED (headless): ${command || action}`,
-			);
+			console.log(`[permissions] AUTO-APPROVED (headless): ${command || action}`);
 			return true;
 		}
 
@@ -1068,9 +1037,7 @@ export class PermissionManager {
 	 * Remove a pattern from the allowed list
 	 */
 	removeAllowedPattern(pattern: string): void {
-		this.config.allowedPatterns = this.config.allowedPatterns.filter(
-			(p) => p !== pattern,
-		);
+		this.config.allowedPatterns = this.config.allowedPatterns.filter((p) => p !== pattern);
 		this.saveConfig();
 	}
 
@@ -1078,9 +1045,7 @@ export class PermissionManager {
 	 * Remove a pattern from the denied list
 	 */
 	removeDeniedPattern(pattern: string): void {
-		this.config.deniedPatterns = this.config.deniedPatterns.filter(
-			(p) => p !== pattern,
-		);
+		this.config.deniedPatterns = this.config.deniedPatterns.filter((p) => p !== pattern);
 		this.saveConfig();
 	}
 
@@ -1175,9 +1140,7 @@ export function needsPermission(command: string): boolean {
 /**
  * Request permission for a command (convenience function)
  */
-export async function requestCommandPermission(
-	command: string,
-): Promise<boolean> {
+export async function requestCommandPermission(command: string): Promise<boolean> {
 	const manager = getPermissionManager();
 	const check = manager.checkPermission(command);
 

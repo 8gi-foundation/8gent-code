@@ -54,18 +54,8 @@ export async function migrateV1ToV2(
 	};
 
 	// Read v1 JSONL files
-	const projectJsonl = path.join(
-		workingDirectory,
-		".8gent",
-		"memory",
-		"project.jsonl",
-	);
-	const globalJsonl = path.join(
-		os.homedir(),
-		".8gent",
-		"memory",
-		"global.jsonl",
-	);
+	const projectJsonl = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
+	const globalJsonl = path.join(os.homedir(), ".8gent", "memory", "global.jsonl");
 
 	const projectEntries = readJsonlSafe(projectJsonl);
 	const globalEntries = readJsonlSafe(globalJsonl);
@@ -238,12 +228,7 @@ function isCoreFact(fact: string, tags: string[]): boolean {
 		/deployment/i,
 		/ci\/cd/i,
 	];
-	const coreTagPatterns = [
-		"config",
-		"architecture",
-		"infrastructure",
-		"convention",
-	];
+	const coreTagPatterns = ["config", "architecture", "infrastructure", "convention"];
 
 	return (
 		corePatterns.some((p) => p.test(fact)) ||
@@ -272,22 +257,16 @@ function isEpisodicFact(fact: string): boolean {
 }
 
 function classifyCoreCategory(fact: string, tags: string[]): CoreCategory {
-	if (/architect|design|pattern|monorepo|structure/i.test(fact))
-		return "architecture";
-	if (/depend|package|version|npm|bun/i.test(fact) || tags.includes("config"))
-		return "dependency";
+	if (/architect|design|pattern|monorepo|structure/i.test(fact)) return "architecture";
+	if (/depend|package|version|npm|bun/i.test(fact) || tags.includes("config")) return "dependency";
 	if (/config|setting|env|tsconfig/i.test(fact)) return "configuration";
 	if (/convention|rule|standard|lint|format/i.test(fact)) return "convention";
 	if (/readme|doc|changelog/i.test(fact)) return "documentation";
-	if (/deploy|ci|cd|docker|kubernetes|infra/i.test(fact))
-		return "infrastructure";
+	if (/deploy|ci|cd|docker|kubernetes|infra/i.test(fact)) return "infrastructure";
 	return "documentation";
 }
 
-function classifySemanticCategory(
-	fact: string,
-	_tags: string[],
-): SemanticCategory {
+function classifySemanticCategory(fact: string, _tags: string[]): SemanticCategory {
 	if (/prefer|like|want|always use|should use/i.test(fact)) return "preference";
 	if (/pattern|usually|tends to|common/i.test(fact)) return "pattern";
 	if (/can |knows? how|api |endpoint|method/i.test(fact)) return "skill";
@@ -336,10 +315,7 @@ function readJsonlSafe(filePath: string): V1MemoryEntry[] {
 	if (!fs.existsSync(filePath)) return [];
 
 	try {
-		const lines = fs
-			.readFileSync(filePath, "utf-8")
-			.split("\n")
-			.filter(Boolean);
+		const lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
 		const entries: V1MemoryEntry[] = [];
 
 		for (const line of lines) {

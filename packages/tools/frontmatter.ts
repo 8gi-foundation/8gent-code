@@ -26,9 +26,7 @@ function parse(content: string): {
 	let frontmatter = "";
 	let body = content;
 	if (secondIndex !== -1) {
-		frontmatter = content
-			.slice(firstIndex + delimiter.length, secondIndex)
-			.trim();
+		frontmatter = content.slice(firstIndex + delimiter.length, secondIndex).trim();
 		body = content.slice(secondIndex + delimiter.length).trim();
 	} else {
 		frontmatter = content.slice(firstIndex + delimiter.length).trim();
@@ -43,11 +41,7 @@ function parse(content: string): {
  * @param format - The format to use (yaml or toml).
  * @returns The serialized string with frontmatter and body.
  */
-function stringify(
-	data: Record<string, unknown>,
-	body: string,
-	format: "yaml" | "toml",
-): string {
+function stringify(data: Record<string, unknown>, body: string, format: "yaml" | "toml"): string {
 	const lines = Object.entries(data).map(([k, v]) => {
 		return format === "yaml" ? `${k}: ${v}` : `${k} = ${v}`;
 	});
@@ -62,10 +56,7 @@ function stringify(
  * @param format - The format (yaml or toml).
  * @returns Parsed data object.
  */
-function parseFrontmatter(
-	frontmatter: string,
-	format: "yaml" | "toml",
-): Record<string, unknown> {
+function parseFrontmatter(frontmatter: string, format: "yaml" | "toml"): Record<string, unknown> {
 	const data: Record<string, unknown> = {};
 	const lines = frontmatter.split("\n");
 	for (const line of lines) {

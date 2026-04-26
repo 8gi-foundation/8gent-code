@@ -62,15 +62,9 @@ export class AuditLog {
         createdAt INTEGER NOT NULL
       )
     `);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, createdAt)",
-		);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_audit_member ON audit_log(memberCode, createdAt)",
-		);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(taskId)",
-		);
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, createdAt)");
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_audit_member ON audit_log(memberCode, createdAt)");
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(taskId)");
 	}
 
 	/** Hash content with SHA-256 - never store raw text */
@@ -97,9 +91,7 @@ export class AuditLog {
 		} = {},
 	): Promise<string> {
 		const id = `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-		const contentHash = fields.content
-			? await this.hashContent(fields.content)
-			: "";
+		const contentHash = fields.content ? await this.hashContent(fields.content) : "";
 
 		this.db
 			.prepare(
@@ -133,18 +125,14 @@ export class AuditLog {
 	/** Get entries for a specific task */
 	getByTask(taskId: string): AuditEntry[] {
 		return this.db
-			.prepare(
-				"SELECT * FROM audit_log WHERE taskId = ? ORDER BY createdAt ASC",
-			)
+			.prepare("SELECT * FROM audit_log WHERE taskId = ? ORDER BY createdAt ASC")
 			.all(taskId) as AuditEntry[];
 	}
 
 	/** Get stats */
 	getStats(): Record<string, number> {
 		const rows = this.db
-			.prepare(
-				"SELECT action, COUNT(*) as count FROM audit_log GROUP BY action",
-			)
+			.prepare("SELECT action, COUNT(*) as count FROM audit_log GROUP BY action")
 			.all() as Array<{ action: string; count: number }>;
 		const stats: Record<string, number> = {};
 		for (const row of rows) stats[row.action] = row.count;

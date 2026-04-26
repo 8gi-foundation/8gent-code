@@ -76,11 +76,7 @@ function send(ws: any, msg: OutboundMessage): void {
 	}
 }
 
-function broadcastToSession(
-	sessionId: string,
-	event: EventName,
-	payload: unknown,
-): void {
+function broadcastToSession(sessionId: string, event: EventName, payload: unknown): void {
 	for (const [ws, state] of clients) {
 		// Computer-route clients use the v1.1 protocol envelope; the legacy v1.0
 		// broadcast skips them so they only see the typed StreamEvent stream.
@@ -215,8 +211,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			if (!job || !job.id || !job.name) {
 				send(ws, {
 					type: "error",
-					message:
-						"invalid cron job: requires id, name, expression, type, payload",
+					message: "invalid cron job: requires id, name, expression, type, payload",
 				});
 				break;
 			}
@@ -286,14 +281,9 @@ function subscribeToBus(): void {
 	}
 }
 
-async function handleAuditAccess(
-	req: Request,
-	config: GatewayConfig,
-): Promise<Response> {
+async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<Response> {
 	if (config.authToken) {
-		const provided = req.headers
-			.get("authorization")
-			?.replace(/^Bearer\s+/i, "");
+		const provided = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 		if (provided !== config.authToken) {
 			return Response.json({ error: "unauthorized" }, { status: 401 });
 		}
@@ -304,23 +294,8 @@ async function handleAuditAccess(
 	} catch {
 		return Response.json({ error: "invalid JSON" }, { status: 400 });
 	}
-	const {
-		actor,
-		actorKind,
-		targetTable,
-		targetId,
-		operation,
-		reason,
-		sessionId,
-	} = body;
-	if (
-		!actor ||
-		!actorKind ||
-		!targetTable ||
-		!targetId ||
-		!operation ||
-		!reason
-	) {
+	const { actor, actorKind, targetTable, targetId, operation, reason, sessionId } = body;
+	if (!actor || !actorKind || !targetTable || !targetId || !operation || !reason) {
 		return Response.json({ error: "missing required field" }, { status: 400 });
 	}
 	try {
@@ -339,9 +314,7 @@ async function handleAuditAccess(
 	}
 }
 
-export function startGateway(
-	config: GatewayConfig,
-): ReturnType<typeof Bun.serve> {
+export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
 	subscribeToBus();
 
 	// v0: the computer channel is loopback-only. We keep the global bind unchanged
@@ -363,13 +336,11 @@ export function startGateway(
 					}
 				).requestIP?.(req);
 				const ip = peer?.address ?? "";
-				const loopback =
-					ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+				const loopback = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
 				if (!loopback) {
-					return new Response(
-						"forbidden: computer channel is loopback-only in v0",
-						{ status: 403 },
-					);
+					return new Response("forbidden: computer channel is loopback-only in v0", {
+						status: 403,
+					});
 				}
 				// Bun's upgrade typings vary across versions; cast the data option.
 				if (
@@ -420,24 +391,16 @@ export function startGateway(
 					isComputerRoute: isComputer,
 				};
 				clients.set(ws, state);
-				console.log(
-					`[gateway] client ${id} connected${isComputer ? " (computer)" : ""}`,
-				);
+				console.log(`[gateway] client ${id} connected${isComputer ? " (computer)" : ""}`);
 				if (isComputer) {
 					handleComputerOpen(ws as unknown as ComputerWS, config.pool, state);
 				}
 			},
 			message(ws, raw) {
 				const state = clients.get(ws);
-				const text =
-					typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+				const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
 				if (state?.isComputerRoute) {
-					handleComputerMessage(
-						ws as unknown as ComputerWS,
-						config.pool,
-						state,
-						text,
-					);
+					handleComputerMessage(ws as unknown as ComputerWS, config.pool, state, text);
 					return;
 				}
 				handleMessage(ws, config, text);
@@ -460,11 +423,7 @@ export function startGateway(
 		},
 	});
 
-	console.log(
-		`[gateway] WebSocket server listening on ws://${hostname}:${config.port}`,
-	);
-	console.log(
-		`[gateway] computer channel: ws://${hostname}:${config.port}/computer`,
-	);
+	console.log(`[gateway] WebSocket server listening on ws://${hostname}:${config.port}`);
+	console.log(`[gateway] computer channel: ws://${hostname}:${config.port}/computer`);
 	return server;
 }

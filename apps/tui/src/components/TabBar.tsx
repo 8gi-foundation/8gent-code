@@ -7,11 +7,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import {
-	TAB_ICONS,
-	type TabType,
-	type WorkspaceTab,
-} from "../hooks/useWorkspaceTabs.js";
+import { TAB_ICONS, type TabType, type WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
 import { MutedText } from "./primitives/index.js";
 
 interface TabBarProps {

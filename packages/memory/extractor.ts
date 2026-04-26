@@ -83,11 +83,7 @@ export function extractFromToolResult(
 
 	// ── File operations ──────────────────────────────────────────────
 
-	if (
-		toolName === "read_file" ||
-		toolName === "write_file" ||
-		toolName === "edit_file"
-	) {
+	if (toolName === "read_file" || toolName === "write_file" || toolName === "edit_file") {
 		const filePath = String(args.path || args.file_path || "");
 		if (filePath) {
 			entities.push({
@@ -356,9 +352,7 @@ function extractFromCommand(
 	) {
 		// Try to extract package names from the command
 		const parts = command.split(/\s+/);
-		const cmdIdx = parts.findIndex(
-			(p) => p === "install" || p === "add" || p === "i",
-		);
+		const cmdIdx = parts.findIndex((p) => p === "install" || p === "add" || p === "i");
 		if (cmdIdx >= 0) {
 			for (let i = cmdIdx + 1; i < parts.length; i++) {
 				const arg = parts[i];
@@ -400,9 +394,7 @@ function extractFromCommand(
  * Detect if a user message contains a correction or preference statement.
  * Call this from the memory manager when processing user messages.
  */
-export function extractPreferencesFromMessage(
-	message: string,
-): ExtractionResult {
+export function extractPreferencesFromMessage(message: string): ExtractionResult {
 	const entities: ExtractedEntity[] = [];
 	const relationships: ExtractedRelationship[] = [];
 

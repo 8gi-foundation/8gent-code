@@ -18,13 +18,7 @@
 
 import { HistoryStore } from "./history";
 import { TopicRouter } from "./router";
-import type {
-	BrokerOptions,
-	Message,
-	MessageHandler,
-	Subscription,
-	Topic,
-} from "./types";
+import type { BrokerOptions, Message, MessageHandler, Subscription, Topic } from "./types";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -40,10 +34,7 @@ function nextMsgId(): string {
 
 // ── Lifecycle Hooks ─────────────────────────────────────────────────
 
-export type LifecycleHook = (
-	topicName: string,
-	subscriptionId: string,
-) => void | Promise<void>;
+export type LifecycleHook = (topicName: string, subscriptionId: string) => void | Promise<void>;
 
 // ── MessageBroker ───────────────────────────────────────────────────
 
@@ -75,11 +66,7 @@ export class MessageBroker {
 	 * Creates a topic with the given configuration.
 	 * If the topic already exists, this is a no-op.
 	 */
-	createTopic(
-		name: string,
-		maxHistory?: number,
-		replayOnSubscribe = false,
-	): Topic {
+	createTopic(name: string, maxHistory?: number, replayOnSubscribe = false): Topic {
 		if (this.topics.has(name)) {
 			return this.topics.get(name)!;
 		}
@@ -118,11 +105,7 @@ export class MessageBroker {
 	 * reading the current list and writing the updated one — this
 	 * enables middleware to validate or log subscriptions.
 	 */
-	async subscribe(
-		topicName: string,
-		handler: MessageHandler,
-		once = false,
-	): Promise<Subscription> {
+	async subscribe(topicName: string, handler: MessageHandler, once = false): Promise<Subscription> {
 		// Ensure topic exists
 		if (!this.topics.has(topicName)) {
 			this.createTopic(topicName);
@@ -222,10 +205,7 @@ export class MessageBroker {
 			? this.findPatternMatches(topicName)
 			: [];
 
-		const allSubs = [
-			...directSubs,
-			...matchedTopics.flatMap((t) => this.subscribers.get(t) ?? []),
-		];
+		const allSubs = [...directSubs, ...matchedTopics.flatMap((t) => this.subscribers.get(t) ?? [])];
 
 		// Deliver to all subscribers
 		const oneTimeSubs: string[] = [];
@@ -261,8 +241,7 @@ export class MessageBroker {
 	/** Returns the message history for a topic. */
 	getHistory(topicName: string, limit?: number): Message[] {
 		const topic = this.topics.get(topicName);
-		const maxLimit =
-			limit ?? topic?.maxHistory ?? this.options.defaultMaxHistory;
+		const maxLimit = limit ?? topic?.maxHistory ?? this.options.defaultMaxHistory;
 		return this.history.getHistory(topicName, { limit: maxLimit });
 	}
 

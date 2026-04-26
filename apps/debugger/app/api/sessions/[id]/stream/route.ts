@@ -9,10 +9,7 @@ export const runtime = "nodejs";
 
 const SESSIONS_DIR = join(homedir(), ".8gent", "sessions");
 
-export async function GET(
-	request: NextRequest,
-	{ params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const { id: sessionId } = await params;
 	const filePath = join(SESSIONS_DIR, `${sessionId}.jsonl`);
 
@@ -40,9 +37,7 @@ export async function GET(
 				const lines = content.split("\n").filter(Boolean);
 				let sentLines = lines.length;
 
-				console.log(
-					`[Stream API] Read ${lines.length} lines, sending initial batch...`,
-				);
+				console.log(`[Stream API] Read ${lines.length} lines, sending initial batch...`);
 
 				for (let i = 0; i < lines.length; i++) {
 					const chunk = `data: ${lines[i]}\n\n`;
@@ -57,15 +52,11 @@ export async function GET(
 				console.log("[Stream API] Sending initial_load_complete marker");
 				controller.enqueue(encoder.encode(marker));
 
-				console.log(
-					"[Stream API] Initial batch sent, setting up file watcher...",
-				);
+				console.log("[Stream API] Initial batch sent, setting up file watcher...");
 
 				// Watch for new lines (live tailing)
 				const watcher = watch(filePath, async (eventType) => {
-					console.log(
-						`[Stream API] File watcher fired: eventType=${eventType}`,
-					);
+					console.log(`[Stream API] File watcher fired: eventType=${eventType}`);
 					try {
 						const newContent = await readFile(filePath, "utf-8");
 						const newLines = newContent.split("\n").filter(Boolean);

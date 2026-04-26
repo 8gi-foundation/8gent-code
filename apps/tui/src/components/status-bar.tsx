@@ -138,13 +138,9 @@ export function EnhancedStatusBar({
 	const planVerbMax = Math.max(12, Math.floor(barWidth * 0.22));
 	// Strip provider prefix (e.g. google/gemma-4-26b-a4b -> gemma-4-26b-a4b) before truncation
 	// so hierarchy emphasis lands on the model identity, not the routing path.
-	const modelShortName = modelName.includes("/")
-		? modelName.split("/").pop()!
-		: modelName;
+	const modelShortName = modelName.includes("/") ? modelName.split("/").pop()! : modelName;
 	const displayModel = truncate(modelShortName, modelMax);
-	const displayBranch = currentBranch
-		? truncate(currentBranch, branchMax)
-		: null;
+	const displayBranch = currentBranch ? truncate(currentBranch, branchMax) : null;
 
 	const [elapsed, setElapsed] = useState("0:00");
 
@@ -164,8 +160,7 @@ export function EnhancedStatusBar({
 
 	// Calculate savings percentage if not provided
 	const savings =
-		savingsPercentage ??
-		(tokensTotal > 0 ? Math.round((tokensSaved / tokensTotal) * 100) : 0);
+		savingsPercentage ?? (tokensTotal > 0 ? Math.round((tokensSaved / tokensTotal) * 100) : 0);
 
 	const effectiveCompact = compact || columns < TUI_STATUS_COMPACT_BELOW;
 
@@ -204,12 +199,7 @@ export function EnhancedStatusBar({
 			flexDirection="column"
 		>
 			{/* Row 1: identity (left) + meta + perm (right) — stable, never wraps */}
-			<Box
-				flexDirection="row"
-				justifyContent="space-between"
-				alignItems="center"
-				width="100%"
-			>
+			<Box flexDirection="row" justifyContent="space-between" alignItems="center" width="100%">
 				<Box flexShrink={0} flexDirection="row" overflow="hidden">
 					<ActiveIndicator active={true} />
 					<MutedText> </MutedText>
@@ -219,28 +209,17 @@ export function EnhancedStatusBar({
 				</Box>
 
 				<Box flexShrink={0} flexDirection="row" overflow="hidden">
-					<TokenSavingsItem
-						saved={tokensSaved}
-						percentage={savings}
-						barWidth={barWidth}
-					/>
+					<TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
 					{displayBranch && (
 						<>
 							<Separator />
-							<GitBranchItem
-								branch={displayBranch}
-								hasChanges={hasUncommittedChanges}
-							/>
+							<GitBranchItem branch={displayBranch} hasChanges={hasUncommittedChanges} />
 						</>
 					)}
 					{authStatus && authStatus !== "unknown" && (
 						<>
 							<Separator />
-							<AuthStatusItem
-								status={authStatus}
-								user={authUser}
-								nameMax={authNameMax}
-							/>
+							<AuthStatusItem status={authStatus} user={authUser} nameMax={authNameMax} />
 						</>
 					)}
 					{voiceEnabled && (
@@ -259,12 +238,7 @@ export function EnhancedStatusBar({
 			{/* Row 2: plan verb — only appears while something is actually running,
           indented to read as a continuation of the model anchor above */}
 			{showPlanRow && (
-				<Box
-					flexDirection="row"
-					alignItems="center"
-					width="100%"
-					marginLeft={rowTwoIndent}
-				>
+				<Box flexDirection="row" alignItems="center" width="100%" marginLeft={rowTwoIndent}>
 					<PlanStatusItem
 						status={planStatus}
 						completed={planStepsCompleted}
@@ -298,10 +272,7 @@ function ModelStatusItem({ name }: { name: string }) {
 	return <Label color="cyan">{name}</Label>;
 }
 
-function AgentStatusItem({
-	running,
-	total,
-}: { running: number; total: number }) {
+function AgentStatusItem({ running, total }: { running: number; total: number }) {
 	return (
 		<Inline gap={0}>
 			<StatusDot status={running > 0 ? "info" : "idle"} />
@@ -320,9 +291,7 @@ function AgentStatusItem({
 	);
 }
 
-function PermissionStatusItem({
-	mode,
-}: { mode: EnhancedStatusBarProps["permissionMode"] }) {
+function PermissionStatusItem({ mode }: { mode: EnhancedStatusBarProps["permissionMode"] }) {
 	const configs = {
 		full: { color: "red" as const, icon: "\u26A0", label: "full" },
 		ask: { color: "yellow" as const, icon: "\u2753", label: "ask" },
@@ -357,8 +326,7 @@ function TokenSavingsItem({
 	percentage: number;
 	barWidth: number;
 }) {
-	const savingsColor =
-		percentage > 50 ? "green" : percentage > 20 ? "yellow" : "blue";
+	const savingsColor = percentage > 50 ? "green" : percentage > 20 ? "yellow" : "blue";
 	const tokenBit = truncate(
 		`(${formatTokens(saved)} tok)`,
 		Math.max(6, Math.floor(barWidth * 0.14)),
@@ -373,10 +341,7 @@ function TokenSavingsItem({
 	);
 }
 
-function GitBranchItem({
-	branch,
-	hasChanges,
-}: { branch: string; hasChanges: boolean }) {
+function GitBranchItem({ branch, hasChanges }: { branch: string; hasChanges: boolean }) {
 	return (
 		<Inline gap={0}>
 			<AppText color="yellow">
@@ -413,9 +378,7 @@ function AuthStatusItem({
 
 function VoiceStatusItem({ state }: { state: string }) {
 	if (state === "listening") {
-		return (
-			<Badge label={"\u25CF VOICE CHAT"} color="green" variant="outline" />
-		);
+		return <Badge label={"\u25CF VOICE CHAT"} color="green" variant="outline" />;
 	}
 	if (state === "speaking") {
 		return <Badge label={"\u266B SPEAKING"} color="blue" variant="outline" />;
@@ -516,15 +479,9 @@ function ClaudeStyleCompactBar({
 }) {
 	const { stdout } = useStdout();
 	const cols = Math.max(24, (stdout?.columns ?? 80) - 4);
-	const modelShort = truncate(
-		modelName,
-		Math.max(6, Math.min(24, Math.floor(cols * 0.28))),
-	);
+	const modelShort = truncate(modelName, Math.max(6, Math.min(24, Math.floor(cols * 0.28))));
 	const branchShort = currentBranch
-		? truncate(
-				currentBranch,
-				Math.max(6, Math.min(18, Math.floor(cols * 0.22))),
-			)
+		? truncate(currentBranch, Math.max(6, Math.min(18, Math.floor(cols * 0.22))))
 		: null;
 	const showBranch = branchShort != null && cols >= 40;
 
@@ -756,12 +713,7 @@ export function DetailedStatusBar({
 		<Box flexDirection="column" marginTop={1}>
 			{showAnimations && <AnimatedSeparator width={70} />}
 
-			<Box
-				borderStyle="round"
-				borderColor="blue"
-				paddingX={1}
-				flexDirection="column"
-			>
+			<Box borderStyle="round" borderColor="blue" paddingX={1} flexDirection="column">
 				{/* Top row */}
 				<Box justifyContent="space-between">
 					<Box gap={2}>
@@ -785,10 +737,7 @@ export function DetailedStatusBar({
 
 				{/* Bottom row - savings percentage */}
 				<Box marginTop={1}>
-					<SavingsPercentage
-						tokensSaved={tokensSaved}
-						animate={showAnimations}
-					/>
+					<SavingsPercentage tokensSaved={tokensSaved} animate={showAnimations} />
 				</Box>
 			</Box>
 		</Box>
@@ -812,8 +761,7 @@ function SavingsPercentage({
 			<MutedText>AST savings:</MutedText>
 			<Label color="green">~{savingsPercent}%</Label>
 			<MutedText>
-				({formatTokens(tokensSaved)} vs ~{formatTokens(estimatedWithoutAST)}{" "}
-				raw)
+				({formatTokens(tokensSaved)} vs ~{formatTokens(estimatedWithoutAST)} raw)
 			</MutedText>
 		</Inline>
 	);

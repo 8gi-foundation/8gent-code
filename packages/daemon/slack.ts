@@ -66,13 +66,10 @@ function statusEmoji(type: NotificationType): string {
 
 function formatBlocks(type: NotificationType, message: string): SlackBlock[] {
 	const emoji = statusEmoji(type);
-	const title = type
-		.replace(/-/g, " ")
-		.replace(/\b\w/g, (c) => c.toUpperCase());
+	const title = type.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 	// Truncate message for Slack block limit (3000 chars)
-	const truncated =
-		message.length > 2800 ? `${message.slice(0, 2797)}...` : message;
+	const truncated = message.length > 2800 ? `${message.slice(0, 2797)}...` : message;
 
 	return [
 		{
@@ -177,13 +174,7 @@ export async function sendSlackNotification(
 
 	// Bot API for threaded replies or when no webhook
 	if (config.botToken && config.channelId) {
-		const result = await sendViaBot(
-			config.botToken,
-			config.channelId,
-			type,
-			message,
-			threadTs,
-		);
+		const result = await sendViaBot(config.botToken, config.channelId, type, message, threadTs);
 		return { ok: result.ok, threadTs: result.ts };
 	}
 

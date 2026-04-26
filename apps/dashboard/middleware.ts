@@ -10,11 +10,7 @@ import { NextResponse } from "next/server";
  * 4. Non-admin users see a 403 response.
  */
 
-const isPublicRoute = createRouteMatcher([
-	"/sign-in(.*)",
-	"/sign-up(.*)",
-	"/api/webhooks(.*)",
-]);
+const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/api/webhooks(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
 	// Allow public routes without auth
@@ -33,17 +29,14 @@ export default clerkMiddleware(async (auth, req) => {
 
 	// Check admin role from session claims
 	// Clerk stores publicMetadata in sessionClaims
-	const metadata = session.sessionClaims?.metadata as
-		| { role?: string }
-		| undefined;
+	const metadata = session.sessionClaims?.metadata as { role?: string } | undefined;
 	const role = metadata?.role;
 
 	if (role !== "admin") {
 		return new NextResponse(
 			JSON.stringify({
 				error: "Forbidden",
-				message:
-					"Admin access required. Contact support if you believe this is an error.",
+				message: "Admin access required. Contact support if you believe this is an error.",
 			}),
 			{
 				status: 403,

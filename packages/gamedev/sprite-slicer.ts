@@ -119,27 +119,16 @@ export function detectGrid(
 /**
  * Slice a sprite sheet into individual frame images.
  */
-export async function sliceSpriteSheet(
-	options: SliceOptions,
-): Promise<SliceResult> {
+export async function sliceSpriteSheet(options: SliceOptions): Promise<SliceResult> {
 	// Dynamic import - sharp may not be installed
 	let sharp: any;
 	try {
 		sharp = (await import("sharp")).default;
 	} catch {
-		throw new Error(
-			"sharp is required for sprite slicing. Install with: bun add sharp",
-		);
+		throw new Error("sharp is required for sprite slicing. Install with: bun add sharp");
 	}
 
-	const {
-		input,
-		outputDir,
-		padding = 0,
-		margin = 0,
-		prefix = "frame",
-		atlas = false,
-	} = options;
+	const { input, outputDir, padding = 0, margin = 0, prefix = "frame", atlas = false } = options;
 
 	if (!fs.existsSync(input)) {
 		throw new Error(`Sprite sheet not found: ${input}`);
@@ -159,26 +148,15 @@ export async function sliceSpriteSheet(
 	if (options.frameWidth && options.frameHeight) {
 		frameWidth = options.frameWidth;
 		frameHeight = options.frameHeight;
-		cols = Math.floor(
-			(sheetWidth - 2 * margin + padding) / (frameWidth + padding),
-		);
-		rows = Math.floor(
-			(sheetHeight - 2 * margin + padding) / (frameHeight + padding),
-		);
+		cols = Math.floor((sheetWidth - 2 * margin + padding) / (frameWidth + padding));
+		rows = Math.floor((sheetHeight - 2 * margin + padding) / (frameHeight + padding));
 	} else if (options.cols && options.rows) {
 		cols = options.cols;
 		rows = options.rows;
-		frameWidth = Math.floor(
-			(sheetWidth - 2 * margin - (cols - 1) * padding) / cols,
-		);
-		frameHeight = Math.floor(
-			(sheetHeight - 2 * margin - (rows - 1) * padding) / rows,
-		);
+		frameWidth = Math.floor((sheetWidth - 2 * margin - (cols - 1) * padding) / cols);
+		frameHeight = Math.floor((sheetHeight - 2 * margin - (rows - 1) * padding) / rows);
 	} else {
-		const detected = detectGrid(
-			sheetWidth - 2 * margin,
-			sheetHeight - 2 * margin,
-		);
+		const detected = detectGrid(sheetWidth - 2 * margin, sheetHeight - 2 * margin);
 		cols = detected.cols;
 		rows = detected.rows;
 		frameWidth = detected.frameWidth;
@@ -198,8 +176,7 @@ export async function sliceSpriteSheet(
 			const y = margin + row * (frameHeight + padding);
 
 			// Skip if out of bounds
-			if (x + frameWidth > sheetWidth || y + frameHeight > sheetHeight)
-				continue;
+			if (x + frameWidth > sheetWidth || y + frameHeight > sheetHeight) continue;
 
 			const filename = `${prefix}-${String(index).padStart(3, "0")}.png`;
 			const outputPath = path.join(outputDir, filename);

@@ -9,13 +9,7 @@
 		"8gent": "./bin/8gent-run.js",
 		"8gent-code": "./bin/8gent-run.js"
 	},
-	"files": [
-		"dist/cli.js",
-		"dist/skills",
-		"bin/8gent-run.js",
-		"README.md",
-		"LICENSE"
-	],
+	"files": ["dist/cli.js", "dist/skills", "bin/8gent-run.js", "README.md", "LICENSE"],
 	"scripts": {
 		"start": "bun run packages/eight/index.ts",
 		"agent": "bun run packages/eight/index.ts",

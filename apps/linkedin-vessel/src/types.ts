@@ -16,12 +16,7 @@ export interface Lead {
 }
 
 export interface Signal {
-	type:
-		| "job_posting"
-		| "funding"
-		| "post_engagement"
-		| "job_change"
-		| "company_news";
+	type: "job_posting" | "funding" | "post_engagement" | "job_change" | "company_news";
 	summary: string;
 	strength: number; // 0-1
 	source: string;

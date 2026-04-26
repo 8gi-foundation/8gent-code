@@ -62,15 +62,13 @@ export interface BaselineDelta {
 
 export const ABILITY_METRIC_DESCRIPTIONS: Record<AbilityName, string> = {
 	memory: "Recall accuracy — did it remember what was stored? (% correct)",
-	worktree:
-		"Parallelization efficiency — tasks completed / time vs sequential estimate",
+	worktree: "Parallelization efficiency — tasks completed / time vs sequential estimate",
 	policy: "Violation rate — policy violations found / total operations",
 	evolution: "Improvement delta — score improvement across iterations",
 	healing: "Recovery rate — successful reverts / total failures",
 	entrepreneurship: "Opportunity hit rate — actionable finds / total scans",
 	ast: "Blast radius accuracy — predicted impact files vs actual changed files",
-	browser:
-		"Research relevance — findings used in implementation / total searches",
+	browser: "Research relevance — findings used in implementation / total searches",
 };
 
 // ---------------------------------------------------------------------------
@@ -85,8 +83,7 @@ export class AbilityScorecardTracker {
 	private filePath: string;
 
 	constructor(sessionId?: string) {
-		this.sessionId =
-			sessionId ?? new Date().toISOString().replace(/[:.]/g, "-");
+		this.sessionId = sessionId ?? new Date().toISOString().replace(/[:.]/g, "-");
 		this.filePath = join(SCORECARDS_DIR, `${this.sessionId}.jsonl`);
 		this.ensureDir();
 		this.loadExisting();
@@ -120,9 +117,7 @@ export class AbilityScorecardTracker {
 		};
 
 		for (const ability of ABILITIES) {
-			const scores = this.metrics
-				.filter((m) => m.ability === ability)
-				.map((m) => m.score);
+			const scores = this.metrics.filter((m) => m.ability === ability).map((m) => m.score);
 			card[ability] = scores.length > 0 ? avg(scores) : 0;
 		}
 
@@ -221,9 +216,7 @@ export class AbilityScorecardTracker {
 		};
 
 		for (const ability of ABILITIES) {
-			const scores = metrics
-				.filter((m) => m.ability === ability)
-				.map((m) => m.score);
+			const scores = metrics.filter((m) => m.ability === ability).map((m) => m.score);
 			card[ability] = scores.length > 0 ? avg(scores) : 0;
 		}
 

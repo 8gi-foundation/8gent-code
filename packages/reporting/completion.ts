@@ -50,8 +50,7 @@ export class CompletionReporter {
 	private reportsDir: string;
 
 	constructor(reportsDir?: string) {
-		this.reportsDir =
-			reportsDir || path.join(os.homedir(), ".8gent", "reports");
+		this.reportsDir = reportsDir || path.join(os.homedir(), ".8gent", "reports");
 		this.ensureReportsDir();
 	}
 
@@ -100,11 +99,7 @@ export class CompletionReporter {
 		}));
 
 		// Generate evidence
-		const evidence = this.generateEvidence(
-			context,
-			filesCreated,
-			filesModified,
-		);
+		const evidence = this.generateEvidence(context, filesCreated, filesModified);
 
 		// Calculate confidence
 		const confidence = this.calculateConfidence(context, evidence);
@@ -160,26 +155,18 @@ export class CompletionReporter {
 		const parts: string[] = [];
 
 		// Count completed steps
-		const completedSteps = context.steps.filter(
-			(s) => s.status === "completed",
-		).length;
+		const completedSteps = context.steps.filter((s) => s.status === "completed").length;
 
 		if (completedSteps > 0) {
-			parts.push(
-				`Completed ${completedSteps} step${completedSteps > 1 ? "s" : ""}`,
-			);
+			parts.push(`Completed ${completedSteps} step${completedSteps > 1 ? "s" : ""}`);
 		}
 
 		if (filesCreated.length > 0) {
-			parts.push(
-				`created ${filesCreated.length} file${filesCreated.length > 1 ? "s" : ""}`,
-			);
+			parts.push(`created ${filesCreated.length} file${filesCreated.length > 1 ? "s" : ""}`);
 		}
 
 		if (filesModified.length > 0) {
-			parts.push(
-				`modified ${filesModified.length} file${filesModified.length > 1 ? "s" : ""}`,
-			);
+			parts.push(`modified ${filesModified.length} file${filesModified.length > 1 ? "s" : ""}`);
 		}
 
 		if (context.gitCommits && context.gitCommits.length > 0) {
@@ -203,9 +190,7 @@ export class CompletionReporter {
 		// Check files exist
 		const allFiles = [...filesCreated, ...filesModified];
 		const existingFiles = allFiles.filter((f) => {
-			const fullPath = path.isAbsolute(f)
-				? f
-				: path.join(context.workingDirectory, f);
+			const fullPath = path.isAbsolute(f) ? f : path.join(context.workingDirectory, f);
 			return fs.existsSync(fullPath);
 		});
 
@@ -241,17 +226,12 @@ export class CompletionReporter {
 		return evidence;
 	}
 
-	private calculateConfidence(
-		context: TaskContext,
-		evidence: EvidenceSummary[],
-	): number {
+	private calculateConfidence(context: TaskContext, evidence: EvidenceSummary[]): number {
 		let score = 0;
 		let maxScore = 0;
 
 		// Steps completion (50 points max)
-		const completedSteps = context.steps.filter(
-			(s) => s.status === "completed",
-		).length;
+		const completedSteps = context.steps.filter((s) => s.status === "completed").length;
 		const totalSteps = context.steps.length;
 		if (totalSteps > 0) {
 			score += (completedSteps / totalSteps) * 50;
@@ -345,9 +325,7 @@ export class CompletionReporter {
 			lines.push(heading("Steps Taken", 2));
 			for (const step of report.steps) {
 				const icon = stepIcon(step.status);
-				const duration = step.duration
-					? muted(` (${formatDuration(step.duration)})`)
-					: "";
+				const duration = step.duration ? muted(` (${formatDuration(step.duration)})`) : "";
 				lines.push(`  ${step.index}. ${icon} ${step.description}${duration}`);
 			}
 			lines.push("");
@@ -365,9 +343,7 @@ export class CompletionReporter {
 
 		// Stats section
 		lines.push(heading("Stats", 2));
-		lines.push(
-			`  ${statusLine("Tools used", String(report.toolsUsed), "info")}`,
-		);
+		lines.push(`  ${statusLine("Tools used", String(report.toolsUsed), "info")}`);
 		lines.push(`  ${statusLine("Duration", report.duration, "warning")}`);
 		lines.push(
 			`  ${statusLine("Confidence", `${report.confidence}%`, report.confidence >= 80 ? "success" : report.confidence >= 50 ? "warning" : "error")}`,
@@ -376,16 +352,13 @@ export class CompletionReporter {
 		// Always show token usage (estimate if not tracked)
 		const tokensUsed = report.tokensUsed || 0;
 		const contextMax = report.contextMax || 128000; // Default 128k context
-		const contextPercent =
-			contextMax > 0 ? Math.round((tokensUsed / contextMax) * 100) : 0;
+		const contextPercent = contextMax > 0 ? Math.round((tokensUsed / contextMax) * 100) : 0;
 		lines.push(
 			`  ${statusLine("Tokens", `${formatNumber(tokensUsed)} / ${formatNumber(contextMax)} (${contextPercent}%)`, contextPercent > 80 ? "error" : contextPercent > 50 ? "warning" : "info")}`,
 		);
 
 		if (report.tokensSaved && report.tokensSaved > 0) {
-			lines.push(
-				`  ${statusLine("Tokens saved", formatNumber(report.tokensSaved), "success")}`,
-			);
+			lines.push(`  ${statusLine("Tokens saved", formatNumber(report.tokensSaved), "success")}`);
 		}
 		if (report.gitBranch) {
 			lines.push(`  ${statusLine("Branch", report.gitBranch, "warning")}`);
@@ -431,11 +404,7 @@ export class CompletionReporter {
 
 		// Header
 		const statusEmoji =
-			report.status === "success"
-				? "check"
-				: report.status === "partial"
-					? "warning"
-					: "x";
+			report.status === "success" ? "check" : report.status === "partial" ? "warning" : "x";
 		lines.push(`# :${statusEmoji}: Task Complete`);
 		lines.push("");
 
@@ -472,12 +441,8 @@ export class CompletionReporter {
 						: step.status === "failed"
 							? ":x:"
 							: ":hourglass:";
-				const duration = step.duration
-					? ` _(${formatDuration(step.duration)})_`
-					: "";
-				lines.push(
-					`${step.index}. ${statusIcon} ${step.description}${duration}`,
-				);
+				const duration = step.duration ? ` _(${formatDuration(step.duration)})_` : "";
+				lines.push(`${step.index}. ${statusIcon} ${step.description}${duration}`);
 			}
 			lines.push("");
 		}
@@ -487,11 +452,7 @@ export class CompletionReporter {
 			lines.push("## Evidence");
 			for (const e of report.evidence) {
 				const statusIcon =
-					e.status === "pass"
-						? ":white_check_mark:"
-						: e.status === "fail"
-							? ":x:"
-							: ":hourglass:";
+					e.status === "pass" ? ":white_check_mark:" : e.status === "fail" ? ":x:" : ":hourglass:";
 				const details = e.details ? ` ${e.details}` : "";
 				const url = e.url ? ` [link](${e.url})` : "";
 				lines.push(`- ${statusIcon} **${e.label}**${details}${url}`);
@@ -621,11 +582,7 @@ export class TaskContextTracker {
 	private context: TaskContext;
 	private currentStep = -1;
 
-	constructor(
-		taskId: string,
-		taskDescription: string,
-		workingDirectory: string = process.cwd(),
-	) {
+	constructor(taskId: string, taskDescription: string, workingDirectory: string = process.cwd()) {
 		this.context = {
 			taskId,
 			taskDescription,

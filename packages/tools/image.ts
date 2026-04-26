@@ -43,9 +43,7 @@ const SUPPORTED_FORMATS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
  * Read an image file and return its base64 encoding along with metadata
  */
 export async function readImage(imagePath: string): Promise<ImageInfo> {
-	const absolutePath = path.isAbsolute(imagePath)
-		? imagePath
-		: path.join(process.cwd(), imagePath);
+	const absolutePath = path.isAbsolute(imagePath) ? imagePath : path.join(process.cwd(), imagePath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`Image not found: ${absolutePath}`);
@@ -84,9 +82,7 @@ export async function resizeImage(
 	maxWidth = 800,
 	maxHeight = 800,
 ): Promise<ImageInfo> {
-	const absolutePath = path.isAbsolute(imagePath)
-		? imagePath
-		: path.join(process.cwd(), imagePath);
+	const absolutePath = path.isAbsolute(imagePath) ? imagePath : path.join(process.cwd(), imagePath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`Image not found: ${absolutePath}`);
@@ -226,9 +222,7 @@ export async function getImageMetadata(imagePath: string): Promise<{
 	channels: number;
 	hasAlpha: boolean;
 }> {
-	const absolutePath = path.isAbsolute(imagePath)
-		? imagePath
-		: path.join(process.cwd(), imagePath);
+	const absolutePath = path.isAbsolute(imagePath) ? imagePath : path.join(process.cwd(), imagePath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`Image not found: ${absolutePath}`);
@@ -256,9 +250,7 @@ export async function convertImage(
 	imagePath: string,
 	outputFormat: "png" | "jpg" | "webp" | "gif",
 ): Promise<Buffer> {
-	const absolutePath = path.isAbsolute(imagePath)
-		? imagePath
-		: path.join(process.cwd(), imagePath);
+	const absolutePath = path.isAbsolute(imagePath) ? imagePath : path.join(process.cwd(), imagePath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`Image not found: ${absolutePath}`);
@@ -283,9 +275,7 @@ export async function convertImage(
 /**
  * Check if Ollama vision model is available
  */
-export async function isVisionModelAvailable(
-	model = "llava",
-): Promise<boolean> {
+export async function isVisionModelAvailable(model = "llava"): Promise<boolean> {
 	try {
 		const response = await fetch("http://localhost:11434/api/tags");
 		if (!response.ok) return false;
@@ -293,9 +283,7 @@ export async function isVisionModelAvailable(
 		const data = (await response.json()) as {
 			models: Array<{ name: string }>;
 		};
-		return data.models.some(
-			(m) => m.name === model || m.name.startsWith(`${model}:`),
-		);
+		return data.models.some((m) => m.name === model || m.name.startsWith(`${model}:`));
 	} catch {
 		return false;
 	}

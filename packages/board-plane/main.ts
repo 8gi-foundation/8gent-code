@@ -91,9 +91,7 @@ function loadConfig(): ControlPlaneConfig {
 	}
 
 	if (members.length === 0) {
-		console.error(
-			"[main] No bot tokens found - need at least one DISCORD_TOKEN_* env var",
-		);
+		console.error("[main] No bot tokens found - need at least one DISCORD_TOKEN_* env var");
 		process.exit(1);
 	}
 
@@ -111,14 +109,8 @@ function loadConfig(): ControlPlaneConfig {
 		vesselAuthToken,
 		members,
 		rateLimitMs: Number.parseInt(process.env.RATE_LIMIT_MS || "10000", 10),
-		staleTaskMaxAgeMs: Number.parseInt(
-			process.env.STALE_TASK_MAX_AGE_MS || "120000",
-			10,
-		),
-		healthCheckIntervalMs: Number.parseInt(
-			process.env.HEALTH_CHECK_INTERVAL_MS || "30000",
-			10,
-		),
+		staleTaskMaxAgeMs: Number.parseInt(process.env.STALE_TASK_MAX_AGE_MS || "120000", 10),
+		healthCheckIntervalMs: Number.parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || "30000", 10),
 	};
 }
 

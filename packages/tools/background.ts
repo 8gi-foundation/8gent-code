@@ -75,8 +75,7 @@ export class BackgroundTaskManager {
 		} = {},
 	): string {
 		const id = this.generateTaskId();
-		const workingDirectory =
-			options.workingDirectory || this.defaultWorkingDirectory;
+		const workingDirectory = options.workingDirectory || this.defaultWorkingDirectory;
 
 		const task: BackgroundTask = {
 			id,
@@ -233,9 +232,7 @@ export class BackgroundTaskManager {
 			task.process = null;
 		});
 
-		console.log(
-			`[background] Adopted running process as task ${id}: ${command.slice(0, 50)}...`,
-		);
+		console.log(`[background] Adopted running process as task ${id}: ${command.slice(0, 50)}...`);
 		return id;
 	}
 
@@ -470,9 +467,7 @@ export class BackgroundTaskManager {
 
 let taskManagerInstance: BackgroundTaskManager | null = null;
 
-export function getBackgroundTaskManager(
-	workingDirectory?: string,
-): BackgroundTaskManager {
+export function getBackgroundTaskManager(workingDirectory?: string): BackgroundTaskManager {
 	if (!taskManagerInstance) {
 		taskManagerInstance = new BackgroundTaskManager(workingDirectory);
 	} else if (workingDirectory) {

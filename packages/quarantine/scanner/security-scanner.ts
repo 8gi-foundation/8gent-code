@@ -120,8 +120,7 @@ const SECURITY_RULES: PatternRule[] = [
 
 	// HIGH: Credential Access
 	{
-		pattern:
-			/process\.env\[?['"`]?(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)/gi,
+		pattern: /process\.env\[?['"`]?(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)/gi,
 		severity: "HIGH",
 		category: "Credential Access",
 		recommendation: "Accessing sensitive env vars - verify necessity",
@@ -191,8 +190,7 @@ const SECURITY_RULES: PatternRule[] = [
 
 	// MEDIUM: Network Calls
 	{
-		pattern:
-			/https?:\/\/(?!localhost|127\.0\.0\.1|github\.com|npmjs\.com)[^\s"'`<>]+/g,
+		pattern: /https?:\/\/(?!localhost|127\.0\.0\.1|github\.com|npmjs\.com)[^\s"'`<>]+/g,
 		severity: "MEDIUM",
 		category: "External Network Call",
 		recommendation: "External URL - verify trusted endpoint",
@@ -323,10 +321,7 @@ const SCANNABLE_EXTENSIONS = new Set([
 // Scanner Implementation
 // ============================================================================
 
-async function getAllFiles(
-	dir: string,
-	files: string[] = [],
-): Promise<string[]> {
+async function getAllFiles(dir: string, files: string[] = []): Promise<string[]> {
 	if (!fs.existsSync(dir)) return files;
 
 	const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -433,9 +428,7 @@ export async function scanSkill(skillPath: string): Promise<ScanResult> {
 		MEDIUM: 2,
 		LOW: 3,
 	};
-	uniqueFindings.sort(
-		(a, b) => severityOrder[a.severity] - severityOrder[b.severity],
-	);
+	uniqueFindings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
 	// Calculate summary
 	const summary = {
@@ -497,9 +490,7 @@ ${"━".repeat(50)}
 
 	if (result.summary.medium > 0) {
 		output += `📝 MEDIUM (${result.summary.medium})\n`;
-		for (const f of result.findings
-			.filter((f) => f.severity === "MEDIUM")
-			.slice(0, 5)) {
+		for (const f of result.findings.filter((f) => f.severity === "MEDIUM").slice(0, 5)) {
 			const relPath = f.file.replace(result.skillPath, ".");
 			output += `  └─ ${relPath}:${f.line} - ${f.category}\n`;
 		}

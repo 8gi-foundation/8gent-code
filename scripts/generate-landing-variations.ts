@@ -136,9 +136,7 @@ async function callOllama(
 
 	const data = (await res.json()) as { response: string };
 	const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-	console.log(
-		`  [ollama] ${model} responded in ${elapsed}s (${data.response.length} chars)`,
-	);
+	console.log(`  [ollama] ${model} responded in ${elapsed}s (${data.response.length} chars)`);
 	return data.response;
 }
 
@@ -159,9 +157,7 @@ async function generateVariation(
 		raw = await callOllama(PRIMARY_MODEL, temp, signal);
 	} catch (err: any) {
 		if (err.name === "AbortError" || err.name === "TimeoutError") {
-			console.log(
-				`  [fallback] ${PRIMARY_MODEL} timed out, trying ${FALLBACK_MODEL}...`,
-			);
+			console.log(`  [fallback] ${PRIMARY_MODEL} timed out, trying ${FALLBACK_MODEL}...`);
 			model = FALLBACK_MODEL;
 			const signal = AbortSignal.timeout(TIMEOUT_MS);
 			raw = await callOllama(FALLBACK_MODEL, temp, signal);
@@ -175,9 +171,7 @@ async function generateVariation(
 	writeFileSync(outPath, component);
 
 	const elapsed = (Date.now() - start) / 1000;
-	console.log(
-		`  [saved] ${outPath} (${label}, model: ${model}, ${elapsed.toFixed(1)}s)`,
-	);
+	console.log(`  [saved] ${outPath} (${label}, model: ${model}, ${elapsed.toFixed(1)}s)`);
 	return { model, elapsed };
 }
 
@@ -276,9 +270,7 @@ export default function VariationsIndex() {
 
 async function main() {
 	console.log("=== 8gent Landing Page Variation Generator ===");
-	console.log(
-		`Models: ${PRIMARY_MODEL} (primary), ${FALLBACK_MODEL} (fallback)`,
-	);
+	console.log(`Models: ${PRIMARY_MODEL} (primary), ${FALLBACK_MODEL} (fallback)`);
 	console.log(`Timeout: ${TIMEOUT_MS / 1000}s per call`);
 	console.log(`Output: ${VARIATIONS_DIR}\n`);
 

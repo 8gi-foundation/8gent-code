@@ -98,8 +98,7 @@ export class SubAgentManager extends EventEmitter {
 		this.defaultConfig = {
 			model: config?.defaultConfig?.model || "glm-4.7-flash:latest",
 			maxTurns: config?.defaultConfig?.maxTurns || 20,
-			workingDirectory:
-				config?.defaultConfig?.workingDirectory || process.cwd(),
+			workingDirectory: config?.defaultConfig?.workingDirectory || process.cwd(),
 			timeout: config?.defaultConfig?.timeout || 300000, // 5 min default
 			capabilities: config?.defaultConfig?.capabilities || [],
 			priority: config?.defaultConfig?.priority || 1,
@@ -174,11 +173,7 @@ export class SubAgentManager extends EventEmitter {
 		}
 
 		// Already complete
-		if (
-			agent.status === "complete" ||
-			agent.status === "failed" ||
-			agent.status === "cancelled"
-		) {
+		if (agent.status === "complete" || agent.status === "failed" || agent.status === "cancelled") {
 			return agent;
 		}
 
@@ -192,9 +187,7 @@ export class SubAgentManager extends EventEmitter {
 			const checkComplete = (event: SubAgentEvent) => {
 				if (
 					event.agentId === id &&
-					(event.type === "completed" ||
-						event.type === "failed" ||
-						event.type === "cancelled")
+					(event.type === "completed" || event.type === "failed" || event.type === "cancelled")
 				) {
 					clearTimeout(timer);
 					this.off("event", checkComplete);
@@ -218,11 +211,7 @@ export class SubAgentManager extends EventEmitter {
 		const agent = this.agents.get(id);
 		if (!agent) return false;
 
-		if (
-			agent.status === "complete" ||
-			agent.status === "failed" ||
-			agent.status === "cancelled"
-		) {
+		if (agent.status === "complete" || agent.status === "failed" || agent.status === "cancelled") {
 			return false; // Already finished
 		}
 
@@ -258,10 +247,7 @@ export class SubAgentManager extends EventEmitter {
 	 */
 	listRunning(): SubAgent[] {
 		return this.listAgents().filter(
-			(a) =>
-				a.status === "planning" ||
-				a.status === "executing" ||
-				a.status === "validating",
+			(a) => a.status === "planning" || a.status === "executing" || a.status === "validating",
 		);
 	}
 
@@ -418,10 +404,7 @@ export class SubAgentManager extends EventEmitter {
 			agent.status = "validating";
 
 			const reporter = new ValidationReporter();
-			agent.validationReport = reporter.generateReport(
-				agent.plan,
-				agent.evidence,
-			);
+			agent.validationReport = reporter.generateReport(agent.plan, agent.evidence);
 
 			// Complete
 			agent.status = "complete";
@@ -519,10 +502,7 @@ Output ONLY the JSON array of steps:`;
 
 			const parsed = JSON.parse(jsonMatch[0]);
 			return parsed.map(
-				(
-					step: { id?: string; action: string; expected: string },
-					index: number,
-				) => ({
+				(step: { id?: string; action: string; expected: string }, index: number) => ({
 					id: step.id || `step_${index + 1}`,
 					action: step.action,
 					expected: step.expected,
@@ -545,10 +525,7 @@ Output ONLY the JSON array of steps:`;
 	private processQueue(): void {
 		// Find idle agents to execute
 		for (const [id, agent] of this.agents) {
-			if (
-				agent.status === "planning" &&
-				this.runningCount < this.maxConcurrent
-			) {
+			if (agent.status === "planning" && this.runningCount < this.maxConcurrent) {
 			}
 		}
 	}

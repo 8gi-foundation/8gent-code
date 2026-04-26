@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
+const WORK_DIR = process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
 let cronParser: any;
@@ -122,9 +121,7 @@ describe("Cron Parser", () => {
 describe("PriorityQueue", () => {
 	it("dequeues in priority order (lower = higher priority)", () => {
 		const PQ =
-			priorityQueue.PriorityQueue ||
-			priorityQueue.default?.PriorityQueue ||
-			priorityQueue.default;
+			priorityQueue.PriorityQueue || priorityQueue.default?.PriorityQueue || priorityQueue.default;
 		const q = new PQ();
 		q.enqueue("low", 10);
 		q.enqueue("high", 1);
@@ -136,9 +133,7 @@ describe("PriorityQueue", () => {
 
 	it("handles ties with FIFO ordering", () => {
 		const PQ =
-			priorityQueue.PriorityQueue ||
-			priorityQueue.default?.PriorityQueue ||
-			priorityQueue.default;
+			priorityQueue.PriorityQueue || priorityQueue.default?.PriorityQueue || priorityQueue.default;
 		const q = new PQ();
 		q.enqueue("first", 1);
 		q.enqueue("second", 1);
@@ -154,9 +149,7 @@ describe("PriorityQueue", () => {
 
 	it("size and isEmpty work correctly", () => {
 		const PQ =
-			priorityQueue.PriorityQueue ||
-			priorityQueue.default?.PriorityQueue ||
-			priorityQueue.default;
+			priorityQueue.PriorityQueue || priorityQueue.default?.PriorityQueue || priorityQueue.default;
 		const q = new PQ();
 		expect(q.isEmpty()).toBe(true);
 		expect(q.size()).toBe(0);
@@ -170,9 +163,7 @@ describe("PriorityQueue", () => {
 
 	it("peek returns highest priority without removing", () => {
 		const PQ =
-			priorityQueue.PriorityQueue ||
-			priorityQueue.default?.PriorityQueue ||
-			priorityQueue.default;
+			priorityQueue.PriorityQueue || priorityQueue.default?.PriorityQueue || priorityQueue.default;
 		const q = new PQ();
 		q.enqueue("low", 10);
 		q.enqueue("high", 1);
@@ -185,10 +176,7 @@ describe("PriorityQueue", () => {
 
 describe("WorkerPool", () => {
 	it("respects maxWorkers concurrency", async () => {
-		const WP =
-			workerPool.WorkerPool ||
-			workerPool.default?.WorkerPool ||
-			workerPool.default;
+		const WP = workerPool.WorkerPool || workerPool.default?.WorkerPool || workerPool.default;
 		const pool = new WP({ maxWorkers: 2 });
 		let concurrent = 0;
 		let maxConcurrent = 0;
@@ -212,10 +200,7 @@ describe("WorkerPool", () => {
 	});
 
 	it("drain waits for all tasks", async () => {
-		const WP =
-			workerPool.WorkerPool ||
-			workerPool.default?.WorkerPool ||
-			workerPool.default;
+		const WP = workerPool.WorkerPool || workerPool.default?.WorkerPool || workerPool.default;
 		const pool = new WP({ maxWorkers: 2 });
 		let completed = 0;
 		for (let i = 0; i < 5; i++) {
@@ -229,10 +214,7 @@ describe("WorkerPool", () => {
 	});
 
 	it("shutdown rejects new tasks", async () => {
-		const WP =
-			workerPool.WorkerPool ||
-			workerPool.default?.WorkerPool ||
-			workerPool.default;
+		const WP = workerPool.WorkerPool || workerPool.default?.WorkerPool || workerPool.default;
 		const pool = new WP({ maxWorkers: 1 });
 		await pool.shutdown();
 		let threw = false;
@@ -345,10 +327,7 @@ describe("CircuitBreaker", () => {
 
 describe("TaskScheduler", () => {
 	it("schedules and executes tasks", async () => {
-		const TS =
-			scheduler.TaskScheduler ||
-			scheduler.default?.TaskScheduler ||
-			scheduler.default;
+		const TS = scheduler.TaskScheduler || scheduler.default?.TaskScheduler || scheduler.default;
 		const sched = new TS();
 		let executed = false;
 		// Schedule a task that runs every second (for testing)
@@ -364,9 +343,7 @@ describe("TaskScheduler", () => {
 		const tasks = sched.getScheduledTasks();
 		expect(Array.isArray(tasks)).toBe(true);
 		expect(tasks.length).toBeGreaterThanOrEqual(1);
-		const testTask = tasks.find(
-			(t: any) => t.id === "test-task" || t.taskId === "test-task",
-		);
+		const testTask = tasks.find((t: any) => t.id === "test-task" || t.taskId === "test-task");
 		expect(testTask).toBeDefined();
 		// Clean up
 		sched.unschedule("test-task");

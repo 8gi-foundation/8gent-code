@@ -12,10 +12,8 @@ const machineMod = await import(`${workDir}/machine.ts`);
 const workflowMod = await import(`${workDir}/workflow.ts`);
 const processMod = await import(`${workDir}/process.ts`);
 
-const SMClass =
-	machineMod.default ?? machineMod.StateMachine ?? machineMod.Machine;
-const WFClass =
-	workflowMod.default ?? workflowMod.WorkflowEngine ?? workflowMod.Workflow;
+const SMClass = machineMod.default ?? machineMod.StateMachine ?? machineMod.Machine;
+const WFClass = workflowMod.default ?? workflowMod.WorkflowEngine ?? workflowMod.Workflow;
 const createOrderWorkflow: Function =
 	processMod.createOrderWorkflow ?? processMod.default?.createOrderWorkflow;
 const createOrderSagaSteps: Function =
@@ -23,8 +21,7 @@ const createOrderSagaSteps: Function =
 
 if (!SMClass) throw new Error("machine.ts must export StateMachine");
 if (!WFClass) throw new Error("workflow.ts must export WorkflowEngine");
-if (!createOrderWorkflow)
-	throw new Error("process.ts must export createOrderWorkflow");
+if (!createOrderWorkflow) throw new Error("process.ts must export createOrderWorkflow");
 
 function delay(ms: number) {
 	return new Promise((r) => setTimeout(r, ms));
@@ -168,10 +165,7 @@ describe("FS003: Workflow Engine (Saga)", () => {
 		const result = await engine.execute(steps);
 		expect(result.success).toBe(true);
 		// results can be Map or plain object
-		const r1 =
-			result.results instanceof Map
-				? result.results.get("step1")
-				: result.results?.step1;
+		const r1 = result.results instanceof Map ? result.results.get("step1") : result.results?.step1;
 		expect(r1).toBe("result1");
 	});
 

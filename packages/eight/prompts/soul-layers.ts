@@ -44,10 +44,7 @@ export interface UserContext {
  * Compose the soul prompt from layered segments based on access tier.
  * Returns the identity + capability + tier-specific + user context layers.
  */
-export function composeSoulPrompt(
-	tier: AccessTier,
-	userContext?: UserContext,
-): string {
+export function composeSoulPrompt(tier: AccessTier, userContext?: UserContext): string {
 	const layers: (string | null)[] = [
 		CORE_IDENTITY,
 		CAPABILITY_LAYER,
@@ -61,8 +58,7 @@ export function composeSoulPrompt(
 		let ctx = "\n## User Context\n";
 		if (userContext.name) ctx += `Name: ${userContext.name}\n`;
 		if (userContext.role) ctx += `Role: ${userContext.role}\n`;
-		if (userContext.communicationStyle)
-			ctx += `Style: ${userContext.communicationStyle}\n`;
+		if (userContext.communicationStyle) ctx += `Style: ${userContext.communicationStyle}\n`;
 		if (userContext.peerRepresentation)
 			ctx += `\nWhat I know about this user:\n${userContext.peerRepresentation}\n`;
 		layers.push(ctx);
@@ -81,8 +77,7 @@ export function determineTier(channel: string, _userId?: string): AccessTier {
 	// Telegram with known owner = owner
 	if (channel === "telegram") return "owner";
 	// API clients with auth = collaborator
-	if (channel === "api" || channel === "os" || channel === "app")
-		return "collaborator";
+	if (channel === "api" || channel === "os" || channel === "app") return "collaborator";
 	// Default = visitor
 	return "visitor";
 }

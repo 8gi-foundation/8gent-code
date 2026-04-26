@@ -134,12 +134,7 @@ function loadCli(args: string[]): ConfigMap {
 // ---- public API -------------------------------------------------------------
 
 export function loadConfig(options: ConfigOptions = {}): ConfigMap {
-	const {
-		defaults = {},
-		filePath,
-		envPrefix = "",
-		cliArgs = process.argv.slice(2),
-	} = options;
+	const { defaults = {}, filePath, envPrefix = "", cliArgs = process.argv.slice(2) } = options;
 
 	let config: ConfigMap = { ...defaults };
 

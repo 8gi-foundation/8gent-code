@@ -172,12 +172,7 @@ export type DesignMood =
 	| "calm"
 	| "energetic";
 
-export type FontCategory =
-	| "sans-serif"
-	| "serif"
-	| "monospace"
-	| "display"
-	| "cursive";
+export type FontCategory = "sans-serif" | "serif" | "monospace" | "display" | "cursive";
 
 // Parsed color object
 export interface ParsedColors {

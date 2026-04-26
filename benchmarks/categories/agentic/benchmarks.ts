@@ -5,8 +5,7 @@ export const agenticBenchmarks: BenchmarkDefinition[] = [
 	{
 		id: "TC001",
 		category: "agentic",
-		title:
-			"Config Parser — Lexer, Parser, Validator, Serializer with AST Roundtrip",
+		title: "Config Parser — Lexer, Parser, Validator, Serializer with AST Roundtrip",
 		difficulty: "hard",
 		prompt: `Build a parser for a Dockerfile-like config language called ".agentfile".
 

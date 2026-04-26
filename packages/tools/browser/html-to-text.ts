@@ -37,10 +37,7 @@ export function htmlToText(html: string): {
 	let cleaned = html;
 	for (const tag of BLOCK_TAGS) {
 		// non-greedy removal of full tag block
-		cleaned = cleaned.replace(
-			new RegExp(`<${tag}[\\s>][\\s\\S]*?<\\/${tag}>`, "gi"),
-			" ",
-		);
+		cleaned = cleaned.replace(new RegExp(`<${tag}[\\s>][\\s\\S]*?<\\/${tag}>`, "gi"), " ");
 		// self-closing variant
 		cleaned = cleaned.replace(new RegExp(`<${tag}[^>]*\\/>`, "gi"), " ");
 	}

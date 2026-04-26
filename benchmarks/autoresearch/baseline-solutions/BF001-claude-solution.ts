@@ -12,10 +12,7 @@ interface Counter {
 const counters = new Map<string, Counter>();
 const locks = new Map<string, Promise<void>>();
 
-export async function updateCounter(
-	id: string,
-	delta: number,
-): Promise<number> {
+export async function updateCounter(id: string, delta: number): Promise<number> {
 	// Acquire lock for this counter
 	while (locks.has(id)) {
 		await locks.get(id);

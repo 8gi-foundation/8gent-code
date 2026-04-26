@@ -40,9 +40,7 @@ export interface DaemonEvents {
 
 export type EventName = keyof DaemonEvents;
 export type EventPayload<E extends EventName> = DaemonEvents[E];
-export type EventHandler<E extends EventName> = (
-	payload: EventPayload<E>,
-) => void;
+export type EventHandler<E extends EventName> = (payload: EventPayload<E>) => void;
 
 interface Subscription {
 	event: EventName;

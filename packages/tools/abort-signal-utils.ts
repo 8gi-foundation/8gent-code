@@ -37,9 +37,7 @@ export function mergeSignals(...signals: AbortSignal[]): AbortSignal {
 export function timeoutSignal(ms: number): AbortSignal {
 	const controller = new AbortController();
 	const timer = setTimeout(() => {
-		controller.abort(
-			new DOMException(`Timed out after ${ms}ms`, "TimeoutError"),
-		);
+		controller.abort(new DOMException(`Timed out after ${ms}ms`, "TimeoutError"));
 	}, ms);
 
 	// Clean up timer if the caller aborts early via their own logic
@@ -62,10 +60,7 @@ export function raceSignals(...signals: AbortSignal[]): AbortSignal {
  * Register a callback that fires when the signal is aborted.
  * Returns a cleanup function to remove the listener.
  */
-export function onAbort(
-	signal: AbortSignal,
-	fn: (reason: unknown) => void,
-): () => void {
+export function onAbort(signal: AbortSignal, fn: (reason: unknown) => void): () => void {
 	if (signal.aborted) {
 		fn(signal.reason);
 		return () => {};
@@ -102,26 +97,17 @@ export function isAborted(signal: AbortSignal): boolean {
  * Wrap a promise so it rejects with an AbortError if the signal fires
  * before the promise resolves.
  */
-export function abortablePromise<T>(
-	promise: Promise<T>,
-	signal: AbortSignal,
-): Promise<T> {
+export function abortablePromise<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 	if (signal.aborted) {
 		const reason = signal.reason;
 		return Promise.reject(
-			reason instanceof Error
-				? reason
-				: new DOMException("AbortError", "AbortError"),
+			reason instanceof Error ? reason : new DOMException("AbortError", "AbortError"),
 		);
 	}
 
 	return new Promise<T>((resolve, reject) => {
 		const cleanup = onAbort(signal, (reason) => {
-			reject(
-				reason instanceof Error
-					? reason
-					: new DOMException("AbortError", "AbortError"),
-			);
+			reject(reason instanceof Error ? reason : new DOMException("AbortError", "AbortError"));
 		});
 
 		promise.then(

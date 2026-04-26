@@ -9,10 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { glob } from "glob";
-import {
-	getSymbolSource,
-	parseTypeScriptFile,
-} from "../packages/ast-index/typescript-parser";
+import { getSymbolSource, parseTypeScriptFile } from "../packages/ast-index/typescript-parser";
 
 interface BenchmarkResult {
 	name: string;
@@ -83,9 +80,7 @@ async function benchmarkSingleFile(filePath: string): Promise<BenchmarkResult> {
 
 	// Get one symbol (simulating typical usage)
 	let symbolTokens = 0;
-	const targetSymbol = outline.symbols.find(
-		(s) => s.kind === "function" && s.name.length > 3,
-	);
+	const targetSymbol = outline.symbols.find((s) => s.kind === "function" && s.name.length > 3);
 	if (targetSymbol) {
 		const symbolSource = getSymbolSource(
 			absolutePath,
@@ -138,22 +133,10 @@ async function benchmarkDirectory(
 }
 
 async function runFullBenchmark(): Promise<BenchmarkSuite> {
-	log(
-		"\n╔══════════════════════════════════════════════════════════════╗",
-		colors.cyan,
-	);
-	log(
-		"║  8gent Code - Benchmark Suite                                 ║",
-		colors.cyan,
-	);
-	log(
-		"║  Proving AST-first efficiency at scale                        ║",
-		colors.cyan,
-	);
-	log(
-		"╚══════════════════════════════════════════════════════════════╝\n",
-		colors.cyan,
-	);
+	log("\n╔══════════════════════════════════════════════════════════════╗", colors.cyan);
+	log("║  8gent Code - Benchmark Suite                                 ║", colors.cyan);
+	log("║  Proving AST-first efficiency at scale                        ║", colors.cyan);
+	log("╚══════════════════════════════════════════════════════════════╝\n", colors.cyan);
 
 	const results: BenchmarkResult[] = [];
 
@@ -164,18 +147,14 @@ async function runFullBenchmark(): Promise<BenchmarkSuite> {
 
 	// Print individual results
 	for (const r of selfResults) {
-		const emoji =
-			r.savings.percent > 50 ? "🔥" : r.savings.percent > 30 ? "✨" : "📄";
+		const emoji = r.savings.percent > 50 ? "🔥" : r.savings.percent > 30 ? "✨" : "📄";
 		log(
 			`  ${emoji} ${r.name.padEnd(40)} ${r.savings.percent.toFixed(1).padStart(5)}% saved (${r.savings.tokens.toLocaleString()} tokens)`,
 		);
 	}
 
 	// Calculate summary
-	const totalTraditional = results.reduce(
-		(sum, r) => sum + r.traditional.tokens,
-		0,
-	);
+	const totalTraditional = results.reduce((sum, r) => sum + r.traditional.tokens, 0);
 	const totalAst = results.reduce((sum, r) => sum + r.astFirst.tokens, 0);
 	const avgSavings =
 		results.length > 0
@@ -194,18 +173,9 @@ async function runFullBenchmark(): Promise<BenchmarkSuite> {
 	};
 
 	// Print summary
-	log(
-		"\n╔══════════════════════════════════════════════════════════════╗",
-		colors.green,
-	);
-	log(
-		"║  BENCHMARK RESULTS                                            ║",
-		colors.green,
-	);
-	log(
-		"╠══════════════════════════════════════════════════════════════╣",
-		colors.green,
-	);
+	log("\n╔══════════════════════════════════════════════════════════════╗", colors.green);
+	log("║  BENCHMARK RESULTS                                            ║", colors.green);
+	log("╠══════════════════════════════════════════════════════════════╣", colors.green);
 	log(
 		`║  Files benchmarked:         ${suite.summary.testsRun.toString().padStart(10)}                    ║`,
 		colors.green,
@@ -226,10 +196,7 @@ async function runFullBenchmark(): Promise<BenchmarkSuite> {
 		`║  Average savings:       ${avgSavings.toFixed(1).padStart(13)}%                    ║`,
 		colors.green,
 	);
-	log(
-		"╚══════════════════════════════════════════════════════════════╝\n",
-		colors.green,
-	);
+	log("╚══════════════════════════════════════════════════════════════╝\n", colors.green);
 
 	// Cost savings projection
 	log("💰 Cost savings projection (per 10,000 operations):\n", colors.yellow);
@@ -247,10 +214,7 @@ async function runFullBenchmark(): Promise<BenchmarkSuite> {
 		log(`   ${p.name.padEnd(18)} $${cost.toFixed(2)} saved`);
 	}
 
-	log(
-		"\n🚀 These savings compound across every codebase interaction.",
-		colors.bright,
-	);
+	log("\n🚀 These savings compound across every codebase interaction.", colors.bright);
 	log("   This is why 8gent Code users never hit usage caps.\n");
 
 	// Save results to file
@@ -265,10 +229,7 @@ async function runFullBenchmark(): Promise<BenchmarkSuite> {
 async function benchmarkSymbolRetrieval(): Promise<void> {
 	log("\n🎯 Benchmark: Symbol Retrieval Efficiency\n", colors.bright);
 
-	const testFile = path.join(
-		process.cwd(),
-		"packages/ast-index/typescript-parser.ts",
-	);
+	const testFile = path.join(process.cwd(), "packages/ast-index/typescript-parser.ts");
 	if (!fs.existsSync(testFile)) {
 		log("   Test file not found, skipping...", colors.yellow);
 		return;
@@ -281,26 +242,14 @@ async function benchmarkSymbolRetrieval(): Promise<void> {
 
 	// Parse and get specific symbols
 	const outline = parseTypeScriptFile(testFile);
-	const symbols = [
-		"parseTypeScriptFile",
-		"extractSymbol",
-		"getJsDoc",
-		"buildSymbolId",
-	];
+	const symbols = ["parseTypeScriptFile", "extractSymbol", "getJsDoc", "buildSymbolId"];
 
 	for (const symbolName of symbols) {
 		const symbol = outline.symbols.find((s) => s.name === symbolName);
 		if (symbol) {
-			const source = getSymbolSource(
-				testFile,
-				symbol.startLine,
-				symbol.endLine,
-			);
+			const source = getSymbolSource(testFile, symbol.startLine, symbol.endLine);
 			const symbolTokens = estimateTokens(source);
-			const savings = (
-				((fullFileTokens - symbolTokens) / fullFileTokens) *
-				100
-			).toFixed(1);
+			const savings = (((fullFileTokens - symbolTokens) / fullFileTokens) * 100).toFixed(1);
 			log(
 				`   ${symbolName.padEnd(25)} ${symbolTokens.toLocaleString().padStart(6)} tokens (${savings}% less than full file)`,
 			);

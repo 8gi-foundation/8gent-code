@@ -24,12 +24,7 @@ import {
 	table,
 	warning,
 } from "./formatter";
-import type {
-	CompletionReport,
-	ReportListItem,
-	ReportQuery,
-	StoredReport,
-} from "./types";
+import type { CompletionReport, ReportListItem, ReportQuery, StoredReport } from "./types";
 
 // ============================================
 // Report History Manager
@@ -40,8 +35,7 @@ export class ReportHistory {
 	private reporter: CompletionReporter;
 
 	constructor(reportsDir?: string) {
-		this.reportsDir =
-			reportsDir || path.join(os.homedir(), ".8gent", "reports");
+		this.reportsDir = reportsDir || path.join(os.homedir(), ".8gent", "reports");
 		this.reporter = new CompletionReporter(this.reportsDir);
 		this.ensureDir();
 	}
@@ -57,14 +51,7 @@ export class ReportHistory {
 	// ============================================
 
 	listReports(query: ReportQuery = {}): ReportListItem[] {
-		const {
-			limit = 20,
-			offset = 0,
-			status,
-			after,
-			before,
-			workingDirectory,
-		} = query;
+		const { limit = 20, offset = 0, status, after, before, workingDirectory } = query;
 
 		const files = fs
 			.readdirSync(this.reportsDir)
@@ -89,8 +76,7 @@ export class ReportHistory {
 				if (status && report.status !== status) continue;
 				if (after && completedAt < after) continue;
 				if (before && completedAt > before) continue;
-				if (workingDirectory && report.workingDirectory !== workingDirectory)
-					continue;
+				if (workingDirectory && report.workingDirectory !== workingDirectory) continue;
 
 				// Apply offset
 				if (skipped < offset) {
@@ -104,8 +90,7 @@ export class ReportHistory {
 					status: report.status,
 					duration: report.duration,
 					completedAt,
-					filesChanged:
-						report.filesCreated.length + report.filesModified.length,
+					filesChanged: report.filesCreated.length + report.filesModified.length,
 				});
 			} catch {
 				// Skip invalid files
@@ -136,9 +121,7 @@ export class ReportHistory {
 	// ============================================
 
 	getStats(): ReportStats {
-		const files = fs
-			.readdirSync(this.reportsDir)
-			.filter((f) => f.endsWith(".json"));
+		const files = fs.readdirSync(this.reportsDir).filter((f) => f.endsWith(".json"));
 
 		const stats: ReportStats = {
 			total: 0,
@@ -199,9 +182,7 @@ export class ReportHistory {
 			lines.push(
 				`${statusStr} ${muted(idShort)} ${item.summary.slice(0, 40)}${item.summary.length > 40 ? "..." : ""}`,
 			);
-			lines.push(
-				`  ${muted(`${item.duration} | ${item.filesChanged} files | ${timeAgo}`)}`,
-			);
+			lines.push(`  ${muted(`${item.duration} | ${item.filesChanged} files | ${timeAgo}`)}`);
 			lines.push("");
 		}
 
@@ -227,9 +208,7 @@ export class ReportHistory {
 			["Failed", error(String(stats.failed))],
 			[
 				"Avg Duration",
-				formatDuration(
-					stats.total > 0 ? Math.round(stats.totalDuration / stats.total) : 0,
-				),
+				formatDuration(stats.total > 0 ? Math.round(stats.totalDuration / stats.total) : 0),
 			],
 			["Total Files Created", String(stats.totalFilesCreated)],
 			["Total Files Modified", String(stats.totalFilesModified)],
@@ -326,14 +305,11 @@ export interface ReportStats {
 // Command Handlers
 // ============================================
 
-export function handleReportsCommand(
-	history: ReportHistory,
-	args: string[],
-): string {
+export function handleReportsCommand(history: ReportHistory, args: string[]): string {
 	const showStats = args.includes("--stats") || args.includes("-s");
-	const statusFilter = args
-		.find((a) => a.startsWith("--status="))
-		?.split("=")[1] as CompletionReport["status"] | undefined;
+	const statusFilter = args.find((a) => a.startsWith("--status="))?.split("=")[1] as
+		| CompletionReport["status"]
+		| undefined;
 	const limitArg = args.find((a) => a.startsWith("--limit="))?.split("=")[1];
 	const limit = limitArg ? Number.parseInt(limitArg, 10) : 10;
 
@@ -346,10 +322,7 @@ export function handleReportsCommand(
 	return history.formatReportList(items);
 }
 
-export function handleReportCommand(
-	history: ReportHistory,
-	reportId: string,
-): string {
+export function handleReportCommand(history: ReportHistory, reportId: string): string {
 	// Support partial ID matching
 	if (reportId.length < 36) {
 		const items = history.listReports({ limit: 100 });

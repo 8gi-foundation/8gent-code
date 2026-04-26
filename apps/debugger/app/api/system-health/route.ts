@@ -110,8 +110,7 @@ function getASTStats(): ASTStats {
 		try {
 			const entries = readdirSync(dir, { withFileTypes: true });
 			for (const entry of entries) {
-				if (ignoreDirs.includes(entry.name) || entry.name.startsWith("."))
-					continue;
+				if (ignoreDirs.includes(entry.name) || entry.name.startsWith(".")) continue;
 				const full = join(dir, entry.name);
 				if (entry.isDirectory()) {
 					walk(full);
@@ -123,9 +122,7 @@ function getASTStats(): ASTStats {
 
 					stats.filesIndexed++;
 					const lang =
-						entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")
-							? "typescript"
-							: "javascript";
+						entry.name.endsWith(".ts") || entry.name.endsWith(".tsx") ? "typescript" : "javascript";
 					stats.languages[lang] = (stats.languages[lang] || 0) + 1;
 
 					try {
@@ -189,9 +186,7 @@ async function getSessionStats(): Promise<SessionStats> {
 	};
 
 	try {
-		const files = (await readdir(sessionsDir)).filter((f) =>
-			f.endsWith(".jsonl"),
-		);
+		const files = (await readdir(sessionsDir)).filter((f) => f.endsWith(".jsonl"));
 		stats.totalSessions = files.length;
 
 		// Sample last 10 sessions for stats
@@ -211,8 +206,7 @@ async function getSessionStats(): Promise<SessionStats> {
 						}
 						if (entry.type === "session_end") {
 							isLive = false;
-							if (entry.summary?.totalTokens)
-								stats.totalTokens += entry.summary.totalTokens;
+							if (entry.summary?.totalTokens) stats.totalTokens += entry.summary.totalTokens;
 							if (entry.summary?.totalUsage?.totalTokens)
 								stats.totalTokens += entry.summary.totalUsage.totalTokens;
 							if (entry.summary?.totalToolCalls)
@@ -237,10 +231,7 @@ async function getSessionStats(): Promise<SessionStats> {
 const startTime = Date.now();
 
 export async function GET() {
-	const [ast, sessions] = await Promise.all([
-		Promise.resolve(getASTStats()),
-		getSessionStats(),
-	]);
+	const [ast, sessions] = await Promise.all([Promise.resolve(getASTStats()), getSessionStats()]);
 
 	// Planner state — return defaults since it's an in-memory singleton in the TUI process
 	// The API shows structural readiness; live data comes from the TUI's own /board command

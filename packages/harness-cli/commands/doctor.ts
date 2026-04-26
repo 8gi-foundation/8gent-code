@@ -25,9 +25,7 @@ export async function doctor(_args: string[]): Promise<void> {
 
 	// 2. Session count
 	if (sessionsExist) {
-		const count = fs
-			.readdirSync(SESSIONS_DIR)
-			.filter((f) => f.endsWith(".jsonl")).length;
+		const count = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".jsonl")).length;
 		checks.push({
 			name: "Existing sessions",
 			pass: true,
@@ -94,9 +92,7 @@ export async function doctor(_args: string[]): Promise<void> {
 	checks.push({
 		name: "OpenRouter API key",
 		pass: !!orKey,
-		detail: orKey
-			? `Set (${orKey.slice(0, 8)}...)`
-			: "Not set (OPENROUTER_API_KEY)",
+		detail: orKey ? `Set (${orKey.slice(0, 8)}...)` : "Not set (OPENROUTER_API_KEY)",
 	});
 
 	// 6. Agent module loadable
@@ -144,8 +140,6 @@ export async function doctor(_args: string[]): Promise<void> {
 	if (allPass) {
 		console.log("  \x1b[32mAll checks passed.\x1b[0m\n");
 	} else {
-		console.log(
-			"  \x1b[33mSome checks failed — 8gent may not work fully.\x1b[0m\n",
-		);
+		console.log("  \x1b[33mSome checks failed — 8gent may not work fully.\x1b[0m\n");
 	}
 }

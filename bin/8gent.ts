@@ -180,17 +180,13 @@ async function main() {
 	// Check for --infinite flag (can be used with any command)
 	// Supports: --infinite, -infinite, -i
 	const hasInfiniteFlag =
-		args.includes("--infinite") ||
-		args.includes("-infinite") ||
-		args.includes("-i");
+		args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
 	if (hasInfiniteFlag) {
 		// Import and enable infinite mode globally
 		const { enableInfiniteMode } = await import("../packages/permissions");
 		enableInfiniteMode();
 		// Remove the flag from args
-		const filteredArgs = args.filter(
-			(a) => a !== "--infinite" && a !== "-infinite" && a !== "-i",
-		);
+		const filteredArgs = args.filter((a) => a !== "--infinite" && a !== "-infinite" && a !== "-i");
 		args.length = 0;
 		args.push(...filteredArgs);
 	}
@@ -203,9 +199,7 @@ async function main() {
 	// Check for --fast flag - start in fast mode (fastest available model)
 	const hasFastFlag = args.includes("--fast");
 	if (hasFastFlag) {
-		const { getModeManager, FAST_MODE_MODELS } = await import(
-			"../packages/eight/modes.ts"
-		);
+		const { getModeManager, FAST_MODE_MODELS } = await import("../packages/eight/modes.ts");
 		const mm = getModeManager();
 		mm.enableFastMode("default");
 
@@ -218,14 +212,8 @@ async function main() {
 					const data = (await resp.json()) as {
 						models?: Array<{ name: string }>;
 					};
-					const available = (data.models || []).map(
-						(m: { name: string }) => m.name,
-					);
-					if (
-						available.some((m: string) =>
-							m.startsWith(candidate.model.split(":")[0]),
-						)
-					) {
+					const available = (data.models || []).map((m: { name: string }) => m.name);
+					if (available.some((m: string) => m.startsWith(candidate.model.split(":")[0]))) {
 						fastModel = candidate.model;
 						console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
 						break;
@@ -257,13 +245,8 @@ async function main() {
 	}
 
 	// --resume (no arg) = resume last session
-	if (
-		args.includes("--resume") &&
-		!args.some((a) => a.startsWith("--resume="))
-	) {
-		const { SessionManager } = await import(
-			"../packages/eight/session-manager.ts"
-		);
+	if (args.includes("--resume") && !args.some((a) => a.startsWith("--resume="))) {
+		const { SessionManager } = await import("../packages/eight/session-manager.ts");
 		const sm = new SessionManager();
 		const last = sm.getLast();
 		if (last) {
@@ -281,11 +264,7 @@ async function main() {
 
 	// --continue <id> = resume specific session
 	const continueIdx = args.indexOf("--continue");
-	if (
-		continueIdx !== -1 &&
-		args[continueIdx + 1] &&
-		!args[continueIdx + 1].startsWith("-")
-	) {
+	if (continueIdx !== -1 && args[continueIdx + 1] && !args[continueIdx + 1].startsWith("-")) {
 		const sessionId = args[continueIdx + 1];
 		args = args.filter((_, i) => i !== continueIdx && i !== continueIdx + 1);
 		args.unshift("tui", `--resume=${sessionId}`);
@@ -332,6 +311,7 @@ async function main() {
 			const { runRunCommand } = await import("../packages/eight/run.ts");
 			const code = await runRunCommand(restArgs);
 			process.exit(code);
+			break;
 		}
 
 		case "pet":
@@ -388,9 +368,7 @@ async function main() {
 			break;
 
 		case "rpc": {
-			const { startRPCServer } = await import(
-				"../packages/eight/rpc-server.ts"
-			);
+			const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
 			await startRPCServer();
 			break;
 		}
@@ -438,10 +416,7 @@ async function initCommand(args: string[]) {
 			},
 		};
 
-		fs.writeFileSync(
-			path.join(configPath, "config.json"),
-			JSON.stringify(config, null, 2),
-		);
+		fs.writeFileSync(path.join(configPath, "config.json"), JSON.stringify(config, null, 2));
 
 		console.log("✅ Created .8gent directory");
 		console.log("✅ Created config.json");
@@ -462,9 +437,7 @@ async function outlineCommand(args: string[]) {
 	const isJson = args.includes("--json");
 
 	// Dynamic import to avoid loading heavy modules for help
-	const { parseTypeScriptFile } = await import(
-		"../packages/ast-index/typescript-parser"
-	);
+	const { parseTypeScriptFile } = await import("../packages/ast-index/typescript-parser");
 
 	const start = performance.now();
 	const outline = parseTypeScriptFile(filePath);
@@ -560,12 +533,7 @@ async function symbolCommand(args: string[]) {
 		process.exit(1);
 	}
 
-	const source = getSymbolSource(
-		filePath,
-		symbol.startLine,
-		symbol.endLine,
-		contextLines,
-	);
+	const source = getSymbolSource(filePath, symbol.startLine, symbol.endLine, contextLines);
 
 	// Calculate savings
 	const fileSize = fs.statSync(filePath).size;
@@ -574,44 +542,32 @@ async function symbolCommand(args: string[]) {
 	const saved = fullTokens - symbolTokens;
 	const percent = ((saved / fullTokens) * 100).toFixed(1);
 
-	console.log(
-		`\n${getSymbolIcon(symbol.kind)} ${symbol.name} (${symbol.kind})`,
-	);
-	console.log(
-		`   Lines ${symbol.startLine}-${symbol.endLine} in ${path.basename(filePath)}`,
-	);
+	console.log(`\n${getSymbolIcon(symbol.kind)} ${symbol.name} (${symbol.kind})`);
+	console.log(`   Lines ${symbol.startLine}-${symbol.endLine} in ${path.basename(filePath)}`);
 	if (symbol.signature) {
 		console.log(`   ${symbol.signature}`);
 	}
 	console.log(`\n${"─".repeat(60)}\n`);
 	console.log(source);
 	console.log(`\n${"─".repeat(60)}`);
-	console.log(
-		`\n   💡 Saved ${saved.toLocaleString()} tokens (${percent}% less than full file)`,
-	);
+	console.log(`\n   💡 Saved ${saved.toLocaleString()} tokens (${percent}% less than full file)`);
 }
 
 async function searchCommand(args: string[]) {
 	if (args.length === 0) {
-		console.error(
-			"Usage: 8gent search <query> [--kinds=function,class] [--dir=src/]",
-		);
+		console.error("Usage: 8gent search <query> [--kinds=function,class] [--dir=src/]");
 		process.exit(1);
 	}
 
 	const query = args[0];
 	const kindsArg = args.find((a) => a.startsWith("--kinds="))?.split("=")[1];
 	const dirArg = args.find((a) => a.startsWith("--dir="))?.split("=")[1] || ".";
-	const limit = Number.parseInt(
-		args.find((a) => a.startsWith("--limit="))?.split("=")[1] || "20",
-	);
+	const limit = Number.parseInt(args.find((a) => a.startsWith("--limit="))?.split("=")[1] || "20");
 
 	console.log(`\n🔍 Searching for "${query}"...\n`);
 
 	const { glob } = await import("glob");
-	const { parseTypeScriptFile } = await import(
-		"../packages/ast-index/typescript-parser"
-	);
+	const { parseTypeScriptFile } = await import("../packages/ast-index/typescript-parser");
 
 	const files = await glob("**/*.{ts,tsx,js,jsx}", {
 		cwd: dirArg,
@@ -651,9 +607,7 @@ async function searchCommand(args: string[]) {
 				`   ${icon} ${symbol.name.padEnd(30)} ${symbol.kind.padEnd(10)} ${path.relative(process.cwd(), file)}`,
 			);
 		}
-		console.log(
-			`\n   Found ${matches.length} match${matches.length === 1 ? "" : "es"}`,
-		);
+		console.log(`\n   Found ${matches.length} match${matches.length === 1 ? "" : "es"}`);
 	}
 }
 
@@ -691,9 +645,7 @@ async function spawnPet(sessionId?: string) {
 	// macOS: native Swift dock pet
 	// Windows/Linux: terminal-rendered pet (future: Electron/Tauri)
 	if (platform !== "darwin") {
-		console.log(
-			"\x1b[36m[pet] Lil Eight terminal mode (cross-platform)\x1b[0m",
-		);
+		console.log("\x1b[36m[pet] Lil Eight terminal mode (cross-platform)\x1b[0m");
 
 		// Start terminal pet in background
 		try {
@@ -710,9 +662,7 @@ async function spawnPet(sessionId?: string) {
 					const padding = " ".repeat(Math.max(0, x));
 					process.stdout.write("\x1b7");
 					for (let i = 0; i < lines.length; i++) {
-						process.stdout.write(
-							`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`,
-						);
+						process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`);
 					}
 					process.stdout.write(
 						`\x1b[${startRow + lines.length};1H\x1b[2K${" ".repeat(Math.max(0, x + 4))}\x1b[2m${label}\x1b[0m`,
@@ -886,9 +836,7 @@ async function tuiCommand(args: string[]) {
 
 async function airdropCommand(args: string[]) {
 	if (process.platform !== "darwin") {
-		console.log(
-			"AirDrop is macOS only. Use 8gent send for cross-platform sharing.",
-		);
+		console.log("AirDrop is macOS only. Use 8gent send for cross-platform sharing.");
 		return;
 	}
 
@@ -1000,11 +948,7 @@ async function petCommand(args: string[]) {
 		case "log":
 		case "logs": {
 			const { spawn: sp } = await import("node:child_process");
-			const logPath = path.join(
-				process.env.HOME || "~",
-				".8gent",
-				"lil-eight.log",
-			);
+			const logPath = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
 			sp("tail", ["-f", logPath], { stdio: "inherit" });
 			break;
 		}
@@ -1012,17 +956,9 @@ async function petCommand(args: string[]) {
 			try {
 				execSync("pgrep -f LilEight", { stdio: "pipe" });
 				console.log("Lil Eight is running");
-				const logP = path.join(
-					process.env.HOME || "~",
-					".8gent",
-					"lil-eight.log",
-				);
+				const logP = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
 				if (fs.existsSync(logP)) {
-					const lines = fs
-						.readFileSync(logP, "utf-8")
-						.trim()
-						.split("\n")
-						.slice(-3);
+					const lines = fs.readFileSync(logP, "utf-8").trim().split("\n").slice(-3);
 					lines.forEach((l) => console.log(`  ${l}`));
 				}
 			} catch {
@@ -1040,9 +976,7 @@ async function infiniteCommand(args: string[]) {
 
 	if (args.length === 0) {
 		console.error("Usage: 8gent infinite <task description>");
-		console.log(
-			'\nExample: 8gent infinite "Build a Next.js landing page with dark theme"',
-		);
+		console.log('\nExample: 8gent infinite "Build a Next.js landing page with dark theme"');
 		process.exit(1);
 	}
 
@@ -1061,9 +995,7 @@ async function infiniteCommand(args: string[]) {
 	console.log("");
 
 	try {
-		const { runInfinite, formatInfiniteState } = await import(
-			"../packages/infinite"
-		);
+		const { runInfinite, formatInfiniteState } = await import("../packages/infinite");
 
 		const state = await runInfinite(task, {
 			maxIterations,
@@ -1091,9 +1023,7 @@ async function infiniteCommand(args: string[]) {
 			console.log(`   Phase: ${state.phase}`);
 			console.log(`   Iterations: ${state.iteration}`);
 			if (state.recoveredErrors.length > 0) {
-				console.log(
-					`   Last error: ${state.recoveredErrors.slice(-1)[0]?.error.message}`,
-				);
+				console.log(`   Last error: ${state.recoveredErrors.slice(-1)[0]?.error.message}`);
 			}
 		}
 	} catch (err) {
@@ -1123,9 +1053,7 @@ async function authCommand(args: string[]) {
 					process.stdout.write(`\rPolling... (attempt ${attempt})`);
 				},
 				onLoginSuccess: (user) => {
-					console.log(
-						`\n\nLogged in as @${user.githubUsername} (${user.plan} plan)`,
-					);
+					console.log(`\n\nLogged in as @${user.githubUsername} (${user.plan} plan)`);
 					console.log(`Email: ${user.email}`);
 				},
 				onLoginError: (error) => {
@@ -1147,8 +1075,9 @@ async function authCommand(args: string[]) {
 		}
 
 		case "status": {
-			const { initAuth, getVesselId, getProxyUrl, isProxyAvailable } =
-				await import("../packages/auth");
+			const { initAuth, getVesselId, getProxyUrl, isProxyAvailable } = await import(
+				"../packages/auth"
+			);
 			const state = await initAuth();
 
 			if (state.state === "authenticated") {
@@ -1161,9 +1090,7 @@ async function authCommand(args: string[]) {
 				const expiresIn = tokenExpiresAt - Date.now();
 				if (expiresIn > 0) {
 					const hours = Math.floor(expiresIn / (1000 * 60 * 60));
-					const minutes = Math.floor(
-						(expiresIn % (1000 * 60 * 60)) / (1000 * 60),
-					);
+					const minutes = Math.floor((expiresIn % (1000 * 60 * 60)) / (1000 * 60));
 					console.log(`  Token:   expires in ${hours}h ${minutes}m`);
 				} else {
 					console.log("  Token:   expired (will refresh on next use)");
@@ -1251,18 +1178,14 @@ async function cronCommand(args: string[]) {
 	if (!sub || sub === "list") {
 		const jobs = mgr.list();
 		if (jobs.length === 0) {
-			console.log(
-				"No cron jobs configured. Use: 8gent cron add <name> <schedule> <command>",
-			);
+			console.log("No cron jobs configured. Use: 8gent cron add <name> <schedule> <command>");
 			return;
 		}
 		console.log("Cron Jobs:\n");
 		for (const j of jobs) {
 			const status = j.enabled ? "ON" : "OFF";
 			const last = j.lastRun ? ` (last: ${j.lastRun})` : "";
-			console.log(
-				`  [${status}] ${j.id}  ${j.name}  ${j.schedule}  -> ${j.command}${last}`,
-			);
+			console.log(`  [${status}] ${j.id}  ${j.name}  ${j.schedule}  -> ${j.command}${last}`);
 		}
 	} else if (sub === "add") {
 		if (args.length < 4) {
@@ -1276,18 +1199,14 @@ async function cronCommand(args: string[]) {
 		const schedule = args[2];
 		const command = args.slice(3).join(" ");
 		const job = mgr.add({ name, schedule, command, enabled: true });
-		console.log(
-			`Added cron job: ${job.id} (${job.name}) - ${job.schedule} -> ${job.command}`,
-		);
+		console.log(`Added cron job: ${job.id} (${job.name}) - ${job.schedule} -> ${job.command}`);
 	} else if (sub === "remove") {
 		if (!args[1]) {
 			console.error("Usage: 8gent cron remove <id>");
 			process.exit(1);
 		}
 		const removed = mgr.remove(args[1]);
-		console.log(
-			removed ? `Removed job ${args[1]}` : `Job ${args[1]} not found`,
-		);
+		console.log(removed ? `Removed job ${args[1]}` : `Job ${args[1]} not found`);
 	} else if (sub === "enable") {
 		if (!args[1]) {
 			console.error("Usage: 8gent cron enable <id>");
@@ -1331,9 +1250,7 @@ async function chatCommand(args: string[]) {
 	}
 
 	if (!message) {
-		console.error(
-			"Usage: 8gent chat <message> [--json] [--model=<m>] [--stdin]",
-		);
+		console.error("Usage: 8gent chat <message> [--json] [--model=<m>] [--stdin]");
 		process.exit(1);
 	}
 
@@ -1352,8 +1269,7 @@ async function chatCommand(args: string[]) {
 				models[0];
 		} catch {}
 		if (!resolvedModel) {
-			const errMsg =
-				"No Ollama models available. Pull a model first: ollama pull qwen3:14b";
+			const errMsg = "No Ollama models available. Pull a model first: ollama pull qwen3:14b";
 			if (isJson) {
 				jsonOut({ success: false, error: errMsg });
 			} else {
@@ -1413,12 +1329,8 @@ async function agentCommand(args: string[]) {
 	const isJson = !!flags.json;
 	const sub = rest[0] || "list";
 
-	const { getOrchestratorBus } = await import(
-		"../packages/orchestration/orchestrator-bus"
-	);
-	const { getPersona, listPersonas } = await import(
-		"../packages/orchestration/personas"
-	);
+	const { getOrchestratorBus } = await import("../packages/orchestration/orchestrator-bus");
+	const { getPersona, listPersonas } = await import("../packages/orchestration/personas");
 	const bus = getOrchestratorBus();
 
 	switch (sub) {
@@ -1442,9 +1354,7 @@ async function agentCommand(args: string[]) {
 					console.log("No active sub-agents.");
 				} else {
 					for (const a of agents) {
-						console.log(
-							`${a.persona.icon} ${a.id} — ${a.persona.name} (${a.persona.role})`,
-						);
+						console.log(`${a.persona.icon} ${a.id} — ${a.persona.name} (${a.persona.role})`);
 						console.log(`  Task: ${a.task}`);
 						console.log(`  Status: ${a.status}`);
 					}
@@ -1483,11 +1393,7 @@ async function agentCommand(args: string[]) {
 				process.exit(1);
 			}
 
-			const request = bus.requestSpawn(
-				personaId,
-				task || "General assistance",
-				"CLI spawn",
-			);
+			const request = bus.requestSpawn(personaId, task || "General assistance", "CLI spawn");
 
 			if (isJson) {
 				jsonOut({
@@ -1498,9 +1404,7 @@ async function agentCommand(args: string[]) {
 					status: request.status,
 				});
 			} else {
-				console.log(
-					`Spawn request: ${persona.icon} ${persona.name} (${persona.role})`,
-				);
+				console.log(`Spawn request: ${persona.icon} ${persona.name} (${persona.role})`);
 				console.log(`Task: ${task || "General assistance"}`);
 				console.log(`Status: ${request.status}`);
 			}
@@ -1517,11 +1421,7 @@ async function agentCommand(args: string[]) {
 			if (isJson) {
 				jsonOut({ success: !!killed, agentId: killId });
 			} else {
-				console.log(
-					killed
-						? `Killed: ${killed.persona.name}`
-						: `Agent "${killId}" not found.`,
-				);
+				console.log(killed ? `Killed: ${killed.persona.name}` : `Agent "${killId}" not found.`);
 			}
 			break;
 		}
@@ -1557,9 +1457,7 @@ async function agentCommand(args: string[]) {
 			if (isJson) {
 				jsonOut({ autoSpawn: bus.isAutoSpawnEnabled() });
 			} else {
-				console.log(
-					`Auto-spawn: ${bus.isAutoSpawnEnabled() ? "enabled" : "disabled"}`,
-				);
+				console.log(`Auto-spawn: ${bus.isAutoSpawnEnabled() ? "enabled" : "disabled"}`);
 			}
 			break;
 		}
@@ -1614,11 +1512,8 @@ async function sessionCommand(args: string[]) {
 					console.log("No sessions found. Use the TUI to create one.");
 				} else {
 					for (const s of sessions) {
-						const ago = Math.floor(
-							(Date.now() - new Date(s.lastActiveAt).getTime()) / 60000,
-						);
-						const timeStr =
-							ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+						const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
+						const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
 						const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
 						console.log(
 							`${s.id}  ${label.slice(0, 40).padEnd(40)}  ${s.model}  ${s.messageCount} msgs  ${timeStr}`,
@@ -1654,9 +1549,7 @@ async function sessionCommand(args: string[]) {
 					message: `${sub} is a TUI operation - use /compact or /checkpoint in the TUI`,
 				});
 			} else {
-				console.log(
-					`${sub} is a TUI operation. Launch the TUI and use /${sub}.`,
-				);
+				console.log(`${sub} is a TUI operation. Launch the TUI and use /${sub}.`);
 			}
 			break;
 		}
@@ -1689,9 +1582,7 @@ async function exportCommand(args: string[]) {
 	if (isLast) {
 		const convos = await sync.getRecentConversations(1);
 		if (!convos || convos.length === 0) {
-			console.error(
-				"No sessions found. Requires authentication for cloud sessions.",
-			);
+			console.error("No sessions found. Requires authentication for cloud sessions.");
 			process.exit(1);
 		}
 		targetId = (convos[0] as any).sessionId;
@@ -1704,9 +1595,7 @@ async function exportCommand(args: string[]) {
 		process.exit(1);
 	}
 
-	const { saveSessionExport } = await import(
-		"../packages/eight/session-export"
-	);
+	const { saveSessionExport } = await import("../packages/eight/session-export");
 	const filePath = await saveSessionExport(
 		convo.messages.map((m: any) => ({
 			role: m.role || "system",
@@ -1735,9 +1624,7 @@ async function preferencesCommand(args: string[]) {
 	const sub = rest[0] || "get";
 	const cwd = (flags.cwd as string) || process.cwd();
 
-	const { OnboardingManager } = await import(
-		"../packages/self-autonomy/onboarding"
-	);
+	const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
 	const mgr = new OnboardingManager(cwd);
 
 	switch (sub) {
@@ -1754,9 +1641,7 @@ async function preferencesCommand(args: string[]) {
 				console.log(`Provider: ${user.preferences.model.provider || "ollama"}`);
 				console.log(`Voice: ${user.preferences.voice.enabled ? "on" : "off"}`);
 				console.log(`Autonomy: ${user.preferences.autonomy.askThreshold}`);
-				console.log(
-					`Understanding: ${Math.round(user.understanding.confidenceScore * 100)}%`,
-				);
+				console.log(`Understanding: ${Math.round(user.understanding.confidenceScore * 100)}%`);
 				console.log(`Onboarded: ${user.onboardingComplete ? "yes" : "no"}`);
 			}
 			break;
@@ -1818,9 +1703,7 @@ async function preferencesCommand(args: string[]) {
 		}
 
 		case "sync": {
-			const { PreferencesSyncManager } = await import(
-				"../packages/self-autonomy/preferences-sync"
-			);
+			const { PreferencesSyncManager } = await import("../packages/self-autonomy/preferences-sync");
 			const sync = new PreferencesSyncManager(cwd);
 			try {
 				const { initAuth } = await import("../packages/auth");
@@ -1888,11 +1771,7 @@ async function memoryCommand(args: string[]) {
 				} else {
 					for (const r of results as any[]) {
 						const entry = r.entry || r.memory;
-						const fact =
-							entry?.fact ||
-							entry?.value ||
-							entry?.content ||
-							JSON.stringify(entry);
+						const fact = entry?.fact || entry?.value || entry?.content || JSON.stringify(entry);
 						console.log(`[${(r.score || 0).toFixed(2)}] ${fact.slice(0, 120)}`);
 					}
 				}
@@ -1910,9 +1789,7 @@ async function memoryCommand(args: string[]) {
 			if (isJson) {
 				jsonOut({ success: true, id, fact });
 			} else {
-				console.log(
-					`Remembered: ${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}`,
-				);
+				console.log(`Remembered: ${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}`);
 				console.log(`ID: ${id}`);
 			}
 			break;
@@ -1966,9 +1843,7 @@ async function onboardCommand(args: string[]) {
 	const isJson = !!flags.json;
 	const cwd = (flags.cwd as string) || process.cwd();
 
-	const { OnboardingManager } = await import(
-		"../packages/self-autonomy/onboarding"
-	);
+	const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
 
 	console.error("Auto-detecting environment...");
 	const detected = await OnboardingManager.autoDetect();
@@ -2031,9 +1906,7 @@ async function statusCommand(args: string[]) {
 
 	// Check user config
 	try {
-		const { OnboardingManager } = await import(
-			"../packages/self-autonomy/onboarding"
-		);
+		const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
 		const mgr = new OnboardingManager(cwd);
 		const user = mgr.getUser();
 		status.user = {
@@ -2079,9 +1952,7 @@ async function statusCommand(args: string[]) {
 
 	// Check orchestration
 	try {
-		const { getOrchestratorBus } = await import(
-			"../packages/orchestration/orchestrator-bus"
-		);
+		const { getOrchestratorBus } = await import("../packages/orchestration/orchestrator-bus");
 		const bus = getOrchestratorBus();
 		status.agents = {
 			count: bus.getAgentCount(),
@@ -2108,10 +1979,7 @@ async function statusCommand(args: string[]) {
 		const { exec } = await import("node:child_process");
 		const { promisify } = await import("node:util");
 		const execAsync = promisify(exec);
-		const { stdout: branch } = await execAsync(
-			"git rev-parse --abbrev-ref HEAD",
-			{ cwd },
-		);
+		const { stdout: branch } = await execAsync("git rev-parse --abbrev-ref HEAD", { cwd });
 		const { stdout: hash } = await execAsync("git rev-parse --short HEAD", {
 			cwd,
 		});
@@ -2130,9 +1998,7 @@ async function statusCommand(args: string[]) {
 			if (typeof val === "object" && val !== null) {
 				console.log(`${key}:`);
 				for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-					const display = Array.isArray(v)
-						? `[${(v as any[]).length}]`
-						: String(v);
+					const display = Array.isArray(v) ? `[${(v as any[]).length}]` : String(v);
 					console.log(`  ${k}: ${display}`);
 				}
 			} else {
@@ -2173,8 +2039,7 @@ async function reviewCommand(args: string[]) {
 			diff = execSync(`gh pr diff ${prNumber}`, { encoding: "utf-8" });
 		} else {
 			diff = execSync("git diff HEAD", { encoding: "utf-8" });
-			if (!diff.trim())
-				diff = execSync("git diff --cached", { encoding: "utf-8" });
+			if (!diff.trim()) diff = execSync("git diff --cached", { encoding: "utf-8" });
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -2253,13 +2118,9 @@ async function doctorCommand() {
 		}
 	} else console.log(dim("  No config (using defaults)"));
 	try {
-		const { verifyPolicies } = await import(
-			"../packages/permissions/policy-engine.ts"
-		);
+		const { verifyPolicies } = await import("../packages/permissions/policy-engine.ts");
 		const r = verifyPolicies();
-		console.log(
-			r.valid ? green("NemoClaw verified") : red(`NemoClaw: ${r.reason}`),
-		);
+		console.log(r.valid ? green("NemoClaw verified") : red(`NemoClaw: ${r.reason}`));
 		if (!r.valid) issues++;
 	} catch {
 		console.log(dim("  NemoClaw skip"));
@@ -2268,11 +2129,7 @@ async function doctorCommand() {
 	if (fs.existsSync(mcpPath)) {
 		try {
 			const m = JSON.parse(fs.readFileSync(mcpPath, "utf-8"));
-			console.log(
-				green(
-					`MCP: ${Object.keys(m.servers || m.mcpServers || {}).length} servers`,
-				),
-			);
+			console.log(green(`MCP: ${Object.keys(m.servers || m.mcpServers || {}).length} servers`));
 		} catch {
 			console.log(red("MCP config invalid"));
 			issues++;

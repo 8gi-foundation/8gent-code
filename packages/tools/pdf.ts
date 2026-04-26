@@ -46,9 +46,7 @@ export interface PdfPageContent {
  * Read a PDF file and extract all text content
  */
 export async function readPdf(pdfPath: string): Promise<PdfInfo> {
-	const absolutePath = path.isAbsolute(pdfPath)
-		? pdfPath
-		: path.join(process.cwd(), pdfPath);
+	const absolutePath = path.isAbsolute(pdfPath) ? pdfPath : path.join(process.cwd(), pdfPath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`PDF not found: ${absolutePath}`);
@@ -91,13 +89,8 @@ export async function readPdf(pdfPath: string): Promise<PdfInfo> {
 /**
  * Read a specific page from a PDF file
  */
-export async function readPdfPage(
-	pdfPath: string,
-	pageNum: number,
-): Promise<PdfPageContent> {
-	const absolutePath = path.isAbsolute(pdfPath)
-		? pdfPath
-		: path.join(process.cwd(), pdfPath);
+export async function readPdfPage(pdfPath: string, pageNum: number): Promise<PdfPageContent> {
+	const absolutePath = path.isAbsolute(pdfPath) ? pdfPath : path.join(process.cwd(), pdfPath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`PDF not found: ${absolutePath}`);
@@ -115,9 +108,7 @@ export async function readPdfPage(
 
 	// Validate page number
 	if (pageNum < 1 || pageNum > totalPages) {
-		throw new Error(
-			`Invalid page number: ${pageNum}. PDF has ${totalPages} pages.`,
-		);
+		throw new Error(`Invalid page number: ${pageNum}. PDF has ${totalPages} pages.`);
 	}
 
 	const pageText = textResult.pages.length > 0 ? textResult.pages[0].text : "";
@@ -139,9 +130,7 @@ export async function getPdfMetadata(pdfPath: string): Promise<{
 	metadata: PdfMetadata;
 	size: number;
 }> {
-	const absolutePath = path.isAbsolute(pdfPath)
-		? pdfPath
-		: path.join(process.cwd(), pdfPath);
+	const absolutePath = path.isAbsolute(pdfPath) ? pdfPath : path.join(process.cwd(), pdfPath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`PDF not found: ${absolutePath}`);
@@ -209,10 +198,7 @@ export async function searchPdf(
 		matches.push({
 			text: pdfInfo.text.slice(position, position + query.length),
 			position,
-			context:
-				(contextStart > 0 ? "..." : "") +
-				context +
-				(contextEnd < text.length ? "..." : ""),
+			context: (contextStart > 0 ? "..." : "") + context + (contextEnd < text.length ? "..." : ""),
 		});
 
 		position += query.length;
@@ -243,9 +229,7 @@ export async function readPdfPageRange(
 	text: string;
 	totalPages: number;
 }> {
-	const absolutePath = path.isAbsolute(pdfPath)
-		? pdfPath
-		: path.join(process.cwd(), pdfPath);
+	const absolutePath = path.isAbsolute(pdfPath) ? pdfPath : path.join(process.cwd(), pdfPath);
 
 	if (!fs.existsSync(absolutePath)) {
 		throw new Error(`PDF not found: ${absolutePath}`);
@@ -273,9 +257,7 @@ export async function readPdfPageRange(
 	}
 
 	// Join text from all pages
-	const fullText = textResult.pages
-		.map((p) => p.text)
-		.join("\n\n--- Page Break ---\n\n");
+	const fullText = textResult.pages.map((p) => p.text).join("\n\n--- Page Break ---\n\n");
 
 	return {
 		path: absolutePath,

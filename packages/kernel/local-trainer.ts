@@ -122,18 +122,12 @@ const DEFAULT_CONFIG: LocalTrainerConfig = {
 	minSamplesForTraining: 8,
 	goodScoreThreshold: 0.7,
 	badScoreThreshold: 0.3,
-	sessionPaths: [
-		join(HOME, ".8gent", "training-data"),
-		join(HOME, ".8gent", "sessions"),
-	],
+	sessionPaths: [join(HOME, ".8gent", "training-data"), join(HOME, ".8gent", "sessions")],
 	checkpointDir: join(HOME, ".8gent", "checkpoints"),
 	dataDir: join(KERNEL_DIR, "training"),
 	validateCommand: "bun run benchmarks/autoresearch/validate-checkpoint.ts",
 	promotionThreshold: 80,
-	trainerScript: join(
-		dirname(new URL(import.meta.url).pathname),
-		"train_lora.py",
-	),
+	trainerScript: join(dirname(new URL(import.meta.url).pathname), "train_lora.py"),
 	backend: "auto",
 };
 
@@ -180,10 +174,7 @@ export class LocalTrainer {
 		this.saveState();
 
 		// Auto-trigger training when enough pairs are ready
-		if (
-			this.state.grpoPairs.length >= this.config.minSamplesForTraining &&
-			!this.isTraining
-		) {
+		if (this.state.grpoPairs.length >= this.config.minSamplesForTraining && !this.isTraining) {
 			await this.runTraining();
 			return true;
 		}
@@ -283,9 +274,7 @@ export class LocalTrainer {
 
 			if (benchScore >= this.config.promotionThreshold) {
 				// Hot-swap into Ollama
-				console.log(
-					`[local-trainer] Promoting checkpoint (score: ${benchScore})`,
-				);
+				console.log(`[local-trainer] Promoting checkpoint (score: ${benchScore})`);
 				await this.hotSwapOllama(outputDir, checkpointId);
 				checkpoint.status = "promoted";
 				checkpoint.promotedAt = new Date().toISOString();
@@ -314,10 +303,7 @@ export class LocalTrainer {
 	 * Create an Ollama model with the LoRA adapter via `ollama create`.
 	 * Generates a Modelfile pointing to the base model + adapter.
 	 */
-	private async hotSwapOllama(
-		adapterDir: string,
-		checkpointId: string,
-	): Promise<void> {
+	private async hotSwapOllama(adapterDir: string, checkpointId: string): Promise<void> {
 		const modelName = `${this.config.ollamaModel}-lora-${checkpointId}`;
 		const modelfilePath = join(adapterDir, "Modelfile");
 
@@ -341,9 +327,7 @@ export class LocalTrainer {
 		const exitCode = await proc.exited;
 		if (exitCode !== 0) {
 			const stderr = await new Response(proc.stderr).text();
-			throw new Error(
-				`ollama create failed (exit ${exitCode}): ${stderr.slice(0, 500)}`,
-			);
+			throw new Error(`ollama create failed (exit ${exitCode}): ${stderr.slice(0, 500)}`);
 		}
 
 		console.log(`[local-trainer] Ollama model created: ${modelName}`);
@@ -403,10 +387,7 @@ export class LocalTrainer {
 	 * (assumes roughly alternating quality across sessions).
 	 */
 	private formPairs(): void {
-		while (
-			this.state.pendingGood.length > 0 &&
-			this.state.pendingBad.length > 0
-		) {
+		while (this.state.pendingGood.length > 0 && this.state.pendingBad.length > 0) {
 			const good = this.state.pendingGood.shift()!;
 			const bad = this.state.pendingBad.shift()!;
 
@@ -475,10 +456,7 @@ export class LocalTrainer {
 				toolTotal += 1;
 				// Heuristic: results without "error" or "Error" are successes
 				const result = (turn as unknown as { result: string }).result ?? "";
-				if (
-					typeof result === "string" &&
-					!result.toLowerCase().includes("error")
-				) {
+				if (typeof result === "string" && !result.toLowerCase().includes("error")) {
 					toolSuccesses += 1;
 				}
 			}
@@ -519,10 +497,7 @@ export class LocalTrainer {
 	/**
 	 * Spawn the Python training script via Bun.
 	 */
-	private async spawnTrainer(
-		dataPath: string,
-		outputDir: string,
-	): Promise<void> {
+	private async spawnTrainer(dataPath: string, outputDir: string): Promise<void> {
 		const args = [
 			"python3",
 			this.config.trainerScript,
@@ -566,9 +541,7 @@ export class LocalTrainer {
 		// Verify the adapter was actually created
 		const adapterConfig = join(outputDir, "adapter_config.json");
 		if (!existsSync(adapterConfig)) {
-			throw new Error(
-				`Training completed but no adapter found at ${outputDir}`,
-			);
+			throw new Error(`Training completed but no adapter found at ${outputDir}`);
 		}
 
 		console.log(`[local-trainer] Training complete, adapter at ${outputDir}`);
@@ -597,11 +570,7 @@ export class LocalTrainer {
 
 		// Try reading structured results
 		try {
-			const resultsPath = join(
-				this.config.checkpointDir,
-				checkpointId,
-				"benchmark_results.json",
-			);
+			const resultsPath = join(this.config.checkpointDir, checkpointId, "benchmark_results.json");
 			if (existsSync(resultsPath)) {
 				const results = JSON.parse(readFileSync(resultsPath, "utf-8"));
 				return results.avgScore ?? 0;
@@ -746,22 +715,17 @@ print(json.dumps(info))
 			result.peft = info.peft ?? false;
 			result.unsloth = info.unsloth ?? false;
 			result.transformers = info.transformers ?? false;
-			result.systemRam = info.ram_gb
-				? `${Math.round(info.ram_gb)}GB`
-				: "unknown";
+			result.systemRam = info.ram_gb ? `${Math.round(info.ram_gb)}GB` : "unknown";
 		}
 	} catch {}
 
 	if (!result.torch) issues.push("PyTorch not installed: pip install torch");
-	if (!result.mps)
-		issues.push("MPS (Apple GPU) not available — training will be slow on CPU");
+	if (!result.mps) issues.push("MPS (Apple GPU) not available — training will be slow on CPU");
 	if (!result.peft && !result.unsloth) {
 		issues.push("Neither peft nor unsloth installed: pip install peft");
 	}
-	if (!result.transformers)
-		issues.push("transformers not installed: pip install transformers");
+	if (!result.transformers) issues.push("transformers not installed: pip install transformers");
 
-	result.ready =
-		result.torch && result.transformers && (result.peft || result.unsloth);
+	result.ready = result.torch && result.transformers && (result.peft || result.unsloth);
 	return result;
 }

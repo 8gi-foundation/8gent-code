@@ -8,13 +8,7 @@
  * State is persisted between iterations so the loop can be resumed.
  */
 
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import type { BenchmarkDefinition, BenchmarkRun, TokenUsage } from "../types";
@@ -30,17 +24,8 @@ import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
 import { getFewShot } from "./few-shot";
-import {
-	getExperienceSummary,
-	getModelOrder,
-	recordResult,
-} from "./model-router";
-import {
-	addMutation,
-	clearMutations,
-	getMutations,
-	getSystemPrompt,
-} from "./system-prompt";
+import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
+import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -155,10 +140,8 @@ function parseModel(spec: string): {
 	provider: "ollama" | "openrouter";
 	model: string;
 } {
-	if (spec.startsWith("ollama::"))
-		return { provider: "ollama", model: spec.slice(8) };
-	if (spec.startsWith("openrouter::"))
-		return { provider: "openrouter", model: spec.slice(12) };
+	if (spec.startsWith("ollama::")) return { provider: "ollama", model: spec.slice(8) };
+	if (spec.startsWith("openrouter::")) return { provider: "openrouter", model: spec.slice(12) };
 	// Default: if it contains :free or / treat as openrouter, else ollama
 	return spec.includes("/")
 		? { provider: "openrouter", model: spec }
@@ -187,10 +170,7 @@ async function callModel(
 
 	// 5 minute timeout (reduced from 10) — prevents stuck benchmarks
 	const controller = new AbortController();
-	const timeoutMs = Number.parseInt(
-		process.env.BENCHMARK_TIMEOUT ?? "300000",
-		10,
-	);
+	const timeoutMs = Number.parseInt(process.env.BENCHMARK_TIMEOUT ?? "300000", 10);
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
 	const response = await fetch(url, {
@@ -233,10 +213,7 @@ async function callModel(
 /**
  * Try models in order. Default fallback chain (no experience data).
  */
-async function callWithFallback(
-	messages: ChatMessage[],
-	temperature: number,
-): Promise<ApiResult> {
+async function callWithFallback(messages: ChatMessage[], temperature: number): Promise<ApiResult> {
 	for (const spec of MODELS) {
 		const { provider, model } = parseModel(spec);
 		try {
@@ -261,9 +238,7 @@ async function callWithExperienceRouting(
 	// Get experience-ordered model list
 	const orderedModels = getModelOrder(MODELS, domain, benchmarkId);
 
-	log(
-		`    🧠 Router order: ${orderedModels.map((m) => m.split("::")[1] || m).join(" → ")}`,
-	);
+	log(`    🧠 Router order: ${orderedModels.map((m) => m.split("::")[1] || m).join(" → ")}`);
 
 	for (const spec of orderedModels) {
 		const { provider, model } = parseModel(spec);
@@ -296,21 +271,18 @@ function buildMessages(benchmark: BenchmarkDefinition): ChatMessage[] {
 	return messages;
 }
 
-async function runBenchmarkSweep(
-	benchmark: BenchmarkDefinition,
-): Promise<BenchmarkRun> {
+async function runBenchmarkSweep(benchmark: BenchmarkDefinition): Promise<BenchmarkRun> {
 	let best: BenchmarkRun | null = null;
 
 	for (const temp of TEMPERATURES) {
 		try {
 			const messages = buildMessages(benchmark);
-			const { content, model, durationMs, tokenUsage } =
-				await callWithExperienceRouting(
-					messages,
-					temp,
-					benchmark.category,
-					benchmark.id,
-				);
+			const { content, model, durationMs, tokenUsage } = await callWithExperienceRouting(
+				messages,
+				temp,
+				benchmark.category,
+				benchmark.id,
+			);
 			const { code, result } = await grade(content, benchmark);
 
 			const run: BenchmarkRun = {
@@ -349,10 +321,7 @@ async function runBenchmarkSweep(
 
 // ── Failure Analysis & Mutation ─────────────────────────────────────
 
-function analyzeAndMutate(
-	benchmark: BenchmarkDefinition,
-	run: BenchmarkRun,
-): string[] {
+function analyzeAndMutate(benchmark: BenchmarkDefinition, run: BenchmarkRun): string[] {
 	if (run.grade.score >= PASS_THRESHOLD) return [];
 
 	const newMutations: string[] = [];
@@ -375,10 +344,7 @@ function analyzeAndMutate(
 		);
 	}
 
-	if (
-		combined.includes("Cannot find module") ||
-		combined.includes("ModuleNotFound")
-	) {
+	if (combined.includes("Cannot find module") || combined.includes("ModuleNotFound")) {
 		newMutations.push(
 			`[${benchmark.id}] Use relative imports ("./filename") for all cross-file references. Import fixture files exactly as documented in the task.`,
 		);
@@ -433,10 +399,7 @@ function analyzeAndMutate(
 				`[AR001] Implement cycle detection in the dependency resolver using DFS with a "visiting" set. When a cycle is found, throw an error that names the cycle path.`,
 			);
 		}
-		if (
-			benchmark.id === "AR001" &&
-			(combined.includes("lazy") || combined.includes("getPlugin"))
-		) {
+		if (benchmark.id === "AR001" && (combined.includes("lazy") || combined.includes("getPlugin"))) {
 			newMutations.push(
 				"[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.",
 			);
@@ -498,8 +461,7 @@ function analyzeAndMutate(
 		if (
 			benchmark.multiFile &&
 			(!run.extractedCode ||
-				Object.keys(run.extractedCode).length <
-					(benchmark.expectedFiles?.length ?? 2))
+				Object.keys(run.extractedCode).length < (benchmark.expectedFiles?.length ?? 2))
 		) {
 			newMutations.push(
 				`[${benchmark.id}] CRITICAL: This is a multi-file task. Output EACH file in its OWN fenced code block: \`\`\`typescript // filename.ts. Do NOT combine files. Do NOT skip any file.`,
@@ -652,9 +614,7 @@ async function main(): Promise<void> {
 	log("╠══════════════════════════════════════════════════════════════╣");
 	log(`║  Max iterations: ${MAX_ITERATIONS}`);
 	log(`║  Pass threshold: ${PASS_THRESHOLD}`);
-	log(
-		`║  Benchmarks:     ${benchmarks.length} (${TARGET_CATEGORY || "all categories"})`,
-	);
+	log(`║  Benchmarks:     ${benchmarks.length} (${TARGET_CATEGORY || "all categories"})`);
 	log(`║  Models:         ${MODELS[0]} + ${MODELS.length - 1} fallbacks`);
 	log("╚══════════════════════════════════════════════════════════════╝");
 	log("");
@@ -723,9 +683,7 @@ async function main(): Promise<void> {
 		}
 
 		const avgScore = Math.round(totalScore / benchmarks.length);
-		const passing = Object.values(scores).filter(
-			(s) => s >= PASS_THRESHOLD,
-		).length;
+		const passing = Object.values(scores).filter((s) => s >= PASS_THRESHOLD).length;
 
 		const iterResult: IterationResult = {
 			iteration: iter + 1,
@@ -772,9 +730,7 @@ async function main(): Promise<void> {
 
 		// ── Convergence Check ─────────────────────────────────────────
 		if (passing === benchmarks.length) {
-			log(
-				`\n🎉 ALL BENCHMARKS PASSING — stopping early at iteration ${iter + 1}`,
-			);
+			log(`\n🎉 ALL BENCHMARKS PASSING — stopping early at iteration ${iter + 1}`);
 			break;
 		}
 

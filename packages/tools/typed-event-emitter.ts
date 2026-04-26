@@ -11,10 +11,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	 * @param handler The handler function.
 	 * @returns This instance for method chaining.
 	 */
-	on<Event extends keyof Events>(
-		event: Event,
-		handler: (data: Events[Event]) => void,
-	): this {
+	on<Event extends keyof Events>(event: Event, handler: (data: Events[Event]) => void): this {
 		if (!this._map.has(event)) this._map.set(event, []);
 		this._map.get(event)?.push(handler);
 		return this;
@@ -26,10 +23,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	 * @param handler The handler function to remove.
 	 * @returns This instance for method chaining.
 	 */
-	off<Event extends keyof Events>(
-		event: Event,
-		handler: (data: Events[Event]) => void,
-	): this {
+	off<Event extends keyof Events>(event: Event, handler: (data: Events[Event]) => void): this {
 		const handlers = this._map.get(event);
 		if (!handlers) return this;
 		const index = handlers.indexOf(handler);

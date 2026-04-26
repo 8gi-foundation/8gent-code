@@ -50,18 +50,12 @@ class ChainBuilder<T> {
 
 	/** Return the value or a fallback if the value is null/undefined. */
 	or<F>(fallback: F): T | F {
-		return this.value !== null && this.value !== undefined
-			? this.value
-			: fallback;
+		return this.value !== null && this.value !== undefined ? this.value : fallback;
 	}
 
 	/** Return the value if it satisfies a type guard, else undefined. */
 	narrow<N extends T>(guard: (v: T) => v is N): ChainBuilder<N> {
-		if (
-			this.value !== undefined &&
-			this.value !== null &&
-			guard(this.value as T)
-		) {
+		if (this.value !== undefined && this.value !== null && guard(this.value as T)) {
 			return new ChainBuilder(this.value as N);
 		}
 		return new ChainBuilder<N>(undefined);
@@ -103,11 +97,7 @@ export function chain<T>(value: T): ChainBuilder<T> {
  *   tryGet(user, 'address.city', 'Unknown')
  *   tryGet(list, '[0].name', null)
  */
-export function tryGet<F = undefined>(
-	obj: unknown,
-	path: string,
-	fallback?: F,
-): unknown | F {
+export function tryGet<F = undefined>(obj: unknown, path: string, fallback?: F): unknown | F {
 	const resolved = resolvePath(obj, path);
 	if (resolved === null || resolved === undefined) {
 		return fallback !== undefined ? fallback : undefined;

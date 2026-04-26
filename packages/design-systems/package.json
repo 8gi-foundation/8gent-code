@@ -19,16 +19,7 @@
 		"test": "vitest",
 		"typecheck": "tsc --noEmit"
 	},
-	"keywords": [
-		"design-system",
-		"themes",
-		"sqlite",
-		"8gent",
-		"ai",
-		"ui",
-		"tailwind",
-		"css"
-	],
+	"keywords": ["design-system", "themes", "sqlite", "8gent", "ai", "ui", "tailwind", "css"],
 	"author": "James Spalding",
 	"license": "MIT",
 	"dependencies": {

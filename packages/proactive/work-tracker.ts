@@ -75,9 +75,7 @@ export async function trackAll(opps: Opportunity[]): Promise<void> {
 /**
  * Get all opportunities, optionally filtered by status.
  */
-export async function getOpportunities(
-	status?: Opportunity["status"],
-): Promise<Opportunity[]> {
+export async function getOpportunities(status?: Opportunity["status"]): Promise<Opportunity[]> {
 	const all = await readStore();
 	if (!status) return all;
 	return all.filter((o) => o.status === status);
@@ -103,9 +101,7 @@ export async function advanceStatus(
 /**
  * Remove all opportunities with the given status (e.g. clear rejected).
  */
-export async function pruneByStatus(
-	status: Opportunity["status"],
-): Promise<number> {
+export async function pruneByStatus(status: Opportunity["status"]): Promise<number> {
 	const existing = await readStore();
 	const before = existing.length;
 	const filtered = existing.filter((o) => o.status !== status);
@@ -116,9 +112,7 @@ export async function pruneByStatus(
 /**
  * Return a simple summary of the current pipeline.
  */
-export async function getPipelineSummary(): Promise<
-	Record<Opportunity["status"], number>
-> {
+export async function getPipelineSummary(): Promise<Record<Opportunity["status"], number>> {
 	const all = await readStore();
 	const summary: Record<string, number> = {
 		found: 0,

@@ -34,8 +34,7 @@ const DEFAULT_URLS: Record<ProviderName, string> = {
  */
 export function createModel(config: ProviderConfig): LanguageModel {
 	const baseURL = config.baseURL || DEFAULT_URLS[config.name];
-	const isFreeModel =
-		config.model.includes(":free") || config.name === "openrouter";
+	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
 
 	const provider = createOpenAICompatible({
 		name: config.name,
@@ -56,16 +55,14 @@ export function createModel(config: ProviderConfig): LanguageModel {
 			? {
 					transformRequestBody: (body: Record<string, unknown>) => {
 						if (Array.isArray(body.tools)) {
-							body.tools = (body.tools as Array<Record<string, unknown>>).map(
-								(t) => {
-									const fn = t.function as Record<string, unknown> | undefined;
-									if (fn?.parameters && typeof fn.parameters === "object") {
-										const params = fn.parameters as Record<string, unknown>;
-										if (!params.type) params.type = "object";
-									}
-									return t;
-								},
-							);
+							body.tools = (body.tools as Array<Record<string, unknown>>).map((t) => {
+								const fn = t.function as Record<string, unknown> | undefined;
+								if (fn?.parameters && typeof fn.parameters === "object") {
+									const params = fn.parameters as Record<string, unknown>;
+									if (!params.type) params.type = "object";
+								}
+								return t;
+							});
 						}
 						return body;
 					},
@@ -100,18 +97,14 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
 /**
  * Check if a provider is available by hitting its models endpoint.
  */
-export async function isProviderAvailable(
-	config: ProviderConfig,
-): Promise<boolean> {
+export async function isProviderAvailable(config: ProviderConfig): Promise<boolean> {
 	const baseURL = config.baseURL || DEFAULT_URLS[config.name];
 	try {
 		const response = await fetch(`${baseURL.replace("/v1", "")}/api/tags`, {
 			signal: AbortSignal.timeout(3000),
 		}).catch(() =>
 			fetch(`${baseURL}/models`, {
-				headers: config.apiKey
-					? { Authorization: `Bearer ${config.apiKey}` }
-					: {},
+				headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
 				signal: AbortSignal.timeout(3000),
 			}),
 		);

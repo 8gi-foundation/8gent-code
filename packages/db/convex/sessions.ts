@@ -70,9 +70,7 @@ export const getByDateRange = query({
 	handler: async (ctx, { userId, startTime, endTime }) => {
 		const sessions = await ctx.db
 			.query("sessions")
-			.withIndex("by_userId_startedAt", (q) =>
-				q.eq("userId", userId).gte("startedAt", startTime),
-			)
+			.withIndex("by_userId_startedAt", (q) => q.eq("userId", userId).gte("startedAt", startTime))
 			.collect();
 
 		// Filter by end time (index only supports prefix equality + range on last field)
@@ -95,9 +93,7 @@ export const getActiveOnOtherSurfaces = query({
 			.withIndex("by_userId", (q) => q.eq("userId", userId))
 			.collect();
 
-		return sessions.filter(
-			(s) => s.endedAt === undefined && s.channel !== currentChannel,
-		);
+		return sessions.filter((s) => s.endedAt === undefined && s.channel !== currentChannel);
 	},
 });
 
@@ -146,10 +142,7 @@ export const end = mutation({
 		toolCalls: v.number(),
 		benchmarkScores: v.optional(v.record(v.string(), v.number())),
 	},
-	handler: async (
-		ctx,
-		{ sessionId, tokensIn, tokensOut, toolCalls, benchmarkScores },
-	) => {
+	handler: async (ctx, { sessionId, tokensIn, tokensOut, toolCalls, benchmarkScores }) => {
 		const session = await ctx.db.get(sessionId);
 		if (!session) return null;
 
@@ -176,10 +169,7 @@ export const updateCounts = mutation({
 		tokensOutDelta: v.number(),
 		toolCallsDelta: v.number(),
 	},
-	handler: async (
-		ctx,
-		{ sessionId, tokensInDelta, tokensOutDelta, toolCallsDelta },
-	) => {
+	handler: async (ctx, { sessionId, tokensInDelta, tokensOutDelta, toolCallsDelta }) => {
 		const session = await ctx.db.get(sessionId);
 		if (!session) return null;
 
@@ -231,9 +221,7 @@ export const closeStale = mutation({
 			.collect();
 
 		const cutoff = Date.now() - olderThanMs;
-		const stale = sessions.filter(
-			(s) => s.endedAt === undefined && s.startedAt < cutoff,
-		);
+		const stale = sessions.filter((s) => s.endedAt === undefined && s.startedAt < cutoff);
 
 		for (const session of stale) {
 			await ctx.db.patch(session._id, {

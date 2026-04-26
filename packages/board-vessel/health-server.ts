@@ -6,10 +6,7 @@
 
 import type { VesselStatus } from "../board-plane/types";
 
-export function startHealthServer(
-	port: number,
-	getStatus: () => VesselStatus,
-): void {
+export function startHealthServer(port: number, getStatus: () => VesselStatus): void {
 	Bun.serve({
 		port,
 		hostname: "0.0.0.0",

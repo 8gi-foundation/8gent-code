@@ -45,8 +45,7 @@ interface TelegramApiResponse {
 export function formatForTelegram(data: any): string {
 	if (data === null || data === undefined) return "_empty_";
 	if (typeof data === "string") return escapeMarkdown(data);
-	if (typeof data === "number" || typeof data === "boolean")
-		return `\`${data}\``;
+	if (typeof data === "number" || typeof data === "boolean") return `\`${data}\``;
 
 	if (Array.isArray(data)) {
 		if (data.length === 0) return "_empty list_";
@@ -101,10 +100,7 @@ export class UnifiedPortal {
 	private botToken: string;
 	private allowedChatIds: Set<string>;
 	private commands: Map<string, PortalCommand> = new Map();
-	private pendingConfirmations: Map<
-		string,
-		{ command: string; args: string[] }
-	> = new Map();
+	private pendingConfirmations: Map<string, { command: string; args: string[] }> = new Map();
 
 	constructor(botToken: string, allowedChatIds: string[]) {
 		this.botToken = botToken;
@@ -121,9 +117,7 @@ export class UnifiedPortal {
 	 * Command string should include the leading slash, e.g. "/deploy".
 	 */
 	registerCommand(cmd: PortalCommand): void {
-		const normalized = cmd.command.startsWith("/")
-			? cmd.command
-			: `/${cmd.command}`;
+		const normalized = cmd.command.startsWith("/") ? cmd.command : `/${cmd.command}`;
 		this.commands.set(normalized, { ...cmd, command: normalized });
 	}
 
@@ -186,11 +180,7 @@ export class UnifiedPortal {
 	}
 
 	/** Send a message with inline keyboard buttons */
-	async sendWithButtons(
-		chatId: string,
-		text: string,
-		buttons: InlineButton[][],
-	): Promise<void> {
+	async sendWithButtons(chatId: string, text: string, buttons: InlineButton[][]): Promise<void> {
 		const keyboard = buttons.map((row) =>
 			row.map((btn) => ({
 				text: btn.text,
@@ -244,10 +234,7 @@ export class UnifiedPortal {
 		return this.rawFetch(url, body);
 	}
 
-	private async rawFetch(
-		url: string,
-		body: Record<string, unknown>,
-	): Promise<TelegramApiResponse> {
+	private async rawFetch(url: string, body: Record<string, unknown>): Promise<TelegramApiResponse> {
 		const res = await fetch(url, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -470,9 +457,7 @@ export class UnifiedPortal {
 				}
 
 				lines.push("");
-				lines.push(
-					"_Commands with (confirms) require /confirm before execution._",
-				);
+				lines.push("_Commands with (confirms) require /confirm before execution._");
 
 				return lines.join("\n");
 			},

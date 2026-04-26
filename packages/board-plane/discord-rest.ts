@@ -14,11 +14,7 @@ export class DiscordRest {
 		this.tokens = tokens;
 	}
 
-	async postMessage(
-		memberCode: string,
-		channelId: string,
-		content: string,
-	): Promise<boolean> {
+	async postMessage(memberCode: string, channelId: string, content: string): Promise<boolean> {
 		const token = this.tokens.get(memberCode);
 		if (!token) {
 			console.error(`[discord-rest] no token for ${memberCode}`);
@@ -26,8 +22,7 @@ export class DiscordRest {
 		}
 
 		// Discord limit is 2000 chars
-		const body =
-			content.length > 1950 ? `${content.slice(0, 1950)}...` : content;
+		const body = content.length > 1950 ? `${content.slice(0, 1950)}...` : content;
 
 		try {
 			const res = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
@@ -41,9 +36,7 @@ export class DiscordRest {
 
 			if (!res.ok) {
 				const text = await res.text();
-				console.error(
-					`[discord-rest] ${memberCode} post failed: ${res.status} ${text}`,
-				);
+				console.error(`[discord-rest] ${memberCode} post failed: ${res.status} ${text}`);
 				return false;
 			}
 

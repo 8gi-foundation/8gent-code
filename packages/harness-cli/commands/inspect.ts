@@ -71,9 +71,7 @@ function resolveSessionPath(sessionId: string): string {
 	// Accept full path, or just session ID
 	if (fs.existsSync(sessionId)) return sessionId;
 
-	const withExt = sessionId.endsWith(".jsonl")
-		? sessionId
-		: `${sessionId}.jsonl`;
+	const withExt = sessionId.endsWith(".jsonl") ? sessionId : `${sessionId}.jsonl`;
 	const fullPath = path.join(SESSIONS_DIR, withExt);
 
 	if (fs.existsSync(fullPath)) return fullPath;
@@ -85,9 +83,7 @@ function resolveSessionPath(sessionId: string): string {
 		if (match) return path.join(SESSIONS_DIR, match);
 	}
 
-	throw new Error(
-		`Session not found: ${sessionId}\nLooked in: ${SESSIONS_DIR}`,
-	);
+	throw new Error(`Session not found: ${sessionId}\nLooked in: ${SESSIONS_DIR}`);
 }
 
 async function readEntries(filePath: string): Promise<SessionEntry[]> {
@@ -110,9 +106,7 @@ async function readEntries(filePath: string): Promise<SessionEntry[]> {
 
 function formatEntry(entry: SessionEntry, index: number): string {
 	const seq = entry.sequenceNumber ?? index;
-	const ts = entry.timestamp
-		? new Date(entry.timestamp).toLocaleTimeString()
-		: "??:??:??";
+	const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "??:??:??";
 	const type = entry.type;
 
 	const lines: string[] = [];
@@ -123,9 +117,7 @@ function formatEntry(entry: SessionEntry, index: number): string {
 			const meta = (entry as any).meta;
 			lines.push(header);
 			lines.push(`       Version: ${meta?.version ?? 1}`);
-			lines.push(
-				`       Model: ${meta?.agent?.model ?? "?"} (${meta?.agent?.runtime ?? "?"})`,
-			);
+			lines.push(`       Model: ${meta?.agent?.model ?? "?"} (${meta?.agent?.runtime ?? "?"})`);
 			lines.push(`       Dir: ${meta?.environment?.workingDirectory ?? "?"}`);
 			if (meta?.environment?.gitBranch) {
 				lines.push(`       Branch: ${meta.environment.gitBranch}`);
@@ -135,17 +127,13 @@ function formatEntry(entry: SessionEntry, index: number): string {
 		case "user_message": {
 			const content = (entry as any).message?.content ?? "";
 			lines.push(header);
-			lines.push(
-				`       ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`,
-			);
+			lines.push(`       ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`);
 			break;
 		}
 		case "assistant_message": {
 			const content = (entry as any).message?.content ?? "";
 			lines.push(header);
-			lines.push(
-				`       ${content.slice(0, 300)}${content.length > 300 ? "..." : ""}`,
-			);
+			lines.push(`       ${content.slice(0, 300)}${content.length > 300 ? "..." : ""}`);
 			break;
 		}
 		case "assistant_content": {
@@ -160,13 +148,9 @@ function formatEntry(entry: SessionEntry, index: number): string {
 				} else if (p.type === "reasoning") {
 					lines.push(`       [think] ${(p.text ?? "").slice(0, 200)}...`);
 				} else if (p.type === "tool-call") {
-					lines.push(
-						`       [tool-call] ${p.toolName}(${JSON.stringify(p.args).slice(0, 80)})`,
-					);
+					lines.push(`       [tool-call] ${p.toolName}(${JSON.stringify(p.args).slice(0, 80)})`);
 				} else if (p.type === "tool-result") {
-					lines.push(
-						`       [tool-result] ${p.toolName}: ${String(p.result).slice(0, 80)}`,
-					);
+					lines.push(`       [tool-result] ${p.toolName}: ${String(p.result).slice(0, 80)}`);
 				} else {
 					lines.push(`       [${p.type}]`);
 				}
@@ -176,9 +160,7 @@ function formatEntry(entry: SessionEntry, index: number): string {
 		case "tool_call": {
 			const tc = (entry as any).toolCall;
 			lines.push(header);
-			lines.push(
-				`       ${tc?.name ?? "?"}(${JSON.stringify(tc?.arguments ?? {}).slice(0, 120)})`,
-			);
+			lines.push(`       ${tc?.name ?? "?"}(${JSON.stringify(tc?.arguments ?? {}).slice(0, 120)})`);
 			break;
 		}
 		case "tool_result": {
@@ -189,9 +171,7 @@ function formatEntry(entry: SessionEntry, index: number): string {
 			const icon = success ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
 			lines.push(`${header} ${icon} ${name}${dur ? ` (${dur}ms)` : ""}`);
 			if (result) {
-				lines.push(
-					`       ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}`,
-				);
+				lines.push(`       ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}`);
 			}
 			break;
 		}
@@ -231,15 +211,11 @@ function formatEntry(entry: SessionEntry, index: number): string {
 			);
 			lines.push(`       Steps: ${sum?.totalSteps ?? sum?.totalTurns ?? "?"}`);
 			lines.push(`       Tool calls: ${sum?.totalToolCalls ?? "?"}`);
-			lines.push(
-				`       Tokens: ${sum?.totalTokens ?? sum?.totalUsage?.totalTokens ?? "?"}`,
-			);
-			if (sum?.filesCreated?.length)
-				lines.push(`       Created: ${sum.filesCreated.join(", ")}`);
+			lines.push(`       Tokens: ${sum?.totalTokens ?? sum?.totalUsage?.totalTokens ?? "?"}`);
+			if (sum?.filesCreated?.length) lines.push(`       Created: ${sum.filesCreated.join(", ")}`);
 			if (sum?.filesModified?.length)
 				lines.push(`       Modified: ${sum.filesModified.join(", ")}`);
-			if (sum?.gitCommits?.length)
-				lines.push(`       Commits: ${sum.gitCommits.join(", ")}`);
+			if (sum?.gitCommits?.length) lines.push(`       Commits: ${sum.gitCommits.join(", ")}`);
 			break;
 		}
 		default: {
@@ -275,10 +251,7 @@ function typeLabel(type: string): string {
 	return `${color}${type}${reset}`;
 }
 
-function collectArtifactRefs(
-	entries: SessionEntry[],
-	sessionEnd: any,
-): string[] {
+function collectArtifactRefs(entries: SessionEntry[], sessionEnd: any): string[] {
 	const refs = new Set<string>();
 	for (const p of [
 		...(sessionEnd?.summary?.filesCreated ?? []),
@@ -296,8 +269,7 @@ function collectArtifactRefs(
 		if (typeof raw === "string") {
 			try {
 				const parsed = JSON.parse(raw);
-				if (parsed && typeof parsed === "object")
-					obj = parsed as Record<string, unknown>;
+				if (parsed && typeof parsed === "object") obj = parsed as Record<string, unknown>;
 			} catch {
 				obj = null;
 			}
@@ -315,10 +287,7 @@ function collectArtifactRefs(
 	return [...refs];
 }
 
-function resolveExistingPath(
-	refPath: string,
-	sessionFilePath: string,
-): string | null {
+function resolveExistingPath(refPath: string, sessionFilePath: string): string | null {
 	if (fs.existsSync(refPath)) return refPath;
 
 	const sessionDir = path.dirname(sessionFilePath);
@@ -334,10 +303,7 @@ function resolveExistingPath(
 	return null;
 }
 
-function buildSummary(
-	entries: SessionEntry[],
-	sessionFilePath: string,
-): InspectSummary {
+function buildSummary(entries: SessionEntry[], sessionFilePath: string): InspectSummary {
 	const counts: Record<string, number> = {};
 	let firstUser = "";
 	let lastAssistant = "";

@@ -77,10 +77,8 @@ export class VoiceChatLoop {
 	private state: VoiceChatState = "idle";
 	private running = false;
 	private ttsProcess: TTSProcess | null = null;
-	private recProcess: { kill: () => void; exited: Promise<number> } | null =
-		null;
-	private listeners: Map<string, Array<(...args: unknown[]) => void>> =
-		new Map();
+	private recProcess: { kill: () => void; exited: Promise<number> } | null = null;
+	private listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
 	private ttsEngine: TTSEngine;
 
 	constructor(config: VoiceChatConfig) {
@@ -188,10 +186,7 @@ export class VoiceChatLoop {
 		return this;
 	}
 
-	private emit<K extends keyof VoiceChatEvents>(
-		event: K,
-		...args: VoiceChatEvents[K]
-	): void {
+	private emit<K extends keyof VoiceChatEvents>(event: K, ...args: VoiceChatEvents[K]): void {
 		const fns = this.listeners.get(event);
 		if (fns) for (const fn of fns) fn(...args);
 	}
@@ -324,17 +319,13 @@ export class VoiceChatLoop {
 	private async transcribeFile(wavPath: string): Promise<string | null> {
 		try {
 			// Import transcription functions directly
-			const { transcribeLocal, findWhisperBinary } = await import(
-				"./transcriber.js"
-			);
+			const { transcribeLocal, findWhisperBinary } = await import("./transcriber.js");
 			const { WhisperModelManager } = await import("./model-manager.js");
 
 			const binaryPath = await findWhisperBinary();
 			if (!binaryPath) {
 				// Try cloud fallback
-				const { transcribeCloud, isCloudAvailable } = await import(
-					"./cloud-transcriber.js"
-				);
+				const { transcribeCloud, isCloudAvailable } = await import("./cloud-transcriber.js");
 				if (isCloudAvailable()) {
 					const result = await transcribeCloud(wavPath, {
 						apiKey: process.env.OPENAI_API_KEY ?? "",
@@ -345,9 +336,7 @@ export class VoiceChatLoop {
 						return result.text.trim() || null;
 					}
 				}
-				this.onError?.(
-					"No whisper binary found. Install: brew install whisper-cpp",
-				);
+				this.onError?.("No whisper binary found. Install: brew install whisper-cpp");
 				return null;
 			}
 

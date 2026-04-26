@@ -11,11 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { evaluatePolicy } from "./policy-engine.js";
-import type {
-	PolicyActionType,
-	PolicyContext,
-	PolicyDecision,
-} from "./types.js";
+import type { PolicyActionType, PolicyContext, PolicyDecision } from "./types.js";
 
 // ============================================
 // Types
@@ -68,11 +64,7 @@ export class ToolG8 {
 	 * @param context - Context fields for condition evaluation
 	 * @returns GateResult with allowed/denied and reason
 	 */
-	gate(
-		agentId: string,
-		action: PolicyActionType,
-		context: PolicyContext,
-	): GateResult {
+	gate(agentId: string, action: PolicyActionType, context: PolicyContext): GateResult {
 		// Inject agentId into context for per-agent scoping
 		const fullContext: PolicyContext = { ...context, agentId };
 
@@ -134,8 +126,7 @@ export class ToolG8 {
 			const safeContext: Record<string, unknown> = {};
 			for (const [k, v] of Object.entries(context)) {
 				if (k === "content") continue;
-				safeContext[k] =
-					typeof v === "string" && v.length > 200 ? `${v.slice(0, 200)}...` : v;
+				safeContext[k] = typeof v === "string" && v.length > 200 ? `${v.slice(0, 200)}...` : v;
 			}
 
 			const entry: AuditEntry = {

@@ -7,11 +7,7 @@ export interface BadgeProps {
 	variant?: "solid" | "outline";
 }
 
-export const Badge: React.FC<BadgeProps> = ({
-	label,
-	color = "cyan",
-	variant = "solid",
-}) => {
+export const Badge: React.FC<BadgeProps> = ({ label, color = "cyan", variant = "solid" }) => {
 	if (variant === "outline") {
 		return (
 			<Text bold color={color}>

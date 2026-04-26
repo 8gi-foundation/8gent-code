@@ -27,12 +27,7 @@ import {
 	extractFromToolResult,
 	extractPreferencesFromMessage,
 } from "./extractor.js";
-import {
-	type Entity,
-	KnowledgeGraph,
-	type Relationship,
-	type SubgraphResult,
-} from "./graph.js";
+import { type Entity, KnowledgeGraph, type Relationship, type SubgraphResult } from "./graph.js";
 import { type MigrationResult, migrateV1ToV2 } from "./migrate.js";
 import {
 	PromotionManager,
@@ -42,11 +37,7 @@ import {
 	isPromoted,
 	softUnlearn,
 } from "./promote.js";
-import {
-	type RecallOptions,
-	SemanticRecall,
-	createSemanticRecall,
-} from "./recall.js";
+import { type RecallOptions, SemanticRecall, createSemanticRecall } from "./recall.js";
 import { MemoryStore } from "./store.js";
 import {
 	type ConsolidationLevel,
@@ -242,14 +233,8 @@ export class MemoryManager {
 
 	constructor(workingDirectory: string) {
 		this.workingDirectory = workingDirectory;
-		const globalDataDir =
-			process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
-		this.projectJsonlPath = path.join(
-			workingDirectory,
-			".8gent",
-			"memory",
-			"project.jsonl",
-		);
+		const globalDataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+		this.projectJsonlPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
 		this.globalJsonlPath = path.join(globalDataDir, "memory", "global.jsonl");
 	}
 
@@ -276,14 +261,10 @@ export class MemoryManager {
 			const projectDbDir = path.join(this.workingDirectory, ".8gent", "memory");
 			ensureDir(projectDbDir);
 			const projectDbPath = path.join(projectDbDir, "memory.db");
-			this.projectStore = new MemoryStore(
-				projectDbPath,
-				this.embeddingProvider,
-			);
+			this.projectStore = new MemoryStore(projectDbPath, this.embeddingProvider);
 
 			// Create global store (EIGHT_DATA_DIR for cloud deployments)
-			const globalBase =
-				process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+			const globalBase = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 			const globalDbDir = path.join(globalBase, "memory");
 			ensureDir(globalDbDir);
 			const globalDbPath = path.join(globalDbDir, "memory.db");
@@ -314,11 +295,7 @@ export class MemoryManager {
 		await this.init();
 
 		// Detect v1-style call: layer = "session" | "project" | "global"
-		if (
-			typeOrLayer === "session" ||
-			typeOrLayer === "project" ||
-			typeOrLayer === "global"
-		) {
+		if (typeOrLayer === "session" || typeOrLayer === "project" || typeOrLayer === "global") {
 			return this._rememberV1(content, typeOrLayer as MemoryLayer, options);
 		}
 
@@ -334,11 +311,7 @@ export class MemoryManager {
 		}
 
 		// Fallback: write to JSONL (v1 style)
-		return this._rememberV1(
-			content,
-			scope === "global" ? "global" : "project",
-			options,
-		);
+		return this._rememberV1(content, scope === "global" ? "global" : "project", options);
 	}
 
 	/**
@@ -658,8 +631,7 @@ export class MemoryManager {
 		}
 
 		// Final fallback: JSONL
-		const filePath =
-			scope === "global" ? this.globalJsonlPath : this.projectJsonlPath;
+		const filePath = scope === "global" ? this.globalJsonlPath : this.projectJsonlPath;
 		const v1Entry: MemoryEntry = {
 			id,
 			fact,
@@ -673,10 +645,7 @@ export class MemoryManager {
 		return id;
 	}
 
-	private async _recallV1(
-		query: string,
-		limit: number,
-	): Promise<RecallResult[]> {
+	private async _recallV1(query: string, limit: number): Promise<RecallResult[]> {
 		// Use v2 search if available, then convert to v1 format
 		const results = (await this.recall(query, { limit })) as SearchResult[];
 
@@ -688,10 +657,7 @@ export class MemoryManager {
 					r.memory.scope === "session"
 						? ("session" as MemoryLayer)
 						: (r.memory.scope as MemoryLayer),
-				tags:
-					"tags" in r.memory
-						? ((r.memory as { tags?: string[] }).tags ?? [])
-						: [],
+				tags: "tags" in r.memory ? ((r.memory as { tags?: string[] }).tags ?? []) : [],
 				createdAt: new Date(r.memory.createdAt).toISOString(),
 				source: r.memory.source,
 			},
@@ -808,9 +774,7 @@ export class MemoryManager {
 
 	// ── Private: Context Assembly ─────────────────────────────────────
 
-	private async _assembleContext(
-		options: ContextWindowOptions,
-	): Promise<ContextWindow> {
+	private async _assembleContext(options: ContextWindowOptions): Promise<ContextWindow> {
 		const startTime = Date.now();
 		const budget = options.maxTokens ?? 2000;
 		const entries: ContextEntry[] = [];
@@ -859,14 +823,11 @@ export class MemoryManager {
 
 		// 3. Semantic facts (30% budget)
 		const semanticBudget = budget * 0.7;
-		const semanticResults = await this._searchAcrossStores(
-			options.query ?? "",
-			{
-				types: ["semantic"],
-				limit: 15,
-				minImportance: 0.2,
-			},
-		);
+		const semanticResults = await this._searchAcrossStores(options.query ?? "", {
+			types: ["semantic"],
+			limit: 15,
+			minImportance: 0.2,
+		});
 		for (const r of semanticResults) {
 			const content = extractFactFromMemory(r.memory);
 			const tokens = estimateTokens(content);
@@ -883,14 +844,11 @@ export class MemoryManager {
 		}
 
 		// 4. Episodic events (remaining budget)
-		const episodicResults = await this._searchAcrossStores(
-			options.query ?? "",
-			{
-				types: ["episodic"],
-				limit: 10,
-				minImportance: 0.3,
-			},
-		);
+		const episodicResults = await this._searchAcrossStores(options.query ?? "", {
+			types: ["episodic"],
+			limit: 10,
+			minImportance: 0.3,
+		});
 		for (const r of episodicResults) {
 			const content = extractFactFromMemory(r.memory);
 			const tokens = estimateTokens(content);
@@ -1237,11 +1195,7 @@ export class MemoryManager {
 		result: unknown,
 	): Promise<ExtractionResult | null> {
 		try {
-			const extraction = extractFromToolResult(
-				toolName,
-				args,
-				String(result ?? ""),
-			);
+			const extraction = extractFromToolResult(toolName, args, String(result ?? ""));
 			if (!extraction || extraction.entities.length === 0) {
 				return null;
 			}
@@ -1331,14 +1285,10 @@ export function extractAutoMemories(
 ): { fact: string; layer: MemoryLayer }[] {
 	const facts: { fact: string; layer: MemoryLayer }[] = [];
 
-	if (
-		toolName === "read_file" &&
-		String(args.path || "").endsWith("package.json")
-	) {
+	if (toolName === "read_file" && String(args.path || "").endsWith("package.json")) {
 		try {
 			const pkg = JSON.parse(result);
-			if (pkg.name)
-				facts.push({ fact: `Project name: ${pkg.name}`, layer: "project" });
+			if (pkg.name) facts.push({ fact: `Project name: ${pkg.name}`, layer: "project" });
 			if (pkg.description)
 				facts.push({
 					fact: `Project description: ${pkg.description}`,
@@ -1375,20 +1325,14 @@ export function extractAutoMemories(
 		}
 	}
 
-	if (
-		toolName === "read_file" &&
-		String(args.path || "").includes("tsconfig")
-	) {
+	if (toolName === "read_file" && String(args.path || "").includes("tsconfig")) {
 		facts.push({
 			fact: `Project uses TypeScript (found ${args.path})`,
 			layer: "project",
 		});
 	}
 
-	if (
-		toolName === "read_file" &&
-		/dockerfile|docker-compose/i.test(String(args.path || ""))
-	) {
+	if (toolName === "read_file" && /dockerfile|docker-compose/i.test(String(args.path || ""))) {
 		facts.push({
 			fact: `Project uses Docker (found ${args.path})`,
 			layer: "project",
@@ -1412,9 +1356,7 @@ export function extractAutoMemories(
 	}
 
 	if (toolName === "read_file" && /readme/i.test(String(args.path || ""))) {
-		const lines = result
-			.split("\n")
-			.filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
+		const lines = result.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
 		if (lines.length > 0) {
 			facts.push({
 				fact: `Project purpose: ${lines[0].trim().slice(0, 200)}`,
@@ -1523,8 +1465,7 @@ function readJsonlSafe(filePath: string): MemoryEntry[] {
 function readJsonlCount(filePath: string): number {
 	if (!fs.existsSync(filePath)) return 0;
 	try {
-		return fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean)
-			.length;
+		return fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean).length;
 	} catch {
 		return 0;
 	}

@@ -292,14 +292,8 @@ async function runBenchmarks(
 		"\n╔══════════════════════════════════════════════════════════════════════════╗",
 		colors.cyan,
 	);
-	log(
-		"║  8gent Code Benchmark Suite                                               ║",
-		colors.cyan,
-	);
-	log(
-		"║  Comprehensive Coding Capability Assessment                               ║",
-		colors.cyan,
-	);
+	log("║  8gent Code Benchmark Suite                                               ║", colors.cyan);
+	log("║  Comprehensive Coding Capability Assessment                               ║", colors.cyan);
 	log(
 		"╚══════════════════════════════════════════════════════════════════════════╝\n",
 		colors.cyan,
@@ -311,26 +305,18 @@ async function runBenchmarks(
 		const diffColor = getDifficultyColor(benchmark.difficulty);
 
 		if (options.verbose) {
-			log(
-				"\n─────────────────────────────────────────────────────────────",
-				colors.dim,
-			);
+			log("\n─────────────────────────────────────────────────────────────", colors.dim);
 			log(`📋 ${benchmark.id}: ${benchmark.name}`, colors.bright);
 			log(
 				`   Category: ${benchmark.category} | Difficulty: ${diffColor}${benchmark.difficulty}${colors.reset}`,
 			);
 			log(`   ${benchmark.description}`, colors.dim);
 		} else {
-			process.stdout.write(
-				`  ${benchmark.id.padEnd(8)} ${benchmark.name.padEnd(35)} `,
-			);
+			process.stdout.write(`  ${benchmark.id.padEnd(8)} ${benchmark.name.padEnd(35)} `);
 		}
 
 		// Execute benchmark
-		const { output, tokensUsed, duration } = await executeBenchmark(
-			benchmark,
-			options,
-		);
+		const { output, tokensUsed, duration } = await executeBenchmark(benchmark, options);
 
 		// Grade result
 		const result = await grader.grade(benchmark, output, tokensUsed, duration);
@@ -358,9 +344,7 @@ async function runBenchmarks(
 			log(
 				`     Tokens:         ${result.tokens.actual} (expected: ${result.tokens.expected}, efficiency: ${(result.tokens.efficiency * 100).toFixed(1)}%)`,
 			);
-			log(
-				`     Duration:       ${duration}ms (limit: ${benchmark.timeLimit}ms)`,
-			);
+			log(`     Duration:       ${duration}ms (limit: ${benchmark.timeLimit}ms)`);
 
 			if (result.errors.length > 0) {
 				log("\n   Errors:", colors.red);
@@ -371,21 +355,13 @@ async function runBenchmarks(
 				result.warnings.forEach((w) => log(`     - ${w}`, colors.yellow));
 			}
 		} else {
-			log(
-				`${scoreColor}${result.scores.overall.toString().padStart(3)}%${colors.reset}`,
-			);
+			log(`${scoreColor}${result.scores.overall.toString().padStart(3)}%${colors.reset}`);
 		}
 	}
 
 	// Calculate aggregated stats
-	const categoryScores: Record<BenchmarkCategory, number> = {} as Record<
-		BenchmarkCategory,
-		number
-	>;
-	const difficultyScores: Record<Difficulty, number> = {} as Record<
-		Difficulty,
-		number
-	>;
+	const categoryScores: Record<BenchmarkCategory, number> = {} as Record<BenchmarkCategory, number>;
+	const difficultyScores: Record<Difficulty, number> = {} as Record<Difficulty, number>;
 
 	const categoryCounts: Record<string, { sum: number; count: number }> = {};
 	const difficultyCounts: Record<string, { sum: number; count: number }> = {};
@@ -418,12 +394,8 @@ async function runBenchmarks(
 	}
 
 	const totalTokensUsed = results.reduce((sum, r) => sum + r.tokens.actual, 0);
-	const totalTokensExpected = results.reduce(
-		(sum, r) => sum + r.tokens.expected,
-		0,
-	);
-	const avgScore =
-		results.reduce((sum, r) => sum + r.scores.overall, 0) / results.length;
+	const totalTokensExpected = results.reduce((sum, r) => sum + r.tokens.expected, 0);
+	const avgScore = results.reduce((sum, r) => sum + r.scores.overall, 0) / results.length;
 	const passedCount = results.filter((r) => r.scores.overall >= 70).length;
 
 	const suiteResult: BenchmarkSuiteResult = {
@@ -436,16 +408,14 @@ async function runBenchmarks(
 		difficultyScores,
 		totalTokensUsed,
 		totalTokensExpected,
-		overallTokenEfficiency:
-			totalTokensUsed > 0 ? totalTokensExpected / totalTokensUsed : 0,
+		overallTokenEfficiency: totalTokensUsed > 0 ? totalTokensExpected / totalTokensUsed : 0,
 		results,
 		stats: {
 			total: results.length,
 			passed: passedCount,
 			failed: results.length - passedCount,
 			avgScore: Math.round(avgScore),
-			avgTokenEfficiency:
-				totalTokensUsed > 0 ? totalTokensExpected / totalTokensUsed : 0,
+			avgTokenEfficiency: totalTokensUsed > 0 ? totalTokensExpected / totalTokensUsed : 0,
 		},
 	};
 
@@ -455,10 +425,7 @@ async function runBenchmarks(
 /**
  * Output results in requested format
  */
-function outputResults(
-	suiteResult: BenchmarkSuiteResult,
-	options: RunnerOptions,
-): void {
+function outputResults(suiteResult: BenchmarkSuiteResult, options: RunnerOptions): void {
 	switch (options.outputFormat) {
 		case "json":
 			console.log(JSON.stringify(suiteResult, null, 2));
@@ -478,14 +445,8 @@ function outputTerminal(suiteResult: BenchmarkSuiteResult): void {
 		"\n╔══════════════════════════════════════════════════════════════════════════╗",
 		colors.cyan,
 	);
-	log(
-		"║  BENCHMARK RESULTS                                                        ║",
-		colors.cyan,
-	);
-	log(
-		"╠══════════════════════════════════════════════════════════════════════════╣",
-		colors.cyan,
-	);
+	log("║  BENCHMARK RESULTS                                                        ║", colors.cyan);
+	log("╠══════════════════════════════════════════════════════════════════════════╣", colors.cyan);
 
 	const scoreColor = getScoreColor(suiteResult.overallScore);
 	log(
@@ -501,14 +462,8 @@ function outputTerminal(suiteResult: BenchmarkSuiteResult): void {
 		colors.cyan,
 	);
 
-	log(
-		"╠══════════════════════════════════════════════════════════════════════════╣",
-		colors.cyan,
-	);
-	log(
-		"║  Scores by Category:                                                      ║",
-		colors.cyan,
-	);
+	log("╠══════════════════════════════════════════════════════════════════════════╣", colors.cyan);
+	log("║  Scores by Category:                                                      ║", colors.cyan);
 
 	for (const [category, score] of Object.entries(suiteResult.categoryScores)) {
 		const catColor = getScoreColor(score);
@@ -518,18 +473,10 @@ function outputTerminal(suiteResult: BenchmarkSuiteResult): void {
 		);
 	}
 
-	log(
-		"╠══════════════════════════════════════════════════════════════════════════╣",
-		colors.cyan,
-	);
-	log(
-		"║  Scores by Difficulty:                                                    ║",
-		colors.cyan,
-	);
+	log("╠══════════════════════════════════════════════════════════════════════════╣", colors.cyan);
+	log("║  Scores by Difficulty:                                                    ║", colors.cyan);
 
-	for (const [difficulty, score] of Object.entries(
-		suiteResult.difficultyScores,
-	)) {
+	for (const [difficulty, score] of Object.entries(suiteResult.difficultyScores)) {
 		const diffColor = getScoreColor(score);
 		log(
 			`║    ${difficulty.padEnd(25)} ${diffColor}${score.toString().padStart(3)}%${colors.reset}${" ".repeat(42)}║`,

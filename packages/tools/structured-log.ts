@@ -53,11 +53,7 @@ export class Logger {
 	 * @returns New Logger instance
 	 */
 	withContext(fields: Record<string, any>): Logger {
-		return new Logger(
-			{ ...this.context, ...fields },
-			this.currentLevel,
-			this.transport,
-		);
+		return new Logger({ ...this.context, ...fields }, this.currentLevel, this.transport);
 	}
 
 	/**

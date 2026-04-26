@@ -12,8 +12,7 @@ export const multiFileBenchmarks: BenchmarkDefinition[] = [
 		name: "Add Error Handling Across Files",
 		category: "multi-file",
 		difficulty: "hard",
-		description:
-			"Add comprehensive error handling and retry logic across an API client module",
+		description: "Add comprehensive error handling and retry logic across an API client module",
 		prompt: `Read all files in fixtures/multi-file/MF001-api-client/ and add error handling:
 
 1. In types.ts:
@@ -198,8 +197,7 @@ Ensure type safety throughout and handle edge cases.`,
 						points: 15,
 						validator: "regex",
 						config: {
-							pattern:
-								"types\\.ts|evaluator\\.ts|provider\\.ts|hooks\\.ts|index\\.ts",
+							pattern: "types\\.ts|evaluator\\.ts|provider\\.ts|hooks\\.ts|index\\.ts",
 							countMin: 5,
 						},
 					},

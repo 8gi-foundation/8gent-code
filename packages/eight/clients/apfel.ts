@@ -29,9 +29,7 @@ function resolveBaseUrl(explicit?: string): string {
 
 function flattenContent(content: MessageContent): string {
 	if (typeof content === "string") return content;
-	return content
-		.map((part) => (part.type === "text" ? (part.text ?? "") : ""))
-		.join("");
+	return content.map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("");
 }
 
 function hasVisionPart(content: MessageContent): boolean {
@@ -83,16 +81,12 @@ export class ApfelClient implements LLMClient {
 				body: JSON.stringify(body),
 			});
 		} catch (err) {
-			throw new Error(
-				`apfel: ${INSTALL_HINT} (cause: ${(err as Error).message})`,
-			);
+			throw new Error(`apfel: ${INSTALL_HINT} (cause: ${(err as Error).message})`);
 		}
 
 		if (!response.ok) {
 			const errorText = await response.text().catch(() => "");
-			throw new Error(
-				`apfel error: ${response.status} ${response.statusText} - ${errorText}`,
-			);
+			throw new Error(`apfel error: ${response.status} ${response.statusText} - ${errorText}`);
 		}
 
 		const data = await response.json();
@@ -134,15 +128,11 @@ export class ApfelClient implements LLMClient {
 				body: JSON.stringify(body),
 			});
 		} catch (err) {
-			throw new Error(
-				`apfel: ${INSTALL_HINT} (cause: ${(err as Error).message})`,
-			);
+			throw new Error(`apfel: ${INSTALL_HINT} (cause: ${(err as Error).message})`);
 		}
 
 		if (!response.ok || !response.body) {
-			throw new Error(
-				`apfel stream error: ${response.status} ${response.statusText}`,
-			);
+			throw new Error(`apfel stream error: ${response.status} ${response.statusText}`);
 		}
 
 		const reader = response.body.getReader();

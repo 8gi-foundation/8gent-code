@@ -67,9 +67,7 @@ export class Mixer {
 
 		// Mix all processed layers together
 		try {
-			execSync(
-				`sox -m ${processed.map((p) => `"${p}"`).join(" ")} "${outPath}"`,
-			);
+			execSync(`sox -m ${processed.map((p) => `"${p}"`).join(" ")} "${outPath}"`);
 		} catch {
 			// Fallback: just use the first layer
 			execSync(`cp "${processed[0]}" "${outPath}"`);
@@ -89,9 +87,7 @@ export class Mixer {
 	master(inputPath: string): string {
 		const outPath = inputPath.replace(".wav", "-mastered.wav");
 		try {
-			execSync(
-				`sox "${inputPath}" "${outPath}" compand 0.01,0.3 -70,-60,-20 -5 0 0.1 norm -1`,
-			);
+			execSync(`sox "${inputPath}" "${outPath}" compand 0.01,0.3 -70,-60,-20 -5 0 0.1 norm -1`);
 			return outPath;
 		} catch {
 			return inputPath; // Return unmastered if it fails
@@ -120,15 +116,11 @@ export class Mixer {
 
 			execSync(`sox "${inputPath}" "${tailPath}" trim ${tailStart}`);
 			execSync(`sox "${inputPath}" "${headPath}" trim 0 ${crossfadeSec}`);
-			execSync(
-				`sox "${inputPath}" "${bodyPath}" trim ${crossfadeSec} ${tailStart - crossfadeSec}`,
-			);
+			execSync(`sox "${inputPath}" "${bodyPath}" trim ${crossfadeSec} ${tailStart - crossfadeSec}`);
 
 			// Crossfade tail with head
 			const xfadePath = `${inputPath}.xfade.wav`;
-			execSync(
-				`sox "${tailPath}" "${xfadePath}" fade l 0 ${crossfadeSec} ${crossfadeSec}`,
-			);
+			execSync(`sox "${tailPath}" "${xfadePath}" fade l 0 ${crossfadeSec} ${crossfadeSec}`);
 
 			// Concatenate: body + crossfade
 			execSync(`sox "${bodyPath}" "${xfadePath}" "${outPath}"`);

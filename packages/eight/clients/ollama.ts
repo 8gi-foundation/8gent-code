@@ -16,9 +16,7 @@ function resolveBaseUrl(explicit?: string): string {
 	// Check .8gent/config.json for training_proxy.proxyUrl
 	try {
 		const configPath = `${process.cwd()}/.8gent/config.json`;
-		const config = JSON.parse(
-			require("node:fs").readFileSync(configPath, "utf-8"),
-		);
+		const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
 		if (config.training_proxy?.enabled && config.training_proxy?.proxyUrl) {
 			return config.training_proxy.proxyUrl;
 		}

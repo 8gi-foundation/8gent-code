@@ -122,8 +122,7 @@ export class InfiniteRunner extends EventEmitter {
 		this.config = {
 			maxIterations: config.maxIterations ?? 100,
 			maxTimeMs: config.maxTimeMs ?? 30 * 60 * 1000, // 30 minutes default
-			successCriteria:
-				config.successCriteria ?? this.defaultSuccessCriteria.bind(this),
+			successCriteria: config.successCriteria ?? this.defaultSuccessCriteria.bind(this),
 			successPrompt: config.successPrompt ?? DEFAULT_SUCCESS_PROMPT,
 			autoValidate: config.autoValidate ?? true,
 			onIteration: config.onIteration ?? (() => {}),
@@ -352,14 +351,8 @@ What alternative approach will you try now?`;
 				.replace("{{TASK}}", state.task)
 				.replace("{{ITERATIONS}}", state.iteration.toString())
 				.replace("{{FILES}}", state.filesChanged.join(", ") || "none")
-				.replace(
-					"{{COMMANDS}}",
-					state.commandsExecuted.slice(-10).join(", ") || "none",
-				)
-				.replace(
-					"{{LAST_RESPONSE}}",
-					state.lastResponse?.slice(0, 500) || "none",
-				)
+				.replace("{{COMMANDS}}", state.commandsExecuted.slice(-10).join(", ") || "none")
+				.replace("{{LAST_RESPONSE}}", state.lastResponse?.slice(0, 500) || "none")
 				.replace("{{ERRORS}}", state.recoveredErrors.length.toString());
 
 			const response = await this.agent.chat(prompt);
@@ -385,9 +378,7 @@ What alternative approach will you try now?`;
 	 */
 	private updateProgress(response: string): void {
 		// Extract file operations
-		const fileMatches = response.match(
-			/write_file|edit_file|created|modified/gi,
-		);
+		const fileMatches = response.match(/write_file|edit_file|created|modified/gi);
 		if (fileMatches) {
 			this.state.filesChanged.push(`iteration-${this.state.iteration}`);
 		}
@@ -403,17 +394,11 @@ What alternative approach will you try now?`;
 		const hasPlan = response.match(/PLAN:|step \d|1\)|2\)|3\)/i);
 
 		if (hasComplete) {
-			this.state.progressEstimate = Math.min(
-				95,
-				this.state.progressEstimate + 20,
-			);
+			this.state.progressEstimate = Math.min(95, this.state.progressEstimate + 20);
 		} else if (hasPlan && this.state.iteration <= 2) {
 			this.state.progressEstimate = 10;
 		} else {
-			this.state.progressEstimate = Math.min(
-				90,
-				this.state.progressEstimate + 5,
-			);
+			this.state.progressEstimate = Math.min(90, this.state.progressEstimate + 5);
 		}
 
 		this.emit("progress", this.state);
@@ -427,10 +412,7 @@ What alternative approach will you try now?`;
 /**
  * Create and run an infinite loop for a task
  */
-export async function runInfinite(
-	task: string,
-	config?: InfiniteConfig,
-): Promise<InfiniteState> {
+export async function runInfinite(task: string, config?: InfiniteConfig): Promise<InfiniteState> {
 	const runner = new InfiniteRunner(task, config);
 	return runner.run();
 }
@@ -438,10 +420,7 @@ export async function runInfinite(
 /**
  * Create an infinite runner (for manual control)
  */
-export function createInfiniteRunner(
-	task: string,
-	config?: InfiniteConfig,
-): InfiniteRunner {
+export function createInfiniteRunner(task: string, config?: InfiniteConfig): InfiniteRunner {
 	return new InfiniteRunner(task, config);
 }
 

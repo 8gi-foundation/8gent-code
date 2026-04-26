@@ -11,10 +11,7 @@
  */
 
 export type EventHandler<T = unknown> = (data: T) => void | Promise<void>;
-export type WildcardHandler = (
-	event: string,
-	data: unknown,
-) => void | Promise<void>;
+export type WildcardHandler = (event: string, data: unknown) => void | Promise<void>;
 
 export interface EventSubscription {
 	unsubscribe: () => void;
@@ -28,8 +25,7 @@ export interface EmitterStats {
 
 export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	private handlers: Map<keyof Events, Set<EventHandler<unknown>>> = new Map();
-	private onceHandlers: Map<keyof Events, Set<EventHandler<unknown>>> =
-		new Map();
+	private onceHandlers: Map<keyof Events, Set<EventHandler<unknown>>> = new Map();
 	private wildcardHandlers: Set<WildcardHandler> = new Set();
 	private maxListeners = 10;
 	private stats: EmitterStats = {
@@ -41,10 +37,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	/**
 	 * Subscribe to an event
 	 */
-	on<K extends keyof Events>(
-		event: K,
-		handler: EventHandler<Events[K]>,
-	): EventSubscription {
+	on<K extends keyof Events>(event: K, handler: EventHandler<Events[K]>): EventSubscription {
 		if (!this.handlers.has(event)) {
 			this.handlers.set(event, new Set());
 		}
@@ -68,10 +61,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	/**
 	 * Subscribe to an event once
 	 */
-	once<K extends keyof Events>(
-		event: K,
-		handler: EventHandler<Events[K]>,
-	): EventSubscription {
+	once<K extends keyof Events>(event: K, handler: EventHandler<Events[K]>): EventSubscription {
 		if (!this.onceHandlers.has(event)) {
 			this.onceHandlers.set(event, new Set());
 		}
@@ -101,10 +91,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	/**
 	 * Unsubscribe from an event
 	 */
-	off<K extends keyof Events>(
-		event: K,
-		handler: EventHandler<Events[K]>,
-	): boolean {
+	off<K extends keyof Events>(event: K, handler: EventHandler<Events[K]>): boolean {
 		const handlers = this.handlers.get(event);
 		if (handlers?.delete(handler as EventHandler<unknown>)) {
 			this.stats.totalHandlers--;
@@ -118,10 +105,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	 */
 	async emit<K extends keyof Events>(event: K, data: Events[K]): Promise<void> {
 		this.stats.totalEvents++;
-		this.stats.eventCounts.set(
-			String(event),
-			(this.stats.eventCounts.get(String(event)) || 0) + 1,
-		);
+		this.stats.eventCounts.set(String(event), (this.stats.eventCounts.get(String(event)) || 0) + 1);
 
 		const errors: Error[] = [];
 
@@ -161,10 +145,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 		}
 
 		if (errors.length > 0) {
-			throw new AggregateError(
-				errors,
-				`${errors.length} handler(s) threw errors`,
-			);
+			throw new AggregateError(errors, `${errors.length} handler(s) threw errors`);
 		}
 	}
 
@@ -197,10 +178,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	/**
 	 * Wait for an event
 	 */
-	waitFor<K extends keyof Events>(
-		event: K,
-		timeout?: number,
-	): Promise<Events[K]> {
+	waitFor<K extends keyof Events>(event: K, timeout?: number): Promise<Events[K]> {
 		return new Promise((resolve, reject) => {
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -224,8 +202,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	removeAllListeners<K extends keyof Events>(event?: K): void {
 		if (event) {
 			const count =
-				(this.handlers.get(event)?.size || 0) +
-				(this.onceHandlers.get(event)?.size || 0);
+				(this.handlers.get(event)?.size || 0) + (this.onceHandlers.get(event)?.size || 0);
 			this.handlers.delete(event);
 			this.onceHandlers.delete(event);
 			this.stats.totalHandlers -= count;
@@ -241,10 +218,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	 * Get listener count for an event
 	 */
 	listenerCount<K extends keyof Events>(event: K): number {
-		return (
-			(this.handlers.get(event)?.size || 0) +
-			(this.onceHandlers.get(event)?.size || 0)
-		);
+		return (this.handlers.get(event)?.size || 0) + (this.onceHandlers.get(event)?.size || 0);
 	}
 
 	/**

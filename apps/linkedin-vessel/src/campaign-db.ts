@@ -9,9 +9,7 @@ import * as path from "node:path";
 import type { Campaign, Lead, MessageRecord, MessageTemplate } from "./types";
 
 function getDbPath(): string {
-	const base =
-		process.env.EIGHT_DATA_DIR ||
-		path.join(process.env.HOME || "/root", ".8gent");
+	const base = process.env.EIGHT_DATA_DIR || path.join(process.env.HOME || "/root", ".8gent");
 	if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true });
 	return path.join(base, "linkedin.db");
 }
@@ -111,9 +109,7 @@ export function upsertLead(lead: Lead): void {
 
 export function getLead(publicId: string): Lead | null {
 	const db = getDb();
-	const row = db
-		.prepare("SELECT * FROM leads WHERE public_id = ?")
-		.get(publicId) as any;
+	const row = db.prepare("SELECT * FROM leads WHERE public_id = ?").get(publicId) as any;
 	if (!row) return null;
 	return {
 		...row,
@@ -132,9 +128,7 @@ export function getTemplates(type?: string): MessageTemplate[] {
 	const sql = type
 		? "SELECT * FROM message_templates WHERE type = ? ORDER BY reply_rate DESC"
 		: "SELECT * FROM message_templates ORDER BY reply_rate DESC";
-	const rows = (
-		type ? db.prepare(sql).all(type) : db.prepare(sql).all()
-	) as any[];
+	const rows = (type ? db.prepare(sql).all(type) : db.prepare(sql).all()) as any[];
 	return rows.map(rowToTemplate);
 }
 

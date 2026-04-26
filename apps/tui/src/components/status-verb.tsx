@@ -198,8 +198,7 @@ export function AnimatedStatusVerb({
 	}
 
 	const prefixCols = showIcon ? 3 : 0;
-	const verbMax =
-		maxWidth != null ? Math.max(4, maxWidth - prefixCols) : undefined;
+	const verbMax = maxWidth != null ? Math.max(4, maxWidth - prefixCols) : undefined;
 	const verbShown = verbMax != null ? truncate(verb, verbMax) : verb;
 
 	return (

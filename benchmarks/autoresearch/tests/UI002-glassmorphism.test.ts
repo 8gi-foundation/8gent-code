@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";
@@ -33,8 +31,7 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 	});
 
 	test("backdrop-filter contains blur() with value >= 10", () => {
-		const blurMatches =
-			css.match(/backdrop-filter\s*:[^;]*blur\(\s*(\d+)/gi) ?? [];
+		const blurMatches = css.match(/backdrop-filter\s*:[^;]*blur\(\s*(\d+)/gi) ?? [];
 		const hasValidBlur = blurMatches.some((m) => {
 			const val = Number.parseInt(m.match(/blur\(\s*(\d+)/i)?.[1] ?? "0", 10);
 			return val >= 10;
@@ -43,12 +40,9 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 	});
 
 	test("background uses rgba with alpha <= 0.5", () => {
-		const rgbaMatches =
-			css.match(/rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/gi) ?? [];
+		const rgbaMatches = css.match(/rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/gi) ?? [];
 		const hasTransparentBg = rgbaMatches.some((m) => {
-			const alpha = Number.parseFloat(
-				m.match(/,\s*([\d.]+)\s*\)$/)?.[1] ?? "1",
-			);
+			const alpha = Number.parseFloat(m.match(/,\s*([\d.]+)\s*\)$/)?.[1] ?? "1");
 			return alpha <= 0.5;
 		});
 		expect(hasTransparentBg).toBe(true);
@@ -56,10 +50,9 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 
 	test("border with rgba white value present", () => {
 		// Look for border using rgba with white-ish values (high R, G, B)
-		const hasBorderRgba =
-			/border\s*:[^;]*rgba\(\s*2[0-5]\d\s*,\s*2[0-5]\d\s*,\s*2[0-5]\d/i.test(
-				css,
-			);
+		const hasBorderRgba = /border\s*:[^;]*rgba\(\s*2[0-5]\d\s*,\s*2[0-5]\d\s*,\s*2[0-5]\d/i.test(
+			css,
+		);
 		// Also accept shorthand with white-ish colors
 		const hasBorderWhite = /border[^:]*:\s*\d+px\s+solid\s+rgba\(/i.test(css);
 		expect(hasBorderRgba || hasBorderWhite).toBe(true);
@@ -82,9 +75,7 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 
 	test("z-index or positioning for overlap", () => {
 		const hasZIndex = /z-index\s*:/i.test(css);
-		const hasPositioning = /position\s*:\s*(absolute|relative|fixed)/i.test(
-			css,
-		);
+		const hasPositioning = /position\s*:\s*(absolute|relative|fixed)/i.test(css);
 		expect(hasZIndex || hasPositioning).toBe(true);
 	});
 });

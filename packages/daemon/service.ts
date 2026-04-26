@@ -127,8 +127,7 @@ async function uninstall(): Promise<void> {
 	} else {
 		const path = systemdUnitPath();
 		if (existsSync(path)) {
-			await Bun.spawn(["systemctl", "--user", "disable", "--now", SERVICE_NAME])
-				.exited;
+			await Bun.spawn(["systemctl", "--user", "disable", "--now", SERVICE_NAME]).exited;
 			await Bun.spawn(["rm", path]).exited;
 			await Bun.spawn(["systemctl", "--user", "daemon-reload"]).exited;
 			console.log(`[service] uninstalled systemd unit: ${path}`);
@@ -190,7 +189,5 @@ if (command && commands[command]) {
 		process.exit(1);
 	});
 } else if (import.meta.main) {
-	console.log(
-		"Usage: bun run service.ts <install|uninstall|start|stop|status>",
-	);
+	console.log("Usage: bun run service.ts <install|uninstall|start|stop|status>");
 }

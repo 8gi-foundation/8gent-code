@@ -120,9 +120,7 @@ export function DesignSelector({
 			}
 
 			if (key.upArrow || (input === "k" && !key.ctrl)) {
-				setSelectedIndex(
-					(prev) => (prev - 1 + options.length) % options.length,
-				);
+				setSelectedIndex((prev) => (prev - 1 + options.length) % options.length);
 				return;
 			}
 
@@ -173,12 +171,8 @@ export function DesignSelector({
 			{/* Help */}
 			{showHelp && (
 				<Stack marginTop={1}>
-					<MutedText>
-						Press [1-{options.length}] to select, or use \u2191\u2193 and Enter
-					</MutedText>
-					{onCancel && (
-						<MutedText>Press [ESC] to skip design selection</MutedText>
-					)}
+					<MutedText>Press [1-{options.length}] to select, or use \u2191\u2193 and Enter</MutedText>
+					{onCancel && <MutedText>Press [ESC] to skip design selection</MutedText>}
 				</Stack>
 			)}
 		</Card>
@@ -195,11 +189,7 @@ interface DesignOptionCardProps {
 	isSelected: boolean;
 }
 
-function DesignOptionCard({
-	option,
-	index,
-	isSelected,
-}: DesignOptionCardProps) {
+function DesignOptionCard({ option, index, isSelected }: DesignOptionCardProps) {
 	const borderColor = isSelected ? "cyan" : "blue";
 	const borderStyle = isSelected ? "double" : "single";
 
@@ -256,12 +246,8 @@ export function DesignSuggestionPanel({
 	onSkip,
 	visible = true,
 }: DesignSuggestionPanelProps) {
-	const [phase, setPhase] = useState<"intro" | "selecting" | "confirming">(
-		"intro",
-	);
-	const [selectedOption, setSelectedOption] = useState<DesignOption | null>(
-		null,
-	);
+	const [phase, setPhase] = useState<"intro" | "selecting" | "confirming">("intro");
+	const [selectedOption, setSelectedOption] = useState<DesignOption | null>(null);
 
 	const handleSelect = useCallback((option: DesignOption) => {
 		setSelectedOption(option);
@@ -292,11 +278,7 @@ export function DesignSuggestionPanel({
 	// Confirming phase
 	if (phase === "confirming" && selectedOption) {
 		return (
-			<DesignConfirmation
-				option={selectedOption}
-				onConfirm={handleConfirm}
-				onBack={handleBack}
-			/>
+			<DesignConfirmation option={selectedOption} onConfirm={handleConfirm} onBack={handleBack} />
 		);
 	}
 
@@ -323,11 +305,7 @@ interface DesignConfirmationProps {
 	onBack: () => void;
 }
 
-function DesignConfirmation({
-	option,
-	onConfirm,
-	onBack,
-}: DesignConfirmationProps) {
+function DesignConfirmation({ option, onConfirm, onBack }: DesignConfirmationProps) {
 	useInput((input, key) => {
 		if (key.return || input === "y") {
 			onConfirm();
@@ -367,10 +345,7 @@ export interface DesignBadgeProps {
 	isActive?: boolean;
 }
 
-export function DesignBadge({
-	designName,
-	isActive = false,
-}: DesignBadgeProps) {
+export function DesignBadge({ designName, isActive = false }: DesignBadgeProps) {
 	if (!designName && !isActive) return null;
 
 	return (
@@ -393,10 +368,7 @@ export interface InlineDesignPromptProps {
 	compact?: boolean;
 }
 
-export function InlineDesignPrompt({
-	message,
-	compact = false,
-}: InlineDesignPromptProps) {
+export function InlineDesignPrompt({ message, compact = false }: InlineDesignPromptProps) {
 	const paintbrushIcon = "\u{1F3A8}";
 
 	if (compact) {

@@ -23,11 +23,7 @@
  */
 
 import { EventEmitter } from "node:events";
-import {
-	getApiKey,
-	isCloudAvailable,
-	transcribeCloud,
-} from "./cloud-transcriber.js";
+import { getApiKey, isCloudAvailable, transcribeCloud } from "./cloud-transcriber.js";
 import { WhisperModelManager } from "./model-manager.js";
 import { MicRecorder, checkSoxInstalled } from "./recorder.js";
 import { findWhisperBinary, transcribeLocal } from "./transcriber.js";
@@ -254,10 +250,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		// Check sox
 		const soxCheck = await checkSoxInstalled();
 		if (!soxCheck.installed) {
-			this.emitError(
-				"SOX_NOT_INSTALLED",
-				`sox not found. ${soxCheck.installHint}`,
-			);
+			this.emitError("SOX_NOT_INSTALLED", `sox not found. ${soxCheck.installHint}`);
 			return;
 		}
 
@@ -285,8 +278,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			this.setState("recording");
 			this.emit("recording-start");
 		} catch (err) {
-			const message =
-				err instanceof Error ? err.message : "Failed to start recording";
+			const message = err instanceof Error ? err.message : "Failed to start recording";
 			this.emitError("RECORDING_FAILED", message);
 		}
 	}
@@ -325,8 +317,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			return transcript;
 		} catch (err) {
 			this.setState("idle");
-			const message =
-				err instanceof Error ? err.message : "Transcription failed";
+			const message = err instanceof Error ? err.message : "Transcription failed";
 			this.emitError("TRANSCRIPTION_FAILED", message);
 			return null;
 		}
@@ -357,9 +348,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		return this.transcribeLocal(wavPath);
 	}
 
-	private async transcribeLocal(
-		wavPath: string,
-	): Promise<TranscriptEvent | null> {
+	private async transcribeLocal(wavPath: string): Promise<TranscriptEvent | null> {
 		// Ensure we have the whisper binary
 		if (!this.whisperBinaryPath) {
 			this.whisperBinaryPath = await findWhisperBinary();
@@ -380,8 +369,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			try {
 				await this.modelManager.downloadModel(this.config.model);
 			} catch (err) {
-				const message =
-					err instanceof Error ? err.message : "Model download failed";
+				const message = err instanceof Error ? err.message : "Model download failed";
 				this.emitError("MODEL_NOT_DOWNLOADED", message);
 				return null;
 			}
@@ -395,9 +383,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		});
 	}
 
-	private async transcribeCloud(
-		wavPath: string,
-	): Promise<TranscriptEvent | null> {
+	private async transcribeCloud(wavPath: string): Promise<TranscriptEvent | null> {
 		const apiKey = getApiKey(this.config.openaiApiKey);
 		if (!apiKey) {
 			this.emitError(
@@ -413,8 +399,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 				language: this.config.language,
 			});
 		} catch (err) {
-			const message =
-				err instanceof Error ? err.message : "Cloud transcription failed";
+			const message = err instanceof Error ? err.message : "Cloud transcription failed";
 			this.emitError("CLOUD_API_ERROR", message);
 			return null;
 		}
@@ -447,10 +432,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		this.vad.on("speech-end", () => {
 			if (this.state === "recording") {
 				this.stopRecording().catch((err) => {
-					this.emitError(
-						"TRANSCRIPTION_FAILED",
-						err instanceof Error ? err.message : "unknown",
-					);
+					this.emitError("TRANSCRIPTION_FAILED", err instanceof Error ? err.message : "unknown");
 				});
 			}
 		});

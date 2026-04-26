@@ -6,13 +6,7 @@
  */
 
 import Stripe from "stripe";
-import type {
-	BillableUsage,
-	BillingPlan,
-	PlanLimits,
-	PlanTier,
-	TenantFeatures,
-} from "./types";
+import type { BillableUsage, BillingPlan, PlanLimits, PlanTier, TenantFeatures } from "./types";
 
 // ============================================
 // Stripe Client (lazy-initialized)
@@ -195,9 +189,7 @@ export function getUsageForBilling(
 	periodEnd: string,
 ): BillableUsage {
 	// Filter to billing period
-	const periodRecords = usageRecords.filter(
-		(r) => r.date >= periodStart && r.date <= periodEnd,
-	);
+	const periodRecords = usageRecords.filter((r) => r.date >= periodStart && r.date <= periodEnd);
 
 	let totalTokens = 0;
 	let totalSessions = 0;
@@ -223,9 +215,7 @@ export function getUsageForBilling(
 /**
  * Estimate monthly revenue based on current user plan distribution.
  */
-export function estimateMonthlyRevenue(
-	planDistribution: Record<PlanTier, number>,
-): number {
+export function estimateMonthlyRevenue(planDistribution: Record<PlanTier, number>): number {
 	let total = 0;
 	for (const [tier, count] of Object.entries(planDistribution)) {
 		total += PLAN_DEFINITIONS[tier as PlanTier].priceMonthly * count;
@@ -260,9 +250,7 @@ export async function createStripeCustomer(
 			name,
 			metadata,
 		});
-		console.log(
-			`[billing] Created Stripe customer ${customer.id} for ${email}`,
-		);
+		console.log(`[billing] Created Stripe customer ${customer.id} for ${email}`);
 		return { customerId: customer.id };
 	} catch (error) {
 		console.error("[billing] Failed to create Stripe customer:", error);
@@ -304,9 +292,7 @@ export async function createStripeSubscription(
 			}
 		}
 
-		console.log(
-			`[billing] Created subscription ${subscription.id} for customer ${customerId}`,
-		);
+		console.log(`[billing] Created subscription ${subscription.id} for customer ${customerId}`);
 		return {
 			subscriptionId: subscription.id,
 			status: subscription.status,
@@ -331,9 +317,7 @@ export async function cancelStripeSubscription(
 			cancel_at_period_end: true,
 		});
 
-		console.log(
-			`[billing] Scheduled cancellation for subscription ${subscriptionId}`,
-		);
+		console.log(`[billing] Scheduled cancellation for subscription ${subscriptionId}`);
 		return {
 			status: subscription.status,
 			cancelAt: subscription.cancel_at,
@@ -355,15 +339,10 @@ export async function cancelStripeSubscriptionImmediately(
 		const stripe = getStripe();
 		const subscription = await stripe.subscriptions.cancel(subscriptionId);
 
-		console.log(
-			`[billing] Immediately canceled subscription ${subscriptionId}`,
-		);
+		console.log(`[billing] Immediately canceled subscription ${subscriptionId}`);
 		return { status: subscription.status };
 	} catch (error) {
-		console.error(
-			"[billing] Failed to immediately cancel subscription:",
-			error,
-		);
+		console.error("[billing] Failed to immediately cancel subscription:", error);
 		throw error;
 	}
 }
@@ -394,9 +373,7 @@ export async function handleStripeWebhook(
 ): Promise<WebhookResult> {
 	const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 	if (!webhookSecret) {
-		console.error(
-			"[billing] STRIPE_WEBHOOK_SECRET is not set — cannot verify webhook",
-		);
+		console.error("[billing] STRIPE_WEBHOOK_SECRET is not set — cannot verify webhook");
 		return {
 			handled: false,
 			event: "unknown",
@@ -409,11 +386,8 @@ export async function handleStripeWebhook(
 		const stripe = getStripe();
 		event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
 	} catch (err) {
-		const message =
-			err instanceof Error ? err.message : "Unknown verification error";
-		console.error(
-			`[billing] Webhook signature verification failed: ${message}`,
-		);
+		const message = err instanceof Error ? err.message : "Unknown verification error";
+		console.error(`[billing] Webhook signature verification failed: ${message}`);
 		return {
 			handled: false,
 			event: "unknown",
@@ -421,9 +395,7 @@ export async function handleStripeWebhook(
 		};
 	}
 
-	console.log(
-		`[billing] Processing webhook event: ${event.type} (${event.id})`,
-	);
+	console.log(`[billing] Processing webhook event: ${event.type} (${event.id})`);
 
 	try {
 		switch (event.type) {
@@ -431,9 +403,7 @@ export async function handleStripeWebhook(
 			case "customer.subscription.created": {
 				const subscription = event.data.object as Stripe.Subscription;
 				const tier = resolvePlanTierFromSubscription(subscription);
-				console.log(
-					`[billing] Subscription created: ${subscription.id}, tier: ${tier}`,
-				);
+				console.log(`[billing] Subscription created: ${subscription.id}, tier: ${tier}`);
 				return {
 					handled: true,
 					event: event.type,
@@ -452,13 +422,9 @@ export async function handleStripeWebhook(
 
 				// Check if subscription was effectively canceled
 				if (subscription.cancel_at_period_end) {
-					console.log(
-						`[billing] Subscription ${subscription.id} scheduled for cancellation`,
-					);
+					console.log(`[billing] Subscription ${subscription.id} scheduled for cancellation`);
 				} else {
-					console.log(
-						`[billing] Subscription updated: ${subscription.id}, tier: ${tier}`,
-					);
+					console.log(`[billing] Subscription updated: ${subscription.id}, tier: ${tier}`);
 				}
 
 				return {
@@ -475,9 +441,7 @@ export async function handleStripeWebhook(
 
 			case "customer.subscription.deleted": {
 				const subscription = event.data.object as Stripe.Subscription;
-				console.log(
-					`[billing] Subscription deleted: ${subscription.id} — downgrading to free`,
-				);
+				console.log(`[billing] Subscription deleted: ${subscription.id} — downgrading to free`);
 				return {
 					handled: true,
 					event: event.type,
@@ -493,16 +457,12 @@ export async function handleStripeWebhook(
 			// ---- Invoice / payment events ----
 			case "invoice.paid": {
 				const invoice = event.data.object as Stripe.Invoice;
-				console.log(
-					`[billing] Invoice paid: ${invoice.id}, amount: ${invoice.amount_paid}`,
-				);
+				console.log(`[billing] Invoice paid: ${invoice.id}, amount: ${invoice.amount_paid}`);
 				return {
 					handled: true,
 					event: event.type,
 					customerId:
-						typeof invoice.customer === "string"
-							? invoice.customer
-							: invoice.customer?.id,
+						typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id,
 					subscriptionId:
 						typeof invoice.subscription === "string"
 							? invoice.subscription
@@ -519,9 +479,7 @@ export async function handleStripeWebhook(
 					handled: true,
 					event: event.type,
 					customerId:
-						typeof invoice.customer === "string"
-							? invoice.customer
-							: invoice.customer?.id,
+						typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id,
 					subscriptionId:
 						typeof invoice.subscription === "string"
 							? invoice.subscription
@@ -535,11 +493,8 @@ export async function handleStripeWebhook(
 				return { handled: false, event: event.type };
 		}
 	} catch (err) {
-		const message =
-			err instanceof Error ? err.message : "Unknown processing error";
-		console.error(
-			`[billing] Error processing webhook event ${event.type}: ${message}`,
-		);
+		const message = err instanceof Error ? err.message : "Unknown processing error";
+		console.error(`[billing] Error processing webhook event ${event.type}: ${message}`);
 		return { handled: false, event: event.type, error: message };
 	}
 }
@@ -570,9 +525,7 @@ export async function getStripeBillingPortalUrl(
  * Retrieve a Stripe customer by ID.
  * Useful for checking if a customer already exists before creating a new one.
  */
-export async function getStripeCustomer(
-	customerId: string,
-): Promise<Stripe.Customer | null> {
+export async function getStripeCustomer(customerId: string): Promise<Stripe.Customer | null> {
 	try {
 		const stripe = getStripe();
 		const customer = await stripe.customers.retrieve(customerId);
@@ -608,9 +561,7 @@ export async function getStripeSubscription(
  * Resolve the PlanTier from a Stripe subscription's price ID.
  * Falls back to "free" if the price ID is not recognized.
  */
-function resolvePlanTierFromSubscription(
-	subscription: Stripe.Subscription,
-): PlanTier {
+function resolvePlanTierFromSubscription(subscription: Stripe.Subscription): PlanTier {
 	const priceId = subscription.items.data[0]?.price?.id;
 	if (!priceId) return "free";
 

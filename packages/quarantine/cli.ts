@@ -68,9 +68,7 @@ async function main() {
 			case "add": {
 				const source = args[1];
 				if (!source) {
-					console.error(
-						"Error: Source required. Usage: quarantine add <source>",
-					);
+					console.error("Error: Source required. Usage: quarantine add <source>");
 					process.exit(1);
 				}
 
@@ -109,9 +107,7 @@ async function main() {
 				const entries = quarantine.list(status);
 
 				if (entries.length === 0) {
-					console.log(
-						`\n📭 No skills in quarantine${status ? ` with status: ${status}` : ""}`,
-					);
+					console.log(`\n📭 No skills in quarantine${status ? ` with status: ${status}` : ""}`);
 					process.exit(0);
 				}
 
@@ -162,9 +158,7 @@ async function main() {
 					console.log("\n🔧 Abstracting skill to 8gent format...");
 					const abstracted = await quarantine.abstract(id);
 					console.log(`   Name: ${abstracted.name}`);
-					console.log(
-						`   Capabilities: ${abstracted.capabilities.join(", ") || "none detected"}`,
-					);
+					console.log(`   Capabilities: ${abstracted.capabilities.join(", ") || "none detected"}`);
 					console.log(`   Token estimate: ${abstracted.tokenEstimate}`);
 				}
 
@@ -188,9 +182,7 @@ async function main() {
 				const reason = args.slice(2).join(" ") || "Manually rejected";
 
 				if (!id) {
-					console.error(
-						"Error: ID required. Usage: quarantine reject <id> [reason]",
-					);
+					console.error("Error: ID required. Usage: quarantine reject <id> [reason]");
 					process.exit(1);
 				}
 
@@ -202,9 +194,7 @@ async function main() {
 
 			case "cleanup": {
 				const days = Number.parseInt(args[1]) || 30;
-				console.log(
-					`\n🧹 Cleaning up rejected skills older than ${days} days...`,
-				);
+				console.log(`\n🧹 Cleaning up rejected skills older than ${days} days...`);
 				const removed = quarantine.cleanup(days);
 				console.log(`   Removed: ${removed} entries`);
 				break;

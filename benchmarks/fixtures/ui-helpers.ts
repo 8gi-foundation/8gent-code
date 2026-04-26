@@ -103,9 +103,7 @@ export function hasSelector(css: string, selector: string): boolean {
 }
 
 /** Parse a CSS numeric value like "10px", "0.5em", "50%", "300ms" into parts. */
-export function parseCSSNumericValue(
-	value: string,
-): { number: number; unit: string } | null {
+export function parseCSSNumericValue(value: string): { number: number; unit: string } | null {
 	const m = value.trim().match(/^(-?\d*\.?\d+)\s*(%|[a-zA-Z]*)$/);
 	if (!m) return null;
 	return { number: Number.parseFloat(m[1]), unit: m[2] || "" };
@@ -119,12 +117,8 @@ export function extractBlurValue(css: string): number | null {
 }
 
 /** Parse rgba(r, g, b, a) into components. */
-export function extractRGBA(
-	value: string,
-): { r: number; g: number; b: number; a: number } | null {
-	const m = value.match(
-		/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/i,
-	);
+export function extractRGBA(value: string): { r: number; g: number; b: number; a: number } | null {
+	const m = value.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/i);
 	if (!m) return null;
 	return {
 		r: Number.parseInt(m[1], 10),

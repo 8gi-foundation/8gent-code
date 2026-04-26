@@ -12,27 +12,15 @@ const humanSkillRubric = (criteria: string[]) => ({
 	correctness: { weight: 30, criteria },
 	codeQuality: {
 		weight: 25,
-		criteria: [
-			"Clear reasoning",
-			"Well-structured response",
-			"Actionable output",
-		],
+		criteria: ["Clear reasoning", "Well-structured response", "Actionable output"],
 	},
 	efficiency: {
 		weight: 20,
-		criteria: [
-			"Concise communication",
-			"No redundant content",
-			"Time-efficient solution",
-		],
+		criteria: ["Concise communication", "No redundant content", "Time-efficient solution"],
 	},
 	bestPractices: {
 		weight: 25,
-		criteria: [
-			"Ethical consideration",
-			"Empathy demonstrated",
-			"Practical wisdom",
-		],
+		criteria: ["Ethical consideration", "Empathy demonstrated", "Practical wisdom"],
 	},
 });
 
@@ -149,8 +137,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		difficulty: "hard",
 		description: "Deliver difficult feedback compassionately",
 		task: `You need to tell a direct report they're being laid off due to company restructuring. They're a good performer and this isn't their fault. Draft the conversation outline.`,
-		expectedBehavior:
-			"Compassionate, clear, provides support, maintains dignity",
+		expectedBehavior: "Compassionate, clear, provides support, maintains dignity",
 		fixture: "fixtures/human-skills/SS002-layoff.txt",
 		rubric: humanSkillRubric([
 			"Clear message",
@@ -200,9 +187,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 			"Epistemic humility",
 			"Ethical awareness",
 		]),
-		validators: [
-			{ type: "llm", config: { rubric: "philosophical_reasoning" } },
-		],
+		validators: [{ type: "llm", config: { rubric: "philosophical_reasoning" } }],
 		expectedTokens: 900,
 		timeLimit: 180,
 	},

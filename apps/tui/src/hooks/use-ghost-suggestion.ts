@@ -106,13 +106,7 @@ export function useGhostSuggestion(
 		}, debounceMs);
 
 		return () => clearTimeout(timeoutId);
-	}, [
-		currentInput,
-		planNextStep,
-		historyPatterns,
-		contextSuggestions,
-		debounceMs,
-	]);
+	}, [currentInput, planNextStep, historyPatterns, contextSuggestions, debounceMs]);
 
 	// Accept the current suggestion
 	const accept = useCallback((): string => {
@@ -147,12 +141,8 @@ interface HistoryPattern {
 	frequency: number;
 }
 
-function buildHistoryPatterns(
-	commands: string[],
-	maxItems: number,
-): HistoryPattern[] {
-	const patterns: Map<string, { completion: string; frequency: number }> =
-		new Map();
+function buildHistoryPatterns(commands: string[], maxItems: number): HistoryPattern[] {
+	const patterns: Map<string, { completion: string; frequency: number }> = new Map();
 
 	for (const cmd of commands.slice(0, maxItems)) {
 		// Build prefix patterns from each command
@@ -226,11 +216,7 @@ export function buildContextSuggestions(
 		);
 
 		// Branch-specific suggestions
-		if (
-			currentBranch &&
-			currentBranch !== "main" &&
-			currentBranch !== "master"
-		) {
+		if (currentBranch && currentBranch !== "main" && currentBranch !== "master") {
 			suggestions.push({
 				trigger: "git push",
 				suggestion: ` origin ${currentBranch}`,
@@ -297,8 +283,7 @@ function getEmptyStateSuggestion(
 			"commit my changes",
 			"create a new branch",
 		];
-		const suggestion =
-			gitSuggestions[Math.floor(Math.random() * gitSuggestions.length)];
+		const suggestion = gitSuggestions[Math.floor(Math.random() * gitSuggestions.length)];
 		return {
 			text: suggestion,
 			source: "context",
@@ -309,9 +294,7 @@ function getEmptyStateSuggestion(
 
 	// Random general suggestion
 	const suggestion =
-		EMPTY_STATE_SUGGESTIONS[
-			Math.floor(Math.random() * EMPTY_STATE_SUGGESTIONS.length)
-		];
+		EMPTY_STATE_SUGGESTIONS[Math.floor(Math.random() * EMPTY_STATE_SUGGESTIONS.length)];
 	return {
 		text: suggestion,
 		source: "context",
@@ -350,10 +333,7 @@ function findBestSuggestion(
 				confidence: ctx.confidence,
 			};
 		}
-		if (
-			ctx.trigger.toLowerCase().startsWith(inputLower) &&
-			inputLower.length >= 2
-		) {
+		if (ctx.trigger.toLowerCase().startsWith(inputLower) && inputLower.length >= 2) {
 			const completion = ctx.trigger.slice(input.length) + ctx.suggestion;
 			return {
 				text: completion,

@@ -10,9 +10,6 @@ export function ProcessBadge({ counts }: ProcessBadgeProps) {
 	if (counts.running === 0) return null;
 
 	return (
-		<Badge
-			label={`${counts.running} process${counts.running > 1 ? "es" : ""}`}
-			color="green"
-		/>
+		<Badge label={`${counts.running} process${counts.running > 1 ? "es" : ""}`} color="green" />
 	);
 }

@@ -84,16 +84,7 @@ Requirements:
 2. After destroy, emit() must be a no-op (no errors, no calls)
 3. 1000 create/destroy cycles must not leak memory (handlers always cleaned)
 4. Provide the full corrected class as a single code block.`,
-		keywords: [
-			"destroy",
-			"clear",
-			"delete",
-			"handlers",
-			"Map",
-			"Set",
-			"emit",
-			"class",
-		],
+		keywords: ["destroy", "clear", "delete", "handlers", "Map", "Set", "emit", "class"],
 		keywordThreshold: 4,
 		testExecution: true,
 		testFile: "autoresearch/tests/BF002-memory-leak.test.ts",

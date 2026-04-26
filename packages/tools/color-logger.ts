@@ -55,8 +55,7 @@ export class ColorLogger {
 		this.minLevel = options.minLevel ?? "debug";
 		this.namespace = options.namespace;
 		this.timestamps = options.timestamps ?? true;
-		this.output =
-			options.output ?? ((line) => process.stderr.write(`${line}\n`));
+		this.output = options.output ?? ((line) => process.stderr.write(`${line}\n`));
 
 		// Auto-detect TTY: check if stderr is a terminal
 		if (options.tty !== undefined) {
@@ -76,9 +75,7 @@ export class ColorLogger {
 
 	private format(level: LogLevel, msg: string): string {
 		const style = LEVEL_STYLE[level];
-		const ts = this.timestamps
-			? new Date().toISOString().replace("T", " ").slice(0, 19)
-			: null;
+		const ts = this.timestamps ? new Date().toISOString().replace("T", " ").slice(0, 19) : null;
 
 		if (!this.tty) {
 			// Plain text - no ANSI

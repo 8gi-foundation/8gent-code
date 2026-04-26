@@ -104,11 +104,7 @@ export function updateContextWindow(
 /**
  * Check if context window has room for new content
  */
-export function hasContextRoom(
-	window: ContextWindow,
-	neededTokens: number,
-	margin = 0.1,
-): boolean {
+export function hasContextRoom(window: ContextWindow, neededTokens: number, margin = 0.1): boolean {
 	const available = window.maxTokens * (1 - margin);
 	return window.usedTokens + neededTokens <= available;
 }
@@ -155,11 +151,7 @@ export function compressMessage(content: string, maxTokens = 500): string {
 /**
  * Compress tool result to essential information
  */
-export function compressToolResult(
-	toolName: string,
-	result: string,
-	maxTokens = 200,
-): string {
+export function compressToolResult(toolName: string, result: string, maxTokens = 200): string {
 	const currentTokens = estimateTokens(result);
 	if (currentTokens <= maxTokens) return result;
 
@@ -182,10 +174,7 @@ export function compressToolResult(
 			// Keep first N items
 			const items = result.split("\n").filter((l) => l.trim());
 			if (items.length > 20) {
-				return [
-					...items.slice(0, 15),
-					`... and ${items.length - 15} more items`,
-				].join("\n");
+				return [...items.slice(0, 15), `... and ${items.length - 15} more items`].join("\n");
 			}
 			break;
 		}
@@ -194,10 +183,7 @@ export function compressToolResult(
 			// Keep last N lines (usually the important output)
 			const outputLines = result.split("\n");
 			if (outputLines.length > 30) {
-				return [
-					`[${outputLines.length - 30} lines omitted]`,
-					...outputLines.slice(-30),
-				].join("\n");
+				return [`[${outputLines.length - 30} lines omitted]`, ...outputLines.slice(-30)].join("\n");
 			}
 			break;
 		}
@@ -279,10 +265,7 @@ export function prioritizeContext(items: ContextPriority[]): ContextPriority[] {
 /**
  * Select context items that fit within token budget
  */
-export function selectContextItems(
-	items: ContextPriority[],
-	maxTokens: number,
-): ContextPriority[] {
+export function selectContextItems(items: ContextPriority[], maxTokens: number): ContextPriority[] {
 	const sorted = prioritizeContext(items);
 	const selected: ContextPriority[] = [];
 	let usedTokens = 0;
@@ -304,9 +287,7 @@ export function selectContextItems(
 /**
  * Apply decay to context priorities (call periodically)
  */
-export function applyPriorityDecay(
-	items: ContextPriority[],
-): ContextPriority[] {
+export function applyPriorityDecay(items: ContextPriority[]): ContextPriority[] {
 	return items.map((item) => ({
 		...item,
 		priority: Math.max(1, item.priority * (1 - item.decay)),
@@ -335,13 +316,11 @@ export function summarizeConversation(
 		const content = msg.content;
 
 		// Extract file references
-		const files =
-			content.match(/(?:src|lib|app|packages)\/[\w./\-]+\.\w+/g) || [];
+		const files = content.match(/(?:src|lib|app|packages)\/[\w./\-]+\.\w+/g) || [];
 		summary.files.push(...files);
 
 		// Extract symbol references
-		const symbols =
-			content.match(/(?:function|class|const|let|var)\s+(\w+)/g) || [];
+		const symbols = content.match(/(?:function|class|const|let|var)\s+(\w+)/g) || [];
 		summary.symbols.push(...symbols.map((s) => s.split(/\s+/)[1]));
 
 		// Extract commands
@@ -349,17 +328,10 @@ export function summarizeConversation(
 		summary.commands.push(...commands);
 
 		// Extract errors
-		if (
-			content.toLowerCase().includes("error") ||
-			content.toLowerCase().includes("failed")
-		) {
+		if (content.toLowerCase().includes("error") || content.toLowerCase().includes("failed")) {
 			const errorLine = content
 				.split("\n")
-				.find(
-					(l) =>
-						l.toLowerCase().includes("error") ||
-						l.toLowerCase().includes("failed"),
-				);
+				.find((l) => l.toLowerCase().includes("error") || l.toLowerCase().includes("failed"));
 			if (errorLine) summary.errors.push(errorLine.slice(0, 100));
 		}
 	}
@@ -454,9 +426,7 @@ export function parseThinkingBlock(response: string): {
 	const thinkingContent = thinkingMatch[1];
 
 	// Extract plan steps
-	const planMatch = thinkingContent.match(
-		/## Execution Plan\n([\s\S]*?)(?:\n##|$)/,
-	);
+	const planMatch = thinkingContent.match(/## Execution Plan\n([\s\S]*?)(?:\n##|$)/);
 	const planSteps: string[] = [];
 
 	if (planMatch) {

@@ -13,10 +13,7 @@ export interface SelectionResult<T> {
 	reset: () => void;
 }
 
-export function useSelection<T>(
-	items: T[],
-	options?: SelectionOptions,
-): SelectionResult<T> {
+export function useSelection<T>(items: T[], options?: SelectionOptions): SelectionResult<T> {
 	const loop = options?.loop ?? true;
 	const [selectedIndex, setSelectedIndex] = useState<number>(0);
 

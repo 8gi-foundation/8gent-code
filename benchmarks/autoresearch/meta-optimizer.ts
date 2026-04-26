@@ -63,14 +63,10 @@ const ALL_CATEGORIES: BenchmarkCategory[] = [
 
 const DEFAULT_CONFIG: MetaConfig = {
 	systemPromptMutations: [],
-	fewShotSelections: Object.fromEntries(
-		ALL_CATEGORIES.map((c) => [c, ["default"]]),
-	),
+	fewShotSelections: Object.fromEntries(ALL_CATEGORIES.map((c) => [c, ["default"]])),
 	gradingWeights: { ...DEFAULT_GRADING },
 	temperatures: [...DEFAULT_TEMPERATURES],
-	modelPriority: Object.fromEntries(
-		ALL_CATEGORIES.map((c) => [c, [...DEFAULT_MODELS]]),
-	),
+	modelPriority: Object.fromEntries(ALL_CATEGORIES.map((c) => [c, [...DEFAULT_MODELS]])),
 };
 
 // ── MetaOptimizer ───────────────────────────────────────────────────
@@ -121,9 +117,7 @@ export class MetaOptimizer {
 		}
 
 		// Use the grading weights from the overall best trial
-		const bestTrial = this.state.trials.reduce((a, b) =>
-			a.avgScore >= b.avgScore ? a : b,
-		);
+		const bestTrial = this.state.trials.reduce((a, b) => (a.avgScore >= b.avgScore ? a : b));
 		config.gradingWeights = { ...bestTrial.config.gradingWeights };
 		config.temperatures = [...bestTrial.config.temperatures];
 		config.systemPromptMutations = [...bestTrial.config.systemPromptMutations];
@@ -239,9 +233,7 @@ export class MetaOptimizer {
 		const trend = this.analyzeWeightTrend();
 		if (trend !== null) {
 			const dir = trend > 0 ? "more execution weight" : "more keyword weight";
-			insights.push(
-				`Grading weight trend: ${dir} correlates with better scores`,
-			);
+			insights.push(`Grading weight trend: ${dir} correlates with better scores`);
 		}
 
 		// Temperature insights
@@ -273,9 +265,7 @@ export class MetaOptimizer {
 
 	// ── Analysis helpers ────────────────────────────────────────────
 
-	private aggregateModelScores(
-		catTrials: Trial[],
-	): { model: string; avgScore: number }[] {
+	private aggregateModelScores(catTrials: Trial[]): { model: string; avgScore: number }[] {
 		// Extract which model was first-priority for these trials and correlate with score
 		const modelScoreMap = new Map<string, number[]>();
 
@@ -298,12 +288,8 @@ export class MetaOptimizer {
 		if (trials.length < 4) return null;
 
 		const median = 0.7; // default split
-		const highExec = trials.filter(
-			(t) => t.config.gradingWeights.execution > median,
-		);
-		const lowExec = trials.filter(
-			(t) => t.config.gradingWeights.execution <= median,
-		);
+		const highExec = trials.filter((t) => t.config.gradingWeights.execution > median);
+		const lowExec = trials.filter((t) => t.config.gradingWeights.execution <= median);
 
 		if (highExec.length < 2 || lowExec.length < 2) return null;
 

@@ -9,13 +9,7 @@
  * Grading: 0.7 * execution + 0.3 * keyword
  */
 
-import {
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type {
 	BenchmarkDefinition,
@@ -47,9 +41,7 @@ export function extractCode(raw: string): string | null {
 	}
 
 	const trimmed = raw.trim();
-	if (
-		/^(export\s+)?(class|function|const|interface|type|import)\s/m.test(trimmed)
-	) {
+	if (/^(export\s+)?(class|function|const|interface|type|import)\s/m.test(trimmed)) {
 		return trimmed;
 	}
 
@@ -134,10 +126,7 @@ export function extractMultiFileCode(raw: string): ExtractedFile[] {
 
 // ── Keyword Grading ─────────────────────────────────────────────────
 
-export function gradeKeywords(
-	code: string,
-	benchmark: BenchmarkDefinition,
-): KeywordGradeResult {
+export function gradeKeywords(code: string, benchmark: BenchmarkDefinition): KeywordGradeResult {
 	const lower = code.toLowerCase();
 	const matched: string[] = [];
 	const missed: string[] = [];
@@ -150,10 +139,7 @@ export function gradeKeywords(
 		}
 	}
 
-	const ratio =
-		benchmark.keywords.length > 0
-			? matched.length / benchmark.keywords.length
-			: 0;
+	const ratio = benchmark.keywords.length > 0 ? matched.length / benchmark.keywords.length : 0;
 
 	return {
 		score: Math.round(ratio * 100),
@@ -171,9 +157,7 @@ export async function gradeExecution(
 	const id = `${benchmark.id}-${Date.now()}`;
 	const tmpDir = join(WORK_DIR, `tmp-${id}`);
 	// Use index.html for ui-design benchmarks, fixture.ts for code benchmarks
-	const isHTML =
-		benchmark.category === "ui-design" ||
-		/^<!DOCTYPE|^<html/i.test(code.trim());
+	const isHTML = benchmark.category === "ui-design" || /^<!DOCTYPE|^<html/i.test(code.trim());
 	const fixtureName = isHTML ? "index.html" : "fixture.ts";
 	const fixturePath = join(tmpDir, fixtureName);
 	const testFile = join(BENCHMARKS_ROOT, benchmark.testFile!);
@@ -204,9 +188,7 @@ export async function gradeExecution(
 		clearTimeout(timeoutId);
 
 		const durationMs = Math.round(performance.now() - startMs);
-		const { passed, failed, total } = parseBunTestOutput(
-			`${stdout}\n${stderr}`,
-		);
+		const { passed, failed, total } = parseBunTestOutput(`${stdout}\n${stderr}`);
 
 		return {
 			score: total > 0 ? Math.round((passed / total) * 100) : 0,
@@ -289,9 +271,7 @@ export async function gradeMultiFileExecution(
 		clearTimeout(timeoutId);
 
 		const durationMs = Math.round(performance.now() - startMs);
-		const { passed, failed, total } = parseBunTestOutput(
-			`${stdout}\n${stderr}`,
-		);
+		const { passed, failed, total } = parseBunTestOutput(`${stdout}\n${stderr}`);
 
 		return {
 			score: total > 0 ? Math.round((passed / total) * 100) : 0,

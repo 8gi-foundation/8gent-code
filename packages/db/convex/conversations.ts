@@ -72,9 +72,7 @@ export const search = query({
 		const lower = searchQuery.toLowerCase();
 		return all
 			.filter(
-				(c) =>
-					c.title.toLowerCase().includes(lower) ||
-					c.summary?.toLowerCase().includes(lower),
+				(c) => c.title.toLowerCase().includes(lower) || c.summary?.toLowerCase().includes(lower),
 			)
 			.sort((a, b) => b.lastActiveAt - a.lastActiveAt)
 			.slice(0, 20);

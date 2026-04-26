@@ -51,16 +51,12 @@ export class MCPClient {
 		const configs = loadConfig(this.configPath);
 		if (configs.length === 0) return;
 
-		const results = await Promise.allSettled(
-			configs.map((cfg) => this._connectServer(cfg)),
-		);
+		const results = await Promise.allSettled(configs.map((cfg) => this._connectServer(cfg)));
 
 		for (let i = 0; i < results.length; i++) {
 			const r = results[i];
 			if (r.status === "rejected") {
-				console.error(
-					`[mcp] Failed to connect "${configs[i].name}": ${r.reason}`,
-				);
+				console.error(`[mcp] Failed to connect "${configs[i].name}": ${r.reason}`);
 			}
 		}
 	}
@@ -123,9 +119,7 @@ export class MCPClient {
 		const conn = this.servers.get(serverName);
 		if (!conn) {
 			return {
-				content: [
-					{ type: "text", text: `Server "${serverName}" not connected` },
-				],
+				content: [{ type: "text", text: `Server "${serverName}" not connected` }],
 				isError: true,
 			};
 		}

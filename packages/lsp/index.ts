@@ -173,8 +173,7 @@ export class LSPClient {
 	private buffer = "";
 	private initialized = false;
 	private openDocuments: Set<string> = new Set();
-	private diagnosticWaiters: Map<string, (diags: Diagnostic[]) => void> =
-		new Map();
+	private diagnosticWaiters: Map<string, (diags: Diagnostic[]) => void> = new Map();
 
 	constructor(language: string, workspaceRoot: string) {
 		this.language = language;
@@ -290,11 +289,7 @@ export class LSPClient {
 	/**
 	 * Get hover information for a symbol
 	 */
-	async hover(
-		filePath: string,
-		line: number,
-		character: number,
-	): Promise<string | null> {
+	async hover(filePath: string, line: number, character: number): Promise<string | null> {
 		await this.ensureDocumentOpen(filePath);
 
 		const params: TextDocumentPositionParams = {
@@ -302,10 +297,7 @@ export class LSPClient {
 			position: { line, character },
 		};
 
-		const result = (await this.sendRequest(
-			"textDocument/hover",
-			params,
-		)) as Hover | null;
+		const result = (await this.sendRequest("textDocument/hover", params)) as Hover | null;
 		if (!result) return null;
 
 		return this.formatHoverContent(result.contents);
@@ -326,19 +318,14 @@ export class LSPClient {
 			textDocument: { uri: this.pathToUri(filePath) },
 		};
 
-		const result = await this.sendRequest(
-			"textDocument/documentSymbol",
-			params,
-		);
+		const result = await this.sendRequest("textDocument/documentSymbol", params);
 		if (!result) return null;
 
 		// Result can be DocumentSymbol[] or SymbolInformation[]
 		if (Array.isArray(result) && result.length > 0) {
 			if ("range" in result[0]) {
 				// DocumentSymbol format
-				return (result as DocumentSymbol[]).map((sym) =>
-					this.formatDocumentSymbol(sym),
-				);
+				return (result as DocumentSymbol[]).map((sym) => this.formatDocumentSymbol(sym));
 			}
 			if ("location" in result[0]) {
 				// SymbolInformation format
@@ -561,10 +548,7 @@ export class LSPClient {
 		}
 
 		// Handle server-initiated notifications
-		if (
-			message.method === "textDocument/publishDiagnostics" &&
-			message.params
-		) {
+		if (message.method === "textDocument/publishDiagnostics" && message.params) {
 			const params = message.params as {
 				uri: string;
 				diagnostics: Diagnostic[];
@@ -782,10 +766,7 @@ export async function lspGoToDefinition(
 		}
 
 		return locations
-			.map(
-				(loc) =>
-					`${loc.uri}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`,
-			)
+			.map((loc) => `${loc.uri}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`)
 			.join("\n");
 	} catch (err) {
 		return `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -817,10 +798,7 @@ export async function lspFindReferences(
 		}
 
 		return `Found ${locations.length} references:\n${locations
-			.map(
-				(loc) =>
-					`  ${loc.uri}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`,
-			)
+			.map((loc) => `  ${loc.uri}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`)
 			.join("\n")}`;
 	} catch (err) {
 		return `Error: ${err instanceof Error ? err.message : String(err)}`;

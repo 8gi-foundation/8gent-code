@@ -120,17 +120,13 @@ console.log(`Average TPS:        ${report.avgTps.toFixed(1)}`);
 console.log(`Peak TPS:           ${report.peakTps.toFixed(1)}`);
 console.log("\nModel breakdown:");
 for (const [model, stats] of Object.entries(report.modelBreakdown)) {
-	console.log(
-		`  ${model}: ${stats.tokens.toLocaleString()} tokens (${stats.calls} calls)`,
-	);
+	console.log(`  ${model}: ${stats.tokens.toLocaleString()} tokens (${stats.calls} calls)`);
 }
 
 const utilization = tracker.getAgentUtilization();
 console.log("\nAgent utilization:");
 for (const [agent, stats] of Object.entries(utilization)) {
-	console.log(
-		`  ${agent}: ${stats.tokens.toLocaleString()} tokens, ${stats.tps.toFixed(1)} TPS`,
-	);
+	console.log(`  ${agent}: ${stats.tokens.toLocaleString()} tokens, ${stats.tps.toFixed(1)} TPS`);
 }
 
 // ── Demo 3: Ability Scorecards ──────────────────────────────────────
@@ -140,29 +136,13 @@ const scorecard = new AbilityScorecardTracker("demo-session");
 
 // Record metrics for each ability
 scorecard.recordMetric("memory", 85, "Recalled 17/20 stored facts correctly");
-scorecard.recordMetric(
-	"worktree",
-	92,
-	"3 agents completed in parallel, 2.8x speedup",
-);
+scorecard.recordMetric("worktree", 92, "3 agents completed in parallel, 2.8x speedup");
 scorecard.recordMetric("policy", 100, "Zero violations in 47 operations");
-scorecard.recordMetric(
-	"evolution",
-	73,
-	"Score improved 60->73 across 3 iterations",
-);
+scorecard.recordMetric("evolution", 73, "Score improved 60->73 across 3 iterations");
 scorecard.recordMetric("healing", 88, "Reverted successfully on 7/8 failures");
-scorecard.recordMetric(
-	"entrepreneurship",
-	65,
-	"Found 3 actionable issues from 12 scans",
-);
+scorecard.recordMetric("entrepreneurship", 65, "Found 3 actionable issues from 12 scans");
 scorecard.recordMetric("ast", 90, "Predicted 9/10 impacted files correctly");
-scorecard.recordMetric(
-	"browser",
-	78,
-	"Used 7/9 research findings in implementation",
-);
+scorecard.recordMetric("browser", 78, "Used 7/9 research findings in implementation");
 
 const card = scorecard.getScorecard();
 console.log("Ability Scores:");

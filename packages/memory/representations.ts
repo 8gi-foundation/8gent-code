@@ -71,12 +71,7 @@ export async function generateRepresentation(
 		.map((row) => {
 			const parsed = JSON.parse(row.data);
 			const content =
-				parsed.content ||
-				parsed.value ||
-				parsed.title ||
-				parsed.description ||
-				parsed.name ||
-				"";
+				parsed.content || parsed.value || parsed.title || parsed.description || parsed.name || "";
 			return `- (${row.type}) ${content}`;
 		})
 		.join("\n");

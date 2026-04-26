@@ -7,10 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	getSymbolSource,
-	parseTypeScriptFile,
-} from "../../../ast-index/typescript-parser";
+import { getSymbolSource, parseTypeScriptFile } from "../../../ast-index/typescript-parser";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -47,8 +44,7 @@ registerTool(
 				},
 				contextLines: {
 					type: "number",
-					description:
-						"Number of lines before/after the symbol to include (default: 0)",
+					description: "Number of lines before/after the symbol to include (default: 0)",
 				},
 			},
 			required: ["symbolId"],
@@ -103,12 +99,7 @@ registerTool(
 		}
 
 		// Get source code for just this symbol
-		const source = getSymbolSource(
-			absolutePath,
-			symbol.startLine,
-			symbol.endLine,
-			contextLines,
-		);
+		const source = getSymbolSource(absolutePath, symbol.startLine, symbol.endLine, contextLines);
 		const symbolTokens = Math.ceil(source.length / 4);
 		const tokensSaved = Math.max(0, fullFileTokens - symbolTokens);
 

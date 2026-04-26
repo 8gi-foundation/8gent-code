@@ -17,10 +17,8 @@ import { TOOL_DEFINITIONS, dispatchTool, handleMCPRequest } from "./mcp-server";
 import type { VesselManifest } from "./types";
 
 const PORT = Number.parseInt(process.env.HEALTH_PORT || "8080");
-const VESSEL_ID =
-	process.env.VESSEL_ID || `linkedin-vessel-${Date.now().toString(36)}`;
-const CONTROL_PLANE_URL =
-	process.env.CONTROL_PLANE_URL || "wss://8gi-board-plane.fly.dev";
+const VESSEL_ID = process.env.VESSEL_ID || `linkedin-vessel-${Date.now().toString(36)}`;
+const CONTROL_PLANE_URL = process.env.CONTROL_PLANE_URL || "wss://8gi-board-plane.fly.dev";
 const PUBLIC_URL = process.env.PUBLIC_URL || "https://linkedin-vessel.fly.dev";
 
 // ── Control Plane WebSocket ───────────────────────────────────────────
@@ -32,9 +30,7 @@ function connectToControlPlane(): void {
 	if (cpWs?.readyState === WebSocket.OPEN) return;
 
 	try {
-		cpWs = new WebSocket(
-			`${CONTROL_PLANE_URL}?vesselId=${VESSEL_ID}&type=linkedin`,
-		);
+		cpWs = new WebSocket(`${CONTROL_PLANE_URL}?vesselId=${VESSEL_ID}&type=linkedin`);
 
 		cpWs.onopen = () => {
 			console.log(`[control-plane] Connected to ${CONTROL_PLANE_URL}`);
@@ -116,8 +112,7 @@ const server = Bun.serve({
 					status: "ok",
 					vesselId: VESSEL_ID,
 					vesselType: "linkedin",
-					controlPlane:
-						cpWs?.readyState === WebSocket.OPEN ? "connected" : "disconnected",
+					controlPlane: cpWs?.readyState === WebSocket.OPEN ? "connected" : "disconnected",
 					tools: TOOL_DEFINITIONS.length,
 					uptime: process.uptime(),
 				},
@@ -185,9 +180,7 @@ const server = Bun.serve({
 
 console.log(`[linkedin-vessel] Starting on port ${PORT}`);
 console.log(`[linkedin-vessel] Vessel ID: ${VESSEL_ID}`);
-console.log(
-	`[linkedin-vessel] Tools: ${TOOL_DEFINITIONS.map((t) => t.name).join(", ")}`,
-);
+console.log(`[linkedin-vessel] Tools: ${TOOL_DEFINITIONS.map((t) => t.name).join(", ")}`);
 
 // Start HyperAgent reflection loop
 startReflectionLoop();

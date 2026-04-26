@@ -433,14 +433,7 @@ const EYES = [".", "o", "*", "^", "~", "@", "x"];
 
 // -- Stats --
 
-const STAT_NAMES = [
-	"DEBUG",
-	"CHAOS",
-	"WISDOM",
-	"PATIENCE",
-	"SNARK",
-	"ARCANA",
-] as const;
+const STAT_NAMES = ["DEBUG", "CHAOS", "WISDOM", "PATIENCE", "SNARK", "ARCANA"] as const;
 
 // -- Rarity system --
 
@@ -486,10 +479,7 @@ export interface Companion {
 	card: string; // formatted display card
 }
 
-function pickWeighted<T extends { tier: string }>(
-	items: readonly T[],
-	rng: () => number,
-): T {
+function pickWeighted<T extends { tier: string }>(items: readonly T[], rng: () => number): T {
 	const roll = rng();
 	// legendary: 0-0.01, epic: 0.01-0.05, rare: 0.05-0.15, uncommon: 0.15-0.40, common: 0.40-1.0
 	let targetTier: string;
@@ -532,12 +522,8 @@ export function generateCompanion(sessionId?: string): Companion {
 		legendary: 19,
 	};
 	const titleBase = tierIndex[species.tier as Rarity] || 0;
-	const titleRange =
-		species.tier === "legendary" ? 2 : species.tier === "epic" ? 3 : 5;
-	const title =
-		TITLES[
-			Math.min(titleBase + Math.floor(rng() * titleRange), TITLES.length - 1)
-		];
+	const titleRange = species.tier === "legendary" ? 2 : species.tier === "epic" ? 3 : 5;
+	const title = TITLES[Math.min(titleBase + Math.floor(rng() * titleRange), TITLES.length - 1)];
 
 	// Roll accessory (separate rarity roll)
 	const accRoll = rng();
@@ -549,9 +535,7 @@ export function generateCompanion(sessionId?: string): Companion {
 	else accTier = "common";
 	const accPool = ACCESSORIES.filter((a) => a.rarity === accTier);
 	const accessory =
-		accPool.length > 0
-			? accPool[Math.floor(rng() * accPool.length)]
-			: ACCESSORIES[0];
+		accPool.length > 0 ? accPool[Math.floor(rng() * accPool.length)] : ACCESSORIES[0];
 
 	// Roll eyes
 	const eyes = EYES[Math.floor(rng() * EYES.length)];
@@ -563,9 +547,7 @@ export function generateCompanion(sessionId?: string): Companion {
 	const rarity = species.tier as Rarity;
 
 	// Generate stats (3-20 range, weighted by rarity)
-	const statBonus = { common: 0, uncommon: 2, rare: 4, epic: 6, legendary: 10 }[
-		rarity
-	];
+	const statBonus = { common: 0, uncommon: 2, rare: 4, epic: 6, legendary: 10 }[rarity];
 	const stats: Record<string, number> = {};
 	for (const stat of STAT_NAMES) {
 		stats[stat] = Math.min(20, Math.floor(rng() * 12) + 3 + statBonus);
@@ -598,9 +580,7 @@ export function generateCompanion(sessionId?: string): Companion {
 	};
 
 	const fullName = `${title} ${species.name}`;
-	const label = shiny
-		? `* ${fullName} * [${element.name}]`
-		: `${fullName} [${element.name}]`;
+	const label = shiny ? `* ${fullName} * [${element.name}]` : `${fullName} [${element.name}]`;
 
 	// Build display card
 	const rc = RARITY_COLORS[rarity];
@@ -721,13 +701,7 @@ function saveDeck(deck: CompanionDeck) {
 	writeFileSync(deckPath, JSON.stringify(deck, null, 2));
 }
 
-const RARITY_ORDER: Rarity[] = [
-	"common",
-	"uncommon",
-	"rare",
-	"epic",
-	"legendary",
-];
+const RARITY_ORDER: Rarity[] = ["common", "uncommon", "rare", "epic", "legendary"];
 
 export function registerCompanion(
 	sessionId: string,
@@ -765,10 +739,7 @@ export function registerCompanion(
 	if (!deck.stats.speciesSeen.includes(companion.species)) {
 		deck.stats.speciesSeen.push(companion.species);
 	}
-	if (
-		RARITY_ORDER.indexOf(companion.rarity) >
-		RARITY_ORDER.indexOf(deck.stats.rarestPull)
-	) {
+	if (RARITY_ORDER.indexOf(companion.rarity) > RARITY_ORDER.indexOf(deck.stats.rarestPull)) {
 		deck.stats.rarestPull = companion.rarity;
 	}
 	if (companion.shiny) deck.stats.shiniesFound++;
@@ -817,9 +788,7 @@ export function formatDeckSummary(): string {
 	for (const entry of recent) {
 		const rc = RARITY_COLORS[entry.companion.rarity];
 		const date = entry.session.startedAt.slice(0, 10);
-		const summary = entry.session.summary
-			? ` - ${entry.session.summary.slice(0, 50)}`
-			: "";
+		const summary = entry.session.summary ? ` - ${entry.session.summary.slice(0, 50)}` : "";
 		const shinyTag = entry.companion.shiny ? " *" : "";
 		lines.push(
 			`  ${rc}${entry.companion.fullName}${shinyTag}${reset} ${dim}[${entry.companion.element}]${reset} ${dim}${date}${summary}${reset}`,

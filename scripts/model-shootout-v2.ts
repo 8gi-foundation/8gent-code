@@ -62,14 +62,7 @@ async function waitForVessel(maxWait = 60_000): Promise<boolean> {
 async function setModel(model: string): Promise<void> {
 	console.log(`  Setting model to ${model}...`);
 	const proc = Bun.spawn(
-		[
-			"fly",
-			"secrets",
-			"set",
-			`DEFAULT_MODEL=${model}`,
-			"--app",
-			"eight-vessel",
-		],
+		["fly", "secrets", "set", `DEFAULT_MODEL=${model}`, "--app", "eight-vessel"],
 		{
 			stdout: "pipe",
 			stderr: "pipe",
@@ -91,10 +84,7 @@ async function runTask(model: string): Promise<Result> {
 
 	// Create session
 	const sessionPromise = new Promise<string>((resolve, reject) => {
-		const timer = setTimeout(
-			() => reject(new Error("session timeout")),
-			15_000,
-		);
+		const timer = setTimeout(() => reject(new Error("session timeout")), 15_000);
 		const handler = (e: MessageEvent) => {
 			const msg = JSON.parse(e.data as string);
 			if (msg.type === "session:created") {
@@ -144,14 +134,10 @@ async function runTask(model: string): Promise<Result> {
 				const input = JSON.stringify(payload.input || {}).slice(0, 80);
 				console.log(`    [${tool}] ${input}`);
 				if (tool === "write_file") wroteFile = true;
-				if (tool === "run_command" && input.includes("shootout-test"))
-					ranTest = true;
+				if (tool === "run_command" && input.includes("shootout-test")) ranTest = true;
 			} else if (evt === "tool:result") {
 				const output = (payload.output || "").slice(0, 200);
-				if (
-					output.includes('"passed":true') ||
-					output.includes('"passed": true')
-				)
+				if (output.includes('"passed":true') || output.includes('"passed": true'))
 					testPassed = true;
 				console.log(`    => ${output.slice(0, 100)}`);
 			} else if (evt === "agent:stream") {
@@ -250,8 +236,7 @@ async function main() {
 
 	for (const r of results) {
 		const name = r.model.split("/")[1].split(":")[0];
-		const icon =
-			r.status === "success" ? "OK" : r.status === "timeout" ? "TIME" : "FAIL";
+		const icon = r.status === "success" ? "OK" : r.status === "timeout" ? "TIME" : "FAIL";
 		console.log(
 			`${name.padEnd(35)} ${icon.padEnd(8)} ${(r.wroteFile ? "Y" : "N").padEnd(6)} ${(r.ranTest ? "Y" : "N").padEnd(5)} ${(r.testPassed ? "Y" : "N").padEnd(6)} ${String(r.toolCalls).padEnd(6)} ${Math.round(r.durationMs / 1000)}s`,
 		);
@@ -269,10 +254,7 @@ async function main() {
 	}
 	console.log("=".repeat(70));
 
-	await Bun.write(
-		"/tmp/model-shootout-v2.json",
-		JSON.stringify(results, null, 2),
-	);
+	await Bun.write("/tmp/model-shootout-v2.json", JSON.stringify(results, null, 2));
 
 	// Restore default
 	console.log("\nRestoring auto:free...");

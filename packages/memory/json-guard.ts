@@ -53,10 +53,7 @@ export function safeJsonParse<T>(raw: string): T {
 			// If it produced another string, unwrap and continue (might be another layer)
 			// If it produced a primitive (number/boolean/null), keep the string form
 			// to avoid accidentally converting "123" to 123
-			if (
-				inner !== null &&
-				(typeof inner === "object" || typeof inner === "string")
-			) {
+			if (inner !== null && (typeof inner === "object" || typeof inner === "string")) {
 				result = inner;
 			} else {
 				break;

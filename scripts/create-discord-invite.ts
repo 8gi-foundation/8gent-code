@@ -50,9 +50,7 @@ const channels = (await channelsRes.json()) as Array<{
 }>;
 
 // Find #introductions or first text channel
-const introChannel = channels.find(
-	(c) => c.name === "introductions" && c.type === 0,
-);
+const introChannel = channels.find((c) => c.name === "introductions" && c.type === 0);
 const textChannel = introChannel || channels.find((c) => c.type === 0);
 
 if (!textChannel) {

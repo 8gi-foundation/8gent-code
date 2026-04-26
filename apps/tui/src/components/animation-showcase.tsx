@@ -96,9 +96,7 @@ const ANIMATIONS: AnimationInfo[] = [
 		id: "glitch",
 		name: "Glitch Text",
 		description: "Cyberpunk text corruption effect",
-		component: (
-			<GlitchText text="8GENT CODE - THE INFINITE GENTLEMAN" intensity={0.2} />
-		),
+		component: <GlitchText text="8GENT CODE - THE INFINITE GENTLEMAN" intensity={0.2} />,
 	},
 	{
 		id: "confetti",
@@ -116,12 +114,7 @@ const ANIMATIONS: AnimationInfo[] = [
 		id: "gradient",
 		name: "Gradient Wave",
 		description: "Rainbow cycling text effect",
-		component: (
-			<GradientWave
-				text="✦ 8gent Code - The Infinite Gentleman ✦"
-				speed={100}
-			/>
-		),
+		component: <GradientWave text="✦ 8gent Code - The Infinite Gentleman ✦" speed={100} />,
 	},
 ];
 
@@ -129,16 +122,12 @@ const ANIMATIONS: AnimationInfo[] = [
 // Main Showcase Component
 // ============================================
 
-export function AnimationShowcase({
-	animation = "all",
-	onClose,
-}: AnimationShowcaseProps) {
+export function AnimationShowcase({ animation = "all", onClose }: AnimationShowcaseProps) {
 	const [currentIndex, setCurrentIndex] = useState(0);
 	const [isGallery, setIsGallery] = useState(animation === "all");
 
 	// Find specific animation if not "all"
-	const targetAnimation =
-		animation !== "all" ? ANIMATIONS.find((a) => a.id === animation) : null;
+	const targetAnimation = animation !== "all" ? ANIMATIONS.find((a) => a.id === animation) : null;
 
 	// Handle keyboard navigation
 	useInput((input, key) => {

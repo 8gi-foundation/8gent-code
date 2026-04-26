@@ -35,11 +35,7 @@ export class TaskRouter {
 	private taskQueue: TaskQueue;
 	private rateLimiter: RateLimiter;
 
-	constructor(
-		members: Map<string, BoardMember>,
-		taskQueue: TaskQueue,
-		rateLimiter: RateLimiter,
-	) {
+	constructor(members: Map<string, BoardMember>, taskQueue: TaskQueue, rateLimiter: RateLimiter) {
 		this.members = members;
 		this.taskQueue = taskQueue;
 		this.rateLimiter = rateLimiter;
@@ -62,9 +58,7 @@ export class TaskRouter {
 		const member = this.members.get(botCode);
 		if (!member) return;
 
-		const isMentioned = message.mentions.some(
-			(m) => m.id === member.discordBotId,
-		);
+		const isMentioned = message.mentions.some((m) => m.id === member.discordBotId);
 		const isDM = !message.guildId;
 		if (!isMentioned && !isDM) return;
 

@@ -74,10 +74,7 @@ export function createHonoWebhookHandler(callbacks?: WebhookCallbacks) {
 		}
 
 		// Always return 200 to Stripe (even for unhandled events) to prevent retries
-		return c.json(
-			{ received: true, event: result.event, handled: result.handled },
-			200,
-		);
+		return c.json({ received: true, event: result.event, handled: result.handled }, 200);
 	};
 }
 
@@ -132,9 +129,7 @@ export function createExpressWebhookHandler(callbacks?: WebhookCallbacks) {
 			}
 		}
 
-		res
-			.status(200)
-			.json({ received: true, event: result.event, handled: result.handled });
+		res.status(200).json({ received: true, event: result.event, handled: result.handled });
 	};
 }
 

@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let cli: any;
 let command: any;
@@ -62,8 +61,7 @@ describe("Command Builder", () => {
 
 describe("Argument Parser", () => {
 	it("parses basic flags", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("test", "Test");
 		cmd.option("--name", "Name", { type: "string" });
@@ -74,8 +72,7 @@ describe("Argument Parser", () => {
 	});
 
 	it("parses --flag=value syntax", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("test", "Test");
 		cmd.option("--name", "Name", { type: "string" });
@@ -84,8 +81,7 @@ describe("Argument Parser", () => {
 	});
 
 	it("handles boolean flags", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("test", "Test");
 		cmd.option("--verbose", "Verbose", { type: "boolean" });
@@ -94,8 +90,7 @@ describe("Argument Parser", () => {
 	});
 
 	it("handles --no- negation", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("test", "Test");
 		cmd.option("--color", "Color", { type: "boolean", default: true });
@@ -104,8 +99,7 @@ describe("Argument Parser", () => {
 	});
 
 	it("collects positional arguments", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("init", "Init");
 		cmd.argument("name", "Project name");
@@ -114,8 +108,7 @@ describe("Argument Parser", () => {
 	});
 
 	it("collects rest args after --", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("run", "Run");
 		const result = parseFn(["--", "extra1", "extra2"], cmd);
@@ -124,8 +117,7 @@ describe("Argument Parser", () => {
 	});
 
 	it("reports errors for missing required args", () => {
-		const parseFn =
-			parser.parseArgs || parser.default?.parseArgs || parser.parse;
+		const parseFn = parser.parseArgs || parser.default?.parseArgs || parser.parse;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("init", "Init");
 		cmd.argument("name", "Name", { required: true });
@@ -149,8 +141,7 @@ describe("Help Generator", () => {
 	});
 
 	it("generates command-specific help", () => {
-		const genCmdFn =
-			help.generateCommandHelp || help.default?.generateCommandHelp;
+		const genCmdFn = help.generateCommandHelp || help.default?.generateCommandHelp;
 		const Cmd = command.Command || command.default;
 		const cmd = new Cmd("deploy", "Deploy application");
 		cmd.argument("env", "Target environment");

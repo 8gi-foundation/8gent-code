@@ -56,8 +56,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Claude",
 		style: "minimal",
 		mood: "warm",
-		description:
-			"Anthropic Claude AI interface - warm terracotta orange with clean typography",
+		description: "Anthropic Claude AI interface - warm terracotta orange with clean typography",
 		colors: {
 			background: "30 20% 98%",
 			foreground: "20 14% 10%",
@@ -104,10 +103,8 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			ring: "161 23% 45%",
 		},
 		typography: {
-			fontFamily:
-				'"OpenAI Sans", "Söhne", ui-sans-serif, system-ui, sans-serif',
-			headingFont:
-				'"OpenAI Sans", "Söhne", ui-sans-serif, system-ui, sans-serif',
+			fontFamily: '"OpenAI Sans", "Söhne", ui-sans-serif, system-ui, sans-serif',
+			headingFont: '"OpenAI Sans", "Söhne", ui-sans-serif, system-ui, sans-serif',
 			category: "sans-serif",
 		},
 		tags: ["ai", "openai", "teal", "chat", "conversational", "clean"],
@@ -165,8 +162,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		},
 		typography: {
 			fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", monospace',
-			headingFont:
-				'"Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+			headingFont: '"Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
 			category: "monospace",
 		},
 		tags: ["tech", "code", "editor", "purple", "teal", "developer", "ai"],
@@ -197,8 +193,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		},
 		typography: {
 			fontFamily: '"Google Sans", "Roboto", system-ui, sans-serif',
-			headingFont:
-				'"Google Sans Display", "Google Sans", "Roboto", system-ui, sans-serif',
+			headingFont: '"Google Sans Display", "Google Sans", "Roboto", system-ui, sans-serif',
 			category: "sans-serif",
 		},
 		tags: ["corporate", "material", "blue", "google", "professional", "brand"],
@@ -323,14 +318,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			headingFont: '"Inter", "Work Sans", ui-sans-serif, system-ui, sans-serif',
 			category: "sans-serif",
 		},
-		tags: [
-			"collaboration",
-			"yellow",
-			"whiteboard",
-			"creative",
-			"canvas",
-			"brand",
-		],
+		tags: ["collaboration", "yellow", "whiteboard", "creative", "canvas", "brand"],
 	},
 
 	// Nature/Organic Themes
@@ -361,15 +349,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			headingFont: '"Nunito", "Quicksand", system-ui, sans-serif',
 			category: "sans-serif",
 		},
-		tags: [
-			"nature",
-			"forest",
-			"green",
-			"organic",
-			"calm",
-			"ghibli",
-			"japanese",
-		],
+		tags: ["nature", "forest", "green", "organic", "calm", "ghibli", "japanese"],
 	},
 	{
 		name: "sage-garden",
@@ -750,20 +730,11 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			ring: "15 85% 55%",
 		},
 		typography: {
-			fontFamily:
-				'"SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace',
-			headingFont:
-				'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+			fontFamily: '"SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace',
+			headingFont: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 			category: "monospace",
 		},
-		tags: [
-			"tactical",
-			"military",
-			"document",
-			"briefing",
-			"monospace",
-			"orange",
-		],
+		tags: ["tactical", "military", "document", "briefing", "monospace", "orange"],
 	},
 
 	// Cosmic/Space Themes
@@ -1374,8 +1345,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Nike",
 		style: "bold",
 		mood: "energetic",
-		description:
-			"Nike - Bold athletic design with warm off-white and Futura-inspired type",
+		description: "Nike - Bold athletic design with warm off-white and Futura-inspired type",
 		colors: {
 			background: "40 30% 95%",
 			foreground: "0 0% 8%",
@@ -1393,10 +1363,8 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			ring: "0 0% 8%",
 		},
 		typography: {
-			fontFamily:
-				'"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
-			headingFont:
-				'"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
+			fontFamily: '"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
+			headingFont: '"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
 			category: "sans-serif",
 		},
 		tags: ["brand", "athletic", "bold", "sport", "nike", "swoosh", "orange"],
@@ -1424,10 +1392,8 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			ring: "210 100% 45%",
 		},
 		typography: {
-			fontFamily:
-				'"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
-			headingFont:
-				'"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
+			fontFamily: '"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
+			headingFont: '"Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif',
 			category: "sans-serif",
 		},
 		tags: ["brand", "athletic", "sport", "adidas", "blue", "clean"],
@@ -1439,8 +1405,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Notebook",
 		style: "retro",
 		mood: "warm",
-		description:
-			"Notebook - Handwritten journal feel with warm parchment tones and serif headings",
+		description: "Notebook - Handwritten journal feel with warm parchment tones and serif headings",
 		colors: {
 			background: "40 30% 92%",
 			foreground: "0 0% 20%",
@@ -1469,8 +1434,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Field Guide",
 		style: "retro",
 		mood: "warm",
-		description:
-			"Field Guide - Naturalist reference book with warm cream and red accents",
+		description: "Field Guide - Naturalist reference book with warm cream and red accents",
 		colors: {
 			background: "45 35% 94%",
 			foreground: "0 0% 15%",
@@ -1492,15 +1456,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			headingFont: '"Fraunces", "Playfair Display", Georgia, serif',
 			category: "sans-serif",
 		},
-		tags: [
-			"field-guide",
-			"nature",
-			"reference",
-			"warm",
-			"red",
-			"cream",
-			"botanical",
-		],
+		tags: ["field-guide", "nature", "reference", "warm", "red", "cream", "botanical"],
 	},
 
 	// Eastern/Philosophical Themes
@@ -1509,8 +1465,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Tao",
 		style: "elegant",
 		mood: "calm",
-		description:
-			"Tao - Serene philosophical aesthetic with cool blue tones and serif type",
+		description: "Tao - Serene philosophical aesthetic with cool blue tones and serif type",
 		colors: {
 			background: "220 15% 96%",
 			foreground: "220 25% 18%",
@@ -1532,15 +1487,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			headingFont: '"Crimson Text", "EB Garamond", Georgia, serif',
 			category: "serif",
 		},
-		tags: [
-			"zen",
-			"philosophy",
-			"calm",
-			"blue",
-			"serif",
-			"spiritual",
-			"minimal",
-		],
+		tags: ["zen", "philosophy", "calm", "blue", "serif", "spiritual", "minimal"],
 	},
 
 	// Fabric/Lifestyle Themes
@@ -1549,8 +1496,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Denim",
 		style: "bold",
 		mood: "cool",
-		description:
-			"Denim - Rich indigo blue fabric aesthetic with elegant serif headings",
+		description: "Denim - Rich indigo blue fabric aesthetic with elegant serif headings",
 		colors: {
 			background: "225 30% 97%",
 			foreground: "228 45% 18%",
@@ -1581,8 +1527,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Kinetic Editorial",
 		style: "elegant",
 		mood: "dramatic",
-		description:
-			"Kinetic Editorial - High-contrast monochrome with bold Swiss-style typography",
+		description: "Kinetic Editorial - High-contrast monochrome with bold Swiss-style typography",
 		colors: {
 			background: "0 0% 99%",
 			foreground: "0 0% 4%",
@@ -1600,21 +1545,11 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			ring: "0 0% 4%",
 		},
 		typography: {
-			fontFamily:
-				'"Neue Haas Grotesk Display Pro", "Helvetica Neue", -apple-system, sans-serif',
-			headingFont:
-				'"Neue Haas Grotesk Display Pro", "Helvetica Neue", -apple-system, sans-serif',
+			fontFamily: '"Neue Haas Grotesk Display Pro", "Helvetica Neue", -apple-system, sans-serif',
+			headingFont: '"Neue Haas Grotesk Display Pro", "Helvetica Neue", -apple-system, sans-serif',
 			category: "sans-serif",
 		},
-		tags: [
-			"editorial",
-			"monochrome",
-			"swiss",
-			"typography",
-			"kinetic",
-			"bold",
-			"black-white",
-		],
+		tags: ["editorial", "monochrome", "swiss", "typography", "kinetic", "bold", "black-white"],
 	},
 
 	// Hardware/Product Design Themes
@@ -1623,8 +1558,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Teenage Engineering",
 		style: "retro",
 		mood: "creative",
-		description:
-			"Teenage Engineering - Industrial product design with orange and monospace type",
+		description: "Teenage Engineering - Industrial product design with orange and monospace type",
 		colors: {
 			background: "0 0% 90%",
 			foreground: "0 0% 17%",
@@ -1663,8 +1597,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Fynt",
 		style: "tech",
 		mood: "dramatic",
-		description:
-			"Fynt - Dark fintech aesthetic with warm orange accent and serif headings",
+		description: "Fynt - Dark fintech aesthetic with warm orange accent and serif headings",
 		colors: {
 			background: "0 0% 8%",
 			foreground: "0 0% 100%",
@@ -1695,8 +1628,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "Entangled Photons",
 		style: "tech",
 		mood: "cool",
-		description:
-			"Entangled Photons - Quantum physics inspired with cyan and purple accents",
+		description: "Entangled Photons - Quantum physics inspired with cyan and purple accents",
 		colors: {
 			background: "220 25% 96%",
 			foreground: "210 50% 10%",
@@ -1714,8 +1646,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 			ring: "185 90% 45%",
 		},
 		typography: {
-			fontFamily:
-				'"IBM Plex Sans", "Inter", system-ui, -apple-system, sans-serif',
+			fontFamily: '"IBM Plex Sans", "Inter", system-ui, -apple-system, sans-serif',
 			headingFont: '"IBM Plex Mono", "JetBrains Mono", monospace',
 			category: "sans-serif",
 		},
@@ -1728,8 +1659,7 @@ export const EXTRACTED_THEMES: ExtractedTheme[] = [
 		label: "E2B",
 		style: "tech",
 		mood: "dramatic",
-		description:
-			"E2B - Dark developer sandbox with gold accent and monospace headings",
+		description: "E2B - Dark developer sandbox with gold accent and monospace headings",
 		colors: {
 			background: "240 6% 6%",
 			foreground: "0 0% 92%",
@@ -1788,9 +1718,7 @@ export function filterByMood(mood: DesignMood): ExtractedTheme[] {
  */
 export function searchByTag(tag: string): ExtractedTheme[] {
 	const lowerTag = tag.toLowerCase();
-	return EXTRACTED_THEMES.filter((t) =>
-		t.tags.some((tg) => tg.toLowerCase().includes(lowerTag)),
-	);
+	return EXTRACTED_THEMES.filter((t) => t.tags.some((tg) => tg.toLowerCase().includes(lowerTag)));
 }
 
 /**

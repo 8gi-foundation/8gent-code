@@ -23,8 +23,7 @@ import { generateResponse } from "./inference";
 import { VesselClient } from "./vessel-client";
 
 // -- Read config from env --
-const CONTROL_PLANE_URL =
-	process.env.CONTROL_PLANE_URL || "ws://8gi-board-plane.internal:3100";
+const CONTROL_PLANE_URL = process.env.CONTROL_PLANE_URL || "ws://8gi-board-plane.internal:3100";
 const AUTH_TOKEN = process.env.VESSEL_AUTH_TOKEN || "";
 const MEMBER_CODE = process.env.BOARD_MEMBER_CODE || "";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:latest";
@@ -53,8 +52,7 @@ const INFERENCE_MODE = process.env.INFERENCE_MODE || "proxy";
 async function waitForInference(maxRetries = 30): Promise<boolean> {
 	if (INFERENCE_MODE === "proxy") {
 		// Model proxy mode - check proxy health
-		const proxyUrl =
-			process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
+		const proxyUrl = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
 		for (let i = 0; i < maxRetries; i++) {
 			try {
 				const res = await fetch(`${proxyUrl}/health`);
@@ -65,9 +63,7 @@ async function waitForInference(maxRetries = 30): Promise<boolean> {
 			} catch {
 				/* not ready */
 			}
-			console.log(
-				`[vessel] Waiting for model proxy... (${i + 1}/${maxRetries})`,
-			);
+			console.log(`[vessel] Waiting for model proxy... (${i + 1}/${maxRetries})`);
 			await Bun.sleep(2000);
 		}
 		console.error("[vessel] Model proxy unreachable after max retries");
@@ -79,9 +75,7 @@ async function waitForInference(maxRetries = 30): Promise<boolean> {
 			const res = await fetch("http://localhost:11434/api/tags");
 			if (res.ok) {
 				const data = (await res.json()) as any;
-				console.log(
-					`[vessel] Ollama ready - ${data.models?.length ?? 0} models`,
-				);
+				console.log(`[vessel] Ollama ready - ${data.models?.length ?? 0} models`);
 				return true;
 			}
 		} catch {

@@ -6,22 +6,9 @@
  */
 
 import * as path from "node:path";
-import {
-	type CompletionReporter,
-	TaskContextTracker,
-	getCompletionReporter,
-} from "./completion";
-import {
-	getReportHistory,
-	handleReportCommand,
-	handleReportsCommand,
-} from "./history";
-import type {
-	CompletionReport,
-	FileOperation,
-	TaskContext,
-	ToolInvocation,
-} from "./types";
+import { type CompletionReporter, TaskContextTracker, getCompletionReporter } from "./completion";
+import { getReportHistory, handleReportCommand, handleReportsCommand } from "./history";
+import type { CompletionReport, FileOperation, TaskContext, ToolInvocation } from "./types";
 
 // ============================================
 // Agent Reporting Wrapper
@@ -37,17 +24,9 @@ export class AgentReportingContext {
 	private currentStepIndex = -1;
 	private toolCount = 0;
 
-	constructor(
-		taskDescription: string,
-		workingDirectory: string = process.cwd(),
-		model?: string,
-	) {
+	constructor(taskDescription: string, workingDirectory: string = process.cwd(), model?: string) {
 		const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-		this.tracker = new TaskContextTracker(
-			taskId,
-			taskDescription,
-			workingDirectory,
-		);
+		this.tracker = new TaskContextTracker(taskId, taskDescription, workingDirectory);
 		this.reporter = getCompletionReporter();
 
 		if (model) {
@@ -215,9 +194,7 @@ export class AgentReportingContext {
 	 * Complete the task and generate a report.
 	 * Returns the formatted report and saves it to disk.
 	 */
-	complete(
-		options: { display?: boolean; save?: boolean } = {},
-	): CompletionReport {
+	complete(options: { display?: boolean; save?: boolean } = {}): CompletionReport {
 		const { display = true, save = true } = options;
 
 		const context = this.tracker.complete();
@@ -269,9 +246,7 @@ export function handleReport(reportId: string): string {
 export function isReportCommand(input: string): boolean {
 	const trimmed = input.trim().toLowerCase();
 	return (
-		trimmed === "/reports" ||
-		trimmed.startsWith("/reports ") ||
-		trimmed.startsWith("/report ")
+		trimmed === "/reports" || trimmed.startsWith("/reports ") || trimmed.startsWith("/report ")
 	);
 }
 
@@ -319,9 +294,7 @@ export function createReportingContext(
  */
 export function extractCommitHash(output: string): string | null {
 	// Match patterns like: [main abc1234] or [feature/x 1234567] or just 7-char hex
-	const match =
-		output.match(/\[[\w\/-]+\s+([a-f0-9]{7,})\]/) ||
-		output.match(/([a-f0-9]{40})/);
+	const match = output.match(/\[[\w\/-]+\s+([a-f0-9]{7,})\]/) || output.match(/([a-f0-9]{40})/);
 
 	return match?.[1]?.slice(0, 7) || null;
 }
@@ -404,11 +377,7 @@ export function formatForVoice(report: CompletionReport): string {
 
 	// Status
 	if (report.status !== "success") {
-		parts.push(
-			report.status === "partial"
-				? "Partially done."
-				: "Well, some issues occurred.",
-		);
+		parts.push(report.status === "partial" ? "Partially done." : "Well, some issues occurred.");
 	}
 
 	// Closer

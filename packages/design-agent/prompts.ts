@@ -87,9 +87,7 @@ export function getDesignIntro(projectType: ProjectType): string {
 			"Even CLI tools deserve good design. Here's how we can make it feel polished...",
 			"For terminal interfaces, these approaches balance aesthetics with readability...",
 		],
-		api: [
-			"While APIs don't have visual UI, documentation and error messages matter. Consider...",
-		],
+		api: ["While APIs don't have visual UI, documentation and error messages matter. Consider..."],
 		unknown: DESIGN_INTROS,
 	};
 
@@ -105,14 +103,11 @@ export function getDesignIntro(projectType: ProjectType): string {
  * How to present each option
  */
 export const OPTION_TEMPLATES = {
-	primary: (name: string, description: string) =>
-		`**Option 1: ${name}**\n${description}`,
+	primary: (name: string, description: string) => `**Option 1: ${name}**\n${description}`,
 
-	secondary: (name: string, description: string) =>
-		`**Option 2: ${name}**\n${description}`,
+	secondary: (name: string, description: string) => `**Option 2: ${name}**\n${description}`,
 
-	alternative: (name: string, description: string) =>
-		`**Or: ${name}**\n${description}`,
+	alternative: (name: string, description: string) => `**Or: ${name}**\n${description}`,
 };
 
 /**
@@ -156,8 +151,7 @@ export const FOLLOW_UP_PROMPTS = {
 	confirmed: (choice: string) =>
 		`Great choice! ${choice} it is. Let me set that up and we'll start building...`,
 
-	custom:
-		"Want to describe what you're thinking? I can suggest something tailored to your vision.",
+	custom: "Want to describe what you're thinking? I can suggest something tailored to your vision.",
 
 	noPreference:
 		"No preference? No worries - I'll pick something modern and clean that we can always adjust later.",
@@ -214,8 +208,7 @@ export function generateAnalysisPrompt(context: DesignPromptContext): string {
 		}
 	}
 
-	prompt +=
-		"\nSuggest 2-3 design system options with clear reasoning for each. Be conversational.";
+	prompt += "\nSuggest 2-3 design system options with clear reasoning for each. Be conversational.";
 
 	return prompt;
 }
@@ -240,24 +233,19 @@ export const QUICK_SUGGESTIONS: Record<
 	"web-app": [
 		{
 			name: "shadcn/ui + Tailwind",
-			description:
-				"Clean, modern components with excellent accessibility. Highly customizable.",
-			reasoning:
-				"Most popular choice for React apps in 2024+. Great defaults, easy to theme.",
+			description: "Clean, modern components with excellent accessibility. Highly customizable.",
+			reasoning: "Most popular choice for React apps in 2024+. Great defaults, easy to theme.",
 			stack: ["Next.js", "Tailwind CSS", "shadcn/ui", "Radix UI"],
 		},
 		{
 			name: "Material UI + Joy UI",
-			description:
-				"Google's design system. Comprehensive component library with built-in themes.",
-			reasoning:
-				"Battle-tested, huge component library. Good for enterprise and complex forms.",
+			description: "Google's design system. Comprehensive component library with built-in themes.",
+			reasoning: "Battle-tested, huge component library. Good for enterprise and complex forms.",
 			stack: ["React", "Material UI", "Emotion"],
 		},
 		{
 			name: "Chakra UI",
-			description:
-				"Simple, modular components with excellent DX. Built-in dark mode.",
+			description: "Simple, modular components with excellent DX. Built-in dark mode.",
 			reasoning: "Fastest to get started with. Great for MVPs and prototypes.",
 			stack: ["React", "Chakra UI", "Framer Motion"],
 		},
@@ -265,82 +253,61 @@ export const QUICK_SUGGESTIONS: Record<
 	"landing-page": [
 		{
 			name: "Tailwind + Custom Components",
-			description:
-				"Minimal footprint, maximum flexibility. Perfect for unique designs.",
+			description: "Minimal footprint, maximum flexibility. Perfect for unique designs.",
 			reasoning:
 				"Landing pages need to stand out. Custom design with Tailwind gives full creative control.",
 			stack: ["Next.js", "Tailwind CSS", "Framer Motion"],
 		},
 		{
 			name: "shadcn/ui Landing Blocks",
-			description:
-				"Pre-built landing page sections: hero, features, pricing, testimonials.",
-			reasoning:
-				"Fastest path to a professional landing page. Easy to customize.",
+			description: "Pre-built landing page sections: hero, features, pricing, testimonials.",
+			reasoning: "Fastest path to a professional landing page. Easy to customize.",
 			stack: ["Next.js", "Tailwind CSS", "shadcn/ui"],
 		},
 		{
 			name: "Bold & Animated",
 			description: "High-impact design with animations and scroll effects.",
-			reasoning:
-				"Great for creative products, agencies, or when you need to wow visitors.",
+			reasoning: "Great for creative products, agencies, or when you need to wow visitors.",
 			stack: ["Next.js", "Tailwind CSS", "Framer Motion", "GSAP"],
 		},
 	],
 	dashboard: [
 		{
 			name: "shadcn/ui + Recharts",
-			description:
-				"Clean data visualization with consistent components. Dark mode ready.",
-			reasoning:
-				"Best balance of aesthetics and data density. shadcn tables are excellent.",
-			stack: [
-				"Next.js",
-				"Tailwind CSS",
-				"shadcn/ui",
-				"Recharts",
-				"TanStack Table",
-			],
+			description: "Clean data visualization with consistent components. Dark mode ready.",
+			reasoning: "Best balance of aesthetics and data density. shadcn tables are excellent.",
+			stack: ["Next.js", "Tailwind CSS", "shadcn/ui", "Recharts", "TanStack Table"],
 		},
 		{
 			name: "Tremor",
-			description:
-				"Dashboard-first component library. Built for analytics and metrics.",
-			reasoning:
-				"Purpose-built for dashboards. Charts, KPIs, and tables out of the box.",
+			description: "Dashboard-first component library. Built for analytics and metrics.",
+			reasoning: "Purpose-built for dashboards. Charts, KPIs, and tables out of the box.",
 			stack: ["React", "Tailwind CSS", "Tremor"],
 		},
 		{
 			name: "Ant Design",
-			description:
-				"Enterprise-grade design system. Comprehensive table and form components.",
-			reasoning:
-				"Chinese enterprise standard. Excellent for data-heavy admin panels.",
+			description: "Enterprise-grade design system. Comprehensive table and form components.",
+			reasoning: "Chinese enterprise standard. Excellent for data-heavy admin panels.",
 			stack: ["React", "Ant Design", "AntV Charts"],
 		},
 	],
 	"mobile-app": [
 		{
 			name: "React Native + NativeWind",
-			description:
-				"Tailwind CSS for React Native. Familiar styling, native performance.",
-			reasoning:
-				"If you know Tailwind, you'll feel at home. Cross-platform with native feel.",
+			description: "Tailwind CSS for React Native. Familiar styling, native performance.",
+			reasoning: "If you know Tailwind, you'll feel at home. Cross-platform with native feel.",
 			stack: ["React Native", "Expo", "NativeWind"],
 		},
 		{
 			name: "Tamagui",
 			description: "Universal design system. Same code for web and native.",
-			reasoning:
-				"True write-once, run-everywhere. Great for apps that need web + mobile.",
+			reasoning: "True write-once, run-everywhere. Great for apps that need web + mobile.",
 			stack: ["React Native", "Tamagui", "Expo"],
 		},
 		{
 			name: "Flutter Material 3",
-			description:
-				"Google's latest Material Design. Smooth animations, consistent look.",
-			reasoning:
-				"Excellent for apps that need to feel premium. Great on Android.",
+			description: "Google's latest Material Design. Smooth animations, consistent look.",
+			reasoning: "Excellent for apps that need to feel premium. Great on Android.",
 			stack: ["Flutter", "Material 3"],
 		},
 	],
@@ -348,42 +315,35 @@ export const QUICK_SUGGESTIONS: Record<
 		{
 			name: "Radix Primitives + Tailwind",
 			description: "Unstyled, accessible primitives you can theme your way.",
-			reasoning:
-				"Maximum flexibility for a design system. You control every pixel.",
+			reasoning: "Maximum flexibility for a design system. You control every pixel.",
 			stack: ["React", "Radix UI", "Tailwind CSS", "CVA"],
 		},
 		{
 			name: "Storybook + Chromatic",
 			description: "Component-driven development with visual testing.",
-			reasoning:
-				"Industry standard for component libraries. Great docs and testing.",
+			reasoning: "Industry standard for component libraries. Great docs and testing.",
 			stack: ["React", "Storybook", "Chromatic", "Tailwind CSS"],
 		},
 	],
 	"cli-tool": [
 		{
 			name: "Ink (React for CLI)",
-			description:
-				"React components rendered in the terminal. Animations, colors, layout.",
-			reasoning:
-				"Modern CLI UX. If you know React, you can build beautiful CLIs.",
+			description: "React components rendered in the terminal. Animations, colors, layout.",
+			reasoning: "Modern CLI UX. If you know React, you can build beautiful CLIs.",
 			stack: ["Node.js", "Ink", "React"],
 		},
 		{
 			name: "Clack",
 			description: "Beautiful prompts and spinners. Minimal but polished.",
-			reasoning:
-				"Simple, elegant CLI interactions. Great for wizards and prompts.",
+			reasoning: "Simple, elegant CLI interactions. Great for wizards and prompts.",
 			stack: ["Node.js", "@clack/prompts"],
 		},
 	],
 	api: [
 		{
 			name: "OpenAPI + Swagger UI",
-			description:
-				"Auto-generated documentation with interactive API explorer.",
-			reasoning:
-				"Industry standard. Great for public APIs and developer experience.",
+			description: "Auto-generated documentation with interactive API explorer.",
+			reasoning: "Industry standard. Great for public APIs and developer experience.",
 			stack: ["OpenAPI", "Swagger UI"],
 		},
 	],
@@ -398,8 +358,7 @@ export const QUICK_SUGGESTIONS: Record<
 		{
 			name: "Vanilla CSS + Custom",
 			description: "Start simple, add frameworks as needed.",
-			reasoning:
-				"Sometimes you need to understand the requirements before committing to a system.",
+			reasoning: "Sometimes you need to understand the requirements before committing to a system.",
 			stack: ["HTML", "CSS", "JavaScript"],
 		},
 	],

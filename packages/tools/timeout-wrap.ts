@@ -15,11 +15,7 @@ class TimeoutError extends Error {
  * @param message Optional message for the TimeoutError.
  * @returns A new promise that resolves or rejects with the timeout.
  */
-function withTimeout<T>(
-	promise: Promise<T>,
-	ms: number,
-	message?: string,
-): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, message?: string): Promise<T> {
 	return new Promise((resolve, reject) => {
 		const timeoutId = setTimeout(() => {
 			reject(new TimeoutError(message || "Timeout"));

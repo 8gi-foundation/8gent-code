@@ -22,9 +22,7 @@ export class KeychainVault {
 	constructor(opts: KeychainVaultOptions = {}) {
 		this.service = opts.service ?? DEFAULT_SERVICE;
 		if (process.platform !== "darwin") {
-			throw new Error(
-				"KeychainVault requires macOS. Use SecretVault on other platforms.",
-			);
+			throw new Error("KeychainVault requires macOS. Use SecretVault on other platforms.");
 		}
 	}
 
@@ -67,10 +65,7 @@ export class KeychainVault {
 	 * the callback but never returned to the caller as a string. Mirrors
 	 * SecretVault.useSecret for callsite compatibility.
 	 */
-	async useSecret<T>(
-		key: string,
-		callback: (value: string) => Promise<T>,
-	): Promise<T> {
+	async useSecret<T>(key: string, callback: (value: string) => Promise<T>): Promise<T> {
 		const value = await this.get(key);
 		if (value === undefined) {
 			throw new Error(`Secret "${key}" not found in keychain`);
@@ -81,13 +76,9 @@ export class KeychainVault {
 	// ---------- Private ----------
 
 	private async writeEntry(account: string, value: string): Promise<void> {
-		await this.runSecurity([
-			"delete-generic-password",
-			"-s",
-			this.service,
-			"-a",
-			account,
-		]).catch(() => {});
+		await this.runSecurity(["delete-generic-password", "-s", this.service, "-a", account]).catch(
+			() => {},
+		);
 
 		const result = await this.runSecurity([
 			"add-generic-password",
@@ -101,9 +92,7 @@ export class KeychainVault {
 		]);
 
 		if (!result.success) {
-			throw new Error(
-				`Keychain write failed for "${account}": ${result.stderr.trim()}`,
-			);
+			throw new Error(`Keychain write failed for "${account}": ${result.stderr.trim()}`);
 		}
 	}
 
@@ -122,13 +111,7 @@ export class KeychainVault {
 	}
 
 	private async deleteEntry(account: string): Promise<void> {
-		await this.runSecurity([
-			"delete-generic-password",
-			"-s",
-			this.service,
-			"-a",
-			account,
-		]);
+		await this.runSecurity(["delete-generic-password", "-s", this.service, "-a", account]);
 	}
 
 	private async readIndex(): Promise<string[]> {
@@ -136,9 +119,7 @@ export class KeychainVault {
 		if (!raw) return [];
 		try {
 			const parsed = JSON.parse(raw);
-			return Array.isArray(parsed)
-				? parsed.filter((k) => typeof k === "string")
-				: [];
+			return Array.isArray(parsed) ? parsed.filter((k) => typeof k === "string") : [];
 		} catch {
 			return [];
 		}

@@ -135,9 +135,7 @@ async function main(): Promise<number> {
 
 		ws.onmessage = (ev) => {
 			const text =
-				typeof ev.data === "string"
-					? ev.data
-					: new TextDecoder().decode(ev.data as ArrayBuffer);
+				typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
 			const msg = JSON.parse(text);
 			events.push(msg);
 
@@ -147,14 +145,10 @@ async function main(): Promise<number> {
 
 			if (msg.type === "ack" && msg.payload?.type === "session:created") {
 				sessionId = msg.payload.sessionId;
-				console.log(
-					`[smoke] session created: ${sessionId} channel=${msg.payload.channel}`,
-				);
+				console.log(`[smoke] session created: ${sessionId} channel=${msg.payload.channel}`);
 				if (msg.payload.channel !== "computer")
 					fail(`expected channel=computer, got ${msg.payload.channel}`);
-				ws.send(
-					JSON.stringify({ type: "intent", text: "screenshot my desktop" }),
-				);
+				ws.send(JSON.stringify({ type: "intent", text: "screenshot my desktop" }));
 			}
 
 			if (msg.type === "event") {
@@ -179,16 +173,11 @@ async function main(): Promise<number> {
 		clearTimeout(timeout);
 
 		// Assertions
-		const kinds = events
-			.filter((e) => e.type === "event")
-			.map((e) => e.event.kind);
-		const ackTypes = events
-			.filter((e) => e.type === "ack")
-			.map((e) => e.payload?.type);
+		const kinds = events.filter((e) => e.type === "event").map((e) => e.event.kind);
+		const ackTypes = events.filter((e) => e.type === "ack").map((e) => e.payload?.type);
 
 		if (!ackTypes.includes("session:created")) fail("no session:created ack");
-		if (!kinds.includes("tool_call"))
-			fail(`missing tool_call event (got ${kinds.join(",")})`);
+		if (!kinds.includes("tool_call")) fail(`missing tool_call event (got ${kinds.join(",")})`);
 		if (!kinds.includes("tool_result")) fail("missing tool_result event");
 		if (!kinds.includes("token")) fail("missing token event");
 		if (!kinds.includes("done")) fail("missing done event");

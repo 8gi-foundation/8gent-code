@@ -52,11 +52,7 @@ export class SessionTree {
 	}
 
 	/** Add a message as child of parentId (null for root). Returns node id. */
-	addMessage(
-		parentId: string | null,
-		role: string,
-		content: string | unknown[],
-	): string {
+	addMessage(parentId: string | null, role: string, content: string | unknown[]): string {
 		const id = makeId();
 		const node: SessionNode = {
 			id,

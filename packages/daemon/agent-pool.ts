@@ -77,10 +77,7 @@ export class AgentPool {
 		};
 
 		// Clean up idle sessions every 5 minutes
-		this.cleanupTimer = setInterval(
-			() => this.cleanupIdleSessions(),
-			5 * 60 * 1000,
-		);
+		this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
 	}
 
 	/** Idle timeout for a given channel (defaults to IDLE_TIMEOUT_MS). */
@@ -120,11 +117,7 @@ export class AgentPool {
 	}
 
 	/** Create a new session with its own Agent instance */
-	createSession(
-		sessionId: string,
-		channel: string,
-		overrides?: { maxTurns?: number },
-	): void {
+	createSession(sessionId: string, channel: string, overrides?: { maxTurns?: number }): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
 		if (this.countOn(channel) >= cap) {
@@ -166,9 +159,7 @@ export class AgentPool {
 		const events = this.buildEventCallbacks(sessionId);
 
 		// Delegation sessions get more tool turns than Telegram chat
-		const maxTurns =
-			overrides?.maxTurns ??
-			(channel === "delegation" ? 25 : this.config.maxTurns);
+		const maxTurns = overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns);
 
 		const agentConfig: AgentConfig = {
 			model: this.config.model,
@@ -401,10 +392,7 @@ export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 	}
 
 	return {
-		model:
-			process.env.DEFAULT_MODEL ||
-			fileConfig?.model ||
-			fileConfig?.defaultModel,
+		model: process.env.DEFAULT_MODEL || fileConfig?.model || fileConfig?.defaultModel,
 		runtime: (process.env.DEFAULT_RUNTIME ||
 			fileConfig?.runtime ||
 			fileConfig?.provider) as PoolConfig["runtime"],

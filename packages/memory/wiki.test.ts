@@ -15,13 +15,7 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import {
-	existsSync,
-	readFileSync,
-	readdirSync,
-	rmSync,
-	unlinkSync,
-} from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { KnowledgeGraph } from "./graph.js";
 import { WikiGenerator, slugify } from "./wiki.js";
 
@@ -92,12 +86,7 @@ function createMemoriesTable(database: Database) {
   `);
 }
 
-function insertMemory(
-	database: Database,
-	id: string,
-	contentText: string,
-	importance: number,
-) {
+function insertMemory(database: Database, id: string, contentText: string, importance: number) {
 	const now = Date.now();
 	database
 		.prepare(
@@ -138,12 +127,7 @@ describe("WikiGenerator", () => {
 		graph.addRelationship(conceptAuth, personAlice, "related_to"); // backlink test
 
 		// Seed some memories
-		insertMemory(
-			db,
-			"mem_001",
-			"Alice designed the Authentication flow using JWT tokens",
-			0.9,
-		);
+		insertMemory(db, "mem_001", "Alice designed the Authentication flow using JWT tokens", 0.9);
 		insertMemory(db, "mem_002", "Redis is used for Caching session data", 0.7);
 		insertMemory(db, "mem_003", "Bob optimized the Redis connection pool", 0.6);
 	});

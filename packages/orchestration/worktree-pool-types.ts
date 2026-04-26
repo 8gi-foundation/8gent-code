@@ -2,12 +2,7 @@
  * WorktreePool types — isolated parallel agent execution.
  */
 
-export type WorktreeTaskStatus =
-	| "pending"
-	| "running"
-	| "completed"
-	| "failed"
-	| "timeout";
+export type WorktreeTaskStatus = "pending" | "running" | "completed" | "failed" | "timeout";
 
 export interface WorktreeTask {
 	id: string;

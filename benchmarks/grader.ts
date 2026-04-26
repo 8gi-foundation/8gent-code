@@ -75,8 +75,7 @@ export class BenchmarkGrader {
 		const scores = this.calculateScores(rubric, checkResults);
 
 		// Token efficiency
-		const tokenEfficiency =
-			tokensUsed > 0 ? benchmark.expectedTokens / tokensUsed : 0;
+		const tokenEfficiency = tokensUsed > 0 ? benchmark.expectedTokens / tokensUsed : 0;
 
 		return {
 			benchmarkId: benchmark.id,
@@ -175,12 +174,7 @@ export class BenchmarkGrader {
 	private runAstCheck(check: RubricCheck, output: string): CheckResult {
 		const config = check.config as {
 			language: string;
-			checkType:
-				| "syntax"
-				| "hasFunction"
-				| "hasClass"
-				| "hasExport"
-				| "noConsoleLog";
+			checkType: "syntax" | "hasFunction" | "hasClass" | "hasExport" | "noConsoleLog";
 			target?: string;
 		};
 
@@ -211,8 +205,7 @@ export class BenchmarkGrader {
 		const patterns: Record<string, RegExp> = {
 			hasFunction: /function\s+\w+|const\s+\w+\s*=\s*(?:async\s*)?\(/,
 			hasClass: /class\s+\w+/,
-			hasExport:
-				/export\s+(?:default\s+)?(?:const|function|class|interface|type)/,
+			hasExport: /export\s+(?:default\s+)?(?:const|function|class|interface|type)/,
 			noConsoleLog: /console\.log/g,
 		};
 
@@ -236,9 +229,7 @@ export class BenchmarkGrader {
 			passed,
 			score: passed ? check.points : 0,
 			maxScore: check.points,
-			details: passed
-				? `${config.checkType} check passed`
-				: `${config.checkType} check failed`,
+			details: passed ? `${config.checkType} check passed` : `${config.checkType} check failed`,
 		};
 	}
 
@@ -264,10 +255,7 @@ export class BenchmarkGrader {
 
 			// Run test command or just try to execute
 			const command = config.testCommand || `bun run ${tempFile}`;
-			const result = await this.executeCommand(
-				command,
-				config.timeout || 10000,
-			);
+			const result = await this.executeCommand(command, config.timeout || 10000);
 
 			// Clean up
 			fs.unlinkSync(tempFile);
@@ -372,10 +360,7 @@ export class BenchmarkGrader {
 	/**
 	 * Execute a shell command
 	 */
-	private async executeCommand(
-		command: string,
-		timeout: number,
-	): Promise<ExecutionResult> {
+	private async executeCommand(command: string, timeout: number): Promise<ExecutionResult> {
 		const { spawn } = await import("node:child_process");
 
 		return new Promise((resolve) => {

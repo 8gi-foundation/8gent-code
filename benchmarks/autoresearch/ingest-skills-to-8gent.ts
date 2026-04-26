@@ -13,14 +13,7 @@
  * Target: ~/.8gent/skills/
  */
 
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 
@@ -61,14 +54,12 @@ interface SkillSummary {
 // Category mapping based on skill name patterns
 function categorize(name: string, desc: string): string {
 	const combined = `${name} ${desc}`.toLowerCase();
-	if (combined.match(/design|ui|ux|css|frontend|theme|canvas|art/))
-		return "design";
+	if (combined.match(/design|ui|ux|css|frontend|theme|canvas|art/)) return "design";
 	if (combined.match(/security|0din|penetration|vuln/)) return "security";
 	if (combined.match(/git|github|pr|branch|commit|workflow/)) return "devops";
 	if (combined.match(/test|vitest|tdd|debug/)) return "testing";
 	if (combined.match(/browser|automation|electron|slack/)) return "automation";
-	if (combined.match(/video|music|audio|elevenlabs|remotion/))
-		return "creative";
+	if (combined.match(/video|music|audio|elevenlabs|remotion/)) return "creative";
 	if (combined.match(/docker|vessel|deploy|ci|cd/)) return "infrastructure";
 	if (combined.match(/api|mcp|sdk|claude|agent/)) return "ai-tools";
 	if (combined.match(/email|outreach|social|engagement/)) return "business";
@@ -95,26 +86,16 @@ function extractCapabilities(content: string, name: string): string[] {
 	}
 
 	// Infer from content
-	if (content.includes("browser") || content.includes("navigate"))
-		caps.push("browser-automation");
-	if (content.includes("git ") || content.includes("commit"))
-		caps.push("version-control");
-	if (content.includes("test") || content.includes("assert"))
-		caps.push("testing");
-	if (content.includes("deploy") || content.includes("Docker"))
-		caps.push("deployment");
-	if (content.includes("API") || content.includes("endpoint"))
-		caps.push("api-integration");
-	if (content.includes("design") || content.includes("CSS"))
-		caps.push("design");
-	if (content.includes("animation") || content.includes("motion"))
-		caps.push("animation");
-	if (content.includes("security") || content.includes("vulnerability"))
-		caps.push("security");
-	if (content.includes("email") || content.includes("outreach"))
-		caps.push("communication");
-	if (content.includes("data") || content.includes("analytics"))
-		caps.push("data-analysis");
+	if (content.includes("browser") || content.includes("navigate")) caps.push("browser-automation");
+	if (content.includes("git ") || content.includes("commit")) caps.push("version-control");
+	if (content.includes("test") || content.includes("assert")) caps.push("testing");
+	if (content.includes("deploy") || content.includes("Docker")) caps.push("deployment");
+	if (content.includes("API") || content.includes("endpoint")) caps.push("api-integration");
+	if (content.includes("design") || content.includes("CSS")) caps.push("design");
+	if (content.includes("animation") || content.includes("motion")) caps.push("animation");
+	if (content.includes("security") || content.includes("vulnerability")) caps.push("security");
+	if (content.includes("email") || content.includes("outreach")) caps.push("communication");
+	if (content.includes("data") || content.includes("analytics")) caps.push("data-analysis");
 
 	return [...new Set(caps)].slice(0, 8);
 }
@@ -125,17 +106,13 @@ function extractTriggers(content: string, name: string): string[] {
 	// Extract "USE WHEN" patterns
 	const useWhen = content.match(/USE WHEN[:\s]+(.*?)(?:\.|$)/gim);
 	if (useWhen) {
-		triggers.push(
-			...useWhen.map((m) => m.replace(/USE WHEN[:\s]+/i, "").trim()),
-		);
+		triggers.push(...useWhen.map((m) => m.replace(/USE WHEN[:\s]+/i, "").trim()));
 	}
 
 	// Extract "Use when" from description
 	const useWhenDesc = content.match(/Use when[:\s]+(.*?)(?:\.|$)/gm);
 	if (useWhenDesc) {
-		triggers.push(
-			...useWhenDesc.map((m) => m.replace(/Use when[:\s]+/i, "").trim()),
-		);
+		triggers.push(...useWhenDesc.map((m) => m.replace(/Use when[:\s]+/i, "").trim()));
 	}
 
 	// Add name-based trigger
@@ -163,8 +140,7 @@ function parseSkillFile(filePath: string): SkillSummary | null {
 			const nameMatch = fm.match(/name:\s*(.+)/);
 			const descMatch = fm.match(/description:\s*>?\s*\n?\s*(.+)/);
 			if (nameMatch) name = nameMatch[1].trim().replace(/^['"]|['"]$/g, "");
-			if (descMatch)
-				description = descMatch[1].trim().replace(/^['"]|['"]$/g, "");
+			if (descMatch) description = descMatch[1].trim().replace(/^['"]|['"]$/g, "");
 		}
 
 		if (!description) {
@@ -217,13 +193,9 @@ function scanDirectory(dir: string): SkillSummary[] {
 }
 
 function main() {
-	console.log(
-		"╔══════════════════════════════════════════════════════════════╗",
-	);
+	console.log("╔══════════════════════════════════════════════════════════════╗");
 	console.log("║     8gent Skill Ingestion — Populating the Toolshed       ║");
-	console.log(
-		"╚══════════════════════════════════════════════════════════════╝",
-	);
+	console.log("╚══════════════════════════════════════════════════════════════╝");
 	console.log("");
 
 	mkdirSync(TARGET_DIR, { recursive: true });
@@ -308,9 +280,7 @@ source: ${skill.source}
 
 	// Summary
 	console.log("\n  Category breakdown:");
-	for (const [cat, count] of [...categories.entries()].sort(
-		(a, b) => b[1] - a[1],
-	)) {
+	for (const [cat, count] of [...categories.entries()].sort((a, b) => b[1] - a[1])) {
 		console.log(`    ${cat.padEnd(20)} ${count} skills`);
 	}
 

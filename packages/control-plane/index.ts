@@ -74,12 +74,7 @@ export class ControlPlane {
 	// Tenant Management
 	// ----------------------------------------
 
-	createTenant(
-		userId: string,
-		clerkId: string,
-		subdomain: string,
-		plan?: PlanTier,
-	): TenantConfig {
+	createTenant(userId: string, clerkId: string, subdomain: string, plan?: PlanTier): TenantConfig {
 		return createTenant(userId, clerkId, subdomain, plan);
 	}
 
@@ -103,22 +98,11 @@ export class ControlPlane {
 		return deleteTenant(tenantId);
 	}
 
-	checkUsageLimits(
-		tenantId: string,
-		dailyTokens: number,
-		activeSessions: number,
-	) {
-		return checkUsageLimits(
-			getTenantById(tenantId),
-			dailyTokens,
-			activeSessions,
-		);
+	checkUsageLimits(tenantId: string, dailyTokens: number, activeSessions: number) {
+		return checkUsageLimits(getTenantById(tenantId), dailyTokens, activeSessions);
 	}
 
-	isFeatureEnabled(
-		tenantId: string,
-		feature: Parameters<typeof isFeatureEnabled>[1],
-	): boolean {
+	isFeatureEnabled(tenantId: string, feature: Parameters<typeof isFeatureEnabled>[1]): boolean {
 		return isFeatureEnabled(getTenantById(tenantId), feature);
 	}
 
@@ -237,13 +221,7 @@ export class ControlPlane {
 		periodStart: string,
 		periodEnd: string,
 	): BillableUsage {
-		return getUsageForBilling(
-			userId,
-			plan,
-			usageRecords,
-			periodStart,
-			periodEnd,
-		);
+		return getUsageForBilling(userId, plan, usageRecords, periodStart, periodEnd);
 	}
 
 	formatCents(cents: number): string {
@@ -251,11 +229,7 @@ export class ControlPlane {
 	}
 
 	// Stripe operations — require STRIPE_SECRET_KEY env var (not needed for free tier)
-	async createStripeCustomer(
-		email: string,
-		name: string,
-		metadata: Record<string, string>,
-	) {
+	async createStripeCustomer(email: string, name: string, metadata: Record<string, string>) {
 		return createStripeCustomer(email, name, metadata);
 	}
 

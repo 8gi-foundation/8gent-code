@@ -72,9 +72,7 @@ export class TrainingProxy {
 		}
 
 		// Verify Ollama is reachable first
-		const ollamaUp = await this.checkEndpoint(
-			`${this.config.ollamaUrl}/api/tags`,
-		);
+		const ollamaUp = await this.checkEndpoint(`${this.config.ollamaUrl}/api/tags`);
 		if (!ollamaUp) {
 			throw new Error(`Ollama not reachable at ${this.config.ollamaUrl}`);
 		}
@@ -85,14 +83,7 @@ export class TrainingProxy {
 		}
 
 		this.process = spawn({
-			cmd: [
-				"metaclaw",
-				"start",
-				"--mode",
-				this.config.mode,
-				"--config",
-				configPath,
-			],
+			cmd: ["metaclaw", "start", "--mode", this.config.mode, "--config", configPath],
 			stdout: "pipe",
 			stderr: "pipe",
 		});
@@ -141,9 +132,7 @@ export class TrainingProxy {
 	 */
 	async getStatus(): Promise<ProxyStatus> {
 		const running = await this.isHealthy();
-		const ollamaReachable = await this.checkEndpoint(
-			`${this.config.ollamaUrl}/api/tags`,
-		);
+		const ollamaReachable = await this.checkEndpoint(`${this.config.ollamaUrl}/api/tags`);
 
 		let latency: LatencySnapshot | null = null;
 		if (running && ollamaReachable) {
@@ -170,15 +159,9 @@ export class TrainingProxy {
 			stream: false,
 		});
 
-		const directMs = await this.timeRequest(
-			`${this.config.ollamaUrl}/api/chat`,
-			testPayload,
-		);
+		const directMs = await this.timeRequest(`${this.config.ollamaUrl}/api/chat`, testPayload);
 
-		const proxiedMs = await this.timeRequest(
-			`${this.url}/api/chat`,
-			testPayload,
-		);
+		const proxiedMs = await this.timeRequest(`${this.url}/api/chat`, testPayload);
 
 		const snapshot: LatencySnapshot = {
 			directMs,
@@ -202,8 +185,7 @@ export class TrainingProxy {
 	isLatencyAcceptable(): boolean {
 		if (this.latencyHistory.length === 0) return true;
 		const recent = this.latencyHistory.slice(-5);
-		const avgOverhead =
-			recent.reduce((s, l) => s + l.overheadMs, 0) / recent.length;
+		const avgOverhead = recent.reduce((s, l) => s + l.overheadMs, 0) / recent.length;
 		return avgOverhead <= this.config.maxLatencyOverheadMs;
 	}
 

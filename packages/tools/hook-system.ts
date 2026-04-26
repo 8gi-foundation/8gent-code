@@ -25,21 +25,14 @@ export interface HookCallResult<T> {
 
 let _nextId = 1;
 
-export class HookSystem<
-	T extends Record<string, unknown> = Record<string, unknown>,
-> {
+export class HookSystem<T extends Record<string, unknown> = Record<string, unknown>> {
 	private hooks: Map<string, HookEntry<T>[]> = new Map();
 
 	/**
 	 * Register a hook for a named lifecycle event.
 	 * Returns the hook ID - keep it to removeHook later.
 	 */
-	addHook(
-		name: string,
-		phase: HookPhase,
-		fn: HookFn<T>,
-		priority = 50,
-	): string {
+	addHook(name: string, phase: HookPhase, fn: HookFn<T>, priority = 50): string {
 		const id = `hook_${_nextId++}`;
 		const entry: HookEntry<T> = { id, name, phase, fn, priority };
 
@@ -75,11 +68,7 @@ export class HookSystem<
 	 * Each hook receives the (possibly mutated) context from the previous hook.
 	 * Returns the final context and a list of ran/skipped hook IDs.
 	 */
-	async callHook(
-		name: string,
-		phase: HookPhase,
-		context: T,
-	): Promise<HookCallResult<T>> {
+	async callHook(name: string, phase: HookPhase, context: T): Promise<HookCallResult<T>> {
 		const entries = this.hooks.get(this._key(name, phase)) ?? [];
 		const ran: string[] = [];
 		const skipped: string[] = [];
@@ -96,10 +85,7 @@ export class HookSystem<
 			} catch (err) {
 				// Hook threw - skip it and continue
 				skipped.push(entry.id);
-				console.warn(
-					`[HookSystem] Hook ${entry.id} (${name}:${phase}) threw:`,
-					err,
-				);
+				console.warn(`[HookSystem] Hook ${entry.id} (${name}:${phase}) threw:`, err);
 			}
 		}
 

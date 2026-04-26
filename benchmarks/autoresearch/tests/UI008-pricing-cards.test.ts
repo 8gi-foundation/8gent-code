@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";
@@ -35,9 +33,8 @@ describe("UI008 - Interactive Pricing Cards with Tilt", () => {
 	test("featured card has elevation/scale difference", () => {
 		const hasScale = css.match(/transform\s*:[^;]*scale\s*\(\s*1\.[0-9]/i);
 		const hasElevation =
-			css.match(
-				/(featured|popular|highlight|recommended)[^{]*\{[^}]*box-shadow/i,
-			) || css.match(/box-shadow[^;]*(0\s+\d{2,}px|0\s+\d+px\s+\d{2,}px)/i);
+			css.match(/(featured|popular|highlight|recommended)[^{]*\{[^}]*box-shadow/i) ||
+			css.match(/box-shadow[^;]*(0\s+\d{2,}px|0\s+\d+px\s+\d{2,}px)/i);
 		expect(hasScale || hasElevation).not.toBeNull();
 	});
 
@@ -52,17 +49,13 @@ describe("UI008 - Interactive Pricing Cards with Tilt", () => {
 	});
 
 	test("price text with numeric value present", () => {
-		const pricePattern = html.match(
-			/[\$\u00A3\u20AC]\s*\d+|\d+\s*[\$\u00A3\u20AC]|\d+\.\d{2}/,
-		);
+		const pricePattern = html.match(/[\$\u00A3\u20AC]\s*\d+|\d+\s*[\$\u00A3\u20AC]|\d+\.\d{2}/);
 		expect(pricePattern).not.toBeNull();
 	});
 
 	test("CTA button element per card (3+ buttons)", () => {
 		const buttons =
-			html.match(
-				/<(button|a)[^>]*class="[^"]*(?:btn|button|cta)[^"]*"[^>]*>/gi,
-			) ??
+			html.match(/<(button|a)[^>]*class="[^"]*(?:btn|button|cta)[^"]*"[^>]*>/gi) ??
 			html.match(/<button\b/gi) ??
 			[];
 		expect(buttons.length).toBeGreaterThanOrEqual(3);
@@ -74,9 +67,7 @@ describe("UI008 - Interactive Pricing Cards with Tilt", () => {
 
 	test(":hover uses transform with rotation for tilt effect", () => {
 		const hoverBlocks = css.match(/:hover[^{]*\{[^}]*\}/g) ?? [];
-		const hasRotation = hoverBlocks.some((block) =>
-			/transform[^;]*rotate/i.test(block),
-		);
+		const hasRotation = hoverBlocks.some((block) => /transform[^;]*rotate/i.test(block));
 		expect(hasRotation).toBe(true);
 	});
 
@@ -92,8 +83,7 @@ describe("UI008 - Interactive Pricing Cards with Tilt", () => {
 	});
 
 	test("transition with duration >= 200ms for smooth interactions", () => {
-		const transitions =
-			css.match(/transition[^;]*(\d+(\.\d+)?s|\d+ms)/gi) ?? [];
+		const transitions = css.match(/transition[^;]*(\d+(\.\d+)?s|\d+ms)/gi) ?? [];
 		const hasAdequateDuration = transitions.some((t) => {
 			const msMatch = t.match(/(\d+)ms/);
 			const sMatch = t.match(/(\d+\.?\d*)s(?!.*ms)/);
@@ -106,8 +96,7 @@ describe("UI008 - Interactive Pricing Cards with Tilt", () => {
 
 	test("button hover state defined", () => {
 		const btnHover =
-			css.match(/(btn|button|cta)[^{]*:hover/i) ||
-			css.match(/:hover[^{]*(btn|button|cta)/i);
+			css.match(/(btn|button|cta)[^{]*:hover/i) || css.match(/:hover[^{]*(btn|button|cta)/i);
 		expect(btnHover).not.toBeNull();
 	});
 });

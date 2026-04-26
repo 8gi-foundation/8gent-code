@@ -23,6 +23,4 @@ const res = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
 });
 
 const data = await res.json();
-console.log(
-	data.ok ? "✅ Bot message sent!" : `❌ Failed: ${JSON.stringify(data)}`,
-);
+console.log(data.ok ? "✅ Bot message sent!" : `❌ Failed: ${JSON.stringify(data)}`);

@@ -17,10 +17,7 @@ import * as path from "node:path";
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 const MODEL = process.env.OLLAMA_MODEL || "glm-4.7-flash:latest";
 const RESULTS_FILE = path.join(__dirname, "../results.tsv");
-const PROMPTS_FILE = path.join(
-	__dirname,
-	"../../packages/eight/prompts/system-prompt.ts",
-);
+const PROMPTS_FILE = path.join(__dirname, "../../packages/eight/prompts/system-prompt.ts");
 
 interface BenchmarkTask {
 	id: string;
@@ -46,24 +43,21 @@ const BENCHMARKS: BenchmarkTask[] = [
 		category: "bug-fixing",
 		fixture: "benchmarks/fixtures/bug-fixing/BF001-async-race.ts",
 		task: "Fix the race condition in updateCounter. Multiple concurrent calls should produce correct results.",
-		expectedBehavior:
-			"10 concurrent +1 updates should result in final value of 10",
+		expectedBehavior: "10 concurrent +1 updates should result in final value of 10",
 	},
 	{
 		id: "BF002",
 		category: "bug-fixing",
 		fixture: "benchmarks/fixtures/bug-fixing/BF002-memory-leak.ts",
 		task: "Fix the memory leak in the subscription manager.",
-		expectedBehavior:
-			"Memory should not grow unbounded with repeated subscribe/unsubscribe cycles",
+		expectedBehavior: "Memory should not grow unbounded with repeated subscribe/unsubscribe cycles",
 	},
 	{
 		id: "BF003",
 		category: "bug-fixing",
 		fixture: "benchmarks/fixtures/bug-fixing/BF003-null-check.ts",
 		task: "Fix null reference errors in the user lookup chain.",
-		expectedBehavior:
-			"Function should handle null/undefined at any level without throwing",
+		expectedBehavior: "Function should handle null/undefined at any level without throwing",
 	},
 	{
 		id: "FM001",
@@ -121,9 +115,7 @@ async function get8gentSystemPrompt(): Promise<string> {
 	let prompt = "";
 
 	// Get FULL_SYSTEM_PROMPT segments
-	const fullMatch = content.match(
-		/export const FULL_SYSTEM_PROMPT = \[([\s\S]*?)\].join/,
-	);
+	const fullMatch = content.match(/export const FULL_SYSTEM_PROMPT = \[([\s\S]*?)\].join/);
 	if (fullMatch) {
 		prompt += `${fullMatch[1]}\n\n`;
 	}
@@ -145,13 +137,8 @@ async function get8gentSystemPrompt(): Promise<string> {
 	return prompt || content;
 }
 
-async function runBenchmarkOn8gent(
-	task: BenchmarkTask,
-): Promise<{ code: string; score: number }> {
-	const fixture = fs.readFileSync(
-		path.join(__dirname, "../..", task.fixture),
-		"utf-8",
-	);
+async function runBenchmarkOn8gent(task: BenchmarkTask): Promise<{ code: string; score: number }> {
+	const fixture = fs.readFileSync(path.join(__dirname, "../..", task.fixture), "utf-8");
 	const systemPrompt = await get8gentSystemPrompt();
 
 	const prompt = `${systemPrompt}
@@ -192,12 +179,7 @@ function gradeSolution(benchmarkId: string, code: string): number {
 
 	// BF001: Race condition fix
 	if (benchmarkId === "BF001") {
-		if (
-			code.includes("lock") ||
-			code.includes("mutex") ||
-			code.includes("semaphore")
-		)
-			score += 20;
+		if (code.includes("lock") || code.includes("mutex") || code.includes("semaphore")) score += 20;
 		if (code.includes("await") && code.includes("Promise")) score += 10;
 		if (code.includes("finally")) score += 10;
 		if (code.includes("Map") && code.includes("delete")) score += 10;
@@ -227,18 +209,8 @@ function gradeSolution(benchmarkId: string, code: string): number {
 	// FI001: Caching
 	if (benchmarkId === "FI001") {
 		if (code.includes("Map") || code.includes("cache")) score += 15;
-		if (
-			code.includes("TTL") ||
-			code.includes("expire") ||
-			code.includes("timestamp")
-		)
-			score += 15;
-		if (
-			code.includes("LRU") ||
-			code.includes("evict") ||
-			code.includes("maxSize")
-		)
-			score += 20;
+		if (code.includes("TTL") || code.includes("expire") || code.includes("timestamp")) score += 15;
+		if (code.includes("LRU") || code.includes("evict") || code.includes("maxSize")) score += 20;
 	}
 
 	return Math.min(score, 100);
@@ -260,10 +232,7 @@ function writePrompts(content: string): void {
 // Track which patterns have been added to avoid duplicates
 const addedPatterns = new Set<string>();
 
-async function improvePrompts(
-	weakBenchmark: string,
-	gap: number,
-): Promise<string> {
+async function improvePrompts(weakBenchmark: string, gap: number): Promise<string> {
 	const patternType = weakBenchmark.slice(0, 2); // BF, FM, FI, etc.
 	const currentPrompts = readPrompts();
 
@@ -275,10 +244,7 @@ async function improvePrompts(
 	};
 
 	const patternName = patternNames[patternType];
-	if (
-		addedPatterns.has(patternType) ||
-		(patternName && currentPrompts.includes(patternName))
-	) {
+	if (addedPatterns.has(patternType) || (patternName && currentPrompts.includes(patternName))) {
 		console.log(`   [Skip: ${patternType} pattern already exists]`);
 		addedPatterns.add(patternType); // Ensure it's in memory too
 		return "already added";

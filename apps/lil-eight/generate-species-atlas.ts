@@ -16,13 +16,7 @@
  *   bun run apps/lil-eight/generate-species-atlas.ts --species all
  */
 
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 
@@ -36,10 +30,7 @@ const manifest: Record<string, { start: number; count: number }> = JSON.parse(
 	readFileSync(manifestPath, "utf-8"),
 );
 
-const totalFrames = Object.values(manifest).reduce(
-	(sum, s) => sum + s.count,
-	0,
-);
+const totalFrames = Object.values(manifest).reduce((sum, s) => sum + s.count, 0);
 
 // Animation transforms per state per frame
 function getFrameOffset(
@@ -90,11 +81,7 @@ function getFrameOffset(
 }
 
 // Draw decorations (thought bubbles, zzz, sparkles)
-function drawDecorations(
-	ctx: CanvasRenderingContext2D,
-	state: string,
-	frame: number,
-) {
+function drawDecorations(ctx: CanvasRenderingContext2D, state: string, frame: number) {
 	switch (state) {
 		case "think": {
 			// Thought dots
@@ -215,9 +202,7 @@ async function generateSpeciesAtlas(species: string) {
 	const outDir = join(import.meta.dir, "sprites");
 	const atlasPath = join(outDir, `atlas-${species.toLowerCase()}.png`);
 	writeFileSync(atlasPath, atlasCanvas.toBuffer("image/png"));
-	console.log(
-		`  Saved: sprites/atlas-${species.toLowerCase()}.png (${totalFrames} frames)`,
-	);
+	console.log(`  Saved: sprites/atlas-${species.toLowerCase()}.png (${totalFrames} frames)`);
 
 	return true;
 }
@@ -226,34 +211,22 @@ async function generateSpeciesAtlas(species: string) {
 const args = process.argv.slice(2);
 const speciesFlag =
 	args.find((a) => a.startsWith("--species="))?.split("=")[1] ||
-	(args.indexOf("--species") >= 0
-		? args[args.indexOf("--species") + 1]
-		: undefined);
+	(args.indexOf("--species") >= 0 ? args[args.indexOf("--species") + 1] : undefined);
 
 if (!speciesFlag) {
 	const partsDir = join(import.meta.dir, "parts");
 	const available = existsSync(partsDir)
-		? readdirSync(partsDir).filter((d) =>
-				existsSync(join(partsDir, d, "body.png")),
-			)
+		? readdirSync(partsDir).filter((d) => existsSync(join(partsDir, d, "body.png")))
 		: [];
-	console.log(
-		"Usage: bun run apps/lil-eight/generate-species-atlas.ts --species Drake",
-	);
-	console.log(
-		"       bun run apps/lil-eight/generate-species-atlas.ts --species all",
-	);
-	console.log(
-		`\nSpecies with body.png (${available.length}): ${available.join(", ")}`,
-	);
+	console.log("Usage: bun run apps/lil-eight/generate-species-atlas.ts --species Drake");
+	console.log("       bun run apps/lil-eight/generate-species-atlas.ts --species all");
+	console.log(`\nSpecies with body.png (${available.length}): ${available.join(", ")}`);
 	process.exit(0);
 }
 
 if (speciesFlag === "all") {
 	const partsDir = join(import.meta.dir, "parts");
-	const species = readdirSync(partsDir).filter((d) =>
-		existsSync(join(partsDir, d, "body.png")),
-	);
+	const species = readdirSync(partsDir).filter((d) => existsSync(join(partsDir, d, "body.png")));
 	let success = 0;
 	for (const s of species) {
 		if (await generateSpeciesAtlas(s)) success++;

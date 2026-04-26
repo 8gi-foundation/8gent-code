@@ -9,10 +9,7 @@ import { join } from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 const MODEL = process.env.MODEL || "qwen3.5:latest";
-const OUTPUT = join(
-	import.meta.dir,
-	"../benchmarks/ui-samples/8gent-one-landing.html",
-);
+const OUTPUT = join(import.meta.dir, "../benchmarks/ui-samples/8gent-one-landing.html");
 
 mkdirSync(join(import.meta.dir, "../benchmarks/ui-samples"), {
 	recursive: true,

@@ -15,10 +15,7 @@
  * select({ a: 1, b: 2, c: 3 }, ['a', 'c'])
  * // { a: 1, c: 3 }
  */
-export function select<T extends object, K extends keyof T>(
-	obj: T,
-	fields: K[],
-): Pick<T, K> {
+export function select<T extends object, K extends keyof T>(obj: T, fields: K[]): Pick<T, K> {
 	const result = {} as Pick<T, K>;
 	for (const key of fields) {
 		if (Object.prototype.hasOwnProperty.call(obj, key)) {
@@ -41,10 +38,7 @@ export function select<T extends object, K extends keyof T>(
  * selectDeep({ user: { name: 'Alice', age: 30 }, id: 1 }, ['user.name', 'id'])
  * // { 'user.name': 'Alice', id: 1 }
  */
-export function selectDeep(
-	obj: Record<string, unknown>,
-	paths: string[],
-): Record<string, unknown> {
+export function selectDeep(obj: Record<string, unknown>, paths: string[]): Record<string, unknown> {
 	const result: Record<string, unknown> = {};
 	for (const path of paths) {
 		const parts = path.split(".");
@@ -73,10 +67,7 @@ export function selectDeep(
  * exclude({ a: 1, b: 2, c: 3 }, ['b'])
  * // { a: 1, c: 3 }
  */
-export function exclude<T extends object, K extends keyof T>(
-	obj: T,
-	fields: K[],
-): Omit<T, K> {
+export function exclude<T extends object, K extends keyof T>(obj: T, fields: K[]): Omit<T, K> {
 	const excluded = new Set(fields as PropertyKey[]);
 	const result = {} as Omit<T, K>;
 	for (const key of Object.keys(obj) as Array<keyof T>) {

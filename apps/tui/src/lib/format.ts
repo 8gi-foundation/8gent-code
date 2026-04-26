@@ -7,10 +7,8 @@
 export function formatTokens(count: number): string {
 	if (count < 0) return "0";
 	if (count < 1000) return String(Math.round(count));
-	if (count < 1_000_000)
-		return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}K`;
-	if (count < 1_000_000_000)
-		return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+	if (count < 1_000_000) return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+	if (count < 1_000_000_000) return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 	return `${(count / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
 }
 

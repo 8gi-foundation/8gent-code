@@ -174,11 +174,7 @@ const PERF_TASKS: Task[] = Array.from({ length: 15 }, (_, i) => ({
 	latest: Math.floor(i / 3) * 2 + 10,
 }));
 
-function isValidSchedule(
-	tasks: Task[],
-	assignments: Assignment[],
-	resourceCount: number,
-): boolean {
+function isValidSchedule(tasks: Task[], assignments: Assignment[], resourceCount: number): boolean {
 	if (!assignments || assignments.length !== tasks.length) return false;
 
 	const resources = new Set(assignments.map((a) => a.resource));
@@ -229,17 +225,14 @@ describe("MR001: Constraint Solver", () => {
 	});
 
 	test("sudoku impossible — returns null, does not hang", async () => {
-		const timeout = new Promise<"timeout">((res) =>
-			setTimeout(() => res("timeout"), 5000),
-		);
+		const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), 5000));
 		const solve = Promise.resolve(solveSudoku(IMPOSSIBLE_PUZZLE));
 		const race = await Promise.race([solve, timeout]);
 
 		expect(race).not.toBe("timeout");
 		// Result should be null/undefined/false — not a valid grid
 		const result = race as any;
-		const isNullish =
-			result === null || result === undefined || result === false;
+		const isNullish = result === null || result === undefined || result === false;
 		expect(isNullish).toBe(true);
 	});
 
@@ -314,13 +307,8 @@ describe("MR001: Constraint Solver", () => {
 		if (!ac3) {
 			// If ac3 is not directly exported, try using CSPSolver's internal methods
 			if (CSPSolver) {
-				const solver =
-					typeof CSPSolver === "function" ? new CSPSolver() : CSPSolver;
-				const ac3Method =
-					solver.ac3 ??
-					solver.AC3 ??
-					solver.arcConsistency ??
-					solver.preprocess;
+				const solver = typeof CSPSolver === "function" ? new CSPSolver() : CSPSolver;
+				const ac3Method = solver.ac3 ?? solver.AC3 ?? solver.arcConsistency ?? solver.preprocess;
 				if (!ac3Method) {
 					// Skip gracefully — AC-3 not accessible
 					expect(true).toBe(true);
@@ -467,22 +455,15 @@ describe("MR001: Constraint Solver", () => {
 					solver.addVariable(v, domains[v]);
 				}
 				for (const [a, b] of constraints) {
-					const notEqual =
-						solver.addConstraint ??
-						solver.addNotEqualConstraint ??
-						solver.constrain;
+					const notEqual = solver.addConstraint ?? solver.addNotEqualConstraint ?? solver.constrain;
 					if (notEqual) {
 						notEqual.call(solver, a, b, (x: string, y: string) => x !== y);
 					}
 				}
-				result = await Promise.resolve(
-					(solver.solve ?? solver.search ?? solver.run).call(solver),
-				);
+				result = await Promise.resolve((solver.solve ?? solver.search ?? solver.run).call(solver));
 			} else if (solver.solve) {
 				// Single-call API: solver.solve(variables, domains, constraints)
-				result = await Promise.resolve(
-					solver.solve(variables, domains, constraints),
-				);
+				result = await Promise.resolve(solver.solve(variables, domains, constraints));
 			}
 		} else {
 			// Function-based API

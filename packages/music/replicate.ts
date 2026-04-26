@@ -103,31 +103,22 @@ export class ReplicateBackend {
 		const genreDescriptions: Partial<Record<Genre, string>> = {
 			techno:
 				"driving four-on-the-floor techno with pulsating synthesizers and deep rolling bassline",
-			house:
-				"groovy deep house with warm chords, shuffling hi-hats, and soulful progression",
+			house: "groovy deep house with warm chords, shuffling hi-hats, and soulful progression",
 			minimal:
 				"hypnotic minimal techno with sparse percussion, subtle modulation, and deep sub bass",
-			ambient:
-				"atmospheric ambient soundscape with evolving textures and ethereal pads",
-			"drum-and-bass":
-				"energetic drum and bass with fast breakbeats and heavy sub bass",
-			breakbeat:
-				"funky breakbeat with chopped drums, fat bass, and syncopated rhythms",
-			trance:
-				"euphoric trance with arpeggiated synths, building energy, and soaring lead melody",
+			ambient: "atmospheric ambient soundscape with evolving textures and ethereal pads",
+			"drum-and-bass": "energetic drum and bass with fast breakbeats and heavy sub bass",
+			breakbeat: "funky breakbeat with chopped drums, fat bass, and syncopated rhythms",
+			trance: "euphoric trance with arpeggiated synths, building energy, and soaring lead melody",
 			lofi: "warm lofi hip hop beats with vinyl crackle, jazzy chords, and mellow drums",
-			synthwave:
-				"retro synthwave with analog synths, gated reverb drums, and nostalgic melody",
-			electro:
-				"aggressive electro with distorted bass, sharp synths, and driving rhythm",
+			synthwave: "retro synthwave with analog synths, gated reverb drums, and nostalgic melody",
+			electro: "aggressive electro with distorted bass, sharp synths, and driving rhythm",
 			dub: "spacious dub with heavy delay, reverb-drenched percussion, and deep bassline",
-			downtempo:
-				"relaxed downtempo with organic drums, warm bass, and gentle melodies",
+			downtempo: "relaxed downtempo with organic drums, warm bass, and gentle melodies",
 			idm: "experimental electronic music with glitchy rhythms and unusual sound design",
 		};
 
-		const desc =
-			genreDescriptions[config.genre] || `${config.genre} electronic music`;
+		const desc = genreDescriptions[config.genre] || `${config.genre} electronic music`;
 		const moodStr = config.mood ? `, ${config.mood} mood` : "";
 		const bpmStr = `${config.bpm} BPM`;
 		const keyStr = config.key ? `, key of ${config.key}` : "";

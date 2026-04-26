@@ -48,12 +48,7 @@ const OLLAMA_OCR_MODELS = [
 ];
 
 // General vision models that also have strong OCR capability (fallback for OCR tasks)
-const VISION_MODELS_WITH_OCR = [
-	"qwen2.5-vl",
-	"minicpm-v",
-	"internvl2",
-	"llama3.2-vision",
-];
+const VISION_MODELS_WITH_OCR = ["qwen2.5-vl", "minicpm-v", "internvl2", "llama3.2-vision"];
 
 export type VisionTaskType = "general" | "ocr";
 
@@ -112,15 +107,8 @@ export function loadVisionConfig(projectDir?: string): VisionConfig {
 /**
  * Save vision config back to .8gent/config.json
  */
-export function saveVisionConfig(
-	config: Partial<VisionConfig>,
-	projectDir?: string,
-): boolean {
-	const configPath = path.join(
-		projectDir || process.cwd(),
-		".8gent",
-		"config.json",
-	);
+export function saveVisionConfig(config: Partial<VisionConfig>, projectDir?: string): boolean {
+	const configPath = path.join(projectDir || process.cwd(), ".8gent", "config.json");
 	try {
 		let data: Record<string, unknown> = {};
 		if (fs.existsSync(configPath)) {
@@ -153,10 +141,7 @@ interface VisionRouterResult {
  * Check if a specific model is installed on Ollama.
  * Used to validate user-configured preferred models.
  */
-async function checkOllamaModel(
-	baseUrl: string,
-	modelName: string,
-): Promise<VisionModel | null> {
+async function checkOllamaModel(baseUrl: string, modelName: string): Promise<VisionModel | null> {
 	try {
 		const res = await fetch(`${baseUrl}/api/tags`, {
 			signal: AbortSignal.timeout(3000),
@@ -169,9 +154,7 @@ async function checkOllamaModel(
 
 		const match = models.find((m) => {
 			const name = m.name.toLowerCase();
-			return (
-				name === modelName.toLowerCase() || name.split(":")[0] === baseName
-			);
+			return name === modelName.toLowerCase() || name.split(":")[0] === baseName;
 		});
 
 		if (!match) return null;
@@ -193,9 +176,7 @@ async function checkOllamaModel(
  * Check Ollama for locally installed vision models.
  * Separates OCR-specialized models from general vision models.
  */
-async function checkOllamaVision(
-	baseUrl = "http://localhost:11434",
-): Promise<VisionModel[]> {
+async function checkOllamaVision(baseUrl = "http://localhost:11434"): Promise<VisionModel[]> {
 	try {
 		const res = await fetch(`${baseUrl}/api/tags`, {
 			signal: AbortSignal.timeout(3000),
@@ -273,15 +254,12 @@ async function checkOpenRouterVision(apiKey?: string): Promise<VisionModel[]> {
 				m.architecture?.modality?.includes("image") ||
 				m.architecture?.input_modalities?.includes("image") ||
 				// Fallback: check common vision model name patterns
-				/vision|llava|pixtral|moondream|gpt-4o|claude.*sonnet|gemini|gemma/i.test(
-					m.id,
-				);
+				/vision|llava|pixtral|moondream|gpt-4o|claude.*sonnet|gemini|gemma/i.test(m.id);
 
 			if (!hasVision) continue;
 
 			const isFree =
-				m.id.endsWith(":free") ||
-				(m.pricing?.prompt === "0" && m.pricing?.completion === "0");
+				m.id.endsWith(":free") || (m.pricing?.prompt === "0" && m.pricing?.completion === "0");
 
 			// Check if this is an OCR-specialized model on OpenRouter
 			const isOcr =
@@ -344,9 +322,7 @@ export async function findVisionModel(options?: {
 
 	// Step 0: Check user-configured preferred model first
 	const preferredModel =
-		taskType === "ocr" && config.ocrModel !== "auto"
-			? config.ocrModel
-			: config.defaultModel;
+		taskType === "ocr" && config.ocrModel !== "auto" ? config.ocrModel : config.defaultModel;
 
 	if (preferredModel && preferLocal) {
 		const configured = await checkOllamaModel(ollamaUrl, preferredModel);
@@ -366,8 +342,7 @@ export async function findVisionModel(options?: {
 	}
 
 	// Step 1.5: Check user-configured fallback chain
-	const fallbackList =
-		taskType === "ocr" ? config.ocrFallback : config.fallback;
+	const fallbackList = taskType === "ocr" ? config.ocrFallback : config.fallback;
 	for (const fallbackModel of fallbackList) {
 		const fb = await checkOllamaModel(ollamaUrl, fallbackModel);
 		if (fb) {
@@ -383,8 +358,7 @@ export async function findVisionModel(options?: {
 	// Prefer free OpenRouter models (no API key needed for :free models)
 	const freeVision = orModels.filter((m) => m.free);
 	if (freeVision.length > 0) {
-		const localBest =
-			ollamaModels.length > 0 ? pickBestModel(ollamaModels, taskType) : null;
+		const localBest = ollamaModels.length > 0 ? pickBestModel(ollamaModels, taskType) : null;
 		const remoteBest = pickBestModel(freeVision, taskType);
 		return {
 			found: true,
@@ -395,8 +369,7 @@ export async function findVisionModel(options?: {
 
 	// Fall back to cheapest paid (requires API key)
 	if (apiKey && orModels.length > 0) {
-		const localBest =
-			ollamaModels.length > 0 ? pickBestModel(ollamaModels, taskType) : null;
+		const localBest = ollamaModels.length > 0 ? pickBestModel(ollamaModels, taskType) : null;
 		const remoteBest = pickBestModel(orModels, taskType);
 		return {
 			found: true,
@@ -447,10 +420,7 @@ export async function findOCRModel(options?: {
  * For OCR tasks: prefer OCR-specialized models, then vision models with strong OCR.
  * For general tasks: prefer general vision models (broader capabilities).
  */
-function pickBestModel(
-	models: VisionModel[],
-	taskType: VisionTaskType,
-): VisionModel {
+function pickBestModel(models: VisionModel[], taskType: VisionTaskType): VisionModel {
 	if (taskType === "ocr") {
 		// First: OCR-specialized models
 		const ocrModels = models.filter((m) => m.ocrSpecialized);

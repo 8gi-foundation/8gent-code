@@ -33,9 +33,7 @@ export default function RootLayout({
 					}}
 				/>
 			</head>
-			<body className={`${geistMono.variable} font-mono antialiased`}>
-				{children}
-			</body>
+			<body className={`${geistMono.variable} font-mono antialiased`}>{children}</body>
 		</html>
 	);
 }

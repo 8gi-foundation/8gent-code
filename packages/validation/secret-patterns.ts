@@ -88,8 +88,7 @@ export const VULNERABILITY_PATTERNS: VulnerabilityPattern[] = [
 		name: "eval() with variable input",
 		pattern: /\beval\s*\(\s*(?!['"`])[^)]+\)/g,
 		severity: "critical",
-		suggestion:
-			"Never use eval() with dynamic input. Use JSON.parse() or a safe parser",
+		suggestion: "Never use eval() with dynamic input. Use JSON.parse() or a safe parser",
 	},
 	{
 		name: "child_process.exec with string concat",
@@ -101,24 +100,19 @@ export const VULNERABILITY_PATTERNS: VulnerabilityPattern[] = [
 		name: "innerHTML with variable",
 		pattern: /\.innerHTML\s*[+]?=\s*(?!['"`])[^;]+/g,
 		severity: "high",
-		suggestion:
-			"Use textContent or sanitize with DOMPurify before setting innerHTML",
+		suggestion: "Use textContent or sanitize with DOMPurify before setting innerHTML",
 	},
 	{
 		name: "dangerouslySetInnerHTML with variable",
-		pattern:
-			/dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?![`'"])[^}]+\}/g,
+		pattern: /dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*(?![`'"])[^}]+\}/g,
 		severity: "high",
-		suggestion:
-			"Sanitize input with DOMPurify before passing to dangerouslySetInnerHTML",
+		suggestion: "Sanitize input with DOMPurify before passing to dangerouslySetInnerHTML",
 	},
 	{
 		name: "SQL string concatenation",
-		pattern:
-			/['"`]\s*(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE)[^`'"]*['"`]\s*[+]\s*[^;]+/gi,
+		pattern: /['"`]\s*(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE)[^`'"]*['"`]\s*[+]\s*[^;]+/gi,
 		severity: "critical",
-		suggestion:
-			"Use parameterized queries or a query builder (e.g. Drizzle, Kysely)",
+		suggestion: "Use parameterized queries or a query builder (e.g. Drizzle, Kysely)",
 	},
 	{
 		name: "process.env secret in log/console",

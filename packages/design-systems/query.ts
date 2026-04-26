@@ -106,12 +106,8 @@ export function getComplete(idOrName: string): CompleteDesignSystem | null {
 		typography: typography || null,
 		components,
 		tags,
-		parsedColors: system.colors_json
-			? parseColorsJson(system.colors_json)
-			: null,
-		parsedTypography: system.typography_json
-			? parseTypographyJson(system.typography_json)
-			: null,
+		parsedColors: system.colors_json ? parseColorsJson(system.colors_json) : null,
+		parsedTypography: system.typography_json ? parseTypographyJson(system.typography_json) : null,
 	};
 }
 
@@ -347,33 +343,24 @@ export function suggestForProject(
 		// Style match (highest weight)
 		if (mapping.styles.includes(system.style as DesignStyle)) {
 			score += 30;
-			reasoning.push(
-				`Style "${system.style}" matches ${normalizedType} projects`,
-			);
+			reasoning.push(`Style "${system.style}" matches ${normalizedType} projects`);
 		}
 
 		// Mood match (high weight)
 		if (mapping.moods.includes(system.mood as DesignMood)) {
 			score += 25;
-			reasoning.push(
-				`Mood "${system.mood}" suits ${normalizedType} applications`,
-			);
+			reasoning.push(`Mood "${system.mood}" suits ${normalizedType} applications`);
 		}
 
 		// Tag matches
 		const systemTags = getTagsBySystemId(system.id);
 		const matchingTags = systemTags.filter((tag) =>
-			mapping.tags.some(
-				(mt) =>
-					tag.toLowerCase().includes(mt) || mt.includes(tag.toLowerCase()),
-			),
+			mapping.tags.some((mt) => tag.toLowerCase().includes(mt) || mt.includes(tag.toLowerCase())),
 		);
 
 		if (matchingTags.length > 0) {
 			score += matchingTags.length * 10;
-			reasoning.push(
-				`Tags "${matchingTags.join(", ")}" relevant to ${normalizedType}`,
-			);
+			reasoning.push(`Tags "${matchingTags.join(", ")}" relevant to ${normalizedType}`);
 		}
 
 		// Only include if there's some match
@@ -573,30 +560,12 @@ export function featured(): CompleteDesignSystem[] {
  * Get all available styles
  */
 export function listStyles(): DesignStyle[] {
-	return [
-		"minimal",
-		"bold",
-		"playful",
-		"elegant",
-		"tech",
-		"retro",
-		"nature",
-		"corporate",
-	];
+	return ["minimal", "bold", "playful", "elegant", "tech", "retro", "nature", "corporate"];
 }
 
 /**
  * Get all available moods
  */
 export function listMoods(): DesignMood[] {
-	return [
-		"professional",
-		"creative",
-		"tech",
-		"warm",
-		"cool",
-		"dramatic",
-		"calm",
-		"energetic",
-	];
+	return ["professional", "creative", "tech", "warm", "cool", "dramatic", "calm", "energetic"];
 }

@@ -48,11 +48,7 @@ export function RainbowBorder({
 	const [colorIndex, setColorIndex] = useState(0);
 
 	const colors =
-		colorPalette === "rainbow"
-			? RAINBOW_COLORS
-			: colorPalette === "neon"
-				? NEON_COLORS
-				: ["cyan"];
+		colorPalette === "rainbow" ? RAINBOW_COLORS : colorPalette === "neon" ? NEON_COLORS : ["cyan"];
 
 	useEffect(() => {
 		if (!animate || colors.length <= 1) return;
@@ -65,11 +61,7 @@ export function RainbowBorder({
 	}, [animate, colors.length, speed]);
 
 	return (
-		<Box
-			borderStyle={borderStyle}
-			borderColor={colors[colorIndex]}
-			paddingX={padding}
-		>
+		<Box borderStyle={borderStyle} borderColor={colors[colorIndex]} paddingX={padding}>
 			{children}
 		</Box>
 	);
@@ -81,10 +73,7 @@ interface GradientBorderProps {
 	animate?: boolean;
 }
 
-export function GradientBorder({
-	children,
-	animate = true,
-}: GradientBorderProps) {
+export function GradientBorder({ children, animate = true }: GradientBorderProps) {
 	const [hue, setHue] = useState(0);
 
 	useEffect(() => {
@@ -126,11 +115,7 @@ interface PulsingBorderProps {
 	speed?: number;
 }
 
-export function PulsingBorder({
-	children,
-	color = "cyan",
-	speed = 500,
-}: PulsingBorderProps) {
+export function PulsingBorder({ children, color = "cyan", speed = 500 }: PulsingBorderProps) {
 	const [visible, setVisible] = useState(true);
 
 	useEffect(() => {
@@ -142,11 +127,7 @@ export function PulsingBorder({
 	}, [speed]);
 
 	return (
-		<Box
-			borderStyle="round"
-			borderColor={visible ? color : "blue"}
-			paddingX={1}
-		>
+		<Box borderStyle="round" borderColor={visible ? color : "blue"} paddingX={1}>
 			{children}
 		</Box>
 	);
@@ -159,11 +140,7 @@ interface DecoratedBoxProps {
 	width?: number;
 }
 
-export function DecoratedBox({
-	children,
-	animate = true,
-	width,
-}: DecoratedBoxProps) {
+export function DecoratedBox({ children, animate = true, width }: DecoratedBoxProps) {
 	const [cornerIndex, setCornerIndex] = useState(0);
 	const corners = ["◢", "◣", "◤", "◥"];
 
@@ -206,11 +183,7 @@ interface AnimatedSeparatorProps {
 	char?: string;
 }
 
-export function AnimatedSeparator({
-	width = 50,
-	speed = 80,
-	char = "─",
-}: AnimatedSeparatorProps) {
+export function AnimatedSeparator({ width = 50, speed = 80, char = "─" }: AnimatedSeparatorProps) {
 	const [glowIndex, setGlowIndex] = useState(0);
 
 	useEffect(() => {
@@ -225,13 +198,7 @@ export function AnimatedSeparator({
 	for (let i = 0; i < width; i++) {
 		const distance = Math.abs(i - glowIndex);
 		const color =
-			distance === 0
-				? "white"
-				: distance <= 2
-					? "cyan"
-					: distance <= 4
-						? "blue"
-						: "gray";
+			distance === 0 ? "white" : distance <= 2 ? "cyan" : distance <= 4 ? "blue" : "gray";
 
 		line.push(
 			<Text key={i} color={color}>

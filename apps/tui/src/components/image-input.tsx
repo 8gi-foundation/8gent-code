@@ -15,14 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Box, useInput } from "ink";
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import {
-	AppText,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Stack,
-} from "./primitives/index.js";
+import { AppText, Inline, Label, MutedText, ShortcutHint, Stack } from "./primitives/index.js";
 
 // ============================================
 // Types
@@ -101,12 +94,9 @@ export function normalizePathToken(raw: string): string {
 }
 
 function resolveIfExists(candidate: string): string | null {
-	const abs = path.isAbsolute(candidate)
-		? candidate
-		: path.resolve(process.cwd(), candidate);
+	const abs = path.isAbsolute(candidate) ? candidate : path.resolve(process.cwd(), candidate);
 	if (fs.existsSync(abs) && isImagePath(abs)) return abs;
-	if (fs.existsSync(candidate) && isImagePath(candidate))
-		return path.normalize(candidate);
+	if (fs.existsSync(candidate) && isImagePath(candidate)) return path.normalize(candidate);
 	return null;
 }
 
@@ -137,8 +127,7 @@ export function extractImagePaths(text: string): string[] {
 	};
 
 	// Quoted paths (spaces inside)
-	const quotedRe =
-		/["']([^"']+\.(?:png|jpe?g|gif|webp|bmp|svg|heic|avif))["']/gi;
+	const quotedRe = /["']([^"']+\.(?:png|jpe?g|gif|webp|bmp|svg|heic|avif))["']/gi;
 	let qm: RegExpExecArray | null;
 	while ((qm = quotedRe.exec(text)) !== null) {
 		tryToken(qm[1]);
@@ -365,11 +354,7 @@ export function ImageInput({
 	// Handle keyboard for removing image
 	useInput((input, key) => {
 		// Ctrl+Backspace or Ctrl+D to remove image
-		if (
-			currentImage &&
-			key.ctrl &&
-			(key.backspace || key.delete || input === "d")
-		) {
+		if (currentImage && key.ctrl && (key.backspace || key.delete || input === "d")) {
 			onImageRemove?.();
 		}
 	});
@@ -377,9 +362,7 @@ export function ImageInput({
 	if (!currentImage) {
 		return (
 			<Box>
-				<MutedText>
-					Drop image file here (pastes path) or paste a file path
-				</MutedText>
+				<MutedText>Drop image file here (pastes path) or paste a file path</MutedText>
 			</Box>
 		);
 	}
@@ -415,9 +398,7 @@ export function useImageInput(options: UseImageInputOptions = {}) {
 		onRemoveRef.current = options.onRemove;
 	}, [options.onAttach, options.onRemove]);
 
-	const [currentImage, setCurrentImage] = useState<ImageAttachment | null>(
-		null,
-	);
+	const [currentImage, setCurrentImage] = useState<ImageAttachment | null>(null);
 	const currentImageRef = useRef<ImageAttachment | null>(null);
 	useEffect(() => {
 		currentImageRef.current = currentImage;
@@ -470,10 +451,7 @@ export function useImageInput(options: UseImageInputOptions = {}) {
 	}, []);
 
 	/** Same-frame attachment (after processInput / attachImage) when React state has not flushed yet */
-	const getAttachedImage = useCallback(
-		(): ImageAttachment | null => currentImageRef.current,
-		[],
-	);
+	const getAttachedImage = useCallback((): ImageAttachment | null => currentImageRef.current, []);
 
 	return {
 		currentImage,

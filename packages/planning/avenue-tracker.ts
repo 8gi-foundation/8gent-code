@@ -98,10 +98,7 @@ export class AvenueTracker {
 	/**
 	 * Generate multiple avenues based on current context
 	 */
-	async generateAvenues(
-		task: string,
-		context: ExecutionContext,
-	): Promise<Avenue[]> {
+	async generateAvenues(task: string, context: ExecutionContext): Promise<Avenue[]> {
 		this.context.currentTask = task;
 
 		// Clear old avenues
@@ -297,15 +294,7 @@ export class AvenueTracker {
 			probability: 0.3,
 			category: "bugfix",
 			plan: this.generateBugfixPlan(task),
-			triggers: [
-				"fix",
-				"bug",
-				"error",
-				"issue",
-				"broken",
-				"wrong",
-				"not working",
-			],
+			triggers: ["fix", "bug", "error", "issue", "broken", "wrong", "not working"],
 			createdAt: new Date(),
 			lastUpdated: new Date(),
 			depth: this.planDepth,
@@ -337,15 +326,7 @@ export class AvenueTracker {
 			probability: 0.4,
 			category: "explore",
 			plan: this.generateExplorationPlan(task),
-			triggers: [
-				"understand",
-				"explain",
-				"show",
-				"find",
-				"where",
-				"how",
-				"what",
-			],
+			triggers: ["understand", "explain", "show", "find", "where", "how", "what"],
 			createdAt: new Date(),
 			lastUpdated: new Date(),
 			depth: this.planDepth,
@@ -632,59 +613,26 @@ export class AvenueTracker {
 	// ============================================
 
 	private isPossibleFeatureRequest(task: string): boolean {
-		const patterns = [
-			"add",
-			"create",
-			"implement",
-			"build",
-			"new",
-			"feature",
-			"make",
-		];
+		const patterns = ["add", "create", "implement", "build", "new", "feature", "make"];
 		return patterns.some((p) => task.includes(p));
 	}
 
 	private isPossibleBugfix(task: string): boolean {
-		const patterns = [
-			"fix",
-			"bug",
-			"error",
-			"issue",
-			"broken",
-			"wrong",
-			"fail",
-			"crash",
-		];
+		const patterns = ["fix", "bug", "error", "issue", "broken", "wrong", "fail", "crash"];
 		return patterns.some((p) => task.includes(p));
 	}
 
 	private isPossibleRefactor(task: string): boolean {
-		const patterns = [
-			"refactor",
-			"improve",
-			"clean",
-			"optimize",
-			"simplify",
-			"reorganize",
-		];
+		const patterns = ["refactor", "improve", "clean", "optimize", "simplify", "reorganize"];
 		return patterns.some((p) => task.includes(p));
 	}
 
 	private isPossibleTesting(task: string): boolean {
-		const patterns = [
-			"test",
-			"spec",
-			"coverage",
-			"verify",
-			"check",
-			"validate",
-		];
+		const patterns = ["test", "spec", "coverage", "verify", "check", "validate"];
 		return patterns.some((p) => task.includes(p));
 	}
 
-	private async detectProjectType(
-		context: ExecutionContext,
-	): Promise<ProjectType> {
+	private async detectProjectType(context: ExecutionContext): Promise<ProjectType> {
 		// This would check package.json, file structure, etc.
 		// For now, return unknown
 		return "unknown";
@@ -710,9 +658,7 @@ export class AvenueTracker {
 
 	private updateUserPatterns(avenue: Avenue): void {
 		for (const trigger of avenue.triggers) {
-			const existing = this.context.userPatterns.find(
-				(p) => p.pattern === trigger,
-			);
+			const existing = this.context.userPatterns.find((p) => p.pattern === trigger);
 			if (existing) {
 				existing.frequency += 1;
 				existing.lastUsed = new Date();

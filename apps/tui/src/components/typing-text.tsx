@@ -55,9 +55,7 @@ export function TypingText({
 	return (
 		<AppText color={color}>
 			{displayedText}
-			{cursor && !isComplete && (
-				<AppText color="cyan">{showCursor ? cursorChar : " "}</AppText>
-			)}
+			{cursor && !isComplete && <AppText color="cyan">{showCursor ? cursorChar : " "}</AppText>}
 		</AppText>
 	);
 }
@@ -69,11 +67,7 @@ interface StreamingTextProps {
 	color?: string;
 }
 
-export function StreamingText({
-	chunks,
-	speed = 10,
-	color = "white",
-}: StreamingTextProps) {
+export function StreamingText({ chunks, speed = 10, color = "white" }: StreamingTextProps) {
 	const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
 	const [displayedText, setDisplayedText] = useState("");
 	const [charIndex, setCharIndex] = useState(0);
@@ -106,12 +100,7 @@ interface WordByWordProps {
 	onComplete?: () => void;
 }
 
-export function WordByWord({
-	text,
-	speed = 50,
-	color = "white",
-	onComplete,
-}: WordByWordProps) {
+export function WordByWord({ text, speed = 50, color = "white", onComplete }: WordByWordProps) {
 	const words = text.split(" ");
 	const [wordIndex, setWordIndex] = useState(0);
 

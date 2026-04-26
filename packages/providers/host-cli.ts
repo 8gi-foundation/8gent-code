@@ -191,9 +191,7 @@ export class HostCliClient implements LLMClient {
 		const invocation = `${this.spec.binary} ${this.extraArgs.join(" ")}`.trim();
 		const decision = evaluatePolicy("run_command", { command: invocation });
 		if (!decision.allowed) {
-			throw new Error(
-				`Policy blocked host-CLI delegation: ${decision.reason ?? "denied"}`,
-			);
+			throw new Error(`Policy blocked host-CLI delegation: ${decision.reason ?? "denied"}`);
 		}
 
 		// Non-interactive invocation. Stdin is closed so the CLI does not hang
@@ -216,9 +214,7 @@ export class HostCliClient implements LLMClient {
 					`Host CLI \`${this.spec.binary}\` disappeared between availability check and spawn (ENOENT).`,
 				);
 			}
-			throw new Error(
-				`Host CLI invocation failed (${this.spec.binary}): ${result.error.message}`,
-			);
+			throw new Error(`Host CLI invocation failed (${this.spec.binary}): ${result.error.message}`);
 		}
 
 		if (result.status !== 0) {
@@ -227,8 +223,7 @@ export class HostCliClient implements LLMClient {
 
 			// Rate limit surfaces via a CLI-specific exit code or a stderr hint.
 			const isRateLimit =
-				(this.spec.rateLimitExitCode !== undefined &&
-					exit === this.spec.rateLimitExitCode) ||
+				(this.spec.rateLimitExitCode !== undefined && exit === this.spec.rateLimitExitCode) ||
 				exit === 429 ||
 				(this.spec.rateLimitStderrPattern?.test(stderr) ?? false) ||
 				/rate[- ]?limit|quota/i.test(stderr);

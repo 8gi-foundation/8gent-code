@@ -78,10 +78,7 @@ async function run(): Promise<void> {
 	}
 
 	/** Wait for a message of a specific type, skipping event broadcasts */
-	async function waitForType(
-		type: string,
-		timeoutMs = TIMEOUT_MS,
-	): Promise<any> {
+	async function waitForType(type: string, timeoutMs = TIMEOUT_MS): Promise<any> {
 		const deadline = Date.now() + timeoutMs;
 		while (Date.now() < deadline) {
 			const msg = await waitForMessage(deadline - Date.now());
@@ -147,10 +144,7 @@ async function run(): Promise<void> {
 		sessionId = sessionReply.sessionId;
 		pass("session:create", `Session ${sessionId}`);
 	} else {
-		fail(
-			"session:create",
-			`Expected session:created, got ${JSON.stringify(sessionReply)}`,
-		);
+		fail("session:create", `Expected session:created, got ${JSON.stringify(sessionReply)}`);
 		ws.close();
 		printSummary();
 		return;
@@ -166,10 +160,7 @@ async function run(): Promise<void> {
 			`sessions=${healthReply.data.sessions} uptime=${Math.round(healthReply.data.uptime)}s`,
 		);
 	} else {
-		fail(
-			"health",
-			`Expected health response, got ${JSON.stringify(healthReply)}`,
-		);
+		fail("health", `Expected health response, got ${JSON.stringify(healthReply)}`);
 	}
 
 	// --- Test 5: List sessions ---
@@ -179,10 +170,7 @@ async function run(): Promise<void> {
 		gotSessionsList = true;
 		pass("sessions:list", `${listReply.sessions.length} session(s) active`);
 	} else {
-		fail(
-			"sessions:list",
-			`Expected sessions:list, got ${JSON.stringify(listReply)}`,
-		);
+		fail("sessions:list", `Expected sessions:list, got ${JSON.stringify(listReply)}`);
 	}
 
 	// --- Test 6: Send prompt and collect events ---
@@ -218,21 +206,15 @@ async function run(): Promise<void> {
 						log(`  event: tool:start - ${payload.tool}`);
 						break;
 					case "tool:result":
-						log(
-							`  event: tool:result - ${payload.tool} (${payload.durationMs}ms)`,
-						);
+						log(`  event: tool:result - ${payload.tool} (${payload.durationMs}ms)`);
 						break;
 					case "agent:stream":
 						if (payload.final) {
 							gotFinalResponse = true;
 							finalResponseText = payload.chunk || "";
-							log(
-								`  event: agent:stream [FINAL] - "${finalResponseText.slice(0, 100)}"`,
-							);
+							log(`  event: agent:stream [FINAL] - "${finalResponseText.slice(0, 100)}"`);
 						} else {
-							log(
-								`  event: agent:stream - "${(payload.chunk || "").slice(0, 80)}..."`,
-							);
+							log(`  event: agent:stream - "${(payload.chunk || "").slice(0, 80)}..."`);
 						}
 						break;
 					case "agent:error":
@@ -261,10 +243,7 @@ async function run(): Promise<void> {
 	}
 
 	if (gotFinalResponse) {
-		pass(
-			"final-response",
-			`Got { final: true } response: "${finalResponseText.slice(0, 100)}"`,
-		);
+		pass("final-response", `Got { final: true } response: "${finalResponseText.slice(0, 100)}"`);
 	} else {
 		fail("final-response", "Never received agent:stream with { final: true }");
 	}
@@ -308,8 +287,6 @@ function printSummary(): void {
 
 run().catch((err) => {
 	console.error("[test] Fatal:", err.message || err);
-	console.error(
-		"[test] Is the daemon running? Start it with: bun run packages/daemon/index.ts",
-	);
+	console.error("[test] Is the daemon running? Start it with: bun run packages/daemon/index.ts");
 	process.exit(1);
 });

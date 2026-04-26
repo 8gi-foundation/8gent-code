@@ -31,12 +31,7 @@ const MOSHI_HF_CACHE_PATH = join(
 	"snapshots",
 );
 
-export type VoiceBackend =
-	| "moshi-mlx"
-	| "moshi-cpu"
-	| "whisper-kokoro"
-	| "nim-api"
-	| "web-speech";
+export type VoiceBackend = "moshi-mlx" | "moshi-cpu" | "whisper-kokoro" | "nim-api" | "web-speech";
 
 export interface FullDuplexProvider {
 	readonly name: VoiceBackend;
@@ -98,15 +93,8 @@ export async function detectCapabilities(): Promise<BackendCapabilities> {
 	};
 }
 
-export async function selectBestBackend(
-	caps: BackendCapabilities,
-): Promise<VoiceBackend> {
-	if (
-		caps.hasAppleSilicon &&
-		caps.hasMLX &&
-		caps.hasMoshiInstalled &&
-		caps.hasMoshiModel
-	) {
+export async function selectBestBackend(caps: BackendCapabilities): Promise<VoiceBackend> {
+	if (caps.hasAppleSilicon && caps.hasMLX && caps.hasMoshiInstalled && caps.hasMoshiModel) {
 		return "moshi-mlx";
 	}
 	if (caps.hasMoshiInstalled && caps.hasMoshiModel) {

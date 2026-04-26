@@ -8,8 +8,7 @@
  */
 
 // Model proxy on Fly internal network, or Ollama fallback
-const MODEL_PROXY_URL =
-	process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
+const MODEL_PROXY_URL = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const INFERENCE_MODE = process.env.INFERENCE_MODE || "proxy"; // "proxy" | "ollama"
 const MAX_RESPONSE_LENGTH = 1900;
@@ -27,9 +26,7 @@ export interface InferenceResult {
 	tokensUsed?: number;
 }
 
-export async function generateResponse(
-	req: InferenceRequest,
-): Promise<InferenceResult> {
+export async function generateResponse(req: InferenceRequest): Promise<InferenceResult> {
 	const start = Date.now();
 
 	const messages = [
@@ -54,8 +51,7 @@ export async function generateResponse(
 				options: { num_predict: 500 },
 			}),
 		});
-		if (!res.ok)
-			throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
+		if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
 		const data = (await res.json()) as any;
 		reply = data.message?.content ?? "No response generated.";
 		tokensUsed = data.eval_count ?? undefined;
@@ -71,10 +67,7 @@ export async function generateResponse(
 			},
 			body: JSON.stringify({ model, messages, max_tokens: 500 }),
 		});
-		if (!res.ok)
-			throw new Error(
-				`Model proxy returned ${res.status}: ${await res.text()}`,
-			);
+		if (!res.ok) throw new Error(`Model proxy returned ${res.status}: ${await res.text()}`);
 		const data = (await res.json()) as any;
 		reply = data.choices?.[0]?.message?.content ?? "No response generated.";
 		tokensUsed = data.usage?.completion_tokens ?? undefined;

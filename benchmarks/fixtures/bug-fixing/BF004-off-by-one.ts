@@ -74,8 +74,5 @@ export function runTests(): void {
 	console.log("getLastN([1,2,3,4,5], 3):", getLastN([1, 2, 3, 4, 5], 3)); // Should be [3,4,5]
 	console.log("paginate([1,2,3,4,5], 1, 2):", paginate([1, 2, 3, 4, 5], 1, 2)); // Should be [1,2]
 	console.log("findMiddle([1,2,3,4]):", findMiddle([1, 2, 3, 4])); // Should be [2,3]
-	console.log(
-		"binarySearch([1,2,3,4,5], 3):",
-		binarySearch([1, 2, 3, 4, 5], 3),
-	); // Should be 2
+	console.log("binarySearch([1,2,3,4,5], 3):", binarySearch([1, 2, 3, 4, 5], 3)); // Should be 2
 }

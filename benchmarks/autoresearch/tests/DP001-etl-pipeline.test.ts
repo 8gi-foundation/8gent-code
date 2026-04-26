@@ -12,10 +12,7 @@ async function loadModules() {
 	const reportMod = await import(resolve(join(WORK_DIR, "report.ts")));
 
 	const parseCSV =
-		parserMod.parseCSV ??
-		parserMod.parse ??
-		parserMod.default?.parseCSV ??
-		parserMod.default;
+		parserMod.parseCSV ?? parserMod.parse ?? parserMod.default?.parseCSV ?? parserMod.default;
 	const pipeline =
 		pipelineMod.runPipeline ??
 		pipelineMod.Pipeline?.run ??
@@ -40,18 +37,14 @@ describe("DP001: ETL Data Pipeline", () => {
 			expect(typeof parseCSV).toBe("function");
 			const result = parseCSV("name,age\nAlice,30\nBob,25\n");
 			expect(result).toBeTruthy();
-			const rows = Array.isArray(result)
-				? result
-				: (result.rows ?? result.data);
+			const rows = Array.isArray(result) ? result : (result.rows ?? result.data);
 			expect(rows.length).toBeGreaterThanOrEqual(2);
 		});
 
 		test("handles quoted fields with commas", async () => {
 			const { parseCSV } = await loadModules();
 			const result = parseCSV('name,bio\nAlice,"Loves coding, hiking"\n');
-			const rows = Array.isArray(result)
-				? result
-				: (result.rows ?? result.data);
+			const rows = Array.isArray(result) ? result : (result.rows ?? result.data);
 			expect(rows.length).toBeGreaterThanOrEqual(1);
 			const first = rows[0];
 			const bio = first.bio ?? first[1] ?? first.bio;
@@ -62,9 +55,7 @@ describe("DP001: ETL Data Pipeline", () => {
 		test("handles BOM marker", async () => {
 			const { parseCSV } = await loadModules();
 			const result = parseCSV("\ufeffid,name\n1,Alice\n");
-			const rows = Array.isArray(result)
-				? result
-				: (result.rows ?? result.data);
+			const rows = Array.isArray(result) ? result : (result.rows ?? result.data);
 			expect(rows.length).toBeGreaterThanOrEqual(1);
 			const first = rows[0];
 			// The key should be "id", not "\ufeffid"
@@ -75,9 +66,7 @@ describe("DP001: ETL Data Pipeline", () => {
 		test("handles mixed line endings (CRLF and LF)", async () => {
 			const { parseCSV } = await loadModules();
 			const result = parseCSV("a,b\r\n1,2\n3,4\r\n");
-			const rows = Array.isArray(result)
-				? result
-				: (result.rows ?? result.data);
+			const rows = Array.isArray(result) ? result : (result.rows ?? result.data);
 			expect(rows.length).toBeGreaterThanOrEqual(2);
 		});
 	});
@@ -90,21 +79,10 @@ describe("DP001: ETL Data Pipeline", () => {
 			// Import the fixture data
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 			expect(result).toBeTruthy();
 		});
@@ -113,37 +91,23 @@ describe("DP001: ETL Data Pipeline", () => {
 			const { pipeline } = await loadModules();
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 
-			const customers =
-				result.customers ?? result.validCustomers ?? result.data?.customers;
+			const customers = result.customers ?? result.validCustomers ?? result.data?.customers;
 			if (customers) {
 				// alice@example.com appears twice (C001 and C004) — should be merged
 				const alices = customers.filter(
-					(c: any) =>
-						(c.email ?? c.Email ?? "").toLowerCase() === "alice@example.com",
+					(c: any) => (c.email ?? c.Email ?? "").toLowerCase() === "alice@example.com",
 				);
 				expect(alices.length).toBe(1);
 
 				// bob@example.com appears twice (C002 and C011) — should be merged
 				const bobs = customers.filter(
-					(c: any) =>
-						(c.email ?? c.Email ?? "").toLowerCase() === "bob@example.com",
+					(c: any) => (c.email ?? c.Email ?? "").toLowerCase() === "bob@example.com",
 				);
 				expect(bobs.length).toBe(1);
 			}
@@ -153,25 +117,13 @@ describe("DP001: ETL Data Pipeline", () => {
 			const { pipeline } = await loadModules();
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 
-			const customers =
-				result.customers ?? result.validCustomers ?? result.data?.customers;
+			const customers = result.customers ?? result.validCustomers ?? result.data?.customers;
 			if (customers) {
 				for (const c of customers) {
 					const date = c.created_at ?? c.createdAt ?? c.date;
@@ -187,35 +139,20 @@ describe("DP001: ETL Data Pipeline", () => {
 			const { pipeline } = await loadModules();
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 
 			const orders = result.orders ?? result.validOrders ?? result.data?.orders;
 			if (orders) {
 				// O005 references C999 (doesn't exist) — should be dropped
-				const o005 = orders.find(
-					(o: any) => (o.order_id ?? o.orderId ?? o.id) === "O005",
-				);
+				const o005 = orders.find((o: any) => (o.order_id ?? o.orderId ?? o.id) === "O005");
 				expect(o005).toBeUndefined();
 
 				// O006 references P999 (doesn't exist) — should be dropped
-				const o006 = orders.find(
-					(o: any) => (o.order_id ?? o.orderId ?? o.id) === "O006",
-				);
+				const o006 = orders.find((o: any) => (o.order_id ?? o.orderId ?? o.id) === "O006");
 				expect(o006).toBeUndefined();
 			}
 		});
@@ -224,28 +161,14 @@ describe("DP001: ETL Data Pipeline", () => {
 			const { pipeline } = await loadModules();
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 
 			const revenue =
-				result.revenue ??
-				result.revenuePerCustomer ??
-				result.data?.revenue ??
-				result.aggregates;
+				result.revenue ?? result.revenuePerCustomer ?? result.data?.revenue ?? result.aggregates;
 			expect(revenue).toBeTruthy();
 
 			// Check Alice's revenue (should be highest)
@@ -264,9 +187,7 @@ describe("DP001: ETL Data Pipeline", () => {
 							.toString()
 							.toLowerCase()
 							.includes("alice") ||
-						(r.customer ?? r.email ?? r.customerId ?? "")
-							.toString()
-							.includes("C001"),
+						(r.customer ?? r.email ?? r.customerId ?? "").toString().includes("C001"),
 				);
 				if (alice) {
 					const total =
@@ -283,28 +204,13 @@ describe("DP001: ETL Data Pipeline", () => {
 			const { pipeline } = await loadModules();
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 
-			const report =
-				result.report ??
-				result.qualityReport ??
-				result.quality ??
-				result.errors;
+			const report = result.report ?? result.qualityReport ?? result.quality ?? result.errors;
 			expect(report).toBeTruthy();
 
 			// Report should mention dropped/invalid rows
@@ -335,21 +241,10 @@ describe("DP001: ETL Data Pipeline", () => {
 			const { pipeline } = await loadModules();
 			const fixtureData = await import(
 				resolve(join(WORK_DIR, "..", "..", "fixtures", "etl-data.ts"))
-			).catch(
-				() =>
-					import(
-						resolve(
-							join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"),
-						)
-					),
-			);
+			).catch(() => import(resolve(join(process.cwd(), "benchmarks", "fixtures", "etl-data.ts"))));
 
 			const result = await Promise.resolve(
-				pipeline(
-					fixtureData.CUSTOMERS_CSV,
-					fixtureData.ORDERS_CSV,
-					fixtureData.PRODUCTS_CSV,
-				),
+				pipeline(fixtureData.CUSTOMERS_CSV, fixtureData.ORDERS_CSV, fixtureData.PRODUCTS_CSV),
 			);
 
 			const orders = result.orders ?? result.validOrders ?? result.data?.orders;
@@ -358,9 +253,7 @@ describe("DP001: ETL Data Pipeline", () => {
 				const total = first.total ?? first.amount ?? first.price;
 				// Total should be numeric, not a string like "$25.98"
 				if (total !== undefined) {
-					expect(
-						typeof total === "number" || !String(total).includes("$"),
-					).toBe(true);
+					expect(typeof total === "number" || !String(total).includes("$")).toBe(true);
 				}
 			}
 		});

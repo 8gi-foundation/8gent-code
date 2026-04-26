@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
+const WORK_DIR = process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
 let schema: any;
@@ -118,9 +117,7 @@ describe("Schema Diffing", () => {
 		const diff = fn(schemaV1, schemaV2);
 		// users table should have columnsAdded with "age"
 		const modified = diff.tablesModified || [];
-		const usersModified = modified.find(
-			(t: any) => t.name === "users" || t.table === "users",
-		);
+		const usersModified = modified.find((t: any) => t.name === "users" || t.table === "users");
 		expect(usersModified).toBeDefined();
 		const addedColNames = (usersModified.columnsAdded || []).map((c: any) =>
 			typeof c === "string" ? c : c.name,
@@ -132,12 +129,10 @@ describe("Schema Diffing", () => {
 		const fn = schema.diffSchemas || schema.default?.diffSchemas;
 		const diff = fn(schemaV2, schemaV1);
 		const modified = diff.tablesModified || [];
-		const usersModified = modified.find(
-			(t: any) => t.name === "users" || t.table === "users",
-		);
+		const usersModified = modified.find((t: any) => t.name === "users" || t.table === "users");
 		expect(usersModified).toBeDefined();
-		const removedColNames = (usersModified.columnsRemoved || []).map(
-			(c: any) => (typeof c === "string" ? c : c.name),
+		const removedColNames = (usersModified.columnsRemoved || []).map((c: any) =>
+			typeof c === "string" ? c : c.name,
 		);
 		expect(removedColNames).toContain("age");
 	});
@@ -171,9 +166,7 @@ describe("SQL Generation", () => {
 describe("MigrationManager", () => {
 	it("topological sort respects dependencies", () => {
 		const MM =
-			migration.MigrationManager ||
-			migration.default?.MigrationManager ||
-			migration.default;
+			migration.MigrationManager || migration.default?.MigrationManager || migration.default;
 		const manager = new MM();
 		manager.register({
 			id: "m2",
@@ -199,9 +192,7 @@ describe("MigrationManager", () => {
 
 	it("detects circular dependencies", () => {
 		const MM =
-			migration.MigrationManager ||
-			migration.default?.MigrationManager ||
-			migration.default;
+			migration.MigrationManager || migration.default?.MigrationManager || migration.default;
 		const manager = new MM();
 		manager.register({
 			id: "a",
@@ -244,9 +235,7 @@ describe("MigrationManager", () => {
 
 	it("getPending returns only unapplied migrations in order", () => {
 		const MM =
-			migration.MigrationManager ||
-			migration.default?.MigrationManager ||
-			migration.default;
+			migration.MigrationManager || migration.default?.MigrationManager || migration.default;
 		const manager = new MM();
 		manager.register({
 			id: "m1",
@@ -282,9 +271,7 @@ describe("MigrationManager", () => {
 
 	it("getRollbackPlan returns reverse order", () => {
 		const MM =
-			migration.MigrationManager ||
-			migration.default?.MigrationManager ||
-			migration.default;
+			migration.MigrationManager || migration.default?.MigrationManager || migration.default;
 		const manager = new MM();
 		manager.register({
 			id: "m1",
@@ -323,13 +310,10 @@ describe("MigrationManager", () => {
 describe("MigrationExecutor", () => {
 	it("runs up migrations in order", async () => {
 		const ME =
-			executor.MigrationExecutor ||
-			executor.default?.MigrationExecutor ||
-			executor.default;
+			executor.MigrationExecutor || executor.default?.MigrationExecutor || executor.default;
 		const executed: string[] = [];
 		const exec = new ME({
-			onProgress: (step: any) =>
-				executed.push(`${step.migrationId}:${step.statement}`),
+			onProgress: (step: any) => executed.push(`${step.migrationId}:${step.statement}`),
 		});
 		const migrations = [
 			{
@@ -353,16 +337,12 @@ describe("MigrationExecutor", () => {
 		expect(result).toBeDefined();
 		expect(result.applied).toContain("m1");
 		expect(result.applied).toContain("m2");
-		expect(result.applied.indexOf("m1")).toBeLessThan(
-			result.applied.indexOf("m2"),
-		);
+		expect(result.applied.indexOf("m1")).toBeLessThan(result.applied.indexOf("m2"));
 	});
 
 	it("dry run collects statements without executing", async () => {
 		const ME =
-			executor.MigrationExecutor ||
-			executor.default?.MigrationExecutor ||
-			executor.default;
+			executor.MigrationExecutor || executor.default?.MigrationExecutor || executor.default;
 		const exec = new ME({ dryRun: true });
 		const migrations = [
 			{
@@ -386,9 +366,7 @@ describe("MigrationExecutor", () => {
 
 	it("stops on failure", async () => {
 		const ME =
-			executor.MigrationExecutor ||
-			executor.default?.MigrationExecutor ||
-			executor.default;
+			executor.MigrationExecutor || executor.default?.MigrationExecutor || executor.default;
 		// Create an executor that simulates failure on second migration
 		let callCount = 0;
 		const exec = new ME({
@@ -446,10 +424,7 @@ describe("MigrationExecutor", () => {
 
 describe("MigrationHistory", () => {
 	it("tracks applied migrations", () => {
-		const MH =
-			history.MigrationHistory ||
-			history.default?.MigrationHistory ||
-			history.default;
+		const MH = history.MigrationHistory || history.default?.MigrationHistory || history.default;
 		const hist = new MH();
 		hist.record("m1", "up", 50);
 		hist.record("m2", "up", 30);
@@ -462,10 +437,7 @@ describe("MigrationHistory", () => {
 	});
 
 	it("handles up/down correctly — down removes from applied", () => {
-		const MH =
-			history.MigrationHistory ||
-			history.default?.MigrationHistory ||
-			history.default;
+		const MH = history.MigrationHistory || history.default?.MigrationHistory || history.default;
 		const hist = new MH();
 		hist.record("m1", "up", 50);
 		hist.record("m2", "up", 30);
@@ -484,9 +456,7 @@ describe("MigrationHistory", () => {
 describe("Lock Mechanism", () => {
 	it("prevents concurrent execution", async () => {
 		const ME =
-			executor.MigrationExecutor ||
-			executor.default?.MigrationExecutor ||
-			executor.default;
+			executor.MigrationExecutor || executor.default?.MigrationExecutor || executor.default;
 		const exec1 = new ME({});
 		const exec2 = new ME({});
 		// acquireLock/releaseLock — if the executor exposes them

@@ -85,9 +85,7 @@ async function readStdin(): Promise<string> {
 		}
 		const chunks: Buffer[] = [];
 		process.stdin.on("data", (chunk) => chunks.push(chunk));
-		process.stdin.on("end", () =>
-			resolve(Buffer.concat(chunks).toString("utf-8").trim()),
-		);
+		process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8").trim()));
 		process.stdin.on("error", () => resolve(""));
 	});
 }
@@ -97,9 +95,7 @@ async function readStdin(): Promise<string> {
 // ============================================
 
 function extractCode(text: string): string | null {
-	const fenced = text.match(
-		/```(?:typescript|ts|javascript|js)?\n([\s\S]*?)```/,
-	);
+	const fenced = text.match(/```(?:typescript|ts|javascript|js)?\n([\s\S]*?)```/);
 	if (fenced) return fenced[1].trim();
 	// Fall back: if response looks like raw code, return as-is
 	if (
@@ -148,8 +144,7 @@ export async function runCLI(args: string[]): Promise<void> {
 	}
 
 	if (!opts.prompt) {
-		const err =
-			"Error: No prompt provided. Pass a prompt argument or pipe via stdin.";
+		const err = "Error: No prompt provided. Pass a prompt argument or pipe via stdin.";
 		if (opts.jsonMode) {
 			console.log(JSON.stringify({ error: err, exitCode: 1 }));
 		} else {

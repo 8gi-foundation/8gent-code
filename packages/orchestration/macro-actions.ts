@@ -61,10 +61,7 @@ function generateId(prefix: string): string {
  * contains the full instruction that Eight should send to the planner model.
  * Eight's agent loop fills in the real actions after the LLM responds.
  */
-export function decompose(
-	userRequest: string,
-	context: DecomposeContext,
-): MacroActionPlan {
+export function decompose(userRequest: string, context: DecomposeContext): MacroActionPlan {
 	const fileList =
 		context.files.length > 0
 			? context.files.map((f) => `  - ${f}`).join("\n")
@@ -278,10 +275,7 @@ export function estimatePlan(plan: MacroActionPlan): PlanEstimate {
 	for (const a of plan.actions) actionMap.set(a.id, a);
 
 	// Sequential: sum of all action times
-	const totalSequential = plan.actions.reduce(
-		(sum, a) => sum + a.estimatedMinutes,
-		0,
-	);
+	const totalSequential = plan.actions.reduce((sum, a) => sum + a.estimatedMinutes, 0);
 
 	// Parallel: sum of max-per-group
 	let totalParallel = 0;

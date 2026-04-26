@@ -8,11 +8,7 @@
  */
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import {
-	type AuthConfig,
-	DEFAULT_AUTH_CONFIG,
-	type TokenPayload,
-} from "./types.js";
+import { type AuthConfig, DEFAULT_AUTH_CONFIG, type TokenPayload } from "./types.js";
 
 // ============================================
 // Config Resolution
@@ -30,8 +26,7 @@ export function resolveAuthConfig(overrides?: Partial<AuthConfig>): AuthConfig {
 			process.env.CLERK_PUBLISHABLE_KEY ||
 			process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
 			DEFAULT_AUTH_CONFIG.clerkPublishableKey,
-		clerkSecretKey:
-			overrides?.clerkSecretKey || process.env.CLERK_SECRET_KEY || undefined,
+		clerkSecretKey: overrides?.clerkSecretKey || process.env.CLERK_SECRET_KEY || undefined,
 		clerkFrontendApi:
 			overrides?.clerkFrontendApi ||
 			process.env.CLERK_FRONTEND_API ||
@@ -49,10 +44,8 @@ export function resolveAuthConfig(overrides?: Partial<AuthConfig>): AuthConfig {
 			process.env.EIGHT_DEVICE_TOKEN_ENDPOINT ||
 			DEFAULT_AUTH_CONFIG.deviceTokenEndpoint,
 		convexUrl: overrides?.convexUrl || process.env.CONVEX_URL || undefined,
-		refreshBufferMs:
-			overrides?.refreshBufferMs ?? DEFAULT_AUTH_CONFIG.refreshBufferMs,
-		deviceFlowTimeoutMs:
-			overrides?.deviceFlowTimeoutMs ?? DEFAULT_AUTH_CONFIG.deviceFlowTimeoutMs,
+		refreshBufferMs: overrides?.refreshBufferMs ?? DEFAULT_AUTH_CONFIG.refreshBufferMs,
+		deviceFlowTimeoutMs: overrides?.deviceFlowTimeoutMs ?? DEFAULT_AUTH_CONFIG.deviceFlowTimeoutMs,
 		...overrides,
 	};
 }
@@ -117,9 +110,7 @@ export function getTokenExpiry(token: string): number {
 let jwksInstance: ReturnType<typeof createRemoteJWKSet> | null = null;
 let jwksUrl: string | null = null;
 
-function getJWKS(
-	clerkFrontendApi: string,
-): ReturnType<typeof createRemoteJWKSet> {
+function getJWKS(clerkFrontendApi: string): ReturnType<typeof createRemoteJWKSet> {
 	const url = `${clerkFrontendApi}/.well-known/jwks.json`;
 
 	// Recreate if the URL changed (different config)
@@ -171,8 +162,7 @@ export async function validateToken(
 					: Array.isArray(payload.aud)
 						? (payload.aud[0] ?? "")
 						: "",
-			metadata: (payload as Record<string, unknown>)
-				.metadata as TokenPayload["metadata"],
+			metadata: (payload as Record<string, unknown>).metadata as TokenPayload["metadata"],
 		};
 	} catch {
 		return null;
@@ -198,8 +188,7 @@ export function extractUserFromToken(payload: TokenPayload): {
 		clerkId: payload.sub,
 		email: payload.email || "",
 		githubUsername: payload.metadata?.githubUsername || "",
-		displayName:
-			payload.metadata?.displayName || payload.email?.split("@")[0] || "",
+		displayName: payload.metadata?.displayName || payload.email?.split("@")[0] || "",
 		avatar: payload.metadata?.avatar || "",
 	};
 }

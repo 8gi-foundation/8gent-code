@@ -57,10 +57,7 @@ function withSession(args: string[], session?: string): string[] {
 /**
  * Open a URL in the browser and return page state summary.
  */
-export function browserOpen(
-	url: string,
-	options?: { browser?: string; session?: string },
-): string {
+export function browserOpen(url: string, options?: { browser?: string; session?: string }): string {
 	const args = ["open", url, "--json"];
 	if (options?.browser) {
 		args.push("--browser", options.browser);
@@ -126,10 +123,7 @@ export function browserEval(js: string, session?: string): string {
 /**
  * Scroll the page. Direction can be "up" or "down".
  */
-export function browserScroll(
-	direction: "up" | "down" = "down",
-	session?: string,
-): string {
+export function browserScroll(direction: "up" | "down" = "down", session?: string): string {
 	return run(withSession(["scroll", direction], session));
 }
 

@@ -60,60 +60,28 @@ export function inferCommitType(description: string): CommitType {
 	if (desc.includes("fix") || desc.includes("bug") || desc.includes("error")) {
 		return "fix";
 	}
-	if (
-		desc.includes("test") ||
-		desc.includes("spec") ||
-		desc.includes("coverage")
-	) {
+	if (desc.includes("test") || desc.includes("spec") || desc.includes("coverage")) {
 		return "test";
 	}
-	if (
-		desc.includes("doc") ||
-		desc.includes("readme") ||
-		desc.includes("comment")
-	) {
+	if (desc.includes("doc") || desc.includes("readme") || desc.includes("comment")) {
 		return "docs";
 	}
-	if (
-		desc.includes("refactor") ||
-		desc.includes("clean") ||
-		desc.includes("simplify")
-	) {
+	if (desc.includes("refactor") || desc.includes("clean") || desc.includes("simplify")) {
 		return "refactor";
 	}
-	if (
-		desc.includes("perf") ||
-		desc.includes("optim") ||
-		desc.includes("faster")
-	) {
+	if (desc.includes("perf") || desc.includes("optim") || desc.includes("faster")) {
 		return "perf";
 	}
-	if (
-		desc.includes("style") ||
-		desc.includes("format") ||
-		desc.includes("lint")
-	) {
+	if (desc.includes("style") || desc.includes("format") || desc.includes("lint")) {
 		return "style";
 	}
-	if (
-		desc.includes("build") ||
-		desc.includes("webpack") ||
-		desc.includes("vite")
-	) {
+	if (desc.includes("build") || desc.includes("webpack") || desc.includes("vite")) {
 		return "build";
 	}
-	if (
-		desc.includes("ci") ||
-		desc.includes("pipeline") ||
-		desc.includes("action")
-	) {
+	if (desc.includes("ci") || desc.includes("pipeline") || desc.includes("action")) {
 		return "ci";
 	}
-	if (
-		desc.includes("chore") ||
-		desc.includes("deps") ||
-		desc.includes("upgrade")
-	) {
+	if (desc.includes("chore") || desc.includes("deps") || desc.includes("upgrade")) {
 		return "chore";
 	}
 
@@ -317,9 +285,7 @@ export function validateBranchName(name: string): {
 
 	// Check for valid characters
 	if (!/^[a-z0-9][a-z0-9\-\/]*[a-z0-9]$/.test(name)) {
-		errors.push(
-			"Branch name must start and end with alphanumeric, contain only a-z, 0-9, -, /",
-		);
+		errors.push("Branch name must start and end with alphanumeric, contain only a-z, 0-9, -, /");
 	}
 
 	// Check for consecutive special characters
@@ -403,8 +369,7 @@ export function generatePRDescription(
 
 	// Check if there are test files changed
 	const testFiles = changes.files.filter(
-		(f) =>
-			f.includes(".test.") || f.includes(".spec.") || f.includes("__tests__"),
+		(f) => f.includes(".test.") || f.includes(".spec.") || f.includes("__tests__"),
 	);
 
 	if (testFiles.length > 0) {
@@ -423,9 +388,7 @@ export function generatePRDescription(
 	}
 
 	// Check for breaking changes
-	const breakingChanges = changes.commits
-		.filter((c) => c.breaking)
-		.map((c) => c.description);
+	const breakingChanges = changes.commits.filter((c) => c.breaking).map((c) => c.description);
 
 	// Extract issues
 	const issues = changes.commits

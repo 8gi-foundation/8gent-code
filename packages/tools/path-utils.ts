@@ -64,9 +64,7 @@ export function commonPrefix(paths: string[]): string {
 	if (paths.length === 0) return "";
 	if (paths.length === 1) return paths[0];
 
-	const normalized = paths.map((p) =>
-		normalizeSlashes(p).split("/").filter(Boolean),
-	);
+	const normalized = paths.map((p) => normalizeSlashes(p).split("/").filter(Boolean));
 
 	const shortest = Math.min(...normalized.map((p) => p.length));
 	const segments: string[] = [];
@@ -93,14 +91,10 @@ export function commonPrefix(paths: string[]): string {
 export function withExtension(path: string, ext: string): string {
 	const normalized = normalizeSlashes(path);
 	const slashIdx = normalized.lastIndexOf("/");
-	const filename =
-		slashIdx === -1 ? normalized : normalized.slice(slashIdx + 1);
+	const filename = slashIdx === -1 ? normalized : normalized.slice(slashIdx + 1);
 	const dotIdx = filename.lastIndexOf(".");
 
-	const base =
-		dotIdx === -1
-			? normalized
-			: normalized.slice(0, normalized.lastIndexOf("."));
+	const base = dotIdx === -1 ? normalized : normalized.slice(0, normalized.lastIndexOf("."));
 	const newExt = ext.startsWith(".") ? ext : `.${ext}`;
 	return base + newExt;
 }
@@ -113,8 +107,7 @@ export function withExtension(path: string, ext: string): string {
 export function withoutExtension(path: string): string {
 	const normalized = normalizeSlashes(path);
 	const slashIdx = normalized.lastIndexOf("/");
-	const filename =
-		slashIdx === -1 ? normalized : normalized.slice(slashIdx + 1);
+	const filename = slashIdx === -1 ? normalized : normalized.slice(slashIdx + 1);
 	const dotIdx = filename.lastIndexOf(".");
 
 	if (dotIdx === -1) return normalized;

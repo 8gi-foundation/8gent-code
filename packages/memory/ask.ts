@@ -56,12 +56,7 @@ export async function askMemory(
 		.map((row, i) => {
 			const parsed = JSON.parse(row.data);
 			const content =
-				parsed.content ||
-				parsed.value ||
-				parsed.title ||
-				parsed.description ||
-				parsed.name ||
-				"";
+				parsed.content || parsed.value || parsed.title || parsed.description || parsed.name || "";
 			return `[${i + 1}] (${row.type}, importance: ${row.importance.toFixed(1)}) ${content}`;
 		})
 		.join("\n");

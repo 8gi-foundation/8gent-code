@@ -91,9 +91,7 @@ async function callModel(prompt: string): Promise<string> {
 		}),
 	});
 	if (!response.ok) {
-		throw new Error(
-			`Model call failed: ${response.status} ${response.statusText}`,
-		);
+		throw new Error(`Model call failed: ${response.status} ${response.statusText}`);
 	}
 	const data = await response.json();
 	return data.message?.content ?? "";
@@ -138,9 +136,7 @@ async function validate(): Promise<ValidationResult> {
 
 	const avgScore = scores.reduce((s, x) => s + x.score, 0) / scores.length;
 	const baselineAvg =
-		baseline.length > 0
-			? baseline.reduce((s, x) => s + x.score, 0) / baseline.length
-			: 0;
+		baseline.length > 0 ? baseline.reduce((s, x) => s + x.score, 0) / baseline.length : 0;
 
 	const passed = regressions.length === 0 && avgScore >= PASS_THRESHOLD;
 
@@ -160,9 +156,7 @@ async function validate(): Promise<ValidationResult> {
 	console.log(`\n${"─".repeat(44)}`);
 	console.log(`  Avg Score:    ${result.avgScore}`);
 	console.log(`  Baseline Avg: ${result.baselineAvg}`);
-	console.log(
-		`  Regressions:  ${regressions.length === 0 ? "none" : regressions.join(", ")}`,
-	);
+	console.log(`  Regressions:  ${regressions.length === 0 ? "none" : regressions.join(", ")}`);
 	console.log(
 		`  Result:       ${passed ? "PASSED — safe to promote checkpoint" : "FAILED — rollback recommended"}`,
 	);

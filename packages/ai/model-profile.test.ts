@@ -84,9 +84,7 @@ describe("MODEL_PROFILES", () => {
 
 	it("no model has the same area in both strengths and weaknesses", () => {
 		for (const [key, profile] of Object.entries(MODEL_PROFILES)) {
-			const overlap = profile.strengths.filter((s) =>
-				profile.weaknesses.includes(s),
-			);
+			const overlap = profile.strengths.filter((s) => profile.weaknesses.includes(s));
 			expect(overlap).toEqual([]);
 		}
 	});
@@ -107,29 +105,19 @@ describe("scoreModelForTask", () => {
 	};
 
 	it("returns high score when required strengths match profile strengths", () => {
-		const score = scoreModelForTask(codingProfile, [
-			"code-generation",
-			"debugging",
-			"reasoning",
-		]);
+		const score = scoreModelForTask(codingProfile, ["code-generation", "debugging", "reasoning"]);
 		// 3 matches * 0.2 = 0.6
 		expect(score).toBeCloseTo(0.6, 5);
 	});
 
 	it("returns negative score when required strengths match profile weaknesses", () => {
-		const score = scoreModelForTask(codingProfile, [
-			"empathy",
-			"creative-writing",
-		]);
+		const score = scoreModelForTask(codingProfile, ["empathy", "creative-writing"]);
 		// 2 weakness matches * -0.2 = -0.4
 		expect(score).toBeCloseTo(-0.4, 5);
 	});
 
 	it("returns 0 when there is no overlap", () => {
-		const score = scoreModelForTask(codingProfile, [
-			"summarization",
-			"translation",
-		]);
+		const score = scoreModelForTask(codingProfile, ["summarization", "translation"]);
 		expect(score).toBe(0);
 	});
 
@@ -138,14 +126,7 @@ describe("scoreModelForTask", () => {
 		const bigProfile: ModelProfile = {
 			modelPattern: "big",
 			displayName: "Big",
-			strengths: [
-				"code-generation",
-				"code-review",
-				"debugging",
-				"reasoning",
-				"math",
-				"analysis",
-			],
+			strengths: ["code-generation", "code-review", "debugging", "reasoning", "math", "analysis"],
 			weaknesses: [],
 			contextWindow: 128_000,
 			costTier: "premium",
@@ -169,14 +150,7 @@ describe("scoreModelForTask", () => {
 			modelPattern: "weak",
 			displayName: "Weak",
 			strengths: [],
-			weaknesses: [
-				"code-generation",
-				"code-review",
-				"debugging",
-				"reasoning",
-				"math",
-				"analysis",
-			],
+			weaknesses: ["code-generation", "code-review", "debugging", "reasoning", "math", "analysis"],
 			contextWindow: 4_096,
 			costTier: "free",
 			speedTier: "instant",

@@ -5,14 +5,7 @@
  * All use Bun.spawn for CLI. All respect dryRun.
  */
 
-import {
-	type ActuatorConfig,
-	type ActuatorResult,
-	checkTarget,
-	fail,
-	log,
-	ok,
-} from "./types";
+import { type ActuatorConfig, type ActuatorResult, checkTarget, fail, log, ok } from "./types";
 
 /** Run a CLI command via Bun.spawn, capture stdout + stderr */
 async function exec(
@@ -62,11 +55,7 @@ export async function npmPublish(
 	const result = await exec(["npm", "publish"], packageDir);
 
 	if (result.exitCode !== 0) {
-		return fail(
-			action,
-			target,
-			`Exit ${result.exitCode}: ${result.stderr || result.stdout}`,
-		);
+		return fail(action, target, `Exit ${result.exitCode}: ${result.stderr || result.stdout}`);
 	}
 
 	return ok(action, target, result.stdout, {
@@ -91,23 +80,13 @@ export async function gitTagAndPush(
 	const blocked = checkTarget(dir, config);
 	if (blocked) return fail(action, target, blocked);
 
-	log(
-		action,
-		target,
-		config.dryRun,
-		`git tag ${tag} && git push origin ${tag}`,
-	);
+	log(action, target, config.dryRun, `git tag ${tag} && git push origin ${tag}`);
 
 	if (config.dryRun) {
-		return ok(
-			action,
-			target,
-			`DRY RUN: would create tag "${tag}" and push to origin`,
-			{
-				reversible: true,
-				undoCommand: `cd ${dir} && git tag -d ${tag} && git push origin :refs/tags/${tag}`,
-			},
-		);
+		return ok(action, target, `DRY RUN: would create tag "${tag}" and push to origin`, {
+			reversible: true,
+			undoCommand: `cd ${dir} && git tag -d ${tag} && git push origin :refs/tags/${tag}`,
+		});
 	}
 
 	// Create tag
@@ -121,11 +100,7 @@ export async function gitTagAndPush(
 	if (pushResult.exitCode !== 0) {
 		// Rollback local tag on push failure
 		await exec(["git", "tag", "-d", tag], dir);
-		return fail(
-			action,
-			target,
-			`Tag created but push failed: ${pushResult.stderr}`,
-		);
+		return fail(action, target, `Tag created but push failed: ${pushResult.stderr}`);
 	}
 
 	return ok(action, target, `Tagged and pushed ${tag}`, {
@@ -167,27 +142,12 @@ export async function createGitHubRelease(
 	}
 
 	const result = await exec(
-		[
-			"gh",
-			"release",
-			"create",
-			tag,
-			"--repo",
-			repo,
-			"--title",
-			tag,
-			"--notes",
-			notes,
-		],
+		["gh", "release", "create", tag, "--repo", repo, "--title", tag, "--notes", notes],
 		process.cwd(),
 	);
 
 	if (result.exitCode !== 0) {
-		return fail(
-			action,
-			target,
-			`Exit ${result.exitCode}: ${result.stderr || result.stdout}`,
-		);
+		return fail(action, target, `Exit ${result.exitCode}: ${result.stderr || result.stdout}`);
 	}
 
 	return ok(action, target, result.stdout, {

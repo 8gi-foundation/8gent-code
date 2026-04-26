@@ -37,9 +37,7 @@ export function time<T>(fn: () => T): TimedResult<T> {
  * Measures execution time of an async function.
  * Awaits the promise and returns the resolved value alongside elapsed milliseconds.
  */
-export async function timeAsync<T>(
-	fn: () => Promise<T>,
-): Promise<TimedResult<T>> {
+export async function timeAsync<T>(fn: () => Promise<T>): Promise<TimedResult<T>> {
 	const start = performance.now();
 	const result = await fn();
 	const durationMs = performance.now() - start;
@@ -101,8 +99,7 @@ function computeStats(samples: number[]): BenchmarkStats {
 	const mean = sum / n;
 
 	const mid = Math.floor(n / 2);
-	const median =
-		n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+	const median = n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 
 	const p95Index = Math.ceil(n * 0.95) - 1;
 

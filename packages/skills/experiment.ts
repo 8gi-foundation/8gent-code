@@ -29,30 +29,27 @@ import { LEARNED_SKILLS_DIR } from "./compound.js";
  * Surfaced as a module-level binding so tests can stub it without spawning real processes.
  * Uses `Bun.spawnSync` when available, falls back to node:child_process for portability.
  */
-export let runShellTest: (cmd: string) => { exitCode: number; stderr: string } =
-	(cmd) => {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const bun = (globalThis as any).Bun as { spawnSync?: Function } | undefined;
-		if (bun && typeof bun.spawnSync === "function") {
-			const proc = bun.spawnSync(["sh", "-c", cmd], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const stderr =
-				proc.stderr && typeof proc.stderr.toString === "function"
-					? proc.stderr.toString()
-					: "";
-			return {
-				exitCode: typeof proc.exitCode === "number" ? proc.exitCode : 1,
-				stderr,
-			};
-		}
-		// node fallback
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const { spawnSync } = require("node:child_process") as typeof import("child_process");
-		const result = spawnSync("sh", ["-c", cmd], { encoding: "utf-8" });
-		return { exitCode: result.status ?? 1, stderr: result.stderr ?? "" };
-	};
+export let runShellTest: (cmd: string) => { exitCode: number; stderr: string } = (cmd) => {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const bun = (globalThis as any).Bun as { spawnSync?: Function } | undefined;
+	if (bun && typeof bun.spawnSync === "function") {
+		const proc = bun.spawnSync(["sh", "-c", cmd], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const stderr =
+			proc.stderr && typeof proc.stderr.toString === "function" ? proc.stderr.toString() : "";
+		return {
+			exitCode: typeof proc.exitCode === "number" ? proc.exitCode : 1,
+			stderr,
+		};
+	}
+	// node fallback
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const { spawnSync } = require("node:child_process") as typeof import("child_process");
+	const result = spawnSync("sh", ["-c", cmd], { encoding: "utf-8" });
+	return { exitCode: result.status ?? 1, stderr: result.stderr ?? "" };
+};
 
 /** Test hook: replace the shell runner. */
 export function setShellTestRunner(fn: typeof runShellTest): void {
@@ -141,15 +138,13 @@ export async function runExperiment(
 	const err = validateSpec(spec);
 	if (err) throw new Error(`invalid experiment spec: ${err}`);
 
-	const skillSlug =
-		skillPath.split("/").pop()?.replace(/\.md$/, "") ?? "unknown";
+	const skillSlug = skillPath.split("/").pop()?.replace(/\.md$/, "") ?? "unknown";
 	const record: ExperimentRecord = {
 		skillSlug,
 		skillPath,
 		hypothesis: spec.hypothesis,
 		test: typeof spec.test === "string" ? spec.test : "[callable]",
-		metricDescriptor:
-			typeof spec.metric === "number" ? `>= ${spec.metric}` : "[predicate]",
+		metricDescriptor: typeof spec.metric === "number" ? `>= ${spec.metric}` : "[predicate]",
 		measurement: null,
 		passed: false,
 		rolledBack: false,
@@ -200,8 +195,7 @@ function evaluateMetric(
 	measurement: Measurement,
 	metric: number | ((m: Measurement) => boolean),
 ): boolean {
-	const value =
-		typeof measurement === "boolean" ? (measurement ? 1 : 0) : measurement;
+	const value = typeof measurement === "boolean" ? (measurement ? 1 : 0) : measurement;
 	if (typeof metric === "number") return value >= metric;
 	return metric(measurement);
 }

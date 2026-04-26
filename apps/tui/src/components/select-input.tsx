@@ -17,21 +17,9 @@
 
 import { Box, type TextProps, useInput } from "ink";
 import React, { useState, useEffect, useMemo } from "react";
-import {
-	AppText,
-	Card,
-	Heading,
-	Inline,
-	Label,
-	MutedText,
-	Stack,
-} from "./primitives/index.js";
+import { AppText, Card, Heading, Inline, Label, MutedText, Stack } from "./primitives/index.js";
 
-function clampScrollOffset(
-	selectedIndex: number,
-	total: number,
-	maxVisible: number,
-): number {
+function clampScrollOffset(selectedIndex: number, total: number, maxVisible: number): number {
 	if (total <= maxVisible) return 0;
 	const maxScroll = total - maxVisible;
 	let off = Math.max(0, selectedIndex - maxVisible + 1);
@@ -132,10 +120,7 @@ export function SelectInput<T = string>({
 			setSelectedIndex((prev) => {
 				let next = prev + 1;
 				// Skip disabled options
-				while (
-					next < filteredOptions.length &&
-					filteredOptions[next]?.disabled
-				) {
+				while (next < filteredOptions.length && filteredOptions[next]?.disabled) {
 					next++;
 				}
 				return Math.min(next, filteredOptions.length - 1);
@@ -169,10 +154,7 @@ export function SelectInput<T = string>({
 	});
 
 	// Visible slice of options
-	const visibleOptions = filteredOptions.slice(
-		scrollOffset,
-		scrollOffset + maxVisible,
-	);
+	const visibleOptions = filteredOptions.slice(scrollOffset, scrollOffset + maxVisible);
 	const hasMore = filteredOptions.length > maxVisible;
 	const canScrollUp = scrollOffset > 0;
 	const canScrollDown = scrollOffset + maxVisible < filteredOptions.length;
@@ -219,18 +201,13 @@ export function SelectInput<T = string>({
 							)}
 
 							{/* Icon if present (omit placeholder spaces — they still rendered a column) */}
-							{option.icon ? (
-								<AppText dimColor={isDisabled}>{option.icon} </AppText>
-							) : null}
+							{option.icon ? <AppText dimColor={isDisabled}>{option.icon} </AppText> : null}
 
 							{/* Label */}
 							{isDisabled ? (
 								<MutedText>{option.label}</MutedText>
 							) : (
-								<AppText
-									color={isSelected ? inkHighlight : undefined}
-									bold={isSelected}
-								>
+								<AppText color={isSelected ? inkHighlight : undefined} bold={isSelected}>
 									{option.label}
 								</AppText>
 							)}
@@ -253,8 +230,7 @@ export function SelectInput<T = string>({
 			{hasMore && canScrollDown && (
 				<Box>
 					<MutedText>
-						{"  "}▼ {filteredOptions.length - scrollOffset - maxVisible} more
-						below
+						{"  "}▼ {filteredOptions.length - scrollOffset - maxVisible} more below
 					</MutedText>
 				</Box>
 			)}
@@ -332,10 +308,7 @@ export function ConfirmDialog({
 		<Card borderColor="yellow">
 			<AppText color="yellow">{message}</AppText>
 			<Inline gap={2} marginTop={1}>
-				<AppText
-					color={selected === 0 ? "green" : "gray"}
-					bold={selected === 0}
-				>
+				<AppText color={selected === 0 ? "green" : "gray"} bold={selected === 0}>
 					{selected === 0 ? "❯ " : "  "}
 					{yesLabel}
 				</AppText>
@@ -397,9 +370,7 @@ export function QuickMenu<T = string>({
 		}
 
 		// Check for shortcut key
-		const action = actions.find(
-			(a) => a.shortcut?.toLowerCase() === input?.toLowerCase(),
-		);
+		const action = actions.find((a) => a.shortcut?.toLowerCase() === input?.toLowerCase());
 		if (action) {
 			onSelect(action.value);
 		}
@@ -492,12 +463,7 @@ export function ProviderSelector({
 	const options: SelectOption<string>[] = providers.map((p) => ({
 		label: p.displayName,
 		value: p.name,
-		icon:
-			p.name === currentProvider
-				? "\u2713"
-				: p.hasApiKey
-					? "\u{1F511}"
-					: undefined,
+		icon: p.name === currentProvider ? "\u2713" : p.hasApiKey ? "\u{1F511}" : undefined,
 		description:
 			p.name === currentProvider
 				? "Currently active"

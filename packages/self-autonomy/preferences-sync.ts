@@ -64,10 +64,7 @@ export class PreferencesSyncManager {
 			const available = await this.resolveConvex();
 			if (!available) return;
 
-			const cloudPrefs = await this._client.query(
-				this._api.preferences.getByClerkId,
-				{ clerkId },
-			);
+			const cloudPrefs = await this._client.query(this._api.preferences.getByClerkId, { clerkId });
 
 			if (!cloudPrefs) return; // No cloud prefs yet
 
@@ -85,12 +82,10 @@ export class PreferencesSyncManager {
 					localConfig.preferences.model.default = cloudPrefs.defaultModel;
 				}
 				if (cloudPrefs.defaultProvider) {
-					localConfig.preferences.model.provider =
-						cloudPrefs.defaultProvider as any;
+					localConfig.preferences.model.provider = cloudPrefs.defaultProvider as any;
 				}
 				if (cloudPrefs.communicationStyle) {
-					localConfig.identity.communicationStyle =
-						cloudPrefs.communicationStyle as any;
+					localConfig.identity.communicationStyle = cloudPrefs.communicationStyle as any;
 				}
 				if (cloudPrefs.language) {
 					localConfig.identity.language = cloudPrefs.language;
@@ -99,13 +94,10 @@ export class PreferencesSyncManager {
 					localConfig.preferences.git.branchPrefix = cloudPrefs.gitBranchPrefix;
 				}
 				if (cloudPrefs.autonomyThreshold) {
-					localConfig.preferences.autonomy.askThreshold =
-						cloudPrefs.autonomyThreshold as any;
+					localConfig.preferences.autonomy.askThreshold = cloudPrefs.autonomyThreshold as any;
 				}
 
-				localConfig.understanding.lastUpdated = new Date(
-					cloudUpdatedAt,
-				).toISOString();
+				localConfig.understanding.lastUpdated = new Date(cloudUpdatedAt).toISOString();
 				this.saveLocalConfig(localConfig);
 			}
 		} catch {
@@ -129,12 +121,10 @@ export class PreferencesSyncManager {
 				userId,
 				defaultModel: localConfig.preferences.model.default || "",
 				defaultProvider: localConfig.preferences.model.provider || "ollama",
-				communicationStyle:
-					localConfig.identity.communicationStyle || undefined,
+				communicationStyle: localConfig.identity.communicationStyle || undefined,
 				language: localConfig.identity.language || undefined,
 				gitBranchPrefix: localConfig.preferences.git.branchPrefix || undefined,
-				autonomyThreshold:
-					localConfig.preferences.autonomy.askThreshold || undefined,
+				autonomyThreshold: localConfig.preferences.autonomy.askThreshold || undefined,
 			});
 		} catch {
 			// Push is best-effort

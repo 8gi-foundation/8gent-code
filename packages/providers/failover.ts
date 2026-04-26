@@ -24,9 +24,7 @@ function appleFoundationAvailable(): boolean {
 	if (process.arch !== "arm64") return false;
 	const major = Number.parseInt(release().split(".")[0] ?? "0", 10);
 	if (Number.isFinite(major) && major < 25) return false;
-	return existsSync(
-		join(homedir(), ".8gent", "bin", "apple-foundation-bridge"),
-	);
+	return existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"));
 }
 
 const APPLE_FOUNDATION_ENTRY: FailoverEntry = {
@@ -61,10 +59,7 @@ export interface FailoverEvent {
 }
 
 export class ModelFailover {
-	private chainsByChannel: Record<
-		FailoverChannel,
-		Record<string, FailoverChain>
-	>;
+	private chainsByChannel: Record<FailoverChannel, Record<string, FailoverChain>>;
 	private down: Set<string> = new Set();
 	private events: FailoverEvent[] = [];
 
@@ -99,9 +94,7 @@ export class ModelFailover {
 
 	private defaultTextChains(): Record<string, FailoverChain> {
 		const preferAppleFoundation = appleFoundationAvailable();
-		const prefix: FailoverEntry[] = preferAppleFoundation
-			? [APPLE_FOUNDATION_ENTRY]
-			: [];
+		const prefix: FailoverEntry[] = preferAppleFoundation ? [APPLE_FOUNDATION_ENTRY] : [];
 
 		return {
 			"eight:latest": {
@@ -187,10 +180,7 @@ export class ModelFailover {
 		const head = chain.models[0];
 		for (const entry of chain.models) {
 			if (!this.down.has(this.key(entry.model, entry.provider))) {
-				if (
-					head &&
-					(entry.model !== head.model || entry.provider !== head.provider)
-				) {
+				if (head && (entry.model !== head.model || entry.provider !== head.provider)) {
 					this.recordEvent({
 						ts: Date.now(),
 						channel,

@@ -47,8 +47,7 @@ export function normalizeToolResult(
 			out = {
 				success: Boolean(obj.success),
 				toolName,
-				result:
-					typeof obj.result === "string" ? obj.result : String(obj.result),
+				result: typeof obj.result === "string" ? obj.result : String(obj.result),
 			};
 			if (obj.error !== undefined) {
 				out.error = String(obj.error);

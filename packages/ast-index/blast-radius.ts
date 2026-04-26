@@ -68,10 +68,9 @@ export function getBlastRadius(filePath: string, rootDir: string): BlastRadius {
 	const node = graph.nodes.get(absFile);
 	const directDependents = node ? [...node.exportedBy] : [];
 
-	const transitiveDependents = collectTransitive(
-		[absFile, ...directDependents],
-		graph,
-	).filter((f) => !directDependents.includes(f));
+	const transitiveDependents = collectTransitive([absFile, ...directDependents], graph).filter(
+		(f) => !directDependents.includes(f),
+	);
 
 	const allAffected = [absFile, ...directDependents, ...transitiveDependents];
 	const testSet = new Set<string>();
@@ -87,9 +86,7 @@ export function getBlastRadius(filePath: string, rootDir: string): BlastRadius {
 	const rel = (f: string) => path.relative(rootDir, f);
 	const fileLabel = rel(absFile);
 	const testLabel =
-		affectedTests.length === 1
-			? "1 test suite"
-			: `${affectedTests.length} test suites`;
+		affectedTests.length === 1 ? "1 test suite" : `${affectedTests.length} test suites`;
 	const depLabel = totalAffected === 1 ? "1 file" : `${totalAffected} files`;
 
 	const summary =

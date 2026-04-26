@@ -30,19 +30,13 @@ function encode(input: number[]): number[] {
 	while (i < input.length) {
 		// Try ascending run
 		let ascLen = 1;
-		while (
-			i + ascLen < input.length &&
-			input[i + ascLen] === input[i + ascLen - 1] + 1
-		) {
+		while (i + ascLen < input.length && input[i + ascLen] === input[i + ascLen - 1] + 1) {
 			ascLen++;
 		}
 
 		// Try descending run
 		let descLen = 1;
-		while (
-			i + descLen < input.length &&
-			input[i + descLen] === input[i + descLen - 1] - 1
-		) {
+		while (i + descLen < input.length && input[i + descLen] === input[i + descLen - 1] - 1) {
 			descLen++;
 		}
 

@@ -112,9 +112,7 @@ describe("lintMemory", () => {
 		});
 
 		// Add a consolidation log entry (recent)
-		db.prepare(
-			"INSERT INTO consolidation_log (id, created_at) VALUES (?, ?)",
-		).run("clog_1", now);
+		db.prepare("INSERT INTO consolidation_log (id, created_at) VALUES (?, ?)").run("clog_1", now);
 
 		const report = lintMemory(db, graph);
 		expect(report.score).toBeGreaterThanOrEqual(80);
@@ -199,15 +197,7 @@ describe("lintMemory", () => {
 		db.prepare(
 			`INSERT INTO knowledge_relationships (id, source_id, target_id, type, strength, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		).run(
-			"rel_broken",
-			e1,
-			"nonexistent_entity_id",
-			"related_to",
-			0.5,
-			now,
-			now,
-		);
+		).run("rel_broken", e1, "nonexistent_entity_id", "related_to", 0.5, now, now);
 
 		insertMemory(db, { content_text: "real-entity test" });
 
@@ -281,9 +271,7 @@ describe("lintMemory", () => {
 			created_at: now,
 			consolidation_level: "consolidated",
 		});
-		db2
-			.prepare("INSERT INTO consolidation_log (id, created_at) VALUES (?, ?)")
-			.run("clog_1", now);
+		db2.prepare("INSERT INTO consolidation_log (id, created_at) VALUES (?, ?)").run("clog_1", now);
 		const cleanReport = lintMemory(db2, graph2);
 		db2.close();
 

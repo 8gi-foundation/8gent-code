@@ -114,9 +114,7 @@ export function lintMemory(db: Database, graph: KnowledgeGraph): LintReport {
 
 	// 5. Broken references — relationships pointing to non-existent entities
 	const broken: BrokenReference[] = [];
-	const allRels = db
-		.prepare("SELECT * FROM knowledge_relationships")
-		.all() as Array<{
+	const allRels = db.prepare("SELECT * FROM knowledge_relationships").all() as Array<{
 		id: string;
 		source_id: string;
 		target_id: string;

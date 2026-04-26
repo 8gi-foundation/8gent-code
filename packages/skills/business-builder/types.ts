@@ -33,9 +33,5 @@ export interface BuildOptions {
 	depth?: BuildDepth;
 	model?: string;
 	parallel?: boolean;
-	onProgress?: (
-		phase: number,
-		agentId: string,
-		status: "start" | "done",
-	) => void;
+	onProgress?: (phase: number, agentId: string, status: "start" | "done") => void;
 }

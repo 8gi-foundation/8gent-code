@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";
@@ -31,9 +29,7 @@ describe("UI007 - Responsive Magazine Layout", () => {
 
 	test("3+ @media blocks with different breakpoints", () => {
 		const mediaBlocks = css.match(/@media\s*\([^)]*\)/g) ?? [];
-		const uniqueBreakpoints = new Set(
-			mediaBlocks.map((m) => m.replace(/\s+/g, "")),
-		);
+		const uniqueBreakpoints = new Set(mediaBlocks.map((m) => m.replace(/\s+/g, "")));
 		expect(uniqueBreakpoints.size).toBeGreaterThanOrEqual(3);
 	});
 
@@ -43,9 +39,7 @@ describe("UI007 - Responsive Magazine Layout", () => {
 	});
 
 	test("hero element spans multiple columns", () => {
-		const hasSpan = css.match(
-			/grid-column\s*:\s*(span\s+[2-9]|\d+\s*\/\s*(-1|\d+))/i,
-		);
+		const hasSpan = css.match(/grid-column\s*:\s*(span\s+[2-9]|\d+\s*\/\s*(-1|\d+))/i);
 		const hasAreaSpan = css.match(/grid-area\s*:\s*hero/i);
 		expect(hasSpan || hasAreaSpan).not.toBeNull();
 	});

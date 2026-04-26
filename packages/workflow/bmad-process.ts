@@ -110,15 +110,7 @@ export function classifyTaskSize(
 		"whitespace",
 		"import",
 	];
-	const smallPatterns = [
-		"add function",
-		"fix bug",
-		"update",
-		"change",
-		"modify",
-		"edit",
-		"adjust",
-	];
+	const smallPatterns = ["add function", "fix bug", "update", "change", "modify", "edit", "adjust"];
 	const mediumPatterns = [
 		"create feature",
 		"implement",
@@ -183,11 +175,7 @@ export function generateAcceptanceCriteria(
 		addCriterion("File contains required content", "file_content");
 	}
 
-	if (
-		taskLower.includes("edit") ||
-		taskLower.includes("modify") ||
-		taskLower.includes("update")
-	) {
+	if (taskLower.includes("edit") || taskLower.includes("modify") || taskLower.includes("update")) {
 		addCriterion("Changes applied to target file", "file_content");
 		addCriterion("No syntax errors in modified code", "command_output");
 	}
@@ -204,10 +192,7 @@ export function generateAcceptanceCriteria(
 
 	// Git-related criteria
 	if (size !== "trivial") {
-		addCriterion(
-			"Changes committed with conventional commit message",
-			"git_commit",
-		);
+		addCriterion("Changes committed with conventional commit message", "git_commit");
 	}
 
 	// Type-check criteria for TypeScript
@@ -427,9 +412,7 @@ export class KanbanBoard extends EventEmitter {
 		this.emit("step:updated", { task, step });
 
 		// Check if all steps are done
-		const allDone = task.steps.every(
-			(s) => s.status === "done" || s.status === "skipped",
-		);
+		const allDone = task.steps.every((s) => s.status === "done" || s.status === "skipped");
 		if (allDone && task.status === "in_progress") {
 			this.moveTask(taskId, "review");
 		}
@@ -440,11 +423,7 @@ export class KanbanBoard extends EventEmitter {
 	/**
 	 * Verify acceptance criterion
 	 */
-	verifyCriterion(
-		taskId: string,
-		criterionId: string,
-		evidence: Evidence,
-	): boolean {
+	verifyCriterion(taskId: string, criterionId: string, evidence: Evidence): boolean {
 		const task = this.taskIndex.get(taskId);
 		if (!task) return false;
 
@@ -498,9 +477,7 @@ export class KanbanBoard extends EventEmitter {
 	 * Get all tasks for an agent
 	 */
 	getTasksByAgent(agentId: string): BMadTask[] {
-		return Array.from(this.taskIndex.values()).filter(
-			(t) => t.assignedAgent === agentId,
-		);
+		return Array.from(this.taskIndex.values()).filter((t) => t.assignedAgent === agentId);
 	}
 
 	/**
@@ -573,18 +550,12 @@ export class KanbanBoard extends EventEmitter {
 	 */
 	render(): string {
 		const lines: string[] = [];
-		lines.push(
-			"\n╔════════════════════════════════════════════════════════════╗",
-		);
+		lines.push("\n╔════════════════════════════════════════════════════════════╗");
 		lines.push(`║  ${this.board.name.padEnd(56)}║`);
-		lines.push(
-			"╠════════════════════════════════════════════════════════════╣",
-		);
+		lines.push("╠════════════════════════════════════════════════════════════╣");
 
 		for (const column of this.board.columns) {
-			const wipInfo = column.wipLimit
-				? ` (${column.tasks.length}/${column.wipLimit})`
-				: "";
+			const wipInfo = column.wipLimit ? ` (${column.tasks.length}/${column.wipLimit})` : "";
 			lines.push(`${`║  ${column.name}${wipInfo}`.padEnd(61)}║`);
 			lines.push(`║  ${"─".repeat(56)}  ║`);
 
@@ -597,17 +568,13 @@ export class KanbanBoard extends EventEmitter {
 					lines.push(`║  ${icon} ${title.padEnd(53)}║`);
 				}
 				if (column.tasks.length > 5) {
-					lines.push(
-						`${`║  ... and ${column.tasks.length - 5} more`.padEnd(61)}║`,
-					);
+					lines.push(`${`║  ... and ${column.tasks.length - 5} more`.padEnd(61)}║`);
 				}
 			}
 			lines.push(`${"║  ".padEnd(61)}║`);
 		}
 
-		lines.push(
-			"╚════════════════════════════════════════════════════════════╝",
-		);
+		lines.push("╚════════════════════════════════════════════════════════════╝");
 		return lines.join("\n");
 	}
 

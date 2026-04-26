@@ -50,9 +50,7 @@ interface State<TContext, TEvent extends { type: string }> {
 	done: boolean;
 }
 
-type Listener<TContext, TEvent extends { type: string }> = (
-	state: State<TContext, TEvent>,
-) => void;
+type Listener<TContext, TEvent extends { type: string }> = (state: State<TContext, TEvent>) => void;
 
 class StateMachine<TContext, TEvent extends { type: string }> {
 	private config: MachineConfig<TContext, TEvent>;
@@ -67,11 +65,7 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 		this.scheduleDelayedTransitions(config.initial);
 	}
 
-	private createState(
-		value: string,
-		context: TContext,
-		changed: boolean,
-	): State<TContext, TEvent> {
+	private createState(value: string, context: TContext, changed: boolean): State<TContext, TEvent> {
 		return {
 			value,
 			context,
@@ -85,12 +79,9 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 		};
 	}
 
-	private getStateConfig(
-		statePath: string,
-	): StateNodeConfig<TContext, TEvent> | undefined {
+	private getStateConfig(statePath: string): StateNodeConfig<TContext, TEvent> | undefined {
 		const parts = statePath.split(".");
-		let current: StateNodeConfig<TContext, TEvent> | undefined =
-			this.config.states[parts[0]];
+		let current: StateNodeConfig<TContext, TEvent> | undefined = this.config.states[parts[0]];
 
 		for (let i = 1; i < parts.length && current; i++) {
 			current = current.states?.[parts[i]];
@@ -103,9 +94,7 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 		const stateConfig = this.getStateConfig(statePath);
 		if (!stateConfig?.entry) return;
 
-		const actions = Array.isArray(stateConfig.entry)
-			? stateConfig.entry
-			: [stateConfig.entry];
+		const actions = Array.isArray(stateConfig.entry) ? stateConfig.entry : [stateConfig.entry];
 
 		for (const action of actions) {
 			const result = action(this.currentState.context, {
@@ -125,9 +114,7 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 		const stateConfig = this.getStateConfig(statePath);
 		if (!stateConfig?.exit) return;
 
-		const actions = Array.isArray(stateConfig.exit)
-			? stateConfig.exit
-			: [stateConfig.exit];
+		const actions = Array.isArray(stateConfig.exit) ? stateConfig.exit : [stateConfig.exit];
 
 		for (const action of actions) {
 			action(this.currentState.context, { type: "EXIT" } as TEvent);
@@ -186,8 +173,7 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 		const currentValue = this.currentState.value as string;
 		const stateConfig = this.getStateConfig(currentValue);
 
-		const transitionConfig =
-			stateConfig?.on?.[event.type] || this.config.on?.[event.type];
+		const transitionConfig = stateConfig?.on?.[event.type] || this.config.on?.[event.type];
 
 		if (!transitionConfig) {
 			return this.currentState;
@@ -213,11 +199,7 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 			}
 		}
 
-		this.currentState = this.createState(
-			target,
-			newContext,
-			target !== currentValue,
-		);
+		this.currentState = this.createState(target, newContext, target !== currentValue);
 
 		if (target !== currentValue) {
 			this.executeEntryActions(target);

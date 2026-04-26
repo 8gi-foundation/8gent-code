@@ -70,11 +70,7 @@ async function apiCall(
 	return json.result;
 }
 
-async function apiFormData(
-	token: string,
-	method: string,
-	formData: FormData,
-): Promise<any> {
+async function apiFormData(token: string, method: string, formData: FormData): Promise<any> {
 	const url = `${API_BASE}${token}/${method}`;
 	const response = await fetch(url, {
 		method: "POST",
@@ -84,9 +80,7 @@ async function apiFormData(
 	const json = (await response.json()) as TelegramResponse;
 
 	if (!json.ok) {
-		throw new Error(
-			`Telegram API ${method}: ${json.description ?? "Unknown error"}`,
-		);
+		throw new Error(`Telegram API ${method}: ${json.description ?? "Unknown error"}`);
 	}
 
 	return json.result;
@@ -95,10 +89,7 @@ async function apiFormData(
 /**
  * Split a long message into Telegram-safe chunks at line boundaries.
  */
-function splitMessage(
-	text: string,
-	maxLen: number = MAX_MESSAGE_LENGTH,
-): string[] {
+function splitMessage(text: string, maxLen: number = MAX_MESSAGE_LENGTH): string[] {
 	if (text.length <= maxLen) return [text];
 
 	const chunks: string[] = [];
@@ -159,10 +150,8 @@ export class TelegramBot {
 	public liveDashboard: LiveDashboard;
 
 	constructor(config?: Partial<TelegramBotConfig>) {
-		this.token =
-			config?.token ?? process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_TOKEN;
-		this.chatId =
-			config?.chatId ?? process.env.TELEGRAM_CHAT_ID ?? DEFAULT_CHAT_ID;
+		this.token = config?.token ?? process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_TOKEN;
+		this.chatId = config?.chatId ?? process.env.TELEGRAM_CHAT_ID ?? DEFAULT_CHAT_ID;
 		this.pollingInterval = config?.pollingInterval ?? 30;
 
 		this.memory = new BotMemory();
@@ -177,10 +166,7 @@ export class TelegramBot {
 	 * Automatically splits messages that exceed Telegram's 4096 char limit.
 	 * Returns the message_id of the last sent message.
 	 */
-	async sendMessage(
-		text: string,
-		options?: SendMessageOptions,
-	): Promise<number> {
+	async sendMessage(text: string, options?: SendMessageOptions): Promise<number> {
 		const parseMode = options?.parseMode ?? "Markdown";
 		const chunks = splitMessage(text);
 		let lastMessageId = 0;
@@ -317,10 +303,7 @@ export class TelegramBot {
 	/**
 	 * Send an alert with severity-based formatting.
 	 */
-	async sendAlert(
-		message: string,
-		severity: AlertSeverity = "info",
-	): Promise<void> {
+	async sendAlert(message: string, severity: AlertSeverity = "info"): Promise<void> {
 		const formatted = formatAlert(message, severity);
 		await this.sendMessage(formatted, { parseMode: "Markdown" });
 	}
@@ -359,15 +342,11 @@ export class TelegramBot {
 
 		while (this.polling) {
 			try {
-				const updates: TelegramUpdate[] = await apiCall(
-					this.token,
-					"getUpdates",
-					{
-						offset: this.pollOffset,
-						timeout: this.pollingInterval,
-						allowed_updates: ["message", "callback_query"],
-					},
-				);
+				const updates: TelegramUpdate[] = await apiCall(this.token, "getUpdates", {
+					offset: this.pollOffset,
+					timeout: this.pollingInterval,
+					allowed_updates: ["message", "callback_query"],
+				});
 
 				for (const update of updates) {
 					this.pollOffset = update.update_id + 1;
@@ -434,10 +413,7 @@ export class TelegramBot {
 				);
 			} else {
 				// Route non-command messages to agent mode
-				const response = await this.agentMode.processMessage(
-					text,
-					String(chatId),
-				);
+				const response = await this.agentMode.processMessage(text, String(chatId));
 				if (response) {
 					await this.sendMessage(response, { parseMode: "Markdown" });
 				}
@@ -480,10 +456,7 @@ export class TelegramBot {
 		}
 
 		// 2. Fallback: route callback data through agent mode as if it were a message.
-		const response = await this.agentMode.processMessage(
-			query.data,
-			String(chatId),
-		);
+		const response = await this.agentMode.processMessage(query.data, String(chatId));
 		if (response) {
 			await this.sendMessage(response, { parseMode: "Markdown" });
 		}
@@ -540,10 +513,7 @@ export class TelegramBot {
  * Create a bot instance with default config and send a single message.
  * Useful for scripts and cron jobs.
  */
-export async function quickSend(
-	text: string,
-	parseMode?: "Markdown" | "HTML",
-): Promise<void> {
+export async function quickSend(text: string, parseMode?: "Markdown" | "HTML"): Promise<void> {
 	const bot = new TelegramBot();
 	await bot.sendMessage(text, { parseMode: parseMode ?? "Markdown" });
 }

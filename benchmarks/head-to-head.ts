@@ -167,10 +167,7 @@ let cachedSystemPrompt: string | null = null;
 function getEightSystemPrompt(): string {
 	if (cachedSystemPrompt) return cachedSystemPrompt;
 	try {
-		const promptFile = path.join(
-			import.meta.dir,
-			"../packages/eight/prompts/system-prompt.ts",
-		);
+		const promptFile = path.join(import.meta.dir, "../packages/eight/prompts/system-prompt.ts");
 		const content = fs.readFileSync(promptFile, "utf-8");
 		// Extract all segment values and concatenate
 		const segments: string[] = [];
@@ -189,9 +186,7 @@ function getEightSystemPrompt(): string {
 	return cachedSystemPrompt;
 }
 
-async function run8gent(
-	task: SWETask,
-): Promise<{ output: string; durationMs: number }> {
+async function run8gent(task: SWETask): Promise<{ output: string; durationMs: number }> {
 	const fixture = task.fixture
 		? fs.readFileSync(path.join(import.meta.dir, "..", task.fixture), "utf-8")
 		: "";
@@ -221,9 +216,7 @@ async function run8gent(
 	return { output, durationMs: Date.now() - start };
 }
 
-async function runClaude(
-	task: SWETask,
-): Promise<{ output: string; durationMs: number }> {
+async function runClaude(task: SWETask): Promise<{ output: string; durationMs: number }> {
 	const fixture = task.fixture
 		? fs.readFileSync(path.join(import.meta.dir, "..", task.fixture), "utf-8")
 		: "";
@@ -234,9 +227,7 @@ async function runClaude(
 	const apiKey = process.env.ANTHROPIC_API_KEY;
 	if (!apiKey) {
 		// Fallback: use qwen3.5 as "Claude stand-in" if no API key
-		console.log(
-			"  ⚠ No ANTHROPIC_API_KEY — using qwen3.5:latest as Claude stand-in",
-		);
+		console.log("  ⚠ No ANTHROPIC_API_KEY — using qwen3.5:latest as Claude stand-in");
 		const start = Date.now();
 		const res = await fetch(`${OLLAMA_URL}/api/chat`, {
 			method: "POST",
@@ -352,12 +343,7 @@ Rate each solution 0-100. Output ONLY valid JSON:
 			claudeScore: parsed.scoreB ?? 50,
 			eightAnalysis: parsed.analysisA ?? "No analysis",
 			claudeAnalysis: parsed.analysisB ?? "No analysis",
-			winner:
-				parsed.winner === "A"
-					? "8gent"
-					: parsed.winner === "B"
-						? "Claude"
-						: "tie",
+			winner: parsed.winner === "A" ? "8gent" : parsed.winner === "B" ? "Claude" : "tie",
 		};
 	} catch {
 		return {
@@ -409,9 +395,7 @@ async function main() {
 		let eightResult: { output: string; durationMs: number };
 		try {
 			eightResult = await run8gent(task);
-			console.log(
-				`  ✓ 8gent: ${eightResult.durationMs}ms, ${eightResult.output.length} chars`,
-			);
+			console.log(`  ✓ 8gent: ${eightResult.durationMs}ms, ${eightResult.output.length} chars`);
 		} catch (err: any) {
 			console.log(`  ✗ 8gent failed: ${err.message}`);
 			eightResult = { output: `ERROR: ${err.message}`, durationMs: 0 };
@@ -421,9 +405,7 @@ async function main() {
 		let claudeResult: { output: string; durationMs: number };
 		try {
 			claudeResult = await runClaude(task);
-			console.log(
-				`  ✓ Claude: ${claudeResult.durationMs}ms, ${claudeResult.output.length} chars`,
-			);
+			console.log(`  ✓ Claude: ${claudeResult.durationMs}ms, ${claudeResult.output.length} chars`);
 		} catch (err: any) {
 			console.log(`  ✗ Claude failed: ${err.message}`);
 			claudeResult = { output: `ERROR: ${err.message}`, durationMs: 0 };
@@ -437,19 +419,10 @@ async function main() {
 		else if (verdict.winner === "Claude") claudeWins++;
 		else ties++;
 
-		const icon =
-			verdict.winner === "8gent"
-				? "🏆"
-				: verdict.winner === "Claude"
-					? "🥈"
-					: "🤝";
+		const icon = verdict.winner === "8gent" ? "🏆" : verdict.winner === "Claude" ? "🥈" : "🤝";
 		console.log(`  ${icon} Winner: ${verdict.winner}`);
-		console.log(
-			`     8gent: ${verdict.eightScore}/100 — ${verdict.eightAnalysis}`,
-		);
-		console.log(
-			`     Claude: ${verdict.claudeScore}/100 — ${verdict.claudeAnalysis}`,
-		);
+		console.log(`     8gent: ${verdict.eightScore}/100 — ${verdict.eightAnalysis}`);
+		console.log(`     Claude: ${verdict.claudeScore}/100 — ${verdict.claudeAnalysis}`);
 
 		results.push({
 			task,
@@ -464,33 +437,24 @@ async function main() {
 	}
 
 	// ── Summary ──────────────────────────────────────────────────
-	console.log(
-		"\n\n╔══════════════════════════════════════════════════════════╗",
-	);
+	console.log("\n\n╔══════════════════════════════════════════════════════════╗");
 	console.log("║                    FINAL SCOREBOARD                      ║");
 	console.log("╠══════════════════════════════════════════════════════════╣");
 
-	const eightAvg =
-		results.reduce((s, r) => s + r.eightScore, 0) / results.length;
-	const claudeAvg =
-		results.reduce((s, r) => s + r.claudeScore, 0) / results.length;
+	const eightAvg = results.reduce((s, r) => s + r.eightScore, 0) / results.length;
+	const claudeAvg = results.reduce((s, r) => s + r.claudeScore, 0) / results.length;
 
 	console.log(
-		`${`║  8gent  Wins: ${eightWins}  |  Avg Score: ${eightAvg.toFixed(1)}/100`.padEnd(
-			59,
-		)}║`,
+		`${`║  8gent  Wins: ${eightWins}  |  Avg Score: ${eightAvg.toFixed(1)}/100`.padEnd(59)}║`,
 	);
 	console.log(
-		`${`║  Claude Wins: ${claudeWins}  |  Avg Score: ${claudeAvg.toFixed(1)}/100`.padEnd(
-			59,
-		)}║`,
+		`${`║  Claude Wins: ${claudeWins}  |  Avg Score: ${claudeAvg.toFixed(1)}/100`.padEnd(59)}║`,
 	);
 	console.log(`${`║  Ties:        ${ties}`.padEnd(59)}║`);
 	console.log("╠══════════════════════════════════════════════════════════╣");
 
 	for (const r of results) {
-		const icon =
-			r.winner === "8gent" ? "🏆" : r.winner === "Claude" ? "🥈" : "🤝";
+		const icon = r.winner === "8gent" ? "🏆" : r.winner === "Claude" ? "🥈" : "🤝";
 		console.log(
 			`${`║  ${icon} ${r.task.id}: 8gent ${r.eightScore} vs Claude ${r.claudeScore} (${r.winner})`.padEnd(
 				59,
@@ -499,11 +463,7 @@ async function main() {
 	}
 
 	const overall =
-		eightWins > claudeWins
-			? "🏆 8GENT WINS"
-			: claudeWins > eightWins
-				? "🥈 CLAUDE WINS"
-				: "🤝 TIE";
+		eightWins > claudeWins ? "🏆 8GENT WINS" : claudeWins > eightWins ? "🥈 CLAUDE WINS" : "🤝 TIE";
 	console.log("╠══════════════════════════════════════════════════════════╣");
 	console.log(`${`║  ${overall}`.padEnd(59)}║`);
 	console.log("╚══════════════════════════════════════════════════════════╝\n");

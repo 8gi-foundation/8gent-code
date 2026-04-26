@@ -1,13 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
-import {
-	AppText,
-	Badge,
-	Inline,
-	MutedText,
-	Stack,
-	StatusDot,
-} from "../primitives/index.js";
+import { AppText, Badge, Inline, MutedText, Stack, StatusDot } from "../primitives/index.js";
 
 export interface TaskCardProps {
 	title: string;
@@ -18,10 +11,7 @@ export interface TaskCardProps {
 	focused?: boolean;
 }
 
-const STATUS_ICONS: Record<
-	TaskCardProps["status"],
-	{ icon: string; color: string }
-> = {
+const STATUS_ICONS: Record<TaskCardProps["status"], { icon: string; color: string }> = {
 	queued: { icon: "\u25CB", color: "" }, // ○ dimColor handled via prop
 	active: { icon: "\u25B6", color: "cyan" }, // ▶
 	done: { icon: "\u2713", color: "green" }, // ✓

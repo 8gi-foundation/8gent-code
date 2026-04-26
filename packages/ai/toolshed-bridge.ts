@@ -68,11 +68,7 @@ function getPermissionsForTool(name: string): Permission[] {
 	) {
 		return ["read:fs"];
 	}
-	if (
-		name.startsWith("write_") ||
-		name.startsWith("edit_") ||
-		name.startsWith("notebook_")
-	) {
+	if (name.startsWith("write_") || name.startsWith("edit_") || name.startsWith("notebook_")) {
 		return ["read:fs", "write:fs"];
 	}
 	if (name.startsWith("git_")) {
@@ -98,9 +94,7 @@ export async function registerToolsInToolshed(): Promise<{
 	registered: number;
 	skipped: number;
 }> {
-	const { registerTool, hasTool } = await import(
-		"../toolshed/registry/register"
-	);
+	const { registerTool, hasTool } = await import("../toolshed/registry/register");
 
 	let registered = 0;
 	let skipped = 0;

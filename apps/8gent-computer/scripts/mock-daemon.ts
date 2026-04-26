@@ -38,9 +38,7 @@ const server = Bun.serve({
 		message(ws, raw) {
 			let msg: { type?: string; text?: string };
 			try {
-				msg = JSON.parse(
-					typeof raw === "string" ? raw : new TextDecoder().decode(raw),
-				);
+				msg = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw));
 			} catch {
 				ws.send(
 					JSON.stringify({
@@ -51,8 +49,7 @@ const server = Bun.serve({
 				);
 				return;
 			}
-			const sid = (ws as unknown as { data: { sessionId: string } }).data
-				.sessionId;
+			const sid = (ws as unknown as { data: { sessionId: string } }).data.sessionId;
 			if (msg.type === "ping") {
 				ws.send(
 					JSON.stringify({
@@ -88,6 +85,4 @@ const server = Bun.serve({
 	},
 });
 
-console.error(
-	`mock daemon listening on ws://127.0.0.1:${server.port}/computer`,
-);
+console.error(`mock daemon listening on ws://127.0.0.1:${server.port}/computer`);

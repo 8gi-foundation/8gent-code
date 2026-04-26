@@ -149,12 +149,7 @@ export function validateAgainstSchema(
 	return { valid: errors.length === 0, errors };
 }
 
-function validate(
-	data: unknown,
-	schema: EmittedSchema,
-	errors: string[],
-	path: string,
-): void {
+function validate(data: unknown, schema: EmittedSchema, errors: string[], path: string): void {
 	// Handle anyOf (union)
 	if (schema.anyOf) {
 		const anyValid = (schema.anyOf as EmittedSchema[]).some((sub) => {
@@ -192,20 +187,13 @@ function validate(
 	if (schema.type) {
 		const actualType = getJsonType(data);
 		if (actualType !== schema.type) {
-			errors.push(
-				`${path || "value"} expected type "${schema.type}", got "${actualType}"`,
-			);
+			errors.push(`${path || "value"} expected type "${schema.type}", got "${actualType}"`);
 			return; // No point checking further if type is wrong
 		}
 	}
 
 	// Object: check required fields and validate properties
-	if (
-		schema.type === "object" &&
-		schema.properties &&
-		typeof data === "object" &&
-		data !== null
-	) {
+	if (schema.type === "object" && schema.properties && typeof data === "object" && data !== null) {
 		const obj = data as Record<string, unknown>;
 
 		if (schema.required) {
@@ -218,12 +206,7 @@ function validate(
 
 		for (const [key, propSchema] of Object.entries(schema.properties)) {
 			if (key in obj) {
-				validate(
-					obj[key],
-					propSchema as EmittedSchema,
-					errors,
-					path ? `${path}.${key}` : key,
-				);
+				validate(obj[key], propSchema as EmittedSchema, errors, path ? `${path}.${key}` : key);
 			}
 		}
 	}

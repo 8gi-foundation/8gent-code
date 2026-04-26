@@ -12,11 +12,7 @@ import { mutation, query } from "./_generated/server";
 // Shared validators
 // ============================================
 
-const planValidator = v.union(
-	v.literal("free"),
-	v.literal("pro"),
-	v.literal("team"),
-);
+const planValidator = v.union(v.literal("free"), v.literal("pro"), v.literal("team"));
 
 const limitsValidator = v.object({
 	tokensPerDay: v.number(),

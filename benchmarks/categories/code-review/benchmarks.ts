@@ -57,8 +57,7 @@ Format your response as a structured code review with sections for each issue.`,
 						points: 10,
 						validator: "regex",
 						config: {
-							pattern:
-								"path.*traversal|directory.*traversal|\\.\\.\\\\|sanitize.*path",
+							pattern: "path.*traversal|directory.*traversal|\\.\\.\\\\|sanitize.*path",
 							countMin: 1,
 						},
 					},

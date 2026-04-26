@@ -18,10 +18,7 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const CACHE_DIR = join(
-	process.env.EIGHT_DATA_DIR || join(homedir(), ".8gent"),
-	"browser-cache",
-);
+const CACHE_DIR = join(process.env.EIGHT_DATA_DIR || join(homedir(), ".8gent"), "browser-cache");
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_CACHE_BYTES = 100 * 1024 * 1024; // 100 MB
 

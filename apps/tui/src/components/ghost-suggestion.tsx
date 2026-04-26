@@ -116,15 +116,9 @@ export function GhostInput({
 			{/* Source hint */}
 			{showSourceHint && isVisible && suggestion && (
 				<Inline paddingLeft={2} marginTop={0} gap={0}>
-					<ShortcutHint
-						keys="[Tab]"
-						description={getSuggestionSourceLabel(suggestion.source)}
-					/>
+					<ShortcutHint keys="[Tab]" description={getSuggestionSourceLabel(suggestion.source)} />
 					{suggestion.source === "history" && suggestion.metadata?.frequency ? (
-						<MutedText>
-							{" "}
-							(used {Number(suggestion.metadata.frequency)}x)
-						</MutedText>
+						<MutedText> (used {Number(suggestion.metadata.frequency)}x)</MutedText>
 					) : null}
 				</Inline>
 			)}
@@ -255,10 +249,7 @@ export function GhostCommandInput({
 				<Box paddingLeft={2}>
 					<Inline gap={0}>
 						<ShortcutHint keys="[Tab]" description="to accept" />
-						<MutedText>
-							{" "}
-							({getSuggestionSourceLabel(suggestion.source)})
-						</MutedText>
+						<MutedText> ({getSuggestionSourceLabel(suggestion.source)})</MutedText>
 					</Inline>
 				</Box>
 			)}
@@ -275,10 +266,7 @@ export interface SuggestionPreviewProps {
 	maxItems?: number;
 }
 
-export function SuggestionPreview({
-	suggestions,
-	maxItems = 3,
-}: SuggestionPreviewProps) {
+export function SuggestionPreview({ suggestions, maxItems = 3 }: SuggestionPreviewProps) {
 	if (suggestions.length === 0) return null;
 
 	return (

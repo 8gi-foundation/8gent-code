@@ -10,12 +10,7 @@
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
-import {
-	type AccessTier,
-	type UserContext,
-	composeSoulPrompt,
-	determineTier,
-} from "./soul-layers";
+import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -133,8 +128,7 @@ const TOOL_CATEGORY_DESCRIPTIONS: Record<string, string> = {
 	terminal: "Write into the user's live terminal session.",
 	lsp: "Language-server queries: definitions, references, hover, diagnostics.",
 	media: "Images, PDFs, Jupyter notebooks — read and edit.",
-	orchestration:
-		"Spawn and coordinate sub-agents. Delegate, message, merge work.",
+	orchestration: "Spawn and coordinate sub-agents. Delegate, message, merge work.",
 	background: "Start long-running background tasks and stream their output.",
 	mcp: "List and call tools from connected MCP servers.",
 };
@@ -388,9 +382,7 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 export function getFullSystemPrompt(): string {
 	// Load project-level instruction files (8GENT.md / AGENTS.md / CLAUDE.md)
 	const instructions = loadInstructions(process.cwd());
-	const instructionSegment = instructions
-		? `## PROJECT INSTRUCTIONS\n\n${instructions}`
-		: "";
+	const instructionSegment = instructions ? `## PROJECT INSTRUCTIONS\n\n${instructions}` : "";
 
 	return [
 		composeSoulPrompt("owner"),
@@ -419,14 +411,9 @@ export const FULL_SYSTEM_PROMPT = getFullSystemPrompt();
  * Build a full system prompt for a specific access tier.
  * Includes all tool/coding segments, but identity layer varies by tier.
  */
-export function buildTieredSystemPrompt(
-	tier: AccessTier,
-	userContext?: UserContext,
-): string {
+export function buildTieredSystemPrompt(tier: AccessTier, userContext?: UserContext): string {
 	const instructions = loadInstructions(process.cwd());
-	const instructionSegment = instructions
-		? `## PROJECT INSTRUCTIONS\n\n${instructions}`
-		: "";
+	const instructionSegment = instructions ? `## PROJECT INSTRUCTIONS\n\n${instructions}` : "";
 
 	return [
 		composeSoulPrompt(tier, userContext),
@@ -534,9 +521,7 @@ export async function getRepoContext(
 /**
  * Compress conversation history to essential context
  */
-export function compressContext(
-	messages: Array<{ role: string; content: string }>,
-): string {
+export function compressContext(messages: Array<{ role: string; content: string }>): string {
 	const essentials: string[] = [];
 
 	for (const msg of messages) {
@@ -585,9 +570,7 @@ export function buildContextualPrompt(state: {
 	userId?: string;
 }): string {
 	// Determine access tier from channel
-	const tier = state.channel
-		? determineTier(state.channel, state.userId)
-		: "owner";
+	const tier = state.channel ? determineTier(state.channel, state.userId) : "owner";
 
 	// Build user context for soul layers
 	const userContext: UserContext | undefined = state.userData
@@ -609,9 +592,7 @@ ${state.currentPlan ? "- Plan in progress: Yes" : ""}
 ${state.infiniteMode ? "- Mode: INFINITE (autonomous until done)" : ""}`;
 
 	const instructions = loadInstructions(state.workingDirectory);
-	const instructionSegment = instructions
-		? `## PROJECT INSTRUCTIONS\n\n${instructions}`
-		: "";
+	const instructionSegment = instructions ? `## PROJECT INSTRUCTIONS\n\n${instructions}` : "";
 
 	return [
 		composeSoulPrompt(tier, userContext),
@@ -635,11 +616,9 @@ export function getTaskSpecificPrompt(
 	taskType: "explore" | "modify" | "debug" | "test" | "git",
 ): string {
 	const prompts: Record<string, string> = {
-		explore:
-			"Explore codebase. Use: get_outline → search_symbols → get_symbol. Report findings.",
+		explore: "Explore codebase. Use: get_outline → search_symbols → get_symbol. Report findings.",
 		modify: "Modify code. Use: read_file → edit_file → verify. Commit changes.",
-		debug:
-			"Debug issue. Use: search_symbols → read_file → analyze. Fix and test.",
+		debug: "Debug issue. Use: search_symbols → read_file → analyze. Fix and test.",
 		test: "Run/create tests. Use: run_command → analyze output. Report results.",
 		git: "Git operations. Use: git_status → git_add → git_commit. Conventional commits.",
 	};

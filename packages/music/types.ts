@@ -20,14 +20,7 @@ export interface Layer {
 	pan: number; // -1 (left) to 1 (right)
 }
 
-export type LayerRole =
-	| "drums"
-	| "bass"
-	| "melody"
-	| "pad"
-	| "fx"
-	| "vocal"
-	| "full";
+export type LayerRole = "drums" | "bass" | "melody" | "pad" | "fx" | "vocal" | "full";
 
 export interface MixConfig {
 	genre: Genre;

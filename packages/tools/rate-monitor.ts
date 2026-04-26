@@ -166,10 +166,7 @@ export class RateMonitor {
 	private checkThreshold(name: string, state: CounterState): void {
 		if (!state.threshold) return;
 
-		const currentRate =
-			state.events.length > 0
-				? (state.events.length / state.windowMs) * 1000
-				: 0;
+		const currentRate = state.events.length > 0 ? (state.events.length / state.windowMs) * 1000 : 0;
 
 		const { min, max, callback } = state.threshold;
 		if (currentRate < min || currentRate > max) {

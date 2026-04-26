@@ -257,12 +257,8 @@ export class MemoryStore {
 			memory.decayFactor,
 			memory.accessCount,
 			memory.lastAccessed || null,
-			"confidence" in memory
-				? ((memory as { confidence?: number }).confidence ?? null)
-				: null,
-			"evidenceCount" in memory
-				? ((memory as { evidenceCount?: number }).evidenceCount ?? 0)
-				: 0,
+			"confidence" in memory ? ((memory as { confidence?: number }).confidence ?? null) : null,
+			"evidenceCount" in memory ? ((memory as { evidenceCount?: number }).evidenceCount ?? 0) : 0,
 			memory.version,
 			memory.source,
 			memory.sourceId || null,
@@ -321,10 +317,7 @@ export class MemoryStore {
 	 * Hybrid search: FTS5 BM25 + optional vector cosine similarity.
 	 * Falls back to FTS-only if embeddings are unavailable.
 	 */
-	async recall(
-		query: string,
-		options: SearchOptions = {},
-	): Promise<SearchResult[]> {
+	async recall(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
 		const limit = options.limit ?? 10;
 		const startTime = Date.now();
 
@@ -377,16 +370,9 @@ export class MemoryStore {
 	/**
 	 * Update a memory. Creates a version snapshot before applying changes.
 	 */
-	update(
-		id: string,
-		updates: Partial<Memory>,
-		reason: string,
-		changedBy: string,
-	): boolean {
+	update(id: string, updates: Partial<Memory>, reason: string, changedBy: string): boolean {
 		const row = this.db
-			.prepare(
-				"SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL",
-			)
+			.prepare("SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL")
 			.get(id) as { data: string; version: number } | null;
 
 		if (!row) return false;
@@ -400,15 +386,7 @@ export class MemoryStore {
 				`INSERT INTO memory_versions (id, memory_id, version, data_snapshot, changed_by, change_reason, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			)
-			.run(
-				generateId("ver"),
-				id,
-				row.version,
-				row.data,
-				changedBy,
-				reason,
-				now,
-			);
+			.run(generateId("ver"), id, row.version, row.data, changedBy, reason, now);
 
 		// Merge updates
 		const merged = {
@@ -430,12 +408,8 @@ export class MemoryStore {
 				contentText,
 				JSON.stringify(tags),
 				merged.importance,
-				"confidence" in merged
-					? ((merged as { confidence?: number }).confidence ?? null)
-					: null,
-				"evidenceCount" in merged
-					? ((merged as { evidenceCount?: number }).evidenceCount ?? 0)
-					: 0,
+				"confidence" in merged ? ((merged as { confidence?: number }).confidence ?? null) : null,
+				"evidenceCount" in merged ? ((merged as { evidenceCount?: number }).evidenceCount ?? 0) : 0,
 				merged.version,
 				now,
 				id,
@@ -457,9 +431,7 @@ export class MemoryStore {
 	 */
 	forget(id: string, reason?: string): boolean {
 		const row = this.db
-			.prepare(
-				"SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL",
-			)
+			.prepare("SELECT data, version FROM memories WHERE id = ? AND deleted_at IS NULL")
 			.get(id) as { data: string; version: number } | null;
 
 		if (!row) return false;
@@ -472,21 +444,11 @@ export class MemoryStore {
 				`INSERT INTO memory_versions (id, memory_id, version, data_snapshot, changed_by, change_reason, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			)
-			.run(
-				generateId("ver"),
-				id,
-				row.version,
-				row.data,
-				"user",
-				reason || "deleted",
-				now,
-			);
+			.run(generateId("ver"), id, row.version, row.data, "user", reason || "deleted", now);
 
 		// Soft delete
 		this.db
-			.prepare(
-				"UPDATE memories SET deleted_at = ?, updated_at = ? WHERE id = ?",
-			)
+			.prepare("UPDATE memories SET deleted_at = ?, updated_at = ? WHERE id = ?")
 			.run(now, now, id);
 
 		return true;
@@ -542,9 +504,10 @@ export class MemoryStore {
 	}
 
 	getEntity(id: string): Entity | null {
-		const row = this.db
-			.prepare("SELECT * FROM entities WHERE id = ?")
-			.get(id) as Record<string, unknown> | null;
+		const row = this.db.prepare("SELECT * FROM entities WHERE id = ?").get(id) as Record<
+			string,
+			unknown
+		> | null;
 		if (!row) return null;
 		return rowToEntity(row);
 	}
@@ -568,14 +531,10 @@ export class MemoryStore {
 		sql += " ORDER BY mention_count DESC LIMIT ?";
 		params.push(query.limit ?? 20);
 
-		return (
-			this.db.prepare(sql).all(...params) as Record<string, unknown>[]
-		).map(rowToEntity);
+		return (this.db.prepare(sql).all(...params) as Record<string, unknown>[]).map(rowToEntity);
 	}
 
-	addRelationship(
-		rel: Omit<Relationship, "id" | "createdAt" | "updatedAt">,
-	): string {
+	addRelationship(rel: Omit<Relationship, "id" | "createdAt" | "updatedAt">): string {
 		const id = generateId("rel");
 		const now = Date.now();
 
@@ -616,16 +575,12 @@ export class MemoryStore {
 			params.push(entityId, entityId);
 		}
 
-		return (
-			this.db.prepare(sql).all(...params) as Record<string, unknown>[]
-		).map(rowToRelationship);
+		return (this.db.prepare(sql).all(...params) as Record<string, unknown>[]).map(
+			rowToRelationship,
+		);
 	}
 
-	linkEntityToMemory(
-		entityId: string,
-		memoryId: string,
-		context?: string,
-	): void {
+	linkEntityToMemory(entityId: string, memoryId: string, context?: string): void {
 		const now = Date.now();
 		this.db
 			.prepare(
@@ -692,9 +647,9 @@ export class MemoryStore {
 		embeddingsCount: number;
 	} {
 		const total = (
-			this.db
-				.prepare("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL")
-				.get() as { c: number }
+			this.db.prepare("SELECT COUNT(*) as c FROM memories WHERE deleted_at IS NULL").get() as {
+				c: number;
+			}
 		).c;
 
 		const byType: Record<string, number> = {
@@ -705,9 +660,7 @@ export class MemoryStore {
 			working: 0,
 		};
 		const typeRows = this.db
-			.prepare(
-				"SELECT type, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY type",
-			)
+			.prepare("SELECT type, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY type")
 			.all() as Array<{ type: string; c: number }>;
 		for (const r of typeRows) byType[r.type] = r.c;
 
@@ -717,9 +670,7 @@ export class MemoryStore {
 			global: 0,
 		};
 		const scopeRows = this.db
-			.prepare(
-				"SELECT scope, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY scope",
-			)
+			.prepare("SELECT scope, COUNT(*) as c FROM memories WHERE deleted_at IS NULL GROUP BY scope")
 			.all() as Array<{ scope: string; c: number }>;
 		for (const r of scopeRows) byScope[r.scope] = r.c;
 
@@ -824,10 +775,7 @@ export class MemoryStore {
 
 	// ── Private: Vector Search ────────────────────────────────────────
 
-	private _vectorSearch(
-		queryEmbedding: Float32Array,
-		options: SearchOptions,
-	): SearchResult[] {
+	private _vectorSearch(queryEmbedding: Float32Array, options: SearchOptions): SearchResult[] {
 		let sql = `
       SELECT e.memory_id, e.vector, m.data, m.importance, m.type, m.scope
       FROM embeddings e
@@ -929,20 +877,13 @@ export class MemoryStore {
 
 	// ── Private: Async Embedding ──────────────────────────────────────
 
-	private async _embedAsync(
-		memoryId: string,
-		contentText: string,
-	): Promise<void> {
+	private async _embedAsync(memoryId: string, contentText: string): Promise<void> {
 		if (!this.embeddingProvider?.available) return;
 
 		const embedding = await this.embeddingProvider.generate(contentText);
 		if (embedding.length === 0) return;
 
-		const buffer = Buffer.from(
-			embedding.buffer,
-			embedding.byteOffset,
-			embedding.byteLength,
-		);
+		const buffer = Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
 
 		this.db
 			.prepare(

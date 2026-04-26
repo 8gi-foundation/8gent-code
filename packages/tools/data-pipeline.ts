@@ -3,9 +3,7 @@
  * ETL-style composable data pipeline with per-stage error handling and stats.
  */
 
-export type StageResult<T> =
-	| { ok: true; value: T }
-	| { ok: false; error: Error; input: unknown };
+export type StageResult<T> = { ok: true; value: T } | { ok: false; error: Error; input: unknown };
 
 export interface PipelineStats {
 	extracted: number;
@@ -127,8 +125,7 @@ export class Pipeline<T> {
 							valid.push(item);
 							this.stats.validated++;
 						} else {
-							const msg =
-								typeof result === "string" ? result : "Validation failed";
+							const msg = typeof result === "string" ? result : "Validation failed";
 							this.stats.errors.push({
 								stage: "validate",
 								error: msg,

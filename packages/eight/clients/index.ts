@@ -33,9 +33,7 @@ export class RoleProviderUnavailableError extends Error {
 		public role: string,
 		public provider: string,
 	) {
-		super(
-			`Provider "${provider}" required for role "${role}" is not available on this host`,
-		);
+		super(`Provider "${provider}" required for role "${role}" is not available on this host`);
 		this.name = "RoleProviderUnavailableError";
 	}
 }

@@ -15,11 +15,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { WorktreePoolAgent } from "./worktree-pool-agent";
-import type {
-	WorktreePoolOptions,
-	WorktreeResult,
-	WorktreeTask,
-} from "./worktree-pool-types";
+import type { WorktreePoolOptions, WorktreeResult, WorktreeTask } from "./worktree-pool-types";
 
 const DEFAULT_TIMEOUT = 600_000; // 10 min
 const DEFAULT_MAX = 4;
@@ -167,11 +163,7 @@ export class WorktreePool {
 			return;
 		}
 
-		const agent = new WorktreePoolAgent(
-			task,
-			this.projectRoot,
-			this.taskTimeoutMs,
-		);
+		const agent = new WorktreePoolAgent(task, this.projectRoot, this.taskTimeoutMs);
 		this.agents.set(task.id, agent);
 
 		agent.start((result) => {

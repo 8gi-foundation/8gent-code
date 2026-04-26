@@ -13,16 +13,13 @@ type CronFn = () => Promise<void> | void;
 
 function nextFireDate(expr: string, after: Date, tz: string): Date {
 	const fields = expr.trim().split(/\s+/);
-	if (fields.length !== 5)
-		throw new Error(`Invalid cron expression: "${expr}"`);
+	if (fields.length !== 5) throw new Error(`Invalid cron expression: "${expr}"`);
 	const [minF, hourF, domF, monthF, dowF] = fields;
 
 	function matches(field: string, value: number): boolean {
 		if (field === "*") return true;
-		if (field.startsWith("*/"))
-			return value % Number.parseInt(field.slice(2), 10) === 0;
-		if (field.includes(","))
-			return field.split(",").some((p) => matches(p, value));
+		if (field.startsWith("*/")) return value % Number.parseInt(field.slice(2), 10) === 0;
+		if (field.includes(",")) return field.split(",").some((p) => matches(p, value));
 		if (field.includes("-")) {
 			const [lo, hi] = field.split("-").map(Number);
 			return value >= lo && value <= hi;
@@ -68,9 +65,7 @@ export class CronJob {
 			timezone: opts.timezone ?? "UTC",
 			noOverlap: opts.noOverlap ?? false,
 			maxRuns: opts.maxRuns ?? Number.POSITIVE_INFINITY,
-			onError:
-				opts.onError ??
-				((err) => console.error(`[CronJob:${this.id}] error:`, err)),
+			onError: opts.onError ?? ((err) => console.error(`[CronJob:${this.id}] error:`, err)),
 		};
 	}
 
@@ -128,8 +123,7 @@ export class CronManager {
 	private jobs = new Map<string, CronJob>();
 
 	add(id: string, expr: string, fn: CronFn, opts?: CronOptions): CronJob {
-		if (this.jobs.has(id))
-			throw new Error(`CronJob "${id}" already registered.`);
+		if (this.jobs.has(id)) throw new Error(`CronJob "${id}" already registered.`);
 		const job = new CronJob(id, expr, fn, opts).start();
 		this.jobs.set(id, job);
 		return job;

@@ -125,9 +125,7 @@ async function keychainStore(token: string): Promise<void> {
 	]);
 
 	if (!result.success) {
-		throw new Error(
-			`Failed to store GitHub token in Keychain: ${result.stderr}`,
-		);
+		throw new Error(`Failed to store GitHub token in Keychain: ${result.stderr}`);
 	}
 }
 
@@ -220,11 +218,7 @@ function fileRetrieve(): string | null {
 		if (envelope.version !== 1) return null;
 
 		const key = deriveKey();
-		const decipher = crypto.createDecipheriv(
-			"aes-256-gcm",
-			key,
-			Buffer.from(envelope.iv, "hex"),
-		);
+		const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "hex"));
 		decipher.setAuthTag(Buffer.from(envelope.tag, "hex"));
 		let plaintext = decipher.update(envelope.ciphertext, "hex", "utf8");
 		plaintext += decipher.final("utf8");

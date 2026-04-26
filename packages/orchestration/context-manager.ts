@@ -64,12 +64,7 @@ export class ContextManager {
 	/**
 	 * Add a message to the global history and route to relevant agents.
 	 */
-	addMessage(
-		role: string,
-		content: string,
-		fromAgentId: string,
-		targetAgentId?: string,
-	): void {
+	addMessage(role: string, content: string, fromAgentId: string, targetAgentId?: string): void {
 		const entry = {
 			role,
 			content,
@@ -123,9 +118,7 @@ export class ContextManager {
 
 		if (ctx.policy === "summary") {
 			// Generate compressed summary of other agents' activity
-			const otherAgents = Array.from(this.contexts.values()).filter(
-				(c) => c.agentId !== agentId,
-			);
+			const otherAgents = Array.from(this.contexts.values()).filter((c) => c.agentId !== agentId);
 
 			if (otherAgents.length > 0) {
 				const summaries = otherAgents.map((other) => {
@@ -162,18 +155,14 @@ export class ContextManager {
 			);
 		}
 
-		return parts.length > 0
-			? `Agent Activity:\n${parts.join("\n")}`
-			: "No sub-agents active.";
+		return parts.length > 0 ? `Agent Activity:\n${parts.join("\n")}` : "No sub-agents active.";
 	}
 
 	/**
 	 * Compress a conversation into a summary message.
 	 * Used by /compact and when context grows too large.
 	 */
-	compressConversation(
-		messages: Array<{ role: string; content: string }>,
-	): string {
+	compressConversation(messages: Array<{ role: string; content: string }>): string {
 		if (messages.length <= 4) return messages.map((m) => m.content).join("\n");
 
 		const userMessages = messages.filter((m) => m.role === "user");

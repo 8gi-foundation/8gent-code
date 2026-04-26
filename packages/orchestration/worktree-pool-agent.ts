@@ -6,19 +6,9 @@
  */
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-	WorktreeResult,
-	WorktreeTask,
-	WorktreeTaskStatus,
-} from "./worktree-pool-types";
+import type { WorktreeResult, WorktreeTask, WorktreeTaskStatus } from "./worktree-pool-types";
 
 export class WorktreePoolAgent {
 	private proc: ChildProcess | null = null;
@@ -46,26 +36,17 @@ export class WorktreePoolAgent {
 			...(this.task.model ? { EIGHGENT_MODEL: this.task.model } : {}),
 		};
 
-		this.proc = spawn(
-			"bun",
-			["run", "packages/eight/index.ts", this.task.prompt],
-			{
-				cwd: this.task.worktreePath,
-				stdio: ["pipe", "pipe", "pipe"],
-				env,
-				detached: false,
-			},
-		);
+		this.proc = spawn("bun", ["run", "packages/eight/index.ts", this.task.prompt], {
+			cwd: this.task.worktreePath,
+			stdio: ["pipe", "pipe", "pipe"],
+			env,
+			detached: false,
+		});
 
 		this.proc.stdout?.on("data", (d: Buffer) => appendFileSync(logPath, d));
-		this.proc.stderr?.on("data", (d: Buffer) =>
-			appendFileSync(logPath, `[ERR] ${d}`),
-		);
+		this.proc.stderr?.on("data", (d: Buffer) => appendFileSync(logPath, `[ERR] ${d}`));
 
-		this.timer = setTimeout(
-			() => this.finish("timeout", null, "Task timed out"),
-			this.timeoutMs,
-		);
+		this.timer = setTimeout(() => this.finish("timeout", null, "Task timed out"), this.timeoutMs);
 
 		this.proc.on("close", (code) => {
 			if (this.timer) {
@@ -73,11 +54,7 @@ export class WorktreePoolAgent {
 				this.timer = null;
 			}
 			const status: WorktreeTaskStatus = code === 0 ? "completed" : "failed";
-			this.finish(
-				status,
-				code,
-				code !== 0 ? `Process exited with code ${code}` : undefined,
-			);
+			this.finish(status, code, code !== 0 ? `Process exited with code ${code}` : undefined);
 		});
 	}
 
@@ -89,11 +66,7 @@ export class WorktreePoolAgent {
 		this.proc?.kill("SIGTERM");
 	}
 
-	private finish(
-		status: WorktreeTaskStatus,
-		exitCode: number | null,
-		error?: string,
-	): void {
+	private finish(status: WorktreeTaskStatus, exitCode: number | null, error?: string): void {
 		const filesChanged = this.getChangedFiles();
 		const result: WorktreeResult = {
 			taskId: this.task.id,

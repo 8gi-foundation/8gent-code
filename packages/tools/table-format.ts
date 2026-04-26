@@ -24,9 +24,7 @@ export function table(
 		return acc;
 	}, [] as number[]);
 	if (maxColumnWidth)
-		columnWidths.forEach(
-			(w, i) => (columnWidths[i] = Math.min(w, maxColumnWidth)),
-		);
+		columnWidths.forEach((w, i) => (columnWidths[i] = Math.min(w, maxColumnWidth)));
 	const lines: string[] = [];
 	const separator = () =>
 		box
@@ -35,11 +33,7 @@ export function table(
 	const border = box
 		? `┌${columnWidths.map((w) => "─".repeat(w)).join("┬")}┐`
 		: ` ${columnWidths.map(() => "─".repeat(maxColumnWidth || 10)).join(" ")} `;
-	const alignCell = (
-		cell: string,
-		width: number,
-		align: "left" | "right" | "center",
-	) => {
+	const alignCell = (cell: string, width: number, align: "left" | "right" | "center") => {
 		switch (align) {
 			case "left":
 				return cell.padEnd(width);
@@ -47,11 +41,7 @@ export function table(
 				return cell.padStart(width);
 			case "center": {
 				const pad = width - cell.length;
-				return (
-					" ".repeat(Math.floor(pad / 2)) +
-					cell +
-					" ".repeat(Math.ceil(pad / 2))
-				);
+				return " ".repeat(Math.floor(pad / 2)) + cell + " ".repeat(Math.ceil(pad / 2));
 			}
 		}
 	};
@@ -62,9 +52,7 @@ export function table(
 	if (header) lines.push(separator());
 	for (const [i, row] of rows.entries()) {
 		const line = row
-			.map((cell, j) =>
-				alignCell(truncate(cell, columnWidths[j]), columnWidths[j], align[j]),
-			)
+			.map((cell, j) => alignCell(truncate(cell, columnWidths[j]), columnWidths[j], align[j]))
 			.join(box ? "│" : " | ");
 		lines.push(line);
 		if (header && i === 0) lines.push(separator());

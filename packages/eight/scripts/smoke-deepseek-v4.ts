@@ -12,11 +12,7 @@
  *   1 = no API key, endpoint down, or empty response
  */
 
-import {
-	DEEPSEEK_FLASH,
-	DEEPSEEK_PRO,
-	DeepSeekClient,
-} from "../clients/deepseek";
+import { DEEPSEEK_FLASH, DEEPSEEK_PRO, DeepSeekClient } from "../clients/deepseek";
 
 async function main() {
 	if (!process.env.DEEPSEEK_API_KEY) {
@@ -27,8 +23,7 @@ async function main() {
 		process.exit(1);
 	}
 
-	const expectedModel =
-		process.env.DEEPSEEK_USE_PRO === "1" ? DEEPSEEK_PRO : DEEPSEEK_FLASH;
+	const expectedModel = process.env.DEEPSEEK_USE_PRO === "1" ? DEEPSEEK_PRO : DEEPSEEK_FLASH;
 	console.log(`[smoke-deepseek-v4] model=${expectedModel}`);
 
 	let client: DeepSeekClient;
@@ -53,20 +48,14 @@ async function main() {
 		process.exit(0);
 	} catch (err) {
 		// Defensive: never echo the API key even if a stack trace bubbles up.
-		const msg = (err as Error).message.replace(
-			process.env.DEEPSEEK_API_KEY!,
-			"[REDACTED]",
-		);
+		const msg = (err as Error).message.replace(process.env.DEEPSEEK_API_KEY!, "[REDACTED]");
 		console.error(`[smoke-deepseek-v4] FAIL: ${msg}`);
 		process.exit(1);
 	}
 }
 
 main().catch((err) => {
-	const msg = String(err).replace(
-		process.env.DEEPSEEK_API_KEY || "__none__",
-		"[REDACTED]",
-	);
+	const msg = String(err).replace(process.env.DEEPSEEK_API_KEY || "__none__", "[REDACTED]");
 	console.error(`[smoke-deepseek-v4] crashed: ${msg}`);
 	process.exit(1);
 });

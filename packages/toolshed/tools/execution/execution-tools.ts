@@ -15,8 +15,7 @@ import { registerTool } from "../../registry/register";
 registerTool(
 	{
 		name: "run_command",
-		description:
-			"Execute a shell command and return stdout/stderr. Supports timeout.",
+		description: "Execute a shell command and return stdout/stderr. Supports timeout.",
 		capabilities: ["code"],
 		inputSchema: {
 			type: "object",
@@ -59,8 +58,7 @@ registerTool(
 registerTool(
 	{
 		name: "run_tests",
-		description:
-			"Run test suite. Auto-detects test runner (bun test, vitest, jest, npm test).",
+		description: "Run test suite. Auto-detects test runner (bun test, vitest, jest, npm test).",
 		capabilities: ["code"],
 		inputSchema: {
 			type: "object",
@@ -216,9 +214,7 @@ registerTool(
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { file = ".env" } = input as { file?: string };
-		const envPath = path.isAbsolute(file)
-			? file
-			: path.join(ctx.workingDirectory, file);
+		const envPath = path.isAbsolute(file) ? file : path.join(ctx.workingDirectory, file);
 
 		if (!fs.existsSync(envPath)) {
 			return { exists: false, file: envPath };

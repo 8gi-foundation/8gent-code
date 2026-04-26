@@ -9,13 +9,7 @@
  * - 100% code coverage
  */
 
-export type Operation =
-	| "add"
-	| "subtract"
-	| "multiply"
-	| "divide"
-	| "power"
-	| "modulo";
+export type Operation = "add" | "subtract" | "multiply" | "divide" | "power" | "modulo";
 
 export interface CalculatorResult {
 	value: number;

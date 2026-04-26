@@ -20,87 +20,16 @@ export interface MatchResult {
 const CAPABILITY_MAP: Record<string, string[]> = {
 	typescript: ["typescript", "ts", "tsx", "type-check", "types"],
 	javascript: ["javascript", "js", "jsx", "node", "nodejs", "bun"],
-	react: [
-		"react",
-		"reactjs",
-		"jsx",
-		"tsx",
-		"component",
-		"hook",
-		"next.js",
-		"nextjs",
-	],
+	react: ["react", "reactjs", "jsx", "tsx", "component", "hook", "next.js", "nextjs"],
 	cli: ["cli", "tui", "terminal", "command-line", "shell", "bash", "ink"],
-	api: [
-		"api",
-		"rest",
-		"graphql",
-		"endpoint",
-		"backend",
-		"server",
-		"http",
-		"fetch",
-	],
-	testing: [
-		"test",
-		"tests",
-		"testing",
-		"jest",
-		"vitest",
-		"bun:test",
-		"unit",
-		"e2e",
-	],
+	api: ["api", "rest", "graphql", "endpoint", "backend", "server", "http", "fetch"],
+	testing: ["test", "tests", "testing", "jest", "vitest", "bun:test", "unit", "e2e"],
 	docs: ["docs", "documentation", "readme", "typo", "markdown", "md"],
-	refactor: [
-		"refactor",
-		"cleanup",
-		"clean up",
-		"reorganize",
-		"restructure",
-		"lint",
-	],
-	tooling: [
-		"build",
-		"bundler",
-		"config",
-		"setup",
-		"install",
-		"package",
-		"npm",
-		"bun",
-	],
-	ai: [
-		"ai",
-		"llm",
-		"ml",
-		"openai",
-		"ollama",
-		"anthropic",
-		"prompt",
-		"embedding",
-	],
-	database: [
-		"database",
-		"db",
-		"sql",
-		"sqlite",
-		"postgres",
-		"mysql",
-		"orm",
-		"query",
-	],
-	git: [
-		"git",
-		"github",
-		"pr",
-		"branch",
-		"commit",
-		"merge",
-		"ci",
-		"workflow",
-		"action",
-	],
+	refactor: ["refactor", "cleanup", "clean up", "reorganize", "restructure", "lint"],
+	tooling: ["build", "bundler", "config", "setup", "install", "package", "npm", "bun"],
+	ai: ["ai", "llm", "ml", "openai", "ollama", "anthropic", "prompt", "embedding"],
+	database: ["database", "db", "sql", "sqlite", "postgres", "mysql", "orm", "query"],
+	git: ["git", "github", "pr", "branch", "commit", "merge", "ci", "workflow", "action"],
 };
 
 // Effort-to-difficulty score — lower effort = higher match probability
@@ -163,8 +92,7 @@ export function evaluateOpportunity(
 	opp: Opportunity,
 	capabilities: string[] = DEFAULT_CAPABILITIES,
 ): MatchResult {
-	const text =
-		`${opp.title} ${opp.description} ${opp.labels.join(" ")}`.toLowerCase();
+	const text = `${opp.title} ${opp.description} ${opp.labels.join(" ")}`.toLowerCase();
 
 	// Count how many capability keywords appear in the issue text
 	let matchedCapabilities = 0;
@@ -182,8 +110,7 @@ export function evaluateOpportunity(
 	}
 
 	// Base score from capability match ratio
-	const capRatio =
-		totalCapabilityWeight > 0 ? matchedCapabilities / totalCapabilityWeight : 0;
+	const capRatio = totalCapabilityWeight > 0 ? matchedCapabilities / totalCapabilityWeight : 0;
 
 	// Effort modifier
 	const effortScore = EFFORT_SCORE[opp.estimatedEffort];
@@ -211,18 +138,12 @@ export function evaluateOpportunity(
 	// Build reason string
 	let reason: string;
 	if (negativeHits > 0) {
-		const blocked = NEGATIVE_LABELS.filter((l) =>
-			labelNames.some((ln) => ln.includes(l)),
-		);
+		const blocked = NEGATIVE_LABELS.filter((l) => labelNames.some((ln) => ln.includes(l)));
 		reason = `Out of scope — requires: ${blocked.join(", ")}`;
 	} else if (matchedDomains.length > 0) {
 		reason = `Matched capabilities: ${matchedDomains.join(", ")} | Effort: ${opp.estimatedEffort}`;
-	} else if (
-		opp.estimatedEffort === "trivial" ||
-		opp.estimatedEffort === "small"
-	) {
-		reason =
-			"Low complexity, likely approachable despite no direct keyword match";
+	} else if (opp.estimatedEffort === "trivial" || opp.estimatedEffort === "small") {
+		reason = "Low complexity, likely approachable despite no direct keyword match";
 	} else {
 		reason = `No strong capability match — ${opp.estimatedEffort} effort`;
 	}
@@ -240,18 +161,13 @@ export function evaluateOpportunity(
 /**
  * Batch evaluate a list of opportunities. Mutates matchScore and status in place.
  */
-export function evaluateAll(
-	opportunities: Opportunity[],
-	capabilities?: string[],
-): Opportunity[] {
+export function evaluateAll(opportunities: Opportunity[], capabilities?: string[]): Opportunity[] {
 	return opportunities.map((opp) => {
 		const result = evaluateOpportunity(opp, capabilities);
 		return {
 			...opp,
 			matchScore: result.matchScore,
-			status: result.canDo
-				? "evaluated"
-				: ("rejected" as Opportunity["status"]),
+			status: result.canDo ? "evaluated" : ("rejected" as Opportunity["status"]),
 		};
 	});
 }

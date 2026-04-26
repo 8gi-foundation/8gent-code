@@ -186,10 +186,7 @@ The repo is at /app/. Create on branch fix/headless-permissions and commit.`,
 async function connectDaemon(url: string): Promise<WebSocket> {
 	return new Promise((resolve, reject) => {
 		const ws = new WebSocket(url);
-		const timer = setTimeout(
-			() => reject(new Error(`Connection timeout: ${url}`)),
-			10_000,
-		);
+		const timer = setTimeout(() => reject(new Error(`Connection timeout: ${url}`)), 10_000);
 		ws.onopen = () => {
 			clearTimeout(timer);
 			resolve(ws);
@@ -201,21 +198,11 @@ async function connectDaemon(url: string): Promise<WebSocket> {
 	});
 }
 
-function sendAndWait(
-	ws: WebSocket,
-	msg: any,
-	type: string,
-	timeoutMs = 30_000,
-): Promise<any> {
+function sendAndWait(ws: WebSocket, msg: any, type: string, timeoutMs = 30_000): Promise<any> {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(
-			() => reject(new Error(`Timeout waiting for ${type}`)),
-			timeoutMs,
-		);
+		const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${type}`)), timeoutMs);
 		const handler = (event: MessageEvent) => {
-			const data = JSON.parse(
-				typeof event.data === "string" ? event.data : "{}",
-			);
+			const data = JSON.parse(typeof event.data === "string" ? event.data : "{}");
 			if (data.type === type) {
 				clearTimeout(timer);
 				ws.removeEventListener("message", handler);
@@ -227,18 +214,13 @@ function sendAndWait(
 	});
 }
 
-async function executeTask(
-	ws: WebSocket,
-	task: TaskAssignment,
-): Promise<TaskResult> {
+async function executeTask(ws: WebSocket, task: TaskAssignment): Promise<TaskResult> {
 	const startMs = Date.now();
 	let toolCalls = 0;
 	let response = "";
 
 	console.log(`\n${"=".repeat(70)}`);
-	console.log(
-		`[${task.target.toUpperCase()}] Starting issue #${task.issueNumber}: ${task.title}`,
-	);
+	console.log(`[${task.target.toUpperCase()}] Starting issue #${task.issueNumber}: ${task.title}`);
 	console.log(`${"=".repeat(70)}`);
 
 	// Create session
@@ -274,9 +256,7 @@ async function executeTask(
 		}, TIMEOUT_MS);
 
 		const handler = (event: MessageEvent) => {
-			const msg = JSON.parse(
-				typeof event.data === "string" ? event.data : "{}",
-			);
+			const msg = JSON.parse(typeof event.data === "string" ? event.data : "{}");
 			if (msg.type !== "event") return;
 
 			const { event: evt, payload } = msg;
@@ -375,11 +355,7 @@ async function main() {
 	const localTasks = assignments.filter((t) => t.target === "local");
 	const vesselTasks = assignments.filter((t) => t.target === "vessel");
 
-	const runTasks = async (
-		ws: WebSocket | null,
-		tasks: TaskAssignment[],
-		label: string,
-	) => {
+	const runTasks = async (ws: WebSocket | null, tasks: TaskAssignment[], label: string) => {
 		if (!ws) {
 			console.log(`\nSkipping ${label} tasks - daemon not connected`);
 			return;
@@ -414,12 +390,7 @@ async function main() {
 	console.log("=".repeat(70));
 
 	for (const r of results) {
-		const icon =
-			r.status === "success"
-				? "PASS"
-				: r.status === "timeout"
-					? "TIME"
-					: "FAIL";
+		const icon = r.status === "success" ? "PASS" : r.status === "timeout" ? "TIME" : "FAIL";
 		console.log(
 			`  [${icon}] #${r.issueNumber} (${r.target}) - ${r.toolCalls} tools, ${Math.round(r.durationMs / 1000)}s`,
 		);

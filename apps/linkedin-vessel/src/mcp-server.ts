@@ -5,12 +5,7 @@
  * These tools are what claude.ai (or 8gent-code clients) call.
  */
 
-import {
-	getCampaignStats,
-	getLead,
-	getTemplates,
-	upsertLead,
-} from "./campaign-db";
+import { getCampaignStats, getLead, getTemplates, upsertLead } from "./campaign-db";
 import { getInsights, reflect, startReflectionLoop } from "./hyperagent";
 import {
 	getProfile,
@@ -60,16 +55,14 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: "linkedin_get_profile",
-		description:
-			"Get full profile data and recent activity for a LinkedIn public ID or URL.",
+		description: "Get full profile data and recent activity for a LinkedIn public ID or URL.",
 		inputSchema: {
 			type: "object",
 			required: ["publicId"],
 			properties: {
 				publicId: {
 					type: "string",
-					description:
-						"LinkedIn public identifier (from URL: linkedin.com/in/[this-part])",
+					description: "LinkedIn public identifier (from URL: linkedin.com/in/[this-part])",
 				},
 			},
 		},
@@ -107,8 +100,7 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: "linkedin_get_replies",
-		description:
-			"Get recent replies across all active campaigns. Returns unread conversations.",
+		description: "Get recent replies across all active campaigns. Returns unread conversations.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -121,8 +113,7 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: "linkedin_get_stats",
-		description:
-			"Get campaign performance stats: send counts, reply rates, template performance.",
+		description: "Get campaign performance stats: send counts, reply rates, template performance.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -135,8 +126,7 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: "linkedin_get_insights",
-		description:
-			"Get HyperAgent insights: which templates are winning, which are being evolved.",
+		description: "Get HyperAgent insights: which templates are winning, which are being evolved.",
 		inputSchema: { type: "object", properties: {} },
 	},
 	{
@@ -168,9 +158,7 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 				});
 
 				// Enrich top 10 with signals (rate-limited, don't hammer all)
-				const enriched = await Promise.all(
-					leads.slice(0, 10).map((l) => enrichLead(l)),
-				);
+				const enriched = await Promise.all(leads.slice(0, 10).map((l) => enrichLead(l)));
 				const rest = leads.slice(10);
 				const allLeads = [...enriched, ...rest];
 
@@ -210,8 +198,7 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 							...enriched,
 							signalHook: buildSignalHook(enriched),
 							suggestedOpener:
-								buildSignalHook(enriched) ||
-								"No strong signal found - consider skipping",
+								buildSignalHook(enriched) || "No strong signal found - consider skipping",
 						},
 						null,
 						2,
@@ -244,9 +231,7 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 
 			case "linkedin_send_message": {
 				if (!limiter.canSend("messages")) {
-					return error(
-						`Daily message cap reached. ${limiter.remaining("messages")} remaining.`,
-					);
+					return error(`Daily message cap reached. ${limiter.remaining("messages")} remaining.`);
 				}
 
 				const { conversationUrn, body } = args as {
@@ -257,15 +242,11 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 				if (!result.success) return error(result.error!);
 
 				limiter.consume("messages");
-				return text(
-					`Message sent. Remaining today: ${limiter.remaining("messages")}`,
-				);
+				return text(`Message sent. Remaining today: ${limiter.remaining("messages")}`);
 			}
 
 			case "linkedin_get_replies": {
-				const replies = await getRecentReplies(
-					args.since as string | undefined,
-				);
+				const replies = await getRecentReplies(args.since as string | undefined);
 				return text(JSON.stringify(replies, null, 2));
 			}
 
@@ -285,9 +266,7 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 						"Reflection complete.",
 						`Evolved: ${result.evolved} templates`,
 						`Skipped: ${result.skipped}`,
-						result.details.length > 0
-							? `\nDetails:\n${result.details.join("\n")}`
-							: "",
+						result.details.length > 0 ? `\nDetails:\n${result.details.join("\n")}` : "",
 					].join("\n"),
 				);
 			}

@@ -50,9 +50,7 @@ async function generateQueries(
 	model: string,
 	previousFindings: string[],
 ): Promise<string[]> {
-	const focus = focusAreas.length
-		? `Focus areas: ${focusAreas.join(", ")}.`
-		: "";
+	const focus = focusAreas.length ? `Focus areas: ${focusAreas.join(", ")}.` : "";
 	const prior = previousFindings.length
 		? `\nAlready found: ${previousFindings.slice(0, 3).join("; ")}`
 		: "";
@@ -68,9 +66,7 @@ Return ONLY a JSON array of 3 strings, nothing else. Example: ["query 1", "query
 		try {
 			const parsed = JSON.parse(match[0]) as unknown[];
 			if (Array.isArray(parsed)) {
-				return parsed
-					.filter((q): q is string => typeof q === "string")
-					.slice(0, 3);
+				return parsed.filter((q): q is string => typeof q === "string").slice(0, 3);
 			}
 		} catch {
 			/* fall through */
@@ -86,11 +82,7 @@ Return ONLY a JSON array of 3 strings, nothing else. Example: ["query 1", "query
 
 // ── Per-Page Extraction ────────────────────────────────────────────────
 
-async function extractFindings(
-	topic: string,
-	pageText: string,
-	model: string,
-): Promise<string[]> {
+async function extractFindings(topic: string, pageText: string, model: string): Promise<string[]> {
 	const truncated = pageText.slice(0, MAX_PAGE_CHARS);
 	const prompt = `From this text about "${topic}", extract 2-3 key facts or patterns as a JSON string array.
 Return ONLY the JSON array. Text:
@@ -132,10 +124,7 @@ async function runIteration(
 			continue;
 		}
 
-		for (const result of results.slice(
-			0,
-			Math.ceil(maxSources / queries.length),
-		)) {
+		for (const result of results.slice(0, Math.ceil(maxSources / queries.length))) {
 			if (seenUrls.has(result.url)) continue;
 			seenUrls.add(result.url);
 
@@ -206,9 +195,7 @@ Return a JSON object with these exact keys:
 				furtherQuestions?: unknown;
 			};
 			const arr = (v: unknown): string[] =>
-				Array.isArray(v)
-					? v.filter((x): x is string => typeof x === "string")
-					: [];
+				Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 			const pats = Array.isArray(parsed.patterns)
 				? (parsed.patterns as Array<Record<string, string>>)
 						.filter((p) => p && typeof p.name === "string")
@@ -242,10 +229,7 @@ Return a JSON object with these exact keys:
  * Runs a configurable search-fetch-extract loop then synthesizes a report.
  * Stores key findings in the memory system when available.
  */
-export async function research(
-	topic: string,
-	opts: ResearchOptions = {},
-): Promise<ResearchReport> {
+export async function research(topic: string, opts: ResearchOptions = {}): Promise<ResearchReport> {
 	const depth = Math.max(1, Math.min(5, opts.depth ?? 2));
 	const maxSources = opts.maxSources ?? 10;
 	const focusAreas = opts.focusAreas ?? [];
@@ -258,12 +242,7 @@ export async function research(
 
 	// Each depth level = one iteration with refined queries
 	for (let d = 0; d < depth; d++) {
-		const queries = await generateQueries(
-			topic,
-			focusAreas,
-			model,
-			allFindings,
-		);
+		const queries = await generateQueries(topic, focusAreas, model, allFindings);
 		allQueries.push(...queries);
 
 		const iter = await runIteration(topic, queries, maxSources, model);

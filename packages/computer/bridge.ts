@@ -82,15 +82,12 @@ function runCli(
 	timeout = DEFAULT_TIMEOUT,
 ): { ok: boolean; data?: any; error?: string } {
 	try {
-		const result = execSync(
-			["npx", "usecomputer", ...args, "--json"].join(" "),
-			{
-				timeout,
-				encoding: "utf-8",
-				stdio: ["pipe", "pipe", "pipe"],
-				cwd: os.homedir(),
-			},
-		);
+		const result = execSync(["npx", "usecomputer", ...args, "--json"].join(" "), {
+			timeout,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+			cwd: os.homedir(),
+		});
 		try {
 			return JSON.parse(result.trim());
 		} catch {
@@ -114,8 +111,7 @@ function runCli(
  * Take a screenshot of the desktop or a region.
  */
 export function screenshot(opts: ScreenshotOptions = {}): ScreenshotResult {
-	const savePath =
-		opts.path || path.join(os.tmpdir(), `8gent-screenshot-${Date.now()}.png`);
+	const savePath = opts.path || path.join(os.tmpdir(), `8gent-screenshot-${Date.now()}.png`);
 
 	const args = ["screenshot", savePath];
 	if (opts.displayId !== undefined) {
@@ -264,20 +260,9 @@ export function scroll(opts: ScrollOptions): CommandResult {
 		if (pointErr) return { ok: false, error: pointErr };
 	}
 
-	const args = [
-		"scroll",
-		"--direction",
-		opts.direction,
-		"--amount",
-		String(amount),
-	];
+	const args = ["scroll", "--direction", opts.direction, "--amount", String(amount)];
 	if (opts.point) {
-		args.push(
-			"-x",
-			String(Math.round(opts.point.x)),
-			"-y",
-			String(Math.round(opts.point.y)),
-		);
+		args.push("-x", String(Math.round(opts.point.x)), "-y", String(Math.round(opts.point.y)));
 	}
 
 	return runCli(args);
@@ -327,13 +312,7 @@ export function hover(point: Point): CommandResult {
 	const pointErr = validatePoint(point, "hover");
 	if (pointErr) return { ok: false, error: pointErr };
 
-	return runCli([
-		"hover",
-		"-x",
-		String(Math.round(point.x)),
-		"-y",
-		String(Math.round(point.y)),
-	]);
+	return runCli(["hover", "-x", String(Math.round(point.x)), "-y", String(Math.round(point.y))]);
 }
 
 /**

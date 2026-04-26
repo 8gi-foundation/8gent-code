@@ -42,12 +42,7 @@ export function Header({
 	}
 
 	return (
-		<RainbowBorder
-			animate={showAnimations}
-			colorPalette="neon"
-			speed={200}
-			borderStyle="round"
-		>
+		<RainbowBorder animate={showAnimations} colorPalette="neon" speed={200} borderStyle="round">
 			<Inline gap={1}>
 				{/* Animated 8gent logo */}
 				<Box>
@@ -112,13 +107,7 @@ function TaglineText({ animate = true }: TaglineTextProps) {
 			{text.split("").map((char, index) => {
 				const distance = Math.abs(index - glowIndex);
 				const color =
-					distance === 0
-						? undefined
-						: distance <= 1
-							? "cyan"
-							: distance <= 3
-								? "blue"
-								: undefined;
+					distance === 0 ? undefined : distance <= 1 ? "cyan" : distance <= 3 ? "blue" : undefined;
 				const dimColor = distance > 3;
 				const bold = distance === 0;
 
@@ -145,14 +134,7 @@ export function CompactHeader({ isProcessing = false }: HeaderProps) {
 // Fancy header with ASCII art
 export function FancyHeader({ isProcessing = false }: HeaderProps) {
 	const [colorIndex, setColorIndex] = useState(0);
-	const colors = [
-		"#FF6B6B",
-		"#4ECDC4",
-		"#45B7D1",
-		"#96CEB4",
-		"#FFEAA7",
-		"#DDA0DD",
-	];
+	const colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD"];
 
 	useEffect(() => {
 		const interval = setInterval(() => {

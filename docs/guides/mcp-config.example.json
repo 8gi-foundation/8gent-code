@@ -13,12 +13,7 @@
 		},
 		"sqlite": {
 			"command": "npx",
-			"args": [
-				"-y",
-				"@modelcontextprotocol/server-sqlite",
-				"--db-path",
-				"./data.db"
-			]
+			"args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "./data.db"]
 		}
 	}
 }

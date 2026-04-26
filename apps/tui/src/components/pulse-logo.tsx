@@ -33,10 +33,7 @@ const GRADIENT_COLORS = [
 	"#00FFBF", // turquoise
 ];
 
-export function PulseLogo({
-	isIdle = true,
-	isProcessing = false,
-}: PulseLogoProps) {
+export function PulseLogo({ isIdle = true, isProcessing = false }: PulseLogoProps) {
 	const [colorIndex, setColorIndex] = useState(0);
 	const [brightness, setBrightness] = useState(1);
 	const [breathingIn, setBreathingIn] = useState(true);
@@ -100,13 +97,7 @@ interface BigLogoProps {
 
 const SMALL_8 = [" ██████ ", "██    ██", " ██████ ", "██    ██", " ██████ "];
 
-const MEDIUM_8 = [
-	"  ████████  ",
-	" ██      ██ ",
-	"  ████████  ",
-	" ██      ██ ",
-	"  ████████  ",
-];
+const MEDIUM_8 = ["  ████████  ", " ██      ██ ", "  ████████  ", " ██      ██ ", "  ████████  "];
 
 export function BigLogo({ animate = true, size = "small" }: BigLogoProps) {
 	const [colorIndex, setColorIndex] = useState(0);
@@ -127,9 +118,7 @@ export function BigLogo({ animate = true, size = "small" }: BigLogoProps) {
 			{logo.map((line, index) => (
 				<Text
 					key={index}
-					color={
-						GRADIENT_COLORS[(colorIndex + index * 2) % GRADIENT_COLORS.length]
-					}
+					color={GRADIENT_COLORS[(colorIndex + index * 2) % GRADIENT_COLORS.length]}
 					bold
 				>
 					{line}
@@ -165,9 +154,7 @@ interface AnimatedWordmarkProps {
 	isProcessing?: boolean;
 }
 
-export function AnimatedWordmark({
-	isProcessing = false,
-}: AnimatedWordmarkProps) {
+export function AnimatedWordmark({ isProcessing = false }: AnimatedWordmarkProps) {
 	const [glowIndex, setGlowIndex] = useState(0);
 	const text = "8gent";
 

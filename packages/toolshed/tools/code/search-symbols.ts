@@ -49,8 +49,7 @@ registerTool(
 			properties: {
 				query: {
 					type: "string",
-					description:
-						"Search query (matches symbol names, signatures, docstrings)",
+					description: "Search query (matches symbol names, signatures, docstrings)",
 				},
 				directory: {
 					type: "string",

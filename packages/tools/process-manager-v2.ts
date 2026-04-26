@@ -27,16 +27,9 @@ export class ProcessManager {
 	private processes = new Map<string, ManagedProcess>();
 	private restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-	spawn(
-		name: string,
-		cmd: string,
-		args: string[] = [],
-		options: SpawnOptions = {},
-	): void {
+	spawn(name: string, cmd: string, args: string[] = [], options: SpawnOptions = {}): void {
 		if (this.processes.has(name)) {
-			throw new Error(
-				`Process "${name}" already exists. Stop it first or use restart().`,
-			);
+			throw new Error(`Process "${name}" already exists. Stop it first or use restart().`);
 		}
 
 		const entry: ManagedProcess = {
@@ -81,8 +74,7 @@ export class ProcessManager {
 		const appendLog = (line: string) => {
 			entry.logs.push(`[${new Date().toISOString()}] ${line}`);
 			const max = entry.options.maxLogLines ?? 200;
-			if (entry.logs.length > max)
-				entry.logs.splice(0, entry.logs.length - max);
+			if (entry.logs.length > max) entry.logs.splice(0, entry.logs.length - max);
 		};
 
 		proc.stdout?.on("data", (chunk) => {
@@ -109,9 +101,7 @@ export class ProcessManager {
 				if (entry.restarts < maxRestarts) {
 					entry.restarts++;
 					entry.status = "restarting";
-					appendLog(
-						`Auto-restarting (attempt ${entry.restarts}/${maxRestarts})`,
-					);
+					appendLog(`Auto-restarting (attempt ${entry.restarts}/${maxRestarts})`);
 					const timer = setTimeout(() => {
 						this.restartTimers.delete(name);
 						this._start(name);
@@ -164,9 +154,7 @@ export class ProcessManager {
 		if (!entry) throw new Error(`Unknown process: "${name}"`);
 
 		const uptime =
-			entry.startedAt && entry.status === "running"
-				? Date.now() - entry.startedAt.getTime()
-				: null;
+			entry.startedAt && entry.status === "running" ? Date.now() - entry.startedAt.getTime() : null;
 
 		return {
 			status: entry.status,

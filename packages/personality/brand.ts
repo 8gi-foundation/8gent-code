@@ -118,10 +118,7 @@ export function getCompactHeader(): string {
 /**
  * Format text with brand styling markers
  */
-export function brandText(
-	text: string,
-	style: "primary" | "accent" | "muted" = "primary",
-): string {
+export function brandText(text: string, style: "primary" | "accent" | "muted" = "primary"): string {
 	// This returns text that can be parsed by the TUI for coloring
 	return `[${style}]${text}[/${style}]`;
 }

@@ -28,12 +28,7 @@ export function StatsCard({ value, label, trend, icon }: StatsCardProps) {
 				? "text-[var(--8gent-error)]"
 				: "text-[var(--8gent-text-muted)]";
 
-	const trendArrow =
-		trend && trend.value > 0
-			? "\u2191"
-			: trend && trend.value < 0
-				? "\u2193"
-				: "";
+	const trendArrow = trend && trend.value > 0 ? "\u2191" : trend && trend.value < 0 ? "\u2193" : "";
 
 	return (
 		<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6 transition-colors hover:border-[var(--8gent-border-focus)]">

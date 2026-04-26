@@ -155,10 +155,8 @@ export class UsageMonitor {
 	getWarning(): string | null {
 		const { dailyPct, weeklyPct } = this.check();
 		const t = this.state.budget.warningThreshold;
-		if (dailyPct >= t)
-			return `Daily usage at ${Math.round(dailyPct * 100)}% - slow down`;
-		if (weeklyPct >= t)
-			return `Weekly usage at ${Math.round(weeklyPct * 100)}% - pace yourselves`;
+		if (dailyPct >= t) return `Daily usage at ${Math.round(dailyPct * 100)}% - slow down`;
+		if (weeklyPct >= t) return `Weekly usage at ${Math.round(weeklyPct * 100)}% - pace yourselves`;
 		return null;
 	}
 

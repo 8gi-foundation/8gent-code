@@ -184,9 +184,7 @@ async function autoDetectOllamaModel(): Promise<string | null> {
 		const data = (await res.json()) as { models?: Array<{ name: string }> };
 		const names = (data.models || []).map((m) => m.name);
 		return (
-			names.find((n) => n.startsWith("eight")) ||
-			names.find((n) => !n.includes("embed")) ||
-			null
+			names.find((n) => n.startsWith("eight")) || names.find((n) => !n.includes("embed")) || null
 		);
 	} catch {
 		return null;
@@ -216,9 +214,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 			const perms = await import("../permissions");
 			perms.getPermissionManager().setAutoApprove(true);
 		} catch (err) {
-			process.stderr.write(
-				`[run] warn: could not enable auto-approve: ${String(err)}\n`,
-			);
+			process.stderr.write(`[run] warn: could not enable auto-approve: ${String(err)}\n`);
 		}
 	}
 
@@ -327,11 +323,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		const { Agent } = await import("./agent");
 		const agent = new Agent({
 			model,
-			runtime: provider as
-				| "ollama"
-				| "lmstudio"
-				| "openrouter"
-				| "apple-foundation",
+			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
 			workingDirectory: opts.cwd || process.cwd(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,

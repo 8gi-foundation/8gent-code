@@ -25,9 +25,7 @@ export async function requireAuth(feature?: string): Promise<AuthUser> {
 
 	if (state.state !== "authenticated") {
 		const featureMsg = feature ? ` to use ${feature}` : "";
-		throw new Error(
-			`Authentication required${featureMsg}. Run \`8gent auth login\` to sign in.`,
-		);
+		throw new Error(`Authentication required${featureMsg}. Run \`8gent auth login\` to sign in.`);
 	}
 
 	return state.user;
@@ -42,10 +40,7 @@ export async function requireAuth(feature?: string): Promise<AuthUser> {
  * @returns The authenticated user
  * @throws Error if not authenticated or plan is insufficient
  */
-export async function requirePlan(
-	requiredPlan: UserPlan,
-	feature?: string,
-): Promise<AuthUser> {
+export async function requirePlan(requiredPlan: UserPlan, feature?: string): Promise<AuthUser> {
 	const user = await requireAuth(feature);
 
 	const planHierarchy: Record<UserPlan, number> = {
@@ -76,9 +71,7 @@ export async function requirePlan(
  * @param request - The incoming Request object
  * @returns The authenticated user, or null if no valid token
  */
-export async function authenticateRequest(
-	request: Request,
-): Promise<AuthUser | null> {
+export async function authenticateRequest(request: Request): Promise<AuthUser | null> {
 	const authHeader = request.headers.get("Authorization");
 	if (!authHeader?.startsWith("Bearer ")) return null;
 

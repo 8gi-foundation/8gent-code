@@ -96,14 +96,7 @@
 
 		"FinishReason": {
 			"type": "string",
-			"enum": [
-				"stop",
-				"length",
-				"content-filter",
-				"tool-calls",
-				"error",
-				"other"
-			],
+			"enum": ["stop", "length", "content-filter", "tool-calls", "error", "other"],
 			"description": "Why a step finished. Maps directly to the AI SDK's FinishReason."
 		},
 
@@ -185,15 +178,7 @@
 			"properties": {
 				"type": {
 					"type": "string",
-					"enum": [
-						"text",
-						"reasoning",
-						"source",
-						"file",
-						"tool-call",
-						"tool-result",
-						"tool-error"
-					]
+					"enum": ["text", "reasoning", "source", "file", "tool-call", "tool-result", "tool-error"]
 				}
 			},
 			"required": ["type"],
@@ -303,13 +288,7 @@
 				"hookName": { "type": "string" },
 				"hookType": {
 					"type": "string",
-					"enum": [
-						"onStart",
-						"onComplete",
-						"onError",
-						"beforeTool",
-						"afterTool"
-					]
+					"enum": ["onStart", "onComplete", "onError", "beforeTool", "afterTool"]
 				},
 				"durationMs": { "type": "integer" },
 				"success": { "type": "boolean" },

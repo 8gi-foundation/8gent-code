@@ -12,30 +12,17 @@ import * as crypto from "node:crypto";
 import { indexFolder as astIndexFolder } from "../ast-index";
 import { getExtensionManager } from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
-import {
-	type InfiniteRunner,
-	type InfiniteState,
-	createInfiniteRunner,
-} from "../infinite";
+import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
 import { KernelManager } from "../kernel/manager";
 import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
-import {
-	type OrchestratorBus,
-	getOrchestratorBus,
-} from "../orchestration/orchestrator-bus";
+import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
-import {
-	type ProactivePlanner,
-	getProactivePlanner,
-} from "../planning/proactive-planner";
+import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
-import {
-	type HeartbeatAgents,
-	getHeartbeatAgents,
-} from "../self-autonomy/heartbeat";
+import { type HeartbeatAgents, getHeartbeatAgents } from "../self-autonomy/heartbeat";
 import { OnboardingManager } from "../self-autonomy/onboarding";
 import type {
 	AgentInfo,
@@ -45,11 +32,7 @@ import type {
 } from "../specifications/session/index.js";
 import { SessionWriter } from "../specifications/session/writer.js";
 import { getActiveTelegramBot, startTelegramBot } from "../telegram";
-import {
-	type Evidence,
-	EvidenceCollector,
-	summarizeEvidence,
-} from "../validation/evidence";
+import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
 import { createClient } from "./clients";
 import {
 	type CompressionStage,
@@ -58,10 +41,7 @@ import {
 	type ProactiveResult,
 } from "./compaction";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
-import {
-	ORCHESTRATOR_SEGMENT,
-	buildOrchestratorContext,
-} from "./prompts/orchestrator-prompt";
+import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
 import { ToolLoopDetector } from "./tool-loop-detector";
@@ -158,9 +138,7 @@ export class Agent {
 		this.sessionStartTime = Date.now();
 
 		// Set working directory for hooks
-		this.hookManager.setWorkingDirectory(
-			config.workingDirectory || process.cwd(),
-		);
+		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
 
 		// Set tool context for AI SDK tools
 		setToolContext({
@@ -175,9 +153,7 @@ export class Agent {
 		const cwd = config.workingDirectory || process.cwd();
 		astIndexFolder(cwd)
 			.then((index) => {
-				console.log(
-					`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`,
-				);
+				console.log(`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`);
 			})
 			.catch(() => {
 				// AST indexing is best-effort, don't block agent startup
@@ -201,9 +177,7 @@ export class Agent {
 		// ── Self-Autonomy: Onboarding ────────────────────────────────────
 		// Check if first run — if .8gent/user.json doesn't exist, flag for onboarding
 		// NOTE: Initialized here (before system prompt) so user context can be injected
-		this.onboarding = new OnboardingManager(
-			config.workingDirectory || process.cwd(),
-		);
+		this.onboarding = new OnboardingManager(config.workingDirectory || process.cwd());
 		if (this.onboarding.needsOnboarding()) {
 			// Detect integrations (Ollama, LM Studio, GitHub) in background
 			this.onboarding.detectIntegrations().catch(() => {});
@@ -250,18 +224,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			: "";
 
 		// Inject deferred tool categories when not loading all tools upfront
-		const deferredToolBlock = config.allTools
-			? ""
-			: `\n\n${getDeferredToolSegment()}`;
+		const deferredToolBlock = config.allTools ? "" : `\n\n${getDeferredToolSegment()}`;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
 		// no tools / no internet when it actually does. Closes #1082.
 		const runtimeName = this.config.runtime as string;
 		const isLocalRuntime =
-			runtimeName === "lmstudio" ||
-			runtimeName === "ollama" ||
-			runtimeName === "8gent";
+			runtimeName === "lmstudio" || runtimeName === "ollama" || runtimeName === "8gent";
 		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${buildToolCatalogSegment({ concise: true })}`;
 
 		this.messageHistory.push({
@@ -280,11 +250,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Initialize session persistence (v2)
 		this.sessionWriter = new SessionWriter(this.sessionId);
 		const systemPromptFull =
-			basePrompt +
-			userContextBlock +
-			personalityBlock +
-			orchestratorBlock +
-			languageInstruction;
+			basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		const agentInfo: AgentInfo = {
 			model: config.model,
 			runtime: config.runtime,
@@ -317,9 +283,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			.catch(() => {});
 
 		// Initialize kernel manager for personal LoRA training
-		this.kernel = KernelManager.fromProjectConfig(
-			config.workingDirectory || process.cwd(),
-		);
+		this.kernel = KernelManager.fromProjectConfig(config.workingDirectory || process.cwd());
 		this.kernel.start().catch(() => {});
 
 		// Initialize orchestrator bus for multi-agent coordination
@@ -328,13 +292,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Populate git info asynchronously
 		import("node:child_process")
 			.then(({ exec }) => {
-				exec(
-					"git rev-parse --abbrev-ref HEAD",
-					{ cwd, timeout: 2000 },
-					(err, stdout) => {
-						if (!err && stdout) env.gitBranch = stdout.trim();
-					},
-				);
+				exec("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000 }, (err, stdout) => {
+					if (!err && stdout) env.gitBranch = stdout.trim();
+				});
 			})
 			.catch(() => {});
 
@@ -407,11 +367,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			});
 	}
 
-	async chat(
-		userMessage: string,
-		imageBase64?: string,
-		imageMimeType?: string,
-	): Promise<string> {
+	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
 		// Reset circuit breaker and privacy tracker for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
@@ -447,10 +403,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			});
 
 			// Fire and forget — runs in parallel while main agent works
-			visionId = interpreter.interpret(
-				imageBase64,
-				imageMimeType || "image/png",
-			);
+			visionId = interpreter.interpret(imageBase64, imageMimeType || "image/png");
 
 			this.config.events?.onStepFinish?.({
 				text: "Image attached — vision interpreter running in the background.",
@@ -482,11 +435,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Classify the task and create a BMAD Kanban card for tracking
 		const taskSize = classifyTaskSize(textForAgent);
 		if (taskSize !== "trivial") {
-			this.currentBmadTask = this.kanban.createTask(
-				textForAgent.slice(0, 80),
-				textForAgent,
-				{ size: taskSize },
-			);
+			this.currentBmadTask = this.kanban.createTask(textForAgent.slice(0, 80), textForAgent, {
+				size: taskSize,
+			});
 			this.kanban.moveTask(this.currentBmadTask.id, "ready");
 			this.kanban.moveTask(this.currentBmadTask.id, "in_progress");
 		}
@@ -497,8 +448,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// instruction that forces the model to emit a numbered plan first.
 		const PLANNING_KEYWORDS =
 			/\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
-		const needsPlanningGate =
-			textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent);
+		const needsPlanningGate = textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent);
 
 		if (needsPlanningGate) {
 			this.messageHistory.push({
@@ -535,9 +485,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		};
 
 		// Build system instructions
-		const systemPrompt = this.messageHistory.find(
-			(m) => m.role === "system",
-		)?.content;
+		const systemPrompt = this.messageHistory.find((m) => m.role === "system")?.content;
 
 		// Create the AI SDK agent with v2 session callbacks
 		// Local providers have limited context — cap at core tools to avoid "Context size exceeded".
@@ -567,9 +515,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		];
 		const providerName = providerConfig.name as string;
 		const isLocalProvider =
-			providerName === "lmstudio" ||
-			providerName === "ollama" ||
-			providerName === "8gent";
+			providerName === "lmstudio" || providerName === "ollama" || providerName === "8gent";
 		// Deferred registry only loads `core` upfront — make sure local providers
 		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
 		// web_search won't exist to pass through.
@@ -582,9 +528,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		}
 		const allTools = this.toolRegistry.getTools();
 		const effectiveTools = isLocalProvider
-			? Object.fromEntries(
-					Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)),
-				)
+			? Object.fromEntries(Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)))
 			: allTools;
 
 		// ── Populate runtime params for self-awareness tools ──────────
@@ -639,18 +583,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				});
 				if (preResult.blocked) {
 					console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
-					throw new Error(
-						`Hook blocked tool "${event.toolName}": ${preResult.reason}`,
-					);
+					throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
 				}
 
 				// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
 				const toolPath = event.args?.path as string | undefined;
 				if (
 					toolPath &&
-					["read_file", "write_file", "edit_file", "delete_file"].includes(
-						event.toolName,
-					)
+					["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
 				) {
 					this.recentFilePaths.push(toolPath);
 					// Keep bounded - only last 20 paths
@@ -664,17 +604,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 							console.log(
 								`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
 							);
-							providerConfig.name =
-								fallback.provider as typeof providerConfig.name;
+							providerConfig.name = fallback.provider as typeof providerConfig.name;
 							providerConfig.model = fallback.model;
 							providerConfig.apiKey = undefined;
 						}
 					}
 				}
 
-				console.log(
-					`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`,
-				);
+				console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
 
 				this.events.onToolStart?.({
 					toolName: event.toolName,
@@ -699,9 +636,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
 			onToolCallFinish: async (event) => {
 				const resultStr =
-					typeof event.result === "string"
-						? event.result
-						: JSON.stringify(event.result);
+					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
 
 				// Loop detection: track repeated tool calls with similar args
 				const fingerprint = `${event.toolName}:${JSON.stringify(event.args).slice(0, 200)}`;
@@ -727,10 +662,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				}
 
 				// Circuit breaker: record call and check for loop patterns
-				this.loopDetector.record(
-					event.toolName,
-					event.args as Record<string, unknown>,
-				);
+				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>);
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
@@ -796,23 +728,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
 				// Update proactive planner context
 				this.planner.updatePredictionContext({
-					recentCommands: [
-						`${event.toolName}(${JSON.stringify(event.args).slice(0, 100)})`,
-					],
+					recentCommands: [`${event.toolName}(${JSON.stringify(event.args).slice(0, 100)})`],
 					...(event.toolName === "write_file" || event.toolName === "edit_file"
 						? { modifiedFiles: [String(event.args.path)] }
 						: {}),
-					...(!event.success && typeof event.error === "string"
-						? { lastError: event.error }
-						: {}),
+					...(!event.success && typeof event.error === "string" ? { lastError: event.error } : {}),
 				});
 
 				// Fire-and-forget evidence collection for significant operations
 				if (
 					event.success &&
-					["write_file", "edit_file", "run_command", "git_commit"].includes(
-						event.toolName,
-					)
+					["write_file", "edit_file", "run_command", "git_commit"].includes(event.toolName)
 				) {
 					this.collectToolEvidence(event)
 						.then((ev) => {
@@ -834,20 +760,11 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				}
 
 				// Auto-memory: extract project facts from tool results
-				if (
-					event.success &&
-					["read_file", "run_command"].includes(event.toolName)
-				) {
+				if (event.success && ["read_file", "run_command"].includes(event.toolName)) {
 					try {
-						const autoFacts = extractAutoMemories(
-							event.toolName,
-							event.args,
-							resultStr,
-						);
+						const autoFacts = extractAutoMemories(event.toolName, event.args, resultStr);
 						if (autoFacts.length > 0) {
-							const memory = getMemoryManager(
-								this.config.workingDirectory || process.cwd(),
-							);
+							const memory = getMemoryManager(this.config.workingDirectory || process.cwd());
 							for (const { fact, layer } of autoFacts) {
 								memory.remember(fact, layer, {
 									source: `auto:${event.toolName}`,
@@ -907,14 +824,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				});
 
 				// Check for premature completion claims
-				if (
-					event.text?.includes("🎯 COMPLETED") &&
-					event.finishReason === "stop"
-				) {
+				if (event.text?.includes("🎯 COMPLETED") && event.finishReason === "stop") {
 					// The agent is claiming completion — this is fine, but log it for tracking
-					console.log(
-						`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`,
-					);
+					console.log(`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`);
 				}
 
 				// ── Plan Parsing → Kanban Feed + Workflow Validation ─────────
@@ -943,16 +855,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 						if (validationSteps.length > 0 && this.currentBmadTask) {
 							// Update the BMAD task's steps with the parsed plan
 							for (const vs of validationSteps) {
-								const bmadStep = this.currentBmadTask.steps.find(
-									(s) => s.status === "pending",
-								);
+								const bmadStep = this.currentBmadTask.steps.find((s) => s.status === "pending");
 								if (bmadStep) {
 									bmadStep.action = vs.action;
-									this.kanban.updateStep(
-										this.currentBmadTask.id,
-										bmadStep.id,
-										"in_progress",
-									);
+									this.kanban.updateStep(this.currentBmadTask.id, bmadStep.id, "in_progress");
 								}
 							}
 							console.log(
@@ -975,10 +881,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				totalTokensUsed += event.usage.totalTokens;
 
 				// Record tokens for Convex session sync (fire-and-forget)
-				this.sessionSync.recordTokens(
-					event.usage.promptTokens,
-					event.usage.completionTokens,
-				);
+				this.sessionSync.recordTokens(event.usage.promptTokens, event.usage.completionTokens);
 
 				// Track cost from provider (OpenRouter sends it in raw)
 				const rawCost = event.usage.raw?.cost;
@@ -989,29 +892,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				const hasToolCalls = event.toolCalls && event.toolCalls.length > 0;
 
 				if (hasToolCalls) {
-					console.log(
-						`\n[Step ${event.stepNumber}: executed ${event.toolCalls.length} tool(s)]`,
-					);
+					console.log(`\n[Step ${event.stepNumber}: executed ${event.toolCalls.length} tool(s)]`);
 				}
 
 				// v2: Write step_end with full AI SDK data
-				this.sessionWriter.writeStepEnd(
-					event.stepNumber,
-					event.finishReason as any,
-					{
-						usage: detailedUsage,
-						response: event.response,
-						providerMetadata: event.providerMetadata,
-					},
-				);
+				this.sessionWriter.writeStepEnd(event.stepNumber, event.finishReason as any, {
+					usage: detailedUsage,
+					response: event.response,
+					providerMetadata: event.providerMetadata,
+				});
 
 				// v2: Write rich assistant content if there's text or reasoning
-				if (
-					event.text ||
-					event.reasoning?.length ||
-					event.sources?.length ||
-					event.files?.length
-				) {
+				if (event.text || event.reasoning?.length || event.sources?.length || event.files?.length) {
 					const parts: ContentPart[] = [];
 
 					// Reasoning blocks first
@@ -1054,20 +946,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 						}
 					}
 
-					this.sessionWriter.writeAssistantContent(
-						event.stepNumber,
-						parts,
-						detailedUsage,
-					);
+					this.sessionWriter.writeAssistantContent(event.stepNumber, parts, detailedUsage);
 				}
 			},
 
 			onFinish: async () => {
 				if (this.sessionEvidence.length > 0) {
 					const summary = summarizeEvidence(this.sessionEvidence);
-					console.log(
-						`\n[Evidence: ${summary.verified}/${summary.total} verified]`,
-					);
+					console.log(`\n[Evidence: ${summary.verified}/${summary.total} verified]`);
 					// Emit summary to TUI
 					this.events.onEvidenceSummary?.(summary);
 				}
@@ -1133,9 +1019,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				result.text.length > 50 &&
 				!agentConfig.maxOutputTokens // only retry once
 			) {
-				const hadToolCalls = result.steps?.some(
-					(s: any) => s.toolCalls?.length > 0,
-				);
+				const hadToolCalls = result.steps?.some((s: any) => s.toolCalls?.length > 0);
 				if (!hadToolCalls) {
 					console.log(
 						`[agent] No tool calls after ${stepCount} step(s) - bumping maxOutputTokens to 8192 and retrying`,
@@ -1156,9 +1040,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 						});
 					} catch (retryErr: any) {
 						if (retryErr?.name === "AbortError") throw retryErr;
-						console.log(
-							`[agent] Retry with larger maxOutputTokens failed: ${retryErr?.message}`,
-						);
+						console.log(`[agent] Retry with larger maxOutputTokens failed: ${retryErr?.message}`);
 					}
 					this.abortController = null;
 				}
@@ -1181,18 +1063,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					0.8, // Default score — PRM judge would score this properly if kernel is active
 					{
 						model: this.config.model,
-						toolCallsSucceeded:
-							this.sessionEvidence.filter((e) => !e.verified).length === 0,
+						toolCallsSucceeded: this.sessionEvidence.filter((e) => !e.verified).length === 0,
 						userCorrected: false, // Will be updated on next user message if it's a correction
 					},
 				);
 			}
 
 			// Save checkpoint every 5 messages
-			if (
-				this.messageHistory.filter((m) => m.role === "user").length % 5 ===
-				0
-			) {
+			if (this.messageHistory.filter((m) => m.role === "user").length % 5 === 0) {
 				this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
 			}
 
@@ -1204,10 +1082,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					const stage = this.compaction.getStage(this.messageHistory);
 					const compactModel = createModel(providerConfig);
 					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(
-							this.messageHistory,
-							compactModel,
-						);
+						await this.compaction.compactProactive(this.messageHistory, compactModel);
 					this.messageHistory = compacted;
 					console.log(
 						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
@@ -1224,9 +1099,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				this.kanban.moveTask(this.currentBmadTask.id, "review");
 				// If evidence looks good, move to done
 				if (this.sessionEvidence.length > 0) {
-					const verifiedCount = this.sessionEvidence.filter(
-						(e) => e.verified,
-					).length;
+					const verifiedCount = this.sessionEvidence.filter((e) => e.verified).length;
 					if (verifiedCount > 0) {
 						this.kanban.moveTask(this.currentBmadTask.id, "done");
 					}
@@ -1366,13 +1239,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		args: Record<string, unknown>;
 		result?: unknown;
 	}): Promise<Evidence[]> {
-		if (
-			(event.toolName === "write_file" || event.toolName === "edit_file") &&
-			event.args.path
-		) {
-			return this.evidenceCollector.collectForFileWrite(
-				String(event.args.path),
-			);
+		if ((event.toolName === "write_file" || event.toolName === "edit_file") && event.args.path) {
+			return this.evidenceCollector.collectForFileWrite(String(event.args.path));
 		}
 		if (event.toolName === "git_commit") {
 			return this.evidenceCollector.collectForGitCommit();
@@ -1380,9 +1248,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		if (event.toolName === "run_command" && event.args.command) {
 			return this.evidenceCollector.collectForCommand(
 				String(event.args.command),
-				typeof event.result === "string"
-					? event.result
-					: JSON.stringify(event.result),
+				typeof event.result === "string" ? event.result : JSON.stringify(event.result),
 			);
 		}
 		return [];
@@ -1513,9 +1379,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 	 * Restore conversation from a checkpoint.
 	 * Injects historical messages into the agent context.
 	 */
-	restoreFromCheckpoint(
-		messages: Array<{ role: string; content: string }>,
-	): void {
+	restoreFromCheckpoint(messages: Array<{ role: string; content: string }>): void {
 		// Keep the system prompt, replace conversation history
 		const systemMsg = this.messageHistory[0];
 		this.messageHistory = systemMsg ? [systemMsg] : [];

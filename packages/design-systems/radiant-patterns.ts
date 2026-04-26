@@ -152,8 +152,7 @@ export const LAYOUT_PATTERNS = {
 				"Single-page scroll with full-viewport hero. Sections separated by thin amber borders.",
 		},
 		galleryLayout: {
-			structure:
-				"Sidebar (240px sticky) + Main (flexible) with floating color controls",
+			structure: "Sidebar (240px sticky) + Main (flexible) with floating color controls",
 			gridTemplate: "240px 1fr",
 			sidebarHeight: "calc(100vh - var(--nav-height, 56px))",
 			sidebarPosition: "sticky, top: var(--nav-height)",
@@ -161,8 +160,7 @@ export const LAYOUT_PATTERNS = {
 				"Fixed sidebar with scrollable main area. Sidebar hides on mobile, replaced by hamburger toggle with slide-in drawer.",
 		},
 		shaderDetailLayout: {
-			structure:
-				"Optional SourceViewer (2fr) + Main preview (3fr) + Sidebar (240px)",
+			structure: "Optional SourceViewer (2fr) + Main preview (3fr) + Sidebar (240px)",
 			gridTemplate: "1fr 240px",
 			gridTemplateWithSource: "minmax(320px, 2fr) 3fr 240px",
 			fullHeight: "100vh",
@@ -196,8 +194,7 @@ export const LAYOUT_PATTERNS = {
 			gap: "2.5rem",
 			mobileColumns: "1fr",
 			mobileGap: "2rem",
-			description:
-				"Three equal columns for instructional steps. Single column on mobile.",
+			description: "Three equal columns for instructional steps. Single column on mobile.",
 		},
 	},
 
@@ -272,8 +269,7 @@ export const ANIMATION_PATTERNS = {
 		colorChange: {
 			property: "color",
 			duration: "0.2s",
-			description:
-				"Standard hover color transition. Used on all interactive text elements.",
+			description: "Standard hover color transition. Used on all interactive text elements.",
 		},
 		borderColor: {
 			property: "border-color",
@@ -288,15 +284,13 @@ export const ANIMATION_PATTERNS = {
 		cardHover: {
 			properties: "border-color 0.3s ease, transform 0.3s ease",
 			transform: "translateY(-2px)",
-			description:
-				"Card lifts 2px on hover with border brightening. 300ms for smooth feel.",
+			description: "Card lifts 2px on hover with border brightening. 300ms for smooth feel.",
 		},
 		opacityReveal: {
 			property: "opacity",
 			duration: "0.4s",
 			timing: "ease",
-			description:
-				"Used for iframe/sprite reveal. Shader fades in over 400ms after loading.",
+			description: "Used for iframe/sprite reveal. Shader fades in over 400ms after loading.",
 		},
 		hintFade: {
 			property: "opacity",
@@ -360,8 +354,7 @@ export const ANIMATION_PATTERNS = {
 				"Runtime parameter control via iframe.contentWindow.postMessage(). Each shader declares its tunable parameters.",
 		},
 		mouseInteraction: {
-			implementation:
-				"mousemove/mousedown/click/touchstart/touchmove listeners",
+			implementation: "mousemove/mousedown/click/touchstart/touchmove listeners",
 			description:
 				"Most shaders respond to mouse position and/or click/drag. Interaction hints auto-detected from script content.",
 		},
@@ -385,13 +378,11 @@ export const COMPONENT_PATTERNS = {
 		contentPlacement: "Left-aligned, vertically centered, max-width 600px",
 		overlay: "Directional gradient from left (dark) to right (transparent)",
 		controls: "Floating pill bar at bottom center with backdrop-filter blur",
-		interactivity:
-			"Drag to rotate camera, range sliders for params, color scheme dots",
+		interactivity: "Drag to rotate camera, range sliders for params, color scheme dots",
 		css: {
 			height: "100dvh",
 			cursor: "grab (dragging: grabbing)",
-			iframeTransition:
-				"opacity 0.4s ease (starts at 0, reveals on .ready class)",
+			iframeTransition: "opacity 0.4s ease (starts at 0, reveals on .ready class)",
 			contentPadding: "0 3rem",
 			headingSize: "clamp(3rem, 8vw, 6rem)",
 			headingWeight: 300,
@@ -410,8 +401,7 @@ export const COMPONENT_PATTERNS = {
 		backdropFilter: "blur(12px)",
 		borderBottom: "1px solid rgba(200, 149, 108, 0.1)",
 		logoStyle: "font-weight: 300, color: #c8956c, letter-spacing: 0.05em",
-		linkStyle:
-			"font-size: 0.8rem, color: rgba(232, 224, 216, 0.5), hover: #c8956c",
+		linkStyle: "font-size: 0.8rem, color: rgba(232, 224, 216, 0.5), hover: #c8956c",
 		description:
 			"Translucent glass nav. Blur creates depth separation from content. Very thin border for definition. Logo is light-weight amber text. Links are muted warm-white, amber on hover.",
 	},
@@ -429,18 +419,14 @@ export const COMPONENT_PATTERNS = {
 		cssVariable: '--card-accent (RGB triplet, e.g. "200, 149, 108")',
 		infoSection: {
 			padding: "1.2rem 1.5rem",
-			numberStyle:
-				"font-size: 0.7rem, uppercase, letter-spacing: 0.15em, color: #c8956c",
+			numberStyle: "font-size: 0.7rem, uppercase, letter-spacing: 0.15em, color: #c8956c",
 			titleStyle: "font-size: 1.1rem, font-weight: 500",
-			descStyle:
-				"font-size: 0.8rem, color: rgba(232,224,216,0.5), line-height: 1.5",
-			actionStyle:
-				"font-size: 0.75rem, uppercase, letter-spacing: 0.1em, color: #c8956c",
+			descStyle: "font-size: 0.8rem, color: rgba(232,224,216,0.5), line-height: 1.5",
+			actionStyle: "font-size: 0.75rem, uppercase, letter-spacing: 0.1em, color: #c8956c",
 		},
 		hoverHint: {
 			position: "absolute bottom center",
-			style:
-				"font-size: 0.6rem, uppercase, letter-spacing: 0.12em, backdrop-filter: blur(4px)",
+			style: "font-size: 0.6rem, uppercase, letter-spacing: 0.12em, backdrop-filter: blur(4px)",
 			background: "rgba(10, 10, 10, 0.6)",
 			border: "1px solid rgba(200, 149, 108, 0.12)",
 		},
@@ -500,8 +486,7 @@ export const COMPONENT_PATTERNS = {
 		position: "sticky",
 		sectionHeading:
 			"font-size: 0.6rem, uppercase, letter-spacing: 0.15em, color: #c8956c, font-weight: 500",
-		linkStyle:
-			"font-size: 0.8rem, color: rgba(232,224,216,0.5), padding: 0.4rem 1rem",
+		linkStyle: "font-size: 0.8rem, color: rgba(232,224,216,0.5), padding: 0.4rem 1rem",
 		activeLinkStyle:
 			"color: #c8956c, background: rgba(200,149,108,0.08), border-left: 2px solid #c8956c",
 		countBadge: "font-size: 0.65rem, color: rgba(232,224,216,0.25)",
@@ -537,8 +522,7 @@ export const COMPONENT_PATTERNS = {
 		codeLineHeight: 1.7,
 		codeColor: "rgba(232, 224, 216, 0.65)",
 		tabSize: 2,
-		scrollbar:
-			"width: 6px, thumb: rgba(200,149,108,0.2), hover: rgba(200,149,108,0.35)",
+		scrollbar: "width: 6px, thumb: rgba(200,149,108,0.2), hover: rgba(200,149,108,0.35)",
 		description:
 			"Side panel for viewing shader source code. Monospace font with generous line height for readability. Custom scrollbar matches theme. Panel title uses uppercase convention.",
 	},
@@ -547,25 +531,20 @@ export const COMPONENT_PATTERNS = {
 	changelog: {
 		entryBorderLeft: "1px solid rgba(200, 149, 108, 0.15)",
 		entryPaddingLeft: "1.5rem",
-		versionStyle:
-			"font-size: 0.9rem, font-weight: 500, color: rgba(232,224,216,0.8)",
+		versionStyle: "font-size: 0.9rem, font-weight: 500, color: rgba(232,224,216,0.8)",
 		dateStyle: "font-size: 0.75rem, color: rgba(232,224,216,0.3)",
 		listItemBullet:
 			"width: 4px, height: 4px, border-radius: 50%, background: rgba(200,149,108,0.3)",
-		listItemStyle:
-			"font-size: 0.82rem, line-height: 1.7, color: rgba(232,224,216,0.45)",
+		listItemStyle: "font-size: 0.82rem, line-height: 1.7, color: rgba(232,224,216,0.45)",
 		description:
 			"Timeline-style changelog with left border accent. Tiny amber dot bullets. Very muted text keeps focus on structure.",
 	},
 
 	// -- How to Use (steps) --
 	howToUse: {
-		stepNumberStyle:
-			"font-size: 2.5rem, font-weight: 200, color: rgba(200,149,108,0.45)",
-		stepTitleStyle:
-			"font-size: 1rem, font-weight: 500, color: rgba(232,224,216,0.85)",
-		stepDescStyle:
-			"font-size: 0.85rem, line-height: 1.6, color: rgba(232,224,216,0.45)",
+		stepNumberStyle: "font-size: 2.5rem, font-weight: 200, color: rgba(200,149,108,0.45)",
+		stepTitleStyle: "font-size: 1rem, font-weight: 500, color: rgba(232,224,216,0.85)",
+		stepDescStyle: "font-size: 0.85rem, line-height: 1.6, color: rgba(232,224,216,0.45)",
 		description:
 			"Large light-weight numbers as visual anchors. Three-column grid with generous gap. Step numbers are oversized and muted amber - decorative rather than informational.",
 	},
@@ -573,8 +552,7 @@ export const COMPONENT_PATTERNS = {
 	// -- Ambient glow --
 	ambientGlow: {
 		implementation: "Layered radial gradients positioned at top edge",
-		gradientPattern:
-			"Elliptical radial-gradient at different X positions (20%, 80%, 50%)",
+		gradientPattern: "Elliptical radial-gradient at different X positions (20%, 80%, 50%)",
 		opacities: [0.22, 0.18, 0.14],
 		animation: "glow-breathe 20s ease-in-out infinite",
 		positioning: "position: absolute, inset: 0, pointer-events: none",
@@ -586,10 +564,8 @@ export const COMPONENT_PATTERNS = {
 	footer: {
 		borderTop: "1px solid rgba(200, 149, 108, 0.1)",
 		padding: "2rem 3rem",
-		wordmarkStyle:
-			"font-size: 1rem, font-weight: 500, letter-spacing: 0.05em, color: #c8956c",
-		linkStyle:
-			"font-size: 0.8rem, color: rgba(232,224,216,0.5), hover: #e8e0d8",
+		wordmarkStyle: "font-size: 1rem, font-weight: 500, letter-spacing: 0.05em, color: #c8956c",
+		linkStyle: "font-size: 0.8rem, color: rgba(232,224,216,0.5), hover: #e8e0d8",
 		socialStyle: "color: rgba(232,224,216,0.4), hover: #c8956c",
 		copyrightStyle: "font-size: 0.7rem, color: rgba(232,224,216,0.3)",
 		bottomBorder: "1px solid rgba(200,149,108,0.06)",
@@ -780,29 +756,19 @@ export const VISUAL_EFFECTS = {
 
 	// -- Shader-specific visual techniques --
 	shaderVisualTechniques: {
-		simplexNoise:
-			"Domain-warped simplex noise for organic flow (Fluid Amber, Shifting Veils)",
+		simplexNoise: "Domain-warped simplex noise for organic flow (Fluid Amber, Shifting Veils)",
 		perlinNoise: "Perlin noise currents for particle flow fields (Flow Field)",
-		fbmNoise:
-			"Fractal Brownian Motion with domain rotation to reduce grid artifacts",
+		fbmNoise: "Fractal Brownian Motion with domain rotation to reduce grid artifacts",
 		voronoiPatterns: "Voronoi fracture patterns (Sugar Glass, Gilded Fracture)",
-		reactionDiffusion:
-			"Gray-Scott reaction-diffusion for organic maze patterns (Edge of Chaos)",
-		metaballs:
-			"Raymarched metaball merging with liquid-metal surface (Metamorphosis)",
-		thinFilmInterference:
-			"Holographic thin-film color shifts (Artpop Iridescence)",
-		gravitationalLensing:
-			"Schwarzschild raytracing with Doppler beaming (Event Horizon)",
+		reactionDiffusion: "Gray-Scott reaction-diffusion for organic maze patterns (Edge of Chaos)",
+		metaballs: "Raymarched metaball merging with liquid-metal surface (Metamorphosis)",
+		thinFilmInterference: "Holographic thin-film color shifts (Artpop Iridescence)",
+		gravitationalLensing: "Schwarzschild raytracing with Doppler beaming (Event Horizon)",
 		chladniPatterns: "Standing wave interference patterns on vibrating plates",
-		particleSystems:
-			"Spring-connected grids, flocking boids, magnetic field alignment",
-		volumetricLighting:
-			"Spotlight cones with dust scattering (Velvet Spotlight)",
-		chromaticAberration:
-			"Color channel separation for holographic/glitch effects",
-		lissajousFigures:
-			"Parametric curves with phosphor persistence (Analog Drift)",
+		particleSystems: "Spring-connected grids, flocking boids, magnetic field alignment",
+		volumetricLighting: "Spotlight cones with dust scattering (Velvet Spotlight)",
+		chromaticAberration: "Color channel separation for holographic/glitch effects",
+		lissajousFigures: "Parametric curves with phosphor persistence (Analog Drift)",
 		description:
 			"Shader techniques span Canvas 2D (particle systems, parametric drawing) and WebGL (GLSL fragment shaders). Most use time-based animation with mouse interaction. All target 60fps.",
 	},
@@ -844,27 +810,23 @@ export const RESPONSIVE_PATTERNS = {
 
 	mobileAdaptations: {
 		"640px": {
-			heroContent:
-				"Centered text, bottom padding 30vh for controls, max-width none",
+			heroContent: "Centered text, bottom padding 30vh for controls, max-width none",
 			heroHeading: "2.5rem (from clamp)",
 			heroOverlay: "Vertical gradient instead of horizontal",
-			heroControls:
-				"Flex-wrap, smaller gaps, labels hidden, range inputs narrower",
+			heroControls: "Flex-wrap, smaller gaps, labels hidden, range inputs narrower",
 			sectionPadding: "1.5rem to 3rem 1.5rem (from 3-5rem 3rem)",
 			gridColumns: "1fr (from auto-fill/3-col)",
 			gridGap: "1rem (from 1.25-1.5rem)",
 			stepsGrid: "1fr (from repeat(3, 1fr))",
 			navPadding: "0 1rem (from 0 2rem)",
 			navLinkGap: "1rem (from 1.5rem)",
-			floatingControls:
-				"Smaller padding, labels hidden, radius reduced to 30px",
+			floatingControls: "Smaller padding, labels hidden, radius reduced to 30px",
 			footer: "Stack vertically instead of horizontal",
 		},
 		"768px": {
 			sidebar: "Hidden by default, slide-in drawer via hamburger",
 			galleryGrid: "1fr (from 240px + 1fr)",
-			shaderDetail:
-				"Single column, source viewer hidden, sidebar below preview",
+			shaderDetail: "Single column, source viewer hidden, sidebar below preview",
 			colorSchemeDots: "Larger (16px), text hidden, circular buttons",
 		},
 		"900px": {
@@ -874,12 +836,9 @@ export const RESPONSIVE_PATTERNS = {
 
 	adaptivePatterns: {
 		fluidType: "clamp(3rem, 8vw, 6rem) for hero heading",
-		iframeFilterInheritance:
-			"style:filter={scheme.filter} on iframes for runtime color change",
-		spriteSheets:
-			"6-frame vertical sprite for shader previews (one per color scheme)",
-		scrollBehavior:
-			"Disabled during popstate navigation for instant scroll restoration",
+		iframeFilterInheritance: "style:filter={scheme.filter} on iframes for runtime color change",
+		spriteSheets: "6-frame vertical sprite for shader previews (one per color scheme)",
+		scrollBehavior: "Disabled during popstate navigation for instant scroll restoration",
 		stickyPositioning: "sidebar sticky to top of viewport below nav",
 		cssVariables: '--nav-height: 56px, --card-accent: "R, G, B"',
 		description:
@@ -917,8 +876,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "flow-field",
 		title: "Flow Field with Particle Trails",
-		description:
-			"Particles following Perlin noise currents with warm amber trails.",
+		description: "Particles following Perlin noise currents with warm amber trails.",
 		tags: ["fill", "particles", "noise"],
 		technique: "canvas-2d",
 		parameterNames: ["SPEED", "NOISE_SCALE"],
@@ -926,8 +884,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "topographic",
 		title: "Topographic Contour Map",
-		description:
-			"Living terrain map with marching squares isolines and elevation labels.",
+		description: "Living terrain map with marching squares isolines and elevation labels.",
 		tags: ["fill", "noise", "geometric"],
 		technique: "canvas-2d",
 		parameterNames: ["NUM_CONTOURS", "TIME_SPEED"],
@@ -935,8 +892,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "generative-tree",
 		title: "Generative Branching Tree",
-		description:
-			"L-system inspired tree with continuous growth and regrowth cycles.",
+		description: "L-system inspired tree with continuous growth and regrowth cycles.",
 		tags: ["object", "organic"],
 		technique: "canvas-2d",
 		parameterNames: ["GROWTH_SPEED_BASE", "MAX_DEPTH"],
@@ -944,8 +900,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "strange-attractor",
 		title: "Strange Attractor (Lorenz)",
-		description:
-			"Lorenz system with 3D projection, rotation, and glowing particle trails.",
+		description: "Lorenz system with 3D projection, rotation, and glowing particle trails.",
 		tags: ["object", "particles", "physics"],
 		technique: "canvas-2d",
 		parameterNames: ["STEPS_PER_FRAME", "TRAIL_LENGTH", "RHO"],
@@ -953,8 +908,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "pendulum-wave",
 		title: "Pendulum Wave",
-		description:
-			"Physics-based pendulum wave creating emergent interference patterns.",
+		description: "Physics-based pendulum wave creating emergent interference patterns.",
 		tags: ["object", "physics"],
 		technique: "canvas-2d",
 		parameterNames: ["NUM_PENDULUMS", "CYCLE_DURATION"],
@@ -970,8 +924,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "fluid-amber",
 		title: "Fluid Amber",
-		description:
-			"Domain-warped simplex noise with layered organic flow and warm palette.",
+		description: "Domain-warped simplex noise with layered organic flow and warm palette.",
 		tags: ["fill", "noise", "organic"],
 		technique: "webgl",
 		parameterNames: ["timeScale", "ampDecay"],
@@ -1090,13 +1043,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 		tags: ["fill", "geometric"],
 		technique: "webgl",
 		inspiration: "Beyonce",
-		parameterNames: [
-			"ANIM_MODE",
-			"TILE_SCALE",
-			"WAVE_SPEED",
-			"WAVE_DELAY",
-			"WAVE_DIR",
-		],
+		parameterNames: ["ANIM_MODE", "TILE_SCALE", "WAVE_SPEED", "WAVE_DELAY", "WAVE_DIR"],
 	},
 	{
 		id: "gilded-fracture",
@@ -1121,8 +1068,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "golden-throne",
 		title: "Golden Throne",
-		description:
-			"Sacred geometry mandala with golden ratio spirals and counter-rotating layers.",
+		description: "Sacred geometry mandala with golden ratio spirals and counter-rotating layers.",
 		tags: ["object", "geometric"],
 		technique: "webgl",
 		inspiration: "Beyonce",
@@ -1141,8 +1087,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "tropical-heat",
 		title: "Tropical Heat",
-		description:
-			"Heat shimmer distortion with chromatic aberration and tropical color blooms.",
+		description: "Heat shimmer distortion with chromatic aberration and tropical color blooms.",
 		tags: ["fill", "noise"],
 		technique: "webgl",
 		inspiration: "Bad Bunny",
@@ -1161,8 +1106,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "voltage-arc",
 		title: "Voltage Arc",
-		description:
-			"Electric plasma arcs crackling between floating conductor points with warm glow.",
+		description: "Electric plasma arcs crackling between floating conductor points with warm glow.",
 		tags: ["object", "physics"],
 		technique: "webgl",
 		inspiration: "Bad Bunny",
@@ -1177,12 +1121,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 		technique: "webgl",
 		inspiration: "SZA",
 		defaultScheme: "blue",
-		parameterNames: [
-			"RIPPLE_SPEED",
-			"MOON_GLOW",
-			"CAMERA_TILT",
-			"WAVE_INTENSITY",
-		],
+		parameterNames: ["RIPPLE_SPEED", "MOON_GLOW", "CAMERA_TILT", "WAVE_INTENSITY"],
 	},
 	{
 		id: "eclipse-glow",
@@ -1248,8 +1187,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "silk-groove",
 		title: "Silk Groove",
-		description:
-			"Flowing silk ribbons with specular highlights and cloth-like wave animation.",
+		description: "Flowing silk ribbons with specular highlights and cloth-like wave animation.",
 		tags: ["fill", "organic"],
 		technique: "webgl",
 		inspiration: "Bruno Mars",
@@ -1274,13 +1212,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 		technique: "webgl",
 		inspiration: "The Weeknd",
 		hasHeroConfig: true,
-		parameterNames: [
-			"ROTATION_SPEED",
-			"DISK_INTENSITY",
-			"TILT",
-			"ROTATE",
-			"CHROMATIC",
-		],
+		parameterNames: ["ROTATION_SPEED", "DISK_INTENSITY", "TILT", "ROTATE", "CHROMATIC"],
 	},
 	{
 		id: "burning-film",
@@ -1387,8 +1319,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "magma-core",
 		title: "Magma Core",
-		description:
-			"Volcanic eruption with thermal lava particles, cooling physics, and magma pool.",
+		description: "Volcanic eruption with thermal lava particles, cooling physics, and magma pool.",
 		tags: ["object", "particles", "physics"],
 		technique: "webgl",
 		inspiration: "Jack Black",
@@ -1408,8 +1339,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "edge-of-chaos",
 		title: "Edge of Chaos",
-		description:
-			"Reaction-diffusion maze with golden edge glow and organic pop-and-regrow cycle.",
+		description: "Reaction-diffusion maze with golden edge glow and organic pop-and-regrow cycle.",
 		tags: ["fill", "organic"],
 		technique: "webgl",
 		inspiration: "Robert Downey Jr.",
@@ -1428,8 +1358,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "shifting-veils",
 		title: "Shifting Veils",
-		description:
-			"Layered translucent noise curtains that morph and reveal patterns underneath.",
+		description: "Layered translucent noise curtains that morph and reveal patterns underneath.",
 		tags: ["fill", "noise", "organic"],
 		technique: "webgl",
 		inspiration: "Meryl Streep",
@@ -1449,8 +1378,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "kaleidoscope-runway",
 		title: "Kaleidoscope Runway",
-		description:
-			"Fashion-inspired kaleidoscopic tessellations with symmetric mirror segments.",
+		description: "Fashion-inspired kaleidoscopic tessellations with symmetric mirror segments.",
 		tags: ["fill", "geometric"],
 		technique: "webgl",
 		inspiration: "Zendaya",
@@ -1459,8 +1387,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "digital-rain",
 		title: "Digital Rain",
-		description:
-			"Warm amber character columns dissolving into zen ripples at the water surface.",
+		description: "Warm amber character columns dissolving into zen ripples at the water surface.",
 		tags: ["fill", "particles"],
 		technique: "canvas-2d",
 		inspiration: "Keanu Reeves",
@@ -1469,8 +1396,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "desert-mirage",
 		title: "Desert Mirage",
-		description:
-			"Layered parallax sand dunes with heat shimmer and wind-blown particles.",
+		description: "Layered parallax sand dunes with heat shimmer and wind-blown particles.",
 		tags: ["fill", "noise"],
 		technique: "canvas-2d",
 		inspiration: "Pedro Pascal",
@@ -1499,8 +1425,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "aurora-veil",
 		title: "Aurora Veil",
-		description:
-			"Northern lights ribbons flowing above hexagonal ice crystal formations.",
+		description: "Northern lights ribbons flowing above hexagonal ice crystal formations.",
 		tags: ["fill", "noise", "organic"],
 		technique: "webgl",
 		inspiration: "Cate Blanchett",
@@ -1509,8 +1434,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "bioluminescence",
 		title: "Bioluminescence",
-		description:
-			"Deep sea jellyfish pulsing with bioluminescent glow and drifting plankton.",
+		description: "Deep sea jellyfish pulsing with bioluminescent glow and drifting plankton.",
 		tags: ["fill", "organic", "particles"],
 		technique: "webgl",
 		inspiration: "Zendaya",
@@ -1551,8 +1475,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "woven-radiance",
 		title: "Woven Radiance",
-		description:
-			"African textile-inspired weave patterns with vibrant kente cloth geometry.",
+		description: "African textile-inspired weave patterns with vibrant kente cloth geometry.",
 		tags: ["fill", "geometric"],
 		technique: "canvas-2d",
 		inspiration: "Lupita Nyong'o",
@@ -1561,8 +1484,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "jazz-chaos",
 		title: "Jazz Chaos",
-		description:
-			"Syncopated particle groups moving in rhythm with swing timing and solos.",
+		description: "Syncopated particle groups moving in rhythm with swing timing and solos.",
 		tags: ["fill", "particles"],
 		technique: "canvas-2d",
 		inspiration: "Jeff Goldblum",
@@ -1571,8 +1493,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "thunder-sermon",
 		title: "Thunder Sermon",
-		description:
-			"Fractal lightning bolts with Lichtenberg branching and thunder shockwaves.",
+		description: "Fractal lightning bolts with Lichtenberg branching and thunder shockwaves.",
 		tags: ["fill", "physics"],
 		technique: "webgl",
 		inspiration: "The Weeknd",
@@ -1581,8 +1502,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "vinyl-grooves",
 		title: "Vinyl Grooves",
-		description:
-			"Spinning vinyl record with visible grooves, tonearm, and needle spark.",
+		description: "Spinning vinyl record with visible grooves, tonearm, and needle spark.",
 		tags: ["object", "geometric"],
 		technique: "webgl",
 		inspiration: "Laufey",
@@ -1591,8 +1511,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 	{
 		id: "vintage-static",
 		title: "Vintage Static",
-		description:
-			"Retro TV color bars melting with VHS glitches and CRT scan lines.",
+		description: "Retro TV color bars melting with VHS glitches and CRT scan lines.",
 		tags: ["fill", "geometric"],
 		technique: "canvas-2d",
 		inspiration: "Harry Styles",
@@ -1825,10 +1744,7 @@ export const SHADER_CATALOG: ShaderEntry[] = [
 // 9. INSPIRATION PALETTES
 // ============================================
 
-export const INSPIRATION_PALETTES: Record<
-	string,
-	{ primary: string; colors: string[] }
-> = {
+export const INSPIRATION_PALETTES: Record<string, { primary: string; colors: string[] }> = {
 	"sabrina-carpenter": {
 		primary: "#E8527A",
 		colors: ["#E8527A", "#8B4570", "#CD6060"],
@@ -1959,15 +1875,13 @@ export const LAYOUT_TEMPLATES = {
 			"Two-column hero: content left (flex: 1), shader right (flex: 0 0 420px, aspect-ratio: 4/3). Nav bar above with logo and links. Content: h1 (2.5rem, weight 500), paragraph (rgba text), CTA button (amber solid).",
 		navStyle:
 			"flex, justify-between, padding: 1.5rem 3rem, logo: weight 600 amber, links: 0.9rem muted",
-		heroStyle:
-			"flex, align-center, gap: 3rem, padding: 3rem, max-width: 1200px, min-height: 60vh",
+		heroStyle: "flex, align-center, gap: 3rem, padding: 3rem, max-width: 1200px, min-height: 60vh",
 	},
 	heroSectionFullBleed: {
 		description:
 			"Full-viewport shader background with content overlaid. Shader in fixed position behind page content. Nav and content in relative z-index layer.",
 		shaderBackground: "position: fixed, inset: 0, z-index: 0",
-		pageContent:
-			"position: relative, z-index: 1, min-height: 100vh, flex column",
+		pageContent: "position: relative, z-index: 1, min-height: 100vh, flex column",
 		heroContent: "max-width: 600px, padding: 3rem",
 	},
 	backgroundOverlay: {

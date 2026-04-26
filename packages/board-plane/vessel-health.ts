@@ -64,9 +64,7 @@ export class VesselHealthMonitor {
 	deregister(vesselId: string): void {
 		const record = this.vessels.get(vesselId);
 		if (record) {
-			console.log(
-				`[vessel-health] deregistered ${vesselId} (${record.memberCode})`,
-			);
+			console.log(`[vessel-health] deregistered ${vesselId} (${record.memberCode})`);
 			this.onAlert?.(`Vessel ${vesselId} (${record.memberCode}) disconnected`);
 		}
 		this.vessels.delete(vesselId);

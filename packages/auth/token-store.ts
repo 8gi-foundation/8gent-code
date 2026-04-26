@@ -175,8 +175,7 @@ export class EncryptedFileTokenStore implements TokenStore {
 	private key: Buffer;
 
 	constructor(filePath?: string) {
-		this.filePath =
-			filePath ?? path.join(os.homedir(), ".8gent", TOKEN_FILE_NAME);
+		this.filePath = filePath ?? path.join(os.homedir(), ".8gent", TOKEN_FILE_NAME);
 		this.key = this.deriveKey();
 	}
 
@@ -250,12 +249,6 @@ export class EncryptedFileTokenStore implements TokenStore {
 	 */
 	private deriveKey(): Buffer {
 		const fingerprint = `${os.hostname()}:${os.userInfo().username}`;
-		return crypto.pbkdf2Sync(
-			fingerprint,
-			KEY_DERIVATION_SALT,
-			100_000,
-			32,
-			"sha256",
-		);
+		return crypto.pbkdf2Sync(fingerprint, KEY_DERIVATION_SALT, 100_000, 32, "sha256");
 	}
 }

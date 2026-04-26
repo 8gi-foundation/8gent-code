@@ -50,10 +50,7 @@ export interface Session {
 	/** Absolute path to the JSONL file */
 	readonly filePath: string;
 	/** Append a new entry. Returns the computed hash. */
-	append(
-		type: AuditEntryType,
-		payload: Record<string, unknown>,
-	): Promise<string>;
+	append(type: AuditEntryType, payload: Record<string, unknown>): Promise<string>;
 	/** Read all entries from disk (full replay). */
 	readAll(): Promise<AuditEntry[]>;
 	/** Get the hash of the last entry (for chain verification). */

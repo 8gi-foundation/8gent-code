@@ -11,15 +11,9 @@ function getToken(): string | null {
 	return process.env.VERCEL_TOKEN || null;
 }
 
-async function vercelFetch(
-	path: string,
-	opts?: RequestInit,
-): Promise<Response> {
+async function vercelFetch(path: string, opts?: RequestInit): Promise<Response> {
 	const token = getToken();
-	if (!token)
-		throw new Error(
-			"VERCEL_TOKEN not set. Run: export VERCEL_TOKEN=your_token",
-		);
+	if (!token) throw new Error("VERCEL_TOKEN not set. Run: export VERCEL_TOKEN=your_token");
 	return fetch(`${VERCEL_API}${path}`, {
 		...opts,
 		headers: {
@@ -54,13 +48,8 @@ export async function vercelListProjects(): Promise<string> {
 	return JSON.stringify({ count: projects.length, projects }, null, 2);
 }
 
-export async function vercelGetDeployments(
-	projectId: string,
-	limit = 5,
-): Promise<string> {
-	const res = await vercelFetch(
-		`/v6/deployments?projectId=${projectId}&limit=${limit}`,
-	);
+export async function vercelGetDeployments(projectId: string, limit = 5): Promise<string> {
+	const res = await vercelFetch(`/v6/deployments?projectId=${projectId}&limit=${limit}`);
 	if (!res.ok) return `Vercel API error ${res.status}: ${await res.text()}`;
 	const data = (await res.json()) as {
 		deployments: Array<{
@@ -80,21 +69,14 @@ export async function vercelGetDeployments(
 		created: new Date(d.created).toISOString(),
 		commitMessage: d.meta?.githubCommitMessage || null,
 	}));
-	return JSON.stringify(
-		{ count: deploys.length, deployments: deploys },
-		null,
-		2,
-	);
+	return JSON.stringify({ count: deploys.length, deployments: deploys }, null, 2);
 }
 
 export async function vercelDeploy(projectId: string): Promise<string> {
 	// Trigger a redeployment by creating a new deployment from the latest
 	// First get the latest deployment to reuse its config
-	const listRes = await vercelFetch(
-		`/v6/deployments?projectId=${projectId}&limit=1`,
-	);
-	if (!listRes.ok)
-		return `Failed to fetch latest deployment: ${await listRes.text()}`;
+	const listRes = await vercelFetch(`/v6/deployments?projectId=${projectId}&limit=1`);
+	if (!listRes.ok) return `Failed to fetch latest deployment: ${await listRes.text()}`;
 	const listData = (await listRes.json()) as {
 		deployments: Array<{ uid: string; name: string; target: string | null }>;
 	};
@@ -144,11 +126,7 @@ export async function vercelSetEnv(
 	});
 	if (!res.ok) return `Set env failed (${res.status}): ${await res.text()}`;
 	const env = (await res.json()) as { key: string; target: string[] };
-	return JSON.stringify(
-		{ status: "created", key: env.key, target: env.target },
-		null,
-		2,
-	);
+	return JSON.stringify({ status: "created", key: env.key, target: env.target }, null, 2);
 }
 
 export async function vercelGetEnv(projectId: string): Promise<string> {
@@ -173,8 +151,7 @@ export async function vercelGetEnv(projectId: string): Promise<string> {
 
 export async function vercelListDomains(projectId: string): Promise<string> {
 	const res = await vercelFetch(`/v9/projects/${projectId}/domains`);
-	if (!res.ok)
-		return `List domains failed (${res.status}): ${await res.text()}`;
+	if (!res.ok) return `List domains failed (${res.status}): ${await res.text()}`;
 	const data = (await res.json()) as {
 		domains: Array<{
 			name: string;
@@ -190,9 +167,7 @@ export async function vercelListDomains(projectId: string): Promise<string> {
 	return JSON.stringify({ count: domains.length, domains }, null, 2);
 }
 
-export async function vercelGetDeploymentLogs(
-	deploymentId: string,
-): Promise<string> {
+export async function vercelGetDeploymentLogs(deploymentId: string): Promise<string> {
 	const res = await vercelFetch(`/v2/deployments/${deploymentId}/events`);
 	if (!res.ok) return `Get logs failed (${res.status}): ${await res.text()}`;
 	const events = (await res.json()) as Array<{
@@ -233,8 +208,7 @@ export async function vercelDetectProject(): Promise<string | null> {
 			projects: Array<{ id: string; name: string }>;
 		};
 		// Return first matching project
-		const project =
-			data.projects.find((p) => p.name === repoName) || data.projects[0];
+		const project = data.projects.find((p) => p.name === repoName) || data.projects[0];
 		return project?.id || null;
 	} catch {
 		return null;

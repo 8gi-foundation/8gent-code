@@ -26,9 +26,7 @@ async function getJobSignals(company: string): Promise<Signal[]> {
 
 			// AI/ML hiring = strong signal
 			const aiJobs = jobs.filter((j) =>
-				/machine learning|ml engineer|ai engineer|llm|data scientist/i.test(
-					j.title,
-				),
+				/machine learning|ml engineer|ai engineer|llm|data scientist/i.test(j.title),
 			);
 			if (aiJobs.length > 0) {
 				signals.push({
@@ -77,8 +75,7 @@ async function getFundingSignals(company: string): Promise<Signal[]> {
 
 		// Recent funding (last 6 months) = strong signal
 		const fundedAt = new Date(props.last_funding_at);
-		const monthsAgo =
-			(Date.now() - fundedAt.getTime()) / (1000 * 60 * 60 * 24 * 30);
+		const monthsAgo = (Date.now() - fundedAt.getTime()) / (1000 * 60 * 60 * 24 * 30);
 
 		if (monthsAgo < 6) {
 			return [
@@ -102,10 +99,7 @@ async function getFundingSignals(company: string): Promise<Signal[]> {
 
 import { getRecentActivity } from "./linkedin-api";
 
-async function getPostSignals(
-	publicId: string,
-	name: string,
-): Promise<Signal[]> {
+async function getPostSignals(publicId: string, name: string): Promise<Signal[]> {
 	try {
 		const posts = await getRecentActivity(publicId);
 		if (posts.length === 0) return [];
@@ -122,9 +116,7 @@ async function getPostSignals(
 			"devtools",
 		];
 
-		const matched = posts.find((p) =>
-			problemKeywords.some((kw) => p.toLowerCase().includes(kw)),
-		);
+		const matched = posts.find((p) => problemKeywords.some((kw) => p.toLowerCase().includes(kw)));
 
 		if (matched) {
 			return [

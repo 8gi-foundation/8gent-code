@@ -71,9 +71,7 @@ function sparkline(values: number[]): string {
 	const min = Math.min(...values);
 	const max = Math.max(...values);
 	const range = max - min || 1;
-	return values
-		.map((v) => chars[Math.min(7, Math.floor(((v - min) / range) * 7))])
-		.join("");
+	return values.map((v) => chars[Math.min(7, Math.floor(((v - min) / range) * 7))]).join("");
 }
 
 function formatDuration(ms: number): string {
@@ -93,15 +91,11 @@ function formatTokens(n: number): string {
 }
 
 function padRight(str: string, len: number): string {
-	return str.length >= len
-		? str.slice(0, len)
-		: str + " ".repeat(len - str.length);
+	return str.length >= len ? str.slice(0, len) : str + " ".repeat(len - str.length);
 }
 
 function padLeft(str: string, len: number): string {
-	return str.length >= len
-		? str.slice(0, len)
-		: " ".repeat(len - str.length) + str;
+	return str.length >= len ? str.slice(0, len) : " ".repeat(len - str.length) + str;
 }
 
 function horizontalRule(): string {
@@ -163,9 +157,7 @@ export function formatScoreboard(scores: Record<string, number>): string {
 	}
 
 	lines.push("├──────────────────────────────┤");
-	lines.push(
-		`│ AVG: ${avg.toFixed(1)} │ PASS: ${passing}/${entries.length}     │`,
-	);
+	lines.push(`│ AVG: ${avg.toFixed(1)} │ PASS: ${passing}/${entries.length}     │`);
 	lines.push("└──────────────────────────────┘");
 
 	return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
@@ -202,8 +194,7 @@ export function formatCompetitionRound(round: CompetitionRound): string {
 		const name = padRight(s.id.slice(0, 14), 14);
 		const bar = progressBar(s.score, s.maxScore);
 		const num = padLeft(String(Math.round(s.score)), 3);
-		const trend =
-			s.previousScore !== undefined ? trendDelta(s.score, s.previousScore) : "";
+		const trend = s.previousScore !== undefined ? trendDelta(s.score, s.previousScore) : "";
 		scoreLines.push(`${icon} ${name} ${bar} ${num}${trend}`);
 	}
 	scoreLines.push("```");
@@ -215,9 +206,7 @@ export function formatCompetitionRound(round: CompetitionRound): string {
 					"",
 					`🧬 *Mutations Applied (${round.mutations.length}):*`,
 					...round.mutations.slice(0, 5).map((m, i) => `  ${i + 1}. ${m}`),
-					...(round.mutations.length > 5
-						? [`  _...and ${round.mutations.length - 5} more_`]
-						: []),
+					...(round.mutations.length > 5 ? [`  _...and ${round.mutations.length - 5} more_`] : []),
 				]
 			: [];
 
@@ -299,8 +288,7 @@ export function formatBenchmarkReport(report: BenchmarkReport): string {
  * Format the morning brief — the message James wakes up to.
  */
 export function formatMorningBrief(summary: OvernightSummary): string {
-	const netEmoji =
-		summary.netDelta > 0 ? "📈" : summary.netDelta < 0 ? "📉" : "➡️";
+	const netEmoji = summary.netDelta > 0 ? "📈" : summary.netDelta < 0 ? "📉" : "➡️";
 	const netSign = summary.netDelta > 0 ? "+" : "";
 	const passedDelta = summary.passingAtEnd - summary.passingAtStart;
 	const passedSign = passedDelta > 0 ? "+" : "";
@@ -316,22 +304,14 @@ export function formatMorningBrief(summary: OvernightSummary): string {
 	// Key metrics block
 	sections.push("```");
 	sections.push("┌────────────────────────────┐");
-	sections.push(
-		`│  🏁 Rounds:    ${padLeft(String(summary.totalRounds), 4)}          │`,
-	);
+	sections.push(`│  🏁 Rounds:    ${padLeft(String(summary.totalRounds), 4)}          │`);
 	sections.push(
 		`│  ⏱  Duration:  ${padLeft(`${summary.totalDurationHours.toFixed(1)}h`, 5)}         │`,
 	);
-	sections.push(
-		`│  🧠 Model:     ${padRight(summary.model.slice(0, 12), 12)}   │`,
-	);
+	sections.push(`│  🧠 Model:     ${padRight(summary.model.slice(0, 12), 12)}   │`);
 	sections.push("├────────────────────────────┤");
-	sections.push(
-		`│  📊 Start Avg: ${padLeft(summary.startingAvg.toFixed(1), 5)}         │`,
-	);
-	sections.push(
-		`│  📊 End Avg:   ${padLeft(summary.endingAvg.toFixed(1), 5)}         │`,
-	);
+	sections.push(`│  📊 Start Avg: ${padLeft(summary.startingAvg.toFixed(1), 5)}         │`);
+	sections.push(`│  📊 End Avg:   ${padLeft(summary.endingAvg.toFixed(1), 5)}         │`);
 	sections.push(
 		`│  ${netEmoji} Net Delta: ${padLeft(netSign + summary.netDelta.toFixed(1), 6)}        │`,
 	);
@@ -339,16 +319,10 @@ export function formatMorningBrief(summary: OvernightSummary): string {
 	sections.push(
 		`│  ✅ Passing:   ${summary.passingAtEnd}/${summary.totalBenchmarks} (${passedSign}${passedDelta})     │`,
 	);
-	sections.push(
-		`│  🧬 Mutations: ${padLeft(String(summary.totalMutations), 4)}          │`,
-	);
-	sections.push(
-		`│  🔤 Tokens:    ${padLeft(formatTokens(summary.tokensUsed), 5)}         │`,
-	);
+	sections.push(`│  🧬 Mutations: ${padLeft(String(summary.totalMutations), 4)}          │`);
+	sections.push(`│  🔤 Tokens:    ${padLeft(formatTokens(summary.tokensUsed), 5)}         │`);
 	if (summary.estimatedCost !== undefined) {
-		sections.push(
-			`│  💰 Est Cost:  $${summary.estimatedCost.toFixed(2)}         │`,
-		);
+		sections.push(`│  💰 Est Cost:  $${summary.estimatedCost.toFixed(2)}         │`);
 	}
 	sections.push("└────────────────────────────┘");
 	sections.push("```");
@@ -413,9 +387,7 @@ export function formatTierBreakdown(tiers: TierBreakdown[]): string {
 		const bar = progressBar(tier.avgScore);
 		const stats = `${tier.passing}/${tier.total} pass`;
 
-		lines.push(
-			`${icon} ${tierName} ${bar} ${tier.avgScore.toFixed(0)} (${stats})`,
-		);
+		lines.push(`${icon} ${tierName} ${bar} ${tier.avgScore.toFixed(0)} (${stats})`);
 
 		// Individual scores within tier
 		for (const s of tier.scores.slice(0, 5)) {
@@ -460,8 +432,7 @@ export function formatMutationList(mutations: string[]): string {
 export function formatAlert(message: string, severity: AlertSeverity): string {
 	const icon = SEVERITY_ICON[severity];
 	const label = severity.toUpperCase();
-	const border =
-		severity === "critical" ? "🔴" : severity === "warning" ? "🟡" : "🔵";
+	const border = severity === "critical" ? "🔴" : severity === "warning" ? "🟡" : "🔵";
 
 	const lines = [
 		`${border}${border}${border} ${icon} *${label}* ${icon} ${border}${border}${border}`,
@@ -488,17 +459,13 @@ export function formatSystemStatus(status: SystemStatus): string {
 	lines.push("```");
 	lines.push(`  Status:     ${status.online ? "Online" : "Offline"}`);
 	lines.push(`  Model:      ${status.model}`);
-	lines.push(
-		`  Loop:       ${status.isRunning ? "Running" : "Stopped"} ${runIcon}`,
-	);
+	lines.push(`  Loop:       ${status.isRunning ? "Running" : "Stopped"} ${runIcon}`);
 	lines.push(`  Iteration:  #${status.currentIteration}`);
 	lines.push(`  Uptime:     ${formatDuration(status.uptime)}`);
 	lines.push(`  Last:       ${timeAgo(status.lastActivity)}`);
 	lines.push("```");
 	lines.push("");
-	lines.push(
-		`📊 Benchmarks: *${status.benchmarksPassing}/${status.benchmarksTotal}* passing`,
-	);
+	lines.push(`📊 Benchmarks: *${status.benchmarksPassing}/${status.benchmarksTotal}* passing`);
 	lines.push(`📈 Avg Score: *${status.avgScore.toFixed(1)}*`);
 	lines.push(`🧬 Mutations: *${status.mutationCount}*`);
 
@@ -516,9 +483,7 @@ export function formatComparison(
 	eightScores: Record<string, number>,
 	claudeScores: Record<string, number>,
 ): string {
-	const allKeys = [
-		...new Set([...Object.keys(eightScores), ...Object.keys(claudeScores)]),
-	].sort();
+	const allKeys = [...new Set([...Object.keys(eightScores), ...Object.keys(claudeScores)])].sort();
 
 	const lines: string[] = [];
 	lines.push("⚔️ *8GENT vs CLAUDE*");
@@ -536,12 +501,7 @@ export function formatComparison(
 		const e = eightScores[key] ?? 0;
 		const c = claudeScores[key] ?? 0;
 		const delta = e - c;
-		const deltaStr =
-			delta > 0
-				? `+${delta.toFixed(0)}`
-				: delta < 0
-					? `${delta.toFixed(0)}`
-					: " =";
+		const deltaStr = delta > 0 ? `+${delta.toFixed(0)}` : delta < 0 ? `${delta.toFixed(0)}` : " =";
 		const winner = delta > 0 ? "🟢" : delta < 0 ? "🔴" : "⚪";
 
 		lines.push(
@@ -557,8 +517,7 @@ export function formatComparison(
 	const eightAvg = count > 0 ? eightTotal / count : 0;
 	const claudeAvg = count > 0 ? claudeTotal / count : 0;
 	const avgDelta = eightAvg - claudeAvg;
-	const avgDeltaStr =
-		avgDelta > 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1);
+	const avgDeltaStr = avgDelta > 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1);
 
 	lines.push(
 		`${padRight("AVERAGE", 16)} ${padLeft(eightAvg.toFixed(1), 5)} ${padLeft(claudeAvg.toFixed(1), 5)} ${padLeft(avgDeltaStr, 4)}`,

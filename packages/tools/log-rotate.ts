@@ -83,10 +83,7 @@ export class RotatingLogger {
 		const logDir = path.dirname(this.baseFilename);
 		const logFiles = fs.readdirSync(logDir).filter((file) => {
 			const filePath = path.join(logDir, file);
-			return (
-				filePath.startsWith(this.baseFilename) &&
-				filePath !== this.currentLogFile
-			);
+			return filePath.startsWith(this.baseFilename) && filePath !== this.currentLogFile;
 		});
 		const sortedFiles = logFiles.sort((a, b) => {
 			const timeA = Number.parseInt(a.split(".")[1], 10);

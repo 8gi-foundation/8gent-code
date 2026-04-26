@@ -75,8 +75,7 @@ export const WHISPER_MODELS: Record<WhisperModelName, WhisperModelInfo> = {
 		url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
 		sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
 		speedFactor: 1,
-		description:
-			"Fastest, good for real-time. ~200ms for 5s audio on Apple Silicon.",
+		description: "Fastest, good for real-time. ~200ms for 5s audio on Apple Silicon.",
 	},
 	base: {
 		name: "base",

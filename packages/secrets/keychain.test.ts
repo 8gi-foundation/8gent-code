@@ -74,9 +74,7 @@ describe.skipIf(skipOnNonMac)("KeychainVault", () => {
 
 	test("useSecret() throws when key is missing", async () => {
 		const vault = new KeychainVault({ service: TEST_SERVICE });
-		await expect(vault.useSecret("MISSING", async () => "ok")).rejects.toThrow(
-			/not found/,
-		);
+		await expect(vault.useSecret("MISSING", async () => "ok")).rejects.toThrow(/not found/);
 	});
 
 	test("reserved __index__ key cannot be set", async () => {

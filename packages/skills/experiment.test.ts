@@ -14,20 +14,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	rmSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-	LEARNED_SKILLS_DIR,
-	compoundSkill,
-	compoundSkillWithExperiment,
-} from "./compound.js";
+import { LEARNED_SKILLS_DIR, compoundSkill, compoundSkillWithExperiment } from "./compound.js";
 import {
 	EXPERIMENTS_DIR,
 	type ExperimentRecord,
@@ -220,9 +209,7 @@ describe("validateSpec", () => {
 	});
 
 	it("accepts well-formed specs", () => {
-		expect(
-			validateSpec({ hypothesis: "h", test: () => 1, metric: 0 }),
-		).toBeNull();
+		expect(validateSpec({ hypothesis: "h", test: () => 1, metric: 0 })).toBeNull();
 		expect(
 			validateSpec({
 				hypothesis: "h",

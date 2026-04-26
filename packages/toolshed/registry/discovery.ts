@@ -64,9 +64,7 @@ export function queryTools(query: DiscoveryQuery): ToolSummary[] {
 
 	if (query.namePattern) {
 		const regex = new RegExp(query.namePattern, "i");
-		results = results.filter(
-			(t) => regex.test(t.name) || regex.test(t.description),
-		);
+		results = results.filter((t) => regex.test(t.name) || regex.test(t.description));
 	}
 
 	return results.map(toSummary);

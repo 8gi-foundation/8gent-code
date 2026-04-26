@@ -153,9 +153,7 @@ export class ProactivePlanner {
 		}
 		if (
 			this.predictionContext.lastError ||
-			this.predictionContext.recentCommands.some((c) =>
-				c.includes("web_search"),
-			)
+			this.predictionContext.recentCommands.some((c) => c.includes("web_search"))
 		) {
 			predictions.push(...this.predictResearchSteps());
 		}
@@ -205,10 +203,7 @@ export class ProactivePlanner {
 			});
 		}
 
-		if (
-			this.predictionContext.branch &&
-			this.predictionContext.branch !== "main"
-		) {
+		if (this.predictionContext.branch && this.predictionContext.branch !== "main") {
 			steps.push({
 				id: this.generateId(),
 				description: "Create pull request",
@@ -375,9 +370,7 @@ export class ProactivePlanner {
 	 */
 	private updateBoard(predictions: ProactiveStep[]): void {
 		// Move high-confidence predictions to ready
-		const ready = predictions
-			.filter((p) => p.confidence >= 0.7)
-			.slice(0, this.maxReady);
+		const ready = predictions.filter((p) => p.confidence >= 0.7).slice(0, this.maxReady);
 		const backlog = predictions.filter((p) => p.confidence < 0.7);
 
 		this.board.ready = ready;
@@ -653,9 +646,7 @@ export class ProactivePlanner {
 
 		// Look for file path patterns in recent commands
 		for (const cmd of commands.slice(0, 5)) {
-			const fileMatch = cmd.match(
-				/(?:src|lib|packages)\/[\w/.-]+\.(ts|tsx|js|jsx)/,
-			);
+			const fileMatch = cmd.match(/(?:src|lib|packages)\/[\w/.-]+\.(ts|tsx|js|jsx)/);
 			if (fileMatch) {
 				const path = fileMatch[0];
 				const dir = path.split("/").slice(0, -1).join("/");

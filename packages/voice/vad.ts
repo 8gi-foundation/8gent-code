@@ -16,11 +16,7 @@ export interface VADOptions {
 	smoothingFactor?: number;
 }
 
-export type VADState =
-	| "idle"
-	| "listening"
-	| "speech-detected"
-	| "silence-timeout";
+export type VADState = "idle" | "listening" | "speech-detected" | "silence-timeout";
 
 export interface VADEvents {
 	"speech-start": [];
@@ -65,10 +61,7 @@ export class VoiceActivityDetector {
 	/**
 	 * Register an event listener.
 	 */
-	on<K extends keyof VADEvents>(
-		event: K,
-		callback: (...args: VADEvents[K]) => void,
-	): void {
+	on<K extends keyof VADEvents>(event: K, callback: (...args: VADEvents[K]) => void): void {
 		const existing = this.listeners.get(event) || [];
 		existing.push(callback);
 		this.listeners.set(event, existing);
@@ -77,10 +70,7 @@ export class VoiceActivityDetector {
 	/**
 	 * Remove an event listener.
 	 */
-	off<K extends keyof VADEvents>(
-		event: K,
-		callback: (...args: VADEvents[K]) => void,
-	): void {
+	off<K extends keyof VADEvents>(event: K, callback: (...args: VADEvents[K]) => void): void {
 		const existing = this.listeners.get(event) || [];
 		this.listeners.set(
 			event,
@@ -88,10 +78,7 @@ export class VoiceActivityDetector {
 		);
 	}
 
-	private emit<K extends keyof VADEvents>(
-		event: K,
-		...args: VADEvents[K]
-	): void {
+	private emit<K extends keyof VADEvents>(event: K, ...args: VADEvents[K]): void {
 		const callbacks = this.listeners.get(event) || [];
 		for (const cb of callbacks) {
 			cb(...args);
@@ -181,14 +168,12 @@ export class VoiceActivityDetector {
 	 * Update options at runtime.
 	 */
 	updateOptions(opts: Partial<VADOptions>): void {
-		if (opts.energyThreshold !== undefined)
-			this.options.energyThreshold = opts.energyThreshold;
+		if (opts.energyThreshold !== undefined) this.options.energyThreshold = opts.energyThreshold;
 		if (opts.silenceDurationMs !== undefined)
 			this.options.silenceDurationMs = opts.silenceDurationMs;
 		if (opts.minSpeechDurationMs !== undefined)
 			this.options.minSpeechDurationMs = opts.minSpeechDurationMs;
-		if (opts.smoothingFactor !== undefined)
-			this.options.smoothingFactor = opts.smoothingFactor;
+		if (opts.smoothingFactor !== undefined) this.options.smoothingFactor = opts.smoothingFactor;
 	}
 
 	private setState(newState: VADState): void {

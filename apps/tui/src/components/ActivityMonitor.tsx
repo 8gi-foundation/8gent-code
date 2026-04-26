@@ -11,11 +11,7 @@
 
 import { Box, Text } from "ink";
 import React, { useState, useEffect, useRef } from "react";
-import type {
-	TaskInfo,
-	TaskOutput,
-	TaskStatus,
-} from "../../../../packages/tools/background.js";
+import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
 
 // ── Activity Types ──────────────────────────────────────────────────
 
@@ -176,11 +172,7 @@ export function pushActivity(
 	logVersion++;
 }
 
-export function completeActivity(
-	toolCallId: string,
-	success: boolean,
-	durationMs: number,
-): void {
+export function completeActivity(toolCallId: string, success: boolean, durationMs: number): void {
 	const entry = activityLog.find((e) => e.id === toolCallId);
 	if (entry) {
 		entry.done = true;
@@ -203,24 +195,13 @@ export function getActivityLogAsTaskInfos(): TaskInfo[] {
 		const now = Date.now();
 		const done = entry.done;
 		const failed = done && entry.color === "red";
-		const status: TaskStatus = done
-			? failed
-				? "failed"
-				: "completed"
-			: "running";
-		const durationMs = done
-			? (entry.durationMs ?? 0)
-			: Math.max(0, now - entry.timestamp);
+		const status: TaskStatus = done ? (failed ? "failed" : "completed") : "running";
+		const durationMs = done ? (entry.durationMs ?? 0) : Math.max(0, now - entry.timestamp);
 		const startedAt = new Date(entry.timestamp).toISOString();
-		const endedAt = done
-			? new Date(entry.timestamp + (entry.durationMs ?? 0)).toISOString()
-			: null;
+		const endedAt = done ? new Date(entry.timestamp + (entry.durationMs ?? 0)).toISOString() : null;
 		return {
 			id: `${AGENT_TASK_PREFIX}${entry.id}`,
-			command: `◇ ${entry.tool} · ${entry.action}: ${entry.detail}`.slice(
-				0,
-				140,
-			),
+			command: `◇ ${entry.tool} · ${entry.action}: ${entry.detail}`.slice(0, 140),
 			status,
 			exitCode: done ? (failed ? 1 : 0) : null,
 			startedAt,
@@ -288,26 +269,10 @@ export function ActivityMonitor({
 
 	// Format elapsed
 	const secs = Math.floor(elapsed / 1000);
-	const elapsedStr =
-		secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+	const elapsedStr = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 
 	// Scanning animation for the active entry
-	const scanChars = [
-		"▁",
-		"▂",
-		"▃",
-		"▄",
-		"▅",
-		"▆",
-		"▇",
-		"█",
-		"▇",
-		"▆",
-		"▅",
-		"▄",
-		"▃",
-		"▂",
-	];
+	const scanChars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"];
 	const scanBar = showAnimations ? scanChars[tick % scanChars.length] : "·";
 
 	return (
@@ -341,9 +306,7 @@ export function ActivityMonitor({
 			>
 				{visibleEntries.length === 0 ? (
 					<Box justifyContent="center" alignItems="center" flexGrow={1}>
-						<Text dimColor>
-							{showAnimations ? `Thinking${dots}` : "Thinking…"}
-						</Text>
+						<Text dimColor>{showAnimations ? `Thinking${dots}` : "Thinking…"}</Text>
 					</Box>
 				) : (
 					visibleEntries.map((entry, i) => {
@@ -357,22 +320,8 @@ export function ActivityMonitor({
 						return (
 							<Box key={entry.id}>
 								{/* Status indicator */}
-								<Text
-									color={
-										entry.done
-											? entry.color === "red"
-												? "red"
-												: "green"
-											: entry.color
-									}
-								>
-									{entry.done
-										? entry.color === "red"
-											? "✗"
-											: "✓"
-										: isActive
-											? scanBar
-											: "·"}{" "}
+								<Text color={entry.done ? (entry.color === "red" ? "red" : "green") : entry.color}>
+									{entry.done ? (entry.color === "red" ? "✗" : "✓") : isActive ? scanBar : "·"}{" "}
 								</Text>
 
 								{/* Action tag */}
@@ -408,9 +357,7 @@ export function ActivityMonitor({
 						{showAnimations ? dots : ""}
 					</Text>
 				) : (
-					<Text dimColor>
-						{showAnimations ? `Reasoning${dots}` : "Reasoning…"}
-					</Text>
+					<Text dimColor>{showAnimations ? `Reasoning${dots}` : "Reasoning…"}</Text>
 				)}
 			</Box>
 		</Box>

@@ -51,10 +51,7 @@ export class TopicRouter {
 
 		// Ensure the prefix and suffix don't overlap in the topic
 		if (matchesPrefix && matchesSuffix) {
-			const wildcardPart = topic.substring(
-				prefix.length,
-				topic.length - (suffix.length || 0),
-			);
+			const wildcardPart = topic.substring(prefix.length, topic.length - (suffix.length || 0));
 			return wildcardPart.length > 0;
 		}
 

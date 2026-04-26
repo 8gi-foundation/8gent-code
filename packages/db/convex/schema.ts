@@ -131,11 +131,7 @@ export default defineSchema({
 		/** UI theme name. */
 		theme: v.string(),
 		/** Status of personal LoRA fine-tuning. */
-		loraStatus: v.union(
-			v.literal("none"),
-			v.literal("training"),
-			v.literal("ready"),
-		),
+		loraStatus: v.union(v.literal("none"), v.literal("training"), v.literal("ready")),
 		/** LoRA version identifier (e.g., "eight-1.0-q3:14b"). */
 		loraVersion: v.optional(v.string()),
 		/** Custom prompt mutations the user has configured. */

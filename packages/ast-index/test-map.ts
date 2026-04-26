@@ -8,14 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const TEST_SUFFIXES = [
-	".test.ts",
-	".test.tsx",
-	".test.js",
-	".spec.ts",
-	".spec.tsx",
-	".spec.js",
-];
+const TEST_SUFFIXES = [".test.ts", ".test.tsx", ".test.js", ".spec.ts", ".spec.tsx", ".spec.js"];
 
 /**
  * Given a source file path, return all test files that likely cover it.
@@ -42,9 +35,7 @@ export function findTestsFor(filePath: string, rootDir: string): string[] {
 		if (fs.existsSync(candidate)) found.push(candidate);
 	}
 
-	const relToRoot = path
-		.relative(absRoot, absFile)
-		.replace(/\.(ts|tsx|js|jsx)$/, "");
+	const relToRoot = path.relative(absRoot, absFile).replace(/\.(ts|tsx|js|jsx)$/, "");
 	for (const testDir of ["tests", "test", "__tests__"]) {
 		for (const suffix of TEST_SUFFIXES) {
 			const candidate = path.join(absRoot, testDir, relToRoot + suffix);
@@ -58,10 +49,7 @@ export function findTestsFor(filePath: string, rootDir: string): string[] {
 /**
  * Build a full source -> tests map for all files in the graph.
  */
-export function buildTestMap(
-	sourceFiles: string[],
-	rootDir: string,
-): Map<string, string[]> {
+export function buildTestMap(sourceFiles: string[], rootDir: string): Map<string, string[]> {
 	const map = new Map<string, string[]>();
 	for (const file of sourceFiles) {
 		const tests = findTestsFor(file, rootDir);

@@ -39,9 +39,7 @@ export async function sendNativeNotification(
 	if (process.platform !== "darwin") return false;
 
 	const sound = options.sound || "Glass";
-	const subtitle = options.subtitle
-		? ` subtitle "${escapeAppleScript(options.subtitle)}"`
-		: "";
+	const subtitle = options.subtitle ? ` subtitle "${escapeAppleScript(options.subtitle)}"` : "";
 
 	const script = `display notification "${escapeAppleScript(message)}" with title "${escapeAppleScript(title)}"${subtitle} sound name "${sound}"`;
 
@@ -146,8 +144,7 @@ function emailSubject(type: NotificationType): string {
 
 function getEmailConfig(): EmailConfig | null {
 	const apiKey = process.env.RESEND_API_KEY;
-	const from =
-		process.env.EIGHT_EMAIL_FROM || "8gent <notifications@8gent.dev>";
+	const from = process.env.EIGHT_EMAIL_FROM || "8gent <notifications@8gent.dev>";
 	const to = process.env.EIGHT_EMAIL_TO;
 	if (!apiKey || !to) return null;
 	return { apiKey, from, to };
@@ -172,20 +169,15 @@ export class NotificationDispatcher {
 		// macOS native notification for key events
 		if (MACOS_NOTIFY_TYPES.has(type)) {
 			const meta = nativeNotifyMeta(type);
-			const short =
-				message.length > 200 ? `${message.slice(0, 197)}...` : message;
-			sendNativeNotification(meta.title, short, { sound: meta.sound }).catch(
-				() => {},
-			);
+			const short = message.length > 200 ? `${message.slice(0, 197)}...` : message;
+			sendNativeNotification(meta.title, short, { sound: meta.sound }).catch(() => {});
 		}
 
 		// Email (if configured)
 		if (EMAIL_NOTIFY_TYPES.has(type)) {
 			const emailCfg = getEmailConfig();
 			if (emailCfg) {
-				sendEmailNotification(emailCfg, emailSubject(type), message).catch(
-					() => {},
-				);
+				sendEmailNotification(emailCfg, emailSubject(type), message).catch(() => {});
 			}
 		}
 	}

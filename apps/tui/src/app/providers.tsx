@@ -8,11 +8,7 @@ interface AppProvidersProps {
 	children: React.ReactNode;
 }
 
-export function AppProviders({
-	adhdMode,
-	adhdRatio = 0.5,
-	children,
-}: AppProvidersProps) {
+export function AppProviders({ adhdMode, adhdRatio = 0.5, children }: AppProvidersProps) {
 	return (
 		<ThemeProvider>
 			<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: adhdRatio }}>

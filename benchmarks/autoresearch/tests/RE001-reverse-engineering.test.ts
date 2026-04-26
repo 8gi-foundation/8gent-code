@@ -20,12 +20,7 @@ const mod = await import(fixturePath);
 const transformFn: (input: number[]) => number[] =
 	typeof mod.default === "function"
 		? mod.default
-		: (mod.transform ??
-			mod.solution ??
-			mod.encode ??
-			mod.solve ??
-			mod.run ??
-			mod.process);
+		: (mod.transform ?? mod.solution ?? mod.encode ?? mod.solve ?? mod.run ?? mod.process);
 
 if (!transformFn || typeof transformFn !== "function") {
 	throw new Error(

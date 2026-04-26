@@ -19,11 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type AbstractedSkill, abstractSkill } from "./abstractor.js";
-import {
-	type ScanResult,
-	type Verdict,
-	scanSkill,
-} from "./scanner/security-scanner.js";
+import { type ScanResult, type Verdict, scanSkill } from "./scanner/security-scanner.js";
 
 // ============================================================================
 // Types
@@ -60,9 +56,7 @@ export class QuarantineManager {
 
 	constructor(config?: Partial<QuarantineConfig>) {
 		this.config = {
-			quarantineDir:
-				config?.quarantineDir ||
-				path.join(os.homedir(), ".8gent", "quarantine"),
+			quarantineDir: config?.quarantineDir || path.join(os.homedir(), ".8gent", "quarantine"),
 			autoReject: config?.autoReject ?? true,
 			autoApprove: config?.autoApprove ?? false, // Default: require human review
 			maxPendingDays: config?.maxPendingDays ?? 30,
@@ -185,10 +179,7 @@ export class QuarantineManager {
 
 		// Auto-reject on CRITICAL
 		if (this.config.autoReject && result.verdict === "FAIL") {
-			await this.reject(
-				id,
-				"Auto-rejected: Security scan failed with CRITICAL findings",
-			);
+			await this.reject(id, "Auto-rejected: Security scan failed with CRITICAL findings");
 			return result;
 		}
 
@@ -209,9 +200,7 @@ export class QuarantineManager {
 		const entry = this.entries.get(id);
 		if (!entry) throw new Error(`Entry not found: ${id}`);
 		if (entry.status !== "scanned") {
-			throw new Error(
-				`Skill must be scanned before abstraction. Current status: ${entry.status}`,
-			);
+			throw new Error(`Skill must be scanned before abstraction. Current status: ${entry.status}`);
 		}
 
 		const skillDir = path.join(this.config.quarantineDir, "scanned", id);
@@ -241,9 +230,7 @@ export class QuarantineManager {
 		const entry = this.entries.get(id);
 		if (!entry) throw new Error(`Entry not found: ${id}`);
 		if (entry.status !== "abstracted" && entry.status !== "approved") {
-			throw new Error(
-				`Skill must be abstracted before release. Current status: ${entry.status}`,
-			);
+			throw new Error(`Skill must be abstracted before release. Current status: ${entry.status}`);
 		}
 
 		const approvedDir = path.join(this.config.quarantineDir, "approved", id);
@@ -256,10 +243,7 @@ export class QuarantineManager {
 
 		// Generate 8gent-compatible skill file
 		const skillContent = this.generateSkillFile(entry);
-		const skillPath = path.join(
-			skillsDir,
-			`${entry.name.toLowerCase().replace(/\s+/g, "-")}.md`,
-		);
+		const skillPath = path.join(skillsDir, `${entry.name.toLowerCase().replace(/\s+/g, "-")}.md`);
 		fs.writeFileSync(skillPath, skillContent);
 
 		entry.status = "approved";
@@ -341,15 +325,8 @@ export class QuarantineManager {
 		let removed = 0;
 
 		for (const [id, entry] of this.entries) {
-			if (
-				entry.status === "rejected" &&
-				entry.quarantinedAt.getTime() < cutoff
-			) {
-				const rejectedDir = path.join(
-					this.config.quarantineDir,
-					"rejected",
-					id,
-				);
+			if (entry.status === "rejected" && entry.quarantinedAt.getTime() < cutoff) {
+				const rejectedDir = path.join(this.config.quarantineDir, "rejected", id);
 				if (fs.existsSync(rejectedDir)) {
 					fs.rmSync(rejectedDir, { recursive: true, force: true });
 				}
@@ -395,11 +372,7 @@ export class QuarantineManager {
 		if (source.includes("github.com") || source.includes("gitlab.com")) {
 			return "github";
 		}
-		if (
-			source.startsWith("/") ||
-			source.startsWith("~") ||
-			source.startsWith(".")
-		) {
+		if (source.startsWith("/") || source.startsWith("~") || source.startsWith(".")) {
 			return "local";
 		}
 		if (source.includes("@") || /^[a-z0-9-]+$/.test(source)) {
@@ -434,23 +407,15 @@ export class QuarantineManager {
 
 			case "npm": {
 				// Download npm package
-				execSync(
-					`cd "${targetDir}" && npm pack "${source}" --pack-destination .`,
-					{
-						stdio: "pipe",
-					},
-				);
+				execSync(`cd "${targetDir}" && npm pack "${source}" --pack-destination .`, {
+					stdio: "pipe",
+				});
 				// Extract
-				const tarball = fs
-					.readdirSync(targetDir)
-					.find((f) => f.endsWith(".tgz"));
+				const tarball = fs.readdirSync(targetDir).find((f) => f.endsWith(".tgz"));
 				if (tarball) {
-					execSync(
-						`cd "${targetDir}" && tar -xzf "${tarball}" && mv package source`,
-						{
-							stdio: "pipe",
-						},
-					);
+					execSync(`cd "${targetDir}" && tar -xzf "${tarball}" && mv package source`, {
+						stdio: "pipe",
+					});
 				}
 				break;
 			}
@@ -518,9 +483,7 @@ ${skill.tools.map((t) => `- \`${t}\``).join("\n")}
 
 let quarantineInstance: QuarantineManager | null = null;
 
-export function getQuarantineManager(
-	config?: Partial<QuarantineConfig>,
-): QuarantineManager {
+export function getQuarantineManager(config?: Partial<QuarantineConfig>): QuarantineManager {
 	if (!quarantineInstance) {
 		quarantineInstance = new QuarantineManager(config);
 	}

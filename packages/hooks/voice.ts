@@ -93,13 +93,7 @@ export async function speak(text: string): Promise<void> {
 	}
 
 	return new Promise((resolve, reject) => {
-		const args = [
-			"-v",
-			voiceConfig.voice,
-			"-r",
-			voiceConfig.rate.toString(),
-			text,
-		];
+		const args = ["-v", voiceConfig.voice, "-r", voiceConfig.rate.toString(), text];
 
 		const proc = spawn("say", args, {
 			stdio: ["ignore", "ignore", "ignore"],

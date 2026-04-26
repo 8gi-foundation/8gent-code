@@ -72,8 +72,7 @@ export function MessageList({
 	showAnimations = true,
 }: MessageListProps) {
 	const { stdout } = useStdout();
-	const resolvedContentWidth =
-		contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
+	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
 
 	const prevCountRef = useRef(messages.length);
 	const [newMessageId, setNewMessageId] = useState<string | null>(null);
@@ -93,9 +92,7 @@ export function MessageList({
 
 	// Only render the most recent messages to prevent scroll jumping.
 	const visibleMessages =
-		chatMessages.length > maxVisible
-			? chatMessages.slice(-maxVisible)
-			: chatMessages;
+		chatMessages.length > maxVisible ? chatMessages.slice(-maxVisible) : chatMessages;
 
 	return (
 		<Box flexDirection="column" flexGrow={1} minHeight={0}>
@@ -145,10 +142,7 @@ function MessageItem({
 	const textWrapWidth = Math.max(8, maxBubbleWidth - 2);
 
 	// Play sound on completion for assistant messages
-	useCompletionSound(
-		typingComplete && message.role === "assistant" && isNew,
-		soundEnabled,
-	);
+	useCompletionSound(typingComplete && message.role === "assistant" && isNew, soundEnabled);
 
 	// Fade in the message header
 	useEffect(() => {
@@ -286,25 +280,14 @@ function MessageContent({
 		}
 		return (
 			<Box width={wrapWidth}>
-				<TypingText
-					text={content}
-					speed={12}
-					onComplete={onTypingComplete}
-					cursor={true}
-				/>
+				<TypingText text={content} speed={12} onComplete={onTypingComplete} cursor={true} />
 			</Box>
 		);
 	}
 
 	// Check for code blocks and format accordingly
 	if (content.includes("```")) {
-		return (
-			<FormattedContent
-				content={content}
-				adhdMode={adhdMode}
-				wrapWidth={wrapWidth}
-			/>
-		);
+		return <FormattedContent content={content} adhdMode={adhdMode} wrapWidth={wrapWidth} />;
 	}
 
 	// Apply bionic reading if ADHD mode is enabled
@@ -442,10 +425,7 @@ interface StreamingMessageProps {
 	isComplete: boolean;
 }
 
-export function StreamingMessage({
-	chunks,
-	isComplete,
-}: StreamingMessageProps) {
+export function StreamingMessage({ chunks, isComplete }: StreamingMessageProps) {
 	const [displayedChunks, setDisplayedChunks] = useState(0);
 
 	useEffect(() => {
@@ -464,9 +444,7 @@ export function StreamingMessage({
 				{!isComplete && <Text color="cyan"> ▌</Text>}
 			</Box>
 			<Box paddingLeft={2}>
-				<AppText wrap="wrap">
-					{chunks.slice(0, displayedChunks).join("")}
-				</AppText>
+				<AppText wrap="wrap">{chunks.slice(0, displayedChunks).join("")}</AppText>
 			</Box>
 		</Stack>
 	);

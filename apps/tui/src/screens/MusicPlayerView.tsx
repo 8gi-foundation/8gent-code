@@ -9,13 +9,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect } from "react";
-import {
-	AppText,
-	Divider,
-	Label,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Divider, Label, MutedText, Stack } from "../components/primitives/index.js";
 
 const CACHE_DIR = join(process.env.HOME || "~", ".8gent", "adhd-audio");
 
@@ -59,9 +53,7 @@ function loadTracks(currentTrack: string | null): Track[] {
 	if (!existsSync(CACHE_DIR)) return tracks;
 
 	try {
-		const files = readdirSync(CACHE_DIR).filter(
-			(f) => f.endsWith(".mp3") || f.endsWith(".wav"),
-		);
+		const files = readdirSync(CACHE_DIR).filter((f) => f.endsWith(".mp3") || f.endsWith(".wav"));
 		for (const file of files) {
 			const filePath = join(CACHE_DIR, file);
 			const stat = statSync(filePath);
@@ -71,9 +63,7 @@ function loadTracks(currentTrack: string | null): Track[] {
 				path: filePath,
 				size: formatBytes(stat.size),
 				modified: formatDate(stat.mtime),
-				playing:
-					currentTrack === name.toLowerCase() ||
-					currentTrack === basename(file, ".mp3"),
+				playing: currentTrack === name.toLowerCase() || currentTrack === basename(file, ".mp3"),
 			});
 		}
 	} catch {
@@ -191,10 +181,7 @@ export function MusicPlayerView({
 				<Text bold color="magenta">
 					🎵 Music Player
 				</Text>
-				<MutedText>
-					{" "}
-					{isPlaying ? `▶ Playing: ${currentTrack}` : "⏸ Stopped"}
-				</MutedText>
+				<MutedText> {isPlaying ? `▶ Playing: ${currentTrack}` : "⏸ Stopped"}</MutedText>
 				<Box flexGrow={1} />
 				<MutedText>Duration: {duration}s</MutedText>
 			</Box>
@@ -203,13 +190,7 @@ export function MusicPlayerView({
 
 			{/* Now Playing bar */}
 			{isPlaying && (
-				<Box
-					marginY={1}
-					borderStyle="round"
-					borderColor="magenta"
-					paddingX={2}
-					paddingY={0}
-				>
+				<Box marginY={1} borderStyle="round" borderColor="magenta" paddingX={2} paddingY={0}>
 					<Text color="magenta" bold>
 						▶{" "}
 					</Text>
@@ -244,9 +225,7 @@ export function MusicPlayerView({
 				<Box flexDirection="column">
 					{tracks.length === 0 ? (
 						<Box paddingY={1}>
-							<MutedText>
-								No tracks yet. Switch to [Generate New] to create some.
-							</MutedText>
+							<MutedText>No tracks yet. Switch to [Generate New] to create some.</MutedText>
 						</Box>
 					) : (
 						tracks.map((track, i) => (
@@ -254,10 +233,7 @@ export function MusicPlayerView({
 								<Text color={i === selectedIndex ? "cyan" : undefined}>
 									{i === selectedIndex ? "❯ " : "  "}
 								</Text>
-								<Text
-									color={track.playing ? "magenta" : undefined}
-									bold={track.playing}
-								>
+								<Text color={track.playing ? "magenta" : undefined} bold={track.playing}>
 									{track.playing ? "▶ " : "  "}
 									{track.name}
 								</Text>
@@ -285,9 +261,7 @@ export function MusicPlayerView({
 						<Divider />
 					</Box>
 					<Box marginTop={1}>
-						<MutedText>
-							Enter=generate & play • Custom: /music gen your prompt here
-						</MutedText>
+						<MutedText>Enter=generate & play • Custom: /music gen your prompt here</MutedText>
 					</Box>
 				</Box>
 			)}
@@ -298,8 +272,7 @@ export function MusicPlayerView({
 			</Box>
 			<Box>
 				<MutedText>
-					↑↓ navigate Enter=play Space=pause S=stop Tab=switch section ESC=back
-					to chat
+					↑↓ navigate Enter=play Space=pause S=stop Tab=switch section ESC=back to chat
 				</MutedText>
 			</Box>
 		</Box>

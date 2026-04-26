@@ -10,17 +10,11 @@
  * Ours improves while you sleep.
  */
 
-import {
-	getCampaignStats,
-	getDb,
-	getTemplates,
-	upsertTemplate,
-} from "./campaign-db";
+import { getCampaignStats, getDb, getTemplates, upsertTemplate } from "./campaign-db";
 import type { MessageTemplate } from "./types";
 import { randomId } from "./utils";
 
-const MODEL_PROXY_URL =
-	process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
+const MODEL_PROXY_URL = process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
 const REFLECTION_THRESHOLD = 20; // min sends before template is eligible for evolution
 const UNDERPERFORM_RATE = 0.03; // below 3% reply rate = rewrite
 const REFLECTION_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
@@ -110,8 +104,7 @@ export async function reflect(): Promise<{
 
 	// Find underperformers with enough data to judge
 	const underperformers = templates.filter(
-		(t) =>
-			t.sendCount >= REFLECTION_THRESHOLD && t.replyRate < UNDERPERFORM_RATE,
+		(t) => t.sendCount >= REFLECTION_THRESHOLD && t.replyRate < UNDERPERFORM_RATE,
 	);
 
 	// Find top performers for reference
@@ -196,8 +189,7 @@ export function getInsights(): string {
 	const templates = getTemplates();
 	const eligible = templates.filter((t) => t.sendCount >= 10);
 
-	if (eligible.length === 0)
-		return "Not enough data yet. Need at least 10 sends per template.";
+	if (eligible.length === 0) return "Not enough data yet. Need at least 10 sends per template.";
 
 	const top = eligible.filter((t) => t.replyRate > 0.08);
 	const bottom = eligible.filter((t) => t.replyRate < UNDERPERFORM_RATE);
@@ -212,9 +204,7 @@ export function getInsights(): string {
 	if (top.length > 0) {
 		lines.push("TOP PERFORMERS:");
 		for (const t of top.slice(0, 3)) {
-			lines.push(
-				`  ${t.name}: ${(t.replyRate * 100).toFixed(1)}% (${t.sendCount} sends)`,
-			);
+			lines.push(`  ${t.name}: ${(t.replyRate * 100).toFixed(1)}% (${t.sendCount} sends)`);
 			lines.push(`  Hook: "${t.signalHook}"`);
 		}
 	}
@@ -222,9 +212,7 @@ export function getInsights(): string {
 	if (bottom.length > 0) {
 		lines.push("\nUNDERPERFORMERS (scheduled for evolution):");
 		for (const t of bottom.slice(0, 3)) {
-			lines.push(
-				`  ${t.name}: ${(t.replyRate * 100).toFixed(1)}% (${t.sendCount} sends)`,
-			);
+			lines.push(`  ${t.name}: ${(t.replyRate * 100).toFixed(1)}% (${t.sendCount} sends)`);
 		}
 	}
 

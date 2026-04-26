@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let theory: any;
 let chord: any;
@@ -64,8 +63,7 @@ describe("Theory — Note Utilities", () => {
 	});
 
 	it("SCALE_PATTERNS has major and minor patterns", () => {
-		const SCALE_PATTERNS =
-			theory.SCALE_PATTERNS || theory.default?.SCALE_PATTERNS;
+		const SCALE_PATTERNS = theory.SCALE_PATTERNS || theory.default?.SCALE_PATTERNS;
 		expect(SCALE_PATTERNS.major).toEqual([2, 2, 1, 2, 2, 2, 1]);
 		expect(SCALE_PATTERNS.minor).toEqual([2, 1, 2, 2, 1, 2, 2]);
 	});
@@ -81,8 +79,7 @@ describe("Theory — Note Utilities", () => {
 	});
 
 	it("SCALE_PATTERNS includes pentatonic and blues", () => {
-		const SCALE_PATTERNS =
-			theory.SCALE_PATTERNS || theory.default?.SCALE_PATTERNS;
+		const SCALE_PATTERNS = theory.SCALE_PATTERNS || theory.default?.SCALE_PATTERNS;
 		expect(SCALE_PATTERNS.pentatonic).toBeDefined();
 		expect(SCALE_PATTERNS.blues).toBeDefined();
 		expect(SCALE_PATTERNS.pentatonic.length).toBe(5);

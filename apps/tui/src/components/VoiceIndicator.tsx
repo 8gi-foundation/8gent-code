@@ -8,13 +8,7 @@
 import type { RecordingState, WhisperModelName } from "@8gent/voice";
 import { Box, Text } from "ink";
 import React, { useState, useEffect } from "react";
-import {
-	AppText,
-	Badge,
-	Inline,
-	Label,
-	MutedText,
-} from "./primitives/index.js";
+import { AppText, Badge, Inline, Label, MutedText } from "./primitives/index.js";
 
 // ============================================
 // Types
@@ -57,14 +51,8 @@ export function VoiceIndicator({
 	compact = false,
 }: VoiceIndicatorProps) {
 	// Downloading state takes priority
-	if (
-		downloadProgress !== null &&
-		downloadProgress !== undefined &&
-		downloadingModel
-	) {
-		return (
-			<DownloadIndicator model={downloadingModel} progress={downloadProgress} />
-		);
+	if (downloadProgress !== null && downloadProgress !== undefined && downloadingModel) {
+		return <DownloadIndicator model={downloadingModel} progress={downloadProgress} />;
 	}
 
 	// Error state
@@ -73,9 +61,7 @@ export function VoiceIndicator({
 	}
 
 	if (compact) {
-		return (
-			<CompactIndicator state={state} audioLevel={audioLevel} model={model} />
-		);
+		return <CompactIndicator state={state} audioLevel={audioLevel} model={model} />;
 	}
 
 	// Full indicator
@@ -165,8 +151,7 @@ function StateLabel({
 		error: "red",
 	};
 
-	const durationStr =
-		durationMs > 0 ? ` ${(durationMs / 1000).toFixed(1)}s` : "";
+	const durationStr = durationMs > 0 ? ` ${(durationMs / 1000).toFixed(1)}s` : "";
 
 	return (
 		<Label color={colors[state] as any}>
@@ -229,8 +214,7 @@ function TranscribingSpinner({ model }: { model: WhisperModelName | "cloud" }) {
 		<Inline gap={1}>
 			<AppText color="yellow">{frames[frame]}</AppText>
 			<MutedText>
-				Transcribing with{" "}
-				{model === "cloud" ? "OpenAI Whisper" : `whisper-${model}`}...
+				Transcribing with {model === "cloud" ? "OpenAI Whisper" : `whisper-${model}`}...
 			</MutedText>
 		</Inline>
 	);

@@ -46,9 +46,7 @@ async function main() {
 		return;
 	}
 
-	const guild = guilds.find(
-		(g: any) => g.name.includes("8GI") || g.name.includes("8gi"),
-	);
+	const guild = guilds.find((g: any) => g.name.includes("8GI") || g.name.includes("8gi"));
 	if (!guild) {
 		console.error("8GI server not found");
 		return;
@@ -244,9 +242,7 @@ async function main() {
 	// Post welcome message in constitution channel
 	console.log("\nPosting welcome message...");
 	const channels = await api("GET", `/guilds/${GUILD}/channels`);
-	const constitutionChannel = channels?.find(
-		(c: any) => c.name === "constitution",
-	);
+	const constitutionChannel = channels?.find((c: any) => c.name === "constitution");
 
 	if (constitutionChannel) {
 		await api("POST", `/channels/${constitutionChannel.id}/messages`, {
@@ -257,9 +253,7 @@ async function main() {
 	}
 
 	// Post in getting-started
-	const gettingStarted = channels?.find(
-		(c: any) => c.name === "getting-started",
-	);
+	const gettingStarted = channels?.find((c: any) => c.name === "getting-started");
 	if (gettingStarted) {
 		await api("POST", `/channels/${gettingStarted.id}/messages`, {
 			content:

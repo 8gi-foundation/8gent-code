@@ -20,11 +20,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import {
-	type ExecutionResult,
-	executeAndValidate,
-	executeSecure,
-} from "./sandbox";
+import { type ExecutionResult, executeAndValidate, executeSecure } from "./sandbox";
 
 /**
  * Validate generated TypeScript files before committing.
@@ -55,10 +51,7 @@ function validateGeneratedFiles(
 		}
 
 		// Reject Pages Router patterns in App Router files
-		if (
-			/\bNextApiRequest\b/.test(file.content) ||
-			/\bNextApiResponse\b/.test(file.content)
-		) {
+		if (/\bNextApiRequest\b/.test(file.content) || /\bNextApiResponse\b/.test(file.content)) {
 			errors.push(`${file.path}: uses Pages Router types — this is App Router`);
 			continue;
 		}
@@ -66,13 +59,10 @@ function validateGeneratedFiles(
 		// page.tsx / layout.tsx must have default component export
 		if (name === "page.tsx" || name === "layout.tsx") {
 			const hasDefault =
-				/export\s+default\s+(function|class|async\s+function)/.test(
-					file.content,
-				) || /export\s+default\s+\w+/.test(file.content);
+				/export\s+default\s+(function|class|async\s+function)/.test(file.content) ||
+				/export\s+default\s+\w+/.test(file.content);
 			if (!hasDefault) {
-				errors.push(
-					`${file.path}: missing default export (required for Next.js App Router)`,
-				);
+				errors.push(`${file.path}: missing default export (required for Next.js App Router)`);
 				continue;
 			}
 		}
@@ -81,19 +71,13 @@ function validateGeneratedFiles(
 		const fullPath = join(workDir, file.path);
 		if (existsSync(fullPath)) {
 			try {
-				execSync(
-					`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`,
-					{
-						cwd: workDir,
-						encoding: "utf-8",
-						timeout: 15000,
-					},
-				);
+				execSync(`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
+					cwd: workDir,
+					encoding: "utf-8",
+					timeout: 15000,
+				});
 			} catch (err: any) {
-				const msg = (err.stderr || err.stdout || err.message || "").slice(
-					0,
-					200,
-				);
+				const msg = (err.stderr || err.stdout || err.message || "").slice(0, 200);
 				errors.push(`${file.path}: transpile failed — ${msg}`);
 			}
 		}
@@ -159,11 +143,7 @@ export async function executeTask(
 	repoPath: string,
 	options: { maxAttempts?: number; model?: string; dryRun?: boolean } = {},
 ): Promise<TaskResult> {
-	const {
-		maxAttempts = 3,
-		model = "devstral:latest",
-		dryRun = false,
-	} = options;
+	const { maxAttempts = 3, model = "devstral:latest", dryRun = false } = options;
 	const start = performance.now();
 	const branchName = `eight/${task.id}-${Date.now()}`;
 
@@ -175,12 +155,7 @@ export async function executeTask(
 
 	try {
 		// Step 1: Create worktree for isolation
-		const worktreePath = join(
-			repoPath,
-			".8gent",
-			"worktrees",
-			branchName.replace(/\//g, "-"),
-		);
+		const worktreePath = join(repoPath, ".8gent", "worktrees", branchName.replace(/\//g, "-"));
 
 		if (!dryRun) {
 			mkdirSync(join(repoPath, ".8gent", "worktrees"), { recursive: true });
@@ -200,12 +175,7 @@ export async function executeTask(
 			attempts++;
 
 			// Generate code
-			const generated = await generateCode(
-				task,
-				contextFiles,
-				model,
-				lastError,
-			);
+			const generated = await generateCode(task, contextFiles, model, lastError);
 
 			if (!generated.files.length) {
 				lastError = "Model generated no files";
@@ -443,9 +413,7 @@ ${context}`;
 
 	// If still no files extracted, the model output is unparseable
 	if (files.length === 0) {
-		console.warn(
-			"[autonomous] model output contained no parseable code blocks",
-		);
+		console.warn("[autonomous] model output contained no parseable code blocks");
 	}
 
 	return { files, tests, explanation: "" };

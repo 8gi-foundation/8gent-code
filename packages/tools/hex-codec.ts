@@ -10,8 +10,7 @@
  * @throws {Error} If input is invalid
  */
 export function encode(input: Uint8Array | string): string {
-	const bytes =
-		typeof input === "string" ? new TextEncoder().encode(input) : input;
+	const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
 	const hex = "0123456789abcdef";
 	let result = "";
 	for (const b of bytes) {
@@ -28,9 +27,7 @@ export function encode(input: Uint8Array | string): string {
  */
 export function decode(hex: string): Uint8Array {
 	if (hex.length % 2 !== 0 || !/^[0-9a-f]+$/.test(hex)) {
-		throw new Error(
-			"Invalid hex string: must be even-length and lowercase alphanumeric",
-		);
+		throw new Error("Invalid hex string: must be even-length and lowercase alphanumeric");
 	}
 	const bytes = new Uint8Array(hex.length / 2);
 	for (let i = 0; i < hex.length; i += 2) {

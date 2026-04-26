@@ -10,13 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import {
-	AppText,
-	Divider,
-	Heading,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Divider, Heading, MutedText, Stack } from "../components/primitives/index.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 
@@ -47,10 +41,7 @@ function loadBTW(): BTWEntry[] {
 function saveBTW(items: BTWEntry[]): void {
 	try {
 		if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-		writeFileSync(
-			join(DATA_DIR, "btw.json"),
-			JSON.stringify({ items }, null, 2),
-		);
+		writeFileSync(join(DATA_DIR, "btw.json"), JSON.stringify({ items }, null, 2));
 	} catch {}
 }
 
@@ -58,10 +49,7 @@ function saveBTW(items: BTWEntry[]): void {
 function sortItems(items: BTWEntry[]): BTWEntry[] {
 	const incomplete = items
 		.filter((i) => !i.completed)
-		.sort(
-			(a, b) =>
-				new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-		);
+		.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 	const complete = items
 		.filter((i) => i.completed)
 		.sort(
@@ -79,12 +67,7 @@ interface BTWViewProps {
 	onClose: () => void;
 }
 
-export function BTWView({
-	visible,
-	data,
-	onUpdateData,
-	onClose,
-}: BTWViewProps) {
+export function BTWView({ visible, data, onUpdateData, onClose }: BTWViewProps) {
 	const [items, setItems] = useState<BTWEntry[]>(() => {
 		const fromFile = loadBTW();
 		if (fromFile.length > 0) return sortItems(fromFile);
@@ -270,9 +253,7 @@ export function BTWView({
 			<Box marginTop={1}>
 				<Divider />
 			</Box>
-			<MutedText>
-				a=add Space/Enter=toggle d=delete arrows=navigate ESC=back
-			</MutedText>
+			<MutedText>a=add Space/Enter=toggle d=delete arrows=navigate ESC=back</MutedText>
 		</Box>
 	);
 }

@@ -35,15 +35,8 @@ export interface ThemeProviderProps {
 	value?: SemanticTheme;
 }
 
-export function ThemeProvider({
-	children,
-	value,
-}: ThemeProviderProps): React.ReactElement {
-	return React.createElement(
-		ThemeContext.Provider,
-		{ value: value ?? semanticTheme },
-		children,
-	);
+export function ThemeProvider({ children, value }: ThemeProviderProps): React.ReactElement {
+	return React.createElement(ThemeContext.Provider, { value: value ?? semanticTheme }, children);
 }
 
 // ---- Hook ----

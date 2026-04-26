@@ -194,10 +194,7 @@ export class RoutineManager {
 	/**
 	 * Manually trigger a routine (e.g. from API or webhook).
 	 */
-	async trigger(
-		id: string,
-		source: RoutineRun["trigger"] = "manual",
-	): Promise<RoutineRun | null> {
+	async trigger(id: string, source: RoutineRun["trigger"] = "manual"): Promise<RoutineRun | null> {
 		const routine = this.routines.find((r) => r.id === id);
 		if (!routine) return null;
 		return this.execute(routine, source);
@@ -206,10 +203,7 @@ export class RoutineManager {
 	/**
 	 * Execute a routine by spawning a headless agent session.
 	 */
-	private async execute(
-		routine: Routine,
-		trigger: RoutineRun["trigger"],
-	): Promise<RoutineRun> {
+	private async execute(routine: Routine, trigger: RoutineRun["trigger"]): Promise<RoutineRun> {
 		const runId = crypto.randomUUID().slice(0, 8);
 		const run: RoutineRun = {
 			id: runId,
@@ -219,14 +213,7 @@ export class RoutineManager {
 		};
 
 		try {
-			const args = [
-				"run",
-				"bin/8gent.ts",
-				"chat",
-				routine.prompt,
-				"--yes",
-				"--json",
-			];
+			const args = ["run", "bin/8gent.ts", "chat", routine.prompt, "--yes", "--json"];
 
 			if (routine.model) args.push(`--model=${routine.model}`);
 

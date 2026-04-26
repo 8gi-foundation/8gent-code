@@ -1,9 +1,6 @@
 import { Box, useInput } from "ink";
 import React from "react";
-import type {
-	TaskInfo,
-	TaskStatus,
-} from "../../../../../packages/tools/background.js";
+import type { TaskInfo, TaskStatus } from "../../../../../packages/tools/background.js";
 import { isAgentProcessTaskId } from "../ActivityMonitor.js";
 import {
 	AppText,
@@ -88,9 +85,7 @@ export function ProcessSidebar({
 			{/* Header */}
 			<Box paddingX={1} justifyContent="space-between">
 				<Heading>Processes</Heading>
-				{runningCount > 0 && (
-					<Badge label={`${runningCount} live`} color="green" />
-				)}
+				{runningCount > 0 && <Badge label={`${runningCount} live`} color="green" />}
 			</Box>
 
 			<Divider width={width - 2} />

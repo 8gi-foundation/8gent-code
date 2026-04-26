@@ -115,9 +115,7 @@ class ToolRegistry {
 	findByCapabilities(capabilities: Capability[]): Tool[] {
 		if (capabilities.length === 0) return this.getAllTools();
 
-		const toolSets = capabilities.map(
-			(cap) => new Set(this.capabilityIndex.get(cap) || []),
-		);
+		const toolSets = capabilities.map((cap) => new Set(this.capabilityIndex.get(cap) || []));
 
 		// Intersection of all sets
 		const intersection = toolSets.reduce((acc, set) => {
@@ -179,9 +177,7 @@ class ToolRegistry {
 	/**
 	 * Get usage stats for a tool
 	 */
-	getStats(
-		name: string,
-	): { usageCount: number; totalTokensSaved: number } | undefined {
+	getStats(name: string): { usageCount: number; totalTokensSaved: number } | undefined {
 		const registration = this.tools.get(name);
 		if (!registration) return undefined;
 		return {
@@ -202,10 +198,7 @@ class ToolRegistry {
 	} {
 		const registrations = Array.from(this.tools.values());
 		const totalUsage = registrations.reduce((sum, r) => sum + r.usageCount, 0);
-		const totalTokensSaved = registrations.reduce(
-			(sum, r) => sum + r.totalTokensSaved,
-			0,
-		);
+		const totalTokensSaved = registrations.reduce((sum, r) => sum + r.totalTokensSaved, 0);
 
 		const topTools = registrations
 			.sort((a, b) => b.usageCount - a.usageCount)

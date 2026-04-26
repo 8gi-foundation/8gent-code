@@ -110,11 +110,7 @@ export class SessionWriter {
 	// ============================================
 
 	/** Write step start boundary (v2) */
-	writeStepStart(
-		stepNumber: number,
-		model?: ModelInfo,
-		messageCount?: number,
-	): void {
+	writeStepStart(stepNumber: number, model?: ModelInfo, messageCount?: number): void {
 		this.totalSteps = Math.max(this.totalSteps, stepNumber + 1);
 		this.write({
 			type: "step_start",
@@ -172,12 +168,7 @@ export class SessionWriter {
 	}
 
 	/** Write a tool error entry (v2) — distinct from tool_result with success=false */
-	writeToolError(
-		toolCallId: string,
-		toolName: string,
-		error: string,
-		stepNumber?: number,
-	): void {
+	writeToolError(toolCallId: string, toolName: string, error: string, stepNumber?: number): void {
 		this.write({
 			type: "tool_error",
 			timestamp: this.now(),
@@ -193,11 +184,7 @@ export class SessionWriter {
 	// Shared entries (both v1 and v2)
 	// ============================================
 
-	writeToolCall(
-		toolCall: ToolCall,
-		turnIndex?: number,
-		stepNumber?: number,
-	): void {
+	writeToolCall(toolCall: ToolCall, turnIndex?: number, stepNumber?: number): void {
 		this.totalToolCalls++;
 		this.write({
 			type: "tool_call",
@@ -336,10 +323,7 @@ export class SessionWriter {
 	// Session end
 	// ============================================
 
-	writeSessionEnd(
-		exitReason: SessionSummary["exitReason"],
-		reportId?: string | null,
-	): void {
+	writeSessionEnd(exitReason: SessionSummary["exitReason"], reportId?: string | null): void {
 		this.write({
 			type: "session_end",
 			timestamp: this.now(),
@@ -393,8 +377,7 @@ export class SessionWriter {
 		this.aggregatedUsage.promptTokens =
 			(this.aggregatedUsage.promptTokens || 0) + (usage.promptTokens || 0);
 		this.aggregatedUsage.completionTokens =
-			(this.aggregatedUsage.completionTokens || 0) +
-			(usage.completionTokens || 0);
+			(this.aggregatedUsage.completionTokens || 0) + (usage.completionTokens || 0);
 
 		// Accumulate detailed breakdowns
 		if (usage.inputTokenDetails) {
@@ -402,14 +385,11 @@ export class SessionWriter {
 				this.aggregatedUsage.inputTokenDetails = {};
 			}
 			const det = this.aggregatedUsage.inputTokenDetails;
-			det.noCacheTokens =
-				(det.noCacheTokens || 0) + (usage.inputTokenDetails.noCacheTokens || 0);
+			det.noCacheTokens = (det.noCacheTokens || 0) + (usage.inputTokenDetails.noCacheTokens || 0);
 			det.cacheReadTokens =
-				(det.cacheReadTokens || 0) +
-				(usage.inputTokenDetails.cacheReadTokens || 0);
+				(det.cacheReadTokens || 0) + (usage.inputTokenDetails.cacheReadTokens || 0);
 			det.cacheWriteTokens =
-				(det.cacheWriteTokens || 0) +
-				(usage.inputTokenDetails.cacheWriteTokens || 0);
+				(det.cacheWriteTokens || 0) + (usage.inputTokenDetails.cacheWriteTokens || 0);
 		}
 
 		if (usage.outputTokenDetails) {
@@ -417,11 +397,9 @@ export class SessionWriter {
 				this.aggregatedUsage.outputTokenDetails = {};
 			}
 			const det = this.aggregatedUsage.outputTokenDetails;
-			det.textTokens =
-				(det.textTokens || 0) + (usage.outputTokenDetails.textTokens || 0);
+			det.textTokens = (det.textTokens || 0) + (usage.outputTokenDetails.textTokens || 0);
 			det.reasoningTokens =
-				(det.reasoningTokens || 0) +
-				(usage.outputTokenDetails.reasoningTokens || 0);
+				(det.reasoningTokens || 0) + (usage.outputTokenDetails.reasoningTokens || 0);
 		}
 	}
 }

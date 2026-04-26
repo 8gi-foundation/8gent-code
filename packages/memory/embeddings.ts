@@ -32,10 +32,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
 	get available(): boolean {
 		// Return cached value if fresh
-		if (
-			this._available !== null &&
-			Date.now() - this._availableCheckedAt < AVAILABILITY_CACHE_MS
-		) {
+		if (this._available !== null && Date.now() - this._availableCheckedAt < AVAILABILITY_CACHE_MS) {
 			return this._available;
 		}
 		// Default to unknown — caller should use checkAvailability() first
@@ -47,10 +44,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 	 * Caches the result for 30 seconds.
 	 */
 	async checkAvailability(): Promise<boolean> {
-		if (
-			this._available !== null &&
-			Date.now() - this._availableCheckedAt < AVAILABILITY_CACHE_MS
-		) {
+		if (this._available !== null && Date.now() - this._availableCheckedAt < AVAILABILITY_CACHE_MS) {
 			return this._available;
 		}
 
@@ -98,9 +92,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 			});
 
 			if (!response.ok) {
-				throw new Error(
-					`Ollama embedding failed: ${response.status} ${response.statusText}`,
-				);
+				throw new Error(`Ollama embedding failed: ${response.status} ${response.statusText}`);
 			}
 
 			const data = (await response.json()) as { embedding: number[] };

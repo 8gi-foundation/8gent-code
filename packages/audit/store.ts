@@ -36,11 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_created_at ON access_audit_log(created_at D
 CREATE INDEX IF NOT EXISTS idx_audit_session    ON access_audit_log(session_id);
 `;
 
-const VALID_OPERATIONS: readonly AccessOperation[] = [
-	"read",
-	"derive",
-	"export",
-];
+const VALID_OPERATIONS: readonly AccessOperation[] = ["read", "derive", "export"];
 const VALID_ACTOR_KINDS: readonly ActorKind[] = ["human", "agent", "system"];
 
 function generateEventId(): string {
@@ -165,9 +161,9 @@ export class AccessAuditStore {
 
 	/** Total row count. Used by admin CLI and tests. */
 	count(): number {
-		const row = this.db
-			.prepare("SELECT COUNT(*) AS n FROM access_audit_log")
-			.get() as { n: number };
+		const row = this.db.prepare("SELECT COUNT(*) AS n FROM access_audit_log").get() as {
+			n: number;
+		};
 		return row.n;
 	}
 

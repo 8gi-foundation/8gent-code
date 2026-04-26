@@ -27,11 +27,7 @@ export function registerFilter(name: string, fn: FilterFn): void {
 // Built-in filters
 // ---------------------------------------------------------------------------
 
-function applyBuiltin(
-	value: string,
-	name: string,
-	arg?: string,
-): string | null {
+function applyBuiltin(value: string, name: string, arg?: string): string | null {
 	switch (name) {
 		case "upper":
 			return value.toUpperCase();
@@ -94,10 +90,7 @@ function applyFilters(raw: string, filters: string[]): string {
 		}
 
 		// Unknown filter - warn in non-production, otherwise pass through silently
-		if (
-			typeof process !== "undefined" &&
-			process.env.NODE_ENV !== "production"
-		) {
+		if (typeof process !== "undefined" && process.env.NODE_ENV !== "production") {
 			process.stderr.write(`[string-template-v2] Unknown filter: "${name}"\n`);
 		}
 	}
@@ -146,9 +139,7 @@ export function template(
 		const filters = parts.slice(1);
 
 		const raw =
-			key in data && data[key] !== null && data[key] !== undefined
-				? String(data[key])
-				: missing;
+			key in data && data[key] !== null && data[key] !== undefined ? String(data[key]) : missing;
 
 		return filters.length > 0 ? applyFilters(raw, filters) : raw;
 	});

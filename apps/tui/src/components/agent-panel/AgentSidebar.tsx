@@ -51,13 +51,7 @@ export function AgentSidebar({ agents, activeAgentId }: AgentSidebarProps) {
 	if (agents.length === 0) return null;
 
 	return (
-		<Box
-			flexDirection="column"
-			width={30}
-			borderStyle="single"
-			borderColor="blue"
-			paddingX={1}
-		>
+		<Box flexDirection="column" width={30} borderStyle="single" borderColor="blue" paddingX={1}>
 			<Text color="blue" bold>
 				Agents ({agents.length + 1})
 			</Text>
@@ -81,8 +75,7 @@ export function AgentSidebar({ agents, activeAgentId }: AgentSidebarProps) {
 						<MutedText>
 							{"   "}
 							{statusIcon(agent.status)} {agent.task.slice(0, 20)}
-							{agent.task.length > 20 ? "..." : ""}{" "}
-							{formatElapsed(agent.spawnedAt)}
+							{agent.task.length > 20 ? "..." : ""} {formatElapsed(agent.spawnedAt)}
 						</MutedText>
 					</Box>
 				);

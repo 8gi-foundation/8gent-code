@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
+const WORK_DIR = process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
 let argParser: any;
@@ -23,9 +22,7 @@ beforeEach(async () => {
 		commandRegistry = await import(path.join(WORK_DIR, "command-registry.ts"));
 	} catch {
 		try {
-			commandRegistry = await import(
-				path.join(WORK_DIR, "command-registry.js")
-			);
+			commandRegistry = await import(path.join(WORK_DIR, "command-registry.js"));
 		} catch {}
 	}
 	try {
@@ -100,16 +97,12 @@ describe("Arg Parser", () => {
 		expect(result.errors.length).toBeGreaterThan(0);
 		// Error should mention 'name' or 'required'
 		const errorStr = result.errors.join(" ").toLowerCase();
-		expect(errorStr.includes("name") || errorStr.includes("required")).toBe(
-			true,
-		);
+		expect(errorStr.includes("name") || errorStr.includes("required")).toBe(true);
 	});
 
 	it("validates choices", () => {
 		const fn = argParser.parseArgs || argParser.default?.parseArgs;
-		const defs = [
-			{ name: "env", type: "string", choices: ["dev", "staging", "prod"] },
-		];
+		const defs = [{ name: "env", type: "string", choices: ["dev", "staging", "prod"] }];
 		const result = fn(["--env", "invalid"], defs);
 		expect(result.errors.length).toBeGreaterThan(0);
 	});
@@ -212,8 +205,7 @@ describe("CommandRegistry", () => {
 
 describe("Help Generator", () => {
 	it("generateHelp formats usage correctly", () => {
-		const fn =
-			helpGenerator.generateHelp || helpGenerator.default?.generateHelp;
+		const fn = helpGenerator.generateHelp || helpGenerator.default?.generateHelp;
 		const cmd = {
 			name: "create",
 			description: "Create a new project",
@@ -246,18 +238,14 @@ describe("Help Generator", () => {
 		expect(helpText.length).toBeGreaterThan(0);
 		// Should contain usage information
 		const lower = helpText.toLowerCase();
-		expect(
-			lower.includes("usage") ||
-				lower.includes("mycli") ||
-				lower.includes("create"),
-		).toBe(true);
+		expect(lower.includes("usage") || lower.includes("mycli") || lower.includes("create")).toBe(
+			true,
+		);
 		// Should mention the arguments
 		expect(helpText).toContain("name");
 		expect(helpText).toContain("verbose");
 		// Should show default values or choices
-		expect(helpText.includes("default") || helpText.includes("template")).toBe(
-			true,
-		);
+		expect(helpText.includes("default") || helpText.includes("template")).toBe(true);
 	});
 });
 
@@ -265,8 +253,7 @@ describe("Help Generator", () => {
 
 describe("ProgressBar", () => {
 	it("renders with correct percentage", () => {
-		const PB =
-			progress.ProgressBar || progress.default?.ProgressBar || progress.default;
+		const PB = progress.ProgressBar || progress.default?.ProgressBar || progress.default;
 		const bar = new PB({ total: 100, width: 20 });
 		const output = bar.update(50);
 		expect(typeof output).toBe("string");
@@ -274,8 +261,7 @@ describe("ProgressBar", () => {
 	});
 
 	it("calculates ETA", () => {
-		const PB =
-			progress.ProgressBar || progress.default?.ProgressBar || progress.default;
+		const PB = progress.ProgressBar || progress.default?.ProgressBar || progress.default;
 		const bar = new PB({ total: 100 });
 		// Simulate some progress to build rate history
 		bar.update(10);
@@ -324,11 +310,7 @@ describe("Formatter", () => {
 		// "Alice" and "Bob" lines should have consistent column alignment
 		// Check that columns are padded (all lines with data should have similar structure)
 		for (const line of lines) {
-			if (
-				line.includes("Alice") ||
-				line.includes("Bob") ||
-				line.includes("Charlie")
-			) {
+			if (line.includes("Alice") || line.includes("Bob") || line.includes("Charlie")) {
 				// The name and age should both be present
 				expect(line.length).toBeGreaterThan(10);
 			}

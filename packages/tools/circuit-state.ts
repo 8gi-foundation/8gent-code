@@ -29,10 +29,7 @@ export class CircuitState {
 	private readonly failureThreshold: number;
 	private readonly successThreshold: number;
 	private readonly cooldownMs: number;
-	private readonly onStateChange?: (
-		from: CircuitBreakerState,
-		to: CircuitBreakerState,
-	) => void;
+	private readonly onStateChange?: (from: CircuitBreakerState, to: CircuitBreakerState) => void;
 
 	constructor(config: CircuitStateConfig = {}) {
 		this.failureThreshold = config.failureThreshold ?? 5;

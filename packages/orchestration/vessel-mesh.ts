@@ -36,13 +36,7 @@ export interface VesselMessage {
 	id: string;
 	from: string; // vesselId
 	to: string; // vesselId or "broadcast"
-	type:
-		| "task"
-		| "result"
-		| "status"
-		| "capability-query"
-		| "capability-response"
-		| "heartbeat";
+	type: "task" | "result" | "status" | "capability-query" | "capability-response" | "heartbeat";
 	payload: Record<string, unknown>;
 	timestamp: number;
 	/** Correlation ID for request/response pairs */
@@ -84,10 +78,7 @@ export class VesselMesh {
 	private heartbeatInterval?: ReturnType<typeof setInterval>;
 	private discoveryInterval?: ReturnType<typeof setInterval>;
 	private messageHandler?: (msg: VesselMessage) => void;
-	private taskHandler?: (
-		task: TaskPayload,
-		from: string,
-	) => Promise<TaskResult>;
+	private taskHandler?: (task: TaskPayload, from: string) => Promise<TaskResult>;
 
 	// Lazily resolved Convex client
 	private _client: any = null;
@@ -190,10 +181,7 @@ export class VesselMesh {
 	async discoverPeers(): Promise<VesselInfo[]> {
 		if (!(await this.resolveConvex())) return Array.from(this.peers.values());
 		try {
-			const rows = (await this._client.query(
-				this._api.vessels.list,
-				{},
-			)) as Array<{
+			const rows = (await this._client.query(this._api.vessels.list, {})) as Array<{
 				vesselId: string;
 				name: string;
 				url: string;
@@ -316,11 +304,7 @@ export class VesselMesh {
 
 	// MARK: - Messaging
 
-	send(
-		to: string,
-		type: VesselMessage["type"],
-		payload: Record<string, unknown>,
-	): void {
+	send(to: string, type: VesselMessage["type"], payload: Record<string, unknown>): void {
 		const ws = this.getOrConnect(to);
 		if (!ws) return;
 
@@ -353,11 +337,7 @@ export class VesselMesh {
 		return new Promise<TaskResult>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pendingRequests.delete(correlationId);
-				reject(
-					new Error(
-						`Task delegation to ${vesselId} timed out after ${timeoutMs}ms`,
-					),
-				);
+				reject(new Error(`Task delegation to ${vesselId} timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
 
 			this.pendingRequests.set(correlationId, {
@@ -504,9 +484,7 @@ export class VesselMesh {
 		this.messageHandler = handler;
 	}
 
-	onTask(
-		handler: (task: TaskPayload, from: string) => Promise<TaskResult>,
-	): void {
+	onTask(handler: (task: TaskPayload, from: string) => Promise<TaskResult>): void {
 		this.taskHandler = handler;
 	}
 

@@ -95,13 +95,7 @@ const QUESTION_TEMPLATES: Record<string, Partial<ClarifyingQuestion>[]> = {
 		{
 			category: "design",
 			question: "Any specific design system?",
-			options: [
-				"Tailwind CSS",
-				"shadcn/ui",
-				"Material UI",
-				"Custom CSS",
-				"None",
-			],
+			options: ["Tailwind CSS", "shadcn/ui", "Material UI", "Custom CSS", "None"],
 			defaultAnswer: "Tailwind CSS",
 			importance: "recommended",
 		},
@@ -110,23 +104,14 @@ const QUESTION_TEMPLATES: Record<string, Partial<ClarifyingQuestion>[]> = {
 		{
 			category: "scope",
 			question: "How many sections/pages?",
-			options: [
-				"Single page (hero + features)",
-				"Multi-section (4-5)",
-				"Multi-page site",
-			],
+			options: ["Single page (hero + features)", "Multi-section (4-5)", "Multi-page site"],
 			defaultAnswer: "Single page (hero + features)",
 			importance: "required",
 		},
 		{
 			category: "design",
 			question: "What's the vibe/aesthetic?",
-			options: [
-				"Modern/minimal",
-				"Bold/colorful",
-				"Corporate/professional",
-				"Creative/artistic",
-			],
+			options: ["Modern/minimal", "Bold/colorful", "Corporate/professional", "Creative/artistic"],
 			defaultAnswer: "Modern/minimal",
 			importance: "recommended",
 		},
@@ -216,14 +201,11 @@ const QUESTION_TEMPLATES: Record<string, Partial<ClarifyingQuestion>[]> = {
 function detectTaskType(task: string): string {
 	const taskLower = task.toLowerCase();
 
-	if (taskLower.match(/landing\s*page|homepage|website|site/))
-		return "landing-page";
-	if (taskLower.match(/web\s*app|dashboard|portal|application/))
-		return "web-app";
+	if (taskLower.match(/landing\s*page|homepage|website|site/)) return "landing-page";
+	if (taskLower.match(/web\s*app|dashboard|portal|application/)) return "web-app";
 	if (taskLower.match(/api|endpoint|backend|server/)) return "api";
 	if (taskLower.match(/fix|bug|error|broken|issue|crash/)) return "fix-bug";
-	if (taskLower.match(/refactor|clean\s*up|reorganize|restructure/))
-		return "refactor";
+	if (taskLower.match(/refactor|clean\s*up|reorganize|restructure/)) return "refactor";
 
 	return "default";
 }
@@ -249,8 +231,7 @@ export class ProactiveGatherer extends EventEmitter {
 		};
 
 		const taskType = detectTaskType(task);
-		const templates =
-			QUESTION_TEMPLATES[taskType] || QUESTION_TEMPLATES.default;
+		const templates = QUESTION_TEMPLATES[taskType] || QUESTION_TEMPLATES.default;
 
 		this.state = {
 			originalTask: task,
@@ -270,10 +251,7 @@ export class ProactiveGatherer extends EventEmitter {
 		};
 
 		// If task is already very clear, skip to ready
-		if (
-			this.config.skipIfClear &&
-			this.state.confidence >= this.config.minConfidence
-		) {
+		if (this.config.skipIfClear && this.state.confidence >= this.config.minConfidence) {
 			this.state.isComplete = true;
 			this.state.readyForInfinite = true;
 			this.state.refinedTask = task;
@@ -368,11 +346,7 @@ export class ProactiveGatherer extends EventEmitter {
 
 		// Boost confidence based on importance
 		const boost =
-			question.importance === "required"
-				? 15
-				: question.importance === "recommended"
-					? 10
-					: 5;
+			question.importance === "required" ? 15 : question.importance === "recommended" ? 10 : 5;
 		this.state.confidence = Math.min(100, this.state.confidence + boost);
 
 		this.emit("answered", { question, answer });
@@ -434,8 +408,7 @@ export class ProactiveGatherer extends EventEmitter {
 		}
 
 		this.state.refinedTask = refined;
-		this.state.readyForInfinite =
-			this.state.confidence >= this.config.minConfidence;
+		this.state.readyForInfinite = this.state.confidence >= this.config.minConfidence;
 
 		this.emit("complete", this.state);
 	}
@@ -489,10 +462,7 @@ export class ProactiveGatherer extends EventEmitter {
 /**
  * Create a proactive gatherer for a task
  */
-export function createGatherer(
-	task: string,
-	config?: ProactiveConfig,
-): ProactiveGatherer {
+export function createGatherer(task: string, config?: ProactiveConfig): ProactiveGatherer {
 	return new ProactiveGatherer(task, config);
 }
 
@@ -512,10 +482,7 @@ export function formatQuestion(q: ClarifyingQuestion): string {
 
 	if (q.options && q.options.length > 0) {
 		text += `\n${q.options
-			.map(
-				(opt, i) =>
-					`  ${i + 1}) ${opt}${opt === q.defaultAnswer ? " (default)" : ""}`,
-			)
+			.map((opt, i) => `  ${i + 1}) ${opt}${opt === q.defaultAnswer ? " (default)" : ""}`)
 			.join("\n")}`;
 	}
 

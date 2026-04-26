@@ -7,11 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type {
-	ExtensionManifest,
-	ExtensionToolDef,
-	LoadedExtension,
-} from "./types";
+import type { ExtensionManifest, ExtensionToolDef, LoadedExtension } from "./types";
 
 const EXTENSIONS_DIR = path.join(
 	process.env.HOME || process.env.USERPROFILE || "~",
@@ -115,9 +111,7 @@ export async function loadAllExtensions(): Promise<LoadedExtension[]> {
 			loaded.push(result.value);
 			const ext = result.value;
 			if (ext.status === "loaded") {
-				console.log(
-					`[ext] Loaded: ${ext.manifest.name}@${ext.manifest.version}`,
-				);
+				console.log(`[ext] Loaded: ${ext.manifest.name}@${ext.manifest.version}`);
 			} else {
 				console.log(`[ext] Failed: ${ext.manifest.name} - ${ext.error}`);
 			}
@@ -127,9 +121,7 @@ export async function loadAllExtensions(): Promise<LoadedExtension[]> {
 }
 
 /** Collect tool functions from loaded extensions */
-export function collectExtensionTools(
-	extensions: LoadedExtension[],
-): Record<string, Function> {
+export function collectExtensionTools(extensions: LoadedExtension[]): Record<string, Function> {
 	const tools: Record<string, Function> = {};
 	for (const ext of extensions) {
 		if (ext.status !== "loaded") continue;

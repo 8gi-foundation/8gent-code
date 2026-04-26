@@ -52,8 +52,7 @@ export function scaffoldGame(config: GameConfig): {
 			dev: "bun run --hot src/main.ts",
 			build: "bun build src/main.ts --outdir=dist",
 		},
-		dependencies:
-			engine === "phaser" ? { phaser: "^3.80.0" } : { pixi: "^8.0.0" },
+		dependencies: engine === "phaser" ? { phaser: "^3.80.0" } : { pixi: "^8.0.0" },
 	};
 	const pkgPath = path.join(outputDir, "package.json");
 	fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
@@ -98,14 +97,8 @@ export function scaffoldGame(config: GameConfig): {
 
 // ── Phaser Template ─────────────────────────────────────────────
 
-function generatePhaserMain(
-	name: string,
-	type: string,
-	w: number,
-	h: number,
-): string {
-	const physics =
-		type === "platformer" || type === "shooter" ? "arcade" : "none";
+function generatePhaserMain(name: string, type: string, w: number, h: number): string {
+	const physics = type === "platformer" || type === "shooter" ? "arcade" : "none";
 
 	return `import Phaser from "phaser";
 
@@ -168,12 +161,7 @@ new Phaser.Game(config);
 
 // ── Pixi Template ───────────────────────────────────────────────
 
-function generatePixiMain(
-	name: string,
-	_type: string,
-	w: number,
-	h: number,
-): string {
+function generatePixiMain(name: string, _type: string, w: number, h: number): string {
 	return `import { Application, Graphics, Text } from "pixi.js";
 
 const app = new Application();

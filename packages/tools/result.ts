@@ -50,10 +50,7 @@ function map<T, E, U>(result: Result<T, E>, f: (value: T) => U): Result<U, E> {
  * @param f The function returning a new Result
  * @returns Chained Result
  */
-function flatMap<T, E, U>(
-	result: Result<T, E>,
-	f: (value: T) => Result<U, E>,
-): Result<U, E> {
+function flatMap<T, E, U>(result: Result<T, E>, f: (value: T) => Result<U, E>): Result<U, E> {
 	if (result.tag === "Ok") {
 		return f(result.value);
 	}
@@ -66,10 +63,7 @@ function flatMap<T, E, U>(
  * @param f The error mapping function
  * @returns New Result with transformed error
  */
-function mapErr<T, E, F>(
-	result: Result<T, E>,
-	f: (error: E) => F,
-): Result<T, F> {
+function mapErr<T, E, F>(result: Result<T, E>, f: (error: E) => F): Result<T, F> {
 	if (result.tag === "Err") {
 		return err(f(result.error));
 	}

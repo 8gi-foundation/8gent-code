@@ -46,9 +46,6 @@ export function toggle(value: number, flag: number): number {
  * @param flags - Flag object created by createFlags.
  * @returns Array of names corresponding to set flags.
  */
-export function toNames(
-	value: number,
-	flags: Record<string, number>,
-): string[] {
+export function toNames(value: number, flags: Record<string, number>): string[] {
 	return Object.keys(flags).filter((key) => has(value, flags[key]));
 }

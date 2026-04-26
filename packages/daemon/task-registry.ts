@@ -12,13 +12,7 @@ import { join } from "node:path";
 const TASKS_PATH = join(process.env.HOME || "/root", ".8gent", "tasks.json");
 const MAX_TASKS = 100;
 
-export type TaskStatus =
-	| "planned"
-	| "delegated"
-	| "in-progress"
-	| "review"
-	| "done"
-	| "failed";
+export type TaskStatus = "planned" | "delegated" | "in-progress" | "review" | "done" | "failed";
 export type TaskPriority = "p0" | "p1" | "p2";
 
 export interface CEOTask {
@@ -89,10 +83,7 @@ export function createTask(
 	return task;
 }
 
-export function updateTask(
-	id: string,
-	updates: Partial<CEOTask>,
-): CEOTask | null {
+export function updateTask(id: string, updates: Partial<CEOTask>): CEOTask | null {
 	load();
 	const task = tasks.find((t) => t.id === id);
 	if (!task) return null;
@@ -118,7 +109,5 @@ export function getTasksByStatus(status: TaskStatus): CEOTask[] {
 
 export function getActiveTasks(): CEOTask[] {
 	load();
-	return tasks.filter((t) =>
-		["planned", "delegated", "in-progress"].includes(t.status),
-	);
+	return tasks.filter((t) => ["planned", "delegated", "in-progress"].includes(t.status));
 }

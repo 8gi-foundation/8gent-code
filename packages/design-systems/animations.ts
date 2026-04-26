@@ -130,8 +130,7 @@ export const PATTERNS = {
 	// --- SCROLL ANIMATIONS ---
 
 	fadeInUp: {
-		description:
-			"Element fades in while moving up 20-30px. The bread and butter of scroll reveal.",
+		description: "Element fades in while moving up 20-30px. The bread and butter of scroll reveal.",
 		css: `
       .fade-in-up {
         opacity: 0;
@@ -156,8 +155,7 @@ export const PATTERNS = {
 	},
 
 	staggerChildren: {
-		description:
-			"Children animate in sequence with delay between each. Creates a cascade effect.",
+		description: "Children animate in sequence with delay between each. Creates a cascade effect.",
 		framer: `
       <motion.div
         initial="hidden"
@@ -206,8 +204,7 @@ export const PATTERNS = {
 	},
 
 	counterUp: {
-		description:
-			"Numbers count up from 0 to target value. Use requestAnimationFrame.",
+		description: "Numbers count up from 0 to target value. Use requestAnimationFrame.",
 		js: `
       function animateCounter(element, target, duration = 2000) {
         const start = performance.now();
@@ -226,8 +223,7 @@ export const PATTERNS = {
 	// --- INTERACTION ANIMATIONS ---
 
 	buttonPress: {
-		description:
-			"Subtle scale down on press, return on release. Feels physical.",
+		description: "Subtle scale down on press, return on release. Feels physical.",
 		css: `
       .btn {
         transition: transform 0.1s ease;
@@ -310,8 +306,7 @@ export const PATTERNS = {
 	// --- LOADING & SKELETON ---
 
 	shimmer: {
-		description:
-			"Gradient sweep across skeleton placeholder. Ambient, not distracting.",
+		description: "Gradient sweep across skeleton placeholder. Ambient, not distracting.",
 		css: `
       .skeleton {
         background: linear-gradient(90deg,
@@ -348,8 +343,7 @@ export const PATTERNS = {
 	},
 
 	splitTextReveal: {
-		description:
-			"Each word or character animates in independently. High-end feel.",
+		description: "Each word or character animates in independently. High-end feel.",
 		framer: `
       {text.split(' ').map((word, i) => (
         <motion.span
@@ -445,8 +439,7 @@ export const REMOTION = {
 export const QUICK_REFERENCE = {
 	"scroll reveal": "fadeInUp with IntersectionObserver, once: true",
 	"grid of items": "staggerChildren with 50-80ms delay",
-	"hero entrance":
-		"splitTextReveal for headline, fadeInUp for subtitle, 800ms total",
+	"hero entrance": "splitTextReveal for headline, fadeInUp for subtitle, 800ms total",
 	"button feedback": "scale(0.97) on :active, 100ms",
 	"card hover": "translateY(-4px) + shadow increase, 300ms",
 	"page transition": "crossfade with AnimatePresence, 300ms",

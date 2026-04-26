@@ -23,11 +23,7 @@ function getPath(obj: JsonObject, path: string): JsonValue | undefined {
 	const parts = path.split(".");
 	let current: JsonValue = obj;
 	for (const part of parts) {
-		if (
-			current === null ||
-			typeof current !== "object" ||
-			Array.isArray(current)
-		) {
+		if (current === null || typeof current !== "object" || Array.isArray(current)) {
 			return undefined;
 		}
 		current = (current as JsonObject)[part];
@@ -62,10 +58,7 @@ function setPath(obj: JsonObject, path: string, value: JsonValue): void {
  * Each rule maps a source path to a dest path with an optional transform fn.
  * Only mapped paths are included in the output.
  */
-export function transform(
-	data: JsonObject,
-	rules: TransformRule[],
-): JsonObject {
+export function transform(data: JsonObject, rules: TransformRule[]): JsonObject {
 	const result: JsonObject = {};
 	for (const rule of rules) {
 		const value = getPath(data, rule.from);
@@ -81,10 +74,7 @@ export function transform(
  * Rename top-level keys in a flat object.
  * mapping is { oldKey: newKey }. Unmapped keys are carried through unchanged.
  */
-export function rename(
-	data: JsonObject,
-	mapping: Record<string, string>,
-): JsonObject {
+export function rename(data: JsonObject, mapping: Record<string, string>): JsonObject {
 	const result: JsonObject = {};
 	for (const [key, value] of Object.entries(data)) {
 		const newKey = mapping[key] ?? key;
@@ -105,11 +95,7 @@ export function reshape(data: JsonObject, template: JsonObject): JsonObject {
 			const sourcePath = tplValue.slice(1);
 			const resolved = getPath(data, sourcePath);
 			result[key] = resolved !== undefined ? resolved : null;
-		} else if (
-			tplValue !== null &&
-			typeof tplValue === "object" &&
-			!Array.isArray(tplValue)
-		) {
+		} else if (tplValue !== null && typeof tplValue === "object" && !Array.isArray(tplValue)) {
 			result[key] = reshape(data, tplValue as JsonObject);
 		} else {
 			result[key] = tplValue;

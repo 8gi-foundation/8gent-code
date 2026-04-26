@@ -90,10 +90,7 @@ function parseFrontmatter(content: string): {
 // Content Extractors
 // ============================================================================
 
-function extractDescription(
-	content: string,
-	frontmatter: Record<string, unknown>,
-): string {
+function extractDescription(content: string, frontmatter: Record<string, unknown>): string {
 	// Try frontmatter first
 	if (frontmatter.description && typeof frontmatter.description === "string") {
 		return frontmatter.description.slice(0, 200);
@@ -142,10 +139,7 @@ function extractInstructions(content: string): string {
 	return "Follow the skill's guidelines.";
 }
 
-function extractTools(
-	content: string,
-	frontmatter: Record<string, unknown>,
-): string[] {
+function extractTools(content: string, frontmatter: Record<string, unknown>): string[] {
 	const tools = new Set<string>();
 
 	// From frontmatter
@@ -153,9 +147,7 @@ function extractTools(
 		frontmatter.tools.forEach((t) => tools.add(String(t)));
 	}
 	if (Array.isArray(frontmatter["allowed-tools"])) {
-		frontmatter["allowed-tools"].forEach((t) =>
-			tools.add(String(t).replace(/\(\*?\)/, "")),
-		);
+		frontmatter["allowed-tools"].forEach((t) => tools.add(String(t).replace(/\(\*?\)/, "")));
 	}
 
 	// From content - look for tool references
@@ -209,10 +201,7 @@ function extractTriggers(
 	return Array.from(triggers).slice(0, 8);
 }
 
-function extractCapabilities(
-	content: string,
-	frontmatter: Record<string, unknown>,
-): string[] {
+function extractCapabilities(content: string, frontmatter: Record<string, unknown>): string[] {
 	const capabilities = new Set<string>();
 
 	// From frontmatter
@@ -266,10 +255,7 @@ function extractExamples(content: string): string[] {
 	// Also look for User: patterns (common in skill docs)
 	const userPattern = /User:\s*["']?([^"'\n]+)/gi;
 	let userMatch;
-	while (
-		(userMatch = userPattern.exec(content)) !== null &&
-		examples.length < 3
-	) {
+	while ((userMatch = userPattern.exec(content)) !== null && examples.length < 3) {
 		examples.push(userMatch[1].trim().slice(0, 100));
 	}
 
@@ -285,21 +271,12 @@ function estimateTokens(text: string): number {
 // Main Abstractor
 // ============================================================================
 
-export async function abstractSkill(
-	skillDir: string,
-	skillName: string,
-): Promise<AbstractedSkill> {
+export async function abstractSkill(skillDir: string, skillName: string): Promise<AbstractedSkill> {
 	const sourceDir = path.join(skillDir, "source");
 	const actualDir = fs.existsSync(sourceDir) ? sourceDir : skillDir;
 
 	// Find main skill file
-	const mainFiles = [
-		"SKILL.md",
-		"README.md",
-		"skill.md",
-		"readme.md",
-		"index.md",
-	];
+	const mainFiles = ["SKILL.md", "README.md", "skill.md", "readme.md", "index.md"];
 	let mainFile: string | null = null;
 
 	for (const file of mainFiles) {
@@ -334,9 +311,7 @@ export async function abstractSkill(
 	walkDir(actualDir);
 
 	// Parse main file's frontmatter
-	const mainContent = mainFile
-		? fs.readFileSync(mainFile, "utf-8")
-		: combinedContent;
+	const mainContent = mainFile ? fs.readFileSync(mainFile, "utf-8") : combinedContent;
 	const { frontmatter, body } = parseFrontmatter(mainContent);
 
 	// Extract and abstract

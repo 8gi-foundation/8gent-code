@@ -80,14 +80,12 @@ async function getSessionMeta(filePath: string): Promise<{
 						result.model = entry.meta.agent?.model ?? null;
 						result.runtime = entry.meta.agent?.runtime ?? null;
 						result.gitBranch = entry.meta.environment?.gitBranch ?? null;
-						result.workingDirectory =
-							entry.meta.environment?.workingDirectory ?? null;
+						result.workingDirectory = entry.meta.environment?.workingDirectory ?? null;
 						result.version = entry.meta.version ?? 1;
 					}
 
 					if (entry.type === "user_message" && !result.firstUserMessage) {
-						result.firstUserMessage =
-							entry.message?.content?.slice(0, 120) ?? null;
+						result.firstUserMessage = entry.message?.content?.slice(0, 120) ?? null;
 					}
 				} catch {
 					// skip malformed
@@ -104,8 +102,7 @@ async function getSessionMeta(filePath: string): Promise<{
 						result.completed = true;
 						result.exitReason = entry.summary.exitReason ?? null;
 						result.durationMs = entry.summary.durationMs ?? null;
-						result.totalSteps =
-							entry.summary.totalSteps ?? entry.summary.totalTurns ?? null;
+						result.totalSteps = entry.summary.totalSteps ?? entry.summary.totalTurns ?? null;
 					}
 				} catch {
 					// skip
@@ -126,10 +123,7 @@ export async function GET() {
 			files = (await readdir(SESSIONS_DIR)).filter((f) => f.endsWith(".jsonl"));
 			console.log(`[Sessions API] Found ${files.length} .jsonl files:`, files);
 		} catch (dirErr) {
-			console.log(
-				`[Sessions API] Directory not found: ${SESSIONS_DIR}`,
-				dirErr,
-			);
+			console.log(`[Sessions API] Directory not found: ${SESSIONS_DIR}`, dirErr);
 			return NextResponse.json([]);
 		}
 
@@ -162,10 +156,7 @@ export async function GET() {
 		}
 
 		// Newest first
-		sessions.sort(
-			(a, b) =>
-				new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime(),
-		);
+		sessions.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
 
 		return NextResponse.json(sessions);
 	} catch (error) {

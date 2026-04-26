@@ -69,20 +69,13 @@ function validateCommittedCode(cwd: string): {
 
 		// Reject: CommonJS module.exports in .ts/.tsx
 		if (/\bmodule\.exports\s*=/.test(content)) {
-			errors.push(
-				`${file}: uses CommonJS module.exports — must use ESM export`,
-			);
+			errors.push(`${file}: uses CommonJS module.exports — must use ESM export`);
 			continue;
 		}
 
 		// Reject: Pages Router API handler pattern in App Router page files
-		if (
-			/\bNextApiRequest\b/.test(content) ||
-			/\bNextApiResponse\b/.test(content)
-		) {
-			errors.push(
-				`${file}: uses Pages Router API types (NextApiRequest) — this is App Router`,
-			);
+		if (/\bNextApiRequest\b/.test(content) || /\bNextApiResponse\b/.test(content)) {
+			errors.push(`${file}: uses Pages Router API types (NextApiRequest) — this is App Router`);
 			continue;
 		}
 
@@ -93,23 +86,18 @@ function validateCommittedCode(cwd: string): {
 				/export\s+\{\s*\w+\s+as\s+default\s*\}/.test(content) ||
 				/export\s+default\s+\w+/.test(content);
 			if (!hasDefaultExport) {
-				errors.push(
-					`${file}: missing default component export (required for Next.js App Router)`,
-				);
+				errors.push(`${file}: missing default component export (required for Next.js App Router)`);
 				continue;
 			}
 		}
 
 		// Basic syntax: try to transpile with Bun
 		try {
-			execSync(
-				`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`,
-				{
-					cwd,
-					encoding: "utf-8",
-					timeout: 15000,
-				},
-			);
+			execSync(`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
+				cwd,
+				encoding: "utf-8",
+				timeout: 15000,
+			});
 		} catch (err: any) {
 			const msg = (err.stderr || err.stdout || err.message || "").slice(0, 200);
 			errors.push(`${file}: transpile failed — ${msg}`);
@@ -124,8 +112,7 @@ function validateCommittedCode(cwd: string): {
 registerTool(
 	{
 		name: "git_status",
-		description:
-			"Get git status: branch, staged/unstaged changes, untracked files.",
+		description: "Get git status: branch, staged/unstaged changes, untracked files.",
 		capabilities: ["github"],
 		inputSchema: {
 			type: "object",
@@ -158,9 +145,7 @@ registerTool(
 			ahead: Number.parseInt(ahead),
 			behind: Number.parseInt(behind),
 			clean: lines.length === 0,
-			files: lines
-				.slice(0, 20)
-				.map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) })),
+			files: lines.slice(0, 20).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) })),
 		};
 	},
 );
@@ -170,8 +155,7 @@ registerTool(
 registerTool(
 	{
 		name: "git_diff",
-		description:
-			"Show git diff for staged or unstaged changes. Returns unified diff output.",
+		description: "Show git diff for staged or unstaged changes. Returns unified diff output.",
 		capabilities: ["github"],
 		inputSchema: {
 			type: "object",
@@ -200,8 +184,7 @@ registerTool(
 registerTool(
 	{
 		name: "git_log",
-		description:
-			"Show recent git commits with hash, author, date, and message.",
+		description: "Show recent git commits with hash, author, date, and message.",
 		capabilities: ["github"],
 		inputSchema: {
 			type: "object",
@@ -260,17 +243,11 @@ registerTool(
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { message, files } = input as { message: string; files?: string[] };
 		if (files && files.length > 0) {
-			run(
-				`git add ${files.map((f) => `"${f}"`).join(" ")}`,
-				ctx.workingDirectory,
-			);
+			run(`git add ${files.map((f) => `"${f}"`).join(" ")}`, ctx.workingDirectory);
 		} else {
 			run("git add -A", ctx.workingDirectory);
 		}
-		const result = run(
-			`git commit -m "${message.replace(/"/g, '\\"')}"`,
-			ctx.workingDirectory,
-		);
+		const result = run(`git commit -m "${message.replace(/"/g, '\\"')}"`, ctx.workingDirectory);
 		const hash = run("git rev-parse --short HEAD", ctx.workingDirectory);
 		return { hash, result };
 	},

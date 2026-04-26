@@ -1,9 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useRef } from "react";
-import type {
-	TaskInfo,
-	TaskOutput,
-} from "../../../../../packages/tools/background.js";
+import type { TaskInfo, TaskOutput } from "../../../../../packages/tools/background.js";
 import { formatDuration } from "../../lib/index.js";
 import { truncate } from "../../lib/text.js";
 import { isAgentProcessTaskId } from "../ActivityMonitor.js";
@@ -111,31 +108,19 @@ export function ProcessDetailView({
 	return (
 		<Box flexDirection="column" flexGrow={1}>
 			{/* Header */}
-			<Box
-				borderStyle="round"
-				borderColor="cyan"
-				flexDirection="column"
-				paddingX={1}
-			>
+			<Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
 				<Inline gap={2}>
 					<Heading>{truncate(task.command, 50)}</Heading>
 					<Badge label={task.status} color={statusColor(task.status)} />
 				</Inline>
 				<Inline gap={2}>
 					<MutedText>
-						Runtime:{" "}
-						<AppText color="cyan">{formatDuration(task.runtime)}</AppText>
+						Runtime: <AppText color="cyan">{formatDuration(task.runtime)}</AppText>
 					</MutedText>
 					<MutedText>
 						Exit:{" "}
 						<AppText
-							color={
-								task.exitCode === 0
-									? "green"
-									: task.exitCode !== null
-										? "red"
-										: "cyan"
-							}
+							color={task.exitCode === 0 ? "green" : task.exitCode !== null ? "red" : "cyan"}
 						>
 							{task.exitCode ?? "—"}
 						</AppText>

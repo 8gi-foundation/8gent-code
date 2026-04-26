@@ -36,9 +36,7 @@ async function checkTaskQueue(path: string): Promise<number> {
 		const file = Bun.file(path);
 		if (!(await file.exists())) return 0;
 		const data = await file.json();
-		return Array.isArray(data)
-			? data.filter((t: any) => t.status === "pending").length
-			: 0;
+		return Array.isArray(data) ? data.filter((t: any) => t.status === "pending").length : 0;
 	} catch {
 		return 0;
 	}
@@ -63,8 +61,7 @@ async function runHeartbeat(config: HeartbeatConfig): Promise<HeartbeatResult> {
 	const dueCronJobs = nextCron ? 1 : 0;
 	const unreadMessages = await checkUnreadMessages();
 
-	const actionTriggered =
-		pendingTasks > 0 || dueCronJobs > 0 || unreadMessages > 0;
+	const actionTriggered = pendingTasks > 0 || dueCronJobs > 0 || unreadMessages > 0;
 
 	const result: HeartbeatResult = {
 		timestamp: new Date().toISOString(),

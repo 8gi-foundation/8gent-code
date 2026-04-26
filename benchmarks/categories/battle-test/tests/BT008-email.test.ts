@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let template: any;
 let personalize: any;
@@ -27,10 +26,7 @@ describe("Email Template", () => {
 
 	it("render handles missing vars gracefully", () => {
 		const Template = template.Template || template.default;
-		const t = new Template(
-			"Hello {{name}}, welcome to {{company}}!",
-			"Welcome",
-		);
+		const t = new Template("Hello {{name}}, welcome to {{company}}!", "Welcome");
 		const result = t.render({ name: "Bob" });
 		expect(result).toContain("Bob");
 		expect(typeof result).toBe("string");
@@ -38,10 +34,7 @@ describe("Email Template", () => {
 
 	it("validate checks required vars", () => {
 		const Template = template.Template || template.default;
-		const t = new Template(
-			"Hello {{name}}, your order {{orderId}} is ready",
-			"Order",
-		);
+		const t = new Template("Hello {{name}}, your order {{orderId}} is ready", "Order");
 		const errors = t.validate({ name: "Alice" });
 		expect(errors.length).toBeGreaterThan(0);
 	});
@@ -71,8 +64,7 @@ describe("Email Template", () => {
 
 describe("Email Personalize", () => {
 	it("personalize replaces recipient fields", () => {
-		const personalizeFn =
-			personalize.personalize || personalize.default?.personalize;
+		const personalizeFn = personalize.personalize || personalize.default?.personalize;
 		const result = personalizeFn("Hello {{firstName}} {{lastName}}", {
 			firstName: "Jane",
 			lastName: "Doe",
@@ -82,8 +74,7 @@ describe("Email Personalize", () => {
 	});
 
 	it("personalize uses fallbacks for optional fields", () => {
-		const personalizeFn =
-			personalize.personalize || personalize.default?.personalize;
+		const personalizeFn = personalize.personalize || personalize.default?.personalize;
 		const result = personalizeFn(
 			"Hello {{firstName}}, your title is {{title}}",
 			{
@@ -97,15 +88,13 @@ describe("Email Personalize", () => {
 
 	it("generateSubjectVariants returns correct count", () => {
 		const genVariants =
-			personalize.generateSubjectVariants ||
-			personalize.default?.generateSubjectVariants;
+			personalize.generateSubjectVariants || personalize.default?.generateSubjectVariants;
 		const result = genVariants("Check out our sale!", 3);
 		expect(result.length).toBe(3);
 	});
 
 	it("segmentRecipients groups correctly", () => {
-		const segment =
-			personalize.segmentRecipients || personalize.default?.segmentRecipients;
+		const segment = personalize.segmentRecipients || personalize.default?.segmentRecipients;
 		const recipients = [
 			{ email: "a@test.com", tier: "premium" },
 			{ email: "b@test.com", tier: "free" },

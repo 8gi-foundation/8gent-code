@@ -180,11 +180,7 @@ export interface SystemStatus {
 
 // ── Command Handler ─────────────────────────────────────
 
-export type CommandHandler = (
-	args: string,
-	chatId: number,
-	bot: any,
-) => Promise<void>;
+export type CommandHandler = (args: string, chatId: number, bot: any) => Promise<void>;
 
 export interface CommandDefinition {
 	name: string;

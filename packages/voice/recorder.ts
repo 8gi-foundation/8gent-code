@@ -101,8 +101,7 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			channels: opts.channels ?? 1,
 			bitDepth: opts.bitDepth ?? 16,
 			maxDurationSeconds: opts.maxDurationSeconds ?? 30,
-			outputPath:
-				opts.outputPath ?? join(tmpdir(), `8gent-voice-${Date.now()}.wav`),
+			outputPath: opts.outputPath ?? join(tmpdir(), `8gent-voice-${Date.now()}.wav`),
 		};
 		this.outputPath = this.options.outputPath;
 	}
@@ -164,18 +163,11 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 						if (existsSync(this.outputPath)) {
 							const stat = statSync(this.outputPath);
 							const bytesPerSecond =
-								this.options.sampleRate *
-								this.options.channels *
-								(this.options.bitDepth / 8);
-							const expectedBytes =
-								((Date.now() - this.startTime) / 1000) * bytesPerSecond;
-							const ratio =
-								expectedBytes > 0 ? Math.min(stat.size / expectedBytes, 1) : 0;
+								this.options.sampleRate * this.options.channels * (this.options.bitDepth / 8);
+							const expectedBytes = ((Date.now() - this.startTime) / 1000) * bytesPerSecond;
+							const ratio = expectedBytes > 0 ? Math.min(stat.size / expectedBytes, 1) : 0;
 							// Add some randomness to simulate real audio levels
-							const level = Math.max(
-								0,
-								Math.min(1, ratio * 0.5 + Math.random() * 0.3),
-							);
+							const level = Math.max(0, Math.min(1, ratio * 0.5 + Math.random() * 0.3));
 							this.emit("audio-level", { level });
 						}
 					} catch {
@@ -203,8 +195,7 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			});
 		} catch (err) {
 			this.isRecording = false;
-			const message =
-				err instanceof Error ? err.message : "Failed to start recording";
+			const message = err instanceof Error ? err.message : "Failed to start recording";
 			this.emit("error", { message });
 			throw err;
 		}

@@ -99,9 +99,7 @@ describe("emitSchema", () => {
 	});
 
 	it("preserves descriptions on objects", () => {
-		const schema = z
-			.object({ id: z.number() })
-			.describe("A resource identifier");
+		const schema = z.object({ id: z.number() }).describe("A resource identifier");
 		const result = emitSchema(schema);
 
 		expect(result.type).toBe("object");

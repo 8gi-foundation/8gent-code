@@ -50,10 +50,7 @@ export class RepoMapper {
 			}
 			if (!EXTS.has(extname(e.name))) continue;
 			try {
-				const [info, raw] = await Promise.all([
-					stat(full),
-					readFile(full, "utf-8"),
-				]);
+				const [info, raw] = await Promise.all([stat(full), readFile(full, "utf-8")]);
 				const rel = relative(this.root, full);
 				this.files.set(rel, {
 					path: rel,
@@ -71,10 +68,8 @@ export class RepoMapper {
 	private extractImports(src: string): string[] {
 		const out: string[] = [];
 		for (const m of src.matchAll(/from\s+["']([^"']+)["']/g)) out.push(m[1]);
-		for (const m of src.matchAll(/require\(["']([^"']+)["']\)/g))
-			out.push(m[1]);
-		for (const m of src.matchAll(/^\s*(?:from|import)\s+([\w.]+)/gm))
-			out.push(m[1]);
+		for (const m of src.matchAll(/require\(["']([^"']+)["']\)/g)) out.push(m[1]);
+		for (const m of src.matchAll(/^\s*(?:from|import)\s+([\w.]+)/gm)) out.push(m[1]);
 		for (const m of src.matchAll(/^\s*use\s+([\w:]+)/gm)) out.push(m[1]);
 		return out;
 	}
@@ -101,8 +96,7 @@ export class RepoMapper {
 		for (const [rel, entry] of this.files) {
 			const hay = `${rel} ${entry.exports.join(" ")}`.toLowerCase();
 			const text =
-				terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0) /
-				Math.max(terms.length, 1);
+				terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0) / Math.max(terms.length, 1);
 			const recency = entry.mtime / maxMtime;
 			const central = this.importers(rel) / maxImp;
 			const small = 1 - Math.min(entry.size / 50_000, 1);
@@ -123,8 +117,7 @@ export class RepoMapper {
 	private importers(rel: string): number {
 		const name = basename(rel, extname(rel));
 		let n = 0;
-		for (const e of this.files.values())
-			if (e.imports.some((i) => i.includes(name))) n++;
+		for (const e of this.files.values()) if (e.imports.some((i) => i.includes(name))) n++;
 		return n;
 	}
 
@@ -149,9 +142,7 @@ export class RepoMapper {
 				const outline = `// Exports: ${entry.exports.join(", ") || "default"}`;
 				const outTok = Math.ceil(outline.length / CHARS_PER_TOKEN);
 				if (tokens + outTok > maxTokens) break;
-				parts.push(
-					`### ${file.path} (score: ${file.score.toFixed(2)}, outline)\n${outline}`,
-				);
+				parts.push(`### ${file.path} (score: ${file.score.toFixed(2)}, outline)\n${outline}`);
 				tokens += outTok;
 			} else {
 				parts.push(

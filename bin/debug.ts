@@ -49,10 +49,7 @@ const SESSIONS_DIR = path.join(
 	"sessions",
 );
 
-const DOT_8GENT = path.join(
-	process.env.HOME || process.env.USERPROFILE || "",
-	".8gent",
-);
+const DOT_8GENT = path.join(process.env.HOME || process.env.USERPROFILE || "", ".8gent");
 
 // ============================================
 // Unified session representation
@@ -100,10 +97,7 @@ function listSessionFiles(): string[] {
 /**
  * Parse a .jsonl file into a NormalizedSession.
  */
-function parseJsonlSession(
-	filePath: string,
-	fileId: string,
-): NormalizedSession {
+function parseJsonlSession(filePath: string, fileId: string): NormalizedSession {
 	const raw = fs.readFileSync(filePath, "utf-8");
 	const lines = raw.split("\n").filter(Boolean);
 
@@ -267,9 +261,7 @@ function parseJsonlSession(
 	}
 
 	if (!durationMs && startedAt) {
-		durationMs =
-			new Date(lastTimestamp || Date.now()).getTime() -
-			new Date(startedAt).getTime();
+		durationMs = new Date(lastTimestamp || Date.now()).getTime() - new Date(startedAt).getTime();
 	}
 
 	return {
@@ -288,10 +280,7 @@ function parseJsonlSession(
 /**
  * Parse a legacy .json file into a NormalizedSession.
  */
-function parseLegacyJsonSession(
-	filePath: string,
-	fileId: string,
-): NormalizedSession {
+function parseLegacyJsonSession(filePath: string, fileId: string): NormalizedSession {
 	const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
 	return {
 		id: raw.id || fileId,
@@ -325,11 +314,7 @@ function loadSession(fileOrId: string): NormalizedSession | null {
 	// Try exact filename first (both extensions)
 	for (const ext of [".jsonl", ".json"]) {
 		let filePath = path.join(SESSIONS_DIR, fileOrId);
-		if (
-			!filePath.endsWith(ext) &&
-			!filePath.endsWith(".json") &&
-			!filePath.endsWith(".jsonl")
-		) {
+		if (!filePath.endsWith(ext) && !filePath.endsWith(".json") && !filePath.endsWith(".jsonl")) {
 			filePath += ext;
 		} else if (!filePath.endsWith(ext)) {
 			continue;
@@ -355,9 +340,7 @@ function loadSession(fileOrId: string): NormalizedSession | null {
 
 	// Try partial match on session ID or filename
 	const files = listSessionFiles();
-	const match = files.find(
-		(f) => f.includes(fileOrId) || f.startsWith(fileOrId),
-	);
+	const match = files.find((f) => f.includes(fileOrId) || f.startsWith(fileOrId));
 	if (match) {
 		const filePath = path.join(SESSIONS_DIR, match);
 		const id = match.replace(/\.(jsonl|json)$/, "");
@@ -430,9 +413,7 @@ function cmdSessions(): void {
 		return;
 	}
 
-	console.log(
-		`${c.boldCyan}Recent Sessions${c.reset} ${c.dim}(${files.length} total)${c.reset}\n`,
-	);
+	console.log(`${c.boldCyan}Recent Sessions${c.reset} ${c.dim}(${files.length} total)${c.reset}\n`);
 	console.log(
 		`${c.dim}${"ID".padEnd(30)} ${"Name".padEnd(35)} ${"Model".padEnd(20)} ${"Msgs".padEnd(6)} ${"Tools".padEnd(7)} ${"Errors".padEnd(7)} Duration${c.reset}`,
 	);
@@ -481,15 +462,9 @@ function cmdInspect(id: string): void {
 
 	console.log(`${c.boldCyan}Session: ${session.name}${c.reset}`);
 	console.log(`${c.dim}ID: ${session.id}${c.reset}`);
-	console.log(
-		`${c.dim}Started: ${formatTimestamp(session.startedAt)}${c.reset}`,
-	);
-	console.log(
-		`${c.dim}Model: ${session.model} (${session.provider})${c.reset}`,
-	);
-	console.log(
-		`${c.dim}Duration: ${formatDuration(session.stats?.durationMs ?? 0)}${c.reset}`,
-	);
+	console.log(`${c.dim}Started: ${formatTimestamp(session.startedAt)}${c.reset}`);
+	console.log(`${c.dim}Model: ${session.model} (${session.provider})${c.reset}`);
+	console.log(`${c.dim}Duration: ${formatDuration(session.stats?.durationMs ?? 0)}${c.reset}`);
 	console.log(
 		`${c.dim}Messages: ${session.stats?.messageCount ?? 0} | Tools: ${session.stats?.toolCalls ?? 0} | Tokens: ${(session.stats?.totalTokens ?? 0).toLocaleString()} | Errors: ${session.stats?.errors ?? 0}${c.reset}`,
 	);
@@ -498,16 +473,12 @@ function cmdInspect(id: string): void {
 
 	for (const event of session.events) {
 		const ts = shortTimestamp(event.timestamp);
-		const tab =
-			event.tabName !== "Chat" ? ` ${c.blue}[${event.tabName}]${c.reset}` : "";
+		const tab = event.tabName !== "Chat" ? ` ${c.blue}[${event.tabName}]${c.reset}` : "";
 
 		switch (event.type) {
 			case "message": {
 				const role = event.data.role as string;
-				const content = truncate(
-					String(event.data.content || "").replace(/\n/g, " "),
-					100,
-				);
+				const content = truncate(String(event.data.content || "").replace(/\n/g, " "), 100);
 				if (role === "user") {
 					console.log(
 						`${c.dim}${ts}${c.reset}${tab} ${c.boldCyan}user:${c.reset} ${c.cyan}${content}${c.reset}`,
@@ -517,9 +488,7 @@ function cmdInspect(id: string): void {
 						`${c.dim}${ts}${c.reset}${tab} ${c.boldGreen}assistant:${c.reset} ${c.green}${content}${c.reset}`,
 					);
 				} else {
-					console.log(
-						`${c.dim}${ts}${c.reset}${tab} ${c.yellow}${role}:${c.reset} ${content}`,
-					);
+					console.log(`${c.dim}${ts}${c.reset}${tab} ${c.yellow}${role}:${c.reset} ${content}`);
 				}
 				break;
 			}
@@ -534,15 +503,11 @@ function cmdInspect(id: string): void {
 			case "tool_end": {
 				const ok = event.data.success as boolean;
 				const dur = formatDuration((event.data.durationMs as number) || 0);
-				const icon = ok
-					? `${c.green}done${c.reset}`
-					: `${c.boldRed}FAIL${c.reset}`;
+				const icon = ok ? `${c.green}done${c.reset}` : `${c.boldRed}FAIL${c.reset}`;
 				const preview = event.data.resultPreview
 					? ` ${c.dim}${truncate(String(event.data.resultPreview).replace(/\n/g, " "), 60)}${c.reset}`
 					: "";
-				console.log(
-					`${c.dim}${ts}${c.reset}${tab}   ${icon} ${c.dim}${dur}${c.reset}${preview}`,
-				);
+				console.log(`${c.dim}${ts}${c.reset}${tab}   ${icon} ${c.dim}${dur}${c.reset}${preview}`);
 				break;
 			}
 			case "error": {
@@ -594,9 +559,7 @@ function cmdTail(): void {
 
 	const latestFile = path.join(SESSIONS_DIR, files[0]);
 	const isJsonl = files[0].endsWith(".jsonl");
-	console.log(
-		`${c.boldCyan}Tailing: ${files[0]}${c.reset} ${c.dim}(Ctrl+C to stop)${c.reset}\n`,
-	);
+	console.log(`${c.boldCyan}Tailing: ${files[0]}${c.reset} ${c.dim}(Ctrl+C to stop)${c.reset}\n`);
 
 	let lastLineCount = 0;
 
@@ -638,24 +601,14 @@ function cmdTail(): void {
 		switch (entry.type) {
 			case "user_message": {
 				const msg = entry.message as Record<string, unknown> | undefined;
-				const content = truncate(
-					String(msg?.content || "").replace(/\n/g, " "),
-					120,
-				);
-				console.log(
-					`${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`,
-				);
+				const content = truncate(String(msg?.content || "").replace(/\n/g, " "), 120);
+				console.log(`${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`);
 				break;
 			}
 			case "assistant_message": {
 				const msg = entry.message as Record<string, unknown> | undefined;
-				const content = truncate(
-					String(msg?.content || "").replace(/\n/g, " "),
-					120,
-				);
-				console.log(
-					`${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`,
-				);
+				const content = truncate(String(msg?.content || "").replace(/\n/g, " "), 120);
+				console.log(`${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`);
 				break;
 			}
 			case "tool_call": {
@@ -669,9 +622,7 @@ function cmdTail(): void {
 				const ok = entry.success as boolean;
 				const dur = formatDuration((entry.durationMs as number) || 0);
 				if (ok) {
-					console.log(
-						`${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`,
-					);
+					console.log(`${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`);
 				} else {
 					console.log(
 						`${c.dim}${ts}${c.reset} ${c.boldRed}[FAIL] ${dur} ${truncate(String(entry.result || ""), 80)}${c.reset}`,
@@ -694,9 +645,7 @@ function cmdTail(): void {
 				break;
 			}
 			case "tab_switch": {
-				console.log(
-					`${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${entry.toTabName}${c.reset}`,
-				);
+				console.log(`${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${entry.toTabName}${c.reset}`);
 				break;
 			}
 			case "session_start": {
@@ -728,22 +677,13 @@ function cmdTail(): void {
 		switch (event.type) {
 			case "message": {
 				const role = data.role as string;
-				const content = truncate(
-					String(data.content || "").replace(/\n/g, " "),
-					120,
-				);
+				const content = truncate(String(data.content || "").replace(/\n/g, " "), 120);
 				if (role === "user") {
-					console.log(
-						`${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`,
-					);
+					console.log(`${c.dim}${ts}${c.reset} ${c.cyan}[user] ${content}${c.reset}`);
 				} else if (role === "assistant") {
-					console.log(
-						`${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`,
-					);
+					console.log(`${c.dim}${ts}${c.reset} ${c.green}[assistant] ${content}${c.reset}`);
 				} else {
-					console.log(
-						`${c.dim}${ts}${c.reset} ${c.yellow}[${role}] ${content}${c.reset}`,
-					);
+					console.log(`${c.dim}${ts}${c.reset} ${c.yellow}[${role}] ${content}${c.reset}`);
 				}
 				break;
 			}
@@ -757,9 +697,7 @@ function cmdTail(): void {
 				const ok = data.success as boolean;
 				const dur = formatDuration((data.durationMs as number) || 0);
 				if (ok) {
-					console.log(
-						`${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`,
-					);
+					console.log(`${c.dim}${ts}${c.reset} ${c.green}[done] ${dur}${c.reset}`);
 				} else {
 					console.log(
 						`${c.dim}${ts}${c.reset} ${c.boldRed}[FAIL] ${dur} ${truncate(String(data.resultPreview || ""), 80)}${c.reset}`,
@@ -774,9 +712,7 @@ function cmdTail(): void {
 				break;
 			}
 			case "tab_switch": {
-				console.log(
-					`${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${data.toTabName}${c.reset}`,
-				);
+				console.log(`${c.dim}${ts}${c.reset} ${c.blue}[tab] -> ${data.toTabName}${c.reset}`);
 				break;
 			}
 			default: {
@@ -812,9 +748,7 @@ async function cmdHealth(): Promise<void> {
 		if (res.ok) {
 			const data = (await res.json()) as { models?: { name: string }[] };
 			const count = data.models?.length ?? 0;
-			console.log(
-				`${c.green}running${c.reset} ${c.dim}(${count} models)${c.reset}`,
-			);
+			console.log(`${c.green}running${c.reset} ${c.dim}(${count} models)${c.reset}`);
 		} else {
 			console.log(`${c.red}error (HTTP ${res.status})${c.reset}`);
 		}
@@ -889,9 +823,7 @@ function cmdTools(id: string): void {
 		return;
 	}
 
-	const toolEvents = session.events.filter(
-		(e) => e.type === "tool_start" || e.type === "tool_end",
-	);
+	const toolEvents = session.events.filter((e) => e.type === "tool_start" || e.type === "tool_end");
 
 	if (toolEvents.length === 0) {
 		console.log(`${c.yellow}No tool calls in this session.${c.reset}`);
@@ -902,10 +834,7 @@ function cmdTools(id: string): void {
 		`${c.boldCyan}Tool Timeline: ${session.name}${c.reset} ${c.dim}(${session.stats?.toolCalls ?? 0} calls)${c.reset}\n`,
 	);
 
-	const starts = new Map<
-		string,
-		{ toolName: string; timestamp: string; args: unknown }
-	>();
+	const starts = new Map<string, { toolName: string; timestamp: string; args: unknown }>();
 
 	for (const event of toolEvents) {
 		if (event.type === "tool_start") {
@@ -919,13 +848,9 @@ function cmdTools(id: string): void {
 			const start = starts.get(callId);
 			const ok = event.data.success as boolean;
 			const dur = formatDuration((event.data.durationMs as number) || 0);
-			const ts = start
-				? shortTimestamp(start.timestamp)
-				: shortTimestamp(event.timestamp);
+			const ts = start ? shortTimestamp(start.timestamp) : shortTimestamp(event.timestamp);
 			const name = start?.toolName || "?";
-			const statusIcon = ok
-				? `${c.green}OK${c.reset}`
-				: `${c.boldRed}FAIL${c.reset}`;
+			const statusIcon = ok ? `${c.green}OK${c.reset}` : `${c.boldRed}FAIL${c.reset}`;
 			const argsStr = start?.args
 				? ` ${c.dim}${truncate(JSON.stringify(start.args), 50)}${c.reset}`
 				: "";

@@ -49,8 +49,7 @@ export interface AgentOrchestrationActions {
 	spawnAgent: (personaId: string, task: string) => void;
 }
 
-export function useAgentOrchestration(): AgentOrchestrationState &
-	AgentOrchestrationActions {
+export function useAgentOrchestration(): AgentOrchestrationState & AgentOrchestrationActions {
 	const [agents, setAgents] = useState<AgentInfo[]>([]);
 	const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
 	const [chatMode, setChatMode] = useState(false);
@@ -67,9 +66,7 @@ export function useAgentOrchestration(): AgentOrchestrationState &
 				const { getOrchestratorBus } = await import(
 					"../../../../packages/orchestration/orchestrator-bus.js"
 				);
-				const { getPersona } = await import(
-					"../../../../packages/orchestration/personas.js"
-				);
+				const { getPersona } = await import("../../../../packages/orchestration/personas.js");
 				const bus = getOrchestratorBus();
 				busRef.current = bus;
 
@@ -133,9 +130,7 @@ export function useAgentOrchestration(): AgentOrchestrationState &
 	const cycleAgent = useCallback(() => {
 		if (agents.length === 0) return;
 
-		const currentIndex = activeAgentId
-			? agents.findIndex((a) => a.id === activeAgentId)
-			: -1;
+		const currentIndex = activeAgentId ? agents.findIndex((a) => a.id === activeAgentId) : -1;
 
 		// null (Eight) → first agent → second agent → ... → null (Eight)
 		if (currentIndex === -1) {
@@ -172,9 +167,7 @@ export function useAgentOrchestration(): AgentOrchestrationState &
 		busRef.current?.requestSpawn(personaId, task, "Manual spawn by user");
 	}, []);
 
-	const activeAgent = activeAgentId
-		? agents.find((a) => a.id === activeAgentId)
-		: null;
+	const activeAgent = activeAgentId ? agents.find((a) => a.id === activeAgentId) : null;
 
 	return {
 		agents,

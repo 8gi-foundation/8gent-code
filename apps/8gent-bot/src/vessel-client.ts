@@ -22,10 +22,7 @@ interface InvokeResult {
 // How long to wait for a sleeping vessel to wake up
 const WAKE_TIMEOUT_MS = 30_000;
 
-export async function invokeVessel(
-	fly_app: string,
-	req: InvokeRequest,
-): Promise<InvokeResult> {
+export async function invokeVessel(fly_app: string, req: InvokeRequest): Promise<InvokeResult> {
 	const url = `https://${fly_app}.fly.dev/invoke`;
 	const start = Date.now();
 

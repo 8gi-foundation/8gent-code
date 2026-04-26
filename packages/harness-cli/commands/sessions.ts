@@ -64,22 +64,12 @@ export async function sessions(args: string[]): Promise<void> {
 	console.log(`  ${"─".repeat(110)}`);
 
 	for (const s of shown) {
-		const status = s.completed
-			? s.exitReason === "error"
-				? "FAILED"
-				: "DONE"
-			: "RUNNING";
+		const status = s.completed ? (s.exitReason === "error" ? "FAILED" : "DONE") : "RUNNING";
 		const statusColor =
-			status === "DONE"
-				? "\x1b[32m"
-				: status === "FAILED"
-					? "\x1b[31m"
-					: "\x1b[33m";
+			status === "DONE" ? "\x1b[32m" : status === "FAILED" ? "\x1b[31m" : "\x1b[33m";
 		const reset = "\x1b[0m";
 
-		const duration = s.durationMs
-			? `${(s.durationMs / 1000).toFixed(1)}s`
-			: "—";
+		const duration = s.durationMs ? `${(s.durationMs / 1000).toFixed(1)}s` : "—";
 
 		const steps = s.totalSteps !== null ? String(s.totalSteps) : "—";
 		const model = s.model?.slice(0, 23) || "—";

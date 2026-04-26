@@ -227,8 +227,7 @@ export class LanguageManager {
 	private settingsPath: string;
 
 	constructor(settingsPath?: string) {
-		this.settingsPath =
-			settingsPath || path.join(os.homedir(), ".8gent", "language.json");
+		this.settingsPath = settingsPath || path.join(os.homedir(), ".8gent", "language.json");
 		this.settings = this.loadSettings();
 	}
 

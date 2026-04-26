@@ -31,13 +31,7 @@ const BUILT_IN_MODES: Record<string, AgentMode> = {
 		description: "Read-only planning mode - no file writes",
 		systemPromptPrefix:
 			"You are a software architect. Analyze, plan, and design. Do NOT write code.",
-		deniedTools: [
-			"write_file",
-			"edit_file",
-			"run_command",
-			"git_commit",
-			"git_push",
-		],
+		deniedTools: ["write_file", "edit_file", "run_command", "git_commit", "git_push"],
 		effort: "high",
 	},
 	review: {
@@ -45,13 +39,7 @@ const BUILT_IN_MODES: Record<string, AgentMode> = {
 		description: "Code review mode - read-only with feedback",
 		systemPromptPrefix:
 			"You are a code reviewer. Read code, find issues, suggest improvements. Do NOT modify files.",
-		deniedTools: [
-			"write_file",
-			"edit_file",
-			"run_command",
-			"git_commit",
-			"git_push",
-		],
+		deniedTools: ["write_file", "edit_file", "run_command", "git_commit", "git_push"],
 		effort: "medium",
 	},
 	debug: {
@@ -85,19 +73,13 @@ function loadCustomModes(filePath: string): Record<string, AgentMode> {
 				name: m.name || key,
 				description: m.description || "",
 				systemPromptPrefix: m.systemPromptPrefix || m.prompt || "",
-				allowedTools: Array.isArray(m.allowedTools)
-					? m.allowedTools
-					: undefined,
+				allowedTools: Array.isArray(m.allowedTools) ? m.allowedTools : undefined,
 				deniedTools: Array.isArray(m.deniedTools) ? m.deniedTools : undefined,
-				effort: ["low", "medium", "high"].includes(m.effort)
-					? m.effort
-					: undefined,
+				effort: ["low", "medium", "high"].includes(m.effort) ? m.effort : undefined,
 			};
 		}
 	} catch (err) {
-		console.warn(
-			`[modes] Failed to load custom modes from ${filePath}: ${err}`,
-		);
+		console.warn(`[modes] Failed to load custom modes from ${filePath}: ${err}`);
 	}
 	return result;
 }
@@ -138,10 +120,7 @@ export class ModeManager {
 	constructor(customModesPath?: string) {
 		const modesPath =
 			customModesPath ||
-			path.join(
-				process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
-				"modes.yaml",
-			);
+			path.join(process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"), "modes.yaml");
 		this.modes = { ...BUILT_IN_MODES, ...loadCustomModes(modesPath) };
 	}
 
@@ -212,8 +191,7 @@ export class ModeManager {
 
 	isToolAllowed(toolName: string): boolean {
 		const mode = this.getActiveMode();
-		if (mode.allowedTools !== undefined)
-			return mode.allowedTools.includes(toolName);
+		if (mode.allowedTools !== undefined) return mode.allowedTools.includes(toolName);
 		if (mode.deniedTools?.length) return !mode.deniedTools.includes(toolName);
 		return true;
 	}

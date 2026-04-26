@@ -108,12 +108,7 @@ export function spinner(frame: number): string {
  * statusLine(0, 5, 3)   // "| [>  ] 0/5 0%"
  * statusLine(2, 5, 3)   // "/ [==>] 2/5 40%"
  */
-export function statusLine(
-	current: number,
-	total: number,
-	frame: number,
-	width = 10,
-): string {
+export function statusLine(current: number, total: number, frame: number, width = 10): string {
 	return [
 		spinner(frame),
 		asciiBar(current, total, width),

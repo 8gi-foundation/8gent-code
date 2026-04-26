@@ -124,9 +124,7 @@ export class GitHubIntelligence {
 			}
 
 			if (!response.ok) {
-				console.error(
-					`[intel] GitHub API error: ${response.status} ${response.statusText}`,
-				);
+				console.error(`[intel] GitHub API error: ${response.status} ${response.statusText}`);
 				return [];
 			}
 
@@ -194,8 +192,7 @@ export class GitHubIntelligence {
 	scoreRelevance(repo: TrendingRepo): { score: number; categories: string[] } {
 		let score = 0;
 		const categories: string[] = [];
-		const text =
-			`${repo.name} ${repo.description} ${repo.topics.join(" ")}`.toLowerCase();
+		const text = `${repo.name} ${repo.description} ${repo.topics.join(" ")}`.toLowerCase();
 
 		// Has "agent" or "claw" or "coding" in name/description -> +3
 		if (/agent|claw|coding/.test(text)) {
@@ -256,11 +253,9 @@ export class GitHubIntelligence {
 		const features: string[] = [];
 		const desc = repo.description.toLowerCase();
 
-		if (/typescript|ts/.test(desc) || repo.language === "TypeScript")
-			features.push("TypeScript");
+		if (/typescript|ts/.test(desc) || repo.language === "TypeScript") features.push("TypeScript");
 		if (/rust/.test(desc) || repo.language === "Rust") features.push("Rust");
-		if (/python/.test(desc) || repo.language === "Python")
-			features.push("Python");
+		if (/python/.test(desc) || repo.language === "Python") features.push("Python");
 		if (/benchmark|eval/.test(desc)) features.push("benchmarks");
 		if (/agent/.test(desc)) features.push("agent-framework");
 		if (/mcp/.test(desc)) features.push("MCP-compatible");
@@ -348,20 +343,17 @@ export class GitHubIntelligence {
 				label: "typescript",
 			},
 			{
-				query:
-					'"AI agent" OR "LLM" OR "coding agent" stars:>10 pushed:>2026-03-01',
+				query: '"AI agent" OR "LLM" OR "coding agent" stars:>10 pushed:>2026-03-01',
 				sort: "stars" as const,
 				label: "ai-ml",
 			},
 			{
-				query:
-					'"developer tools" OR "dev tools" OR "CLI" stars:>20 pushed:>2026-03-01',
+				query: '"developer tools" OR "dev tools" OR "CLI" stars:>20 pushed:>2026-03-01',
 				sort: "stars" as const,
 				label: "devtools",
 			},
 			{
-				query:
-					'"coding agent" OR "code assistant" OR "agentic" stars:>5 pushed:>2026-03-01',
+				query: '"coding agent" OR "code assistant" OR "agentic" stars:>5 pushed:>2026-03-01',
 				sort: "updated" as const,
 				label: "agents",
 			},
@@ -392,9 +384,7 @@ export class GitHubIntelligence {
 			}
 		}
 
-		console.log(
-			`[intel] Scanned ${scanned} results, ${uniqueRepos.length} unique repos`,
-		);
+		console.log(`[intel] Scanned ${scanned} results, ${uniqueRepos.length} unique repos`);
 
 		// 3. Score and filter
 		let relevant = 0;
@@ -418,10 +408,7 @@ export class GitHubIntelligence {
 		// 4. Calculate trending up (repos with star increases)
 		const trendingUp: { name: string; starDelta: number }[] = [];
 		for (const entry of this.knowledgeBase) {
-			if (
-				entry.previousStars !== undefined &&
-				entry.stars > entry.previousStars
-			) {
+			if (entry.previousStars !== undefined && entry.stars > entry.previousStars) {
 				trendingUp.push({
 					name: entry.name,
 					starDelta: entry.stars - entry.previousStars,
@@ -482,9 +469,7 @@ export class GitHubIntelligence {
 			lines.push("*New Discoveries:*");
 			for (const repo of digest.repos.slice(0, 8)) {
 				const stars = repo.stars.toLocaleString();
-				lines.push(
-					`  ${stars} stars \`${repo.name}\` (${repo.relevanceScore}/10)`,
-				);
+				lines.push(`  ${stars} stars \`${repo.name}\` (${repo.relevanceScore}/10)`);
 				if (repo.description) {
 					lines.push(`  _${repo.description.slice(0, 100)}_`);
 				}
@@ -521,9 +506,7 @@ export class GitHubIntelligence {
 	getLatestDigest(): string {
 		try {
 			if (existsSync(DIGEST_FILE)) {
-				const digest: IntelligenceDigest = JSON.parse(
-					readFileSync(DIGEST_FILE, "utf-8"),
-				);
+				const digest: IntelligenceDigest = JSON.parse(readFileSync(DIGEST_FILE, "utf-8"));
 				return this.formatDigest(digest);
 			}
 		} catch {}
@@ -609,9 +592,7 @@ export class GitHubIntelligence {
 				.slice(0, 5);
 
 			for (const repo of newRepos) {
-				lines.push(
-					`  \`${repo.name}\` (${repo.relevanceScore}/10) ${repo.stars} stars`,
-				);
+				lines.push(`  \`${repo.name}\` (${repo.relevanceScore}/10) ${repo.stars} stars`);
 			}
 		} else {
 			lines.push("_No new repos above threshold._");

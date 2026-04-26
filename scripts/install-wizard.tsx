@@ -59,9 +59,7 @@ async function fetchLatestModels(memoryGB: number): Promise<ModelOption[]> {
 	// Also check what's already installed locally
 	const installed = await getInstalledModels();
 	for (const model of installed) {
-		const isCoderModel = CODING_MODEL_PATTERNS.some((p) =>
-			model.toLowerCase().includes(p),
-		);
+		const isCoderModel = CODING_MODEL_PATTERNS.some((p) => model.toLowerCase().includes(p));
 		if (isCoderModel && !models.find((m) => m.value === model)) {
 			models.unshift({
 				label: `${model} (installed)`,
@@ -78,9 +76,7 @@ async function fetchLatestModels(memoryGB: number): Promise<ModelOption[]> {
 		(m) => !models.find((existing) => existing.value === m.value),
 	);
 
-	return [...models, ...fallbackFiltered].filter(
-		(m) => m.minRAM <= memoryGB + 8,
-	);
+	return [...models, ...fallbackFiltered].filter((m) => m.minRAM <= memoryGB + 8);
 }
 
 // Check Ollama for available models
@@ -210,10 +206,7 @@ const Logo = () => (
 	</Box>
 );
 
-const ProgressBar = ({
-	progress,
-	width = 40,
-}: { progress: number; width?: number }) => {
+const ProgressBar = ({ progress, width = 40 }: { progress: number; width?: number }) => {
 	const filled = Math.round(progress * width);
 	const empty = width - filled;
 	return (
@@ -245,9 +238,7 @@ const SystemCard = ({ info }: { info: SystemInfo }) => (
 		</Text>
 		<Text>
 			<Text dimColor>Memory: </Text>
-			<Text color={info.memoryGB >= 16 ? "green" : "yellow"}>
-				{info.memoryGB}GB RAM
-			</Text>
+			<Text color={info.memoryGB >= 16 ? "green" : "yellow"}>{info.memoryGB}GB RAM</Text>
 		</Text>
 		<Text>
 			<Text dimColor>CPU: </Text>
@@ -274,10 +265,7 @@ const SystemCard = ({ info }: { info: SystemInfo }) => (
 	</Box>
 );
 
-const ModelCard = ({
-	model,
-	recommended,
-}: { model: ModelOption; recommended: boolean }) => (
+const ModelCard = ({ model, recommended }: { model: ModelOption; recommended: boolean }) => (
 	<Box flexDirection="column" marginLeft={2}>
 		<Text>
 			<Text bold>{model.label}</Text>
@@ -393,14 +381,10 @@ const InstallerApp = () => {
 				// Linux - use curl script
 				await execAsync("curl -fsSL https://ollama.com/install.sh | sh");
 			} else {
-				throw new Error(
-					"Please install Ollama manually from https://ollama.com",
-				);
+				throw new Error("Please install Ollama manually from https://ollama.com");
 			}
 
-			setSystemInfo((prev) =>
-				prev ? { ...prev, ollamaInstalled: true } : null,
-			);
+			setSystemInfo((prev) => (prev ? { ...prev, ollamaInstalled: true } : null));
 			downloadModel();
 		} catch (err) {
 			setError(`Failed to install Ollama: ${err}`);
@@ -509,13 +493,7 @@ const InstallerApp = () => {
 
 			{step === "welcome" && (
 				<Box flexDirection="column" alignItems="center">
-					<Box
-						borderStyle="double"
-						borderColor="magenta"
-						paddingX={3}
-						paddingY={1}
-						marginY={1}
-					>
+					<Box borderStyle="double" borderColor="magenta" paddingX={3} paddingY={1} marginY={1}>
 						<Text>
 							Welcome to{" "}
 							<Text color="cyan" bold>
@@ -546,8 +524,7 @@ const InstallerApp = () => {
 						</Text>
 					</Box>
 					<Text color="yellow" marginTop={1}>
-						Press <Text bold>ENTER</Text> to begin or <Text bold>Q</Text> to
-						quit
+						Press <Text bold>ENTER</Text> to begin or <Text bold>Q</Text> to quit
 					</Text>
 				</Box>
 			)}
@@ -571,9 +548,7 @@ const InstallerApp = () => {
 					</Text>
 
 					<SelectInput
-						items={FALLBACK_MODELS.filter(
-							(m) => m.minRAM <= systemInfo.memoryGB + 4,
-						).map((m) => ({
+						items={FALLBACK_MODELS.filter((m) => m.minRAM <= systemInfo.memoryGB + 4).map((m) => ({
 							label: `${m.label} (${m.size})${m.value === selectedModel ? " ← Recommended" : ""}`,
 							value: m.value,
 						}))}
@@ -583,10 +558,7 @@ const InstallerApp = () => {
 
 					<Box marginTop={1}>
 						<Text dimColor>
-							{
-								FALLBACK_MODELS.find((m) => m.value === selectedModel)
-									?.description
-							}
+							{FALLBACK_MODELS.find((m) => m.value === selectedModel)?.description}
 						</Text>
 					</Box>
 
@@ -626,34 +598,20 @@ const InstallerApp = () => {
 					</Box>
 					<ProgressBar progress={downloadProgress} />
 					<Text dimColor marginTop={1}>
-						{downloadProgress < 1
-							? "Downloading model weights..."
-							: "Finalizing..."}
+						{downloadProgress < 1 ? "Downloading model weights..." : "Finalizing..."}
 					</Text>
 				</Box>
 			)}
 
 			{step === "complete" && (
 				<Box flexDirection="column" alignItems="center">
-					<Box
-						borderStyle="round"
-						borderColor="green"
-						paddingX={3}
-						paddingY={1}
-						marginY={1}
-					>
+					<Box borderStyle="round" borderColor="green" paddingX={3} paddingY={1} marginY={1}>
 						<Text color="green" bold>
 							✓ Installation Complete!
 						</Text>
 					</Box>
 					<Text marginY={1}>8gent Code is ready. Start coding with:</Text>
-					<Box
-						borderStyle="single"
-						borderColor="cyan"
-						paddingX={2}
-						paddingY={1}
-						marginY={1}
-					>
+					<Box borderStyle="single" borderColor="cyan" paddingX={2} paddingY={1} marginY={1}>
 						<Text color="cyan">npx 8gent-code</Text>
 					</Box>
 					<Text dimColor marginTop={1}>
@@ -670,13 +628,7 @@ const InstallerApp = () => {
 
 			{step === "error" && (
 				<Box flexDirection="column" alignItems="center">
-					<Box
-						borderStyle="round"
-						borderColor="red"
-						paddingX={3}
-						paddingY={1}
-						marginY={1}
-					>
+					<Box borderStyle="round" borderColor="red" paddingX={3} paddingY={1} marginY={1}>
 						<Text color="red" bold>
 							✗ Installation Failed
 						</Text>

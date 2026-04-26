@@ -22,11 +22,7 @@ import {
 	validateToken,
 } from "./clerk.js";
 import { executeDeviceFlow, refreshAccessToken } from "./device-flow.js";
-import {
-	type GitHubAuth,
-	extractGitHubUsername,
-	getGitHubAuth,
-} from "./github.js";
+import { type GitHubAuth, extractGitHubUsername, getGitHubAuth } from "./github.js";
 import { getTokenStore } from "./token-store.js";
 import type {
 	AuthCallbacks,
@@ -141,9 +137,7 @@ export class AuthManager {
 			}
 
 			// Check if token is expired
-			if (
-				isTokenExpired(storedToken.accessToken, this.config.refreshBufferMs)
-			) {
+			if (isTokenExpired(storedToken.accessToken, this.config.refreshBufferMs)) {
 				// Try to refresh
 				if (storedToken.refreshToken) {
 					const refreshed = await this.tryRefresh(storedToken.refreshToken);
@@ -316,9 +310,7 @@ export class AuthManager {
 
 	/** Check if the user is authenticated. */
 	isAuthenticated(): boolean {
-		return (
-			this.state.state === "authenticated" || this.state.state === "refreshing"
-		);
+		return this.state.state === "authenticated" || this.state.state === "refreshing";
 	}
 
 	/** Get the stored access token (for Convex auth). */
@@ -434,8 +426,7 @@ export class AuthManager {
 
 		if (!token.refreshToken) return;
 
-		const timeUntilRefresh =
-			token.expiresAt - Date.now() - this.config.refreshBufferMs;
+		const timeUntilRefresh = token.expiresAt - Date.now() - this.config.refreshBufferMs;
 		if (timeUntilRefresh <= 0) {
 			// Already past refresh window — refresh now
 			this.tryRefresh(token.refreshToken);

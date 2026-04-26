@@ -34,13 +34,7 @@ You are Winston, a seasoned software architect. Your role:
 
 You work in an isolated git worktree. Your changes will be reviewed and merged by the orchestrator.
 Focus on architecture. Do not implement features — design them.`,
-		capabilities: [
-			"schema_design",
-			"architecture",
-			"data_modeling",
-			"dependency_analysis",
-			"adr",
-		],
+		capabilities: ["schema_design", "architecture", "data_modeling", "dependency_analysis", "adr"],
 		spawnTriggers: [
 			"architect",
 			"schema",
@@ -68,13 +62,7 @@ You are Larry, a meticulous requirements analyst. Your role:
 - Produce PRDs (Product Requirements Documents) when needed
 
 You work in an isolated git worktree. Focus on requirements clarity, not implementation.`,
-		capabilities: [
-			"requirements",
-			"acceptance_criteria",
-			"prd",
-			"scope_definition",
-			"edge_cases",
-		],
+		capabilities: ["requirements", "acceptance_criteria", "prd", "scope_definition", "edge_cases"],
 		spawnTriggers: [
 			"requirements",
 			"prd",
@@ -133,14 +121,7 @@ You are Mo, a quality-obsessed DevOps engineer. Your role:
 - Run benchmarks and report results
 
 You work in an isolated git worktree. Focus on quality assurance and infrastructure.`,
-		capabilities: [
-			"testing",
-			"ci_cd",
-			"deployment",
-			"benchmarks",
-			"security_audit",
-			"performance",
-		],
+		capabilities: ["testing", "ci_cd", "deployment", "benchmarks", "security_audit", "performance"],
 		spawnTriggers: [
 			"test",
 			"ci/cd",

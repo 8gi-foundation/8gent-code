@@ -83,9 +83,7 @@ function recordResult(result: ExperimentResult): void {
 	fs.appendFileSync(RESULTS_FILE, line);
 }
 
-async function runExperiment8gent(
-	experiment: (typeof EXPERIMENTS)[0],
-): Promise<ExperimentResult> {
+async function runExperiment8gent(experiment: (typeof EXPERIMENTS)[0]): Promise<ExperimentResult> {
 	const startTime = Date.now();
 
 	// TODO: Actually run through 8gent toolshed
@@ -111,9 +109,7 @@ async function runExperiment8gent(
 	};
 }
 
-async function runExperimentClaude(
-	experiment: (typeof EXPERIMENTS)[0],
-): Promise<ExperimentResult> {
+async function runExperimentClaude(experiment: (typeof EXPERIMENTS)[0]): Promise<ExperimentResult> {
 	const startTime = Date.now();
 
 	// TODO: Actually run through Claude Code
@@ -167,8 +163,7 @@ async function runCompetitionRound(): Promise<void> {
 
 		// Log comparison
 		const savings = (
-			((resultClaude.tokensUsed - result8gent.tokensUsed) /
-				resultClaude.tokensUsed) *
+			((resultClaude.tokensUsed - result8gent.tokensUsed) / resultClaude.tokensUsed) *
 			100
 		).toFixed(1);
 		log(
@@ -180,9 +175,7 @@ async function runCompetitionRound(): Promise<void> {
 	log("\n═══════════════════════════════════════════════════════════════");
 	log("  ROUND SUMMARY");
 	log("═══════════════════════════════════════════════════════════════");
-	log(
-		`Total tokens - 8gent: ${totalTokens8gent} | Claude: ${totalTokensClaude}`,
-	);
+	log(`Total tokens - 8gent: ${totalTokens8gent} | Claude: ${totalTokensClaude}`);
 	log(`Total saved by 8gent: ${totalSaved8gent}`);
 	const overallSavings = (
 		((totalTokensClaude - totalTokens8gent) / totalTokensClaude) *

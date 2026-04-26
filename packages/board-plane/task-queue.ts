@@ -10,14 +10,7 @@ import type { BoardTask } from "./types";
 
 type TaskInsert = Omit<
 	BoardTask,
-	| "id"
-	| "status"
-	| "response"
-	| "vesselId"
-	| "retryCount"
-	| "assignedAt"
-	| "completedAt"
-	| "error"
+	"id" | "status" | "response" | "vesselId" | "retryCount" | "assignedAt" | "completedAt" | "error"
 >;
 
 export class TaskQueue {
@@ -52,15 +45,9 @@ export class TaskQueue {
         error TEXT
       )
     `);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_tasks_status ON board_tasks(status)",
-		);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_tasks_member ON board_tasks(memberCode)",
-		);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_tasks_channel ON board_tasks(channelId)",
-		);
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_status ON board_tasks(status)");
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_member ON board_tasks(memberCode)");
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_channel ON board_tasks(channelId)");
 	}
 
 	createTask(task: TaskInsert): string {

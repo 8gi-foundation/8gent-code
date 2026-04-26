@@ -11,11 +11,7 @@ function parseSimpleYaml(raw: string): Record<string, ChannelConfig> {
 	for (const line of raw.split("\n")) {
 		const trimmed = line.trim();
 		if (!trimmed || trimmed.startsWith("#")) continue;
-		if (
-			!line.startsWith(" ") &&
-			!line.startsWith("\t") &&
-			trimmed.endsWith(":")
-		) {
+		if (!line.startsWith(" ") && !line.startsWith("\t") && trimmed.endsWith(":")) {
 			if (current.key && current.platform) {
 				configs[current.key] = {
 					platform: current.platform,
@@ -56,9 +52,7 @@ export class ChannelRouter {
 
 	constructor(configPath?: string) {
 		const path = configPath ?? join(homedir(), ".8gent", "channels.yaml");
-		this.configs = existsSync(path)
-			? parseSimpleYaml(readFileSync(path, "utf-8"))
-			: {};
+		this.configs = existsSync(path) ? parseSimpleYaml(readFileSync(path, "utf-8")) : {};
 	}
 
 	registerAdapter(adapter: ChannelAdapter): void {

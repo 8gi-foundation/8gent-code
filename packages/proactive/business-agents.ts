@@ -80,19 +80,13 @@ export const BUSINESS_AGENTS: readonly AgentDef[] = [
 			"Automation Blueprints",
 		],
 		collaborates: ["strategy", "tech", "hr"],
-		promptFocus:
-			"process mapping, SOPs, tool selection, automation pipelines, and KPI dashboards",
+		promptFocus: "process mapping, SOPs, tool selection, automation pipelines, and KPI dashboards",
 	},
 	{
 		id: "marketing",
 		name: "Marketing Agent",
 		role: "Head of Marketing",
-		deliverables: [
-			"Brand Guidelines",
-			"Content Strategy",
-			"SEO/AEO Playbook",
-			"Campaign Briefs",
-		],
+		deliverables: ["Brand Guidelines", "Content Strategy", "SEO/AEO Playbook", "Campaign Briefs"],
 		collaborates: ["sales", "product", "strategy"],
 		promptFocus:
 			"brand identity, content calendar, SEO/AEO optimization, social campaigns, and email sequences",
@@ -157,12 +151,7 @@ export const BUSINESS_AGENTS: readonly AgentDef[] = [
 		id: "product",
 		name: "Product Agent",
 		role: "Head of Product",
-		deliverables: [
-			"Product Roadmap",
-			"Feature Specs",
-			"User Personas",
-			"Prioritization Matrix",
-		],
+		deliverables: ["Product Roadmap", "Feature Specs", "User Personas", "Prioritization Matrix"],
 		collaborates: ["strategy", "tech", "marketing"],
 		promptFocus:
 			"product roadmap, feature prioritization, user personas, specs, and feedback loops",
@@ -262,9 +251,7 @@ export function getPhaseAgents(phase: number): BusinessAgentRole[] {
 	return p ? [...p.agents] : [];
 }
 
-export function getCollaborators(
-	agentId: BusinessAgentRole,
-): BusinessAgentRole[] {
+export function getCollaborators(agentId: BusinessAgentRole): BusinessAgentRole[] {
 	const agent = agentMap.get(agentId);
 	return agent ? [...agent.collaborates] : [];
 }
@@ -333,10 +320,7 @@ export function scopeBusiness(idea: string): BusinessScope {
 		BUSINESS_AGENTS.map((a) => [a.id, [...a.collaborates]]),
 	) as Record<BusinessAgentRole, BusinessAgentRole[]>;
 
-	const estimatedMinutes = SCOPING_PHASES.reduce(
-		(sum, p) => sum + p.durationMinutes,
-		0,
-	);
+	const estimatedMinutes = SCOPING_PHASES.reduce((sum, p) => sum + p.durationMinutes, 0);
 
 	return {
 		idea,

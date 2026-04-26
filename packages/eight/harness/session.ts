@@ -68,10 +68,7 @@ export function createSession(sessionId?: string): Session {
 		id,
 		filePath,
 
-		async append(
-			type: AuditEntryType,
-			payload: Record<string, unknown>,
-		): Promise<string> {
+		async append(type: AuditEntryType, payload: Record<string, unknown>): Promise<string> {
 			const entryId = crypto.randomUUID().slice(0, 8);
 			const timestamp = new Date().toISOString();
 			const prevHash = await getLastHash();

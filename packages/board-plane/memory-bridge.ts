@@ -44,12 +44,8 @@ export class MemoryBridge {
         createdAt INTEGER NOT NULL
       )
     `);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_memory_scope ON board_memory(scope, createdAt)",
-		);
-		this.db.exec(
-			"CREATE INDEX IF NOT EXISTS idx_memory_channel ON board_memory(channelId)",
-		);
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_memory_scope ON board_memory(scope, createdAt)");
+		this.db.exec("CREATE INDEX IF NOT EXISTS idx_memory_channel ON board_memory(channelId)");
 	}
 
 	/** Build scope key: channel + member pair */
@@ -72,16 +68,7 @@ export class MemoryBridge {
 				`INSERT INTO board_memory (id, scope, role, content, authorId, authorName, memberCode, channelId, createdAt)
          VALUES (?, ?, 'user', ?, ?, ?, ?, ?, ?)`,
 			)
-			.run(
-				id,
-				scope,
-				content,
-				authorId,
-				authorName,
-				memberCode,
-				channelId,
-				Date.now(),
-			);
+			.run(id, scope, content, authorId, authorName, memberCode, channelId, Date.now());
 	}
 
 	/** Store an assistant response */
@@ -139,9 +126,9 @@ export class MemoryBridge {
 
 	/** Prune old entries per scope (keep last N) */
 	prune(maxPerScope = 50): number {
-		const scopes = this.db
-			.prepare("SELECT DISTINCT scope FROM board_memory")
-			.all() as Array<{ scope: string }>;
+		const scopes = this.db.prepare("SELECT DISTINCT scope FROM board_memory").all() as Array<{
+			scope: string;
+		}>;
 
 		let pruned = 0;
 		for (const { scope } of scopes) {
@@ -159,9 +146,7 @@ export class MemoryBridge {
 
 	/** Get stats */
 	getStats(): { totalEntries: number; uniqueScopes: number } {
-		const total = this.db
-			.prepare("SELECT COUNT(*) as c FROM board_memory")
-			.get() as any;
+		const total = this.db.prepare("SELECT COUNT(*) as c FROM board_memory").get() as any;
 		const scopes = this.db
 			.prepare("SELECT COUNT(DISTINCT scope) as c FROM board_memory")
 			.get() as any;

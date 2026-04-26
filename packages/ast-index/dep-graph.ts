@@ -18,24 +18,10 @@ export interface DepGraph {
 	rootDir: string;
 }
 
-const IMPORT_RE =
-	/(?:import\s+(?:[\w*{},\s]+\s+from\s+)?|require\s*\()\s*['"]([^'"]+)['"]/g;
-const IGNORE_DIRS = new Set([
-	"node_modules",
-	"dist",
-	".git",
-	".next",
-	"coverage",
-	".8gent",
-]);
+const IMPORT_RE = /(?:import\s+(?:[\w*{},\s]+\s+from\s+)?|require\s*\()\s*['"]([^'"]+)['"]/g;
+const IGNORE_DIRS = new Set(["node_modules", "dist", ".git", ".next", "coverage", ".8gent"]);
 const SOURCE_EXTS = [".ts", ".tsx", ".js", ".jsx"];
-const RESOLVE_EXTS = [
-	...SOURCE_EXTS,
-	"/index.ts",
-	"/index.tsx",
-	"/index.js",
-	"/index.jsx",
-];
+const RESOLVE_EXTS = [...SOURCE_EXTS, "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
 
 /** Walk a directory and collect all source files */
 function walkDir(dir: string): string[] {
@@ -53,11 +39,7 @@ function walkDir(dir: string): string[] {
 }
 
 /** Resolve a relative import specifier to an absolute file path */
-function resolveImport(
-	specifier: string,
-	fromFile: string,
-	rootDir: string,
-): string | null {
+function resolveImport(specifier: string, fromFile: string, rootDir: string): string | null {
 	if (!specifier.startsWith(".") && !specifier.startsWith("/")) return null;
 	const base = path.resolve(path.dirname(fromFile), specifier);
 	if (fs.existsSync(base) && fs.statSync(base).isFile()) return base;

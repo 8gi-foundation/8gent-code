@@ -75,18 +75,13 @@ describe.skipIf(!isLinux || !hasSecretTool)("LibsecretVault", () => {
 	test("useSecret() runs callback with decrypted value, returns result", async () => {
 		const vault = new LibsecretVault({ service: TEST_SERVICE });
 		await vault.set("TOKEN", "secret-value");
-		const result = await vault.useSecret(
-			"TOKEN",
-			async (value) => value.length,
-		);
+		const result = await vault.useSecret("TOKEN", async (value) => value.length);
 		expect(result).toBe("secret-value".length);
 	});
 
 	test("useSecret() throws when key is missing", async () => {
 		const vault = new LibsecretVault({ service: TEST_SERVICE });
-		await expect(vault.useSecret("MISSING", async () => "ok")).rejects.toThrow(
-			/not found/,
-		);
+		await expect(vault.useSecret("MISSING", async () => "ok")).rejects.toThrow(/not found/);
 	});
 
 	test("reserved __index__ key cannot be set", async () => {
@@ -97,8 +92,6 @@ describe.skipIf(!isLinux || !hasSecretTool)("LibsecretVault", () => {
 
 describe.skipIf(isLinux)("LibsecretVault on non-Linux", () => {
 	test("constructor throws on non-Linux platforms", () => {
-		expect(() => new LibsecretVault({ service: TEST_SERVICE })).toThrow(
-			/Linux/,
-		);
+		expect(() => new LibsecretVault({ service: TEST_SERVICE })).toThrow(/Linux/);
 	});
 });

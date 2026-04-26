@@ -12,10 +12,7 @@ interface Counter {
 
 const counters = new Map<string, Counter>();
 
-export async function updateCounter(
-	id: string,
-	delta: number,
-): Promise<number> {
+export async function updateCounter(id: string, delta: number): Promise<number> {
 	// BUG: Race condition - read and write are not atomic
 	const current = counters.get(id) || { value: 0, lastUpdated: new Date() };
 

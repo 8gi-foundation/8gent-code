@@ -20,11 +20,7 @@ export interface TaskCardListProps {
 const COLLAPSED_LINES = 1;
 const EXPANDED_LINES = 4;
 
-export function TaskCardList({
-	tasks: rawTasks,
-	maxHeight,
-	focusable = true,
-}: TaskCardListProps) {
+export function TaskCardList({ tasks: rawTasks, maxHeight, focusable = true }: TaskCardListProps) {
 	const tasks = rawTasks || [];
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -102,11 +98,7 @@ export function TaskCardList({
 			const reserveBelow = bottom < tasks.length - 1 ? 1 : 0;
 			// Reserve 1 line for "N above" indicator if there would be items above
 			const reserveAbove = top - 1 > 0 ? 1 : 0;
-			if (
-				usedHeight + candidateHeight + reserveBelow + reserveAbove >
-				maxHeight
-			)
-				break;
+			if (usedHeight + candidateHeight + reserveBelow + reserveAbove > maxHeight) break;
 			top--;
 			usedHeight += candidateHeight;
 		}
@@ -116,11 +108,7 @@ export function TaskCardList({
 			const candidateHeight = heights[bottom + 1]!;
 			const reserveAbove = top > 0 ? 1 : 0;
 			const reserveBelow = bottom + 1 < tasks.length - 1 ? 1 : 0;
-			if (
-				usedHeight + candidateHeight + reserveAbove + reserveBelow >
-				maxHeight
-			)
-				break;
+			if (usedHeight + candidateHeight + reserveAbove + reserveBelow > maxHeight) break;
 			bottom++;
 			usedHeight += candidateHeight;
 		}
@@ -135,9 +123,7 @@ export function TaskCardList({
 
 	return (
 		<Box flexDirection="column" height={maxHeight} overflow="hidden">
-			{aboveCount > 0 && (
-				<MutedText>{`  \u25B2 ${aboveCount} above`}</MutedText>
-			)}
+			{aboveCount > 0 && <MutedText>{`  \u25B2 ${aboveCount} above`}</MutedText>}
 
 			{visibleTasks.map((task, i) => {
 				const globalIndex = scrollStart + i;
@@ -154,9 +140,7 @@ export function TaskCardList({
 				);
 			})}
 
-			{belowCount > 0 && (
-				<MutedText>{`  \u25BC ${belowCount} below`}</MutedText>
-			)}
+			{belowCount > 0 && <MutedText>{`  \u25BC ${belowCount} below`}</MutedText>}
 		</Box>
 	);
 }

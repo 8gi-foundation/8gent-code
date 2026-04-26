@@ -141,20 +141,11 @@ export class JudgeScorer {
 	): Promise<ScoreRecord[]> {
 		const results = await Promise.allSettled(
 			items.map((item) =>
-				this.score(
-					item.sessionId,
-					item.turnIndex,
-					item.model,
-					item.prompt,
-					item.response,
-				),
+				this.score(item.sessionId, item.turnIndex, item.model, item.prompt, item.response),
 			),
 		);
 		return results
-			.filter(
-				(r): r is PromiseFulfilledResult<ScoreRecord> =>
-					r.status === "fulfilled",
-			)
+			.filter((r): r is PromiseFulfilledResult<ScoreRecord> => r.status === "fulfilled")
 			.map((r) => r.value);
 	}
 
@@ -240,9 +231,7 @@ export class JudgeScorer {
 		});
 
 		if (!response.ok) {
-			throw new Error(
-				`Judge model error: ${response.status} ${response.statusText}`,
-			);
+			throw new Error(`Judge model error: ${response.status} ${response.statusText}`);
 		}
 
 		const data = await response.json();
@@ -289,9 +278,7 @@ export class JudgeScorer {
 		history.stats.totalScored += 1;
 		const allOverall = history.records.map((r) => r.scores.overall);
 		history.stats.avgOverall =
-			Math.round(
-				(allOverall.reduce((a, b) => a + b, 0) / allOverall.length) * 100,
-			) / 100;
+			Math.round((allOverall.reduce((a, b) => a + b, 0) / allOverall.length) * 100) / 100;
 
 		// Per-model stats
 		const byModel: Record<string, number[]> = {};
@@ -302,10 +289,7 @@ export class JudgeScorer {
 		history.stats.scoresByModel = {};
 		for (const [model, scores] of Object.entries(byModel)) {
 			history.stats.scoresByModel[model] = {
-				avg:
-					Math.round(
-						(scores.reduce((a, b) => a + b, 0) / scores.length) * 100,
-					) / 100,
+				avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 100) / 100,
 				count: scores.length,
 			};
 		}

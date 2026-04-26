@@ -48,9 +48,7 @@ const DEFAULT_LOCAL_MODEL = "qwen3.5:latest";
  * Used to detect when the agent is operating on secrets/keys/credentials.
  */
 export function isSensitiveContext(filePaths: string[]): boolean {
-	return filePaths.some((fp) =>
-		SENSITIVE_PATTERNS.some((pattern) => pattern.test(fp)),
-	);
+	return filePaths.some((fp) => SENSITIVE_PATTERNS.some((pattern) => pattern.test(fp)));
 }
 
 /**
@@ -82,9 +80,7 @@ export function privacyGate(
 		return { shouldForceLocal: false };
 	}
 
-	const matched = filePaths.filter((fp) =>
-		SENSITIVE_PATTERNS.some((p) => p.test(fp)),
-	);
+	const matched = filePaths.filter((fp) => SENSITIVE_PATTERNS.some((p) => p.test(fp)));
 
 	return {
 		shouldForceLocal: true,

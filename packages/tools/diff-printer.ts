@@ -20,20 +20,14 @@ interface Hunk {
 function lcs(a: string[], b: string[]): boolean[][] {
 	const m = a.length;
 	const n = b.length;
-	const dp: number[][] = Array.from({ length: m + 1 }, () =>
-		new Array(n + 1).fill(0),
-	);
+	const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
 	for (let i = 1; i <= m; i++)
 		for (let j = 1; j <= n; j++)
 			dp[i][j] =
-				a[i - 1] === b[j - 1]
-					? dp[i - 1][j - 1] + 1
-					: Math.max(dp[i - 1][j], dp[i][j - 1]);
+				a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
 
 	// backtrack to build match table
-	const match: boolean[][] = Array.from({ length: m }, () =>
-		new Array(n).fill(false),
-	);
+	const match: boolean[][] = Array.from({ length: m }, () => new Array(n).fill(false));
 	let i = m;
 	let j = n;
 	while (i > 0 && j > 0) {
@@ -64,10 +58,7 @@ function buildHunks(a: string[], b: string[], context: number): Hunk[] {
 			ops.push({ tag: "equal", line: a[ai], ai, bi });
 			ai++;
 			bi++;
-		} else if (
-			ai < a.length &&
-			(bi >= b.length || !match[ai].slice(bi).includes(true))
-		) {
+		} else if (ai < a.length && (bi >= b.length || !match[ai].slice(bi).includes(true))) {
 			ops.push({ tag: "remove", line: a[ai], ai, bi });
 			ai++;
 		} else {
@@ -86,11 +77,7 @@ function buildHunks(a: string[], b: string[], context: number): Hunk[] {
 		// find the span of changed lines
 		const start = Math.max(0, idx - context);
 		let end = idx;
-		while (
-			end < ops.length &&
-			(ops[end].tag !== "equal" || end - idx < context)
-		)
-			end++;
+		while (end < ops.length && (ops[end].tag !== "equal" || end - idx < context)) end++;
 		end = Math.min(ops.length - 1, end + context);
 
 		const slice = ops.slice(start, end + 1);
@@ -127,11 +114,7 @@ export interface DiffOptions {
  * Returns an ANSI-colored string ready for terminal output.
  * Returns an empty string when `a === b`.
  */
-export function printDiff(
-	a: string,
-	b: string,
-	options: DiffOptions = {},
-): string {
+export function printDiff(a: string, b: string, options: DiffOptions = {}): string {
 	if (a === b) return "";
 	const context = options.context ?? 3;
 	const labelA = options.labelA ?? "a";

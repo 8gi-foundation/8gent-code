@@ -12,12 +12,7 @@ import type { Opportunity } from "./opportunity-scanner.ts";
 
 export interface Deliverable {
 	opportunityId: string;
-	type:
-		| "pull-request"
-		| "code-review"
-		| "documentation"
-		| "bug-fix"
-		| "feature";
+	type: "pull-request" | "code-review" | "documentation" | "bug-fix" | "feature";
 	description: string;
 	files: string[];
 	estimatedTime: string;
@@ -27,15 +22,13 @@ export interface Deliverable {
 
 // -- Effort estimation ------------------------------------------------------
 
-const EFFORT_TABLE: Record<
-	Opportunity["estimatedEffort"],
-	{ hours: number; complexity: string }
-> = {
-	trivial: { hours: 0.5, complexity: "trivial" },
-	small: { hours: 2, complexity: "low" },
-	medium: { hours: 6, complexity: "medium" },
-	large: { hours: 16, complexity: "high" },
-};
+const EFFORT_TABLE: Record<Opportunity["estimatedEffort"], { hours: number; complexity: string }> =
+	{
+		trivial: { hours: 0.5, complexity: "trivial" },
+		small: { hours: 2, complexity: "low" },
+		medium: { hours: 6, complexity: "medium" },
+		large: { hours: 16, complexity: "high" },
+	};
 
 /**
  * Estimate work effort for an opportunity.
@@ -55,8 +48,7 @@ export function estimateEffort(opportunity: Opportunity): {
 // -- Type inference ---------------------------------------------------------
 
 function inferDeliverableType(opp: Opportunity): Deliverable["type"] {
-	const text =
-		`${opp.title} ${opp.description} ${opp.labels.join(" ")}`.toLowerCase();
+	const text = `${opp.title} ${opp.description} ${opp.labels.join(" ")}`.toLowerCase();
 
 	if (text.match(/doc|readme|wiki|typo|spelling/)) return "documentation";
 	if (text.match(/bug|fix|crash|error|broken|regression/)) return "bug-fix";
@@ -69,8 +61,7 @@ function inferAffectedFiles(opp: Opportunity): string[] {
 	const text = `${opp.title} ${opp.description}`.toLowerCase();
 	const files: string[] = [];
 
-	if (text.match(/readme|docs?|documentation/))
-		files.push("README.md", "docs/");
+	if (text.match(/readme|docs?|documentation/)) files.push("README.md", "docs/");
 	if (text.match(/test|spec/)) files.push("tests/", "*.test.ts");
 	if (text.match(/config|settings|env/)) files.push("config/", ".env.example");
 	if (text.match(/api|endpoint|route/)) files.push("src/routes/", "src/api/");
@@ -94,9 +85,7 @@ export function planDeliverable(opportunity: Opportunity): Deliverable {
 	const files = inferAffectedFiles(opportunity);
 
 	const timeStr =
-		effort.hours < 1
-			? `~${Math.round(effort.hours * 60)} minutes`
-			: `~${effort.hours} hours`;
+		effort.hours < 1 ? `~${Math.round(effort.hours * 60)} minutes` : `~${effort.hours} hours`;
 
 	const description = buildDeliverableDescription(type, opportunity);
 
@@ -111,10 +100,7 @@ export function planDeliverable(opportunity: Opportunity): Deliverable {
 	};
 }
 
-function buildDeliverableDescription(
-	type: Deliverable["type"],
-	opp: Opportunity,
-): string {
+function buildDeliverableDescription(type: Deliverable["type"], opp: Opportunity): string {
 	const base = opp.title.slice(0, 80);
 	const approach = {
 		"pull-request": `Open a PR addressing: ${base}`,

@@ -102,34 +102,25 @@ describe("SharedMemoryBus", () => {
 
 		const channel = bus.getChannelConversation("discord:ch1");
 		expect(channel).toHaveLength(2);
-		expect(channel.map((c) => c.content).sort()).toEqual([
-			"msg from EO",
-			"msg from TO",
-		]);
+		expect(channel.map((c) => c.content).sort()).toEqual(["msg from EO", "msg from TO"]);
 	});
 
 	// ── Test 4: remember stores semantic memory ────────────────────────
 
 	it("stores a semantic memory retrievable from database", () => {
-		const id = bus.remember(
-			"TypeScript is preferred over JavaScript",
-			"semantic",
-			{
-				source: "cli",
-				scope: "global",
-				importance: 0.8,
-				tags: ["preference", "language"],
-			},
-		);
+		const id = bus.remember("TypeScript is preferred over JavaScript", "semantic", {
+			source: "cli",
+			scope: "global",
+			importance: 0.8,
+			tags: ["preference", "language"],
+		});
 
 		expect(id).toBeTruthy();
 		expect(id.startsWith("mem_")).toBe(true);
 
 		// Verify it's in the database
 		const db = bus.database();
-		const row = db
-			.prepare("SELECT content_text FROM memories WHERE id = ?")
-			.get(id) as any;
+		const row = db.prepare("SELECT content_text FROM memories WHERE id = ?").get(id) as any;
 		expect(row).toBeTruthy();
 	});
 

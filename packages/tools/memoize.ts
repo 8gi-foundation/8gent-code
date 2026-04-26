@@ -66,10 +66,7 @@ export function memoize<T extends (...args: any[]) => any>(
 	fn: T,
 	options: MemoizeOptions = {},
 ): T & { cache: Cache } {
-	const {
-		keyResolver = (...args: any[]) => JSON.stringify(args),
-		maxSize = 100,
-	} = options;
+	const { keyResolver = (...args: any[]) => JSON.stringify(args), maxSize = 100 } = options;
 	const cache = new Cache(maxSize);
 
 	const memoized = ((...args: Parameters<T>): ReturnType<T> => {

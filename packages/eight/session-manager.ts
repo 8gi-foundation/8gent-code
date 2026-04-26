@@ -30,8 +30,7 @@ export class SessionManager {
 	private dir: string;
 
 	constructor(dataDir?: string) {
-		this.dir =
-			dataDir || path.join(process.env.HOME || "~", ".8gent", "sessions");
+		this.dir = dataDir || path.join(process.env.HOME || "~", ".8gent", "sessions");
 		fs.mkdirSync(this.dir, { recursive: true });
 	}
 
@@ -63,9 +62,7 @@ export class SessionManager {
 	/** Resume a session by exact ID or name prefix match. Returns null if not found. */
 	resume(
 		nameOrId: string,
-	):
-		| (SessionInfo & { messages: Array<{ role: string; content: string }> })
-		| null {
+	): (SessionInfo & { messages: Array<{ role: string; content: string }> }) | null {
 		const needle = nameOrId.toLowerCase();
 
 		// Try exact ID match first
@@ -75,8 +72,7 @@ export class SessionManager {
 		// Scan all sessions for name prefix match
 		const all = this.listAll();
 		const match = all.find(
-			(s) =>
-				s.name?.toLowerCase().startsWith(needle) || s.id.startsWith(needle),
+			(s) => s.name?.toLowerCase().startsWith(needle) || s.id.startsWith(needle),
 		);
 		if (!match) return null;
 
@@ -86,11 +82,7 @@ export class SessionManager {
 	/** List sessions sorted by lastActiveAt descending. */
 	list(limit = 20): SessionInfo[] {
 		return this.listAll()
-			.sort(
-				(a, b) =>
-					new Date(b.lastActiveAt).getTime() -
-					new Date(a.lastActiveAt).getTime(),
-			)
+			.sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
 			.slice(0, limit);
 	}
 

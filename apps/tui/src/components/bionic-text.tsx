@@ -67,13 +67,7 @@ function isPunctuation(str: string): boolean {
 // Bionic Word Component
 // ============================================
 
-function BionicWord({
-	word,
-	ratio,
-	boldColor,
-	normalColor,
-	dimNormal = true,
-}: BionicWordProps) {
+function BionicWord({ word, ratio, boldColor, normalColor, dimNormal = true }: BionicWordProps) {
 	// Don't process punctuation
 	if (isPunctuation(word)) {
 		return <Text>{word}</Text>;
@@ -180,10 +174,7 @@ export function BionicParagraph({
 /**
  * Returns an array of { text, bold } segments for manual rendering
  */
-export function parseBionicText(
-	text: string,
-	ratio = 0.5,
-): Array<{ text: string; bold: boolean }> {
+export function parseBionicText(text: string, ratio = 0.5): Array<{ text: string; bold: boolean }> {
 	const result: Array<{ text: string; bold: boolean }> = [];
 	const tokens = text.split(/(\s+)/);
 

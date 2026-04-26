@@ -18,13 +18,7 @@ import {
 	type TurthRequest,
 	registerPromptSurface,
 } from "../../../../packages/permissions/turth.js";
-import {
-	AppText,
-	Card,
-	Heading,
-	MutedText,
-	Stack,
-} from "./primitives/index.js";
+import { AppText, Card, Heading, MutedText, Stack } from "./primitives/index.js";
 import { SelectInput, type SelectOption } from "./select-input.js";
 
 interface PendingPrompt extends TurthRequest {
@@ -50,8 +44,7 @@ const SCOPE_OPTIONS: SelectOption<ApprovalScope>[] = [
 	{
 		label: "Allow always",
 		value: "always",
-		description:
-			"Persist across restarts. Stored in ~/.8gent/user-policy.json.",
+		description: "Persist across restarts. Stored in ~/.8gent/user-policy.json.",
 	},
 	{
 		label: "Deny",

@@ -162,16 +162,10 @@ describe("AccessAuditStore", () => {
 			operation: "read" as const,
 			reason: "r",
 		};
-		expect(() => store.logAccess({ ...base, actor: "" })).toThrow(
-			/actor is required/,
-		);
+		expect(() => store.logAccess({ ...base, actor: "" })).toThrow(/actor is required/);
 		// @ts-expect-error - deliberately wrong
-		expect(() => store.logAccess({ ...base, actorKind: "robot" })).toThrow(
-			/invalid actorKind/,
-		);
+		expect(() => store.logAccess({ ...base, actorKind: "robot" })).toThrow(/invalid actorKind/);
 		// @ts-expect-error - deliberately wrong
-		expect(() => store.logAccess({ ...base, operation: "write" })).toThrow(
-			/invalid operation/,
-		);
+		expect(() => store.logAccess({ ...base, operation: "write" })).toThrow(/invalid operation/);
 	});
 });

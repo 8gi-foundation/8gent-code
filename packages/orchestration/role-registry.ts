@@ -12,12 +12,7 @@ export const ROLE_REGISTRY: Record<string, RunnerConfig> = {
 		role: "orchestrator",
 		systemPrompt:
 			"You are the Orchestrator. Plan, delegate, and coordinate. Think before acting. No code — direct others.",
-		allowedTools: [
-			"write_notes",
-			"gh_issue_create",
-			"gh_pr_list",
-			"gh_issue_list",
-		],
+		allowedTools: ["write_notes", "gh_issue_create", "gh_pr_list", "gh_issue_list"],
 		retryPolicy: { maxAttempts: 2, backoffMs: 1000 },
 	},
 	engineer: {

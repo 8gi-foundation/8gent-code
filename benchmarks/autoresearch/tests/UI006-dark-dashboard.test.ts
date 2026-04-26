@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";
@@ -35,12 +33,8 @@ describe("UI006 - Dark Theme Analytics Dashboard", () => {
 	});
 
 	test("background color is dark (low RGB values)", () => {
-		const hasDarkHex = css.match(
-			/background(-color)?\s*:\s*#(0[0-9a-f]|1[0-9a-f]|2[0-3])/i,
-		);
-		const hasDarkRgb = css.match(
-			/background(-color)?\s*:\s*rgb\(\s*\d{1,2}\s*,/i,
-		);
+		const hasDarkHex = css.match(/background(-color)?\s*:\s*#(0[0-9a-f]|1[0-9a-f]|2[0-3])/i);
+		const hasDarkRgb = css.match(/background(-color)?\s*:\s*rgb\(\s*\d{1,2}\s*,/i);
 		const hasDarkVar = css.match(
 			/--[\w-]*(bg|background|surface|base)[\w-]*\s*:\s*#(0[0-9a-f]|1[0-9a-f]|2[0-3])/i,
 		);
@@ -49,19 +43,15 @@ describe("UI006 - Dark Theme Analytics Dashboard", () => {
 
 	test("4+ stat card elements present", () => {
 		const cards =
-			html.match(
-				/<(div|section|article)[^>]*class="[^"]*(?:stat|card|metric|kpi)[^"]*"[^>]*>/gi,
-			) ?? [];
+			html.match(/<(div|section|article)[^>]*class="[^"]*(?:stat|card|metric|kpi)[^"]*"[^>]*>/gi) ??
+			[];
 		if (cards.length >= 4) {
 			expect(cards.length).toBeGreaterThanOrEqual(4);
 		} else {
 			// fallback: count repeated card-like structures
 			const allCards =
-				html.match(
-					/<(div|section|article)[^>]*class="[^"]*card[^"]*"[^>]*>/gi,
-				) ?? [];
-			const statSections =
-				html.match(/<(div|section)[^>]*class="[^"]*stat[^"]*"[^>]*>/gi) ?? [];
+				html.match(/<(div|section|article)[^>]*class="[^"]*card[^"]*"[^>]*>/gi) ?? [];
+			const statSections = html.match(/<(div|section)[^>]*class="[^"]*stat[^"]*"[^>]*>/gi) ?? [];
 			expect(allCards.length + statSections.length).toBeGreaterThanOrEqual(4);
 		}
 	});
@@ -84,9 +74,7 @@ describe("UI006 - Dark Theme Analytics Dashboard", () => {
 			html
 				.match(/<(aside|div)[^>]*class="[^"]*sidebar[^"]*"[\s\S]*?<\/\1>/i)?.[0]
 				?.match(/<(a|li)\b/gi) ?? [];
-		expect(
-			Math.max(navItems.length, sidebarLinks.length),
-		).toBeGreaterThanOrEqual(4);
+		expect(Math.max(navItems.length, sidebarLinks.length)).toBeGreaterThanOrEqual(4);
 	});
 
 	test("green/red colors for positive/negative indicators", () => {

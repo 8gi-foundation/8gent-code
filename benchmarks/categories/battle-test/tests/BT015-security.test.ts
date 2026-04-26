@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let scanner: any;
 let vulnerability: any;
@@ -18,8 +17,7 @@ beforeEach(async () => {
 
 describe("Scanner — scanDependencies", () => {
 	it("flags wildcard version dependencies", () => {
-		const scanDependencies =
-			scanner.scanDependencies || scanner.default?.scanDependencies;
+		const scanDependencies = scanner.scanDependencies || scanner.default?.scanDependencies;
 		const result = scanDependencies({
 			dependencies: { "some-lib": "*", "safe-lib": "^2.0.0" },
 		});
@@ -28,8 +26,7 @@ describe("Scanner — scanDependencies", () => {
 	});
 
 	it("flags 'latest' version as risky", () => {
-		const scanDependencies =
-			scanner.scanDependencies || scanner.default?.scanDependencies;
+		const scanDependencies = scanner.scanDependencies || scanner.default?.scanDependencies;
 		const result = scanDependencies({
 			dependencies: { "my-pkg": "latest" },
 		});
@@ -37,8 +34,7 @@ describe("Scanner — scanDependencies", () => {
 	});
 
 	it("returns clean result for safe dependencies", () => {
-		const scanDependencies =
-			scanner.scanDependencies || scanner.default?.scanDependencies;
+		const scanDependencies = scanner.scanDependencies || scanner.default?.scanDependencies;
 		const result = scanDependencies({
 			dependencies: { react: "^18.2.0", typescript: "^5.0.0" },
 		});
@@ -46,8 +42,7 @@ describe("Scanner — scanDependencies", () => {
 	});
 
 	it("scans both dependencies and devDependencies", () => {
-		const scanDependencies =
-			scanner.scanDependencies || scanner.default?.scanDependencies;
+		const scanDependencies = scanner.scanDependencies || scanner.default?.scanDependencies;
 		const result = scanDependencies({
 			dependencies: { safe: "^1.0.0" },
 			devDependencies: { risky: "*" },
@@ -62,9 +57,7 @@ describe("Scanner — scanCode", () => {
 		const scanCode = scanner.scanCode || scanner.default?.scanCode;
 		const result = scanCode(`const x = eval("alert(1)");`);
 		expect(result.vulnerabilities.length).toBeGreaterThan(0);
-		const evalVuln = result.vulnerabilities.find(
-			(v: any) => v.category === "injection",
-		);
+		const evalVuln = result.vulnerabilities.find((v: any) => v.category === "injection");
 		expect(evalVuln).toBeDefined();
 		expect(evalVuln.severity).toBe("critical");
 	});
@@ -72,25 +65,19 @@ describe("Scanner — scanCode", () => {
 	it("detects innerHTML as XSS risk", () => {
 		const scanCode = scanner.scanCode || scanner.default?.scanCode;
 		const result = scanCode("element.innerHTML = userInput;");
-		const xssVuln = result.vulnerabilities.find(
-			(v: any) => v.category === "xss",
-		);
+		const xssVuln = result.vulnerabilities.find((v: any) => v.category === "xss");
 		expect(xssVuln).toBeDefined();
 	});
 
 	it("detects hardcoded secrets", () => {
 		const scanCode = scanner.scanCode || scanner.default?.scanCode;
-		const result = scanCode(
-			`const password = "hunter2";\nconst apiKey = "sk-abc123";`,
-		);
+		const result = scanCode(`const password = "hunter2";\nconst apiKey = "sk-abc123";`);
 		expect(result.vulnerabilities.length).toBeGreaterThan(0);
 	});
 
 	it("returns clean result for safe code", () => {
 		const scanCode = scanner.scanCode || scanner.default?.scanCode;
-		const result = scanCode(
-			"function add(a: number, b: number) { return a + b; }",
-		);
+		const result = scanCode("function add(a: number, b: number) { return a + b; }");
 		expect(result.vulnerabilities.length).toBe(0);
 	});
 
@@ -111,8 +98,7 @@ describe("Scanner — scanConfig", () => {
 		expect(result.vulnerabilities.length).toBeGreaterThan(0);
 		const debugVuln = result.vulnerabilities.find(
 			(v: any) =>
-				v.title?.toLowerCase().includes("debug") ||
-				v.description?.toLowerCase().includes("debug"),
+				v.title?.toLowerCase().includes("debug") || v.description?.toLowerCase().includes("debug"),
 		);
 		expect(debugVuln).toBeDefined();
 	});
@@ -120,9 +106,7 @@ describe("Scanner — scanConfig", () => {
 	it("flags open CORS as high severity", () => {
 		const scanConfig = scanner.scanConfig || scanner.default?.scanConfig;
 		const result = scanConfig({ cors: "*" });
-		const corsVuln = result.vulnerabilities.find(
-			(v: any) => v.severity === "high",
-		);
+		const corsVuln = result.vulnerabilities.find((v: any) => v.severity === "high");
 		expect(corsVuln).toBeDefined();
 	});
 
@@ -142,8 +126,7 @@ describe("Scanner — scanConfig", () => {
 describe("Vulnerability utilities", () => {
 	it("calculateRiskScore weights by severity", () => {
 		const calculateRiskScore =
-			vulnerability.calculateRiskScore ||
-			vulnerability.default?.calculateRiskScore;
+			vulnerability.calculateRiskScore || vulnerability.default?.calculateRiskScore;
 		const vulns = [
 			{
 				id: "1",
@@ -169,8 +152,7 @@ describe("Vulnerability utilities", () => {
 
 	it("calculateRiskScore caps at 100", () => {
 		const calculateRiskScore =
-			vulnerability.calculateRiskScore ||
-			vulnerability.default?.calculateRiskScore;
+			vulnerability.calculateRiskScore || vulnerability.default?.calculateRiskScore;
 		const vulns = Array.from({ length: 20 }, (_, i) => ({
 			id: String(i),
 			title: "t",
@@ -184,8 +166,7 @@ describe("Vulnerability utilities", () => {
 	});
 
 	it("groupBySeverity groups correctly", () => {
-		const groupBySeverity =
-			vulnerability.groupBySeverity || vulnerability.default?.groupBySeverity;
+		const groupBySeverity = vulnerability.groupBySeverity || vulnerability.default?.groupBySeverity;
 		const vulns = [
 			{
 				id: "1",
@@ -219,8 +200,7 @@ describe("Vulnerability utilities", () => {
 
 	it("getRemediationPriority sorts critical injection first", () => {
 		const getRemediationPriority =
-			vulnerability.getRemediationPriority ||
-			vulnerability.default?.getRemediationPriority;
+			vulnerability.getRemediationPriority || vulnerability.default?.getRemediationPriority;
 		const vulns = [
 			{
 				id: "1",

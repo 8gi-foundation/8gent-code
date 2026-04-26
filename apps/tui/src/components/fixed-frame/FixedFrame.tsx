@@ -10,12 +10,7 @@ export function FixedFrame({ children }: FixedFrameProps) {
 	const viewport = useViewport();
 
 	return (
-		<Box
-			height={viewport.height}
-			width="100%"
-			flexDirection="column"
-			overflow="hidden"
-		>
+		<Box height={viewport.height} width="100%" flexDirection="column" overflow="hidden">
 			{children}
 		</Box>
 	);

@@ -54,11 +54,7 @@ export function appendRun(entry: RunLogEntry): void {
 export function readRuns(limit = 20): RunLogEntry[] {
 	if (!fs.existsSync(LOG_PATH)) return [];
 
-	const lines = fs
-		.readFileSync(LOG_PATH, "utf-8")
-		.trim()
-		.split("\n")
-		.filter(Boolean);
+	const lines = fs.readFileSync(LOG_PATH, "utf-8").trim().split("\n").filter(Boolean);
 	const entries: RunLogEntry[] = [];
 
 	// Read from the end

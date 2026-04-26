@@ -23,10 +23,7 @@ interface Order {
 // Performance issues to find:
 
 // 1. Inefficient array operations
-export function findProductsByCategory(
-	products: Product[],
-	category: string,
-): Product[] {
+export function findProductsByCategory(products: Product[], category: string): Product[] {
 	const result: Product[] = [];
 	for (let i = 0; i < products.length; i++) {
 		if (products[i].category === category) {
@@ -36,10 +33,7 @@ export function findProductsByCategory(
 	return result;
 }
 
-export function findProductsByCategories(
-	products: Product[],
-	categories: string[],
-): Product[] {
+export function findProductsByCategories(products: Product[], categories: string[]): Product[] {
 	let result: Product[] = [];
 	for (const category of categories) {
 		result = result.concat(findProductsByCategory(products, category));
@@ -102,10 +96,7 @@ export function processProducts(products: Product[]): void {
 }
 
 // 6. Inefficient search
-export function findProduct(
-	products: Product[],
-	id: string,
-): Product | undefined {
+export function findProduct(products: Product[], id: string): Product | undefined {
 	for (let i = 0; i < products.length; i++) {
 		if (products[i].id === id) {
 			return products[i];
@@ -115,18 +106,13 @@ export function findProduct(
 }
 
 export function findProducts(products: Product[], ids: string[]): Product[] {
-	return ids
-		.map((id) => findProduct(products, id))
-		.filter((p): p is Product => p !== undefined);
+	return ids.map((id) => findProduct(products, id)).filter((p): p is Product => p !== undefined);
 }
 
 // 7. Memory leak potential
 const cache: Record<string, unknown> = {};
 
-export function expensiveOperation(
-	key: string,
-	compute: () => unknown,
-): unknown {
+export function expensiveOperation(key: string, compute: () => unknown): unknown {
 	if (!(key in cache)) {
 		cache[key] = compute();
 	}

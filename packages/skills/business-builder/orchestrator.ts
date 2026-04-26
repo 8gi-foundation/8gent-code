@@ -36,9 +36,7 @@ async function runAgent(
 
 	onProgress?.(phase ?? 0, agentId, "start");
 
-	const prompt = def.promptTemplate
-		.replace("{{idea}}", idea)
-		.replace("{{blueprint}}", blueprint);
+	const prompt = def.promptTemplate.replace("{{idea}}", idea).replace("{{blueprint}}", blueprint);
 
 	const { text } = await generateText({ model, prompt, maxTokens });
 
@@ -136,18 +134,12 @@ Keep it tight. Be specific.`;
 		nextSteps: nextSteps.length ? nextSteps : lines.slice(0, 5),
 		risks: risks.length
 			? risks
-			: [
-					"Market validation needed",
-					"Funding runway risk",
-					"Execution speed vs. competition",
-				],
+			: ["Market validation needed", "Funding runway risk", "Execution speed vs. competition"],
 		estimatedCosts: {
 			monthly: costMatch?.[0] ?? "See finance agent",
 			startup: startupMatch ? `$${startupMatch[1]}` : "See finance agent",
 		},
-		timeline:
-			text.match(/(\d+[-–]\d+\s*weeks?|\d+\s*months?)/i)?.[0] ??
-			"8-12 weeks to MVP",
+		timeline: text.match(/(\d+[-–]\d+\s*weeks?|\d+\s*months?)/i)?.[0] ?? "8-12 weeks to MVP",
 	};
 }
 
@@ -177,24 +169,14 @@ export async function buildBusiness(
 
 		if (parallel && phaseAgents.length > 1) {
 			const results = await Promise.all(
-				phaseAgents.map((id) =>
-					runAgent(id, idea, blueprint, model, maxTokens, onProgress, i + 1),
-				),
+				phaseAgents.map((id) => runAgent(id, idea, blueprint, model, maxTokens, onProgress, i + 1)),
 			);
 			results.forEach((r) => {
 				agentOutputs[r.agentId] = r;
 			});
 		} else {
 			for (const id of phaseAgents) {
-				const result = await runAgent(
-					id,
-					idea,
-					blueprint,
-					model,
-					maxTokens,
-					onProgress,
-					i + 1,
-				);
+				const result = await runAgent(id, idea, blueprint, model, maxTokens, onProgress, i + 1);
 				agentOutputs[result.agentId] = result;
 			}
 		}

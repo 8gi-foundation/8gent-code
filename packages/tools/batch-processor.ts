@@ -93,8 +93,7 @@ export class BatchProcessor<T, R = void> {
 			allResults.push(...batchResults);
 
 			if (this.onBatchCallback) {
-				const percent =
-					total === 0 ? 100 : Math.round((processed / total) * 100);
+				const percent = total === 0 ? 100 : Math.round((processed / total) * 100);
 				await this.onBatchCallback(batchResults, batchIndex, {
 					processed,
 					total,

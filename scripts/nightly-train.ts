@@ -28,10 +28,7 @@ const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 const CHECKPOINTS_DIR = path.join(os.homedir(), ".8gent", "checkpoints");
 const TRAINING_DATA_DIR = path.join(os.homedir(), ".8gent", "training-data");
 const NIGHTLY_LOG = path.join(os.homedir(), ".8gent", "nightly.log");
-const SYSTEM_PROMPT_PATH = path.join(
-	PROJECT_ROOT,
-	"packages/eight/prompts/system-prompt.ts",
-);
+const SYSTEM_PROMPT_PATH = path.join(PROJECT_ROOT, "packages/eight/prompts/system-prompt.ts");
 // Auto-detect bun path (local: ~/.bun/bin/bun, container: /usr/local/bin/bun)
 const BUN_PATH = fs.existsSync(path.join(os.homedir(), ".bun/bin/bun"))
 	? path.join(os.homedir(), ".bun/bin/bun")
@@ -40,9 +37,7 @@ const OLLAMA_PATH = "/usr/local/bin/ollama";
 
 // Parse args
 const args = process.argv.slice(2);
-const maxIterations = Number.parseInt(
-	args.find((_, i, a) => a[i - 1] === "--iterations") || "5",
-);
+const maxIterations = Number.parseInt(args.find((_, i, a) => a[i - 1] === "--iterations") || "5");
 const baseModel = args.find((_, i, a) => a[i - 1] === "--model") || "qwen3:14b";
 const skipTraining = args.includes("--skip-training");
 const useSequential = args.includes("--sequential");
@@ -65,16 +60,8 @@ function log(msg: string) {
 // RunCheckpoint, saveCheckpoint, loadCheckpoint, clearCheckpoint
 // are imported from packages/orchestration/sequential-pipeline
 
-const CHECKPOINT_PATH = path.join(
-	os.homedir(),
-	".8gent",
-	"run-checkpoint.json",
-);
-const HARNESS_STATE_PATH = path.join(
-	os.homedir(),
-	".8gent",
-	"harness-state.json",
-);
+const CHECKPOINT_PATH = path.join(os.homedir(), ".8gent", "run-checkpoint.json");
+const HARNESS_STATE_PATH = path.join(os.homedir(), ".8gent", "harness-state.json");
 
 function logCheckpointResume(data: RunCheckpoint): void {
 	log(
@@ -261,11 +248,7 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.`,
 			const taskTimeout = INFERENCE_MODE === "lmstudio" ? 600000 : 120000;
 			const subprocessTimeout = INFERENCE_MODE === "lmstudio" ? 660000 : 180000;
 			const maxStepsForMode =
-				INFERENCE_MODE === "lmstudio"
-					? 10
-					: useSequential
-						? harnessState.maxSteps
-						: 15;
+				INFERENCE_MODE === "lmstudio" ? 10 : useSequential ? harnessState.maxSteps : 15;
 
 			const result = await runCommand(
 				BUN_PATH,
@@ -306,9 +289,7 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.`,
 					// 1. Files created in workdir (40% weight)
 					let filesScore = 0;
 					if (workdir && fs.existsSync(workdir)) {
-						const files = fs
-							.readdirSync(workdir)
-							.filter((f) => !f.startsWith("."));
+						const files = fs.readdirSync(workdir).filter((f) => !f.startsWith("."));
 						filesScore = files.length > 0 ? 40 : 0;
 					}
 
@@ -346,18 +327,12 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.`,
 								if (entry.type === "session_end") {
 									const reason = entry.summary?.exitReason;
 									// Clean exits: "natural_stop", "completed", "stop"
-									if (
-										reason &&
-										!["error", "timeout", "crash"].includes(reason)
-									) {
+									if (reason && !["error", "timeout", "crash"].includes(reason)) {
 										exitScore = 30;
 									}
 								}
 								// Also check for hard errors
-								if (
-									entry.type === "error" &&
-									entry.error?.recoverable === false
-								) {
+								if (entry.type === "error" && entry.error?.recoverable === false) {
 									exitScore = 0;
 								}
 							} catch {
@@ -388,10 +363,7 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.`,
 				if (sessionId) {
 					const failSessionPath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
 					if (fs.existsSync(failSessionPath)) {
-						const lines = fs
-							.readFileSync(failSessionPath, "utf-8")
-							.split("\n")
-							.filter(Boolean);
+						const lines = fs.readFileSync(failSessionPath, "utf-8").split("\n").filter(Boolean);
 						// Extract last error and last assistant message
 						for (const line of lines.slice(-20)) {
 							try {
@@ -408,9 +380,7 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.`,
 				if (!failureContext)
 					failureContext = `Score was ${score}/100. Task did not produce passing output.`;
 
-				log(
-					`  [HEAL] Retrying with failure context (${failureContext.length} chars)`,
-				);
+				log(`  [HEAL] Retrying with failure context (${failureContext.length} chars)`);
 
 				// Build a healing prompt: original task + analyst/critic context + failure lesson
 				const healPrompt = `${effectivePrompt}
@@ -447,25 +417,18 @@ Focus on getting working code with passing tests. Simplify if needed.`;
 				let retryScore = 0;
 				let retryPassed = false;
 				try {
-					const jsonMatch = retryResult.stdout.match(
-						/\{[\s\S]*"success"[\s\S]*\}/,
-					);
+					const jsonMatch = retryResult.stdout.match(/\{[\s\S]*"success"[\s\S]*\}/);
 					if (jsonMatch) {
 						const data = JSON.parse(jsonMatch[0]);
 						// Same multi-signal scoring
 						let filesScore = 0;
 						if (data.workdir && fs.existsSync(data.workdir)) {
-							const files = fs
-								.readdirSync(data.workdir)
-								.filter((f: string) => !f.startsWith("."));
+							const files = fs.readdirSync(data.workdir).filter((f: string) => !f.startsWith("."));
 							filesScore = files.length > 0 ? 40 : 0;
 						}
 						let toolsScore = 0;
 						if (data.sessionPath && fs.existsSync(data.sessionPath)) {
-							const sc = fs
-								.readFileSync(data.sessionPath, "utf-8")
-								.split("\n")
-								.filter(Boolean);
+							const sc = fs.readFileSync(data.sessionPath, "utf-8").split("\n").filter(Boolean);
 							let tt = 0;
 							let ts = 0;
 							for (const l of sc) {
@@ -481,17 +444,13 @@ Focus on getting working code with passing tests. Simplify if needed.`;
 						}
 						let exitScore = 0;
 						if (data.sessionPath && fs.existsSync(data.sessionPath)) {
-							const sc = fs
-								.readFileSync(data.sessionPath, "utf-8")
-								.split("\n")
-								.filter(Boolean);
+							const sc = fs.readFileSync(data.sessionPath, "utf-8").split("\n").filter(Boolean);
 							for (const l of sc) {
 								try {
 									const e = JSON.parse(l);
 									if (e.type === "session_end") {
 										const r = e.summary?.exitReason;
-										if (r && !["error", "timeout", "crash"].includes(r))
-											exitScore = 30;
+										if (r && !["error", "timeout", "crash"].includes(r)) exitScore = 30;
 									}
 								} catch {}
 							}
@@ -504,15 +463,11 @@ Focus on getting working code with passing tests. Simplify if needed.`;
 				}
 
 				if (retryScore > score) {
-					log(
-						`  [HEAL] Retry improved: ${score} → ${retryScore} ${retryPassed ? "PASS" : "FAIL"}`,
-					);
+					log(`  [HEAL] Retry improved: ${score} → ${retryScore} ${retryPassed ? "PASS" : "FAIL"}`);
 					score = retryScore;
 					passed = retryPassed;
 				} else {
-					log(
-						`  [HEAL] Retry did not improve: ${retryScore} (keeping original ${score})`,
-					);
+					log(`  [HEAL] Retry did not improve: ${retryScore} (keeping original ${score})`);
 				}
 			}
 
@@ -562,10 +517,7 @@ Focus on getting working code with passing tests. Simplify if needed.`;
 // Phase 2: Analyze + Mutate System Prompt
 // ============================================
 
-async function analyzeAndMutate(
-	results: BenchmarkResult[],
-	iteration: number,
-): Promise<void> {
+async function analyzeAndMutate(results: BenchmarkResult[], iteration: number): Promise<void> {
 	const failures = results.filter((r) => !r.passed);
 	if (failures.length === 0) {
 		log("All benchmarks passed — no mutations needed");
@@ -592,10 +544,7 @@ async function analyzeAndMutate(
 				for (const line of lines) {
 					try {
 						const entry = JSON.parse(line);
-						if (
-							entry.type === "tool_error" ||
-							(entry.type === "tool_result" && !entry.success)
-						) {
+						if (entry.type === "tool_error" || (entry.type === "tool_result" && !entry.success)) {
 							const errorMsg = entry.error || entry.result || "";
 							if (typeof errorMsg === "string" && errorMsg.length > 10) {
 								mutations.push(
@@ -623,11 +572,7 @@ async function analyzeAndMutate(
 		// 213 lines of "BENCHMARK FAILURE: needs improvement" caused scores to drop from 70 to 0.
 		// Mutations now logged to a separate file for analysis without polluting the prompt.
 		const mutationBlock = `ITERATION ${iteration} — ${new Date().toISOString()}\nFailures: ${failures.map((f) => f.benchmarkId).join(", ")}\n${uniqueMutations.join("\n")}\n---\n`;
-		const learningsPath = path.join(
-			os.homedir(),
-			".8gent",
-			"benchmark-learnings.log",
-		);
+		const learningsPath = path.join(os.homedir(), ".8gent", "benchmark-learnings.log");
 		fs.appendFileSync(learningsPath, mutationBlock);
 		log(
 			`Logged ${uniqueMutations.length} learnings to benchmark-learnings.log (prompt NOT modified)`,
@@ -642,10 +587,7 @@ async function analyzeAndMutate(
 const DISCORD_BOARDROOM_CHANNEL = "1487059185299357797";
 const DISCORD_BOT_TOKEN_8EO = process.env.DISCORD_TOKEN_8EO || "";
 
-async function postToBoardroom(
-	results: BenchmarkResult[],
-	iteration: number,
-): Promise<void> {
+async function postToBoardroom(results: BenchmarkResult[], iteration: number): Promise<void> {
 	if (!DISCORD_BOT_TOKEN_8EO) {
 		log("No Discord token — skipping boardroom post");
 		return;
@@ -678,8 +620,7 @@ async function postToBoardroom(
 	].join("\n");
 
 	// Truncate to Discord limit
-	const truncated =
-		message.length > 1900 ? `${message.slice(0, 1900)}...` : message;
+	const truncated = message.length > 1900 ? `${message.slice(0, 1900)}...` : message;
 
 	try {
 		const res = await fetch(
@@ -738,8 +679,7 @@ async function sendTelegramUpdate(
 
 	// Performance commentary
 	let commentary = "";
-	if (passCount === results.length)
-		commentary = "PERFECT SCORE. All tasks passed.";
+	if (passCount === results.length) commentary = "PERFECT SCORE. All tasks passed.";
 	else if (passCount >= 4) commentary = "Strong run. Nearly perfect.";
 	else if (passCount >= 2) commentary = "Mixed results. HyperAgent adapting.";
 	else if (passCount === 1) commentary = "Struggling. Self-healing active.";
@@ -763,18 +703,15 @@ async function sendTelegramUpdate(
 	].join("\n");
 
 	try {
-		await fetch(
-			`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-			{
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					chat_id: TELEGRAM_CHAT_ID,
-					parse_mode: "Markdown",
-					text,
-				}),
-			},
-		);
+		await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				chat_id: TELEGRAM_CHAT_ID,
+				parse_mode: "Markdown",
+				text,
+			}),
+		});
 	} catch {
 		/* best effort */
 	}
@@ -786,10 +723,7 @@ async function sendTelegramUpdate(
 // ============================================
 
 interface HarnessState {
-	taskPerformance: Record<
-		string,
-		{ bestScore: number; bestStrategy: string; failCount: number }
-	>;
+	taskPerformance: Record<string, { bestScore: number; bestStrategy: string; failCount: number }>;
 	globalTemperature: number;
 	maxSteps: number;
 }
@@ -825,18 +759,12 @@ function selfImprove(results: BenchmarkResult[], iteration: number): void {
 
 	// Adaptive temperature: if pass rate is low, try higher temperature for diversity
 	if (passRate < 0.4) {
-		harnessState.globalTemperature = Math.min(
-			0.95,
-			harnessState.globalTemperature + 0.05,
-		);
+		harnessState.globalTemperature = Math.min(0.95, harnessState.globalTemperature + 0.05);
 		log(
 			`  [HYPER] Low pass rate (${(passRate * 100).toFixed(0)}%) - raising temperature to ${harnessState.globalTemperature}`,
 		);
 	} else if (passRate > 0.6) {
-		harnessState.globalTemperature = Math.max(
-			0.5,
-			harnessState.globalTemperature - 0.05,
-		);
+		harnessState.globalTemperature = Math.max(0.5, harnessState.globalTemperature - 0.05);
 		log(
 			`  [HYPER] Good pass rate (${(passRate * 100).toFixed(0)}%) - lowering temperature to ${harnessState.globalTemperature} for consistency`,
 		);
@@ -850,9 +778,7 @@ function selfImprove(results: BenchmarkResult[], iteration: number): void {
 		);
 	} else if (passRate > 0.8 && harnessState.maxSteps > 15) {
 		harnessState.maxSteps = Math.max(15, harnessState.maxSteps - 5);
-		log(
-			`  [HYPER] High pass rate - reducing max steps to ${harnessState.maxSteps} for efficiency`,
-		);
+		log(`  [HYPER] High pass rate - reducing max steps to ${harnessState.maxSteps} for efficiency`);
 	}
 
 	// Log the harness state for analysis
@@ -935,10 +861,7 @@ async function collectTrainingData(
 	}
 
 	// Write training data as JSONL
-	const dataPath = path.join(
-		TRAINING_DATA_DIR,
-		`training_iter${iteration}_${Date.now()}.jsonl`,
-	);
+	const dataPath = path.join(TRAINING_DATA_DIR, `training_iter${iteration}_${Date.now()}.jsonl`);
 	const jsonlContent = trainingPairs
 		.filter((p) => p.prompt.length > 10 && p.chosen.length > 10)
 		.map((p) => JSON.stringify(p))
@@ -954,16 +877,10 @@ async function collectTrainingData(
 // Phase 4: Fine-tune LoRA → Create "eight" model
 // ============================================
 
-async function trainLoRA(
-	dataPath: string,
-	iteration: number,
-): Promise<string | null> {
+async function trainLoRA(dataPath: string, iteration: number): Promise<string | null> {
 	log(`Starting LoRA fine-tuning (iteration ${iteration})...`);
 
-	const outputDir = path.join(
-		CHECKPOINTS_DIR,
-		`eight_iter${iteration}_${Date.now()}`,
-	);
+	const outputDir = path.join(CHECKPOINTS_DIR, `eight_iter${iteration}_${Date.now()}`);
 
 	const result = await runCommand(
 		"python3",
@@ -992,10 +909,7 @@ async function trainLoRA(
 	return outputDir;
 }
 
-async function createOllamaModel(
-	checkpointDir: string,
-	iteration: number,
-): Promise<boolean> {
+async function createOllamaModel(checkpointDir: string, iteration: number): Promise<boolean> {
 	log("Creating 'eight' model in Ollama...");
 
 	// Create a Modelfile that references the base model + LoRA adapter
@@ -1023,11 +937,9 @@ SYSTEM """You are Eight — 8gent's fine-tuned model, iteration ${iteration}. Yo
 
 	// Naming convention: eight-{iteration}-q-14b (q = qwen lineage, 14b = params)
 	const modelName = `eight-${iteration}-q-14b`;
-	const result = await runCommand(
-		OLLAMA_PATH,
-		["create", modelName, "-f", modelfilePath],
-		{ timeout: 120000 },
-	);
+	const result = await runCommand(OLLAMA_PATH, ["create", modelName, "-f", modelfilePath], {
+		timeout: 120000,
+	});
 
 	if (result.exitCode !== 0) {
 		log(`Failed to create Ollama model: ${result.stderr.slice(-300)}`);
@@ -1095,9 +1007,7 @@ async function main() {
 			if (checkpoint) {
 				const created = await createOllamaModel(checkpoint, i);
 				if (created) {
-					log(
-						"LoRA model created but NOT switching - keeping base model for consistency",
-					);
+					log("LoRA model created but NOT switching - keeping base model for consistency");
 				}
 			}
 		}

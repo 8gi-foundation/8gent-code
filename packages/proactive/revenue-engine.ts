@@ -84,9 +84,7 @@ const CAPABILITY_TO_STREAM: Array<{
  * Identify potential revenue streams based on 8gent capabilities.
  * Cross-references capabilities with known opportunity types.
  */
-export async function identifyRevenueStreams(
-	capabilities: string[],
-): Promise<RevenueStream[]> {
+export async function identifyRevenueStreams(capabilities: string[]): Promise<RevenueStream[]> {
 	const now = new Date().toISOString();
 	const streams: RevenueStream[] = [];
 	const text = capabilities.join(" ").toLowerCase();
@@ -120,20 +118,13 @@ function estimateStreamValue(type: RevenueStream["type"]): string {
 	return ranges[type];
 }
 
-function buildStreamDescription(
-	type: RevenueStream["type"],
-	relevance: string,
-): string {
+function buildStreamDescription(type: RevenueStream["type"], relevance: string): string {
 	const descriptions: Record<RevenueStream["type"], string> = {
-		bounty:
-			"Resolve open GitHub issues with attached bounties or Bountysource rewards",
-		freelance:
-			"Take on short-term coding contracts via discovered job boards or direct outreach",
+		bounty: "Resolve open GitHub issues with attached bounties or Bountysource rewards",
+		freelance: "Take on short-term coding contracts via discovered job boards or direct outreach",
 		saas: "Package a solved capability as a productized API or plugin with recurring billing",
-		content:
-			"Write technical tutorials, API docs, or case studies for developer platforms",
-		consulting:
-			"Offer async code review, architecture audits, or debugging sessions",
+		content: "Write technical tutorials, API docs, or case studies for developer platforms",
+		consulting: "Offer async code review, architecture audits, or debugging sessions",
 	};
 	return `[${relevance}] ${descriptions[type]}`;
 }
@@ -184,9 +175,7 @@ export async function getRevenueReport(): Promise<{
 }> {
 	const streams = await readStore();
 	const identified = streams.filter((s) => s.status !== "paid").length;
-	const delivered = streams.filter(
-		(s) => s.status === "delivered" || s.status === "paid",
-	).length;
+	const delivered = streams.filter((s) => s.status === "delivered" || s.status === "paid").length;
 
 	return {
 		streams,

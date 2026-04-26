@@ -14,10 +14,7 @@ import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import React, { useState, useEffect, useCallback } from "react";
-import {
-	getSuggestionSourceLabel,
-	useGhostSuggestion,
-} from "../hooks/use-ghost-suggestion.js";
+import { getSuggestionSourceLabel, useGhostSuggestion } from "../hooks/use-ghost-suggestion.js";
 import {
 	AppText,
 	Badge,
@@ -165,13 +162,7 @@ interface InputWithGhostProps {
 	isVisible: boolean;
 }
 
-function InputWithGhost({
-	value,
-	onChange,
-	onSubmit,
-	suggestion,
-	isVisible,
-}: InputWithGhostProps) {
+function InputWithGhost({ value, onChange, onSubmit, suggestion, isVisible }: InputWithGhostProps) {
 	const [promptColor, setPromptColor] = useState(0);
 	const colors = ["cyan", "blue", "magenta", "cyan"] as const;
 
@@ -190,20 +181,13 @@ function InputWithGhost({
 
 			{/* Input field */}
 			<Box flexGrow={1}>
-				<TextInput
-					value={value}
-					onChange={onChange}
-					onSubmit={onSubmit}
-					placeholder=""
-				/>
+				<TextInput value={value} onChange={onChange} onSubmit={onSubmit} placeholder="" />
 
 				{/* Ghost text (after cursor) */}
 				{isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
 
 				{/* Placeholder when empty */}
-				{!value && !isVisible && (
-					<MutedText>What would you like to build?</MutedText>
-				)}
+				{!value && !isVisible && <MutedText>What would you like to build?</MutedText>}
 			</Box>
 		</Inline>
 	);
@@ -264,9 +248,7 @@ function StatusLine({
 			<MutedText>·</MutedText>
 
 			{/* Permission mode */}
-			<AppText color={permColors[permissionMode]}>
-				{permIcons[permissionMode]}
-			</AppText>
+			<AppText color={permColors[permissionMode]}>{permIcons[permissionMode]}</AppText>
 			<MutedText>·</MutedText>
 
 			{/* Git branch */}

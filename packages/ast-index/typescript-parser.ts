@@ -17,18 +17,14 @@ export function parseTypeScriptFile(filePath: string): FileOutline {
 	const absolutePath = path.resolve(filePath);
 	const content = fs.readFileSync(absolutePath, "utf-8");
 	const language =
-		filePath.endsWith(".tsx") || filePath.endsWith(".ts")
-			? "typescript"
-			: "javascript";
+		filePath.endsWith(".tsx") || filePath.endsWith(".ts") ? "typescript" : "javascript";
 
 	const sourceFile = ts.createSourceFile(
 		absolutePath,
 		content,
 		ts.ScriptTarget.Latest,
 		true,
-		filePath.endsWith(".tsx") || filePath.endsWith(".jsx")
-			? ts.ScriptKind.TSX
-			: ts.ScriptKind.TS,
+		filePath.endsWith(".tsx") || filePath.endsWith(".jsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
 	);
 
 	const symbols: Symbol[] = [];
@@ -58,12 +54,8 @@ function extractSymbol(
 	sourceFile: ts.SourceFile,
 	parentPath: string,
 ): Symbol | null {
-	const { line: startLine } = sourceFile.getLineAndCharacterOfPosition(
-		node.getStart(),
-	);
-	const { line: endLine } = sourceFile.getLineAndCharacterOfPosition(
-		node.getEnd(),
-	);
+	const { line: startLine } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+	const { line: endLine } = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
 
 	// Function declarations
 	if (ts.isFunctionDeclaration(node) && node.name) {
@@ -81,10 +73,7 @@ function extractSymbol(
 
 	// Arrow functions assigned to variables
 	if (ts.isVariableDeclaration(node) && node.initializer) {
-		if (
-			ts.isArrowFunction(node.initializer) ||
-			ts.isFunctionExpression(node.initializer)
-		) {
+		if (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) {
 			const name = ts.isIdentifier(node.name) ? node.name.text : null;
 			if (name) {
 				return {
@@ -117,9 +106,7 @@ function extractSymbol(
 
 	// Method declarations
 	if (ts.isMethodDeclaration(node) && node.name) {
-		const name = ts.isIdentifier(node.name)
-			? node.name.text
-			: node.name.getText(sourceFile);
+		const name = ts.isIdentifier(node.name) ? node.name.text : node.name.getText(sourceFile);
 		return {
 			id: buildSymbolId(sourceFile.fileName, name, parentPath),
 			name,
@@ -189,11 +176,7 @@ function extractSymbol(
 	return null;
 }
 
-function buildSymbolId(
-	filePath: string,
-	name: string,
-	parentPath: string,
-): string {
+function buildSymbolId(filePath: string, name: string, parentPath: string): string {
 	const relativePath = filePath; // Could normalize this
 	if (parentPath) {
 		return `${parentPath}::${name}`;
@@ -201,10 +184,7 @@ function buildSymbolId(
 	return `${relativePath}::${name}`;
 }
 
-function getFunctionSignature(
-	node: ts.FunctionDeclaration,
-	sourceFile: ts.SourceFile,
-): string {
+function getFunctionSignature(node: ts.FunctionDeclaration, sourceFile: ts.SourceFile): string {
 	const params = node.parameters.map((p) => p.getText(sourceFile)).join(", ");
 	const returnType = node.type ? `: ${node.type.getText(sourceFile)}` : "";
 	return `function ${node.name?.text}(${params})${returnType}`;
@@ -224,20 +204,14 @@ function getArrowFunctionSignature(
 	return `const ${name}`;
 }
 
-function getMethodSignature(
-	node: ts.MethodDeclaration,
-	sourceFile: ts.SourceFile,
-): string {
+function getMethodSignature(node: ts.MethodDeclaration, sourceFile: ts.SourceFile): string {
 	const name = node.name.getText(sourceFile);
 	const params = node.parameters.map((p) => p.getText(sourceFile)).join(", ");
 	const returnType = node.type ? `: ${node.type.getText(sourceFile)}` : "";
 	return `${name}(${params})${returnType}`;
 }
 
-function getJsDoc(
-	node: ts.Node,
-	sourceFile: ts.SourceFile,
-): string | undefined {
+function getJsDoc(node: ts.Node, sourceFile: ts.SourceFile): string | undefined {
 	const jsDocTags = ts.getJSDocTags(node);
 	if (jsDocTags.length > 0) {
 		return jsDocTags.map((tag) => tag.getText(sourceFile)).join("\n");

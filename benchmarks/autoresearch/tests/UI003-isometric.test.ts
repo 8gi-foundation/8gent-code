@@ -9,9 +9,7 @@ function loadHTML(): string {
 	const fixturePath = join(dir, "fixture.ts");
 	if (existsSync(fixturePath)) {
 		const content = readFileSync(fixturePath, "utf-8");
-		const match =
-			content.match(/export\s+default\s+`([\s\S]*)`/) ||
-			content.match(/`([\s\S]*)`/);
+		const match = content.match(/export\s+default\s+`([\s\S]*)`/) || content.match(/`([\s\S]*)`/);
 		return match?.[1] ?? content;
 	}
 	return "";
@@ -36,9 +34,7 @@ describe("UI003 - 3D Isometric Dashboard", () => {
 	test("6+ tile elements exist", () => {
 		// Match elements with class containing "tile", "card", "panel", or "cell"
 		const tileByClass =
-			html.match(
-				/class\s*=\s*"[^"]*\b(tile|card|panel|cell|block|item)\b[^"]*"/gi,
-			) ?? [];
+			html.match(/class\s*=\s*"[^"]*\b(tile|card|panel|cell|block|item)\b[^"]*"/gi) ?? [];
 		expect(tileByClass.length).toBeGreaterThanOrEqual(6);
 	});
 
@@ -57,9 +53,7 @@ describe("UI003 - 3D Isometric Dashboard", () => {
 	test(":hover modifies transform", () => {
 		// Find :hover blocks and check if they contain transform
 		const hoverBlocks = css.match(/:hover\s*\{([^}]*)\}/gi) ?? [];
-		const hoverModifiesTransform = hoverBlocks.some((block) =>
-			/transform\s*:/i.test(block),
-		);
+		const hoverModifiesTransform = hoverBlocks.some((block) => /transform\s*:/i.test(block));
 		expect(hoverModifiesTransform).toBe(true);
 	});
 
@@ -85,14 +79,9 @@ describe("UI003 - 3D Isometric Dashboard", () => {
 	test("CSS bar chart elements exist (divs with varying heights)", () => {
 		// Look for bar/chart elements or inline height styles
 		const barByClass =
-			html.match(
-				/class\s*=\s*"[^"]*\b(bar|chart-bar|column|metric)\b[^"]*"/gi,
-			) ?? [];
-		const heightStyles =
-			html.match(/style\s*=\s*"[^"]*height\s*:\s*\d+/gi) ?? [];
+			html.match(/class\s*=\s*"[^"]*\b(bar|chart-bar|column|metric)\b[^"]*"/gi) ?? [];
+		const heightStyles = html.match(/style\s*=\s*"[^"]*height\s*:\s*\d+/gi) ?? [];
 		const barInCSS = /\.(bar|chart-bar|column)\b/i.test(css);
-		expect(barByClass.length > 0 || heightStyles.length > 0 || barInCSS).toBe(
-			true,
-		);
+		expect(barByClass.length > 0 || heightStyles.length > 0 || barInCSS).toBe(true);
 	});
 });

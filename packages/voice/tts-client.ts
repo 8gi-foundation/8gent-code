@@ -68,13 +68,10 @@ export async function cloneVoice(
 	form.append("audio", new Blob([audioData]), "sample.wav");
 	form.append("reference_text", "");
 
-	const sampleRes = await fetch(
-		`${TTS_SERVER_URL}/profiles/${profile.id}/samples`,
-		{
-			method: "POST",
-			body: form,
-		},
-	);
+	const sampleRes = await fetch(`${TTS_SERVER_URL}/profiles/${profile.id}/samples`, {
+		method: "POST",
+		body: form,
+	});
 
 	if (!sampleRes.ok) {
 		console.error(`Failed to upload sample: ${sampleRes.status}`);
@@ -85,10 +82,7 @@ export async function cloneVoice(
 }
 
 /** Generate speech via local TTS server. Returns audio buffer. */
-export async function generateSpeech(
-	text: string,
-	profileId: string,
-): Promise<Buffer | null> {
+export async function generateSpeech(text: string, profileId: string): Promise<Buffer | null> {
 	if (!(await isLocalTTSAvailable())) return null;
 
 	const res = await fetch(`${TTS_SERVER_URL}/generate`, {
@@ -102,9 +96,7 @@ export async function generateSpeech(
 }
 
 /** List available voice profiles */
-export async function listProfiles(): Promise<
-	Array<{ id: string; name: string }>
-> {
+export async function listProfiles(): Promise<Array<{ id: string; name: string }>> {
 	if (!(await isLocalTTSAvailable())) return [];
 	try {
 		const res = await fetch(`${TTS_SERVER_URL}/profiles`);

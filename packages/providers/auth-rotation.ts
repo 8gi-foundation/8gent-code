@@ -27,8 +27,7 @@ export class AuthRotator {
 	private configPath: string;
 
 	constructor(configPath?: string) {
-		this.configPath =
-			configPath || join(homedir(), ".8gent", "auth-profiles.json");
+		this.configPath = configPath || join(homedir(), ".8gent", "auth-profiles.json");
 		this.load();
 	}
 

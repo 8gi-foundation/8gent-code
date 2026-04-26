@@ -43,11 +43,7 @@ export const threejsBenchmarks: BenchmarkDefinition[] = [
 			},
 			efficiency: {
 				weight: 20,
-				criteria: [
-					"Uses BufferGeometry",
-					"Disposes of resources properly",
-					"Single render loop",
-				],
+				criteria: ["Uses BufferGeometry", "Disposes of resources properly", "Single render loop"],
 			},
 			bestPractices: {
 				weight: 15,
@@ -62,11 +58,7 @@ export const threejsBenchmarks: BenchmarkDefinition[] = [
 			{
 				type: "ast",
 				config: {
-					mustContain: [
-						"THREE.Scene",
-						"THREE.PerspectiveCamera",
-						"requestAnimationFrame",
-					],
+					mustContain: ["THREE.Scene", "THREE.PerspectiveCamera", "requestAnimationFrame"],
 				},
 			},
 			{ type: "execution", config: { timeout: 5000, expectNoErrors: true } },
@@ -187,12 +179,7 @@ export const threejsBenchmarks: BenchmarkDefinition[] = [
 			{
 				type: "ast",
 				config: {
-					mustContain: [
-						"ShaderMaterial",
-						"vertexShader",
-						"fragmentShader",
-						"uniforms",
-					],
+					mustContain: ["ShaderMaterial", "vertexShader", "fragmentShader", "uniforms"],
 				},
 			},
 		],

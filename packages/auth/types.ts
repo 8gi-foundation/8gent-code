@@ -134,11 +134,7 @@ export interface DeviceTokenResponse {
 
 /** Error response from the device token endpoint. */
 export interface DeviceTokenErrorResponse {
-	error:
-		| "authorization_pending"
-		| "slow_down"
-		| "expired_token"
-		| "access_denied";
+	error: "authorization_pending" | "slow_down" | "expired_token" | "access_denied";
 	error_description?: string;
 }
 

@@ -11,28 +11,13 @@
 
 // ── Enums & Unions ────────────────────────────────────────────────────
 
-export type MemoryType =
-	| "core"
-	| "episodic"
-	| "semantic"
-	| "procedural"
-	| "working";
+export type MemoryType = "core" | "episodic" | "semantic" | "procedural" | "working";
 
 export type MemoryScope = "session" | "project" | "global";
 
-export type ConsolidationLevel =
-	| "raw"
-	| "daily"
-	| "weekly"
-	| "monthly"
-	| "archetype";
+export type ConsolidationLevel = "raw" | "daily" | "weekly" | "monthly" | "archetype";
 
-export type LearningType =
-	| "preference"
-	| "behavior"
-	| "outcome"
-	| "correction"
-	| "feedback";
+export type LearningType = "preference" | "behavior" | "outcome" | "correction" | "feedback";
 
 export type SourceType =
 	| "conversation"
@@ -331,9 +316,7 @@ export function estimateTokens(text: string): number {
  * 3. Access boost (frequently used memories stay strong)
  * 4. Confidence (for semantic/core types)
  */
-export function effectiveImportance(
-	memory: MemoryBase & { confidence?: number },
-): number {
+export function effectiveImportance(memory: MemoryBase & { confidence?: number }): number {
 	const ageMs = Date.now() - memory.createdAt;
 	const ageDays = ageMs / (24 * 60 * 60 * 1000);
 

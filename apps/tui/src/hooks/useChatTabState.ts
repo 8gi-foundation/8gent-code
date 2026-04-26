@@ -67,8 +67,7 @@ function persistMessages(tabId: string, messages: Message[]) {
 		// Serialize with date handling
 		const serializable = messages.map((m) => ({
 			...m,
-			timestamp:
-				m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
+			timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
 		}));
 		fs.writeFileSync(filePath, JSON.stringify(serializable, null, 2), "utf-8");
 	} catch {
@@ -99,12 +98,9 @@ function loadPersistedMessages(tabId: string): Message[] | null {
 // Map provider string to runtime
 // ============================================
 
-function mapProviderToRuntime(
-	provider: string,
-): "ollama" | "lmstudio" | "openrouter" {
+function mapProviderToRuntime(provider: string): "ollama" | "lmstudio" | "openrouter" {
 	if (provider === "lmstudio") return "lmstudio";
-	if (provider === "openrouter" || provider === "openrouter-free")
-		return "openrouter";
+	if (provider === "openrouter" || provider === "openrouter-free") return "openrouter";
 	return "ollama";
 }
 
@@ -143,19 +139,13 @@ export function useChatTabState(
 	state: ChatTabState;
 	addMessage: (msg: Message) => void;
 	addSystemMessage: (content: string) => void;
-	chat: (
-		message: string,
-		imageBase64?: string,
-		imageMimeType?: string,
-	) => Promise<void>;
+	chat: (message: string, imageBase64?: string, imageMimeType?: string) => Promise<void>;
 	abort: () => void;
 	cleanup: () => void;
 } {
 	// Per-tab state stored in a Map ref so tab switches don't lose state
 	const tabStatesRef = useRef<Map<string, TabStateEntry>>(new Map());
-	const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
-		new Map(),
-	);
+	const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
 	// Force re-render counter (bumped when active tab state changes)
 	const [, setRenderTick] = useState(0);
@@ -262,16 +252,10 @@ export function useChatTabState(
 								(event.resultPreview?.startsWith("Exit code ") &&
 									!event.resultPreview.startsWith("Exit code 0"));
 							const duration =
-								event.durationMs > 0
-									? ` (${(event.durationMs / 1000).toFixed(1)}s)`
-									: "";
+								event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
 							let content: string;
 							if (isRealFailure && event.resultPreview) {
-								const errMsg = event.resultPreview
-									.slice(0, 120)
-									.split("\n")
-									.slice(0, 2)
-									.join(" ");
+								const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
 								content = `  \u2717 ${errMsg}${duration}`;
 							} else {
 								content = `  \u2713${duration}`;
@@ -376,15 +360,7 @@ export function useChatTabState(
 				return null;
 			}
 		},
-		[
-			model,
-			provider,
-			tabId,
-			getTabEntry,
-			updateTabState,
-			schedulePersist,
-			forceRender,
-		],
+		[model, provider, tabId, getTabEntry, updateTabState, schedulePersist, forceRender],
 	);
 
 	// Initialize agent for the current tab on mount / model change
@@ -419,19 +395,13 @@ export function useChatTabState(
 	);
 
 	const chat = useCallback(
-		async (
-			message: string,
-			imageBase64?: string,
-			imageMimeType?: string,
-		): Promise<void> => {
+		async (message: string, imageBase64?: string, imageMimeType?: string): Promise<void> => {
 			const e = getTabEntry(tabId);
 
 			// Queue if already processing
 			if (e.agentRunningRef) {
 				e.messageQueueRef.push(message);
-				addSystemMessage(
-					"Queued \u2014 will send after current task completes.",
-				);
+				addSystemMessage("Queued \u2014 will send after current task completes.");
 				return;
 			}
 

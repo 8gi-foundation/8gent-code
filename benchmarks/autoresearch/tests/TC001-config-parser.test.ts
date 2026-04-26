@@ -10,20 +10,12 @@ async function loadModules() {
 	const validatorMod = await import(resolve(join(WORK_DIR, "validator.ts")));
 	const serializerMod = await import(resolve(join(WORK_DIR, "serializer.ts")));
 
-	const lex =
-		lexerMod.lex ??
-		lexerMod.tokenize ??
-		lexerMod.Lexer?.tokenize ??
-		lexerMod.default;
+	const lex = lexerMod.lex ?? lexerMod.tokenize ?? lexerMod.Lexer?.tokenize ?? lexerMod.default;
 	const parse = parserMod.parse ?? parserMod.Parser?.parse ?? parserMod.default;
 	const validate =
-		validatorMod.validate ??
-		validatorMod.Validator?.validate ??
-		validatorMod.default;
+		validatorMod.validate ?? validatorMod.Validator?.validate ?? validatorMod.default;
 	const serialize =
-		serializerMod.serialize ??
-		serializerMod.Serializer?.serialize ??
-		serializerMod.default;
+		serializerMod.serialize ?? serializerMod.Serializer?.serialize ?? serializerMod.default;
 
 	return { lex, parse, validate, serialize };
 }
@@ -37,27 +29,18 @@ describe("TC001: Config Parser with AST Roundtrip", () => {
 			const ast = parse("FROM node:20\nRUN apt-get update\n");
 			expect(ast).toBeTruthy();
 
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 			expect(nodes.length).toBeGreaterThanOrEqual(2);
 
 			const first = nodes[0];
-			const directive =
-				first.directive ?? first.name ?? first.type ?? first.keyword;
+			const directive = first.directive ?? first.name ?? first.type ?? first.keyword;
 			expect(String(directive).toUpperCase()).toContain("FROM");
 		});
 
 		test("parses key-value assignments", async () => {
 			const { parse } = await loadModules();
 			const ast = parse("PORT 3000\nHOST localhost\n");
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 			expect(nodes.length).toBeGreaterThanOrEqual(2);
 		});
 	});
@@ -70,18 +53,11 @@ describe("TC001: Config Parser with AST Roundtrip", () => {
   DEPENDS_ON db
 }`;
 			const ast = parse(input);
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 
 			const serviceNode = nodes.find(
 				(n: any) =>
-					(n.directive ?? n.name ?? n.type ?? "")
-						.toString()
-						.toUpperCase()
-						.includes("SERVICE") ||
+					(n.directive ?? n.name ?? n.type ?? "").toString().toUpperCase().includes("SERVICE") ||
 					n.block === true ||
 					n.children?.length > 0,
 			);
@@ -113,18 +89,11 @@ ls -la
 EOF
 PORT 3000`;
 			const ast = parse(input);
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 			expect(nodes.length).toBeGreaterThanOrEqual(2);
 
 			const scriptNode = nodes.find((n: any) =>
-				(n.directive ?? n.name ?? n.type ?? "")
-					.toString()
-					.toUpperCase()
-					.includes("SCRIPT"),
+				(n.directive ?? n.name ?? n.type ?? "").toString().toUpperCase().includes("SCRIPT"),
 			);
 			if (scriptNode) {
 				const value = scriptNode.value ?? scriptNode.content ?? scriptNode.body;
@@ -140,21 +109,12 @@ PORT 3000`;
 			const ast = parse(input);
 			expect(ast).toBeTruthy();
 
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 			const portNode = nodes.find((n: any) =>
-				(n.directive ?? n.name ?? n.type ?? "")
-					.toString()
-					.toUpperCase()
-					.includes("PORT"),
+				(n.directive ?? n.name ?? n.type ?? "").toString().toUpperCase().includes("PORT"),
 			);
 			if (portNode) {
-				const value = JSON.stringify(
-					portNode.value ?? portNode.content ?? portNode,
-				);
+				const value = JSON.stringify(portNode.value ?? portNode.content ?? portNode);
 				expect(value).toContain("API_PORT");
 			}
 		});
@@ -169,19 +129,12 @@ PORT 3000`;
   REPLICAS 1
 }`;
 			const ast = parse(input);
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 
 			const conditional = nodes.find(
 				(n: any) =>
 					(n.type ?? n.kind ?? "").toString().toLowerCase().includes("if") ||
-					(n.type ?? n.kind ?? "")
-						.toString()
-						.toLowerCase()
-						.includes("conditional") ||
+					(n.type ?? n.kind ?? "").toString().toLowerCase().includes("conditional") ||
 					n.condition !== undefined,
 			);
 			expect(conditional).toBeTruthy();
@@ -206,15 +159,9 @@ RUN apt-get update`;
 
 			// Compare structural equivalence (not exact string match)
 			const nodes1 =
-				ast1.body ??
-				ast1.nodes ??
-				ast1.children ??
-				(Array.isArray(ast1) ? ast1 : [ast1]);
+				ast1.body ?? ast1.nodes ?? ast1.children ?? (Array.isArray(ast1) ? ast1 : [ast1]);
 			const nodes2 =
-				ast2.body ??
-				ast2.nodes ??
-				ast2.children ??
-				(Array.isArray(ast2) ? ast2 : [ast2]);
+				ast2.body ?? ast2.nodes ?? ast2.children ?? (Array.isArray(ast2) ? ast2 : [ast2]);
 			expect(nodes2.length).toBe(nodes1.length);
 		});
 
@@ -231,15 +178,9 @@ RUN apt-get update`;
 			const ast2 = parse(output);
 
 			const nodes1 =
-				ast1.body ??
-				ast1.nodes ??
-				ast1.children ??
-				(Array.isArray(ast1) ? ast1 : [ast1]);
+				ast1.body ?? ast1.nodes ?? ast1.children ?? (Array.isArray(ast1) ? ast1 : [ast1]);
 			const nodes2 =
-				ast2.body ??
-				ast2.nodes ??
-				ast2.children ??
-				(Array.isArray(ast2) ? ast2 : [ast2]);
+				ast2.body ?? ast2.nodes ?? ast2.children ?? (Array.isArray(ast2) ? ast2 : [ast2]);
 			expect(nodes2.length).toBe(nodes1.length);
 		});
 	});
@@ -250,8 +191,7 @@ RUN apt-get update`;
 			const ast = parse("PORT 3000\nPORT 8080\n");
 
 			const result = validate(ast);
-			const errors =
-				result.errors ?? result.issues ?? result.warnings ?? result;
+			const errors = result.errors ?? result.issues ?? result.warnings ?? result;
 
 			if (Array.isArray(errors)) {
 				const hasDup = errors.some((e: any) =>
@@ -267,11 +207,7 @@ RUN apt-get update`;
 			const { parse } = await loadModules();
 			const ast = parse("");
 			expect(ast).toBeTruthy();
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : []);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : []);
 			expect(nodes.length).toBe(0);
 		});
 
@@ -284,11 +220,7 @@ RUN apt-get update`;
 		test("handles inline comments", async () => {
 			const { parse } = await loadModules();
 			const ast = parse("PORT 3000 # the api port\n");
-			const nodes =
-				ast.body ??
-				ast.nodes ??
-				ast.children ??
-				(Array.isArray(ast) ? ast : [ast]);
+			const nodes = ast.body ?? ast.nodes ?? ast.children ?? (Array.isArray(ast) ? ast : [ast]);
 			expect(nodes.length).toBeGreaterThanOrEqual(1);
 		});
 	});

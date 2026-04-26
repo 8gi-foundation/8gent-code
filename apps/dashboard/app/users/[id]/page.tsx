@@ -46,10 +46,7 @@ export default function UserDetailPage() {
 				<main className="mx-auto max-w-7xl px-6 py-8">
 					<div className="rounded-lg border border-[var(--8gent-error)]/30 bg-[var(--8gent-bg-elevated)] p-8 text-center">
 						<p className="text-[var(--8gent-error)]">User not found</p>
-						<a
-							href="/users"
-							className="mt-2 inline-block text-sm text-[var(--8gent-accent)]"
-						>
+						<a href="/users" className="mt-2 inline-block text-sm text-[var(--8gent-accent)]">
 							Back to users
 						</a>
 					</div>
@@ -76,10 +73,7 @@ export default function UserDetailPage() {
 			<main className="mx-auto max-w-7xl px-6 py-8 space-y-6">
 				{/* Breadcrumb */}
 				<div className="text-sm text-[var(--8gent-text-muted)]">
-					<a
-						href="/users"
-						className="hover:text-[var(--8gent-accent)] transition-colors"
-					>
+					<a href="/users" className="hover:text-[var(--8gent-accent)] transition-colors">
 						Users
 					</a>
 					<span className="mx-2">/</span>
@@ -89,23 +83,11 @@ export default function UserDetailPage() {
 				{/* Profile Card */}
 				<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
 					<div className="flex items-start gap-6">
-						{user.avatar && (
-							<img
-								src={user.avatar}
-								alt=""
-								className="h-16 w-16 rounded-full"
-							/>
-						)}
+						{user.avatar && <img src={user.avatar} alt="" className="h-16 w-16 rounded-full" />}
 						<div className="flex-1">
-							<h2 className="text-xl font-bold text-[var(--8gent-text)]">
-								{user.displayName}
-							</h2>
-							<p className="text-sm text-[var(--8gent-text-muted)]">
-								@{user.githubUsername}
-							</p>
-							<p className="text-sm text-[var(--8gent-text-secondary)]">
-								{user.email}
-							</p>
+							<h2 className="text-xl font-bold text-[var(--8gent-text)]">{user.displayName}</h2>
+							<p className="text-sm text-[var(--8gent-text-muted)]">@{user.githubUsername}</p>
+							<p className="text-sm text-[var(--8gent-text-secondary)]">{user.email}</p>
 							<p className="mt-1 text-xs text-[var(--8gent-text-muted)]">
 								Joined{" "}
 								{new Date(user.createdAt).toLocaleDateString("en-US", {
@@ -118,14 +100,10 @@ export default function UserDetailPage() {
 
 						{/* Plan Management */}
 						<div className="text-right">
-							<label className="text-xs text-[var(--8gent-text-muted)]">
-								Plan
-							</label>
+							<label className="text-xs text-[var(--8gent-text-muted)]">Plan</label>
 							<select
 								value={user.plan}
-								onChange={(e) =>
-									handlePlanChange(e.target.value as "free" | "pro" | "team")
-								}
+								onChange={(e) => handlePlanChange(e.target.value as "free" | "pro" | "team")}
 								disabled={planUpdating}
 								className="mt-1 block rounded-md border border-[var(--8gent-border)] bg-[var(--8gent-bg)] px-3 py-1.5 text-sm text-[var(--8gent-text)] focus:border-[var(--8gent-border-focus)] focus:outline-none disabled:opacity-50"
 							>
@@ -139,14 +117,8 @@ export default function UserDetailPage() {
 
 				{/* Stats Row */}
 				<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-					<StatBox
-						label="Total Tokens In"
-						value={formatTokenCount(stats.totalTokensIn)}
-					/>
-					<StatBox
-						label="Total Tokens Out"
-						value={formatTokenCount(stats.totalTokensOut)}
-					/>
+					<StatBox label="Total Tokens In" value={formatTokenCount(stats.totalTokensIn)} />
+					<StatBox label="Total Tokens Out" value={formatTokenCount(stats.totalTokensOut)} />
 					<StatBox label="Total Sessions" value={String(stats.totalSessions)} />
 					<StatBox
 						label="Active Sessions"
@@ -160,9 +132,7 @@ export default function UserDetailPage() {
 					{/* Session History */}
 					<div className="lg:col-span-2 rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)]">
 						<div className="border-b border-[var(--8gent-border)] px-6 py-4">
-							<h3 className="text-sm font-medium text-[var(--8gent-text)]">
-								Session History
-							</h3>
+							<h3 className="text-sm font-medium text-[var(--8gent-text)]">Session History</h3>
 						</div>
 						<div className="overflow-x-auto">
 							<table className="w-full">
@@ -213,9 +183,7 @@ export default function UserDetailPage() {
 													{session.provider}
 												</td>
 												<td className="px-6 py-3 text-sm text-[var(--8gent-text-secondary)]">
-													{formatTokenCount(
-														session.tokensIn + session.tokensOut,
-													)}
+													{formatTokenCount(session.tokensIn + session.tokensOut)}
 												</td>
 												<td className="px-6 py-3 text-sm text-[var(--8gent-text-secondary)]">
 													{session.toolCalls}
@@ -243,68 +211,43 @@ export default function UserDetailPage() {
 					<div className="space-y-4">
 						{/* Preferences */}
 						<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
-							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">
-								Preferences
-							</h3>
+							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">Preferences</h3>
 							{preferences ? (
 								<div className="space-y-2">
-									<PrefRow
-										label="Default Model"
-										value={preferences.defaultModel || "None"}
-									/>
-									<PrefRow
-										label="Provider"
-										value={preferences.defaultProvider}
-									/>
+									<PrefRow label="Default Model" value={preferences.defaultModel || "None"} />
+									<PrefRow label="Provider" value={preferences.defaultProvider} />
 									<PrefRow label="Theme" value={preferences.theme} />
 									<PrefRow label="LoRA Status" value={preferences.loraStatus} />
 									{preferences.loraVersion && (
-										<PrefRow
-											label="LoRA Version"
-											value={preferences.loraVersion}
-										/>
+										<PrefRow label="LoRA Version" value={preferences.loraVersion} />
 									)}
 								</div>
 							) : (
-								<p className="text-xs text-[var(--8gent-text-muted)]">
-									No preferences set
-								</p>
+								<p className="text-xs text-[var(--8gent-text-muted)]">No preferences set</p>
 							)}
 						</div>
 
 						{/* Usage Summary */}
 						<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
-							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">
-								Usage Summary
-							</h3>
+							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">Usage Summary</h3>
 							<div className="space-y-2">
 								{usageRecords.slice(-7).map((record: any) => (
-									<div
-										key={record._id}
-										className="flex items-center justify-between text-xs"
-									>
-										<span className="text-[var(--8gent-text-muted)]">
-											{record.date}
-										</span>
+									<div key={record._id} className="flex items-center justify-between text-xs">
+										<span className="text-[var(--8gent-text-muted)]">{record.date}</span>
 										<span className="text-[var(--8gent-text-secondary)]">
-											{formatTokenCount(record.tokensIn + record.tokensOut)}{" "}
-											tokens
+											{formatTokenCount(record.tokensIn + record.tokensOut)} tokens
 										</span>
 									</div>
 								))}
 								{usageRecords.length === 0 && (
-									<p className="text-xs text-[var(--8gent-text-muted)]">
-										No usage data
-									</p>
+									<p className="text-xs text-[var(--8gent-text-muted)]">No usage data</p>
 								)}
 							</div>
 						</div>
 
 						{/* Models Used */}
 						<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
-							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">
-								Models Used
-							</h3>
+							<h3 className="mb-4 text-sm font-medium text-[var(--8gent-text)]">Models Used</h3>
 							<div className="flex flex-wrap gap-1">
 								{stats.uniqueModels.length > 0 ? (
 									stats.uniqueModels.map((model: any) => (
@@ -316,9 +259,7 @@ export default function UserDetailPage() {
 										</span>
 									))
 								) : (
-									<p className="text-xs text-[var(--8gent-text-muted)]">
-										No models used
-									</p>
+									<p className="text-xs text-[var(--8gent-text-muted)]">No models used</p>
 								)}
 							</div>
 						</div>
@@ -339,12 +280,8 @@ function Header() {
 			<div className="mx-auto max-w-7xl px-6 py-4">
 				<div className="flex items-center justify-between">
 					<div>
-						<h1 className="text-lg font-bold text-[var(--8gent-text)]">
-							8gent Dashboard
-						</h1>
-						<p className="text-xs text-[var(--8gent-text-muted)]">
-							Admin Control Plane
-						</p>
+						<h1 className="text-lg font-bold text-[var(--8gent-text)]">8gent Dashboard</h1>
+						<p className="text-xs text-[var(--8gent-text-muted)]">Admin Control Plane</p>
 					</div>
 					<nav className="flex gap-4">
 						<a

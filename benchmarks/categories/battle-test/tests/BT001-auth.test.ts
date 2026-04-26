@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 // Dynamic imports from generated code
 let auth: any;
@@ -37,9 +36,7 @@ beforeEach(async () => {
 
 describe("Password Hashing", () => {
 	it("hashPassword returns a string different from input", async () => {
-		const hash = await (auth.hashPassword || auth.default?.hashPassword)(
-			"mypassword123",
-		);
+		const hash = await (auth.hashPassword || auth.default?.hashPassword)("mypassword123");
 		expect(typeof hash).toBe("string");
 		expect(hash).not.toBe("mypassword123");
 		expect(hash.length).toBeGreaterThan(10);
@@ -76,10 +73,7 @@ describe("Token Generation", () => {
 
 	it("generateToken returns a string with 3 parts", () => {
 		const genFn = auth.generateToken || auth.default?.generateToken;
-		const token = genFn(
-			{ userId: "u1", role: "admin", email: "a@b.com" },
-			SECRET,
-		);
+		const token = genFn({ userId: "u1", role: "admin", email: "a@b.com" }, SECRET);
 		expect(typeof token).toBe("string");
 		expect(token.split(".").length).toBe(3);
 	});
@@ -87,10 +81,7 @@ describe("Token Generation", () => {
 	it("verifyToken returns payload for valid token", () => {
 		const genFn = auth.generateToken || auth.default?.generateToken;
 		const verifyFn = auth.verifyToken || auth.default?.verifyToken;
-		const token = genFn(
-			{ userId: "u1", role: "admin", email: "a@b.com" },
-			SECRET,
-		);
+		const token = genFn({ userId: "u1", role: "admin", email: "a@b.com" }, SECRET);
 		const payload = verifyFn(token, SECRET);
 		expect(payload).not.toBeNull();
 		expect(payload.userId).toBe("u1");
@@ -101,10 +92,7 @@ describe("Token Generation", () => {
 	it("verifyToken returns null for wrong secret", () => {
 		const genFn = auth.generateToken || auth.default?.generateToken;
 		const verifyFn = auth.verifyToken || auth.default?.verifyToken;
-		const token = genFn(
-			{ userId: "u1", role: "admin", email: "a@b.com" },
-			SECRET,
-		);
+		const token = genFn({ userId: "u1", role: "admin", email: "a@b.com" }, SECRET);
 		const result = verifyFn(token, "wrong-secret");
 		expect(result).toBeNull();
 	});
@@ -112,11 +100,7 @@ describe("Token Generation", () => {
 	it("verifyToken returns null for expired token", () => {
 		const genFn = auth.generateToken || auth.default?.generateToken;
 		const verifyFn = auth.verifyToken || auth.default?.verifyToken;
-		const token = genFn(
-			{ userId: "u1", role: "admin", email: "a@b.com" },
-			SECRET,
-			-1000,
-		); // expired 1s ago
+		const token = genFn({ userId: "u1", role: "admin", email: "a@b.com" }, SECRET, -1000); // expired 1s ago
 		const result = verifyFn(token, SECRET);
 		expect(result).toBeNull();
 	});

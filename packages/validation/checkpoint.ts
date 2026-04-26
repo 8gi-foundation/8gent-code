@@ -60,10 +60,7 @@ export function createCheckpoint(cwd: string, label: string): Checkpoint {
  * Restore to a checkpoint by popping the stash.
  * Discards any changes made after the checkpoint.
  */
-export function restoreCheckpoint(
-	cwd: string,
-	checkpoint: Checkpoint,
-): boolean {
+export function restoreCheckpoint(cwd: string, checkpoint: Checkpoint): boolean {
 	if (checkpoint.stashRef === "clean") {
 		// Nothing was stashed — just reset any changes made since
 		const reset = git(["checkout", "--", "."], cwd);

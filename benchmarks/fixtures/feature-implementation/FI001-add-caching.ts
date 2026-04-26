@@ -36,9 +36,7 @@ export class DataFetcher {
 		return this.fetch(`/posts/${id}`);
 	}
 
-	async fetchUserPosts(
-		userId: number,
-	): Promise<Array<{ id: number; title: string }>> {
+	async fetchUserPosts(userId: number): Promise<Array<{ id: number; title: string }>> {
 		return this.fetch(`/users/${userId}/posts`);
 	}
 }

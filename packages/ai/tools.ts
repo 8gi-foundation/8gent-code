@@ -99,9 +99,7 @@ const getOutline = tool({
 		filePath: z.string().describe("Path to the file to analyze"),
 	}),
 	execute: async ({ filePath }) => {
-		const { parseTypeScriptFile } = await import(
-			"../ast-index/typescript-parser"
-		);
+		const { parseTypeScriptFile } = await import("../ast-index/typescript-parser");
 		const absolutePath = resolvePath(filePath);
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
@@ -130,17 +128,12 @@ const getOutline = tool({
 });
 
 const getSymbol = tool({
-	description:
-		"Get the full source code of a specific symbol (function, class, etc.)",
+	description: "Get the full source code of a specific symbol (function, class, etc.)",
 	inputSchema: z.object({
-		symbolId: z
-			.string()
-			.describe("Symbol ID in format 'path/to/file.ts::symbolName'"),
+		symbolId: z.string().describe("Symbol ID in format 'path/to/file.ts::symbolName'"),
 	}),
 	execute: async ({ symbolId }) => {
-		const { parseTypeScriptFile, getSymbolSource } = await import(
-			"../ast-index/typescript-parser"
-		);
+		const { parseTypeScriptFile, getSymbolSource } = await import("../ast-index/typescript-parser");
 		const separatorIndex = symbolId.lastIndexOf("::");
 		if (separatorIndex === -1)
 			return "Invalid symbol ID format. Expected 'path/to/file.ts::symbolName'";
@@ -155,11 +148,7 @@ const getSymbol = tool({
 			const symbol = outline.symbols.find((s: any) => s.name === symbolName);
 			if (!symbol)
 				return `Symbol '${symbolName}' not found. Available: ${outline.symbols.map((s: any) => s.name).join(", ")}`;
-			const source = getSymbolSource(
-				absolutePath,
-				symbol.startLine,
-				symbol.endLine,
-			);
+			const source = getSymbolSource(absolutePath, symbol.startLine, symbol.endLine);
 			return `// ${symbol.kind}: ${symbol.name}\n// Lines ${symbol.startLine}-${symbol.endLine}\n\n${source}`;
 		} catch (err) {
 			return `Error: ${err}`;
@@ -168,8 +157,7 @@ const getSymbol = tool({
 });
 
 const searchSymbols = tool({
-	description:
-		"Search for symbols (functions, classes, etc.) across the codebase",
+	description: "Search for symbols (functions, classes, etc.) across the codebase",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		kinds: z
@@ -178,9 +166,7 @@ const searchSymbols = tool({
 			.describe("Filter by kinds: function, class, method, variable"),
 	}),
 	execute: async ({ query, kinds }) => {
-		const { parseTypeScriptFile } = await import(
-			"../ast-index/typescript-parser"
-		);
+		const { parseTypeScriptFile } = await import("../ast-index/typescript-parser");
 		const { glob } = await import("glob");
 
 		const files = await glob("**/*.{ts,tsx,js,jsx}", {
@@ -278,10 +264,7 @@ const editFile = tool({
 const listFiles = tool({
 	description: "List files in a directory",
 	inputSchema: z.object({
-		path: z
-			.string()
-			.optional()
-			.describe("Directory path (default: current directory)"),
+		path: z.string().optional().describe("Directory path (default: current directory)"),
 		pattern: z.string().optional().describe("Glob pattern to filter files"),
 	}),
 	execute: async ({ path: dirPath, pattern }) => {
@@ -321,20 +304,15 @@ const gitDiff = tool({
 	inputSchema: z.object({
 		staged: z.boolean().optional().describe("Show staged changes only"),
 	}),
-	execute: async ({ staged }) =>
-		runShellCommand(staged ? "git diff --staged" : "git diff"),
+	execute: async ({ staged }) => runShellCommand(staged ? "git diff --staged" : "git diff"),
 });
 
 const gitLog = tool({
 	description: "Show git commit log",
 	inputSchema: z.object({
-		count: z
-			.number()
-			.optional()
-			.describe("Number of commits to show (default: 10)"),
+		count: z.number().optional().describe("Number of commits to show (default: 10)"),
 	}),
-	execute: async ({ count }) =>
-		runShellCommand(`git log --oneline -${count || 10}`),
+	execute: async ({ count }) => runShellCommand(`git log --oneline -${count || 10}`),
 });
 
 const gitAdd = tool({
@@ -407,10 +385,7 @@ const ghPrCreate = tool({
 const ghPrView = tool({
 	description: "View a pull request",
 	inputSchema: z.object({
-		number: z
-			.number()
-			.optional()
-			.describe("PR number (default: current branch PR)"),
+		number: z.number().optional().describe("PR number (default: current branch PR)"),
 	}),
 	execute: async ({ number }) => runShellCommand(`gh pr view ${number || ""}`),
 });
@@ -640,9 +615,7 @@ const readNotebook = tool({
 				type: cell.type,
 				executionCount: cell.executionCount,
 				source:
-					cell.source.length > 500
-						? `${cell.source.slice(0, 500)}... [truncated]`
-						: cell.source,
+					cell.source.length > 500 ? `${cell.source.slice(0, 500)}... [truncated]` : cell.source,
 				outputCount: cell.outputs.length,
 				outputs: cell.outputs.slice(0, 3).map((o: any) => ({
 					type: o.type,
@@ -698,12 +671,7 @@ const notebookInsertCell = tool({
 		const { insertCell } = await import("../tools/notebook");
 		const absolutePath = resolvePath(notebookPath);
 		try {
-			const result = await insertCell(
-				absolutePath,
-				afterIndex,
-				cellType,
-				source,
-			);
+			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
 			return `Error inserting notebook cell: ${err}`;
@@ -786,9 +754,7 @@ const mcpListTools = tool({
 			const grouped: Record<string, string[]> = {};
 			for (const { server, tool } of tools) {
 				if (!grouped[server]) grouped[server] = [];
-				grouped[server].push(
-					`  - ${tool.name}: ${tool.description || "No description"}`,
-				);
+				grouped[server].push(`  - ${tool.name}: ${tool.description || "No description"}`);
 			}
 
 			let output = "Available MCP Tools:\n\n";
@@ -807,10 +773,7 @@ const mcpCallTool = tool({
 	inputSchema: z.object({
 		server: z.string().describe("MCP server name"),
 		tool: z.string().describe("Tool name"),
-		args: z
-			.record(z.string(), z.unknown())
-			.optional()
-			.describe("Tool arguments"),
+		args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments"),
 	}),
 	execute: async ({ server, tool: toolName, args }) => {
 		try {
@@ -853,9 +816,7 @@ const backgroundStatus = tool({
 	}),
 	execute: async ({ taskId }) => {
 		try {
-			const { getBackgroundTaskManager, formatTaskStatus } = await import(
-				"../tools/background"
-			);
+			const { getBackgroundTaskManager, formatTaskStatus } = await import("../tools/background");
 			const taskManager = getBackgroundTaskManager();
 			const status = taskManager.getTaskStatus(taskId);
 			if (!status) return `Task not found: ${taskId}`;
@@ -874,8 +835,9 @@ const backgroundOutput = tool({
 	}),
 	execute: async ({ taskId, tail }) => {
 		try {
-			const { getBackgroundTaskManager, formatTaskStatus, formatTaskOutput } =
-				await import("../tools/background");
+			const { getBackgroundTaskManager, formatTaskStatus, formatTaskOutput } = await import(
+				"../tools/background"
+			);
 			const taskManager = getBackgroundTaskManager();
 			const status = taskManager.getTaskStatus(taskId);
 			const output = taskManager.getTaskOutput(taskId, { tail });
@@ -892,9 +854,7 @@ const backgroundOutput = tool({
 // ============================================
 
 async function runShellCommand(command: string): Promise<string> {
-	const { getPermissionManager, isCommandDangerous } = await import(
-		"../permissions"
-	);
+	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const { getHookManager } = await import("../hooks");
 
 	const permissionManager = getPermissionManager();
@@ -913,8 +873,7 @@ async function runShellCommand(command: string): Promise<string> {
 				: "The agent wants to run a shell command.",
 			command,
 		);
-		if (!allowed)
-			return `[PERMISSION DENIED] User declined to execute: ${command}`;
+		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
 
 	const startTime = Date.now();
@@ -973,16 +932,9 @@ async function runShellCommand(command: string): Promise<string> {
 			clearTimeout(timeout);
 
 			try {
-				const { getBackgroundTaskManager } = await import(
-					"../tools/background"
-				);
+				const { getBackgroundTaskManager } = await import("../tools/background");
 				const taskManager = getBackgroundTaskManager(_ctx.workingDirectory);
-				const taskId = taskManager.adoptProcess(
-					finalCommand,
-					proc,
-					stdout,
-					stderr,
-				);
+				const taskId = taskManager.adoptProcess(finalCommand, proc, stdout, stderr);
 
 				hookManager.executeHooks("afterCommand", {
 					command: finalCommand,
@@ -1068,25 +1020,18 @@ const spawnAgent = tool({
 	description:
 		"Spawn a background agent. Use runtime='claude' for complex tasks that need a stronger model, runtime='8gent' for standard tasks, runtime='shell' for simple commands.",
 	inputSchema: z.object({
-		task: z
-			.string()
-			.describe("Task description for the background agent to execute"),
+		task: z.string().describe("Task description for the background agent to execute"),
 		runtime: z
 			.enum(["8gent", "claude", "shell"])
 			.optional()
 			.describe(
 				"Runtime to use: '8gent' (default, internal agent), 'claude' (Claude CLI for complex tasks), 'shell' (sh -c for simple commands)",
 			),
-		model: z
-			.string()
-			.optional()
-			.describe("Model to use (only for 8gent runtime)"),
+		model: z.string().optional().describe("Model to use (only for 8gent runtime)"),
 		timeout: z
 			.number()
 			.optional()
-			.describe(
-				"Timeout in ms (default: 5 min, only for claude/shell runtimes)",
-			),
+			.describe("Timeout in ms (default: 5 min, only for claude/shell runtimes)"),
 	}),
 	execute: async ({ task, runtime, model, timeout }) => {
 		try {
@@ -1209,9 +1154,7 @@ const listAgents = tool({
 	inputSchema: z.object({}),
 	execute: async () => {
 		try {
-			const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import(
-				"../orchestration"
-			);
+			const { getAgentPool, listCLIAgents, getCLIAgentStatus } = await import("../orchestration");
 			const pool = getAgentPool();
 			const poolAgents = pool.listAgents();
 			const cliAgentsList = listCLIAgents();
@@ -1284,19 +1227,13 @@ const listAgents = tool({
 // ── Multi-Agent Orchestration Tools ──────────────────────────────
 
 import { getOrchestratorBus } from "../orchestration/orchestrator-bus";
-import {
-	getPersona,
-	listPersonas,
-	matchPersona,
-} from "../orchestration/personas";
+import { getPersona, listPersonas, matchPersona } from "../orchestration/personas";
 
 const suggest_spawn = tool({
 	description:
 		"Suggest spawning a specialist sub-agent for a specific task. The user will be asked to approve unless auto-spawn is enabled.",
 	inputSchema: z.object({
-		persona: z
-			.string()
-			.describe("Persona ID: winston, larry, curly, mo, or doc"),
+		persona: z.string().describe("Persona ID: winston, larry, curly, mo, or doc"),
 		task: z.string().describe("The specific task for this agent"),
 		reason: z.string().describe("Why this specialist is needed"),
 	}),
@@ -1386,10 +1323,7 @@ const merge_agent_work = tool({
 		"Review and merge a sub-agent's worktree changes into the main branch. Only the orchestrator should call this.",
 	inputSchema: z.object({
 		agentId: z.string().describe("The agent ID whose work to merge"),
-		commitMessage: z
-			.string()
-			.optional()
-			.describe("Custom merge commit message"),
+		commitMessage: z.string().optional().describe("Custom merge commit message"),
 	}),
 	execute: async ({ agentId, commitMessage }) => {
 		const bus = getOrchestratorBus();
@@ -1404,9 +1338,7 @@ const merge_agent_work = tool({
 		}
 
 		// Import worktree manager lazily
-		const { WorktreeManager } = await import(
-			"../orchestration/worktree-manager"
-		);
+		const { WorktreeManager } = await import("../orchestration/worktree-manager");
 		const wm = new WorktreeManager();
 
 		// Get diff for review
@@ -1448,14 +1380,10 @@ const writeNotesTool = tool({
 		append: z
 			.boolean()
 			.optional()
-			.describe(
-				"If true, appends to existing note with same title instead of creating new",
-			),
+			.describe("If true, appends to existing note with same title instead of creating new"),
 	}),
 	execute: async ({ title, content, append }) => {
-		const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import(
-			"node:fs"
-		);
+		const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import("node:fs");
 		const { join } = await import("node:path");
 		const dataDir = join(process.env.HOME || "~", ".8gent", "tabs");
 		const filepath = join(dataDir, "notes.json");
@@ -1516,9 +1444,7 @@ const writeTerminalTool = tool({
 			),
 		input: z
 			.string()
-			.describe(
-				"The command or text to send. A newline will be appended automatically.",
-			),
+			.describe("The command or text to send. A newline will be appended automatically."),
 	}),
 	execute: async ({ tabId, input }) => {
 		// Dynamic import to avoid bundling node-pty in non-TUI contexts
@@ -1531,8 +1457,7 @@ const writeTerminalTool = tool({
 			const open = listTerminals();
 			if (open.length === 0)
 				return {
-					error:
-						"No terminal tabs are open. Ask the user to open one with /terminal.",
+					error: "No terminal tabs are open. Ask the user to open one with /terminal.",
 				};
 			resolvedId = open[0];
 		}
@@ -1571,9 +1496,7 @@ const selfInspect = tool({
 			appendedContextCount: p.appendedContext.length,
 			appendedContext:
 				p.appendedContext.length > 0
-					? p.appendedContext.map(
-							(c, i) => `[${i}] ${c.slice(0, 80)}${c.length > 80 ? "..." : ""}`,
-						)
+					? p.appendedContext.map((c, i) => `[${i}] ${c.slice(0, 80)}${c.length > 80 ? "..." : ""}`)
 					: [],
 		};
 	},
@@ -1599,9 +1522,7 @@ const selfTune = tool({
 				"Parameter name: temperature, topP, topK, maxOutputTokens, maxSteps, frequencyPenalty, presencePenalty",
 			),
 		value: z.number().describe("New value for the parameter"),
-		reason: z
-			.string()
-			.describe("Why you're making this change - logged for introspection"),
+		reason: z.string().describe("Why you're making this change - logged for introspection"),
 	}),
 	execute: async ({ parameter, value, reason }) => {
 		if (!TUNABLE_KEYS.includes(parameter as any)) {
@@ -1622,9 +1543,7 @@ const selfTune = tool({
 		const clamped = Math.max(min, Math.min(max, value));
 		const prev = (getRuntimeParams() as any)[parameter];
 		setRuntimeParams({ [parameter]: clamped } as any);
-		console.log(
-			`[SELF-TUNE] ${parameter}: ${prev} -> ${clamped} (reason: ${reason})`,
-		);
+		console.log(`[SELF-TUNE] ${parameter}: ${prev} -> ${clamped} (reason: ${reason})`);
 		return {
 			parameter,
 			previous: prev,
@@ -1639,27 +1558,20 @@ const selfAppendContext = tool({
 	description:
 		"[SELF] Append additional context or instructions to your own system prompt for this session. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
 	inputSchema: z.object({
-		context: z
-			.string()
-			.describe("Text to append to your system prompt (max 500 chars)"),
-		reason: z
-			.string()
-			.describe("Why this context is important for future steps"),
+		context: z.string().describe("Text to append to your system prompt (max 500 chars)"),
+		reason: z.string().describe("Why this context is important for future steps"),
 	}),
 	execute: async ({ context, reason }) => {
 		const p = getRuntimeParams();
 		if (p.appendedContext.length >= 10) {
 			return {
-				error:
-					"Max 10 context appends per session reached. Consolidate existing context instead.",
+				error: "Max 10 context appends per session reached. Consolidate existing context instead.",
 			};
 		}
 		const trimmed = context.slice(0, 500);
 		p.appendedContext.push(trimmed);
 		setRuntimeParams({ appendedContext: p.appendedContext });
-		console.log(
-			`[SELF-CONTEXT] Appended ${trimmed.length} chars (reason: ${reason})`,
-		);
+		console.log(`[SELF-CONTEXT] Appended ${trimmed.length} chars (reason: ${reason})`);
 		return {
 			appended: true,
 			index: p.appendedContext.length - 1,
@@ -1719,16 +1631,12 @@ const suggestDesign = tool({
 		projectType: z
 			.string()
 			.optional()
-			.describe(
-				"Project type hint: ai, saas, portfolio, ecommerce, dashboard, landing-page, etc.",
-			),
+			.describe("Project type hint: ai, saas, portfolio, ecommerce, dashboard, landing-page, etc."),
 	}),
 	execute: async ({ task, projectType }) => {
-		const {
-			detectDesignNeed,
-			suggestDesignSystems,
-			getAvailableDesignSystems,
-		} = await import("../design-agent/index.js");
+		const { detectDesignNeed, suggestDesignSystems, getAvailableDesignSystems } = await import(
+			"../design-agent/index.js"
+		);
 		const detection = await detectDesignNeed(task);
 		if (!detection.needsDesign) {
 			return { needsDesign: false, reason: detection.reason };
@@ -1737,19 +1645,15 @@ const suggestDesign = tool({
 		let dbSuggestions: any[] = [];
 		if (projectType) {
 			try {
-				const { initDatabase, suggestForProject } = await import(
-					"../design-systems/index.js"
-				);
+				const { initDatabase, suggestForProject } = await import("../design-systems/index.js");
 				initDatabase();
-				dbSuggestions = suggestForProject(projectType, { maxResults: 3 }).map(
-					(s: any) => ({
-						name: s.system.system.name,
-						style: s.system.system.style,
-						mood: s.system.system.mood,
-						score: s.score,
-						reasoning: s.reasoning,
-					}),
-				);
+				dbSuggestions = suggestForProject(projectType, { maxResults: 3 }).map((s: any) => ({
+					name: s.system.system.name,
+					style: s.system.system.style,
+					mood: s.system.system.mood,
+					score: s.score,
+					reasoning: s.reasoning,
+				}));
 			} catch {}
 		}
 		return {
@@ -1757,17 +1661,15 @@ const suggestDesign = tool({
 			confidence: detection.confidence,
 			projectType: detection.projectType,
 			categories: detection.suggestedCategories,
-			frameworkSuggestions: suggestions.suggestions
-				.slice(0, 3)
-				.map((s: any) => ({
-					id: s.id,
-					name: s.name,
-					description: s.description,
-					reasoning: s.reasoning,
-					score: s.score,
-					stack: s.stack,
-					installCommands: s.installCommands,
-				})),
+			frameworkSuggestions: suggestions.suggestions.slice(0, 3).map((s: any) => ({
+				id: s.id,
+				name: s.name,
+				description: s.description,
+				reasoning: s.reasoning,
+				score: s.score,
+				stack: s.stack,
+				installCommands: s.installCommands,
+			})),
 			designSystemSuggestions: dbSuggestions,
 			availableSystems: getAvailableDesignSystems().map((s: any) => s.name),
 		};
@@ -1785,17 +1687,12 @@ const queryDesignSystem = tool({
 		style: z
 			.string()
 			.optional()
-			.describe(
-				"Filter by style: minimal, bold, playful, elegant, tech, retro",
-			),
+			.describe("Filter by style: minimal, bold, playful, elegant, tech, retro"),
 		mood: z
 			.string()
 			.optional()
 			.describe("Filter by mood: professional, creative, tech, warm, cool"),
-		output: z
-			.string()
-			.optional()
-			.describe("Output format: summary (default), css, tailwind, hex"),
+		output: z.string().optional().describe("Output format: summary (default), css, tailwind, hex"),
 	}),
 	execute: async ({ query, style, mood, output: outputFormat }) => {
 		const {
@@ -1815,17 +1712,10 @@ const queryDesignSystem = tool({
 		if (query) {
 			const complete = getComplete(query);
 			if (complete) {
-				if (fmt === "css")
-					return (
-						generateCssVariables(complete.system.id) || "No palette for CSS."
-					);
+				if (fmt === "css") return generateCssVariables(complete.system.id) || "No palette for CSS.";
 				if (fmt === "tailwind")
-					return (
-						generateTailwindConfig(complete.system.id) ||
-						"No palette for Tailwind."
-					);
-				if (fmt === "hex")
-					return getHexPalette(complete.system.id) || "No palette.";
+					return generateTailwindConfig(complete.system.id) || "No palette for Tailwind.";
+				if (fmt === "hex") return getHexPalette(complete.system.id) || "No palette.";
 				return {
 					name: complete.system.name,
 					style: complete.system.style,

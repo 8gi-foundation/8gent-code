@@ -13,10 +13,7 @@ function observable<T>(initialValue: T): Observable<T> {
  * @param fn - Function to compute the derived value.
  * @returns The computed observable.
  */
-function computed<T>(
-	deps: Observable<unknown>[],
-	fn: (...args: any[]) => T,
-): Observable<T> {
+function computed<T>(deps: Observable<unknown>[], fn: (...args: any[]) => T): Observable<T> {
 	const obs = new Observable<T>(fn(...deps.map((d) => d.peek())));
 	let currentValue = obs.peek();
 	deps.forEach((dep) => {

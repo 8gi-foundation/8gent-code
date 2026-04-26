@@ -99,9 +99,7 @@ export class SkillRegistry {
 		this.summaries.set(skill.name, summary);
 		this.saveIndex();
 
-		console.log(
-			`[skill-registry] ✅ Registered: ${skill.name} (${skill.tokenEstimate} tokens)`,
-		);
+		console.log(`[skill-registry] ✅ Registered: ${skill.name} (${skill.tokenEstimate} tokens)`);
 	}
 
 	/**
@@ -111,10 +109,7 @@ export class SkillRegistry {
 		const deleted = this.summaries.delete(name);
 		if (deleted) {
 			// Remove skill file
-			const skillPath = path.join(
-				this.skillsDir,
-				`${name.toLowerCase().replace(/\s+/g, "-")}.md`,
-			);
+			const skillPath = path.join(this.skillsDir, `${name.toLowerCase().replace(/\s+/g, "-")}.md`);
 			if (fs.existsSync(skillPath)) {
 				fs.unlinkSync(skillPath);
 			}
@@ -142,9 +137,7 @@ export class SkillRegistry {
 	 * Query skills by capability
 	 */
 	findByCapability(capability: string): SkillSummary[] {
-		return Array.from(this.summaries.values()).filter((s) =>
-			s.capabilities.includes(capability),
-		);
+		return Array.from(this.summaries.values()).filter((s) => s.capabilities.includes(capability));
 	}
 
 	/**
@@ -179,16 +172,12 @@ export class SkillRegistry {
 
 		if (q.trigger) {
 			const triggerLower = q.trigger.toLowerCase();
-			results = results.filter((s) =>
-				s.triggers.some((t) => t.includes(triggerLower)),
-			);
+			results = results.filter((s) => s.triggers.some((t) => t.includes(triggerLower)));
 		}
 
 		if (q.namePattern) {
 			const regex = new RegExp(q.namePattern, "i");
-			results = results.filter(
-				(s) => regex.test(s.name) || regex.test(s.description),
-			);
+			results = results.filter((s) => regex.test(s.name) || regex.test(s.description));
 		}
 
 		return results.slice(0, q.maxResults || 10);
@@ -218,10 +207,7 @@ export class SkillRegistry {
 	 * Load full skill content (when actually needed)
 	 */
 	loadFullSkill(name: string): string | null {
-		const skillPath = path.join(
-			this.skillsDir,
-			`${name.toLowerCase().replace(/\s+/g, "-")}.md`,
-		);
+		const skillPath = path.join(this.skillsDir, `${name.toLowerCase().replace(/\s+/g, "-")}.md`);
 		if (fs.existsSync(skillPath)) {
 			return fs.readFileSync(skillPath, "utf-8");
 		}
@@ -250,8 +236,7 @@ export class SkillRegistry {
 			skillCount: skills.length,
 			totalTokens,
 			capabilities,
-			avgTokensPerSkill:
-				skills.length > 0 ? Math.round(totalTokens / skills.length) : 0,
+			avgTokensPerSkill: skills.length > 0 ? Math.round(totalTokens / skills.length) : 0,
 		};
 	}
 
@@ -261,9 +246,7 @@ export class SkillRegistry {
 	rebuildIndex(): void {
 		this.summaries.clear();
 
-		const files = fs
-			.readdirSync(this.skillsDir)
-			.filter((f) => f.endsWith(".md"));
+		const files = fs.readdirSync(this.skillsDir).filter((f) => f.endsWith(".md"));
 
 		for (const file of files) {
 			const filePath = path.join(this.skillsDir, file);
@@ -301,9 +284,7 @@ export class SkillRegistry {
 		}
 
 		this.saveIndex();
-		console.log(
-			`[skill-registry] 🔄 Rebuilt index: ${this.summaries.size} skills`,
-		);
+		console.log(`[skill-registry] 🔄 Rebuilt index: ${this.summaries.size} skills`);
 	}
 
 	private parseArray(val: string | undefined): string[] {

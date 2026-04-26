@@ -145,8 +145,7 @@ export function generateDecompositionPrompt(
 	task: string,
 	complexity: "small" | "medium" | "large",
 ): string {
-	const stepCount =
-		complexity === "small" ? "2-3" : complexity === "medium" ? "4-6" : "7-10";
+	const stepCount = complexity === "small" ? "2-3" : complexity === "medium" ? "4-6" : "7-10";
 
 	return `## TASK DECOMPOSITION
 
@@ -268,25 +267,13 @@ export class DelegationManager {
 		const capabilities: string[] = [];
 		const taskLower = task.toLowerCase();
 
-		if (
-			taskLower.includes("file") ||
-			taskLower.includes("create") ||
-			taskLower.includes("write")
-		) {
+		if (taskLower.includes("file") || taskLower.includes("create") || taskLower.includes("write")) {
 			capabilities.push("file_operations");
 		}
-		if (
-			taskLower.includes("git") ||
-			taskLower.includes("commit") ||
-			taskLower.includes("push")
-		) {
+		if (taskLower.includes("git") || taskLower.includes("commit") || taskLower.includes("push")) {
 			capabilities.push("git_operations");
 		}
-		if (
-			taskLower.includes("test") ||
-			taskLower.includes("verify") ||
-			taskLower.includes("check")
-		) {
+		if (taskLower.includes("test") || taskLower.includes("verify") || taskLower.includes("check")) {
 			capabilities.push("testing");
 		}
 		if (
@@ -349,16 +336,14 @@ export class DelegationManager {
 		return {
 			active: this.activeDelegations.size,
 			completed: completed.length,
-			successRate:
-				completed.length > 0 ? successful.length / completed.length : 0,
+			successRate: completed.length > 0 ? successful.length / completed.length : 0,
 			avgDuration:
 				completed.length > 0
 					? completed.reduce((sum, d) => sum + d.duration, 0) / completed.length
 					: 0,
 			avgTokens:
 				completed.length > 0
-					? completed.reduce((sum, d) => sum + d.tokensUsed, 0) /
-						completed.length
+					? completed.reduce((sum, d) => sum + d.tokensUsed, 0) / completed.length
 					: 0,
 		};
 	}

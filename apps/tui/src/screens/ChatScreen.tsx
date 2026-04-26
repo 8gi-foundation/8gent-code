@@ -8,16 +8,8 @@ interface ChatScreenProps {
 	soundEnabled: boolean;
 }
 
-export function ChatScreen({
-	messages,
-	animateTyping,
-	soundEnabled,
-}: ChatScreenProps) {
+export function ChatScreen({ messages, animateTyping, soundEnabled }: ChatScreenProps) {
 	return (
-		<MessageList
-			messages={messages}
-			animateTyping={animateTyping}
-			soundEnabled={soundEnabled}
-		/>
+		<MessageList messages={messages} animateTyping={animateTyping} soundEnabled={soundEnabled} />
 	);
 }

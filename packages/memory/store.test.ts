@@ -13,12 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { MemoryStore } from "./store.js";
-import {
-	type CoreMemory,
-	type Memory,
-	type SemanticMemory,
-	generateId,
-} from "./types.js";
+import { type CoreMemory, type Memory, type SemanticMemory, generateId } from "./types.js";
 
 const TEST_DB = `/tmp/memory-store-test-${Date.now()}.db`;
 
@@ -47,9 +42,7 @@ function makeCoreMemory(overrides: Partial<CoreMemory> = {}): CoreMemory {
 	};
 }
 
-function makeSemanticMemory(
-	overrides: Partial<SemanticMemory> = {},
-): SemanticMemory {
+function makeSemanticMemory(overrides: Partial<SemanticMemory> = {}): SemanticMemory {
 	const now = Date.now();
 	return {
 		id: generateId("mem"),
@@ -104,9 +97,7 @@ describe("JSONB double-encoding guard", () => {
 
 		expect(retrieved).not.toBeNull();
 		expect(retrieved?.type).toBe("core");
-		expect((retrieved as CoreMemory).content).toBe(
-			"Architecture uses microservices",
-		);
+		expect((retrieved as CoreMemory).content).toBe("Architecture uses microservices");
 		expect((retrieved as CoreMemory).tags).toEqual(["arch", "design"]);
 		expect(Array.isArray((retrieved as CoreMemory).tags)).toBe(true);
 	});
@@ -244,12 +235,7 @@ describe("JSONB double-encoding guard", () => {
 
 		const id = store.write(mem);
 
-		store.update(
-			id,
-			{ content: "updated content" } as Partial<Memory>,
-			"test update",
-			"test-user",
-		);
+		store.update(id, { content: "updated content" } as Partial<Memory>, "test update", "test-user");
 
 		const retrieved = store.get(id) as CoreMemory;
 		expect(retrieved).not.toBeNull();
@@ -260,12 +246,7 @@ describe("JSONB double-encoding guard", () => {
 		expect(Array.isArray(retrieved.tags)).toBe(true);
 
 		// Update again to verify no accumulation of encoding
-		store.update(
-			id,
-			{ content: "second update" } as Partial<Memory>,
-			"second update",
-			"test-user",
-		);
+		store.update(id, { content: "second update" } as Partial<Memory>, "second update", "test-user");
 		const retrieved2 = store.get(id) as CoreMemory;
 		expect(retrieved2.content).toBe("second update");
 		expect(retrieved2.version).toBe(3);

@@ -116,18 +116,8 @@ function addQueryParam(
  * @param params - The record to modify.
  * @param key - The parameter key to remove.
  */
-function removeQueryParam(
-	params: Record<string, string | string[]>,
-	key: string,
-): void {
+function removeQueryParam(params: Record<string, string | string[]>, key: string): void {
 	delete params[key];
 }
 
-export {
-	parseUrl,
-	buildUrl,
-	parseQueryString,
-	stringifyQuery,
-	addQueryParam,
-	removeQueryParam,
-};
+export { parseUrl, buildUrl, parseQueryString, stringifyQuery, addQueryParam, removeQueryParam };

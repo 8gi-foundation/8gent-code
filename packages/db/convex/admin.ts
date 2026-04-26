@@ -93,9 +93,7 @@ export const getUserList = query({
 		limit: v.optional(v.number()),
 		offset: v.optional(v.number()),
 		search: v.optional(v.string()),
-		planFilter: v.optional(
-			v.union(v.literal("free"), v.literal("pro"), v.literal("team")),
-		),
+		planFilter: v.optional(v.union(v.literal("free"), v.literal("pro"), v.literal("team"))),
 	},
 	handler: async (ctx, { limit = 50, offset = 0, search, planFilter }) => {
 		await requireAdmin(ctx);
@@ -148,9 +146,7 @@ export const getUserList = query({
 					.query("sessions")
 					.withIndex("by_userId", (q) => q.eq("userId", user._id))
 					.collect();
-				const activeSessionCount = sessions.filter(
-					(s) => s.endedAt === undefined,
-				).length;
+				const activeSessionCount = sessions.filter((s) => s.endedAt === undefined).length;
 
 				return {
 					...user,
@@ -185,20 +181,14 @@ export const getSystemHealth = query({
 
 		const allSessions = await ctx.db.query("sessions").collect();
 
-		const activeSessions = allSessions.filter(
-			(s) => s.endedAt === undefined,
-		).length;
-		const sessionsLastHour = allSessions.filter(
-			(s) => s.startedAt >= oneHourAgo,
-		).length;
+		const activeSessions = allSessions.filter((s) => s.endedAt === undefined).length;
+		const sessionsLastHour = allSessions.filter((s) => s.startedAt >= oneHourAgo).length;
 
 		// Stale sessions (started > 2hr ago, never ended) indicate crashes
 		const staleSessions = allSessions.filter(
 			(s) => s.endedAt === undefined && s.startedAt < twoHoursAgo,
 		).length;
-		const completedSessions = allSessions.filter(
-			(s) => s.endedAt !== undefined,
-		).length;
+		const completedSessions = allSessions.filter((s) => s.endedAt !== undefined).length;
 		const errorRate =
 			completedSessions + staleSessions > 0
 				? staleSessions / (completedSessions + staleSessions)
@@ -206,9 +196,7 @@ export const getSystemHealth = query({
 
 		// Model distribution (last 30 days)
 		const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
-		const recentSessions = allSessions.filter(
-			(s) => s.startedAt >= thirtyDaysAgo,
-		);
+		const recentSessions = allSessions.filter((s) => s.startedAt >= thirtyDaysAgo);
 
 		const modelDistribution: Record<string, number> = {};
 		const providerDistribution: Record<string, number> = {};
@@ -216,10 +204,8 @@ export const getSystemHealth = query({
 		let completedCount = 0;
 
 		for (const session of recentSessions) {
-			modelDistribution[session.model] =
-				(modelDistribution[session.model] ?? 0) + 1;
-			providerDistribution[session.provider] =
-				(providerDistribution[session.provider] ?? 0) + 1;
+			modelDistribution[session.model] = (modelDistribution[session.model] ?? 0) + 1;
+			providerDistribution[session.provider] = (providerDistribution[session.provider] ?? 0) + 1;
 
 			if (session.endedAt) {
 				totalDuration += session.endedAt - session.startedAt;
@@ -227,8 +213,7 @@ export const getSystemHealth = query({
 			}
 		}
 
-		const avgSessionDuration =
-			completedCount > 0 ? Math.round(totalDuration / completedCount) : 0;
+		const avgSessionDuration = completedCount > 0 ? Math.round(totalDuration / completedCount) : 0;
 
 		return {
 			activeSessions,
@@ -388,9 +373,7 @@ export const getUserDetail = query({
 			}
 		}
 
-		const activeSessions = sessions.filter(
-			(s) => s.endedAt === undefined,
-		).length;
+		const activeSessions = sessions.filter((s) => s.endedAt === undefined).length;
 
 		return {
 			user,

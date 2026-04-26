@@ -129,9 +129,7 @@ export interface FinishEvent {
 /**
  * Create an 8gent AI agent powered by the Vercel AI SDK.
  */
-export function createEightAgent(
-	config: EightAgentConfig,
-): ToolLoopAgent<never, AgentTools> {
+export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never, AgentTools> {
 	const workingDir = config.workingDirectory || process.cwd();
 	setToolContext({ workingDirectory: workingDir });
 
@@ -158,8 +156,7 @@ export function createEightAgent(
 			: agentTools;
 	const tools = (config.tools as AgentTools) || defaultTools;
 
-	const isLocalProvider =
-		config.provider.name === "lmstudio" || config.provider.name === "ollama";
+	const isLocalProvider = config.provider.name === "lmstudio" || config.provider.name === "ollama";
 
 	const agent = new ToolLoopAgent<never, AgentTools>({
 		model,
@@ -171,17 +168,11 @@ export function createEightAgent(
 				? { maxOutputTokens: 4096 }
 				: {}),
 		// Generation params (tunable via self_tune)
-		...(config.temperature !== undefined
-			? { temperature: config.temperature }
-			: {}),
+		...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
 		...(config.topP !== undefined ? { topP: config.topP } : {}),
 		...(config.topK !== undefined ? { topK: config.topK } : {}),
-		...(config.frequencyPenalty !== undefined
-			? { frequencyPenalty: config.frequencyPenalty }
-			: {}),
-		...(config.presencePenalty !== undefined
-			? { presencePenalty: config.presencePenalty }
-			: {}),
+		...(config.frequencyPenalty !== undefined ? { frequencyPenalty: config.frequencyPenalty } : {}),
+		...(config.presencePenalty !== undefined ? { presencePenalty: config.presencePenalty } : {}),
 		tools,
 		stopWhen: stepCountIs(config.maxSteps || 30),
 

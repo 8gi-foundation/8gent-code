@@ -205,9 +205,7 @@ export class SSETransport implements Transport {
 		});
 
 		if (!res.ok) {
-			throw new Error(
-				`MCP SSE request failed: ${res.status} ${res.statusText}`,
-			);
+			throw new Error(`MCP SSE request failed: ${res.status} ${res.statusText}`);
 		}
 
 		const body = (await res.json()) as JSONRPCResponse;

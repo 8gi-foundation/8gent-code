@@ -73,12 +73,7 @@ export async function indexFolder(
 	function walkDirectory(dir: string): void {
 		const entries = fs.readdirSync(dir, { withFileTypes: true });
 		for (const entry of entries) {
-			if (
-				ignorePatterns.some(
-					(p) => entry.name === p || entry.name.startsWith("."),
-				)
-			)
-				continue;
+			if (ignorePatterns.some((p) => entry.name === p || entry.name.startsWith("."))) continue;
 			const fullPath = path.join(dir, entry.name);
 			if (entry.isDirectory()) {
 				walkDirectory(fullPath);
@@ -136,18 +131,13 @@ export async function indexRepo(
 		sparse?: boolean;
 	},
 ): Promise<RepoIndex> {
-	throw new Error(
-		"Use indexFolder() with a local checkout. Remote indexing not yet supported.",
-	);
+	throw new Error("Use indexFolder() with a local checkout. Remote indexing not yet supported.");
 }
 
 /**
  * Get file outline (all symbols in a file)
  */
-export function getFileOutline(
-	repoId: string,
-	filePath: string,
-): FileOutline | null {
+export function getFileOutline(repoId: string, filePath: string): FileOutline | null {
 	const repo = fileOutlines.get(repoId);
 	if (!repo) return null;
 	return repo.get(filePath) || null;
@@ -298,10 +288,7 @@ export function estimateTokenSavings(
 		? outline.symbols.filter((s) => symbolIds.includes(s.id))
 		: outline.symbols;
 
-	const symbolLines = symbols.reduce(
-		(sum, s) => sum + (s.endLine - s.startLine + 1),
-		0,
-	);
+	const symbolLines = symbols.reduce((sum, s) => sum + (s.endLine - s.startLine + 1), 0);
 	const symbolOnlyTokens = Math.ceil((symbolLines * 40) / 4); // ~40 chars per line estimate
 
 	const savingsPercent =

@@ -60,9 +60,7 @@ export function OnboardingScreen({
 				{Array.from({ length: totalSteps }).map((_, i) => (
 					<Text
 						key={i}
-						color={
-							i < stepIndex ? "green" : i === stepIndex ? "cyan" : undefined
-						}
+						color={i < stepIndex ? "green" : i === stepIndex ? "cyan" : undefined}
 						dimColor={i > stepIndex}
 					>
 						{i < stepIndex ? " * " : i === stepIndex ? " > " : " - "}

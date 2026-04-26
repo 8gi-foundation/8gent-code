@@ -34,14 +34,10 @@ async function main() {
 					],
 				},
 			]);
-			console.error(
-				"[smoke-apfel] FAIL: vision prompt should have been rejected",
-			);
+			console.error("[smoke-apfel] FAIL: vision prompt should have been rejected");
 			process.exit(2);
 		} catch (err) {
-			console.log(
-				`[smoke-apfel] vision-rejection OK: ${(err as Error).message}`,
-			);
+			console.log(`[smoke-apfel] vision-rejection OK: ${(err as Error).message}`);
 			process.exit(0);
 		}
 	}
@@ -55,9 +51,7 @@ async function main() {
 	}
 
 	try {
-		const response = await client.chat([
-			{ role: "user", content: "Say hello in one word." },
-		]);
+		const response = await client.chat([{ role: "user", content: "Say hello in one word." }]);
 		const content = response.message.content || "";
 		if (!content.trim()) {
 			console.error("[smoke-apfel] FAIL: empty response");

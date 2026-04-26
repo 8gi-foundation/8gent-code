@@ -23,9 +23,7 @@ export const getDaily = query({
 	handler: async (ctx, { userId, date }) => {
 		return await ctx.db
 			.query("usage")
-			.withIndex("by_userId_date", (q) =>
-				q.eq("userId", userId).eq("date", date),
-			)
+			.withIndex("by_userId_date", (q) => q.eq("userId", userId).eq("date", date))
 			.unique();
 	},
 });
@@ -43,15 +41,11 @@ export const getRange = query({
 	handler: async (ctx, { userId, startDate, endDate }) => {
 		const records = await ctx.db
 			.query("usage")
-			.withIndex("by_userId_date", (q) =>
-				q.eq("userId", userId).gte("date", startDate),
-			)
+			.withIndex("by_userId_date", (q) => q.eq("userId", userId).gte("date", startDate))
 			.collect();
 
 		// Filter by end date and sort
-		return records
-			.filter((r) => r.date <= endDate)
-			.sort((a, b) => a.date.localeCompare(b.date));
+		return records.filter((r) => r.date <= endDate).sort((a, b) => a.date.localeCompare(b.date));
 	},
 });
 
@@ -69,14 +63,10 @@ export const getMonthlySummary = query({
 
 		const records = await ctx.db
 			.query("usage")
-			.withIndex("by_userId_date", (q) =>
-				q.eq("userId", userId).gte("date", startDate),
-			)
+			.withIndex("by_userId_date", (q) => q.eq("userId", userId).gte("date", startDate))
 			.collect();
 
-		const monthRecords = records.filter(
-			(r) => r.date <= endDate && r.date.startsWith(yearMonth),
-		);
+		const monthRecords = records.filter((r) => r.date <= endDate && r.date.startsWith(yearMonth));
 
 		// Aggregate
 		const allModels = new Set<string>();
@@ -128,16 +118,11 @@ export const recordDaily = mutation({
 		sessionCount: v.number(),
 		model: v.string(),
 	},
-	handler: async (
-		ctx,
-		{ userId, date, tokensIn, tokensOut, sessionCount, model },
-	) => {
+	handler: async (ctx, { userId, date, tokensIn, tokensOut, sessionCount, model }) => {
 		// Check for existing record
 		const existing = await ctx.db
 			.query("usage")
-			.withIndex("by_userId_date", (q) =>
-				q.eq("userId", userId).eq("date", date),
-			)
+			.withIndex("by_userId_date", (q) => q.eq("userId", userId).eq("date", date))
 			.unique();
 
 		if (existing) {

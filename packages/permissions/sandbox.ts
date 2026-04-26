@@ -15,11 +15,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type {
-	IsolationLevel,
-	SandboxOptions,
-	SandboxResult,
-} from "./sandbox-types.js";
+import type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
 
 // Re-export types for convenience
 export type {
@@ -91,9 +87,7 @@ async function runInTempdir(
 	workDir?: string,
 ): Promise<SandboxResult> {
 	const useTmp = !workDir;
-	const tmpDir = useTmp
-		? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-sandbox-"))
-		: workDir!;
+	const tmpDir = useTmp ? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-sandbox-")) : workDir!;
 
 	const start = Date.now();
 	let timedOut = false;
@@ -151,18 +145,13 @@ async function runInDocker(
 	workDir?: string,
 ): Promise<SandboxResult> {
 	const useTmp = !workDir;
-	const tmpDir = useTmp
-		? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-docker-"))
-		: workDir!;
+	const tmpDir = useTmp ? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-docker-")) : workDir!;
 
 	const start = Date.now();
 	let timedOut = false;
 
 	const networkFlag = opts.allowNetwork ? [] : ["--network", "none"];
-	const envFlags = Object.entries(opts.env).flatMap(([k, v]) => [
-		"-e",
-		`${k}=${v}`,
-	]);
+	const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
 
 	const dockerArgs = [
 		"docker",

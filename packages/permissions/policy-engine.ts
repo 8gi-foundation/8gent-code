@@ -25,11 +25,7 @@ import type {
 // ============================================
 
 const DEFAULT_POLICY_PATH = path.join(
-	path.dirname(
-		typeof __filename !== "undefined"
-			? __filename
-			: new URL(import.meta.url).pathname,
-	),
+	path.dirname(typeof __filename !== "undefined" ? __filename : new URL(import.meta.url).pathname),
 	"default-policies.yaml",
 );
 
@@ -51,13 +47,7 @@ const POLICY_CHECKSUM_PATH = path.join(
 const MAX_PATTERN_LENGTH = 200;
 
 /** Valid condition operators */
-const VALID_OPERATORS = [
-	"contains",
-	"in",
-	"equals",
-	"starts_with",
-	"ends_with",
-] as const;
+const VALID_OPERATORS = ["contains", "in", "equals", "starts_with", "ends_with"] as const;
 
 type ConditionOperator = (typeof VALID_OPERATORS)[number];
 
@@ -80,8 +70,7 @@ interface ParsedCondition {
 function parseCondition(condition: string): ParsedCondition {
 	const cond = condition.trim();
 	if (!cond) throw new Error("Empty condition");
-	if (cond.length > 2000)
-		throw new Error("Condition too long (max 2000 chars)");
+	if (cond.length > 2000) throw new Error("Condition too long (max 2000 chars)");
 
 	// Split on " or " for OR groups, then " and " within each group for AND
 	const orParts = cond.split(/\s+or\s+/i);
@@ -349,8 +338,7 @@ export function getPolicies(): PolicyRule[] {
 function coerceToString(value: unknown): string {
 	if (value === null || value === undefined) return "";
 	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean")
-		return String(value);
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
 	if (Array.isArray(value)) return value.map(coerceToString).join(",");
 	if (typeof value === "object") {
 		try {
@@ -376,11 +364,7 @@ function coerceToString(value: unknown): string {
  *
  * All comparisons are case-insensitive.
  */
-function evaluateCondition(
-	ruleIndex: number,
-	condition: string,
-	context: PolicyContext,
-): boolean {
+function evaluateCondition(ruleIndex: number, condition: string, context: PolicyContext): boolean {
 	// Use pre-parsed condition if available
 	let parsed = _parsedConditions.get(ruleIndex);
 	if (!parsed) {
@@ -399,10 +383,7 @@ function evaluateCondition(
 	);
 }
 
-function evaluateClauseParsed(
-	clause: ParsedClause,
-	context: PolicyContext,
-): boolean {
+function evaluateClauseParsed(clause: ParsedClause, context: PolicyContext): boolean {
 	const rawValue = context[clause.field];
 	const haystack = coerceToString(rawValue).toLowerCase();
 
@@ -438,11 +419,7 @@ function evaluateClauseParsed(
  * flagged as 8gent Jr or under 13 is a hard deny - no YAML rule can lift it.
  * See PRD: docs/specs/PRD-AGENT-MESSAGING-AND-EMAIL.md (Security considerations).
  */
-const COPPA_GATED_ACTIONS = new Set<string>([
-	"email_send",
-	"email_receive",
-	"issue_email_address",
-]);
+const COPPA_GATED_ACTIONS = new Set<string>(["email_send", "email_receive", "issue_email_address"]);
 
 /**
  * COPPA gate. Returns a block decision if the context indicates a child
@@ -452,10 +429,7 @@ const COPPA_GATED_ACTIONS = new Set<string>([
  *   - context.product === "8gentjr"
  *   - context.account_age_verified_13_plus !== true (default deny without proof)
  */
-function coppaGate(
-	action: string,
-	context: PolicyContext,
-): PolicyDecision | null {
+function coppaGate(action: string, context: PolicyContext): PolicyDecision | null {
 	if (!COPPA_GATED_ACTIONS.has(action)) return null;
 
 	const isJr = context.product === "8gentjr";
@@ -514,18 +488,14 @@ export function evaluatePolicy(
 	}));
 
 	// 1. Hard block - checked FIRST, blocks always win
-	for (const { rule, index } of withIndex.filter(
-		(r) => r.rule.decision === "block",
-	)) {
+	for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "block")) {
 		if (evaluateCondition(index, rule.condition, context)) {
 			return { allowed: false, reason: `[${rule.name}] ${rule.message}` };
 		}
 	}
 
 	// 2. Soft deny (requires user approval)
-	for (const { rule, index } of withIndex.filter(
-		(r) => r.rule.decision === "require_approval",
-	)) {
+	for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "require_approval")) {
 		if (evaluateCondition(index, rule.condition, context)) {
 			return {
 				allowed: false,
@@ -536,9 +506,7 @@ export function evaluatePolicy(
 	}
 
 	// 3. Explicit allow
-	for (const { rule, index } of withIndex.filter(
-		(r) => r.rule.decision === "allow",
-	)) {
+	for (const { rule, index } of withIndex.filter((r) => r.rule.decision === "allow")) {
 		if (evaluateCondition(index, rule.condition, context)) {
 			return { allowed: true };
 		}
@@ -567,10 +535,7 @@ export function verifyPolicies(): { valid: boolean; reason: string } {
 }
 
 /** Quick check: is this file write allowed? */
-export function checkFileWrite(
-	filePath: string,
-	content?: string,
-): PolicyDecision {
+export function checkFileWrite(filePath: string, content?: string): PolicyDecision {
 	return evaluatePolicy("write_file", {
 		path: filePath,
 		content: content ?? "",

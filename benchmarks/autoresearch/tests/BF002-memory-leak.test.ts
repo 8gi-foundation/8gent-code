@@ -10,13 +10,10 @@ const fixturePath = process.env.FIXTURE_PATH;
 if (!fixturePath) throw new Error("FIXTURE_PATH env var required");
 
 const mod = await import(fixturePath);
-const EmitterClass =
-	mod.default ?? mod.JsonEventEmitter ?? mod.EventEmitter ?? mod.Emitter;
+const EmitterClass = mod.default ?? mod.JsonEventEmitter ?? mod.EventEmitter ?? mod.Emitter;
 
 if (!EmitterClass) {
-	throw new Error(
-		"Module must export JsonEventEmitter, EventEmitter, Emitter, or default class",
-	);
+	throw new Error("Module must export JsonEventEmitter, EventEmitter, Emitter, or default class");
 }
 
 describe("BF002: Memory Leak Fix", () => {

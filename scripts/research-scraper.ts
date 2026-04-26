@@ -71,11 +71,7 @@ function loadEnv(): Record<string, string> {
 // Telegram
 // ---------------------------------------------------------------------------
 
-async function sendTelegram(
-	token: string,
-	chatId: string,
-	text: string,
-): Promise<void> {
+async function sendTelegram(token: string, chatId: string, text: string): Promise<void> {
 	const url = `https://api.telegram.org/bot${token}/sendMessage`;
 	try {
 		await fetch(url, {
@@ -238,13 +234,9 @@ async function scrapeNpm(): Promise<UtilitySpec[]> {
 		if (slug.length < 2) continue;
 
 		// Grab nearby text for description
-		const textChunk = clean(
-			sec.slice(nameEnd, Math.min(nameEnd + 400, sec.length)),
-		);
+		const textChunk = clean(sec.slice(nameEnd, Math.min(nameEnd + 400, sec.length)));
 		const descMatch = textChunk.match(/([A-Z][^.!?]{15,120}[.!?])/);
-		const desc = descMatch
-			? descMatch[1].trim()
-			: textChunk.slice(0, 80).trim();
+		const desc = descMatch ? descMatch[1].trim() : textChunk.slice(0, 80).trim();
 
 		if (desc.length > 15 && !found.has(slug)) {
 			found.set(slug, desc);
@@ -273,10 +265,7 @@ async function scrapeNpm(): Promise<UtilitySpec[]> {
 // Source 2 & 3: GitHub trending
 // ---------------------------------------------------------------------------
 
-async function scrapeGithubTrending(
-	url: string,
-	sourceLabel: string,
-): Promise<UtilitySpec[]> {
+async function scrapeGithubTrending(url: string, sourceLabel: string): Promise<UtilitySpec[]> {
 	console.log(`  Fetching ${sourceLabel}...`);
 	let html = "";
 	try {
@@ -301,30 +290,20 @@ async function scrapeGithubTrending(
 		const block = repoBlocks[i];
 
 		// Extract repo name from href
-		const hrefMatch = block.match(
-			/href="\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)"/,
-		);
+		const hrefMatch = block.match(/href="\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)"/);
 		if (!hrefMatch) continue;
 		const fullName = hrefMatch[1];
 		const repoName = fullName.split("/")[1];
 		const slug = toKebab(repoName);
 
 		// Extract description - look for p tag content
-		const descMatch = block.match(
-			/<p[^>]*class="[^"]*col-9[^"]*"[^>]*>([\s\S]*?)<\/p>/,
-		);
+		const descMatch = block.match(/<p[^>]*class="[^"]*col-9[^"]*"[^>]*>([\s\S]*?)<\/p>/);
 		const rawDesc = descMatch ? clean(descMatch[1]) : "";
 
 		// Also try itemprop="description"
-		const itemPropMatch = block.match(
-			/itemprop="description"[^>]*>([\s\S]*?)</,
-		);
+		const itemPropMatch = block.match(/itemprop="description"[^>]*>([\s\S]*?)</);
 		const desc = (
-			rawDesc.length > 10
-				? rawDesc
-				: itemPropMatch
-					? clean(itemPropMatch[1])
-					: ""
+			rawDesc.length > 10 ? rawDesc : itemPropMatch ? clean(itemPropMatch[1]) : ""
 		).slice(0, 140);
 
 		if (slug.length < 2 || desc.length < 10) continue;
@@ -368,8 +347,7 @@ async function scrapeHackerNews(): Promise<UtilitySpec[]> {
 	const specs: UtilitySpec[] = [];
 
 	// HN structure: <span class="titleline"><a href="...">TITLE</a>
-	const titleRegex =
-		/<span class="titleline"><a href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+	const titleRegex = /<span class="titleline"><a href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
 	let m: RegExpExecArray | null;
 
 	const devKeywords = [
@@ -493,14 +471,8 @@ async function run(): Promise<void> {
 	// Collect from all sources
 	const [npmSpecs, ghTsSpecs, ghAllSpecs, hnSpecs] = await Promise.all([
 		scrapeNpm(),
-		scrapeGithubTrending(
-			"https://github.com/trending/typescript?since=daily",
-			"github-ts",
-		),
-		scrapeGithubTrending(
-			"https://github.com/trending?since=daily",
-			"github-all",
-		),
+		scrapeGithubTrending("https://github.com/trending/typescript?since=daily", "github-ts"),
+		scrapeGithubTrending("https://github.com/trending?since=daily", "github-all"),
 		scrapeHackerNews(),
 	]);
 
@@ -536,9 +508,7 @@ async function run(): Promise<void> {
 	// Feynman specs
 	for (const spec of FEYNMAN_SPECS) filterAndAdd(spec);
 
-	console.log(
-		`\nNew specs: ${newSpecs.length} | Skipped: ${skippedNames.length}`,
-	);
+	console.log(`\nNew specs: ${newSpecs.length} | Skipped: ${skippedNames.length}`);
 
 	// Append to queue
 	let currentQueue: UtilitySpec[] = [];
@@ -549,9 +519,7 @@ async function run(): Promise<void> {
 	}
 	const updatedQueue = [...currentQueue, ...newSpecs];
 	writeFileSync(QUEUE_PATH, JSON.stringify(updatedQueue, null, 2));
-	console.log(
-		`Queue updated: ${currentQueue.length} -> ${updatedQueue.length} entries`,
-	);
+	console.log(`Queue updated: ${currentQueue.length} -> ${updatedQueue.length} entries`);
 
 	// Append to log
 	let log: LogEntry[] = [];
@@ -585,9 +553,7 @@ async function run(): Promise<void> {
 				? `Added: ${newSpecs
 						.slice(0, 8)
 						.map((s) => s.name)
-						.join(
-							", ",
-						)}${newSpecs.length > 8 ? ` +${newSpecs.length - 8} more` : ""}`
+						.join(", ")}${newSpecs.length > 8 ? ` +${newSpecs.length - 8} more` : ""}`
 				: "No new specs this run (all deduplicated)"
 		}`;
 		await sendTelegram(telegramToken, telegramChat, msg);

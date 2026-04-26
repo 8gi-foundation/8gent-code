@@ -30,9 +30,7 @@ async function fetchDataset(): Promise<SWEBenchTask[]> {
 	const res = await fetch(HF_URL);
 	if (!res.ok) throw new Error(`HuggingFace API error: ${res.status}`);
 	const data = await res.json();
-	const tasks: SWEBenchTask[] = (data.rows || []).map(
-		(r: { row: SWEBenchTask }) => r.row,
-	);
+	const tasks: SWEBenchTask[] = (data.rows || []).map((r: { row: SWEBenchTask }) => r.row);
 	fs.mkdirSync(CACHE_DIR, { recursive: true });
 	fs.writeFileSync(CACHE_FILE, JSON.stringify(tasks, null, 2));
 	console.log(`Cached ${tasks.length} tasks to ${CACHE_FILE}`);

@@ -126,9 +126,7 @@ export interface SelectResult<T> {
  * Receive from whichever channel produces a value first.
  * Returns as soon as any channel delivers.
  */
-export async function select<T>(
-	...channels: Channel<T>[]
-): Promise<SelectResult<T>> {
+export async function select<T>(...channels: Channel<T>[]): Promise<SelectResult<T>> {
 	return new Promise((resolve) => {
 		const done = { settled: false };
 

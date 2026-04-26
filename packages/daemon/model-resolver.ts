@@ -35,9 +35,7 @@ const BLOCKLIST = ["openrouter/free", "openrouter/auto"];
  * Query OpenRouter API and return the best free model.
  * Falls back to cheapest model if no free models exist.
  */
-export async function resolveBestFreeModel(
-	apiKey?: string,
-): Promise<ResolvedModel> {
+export async function resolveBestFreeModel(apiKey?: string): Promise<ResolvedModel> {
 	const headers: Record<string, string> = {
 		"HTTP-Referer": "https://8gent.dev",
 		"X-Title": "8gent Daemon",
@@ -76,11 +74,7 @@ export async function resolveBestFreeModel(
 		// Sort by prompt price and pick cheapest
 		const sorted = models
 			.filter((m) => !BLOCKLIST.includes(m.id) && m.pricing?.prompt)
-			.sort(
-				(a, b) =>
-					Number.parseFloat(a.pricing.prompt) -
-					Number.parseFloat(b.pricing.prompt),
-			);
+			.sort((a, b) => Number.parseFloat(a.pricing.prompt) - Number.parseFloat(b.pricing.prompt));
 
 		const cheapest = sorted[0];
 		if (cheapest) {
@@ -139,9 +133,7 @@ export async function resolveBestFreeModel(
 	// Log top 5 candidates
 	console.log("[model-resolver] top free models:");
 	for (const { model, score } of scored.slice(0, 5)) {
-		console.log(
-			`  ${score.toFixed(1)} - ${model.id} (ctx: ${model.context_length})`,
-		);
+		console.log(`  ${score.toFixed(1)} - ${model.id} (ctx: ${model.context_length})`);
 	}
 
 	// Try top candidates until one actually responds
@@ -160,9 +152,7 @@ export async function resolveBestFreeModel(
 
 	// None of the top 5 responded - use the highest scored anyway
 	const best = scored[0].model;
-	console.warn(
-		`[model-resolver] no model passed probe, using ${best.id} anyway`,
-	);
+	console.warn(`[model-resolver] no model passed probe, using ${best.id} anyway`);
 	return {
 		id: best.id,
 		name: best.name || best.id,
@@ -190,16 +180,12 @@ async function probeModel(modelId: string, apiKey?: string): Promise<boolean> {
 		});
 		if (!res.ok) {
 			const body = await res.text();
-			console.log(
-				`[model-resolver] probe ${modelId}: ${res.status} ${body.slice(0, 100)}`,
-			);
+			console.log(`[model-resolver] probe ${modelId}: ${res.status} ${body.slice(0, 100)}`);
 			return false;
 		}
 		const data = await res.json();
 		const content = data.choices?.[0]?.message?.content || "";
-		console.log(
-			`[model-resolver] probe ${modelId}: OK ("${content.slice(0, 20)}")`,
-		);
+		console.log(`[model-resolver] probe ${modelId}: OK ("${content.slice(0, 20)}")`);
 		return true;
 	} catch (err) {
 		console.log(`[model-resolver] probe ${modelId}: error ${err}`);

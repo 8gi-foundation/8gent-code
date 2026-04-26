@@ -84,9 +84,7 @@ export async function transcribeCloud(
 
 		if (!response.ok) {
 			const errorBody = await response.text().catch(() => "");
-			throw new Error(
-				`OpenAI API error ${response.status}: ${errorBody || response.statusText}`,
-			);
+			throw new Error(`OpenAI API error ${response.status}: ${errorBody || response.statusText}`);
 		}
 
 		const result = (await response.json()) as { text: string };

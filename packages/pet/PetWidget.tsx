@@ -84,9 +84,7 @@ export function PetOverlay({ sessionId = "eight" }: { sessionId?: string }) {
 				out.write(`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`);
 			}
 			const labelPad = " ".repeat(Math.max(0, x + 4));
-			out.write(
-				`\x1b[${startRow + lines.length};1H\x1b[2K${labelPad}\x1b[2m${label}\x1b[0m`,
-			);
+			out.write(`\x1b[${startRow + lines.length};1H\x1b[2K${labelPad}\x1b[2m${label}\x1b[0m`);
 			out.write("\x1b8"); // restore cursor (DEC)
 		};
 

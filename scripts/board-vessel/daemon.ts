@@ -90,9 +90,7 @@ function connectGateway(): void {
 	});
 
 	ws.addEventListener("close", (event) => {
-		console.log(
-			`[board-vessel] WebSocket closed: ${event.code} ${event.reason}`,
-		);
+		console.log(`[board-vessel] WebSocket closed: ${event.code} ${event.reason}`);
 		if (heartbeatInterval) clearInterval(heartbeatInterval);
 		heartbeatInterval = null;
 
@@ -249,9 +247,7 @@ async function handleMessage(msg: any): Promise<void> {
 	const content = msg.content.replace(/<@!?\d+>/g, "").trim();
 	if (!content) return;
 
-	console.log(
-		`[board-vessel] Message from ${msg.author.username}: ${content.slice(0, 80)}`,
-	);
+	console.log(`[board-vessel] Message from ${msg.author.username}: ${content.slice(0, 80)}`);
 
 	try {
 		const response = await generateResponse(content);
@@ -295,10 +291,7 @@ async function generateResponse(userMessage: string): Promise<string> {
 	return reply;
 }
 
-async function sendDiscordMessage(
-	channelId: string,
-	content: string,
-): Promise<void> {
+async function sendDiscordMessage(channelId: string, content: string): Promise<void> {
 	const res = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
 		method: "POST",
 		headers: {
@@ -309,9 +302,7 @@ async function sendDiscordMessage(
 	});
 
 	if (!res.ok) {
-		console.error(
-			`[board-vessel] Discord API error: ${res.status} ${await res.text()}`,
-		);
+		console.error(`[board-vessel] Discord API error: ${res.status} ${await res.text()}`);
 	}
 }
 

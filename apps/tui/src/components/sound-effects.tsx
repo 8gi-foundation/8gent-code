@@ -52,11 +52,7 @@ interface UseSoundProps {
 	condition?: boolean;
 }
 
-export function useSound({
-	type,
-	enabled = true,
-	condition = true,
-}: UseSoundProps): void {
+export function useSound({ type, enabled = true, condition = true }: UseSoundProps): void {
 	useEffect(() => {
 		if (enabled && condition) {
 			playSound(type);

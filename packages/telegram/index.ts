@@ -93,11 +93,7 @@ function saveConfig(config: TelegramConfig): void {
 
 const API_BASE = "https://api.telegram.org/bot";
 
-async function api(
-	token: string,
-	method: string,
-	body?: Record<string, unknown>,
-): Promise<any> {
+async function api(token: string, method: string, body?: Record<string, unknown>): Promise<any> {
 	const url = `${API_BASE}${token}/${method}`;
 	const response = await fetch(url, {
 		method: "POST",
@@ -217,11 +213,7 @@ async function answerCallback(
 	});
 }
 
-async function getUpdates(
-	token: string,
-	offset: number,
-	timeout = 30,
-): Promise<TelegramUpdate[]> {
+async function getUpdates(token: string, offset: number, timeout = 30): Promise<TelegramUpdate[]> {
 	return api(token, "getUpdates", {
 		offset,
 		timeout,
@@ -229,9 +221,7 @@ async function getUpdates(
 	});
 }
 
-async function getMe(
-	token: string,
-): Promise<{ id: number; first_name: string; username: string }> {
+async function getMe(token: string): Promise<{ id: number; first_name: string; username: string }> {
 	return api(token, "getMe");
 }
 
@@ -330,12 +320,7 @@ function buildTasksMenu(agent: any): { text: string; keyboard: any } {
 			if (tasks.length > 0) {
 				taskLines = tasks
 					.map((t: any) => {
-						const icon =
-							t.status === "running"
-								? "🟢"
-								: t.status === "completed"
-									? "✅"
-									: "🔴";
+						const icon = t.status === "running" ? "🟢" : t.status === "completed" ? "✅" : "🔴";
 						return `${icon} \`${t.id}\` — ${t.command?.slice(0, 40)}`;
 					})
 					.join("\n");
@@ -359,12 +344,7 @@ function buildSkillsMenu(agent: any): { text: string; keyboard: any } {
 	let skillLines = "No skills loaded.";
 	try {
 		// Try to read skill index
-		const indexPath = path.join(
-			os.homedir(),
-			".8gent",
-			"skills",
-			".index.json",
-		);
+		const indexPath = path.join(os.homedir(), ".8gent", "skills", ".index.json");
 		if (fs.existsSync(indexPath)) {
 			const index = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
 			const cats = Object.entries(index.categories || {})
@@ -440,14 +420,9 @@ export class TelegramBot {
 	}
 
 	private isAllowed(userId: number, username?: string): boolean {
-		if (
-			!this.config.allowedUsers?.length &&
-			!this.config.allowedUsernames?.length
-		)
-			return true;
+		if (!this.config.allowedUsers?.length && !this.config.allowedUsernames?.length) return true;
 		if (this.config.allowedUsers?.includes(userId)) return true;
-		if (username && this.config.allowedUsernames?.includes(username))
-			return true;
+		if (username && this.config.allowedUsernames?.includes(username)) return true;
 		return false;
 	}
 
@@ -521,12 +496,7 @@ export class TelegramBot {
 		}
 
 		if (data === "panel:stop") {
-			await answerCallback(
-				this.config.token,
-				id,
-				"Agent stop not implemented yet",
-				true,
-			);
+			await answerCallback(this.config.token, id, "Agent stop not implemented yet", true);
 			return;
 		}
 
@@ -557,12 +527,7 @@ export class TelegramBot {
 					if (lastHistory) {
 						const scores = Object.entries(lastHistory.scores || {})
 							.map(([id, score]) => {
-								const icon =
-									(score as number) >= 70
-										? "✅"
-										: (score as number) >= 40
-											? "🟡"
-											: "🔴";
+								const icon = (score as number) >= 70 ? "✅" : (score as number) >= 40 ? "🟡" : "🔴";
 								return `${icon} \`${id}\`: ${score}`;
 							})
 							.join("\n");
@@ -591,20 +556,10 @@ export class TelegramBot {
 			const model = data.slice(6);
 			try {
 				this.agent?.setModel?.(model);
-				await answerCallback(
-					this.config.token,
-					id,
-					`Switched to ${model}`,
-					true,
-				);
+				await answerCallback(this.config.token, id, `Switched to ${model}`, true);
 				await this.updatePanel(chatId, msgId);
 			} catch (err: any) {
-				await answerCallback(
-					this.config.token,
-					id,
-					`Failed: ${err.message}`,
-					true,
-				);
+				await answerCallback(this.config.token, id, `Failed: ${err.message}`, true);
 			}
 			return;
 		}
@@ -650,21 +605,13 @@ export class TelegramBot {
 
 		// Access control
 		if (!this.isAllowed(from.id, from.username)) {
-			await sendMsg(
-				this.config.token,
-				chat.id,
-				"⛔ Not authorized. Ask the owner to add you.",
-			);
+			await sendMsg(this.config.token, chat.id, "⛔ Not authorized. Ask the owner to add you.");
 			return;
 		}
 
 		// Rate limiting
 		if (!this.checkRateLimit(from.id)) {
-			await sendMsg(
-				this.config.token,
-				chat.id,
-				"⏳ Rate limit hit. Wait a minute.",
-			);
+			await sendMsg(this.config.token, chat.id, "⏳ Rate limit hit. Wait a minute.");
 			return;
 		}
 
@@ -722,11 +669,7 @@ export class TelegramBot {
 		if (text.startsWith("/btw ")) {
 			const question = text.slice(5).trim();
 			if (!question) {
-				await sendMsg(
-					this.config.token,
-					chat.id,
-					"Usage: `/btw your question here`",
-				);
+				await sendMsg(this.config.token, chat.id, "Usage: `/btw your question here`");
 				return;
 			}
 
@@ -738,18 +681,9 @@ export class TelegramBot {
 
 			try {
 				const answer = await this.agent.btw(question);
-				await sendMsg(
-					this.config.token,
-					chat.id,
-					`💭 *btw:*\n\n${answer}`,
-					buildQuickActions(),
-				);
+				await sendMsg(this.config.token, chat.id, `💭 *btw:*\n\n${answer}`, buildQuickActions());
 			} catch (err: any) {
-				await sendMsg(
-					this.config.token,
-					chat.id,
-					`❌ ${err.message?.slice(0, 200)}`,
-				);
+				await sendMsg(this.config.token, chat.id, `❌ ${err.message?.slice(0, 200)}`);
 			}
 			return;
 		}
@@ -779,8 +713,7 @@ export class TelegramBot {
 
 				let output = "";
 				if (stdout) output += `\`\`\`\n${stdout.slice(0, 3000)}\n\`\`\``;
-				if (stderr)
-					output += `\n⚠️ stderr:\n\`\`\`\n${stderr.slice(0, 1000)}\n\`\`\``;
+				if (stderr) output += `\n⚠️ stderr:\n\`\`\`\n${stderr.slice(0, 1000)}\n\`\`\``;
 				output += `\n_Exit: ${exitCode}_`;
 
 				await sendMsg(this.config.token, chat.id, output, buildQuickActions());
@@ -839,9 +772,7 @@ export class TelegramBot {
 		await registerBotCommands(this.config.token);
 
 		console.log(`\n\x1b[36m🤖 Telegram bot connected: @${me.username}\x1b[0m`);
-		console.log(
-			`\x1b[90m   Bot ID: ${me.id} | Commands registered | Polling...\x1b[0m\n`,
-		);
+		console.log(`\x1b[90m   Bot ID: ${me.id} | Commands registered | Polling...\x1b[0m\n`);
 
 		// Long-polling loop
 		while (this.running) {
@@ -870,11 +801,7 @@ export class TelegramBot {
 	/**
 	 * Send a proactive notification to a chat
 	 */
-	async notify(
-		chatId: number,
-		message: string,
-		withPanel = false,
-	): Promise<void> {
+	async notify(chatId: number, message: string, withPanel = false): Promise<void> {
 		const markup = withPanel ? buildQuickActions() : undefined;
 		await sendMsg(this.config.token, chatId, message, markup);
 	}

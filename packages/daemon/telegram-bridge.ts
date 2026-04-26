@@ -158,13 +158,8 @@ class TelegramDaemonBridge {
 	private polling = false;
 	private agentReady = false;
 	private agentBusy = false;
-	private pendingApprovals = new Map<
-		string,
-		{ tool: string; input: unknown }
-	>();
-	private cosRouter: InstanceType<
-		typeof import("./cos-router").CoSRouter
-	> | null = null;
+	private pendingApprovals = new Map<string, { tool: string; input: unknown }>();
+	private cosRouter: InstanceType<typeof import("./cos-router").CoSRouter> | null = null;
 
 	constructor(config: BridgeConfig) {
 		this.config = config;
@@ -186,9 +181,7 @@ class TelegramDaemonBridge {
 			const cosPool = new AgentPool({
 				model: process.env.DEFAULT_MODEL || "auto:free",
 				runtime: (process.env.DEFAULT_RUNTIME as any) || "openrouter",
-				workingDirectory: process.env.HOME
-					? `${process.env.HOME}/.8gent/workspace`
-					: "/app",
+				workingDirectory: process.env.HOME ? `${process.env.HOME}/.8gent/workspace` : "/app",
 				apiKey: process.env.OPENROUTER_API_KEY,
 			});
 
@@ -231,9 +224,7 @@ class TelegramDaemonBridge {
 		this.polling = true;
 		this.poll();
 
-		console.log(
-			"[telegram-bridge] ready - polling Telegram, connected to daemon",
-		);
+		console.log("[telegram-bridge] ready - polling Telegram, connected to daemon");
 	}
 
 	private async connectDaemon(): Promise<void> {
@@ -248,15 +239,11 @@ class TelegramDaemonBridge {
 
 				// Auth if needed
 				if (this.config.authToken) {
-					this.ws?.send(
-						JSON.stringify({ type: "auth", token: this.config.authToken }),
-					);
+					this.ws?.send(JSON.stringify({ type: "auth", token: this.config.authToken }));
 				}
 
 				// Create a session
-				this.ws?.send(
-					JSON.stringify({ type: "session:create", channel: "telegram" }),
-				);
+				this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
 			};
 
 			this.ws.onmessage = (event: MessageEvent) => {
@@ -281,9 +268,7 @@ class TelegramDaemonBridge {
 			};
 
 			this.ws.onclose = () => {
-				console.log(
-					"[telegram-bridge] daemon disconnected, reconnecting in 5s...",
-				);
+				console.log("[telegram-bridge] daemon disconnected, reconnecting in 5s...");
 				setTimeout(() => this.connectDaemon().catch(console.error), 5000);
 			};
 		});
@@ -315,16 +300,10 @@ class TelegramDaemonBridge {
 				// If session was evicted, recreate it silently
 				if (payload.error === "session not found") {
 					console.log("[telegram-bridge] session evicted, recreating...");
-					this.ws?.send(
-						JSON.stringify({ type: "session:create", channel: "telegram" }),
-					);
+					this.ws?.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
 					return;
 				}
-				tgSend(
-					this.config.telegramToken,
-					this.config.chatId,
-					`Error: ${payload.error}`,
-				);
+				tgSend(this.config.telegramToken, this.config.chatId, `Error: ${payload.error}`);
 				break;
 
 			case "session:end":
@@ -362,40 +341,24 @@ class TelegramDaemonBridge {
 							await this.handleCallbackQuery(update.callback_query);
 						} else if (update.message?.voice || update.message?.audio) {
 							// Voice/audio message - transcribe then process
-							const fileId =
-								update.message.voice?.file_id || update.message.audio?.file_id;
+							const fileId = update.message.voice?.file_id || update.message.audio?.file_id;
 							if (fileId && update.message.chat) {
 								await tgTyping(this.config.telegramToken, this.config.chatId);
-								const transcript = await transcribeVoice(
-									this.config.telegramToken,
-									fileId,
-								);
-								console.log(
-									`[telegram-bridge] voice transcription: "${transcript.slice(0, 100)}"`,
-								);
+								const transcript = await transcribeVoice(this.config.telegramToken, fileId);
+								console.log(`[telegram-bridge] voice transcription: "${transcript.slice(0, 100)}"`);
 								if (!transcript.startsWith("[")) {
 									await tgSend(
 										this.config.telegramToken,
 										this.config.chatId,
 										`Heard: "${transcript}"`,
 									);
-									await this.handleTelegramMessage(
-										transcript,
-										update.message.chat.id,
-									);
+									await this.handleTelegramMessage(transcript, update.message.chat.id);
 								} else {
-									await tgSend(
-										this.config.telegramToken,
-										this.config.chatId,
-										transcript,
-									);
+									await tgSend(this.config.telegramToken, this.config.chatId, transcript);
 								}
 							}
 						} else if (update.message?.text) {
-							await this.handleTelegramMessage(
-								update.message.text,
-								update.message.chat.id,
-							);
+							await this.handleTelegramMessage(update.message.text, update.message.chat.id);
 						}
 					}
 				}
@@ -408,10 +371,7 @@ class TelegramDaemonBridge {
 		}
 	}
 
-	private async handleTelegramMessage(
-		text: string,
-		chatId: number,
-	): Promise<void> {
+	private async handleTelegramMessage(text: string, chatId: number): Promise<void> {
 		// Only respond to the configured chat
 		if (String(chatId) !== this.config.chatId) return;
 
@@ -438,11 +398,7 @@ class TelegramDaemonBridge {
 					`*Recent Logs*\n\`\`\`\n${logs.slice(-3000)}\n\`\`\``,
 				);
 			} catch {
-				await tgSend(
-					this.config.telegramToken,
-					this.config.chatId,
-					"Could not read logs.",
-				);
+				await tgSend(this.config.telegramToken, this.config.chatId, "Could not read logs.");
 			}
 			return;
 		}
@@ -564,9 +520,7 @@ class TelegramDaemonBridge {
 			if (this.agentBusy) {
 				// Create a new session to clear any stuck state
 				if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-					this.ws.send(
-						JSON.stringify({ type: "session:create", channel: "telegram" }),
-					);
+					this.ws.send(JSON.stringify({ type: "session:create", channel: "telegram" }));
 				}
 				// Retry with next strategy
 				this.retryPrompt(originalText, attempt + 1);
@@ -584,9 +538,7 @@ class TelegramDaemonBridge {
 		this.pendingApprovals.set(requestId, { tool, input });
 
 		const inputPreview =
-			typeof input === "string"
-				? input.slice(0, 200)
-				: JSON.stringify(input).slice(0, 200);
+			typeof input === "string" ? input.slice(0, 200) : JSON.stringify(input).slice(0, 200);
 
 		try {
 			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
@@ -618,14 +570,11 @@ class TelegramDaemonBridge {
 		const [action, requestId] = data.split(":");
 
 		// Answer the callback to remove the loading spinner
-		await fetch(
-			`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`,
-			{
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ callback_query_id: query.id }),
-			},
-		).catch(() => {});
+		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ callback_query_id: query.id }),
+		}).catch(() => {});
 
 		if (!requestId || !this.pendingApprovals.has(requestId)) {
 			return;
@@ -639,19 +588,16 @@ class TelegramDaemonBridge {
 
 		// Update the message to show the decision
 		if (query.message) {
-			await fetch(
-				`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`,
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						chat_id: query.message.chat.id,
-						message_id: query.message.message_id,
-						text: `*${statusText}:* \`${approval.tool}\``,
-						parse_mode: "Markdown",
-					}),
-				},
-			).catch(() => {});
+			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					chat_id: query.message.chat.id,
+					message_id: query.message.message_id,
+					text: `*${statusText}:* \`${approval.tool}\``,
+					parse_mode: "Markdown",
+				}),
+			}).catch(() => {});
 		}
 
 		// Send the approval decision back to the daemon
@@ -682,9 +628,7 @@ if (import.meta.main) {
 	const chatId = process.env.TELEGRAM_CHAT_ID;
 
 	if (!token || !chatId) {
-		console.error(
-			"[telegram-bridge] TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required",
-		);
+		console.error("[telegram-bridge] TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required");
 		process.exit(1);
 	}
 

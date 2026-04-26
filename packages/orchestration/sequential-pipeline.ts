@@ -36,11 +36,7 @@ export interface RunCheckpoint {
 
 export const MAX_ANALYST_RETRIES = 2;
 
-const DEFAULT_CHECKPOINT_PATH = path.join(
-	os.homedir(),
-	".8gent",
-	"run-checkpoint.json",
-);
+const DEFAULT_CHECKPOINT_PATH = path.join(os.homedir(), ".8gent", "run-checkpoint.json");
 
 // ── Default params ─────────────────────────────────────────────────────────
 
@@ -70,16 +66,11 @@ export async function inferenceChat(
 	const start = Date.now();
 
 	// Resolve backend settings — opts override env vars
-	const inferenceMode =
-		opts?.inferenceMode || process.env.INFERENCE_MODE || "ollama";
+	const inferenceMode = opts?.inferenceMode || process.env.INFERENCE_MODE || "ollama";
 	const modelProxyUrl =
-		opts?.modelProxyUrl ||
-		process.env.MODEL_PROXY_URL ||
-		"http://8gi-model-proxy.internal:3200";
-	const ollamaHost =
-		opts?.ollamaHost || process.env.OLLAMA_HOST || "http://localhost:11434";
-	const lmStudioHost =
-		opts?.lmStudioHost || process.env.LM_STUDIO_HOST || "http://127.0.0.1:1234";
+		opts?.modelProxyUrl || process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";
+	const ollamaHost = opts?.ollamaHost || process.env.OLLAMA_HOST || "http://localhost:11434";
+	const lmStudioHost = opts?.lmStudioHost || process.env.LM_STUDIO_HOST || "http://127.0.0.1:1234";
 	const vesselId = opts?.vesselId || process.env.BOARD_MEMBER_CODE || "local";
 
 	try {
@@ -91,8 +82,7 @@ export async function inferenceChat(
 		if (inferenceMode === "proxy") {
 			// Cloud mode: call OpenRouter directly for analyst/critic (bypasses proxy token limits)
 			// The model-proxy is used by the harness-cli agent loop, not by pre-processing
-			const openrouterKey =
-				process.env.OPENROUTER_API_KEY || process.env.PROXY_API_KEY || "";
+			const openrouterKey = process.env.OPENROUTER_API_KEY || process.env.PROXY_API_KEY || "";
 			const apiUrl = "https://openrouter.ai/api/v1/chat/completions";
 			const authKey = openrouterKey;
 
@@ -188,9 +178,7 @@ export async function adaptiveSequentialPreProcess(
 		if (analystAttempt > 1) {
 			// Self-improve: increase timeout, raise temperature for diversity
 			analystParams = {
-				timeout:
-					(analystParams.timeout || defaultParams(taskPrompt.length).timeout) *
-					1.5,
+				timeout: (analystParams.timeout || defaultParams(taskPrompt.length).timeout) * 1.5,
 				temperature: Math.min(0.9, (analystParams.temperature || 0.7) + 0.1),
 			};
 			console.log(
@@ -198,9 +186,7 @@ export async function adaptiveSequentialPreProcess(
 			);
 		}
 
-		console.log(
-			`  [SEQ] Pass 1: Analyst for ${taskId} (attempt ${analystAttempt})`,
-		);
+		console.log(`  [SEQ] Pass 1: Analyst for ${taskId} (attempt ${analystAttempt})`);
 		const result = await inferenceChat(
 			model,
 			`You are an Analyst. Your ONLY job is to identify the transformation rule or algorithm required.
@@ -254,9 +240,7 @@ IMPLEMENTATION RISKS: <what will go wrong when coding this>`,
 
 	// --- Critic rejection triggers analyst retry ---
 	if (critique.includes("REJECTED") && analystAttempt < MAX_ANALYST_RETRIES) {
-		console.log(
-			"  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback",
-		);
+		console.log("  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback");
 		const retryResult = await inferenceChat(
 			model,
 			`You are an Analyst. Your previous analysis was REJECTED by a critic.
@@ -297,14 +281,8 @@ You have received analysis and critique from two prior reviewers. Use their insi
 
 // ── Checkpoint persistence ─────────────────────────────────────────────────
 
-export function saveCheckpoint(
-	cp: RunCheckpoint,
-	checkpointPath?: string,
-): void {
-	fs.writeFileSync(
-		checkpointPath || DEFAULT_CHECKPOINT_PATH,
-		JSON.stringify(cp, null, 2),
-	);
+export function saveCheckpoint(cp: RunCheckpoint, checkpointPath?: string): void {
+	fs.writeFileSync(checkpointPath || DEFAULT_CHECKPOINT_PATH, JSON.stringify(cp, null, 2));
 }
 
 export function loadCheckpoint(checkpointPath?: string): RunCheckpoint | null {

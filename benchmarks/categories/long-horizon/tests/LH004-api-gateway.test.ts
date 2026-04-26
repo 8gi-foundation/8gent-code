@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
+const WORK_DIR = process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
 let router: any;
@@ -113,9 +112,7 @@ describe("Router", () => {
 describe("MiddlewarePipeline", () => {
 	it("executes middlewares in order", async () => {
 		const MP =
-			middleware.MiddlewarePipeline ||
-			middleware.default?.MiddlewarePipeline ||
-			middleware.default;
+			middleware.MiddlewarePipeline || middleware.default?.MiddlewarePipeline || middleware.default;
 		const pipeline = new MP();
 		const order: number[] = [];
 		pipeline.use(async (_req: any, _res: any, next: any) => {
@@ -142,9 +139,7 @@ describe("MiddlewarePipeline", () => {
 
 	it("middleware can short-circuit (not call next)", async () => {
 		const MP =
-			middleware.MiddlewarePipeline ||
-			middleware.default?.MiddlewarePipeline ||
-			middleware.default;
+			middleware.MiddlewarePipeline || middleware.default?.MiddlewarePipeline || middleware.default;
 		const pipeline = new MP();
 		let reachedSecond = false;
 		pipeline.use(async (_req: any, res: any, _next: any) => {
@@ -172,8 +167,7 @@ describe("MiddlewarePipeline", () => {
 
 describe("CORS Middleware", () => {
 	it("corsMiddleware sets CORS headers", async () => {
-		const corsFn =
-			middleware.corsMiddleware || middleware.default?.corsMiddleware;
+		const corsFn = middleware.corsMiddleware || middleware.default?.corsMiddleware;
 		const cors = corsFn();
 		const req = {
 			method: "GET",
@@ -199,8 +193,7 @@ describe("CORS Middleware", () => {
 
 describe("ResponseCache", () => {
 	it("get/set with TTL", async () => {
-		const RC =
-			cache.ResponseCache || cache.default?.ResponseCache || cache.default;
+		const RC = cache.ResponseCache || cache.default?.ResponseCache || cache.default;
 		const c = new RC({ maxSize: 10, defaultTTL: 5000 });
 		const response = {
 			status: 200,
@@ -217,8 +210,7 @@ describe("ResponseCache", () => {
 	});
 
 	it("TTL expiration works", async () => {
-		const RC =
-			cache.ResponseCache || cache.default?.ResponseCache || cache.default;
+		const RC = cache.ResponseCache || cache.default?.ResponseCache || cache.default;
 		const c = new RC({ maxSize: 10, defaultTTL: 50 });
 		const response = {
 			status: 200,
@@ -236,8 +228,7 @@ describe("ResponseCache", () => {
 	});
 
 	it("LRU eviction when cache is full", () => {
-		const RC =
-			cache.ResponseCache || cache.default?.ResponseCache || cache.default;
+		const RC = cache.ResponseCache || cache.default?.ResponseCache || cache.default;
 		const c = new RC({ maxSize: 2, defaultTTL: 60000 });
 		c.set("a", {
 			status: 200,
@@ -269,8 +260,7 @@ describe("ResponseCache", () => {
 	});
 
 	it("invalidate by pattern", () => {
-		const RC =
-			cache.ResponseCache || cache.default?.ResponseCache || cache.default;
+		const RC = cache.ResponseCache || cache.default?.ResponseCache || cache.default;
 		const c = new RC({ maxSize: 10, defaultTTL: 60000 });
 		c.set("/api/users/1", {
 			status: 200,
@@ -318,9 +308,7 @@ describe("RequestTransformer", () => {
 				path: "/test",
 				headers: { Authorization: "Bearer token", Accept: "application/json" },
 			});
-		expect(
-			transformed.headers["X-Custom"] || transformed.headers["x-custom"],
-		).toBe("value");
+		expect(transformed.headers["X-Custom"] || transformed.headers["x-custom"]).toBe("value");
 		// Authorization should be removed (case-insensitive check)
 		const hasAuth = Object.keys(transformed.headers).some(
 			(k) => k.toLowerCase() === "authorization",
@@ -345,8 +333,7 @@ describe("RequestTransformer", () => {
 
 describe("APIGateway", () => {
 	it("routes requests to handlers", async () => {
-		const GW =
-			gateway.APIGateway || gateway.default?.APIGateway || gateway.default;
+		const GW = gateway.APIGateway || gateway.default?.APIGateway || gateway.default;
 		const gw = new GW();
 		gw.route("GET", "/hello", async (req: any, res: any) => {
 			res.status = 200;
@@ -363,8 +350,7 @@ describe("APIGateway", () => {
 	});
 
 	it("applies middleware pipeline", async () => {
-		const GW =
-			gateway.APIGateway || gateway.default?.APIGateway || gateway.default;
+		const GW = gateway.APIGateway || gateway.default?.APIGateway || gateway.default;
 		const gw = new GW();
 		let middlewareRan = false;
 		gw.use(async (req: any, res: any, next: any) => {
@@ -382,14 +368,11 @@ describe("APIGateway", () => {
 			headers: {},
 		});
 		expect(middlewareRan).toBe(true);
-		expect(
-			response.headers["X-Middleware"] || response.headers["x-middleware"],
-		).toBe("applied");
+		expect(response.headers["X-Middleware"] || response.headers["x-middleware"]).toBe("applied");
 	});
 
 	it("returns 404 for unknown routes", async () => {
-		const GW =
-			gateway.APIGateway || gateway.default?.APIGateway || gateway.default;
+		const GW = gateway.APIGateway || gateway.default?.APIGateway || gateway.default;
 		const gw = new GW();
 		gw.route("GET", "/exists", async (req: any, res: any) => {
 			res.status = 200;

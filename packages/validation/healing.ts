@@ -13,12 +13,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import {
-	type Checkpoint,
-	createCheckpoint,
-	dropCheckpoint,
-	restoreCheckpoint,
-} from "./checkpoint";
+import { type Checkpoint, createCheckpoint, dropCheckpoint, restoreCheckpoint } from "./checkpoint";
 import { type FailureEntry, findPriorFailure, logFailure } from "./failure-log";
 
 // ============================================
@@ -146,8 +141,7 @@ export class SelfHealer {
 					timestamp: new Date().toISOString(),
 					action: actionLabel,
 					error,
-					resolution:
-						attempt < limit ? `retrying (attempt ${attempt})` : "reverted",
+					resolution: attempt < limit ? `retrying (attempt ${attempt})` : "reverted",
 					checkpointId: cp.id,
 					attempts: attempt,
 				};
@@ -192,8 +186,7 @@ export class SelfHealer {
 				timestamp: new Date().toISOString(),
 				action: actionLabel,
 				error,
-				resolution:
-					attempt < limit ? `retrying (attempt ${attempt})` : "reverted",
+				resolution: attempt < limit ? `retrying (attempt ${attempt})` : "reverted",
 				checkpointId: cp.id,
 				attempts: attempt,
 			};

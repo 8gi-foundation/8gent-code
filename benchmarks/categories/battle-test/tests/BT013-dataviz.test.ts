@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 
-const WORK_DIR =
-	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
+const WORK_DIR = process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 let chart: any;
 let scale: any;
@@ -77,8 +76,7 @@ describe("Chart — generateASCII", () => {
 
 describe("Chart — calculateBounds", () => {
 	it("calculates correct min, max, range", () => {
-		const calculateBounds =
-			chart.calculateBounds || chart.default?.calculateBounds;
+		const calculateBounds = chart.calculateBounds || chart.default?.calculateBounds;
 		const result = calculateBounds([2, 4, 6, 8, 10]);
 		expect(result.min).toBe(2);
 		expect(result.max).toBe(10);
@@ -86,22 +84,19 @@ describe("Chart — calculateBounds", () => {
 	});
 
 	it("calculates correct mean", () => {
-		const calculateBounds =
-			chart.calculateBounds || chart.default?.calculateBounds;
+		const calculateBounds = chart.calculateBounds || chart.default?.calculateBounds;
 		const result = calculateBounds([2, 4, 6, 8, 10]);
 		expect(result.mean).toBe(6);
 	});
 
 	it("calculates correct median for odd-length array", () => {
-		const calculateBounds =
-			chart.calculateBounds || chart.default?.calculateBounds;
+		const calculateBounds = chart.calculateBounds || chart.default?.calculateBounds;
 		const result = calculateBounds([1, 3, 5, 7, 9]);
 		expect(result.median).toBe(5);
 	});
 
 	it("calculates population stdDev", () => {
-		const calculateBounds =
-			chart.calculateBounds || chart.default?.calculateBounds;
+		const calculateBounds = chart.calculateBounds || chart.default?.calculateBounds;
 		const result = calculateBounds([2, 4, 4, 4, 5, 5, 7, 9]);
 		expect(result.stdDev).toBeGreaterThan(0);
 		expect(typeof result.stdDev).toBe("number");
@@ -157,8 +152,7 @@ describe("Scale functions", () => {
 
 describe("Layout functions", () => {
 	it("calculateBarLayout returns positioned rectangles", () => {
-		const calculateBarLayout =
-			layout.calculateBarLayout || layout.default?.calculateBarLayout;
+		const calculateBarLayout = layout.calculateBarLayout || layout.default?.calculateBarLayout;
 		const bars = calculateBarLayout(
 			[
 				{ label: "A", value: 10 },
@@ -178,38 +172,29 @@ describe("Layout functions", () => {
 	});
 
 	it("calculatePieLayout angles sum to 2π", () => {
-		const calculatePieLayout =
-			layout.calculatePieLayout || layout.default?.calculatePieLayout;
+		const calculatePieLayout = layout.calculatePieLayout || layout.default?.calculatePieLayout;
 		const slices = calculatePieLayout([
 			{ label: "A", value: 30 },
 			{ label: "B", value: 50 },
 			{ label: "C", value: 20 },
 		]);
 		expect(slices.length).toBe(3);
-		const totalAngle = slices.reduce(
-			(sum: number, s: any) => sum + (s.endAngle - s.startAngle),
-			0,
-		);
+		const totalAngle = slices.reduce((sum: number, s: any) => sum + (s.endAngle - s.startAngle), 0);
 		expect(Math.abs(totalAngle - 2 * Math.PI)).toBeLessThan(0.001);
 	});
 
 	it("calculatePieLayout percentages sum to 100", () => {
-		const calculatePieLayout =
-			layout.calculatePieLayout || layout.default?.calculatePieLayout;
+		const calculatePieLayout = layout.calculatePieLayout || layout.default?.calculatePieLayout;
 		const slices = calculatePieLayout([
 			{ label: "A", value: 25 },
 			{ label: "B", value: 75 },
 		]);
-		const totalPct = slices.reduce(
-			(sum: number, s: any) => sum + s.percentage,
-			0,
-		);
+		const totalPct = slices.reduce((sum: number, s: any) => sum + s.percentage, 0);
 		expect(Math.abs(totalPct - 100)).toBeLessThan(0.01);
 	});
 
 	it("calculateGridLayout returns rows and cols", () => {
-		const calculateGridLayout =
-			layout.calculateGridLayout || layout.default?.calculateGridLayout;
+		const calculateGridLayout = layout.calculateGridLayout || layout.default?.calculateGridLayout;
 		const grid = calculateGridLayout(12, 600, 400);
 		expect(grid).toHaveProperty("cols");
 		expect(grid).toHaveProperty("rows");
@@ -219,8 +204,7 @@ describe("Layout functions", () => {
 	});
 
 	it("calculateAxisTicks returns normalized positions between 0 and 1", () => {
-		const calculateAxisTicks =
-			layout.calculateAxisTicks || layout.default?.calculateAxisTicks;
+		const calculateAxisTicks = layout.calculateAxisTicks || layout.default?.calculateAxisTicks;
 		const ticks = calculateAxisTicks(0, 100, 5);
 		expect(Array.isArray(ticks)).toBe(true);
 		expect(ticks.length).toBeGreaterThan(0);

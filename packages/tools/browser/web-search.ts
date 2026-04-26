@@ -24,10 +24,7 @@ async function rateLimit() {
 /**
  * Search via DuckDuckGo HTML endpoint. Free, no API key required.
  */
-export async function webSearch(
-	query: string,
-	maxResults = 10,
-): Promise<SearchResult[]> {
+export async function webSearch(query: string, maxResults = 10): Promise<SearchResult[]> {
 	await rateLimit();
 
 	const params = new URLSearchParams({ q: query, kl: "us-en" });
@@ -41,8 +38,7 @@ export async function webSearch(
 		},
 	});
 
-	if (!res.ok)
-		throw new Error(`webSearch failed: ${res.status} ${res.statusText}`);
+	if (!res.ok) throw new Error(`webSearch failed: ${res.status} ${res.statusText}`);
 
 	const html = await res.text();
 	return parseResults(html, maxResults);
@@ -57,8 +53,7 @@ function parseResults(html: string, max: number): SearchResult[] {
 
 	// DuckDuckGo HTML wraps each result in <div class="result ...">
 	// We pull out result blocks, then extract title/url/snippet from each.
-	const blockRe =
-		/<div[^>]+class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+	const blockRe = /<div[^>]+class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
 	let block: RegExpExecArray | null;
 
 	while ((block = blockRe.exec(html)) !== null && results.length < max) {

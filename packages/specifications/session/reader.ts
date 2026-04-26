@@ -57,9 +57,7 @@ export interface SessionListItem {
 // List all sessions
 // ============================================
 
-export async function listSessions(
-	sessionsDir?: string,
-): Promise<SessionListItem[]> {
+export async function listSessions(sessionsDir?: string): Promise<SessionListItem[]> {
 	const dir = sessionsDir || SESSIONS_DIR;
 
 	if (!fs.existsSync(dir)) {
@@ -97,10 +95,7 @@ export async function listSessions(
 	}
 
 	// Newest first
-	sessions.sort(
-		(a, b) =>
-			new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime(),
-	);
+	sessions.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
 
 	return sessions;
 }
@@ -163,8 +158,7 @@ async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
 						result.model = start.meta.agent.model;
 						result.runtime = start.meta.agent.runtime;
 						result.gitBranch = start.meta.environment.gitBranch ?? null;
-						result.workingDirectory =
-							start.meta.environment.workingDirectory ?? null;
+						result.workingDirectory = start.meta.environment.workingDirectory ?? null;
 						result.version = start.meta.version;
 					}
 
@@ -187,8 +181,7 @@ async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
 						result.completed = true;
 						result.exitReason = end.summary.exitReason;
 						result.durationMs = end.summary.durationMs;
-						result.totalSteps =
-							end.summary.totalSteps ?? end.summary.totalTurns ?? null;
+						result.totalSteps = end.summary.totalSteps ?? end.summary.totalTurns ?? null;
 					}
 				} catch {
 					// skip
@@ -234,9 +227,7 @@ export class SessionReader {
 	}
 
 	/** Stream entries as they're appended (for live tailing) */
-	async *stream(
-		startAfterSeq?: number,
-	): AsyncGenerator<SessionEntry, void, unknown> {
+	async *stream(startAfterSeq?: number): AsyncGenerator<SessionEntry, void, unknown> {
 		const rl = readline.createInterface({
 			input: fs.createReadStream(this.filePath),
 			crlfDelay: Number.POSITIVE_INFINITY,
@@ -246,10 +237,7 @@ export class SessionReader {
 			if (!line.trim()) continue;
 			try {
 				const entry = JSON.parse(line) as SessionEntry;
-				if (
-					startAfterSeq !== undefined &&
-					entry.sequenceNumber <= startAfterSeq
-				) {
+				if (startAfterSeq !== undefined && entry.sequenceNumber <= startAfterSeq) {
 					continue;
 				}
 				yield entry;
@@ -310,9 +298,7 @@ export function normalizeToV1(entry: SessionEntry): SessionEntry {
 		case "assistant_content": {
 			const ac = entry as AssistantContentEntry;
 			const textParts = ac.parts.filter((p) => p.type === "text");
-			const content = textParts
-				.map((p) => (p as { text: string }).text)
-				.join("\n");
+			const content = textParts.map((p) => (p as { text: string }).text).join("\n");
 			const hasToolCalls = ac.parts.some((p) => p.type === "tool-call");
 			return {
 				type: "assistant_message",
@@ -341,10 +327,7 @@ export function normalizeToV1(entry: SessionEntry): SessionEntry {
 		case "step_end": {
 			const se = entry as StepEndEntry;
 			// Map v2 finishReason to v1 reason
-			const reasonMap: Record<
-				string,
-				"natural_stop" | "tool_calls" | "max_turns" | "error"
-			> = {
+			const reasonMap: Record<string, "natural_stop" | "tool_calls" | "max_turns" | "error"> = {
 				stop: "natural_stop",
 				length: "natural_stop",
 				"content-filter": "error",

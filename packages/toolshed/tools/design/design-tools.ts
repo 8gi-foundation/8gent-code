@@ -43,11 +43,7 @@ registerTool(
 		};
 
 		// Check for Tailwind
-		for (const name of [
-			"tailwind.config.ts",
-			"tailwind.config.js",
-			"tailwind.config.mjs",
-		]) {
+		for (const name of ["tailwind.config.ts", "tailwind.config.js", "tailwind.config.mjs"]) {
 			if (fs.existsSync(path.join(cwd, name))) {
 				result.hasTailwind = true;
 				result.tailwindConfig = name;
@@ -68,11 +64,7 @@ registerTool(
 		// Check for CSS variables (design tokens)
 		const globalCss = path.join(cwd, "src", "app", "globals.css");
 		const altCss = path.join(cwd, "src", "index.css");
-		const cssPath = fs.existsSync(globalCss)
-			? globalCss
-			: fs.existsSync(altCss)
-				? altCss
-				: null;
+		const cssPath = fs.existsSync(globalCss) ? globalCss : fs.existsSync(altCss) ? altCss : null;
 		if (cssPath) {
 			const css = fs.readFileSync(cssPath, "utf-8");
 			const customProps = css.match(/--[\w-]+:/g);
@@ -83,14 +75,7 @@ registerTool(
 		}
 
 		// Count components
-		const componentDirs = [
-			"components",
-			"ui",
-			"shared",
-			"atoms",
-			"molecules",
-			"organisms",
-		];
+		const componentDirs = ["components", "ui", "shared", "atoms", "molecules", "organisms"];
 		for (const dir of componentDirs) {
 			for (const scanPath of scanPaths) {
 				const fullDir = path.join(cwd, scanPath, dir);
@@ -100,10 +85,7 @@ registerTool(
 							recursive: true,
 						}) as string[];
 						const components = files.filter(
-							(f: string) =>
-								f.endsWith(".tsx") ||
-								f.endsWith(".vue") ||
-								f.endsWith(".svelte"),
+							(f: string) => f.endsWith(".tsx") || f.endsWith(".vue") || f.endsWith(".svelte"),
 						);
 						result.componentCount += components.length;
 						result.componentDir = path.join(scanPath, dir);
@@ -157,8 +139,7 @@ registerTool(
 				},
 				framework: {
 					type: "string",
-					description:
-						"Framework: react, vue, svelte (auto-detected if omitted)",
+					description: "Framework: react, vue, svelte (auto-detected if omitted)",
 				},
 				withTest: { type: "boolean", description: "Include test file" },
 				withStory: { type: "boolean", description: "Include Storybook story" },
@@ -259,8 +240,7 @@ describe("${name}", () => {
 registerTool(
 	{
 		name: "extract_colors",
-		description:
-			"Extract all color values from CSS/SCSS/Tailwind config files in the project.",
+		description: "Extract all color values from CSS/SCSS/Tailwind config files in the project.",
 		capabilities: ["design"],
 		inputSchema: {
 			type: "object",

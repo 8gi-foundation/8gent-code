@@ -81,9 +81,7 @@ const artem =
 		?.replace(/## Artem.*/, "")
 		.trim() || "";
 
-await send(
-	`DAY 1 CONTENT DRAFTS\n====================\n\nLINKEDIN:\n\n${linkedin}`,
-);
+await send(`DAY 1 CONTENT DRAFTS\n====================\n\nLINKEDIN:\n\n${linkedin}`);
 await new Promise((r) => setTimeout(r, 1000));
 await send(`X / TWITTER:\n\n${twitter}`);
 await new Promise((r) => setTimeout(r, 1000));

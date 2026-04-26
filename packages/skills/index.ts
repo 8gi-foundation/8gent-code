@@ -159,8 +159,7 @@ export class SkillManager {
 	private invocations: Map<string, SkillInvocation> = new Map();
 
 	constructor(skillsDirectory?: string) {
-		this.skillsDirectory =
-			skillsDirectory || path.join(os.homedir(), ".8gent", "skills");
+		this.skillsDirectory = skillsDirectory || path.join(os.homedir(), ".8gent", "skills");
 	}
 
 	/**
@@ -195,9 +194,7 @@ export class SkillManager {
 
 		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
 		if (fs.existsSync(LEARNED_DIR)) {
-			const learnedFiles = fs
-				.readdirSync(LEARNED_DIR)
-				.filter((f) => f.endsWith(".md"));
+			const learnedFiles = fs.readdirSync(LEARNED_DIR).filter((f) => f.endsWith(".md"));
 			for (const file of learnedFiles) {
 				this.tryIngestSkillFile(path.join(LEARNED_DIR, file), true);
 			}
@@ -206,10 +203,7 @@ export class SkillManager {
 		return this.getAllSkills();
 	}
 
-	private registerLookupKeys(
-		skillName: string,
-		frontmatter: SkillFrontmatter,
-	): void {
+	private registerLookupKeys(skillName: string, frontmatter: SkillFrontmatter): void {
 		const norm = (s: string) => s.replace(/^\//, "").toLowerCase();
 		this.aliasToCanonical.set(norm(skillName), skillName);
 		if (typeof frontmatter.trigger === "string") {
@@ -230,10 +224,7 @@ export class SkillManager {
 		body: string,
 	): Skill {
 		const triggerExtras: string[] = [];
-		if (
-			typeof frontmatter.trigger === "string" &&
-			frontmatter.trigger.startsWith("/")
-		) {
+		if (typeof frontmatter.trigger === "string" && frontmatter.trigger.startsWith("/")) {
 			triggerExtras.push(frontmatter.trigger.slice(1));
 		}
 		return {
@@ -559,8 +550,7 @@ export function parseSkillCommand(
 			}
 		} else {
 			// Positional argument
-			args[`_${Object.keys(args).filter((k) => k.startsWith("_")).length}`] =
-				part;
+			args[`_${Object.keys(args).filter((k) => k.startsWith("_")).length}`] = part;
 			i++;
 		}
 	}

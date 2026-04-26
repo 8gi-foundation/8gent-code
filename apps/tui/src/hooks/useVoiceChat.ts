@@ -89,9 +89,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
 		const engine = engineRef.current;
 		const available = await engine.isAvailable();
 		if (!available) {
-			setError(
-				"Voice not available. Install sox and whisper.cpp: brew install sox whisper-cpp",
-			);
+			setError("Voice not available. Install sox and whisper.cpp: brew install sox whisper-cpp");
 			return;
 		}
 

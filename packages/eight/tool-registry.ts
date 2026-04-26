@@ -33,13 +33,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools)[]> = {
 		"git_checkout",
 		"git_create_branch",
 	],
-	github: [
-		"gh_pr_list",
-		"gh_pr_create",
-		"gh_pr_view",
-		"gh_issue_list",
-		"gh_issue_create",
-	],
+	github: ["gh_pr_list", "gh_pr_create", "gh_pr_view", "gh_issue_list", "gh_issue_create"],
 	notes: ["write_notes"],
 	terminal: ["write_terminal"],
 	web: ["web_search", "web_fetch"],
@@ -137,9 +131,7 @@ export class ToolRegistry {
 		return tool({
 			description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Call this to unlock a category before using its tools.`,
 			inputSchema: z.object({
-				category: z
-					.string()
-					.describe(`Category to load. One of: ${CATEGORY_NAMES.join(", ")}`),
+				category: z.string().describe(`Category to load. One of: ${CATEGORY_NAMES.join(", ")}`),
 			}),
 			execute: async ({ category }: { category: string }) => {
 				if (!TOOL_CATEGORIES[category]) {
