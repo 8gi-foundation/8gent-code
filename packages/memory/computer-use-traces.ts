@@ -14,6 +14,12 @@ export interface TraceStartParams {
 	sessionId: string;
 	channel: string;
 	intent: string;
+	/** Surface that originated the dispatch (per feedback_dispatch_everywhere.md). */
+	originatingChannel?: string | null;
+	/** Free-form provenance label (e.g. "telegram-bot:userid"). */
+	dispatchSource?: string | null;
+	/** Replay-protected dispatch id from the originating surface. */
+	dispatchId?: string | null;
 }
 
 export interface TraceCloseParams {
@@ -41,6 +47,9 @@ export interface TraceRow {
 	outcome: TraceOutcome | null;
 	stepCount: number;
 	summary: string | null;
+	originatingChannel: string | null;
+	dispatchSource: string | null;
+	dispatchId: string | null;
 }
 
 export interface TraceStepRow {
@@ -94,10 +103,20 @@ export class ComputerUseTraceStore {
 		this.db
 			.prepare(
 				`INSERT INTO computer_use_traces
-         (id, session_id, channel, intent, started_at, ended_at, outcome, step_count, summary)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, NULL)`,
+         (id, session_id, channel, intent, started_at, ended_at, outcome, step_count, summary,
+          originating_channel, dispatch_source, dispatch_id)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, NULL, ?, ?, ?)`,
 			)
-			.run(id, params.sessionId, params.channel, params.intent, now);
+			.run(
+				id,
+				params.sessionId,
+				params.channel,
+				params.intent,
+				now,
+				params.originatingChannel ?? null,
+				params.dispatchSource ?? null,
+				params.dispatchId ?? null,
+			);
 		fs.mkdirSync(path.join(this.tracesDir, params.sessionId), {
 			recursive: true,
 		});
@@ -221,6 +240,9 @@ function rowToTrace(r: Record<string, unknown>): TraceRow {
 		outcome: (r.outcome as TraceOutcome | null) ?? null,
 		stepCount: Number(r.step_count ?? 0),
 		summary: (r.summary as string | null) ?? null,
+		originatingChannel: (r.originating_channel as string | null) ?? null,
+		dispatchSource: (r.dispatch_source as string | null) ?? null,
+		dispatchId: (r.dispatch_id as string | null) ?? null,
 	};
 }
 

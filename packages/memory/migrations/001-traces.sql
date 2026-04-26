@@ -3,21 +3,27 @@
 -- Local-only; no sync. Screenshots stored on disk; rows reference the path.
 
 CREATE TABLE IF NOT EXISTS computer_use_traces (
-  id            TEXT PRIMARY KEY,
-  session_id    TEXT NOT NULL,
-  channel       TEXT NOT NULL,
-  intent        TEXT NOT NULL,
-  started_at    INTEGER NOT NULL,
-  ended_at      INTEGER,
-  outcome       TEXT
-                CHECK (outcome IS NULL OR outcome IN ('ok','error','timeout','aborted')),
-  step_count    INTEGER NOT NULL DEFAULT 0,
-  summary       TEXT
+  id                  TEXT PRIMARY KEY,
+  session_id          TEXT NOT NULL,
+  channel             TEXT NOT NULL,
+  intent              TEXT NOT NULL,
+  started_at          INTEGER NOT NULL,
+  ended_at            INTEGER,
+  outcome             TEXT
+                      CHECK (outcome IS NULL OR outcome IN ('ok','error','timeout','aborted')),
+  step_count          INTEGER NOT NULL DEFAULT 0,
+  summary             TEXT,
+  -- Dispatch provenance (per feedback_dispatch_everywhere.md, 8gent-code#1896).
+  -- Nullable for local sessions that did not arrive via the dispatch protocol.
+  originating_channel TEXT,
+  dispatch_source     TEXT,
+  dispatch_id         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_session ON computer_use_traces(session_id);
 CREATE INDEX IF NOT EXISTS idx_traces_channel ON computer_use_traces(channel);
 CREATE INDEX IF NOT EXISTS idx_traces_started ON computer_use_traces(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_dispatch_source ON computer_use_traces(dispatch_source);
 
 CREATE TABLE IF NOT EXISTS computer_use_trace_steps (
   id              TEXT PRIMARY KEY,
