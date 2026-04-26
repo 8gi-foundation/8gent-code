@@ -49,6 +49,7 @@
 		"benchmark:multi": "bun run benchmarks/autoresearch/multi-model-harness.ts",
 		"audit": "bun run packages/audit/cli.ts",
 		"demo": "bun run scripts/demo-savings.ts",
+		"provision-tenant": "bun run scripts/provision-tenant.ts",
 		"harness": "bun run packages/harness-cli/index.ts",
 		"harness:run": "bun run packages/harness-cli/index.ts run",
 		"harness:sessions": "bun run packages/harness-cli/index.ts sessions",
