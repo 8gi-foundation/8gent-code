@@ -188,16 +188,47 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - name: Show Swift version
         run: swift --version
       - name: Build Swift package
         working-directory: apps/8gent-computer
         run: swift build -c release
-      - name: Headless smoke test
+      - name: Start mock daemon
         working-directory: apps/8gent-computer
         run: |
-          OUTPUT=$(swift run -c release 8gent-computer --headless --intent "ci-smoke")
-          echo "Headless output: $OUTPUT"
-          echo "$OUTPUT" | grep -q '"status":"noop"' || (echo "::error::headless status missing" && exit 1)
-          echo "$OUTPUT" | grep -q '"headless_phase":"scaffold"' || (echo "::error::headless_phase missing" && exit 1)
+          bun scripts/mock-daemon.ts &
+          echo $! > /tmp/mock-daemon.pid
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -sf http://127.0.0.1:18789/health > /dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:18789/health || (echo "::error::mock daemon failed to start" && exit 1)
+      - name: Headless smoke test
+        working-directory: apps/8gent-computer
+        env:
+          EIGHT_DAEMON_URL: ws://127.0.0.1:18789/computer
+          EIGHT_DAEMON_TIMEOUT_MS: "10000"
+        run: |
+          set -o pipefail
+          OUTPUT=$(swift run -c release 8gent-computer --headless --intent "ping")
+          EXIT=$?
+          echo "Headless output:"
+          echo "$OUTPUT"
+          if [ $EXIT -ne 0 ]; then
+            echo "::error::headless exited with code $EXIT"
+            exit 1
+          fi
+          echo "$OUTPUT" | grep -q '"type":"token"' || (echo "::error::no token event in output" && exit 1)
+          echo "$OUTPUT" | grep -q '"type":"done"' || (echo "::error::no done event in output" && exit 1)
+          echo "$OUTPUT" | grep -q '"reason":"turn-complete"' || (echo "::error::done reason missing" && exit 1)
           echo "Swift smoke: PASS"
+      - name: Stop mock daemon
+        if: always()
+        run: |
+          if [ -f /tmp/mock-daemon.pid ]; then
+            kill "$(cat /tmp/mock-daemon.pid)" 2>/dev/null || true
+          fi

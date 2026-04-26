@@ -28,5 +28,9 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>8gent Computer listens to your spoken intent so it can act on it locally. Audio is transcribed on-device and never sent to a remote service.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>8gent Computer transcribes your speech on-device to turn what you say into an intent for the local agent.</string>
 </dict>
 </plist>
