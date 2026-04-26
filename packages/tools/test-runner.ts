@@ -137,5 +137,5 @@ export async function run(): Promise<{ passed: number, failed: number, duration:
   }
 
   const totalDuration = Date.now() - startTime;
-  return { passed, failed, duration: total意图 };
+  return { passed, failed, duration: totalDuration };
 }
