@@ -16,11 +16,11 @@ function getParser(): ((filePath: string) => ParseResult) | null {
   try {
     // Use eval to prevent Turbopack from statically analyzing this import
     const mod = eval(`require("${join(PROJECT_ROOT, "packages/ast-index/typescript-parser").replace(/\\/g, "/")}")`);
-    _parser = mod.parseTypeScriptFile;
+    _parser = mod.parseTypeScriptFile ?? null;
   } catch {
     _parser = null;
   }
-  return _parser;
+  return _parser ?? null;
 }
 
 interface SymbolInfo {
