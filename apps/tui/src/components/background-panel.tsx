@@ -1,3 +1,4 @@
+import { Box, useInput } from "ink";
 /**
  * BackgroundPanel: a small, non-modal side panel listing tasks the user
  * sent to the background via Ctrl+G. Toggled with Ctrl+J ("jobs").
@@ -9,15 +10,8 @@
  * - Keyboard-only friendly: Escape returns focus to foreground input.
  */
 import React from "react";
-import { Box, useInput } from "ink";
-import {
-	AppText,
-	MutedText,
-	Heading,
-	Divider,
-	StatusDot,
-} from "./primitives/index.js";
 import type { BgTask } from "../lib/background-pool.js";
+import { AppText, Divider, Heading, MutedText, StatusDot } from "./primitives/index.js";
 
 interface BackgroundPanelProps {
 	tasks: BgTask[];
@@ -43,11 +37,7 @@ function formatElapsed(t: BgTask): string {
 	return rem === 0 ? `${mins}m` : `${mins}m ${rem}s`;
 }
 
-export function BackgroundPanel({
-	tasks,
-	onClose,
-	width = 44,
-}: BackgroundPanelProps) {
+export function BackgroundPanel({ tasks, onClose, width = 44 }: BackgroundPanelProps) {
 	useInput((_input, key) => {
 		if (key.escape) onClose();
 	});
@@ -65,9 +55,7 @@ export function BackgroundPanel({
 			<MutedText>Ctrl+J to close. Escape to dismiss.</MutedText>
 			<Divider />
 			{tasks.length === 0 ? (
-				<MutedText>
-					No background tasks yet. Press Ctrl+G while a task is running.
-				</MutedText>
+				<MutedText>No background tasks yet. Press Ctrl+G while a task is running.</MutedText>
 			) : (
 				tasks.map((t) => {
 					const s = statusLabel(t);

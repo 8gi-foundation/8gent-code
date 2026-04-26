@@ -17,33 +17,29 @@ const SPINNER_FRAMES = ["|", "/", "-", "\\"] as const;
  * asciiBar(10, 10)       // "[==========] 100%"
  * asciiBar(0, 10)        // "[>         ] 0%"
  */
-export function asciiBar(
-  current: number,
-  total: number,
-  width: number = 10
-): string {
-  if (total <= 0) return `[${">".padEnd(width)}] 0%`;
+export function asciiBar(current: number, total: number, width = 10): string {
+	if (total <= 0) return `[${">".padEnd(width)}] 0%`;
 
-  const clamped = Math.max(0, Math.min(current, total));
-  const ratio = clamped / total;
-  const pct = Math.round(ratio * 100);
-  const filled = Math.floor(ratio * width);
+	const clamped = Math.max(0, Math.min(current, total));
+	const ratio = clamped / total;
+	const pct = Math.round(ratio * 100);
+	const filled = Math.floor(ratio * width);
 
-  let bar: string;
-  if (clamped >= total) {
-    // Complete - no arrow head, all filled
-    bar = "=".repeat(width);
-  } else if (filled === 0) {
-    // Nothing filled yet - just arrow at start
-    bar = ">" + " ".repeat(width - 1);
-  } else {
-    // Partial fill with arrow head
-    const body = "=".repeat(filled - 1) + ">";
-    const empty = " ".repeat(width - filled);
-    bar = body + empty;
-  }
+	let bar: string;
+	if (clamped >= total) {
+		// Complete - no arrow head, all filled
+		bar = "=".repeat(width);
+	} else if (filled === 0) {
+		// Nothing filled yet - just arrow at start
+		bar = `>${" ".repeat(width - 1)}`;
+	} else {
+		// Partial fill with arrow head
+		const body = `${"=".repeat(filled - 1)}>`;
+		const empty = " ".repeat(width - filled);
+		bar = body + empty;
+	}
 
-  return `[${bar}] ${pct}%`;
+	return `[${bar}] ${pct}%`;
 }
 
 /**
@@ -55,10 +51,10 @@ export function asciiBar(
  * dots(10, 10)  // ".........."
  */
 export function dots(current: number, total: number): string {
-  if (total <= 0) return "";
-  const clamped = Math.max(0, Math.min(current, total));
-  const count = Math.round((clamped / total) * total);
-  return ".".repeat(count);
+	if (total <= 0) return "";
+	const clamped = Math.max(0, Math.min(current, total));
+	const count = Math.round((clamped / total) * total);
+	return ".".repeat(count);
 }
 
 /**
@@ -71,9 +67,9 @@ export function dots(current: number, total: number): string {
  * percentage(0, 0)   // "0%"
  */
 export function percentage(current: number, total: number): string {
-  if (total <= 0) return "0%";
-  const clamped = Math.max(0, Math.min(current, total));
-  return `${Math.round((clamped / total) * 100)}%`;
+	if (total <= 0) return "0%";
+	const clamped = Math.max(0, Math.min(current, total));
+	return `${Math.round((clamped / total) * 100)}%`;
 }
 
 /**
@@ -85,8 +81,8 @@ export function percentage(current: number, total: number): string {
  * fraction(7, 7)     // "7/7"
  */
 export function fraction(current: number, total: number): string {
-  const clamped = Math.max(0, Math.min(current, total));
-  return `${clamped}/${total}`;
+	const clamped = Math.max(0, Math.min(current, total));
+	return `${clamped}/${total}`;
 }
 
 /**
@@ -101,7 +97,7 @@ export function fraction(current: number, total: number): string {
  * spinner(4)   // "|"  (wraps)
  */
 export function spinner(frame: number): string {
-  return SPINNER_FRAMES[Math.abs(frame) % SPINNER_FRAMES.length];
+	return SPINNER_FRAMES[Math.abs(frame) % SPINNER_FRAMES.length];
 }
 
 /**
@@ -112,16 +108,11 @@ export function spinner(frame: number): string {
  * statusLine(0, 5, 3)   // "| [>  ] 0/5 0%"
  * statusLine(2, 5, 3)   // "/ [==>] 2/5 40%"
  */
-export function statusLine(
-  current: number,
-  total: number,
-  frame: number,
-  width: number = 10
-): string {
-  return [
-    spinner(frame),
-    asciiBar(current, total, width),
-    fraction(current, total),
-    percentage(current, total),
-  ].join(" ");
+export function statusLine(current: number, total: number, frame: number, width = 10): string {
+	return [
+		spinner(frame),
+		asciiBar(current, total, width),
+		fraction(current, total),
+		percentage(current, total),
+	].join(" ");
 }

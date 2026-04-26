@@ -6,10 +6,10 @@
  * labels defer to muted weight so the keys read as the primary affordance.
  */
 
-import React from "react";
 import { Box } from "ink";
-import { AppText, MutedText } from "./primitives/index.js";
+import React from "react";
 import { truncate } from "../lib/index.js";
+import { AppText, MutedText } from "./primitives/index.js";
 
 interface Shortcut {
 	key: string;

@@ -30,25 +30,16 @@ const SIDEBAR_MIN = 18;
 /**
  * Process sidebar width when open. Shrinks when the terminal is narrow so chat keeps a usable slice.
  */
-export function computeProcessSidebarWidth(
-	sidebarOpen: boolean,
-	viewportWidth: number,
-): number {
+export function computeProcessSidebarWidth(sidebarOpen: boolean, viewportWidth: number): number {
 	if (!sidebarOpen) return 0;
 	const narrow = viewportWidth < TUI_NARROW_WIDTH;
 	const mainFloor = narrow ? 26 : 34;
-	const maxByViewport = Math.max(
-		SIDEBAR_MIN,
-		viewportWidth - RESERVED_CHROME - mainFloor,
-	);
+	const maxByViewport = Math.max(SIDEBAR_MIN, viewportWidth - RESERVED_CHROME - mainFloor);
 	const cap = narrow ? SIDEBAR_MAX_NARROW : SIDEBAR_MAX_WIDE;
 	return Math.min(cap, maxByViewport);
 }
 
 /** Inner width passed to MessageList and similar (approximate content columns). */
-export function tuiChatContentWidth(
-	viewportWidth: number,
-	sidebarWidth: number,
-): number {
+export function tuiChatContentWidth(viewportWidth: number, sidebarWidth: number): number {
 	return Math.max(16, viewportWidth - sidebarWidth - HORIZONTAL_CHROME_COLS);
 }

@@ -40,9 +40,7 @@ export function mergeSlashEntries(
 		byToken.set(entry.token, entry);
 	}
 	return {
-		entries: [...byToken.values()].sort(
-			(a, b) => b.token.length - a.token.length,
-		),
+		entries: [...byToken.values()].sort((a, b) => b.token.length - a.token.length),
 		byToken,
 	};
 }

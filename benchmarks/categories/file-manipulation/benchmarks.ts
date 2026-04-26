@@ -1,12 +1,12 @@
 import type { BenchmarkDefinition } from "../../types";
 
 export const fileManipulationBenchmarks: BenchmarkDefinition[] = [
-  {
-    id: "FM001",
-    category: "file-manipulation",
-    title: "Input Validation with Structured Errors",
-    difficulty: "medium",
-    prompt: `Implement a validateInput function that validates user registration data and returns structured errors.
+	{
+		id: "FM001",
+		category: "file-manipulation",
+		title: "Input Validation with Structured Errors",
+		difficulty: "medium",
+		prompt: `Implement a validateInput function that validates user registration data and returns structured errors.
 
 \`\`\`typescript
 interface RegistrationInput {
@@ -36,10 +36,21 @@ Return { valid: true, errors: [] } if all pass, or { valid: false, errors: [...]
 Each error entry: { field: "fieldName", message: "human readable message" }
 
 Provide the full function as a single code block.`,
-    keywords: ["validate", "errors", "field", "message", "valid", "name", "email", "age", "trim", "includes"],
-    keywordThreshold: 5,
-    testExecution: true,
-    testFile: "autoresearch/tests/FM001-validation.test.ts",
-    timeoutMs: 10000,
-  },
+		keywords: [
+			"validate",
+			"errors",
+			"field",
+			"message",
+			"valid",
+			"name",
+			"email",
+			"age",
+			"trim",
+			"includes",
+		],
+		keywordThreshold: 5,
+		testExecution: true,
+		testFile: "autoresearch/tests/FM001-validation.test.ts",
+		timeoutMs: 10000,
+	},
 ];

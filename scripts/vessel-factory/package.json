@@ -1,14 +1,14 @@
 {
-  "name": "@8gi-foundation/vessel-daemon",
-  "version": "2.0.0",
-  "description": "Shared officer vessel daemon - no Ollama, proxy inference",
-  "main": "src/daemon.ts",
-  "scripts": {
-    "start": "bun run src/daemon.ts",
-    "dev": "bun run --hot src/daemon.ts"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "@types/bun": "latest"
-  }
+	"name": "@8gi-foundation/vessel-daemon",
+	"version": "2.0.0",
+	"description": "Shared officer vessel daemon - no Ollama, proxy inference",
+	"main": "src/daemon.ts",
+	"scripts": {
+		"start": "bun run src/daemon.ts",
+		"dev": "bun run --hot src/daemon.ts"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
 }

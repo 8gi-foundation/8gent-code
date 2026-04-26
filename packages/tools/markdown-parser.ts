@@ -91,7 +91,7 @@ function parse(md: string): Node[] {
     if (!line) { i++; continue; }
 
     if (line.startsWith('#')) {
-      const level = line.match(/^#{1,6}/)![0].length;
+      const level = line.match(/^#{1,6}/)?.[0].length;
       const text = line.slice(level).trim();
       ast.push({
         type: 'heading',
@@ -332,7 +332,7 @@ function toString(nodes: Node[]): string {
 function serializeNode(node: Node): string {
   switch (node.type) {
     case 'heading':
-      return '#'.repeat(node.level) + ' ' + toStringInline(node.children);
+      return `${'#'.repeat(node.level)} ${toStringInline(node.children)}`;
     case 'paragraph':
       return toStringInline(node.children);
     case 'code':

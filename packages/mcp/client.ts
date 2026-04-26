@@ -6,184 +6,189 @@
  */
 
 import type { ToolSet } from "ai";
-import { loadConfig, type ServerConfig, type StdioServerConfig, type SSEServerConfig } from "./config";
-import { StdioTransport, SSETransport, type Transport } from "./transport";
-import { bridgeTools, type MCPToolSchema } from "./tool-bridge";
+import {
+	type SSEServerConfig,
+	type ServerConfig,
+	type StdioServerConfig,
+	loadConfig,
+} from "./config";
+import { type MCPToolSchema, bridgeTools } from "./tool-bridge";
+import { SSETransport, StdioTransport, type Transport } from "./transport";
 
 // ── Types ────────────────────────────────────────────────────────
 
 interface ServerConnection {
-  config: ServerConfig;
-  transport: Transport;
-  tools: MCPToolSchema[];
+	config: ServerConfig;
+	transport: Transport;
+	tools: MCPToolSchema[];
 }
 
 export interface MCPToolResult {
-  content: Array<{
-    type: string;
-    text?: string;
-    data?: string;
-    mimeType?: string;
-  }>;
-  isError?: boolean;
+	content: Array<{
+		type: string;
+		text?: string;
+		data?: string;
+		mimeType?: string;
+	}>;
+	isError?: boolean;
 }
 
 // ── Client ───────────────────────────────────────────────────────
 
 export class MCPClient {
-  private servers = new Map<string, ServerConnection>();
-  private configPath?: string;
+	private servers = new Map<string, ServerConnection>();
+	private configPath?: string;
 
-  constructor(configPath?: string) {
-    this.configPath = configPath;
-  }
+	constructor(configPath?: string) {
+		this.configPath = configPath;
+	}
 
-  /**
-   * Connect to all configured MCP servers.
-   * Performs handshake + tool discovery on each.
-   */
-  async connect(): Promise<void> {
-    const configs = loadConfig(this.configPath);
-    if (configs.length === 0) return;
+	/**
+	 * Connect to all configured MCP servers.
+	 * Performs handshake + tool discovery on each.
+	 */
+	async connect(): Promise<void> {
+		const configs = loadConfig(this.configPath);
+		if (configs.length === 0) return;
 
-    const results = await Promise.allSettled(
-      configs.map(cfg => this._connectServer(cfg))
-    );
+		const results = await Promise.allSettled(configs.map((cfg) => this._connectServer(cfg)));
 
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      if (r.status === "rejected") {
-        console.error(`[mcp] Failed to connect "${configs[i].name}": ${r.reason}`);
-      }
-    }
-  }
+		for (let i = 0; i < results.length; i++) {
+			const r = results[i];
+			if (r.status === "rejected") {
+				console.error(`[mcp] Failed to connect "${configs[i].name}": ${r.reason}`);
+			}
+		}
+	}
 
-  private async _connectServer(config: ServerConfig): Promise<void> {
-    let transport: Transport;
+	private async _connectServer(config: ServerConfig): Promise<void> {
+		let transport: Transport;
 
-    if (config.type === "stdio") {
-      const stdio = new StdioTransport(config.command, config.args, config.env);
-      await stdio.start();
-      transport = stdio;
-    } else {
-      transport = new SSETransport(config.url, config.headers);
-    }
+		if (config.type === "stdio") {
+			const stdio = new StdioTransport(config.command, config.args, config.env);
+			await stdio.start();
+			transport = stdio;
+		} else {
+			transport = new SSETransport(config.url, config.headers);
+		}
 
-    // MCP handshake
-    await transport.send("initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: { roots: { listChanged: true } },
-      clientInfo: { name: "8gent-code", version: "1.0.0" },
-    });
+		// MCP handshake
+		await transport.send("initialize", {
+			protocolVersion: "2024-11-05",
+			capabilities: { roots: { listChanged: true } },
+			clientInfo: { name: "8gent-code", version: "1.0.0" },
+		});
 
-    transport.notify("notifications/initialized");
+		transport.notify("notifications/initialized");
 
-    // Discover tools
-    const result = await transport.send("tools/list") as { tools: MCPToolSchema[] };
-    const tools = result?.tools || [];
+		// Discover tools
+		const result = (await transport.send("tools/list")) as {
+			tools: MCPToolSchema[];
+		};
+		const tools = result?.tools || [];
 
-    this.servers.set(config.name, { config, transport, tools });
+		this.servers.set(config.name, { config, transport, tools });
 
-    console.log(`[mcp] Connected to "${config.name}" - ${tools.length} tools`);
-  }
+		console.log(`[mcp] Connected to "${config.name}" - ${tools.length} tools`);
+	}
 
-  /**
-   * Get all MCP tools as AI SDK ToolSet entries.
-   * Merges tools from all connected servers.
-   */
-  getTools(): ToolSet {
-    const merged: ToolSet = {};
+	/**
+	 * Get all MCP tools as AI SDK ToolSet entries.
+	 * Merges tools from all connected servers.
+	 */
+	getTools(): ToolSet {
+		const merged: ToolSet = {};
 
-    for (const [name, conn] of this.servers) {
-      const bridged = bridgeTools(name, conn.tools, this);
-      Object.assign(merged, bridged);
-    }
+		for (const [name, conn] of this.servers) {
+			const bridged = bridgeTools(name, conn.tools, this);
+			Object.assign(merged, bridged);
+		}
 
-    return merged;
-  }
+		return merged;
+	}
 
-  /**
-   * Call a tool on a specific server.
-   * Used by the tool-bridge execute callbacks.
-   */
-  async callTool(
-    serverName: string,
-    toolName: string,
-    args?: Record<string, unknown>,
-  ): Promise<MCPToolResult> {
-    const conn = this.servers.get(serverName);
-    if (!conn) {
-      return {
-        content: [{ type: "text", text: `Server "${serverName}" not connected` }],
-        isError: true,
-      };
-    }
+	/**
+	 * Call a tool on a specific server.
+	 * Used by the tool-bridge execute callbacks.
+	 */
+	async callTool(
+		serverName: string,
+		toolName: string,
+		args?: Record<string, unknown>,
+	): Promise<MCPToolResult> {
+		const conn = this.servers.get(serverName);
+		if (!conn) {
+			return {
+				content: [{ type: "text", text: `Server "${serverName}" not connected` }],
+				isError: true,
+			};
+		}
 
-    try {
-      const result = await conn.transport.send("tools/call", {
-        name: toolName,
-        arguments: args || {},
-      }) as MCPToolResult;
+		try {
+			const result = (await conn.transport.send("tools/call", {
+				name: toolName,
+				arguments: args || {},
+			})) as MCPToolResult;
 
-      return result;
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: `MCP tool error: ${err}` }],
-        isError: true,
-      };
-    }
-  }
+			return result;
+		} catch (err) {
+			return {
+				content: [{ type: "text", text: `MCP tool error: ${err}` }],
+				isError: true,
+			};
+		}
+	}
 
-  /**
-   * List all connected servers and their tool counts.
-   */
-  listServers(): Array<{ name: string; toolCount: number; type: string }> {
-    return [...this.servers.entries()].map(([name, conn]) => ({
-      name,
-      toolCount: conn.tools.length,
-      type: conn.config.type,
-    }));
-  }
+	/**
+	 * List all connected servers and their tool counts.
+	 */
+	listServers(): Array<{ name: string; toolCount: number; type: string }> {
+		return [...this.servers.entries()].map(([name, conn]) => ({
+			name,
+			toolCount: conn.tools.length,
+			type: conn.config.type,
+		}));
+	}
 
-  /**
-   * Check if any servers are connected.
-   */
-  isConnected(): boolean {
-    return this.servers.size > 0;
-  }
+	/**
+	 * Check if any servers are connected.
+	 */
+	isConnected(): boolean {
+		return this.servers.size > 0;
+	}
 
-  /** @deprecated Use listServers() */
-  getRunningServers(): string[] {
-    return this.listServers().map(s => s.name);
-  }
+	/** @deprecated Use listServers() */
+	getRunningServers(): string[] {
+		return this.listServers().map((s) => s.name);
+	}
 
-  /** @deprecated Use listServers() for counts, getTools() for merged ToolSet */
-  getServerTools(serverName: string): MCPToolSchema[] {
-    return this.servers.get(serverName)?.tools ?? [];
-  }
+	/** @deprecated Use listServers() for counts, getTools() for merged ToolSet */
+	getServerTools(serverName: string): MCPToolSchema[] {
+		return this.servers.get(serverName)?.tools ?? [];
+	}
 
-  /** @deprecated Use getTools() which returns a ToolSet */
-  listTools(): Array<{ server: string; tool: MCPToolSchema }> {
-    const result: Array<{ server: string; tool: MCPToolSchema }> = [];
-    for (const [name, conn] of this.servers) {
-      for (const tool of conn.tools) {
-        result.push({ server: name, tool });
-      }
-    }
-    return result;
-  }
+	/** @deprecated Use getTools() which returns a ToolSet */
+	listTools(): Array<{ server: string; tool: MCPToolSchema }> {
+		const result: Array<{ server: string; tool: MCPToolSchema }> = [];
+		for (const [name, conn] of this.servers) {
+			for (const tool of conn.tools) {
+				result.push({ server: name, tool });
+			}
+		}
+		return result;
+	}
 
-  /**
-   * Shutdown all server connections.
-   */
-  close(): void {
-    for (const [name, conn] of this.servers) {
-      try {
-        conn.transport.close();
-      } catch {
-        // Best-effort cleanup
-      }
-    }
-    this.servers.clear();
-  }
+	/**
+	 * Shutdown all server connections.
+	 */
+	close(): void {
+		for (const [name, conn] of this.servers) {
+			try {
+				conn.transport.close();
+			} catch {
+				// Best-effort cleanup
+			}
+		}
+		this.servers.clear();
+	}
 }
