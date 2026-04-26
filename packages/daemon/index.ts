@@ -6,14 +6,26 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { ComputerUseTraceStore, defaultTraceDbPath } from "../memory/computer-use-traces";
 import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { addJob, getJobs, startCron, stopCron } from "./cron";
 import { getDataDir } from "./data-dir";
+import {
+	type DispatchExecutor,
+	DispatchHub,
+	DispatchLedger,
+	DispatchRateLimiter,
+	DispatchRouter,
+	LocalTokenVerifier,
+	SurfaceRegistry,
+	resolveLocalDispatchSecret,
+} from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
+import type { DaemonChannel } from "./types";
 
 const PORT = 18789;
 const DATA_DIR = getDataDir();
@@ -163,11 +175,84 @@ async function main(): Promise<void> {
 	// Create the agent pool - manages Agent instances per session
 	pool = new AgentPool(poolConfig);
 
-	// Start WebSocket gateway with agent pool
+	// Wire the dispatch protocol (issue #1896). Surfaces register and
+	// fan results across each other; the daemon is the trusted executor.
+	const dispatchRegistry = new SurfaceRegistry();
+	const dispatchLedger = new DispatchLedger();
+	const dispatchRateLimiter = new DispatchRateLimiter();
+	const dispatchVerifier = new LocalTokenVerifier(resolveLocalDispatchSecret());
+	const dispatchHub = new DispatchHub();
+
+	// Dispatch traces flow into the Phase 4 ComputerUseTraceStore
+	// (#1868). Best-effort: if the store fails to open, we log and
+	// keep dispatching - audit isn't on the critical path.
+	let traceStore: ComputerUseTraceStore | null = null;
+	try {
+		traceStore = new ComputerUseTraceStore(defaultTraceDbPath());
+	} catch (err) {
+		console.warn(`[daemon] trace store unavailable: ${err instanceof Error ? err.message : err}`);
+	}
+
+	const dispatchExecutor: DispatchExecutor = {
+		async executeOnChannel(targetChannel, intent, meta) {
+			const sessionId = `disp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+			pool!.createSession(sessionId, targetChannel as DaemonChannel);
+			pool!
+				.chat(sessionId, intent)
+				.then(() => bus.emit("session:end", { sessionId, reason: "turn-complete" }))
+				.catch((err) =>
+					bus.emit("agent:error", {
+						sessionId,
+						error: err instanceof Error ? err.message : String(err),
+					}),
+				);
+			return { sessionId };
+		},
+	};
+	const dispatchRouter = new DispatchRouter({
+		registry: dispatchRegistry,
+		ledger: dispatchLedger,
+		rateLimiter: dispatchRateLimiter,
+		verifier: dispatchVerifier,
+		executor: dispatchExecutor,
+		hub: dispatchHub,
+		onTrace: traceStore
+			? (record) => {
+					try {
+						const traceId = traceStore!.startTrace({
+							sessionId: record.correlationId,
+							channel: record.targetChannel,
+							intent: record.intentPreview,
+							originatingChannel: record.originatingChannel,
+							dispatchSource: record.dispatchSource,
+							dispatchId: record.dispatchId,
+						});
+						traceStore!.closeTrace(traceId, {
+							outcome: record.result === "allowed" ? "ok" : "error",
+							summary: record.reason ?? null,
+						});
+					} catch (err) {
+						console.warn(
+							`[daemon] dispatch trace write failed: ${err instanceof Error ? err.message : err}`,
+						);
+					}
+				}
+			: undefined,
+	});
+
+	// Start WebSocket gateway with agent pool + dispatch
 	server = startGateway({
 		port: config.port,
 		authToken: config.authToken,
 		pool,
+		dispatch: {
+			registry: dispatchRegistry,
+			router: dispatchRouter,
+			ledger: dispatchLedger,
+			rateLimiter: dispatchRateLimiter,
+			verifier: dispatchVerifier,
+			hub: dispatchHub,
+		},
 	});
 
 	// Start heartbeat
