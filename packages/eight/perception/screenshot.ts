@@ -30,8 +30,8 @@ export interface ScreenshotPerception {
 /**
  * Token cost estimate for a desktop screenshot.
  *
- * Vision models bill per tile (Qwen 3.6 follows the OpenAI-style 512x512
- * tile rule: 85 base tokens + 170 per tile). A typical Mac shot at 1440x900
+ * Vision models bill per tile (Qwen 3.6 follows the chat-completions-style
+ * 512x512 tile rule: 85 base tokens + 170 per tile). A typical Mac shot at 1440x900
  * lands around 12-16 tiles. We emit a conservative upper bound so the
  * agent's perception budget is not surprised at end-of-loop.
  */
