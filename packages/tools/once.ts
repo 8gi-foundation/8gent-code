@@ -5,11 +5,11 @@
  */
 function once<T>(fn: () => T): () => T {
   let called = false;
-  let result: T;
+  let result: T | undefined;
 
   function wrapped(): T {
     if (called) {
-      return result;
+      return result as T;
     }
     called = true;
     result = fn();
@@ -31,11 +31,11 @@ function once<T>(fn: () => T): () => T {
  */
 function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
   let called = false;
-  let result: T;
+  let result: T | undefined;
 
   async function wrapped(): Promise<T> {
     if (called) {
-      return Promise.resolve(result);
+      return Promise.resolve(result as T);
     }
     called = true;
     result = await fn();

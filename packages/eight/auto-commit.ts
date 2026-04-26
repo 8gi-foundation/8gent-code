@@ -19,7 +19,7 @@ export async function autoCommitMessage(diff: string): Promise<string> {
   const { text } = await generateText({
     model,
     prompt: `Generate a single-line conventional commit message for this diff. Format: type(scope): description. Types: feat, fix, refactor, docs, chore, test, style. Be concise.\n\nDiff:\n${diff.slice(0, 3000)}`,
-    maxTokens: 100,
+    maxOutputTokens: 100,
   });
 
   // Clean up - take first line, remove quotes

@@ -262,6 +262,5 @@ export async function withConvex<T>(
   }
 }
 
-// Re-export types
-export type { ConvexClientConfig };
+// Re-export wrapper class only (ConvexClientConfig is already exported above)
 export { ConvexClientWrapper as ConvexClient };

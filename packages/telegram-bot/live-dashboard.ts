@@ -52,7 +52,7 @@ export class LiveDashboard {
     });
 
     this.messageId = result.message_id;
-    return this.messageId;
+    return this.messageId ?? 0;
   }
 
   /**

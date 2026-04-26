@@ -183,7 +183,7 @@ export class TaskRouter {
       model,
       schema: ClassificationSchema,
       prompt: `Classify this user task into exactly one category.\n\nTask: ${prompt.slice(0, 500)}`,
-      maxTokens: 100,
+      maxOutputTokens: 100,
     });
 
     return {
