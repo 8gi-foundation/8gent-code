@@ -1,0 +1,40 @@
+# /etc/caddy/Caddyfile - james.8gentos.com vessel
+# Reverse proxies the 8gent-OS Next.js app on localhost:3000.
+# Auth is handled by Clerk inside the Next.js app (no Caddy basic_auth).
+# The eight-vessel daemon runs on localhost:18789, internal only.
+
+{
+    email ops@8gi.org
+}
+
+james.8gentos.com {
+    encode gzip zstd
+
+    # Next.js (handles its own routing, websockets, server actions)
+    reverse_proxy localhost:3000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}
+
+# Fallback: any other host hitting :80 by IP gets a flat 200 so probes work pre-DNS.
+:80 {
+    respond "8gent vessel: alive (host did not match james.8gentos.com)" 200
+}
