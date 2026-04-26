@@ -103,9 +103,9 @@ What changes when the template is pointed at a non-Qwen vision model:
 - Image budget: tile arithmetic in `perception/screenshot.ts` assumes
   512x512 tiles. Other vision models that use 384x384 or 768x768 tiles
   need a tweak to `estimateScreenshotCost()`.
-- Tool-call format: the template assumes the OpenAI tool-call shape used by
-  Qwen 3.6 + DeepSeek V4. Models that emit tool calls in a different shape
-  need an adapter inside the LLM client, not the prompt.
+- Tool-call format: the template assumes the chat-completions tool-call
+  shape used by Qwen 3.6 + DeepSeek V4. Models that emit tool calls in a
+  different shape need an adapter inside the LLM client, not the prompt.
 - Termination: the template requires the model to call `goal_complete` /
   `goal_failed`. Models without reliable tool-call termination should be
   wrapped with a regex parser in the loop (out of scope for v0).
