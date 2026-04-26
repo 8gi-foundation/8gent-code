@@ -568,3 +568,54 @@ export { BotMemory } from "./memory";
 export { LiveDashboard } from "./live-dashboard";
 export { UnifiedPortal, formatForTelegram } from "./unified-portal";
 export type { PortalCommand } from "./unified-portal";
+
+// ── Multi-step task runtime ─────────────────────────────
+export { TaskRunner, renderTaskProgress, spinnerFrame } from "./task-runner";
+export type {
+	Task,
+	TaskStatus,
+	TaskStep,
+	StepStatus,
+	TaskAttachment,
+	TaskRunnerEvents,
+} from "./task-runner";
+
+export {
+	summarizeToolCall,
+	summarizeToolResult,
+	truncateForMobile,
+	splitIntoChunks,
+	detectFilePaths,
+	fence,
+	formatMs,
+} from "./mobile-formatter";
+export type { ToolSummary } from "./mobile-formatter";
+
+export { FileSender } from "./file-sender";
+export type { FileSenderConfig } from "./file-sender";
+
+export { SessionStore } from "./session-store";
+export type { ChatSession, SessionStoreConfig } from "./session-store";
+
+export { DaemonClient } from "./daemon-client";
+export type {
+	DaemonClientConfig,
+	DaemonEventName,
+	DaemonEvent,
+	WebSocketLike,
+	EventPayloads,
+} from "./daemon-client";
+
+export {
+	taskRunningKeyboard,
+	taskCompleteKeyboard,
+	taskFailedKeyboard,
+	approvalKeyboard,
+	confirmKeyboard,
+	safeData,
+	parseCallbackData,
+	CB_PREFIX,
+} from "./keyboards";
+
+export { TelegramBridgeAdapter } from "./bridge-adapter";
+export type { BridgeAdapterConfig } from "./bridge-adapter";

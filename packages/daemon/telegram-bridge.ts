@@ -13,8 +13,16 @@
  * - Startup notification: "I'm online. What do we work on next?"
  */
 
+import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
+import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_MSG_LENGTH = 4000;
+
+/** Multi-step mode is on by default. Set EIGHT_TG_LEGACY=1 to fall back. */
+const MULTI_STEP_ENABLED = process.env.EIGHT_TG_LEGACY !== "1";
+const SESSION_STORE_PATH =
+	process.env.EIGHT_TG_SESSIONS || `${process.env.HOME ?? ""}/.8gent/telegram-sessions.json`;
 
 interface TelegramUpdate {
 	update_id: number;
@@ -161,6 +169,12 @@ class TelegramDaemonBridge {
 	private pendingApprovals = new Map<string, { tool: string; input: unknown }>();
 	private cosRouter: InstanceType<typeof import("./cos-router").CoSRouter> | null = null;
 
+	// Multi-step task runtime (issue #1906 / #1913).
+	private multiStepEnabled: boolean = MULTI_STEP_ENABLED;
+	private daemonClient: DaemonClient | null = null;
+	private adapter: TelegramBridgeAdapter | null = null;
+	private sessionStore: SessionStore | null = null;
+
 	constructor(config: BridgeConfig) {
 		this.config = config;
 	}
@@ -170,6 +184,33 @@ class TelegramDaemonBridge {
 
 		// Connect to daemon WebSocket
 		await this.connectDaemon();
+
+		// Multi-step task adapter sits on top of the same connection. We open
+		// a parallel DaemonClient so the adapter manages its own session;
+		// legacy single-shot prompts continue to use `this.ws`.
+		if (this.multiStepEnabled) {
+			try {
+				this.daemonClient = new DaemonClient({
+					url: this.config.daemonUrl,
+					authToken: this.config.authToken,
+					channel: "telegram",
+				});
+				await this.daemonClient.connect();
+				this.sessionStore = new SessionStore({ persistPath: SESSION_STORE_PATH });
+				this.adapter = new TelegramBridgeAdapter({
+					telegramToken: this.config.telegramToken,
+					chatId: this.config.chatId,
+					daemon: this.daemonClient,
+					sessionStore: this.sessionStore,
+				});
+				console.log("[telegram-bridge] multi-step task adapter attached");
+			} catch (err) {
+				console.error("[telegram-bridge] multi-step adapter failed, falling back:", err);
+				this.multiStepEnabled = false;
+				this.daemonClient?.close();
+				this.daemonClient = null;
+			}
+		}
 
 		// Initialize CoS router for CEO command handling
 		try {
@@ -198,10 +239,11 @@ class TelegramDaemonBridge {
 		}
 
 		// Send startup message (direct to Telegram, not through agent)
+		const mode = this.multiStepEnabled ? "multi-step" : "legacy";
 		await tgSend(
 			this.config.telegramToken,
 			this.config.chatId,
-			"Eight is online. Commands: /delegate, /status, /review, /plan, /goals\n\nWhat do we work on next?",
+			`Eight is online (${mode} mode). Commands: /delegate, /status, /cancel, /review, /plan, /goals\n\nWhat do we work on next?`,
 		);
 
 		// Wait for agent to finish initializing (AST indexing takes ~5s)
@@ -405,11 +447,29 @@ class TelegramDaemonBridge {
 
 		if (text === "/unstick") {
 			this.agentBusy = false;
+			if (this.adapter) {
+				await this.adapter.cancelCurrent("Reset by /unstick").catch(() => {});
+			}
 			await tgSend(
 				this.config.telegramToken,
 				this.config.chatId,
 				"Cleared busy state. Ready for new messages.",
 			);
+			return;
+		}
+
+		if (text === "/cancel") {
+			if (this.adapter) {
+				const cancelled = await this.adapter.cancelCurrent();
+				await tgSend(
+					this.config.telegramToken,
+					this.config.chatId,
+					cancelled ? "Task cancelled." : "Nothing to cancel.",
+				);
+			} else {
+				this.agentBusy = false;
+				await tgSend(this.config.telegramToken, this.config.chatId, "Reset (legacy mode).");
+			}
 			return;
 		}
 
@@ -441,12 +501,28 @@ class TelegramDaemonBridge {
 			await tgSend(
 				this.config.telegramToken,
 				this.config.chatId,
-				"*Eight - Telegram Bridge*\n\nSend any message to chat with Eight.\n\n/status - Daemon health\n/help - This message\n\nEight has full tool access: shell, git, file system, web browsing.",
+				"*Eight - Telegram Bridge*\n\nSend any message to start a multi-step task.\n\n/status - Daemon health\n/cancel - Stop the current task\n/unstick - Reset busy state\n/logs - Tail daemon logs\n/help - This message\n\nEight has full tool access: shell, git, file system, web browsing. Watch tasks stream live; use the inline buttons to cancel or retry.",
 			);
 			return;
 		}
 
-		// Route everything else as a prompt to the daemon
+		// Multi-step path: TaskRunner adapter owns the response message, edits
+		// it as steps complete, and sends final files automatically.
+		if (this.multiStepEnabled && this.adapter) {
+			try {
+				await this.adapter.handleUserMessage(text);
+			} catch (err) {
+				console.error("[telegram-bridge] adapter error, falling back to legacy:", err);
+				await tgSend(
+					this.config.telegramToken,
+					this.config.chatId,
+					`Adapter error: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+
+		// Legacy single-shot path (EIGHT_TG_LEGACY=1).
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
 			await tgSend(
 				this.config.telegramToken,
@@ -567,7 +643,8 @@ class TelegramDaemonBridge {
 		query: NonNullable<TelegramUpdate["callback_query"]>,
 	): Promise<void> {
 		const data = query.data || "";
-		const [action, requestId] = data.split(":");
+		const { prefix, payload } = parseCallbackData(data);
+		const requestId = payload || data.split(":")[1] || "";
 
 		// Answer the callback to remove the loading spinner
 		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`, {
@@ -576,6 +653,27 @@ class TelegramDaemonBridge {
 			body: JSON.stringify({ callback_query_id: query.id }),
 		}).catch(() => {});
 
+		// Multi-step task action callbacks (cancel / retry / continue / new / files).
+		if (this.adapter) {
+			if (prefix === CB_PREFIX.taskCancel) {
+				await this.adapter.cancelCurrent();
+				return;
+			}
+			if (prefix === CB_PREFIX.taskRetry) {
+				await this.adapter.retryCurrent();
+				return;
+			}
+			if (prefix === CB_PREFIX.taskContinue || prefix === CB_PREFIX.taskNew) {
+				await tgSend(
+					this.config.telegramToken,
+					this.config.chatId,
+					"Send your next message to continue.",
+				);
+				return;
+			}
+		}
+
+		const action = prefix;
 		if (!requestId || !this.pendingApprovals.has(requestId)) {
 			return;
 		}
@@ -614,6 +712,11 @@ class TelegramDaemonBridge {
 
 	stop(): void {
 		this.polling = false;
+		this.adapter?.close();
+		this.adapter = null;
+		this.daemonClient?.close();
+		this.daemonClient = null;
+		this.sessionStore?.flush();
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;
