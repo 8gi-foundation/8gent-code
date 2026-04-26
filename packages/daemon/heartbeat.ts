@@ -6,8 +6,8 @@
  * when something actually needs attention.
  */
 
-import { bus } from "./events";
 import { getNextDueJob } from "./cron";
+import { bus } from "./events";
 
 export interface HeartbeatConfig {
 	intervalMs: number; // default 30 * 60 * 1000

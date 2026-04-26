@@ -5,10 +5,10 @@
  * and CSS/styling utilities.
  */
 
-import { registerTool } from "../../registry/register";
-import type { ExecutionContext } from "../../../types";
 import * as fs from "fs";
 import * as path from "path";
+import type { ExecutionContext } from "../../../types";
+import { registerTool } from "../../registry/register";
 
 // ── analyze_design_system ───────────────────────────
 

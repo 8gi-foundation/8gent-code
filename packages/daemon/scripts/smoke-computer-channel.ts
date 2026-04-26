@@ -15,9 +15,9 @@
  * Exit code 0 on success, 1 on any assertion miss.
  */
 
+import type { AgentPool } from "../agent-pool";
 import { bus } from "../events";
 import { startGateway } from "../gateway";
-import type { AgentPool } from "../agent-pool";
 import { PROTOCOL_VERSION } from "../types";
 
 interface MockSession {

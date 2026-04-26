@@ -6,8 +6,8 @@
  * for async scoring. Tracks score distributions over time.
  */
 
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export interface JudgeConfig {
 	/** Judge model endpoint (default: OpenRouter) */
@@ -214,9 +214,7 @@ export class JudgeScorer {
 
 	// ── Private helpers ────────────────────────────────────────────────
 
-	private async callJudge(
-		prompt: string,
-	): Promise<{
+	private async callJudge(prompt: string): Promise<{
 		executionSuccess: number;
 		codeQuality: number;
 		toolEfficiency: number;

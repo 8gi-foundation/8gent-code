@@ -6,19 +6,19 @@
  * Handles graceful shutdown on SIGTERM/SIGINT.
  */
 
+import { AuditLog } from "./audit-log";
+import { sanitizeResponse, validateResponse } from "./content-policy";
+import { DiscordGateway } from "./discord-gateway";
+import { DiscordRest } from "./discord-rest";
+import { MemoryBridge } from "./memory-bridge";
+import { TaskQueue } from "./task-queue";
+import { RateLimiter, TaskRouter } from "./task-router";
 import type {
+	BoardTask,
 	ControlPlaneConfig,
 	PlaneToVessel,
 	VesselToPlane,
-	BoardTask,
 } from "./types";
-import { TaskQueue } from "./task-queue";
-import { DiscordGateway } from "./discord-gateway";
-import { DiscordRest } from "./discord-rest";
-import { TaskRouter, RateLimiter } from "./task-router";
-import { MemoryBridge } from "./memory-bridge";
-import { AuditLog } from "./audit-log";
-import { validateResponse, sanitizeResponse } from "./content-policy";
 import { VesselHealthMonitor } from "./vessel-health";
 
 interface VesselConnection {

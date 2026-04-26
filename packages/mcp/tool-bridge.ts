@@ -6,8 +6,8 @@
  */
 
 import { tool } from "ai";
-import { z } from "zod";
 import type { ToolSet } from "ai";
+import { z } from "zod";
 import type { MCPClient } from "./client";
 
 // ── Types ────────────────────────────────────────────────────────

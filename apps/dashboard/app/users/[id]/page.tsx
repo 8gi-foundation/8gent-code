@@ -7,10 +7,10 @@
  * preferences, and plan management.
  */
 
+import { useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
 import { useState } from "react";
+import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 export default function UserDetailPage() {

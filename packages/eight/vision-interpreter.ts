@@ -14,11 +14,11 @@
  */
 
 import {
-	findVisionModel,
-	findOCRModel,
-	loadVisionConfig,
 	type VisionModel,
 	type VisionTaskType,
+	findOCRModel,
+	findVisionModel,
+	loadVisionConfig,
 } from "./vision-router";
 
 interface VisionInterpretation {

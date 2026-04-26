@@ -21,8 +21,8 @@
 import { spawnSync } from "child_process";
 import { existsSync } from "fs";
 import { delimiter, isAbsolute, join } from "path";
+import type { LLMClient, LLMResponse, Message } from "../eight/types.js";
 import { evaluatePolicy } from "../permissions/policy-engine.js";
-import type { Message, LLMResponse, LLMClient } from "../eight/types.js";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 

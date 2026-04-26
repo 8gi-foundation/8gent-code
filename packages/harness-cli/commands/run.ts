@@ -10,8 +10,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import { Agent } from "../../eight/agent.js";
 import type { AgentConfig } from "../../eight/types.js";
 import { getPermissionManager } from "../../permissions/index.js";
@@ -107,13 +107,13 @@ function parseArgs(args: string[]): RunOptions {
 				opts.runtime = args[++i] as RunOptions["runtime"];
 				break;
 			case "--max-steps":
-				opts.maxSteps = parseInt(args[++i], 10);
+				opts.maxSteps = Number.parseInt(args[++i], 10);
 				break;
 			case "--workdir":
 				opts.workdir = args[++i];
 				break;
 			case "--timeout":
-				opts.timeout = parseInt(args[++i], 10);
+				opts.timeout = Number.parseInt(args[++i], 10);
 				break;
 			case "--json":
 				opts.json = true;

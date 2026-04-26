@@ -13,29 +13,29 @@
  */
 
 import type {
+	AlertSeverity,
+	BenchmarkReport,
+	CompetitionRound,
+	InlineKeyboardMarkup,
+	OvernightSummary,
+	SendMessageOptions,
 	TelegramBotConfig,
 	TelegramResponse,
 	TelegramUpdate,
-	CompetitionRound,
-	BenchmarkReport,
-	OvernightSummary,
-	AlertSeverity,
-	SendMessageOptions,
-	InlineKeyboardMarkup,
 } from "./types";
 
 import {
-	formatCompetitionRound,
-	formatBenchmarkReport,
-	formatMorningBrief,
 	formatAlert,
+	formatBenchmarkReport,
+	formatCompetitionRound,
+	formatMorningBrief,
 	formatScoreboard,
 } from "./formatters";
 
-import { routeCommand, commands } from "./commands";
 import { TelegramAgentMode } from "./agent-mode";
-import { BotMemory } from "./memory";
+import { commands, routeCommand } from "./commands";
 import { LiveDashboard } from "./live-dashboard";
+import { BotMemory } from "./memory";
 
 // ── Default credentials (env overrides) ─────────────────
 
@@ -142,8 +142,8 @@ export type CallbackInterceptor = (ctx: {
 export class TelegramBot {
 	private token: string;
 	private chatId: string;
-	private polling: boolean = false;
-	private pollOffset: number = 0;
+	private polling = false;
+	private pollOffset = 0;
 	private pollingInterval: number;
 	private abortController: AbortController | null = null;
 	/** Registered callback_query interceptors. First to return true wins. */

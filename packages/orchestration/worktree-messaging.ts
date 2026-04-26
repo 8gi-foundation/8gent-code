@@ -8,10 +8,10 @@
 import {
 	existsSync,
 	mkdirSync,
-	writeFileSync,
 	readFileSync,
 	readdirSync,
 	unlinkSync,
+	writeFileSync,
 } from "fs";
 import { join } from "path";
 import type { AgentMessage } from "./worktree-pool-types";

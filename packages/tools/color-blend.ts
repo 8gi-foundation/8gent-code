@@ -46,7 +46,7 @@ function blendChannel(
 export function blend(
 	color1: RGBColor,
 	color2: RGBColor,
-	ratio: number = 0.5,
+	ratio = 0.5,
 	mode: BlendMode = "normal",
 ): RGBColor {
 	const t = Math.max(0, Math.min(1, ratio));
@@ -164,8 +164,8 @@ export function fromHex(hex: string): RGBColor {
 					.join("")
 			: clean;
 	return {
-		r: parseInt(expanded.slice(0, 2), 16),
-		g: parseInt(expanded.slice(2, 4), 16),
-		b: parseInt(expanded.slice(4, 6), 16),
+		r: Number.parseInt(expanded.slice(0, 2), 16),
+		g: Number.parseInt(expanded.slice(2, 4), 16),
+		b: Number.parseInt(expanded.slice(4, 6), 16),
 	};
 }

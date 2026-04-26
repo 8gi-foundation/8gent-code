@@ -11,8 +11,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 
 const VERSION_FILE = path.join(os.homedir(), ".8gent", "model-version.json");
 const BASELINE_FILE = path.join(

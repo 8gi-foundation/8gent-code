@@ -7,18 +7,18 @@
  * Supports toggling between tokens, sessions, and active users.
  */
 
+import { useState } from "react";
 import {
-	LineChart,
-	Line,
-	XAxis,
-	YAxis,
-	CartesianGrid,
-	Tooltip,
-	ResponsiveContainer,
 	Area,
 	AreaChart,
+	CartesianGrid,
+	Line,
+	LineChart,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis,
 } from "recharts";
-import { useState } from "react";
 
 interface UsageDataPoint {
 	date: string;

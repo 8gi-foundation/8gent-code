@@ -1,5 +1,5 @@
-import React from "react";
 import { Box, type BoxProps } from "ink";
+import type React from "react";
 import { Heading } from "./AppText.js";
 
 export interface CardProps extends BoxProps {

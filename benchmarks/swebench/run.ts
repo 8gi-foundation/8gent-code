@@ -10,11 +10,11 @@
  *   bun run benchmarks/swebench/run.ts --refresh
  */
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import { loadTasks, refreshDataset } from "./loader";
-import { runAllTasks, type TaskResult } from "./runner";
-import { score, saveReport, printSummary } from "./scorer";
+import { type TaskResult, runAllTasks } from "./runner";
+import { printSummary, saveReport, score } from "./scorer";
 
 interface CLIOptions {
 	subset?: number;
@@ -38,12 +38,12 @@ function parseArgs(): CLIOptions {
 		switch (arg) {
 			case "--subset":
 			case "-n":
-				opts.subset = parseInt(next, 10);
+				opts.subset = Number.parseInt(next, 10);
 				i++;
 				break;
 			case "--timeout":
 			case "-t":
-				opts.timeout = parseInt(next, 10);
+				opts.timeout = Number.parseInt(next, 10);
 				i++;
 				break;
 			case "--model":

@@ -8,7 +8,7 @@
  *   bun scripts/run-autonomous.ts --dry-run --task "Refactor auth middleware"
  */
 
-import { executeTask, type Task } from "../packages/executor/autonomous";
+import { type Task, executeTask } from "../packages/executor/autonomous";
 
 const args = process.argv.slice(2);
 const taskTitle =

@@ -1,10 +1,10 @@
-import React from "react";
 import { Box, Text } from "ink";
+import React from "react";
 import {
 	AppText,
-	MutedText,
 	Badge,
 	Inline,
+	MutedText,
 	Stack,
 	StatusDot,
 } from "../primitives/index.js";

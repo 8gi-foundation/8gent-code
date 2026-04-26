@@ -10,10 +10,10 @@
  *   <StatusLine type="thinking" elapsed="2m 34s" tokens="1.2k" />
  */
 
-import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
-import { MutedText, Inline } from "./primitives/index.js";
+import React, { useState, useEffect, useCallback } from "react";
 import { truncate } from "../lib/index.js";
+import { Inline, MutedText } from "./primitives/index.js";
 
 // Import from personality package (relative path for monorepo)
 // In production, this would be: import { ... } from "@8gent/personality";
@@ -273,7 +273,7 @@ export function StatusLine({
 // UseStatusVerb Hook
 // ============================================
 
-export function useStatusVerb(type: StatusVerbType, intervalMs: number = 2000) {
+export function useStatusVerb(type: StatusVerbType, intervalMs = 2000) {
 	const [verb, setVerb] = useState(getRandomVerb(type));
 	const [isActive, setIsActive] = useState(false);
 

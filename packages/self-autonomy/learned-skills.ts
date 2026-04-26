@@ -7,10 +7,10 @@
 
 import * as crypto from "crypto";
 import {
-	saveSkill,
-	getSkillById,
 	getAllSkills,
+	getSkillById,
 	querySkillsByTrigger,
+	saveSkill,
 	updateSkillStats,
 } from "./evolution-db.js";
 import type { LearnedSkill } from "./evolution-db.js";
@@ -28,7 +28,7 @@ export type { LearnedSkill } from "./evolution-db.js";
 export function learnSkill(
 	trigger: string,
 	action: string,
-	source: string = "manual",
+	source = "manual",
 ): LearnedSkill {
 	// Check for near-duplicate trigger (exact match)
 	const existing = querySkillsByTrigger(trigger).find(
@@ -61,7 +61,7 @@ export function learnSkill(
  */
 export function getRelevantSkills(
 	taskDescription: string,
-	limit: number = 5,
+	limit = 5,
 ): LearnedSkill[] {
 	const allSkills = getAllSkills();
 	if (allSkills.length === 0) return [];
@@ -98,10 +98,7 @@ export function reinforceSkill(skillId: string, success: boolean): void {
  * Format relevant skills as a prompt prefix for injection into agent context.
  * Returns empty string if no skills found.
  */
-export function buildSkillsContext(
-	taskDescription: string,
-	limit: number = 3,
-): string {
+export function buildSkillsContext(taskDescription: string, limit = 3): string {
 	const skills = getRelevantSkills(taskDescription, limit);
 	if (skills.length === 0) return "";
 

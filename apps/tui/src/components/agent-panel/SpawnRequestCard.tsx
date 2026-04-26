@@ -3,9 +3,9 @@
  * User presses y to approve, n to reject.
  */
 
-import React from "react";
 import { Box, Text, useInput } from "ink";
-import { AppText, MutedText, Stack, Inline } from "../primitives/index.js";
+import React from "react";
+import { AppText, Inline, MutedText, Stack } from "../primitives/index.js";
 
 interface SpawnRequestCardProps {
 	personaName: string;

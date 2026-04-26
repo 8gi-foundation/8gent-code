@@ -11,24 +11,24 @@
  * - Animated selection
  */
 
-import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useCallback } from "react";
+import { truncate } from "../lib/index.js";
 import {
 	AppText,
-	MutedText,
-	Heading,
-	Label,
+	Badge,
+	Card,
+	Divider,
 	ErrorText,
+	Heading,
+	Inline,
+	Label,
+	MutedText,
+	Stack,
+	StatusDot,
 	SuccessText,
 	WarningText,
-	Badge,
-	StatusDot,
-	Card,
-	Stack,
-	Inline,
-	Divider,
 } from "./primitives/index.js";
-import { truncate } from "../lib/index.js";
 
 // ============================================
 // Types
@@ -104,7 +104,7 @@ export function DesignSelector({
 			if (!visible) return;
 
 			// Number selection (1, 2, 3)
-			const num = parseInt(input, 10);
+			const num = Number.parseInt(input, 10);
 			if (num >= 1 && num <= options.length) {
 				const option = options[num - 1];
 				if (option) {

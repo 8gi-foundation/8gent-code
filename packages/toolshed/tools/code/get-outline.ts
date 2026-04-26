@@ -5,11 +5,11 @@
  * This is the core of token-efficient code exploration.
  */
 
-import { registerTool } from "../../registry/register";
+import * as fs from "fs";
+import * as path from "path";
 import { parseTypeScriptFile } from "../../../ast-index/typescript-parser";
 import type { ExecutionContext } from "../../../types";
-import * as path from "path";
-import * as fs from "fs";
+import { registerTool } from "../../registry/register";
 
 interface GetOutlineInput {
 	filePath: string;

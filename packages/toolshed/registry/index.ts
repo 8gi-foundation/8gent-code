@@ -8,7 +8,7 @@
  * and the planner queries for tools matching required capabilities.
  */
 
-import type { Tool, Capability, Permission } from "../../types";
+import type { Capability, Permission, Tool } from "../../types";
 
 interface ToolRegistration {
 	tool: Tool;
@@ -168,7 +168,7 @@ class ToolRegistry {
 	/**
 	 * Record tool usage
 	 */
-	recordUsage(name: string, tokensSaved: number = 0): void {
+	recordUsage(name: string, tokensSaved = 0): void {
 		const registration = this.tools.get(name);
 		if (registration) {
 			registration.usageCount++;

@@ -10,8 +10,8 @@
  *   <BionicText ratio={0.5}>Custom ratio</BionicText>
  */
 
-import React from "react";
 import { Text } from "ink";
+import React from "react";
 
 // ============================================
 // Types
@@ -182,7 +182,7 @@ export function BionicParagraph({
  */
 export function parseBionicText(
 	text: string,
-	ratio: number = 0.5,
+	ratio = 0.5,
 ): Array<{ text: string; bold: boolean }> {
 	const result: Array<{ text: string; bold: boolean }> = [];
 	const tokens = text.split(/(\s+)/);

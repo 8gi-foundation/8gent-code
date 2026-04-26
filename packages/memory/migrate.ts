@@ -8,19 +8,19 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
+import type { EmbeddingProvider } from "./embeddings.js";
+import type { MemoryStore } from "./store.js";
 import {
-	type Memory,
-	type MemoryType,
-	type MemoryScope,
-	type SemanticCategory,
 	type CoreCategory,
+	type Memory,
+	type MemoryScope,
+	type MemoryType,
+	type SemanticCategory,
 	type V1MemoryEntry,
 	generateId,
 } from "./types.js";
-import { MemoryStore } from "./store.js";
-import { type EmbeddingProvider } from "./embeddings.js";
 
 // ── Migration Result ──────────────────────────────────────────────────
 

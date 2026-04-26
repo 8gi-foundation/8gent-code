@@ -9,13 +9,9 @@
  * Designed for use in the agent loop — non-blocking, never throws.
  */
 
-import { type MemoryStore } from "./store.js";
-import {
-	type SearchResult,
-	type SearchOptions,
-	type MemoryType,
-} from "./types.js";
 import { getEmbeddingProvider } from "./embeddings.js";
+import type { MemoryStore } from "./store.js";
+import type { MemoryType, SearchOptions, SearchResult } from "./types.js";
 
 // ── Recall Options ────────────────────────────────────────────────────
 

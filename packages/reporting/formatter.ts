@@ -372,7 +372,7 @@ export function list(items: string[], options: ListOptions = {}): string {
 		.join("\n");
 }
 
-export function numberedList(items: string[], startIndex: number = 1): string {
+export function numberedList(items: string[], startIndex = 1): string {
 	const maxNum = startIndex + items.length - 1;
 	const numWidth = String(maxNum).length;
 
@@ -384,7 +384,7 @@ export function numberedList(items: string[], startIndex: number = 1): string {
 		.join("\n");
 }
 
-export function tree(items: TreeItem[], indent: number = 0): string {
+export function tree(items: TreeItem[], indent = 0): string {
 	const lines: string[] = [];
 
 	items.forEach((item, index) => {
@@ -431,7 +431,7 @@ export function statusLine(
 export function keyValueLine(
 	key: string,
 	value: string,
-	keyWidth: number = 20,
+	keyWidth = 20,
 ): string {
 	const paddedKey = key.padEnd(keyWidth);
 	return `${muted(paddedKey)} ${value}`;
@@ -443,17 +443,17 @@ export function keyValueLine(
 
 export function divider(
 	char: string = boxChars.singleHorizontal,
-	width: number = 64,
+	width = 64,
 	color: keyof typeof colors = "muted",
 ): string {
 	return colorize(char.repeat(width), color);
 }
 
-export function doubleDivider(width: number = 64): string {
+export function doubleDivider(width = 64): string {
 	return colorize(boxChars.doubleHorizontal.repeat(width), "muted");
 }
 
-export function dashedDivider(width: number = 64): string {
+export function dashedDivider(width = 64): string {
 	return muted("-".repeat(width));
 }
 
@@ -474,7 +474,7 @@ export function heading(text: string, level: 1 | 2 | 3 = 1): string {
 	}
 }
 
-export function sectionHeader(text: string, width: number = 64): string {
+export function sectionHeader(text: string, width = 64): string {
 	const padded = ` ${text} `;
 	const totalPad = width - padded.length;
 	const leftPad = Math.floor(totalPad / 2);
@@ -494,7 +494,7 @@ export function sectionHeader(text: string, width: number = 64): string {
 export function progressBar(
 	current: number,
 	total: number,
-	width: number = 40,
+	width = 40,
 ): string {
 	const percentage = Math.min(100, Math.max(0, (current / total) * 100));
 	const filled = Math.round((width * percentage) / 100);
@@ -604,7 +604,7 @@ export function wrapText(text: string, maxWidth: number): string[] {
 export function truncate(
 	text: string,
 	maxLength: number,
-	suffix: string = "...",
+	suffix = "...",
 ): string {
 	const stripped = stripAnsi(text);
 	if (stripped.length <= maxLength) {

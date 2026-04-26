@@ -6,8 +6,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import { parse as parseYaml } from "yaml";
 
 export interface AgentMode {
@@ -131,8 +131,8 @@ export const FAST_MODE_MODELS: Array<{
 
 export class ModeManager {
 	private modes: Record<string, AgentMode>;
-	private active: string = "code";
-	private _fastMode: boolean = false;
+	private active = "code";
+	private _fastMode = false;
 	private _previousModel: string | null = null;
 
 	constructor(customModesPath?: string) {

@@ -9,111 +9,111 @@
  */
 
 import * as crypto from "crypto";
-import type { AgentConfig, AgentEventCallbacks } from "./types";
-import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
-import { createClient } from "./clients";
-import { ToolExecutor } from "./tools";
-import { VisionInterpreter } from "./vision-interpreter";
-import { getHookManager, type HookManager } from "../hooks";
-import { extractCommitHash, extractBranchName } from "../reporting";
-import { appendRun, type RunLogEntry } from "../reporting/runlog";
-import { SessionWriter } from "../specifications/session/writer.js";
-import type {
-	AgentInfo,
-	Environment,
-	ContentPart,
-	DetailedTokenUsage,
-} from "../specifications/session/index.js";
-import { getLSPManager } from "../lsp";
-import {
-	getProactivePlanner,
-	type ProactivePlanner,
-} from "../planning/proactive-planner";
-import {
-	EvidenceCollector,
-	type Evidence,
-	summarizeEvidence,
-} from "../validation/evidence";
 import { indexFolder as astIndexFolder } from "../ast-index";
+import { getExtensionManager } from "../extensions";
+import { type HookManager, getHookManager } from "../hooks";
 import {
-	getHeartbeatAgents,
-	type HeartbeatAgents,
-} from "../self-autonomy/heartbeat";
-import { OnboardingManager } from "../self-autonomy/onboarding";
-import { startTelegramBot, getActiveTelegramBot } from "../telegram";
-import { getVault } from "../secrets";
-import {
-	createInfiniteRunner,
 	type InfiniteRunner,
 	type InfiniteState,
+	createInfiniteRunner,
 } from "../infinite";
-import { ToolLoopDetector } from "./tool-loop-detector";
-import { getMemoryManager, extractAutoMemories } from "../memory";
-import { SessionSyncManager } from "./session-sync";
 import { KernelManager } from "../kernel/manager";
+import { getLSPManager } from "../lsp";
+import { extractAutoMemories, getMemoryManager } from "../memory";
 import {
-	getOrchestratorBus,
 	type OrchestratorBus,
+	getOrchestratorBus,
 } from "../orchestration/orchestrator-bus";
+import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
+import {
+	type ProactivePlanner,
+	getProactivePlanner,
+} from "../planning/proactive-planner";
+import { extractBranchName, extractCommitHash } from "../reporting";
+import { type RunLogEntry, appendRun } from "../reporting/runlog";
+import { getVault } from "../secrets";
+import {
+	type HeartbeatAgents,
+	getHeartbeatAgents,
+} from "../self-autonomy/heartbeat";
+import { OnboardingManager } from "../self-autonomy/onboarding";
+import type {
+	AgentInfo,
+	ContentPart,
+	DetailedTokenUsage,
+	Environment,
+} from "../specifications/session/index.js";
+import { SessionWriter } from "../specifications/session/writer.js";
+import { getActiveTelegramBot, startTelegramBot } from "../telegram";
+import {
+	type Evidence,
+	EvidenceCollector,
+	summarizeEvidence,
+} from "../validation/evidence";
+import { createClient } from "./clients";
+import {
+	type CompressionStage,
+	DEFAULT_PROACTIVE_CONFIG,
+	ProactiveCompression,
+	type ProactiveResult,
+} from "./compaction";
+import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import {
 	ORCHESTRATOR_SEGMENT,
 	buildOrchestratorContext,
 } from "./prompts/orchestrator-prompt";
-import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
-import { getExtensionManager } from "../extensions";
-import {
-	ProactiveCompression,
-	DEFAULT_PROACTIVE_CONFIG,
-	type ProactiveResult,
-	type CompressionStage,
-} from "./compaction";
-import { privacyGate, forceLocalModel } from "../permissions/privacy-router";
+import { SessionSyncManager } from "./session-sync";
+import { ToolLoopDetector } from "./tool-loop-detector";
+import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
+import { ToolExecutor } from "./tools";
+import type { AgentConfig, AgentEventCallbacks } from "./types";
+import { VisionInterpreter } from "./vision-interpreter";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
-	needsClarification,
+	type ProactiveGatherer,
 	createGatherer,
 	formatQuestion,
-	type ProactiveGatherer,
+	needsClarification,
 } from "../proactive";
 
+import { BRAND } from "../personality/brand.js";
 // Personality voice — the infinite gentleman
 import {
 	PERSONALITY,
-	voice as personalityVoice,
+	flavorResponse,
 	getCompletionPhrase,
 	getErrorPhrase,
 	getGreeting,
-	flavorResponse,
+	voice as personalityVoice,
 } from "../personality/voice.js";
-import { BRAND } from "../personality/brand.js";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 import {
-	PlanValidateLoop,
-	parsePlanFromResponse,
-	formatPlan,
-	getKanbanBoard,
-	classifyTaskSize,
-	generateAcceptanceCriteria,
-	decomposeTask,
-	PROACTIVE_SYSTEM_ADDITION,
-	type Step,
 	type BMadTask,
+	PROACTIVE_SYSTEM_ADDITION,
+	PlanValidateLoop,
+	type Step,
+	classifyTaskSize,
+	decomposeTask,
+	formatPlan,
+	generateAcceptanceCriteria,
+	getKanbanBoard,
+	parsePlanFromResponse,
 } from "../workflow";
 
 // AI SDK imports
 import {
-	createEightAgent,
-	createModel,
-	setToolContext,
-	setRuntimeParams,
-	getRuntimeParams,
 	type EightAgentConfig,
 	type ProviderConfig,
 	type ProviderName,
 	type StepFinishEvent,
+	createEightAgent,
+	createModel,
+	getRuntimeParams,
+	setRuntimeParams,
+	setToolContext,
 } from "../ai";
 
 export class Agent {
@@ -122,7 +122,7 @@ export class Agent {
 	private hookManager: HookManager;
 	private sessionId: string;
 	private sessionStartTime: number;
-	private enableReporting: boolean = true;
+	private enableReporting = true;
 	private totalCost: number | null = null;
 	private sessionWriter: SessionWriter;
 	private messageHistory: Array<{ role: string; content: string }> = [];
@@ -140,7 +140,7 @@ export class Agent {
 	private heartbeat: HeartbeatAgents;
 	private onboarding: OnboardingManager;
 	private infiniteRunner: InfiniteRunner | null = null;
-	private infiniteModeActive: boolean = false;
+	private infiniteModeActive = false;
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
@@ -380,7 +380,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			if (telegramToken) {
 				const chatId = vault.get("TELEGRAM_CHAT_ID");
 				startTelegramBot(telegramToken, this, {
-					allowedUsers: chatId ? [parseInt(chatId, 10)] : undefined,
+					allowedUsers: chatId ? [Number.parseInt(chatId, 10)] : undefined,
 				}).catch((err) => {
 					console.log(`[8gent] Telegram auto-start failed: ${err.message}`);
 				});

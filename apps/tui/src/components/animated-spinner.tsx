@@ -4,10 +4,10 @@
  * Enhanced spinner with multiple animation styles and status text
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
-import { MutedText, Label, StatusDot, Inline } from "./primitives/index.js";
+import React, { useState, useEffect } from "react";
+import { Inline, Label, MutedText, StatusDot } from "./primitives/index.js";
 
 type SpinnerStyle = "dots" | "line" | "arc" | "bouncingBar" | "moon" | "runner";
 

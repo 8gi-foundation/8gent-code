@@ -7,7 +7,7 @@
  * Works directly on the SQLite store — no external deps.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -86,9 +86,7 @@ export class PromotionManager {
 		};
 	}
 
-	getPromotionCandidates(
-		limit = 20,
-	): Array<{
+	getPromotionCandidates(limit = 20): Array<{
 		id: string;
 		type: string;
 		access_count: number;
@@ -113,9 +111,7 @@ export class PromotionManager {
 		}>;
 	}
 
-	getArchiveCandidates(
-		limit = 20,
-	): Array<{
+	getArchiveCandidates(limit = 20): Array<{
 		id: string;
 		type: string;
 		last_accessed: number | null;

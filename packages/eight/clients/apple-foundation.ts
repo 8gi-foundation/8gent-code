@@ -8,12 +8,12 @@
  * v1: non-streaming, single-turn per request, no tool calling, no vision.
  */
 
+import { spawn } from "child_process";
+import type { ChildProcessWithoutNullStreams } from "child_process";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { spawn } from "child_process";
-import type { ChildProcessWithoutNullStreams } from "child_process";
-import type { Message, MessageContent, LLMResponse, LLMClient } from "../types";
+import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
 
 function flattenContent(content: MessageContent): string {
 	if (typeof content === "string") return content;

@@ -4,7 +4,7 @@
  * Tests a generic CSP solver with Sudoku and scheduling encoders.
  * WORK_DIR contains: csp.ts, sudoku.ts, scheduler.ts, utils.ts (all LLM-generated, no fixtures)
  */
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 const workDir = process.env.WORK_DIR;
 if (!workDir) throw new Error("WORK_DIR env var required");

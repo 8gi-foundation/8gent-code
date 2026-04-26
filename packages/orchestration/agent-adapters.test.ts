@@ -3,19 +3,19 @@
  * adapter-name migration shim. See issue #1819.
  */
 
-import { test, expect, describe } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import {
-	getAdapter,
-	getAdapters,
-	migrateAdapterName,
-	hostCliPrimaryAdapter,
-	hostCliSecondaryAdapter,
-	hostCliTertiaryAdapter,
-	eightAdapter,
 	// Deprecated aliases retained for backward compatibility.
 	claudeCodeAdapter,
 	codexAdapter,
+	eightAdapter,
+	getAdapter,
+	getAdapters,
+	hostCliPrimaryAdapter,
+	hostCliSecondaryAdapter,
+	hostCliTertiaryAdapter,
+	migrateAdapterName,
 	openCodeAdapter,
 } from "./agent-adapters";
 

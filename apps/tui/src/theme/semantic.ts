@@ -5,7 +5,7 @@
  * can reference `theme.text.success` instead of `tokens.color.green`.
  */
 
-import { color, space, size, border } from "./tokens.js";
+import { border, color, size, space } from "./tokens.js";
 
 /**
  * Sentinel value for "muted" text. This does NOT map to a color string.

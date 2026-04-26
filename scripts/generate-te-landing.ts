@@ -4,7 +4,7 @@
  * using the eight:latest model, then open it in browser.
  */
 
-import { writeFileSync, mkdirSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";

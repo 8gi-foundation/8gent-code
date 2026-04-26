@@ -6,7 +6,7 @@
  * Falls back to devstral:latest if eight:latest times out.
  */
 
-import { writeFileSync, mkdirSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";

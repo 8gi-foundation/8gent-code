@@ -5,8 +5,8 @@
  * Also provides the `requireAuth()` guard for gating features by plan.
  */
 
-import type { AuthUser, UserPlan, AuthState } from "./types.js";
 import { getAuthManager } from "./index.js";
+import type { AuthState, AuthUser, UserPlan } from "./types.js";
 
 // ============================================
 // Feature Gating

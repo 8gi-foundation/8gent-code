@@ -9,8 +9,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 
 // ============================================
 // Types
@@ -81,7 +81,7 @@ const DEFAULT_PERSIST_FILE = path.join(
 export class ThroughputTracker {
 	private events: TokenEvent[] = [];
 	private persistFile: string;
-	private peakTpsAllTime: number = 0;
+	private peakTpsAllTime = 0;
 
 	constructor(persistFile?: string) {
 		this.persistFile = persistFile ?? DEFAULT_PERSIST_FILE;
@@ -367,7 +367,7 @@ export function resetThroughputTracker(): void {
 // Helpers
 // ============================================
 
-function round(n: number, decimals: number = 2): number {
+function round(n: number, decimals = 2): number {
 	const f = 10 ** decimals;
 	return Math.round(n * f) / f;
 }

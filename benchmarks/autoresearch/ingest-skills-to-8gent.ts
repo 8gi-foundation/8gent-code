@@ -14,15 +14,15 @@
  */
 
 import {
-	readFileSync,
-	writeFileSync,
-	readdirSync,
 	existsSync,
 	mkdirSync,
+	readFileSync,
+	readdirSync,
 	statSync,
+	writeFileSync,
 } from "fs";
-import { join, basename, extname } from "path";
 import { homedir } from "os";
+import { basename, extname, join } from "path";
 
 const HOME = homedir();
 const TARGET_DIR = join(HOME, ".8gent", "skills");

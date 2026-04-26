@@ -7,11 +7,11 @@
  * Tools are split into groups and composed into a single ToolSet.
  */
 
-import { tool } from "ai";
-import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { tool } from "ai";
 import type { ToolSet } from "ai";
+import { z } from "zod";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -1622,7 +1622,7 @@ const selfTune = tool({
 			frequencyPenalty: [-2, 2],
 			presencePenalty: [-2, 2],
 		};
-		const [min, max] = bounds[parameter] || [0, Infinity];
+		const [min, max] = bounds[parameter] || [0, Number.POSITIVE_INFINITY];
 		const clamped = Math.max(min, Math.min(max, value));
 		const prev = (getRuntimeParams() as any)[parameter];
 		setRuntimeParams({ [parameter]: clamped } as any);

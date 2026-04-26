@@ -5,9 +5,9 @@
  * These short paragraphs get injected into system prompts for personalization.
  */
 
+import type { Database } from "bun:sqlite";
 import { generateText } from "ai";
 import { createModel } from "../ai/providers.js";
-import type { Database } from "bun:sqlite";
 
 export interface PeerRepresentation {
 	userId: string;

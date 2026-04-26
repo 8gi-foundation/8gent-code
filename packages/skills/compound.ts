@@ -15,8 +15,8 @@ import {
 	readdirSync,
 	writeFileSync,
 } from "fs";
-import { join } from "path";
 import { homedir } from "os";
+import { join } from "path";
 
 export const LEARNED_SKILLS_DIR = join(homedir(), ".8gent", "learned-skills");
 
@@ -109,7 +109,7 @@ function bumpConfidence(filePath: string): void {
 	const content = readFileSync(filePath, "utf-8");
 	const updated = content.replace(
 		/^successes:\s*(\d+)/m,
-		(_, n) => `successes: ${parseInt(n, 10) + 1}`,
+		(_, n) => `successes: ${Number.parseInt(n, 10) + 1}`,
 	);
 	if (updated !== content) {
 		writeFileSync(filePath, updated);

@@ -8,8 +8,8 @@
  * the ToolRegistry class doesn't expose a public `has()` method.
  */
 
-import { agentTools } from "./tools";
 import type { Capability, Permission, ToolRegistration } from "../types";
+import { agentTools } from "./tools";
 
 /** Map AI SDK tool names to typed toolshed capabilities */
 const TOOL_CAPABILITIES: Record<string, Capability[]> = {

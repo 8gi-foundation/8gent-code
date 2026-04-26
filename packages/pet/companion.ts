@@ -505,9 +505,9 @@ function pickWeighted<T extends { tier: string }>(
 }
 
 function hexToAnsi(hex: string): string {
-	const r = parseInt(hex.slice(1, 3), 16);
-	const g = parseInt(hex.slice(3, 5), 16);
-	const b = parseInt(hex.slice(5, 7), 16);
+	const r = Number.parseInt(hex.slice(1, 3), 16);
+	const g = Number.parseInt(hex.slice(3, 5), 16);
+	const b = Number.parseInt(hex.slice(5, 7), 16);
 	return `\x1b[38;2;${r};${g};${b}m`;
 }
 
@@ -575,9 +575,9 @@ export function generateCompanion(sessionId?: string): Companion {
 	const bodyHex = element.color;
 	const accentHex = element.accent;
 	// Highlight: brighten the accent
-	const hr = Math.min(255, parseInt(accentHex.slice(1, 3), 16) + 60);
-	const hg = Math.min(255, parseInt(accentHex.slice(3, 5), 16) + 60);
-	const hb = Math.min(255, parseInt(accentHex.slice(5, 7), 16) + 60);
+	const hr = Math.min(255, Number.parseInt(accentHex.slice(1, 3), 16) + 60);
+	const hg = Math.min(255, Number.parseInt(accentHex.slice(3, 5), 16) + 60);
+	const hb = Math.min(255, Number.parseInt(accentHex.slice(5, 7), 16) + 60);
 	const highlightHex = `#${hr.toString(16).padStart(2, "0")}${hg.toString(16).padStart(2, "0")}${hb.toString(16).padStart(2, "0")}`;
 
 	const palette = {
@@ -648,7 +648,7 @@ export function generateCompanion(sessionId?: string): Companion {
 
 // -- Collection Deck (persistent session history) --
 
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 export interface DeckEntry {

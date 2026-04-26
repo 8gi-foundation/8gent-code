@@ -6,41 +6,41 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import {
-	type CompletionReport,
-	type TaskContext,
-	type StepSummary,
-	type EvidenceSummary,
-	type FileOperation,
-	type ToolInvocation,
-	type StoredReport,
-} from "./types";
-import {
-	box,
-	colors,
-	colorize,
+	type TreeItem,
 	bold,
-	muted,
-	success,
-	warning,
-	error,
-	info,
+	box,
+	boxChars,
+	colorize,
+	colors,
 	divider,
 	doubleDivider,
-	heading,
-	list,
-	numberedList,
-	tree,
-	statusLine,
-	statusIcon,
-	stepIcon,
+	error,
 	formatDuration,
 	formatNumber,
-	boxChars,
-	type TreeItem,
+	heading,
+	info,
+	list,
+	muted,
+	numberedList,
+	statusIcon,
+	statusLine,
+	stepIcon,
+	success,
+	tree,
+	warning,
 } from "./formatter";
+import type {
+	CompletionReport,
+	EvidenceSummary,
+	FileOperation,
+	StepSummary,
+	StoredReport,
+	TaskContext,
+	ToolInvocation,
+} from "./types";
 
 // ============================================
 // Completion Reporter Class
@@ -619,7 +619,7 @@ export class CompletionReporter {
 
 export class TaskContextTracker {
 	private context: TaskContext;
-	private currentStep: number = -1;
+	private currentStep = -1;
 
 	constructor(
 		taskId: string,

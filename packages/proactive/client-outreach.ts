@@ -8,8 +8,8 @@
  * traces back to the company mission. Agents speak with intent.
  */
 
-import type { Opportunity } from "./opportunity-scanner.ts";
 import type { Deliverable } from "./deliverable-generator.ts";
+import type { Opportunity } from "./opportunity-scanner.ts";
 
 // -- Templates --------------------------------------------------------------
 

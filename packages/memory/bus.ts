@@ -8,13 +8,13 @@
  * Consumers: control plane (discord), telegram bot, CLI, API.
  */
 
-import { Database } from "bun:sqlite";
-import * as os from "os";
+import type { Database } from "bun:sqlite";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
-import { MemoryStore } from "./store.js";
 import { KnowledgeGraph } from "./graph.js";
-import { memoryHealth, type MemoryHealth } from "./health.js";
+import { type MemoryHealth, memoryHealth } from "./health.js";
+import { MemoryStore } from "./store.js";
 import { generateId } from "./types.js";
 
 // ── Types ────────────────────────────────────────────────────────────

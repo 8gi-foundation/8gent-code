@@ -113,13 +113,13 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		if (a === "--max-turns") {
 			const next = argv[i + 1];
 			if (next && !next.startsWith("-")) {
-				maxTurns = parseInt(next, 10);
+				maxTurns = Number.parseInt(next, 10);
 				i++;
 			}
 			continue;
 		}
 		if (a.startsWith("--max-turns=")) {
-			maxTurns = parseInt(a.slice("--max-turns=".length), 10);
+			maxTurns = Number.parseInt(a.slice("--max-turns=".length), 10);
 			continue;
 		}
 		// Any other flag is ignored silently so Orchestra can pass extras

@@ -13,12 +13,12 @@
  *   - Every decision is audit-logged (see user-policy.ts).
  */
 
+import type { PolicyDecision } from "./types.js";
 import {
+	type ApprovalScope,
 	checkCapability,
 	recordDecision,
-	type ApprovalScope,
 } from "./user-policy.js";
-import type { PolicyDecision } from "./types.js";
 
 export type { ApprovalScope } from "./user-policy.js";
 

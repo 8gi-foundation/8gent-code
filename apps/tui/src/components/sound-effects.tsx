@@ -85,8 +85,8 @@ export function useErrorSound(hasError: boolean, enabled = true): void {
 // Sound manager for global control
 class SoundManager {
 	private static instance: SoundManager;
-	private enabled: boolean = true;
-	private volume: number = 1; // Not actually used for terminal beeps, but for future
+	private enabled = true;
+	private volume = 1; // Not actually used for terminal beeps, but for future
 
 	private constructor() {}
 

@@ -8,7 +8,7 @@
  */
 
 import * as path from "path";
-import { buildDepGraph, type DepGraph } from "./dep-graph";
+import { type DepGraph, buildDepGraph } from "./dep-graph";
 import { findTestsFor } from "./test-map";
 
 export interface BlastRadius {

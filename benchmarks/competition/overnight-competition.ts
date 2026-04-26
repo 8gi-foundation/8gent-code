@@ -11,13 +11,13 @@
  */
 
 import {
-	writeFileSync,
-	readFileSync,
+	appendFileSync,
 	existsSync,
 	mkdirSync,
-	appendFileSync,
+	readFileSync,
+	writeFileSync,
 } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type {
 	BenchmarkDefinition,
@@ -27,26 +27,26 @@ import type {
 
 // ── Import ALL benchmark categories ────────────────────────────────
 
-import { bugFixingBenchmarks } from "../categories/bug-fixing/benchmarks";
-import { fileManipulationBenchmarks } from "../categories/file-manipulation/benchmarks";
-import { featureImplementationBenchmarks } from "../categories/feature-implementation/benchmarks";
-import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { agenticBenchmarks } from "../categories/agentic/benchmarks";
-import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { battleTestBenchmarks } from "../categories/battle-test/benchmarks";
 import { battleTestProBenchmarks } from "../categories/battle-test/benchmarks-pro";
+import { bugFixingBenchmarks } from "../categories/bug-fixing/benchmarks";
+import { featureImplementationBenchmarks } from "../categories/feature-implementation/benchmarks";
+import { fileManipulationBenchmarks } from "../categories/file-manipulation/benchmarks";
+import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
+import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 
 // ── Import existing grading & mutation system ──────────────────────
 
 import { grade } from "../autoresearch/execution-grader";
+import { getModelOrder, recordResult } from "../autoresearch/model-router";
 import {
-	getSystemPrompt,
 	addMutation,
-	getMutations,
 	clearMutations,
+	getMutations,
+	getSystemPrompt,
 } from "../autoresearch/system-prompt";
-import { recordResult, getModelOrder } from "../autoresearch/model-router";
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -56,8 +56,8 @@ const COMP_DIR = join(ROOT, "competition");
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 const EIGHT_MODEL = process.env.EIGHT_MODEL ?? "eight:latest";
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
-const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS ?? "0", 10);
-const STOP_HOUR = parseInt(process.env.STOP_HOUR ?? "7", 10);
+const MAX_ROUNDS = Number.parseInt(process.env.MAX_ROUNDS ?? "0", 10);
+const STOP_HOUR = Number.parseInt(process.env.STOP_HOUR ?? "7", 10);
 
 const CLAUDE_MODEL = "claude-sonnet-4-6-20250514";
 const CLAUDE_FALLBACK_MODEL = "qwen3.5:latest";

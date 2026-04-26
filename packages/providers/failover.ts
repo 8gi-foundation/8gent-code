@@ -10,9 +10,9 @@
  * → DeepSeek V4-Flash (heavy cloud) → OpenRouter `:free` (last resort).
  */
 
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync } from "fs";
 import { homedir, release } from "os";
+import { join } from "path";
 
 /**
  * Apple Foundation Model is preferred at the top of every local chain when
@@ -22,7 +22,7 @@ import { homedir, release } from "os";
 function appleFoundationAvailable(): boolean {
 	if (process.platform !== "darwin") return false;
 	if (process.arch !== "arm64") return false;
-	const major = parseInt(release().split(".")[0] ?? "0", 10);
+	const major = Number.parseInt(release().split(".")[0] ?? "0", 10);
 	if (Number.isFinite(major) && major < 25) return false;
 	return existsSync(
 		join(homedir(), ".8gent", "bin", "apple-foundation-bridge"),

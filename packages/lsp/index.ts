@@ -5,9 +5,9 @@
  * Supports: typescript-language-server, pyright, rust-analyzer
  */
 
-import { spawn, ChildProcess } from "child_process";
-import * as path from "path";
+import { type ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
+import * as path from "path";
 
 // ============================================
 // Types
@@ -162,7 +162,7 @@ export class LSPClient {
 	private process: ChildProcess | null = null;
 	private language: string;
 	private workspaceRoot: string;
-	private messageId: number = 0;
+	private messageId = 0;
 	private pendingRequests: Map<
 		number,
 		{
@@ -170,8 +170,8 @@ export class LSPClient {
 			reject: (error: Error) => void;
 		}
 	> = new Map();
-	private buffer: string = "";
-	private initialized: boolean = false;
+	private buffer = "";
+	private initialized = false;
 	private openDocuments: Set<string> = new Set();
 	private diagnosticWaiters: Map<string, (diags: Diagnostic[]) => void> =
 		new Map();
@@ -274,7 +274,7 @@ export class LSPClient {
 		filePath: string,
 		line: number,
 		character: number,
-		includeDeclaration: boolean = true,
+		includeDeclaration = true,
 	): Promise<Location[] | null> {
 		await this.ensureDocumentOpen(filePath);
 
@@ -315,9 +315,7 @@ export class LSPClient {
 	/**
 	 * Get document symbols (outline)
 	 */
-	async documentSymbols(
-		filePath: string,
-	): Promise<Array<{
+	async documentSymbols(filePath: string): Promise<Array<{
 		name: string;
 		kind: string;
 		range: Range;
@@ -530,7 +528,7 @@ export class LSPClient {
 				continue;
 			}
 
-			const contentLength = parseInt(contentLengthMatch[1], 10);
+			const contentLength = Number.parseInt(contentLengthMatch[1], 10);
 			const messageStart = headerEnd + 4;
 			const messageEnd = messageStart + contentLength;
 
@@ -882,7 +880,7 @@ export async function lspDocumentSymbols(
 
 		function formatSymbol(
 			sym: { name: string; kind: string; range: Range; children?: unknown[] },
-			indent: number = 0,
+			indent = 0,
 		): string {
 			const prefix = "  ".repeat(indent);
 			let result = `${prefix}${sym.kind}: ${sym.name} (line ${sym.range.start.line + 1})`;

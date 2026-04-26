@@ -295,8 +295,8 @@ export function createErrorResponse(error: string, recovery?: string): string {
 // ============================================
 
 export class Voice {
-	private isFirstMessage: boolean = true;
-	private messageCount: number = 0;
+	private isFirstMessage = true;
+	private messageCount = 0;
 
 	/**
 	 * Get appropriate flavor for the current context

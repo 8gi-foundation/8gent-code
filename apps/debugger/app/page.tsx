@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { SessionInfo } from "./api/sessions/route";
 import SessionList from "./components/SessionList";
 import SessionViewer from "./components/SessionViewer";
 import SystemHealth from "./components/SystemHealth";
-import type { SessionInfo } from "./api/sessions/route";
 
 export default function Home() {
 	const [sessions, setSessions] = useState<SessionInfo[]>([]);

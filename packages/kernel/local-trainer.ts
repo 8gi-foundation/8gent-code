@@ -7,17 +7,17 @@
  * and hot-swaps adapters into Ollama.
  */
 
-import { spawn } from "bun";
 import {
-	writeFileSync,
-	readFileSync,
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	readdirSync,
 	unlinkSync,
+	writeFileSync,
 } from "node:fs";
-import { join, resolve, dirname } from "node:path";
 import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { spawn } from "bun";
 import type { ScoreRecord } from "./judge";
 import type { CheckpointInfo } from "./training";
 
@@ -611,7 +611,7 @@ export class LocalTrainer {
 
 		// Fallback: parse from stdout
 		const match = stdout.match(/(?:Avg Score|score|Score):\s*([\d.]+)/i);
-		return match ? parseFloat(match[1]) : 0;
+		return match ? Number.parseFloat(match[1]) : 0;
 	}
 
 	private loadState(): LocalTrainerState {

@@ -5,8 +5,8 @@
  * Implements structured handoff protocols and context transfer.
  */
 
-import type { SubAgentConfig, SubAgent } from "./subagent";
 import type { Step } from "../workflow/plan-validate";
+import type { SubAgent, SubAgentConfig } from "./subagent";
 
 // ============================================
 // Types

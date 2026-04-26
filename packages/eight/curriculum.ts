@@ -40,7 +40,7 @@ export interface Curriculum {
 
 export class CurriculumRunner {
 	private curriculum: Curriculum;
-	private currentIndex: number = 0;
+	private currentIndex = 0;
 	private completedSteps: Set<string> = new Set();
 
 	constructor(curriculum: Curriculum) {

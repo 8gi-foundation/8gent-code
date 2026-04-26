@@ -5,8 +5,8 @@
  * with animated status updates, a pulsing dot grid, and real-time tool info.
  */
 
-import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text } from "ink";
+import React, { useState, useEffect, useMemo } from "react";
 
 // ── Status Phases ──────────────────────────────────────────────────────
 

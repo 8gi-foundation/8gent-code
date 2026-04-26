@@ -4,7 +4,7 @@
  * Loads the LLM-generated cache from FIXTURE_PATH env var,
  * then verifies LRU eviction, TTL expiry, and stats tracking.
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 const fixturePath = process.env.FIXTURE_PATH;
 if (!fixturePath) throw new Error("FIXTURE_PATH env var required");

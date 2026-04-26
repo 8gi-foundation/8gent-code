@@ -77,7 +77,9 @@ export async function resolveBestFreeModel(
 		const sorted = models
 			.filter((m) => !BLOCKLIST.includes(m.id) && m.pricing?.prompt)
 			.sort(
-				(a, b) => parseFloat(a.pricing.prompt) - parseFloat(b.pricing.prompt),
+				(a, b) =>
+					Number.parseFloat(a.pricing.prompt) -
+					Number.parseFloat(b.pricing.prompt),
 			);
 
 		const cheapest = sorted[0];
@@ -119,7 +121,7 @@ export async function resolveBestFreeModel(
 		// Prefer larger models (param count heuristic from ID)
 		const paramMatch = m.id.match(/(\d+)b/i);
 		if (paramMatch) {
-			const params = parseInt(paramMatch[1], 10);
+			const params = Number.parseInt(paramMatch[1], 10);
 			score += Math.min(params / 10, 15); // Cap at 15 points
 		}
 

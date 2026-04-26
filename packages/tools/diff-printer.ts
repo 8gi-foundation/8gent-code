@@ -84,7 +84,7 @@ function buildHunks(a: string[], b: string[], context: number): Hunk[] {
 			continue;
 		}
 		// find the span of changed lines
-		let start = Math.max(0, idx - context);
+		const start = Math.max(0, idx - context);
 		let end = idx;
 		while (
 			end < ops.length &&

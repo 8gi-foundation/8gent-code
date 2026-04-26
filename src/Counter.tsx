@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import type React from "react";
+import { useState } from "react";
 
 const Counter: React.FC = () => {
 	const [count, setCount] = useState(0);

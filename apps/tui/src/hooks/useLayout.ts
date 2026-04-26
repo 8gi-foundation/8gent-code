@@ -12,7 +12,7 @@
  * Focus flows: main → sidebar → overlay, with Escape going backwards.
  */
 
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 
 // What's showing in the main content area
 export type MainPane =

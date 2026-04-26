@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 // 8gi:200-exempt — ExtensionCrafter uses HyperAgent pipeline, inherently complex
 /**
  * ExtensionCrafter
@@ -5,11 +6,10 @@
  * Uses Analyst→Critic→Implementer pipeline from @8gent/orchestration.
  */
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
+import * as path from "path";
 import { inferenceChat } from "../orchestration/sequential-pipeline";
-import { loadAllExtensions, collectExtensionTools } from "./loader";
+import { collectExtensionTools, loadAllExtensions } from "./loader";
 import type { ExtensionManifest, ExtensionToolDef } from "./types";
 
 const EXTENSIONS_DIR = path.join(os.homedir(), ".8gent", "extensions");

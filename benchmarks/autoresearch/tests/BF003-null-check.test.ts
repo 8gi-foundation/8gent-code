@@ -4,7 +4,7 @@
  * Loads the LLM-generated fix from FIXTURE_PATH env var,
  * then verifies null-safety.
  */
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 const fixturePath = process.env.FIXTURE_PATH;
 if (!fixturePath) throw new Error("FIXTURE_PATH env var required");

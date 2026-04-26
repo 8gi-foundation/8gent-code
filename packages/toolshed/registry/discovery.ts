@@ -4,7 +4,7 @@
  * Agents use this to find tools without loading them all into context.
  */
 
-import type { Tool, Capability, Permission } from "../../types";
+import type { Capability, Permission, Tool } from "../../types";
 import { getAllTools, getTool } from "./register";
 
 export interface ToolSummary {

@@ -7,9 +7,9 @@
  * Backward compat: pass allTools=true to load everything upfront.
  */
 import { tool } from "ai";
-import { z } from "zod";
-import { agentTools, type AgentTools } from "../ai/tools";
 import type { ToolSet } from "ai";
+import { z } from "zod";
+import { type AgentTools, agentTools } from "../ai/tools";
 
 export const TOOL_CATEGORIES: Record<string, (keyof AgentTools)[]> = {
 	core: [
@@ -134,7 +134,6 @@ export class ToolRegistry {
 
 	/** Create the discover_tools meta-tool */
 	private createDiscoverTool() {
-		const registry = this;
 		return tool({
 			description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Call this to unlock a category before using its tools.`,
 			inputSchema: z.object({
@@ -148,7 +147,7 @@ export class ToolRegistry {
 						error: `Unknown category "${category}". Available: ${CATEGORY_NAMES.join(", ")}`,
 					};
 				}
-				const loaded = registry.loadCategory(category);
+				const loaded = this.loadCategory(category);
 				const allInCategory = TOOL_CATEGORIES[category] || [];
 				return {
 					category,

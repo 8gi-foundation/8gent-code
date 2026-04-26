@@ -107,15 +107,15 @@ function loadConfig(): ControlPlaneConfig {
 
 	return {
 		dbPath: process.env.DB_PATH || "/data/board-plane.db",
-		vesselPort: parseInt(process.env.VESSEL_PORT || "3100", 10),
+		vesselPort: Number.parseInt(process.env.VESSEL_PORT || "3100", 10),
 		vesselAuthToken,
 		members,
-		rateLimitMs: parseInt(process.env.RATE_LIMIT_MS || "10000", 10),
-		staleTaskMaxAgeMs: parseInt(
+		rateLimitMs: Number.parseInt(process.env.RATE_LIMIT_MS || "10000", 10),
+		staleTaskMaxAgeMs: Number.parseInt(
 			process.env.STALE_TASK_MAX_AGE_MS || "120000",
 			10,
 		),
-		healthCheckIntervalMs: parseInt(
+		healthCheckIntervalMs: Number.parseInt(
 			process.env.HEALTH_CHECK_INTERVAL_MS || "30000",
 			10,
 		),

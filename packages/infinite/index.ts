@@ -13,7 +13,7 @@
  */
 
 import { EventEmitter } from "events";
-import { enableInfiniteMode, disableInfiniteMode } from "../permissions";
+import { disableInfiniteMode, enableInfiniteMode } from "../permissions";
 
 // ============================================
 // Types
@@ -113,7 +113,7 @@ Your response:`;
 export class InfiniteRunner extends EventEmitter {
 	private config: Required<InfiniteConfig>;
 	private state: InfiniteState;
-	private aborted: boolean = false;
+	private aborted = false;
 	private agent: any = null;
 
 	constructor(task: string, config: InfiniteConfig = {}) {

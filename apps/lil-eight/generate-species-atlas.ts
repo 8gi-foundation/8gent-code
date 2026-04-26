@@ -16,15 +16,15 @@
  *   bun run apps/lil-eight/generate-species-atlas.ts --species all
  */
 
-import { createCanvas, loadImage } from "@napi-rs/canvas";
 import {
-	writeFileSync,
-	mkdirSync,
 	existsSync,
+	mkdirSync,
 	readFileSync,
 	readdirSync,
+	writeFileSync,
 } from "fs";
 import { join } from "path";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 
 const FRAME_SIZE = 64;
 const SPRITE_SIZE = 48; // character fills 48x48 within the 64x64 frame

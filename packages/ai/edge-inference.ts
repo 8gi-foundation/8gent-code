@@ -11,7 +11,7 @@
  * (edge inference pattern - tiny models for fast classification tasks)
  */
 
-import { getEmbeddingCache, cosineSimilarity } from "./embedding-cache";
+import { cosineSimilarity, getEmbeddingCache } from "./embedding-cache";
 
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const EMBED_MODEL = process.env.EDGE_EMBED_MODEL ?? "nomic-embed-text";
@@ -98,7 +98,7 @@ export async function classify(
 	const [textVec, ...categoryVecs] = await batchEmbed([text, ...categories]);
 
 	let best = categories[0];
-	let bestScore = -Infinity;
+	let bestScore = Number.NEGATIVE_INFINITY;
 
 	for (let i = 0; i < categories.length; i++) {
 		const score = cosineSimilarity(textVec, categoryVecs[i]);

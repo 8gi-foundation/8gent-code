@@ -4,8 +4,8 @@
  * Smooth fade in/out effects for messages and content
  */
 
-import React, { useState, useEffect, type ReactNode } from "react";
 import { Box, Text } from "ink";
+import React, { useState, useEffect, type ReactNode } from "react";
 
 interface FadeInProps {
 	children: ReactNode;

@@ -4,7 +4,7 @@
  * Loads the LLM-generated fix from FIXTURE_PATH env var,
  * then verifies proper cleanup behavior.
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 const fixturePath = process.env.FIXTURE_PATH;
 if (!fixturePath) throw new Error("FIXTURE_PATH env var required");

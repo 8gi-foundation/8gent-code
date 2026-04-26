@@ -5,16 +5,16 @@
  * Handles keyboard trigger, state management, and cleanup.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useInput } from "ink";
 import {
-	VoiceEngine,
-	type VoiceConfig,
 	type RecordingState,
 	type TranscriptEvent,
-	type WhisperModelName,
+	type VoiceConfig,
+	VoiceEngine,
 	type VoiceErrorCode,
+	type WhisperModelName,
 } from "@8gent/voice";
+import { useInput } from "ink";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface UseVoiceInputOptions {
 	/** Voice configuration overrides */

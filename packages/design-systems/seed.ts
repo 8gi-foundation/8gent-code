@@ -6,13 +6,13 @@
  */
 
 import {
+	closeDatabase,
+	getDatabaseStats,
 	initDatabase,
 	insertDesignSystemWithRelations,
-	getDatabaseStats,
-	closeDatabase,
 } from "./db";
 import { EXTRACTED_THEMES, type ExtractedTheme } from "./extractor";
-import type { DesignStyle, DesignMood, FontCategory } from "./schema";
+import type { DesignMood, DesignStyle, FontCategory } from "./schema";
 
 /**
  * Generate default component configurations for a design system

@@ -5,8 +5,8 @@
  * Deterministic, low-context, just heartbeats.
  */
 
-import { AutoGit, SelfHeal, SessionMemory, SelfAutonomy } from "./index";
 import { EventEmitter } from "events";
+import { AutoGit, SelfAutonomy, SelfHeal, SessionMemory } from "./index";
 
 // ============================================
 // Types
@@ -78,7 +78,7 @@ export class HeartbeatAgents extends EventEmitter {
 	private modifyTimer: NodeJS.Timeout | null = null;
 
 	private status: HeartbeatStatus;
-	private running: boolean = false;
+	private running = false;
 
 	// Track errors for self-heal
 	private recentErrors: Array<{ error: string; timestamp: number }> = [];

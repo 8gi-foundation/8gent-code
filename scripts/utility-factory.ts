@@ -12,9 +12,9 @@
  *   bun run scripts/utility-factory.ts --dry-run
  */
 
+import { execSync, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { execSync, spawnSync } from "child_process";
 
 // ============================================
 // Config
@@ -62,8 +62,8 @@ const countArg =
 	args.find((a) => a.startsWith("--count=")) ??
 	args[args.indexOf("--count") + 1];
 const maxCount = countArg
-	? parseInt(String(countArg).replace("--count=", ""), 10)
-	: Infinity;
+	? Number.parseInt(String(countArg).replace("--count=", ""), 10)
+	: Number.POSITIVE_INFINITY;
 
 // ============================================
 // Load / save log

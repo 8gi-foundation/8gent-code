@@ -4,9 +4,9 @@
  */
 
 import { Database } from "bun:sqlite";
+import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import * as fs from "fs";
 
 // ============================================
 // Types
@@ -143,7 +143,7 @@ export function getReflection(sessionId: string): SessionReflection | null {
 	return deserializeReflection(row);
 }
 
-export function getRecentReflections(limit: number = 20): SessionReflection[] {
+export function getRecentReflections(limit = 20): SessionReflection[] {
 	const db = getDb();
 	const rows = db
 		.prepare("SELECT * FROM reflections ORDER BY timestamp DESC LIMIT ?")
@@ -385,7 +385,7 @@ export function getSchemaVersion(): number {
 	const row = db
 		.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'")
 		.get() as any;
-	return row ? parseInt(row.value, 10) : 1;
+	return row ? Number.parseInt(row.value, 10) : 1;
 }
 
 export function setSchemaVersion(version: number): void {

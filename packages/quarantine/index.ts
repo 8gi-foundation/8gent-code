@@ -14,16 +14,16 @@
  * └── rejected/     # Failed (kept for forensics)
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 import { execSync, spawn } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { type AbstractedSkill, abstractSkill } from "./abstractor.js";
 import {
-	scanSkill,
 	type ScanResult,
 	type Verdict,
+	scanSkill,
 } from "./scanner/security-scanner.js";
-import { abstractSkill, type AbstractedSkill } from "./abstractor.js";
 
 // ============================================================================
 // Types
@@ -336,7 +336,7 @@ export class QuarantineManager {
 	/**
 	 * Clean up old rejected entries
 	 */
-	cleanup(olderThanDays: number = 30): number {
+	cleanup(olderThanDays = 30): number {
 		const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
 		let removed = 0;
 

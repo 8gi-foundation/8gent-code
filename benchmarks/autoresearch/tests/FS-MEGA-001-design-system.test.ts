@@ -7,7 +7,7 @@
  *
  * 22 tests across 6 areas: schema, tokens, components, themes, renderer, full pipeline.
  */
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 const workDir = process.env.WORK_DIR;
 if (!workDir) throw new Error("WORK_DIR env var required");

@@ -1,5 +1,5 @@
-import React from "react";
 import { Box, type BoxProps } from "ink";
+import React from "react";
 
 export interface InlineProps extends BoxProps {
 	gap?: number;

@@ -10,23 +10,23 @@
  * - Status bar integrated below
  */
 
-import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
+import TextInput from "ink-text-input";
+import React, { useState, useEffect, useCallback } from "react";
 import {
-	useGhostSuggestion,
 	getSuggestionSourceLabel,
+	useGhostSuggestion,
 } from "../hooks/use-ghost-suggestion.js";
 import {
 	AppText,
-	MutedText,
-	Label,
-	ShortcutHint,
-	Inline,
-	Stack,
-	Divider,
 	Badge,
+	Divider,
+	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
+	Stack,
 } from "./primitives/index.js";
 
 // ============================================

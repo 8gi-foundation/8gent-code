@@ -3,9 +3,9 @@
  * Shown alongside the main chat when agents are running.
  */
 
-import React from "react";
 import { Box, Text } from "ink";
-import { AppText, MutedText, Stack, Divider } from "../primitives/index.js";
+import React from "react";
+import { AppText, Divider, MutedText, Stack } from "../primitives/index.js";
 
 interface AgentEntry {
 	id: string;

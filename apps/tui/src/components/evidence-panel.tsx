@@ -8,24 +8,25 @@
  * - Expandable details for each evidence item
  */
 
-import React, { useState, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useMemo, useState } from "react";
+import { formatBytes as formatBytesLib } from "../lib/index.js";
 import {
 	AppText,
-	MutedText,
-	Heading,
-	Label,
+	Badge,
+	Card,
+	Divider,
 	ErrorText,
+	Heading,
+	Inline,
+	Label,
+	MutedText,
+	Stack,
+	StatusDot,
 	SuccessText,
 	WarningText,
-	Badge,
-	StatusDot,
-	Card,
-	Stack,
-	Inline,
-	Divider,
 } from "./primitives/index.js";
-import { formatBytes as formatBytesLib } from "../lib/index.js";
 
 // ============================================
 // Types (inline to avoid import path issues)

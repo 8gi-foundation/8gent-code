@@ -6,8 +6,8 @@
  * "Never hit usage caps again"
  */
 
-import * as path from "path";
 import * as fs from "fs";
+import * as path from "path";
 
 const VERSION = "0.9.5";
 const BANNER = `
@@ -497,7 +497,7 @@ async function outlineCommand(args: string[]) {
 						traditionalTokens: fullTokens,
 						astTokens: outlineTokens,
 						tokensSaved: saved,
-						savingsPercent: parseFloat(percent),
+						savingsPercent: Number.parseFloat(percent),
 					},
 				},
 				null,
@@ -533,7 +533,7 @@ async function symbolCommand(args: string[]) {
 	}
 
 	const symbolId = args[0];
-	const contextLines = parseInt(
+	const contextLines = Number.parseInt(
 		args.find((a) => a.startsWith("--context="))?.split("=")[1] || "0",
 	);
 
@@ -604,7 +604,7 @@ async function searchCommand(args: string[]) {
 	const query = args[0];
 	const kindsArg = args.find((a) => a.startsWith("--kinds="))?.split("=")[1];
 	const dirArg = args.find((a) => a.startsWith("--dir="))?.split("=")[1] || ".";
-	const limit = parseInt(
+	const limit = Number.parseInt(
 		args.find((a) => a.startsWith("--limit="))?.split("=")[1] || "20",
 	);
 
@@ -788,33 +788,29 @@ async function spawnPet(sessionId?: string) {
 	try {
 		execSync("pkill -f LilEight 2>/dev/null", { stdio: "pipe" });
 	} catch {}
-
-	// Spawn new pet
-	{
-		// Not running - spawn it
-		if (fs.existsSync(lilEightScript)) {
-			const pet = spawnProc("bash", [lilEightScript, "start"], {
-				detached: true,
-				stdio: "ignore",
-			});
-			pet.unref();
-			console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
-		} else {
-			// Try build first
-			const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
-			if (fs.existsSync(buildScript)) {
-				console.log("\x1b[36m[pet] Building Lil Eight...\x1b[0m");
-				try {
-					execSync(`bash "${buildScript}"`, { stdio: "pipe" });
-					const pet = spawnProc("bash", [lilEightScript, "start"], {
-						detached: true,
-						stdio: "ignore",
-					});
-					pet.unref();
-					console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
-				} catch (e) {
-					console.log("\x1b[33m[pet] Could not build Lil Eight\x1b[0m");
-				}
+	// Not running - spawn it
+	if (fs.existsSync(lilEightScript)) {
+		const pet = spawnProc("bash", [lilEightScript, "start"], {
+			detached: true,
+			stdio: "ignore",
+		});
+		pet.unref();
+		console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
+	} else {
+		// Try build first
+		const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
+		if (fs.existsSync(buildScript)) {
+			console.log("\x1b[36m[pet] Building Lil Eight...\x1b[0m");
+			try {
+				execSync(`bash "${buildScript}"`, { stdio: "pipe" });
+				const pet = spawnProc("bash", [lilEightScript, "start"], {
+					detached: true,
+					stdio: "ignore",
+				});
+				pet.unref();
+				console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
+			} catch (e) {
+				console.log("\x1b[33m[pet] Could not build Lil Eight\x1b[0m");
 			}
 		}
 	}
@@ -1052,10 +1048,10 @@ async function infiniteCommand(args: string[]) {
 	}
 
 	const task = args.join(" ");
-	const maxIterations = parseInt(
+	const maxIterations = Number.parseInt(
 		args.find((a) => a.startsWith("--max="))?.split("=")[1] || "100",
 	);
-	const maxTimeMin = parseInt(
+	const maxTimeMin = Number.parseInt(
 		args.find((a) => a.startsWith("--time="))?.split("=")[1] || "30",
 	);
 
@@ -1612,7 +1608,7 @@ async function sessionCommand(args: string[]) {
 
 	switch (sub) {
 		case "list": {
-			const limit = parseInt((flags.limit as string) || "10");
+			const limit = Number.parseInt((flags.limit as string) || "10");
 			const sessions = mgr.list(limit);
 			if (isJson) {
 				jsonOut({ count: sessions.length, sessions });

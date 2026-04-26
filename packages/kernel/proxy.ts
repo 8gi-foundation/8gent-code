@@ -8,9 +8,9 @@
  * - Conversation trace collection status
  */
 
-import { spawn, type Subprocess } from "bun";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { type Subprocess, spawn } from "bun";
 
 export interface ProxyConfig {
 	/** Training proxy port (default: 30000) */
@@ -52,7 +52,7 @@ const DEFAULT_CONFIG: ProxyConfig = {
 export class TrainingProxy {
 	private config: ProxyConfig;
 	private process: Subprocess | null = null;
-	private startedAt: number = 0;
+	private startedAt = 0;
 	private latencyHistory: LatencySnapshot[] = [];
 
 	constructor(config: Partial<ProxyConfig> = {}) {

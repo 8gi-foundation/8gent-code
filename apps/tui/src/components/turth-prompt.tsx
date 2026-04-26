@@ -10,21 +10,22 @@
  * state and resolves when the user picks a scope.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
 import { Box } from "ink";
-import { SelectInput, type SelectOption } from "./select-input.js";
+import type React from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-	AppText,
-	MutedText,
-	Heading,
-	Card,
-	Stack,
-} from "./primitives/index.js";
-import {
-	registerPromptSurface,
 	type ApprovalScope,
 	type TurthRequest,
+	registerPromptSurface,
 } from "../../../../packages/permissions/turth.js";
+import {
+	AppText,
+	Card,
+	Heading,
+	MutedText,
+	Stack,
+} from "./primitives/index.js";
+import { SelectInput, type SelectOption } from "./select-input.js";
 
 interface PendingPrompt extends TurthRequest {
 	resolve: (scope: ApprovalScope) => void;

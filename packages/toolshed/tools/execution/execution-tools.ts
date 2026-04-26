@@ -4,11 +4,11 @@
  * Shell execution, process management, and environment tools.
  */
 
-import { registerTool } from "../../registry/register";
-import type { ExecutionContext } from "../../../types";
 import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import type { ExecutionContext } from "../../../types";
+import { registerTool } from "../../registry/register";
 
 // ── run_command ─────────────────────────────────────
 

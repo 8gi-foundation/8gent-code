@@ -12,8 +12,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import type { AbstractedSkill } from "../quarantine/abstractor.js";
 
 // ============================================================================
@@ -278,7 +278,7 @@ export class SkillRegistry {
 				const colonIdx = line.indexOf(":");
 				if (colonIdx > 0) {
 					const key = line.slice(0, colonIdx).trim();
-					let val = line.slice(colonIdx + 1).trim();
+					const val = line.slice(colonIdx + 1).trim();
 					// Handle arrays
 					if (val.startsWith("[")) {
 						frontmatter[key] = val;

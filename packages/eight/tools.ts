@@ -8,116 +8,116 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
-	parseTypeScriptFile,
-	getSymbolSource,
-} from "../ast-index/typescript-parser";
-import {
-	indexFolder as astIndexFolder,
+	type RepoIndex,
 	getFileOutline as astGetFileOutline,
 	getFileTree as astGetFileTree,
+	indexFolder as astIndexFolder,
 	listRepos as astListRepos,
-	type RepoIndex,
 } from "../ast-index";
 import {
+	getSymbolSource,
+	parseTypeScriptFile,
+} from "../ast-index/typescript-parser";
+import {
+	addToSafeList as computerAddToSafeList,
+	click as computerClick,
+	clipboardGet as computerClipboardGet,
+	clipboardSet as computerClipboardSet,
+	drag as computerDrag,
+	hover as computerHover,
+	listProcesses as computerListProcesses,
+	loadSafeList as computerLoadSafeList,
+	mousePosition as computerMousePosition,
+	press as computerPress,
+	quitByName as computerQuitByName,
+	quitProcess as computerQuitProcess,
+	removeFromSafeList as computerRemoveFromSafeList,
+	screenshot as computerScreenshot,
+	scroll as computerScroll,
+	suggestQuittable as computerSuggestQuittable,
+	typeText as computerType,
+	windowList as computerWindowList,
+	decodeCoordMap,
+	getToolDefinitions as getComputerToolDefs,
+	imageToDesktop,
+} from "../computer";
+import {
+	detectDesignNeed,
+	getAvailableDesignSystems,
+	needsDesignDecision,
+	suggestDesignSystems,
+} from "../design-agent/index.js";
+import {
+	findByMood as findDesignByMood,
+	findByStyle as findDesignByStyle,
+	generateCssVariables,
+	generateTailwindConfig,
+	getComplete as getCompleteDesignSystem,
+	getHexPalette,
+	initDatabase as initDesignDb,
+	listAll as listAllDesignSystems,
+	listMoods as listDesignMoods,
+	listStyles as listDesignStyles,
+	search as searchDesignSystems_db,
+	suggestForProject as suggestDesignForProject,
+} from "../design-systems/index.js";
+import { type HookManager, getHookManager } from "../hooks";
+import {
+	type InfiniteRunner,
+	createInfiniteRunner,
+	formatInfiniteState,
+} from "../infinite";
+import {
+	lspDiagnostics,
+	lspDocumentSymbols,
+	lspFindReferences,
+	lspGoToDefinition,
+	lspHover,
+} from "../lsp";
+import { formatToolResult, getMCPClient } from "../mcp";
+import { getMemoryManager } from "../memory";
+import {
+	type PermissionManager,
 	getPermissionManager,
 	isCommandDangerous,
-	type PermissionManager,
 } from "../permissions";
 import { ToolG8 } from "../permissions/toolg8.js";
 import type { PolicyActionType } from "../permissions/types.js";
-import { getHookManager, type HookManager } from "../hooks";
-import { readImage, describeImage } from "../tools/image";
-import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import {
-	readNotebook,
-	editCell,
-	insertCell,
-	deleteCell,
-} from "../tools/notebook";
-import { getMCPClient, formatToolResult } from "../mcp";
-import {
-	lspGoToDefinition,
-	lspFindReferences,
-	lspHover,
-	lspDocumentSymbols,
-	lspDiagnostics,
-} from "../lsp";
-import {
-	webSearch,
-	webFetch,
-	formatSearchResults,
-	formatFetchResult,
-} from "../tools/web";
-import {
-	vercelListProjects,
-	vercelGetDeployments,
-	vercelDeploy,
-	vercelSetEnv,
-	vercelGetEnv,
-	vercelListDomains,
-	vercelGetDeploymentLogs,
-} from "../tools/vercel";
-import {
-	getBackgroundTaskManager,
-	formatTaskStatus,
 	formatTaskOutput,
+	formatTaskStatus,
+	getBackgroundTaskManager,
 } from "../tools/background";
 import {
-	needsDesignDecision,
-	detectDesignNeed,
-	suggestDesignSystems,
-	getAvailableDesignSystems,
-} from "../design-agent/index.js";
-import {
-	initDatabase as initDesignDb,
-	search as searchDesignSystems_db,
-	suggestForProject as suggestDesignForProject,
-	getComplete as getCompleteDesignSystem,
-	findByStyle as findDesignByStyle,
-	findByMood as findDesignByMood,
-	generateCssVariables,
-	generateTailwindConfig,
-	getHexPalette,
-	listAll as listAllDesignSystems,
-	listStyles as listDesignStyles,
-	listMoods as listDesignMoods,
-} from "../design-systems/index.js";
-import {
-	createInfiniteRunner,
-	formatInfiniteState,
-	type InfiniteRunner,
-} from "../infinite";
-import {
 	browserOpen,
-	browserState,
 	browserScreenshot,
+	browserState,
 	browserTask,
 } from "../tools/browser-use";
+import { describeImage, readImage } from "../tools/image";
 import {
-	screenshot as computerScreenshot,
-	click as computerClick,
-	typeText as computerType,
-	press as computerPress,
-	scroll as computerScroll,
-	drag as computerDrag,
-	hover as computerHover,
-	mousePosition as computerMousePosition,
-	windowList as computerWindowList,
-	clipboardGet as computerClipboardGet,
-	clipboardSet as computerClipboardSet,
-	listProcesses as computerListProcesses,
-	quitProcess as computerQuitProcess,
-	quitByName as computerQuitByName,
-	suggestQuittable as computerSuggestQuittable,
-	loadSafeList as computerLoadSafeList,
-	addToSafeList as computerAddToSafeList,
-	removeFromSafeList as computerRemoveFromSafeList,
-	imageToDesktop,
-	decodeCoordMap,
-	getToolDefinitions as getComputerToolDefs,
-} from "../computer";
-import { getMemoryManager } from "../memory";
+	deleteCell,
+	editCell,
+	insertCell,
+	readNotebook,
+} from "../tools/notebook";
+import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import { RateLimiter } from "../tools/rate-limiter";
+import {
+	vercelDeploy,
+	vercelGetDeploymentLogs,
+	vercelGetDeployments,
+	vercelGetEnv,
+	vercelListDomains,
+	vercelListProjects,
+	vercelSetEnv,
+} from "../tools/vercel";
+import {
+	formatFetchResult,
+	formatSearchResults,
+	webFetch,
+	webSearch,
+} from "../tools/web";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -235,14 +235,11 @@ export class ToolExecutor {
 	private hookManager: HookManager;
 	private toolG8: ToolG8;
 	private agentId: string;
-	private astIndexReady: boolean = false;
+	private astIndexReady = false;
 	private astRepoId: string | null = null;
 	private astIndexPromise: Promise<RepoIndex> | null = null;
 
-	constructor(
-		workingDirectory: string = process.cwd(),
-		agentId: string = "primary",
-	) {
+	constructor(workingDirectory: string = process.cwd(), agentId = "primary") {
 		this.workingDirectory = workingDirectory;
 		this.agentId = agentId;
 		this.toolG8 = ToolG8.instance();
@@ -1742,10 +1739,7 @@ export class ToolExecutor {
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	}
 
-	private async listFiles(
-		dirPath: string = ".",
-		pattern?: string,
-	): Promise<string> {
+	private async listFiles(dirPath = ".", pattern?: string): Promise<string> {
 		const { glob } = await import("glob");
 
 		const absolutePath = path.isAbsolute(dirPath)

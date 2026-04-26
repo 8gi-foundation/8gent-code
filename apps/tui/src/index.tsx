@@ -6,10 +6,10 @@
  * Built with Ink (React for CLI).
  */
 
-import React from "react";
 import { render } from "ink";
-import { App } from "./app.js";
+import React from "react";
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
+import { App } from "./app.js";
 import { parseTuiArgv } from "./lib/tui-cli.js";
 
 const argv = process.argv.slice(2);

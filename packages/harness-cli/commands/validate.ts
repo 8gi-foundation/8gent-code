@@ -8,8 +8,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import * as readline from "readline";
 import type { SessionEntry } from "../../specifications/session/index.js";
 
@@ -85,7 +85,7 @@ async function readEntries(filePath: string): Promise<SessionEntry[]> {
 	const entries: SessionEntry[] = [];
 	const rl = readline.createInterface({
 		input: fs.createReadStream(filePath),
-		crlfDelay: Infinity,
+		crlfDelay: Number.POSITIVE_INFINITY,
 	});
 	for await (const line of rl) {
 		if (!line.trim()) continue;

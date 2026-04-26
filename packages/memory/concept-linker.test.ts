@@ -13,11 +13,11 @@
  * 8. Handles special regex chars in concept names (e.g. "C++", "node.js")
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
-import { KnowledgeGraph } from "./graph.js";
 import { ConceptLinker } from "./concept-linker.js";
+import { KnowledgeGraph } from "./graph.js";
 
 const TEST_DB = "/tmp/test-concept-linker-1368.db";
 

@@ -15,24 +15,24 @@
  * Also includes animated variants from original implementation.
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, useStdout } from "ink";
+import React, { useState, useEffect } from "react";
+import { formatDuration, formatTokens, truncate } from "../lib/index.js";
+import { TUI_STATUS_COMPACT_BELOW } from "../lib/layout-breakpoints.js";
+import { StatusIndicator } from "./animated-spinner.js";
 import {
 	AppText,
-	MutedText,
-	Label,
 	Badge,
-	StatusDot,
-	ShortcutHint,
 	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
 	Spacer,
+	StatusDot,
 } from "./primitives/index.js";
-import { formatTokens, formatDuration, truncate } from "../lib/index.js";
-import { TUI_STATUS_COMPACT_BELOW } from "../lib/layout-breakpoints.js";
-import { TokenSavingsBar, Sparkline } from "./progress-bar.js";
-import { StatusIndicator } from "./animated-spinner.js";
-import { RainbowBorder, AnimatedSeparator } from "./rainbow-border.js";
-import { AnimatedStatusVerb, StatusVerbType } from "./status-verb.js";
+import { Sparkline, TokenSavingsBar } from "./progress-bar.js";
+import { AnimatedSeparator, RainbowBorder } from "./rainbow-border.js";
+import { AnimatedStatusVerb, type StatusVerbType } from "./status-verb.js";
 
 // ============================================
 // Types

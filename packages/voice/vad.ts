@@ -47,9 +47,9 @@ export interface VADEvents {
 export class VoiceActivityDetector {
 	private options: Required<VADOptions>;
 	private state: VADState = "idle";
-	private smoothedLevel: number = 0;
-	private speechStartTime: number = 0;
-	private lastSpeechTime: number = 0;
+	private smoothedLevel = 0;
+	private speechStartTime = 0;
+	private lastSpeechTime = 0;
 	private silenceTimer: ReturnType<typeof setTimeout> | null = null;
 	private listeners: Map<string, Array<(...args: any[]) => void>> = new Map();
 

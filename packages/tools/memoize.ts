@@ -72,7 +72,7 @@ export function memoize<T extends (...args: any[]) => any>(
 	} = options;
 	const cache = new Cache(maxSize);
 
-	const memoized = function (...args: Parameters<T>): ReturnType<T> {
+	const memoized = ((...args: Parameters<T>): ReturnType<T> => {
 		const key = keyResolver(...args);
 		if (cache.has(key)) {
 			return cache.get(key) as ReturnType<T>;
@@ -80,7 +80,7 @@ export function memoize<T extends (...args: any[]) => any>(
 		const result = fn(...args);
 		cache.set(key, result);
 		return result;
-	} as T & { cache: Cache };
+	}) as T & { cache: Cache };
 
 	memoized.cache = cache;
 	return memoized;

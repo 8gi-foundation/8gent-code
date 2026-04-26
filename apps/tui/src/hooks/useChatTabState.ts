@@ -9,16 +9,16 @@
  * Messages persist to ~/.8gent/tabs/chat-{tabId}.json on each update.
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
 import * as fs from "fs";
 import * as path from "path";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Agent } from "../../../../packages/eight/index.js";
 import type {
-	AgentToolStartEvent,
-	AgentToolEndEvent,
-	AgentStepEvent,
 	AgentEvidenceEvent,
 	AgentEvidenceSummaryEvent,
+	AgentStepEvent,
+	AgentToolEndEvent,
+	AgentToolStartEvent,
 } from "../../../../packages/eight/index.js";
 import type { Message } from "../app.js";
 

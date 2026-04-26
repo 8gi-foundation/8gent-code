@@ -5,16 +5,16 @@
  * and current model info. Follows TUI color rules: no gray/white/black.
  */
 
-import React, { useState, useEffect } from "react";
+import type { RecordingState, WhisperModelName } from "@8gent/voice";
 import { Box, Text } from "ink";
+import React, { useState, useEffect } from "react";
 import {
 	AppText,
-	MutedText,
-	Label,
 	Badge,
 	Inline,
+	Label,
+	MutedText,
 } from "./primitives/index.js";
-import type { RecordingState, WhisperModelName } from "@8gent/voice";
 
 // ============================================
 // Types

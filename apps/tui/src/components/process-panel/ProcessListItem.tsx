@@ -1,9 +1,9 @@
-import React from "react";
 import { Box, Text } from "ink";
+import React from "react";
 import type { TaskInfo } from "../../../../../packages/tools/background.js";
-import { AppText, MutedText, StatusDot, Inline } from "../primitives/index.js";
-import { formatDuration, formatBytes } from "../../lib/index.js";
+import { formatBytes, formatDuration } from "../../lib/index.js";
 import { truncate } from "../../lib/text.js";
+import { AppText, Inline, MutedText, StatusDot } from "../primitives/index.js";
 
 function statusToDot(
 	status: string,

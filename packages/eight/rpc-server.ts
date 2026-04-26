@@ -1,14 +1,14 @@
+import * as readline from "readline";
 /**
  * 8gent Code - JSON-RPC 2.0 Server
  * Headless mode for CI/IDE integration. Newline-delimited JSON on stdin/stdout.
  * Spawn with: 8gent rpc | 8gent --rpc
  */
 import { Agent } from "./agent";
-import { TOOL_CATEGORIES } from "./tool-registry";
-import type { RPCRequest, RPCResponse, RPCNotification } from "./rpc-types";
+import type { RPCNotification, RPCRequest, RPCResponse } from "./rpc-types";
 import { RPC_ERRORS } from "./rpc-types";
+import { TOOL_CATEGORIES } from "./tool-registry";
 import type { AgentEventCallbacks } from "./types";
-import * as readline from "readline";
 
 const sessions = new Map<string, { agent: Agent; id: string }>();
 

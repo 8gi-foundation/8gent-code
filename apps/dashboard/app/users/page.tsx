@@ -7,8 +7,8 @@
  * to user detail pages.
  */
 
-import { useState } from "react";
 import { useQuery } from "convex/react";
+import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import { UserTable, UserTableSkeleton } from "../components/UserTable";
 

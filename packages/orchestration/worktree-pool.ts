@@ -14,12 +14,12 @@
 import { execFileSync } from "child_process";
 import { existsSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
-import type {
-	WorktreeTask,
-	WorktreeResult,
-	WorktreePoolOptions,
-} from "./worktree-pool-types";
 import { WorktreePoolAgent } from "./worktree-pool-agent";
+import type {
+	WorktreePoolOptions,
+	WorktreeResult,
+	WorktreeTask,
+} from "./worktree-pool-types";
 
 const DEFAULT_TIMEOUT = 600_000; // 10 min
 const DEFAULT_MAX = 4;

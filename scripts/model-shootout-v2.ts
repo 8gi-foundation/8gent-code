@@ -115,7 +115,7 @@ async function runTask(model: string): Promise<Result> {
 	let wroteFile = false;
 	let ranTest = false;
 	let testPassed = false;
-	let chunks: string[] = [];
+	const chunks: string[] = [];
 
 	return new Promise((resolve) => {
 		const deadline = setTimeout(() => {

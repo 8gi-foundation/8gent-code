@@ -5,15 +5,15 @@
  * Persists to ~/.8gent/bot-memory.json with atomic writes.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { homedir } from "os";
 import { randomUUID } from "crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { dirname, join } from "path";
 import type {
 	BotMemoryData,
 	ConversationEntry,
-	RepoEntry,
 	Learning,
+	RepoEntry,
 } from "./types";
 
 const DEFAULT_MEMORY_PATH = join(homedir(), ".8gent", "bot-memory.json");
@@ -138,10 +138,7 @@ export class BotMemory {
 	/**
 	 * Get recent conversation history for a chat.
 	 */
-	getConversationHistory(
-		chatId: string,
-		limit: number = 20,
-	): ConversationEntry[] {
+	getConversationHistory(chatId: string, limit = 20): ConversationEntry[] {
 		const history = this.data.conversations[chatId] ?? [];
 		return history.slice(-limit);
 	}

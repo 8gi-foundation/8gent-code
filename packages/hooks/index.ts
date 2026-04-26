@@ -5,10 +5,10 @@
  * at key points in the agent workflow. Inspired by git hooks and Claude Code hooks.
  */
 
+import { exec, spawn } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
-import { spawn, exec } from "child_process";
+import * as path from "path";
 import { parse as parseYaml } from "yaml";
 
 // ============================================

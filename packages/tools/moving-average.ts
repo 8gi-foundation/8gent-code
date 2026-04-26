@@ -11,7 +11,7 @@ export function sma(data: number[], period: number): number[] {
 			const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
 			result.push(sum / period);
 		} else {
-			result.push(NaN);
+			result.push(Number.NaN);
 		}
 	}
 	return result;
@@ -51,7 +51,7 @@ export function wma(data: number[], period: number): number[] {
 			}
 			result.push(sum / weightSum);
 		} else {
-			result.push(NaN);
+			result.push(Number.NaN);
 		}
 	}
 	return result;
@@ -85,7 +85,7 @@ export class StreamingSMA {
 	 */
 	get sma(): number {
 		if (this.buffer.length < this.period) {
-			return NaN;
+			return Number.NaN;
 		}
 		return this.buffer.reduce((a, b) => a + b, 0) / this.period;
 	}
@@ -101,7 +101,7 @@ export class StreamingEMA {
 	 * @param period Calculation period
 	 */
 	constructor(period: number) {
-		this.emaValue = NaN;
+		this.emaValue = Number.NaN;
 		this.alpha = 2 / (period + 1);
 	}
 	/**

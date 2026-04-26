@@ -19,8 +19,8 @@
 
 import { execSync, spawnSync } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 
 const ROOT = path.resolve(import.meta.dir, "..");
 const LOG_PATH = path.join(os.homedir(), ".8gent", "social-research.log");
@@ -32,7 +32,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "5486040131";
 const args = process.argv.slice(2);
 const isDryRun = args.includes("--dry-run");
 const isVessel = args.includes("--vessel");
-const maxFindings = parseInt(
+const maxFindings = Number.parseInt(
 	args.find((_, i, a) => a[i - 1] === "--max") || "20",
 );
 

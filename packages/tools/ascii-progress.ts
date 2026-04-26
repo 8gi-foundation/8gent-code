@@ -17,11 +17,7 @@ const SPINNER_FRAMES = ["|", "/", "-", "\\"] as const;
  * asciiBar(10, 10)       // "[==========] 100%"
  * asciiBar(0, 10)        // "[>         ] 0%"
  */
-export function asciiBar(
-	current: number,
-	total: number,
-	width: number = 10,
-): string {
+export function asciiBar(current: number, total: number, width = 10): string {
 	if (total <= 0) return `[${">".padEnd(width)}] 0%`;
 
 	const clamped = Math.max(0, Math.min(current, total));
@@ -116,7 +112,7 @@ export function statusLine(
 	current: number,
 	total: number,
 	frame: number,
-	width: number = 10,
+	width = 10,
 ): string {
 	return [
 		spinner(frame),

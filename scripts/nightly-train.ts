@@ -10,17 +10,17 @@
 
 import { spawn } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import {
 	type InferenceParams,
 	type RunCheckpoint,
+	adaptiveSequentialPreProcess,
+	clearCheckpoint,
 	defaultParams,
 	inferenceChat,
-	adaptiveSequentialPreProcess,
-	saveCheckpoint,
 	loadCheckpoint,
-	clearCheckpoint,
+	saveCheckpoint,
 } from "../packages/orchestration/sequential-pipeline";
 
 const PROJECT_ROOT = path.resolve(path.dirname(import.meta.dir)); // -> ~/8gent-code
@@ -40,7 +40,7 @@ const OLLAMA_PATH = "/usr/local/bin/ollama";
 
 // Parse args
 const args = process.argv.slice(2);
-const maxIterations = parseInt(
+const maxIterations = Number.parseInt(
 	args.find((_, i, a) => a[i - 1] === "--iterations") || "5",
 );
 const baseModel = args.find((_, i, a) => a[i - 1] === "--model") || "qwen3:14b";
@@ -1054,7 +1054,7 @@ async function main() {
 	// Load persisted harness state from previous runs (survives crashes)
 	loadHarnessState();
 
-	let currentModel = baseModel;
+	const currentModel = baseModel;
 	const allResults: Array<{
 		iteration: number;
 		results: BenchmarkResult[];

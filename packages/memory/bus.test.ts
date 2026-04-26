@@ -12,9 +12,9 @@
  * 8. extractChannelPrefix handles various scope formats
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
-import { createSharedMemoryBus, type SharedMemoryBus } from "./bus.js";
+import { type SharedMemoryBus, createSharedMemoryBus } from "./bus.js";
 
 const TEST_DB = "/tmp/test-shared-bus.db";
 

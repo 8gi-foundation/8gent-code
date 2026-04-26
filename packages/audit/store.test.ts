@@ -3,7 +3,7 @@
  * Covers: insert+read, query by target/actor/time, append-only invariant, input validation.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { AccessAuditStore } from "./store.js";
 

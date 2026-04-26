@@ -4,35 +4,35 @@
  */
 
 import {
-	initDatabase,
-	getDatabase,
 	closeDatabase,
 	getAllDesignSystems,
-	getDesignSystemsByStyle,
-	getDesignSystemsByMood,
+	getColorPaletteBySystemId,
+	getComponentsBySystemId,
+	getDatabase,
+	getDatabaseStats,
 	getDesignSystemById,
 	getDesignSystemByName,
-	searchDesignSystems,
-	getColorPaletteBySystemId,
-	getTypographyBySystemId,
-	getComponentsBySystemId,
-	getTagsBySystemId,
+	getDesignSystemsByMood,
+	getDesignSystemsByStyle,
 	getSystemsByTag,
+	getTagsBySystemId,
+	getTypographyBySystemId,
+	hslToHex,
+	initDatabase,
 	parseColorsJson,
 	parseTypographyJson,
-	hslToHex,
-	getDatabaseStats,
+	searchDesignSystems,
 } from "./db";
 
 import type {
-	DesignSystem,
-	DesignStyle,
-	DesignMood,
 	ColorPalette,
-	Typography,
 	Component,
+	DesignMood,
+	DesignStyle,
+	DesignSystem,
 	ParsedColors,
 	ParsedTypography,
+	Typography,
 } from "./schema";
 
 // Re-export types
@@ -400,10 +400,7 @@ export function suggestForProject(
 /**
  * Find similar design systems to a given one
  */
-export function findSimilar(
-	systemId: string,
-	maxResults: number = 5,
-): DesignSystem[] {
+export function findSimilar(systemId: string, maxResults = 5): DesignSystem[] {
 	const source = getDesignSystemById(systemId);
 	if (!source) return [];
 

@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { readFileSync, existsSync } from "fs";
+import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 function loadHTML(): string {
@@ -27,7 +27,7 @@ describe("UI003 - 3D Isometric Dashboard", () => {
 	test("perspective CSS property with value >= 400", () => {
 		const perspectiveMatches = css.match(/perspective\s*:\s*(\d+)/gi) ?? [];
 		const hasValidPerspective = perspectiveMatches.some((m) => {
-			const val = parseInt(m.match(/(\d+)/)?.[1] ?? "0", 10);
+			const val = Number.parseInt(m.match(/(\d+)/)?.[1] ?? "0", 10);
 			return val >= 400;
 		});
 		expect(hasValidPerspective).toBe(true);

@@ -12,12 +12,12 @@
  */
 
 import type {
+	AuthCallbacks,
 	AuthConfig,
 	DeviceAuthorizationResponse,
-	DeviceTokenResponse,
-	DeviceTokenErrorResponse,
 	DeviceFlowState,
-	AuthCallbacks,
+	DeviceTokenErrorResponse,
+	DeviceTokenResponse,
 } from "./types.js";
 
 // ============================================

@@ -7,15 +7,15 @@
  * Identity and access control are composed via soul-layers.ts.
  */
 
+import { getRepoMapper } from "../../repo-context";
+import { loadInstructions } from "../instruction-loader";
+import { TOOL_CATEGORIES } from "../tool-registry";
 import {
-	composeSoulPrompt,
-	determineTier,
 	type AccessTier,
 	type UserContext,
+	composeSoulPrompt,
+	determineTier,
 } from "./soul-layers";
-import { loadInstructions } from "../instruction-loader";
-import { getRepoMapper } from "../../repo-context";
-import { TOOL_CATEGORIES } from "../tool-registry";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -508,7 +508,7 @@ Report confidence (0-100%) with evidence list.`;
 // ============================================
 
 /** Cache to avoid re-scanning per session */
-let _repoContextCache: string | null = null;
+const _repoContextCache: string | null = null;
 
 /**
  * Generate repo context for a user message.

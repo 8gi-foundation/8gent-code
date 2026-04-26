@@ -15,8 +15,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import { AuthRotator } from "./auth-rotation";
 import { ModelFailover } from "./failover";
 
@@ -121,7 +121,7 @@ export function isAppleFoundationAvailable(): boolean {
 	if (process.arch !== "arm64") return false;
 	// Darwin 25.x === macOS 26 Tahoe. Apple's `FoundationModels` framework
 	// is only available from macOS 26 onwards.
-	const major = parseInt(os.release().split(".")[0] ?? "0", 10);
+	const major = Number.parseInt(os.release().split(".")[0] ?? "0", 10);
 	if (Number.isFinite(major) && major < 25) return false;
 	const bridgePath = path.join(
 		os.homedir(),

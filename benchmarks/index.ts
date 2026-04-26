@@ -20,14 +20,14 @@ export { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
 export { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
 export { documentationBenchmarks } from "./categories/documentation/benchmarks";
 
+import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
+import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
+import { documentationBenchmarks } from "./categories/documentation/benchmarks";
+import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
 // Combined benchmarks
 import { fileManipulationBenchmarks } from "./categories/file-manipulation/benchmarks";
 import { multiFileBenchmarks } from "./categories/multi-file/benchmarks";
-import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
-import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
-import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
 import { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
-import { documentationBenchmarks } from "./categories/documentation/benchmarks";
 
 export const ALL_BENCHMARKS = [
 	...fileManipulationBenchmarks,

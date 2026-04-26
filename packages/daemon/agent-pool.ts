@@ -7,8 +7,8 @@
 
 import { Agent } from "../eight/agent";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
-import { bus } from "./events";
 import { getUsageMonitor } from "../providers/usage-monitor";
+import { bus } from "./events";
 
 export interface PoolConfig {
 	/** Default model to use (e.g. "qwen3.5:14b") */
@@ -129,7 +129,7 @@ export class AgentPool {
 		const cap = this.capFor(channel);
 		if (this.countOn(channel) >= cap) {
 			let oldestId: string | null = null;
-			let oldestTime = Infinity;
+			let oldestTime = Number.POSITIVE_INFINITY;
 			for (const [id, entry] of this.sessions) {
 				if (entry.channel !== channel) continue;
 				if (NEVER_EVICT.has(entry.channel)) continue;
@@ -150,7 +150,7 @@ export class AgentPool {
 		// Global cap as belt-and-braces: evict oldest idle (any channel).
 		if (this.sessions.size >= MAX_SESSIONS) {
 			let oldestId: string | null = null;
-			let oldestTime = Infinity;
+			let oldestTime = Number.POSITIVE_INFINITY;
 			for (const [id, entry] of this.sessions) {
 				if (NEVER_EVICT.has(entry.channel)) continue;
 				if (!entry.busy && entry.createdAt < oldestTime) {

@@ -7,7 +7,7 @@
  * Tests: diamond deps, circular detection, lifecycle ordering, lazy loading,
  * hot-reload, optional deps, duplicate registration, stop idempotency, provides/requires.
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 const workDir = process.env.WORK_DIR;
 if (!workDir) throw new Error("WORK_DIR env var required");

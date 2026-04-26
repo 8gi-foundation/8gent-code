@@ -5,19 +5,19 @@
  * Logs to ~/.8gent/daemon.log. Graceful shutdown on SIGTERM/SIGINT.
  */
 
-import { existsSync, appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync } from "fs";
+import {
+	type TaskPayload,
+	type TaskResult,
+	VesselMesh,
+} from "../orchestration/vessel-mesh";
+import { AgentPool, loadPoolConfig } from "./agent-pool";
+import { addJob, getJobs, startCron, stopCron } from "./cron";
+import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
-import { startCron, stopCron, getJobs, addJob } from "./cron";
-import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { resolveBestFreeModel } from "./model-resolver";
-import { getDataDir } from "./data-dir";
-import {
-	VesselMesh,
-	type TaskPayload,
-	type TaskResult,
-} from "../orchestration/vessel-mesh";
 
 const PORT = 18789;
 const DATA_DIR = getDataDir();

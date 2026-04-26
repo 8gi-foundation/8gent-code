@@ -58,7 +58,7 @@ export interface Competitor {
 }
 
 export class JBTD {
-  industry: string = '';
+  industry = '';
   
   jobsToBeDone: Array<{
     customerSegment: string;
@@ -123,9 +123,9 @@ export class JBTD {
 }
 
 export class BrandVision {
-  name: string = '';
-  missionStatement: string = '';
-  visionStatement: string = '';
+  name = '';
+  missionStatement = '';
+  visionStatement = '';
   values: string[] = [];
   brandVoice: 'authoritative' | 'friendly' | 'witty' | 'professional' | 'casual' = 'professional';
   targetAudienceDemographics: {

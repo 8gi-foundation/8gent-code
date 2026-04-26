@@ -13,7 +13,7 @@
  * 9. MemorySink receives the record
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -30,12 +30,12 @@ import {
 } from "./compound.js";
 import {
 	EXPERIMENTS_DIR,
+	type ExperimentRecord,
 	getExperimentHistory,
 	runExperiment,
 	setExperimentMemorySink,
 	setShellTestRunner,
 	validateSpec,
-	type ExperimentRecord,
 } from "./experiment.js";
 
 // Each test uses a unique slug so we never collide with real learned skills.

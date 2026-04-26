@@ -5,9 +5,9 @@
  * Evolution, not vibes.
  */
 
+import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { spawn, execSync } from "child_process";
 
 // ============================================
 // Types
@@ -69,7 +69,7 @@ export class AutoGit {
 	private verbose: boolean;
 	private branchPrefix = "8gent/";
 
-	constructor(workingDirectory: string, verbose: boolean = false) {
+	constructor(workingDirectory: string, verbose = false) {
 		this.cwd = workingDirectory;
 		this.verbose = verbose;
 	}
@@ -195,7 +195,7 @@ export class AutoGit {
 	/**
 	 * Merge branch back to main
 	 */
-	mergeBranch(branchName: string, deleteAfter: boolean = false): boolean {
+	mergeBranch(branchName: string, deleteAfter = false): boolean {
 		const currentBranch = this.getState().branch;
 
 		// Switch to main
@@ -254,7 +254,7 @@ export class SelfHeal {
 	private memoryPath: string;
 	private memory: HealingMemory;
 
-	constructor(workingDirectory: string, verbose: boolean = false) {
+	constructor(workingDirectory: string, verbose = false) {
 		this.cwd = workingDirectory;
 		this.verbose = verbose;
 		this.memoryPath = path.join(
@@ -409,7 +409,7 @@ export class SessionMemory {
 	private contextPath: string;
 	private verbose: boolean;
 
-	constructor(workingDirectory: string, verbose: boolean = false) {
+	constructor(workingDirectory: string, verbose = false) {
 		this.cwd = workingDirectory;
 		this.contextPath = path.join(workingDirectory, ".8gent", "context");
 		this.verbose = verbose;
@@ -574,7 +574,7 @@ export class SelfAutonomy {
 		error: Error,
 		operation: string,
 		retryFn: () => Promise<any>,
-		maxRetries: number = 3,
+		maxRetries = 3,
 	): Promise<{ success: boolean; result?: any; solution?: string }> {
 		if (!this.config.selfHeal) {
 			throw error;

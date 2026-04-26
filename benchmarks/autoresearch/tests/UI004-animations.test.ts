@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { readFileSync, existsSync } from "fs";
+import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 function loadHTML(): string {

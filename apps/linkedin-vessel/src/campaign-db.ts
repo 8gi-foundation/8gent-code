@@ -6,7 +6,7 @@
 import { Database } from "bun:sqlite";
 import * as fs from "fs";
 import * as path from "path";
-import type { Lead, Campaign, MessageTemplate, MessageRecord } from "./types";
+import type { Campaign, Lead, MessageRecord, MessageTemplate } from "./types";
 
 function getDbPath(): string {
 	const base =

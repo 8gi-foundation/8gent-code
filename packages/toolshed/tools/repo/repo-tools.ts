@@ -5,10 +5,10 @@
  * file tree, and codebase statistics.
  */
 
-import { registerTool } from "../../registry/register";
-import type { ExecutionContext } from "../../../types";
 import * as fs from "fs";
 import * as path from "path";
+import type { ExecutionContext } from "../../../types";
+import { registerTool } from "../../registry/register";
 
 // ── file_tree ───────────────────────────────────────
 
@@ -324,7 +324,7 @@ registerTool(
 					const secondColon = line.indexOf(":", colonIdx + 1);
 					return {
 						file: line.slice(0, colonIdx),
-						line: parseInt(line.slice(colonIdx + 1, secondColon)),
+						line: Number.parseInt(line.slice(colonIdx + 1, secondColon)),
 						content: line.slice(secondColon + 1).trim(),
 					};
 				});

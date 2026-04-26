@@ -16,12 +16,12 @@
  * Smaller models that struggle with function schemas can compose CLI strings naturally.
  */
 
-import { registerTool } from "../../registry/register";
-import type { ExecutionContext } from "../../../types";
 import { execSync } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
+import type { ExecutionContext } from "../../../types";
+import { registerTool } from "../../registry/register";
 
 // ============================================
 // Built-in Commands Registry
@@ -261,7 +261,7 @@ registerBuiltin({
 	summary: "Show first N lines (default 10).",
 	usage: "head [N] [file]",
 	handler: (args, stdin, ctx) => {
-		const n = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "10");
+		const n = Number.parseInt(args.find((a) => /^\d+$/.test(a)) ?? "10");
 		const file = args.find((a) => !/^\d+$/.test(a) && !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
@@ -285,7 +285,7 @@ registerBuiltin({
 	summary: "Show last N lines (default 10).",
 	usage: "tail [N] [file]",
 	handler: (args, stdin, ctx) => {
-		const n = parseInt(args.find((a) => /^\d+$/.test(a)) ?? "10");
+		const n = Number.parseInt(args.find((a) => /^\d+$/.test(a)) ?? "10");
 		const file = args.find((a) => !/^\d+$/.test(a) && !a.startsWith("-"));
 		let input = stdin;
 		if (file) {
@@ -353,8 +353,9 @@ registerBuiltin({
 				return { stdout: "", stderr: `sort: ${file}: not found`, exitCode: 1 };
 			input = fs.readFileSync(p, "utf-8");
 		}
-		let lines = input.split("\n").filter(Boolean);
-		if (numeric) lines.sort((a, b) => parseFloat(a) - parseFloat(b));
+		const lines = input.split("\n").filter(Boolean);
+		if (numeric)
+			lines.sort((a, b) => Number.parseFloat(a) - Number.parseFloat(b));
 		else lines.sort();
 		if (reverse) lines.reverse();
 		return { stdout: lines.join("\n"), stderr: "", exitCode: 0 };
@@ -431,7 +432,7 @@ registerBuiltin({
 	usage: "tree [path] [depth]",
 	handler: (args, _stdin, ctx) => {
 		const dir = args[0] ?? ".";
-		const maxDepth = parseInt(args[1] ?? "3");
+		const maxDepth = Number.parseInt(args[1] ?? "3");
 		const absDir = path.isAbsolute(dir)
 			? dir
 			: path.join(ctx.workingDirectory, dir);

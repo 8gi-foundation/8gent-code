@@ -2,8 +2,8 @@
  * Users API module - needs error handling
  */
 
-import { ApiClient } from "./client";
-import type { User, ApiResponse } from "./types";
+import type { ApiClient } from "./client";
+import type { ApiResponse, User } from "./types";
 
 export class UsersApi {
 	private client: ApiClient;

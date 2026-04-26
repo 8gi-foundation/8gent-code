@@ -6,7 +6,7 @@
  * workflows that worked. Confidence is updated via success/failure tracking.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { randomUUIDv7 } from "bun";
 
 export interface ProceduralMemory {
@@ -120,7 +120,7 @@ function rowToMemory(row: Record<string, unknown>): ProceduralMemory {
 export function findProcedures(
 	db: Database,
 	query: string,
-	limit: number = 5,
+	limit = 5,
 ): ProceduralMemory[] {
 	const rows = db
 		.query(
@@ -130,10 +130,7 @@ export function findProcedures(
 	return rows.map(rowToMemory);
 }
 
-export function getTopProcedures(
-	db: Database,
-	limit: number = 10,
-): ProceduralMemory[] {
+export function getTopProcedures(db: Database, limit = 10): ProceduralMemory[] {
 	const rows = db
 		.query(
 			"SELECT * FROM procedural_memory ORDER BY confidence DESC, last_used DESC LIMIT ?",

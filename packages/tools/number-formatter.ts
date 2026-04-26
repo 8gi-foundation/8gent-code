@@ -141,5 +141,5 @@ export function formatOrdinal(n: number): string {
 export function formatSignificant(n: number, sigFigs = 3): string {
 	if (!isFinite(n) || isNaN(n)) return "0";
 	if (n === 0) return "0";
-	return parseFloat(n.toPrecision(sigFigs)).toString();
+	return Number.parseFloat(n.toPrecision(sigFigs)).toString();
 }

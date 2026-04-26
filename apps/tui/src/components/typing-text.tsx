@@ -4,8 +4,8 @@
  * Character-by-character text reveal for that authentic CLI feel
  */
 
-import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text } from "ink";
+import React, { useState, useEffect, useCallback } from "react";
 import { AppText, MutedText, Stack } from "./primitives/index.js";
 
 interface TypingTextProps {

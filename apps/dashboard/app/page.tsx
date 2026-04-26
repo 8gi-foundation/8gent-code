@@ -7,12 +7,12 @@
  * and model distribution. All data comes from Convex admin queries.
  */
 
+import { PLAN_DEFINITIONS } from "@8gent/control-plane";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { SessionTable, SessionTableSkeleton } from "./components/SessionTable";
 import { StatsCard, StatsCardSkeleton } from "./components/StatsCard";
 import { UsageChart, UsageChartSkeleton } from "./components/UsageChart";
-import { SessionTable, SessionTableSkeleton } from "./components/SessionTable";
-import { PLAN_DEFINITIONS } from "@8gent/control-plane";
 
 export default function DashboardPage() {
 	const dashboard = useQuery(api.admin.getAdminDashboard);

@@ -16,15 +16,15 @@
  *    the operation completes, enabling middleware-like extension.
  */
 
-import type {
-	Message,
-	Subscription,
-	MessageHandler,
-	Topic,
-	BrokerOptions,
-} from "./types";
 import { HistoryStore } from "./history";
 import { TopicRouter } from "./router";
+import type {
+	BrokerOptions,
+	Message,
+	MessageHandler,
+	Subscription,
+	Topic,
+} from "./types";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 

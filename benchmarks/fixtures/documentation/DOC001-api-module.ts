@@ -174,7 +174,7 @@ export function wrapResult<T>(promise: Promise<T>): Promise<ApiResult<T>> {
 
 export async function batch<T>(
 	requests: Array<() => Promise<T>>,
-	concurrency: number = 5,
+	concurrency = 5,
 ): Promise<Array<ApiResult<T>>> {
 	const results: Array<ApiResult<T>> = [];
 	const executing: Promise<void>[] = [];
@@ -199,4 +199,10 @@ export async function batch<T>(
 	return results;
 }
 
-export { HttpError, QueryParams, PaginatedResponse, ApiError, ApiResult };
+export {
+	HttpError,
+	type QueryParams,
+	type PaginatedResponse,
+	type ApiError,
+	type ApiResult,
+};

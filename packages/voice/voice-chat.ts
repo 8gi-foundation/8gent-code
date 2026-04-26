@@ -13,13 +13,13 @@
  * ```
  */
 
-import { VoiceEngine } from "./index.js";
-import type { TranscriptEvent } from "./types.js";
-import { TTSEngine, getTTSEngine } from "./tts-engine.js";
-import type { TTSProcess } from "./tts-engine.js";
+import { existsSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { existsSync, unlinkSync } from "fs";
+import type { VoiceEngine } from "./index.js";
+import { type TTSEngine, getTTSEngine } from "./tts-engine.js";
+import type { TTSProcess } from "./tts-engine.js";
+import type { TranscriptEvent } from "./types.js";
 
 // ============================================
 // Types

@@ -3,7 +3,7 @@
  *
  * WORK_DIR contains: types.ts, queue.ts, worker.ts, scheduler.ts (all LLM-generated)
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 const workDir = process.env.WORK_DIR;
 if (!workDir) throw new Error("WORK_DIR env var required");

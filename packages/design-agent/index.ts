@@ -22,31 +22,31 @@
 
 import { EventEmitter } from "events";
 import {
+	type DesignCategory,
 	DesignDecisionDetector,
+	type DetectionResult,
+	type DetectorConfig,
 	createDetector,
 	detectDesignNeed,
 	needsDesignDecision,
-	type DetectionResult,
-	type DesignCategory,
-	type DetectorConfig,
 } from "./detector.js";
 import {
-	DesignSuggester,
-	createSuggester,
-	suggestDesignSystems,
-	getAvailableDesignSystems,
-	type DesignSuggestion,
-	type SuggestionResult,
-	type SuggesterConfig,
-} from "./suggester.js";
-import {
-	type ProjectType,
-	type UserDesignPreferences,
-	QUICK_SUGGESTIONS,
-	getDesignIntro,
-	formatDesignOptions,
 	FOLLOW_UP_PROMPTS,
+	type ProjectType,
+	QUICK_SUGGESTIONS,
+	type UserDesignPreferences,
+	formatDesignOptions,
+	getDesignIntro,
 } from "./prompts.js";
+import {
+	DesignSuggester,
+	type DesignSuggestion,
+	type SuggesterConfig,
+	type SuggestionResult,
+	createSuggester,
+	getAvailableDesignSystems,
+	suggestDesignSystems,
+} from "./suggester.js";
 
 // ============================================
 // Types
@@ -231,7 +231,7 @@ export class DesignAgent extends EventEmitter {
 			selectedIndex = choiceInput - 1;
 		} else {
 			// Try to match by name or number
-			const asNum = parseInt(choiceInput, 10);
+			const asNum = Number.parseInt(choiceInput, 10);
 			if (!isNaN(asNum)) {
 				selectedIndex = asNum - 1;
 			} else {

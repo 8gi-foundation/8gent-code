@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { readFileSync, existsSync } from "fs";
+import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 function loadHTML(): string {
@@ -97,8 +97,8 @@ describe("UI008 - Interactive Pricing Cards with Tilt", () => {
 		const hasAdequateDuration = transitions.some((t) => {
 			const msMatch = t.match(/(\d+)ms/);
 			const sMatch = t.match(/(\d+\.?\d*)s(?!.*ms)/);
-			if (msMatch) return parseInt(msMatch[1]) >= 200;
-			if (sMatch) return parseFloat(sMatch[1]) >= 0.2;
+			if (msMatch) return Number.parseInt(msMatch[1]) >= 200;
+			if (sMatch) return Number.parseFloat(sMatch[1]) >= 0.2;
 			return false;
 		});
 		expect(hasAdequateDuration).toBe(true);

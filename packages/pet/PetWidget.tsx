@@ -8,8 +8,8 @@
  *   <PetWidget />
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text, useStdout } from "ink";
+import React, { useState, useEffect } from "react";
 import { TerminalPet, renderSpriteToAnsi } from "./terminal-pet.js";
 
 interface PetWidgetProps {

@@ -207,7 +207,7 @@ export function generateCompletionVoice(
 // Integration with Hook System
 // ============================================
 
-import { registerHook, type Hook } from "./index.js";
+import { type Hook, registerHook } from "./index.js";
 
 /**
  * Register the voice completion hook

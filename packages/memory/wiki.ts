@@ -7,14 +7,14 @@
  * and a log page summarises consolidation activity.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
+import type {
+	Entity,
+	EntityType,
 	KnowledgeGraph,
-	type Entity,
-	type EntityType,
-	type Relationship,
+	Relationship,
 } from "./graph.js";
 
 // ── Public Types ─────────────────────────────────────────────────────

@@ -7,10 +7,10 @@
  * write_terminal tool, which goes through the global TerminalRegistry.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import * as pty from "node-pty";
 import * as os from "os";
 import * as path from "path";
+import * as pty from "node-pty";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 const MAX_LINES = 1000;

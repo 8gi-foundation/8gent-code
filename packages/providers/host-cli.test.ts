@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdirSync, writeFileSync, chmodSync, rmSync, mkdtempSync } from "fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
 	HostCliClient,
-	checkHostCliAvailability,
 	HostCliRateLimitError,
 	HostCliUnavailableError,
+	checkHostCliAvailability,
 } from "./host-cli.js";
 import { isHostCliAvailable } from "./index.js";
 

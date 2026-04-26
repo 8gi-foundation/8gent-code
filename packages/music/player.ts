@@ -3,12 +3,12 @@
  * Supports play, stop, loop, and queue management.
  */
 
-import { spawn, execSync, type ChildProcess } from "child_process";
+import { type ChildProcess, execSync, spawn } from "child_process";
 import { existsSync } from "fs";
 
 export class Player {
 	private process: ChildProcess | null = null;
-	private looping: boolean = false;
+	private looping = false;
 	private currentTrack: string | null = null;
 	private queue: string[] = [];
 

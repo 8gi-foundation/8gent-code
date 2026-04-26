@@ -6,15 +6,15 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import * as readline from "readline";
 import type {
-	SessionEntry,
-	SessionStartEntry,
-	SessionEndEntry,
-	SessionMeta,
 	AssistantContentEntry,
+	SessionEndEntry,
+	SessionEntry,
+	SessionMeta,
+	SessionStartEntry,
 	StepEndEntry,
 } from "./index.js";
 
@@ -145,7 +145,7 @@ async function extractSessionMeta(filePath: string): Promise<ExtractedMeta> {
 
 		const rl = readline.createInterface({
 			input: fs.createReadStream(filePath),
-			crlfDelay: Infinity,
+			crlfDelay: Number.POSITIVE_INFINITY,
 		});
 
 		rl.on("line", (line) => {
@@ -218,7 +218,7 @@ export class SessionReader {
 
 		const rl = readline.createInterface({
 			input: fs.createReadStream(this.filePath),
-			crlfDelay: Infinity,
+			crlfDelay: Number.POSITIVE_INFINITY,
 		});
 
 		for await (const line of rl) {
@@ -239,7 +239,7 @@ export class SessionReader {
 	): AsyncGenerator<SessionEntry, void, unknown> {
 		const rl = readline.createInterface({
 			input: fs.createReadStream(this.filePath),
-			crlfDelay: Infinity,
+			crlfDelay: Number.POSITIVE_INFINITY,
 		});
 
 		for await (const line of rl) {
@@ -263,7 +263,7 @@ export class SessionReader {
 	async getMeta(): Promise<SessionMeta | null> {
 		const rl = readline.createInterface({
 			input: fs.createReadStream(this.filePath),
-			crlfDelay: Infinity,
+			crlfDelay: Number.POSITIVE_INFINITY,
 		});
 
 		for await (const line of rl) {

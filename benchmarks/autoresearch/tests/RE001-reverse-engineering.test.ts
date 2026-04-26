@@ -7,8 +7,8 @@
  *
  * Loads the LLM-generated solution from FIXTURE_PATH env var.
  */
-import { describe, test, expect } from "bun:test";
-import { TRAINING_PAIRS, HOLDOUT_PAIRS } from "../../fixtures/re-pairs";
+import { describe, expect, test } from "bun:test";
+import { HOLDOUT_PAIRS, TRAINING_PAIRS } from "../../fixtures/re-pairs";
 
 const fixturePath = process.env.FIXTURE_PATH ?? process.env.WORK_DIR;
 if (!fixturePath) throw new Error("FIXTURE_PATH or WORK_DIR env var required");

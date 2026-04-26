@@ -15,10 +15,10 @@
  * - Priority levels
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 import { EventEmitter } from "events";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 // ============================================
 // Types
@@ -91,8 +91,8 @@ export interface TaskUpdate {
 export class TaskManager extends EventEmitter {
 	private store: TaskStore;
 	private storePath: string;
-	private idCounter: number = 0;
-	private autoSave: boolean = true;
+	private idCounter = 0;
+	private autoSave = true;
 
 	constructor(storePath?: string) {
 		super();
@@ -119,7 +119,7 @@ export class TaskManager extends EventEmitter {
 				for (const task of [...store.tasks, ...store.archivedTasks]) {
 					const match = task.id.match(/^task-(\d+)/);
 					if (match) {
-						const num = parseInt(match[1], 10);
+						const num = Number.parseInt(match[1], 10);
 						if (num > this.idCounter) {
 							this.idCounter = num;
 						}
@@ -161,7 +161,7 @@ export class TaskManager extends EventEmitter {
 	 */
 	createTask(
 		subject: string,
-		description: string = "",
+		description = "",
 		options?: {
 			priority?: TaskPriority;
 			owner?: string;
@@ -340,7 +340,7 @@ export class TaskManager extends EventEmitter {
 	/**
 	 * Delete a task
 	 */
-	deleteTask(id: string, archive: boolean = true): boolean {
+	deleteTask(id: string, archive = true): boolean {
 		const index = this.store.tasks.findIndex((t) => t.id === id);
 		if (index === -1) return false;
 
@@ -525,7 +525,7 @@ export class TaskManager extends EventEmitter {
 		}
 
 		while ((match = stepRegex.exec(planContent)) !== null) {
-			const stepNum = parseInt(match[1], 10);
+			const stepNum = Number.parseInt(match[1], 10);
 			const stepDesc = match[2].trim();
 
 			if (stepDesc) {
@@ -582,7 +582,7 @@ export class TaskManager extends EventEmitter {
 	/**
 	 * Archive completed tasks older than days
 	 */
-	archiveOld(olderThanDays: number = 30): number {
+	archiveOld(olderThanDays = 30): number {
 		const cutoff = new Date();
 		cutoff.setDate(cutoff.getDate() - olderThanDays);
 		const cutoffStr = cutoff.toISOString();
@@ -680,7 +680,7 @@ export function resetTaskManager(): void {
 /**
  * Format task for display
  */
-export function formatTask(task: Task, verbose: boolean = false): string {
+export function formatTask(task: Task, verbose = false): string {
 	const statusIcons: Record<TaskStatus, string> = {
 		pending: "\u25cb", // Circle
 		in_progress: "\u25d4", // Half circle

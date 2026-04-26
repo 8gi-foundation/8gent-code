@@ -8,14 +8,14 @@
  * key facts via local LLM, optionally loop for deeper coverage, synthesize report.
  */
 
-import { webSearch } from "../tools/browser/web-search.js";
 import { fetchPage } from "../tools/browser/fetch-page.js";
+import { webSearch } from "../tools/browser/web-search.js";
 import type {
+	ResearchIteration,
 	ResearchOptions,
+	ResearchPattern,
 	ResearchReport,
 	ResearchSource,
-	ResearchPattern,
-	ResearchIteration,
 } from "./research-types.js";
 
 // ── Constants ──────────────────────────────────────────────────────────

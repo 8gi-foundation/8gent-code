@@ -7,7 +7,7 @@
 export class Calculator {
 	private result: number;
 
-	constructor(initial: number = 0) {
+	constructor(initial = 0) {
 		this.result = initial;
 	}
 

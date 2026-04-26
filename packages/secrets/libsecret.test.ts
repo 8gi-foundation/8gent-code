@@ -1,4 +1,4 @@
-import { describe, test, expect, afterAll } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { LibsecretVault } from "./libsecret";
 
 const TEST_SERVICE = `8gent-secrets-test-${process.pid}`;

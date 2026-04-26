@@ -494,7 +494,7 @@ function generateCellId(): string {
  */
 export async function createNotebook(
 	notebookPath: string,
-	language: string = "python",
+	language = "python",
 ): Promise<{ success: boolean; path: string }> {
 	const absolutePath = path.isAbsolute(notebookPath)
 		? notebookPath

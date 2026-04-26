@@ -11,7 +11,7 @@
  * WORK_DIR contains: types.ts, broker.ts, history.ts, router.ts
  * (all 4 files are copied from fixtures, LLM overwrites with fixed versions)
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 const workDir = process.env.WORK_DIR;
 if (!workDir) throw new Error("WORK_DIR env var required");

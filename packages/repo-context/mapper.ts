@@ -2,8 +2,8 @@
  * Repo Context Mapper - Phase 1 (regex-based)
  * Scans source files, builds import graph, ranks by relevance to query.
  */
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join, relative, basename, extname } from "node:path";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { basename, extname, join, relative } from "node:path";
 
 const EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".rs"]);
 const SKIP = /node_modules|\.git|dist|build|\.8gent|\.next/;

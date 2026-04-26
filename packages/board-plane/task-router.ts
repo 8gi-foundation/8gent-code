@@ -6,14 +6,14 @@
  * in the durable queue. No LLM calls - pure routing logic.
  */
 
-import type { BoardMember, DiscordMessage } from "./types";
 import type { TaskQueue } from "./task-queue";
+import type { BoardMember, DiscordMessage } from "./types";
 
 export class RateLimiter {
 	private lastResponse: Map<string, number> = new Map(); // channelId -> timestamp
 	private limitMs: number;
 
-	constructor(limitMs: number = 10_000) {
+	constructor(limitMs = 10_000) {
 		this.limitMs = limitMs;
 	}
 

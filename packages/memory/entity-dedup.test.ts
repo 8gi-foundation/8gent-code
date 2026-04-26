@@ -13,11 +13,11 @@
  * Issue: #1369
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, unlinkSync } from "node:fs";
 import { KnowledgeGraph } from "./graph.js";
 import type { EntityType } from "./graph.js";
-import { unlinkSync, existsSync } from "node:fs";
 
 const TEST_DB = "/tmp/test-entity-dedup-1369.db";
 

@@ -7,7 +7,7 @@
  * Pure heuristics — no ML. Persists state to JSON for resumability.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { BenchmarkCategory } from "../types";
 
 // ── Interfaces ──────────────────────────────────────────────────────

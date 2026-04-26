@@ -7,13 +7,13 @@
  * Issue: #1367
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { MemoryStore } from "./store.js";
-import { type CoreMemory, type SemanticMemory } from "./types.js";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { MemoryStore } from "./store.js";
+import type { CoreMemory, SemanticMemory } from "./types.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 

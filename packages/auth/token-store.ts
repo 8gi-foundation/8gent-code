@@ -10,9 +10,9 @@
 
 import * as crypto from "crypto";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
-import type { TokenStore, StoredToken } from "./types.js";
+import * as path from "path";
+import type { StoredToken, TokenStore } from "./types.js";
 
 // ============================================
 // Platform Detection

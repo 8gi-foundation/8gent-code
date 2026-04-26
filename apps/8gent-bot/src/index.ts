@@ -13,7 +13,7 @@ import { invokeVessel } from "./vessel-client";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const JAMES_CHAT_ID = process.env.JAMES_TELEGRAM_CHAT_ID!;
-const PORT = parseInt(process.env.PORT ?? "8080");
+const PORT = Number.parseInt(process.env.PORT ?? "8080");
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 

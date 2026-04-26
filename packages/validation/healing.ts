@@ -14,12 +14,12 @@
 
 import { spawnSync } from "child_process";
 import {
-	createCheckpoint,
-	restoreCheckpoint,
-	dropCheckpoint,
 	type Checkpoint,
+	createCheckpoint,
+	dropCheckpoint,
+	restoreCheckpoint,
 } from "./checkpoint";
-import { logFailure, findPriorFailure, type FailureEntry } from "./failure-log";
+import { type FailureEntry, findPriorFailure, logFailure } from "./failure-log";
 
 // ============================================
 // Types

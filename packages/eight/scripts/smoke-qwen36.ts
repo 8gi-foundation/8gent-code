@@ -14,8 +14,8 @@
  *   1 = endpoint down or model not pulled
  */
 
-import { OllamaClient } from "../clients/ollama";
 import { LMStudioClient } from "../clients/lmstudio";
+import { OllamaClient } from "../clients/ollama";
 import { getModel } from "../registry";
 
 const QWEN_ID = "qwen3.6:27b";

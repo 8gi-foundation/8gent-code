@@ -12,27 +12,27 @@
  * The agent-facing surface stays identical.
  */
 
-import { evaluatePolicy } from "../../permissions/policy-engine";
 import {
-	screenshot as desktopScreenshot,
+	addToSafeList as desktopAddToSafeList,
 	click as desktopClick,
-	typeText as desktopType,
-	press as desktopPress,
-	scroll as desktopScroll,
-	drag as desktopDrag,
-	hover as desktopHover,
-	windowList as desktopWindowList,
 	clipboardGet as desktopClipboardGet,
 	clipboardSet as desktopClipboardSet,
+	drag as desktopDrag,
+	hover as desktopHover,
 	listProcesses as desktopListProcesses,
-	quitProcess as desktopQuitProcess,
-	quitByName as desktopQuitByName,
-	suggestQuittable as desktopSuggestQuittable,
 	loadSafeList as desktopLoadSafeList,
-	addToSafeList as desktopAddToSafeList,
+	press as desktopPress,
+	quitByName as desktopQuitByName,
+	quitProcess as desktopQuitProcess,
 	removeFromSafeList as desktopRemoveFromSafeList,
+	screenshot as desktopScreenshot,
+	scroll as desktopScroll,
+	suggestQuittable as desktopSuggestQuittable,
+	typeText as desktopType,
+	windowList as desktopWindowList,
 	getToolDefinitions as getDesktopToolDefs,
 } from "../../computer";
+import { evaluatePolicy } from "../../permissions/policy-engine";
 
 export interface HandsToolCtx {
 	sessionId: string;

@@ -199,7 +199,7 @@ async function runTask(
 	const startMs = Date.now();
 	let toolCalls = 0;
 	let response = "";
-	let chunks: string[] = [];
+	const chunks: string[] = [];
 
 	return new Promise((resolve) => {
 		const deadline = setTimeout(() => {

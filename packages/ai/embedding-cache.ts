@@ -8,7 +8,7 @@
  * (edge inference pattern - compute once, reuse often)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const CACHE_DIR = join(process.env.HOME || "~", ".8gent");

@@ -5,15 +5,15 @@
  * Uses design system primitives, follows TUI color rules.
  */
 
-import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import React, { useState } from "react";
 import {
 	AppText,
-	MutedText,
-	Heading,
-	Stack,
-	Inline,
 	Divider,
+	Heading,
+	Inline,
+	MutedText,
+	Stack,
 } from "../components/primitives/index.js";
 
 interface ConversationEntry {

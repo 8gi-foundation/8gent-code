@@ -12,70 +12,70 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import {
-	type Memory,
-	type MemoryType,
-	type MemoryScope,
-	type SourceType,
-	type SemanticCategory,
-	type CoreCategory,
-	type SearchOptions,
-	type SearchResult,
-	type ContextWindowOptions,
-	type ContextWindow,
-	type ContextEntry,
-	type CoreMemory,
-	type EpisodicMemory,
-	type SemanticMemory,
-	type ProceduralMemory,
-	type ProceduralStep,
-	type WorkingMemory,
-	type V1MemoryEntry,
-	type V1RecallResult,
-	type ConsolidationLevel,
-	type LearningType,
-	type MemoryWithEvidence,
-	type PeerRepresentation,
-	generateId,
-	estimateTokens,
-	effectiveImportance,
-} from "./types.js";
-import { MemoryStore } from "./store.js";
-import {
-	getEmbeddingProvider,
 	type EmbeddingProvider,
-	OllamaEmbeddingProvider,
 	NullEmbeddingProvider,
+	OllamaEmbeddingProvider,
+	getEmbeddingProvider,
 } from "./embeddings.js";
-import { migrateV1ToV2, type MigrationResult } from "./migrate.js";
 import {
-	KnowledgeGraph,
+	type ExtractedEntity,
+	type ExtractedRelationship,
+	type ExtractionResult,
+	extractFromToolResult,
+	extractPreferencesFromMessage,
+} from "./extractor.js";
+import {
 	type Entity,
+	KnowledgeGraph,
 	type Relationship,
 	type SubgraphResult,
 } from "./graph.js";
-import {
-	extractFromToolResult,
-	extractPreferencesFromMessage,
-	type ExtractionResult,
-	type ExtractedEntity,
-	type ExtractedRelationship,
-} from "./extractor.js";
+import { type MigrationResult, migrateV1ToV2 } from "./migrate.js";
 import {
 	PromotionManager,
-	isPromoted,
-	daysUntilArchival,
-	softUnlearn,
-	boostEvidence,
 	type PromotionResult,
+	boostEvidence,
+	daysUntilArchival,
+	isPromoted,
+	softUnlearn,
 } from "./promote.js";
 import {
+	type RecallOptions,
 	SemanticRecall,
 	createSemanticRecall,
-	type RecallOptions,
 } from "./recall.js";
+import { MemoryStore } from "./store.js";
+import {
+	type ConsolidationLevel,
+	type ContextEntry,
+	type ContextWindow,
+	type ContextWindowOptions,
+	type CoreCategory,
+	type CoreMemory,
+	type EpisodicMemory,
+	type LearningType,
+	type Memory,
+	type MemoryScope,
+	type MemoryType,
+	type MemoryWithEvidence,
+	type PeerRepresentation,
+	type ProceduralMemory,
+	type ProceduralStep,
+	type SearchOptions,
+	type SearchResult,
+	type SemanticCategory,
+	type SemanticMemory,
+	type SourceType,
+	type V1MemoryEntry,
+	type V1RecallResult,
+	type WorkingMemory,
+	effectiveImportance,
+	estimateTokens,
+	generateId,
+} from "./types.js";
 
 // ── Re-exports ────────────────────────────────────────────────────────
 

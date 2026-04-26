@@ -10,8 +10,8 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import {
 	type AuthConfig,
-	type TokenPayload,
 	DEFAULT_AUTH_CONFIG,
+	type TokenPayload,
 } from "./types.js";
 
 // ============================================

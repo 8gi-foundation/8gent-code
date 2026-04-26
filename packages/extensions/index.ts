@@ -13,7 +13,7 @@ export type {
 } from "./types";
 export { loadAllExtensions, collectExtensionTools } from "./loader";
 
-import { loadAllExtensions, collectExtensionTools } from "./loader";
+import { collectExtensionTools, loadAllExtensions } from "./loader";
 import type { ExtensionManager, LoadedExtension } from "./types";
 
 let _manager: ExtensionManager | null = null;

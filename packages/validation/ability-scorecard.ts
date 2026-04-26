@@ -7,9 +7,9 @@
  * Persists to ~/.8gent/scorecards/ as JSONL files (one per session).
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
 
 // ---------------------------------------------------------------------------
 // Types

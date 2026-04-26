@@ -10,8 +10,8 @@
  * #1569 landing first.
  */
 
-import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
 const STALE_MS = 90_000;
 

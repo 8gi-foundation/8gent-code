@@ -22,6 +22,7 @@ import {
 } from "../../../packages/ai/task-router.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { SessionTree } from "../../../packages/eight/session-tree.js";
+import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	ActivityMonitor,
 	clearActivity,
@@ -40,6 +41,7 @@ import {
 	type AnimationType,
 	isValidAnimation,
 } from "./components/animation-showcase.js";
+import { BackgroundPanel } from "./components/background-panel.js";
 import {
 	ADHDModeContext,
 	ADHD_MODE_DISABLED_MSG,
@@ -88,7 +90,6 @@ import {
 } from "./components/select-input.js";
 import { ShortcutDock } from "./components/shortcut-dock.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
-import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	DetailedStatusBar,
 	EnhancedStatusBar,
@@ -99,12 +100,14 @@ import type { TaskItem } from "./components/task-card/index.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
+import { writeToTerminal } from "./hooks/useTerminal.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { useViewport } from "./hooks/useViewport.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
+import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatTokens, truncate } from "./lib/index.js";
 import {
@@ -129,8 +132,6 @@ import {
 	logToolStart,
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
-import * as bgPool from "./lib/background-pool.js";
-import { BackgroundPanel } from "./components/background-panel.js";
 import type { SlashCommand } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
@@ -140,9 +141,8 @@ import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
-import { NarratorView } from "./screens/index.js";
 import { TerminalView } from "./screens/TerminalView.js";
-import { writeToTerminal } from "./hooks/useTerminal.js";
+import { NarratorView } from "./screens/index.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;

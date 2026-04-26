@@ -7,13 +7,13 @@
 
 import type { ToolSet } from "ai";
 import {
-	loadConfig,
+	type SSEServerConfig,
 	type ServerConfig,
 	type StdioServerConfig,
-	type SSEServerConfig,
+	loadConfig,
 } from "./config";
-import { StdioTransport, SSETransport, type Transport } from "./transport";
-import { bridgeTools, type MCPToolSchema } from "./tool-bridge";
+import { type MCPToolSchema, bridgeTools } from "./tool-bridge";
+import { SSETransport, StdioTransport, type Transport } from "./transport";
 
 // ── Types ────────────────────────────────────────────────────────
 

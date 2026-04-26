@@ -13,30 +13,30 @@
  * - Network failures degrade gracefully (never crash)
  */
 
+import {
+	decodeJwt,
+	extractUserFromToken,
+	getTokenExpiry,
+	isTokenExpired,
+	resolveAuthConfig,
+	validateToken,
+} from "./clerk.js";
+import { executeDeviceFlow, refreshAccessToken } from "./device-flow.js";
+import {
+	type GitHubAuth,
+	extractGitHubUsername,
+	getGitHubAuth,
+} from "./github.js";
+import { getTokenStore } from "./token-store.js";
 import type {
-	AuthUser,
-	AuthState,
-	AuthConfig,
 	AuthCallbacks,
+	AuthConfig,
+	AuthState,
+	AuthUser,
 	StoredToken,
 	TokenStore,
 	UserPlan,
 } from "./types.js";
-import {
-	resolveAuthConfig,
-	decodeJwt,
-	isTokenExpired,
-	getTokenExpiry,
-	validateToken,
-	extractUserFromToken,
-} from "./clerk.js";
-import { executeDeviceFlow, refreshAccessToken } from "./device-flow.js";
-import { getTokenStore } from "./token-store.js";
-import {
-	getGitHubAuth,
-	extractGitHubUsername,
-	type GitHubAuth,
-} from "./github.js";
 
 // Re-export types
 export type {

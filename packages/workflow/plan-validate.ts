@@ -347,7 +347,7 @@ Execute the necessary tools to complete this step. Report what you did and the r
 
 export class PlanBuilder {
 	private steps: Step[] = [];
-	private idCounter: number = 0;
+	private idCounter = 0;
 
 	/**
 	 * Add a step to the plan

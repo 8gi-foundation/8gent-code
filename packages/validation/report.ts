@@ -54,7 +54,7 @@ export interface ReportDisplayOptions {
 // ============================================
 
 export class ValidationReporter {
-	private idCounter: number = 0;
+	private idCounter = 0;
 
 	/**
 	 * Generate a validation report from executed plan

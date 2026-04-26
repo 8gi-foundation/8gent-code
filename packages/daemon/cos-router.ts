@@ -16,19 +16,19 @@
 import { execSync } from "child_process";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import type { AgentPool } from "./agent-pool";
+import { bus } from "./events";
+import type { NotificationDispatcher } from "./notifications";
 import {
-	createTask,
-	updateTask,
-	getTask,
-	listTasks,
-	getActiveTasks,
-	getTasksByStatus,
 	type CEOTask,
 	type TaskPriority,
+	createTask,
+	getActiveTasks,
+	getTask,
+	getTasksByStatus,
+	listTasks,
+	updateTask,
 } from "./task-registry";
-import { bus } from "./events";
-import type { AgentPool } from "./agent-pool";
-import type { NotificationDispatcher } from "./notifications";
 
 const GOALS_PATH = join(process.env.HOME || "/root", ".8gent", "goals.json");
 const WORKSPACE = join(process.env.HOME || "/root", ".8gent", "workspace");
@@ -146,7 +146,7 @@ export class CoSRouter {
 				// gh issue create returns the URL
 				issueUrl = result;
 				const numMatch = result.match(/\/(\d+)$/);
-				if (numMatch) issueNumber = parseInt(numMatch[1], 10);
+				if (numMatch) issueNumber = Number.parseInt(numMatch[1], 10);
 
 				updateTask(task.id, {
 					githubIssue: { number: issueNumber, url: issueUrl, repo },

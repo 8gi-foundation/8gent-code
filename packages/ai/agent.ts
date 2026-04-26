@@ -10,9 +10,9 @@
  */
 
 import { ToolLoopAgent, stepCountIs } from "ai";
-import type { LanguageModel, GenerateTextResult, ToolSet } from "ai";
-import { createModel, type ProviderConfig } from "./providers";
-import { agentTools, setToolContext, type AgentTools } from "./tools";
+import type { GenerateTextResult, LanguageModel, ToolSet } from "ai";
+import { type ProviderConfig, createModel } from "./providers";
+import { type AgentTools, agentTools, setToolContext } from "./tools";
 
 export interface EightAgentConfig {
 	/** Provider configuration */

@@ -10,15 +10,15 @@
  * 6. update() doesn't double-encode merged data
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, unlinkSync } from "node:fs";
 import { MemoryStore } from "./store.js";
 import {
 	type CoreMemory,
-	type SemanticMemory,
 	type Memory,
+	type SemanticMemory,
 	generateId,
 } from "./types.js";
-import { existsSync, unlinkSync } from "node:fs";
 
 const TEST_DB = "/tmp/memory-store-test-" + Date.now() + ".db";
 

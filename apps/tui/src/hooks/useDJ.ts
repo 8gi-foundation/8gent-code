@@ -3,7 +3,7 @@
  * Provides state for MusicPlayer widget and handles slash commands.
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Lazy import to avoid circular deps
 let djInstance: any = null;
@@ -151,7 +151,7 @@ export function useDJ() {
 
 				case "vol":
 				case "volume": {
-					const level = parseInt(args[0] || "80");
+					const level = Number.parseInt(args[0] || "80");
 					setState((s) => ({ ...s, volume: level }));
 					return await dj.volume(level);
 				}
@@ -187,7 +187,7 @@ export function useDJ() {
 				case "mix": {
 					if (args.length < 2)
 						return "Usage: /dj mix <file1> <file2> [crossfade_sec]";
-					return dj.mix(args[0], args[1], parseInt(args[2] || "5"));
+					return dj.mix(args[0], args[1], Number.parseInt(args[2] || "5"));
 				}
 
 				case "resume": {

@@ -3,7 +3,7 @@
  * No LLM needed - uses keyword matching and temporal analysis.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 
 export interface Contradiction {
 	memoryA: { id: string; content: string; createdAt: number };

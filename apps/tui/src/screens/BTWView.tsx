@@ -6,17 +6,17 @@
  * Data persists to ~/.8gent/tabs/btw.json
  */
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
-import {
-	AppText,
-	MutedText,
-	Heading,
-	Stack,
-	Divider,
-} from "../components/primitives/index.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+	AppText,
+	Divider,
+	Heading,
+	MutedText,
+	Stack,
+} from "../components/primitives/index.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 

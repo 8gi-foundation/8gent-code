@@ -7,7 +7,7 @@
  * back to actual screen coordinates for accurate clicking.
  */
 
-import type { Point, CoordMap } from "./types";
+import type { CoordMap, Point } from "./types";
 
 /** Max screenshot dimension sent to models (matches usecomputer default) */
 export const MAX_SCREENSHOT_DIM = 1568;

@@ -5,13 +5,13 @@ interface Test {
 	afterEach: Function[];
 }
 
-let tests: Test[] = [];
+const tests: Test[] = [];
 let currentContext: { beforeEach: Function[]; afterEach: Function[] } = {
 	beforeEach: [],
 	afterEach: [],
 };
-let beforeAllFns: Function[] = [];
-let afterAllFns: Function[] = [];
+const beforeAllFns: Function[] = [];
+const afterAllFns: Function[] = [];
 
 /**
  * Registers a test suite.
@@ -89,7 +89,7 @@ export async function run(): Promise<{
 	failed: number;
 	duration: number;
 }> {
-	let startTime = Date.now();
+	const startTime = Date.now();
 	let passed = 0;
 	let failed = 0;
 
@@ -103,7 +103,7 @@ export async function run(): Promise<{
 	}
 
 	for (const test of tests) {
-		let testStartTime = Date.now();
+		const testStartTime = Date.now();
 		let testPassed = true;
 
 		// Execute beforeEach

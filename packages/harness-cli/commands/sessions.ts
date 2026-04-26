@@ -18,7 +18,7 @@ function parseArgs(args: string[]): SessionsOptions {
 	while (i < args.length) {
 		switch (args[i]) {
 			case "--limit":
-				opts.limit = parseInt(args[++i], 10);
+				opts.limit = Number.parseInt(args[++i], 10);
 				break;
 			case "--json":
 				opts.json = true;

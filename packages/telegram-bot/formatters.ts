@@ -13,13 +13,13 @@
  */
 
 import type {
+	AlertSeverity,
+	BenchmarkReport,
 	BenchmarkScore,
 	CompetitionRound,
-	BenchmarkReport,
 	OvernightSummary,
-	TierBreakdown,
 	SystemStatus,
-	AlertSeverity,
+	TierBreakdown,
 } from "./types";
 
 // ── Constants ───────────────────────────────────────────
@@ -43,7 +43,7 @@ const TIER_ICON: Record<string, string> = {
 
 // ── Helpers ─────────────────────────────────────────────
 
-function progressBar(value: number, max: number = 100): string {
+function progressBar(value: number, max = 100): string {
 	const ratio = Math.max(0, Math.min(1, value / max));
 	const filled = Math.round(ratio * BAR_LENGTH);
 	const empty = BAR_LENGTH - filled;

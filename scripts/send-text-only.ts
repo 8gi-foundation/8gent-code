@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { readFileSync } from "fs";
-import { join } from "path";
 import * as os from "os";
+import { join } from "path";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;

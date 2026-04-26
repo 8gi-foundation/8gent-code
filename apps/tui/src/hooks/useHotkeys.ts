@@ -1,4 +1,4 @@
-import { useInput, type Key } from "ink";
+import { type Key, useInput } from "ink";
 
 export interface HotkeyBindings {
 	up?: () => void;
@@ -20,10 +20,7 @@ export interface HotkeyBindings {
 	number?: (n: number) => void;
 }
 
-export function useHotkeys(
-	bindings: HotkeyBindings,
-	active: boolean = true,
-): void {
+export function useHotkeys(bindings: HotkeyBindings, active = true): void {
 	useInput(
 		(input: string, key: Key) => {
 			if (!active) {
@@ -107,7 +104,7 @@ export function useHotkeys(
 
 			// Number keys 1-9
 			if (bindings.number) {
-				const n = parseInt(input, 10);
+				const n = Number.parseInt(input, 10);
 				if (n >= 1 && n <= 9) {
 					bindings.number(n);
 					return;

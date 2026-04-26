@@ -12,8 +12,8 @@
  * 8. lintReportToMarkdown produces valid markdown
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { KnowledgeGraph } from "./graph.js";
 import { lintMemory, lintReportToMarkdown } from "./lint.js";

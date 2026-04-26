@@ -1,8 +1,8 @@
-import { NextRequest } from "next/server";
-import { stat, readFile } from "fs/promises";
-import { join } from "path";
-import { homedir } from "os";
 import { watch } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+import { readFile, stat } from "fs/promises";
+import type { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

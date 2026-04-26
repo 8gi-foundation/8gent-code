@@ -8,11 +8,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import {
-	parseTypeScriptFile,
-	getSymbolSource,
-} from "../packages/ast-index/typescript-parser";
 import { glob } from "glob";
+import {
+	getSymbolSource,
+	parseTypeScriptFile,
+} from "../packages/ast-index/typescript-parser";
 
 interface BenchmarkResult {
 	name: string;
@@ -51,7 +51,7 @@ const colors = {
 	red: "\x1b[31m",
 };
 
-function log(msg: string, color: string = "") {
+function log(msg: string, color = "") {
 	console.log(`${color}${msg}${colors.reset}`);
 }
 
@@ -115,7 +115,7 @@ async function benchmarkSingleFile(filePath: string): Promise<BenchmarkResult> {
 
 async function benchmarkDirectory(
 	directory: string,
-	pattern: string = "**/*.{ts,tsx}",
+	pattern = "**/*.{ts,tsx}",
 ): Promise<BenchmarkResult[]> {
 	const files = await glob(pattern, {
 		cwd: directory,

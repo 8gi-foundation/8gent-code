@@ -411,7 +411,7 @@ async function runAutoresearchLoop(): Promise<void> {
 
 	let iteration = 0;
 	let totalWins = 0;
-	let totalBenchmarks = BENCHMARKS.length;
+	const totalBenchmarks = BENCHMARKS.length;
 
 	// LOOP FOREVER (per Karpathy's autoresearch methodology)
 	while (true) {

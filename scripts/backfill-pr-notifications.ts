@@ -10,20 +10,20 @@
  *   bun run scripts/backfill-pr-notifications.ts --delay 30
  */
 
+import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
 
 const TELEGRAM_CHAT_ID = "5486040131";
-const DELAY_SECONDS = parseInt(
+const DELAY_SECONDS = Number.parseInt(
 	process.argv.find((a) => a.startsWith("--delay="))?.split("=")[1] ?? "15",
 	10,
 );
-const START = parseInt(
+const START = Number.parseInt(
 	process.argv.find((a) => a.startsWith("--start="))?.split("=")[1] ?? "1",
 	10,
 );
-const END = parseInt(
+const END = Number.parseInt(
 	process.argv.find((a) => a.startsWith("--end="))?.split("=")[1] ?? "9999",
 	10,
 );

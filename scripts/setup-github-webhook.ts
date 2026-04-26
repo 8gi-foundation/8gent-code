@@ -7,7 +7,7 @@
  * as DISCORD_GITHUB_WEBHOOK_URL.
  */
 
-import { readFileSync, appendFileSync, writeFileSync } from "fs";
+import { appendFileSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 const ENV_PATH = resolve(import.meta.dir, "../.env");

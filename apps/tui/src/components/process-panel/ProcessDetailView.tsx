@@ -1,23 +1,23 @@
-import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useRef } from "react";
 import type {
 	TaskInfo,
 	TaskOutput,
 } from "../../../../../packages/tools/background.js";
-import {
-	AppText,
-	MutedText,
-	Heading,
-	Badge,
-	Label,
-	Inline,
-	Stack,
-	Divider,
-	ShortcutHint,
-} from "../primitives/index.js";
 import { formatDuration } from "../../lib/index.js";
 import { truncate } from "../../lib/text.js";
 import { isAgentProcessTaskId } from "../ActivityMonitor.js";
+import {
+	AppText,
+	Badge,
+	Divider,
+	Heading,
+	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
+	Stack,
+} from "../primitives/index.js";
 
 function statusColor(status: string): "green" | "red" | "yellow" | "cyan" {
 	switch (status) {

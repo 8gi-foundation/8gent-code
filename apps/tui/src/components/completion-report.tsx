@@ -9,28 +9,29 @@
  * - Copy support
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import Gradient from "ink-gradient";
-import {
-	AppText,
-	MutedText,
-	Heading,
-	Label,
-	ErrorText,
-	SuccessText,
-	WarningText,
-	Badge,
-	StatusDot,
-	Card,
-	Stack,
-	Inline,
-	Divider,
-} from "./primitives/index.js";
+import type React from "react";
+import { useEffect, useState } from "react";
 import {
 	formatDuration as formatDurationLib,
 	formatTokens,
 } from "../lib/index.js";
+import {
+	AppText,
+	Badge,
+	Card,
+	Divider,
+	ErrorText,
+	Heading,
+	Inline,
+	Label,
+	MutedText,
+	Stack,
+	StatusDot,
+	SuccessText,
+	WarningText,
+} from "./primitives/index.js";
 
 // ============================================
 // Types

@@ -9,22 +9,22 @@
  */
 
 import { Database } from "bun:sqlite";
+import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
+import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
 import {
-	type Memory,
-	type MemoryType,
-	type MemoryScope,
-	type SourceType,
-	type SearchOptions,
-	type SearchResult,
 	type Entity,
 	type EntityType,
+	type Memory,
+	type MemoryScope,
+	type MemoryType,
 	type Relationship,
 	type RelationshipType,
-	generateId,
+	type SearchOptions,
+	type SearchResult,
+	type SourceType,
 	effectiveImportance,
+	generateId,
 } from "./types.js";
-import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
-import { safeJsonStringify, safeJsonParse } from "./json-guard.js";
 
 // ── Schema SQL ────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
  * - SSETransport: fetch-based SSE connection to an HTTP MCP endpoint
  */
 
-import { spawn, type Subprocess } from "bun";
+import { type Subprocess, spawn } from "bun";
 
 // ── Interface ────────────────────────────────────────────────────
 

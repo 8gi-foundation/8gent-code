@@ -108,14 +108,14 @@ export function parseCSSNumericValue(
 ): { number: number; unit: string } | null {
 	const m = value.trim().match(/^(-?\d*\.?\d+)\s*(%|[a-zA-Z]*)$/);
 	if (!m) return null;
-	return { number: parseFloat(m[1]), unit: m[2] || "" };
+	return { number: Number.parseFloat(m[1]), unit: m[2] || "" };
 }
 
 /** Find blur(Npx) in CSS and return N. */
 export function extractBlurValue(css: string): number | null {
 	const m = css.match(/blur\(\s*(\d*\.?\d+)\s*px\s*\)/i);
 	if (!m) return null;
-	return parseFloat(m[1]);
+	return Number.parseFloat(m[1]);
 }
 
 /** Parse rgba(r, g, b, a) into components. */
@@ -127,10 +127,10 @@ export function extractRGBA(
 	);
 	if (!m) return null;
 	return {
-		r: parseInt(m[1], 10),
-		g: parseInt(m[2], 10),
-		b: parseInt(m[3], 10),
-		a: m[4] !== undefined ? parseFloat(m[4]) : 1,
+		r: Number.parseInt(m[1], 10),
+		g: Number.parseInt(m[2], 10),
+		b: Number.parseInt(m[3], 10),
+		a: m[4] !== undefined ? Number.parseFloat(m[4]) : 1,
 	};
 }
 

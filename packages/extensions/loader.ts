@@ -9,8 +9,8 @@ import * as fs from "fs";
 import * as path from "path";
 import type {
 	ExtensionManifest,
-	LoadedExtension,
 	ExtensionToolDef,
+	LoadedExtension,
 } from "./types";
 
 const EXTENSIONS_DIR = path.join(

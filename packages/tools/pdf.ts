@@ -178,7 +178,7 @@ export async function getPdfMetadata(pdfPath: string): Promise<{
 export async function searchPdf(
 	pdfPath: string,
 	query: string,
-	caseSensitive: boolean = false,
+	caseSensitive = false,
 ): Promise<{
 	path: string;
 	query: string;

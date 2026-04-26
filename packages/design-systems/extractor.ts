@@ -4,8 +4,8 @@
  */
 
 import type {
-	DesignStyle,
 	DesignMood,
+	DesignStyle,
 	FontCategory,
 	ParsedColors,
 	ParsedTypography,

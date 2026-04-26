@@ -16,16 +16,16 @@
  */
 
 import {
+	existsSync,
 	mkdirSync,
-	writeFileSync,
 	readFileSync,
 	readdirSync,
-	unlinkSync,
-	existsSync,
 	statSync,
+	unlinkSync,
+	writeFileSync,
 } from "fs";
-import { join } from "path";
 import { homedir } from "os";
+import { join } from "path";
 
 // MARK: - Types
 
@@ -323,7 +323,7 @@ export class AgentMesh {
 	}
 
 	// Read broadcast messages (non-destructive, returns since timestamp)
-	readBroadcasts(since: number = 0): MeshMessage[] {
+	readBroadcasts(since = 0): MeshMessage[] {
 		if (!existsSync(BROADCAST_DIR)) return [];
 
 		return readdirSync(BROADCAST_DIR)
@@ -416,7 +416,7 @@ export class AgentMesh {
 	async request(
 		to: string,
 		content: string,
-		timeoutMs: number = 30_000,
+		timeoutMs = 30_000,
 	): Promise<MeshMessage | null> {
 		const requestId = `req-${Date.now().toString(36)}`;
 		this.send(to, "request", content, { requestId });

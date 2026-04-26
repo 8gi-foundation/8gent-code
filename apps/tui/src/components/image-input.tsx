@@ -11,16 +11,16 @@
  * Users can paste image paths directly.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from "react";
-import { Box, useInput } from "ink";
 import * as fs from "fs";
 import * as path from "path";
+import { Box, useInput } from "ink";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
 	AppText,
-	MutedText,
-	Label,
-	ShortcutHint,
 	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
 	Stack,
 } from "./primitives/index.js";
 

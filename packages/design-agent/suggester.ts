@@ -11,14 +11,14 @@
  */
 
 import { EventEmitter } from "events";
+import type { DesignCategory, DetectionResult } from "./detector.js";
 import type { ProjectType, UserDesignPreferences } from "./prompts.js";
 import {
-	QUICK_SUGGESTIONS,
-	getDesignIntro,
-	formatDesignOptions,
 	FOLLOW_UP_PROMPTS,
+	QUICK_SUGGESTIONS,
+	formatDesignOptions,
+	getDesignIntro,
 } from "./prompts.js";
-import type { DetectionResult, DesignCategory } from "./detector.js";
 
 // ============================================
 // Types

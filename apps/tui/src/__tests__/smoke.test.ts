@@ -2,14 +2,14 @@
  * Smoke tests for TUI components
  * Verifies all new TV Mode components render without crashing
  */
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 // Test narrator translation functions (pure, no React)
 import {
-	narrateToolStart,
-	narrateToolEnd,
 	narratePlan,
 	narrateStep,
+	narrateToolEnd,
+	narrateToolStart,
 } from "../lib/narrator";
 
 describe("Narrator translations", () => {

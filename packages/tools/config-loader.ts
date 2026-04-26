@@ -7,7 +7,7 @@
  * Supports nested keys via dot notation ("server.port").
  */
 
-import { readFileSync, existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { extname } from "path";
 
 export type ConfigValue = string | number | boolean | null;

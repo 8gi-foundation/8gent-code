@@ -2,7 +2,7 @@
  * Ollama LLM Client
  */
 
-import type { Message, LLMResponse, LLMClient } from "../types";
+import type { LLMClient, LLMResponse, Message } from "../types";
 
 /**
  * Resolve the Ollama base URL, checking for training proxy override.

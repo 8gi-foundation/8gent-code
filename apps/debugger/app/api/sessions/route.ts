@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
-import { readdir, stat } from "fs/promises";
-import { join } from "path";
 import { createReadStream } from "fs";
+import { join } from "path";
 import { createInterface } from "readline";
+import { readdir, stat } from "fs/promises";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 import { homedir } from "os";
@@ -64,7 +64,7 @@ async function getSessionMeta(filePath: string): Promise<{
 
 		const rl = createInterface({
 			input: createReadStream(filePath),
-			crlfDelay: Infinity,
+			crlfDelay: Number.POSITIVE_INFINITY,
 		});
 
 		rl.on("line", (line) => {

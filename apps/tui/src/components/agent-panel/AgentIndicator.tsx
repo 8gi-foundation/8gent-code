@@ -3,9 +3,9 @@
  * Appears in the prompt area. Shift+Tab cycles through agents.
  */
 
+import { Box, Text } from "ink";
 import React from "react";
-import { Text, Box } from "ink";
-import { Inline, MutedText, Badge } from "../primitives/index.js";
+import { Badge, Inline, MutedText } from "../primitives/index.js";
 
 interface AgentIndicatorProps {
 	agentName: string;

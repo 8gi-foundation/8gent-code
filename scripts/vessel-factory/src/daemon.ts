@@ -11,11 +11,11 @@
  *   WS   control plane auto-connect
  */
 
+import { connectControlPlane } from "./control-plane";
 import { vesselInvoke } from "./invoke";
 import { buildManifest } from "./manifest";
-import { connectControlPlane } from "./control-plane";
 
-const PORT = parseInt(process.env.PORT ?? "8080");
+const PORT = Number.parseInt(process.env.PORT ?? "8080");
 
 const VESSEL_CODE = process.env.VESSEL_CODE ?? "???";
 const VESSEL_NAME = process.env.VESSEL_NAME ?? "Unknown";

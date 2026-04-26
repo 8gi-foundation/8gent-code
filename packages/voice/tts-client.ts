@@ -16,7 +16,7 @@
  */
 
 import { execSync } from "child_process";
-import { readFileSync, existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 
 const TTS_SERVER_URL = process.env.TTS_SERVER_URL || "http://localhost:8000";
 

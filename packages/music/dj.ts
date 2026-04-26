@@ -15,11 +15,11 @@
  * - Resume across sessions
  */
 
-import { execSync, spawn, type ChildProcess } from "child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { homedir, tmpdir, platform } from "os";
-import { join, basename } from "path";
+import { type ChildProcess, execSync, spawn } from "child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import * as net from "net";
+import { homedir, platform, tmpdir } from "os";
+import { basename, join } from "path";
 
 // ---- Platform ----
 const IS_MAC = platform() === "darwin";
@@ -110,7 +110,7 @@ let isPlaying = false;
 let isPaused = false;
 let isLooping = false;
 let trackQueue: { title: string; url: string }[] = [];
-let history: { title: string; url: string; playedAt: number }[] = [];
+const history: { title: string; url: string; playedAt: number }[] = [];
 
 // ---- Resume State ----
 interface ResumeState {
@@ -403,7 +403,7 @@ export class DJ {
 			const times =
 				result
 					.match(/pts_time:([0-9.]+)/g)
-					?.map((s) => parseFloat(s.split(":")[1])) || [];
+					?.map((s) => Number.parseFloat(s.split(":")[1])) || [];
 			if (times.length < 4) return "Could not detect BPM (too few onsets).";
 
 			const intervals = times.slice(1).map((t, i) => t - times[i]);
@@ -418,7 +418,7 @@ export class DJ {
 	}
 
 	/** Crossfade mix two files */
-	mix(fileA: string, fileB: string, crossfadeSec: number = 5): string {
+	mix(fileA: string, fileB: string, crossfadeSec = 5): string {
 		const t = detectTools();
 		if (!t.ffmpeg) return "ffmpeg not installed.";
 		if (!existsSync(fileA) || !existsSync(fileB))

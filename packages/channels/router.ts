@@ -1,8 +1,8 @@
 /** @8gent/channels - Channel Router */
 
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
 import type { ChannelAdapter, ChannelConfig, ChannelMessage } from "./types";
 
 function parseSimpleYaml(raw: string): Record<string, ChannelConfig> {

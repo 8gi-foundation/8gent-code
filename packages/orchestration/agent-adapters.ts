@@ -18,10 +18,10 @@
  * 4. Collects results
  */
 
-import { spawn, type ChildProcess } from "child_process";
+import { type ChildProcess, spawn } from "child_process";
 import { existsSync } from "fs";
-import { join } from "path";
 import { homedir } from "os";
+import { join } from "path";
 
 // ── Types ───────────────────────────────────────────────────────
 

@@ -5,11 +5,11 @@
  * glob matching, strength/weakness validation.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-	type StrengthArea,
-	type ModelProfile,
 	MODEL_PROFILES,
+	type ModelProfile,
+	type StrengthArea,
 	getProfile,
 	scoreModelForTask,
 } from "./model-profile.js";

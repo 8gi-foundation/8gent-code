@@ -5,18 +5,18 @@
  * Data persists to ~/.8gent/tabs/ideas.json
  */
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
-import {
-	AppText,
-	MutedText,
-	Heading,
-	Stack,
-	Divider,
-	Badge,
-} from "../components/primitives/index.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+	AppText,
+	Badge,
+	Divider,
+	Heading,
+	MutedText,
+	Stack,
+} from "../components/primitives/index.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 

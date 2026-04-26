@@ -6,21 +6,21 @@
  */
 
 import {
-	searchPeople,
-	getProfile,
-	sendConnectionRequest,
-	sendMessage,
-	getRecentReplies,
-} from "./linkedin-api";
-import { enrichLead, buildSignalHook } from "./signal-engine";
-import {
-	upsertLead,
+	getCampaignStats,
 	getLead,
 	getTemplates,
-	getCampaignStats,
+	upsertLead,
 } from "./campaign-db";
+import { getInsights, reflect, startReflectionLoop } from "./hyperagent";
+import {
+	getProfile,
+	getRecentReplies,
+	searchPeople,
+	sendConnectionRequest,
+	sendMessage,
+} from "./linkedin-api";
 import { RateLimiter } from "./rate-limiter";
-import { reflect, getInsights, startReflectionLoop } from "./hyperagent";
+import { buildSignalHook, enrichLead } from "./signal-engine";
 import type { MCPToolCall, MCPToolResult } from "./types";
 import { randomId } from "./utils";
 

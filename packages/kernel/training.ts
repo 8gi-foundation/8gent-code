@@ -8,15 +8,15 @@
  * - Rollback on regression, promote on improvement
  */
 
-import { spawn } from "bun";
 import {
-	writeFileSync,
-	readFileSync,
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	readdirSync,
+	writeFileSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { spawn } from "bun";
 import type { ScoreRecord } from "./judge";
 
 export interface TrainingConfig {
@@ -318,7 +318,7 @@ export class TrainingOrchestrator {
 
 		// Fallback: parse score from stdout
 		const scoreMatch = stdout.match(/Avg Score:\s+([\d.]+)/);
-		return scoreMatch ? parseFloat(scoreMatch[1]) : 0;
+		return scoreMatch ? Number.parseFloat(scoreMatch[1]) : 0;
 	}
 
 	private async rollback(_checkpointId: string): Promise<void> {

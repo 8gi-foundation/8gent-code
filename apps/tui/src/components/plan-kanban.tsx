@@ -8,22 +8,22 @@
  * - Toggle with /kanban command
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect } from "react";
+import { truncate } from "../lib/index.js";
 import {
 	AppText,
-	MutedText,
-	Heading,
-	Label,
 	Badge,
-	StatusDot,
 	Card,
-	Stack,
-	Inline,
-	Spacer,
 	Divider,
+	Heading,
+	Inline,
+	Label,
+	MutedText,
+	Spacer,
+	Stack,
+	StatusDot,
 } from "./primitives/index.js";
-import { truncate } from "../lib/index.js";
 
 // Inline types to avoid import issues
 export type StepCategory =

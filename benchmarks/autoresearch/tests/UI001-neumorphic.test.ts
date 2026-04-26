@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { readFileSync, existsSync } from "fs";
+import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 function loadHTML(): string {
@@ -49,7 +49,7 @@ describe("UI001 - Neumorphic Button Set", () => {
 	test("border-radius >= 10px on buttons", () => {
 		const radiusMatches = css.match(/border-radius\s*:\s*(\d+)/gi) ?? [];
 		const hasLargeRadius = radiusMatches.some((m) => {
-			const val = parseInt(m.match(/(\d+)/)?.[1] ?? "0", 10);
+			const val = Number.parseInt(m.match(/(\d+)/)?.[1] ?? "0", 10);
 			return val >= 10;
 		});
 		expect(hasLargeRadius).toBe(true);

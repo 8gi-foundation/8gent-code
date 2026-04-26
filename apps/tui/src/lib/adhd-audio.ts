@@ -14,9 +14,9 @@
  *   audio.setConfig({ duration: 120, bpm: 80 }); // Override settings
  */
 
-import { spawn, type Subprocess } from "bun";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { type Subprocess, spawn } from "bun";
 
 // ============================================
 // Types

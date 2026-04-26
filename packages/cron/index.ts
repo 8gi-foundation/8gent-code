@@ -5,9 +5,9 @@
  * and runs 8gent commands via Bun.spawn when due.
  */
 
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 
 export interface CronJob {
 	id: string;
@@ -23,7 +23,7 @@ function matchField(field: string, value: number, max: number): boolean {
 	if (field === "*") return true;
 	// */N step
 	if (field.startsWith("*/")) {
-		const step = parseInt(field.slice(2), 10);
+		const step = Number.parseInt(field.slice(2), 10);
 		return step > 0 && value % step === 0;
 	}
 	// range: 1-5
@@ -36,7 +36,7 @@ function matchField(field: string, value: number, max: number): boolean {
 		return field.split(",").map(Number).includes(value);
 	}
 	// exact value
-	return parseInt(field, 10) === value;
+	return Number.parseInt(field, 10) === value;
 }
 
 /** Returns true if the cron expression matches the given Date */

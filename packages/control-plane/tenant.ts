@@ -11,13 +11,13 @@
  * Use `createTenantStore()` to get the appropriate backend.
  */
 
+import { PLAN_DEFINITIONS } from "./billing";
 import type {
-	TenantConfig,
-	PlanTier,
 	PlanLimits,
+	PlanTier,
+	TenantConfig,
 	TenantFeatures,
 } from "./types";
-import { PLAN_DEFINITIONS } from "./billing";
 
 // ============================================
 // TenantStore Interface

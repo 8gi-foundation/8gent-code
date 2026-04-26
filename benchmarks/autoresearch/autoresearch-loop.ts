@@ -9,45 +9,45 @@
  */
 
 import {
-	writeFileSync,
-	readFileSync,
 	appendFileSync,
-	mkdirSync,
 	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
 } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { BenchmarkDefinition, BenchmarkRun, TokenUsage } from "../types";
 
-import { bugFixingBenchmarks } from "../categories/bug-fixing/benchmarks";
-import { fileManipulationBenchmarks } from "../categories/file-manipulation/benchmarks";
-import { featureImplementationBenchmarks } from "../categories/feature-implementation/benchmarks";
-import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { agenticBenchmarks } from "../categories/agentic/benchmarks";
-import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { battleTestBenchmarks } from "../categories/battle-test/benchmarks";
 import { battleTestProBenchmarks } from "../categories/battle-test/benchmarks-pro";
+import { bugFixingBenchmarks } from "../categories/bug-fixing/benchmarks";
+import { featureImplementationBenchmarks } from "../categories/feature-implementation/benchmarks";
+import { fileManipulationBenchmarks } from "../categories/file-manipulation/benchmarks";
+import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
-import { getFewShot } from "./few-shot";
+import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
+import { getFewShot } from "./few-shot";
 import {
-	getSystemPrompt,
-	addMutation,
-	getMutations,
-	clearMutations,
-} from "./system-prompt";
-import {
-	recordResult,
-	getModelOrder,
 	getExperienceSummary,
+	getModelOrder,
+	recordResult,
 } from "./model-router";
+import {
+	addMutation,
+	clearMutations,
+	getMutations,
+	getSystemPrompt,
+} from "./system-prompt";
 
 // ── Config ──────────────────────────────────────────────────────────
 
 const ROOT = resolve(dirname(import.meta.dir));
 
-const MAX_ITERATIONS = parseInt(process.env.MAX_ITERATIONS ?? "5", 10);
-const PASS_THRESHOLD = parseInt(process.env.PASS_THRESHOLD ?? "80", 10);
+const MAX_ITERATIONS = Number.parseInt(process.env.MAX_ITERATIONS ?? "5", 10);
+const PASS_THRESHOLD = Number.parseInt(process.env.PASS_THRESHOLD ?? "80", 10);
 const TARGET_CATEGORY = process.env.CATEGORY ?? ""; // empty = all
 const API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 
@@ -187,7 +187,10 @@ async function callModel(
 
 	// 5 minute timeout (reduced from 10) — prevents stuck benchmarks
 	const controller = new AbortController();
-	const timeoutMs = parseInt(process.env.BENCHMARK_TIMEOUT ?? "300000", 10);
+	const timeoutMs = Number.parseInt(
+		process.env.BENCHMARK_TIMEOUT ?? "300000",
+		10,
+	);
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
 	const response = await fetch(url, {

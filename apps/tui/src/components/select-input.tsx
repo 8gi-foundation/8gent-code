@@ -15,16 +15,16 @@
  * - Highlighted current selection
  */
 
+import { Box, type TextProps, useInput } from "ink";
 import React, { useState, useEffect, useMemo } from "react";
-import { Box, useInput, type TextProps } from "ink";
 import {
 	AppText,
-	MutedText,
-	Heading,
-	Label,
 	Card,
-	Stack,
+	Heading,
 	Inline,
+	Label,
+	MutedText,
+	Stack,
 } from "./primitives/index.js";
 
 function clampScrollOffset(

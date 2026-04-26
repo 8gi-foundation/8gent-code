@@ -1,6 +1,6 @@
-import React from "react";
-import { ThemeProvider } from "../theme/index.js";
+import type React from "react";
 import { ADHDModeContext } from "../components/bionic-text.js";
+import { ThemeProvider } from "../theme/index.js";
 
 interface AppProvidersProps {
 	adhdMode: boolean;

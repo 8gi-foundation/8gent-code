@@ -8,15 +8,15 @@
  * along for the ride.
  */
 
+import {
+	RoleProviderUnavailableError,
+	createClientForRole,
+} from "../eight/clients";
+import type { AgentConfig } from "../eight/types";
+import { type ProviderName, getProviderManager } from "../providers";
+import { type RoleName, loadRoleConfig } from "./role-config";
 import type { DispatchedTask } from "./task-dispatcher";
 import { globalDispatcher } from "./task-dispatcher";
-import {
-	createClientForRole,
-	RoleProviderUnavailableError,
-} from "../eight/clients";
-import { loadRoleConfig, type RoleName } from "./role-config";
-import type { AgentConfig } from "../eight/types";
-import { getProviderManager, type ProviderName } from "../providers";
 
 export interface RunClaimedTaskResult {
 	taskId: string;

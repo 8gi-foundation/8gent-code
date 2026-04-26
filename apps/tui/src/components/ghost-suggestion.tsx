@@ -11,24 +11,24 @@
  * - Source indicator (plan, history, context)
  */
 
-import React, { useState, useEffect, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
+import TextInput from "ink-text-input";
+import React, { useState, useEffect, useCallback } from "react";
 import {
-	useGhostSuggestion,
-	GhostSuggestion,
-	SuggestionSource,
+	type GhostSuggestion,
+	type SuggestionSource,
 	getSuggestionSourceLabel,
+	useGhostSuggestion,
 } from "../hooks/use-ghost-suggestion.js";
 import {
 	AppText,
-	MutedText,
-	Label,
-	ShortcutHint,
-	Inline,
-	Stack,
 	Badge,
+	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
+	Stack,
 } from "./primitives/index.js";
 
 // ============================================

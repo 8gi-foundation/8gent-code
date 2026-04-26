@@ -13,9 +13,9 @@
  */
 
 import {
-	DeepSeekClient,
 	DEEPSEEK_FLASH,
 	DEEPSEEK_PRO,
+	DeepSeekClient,
 } from "../clients/deepseek";
 
 async function main() {

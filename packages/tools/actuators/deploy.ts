@@ -8,10 +8,10 @@
 import {
 	type ActuatorConfig,
 	type ActuatorResult,
-	ok,
-	fail,
 	checkTarget,
+	fail,
 	log,
+	ok,
 } from "./types";
 
 /** Run a CLI command via Bun.spawn, capture stdout + stderr */

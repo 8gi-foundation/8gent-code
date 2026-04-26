@@ -10,9 +10,9 @@ import type {
 	BenchmarkDefinition,
 	BenchmarkResult,
 	CheckResult,
+	ExecutionResult,
 	GradeResult,
 	RubricCheck,
-	ExecutionResult,
 } from "./types";
 
 /**
@@ -147,7 +147,7 @@ export class BenchmarkGrader {
 
 		if (config.countMin !== undefined || config.countMax !== undefined) {
 			const min = config.countMin ?? 0;
-			const max = config.countMax ?? Infinity;
+			const max = config.countMax ?? Number.POSITIVE_INFINITY;
 			passed = matchCount >= min && matchCount <= max;
 			details = `Found ${matchCount} matches (expected ${min}-${max})`;
 		} else {

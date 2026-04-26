@@ -8,9 +8,9 @@
  * based on real tool start/end events, not predictions.
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import * as fs from "fs";
 import * as path from "path";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ============================================
 // Types

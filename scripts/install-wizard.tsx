@@ -6,17 +6,17 @@
  * No API keys. No cloud. Just vibes.
  */
 
-import React, { useState, useEffect } from "react";
-import { render, Box, Text, useInput, useApp } from "ink";
-import Gradient from "ink-gradient";
-import BigText from "ink-big-text";
-import Spinner from "ink-spinner";
-import SelectInput from "ink-select-input";
 import { exec, spawn } from "child_process";
-import { promisify } from "util";
-import * as os from "os";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
+import { promisify } from "util";
+import { Box, Text, render, useApp, useInput } from "ink";
+import BigText from "ink-big-text";
+import Gradient from "ink-gradient";
+import SelectInput from "ink-select-input";
+import Spinner from "ink-spinner";
+import React, { useState, useEffect } from "react";
 
 const execAsync = promisify(exec);
 
@@ -433,7 +433,7 @@ const InstallerApp = () => {
 				// Parse progress from ollama output
 				const match = output.match(/(\d+)%/);
 				if (match) {
-					lastProgress = parseInt(match[1]) / 100;
+					lastProgress = Number.parseInt(match[1]) / 100;
 					setDownloadProgress(lastProgress);
 				}
 			});
@@ -442,7 +442,7 @@ const InstallerApp = () => {
 				const output = data.toString();
 				const match = output.match(/(\d+)%/);
 				if (match) {
-					lastProgress = parseInt(match[1]) / 100;
+					lastProgress = Number.parseInt(match[1]) / 100;
 					setDownloadProgress(lastProgress);
 				}
 			});

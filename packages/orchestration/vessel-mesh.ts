@@ -346,7 +346,7 @@ export class VesselMesh {
 	async delegateTask(
 		vesselId: string,
 		task: TaskPayload,
-		timeoutMs: number = 120_000,
+		timeoutMs = 120_000,
 	): Promise<TaskResult> {
 		const correlationId = this.genId();
 

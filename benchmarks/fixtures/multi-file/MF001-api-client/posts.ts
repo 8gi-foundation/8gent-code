@@ -2,8 +2,8 @@
  * Posts API module - needs error handling
  */
 
-import { ApiClient } from "./client";
-import type { Post, ApiResponse } from "./types";
+import type { ApiClient } from "./client";
+import type { ApiResponse, Post } from "./types";
 
 export class PostsApi {
 	private client: ApiClient;

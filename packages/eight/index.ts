@@ -78,9 +78,9 @@ export {
 // ============================================
 
 import { getPermissionManager } from "../permissions";
-import type { AgentConfig } from "./types";
 import { Agent } from "./agent";
 import { startREPL } from "./repl";
+import type { AgentConfig } from "./types";
 
 if (import.meta.main) {
 	let args = process.argv.slice(2);

@@ -18,7 +18,7 @@ export function clamp(value: number, min: number, max: number): number {
 export function columnWidth(
 	totalWidth: number,
 	columns: number,
-	gap: number = 0,
+	gap = 0,
 ): number {
 	if (columns <= 0) return 0;
 	if (columns === 1) return Math.max(0, totalWidth);
@@ -35,7 +35,7 @@ export function fitColumns(
 	items: number,
 	maxWidth: number,
 	minItemWidth: number,
-	gap: number = 0,
+	gap = 0,
 ): number {
 	if (items <= 0) return 0;
 	if (minItemWidth <= 0) return items;
@@ -79,7 +79,7 @@ export function distributeWidths(
 	);
 
 	// Distribute remainder to maintain exact total
-	let assigned = rawWidths.reduce((sum, w) => sum + w, 0);
+	const assigned = rawWidths.reduce((sum, w) => sum + w, 0);
 	let remainder = totalWidth - assigned;
 	for (let i = 0; i < rawWidths.length && remainder > 0; i++) {
 		rawWidths[i]++;

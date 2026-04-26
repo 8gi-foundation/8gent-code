@@ -9,8 +9,8 @@
  * making the agent's work visible and comprehensible.
  */
 
-import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
+import React, { useState, useEffect, useRef } from "react";
 import type {
 	TaskInfo,
 	TaskOutput,

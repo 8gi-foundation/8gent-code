@@ -5,10 +5,10 @@
  * Downloads the whisper.cpp binary if not available.
  */
 
-import { spawn } from "bun";
 import { existsSync } from "fs";
+import { arch, homedir, platform } from "os";
 import { join } from "path";
-import { homedir, platform, arch } from "os";
+import { spawn } from "bun";
 import type { TranscriptEvent, WhisperModelName } from "./types.js";
 
 /** Where we store the whisper.cpp binary */
@@ -239,7 +239,7 @@ export async function transcribeLocal(
  * Removes artifacts, extra whitespace, and common whisper hallucinations.
  */
 function cleanTranscript(text: string): string {
-	let cleaned = text
+	const cleaned = text
 		// Remove whisper.cpp artifacts
 		.replace(/\[BLANK_AUDIO\]/g, "")
 		.replace(/\(silence\)/g, "")

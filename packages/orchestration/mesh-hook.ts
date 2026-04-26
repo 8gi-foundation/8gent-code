@@ -18,10 +18,10 @@
  * }
  */
 
-import { joinMesh, AgentMesh } from "./agent-mesh";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
+import { AgentMesh, joinMesh } from "./agent-mesh";
 
 const STATE_DIR = join(homedir(), ".8gent", "mesh");
 const MY_STATE = join(STATE_DIR, `hook-${process.ppid}.json`);

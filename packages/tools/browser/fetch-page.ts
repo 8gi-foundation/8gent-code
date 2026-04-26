@@ -5,8 +5,8 @@
  * Caches results for 1 hour.
  */
 
-import { htmlToText } from "./html-to-text";
 import { cacheGet, cacheSet } from "./cache";
+import { htmlToText } from "./html-to-text";
 
 export interface PageResult {
 	title: string;

@@ -2,12 +2,12 @@
  * Smoke test for policy-engine — run with: bun packages/permissions/policy-engine.smoke-test.ts
  */
 import {
-	loadPolicies,
-	evaluatePolicy,
-	checkCommand,
-	checkGitPush,
-	checkFileWrite,
 	addPolicy,
+	checkCommand,
+	checkFileWrite,
+	checkGitPush,
+	evaluatePolicy,
+	loadPolicies,
 	verifyPolicies,
 } from "./policy-engine.js";
 

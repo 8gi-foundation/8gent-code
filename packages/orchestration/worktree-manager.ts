@@ -7,10 +7,10 @@
  */
 
 import { exec } from "child_process";
-import { promisify } from "util";
+import * as crypto from "crypto";
 import { existsSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
-import * as crypto from "crypto";
+import { promisify } from "util";
 
 const execAsync = promisify(exec);
 

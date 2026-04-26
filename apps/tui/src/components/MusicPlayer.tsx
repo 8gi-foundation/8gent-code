@@ -5,8 +5,8 @@
  * Shows animated equalizer bars, track info, volume, and playback state.
  */
 
-import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
+import React, { useState, useEffect, useRef } from "react";
 
 // ---- Visualizer Bar Characters ----
 const BARS = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];

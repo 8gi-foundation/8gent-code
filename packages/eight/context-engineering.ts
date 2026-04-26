@@ -56,7 +56,7 @@ export function estimateTokens(text: string): number {
 /**
  * Create a context window tracker
  */
-export function createContextWindow(maxTokens: number = 128000): ContextWindow {
+export function createContextWindow(maxTokens = 128000): ContextWindow {
 	return {
 		maxTokens,
 		usedTokens: 0,
@@ -107,7 +107,7 @@ export function updateContextWindow(
 export function hasContextRoom(
 	window: ContextWindow,
 	neededTokens: number,
-	margin: number = 0.1,
+	margin = 0.1,
 ): boolean {
 	const available = window.maxTokens * (1 - margin);
 	return window.usedTokens + neededTokens <= available;
@@ -127,10 +127,7 @@ export function getContextUsage(window: ContextWindow): number {
 /**
  * Compress a message while preserving essential information
  */
-export function compressMessage(
-	content: string,
-	maxTokens: number = 500,
-): string {
+export function compressMessage(content: string, maxTokens = 500): string {
 	const currentTokens = estimateTokens(content);
 	if (currentTokens <= maxTokens) return content;
 
@@ -161,7 +158,7 @@ export function compressMessage(
 export function compressToolResult(
 	toolName: string,
 	result: string,
-	maxTokens: number = 200,
+	maxTokens = 200,
 ): string {
 	const currentTokens = estimateTokens(result);
 	if (currentTokens <= maxTokens) return result;

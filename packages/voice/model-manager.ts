@@ -5,14 +5,14 @@
  * Models are stored in ~/.8gent/models/whisper/ by default.
  */
 
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
 import { EventEmitter } from "events";
+import { existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import {
 	WHISPER_MODELS,
-	type WhisperModelName,
 	type WhisperModelInfo,
+	type WhisperModelName,
 } from "./types.js";
 
 export interface ModelManagerEvents {
@@ -45,7 +45,7 @@ export function resolveModelsPath(configPath: string): string {
 export class WhisperModelManager extends EventEmitter<ModelManagerEvents> {
 	private modelsDir: string;
 
-	constructor(modelsPath: string = "~/.8gent/models/whisper") {
+	constructor(modelsPath = "~/.8gent/models/whisper") {
 		super();
 		this.modelsDir = resolveModelsPath(modelsPath);
 	}

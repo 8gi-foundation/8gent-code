@@ -5,8 +5,8 @@
  * and Readability for content extraction.
  */
 
-import * as cheerio from "cheerio";
 import { Readability } from "@mozilla/readability";
+import * as cheerio from "cheerio";
 import { JSDOM } from "jsdom";
 
 // ============================================
@@ -313,10 +313,7 @@ function htmlToMarkdown(html: string): string {
 /**
  * Create a simple extractive summary of content
  */
-export function summarizeContent(
-	content: string,
-	maxSentences: number = 5,
-): string {
+export function summarizeContent(content: string, maxSentences = 5): string {
 	// Split into sentences
 	const sentences = content
 		.split(/[.!?]+/)

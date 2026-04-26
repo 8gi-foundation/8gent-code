@@ -5,14 +5,14 @@
  * Active tab is raised and connected to the content below.
  */
 
-import React from "react";
 import { Box, Text } from "ink";
-import { MutedText } from "./primitives/index.js";
+import React from "react";
 import {
 	TAB_ICONS,
-	type WorkspaceTab,
 	type TabType,
+	type WorkspaceTab,
 } from "../hooks/useWorkspaceTabs.js";
+import { MutedText } from "./primitives/index.js";
 
 interface TabBarProps {
 	tabs: WorkspaceTab[];

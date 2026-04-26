@@ -12,7 +12,7 @@
  * Requires FAL_KEY env var (from ~/Myresumeportfolio/.env.local)
  */
 
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 // Load API keys from env or from Myresumeportfolio .env.local

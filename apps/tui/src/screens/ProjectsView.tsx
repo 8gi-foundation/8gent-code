@@ -5,28 +5,28 @@
  * or .8gent/.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
-import {
-	AppText,
-	MutedText,
-	Heading,
-	Stack,
-	Inline,
-	Divider,
-	Badge,
-} from "../components/primitives/index.js";
 import { execSync } from "child_process";
 import {
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	readdirSync,
 	statSync,
-	readFileSync,
 	writeFileSync,
 } from "fs";
-import { join, basename } from "path";
 import { homedir } from "os";
+import { basename, join } from "path";
+import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+	AppText,
+	Badge,
+	Divider,
+	Heading,
+	Inline,
+	MutedText,
+	Stack,
+} from "../components/primitives/index.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

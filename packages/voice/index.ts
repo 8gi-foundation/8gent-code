@@ -23,25 +23,25 @@
  */
 
 import { EventEmitter } from "events";
-import { MicRecorder, checkSoxInstalled } from "./recorder.js";
-import { WhisperModelManager } from "./model-manager.js";
-import { transcribeLocal, findWhisperBinary } from "./transcriber.js";
 import {
-	transcribeCloud,
-	isCloudAvailable,
 	getApiKey,
+	isCloudAvailable,
+	transcribeCloud,
 } from "./cloud-transcriber.js";
-import { VoiceActivityDetector } from "./vad.js";
+import { WhisperModelManager } from "./model-manager.js";
+import { MicRecorder, checkSoxInstalled } from "./recorder.js";
+import { findWhisperBinary, transcribeLocal } from "./transcriber.js";
 import {
 	DEFAULT_VOICE_CONFIG,
-	type VoiceConfig,
-	type VoiceEventMap,
+	type DependencyCheckResult,
 	type RecordingState,
 	type TranscriptEvent,
-	type DependencyCheckResult,
-	type WhisperModelName,
+	type VoiceConfig,
 	type VoiceErrorCode,
+	type VoiceEventMap,
+	type WhisperModelName,
 } from "./types.js";
+import { VoiceActivityDetector } from "./vad.js";
 
 // Re-export types and utilities
 export * from "./types.js";

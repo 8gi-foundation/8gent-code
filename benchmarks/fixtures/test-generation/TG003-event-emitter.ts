@@ -31,7 +31,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 	private onceHandlers: Map<keyof Events, Set<EventHandler<unknown>>> =
 		new Map();
 	private wildcardHandlers: Set<WildcardHandler> = new Set();
-	private maxListeners: number = 10;
+	private maxListeners = 10;
 	private stats: EmitterStats = {
 		totalEvents: 0,
 		totalHandlers: 0,

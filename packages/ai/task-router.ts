@@ -15,15 +15,15 @@
  * certain task types get prioritized.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-	createModel,
 	type ProviderConfig,
 	type ProviderName,
+	createModel,
 } from "./providers";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
 
 // ============================================
 // Types
@@ -192,9 +192,7 @@ export class TaskRouter {
 	}
 
 	/** Classify a task using the small classifier model */
-	async classify(
-		prompt: string,
-	): Promise<{
+	async classify(prompt: string): Promise<{
 		category: TaskCategory;
 		confidence: number;
 		reasoning: string;

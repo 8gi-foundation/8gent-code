@@ -18,8 +18,8 @@
  */
 
 import type { BoardTask, VesselStatus } from "../board-plane/types";
-import { generateResponse } from "./inference";
 import { startHealthServer } from "./health-server";
+import { generateResponse } from "./inference";
 import { VesselClient } from "./vessel-client";
 
 // -- Read config from env --
@@ -28,7 +28,7 @@ const CONTROL_PLANE_URL =
 const AUTH_TOKEN = process.env.VESSEL_AUTH_TOKEN || "";
 const MEMBER_CODE = process.env.BOARD_MEMBER_CODE || "";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:latest";
-const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || "8080", 10);
+const HEALTH_PORT = Number.parseInt(process.env.HEALTH_PORT || "8080", 10);
 
 // Security: delete secrets from env after reading
 delete process.env.VESSEL_AUTH_TOKEN;

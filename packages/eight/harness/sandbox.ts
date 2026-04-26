@@ -12,7 +12,7 @@
  * Issue: #1403
  */
 
-import type { Sandbox, ToolHandler, CredentialVault } from "./types";
+import type { CredentialVault, Sandbox, ToolHandler } from "./types";
 
 /** Create a sandboxed tool executor. */
 export function createSandbox(vault?: CredentialVault): Sandbox {

@@ -56,7 +56,7 @@ function peek<T>(obs: Observable<T>): T {
 class Observable<T> {
 	private value: T;
 	private subscribers: Set<() => void> = new Set();
-	static isBatching: boolean = false;
+	static isBatching = false;
 
 	constructor(initialValue: T) {
 		this.value = initialValue;

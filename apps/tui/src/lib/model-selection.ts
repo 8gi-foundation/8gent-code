@@ -32,7 +32,7 @@ function scoreChatModelCandidate(id: string): number {
 		score += 80;
 	}
 	const sizeMatch = s.match(/(\d{1,3})b\b/);
-	if (sizeMatch) score += Math.min(parseInt(sizeMatch[1], 10), 120);
+	if (sizeMatch) score += Math.min(Number.parseInt(sizeMatch[1], 10), 120);
 	if (/\b(0\.5b|1b|2b|3b)\b/.test(s) && !/\b(30|32|70|72)\b/.test(s))
 		score -= 15;
 	return score;

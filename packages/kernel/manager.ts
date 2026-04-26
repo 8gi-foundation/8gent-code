@@ -5,16 +5,16 @@
  * for the agent loop to hook into.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ProductionLoop, type ProductionConfig, type LoopStatus } from "./loop";
 import type { ScoreRecord } from "./judge";
-import type { CheckpointInfo } from "./training";
+import { type LoopStatus, type ProductionConfig, ProductionLoop } from "./loop";
 import {
+	type CollectorStats,
 	PersonalCollector,
 	type TrainingPair,
-	type CollectorStats,
 } from "./personal-collector";
+import type { CheckpointInfo } from "./training";
 
 export interface KernelConfig {
 	/** Enable the kernel fine-tuning pipeline (default: false) */

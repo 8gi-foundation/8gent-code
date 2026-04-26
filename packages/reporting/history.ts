@@ -6,30 +6,30 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
-import {
-	type CompletionReport,
-	type StoredReport,
-	type ReportQuery,
-	type ReportListItem,
-} from "./types";
-import {
-	colors,
-	colorize,
-	bold,
-	muted,
-	success,
-	warning,
-	error,
-	info,
-	divider,
-	table,
-	statusIcon,
-	formatDuration,
-	boxChars,
-} from "./formatter";
+import * as path from "path";
 import { CompletionReporter } from "./completion";
+import {
+	bold,
+	boxChars,
+	colorize,
+	colors,
+	divider,
+	error,
+	formatDuration,
+	info,
+	muted,
+	statusIcon,
+	success,
+	table,
+	warning,
+} from "./formatter";
+import type {
+	CompletionReport,
+	ReportListItem,
+	ReportQuery,
+	StoredReport,
+} from "./types";
 
 // ============================================
 // Report History Manager
@@ -335,7 +335,7 @@ export function handleReportsCommand(
 		.find((a) => a.startsWith("--status="))
 		?.split("=")[1] as CompletionReport["status"] | undefined;
 	const limitArg = args.find((a) => a.startsWith("--limit="))?.split("=")[1];
-	const limit = limitArg ? parseInt(limitArg, 10) : 10;
+	const limit = limitArg ? Number.parseInt(limitArg, 10) : 10;
 
 	if (showStats) {
 		const stats = history.getStats();

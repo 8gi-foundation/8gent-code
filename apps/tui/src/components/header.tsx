@@ -7,12 +7,12 @@
  * - Rainbow border animation
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import Gradient from "ink-gradient";
-import { PulseLogo, AnimatedWordmark } from "./pulse-logo.js";
-import { RainbowBorder, AnimatedSeparator } from "./rainbow-border.js";
-import { AppText, MutedText, Inline } from "./primitives/index.js";
+import React, { useState, useEffect } from "react";
+import { AppText, Inline, MutedText } from "./primitives/index.js";
+import { AnimatedWordmark, PulseLogo } from "./pulse-logo.js";
+import { AnimatedSeparator, RainbowBorder } from "./rainbow-border.js";
 
 interface HeaderProps {
 	isProcessing?: boolean;

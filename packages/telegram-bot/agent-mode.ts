@@ -5,19 +5,19 @@
  * Receives natural language messages, detects intent, and executes actions.
  */
 
-import { readFileSync, existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { homedir } from "os";
-import type { AgentAction, AgentActionType, ActionResult } from "./types";
-import { BotMemory } from "./memory";
+import { join } from "path";
 import {
-	formatScoreboard,
 	formatComparison,
-	formatSystemStatus,
-	formatMutationList,
-	sparkline,
 	formatDuration,
+	formatMutationList,
+	formatScoreboard,
+	formatSystemStatus,
+	sparkline,
 } from "./formatters";
+import { BotMemory } from "./memory";
+import type { ActionResult, AgentAction, AgentActionType } from "./types";
 
 // ── State paths (same as commands.ts) ───────────────────
 
@@ -151,7 +151,7 @@ function readConfig(): any {
 function isRunActive(): boolean {
 	try {
 		if (!existsSync(RUN_PID_FILE)) return false;
-		const pid = parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
+		const pid = Number.parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
 		process.kill(pid, 0);
 		return true;
 	} catch {
@@ -547,7 +547,10 @@ export class TelegramAgentMode {
 		}
 
 		try {
-			const pid = parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
+			const pid = Number.parseInt(
+				readFileSync(RUN_PID_FILE, "utf-8").trim(),
+				10,
+			);
 			process.kill(pid, "SIGTERM");
 
 			try {

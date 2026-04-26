@@ -11,10 +11,10 @@
  *  7. Surface cancel -> deny (no state written).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 
 // Point EIGHT_DATA_DIR at an isolated temp dir before importing the modules.
 const TMP_DIR = path.join(os.tmpdir(), `turth-test-${Date.now()}`);
@@ -22,18 +22,18 @@ fs.mkdirSync(TMP_DIR, { recursive: true });
 process.env.EIGHT_DATA_DIR = TMP_DIR;
 
 import {
-	requestApproval,
-	registerPromptSurface,
-	isInteractiveEnabled,
 	type TurthRequest,
+	isInteractiveEnabled,
+	registerPromptSurface,
+	requestApproval,
 } from "./turth.js";
 import {
 	__resetForTest,
 	checkCapability,
-	recordDecision,
 	clearSession,
 	getAuditLogPath,
 	getUserPolicyPath,
+	recordDecision,
 } from "./user-policy.js";
 
 function mockSurface(

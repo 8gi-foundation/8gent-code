@@ -15,7 +15,7 @@
  *     (handled by KnowledgeGraph's addRelationship upsert)
  */
 
-import { KnowledgeGraph } from "./graph.js";
+import type { KnowledgeGraph } from "./graph.js";
 
 function escapeRegex(str: string): string {
 	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

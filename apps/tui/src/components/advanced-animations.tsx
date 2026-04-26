@@ -14,8 +14,9 @@
  * - Gradient wave text (header)
  */
 
-import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text } from "ink";
+import type React from "react";
+import { useEffect, useMemo, useState } from "react";
 
 // ============================================
 // Matrix Rain Effect

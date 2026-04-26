@@ -4,7 +4,7 @@
  * These limits are conservative. Do not override them.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { getDb } from "./campaign-db";
 
 const DAILY_CAPS = {

@@ -3,18 +3,18 @@
  * pattern frequency, evolution summary, and schema versioning.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 
 import {
-	resetDb,
-	recordEvent,
-	getSkillHistory,
-	getPatternFrequency,
 	getEvolutionSummary,
+	getPatternFrequency,
 	getSchemaVersion,
+	getSkillHistory,
+	recordEvent,
+	resetDb,
 	setSchemaVersion,
 } from "./evolution-db";
 

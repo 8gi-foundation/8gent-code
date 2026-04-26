@@ -15,7 +15,7 @@
  *    storage array (for debugging / memory auditing).
  */
 
-import type { Message, HistoryOptions } from "./types";
+import type { HistoryOptions, Message } from "./types";
 
 export class HistoryStore {
 	private store = new Map<string, Message[]>();

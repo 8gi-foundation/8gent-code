@@ -3,10 +3,10 @@
  * and knowledge graph integrity into a single diagnostic report.
  */
 
-import { Database } from "bun:sqlite";
-import { memoryHealth, type MemoryHealth } from "./health.js";
-import { detectContradictions, type Contradiction } from "./contradictions.js";
-import { KnowledgeGraph, type Entity, type Relationship } from "./graph.js";
+import type { Database } from "bun:sqlite";
+import { type Contradiction, detectContradictions } from "./contradictions.js";
+import type { Entity, KnowledgeGraph, Relationship } from "./graph.js";
+import { type MemoryHealth, memoryHealth } from "./health.js";
 
 // ============================================
 // Types
@@ -109,7 +109,7 @@ export function lintMemory(db: Database, graph: KnowledgeGraph): LintReport {
 		lastAccessed: row.last_accessed,
 		daysSinceAccess: row.last_accessed
 			? Math.floor((now - row.last_accessed) / DAY_MS)
-			: Infinity,
+			: Number.POSITIVE_INFINITY,
 	}));
 
 	// 5. Broken references — relationships pointing to non-existent entities
@@ -234,7 +234,7 @@ export function lintReportToMarkdown(report: LintReport): string {
 		const top10 = report.stale.slice(0, 10);
 		for (const s of top10) {
 			const days =
-				s.daysSinceAccess === Infinity
+				s.daysSinceAccess === Number.POSITIVE_INFINITY
 					? "never accessed"
 					: `${s.daysSinceAccess}d ago`;
 			lines.push(

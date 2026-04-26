@@ -100,7 +100,7 @@ export class MemoryBridge {
 	getContext(
 		channelId: string,
 		memberCode: string,
-		limit: number = 10,
+		limit = 10,
 	): Array<{ role: string; content: string }> {
 		const scope = this.scopeKey(channelId, memberCode);
 		const rows = this.db
@@ -115,7 +115,7 @@ export class MemoryBridge {
 	/** Get cross-member context for a channel (hive mind view) */
 	getChannelContext(
 		channelId: string,
-		limit: number = 20,
+		limit = 20,
 	): Array<{
 		role: string;
 		content: string;
@@ -138,7 +138,7 @@ export class MemoryBridge {
 	}
 
 	/** Prune old entries per scope (keep last N) */
-	prune(maxPerScope: number = 50): number {
+	prune(maxPerScope = 50): number {
 		const scopes = this.db
 			.prepare(`SELECT DISTINCT scope FROM board_memory`)
 			.all() as Array<{ scope: string }>;

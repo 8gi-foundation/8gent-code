@@ -9,18 +9,18 @@
  * - Graceful degradation when components are unavailable
  */
 
-import { TrainingProxy, type ProxyConfig, type ProxyStatus } from "./proxy";
-import { JudgeScorer, type JudgeConfig, type ScoreRecord } from "./judge";
 import {
-	TrainingOrchestrator,
-	type TrainingConfig,
-	type CheckpointInfo,
-} from "./training";
-import {
-	recordResult,
-	getModelOrder,
 	getExperienceSummary,
+	getModelOrder,
+	recordResult,
 } from "../../benchmarks/autoresearch/model-router";
+import { type JudgeConfig, JudgeScorer, type ScoreRecord } from "./judge";
+import { type ProxyConfig, type ProxyStatus, TrainingProxy } from "./proxy";
+import {
+	type CheckpointInfo,
+	type TrainingConfig,
+	TrainingOrchestrator,
+} from "./training";
 
 export interface ProductionConfig {
 	proxy: Partial<ProxyConfig>;
@@ -89,7 +89,7 @@ export class ProductionLoop {
 	private judge: JudgeScorer;
 	private trainer: TrainingOrchestrator;
 	private lastActivityAt: number = Date.now();
-	private startedAt: number = 0;
+	private startedAt = 0;
 	private running = false;
 	private tickInterval: ReturnType<typeof setInterval> | null = null;
 

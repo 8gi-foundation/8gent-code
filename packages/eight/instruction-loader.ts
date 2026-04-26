@@ -8,8 +8,8 @@
  */
 
 import { existsSync, readFileSync } from "fs";
-import { join, dirname, resolve } from "path";
 import { homedir } from "os";
+import { dirname, join, resolve } from "path";
 
 /** File names to search for, in priority order (first match per directory wins) */
 const INSTRUCTION_FILES = ["8GENT.md", "AGENTS.md", "CLAUDE.md"] as const;

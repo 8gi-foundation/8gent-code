@@ -7,9 +7,9 @@
 
 import type { Hook, HookContext } from "./index";
 import {
-	registerShellHook,
-	registerFunctionHook,
 	getHookManager,
+	registerFunctionHook,
+	registerShellHook,
 } from "./index";
 
 // ============================================

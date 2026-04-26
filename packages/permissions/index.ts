@@ -7,8 +7,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import * as readline from "readline";
 
 // ============================================
@@ -509,7 +509,7 @@ export class PermissionManager {
 	private log: PermissionLog;
 	private approvedCommands: Set<string> = new Set();
 	private deniedCommands: Set<string> = new Set();
-	private infiniteMode: boolean = false;
+	private infiniteMode = false;
 	private infiniteModeStartTime: number | null = null;
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
 

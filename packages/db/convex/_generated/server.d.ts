@@ -8,16 +8,16 @@
  * @module
  */
 
-import {
+import type {
 	ActionBuilder,
+	GenericActionCtx,
+	GenericDatabaseReader,
+	GenericDatabaseWriter,
+	GenericMutationCtx,
+	GenericQueryCtx,
 	HttpActionBuilder,
 	MutationBuilder,
 	QueryBuilder,
-	GenericActionCtx,
-	GenericMutationCtx,
-	GenericQueryCtx,
-	GenericDatabaseReader,
-	GenericDatabaseWriter,
 } from "convex/server";
 import type { DataModel } from "./dataModel.js";
 

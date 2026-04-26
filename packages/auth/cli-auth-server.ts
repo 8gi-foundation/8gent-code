@@ -39,7 +39,7 @@ export interface CLIAuthCallbacks {
  * - Return token
  */
 export async function runCLIAuthFlow(
-	webBaseUrl: string = "https://8gent.app",
+	webBaseUrl = "https://8gent.app",
 	callbacks?: CLIAuthCallbacks,
 	timeoutMs: number = 5 * 60 * 1000, // 5 min
 ): Promise<CLIAuthResult> {

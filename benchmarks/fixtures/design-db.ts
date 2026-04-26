@@ -9,7 +9,7 @@ import { Database as BunDB } from "bun:sqlite";
 export class DesignDB {
 	db: BunDB;
 
-	constructor(path: string = ":memory:") {
+	constructor(path = ":memory:") {
 		this.db = new BunDB(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA foreign_keys = ON");

@@ -155,7 +155,7 @@ export function getStatusIcon(
 /**
  * Create a branded box around text
  */
-export function createBrandedBox(content: string, width: number = 60): string {
+export function createBrandedBox(content: string, width = 60): string {
 	const { borders } = BRAND;
 	const horizontalLine = borders.horizontal.repeat(width - 2);
 

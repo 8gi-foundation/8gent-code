@@ -12,7 +12,7 @@
  * no vision. Vision-bearing prompts are rejected up-front with a clear error.
  */
 
-import type { Message, MessageContent, LLMResponse, LLMClient } from "../types";
+import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
 
 const DEFAULT_BASE_URL = "http://localhost:11434/v1";
 const INSTALL_HINT =

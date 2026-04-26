@@ -52,7 +52,7 @@ export class SessionSyncManager {
 	private messageCount = 0;
 	private sessionModel = "";
 	private sessionWorkingDir = "";
-	private channel: string = "cli";
+	private channel = "cli";
 
 	// Lazily resolved — dynamic imports so @8gent/db is optional
 	private _client: any = null;
@@ -60,7 +60,7 @@ export class SessionSyncManager {
 	private _resolved = false;
 	private _resolving: Promise<boolean> | null = null;
 
-	constructor(enabled: boolean = true, channel: string = "cli") {
+	constructor(enabled = true, channel = "cli") {
 		this.enabled = enabled;
 		this.channel = channel;
 	}

@@ -7,16 +7,16 @@
  *   - whisper-kokoro: half-duplex listen → STT → agent → TTS (default, no extra deps)
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useInput } from "ink";
 import {
+	type VoiceBackend,
 	VoiceChatLoop,
 	type VoiceChatState,
 	VoiceEngine,
 	detectCapabilities,
 	selectBestBackend,
-	type VoiceBackend,
 } from "@8gent/voice";
+import { useInput } from "ink";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface UseVoiceChatOptions {
 	/** Send message to agent, return response text */

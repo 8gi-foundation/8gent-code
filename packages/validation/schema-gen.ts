@@ -6,7 +6,7 @@
  *
  * Closes #1370 - prevents Zod type drift from becoming an injection vector.
  */
-import { z } from "zod";
+import type { z } from "zod";
 
 export interface EmittedSchema {
 	$schema?: string;

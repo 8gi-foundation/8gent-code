@@ -7,11 +7,11 @@
  * Inspired by jcodemunch, but native to 8gent.
  */
 
-import type { Symbol, SymbolKind, FileOutline, RepoIndex } from "../types";
+import type { FileOutline, RepoIndex, Symbol, SymbolKind } from "../types";
 export type { RepoIndex, FileOutline, Symbol, SymbolKind };
-import { parseTypeScriptFile } from "./typescript-parser";
 import * as fs from "fs";
 import * as path from "path";
+import { parseTypeScriptFile } from "./typescript-parser";
 
 // Parser interface - will be implemented with tree-sitter or native TS parser
 export interface Parser {
@@ -168,7 +168,7 @@ export function getSymbol(repoId: string, symbolId: string): Symbol | null {
 export async function getSymbolSource(
 	repoId: string,
 	symbolId: string,
-	contextLines: number = 0,
+	contextLines = 0,
 ): Promise<string | null> {
 	const symbol = getSymbol(repoId, symbolId);
 	if (!symbol) return null;

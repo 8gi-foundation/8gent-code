@@ -7,8 +7,9 @@
  * Agents can also write to the PTY via write_terminal tool.
  */
 
-import React, { useState, useCallback, useEffect } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
+import type React from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTerminal } from "../hooks/useTerminal.js";
 
 interface TerminalViewProps {

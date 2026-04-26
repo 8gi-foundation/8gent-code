@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { readFileSync, existsSync } from "fs";
+import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 function loadHTML(): string {
@@ -36,7 +36,7 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 		const blurMatches =
 			css.match(/backdrop-filter\s*:[^;]*blur\(\s*(\d+)/gi) ?? [];
 		const hasValidBlur = blurMatches.some((m) => {
-			const val = parseInt(m.match(/blur\(\s*(\d+)/i)?.[1] ?? "0", 10);
+			const val = Number.parseInt(m.match(/blur\(\s*(\d+)/i)?.[1] ?? "0", 10);
 			return val >= 10;
 		});
 		expect(hasValidBlur).toBe(true);
@@ -46,7 +46,9 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 		const rgbaMatches =
 			css.match(/rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/gi) ?? [];
 		const hasTransparentBg = rgbaMatches.some((m) => {
-			const alpha = parseFloat(m.match(/,\s*([\d.]+)\s*\)$/)?.[1] ?? "1");
+			const alpha = Number.parseFloat(
+				m.match(/,\s*([\d.]+)\s*\)$/)?.[1] ?? "1",
+			);
 			return alpha <= 0.5;
 		});
 		expect(hasTransparentBg).toBe(true);
@@ -72,7 +74,7 @@ describe("UI002 - Glassmorphism Card Layout", () => {
 	test("border-radius >= 8px", () => {
 		const radiusMatches = css.match(/border-radius\s*:\s*(\d+)/gi) ?? [];
 		const hasRadius = radiusMatches.some((m) => {
-			const val = parseInt(m.match(/(\d+)/)?.[1] ?? "0", 10);
+			const val = Number.parseInt(m.match(/(\d+)/)?.[1] ?? "0", 10);
 			return val >= 8;
 		});
 		expect(hasRadius).toBe(true);

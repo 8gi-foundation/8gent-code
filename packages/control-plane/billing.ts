@@ -7,10 +7,10 @@
 
 import Stripe from "stripe";
 import type {
-	BillingPlan,
 	BillableUsage,
-	PlanTier,
+	BillingPlan,
 	PlanLimits,
+	PlanTier,
 	TenantFeatures,
 } from "./types";
 

@@ -4,7 +4,7 @@
  * Run commands in the background and retrieve their status/output later.
  */
 
-import { spawn, ChildProcess } from "child_process";
+import { type ChildProcess, spawn } from "child_process";
 import * as path from "path";
 
 // ============================================
@@ -51,7 +51,7 @@ export interface TaskOutput {
 
 export class BackgroundTaskManager {
 	private tasks: Map<string, BackgroundTask> = new Map();
-	private taskCounter: number = 0;
+	private taskCounter = 0;
 	private maxOutputSize: number = 1024 * 1024; // 1MB per task
 
 	constructor(private defaultWorkingDirectory: string = process.cwd()) {}
@@ -177,8 +177,8 @@ export class BackgroundTaskManager {
 	adoptProcess(
 		command: string,
 		proc: ChildProcess,
-		existingStdout: string = "",
-		existingStderr: string = "",
+		existingStdout = "",
+		existingStderr = "",
 	): string {
 		const id = this.generateTaskId();
 
@@ -367,10 +367,7 @@ export class BackgroundTaskManager {
 	/**
 	 * Wait for a task to complete
 	 */
-	async waitForTask(
-		taskId: string,
-		timeout: number = 60000,
-	): Promise<TaskInfo | null> {
+	async waitForTask(taskId: string, timeout = 60000): Promise<TaskInfo | null> {
 		const startTime = Date.now();
 
 		return new Promise((resolve) => {

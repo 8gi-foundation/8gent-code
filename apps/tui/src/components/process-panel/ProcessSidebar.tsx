@@ -1,22 +1,22 @@
-import React from "react";
 import { Box, useInput } from "ink";
+import React from "react";
 import type {
 	TaskInfo,
 	TaskStatus,
 } from "../../../../../packages/tools/background.js";
+import { isAgentProcessTaskId } from "../ActivityMonitor.js";
 import {
 	AppText,
-	MutedText,
-	Heading,
 	Badge,
 	Divider,
-	Stack,
+	Heading,
 	Inline,
+	MutedText,
 	ShortcutHint,
 	Spacer,
+	Stack,
 } from "../primitives/index.js";
 import { ProcessListItem } from "./ProcessListItem.js";
-import { isAgentProcessTaskId } from "../ActivityMonitor.js";
 
 interface ProcessSidebarProps {
 	tasks: TaskInfo[];

@@ -5,12 +5,12 @@
  * More efficient than grep for code navigation.
  */
 
-import { registerTool } from "../../registry/register";
+import * as fs from "fs";
+import * as path from "path";
+import { glob } from "glob";
 import { parseTypeScriptFile } from "../../../ast-index/typescript-parser";
 import type { ExecutionContext, Symbol } from "../../../types";
-import * as path from "path";
-import * as fs from "fs";
-import { glob } from "glob";
+import { registerTool } from "../../registry/register";
 
 interface SearchSymbolsInput {
 	query: string;

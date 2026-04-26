@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { resolve, join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { join, resolve } from "node:path";
 
 const WORK_DIR = process.env.WORK_DIR;
 if (!WORK_DIR) throw new Error("WORK_DIR env required");
@@ -272,7 +272,7 @@ describe("DP001: ETL Data Pipeline", () => {
 					const total =
 						typeof alice.total === "number"
 							? alice.total
-							: parseFloat(String(alice.total ?? alice.revenue ?? 0));
+							: Number.parseFloat(String(alice.total ?? alice.revenue ?? 0));
 					// Alice's total should be ~$1055.43 (allow for currency conversion differences)
 					expect(total).toBeGreaterThan(1000);
 				}

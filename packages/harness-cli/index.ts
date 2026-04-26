@@ -9,12 +9,12 @@
  * It will refuse to run inside a git repo to prevent overwrites.
  */
 
+import { doctor } from "./commands/doctor.js";
+import { inspect } from "./commands/inspect.js";
 import { run } from "./commands/run.js";
 import { sessions } from "./commands/sessions.js";
-import { inspect } from "./commands/inspect.js";
 import { tail } from "./commands/tail.js";
 import { validate } from "./commands/validate.js";
-import { doctor } from "./commands/doctor.js";
 
 const HELP = `
 8gent Harness CLI — Headless agent testing & inspection

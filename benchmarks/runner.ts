@@ -15,29 +15,29 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { BenchmarkGrader } from "./grader";
 import type {
+	BenchmarkCategory,
 	BenchmarkDefinition,
 	BenchmarkResult,
 	BenchmarkSuiteResult,
-	BenchmarkCategory,
 	Difficulty,
 } from "./types";
-import { BenchmarkGrader } from "./grader";
 
+import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
+import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
+import { creativeBenchmarks } from "./categories/creative/benchmarks";
+import { documentationBenchmarks } from "./categories/documentation/benchmarks";
+import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
 // Import all benchmark categories
 import { fileManipulationBenchmarks } from "./categories/file-manipulation/benchmarks";
+import { humanSkillsBenchmarks } from "./categories/human-skills/benchmarks";
 import { multiFileBenchmarks } from "./categories/multi-file/benchmarks";
-import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
-import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
-import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
+import { nextjsBenchmarks } from "./categories/nextjs/benchmarks";
+import { reactNativeBenchmarks } from "./categories/react-native/benchmarks";
 import { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
-import { documentationBenchmarks } from "./categories/documentation/benchmarks";
 // New expanded categories
 import { threejsBenchmarks } from "./categories/threejs/benchmarks";
-import { reactNativeBenchmarks } from "./categories/react-native/benchmarks";
-import { nextjsBenchmarks } from "./categories/nextjs/benchmarks";
-import { creativeBenchmarks } from "./categories/creative/benchmarks";
-import { humanSkillsBenchmarks } from "./categories/human-skills/benchmarks";
 
 // All benchmarks combined
 const ALL_BENCHMARKS: BenchmarkDefinition[] = [
@@ -69,7 +69,7 @@ const colors = {
 	blue: "\x1b[34m",
 };
 
-function log(msg: string, color: string = ""): void {
+function log(msg: string, color = ""): void {
 	console.log(`${color}${msg}${colors.reset}`);
 }
 

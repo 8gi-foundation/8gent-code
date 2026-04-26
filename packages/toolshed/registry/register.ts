@@ -3,10 +3,10 @@
  */
 
 import type {
-	Tool,
-	ToolRegistration,
 	Capability,
 	Permission,
+	Tool,
+	ToolRegistration,
 } from "../../types";
 
 // In-memory registry (will be persisted to disk)

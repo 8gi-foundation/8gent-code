@@ -8,8 +8,8 @@
  *   bun run scripts/research-scraper.ts --loop   -- run every 4 hours
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 // ---------------------------------------------------------------------------

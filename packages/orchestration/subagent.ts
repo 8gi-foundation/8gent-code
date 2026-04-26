@@ -6,8 +6,8 @@
  */
 
 import { EventEmitter } from "events";
-import type { Step, Evidence } from "../workflow/plan-validate";
 import type { ValidationReport } from "../validation/report";
+import type { Evidence, Step } from "../workflow/plan-validate";
 
 // ============================================
 // Types
@@ -84,9 +84,9 @@ export interface SubAgentEvent {
 export class SubAgentManager extends EventEmitter {
 	private agents: Map<string, SubAgent> = new Map();
 	private eventLog: SubAgentEvent[] = [];
-	private idCounter: number = 0;
-	private maxConcurrent: number = 4;
-	private runningCount: number = 0;
+	private idCounter = 0;
+	private maxConcurrent = 4;
+	private runningCount = 0;
 	private defaultConfig: SubAgentConfig;
 
 	constructor(config?: {

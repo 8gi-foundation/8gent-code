@@ -13,19 +13,19 @@
 
 import { EventEmitter } from "events";
 import {
-	ProactiveGatherer,
-	createGatherer,
-	formatQuestion,
-	type ClarifyingQuestion,
-	type GatheringState,
-} from "../proactive";
-import {
-	InfiniteRunner,
+	type InfiniteConfig,
+	type InfiniteRunner,
+	type InfiniteState,
 	createInfiniteRunner,
 	formatInfiniteState,
-	type InfiniteState,
-	type InfiniteConfig,
 } from "../infinite";
+import {
+	type ClarifyingQuestion,
+	type GatheringState,
+	type ProactiveGatherer,
+	createGatherer,
+	formatQuestion,
+} from "../proactive";
 
 // ============================================
 // Types

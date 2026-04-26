@@ -6,30 +6,30 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import * as readline from "readline";
-import type { AgentConfig } from "./types";
-import { Agent } from "./agent";
-import { getPermissionManager } from "../permissions";
 import { getHookManager } from "../hooks";
-import { getSkillManager, parseSkillCommand } from "../skills";
-import {
-	getAgentPool,
-	parseSpawnCommand,
-	formatAgentStatus,
-} from "../orchestration";
-import { getTaskManager, parseTaskCommand, formatTask } from "../tasks";
 import { getMCPClient } from "../mcp";
 import {
-	getBackgroundTaskManager,
-	formatTaskStatus,
-	formatTaskOutput,
-} from "../tools/background";
-import { readRuns, type RunLogEntry } from "../reporting/runlog";
+	formatAgentStatus,
+	getAgentPool,
+	parseSpawnCommand,
+} from "../orchestration";
+import { getPermissionManager } from "../permissions";
+import { type RunLogEntry, readRuns } from "../reporting/runlog";
 import { getVault } from "../secrets";
-import { startTelegramBot, getActiveTelegramBot } from "../telegram";
 import { runTelegramSetup } from "../self-autonomy/onboarding";
+import { getSkillManager, parseSkillCommand } from "../skills";
+import { formatTask, getTaskManager, parseTaskCommand } from "../tasks";
+import { getActiveTelegramBot, startTelegramBot } from "../telegram";
+import {
+	formatTaskOutput,
+	formatTaskStatus,
+	getBackgroundTaskManager,
+} from "../tools/background";
+import { Agent } from "./agent";
+import type { AgentConfig } from "./types";
 
 export async function startREPL(config?: Partial<AgentConfig>) {
 	// Load config from file
@@ -913,7 +913,7 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 
 	if (trimmed.startsWith("/voice rate ")) {
 		const rateStr = trimmed.slice(12).trim();
-		const rate = parseInt(rateStr, 10);
+		const rate = Number.parseInt(rateStr, 10);
 		if (isNaN(rate) || rate < 50 || rate > 400) {
 			console.log("\x1b[31mRate must be between 50-400 wpm\x1b[0m");
 		} else {
@@ -926,7 +926,7 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 
 	if (trimmed.startsWith("/voice maxlength ")) {
 		const lenStr = trimmed.slice(17).trim();
-		const maxLength = parseInt(lenStr, 10);
+		const maxLength = Number.parseInt(lenStr, 10);
 		if (isNaN(maxLength) || maxLength < 50 || maxLength > 1000) {
 			console.log("\x1b[31mMax length must be between 50-1000 chars\x1b[0m");
 		} else {
@@ -1615,7 +1615,7 @@ async function handleTelegramCommands(
 		try {
 			const chatId = vault.get("TELEGRAM_CHAT_ID");
 			const bot = await startTelegramBot(token, agent, {
-				allowedUsers: chatId ? [parseInt(chatId, 10)] : undefined,
+				allowedUsers: chatId ? [Number.parseInt(chatId, 10)] : undefined,
 			});
 			console.log(`\n\x1b[32mTelegram bot started!\x1b[0m @${bot.botUsername}`);
 		} catch (err: any) {

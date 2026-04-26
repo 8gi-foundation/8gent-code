@@ -12,17 +12,17 @@
  */
 
 import { mkdirSync } from "fs";
-import { SoxSynth } from "./sox-synth.js";
-import { ReplicateBackend } from "./replicate.js";
 import { Mixer } from "./mixer.js";
 import { Player } from "./player.js";
+import { ReplicateBackend } from "./replicate.js";
+import { SoxSynth } from "./sox-synth.js";
 import {
 	GENRES,
 	type Genre,
-	type Track,
-	type MixConfig,
 	type Layer,
 	type LayerRole,
+	type MixConfig,
+	type Track,
 } from "./types.js";
 
 const DEFAULT_OUTPUT_DIR = `${process.env.HOME}/.8gent/music`;
@@ -180,10 +180,7 @@ export class MusicProducer {
 	}
 
 	/** Quick produce and play */
-	async quickPlay(
-		genre: Genre = "house",
-		durationSec: number = 60,
-	): Promise<Track> {
+	async quickPlay(genre: Genre = "house", durationSec = 60): Promise<Track> {
 		const track = await this.produce({ genre, durationSec, loop: true });
 		this.loop(track);
 		return track;
@@ -215,7 +212,7 @@ export class MusicProducer {
 	}
 
 	/** Produce a DJ set - multiple tracks in sequence */
-	async djSet(genres: Genre[], minutesPerTrack: number = 2): Promise<Track[]> {
+	async djSet(genres: Genre[], minutesPerTrack = 2): Promise<Track[]> {
 		const tracks: Track[] = [];
 		for (const genre of genres) {
 			const track = await this.produce({
@@ -257,7 +254,7 @@ export class MusicProducer {
 	private getDuration(path: string): number {
 		try {
 			const { execSync } = require("child_process");
-			return parseFloat(execSync(`soxi -D "${path}"`).toString().trim());
+			return Number.parseFloat(execSync(`soxi -D "${path}"`).toString().trim());
 		} catch {
 			return 0;
 		}

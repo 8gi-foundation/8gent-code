@@ -1,5 +1,5 @@
-import React from "react";
 import { Box } from "ink";
+import type React from "react";
 import { useViewport } from "../../hooks/useViewport.js";
 
 interface FixedFrameProps {

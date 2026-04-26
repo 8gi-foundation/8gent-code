@@ -8,8 +8,8 @@
  * It returns the new content string. The caller decides whether to write.
  */
 
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { dirname, join } from "path";
 
 // ============================================
 // Types
@@ -115,7 +115,7 @@ export class PersonaMutator {
 			if (match) {
 				params.push({
 					name: match[1].trim().toLowerCase(),
-					value: parseInt(match[2], 10),
+					value: Number.parseInt(match[2], 10),
 					delta: 0,
 					evidence: [],
 				});

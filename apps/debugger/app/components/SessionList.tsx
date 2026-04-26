@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { SessionInfo } from "../api/sessions/route";
 
 function timeAgo(dateStr: string): string {

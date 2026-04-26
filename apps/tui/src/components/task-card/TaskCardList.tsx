@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
 import { Box, useInput } from "ink";
-import { TaskCard, type TaskCardProps } from "./TaskCard.js";
+import React, { useState, useEffect } from "react";
 import { MutedText } from "../primitives/index.js";
+import { TaskCard, type TaskCardProps } from "./TaskCard.js";
 
 export interface TaskItem {
 	id: string;

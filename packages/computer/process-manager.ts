@@ -14,8 +14,8 @@
 
 import { execSync } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import type { CommandResult } from "./types";
 
 // ============================================
@@ -170,9 +170,9 @@ export function listProcesses(sort: SortMode = "memory"): ProcessInfo[] {
 			const parts = line.trim().split(/\s+/);
 			if (parts.length < 5) continue;
 
-			const pid = parseInt(parts[0], 10);
-			const rssKB = parseInt(parts[1], 10);
-			const cpu = parseFloat(parts[2]);
+			const pid = Number.parseInt(parts[0], 10);
+			const rssKB = Number.parseInt(parts[1], 10);
+			const cpu = Number.parseFloat(parts[2]);
 			const user = parts[3];
 			// comm can contain paths - extract just the binary name
 			const fullPath = parts.slice(4).join(" ");

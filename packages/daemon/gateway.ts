@@ -5,16 +5,16 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
-import { bus, type EventName } from "./events";
-import type { AgentPool } from "./agent-pool";
-import { getJobs, addJob, removeJob, type CronJob } from "./cron";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import type { AgentPool } from "./agent-pool";
+import { type CronJob, addJob, getJobs, removeJob } from "./cron";
+import { type EventName, bus } from "./events";
 import {
-	handleComputerOpen,
-	handleComputerMessage,
-	handleComputerClose,
 	type ComputerWS,
+	handleComputerClose,
+	handleComputerMessage,
+	handleComputerOpen,
 } from "./routes/computer";
 
 export interface GatewayConfig {

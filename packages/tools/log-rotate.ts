@@ -89,15 +89,15 @@ export class RotatingLogger {
 			);
 		});
 		const sortedFiles = logFiles.sort((a, b) => {
-			const timeA = parseInt(a.split(".")[1], 10);
-			const timeB = parseInt(b.split(".")[1], 10);
+			const timeA = Number.parseInt(a.split(".")[1], 10);
+			const timeB = Number.parseInt(b.split(".")[1], 10);
 			return timeA - timeB;
 		});
 		const now = Date.now();
 		for (let i = 0; i < sortedFiles.length; i++) {
 			const file = sortedFiles[i];
 			const filePath = path.join(logDir, file);
-			const fileTime = parseInt(file.split(".")[1], 10);
+			const fileTime = Number.parseInt(file.split(".")[1], 10);
 			const ageMs = now - fileTime;
 			if (ageMs > this.maxDays * 24 * 60 * 60 * 1000) {
 				try {

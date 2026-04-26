@@ -3,7 +3,7 @@
  * Test the TypeScript parser
  */
 
-import { parseTypeScriptFile, getSymbolSource } from "./typescript-parser";
+import { getSymbolSource, parseTypeScriptFile } from "./typescript-parser";
 
 const testFile = process.argv[2] || "./typescript-parser.ts";
 

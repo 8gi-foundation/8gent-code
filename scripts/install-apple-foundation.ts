@@ -18,7 +18,7 @@
  */
 
 import { spawnSync } from "child_process";
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from "fs";
 import { homedir, release } from "os";
 import { join, resolve } from "path";
 
@@ -61,7 +61,7 @@ function checkHost(): void {
 	}
 	// Darwin 25.x corresponds to macOS 26 Tahoe. Apple's FoundationModels
 	// framework is only available from macOS 26 onwards.
-	const major = parseInt(release().split(".")[0] ?? "0", 10);
+	const major = Number.parseInt(release().split(".")[0] ?? "0", 10);
 	if (!Number.isFinite(major) || major < 25) {
 		fail(
 			1,

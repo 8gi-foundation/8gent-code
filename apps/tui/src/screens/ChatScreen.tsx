@@ -1,6 +1,6 @@
 import React from "react";
-import { MessageList } from "../components/message-list.js";
 import type { Message } from "../app.js";
+import { MessageList } from "../components/message-list.js";
 
 interface ChatScreenProps {
 	messages: Message[];

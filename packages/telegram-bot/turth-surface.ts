@@ -13,9 +13,9 @@
  */
 
 import {
-	registerPromptSurface,
 	type ApprovalScope,
 	type TurthRequest,
+	registerPromptSurface,
 } from "../permissions/turth.js";
 import type { TelegramBot } from "./index";
 

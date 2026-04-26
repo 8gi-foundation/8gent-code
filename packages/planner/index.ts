@@ -8,8 +8,8 @@
  * (not: search → read → guess → patch)
  */
 
-import type { Tool, ExecutionContext, Symbol } from "../types";
 import { getToolRegistry } from "../toolshed/registry";
+import type { ExecutionContext, Symbol, Tool } from "../types";
 
 export interface PlanStep {
 	id: string;

@@ -2,7 +2,7 @@
  * LM Studio LLM Client (OpenAI-compatible)
  */
 
-import type { Message, LLMResponse, LLMClient } from "../types";
+import type { LLMClient, LLMResponse, Message } from "../types";
 
 export class LMStudioClient implements LLMClient {
 	private baseUrl: string;
@@ -12,7 +12,7 @@ export class LMStudioClient implements LLMClient {
 	constructor(
 		model: string,
 		baseUrl: string = process.env.LM_STUDIO_HOST || "http://localhost:1234",
-		apiKey: string = "lm-studio",
+		apiKey = "lm-studio",
 	) {
 		this.model = model;
 		this.baseUrl = baseUrl;

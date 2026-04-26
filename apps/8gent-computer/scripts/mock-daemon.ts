@@ -7,7 +7,7 @@
 // This is NOT a real daemon and NOT used outside CI.
 
 const PROTOCOL_VERSION = 1;
-const port = parseInt(process.env.MOCK_PORT ?? "18789", 10);
+const port = Number.parseInt(process.env.MOCK_PORT ?? "18789", 10);
 
 const server = Bun.serve({
 	port,

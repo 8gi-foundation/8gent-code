@@ -75,7 +75,7 @@ export function detectGrid(
 
 	// Find best fit for width
 	let bestW = 0;
-	let bestScore = Infinity;
+	let bestScore = Number.POSITIVE_INFINITY;
 	for (const size of commonSizes) {
 		if (width % size === 0) {
 			const cols = width / size;
@@ -92,7 +92,7 @@ export function detectGrid(
 	if (!bestW) bestW = Math.floor(width / 4);
 
 	let bestH = 0;
-	bestScore = Infinity;
+	bestScore = Number.POSITIVE_INFINITY;
 	for (const size of commonSizes) {
 		if (height % size === 0) {
 			const rows = height / size;

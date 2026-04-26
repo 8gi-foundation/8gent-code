@@ -10,13 +10,13 @@
  *   pet.start()
  */
 
-import { readFileSync, existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import {
+	type Companion,
+	endSession,
 	generateCompanion,
 	registerCompanion,
-	endSession,
-	type Companion,
 } from "./companion.js";
 
 // MARK: - Sprite Data (inline fallback if PNG not available)
@@ -178,17 +178,17 @@ type PetState = "idle" | "walk-right" | "walk-left" | "think" | "sleep";
 
 export class TerminalPet {
 	private state: PetState = "idle";
-	private posX: number = 0;
-	private maxX: number = 60;
-	private direction: number = 1;
-	private frameIndex: number = 0;
+	private posX = 0;
+	private maxX = 60;
+	private direction = 1;
+	private frameIndex = 0;
 	private animTimer: ReturnType<typeof setInterval> | null = null;
 	private idleTimer: ReturnType<typeof setInterval> | null = null;
-	private idleSeconds: number = 0;
-	private label: string = "eight";
-	private visible: boolean = true;
+	private idleSeconds = 0;
+	private label = "eight";
+	private visible = true;
 	public companion: Companion | null = null;
-	private sessionId: string = "";
+	private sessionId = "";
 
 	// Callbacks
 	onRender?: (lines: string[], x: number, label: string) => void;

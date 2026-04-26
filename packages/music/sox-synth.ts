@@ -7,7 +7,7 @@
  */
 
 import { execSync } from "child_process";
-import { mkdirSync, existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import type { LayerRole } from "./types.js";
 
 const SOX = "sox";
@@ -168,7 +168,7 @@ export class SoxSynth {
 	}
 
 	/** Generate a bass line */
-	generateBass(bpm: number, bars: number, key: string = "Am"): string {
+	generateBass(bpm: number, bars: number, key = "Am"): string {
 		const beatDur = 60 / bpm;
 		const barDur = beatDur * 4;
 		const outPath = `${this.outputDir}/bass-${Date.now()}.wav`;
@@ -199,7 +199,7 @@ export class SoxSynth {
 	}
 
 	/** Generate a pad layer */
-	generatePad(bpm: number, bars: number, key: string = "Am"): string {
+	generatePad(bpm: number, bars: number, key = "Am"): string {
 		const barDur = (60 / bpm) * 4;
 		const totalDur = barDur * bars;
 		const outPath = `${this.outputDir}/pad-${Date.now()}.wav`;
@@ -218,7 +218,7 @@ export class SoxSynth {
 	}
 
 	/** Generate a simple melody */
-	generateMelody(bpm: number, bars: number, key: string = "Am"): string {
+	generateMelody(bpm: number, bars: number, key = "Am"): string {
 		const beatDur = 60 / bpm;
 		const barDur = beatDur * 4;
 		const totalDur = barDur * bars;

@@ -27,15 +27,15 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import {
-	ModelFailover,
-	type FailoverEntry,
-} from "../packages/providers/failover";
-import { OllamaClient } from "../packages/eight/clients/ollama";
-import { LMStudioClient } from "../packages/eight/clients/lmstudio";
 import { ApfelClient } from "../packages/eight/clients/apfel";
+import { LMStudioClient } from "../packages/eight/clients/lmstudio";
+import { OllamaClient } from "../packages/eight/clients/ollama";
 import { OpenRouterClient } from "../packages/eight/clients/openrouter";
 import type { LLMClient, Message } from "../packages/eight/types";
+import {
+	type FailoverEntry,
+	ModelFailover,
+} from "../packages/providers/failover";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASKS_FILE = path.join(HERE, "categories/computer-use/tasks.json");

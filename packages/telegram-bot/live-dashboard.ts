@@ -6,16 +6,16 @@
  * with fresh data as rounds complete.
  */
 
-import type { DashboardData } from "./types";
+import { formatDuration, progressBar, sparkline } from "./formatters";
 import type { TelegramBot } from "./index";
-import { progressBar, sparkline, formatDuration } from "./formatters";
+import type { DashboardData } from "./types";
 
 const MIN_UPDATE_INTERVAL_MS = 3000; // Telegram rate limit protection
 
 export class LiveDashboard {
 	private messageId: number | null = null;
 	private chatId: string;
-	private lastUpdateTime: number = 0;
+	private lastUpdateTime = 0;
 	private history: number[] = []; // score history for sparkline
 	private startTime: number = Date.now();
 

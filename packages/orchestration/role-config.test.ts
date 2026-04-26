@@ -2,16 +2,16 @@
  * Tests for role-config: defaults, round-trip, atomic write.
  */
 
-import { test, expect, describe, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 
 import {
+	type RoleConfig,
+	defaultRoleConfig,
 	loadRoleConfig,
 	saveRoleConfig,
-	defaultRoleConfig,
-	type RoleConfig,
 } from "./role-config";
 
 let tempDir: string;

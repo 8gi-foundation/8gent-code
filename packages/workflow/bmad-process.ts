@@ -6,8 +6,8 @@
  */
 
 import { EventEmitter } from "events";
-import type { Step } from "./plan-validate";
 import type { Evidence } from "../validation/evidence";
+import type { Step } from "./plan-validate";
 
 // ============================================
 // Types
@@ -296,7 +296,7 @@ export class KanbanBoard extends EventEmitter {
 	private taskIndex: Map<string, BMadTask> = new Map();
 	private idCounter = 0;
 
-	constructor(name: string = "8gent Board") {
+	constructor(name = "8gent Board") {
 		super();
 		this.board = {
 			id: `board_${Date.now()}`,

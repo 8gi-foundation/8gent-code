@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useSelection } from "./useSelection.js";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
 	TaskInfo,
 	TaskOutput,
@@ -11,6 +10,7 @@ import {
 	getAgentTaskOutput,
 	isAgentProcessTaskId,
 } from "../components/ActivityMonitor.js";
+import { useSelection } from "./useSelection.js";
 
 function mergeTasksByRecency(shell: TaskInfo[], agent: TaskInfo[]): TaskInfo[] {
 	const all = [...shell, ...agent];

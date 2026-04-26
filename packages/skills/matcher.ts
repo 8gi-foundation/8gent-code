@@ -33,7 +33,7 @@ function tokenize(text: string): Set<string> {
  */
 export function matchSkills(
 	taskDescription: string,
-	limit: number = 3,
+	limit = 3,
 ): MatchedSkill[] {
 	const paths = listLearnedSkills();
 	if (paths.length === 0) return [];
@@ -55,7 +55,7 @@ export function matchSkills(
 
 		const name = nameMatch?.[1]?.trim() ?? "";
 		const description = descMatch?.[1]?.trim() ?? "";
-		const successes = successMatch ? parseInt(successMatch[1], 10) : 1;
+		const successes = successMatch ? Number.parseInt(successMatch[1], 10) : 1;
 
 		// Score: keyword overlap between query and skill content
 		const skillTokens = tokenize(`${name} ${description} ${content}`);
@@ -83,7 +83,7 @@ export function matchSkills(
  */
 export function formatMatchedSkills(
 	taskDescription: string,
-	limit: number = 3,
+	limit = 3,
 ): string {
 	const matches = matchSkills(taskDescription, limit);
 	if (matches.length === 0) return "";

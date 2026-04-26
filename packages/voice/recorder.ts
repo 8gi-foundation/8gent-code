@@ -5,11 +5,11 @@
  * (the format Whisper expects). Emits audio level events.
  */
 
-import { spawn, type Subprocess } from "bun";
+import { EventEmitter } from "events";
+import { existsSync, statSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { existsSync, unlinkSync, statSync } from "fs";
-import { EventEmitter } from "events";
+import { type Subprocess, spawn } from "bun";
 
 export interface RecorderOptions {
 	/** Sample rate in Hz (default: 16000 for Whisper) */
@@ -88,10 +88,10 @@ export async function checkSoxInstalled(): Promise<{
 export class MicRecorder extends EventEmitter<RecorderEvents> {
 	private process: Subprocess | null = null;
 	private outputPath: string;
-	private startTime: number = 0;
+	private startTime = 0;
 	private maxDurationTimer: ReturnType<typeof setTimeout> | null = null;
 	private levelInterval: ReturnType<typeof setInterval> | null = null;
-	private isRecording: boolean = false;
+	private isRecording = false;
 	private options: Required<RecorderOptions>;
 
 	constructor(opts: RecorderOptions = {}) {

@@ -9,21 +9,21 @@
  */
 
 import { execSync } from "child_process";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import type {
-	ScreenshotOptions,
 	ClickOptions,
-	TypeOptions,
-	PressOptions,
-	ScrollOptions,
-	DragOptions,
-	ScreenshotResult,
 	CommandResult,
-	WindowInfo,
-	DisplayInfo,
-	Point,
 	ComputerUseContext,
+	DisplayInfo,
+	DragOptions,
+	Point,
+	PressOptions,
+	ScreenshotOptions,
+	ScreenshotResult,
+	ScrollOptions,
+	TypeOptions,
+	WindowInfo,
 } from "./types";
 
 // ============================================

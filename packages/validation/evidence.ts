@@ -13,9 +13,9 @@
  * - test_result: Test execution results
  */
 
+import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { spawn } from "child_process";
 import type { Step, ToolCallRecord } from "../workflow/plan-validate";
 
 // ============================================
@@ -370,9 +370,9 @@ export class EvidenceCollector {
 			const skipMatch = output.match(/(\d+)\s*(?:skipped|pending)/i);
 
 			const testResults = {
-				passed: passMatch ? parseInt(passMatch[1]) : 0,
-				failed: failMatch ? parseInt(failMatch[1]) : 0,
-				skipped: skipMatch ? parseInt(skipMatch[1]) : 0,
+				passed: passMatch ? Number.parseInt(passMatch[1]) : 0,
+				failed: failMatch ? Number.parseInt(failMatch[1]) : 0,
+				skipped: skipMatch ? Number.parseInt(skipMatch[1]) : 0,
 				exitCode: result.exitCode,
 				duration: result.duration,
 				output: output.slice(-this.config.maxContentLength!), // Last N chars
@@ -436,7 +436,7 @@ export class EvidenceCollector {
 	 */
 	private runCommand(
 		command: string,
-		timeoutMs: number = 30000,
+		timeoutMs = 30000,
 	): Promise<{ output: string; exitCode: number; duration: number }> {
 		return new Promise((resolve, reject) => {
 			const startTime = Date.now();

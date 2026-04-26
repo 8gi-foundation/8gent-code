@@ -3,8 +3,8 @@
  * Uses SQLite VACUUM INTO for atomic snapshots.
  */
 
-import { Database } from "bun:sqlite";
-import { mkdirSync, readdirSync, unlinkSync, copyFileSync } from "fs";
+import type { Database } from "bun:sqlite";
+import { copyFileSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 
 const MAX_CHECKPOINTS = 5;
 

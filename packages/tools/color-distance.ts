@@ -181,7 +181,7 @@ export function nearestColor(
 
 	const targetLab = rgbToLab(target);
 	let bestIndex = 0;
-	let bestDist = Infinity;
+	let bestDist = Number.POSITIVE_INFINITY;
 
 	for (let i = 0; i < palette.length; i++) {
 		const lab = rgbToLab(palette[i]);

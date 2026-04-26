@@ -133,7 +133,7 @@ export class TaskQueue {
 			.run(newStatus, error, newRetry, taskId);
 	}
 
-	recoverStaleTasks(maxAgeMs: number = 120_000): number {
+	recoverStaleTasks(maxAgeMs = 120_000): number {
 		const cutoff = Date.now() - maxAgeMs;
 		const result = this.db
 			.prepare(
@@ -143,7 +143,7 @@ export class TaskQueue {
 		return result.changes;
 	}
 
-	getRecentTasks(channelId: string, limit: number = 10): BoardTask[] {
+	getRecentTasks(channelId: string, limit = 10): BoardTask[] {
 		const rows = this.db
 			.prepare(
 				`SELECT * FROM board_tasks WHERE channelId = ? AND status = 'completed' ORDER BY completedAt DESC LIMIT ?`,

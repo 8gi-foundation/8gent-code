@@ -10,7 +10,7 @@
  *   - onChange listeners notified after successful reload only
  */
 
-import { watch, readFileSync, existsSync, type FSWatcher } from "fs";
+import { type FSWatcher, existsSync, readFileSync, watch } from "fs";
 
 export type Parser<T> = (raw: string) => T;
 export type Validator<T> = (value: T) => boolean | string;

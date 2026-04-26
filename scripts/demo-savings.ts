@@ -9,8 +9,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
-	parseTypeScriptFile,
 	getSymbolSource,
+	parseTypeScriptFile,
 } from "../packages/ast-index/typescript-parser";
 
 const DEMO_FILE =

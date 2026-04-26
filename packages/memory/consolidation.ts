@@ -8,7 +8,7 @@
  * higher-level summary memories that reference the originals.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { type ConsolidationLevel, type Memory, generateId } from "./types.js";
 
 // ── Consolidation Prompt ──────────────────────────────────────────────

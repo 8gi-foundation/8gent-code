@@ -9,12 +9,12 @@
  * Every outbound message carries `protocol_version: 1`.
  */
 
-import { bus, type EventName } from "../events";
 import type { AgentPool } from "../agent-pool";
+import { type EventName, bus } from "../events";
 import {
-	PROTOCOL_VERSION,
 	type ChannelInbound,
 	type ChannelOutbound,
+	PROTOCOL_VERSION,
 	type StreamEvent,
 } from "../types";
 

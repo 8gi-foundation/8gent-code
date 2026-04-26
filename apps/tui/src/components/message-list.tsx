@@ -13,14 +13,15 @@
  * its column.
  */
 
-import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
-import { TypingText, WordByWord } from "./typing-text.js";
-import { FadeIn, PopIn, GlowText } from "./fade-transition.js";
+import { BionicText, useADHDMode } from "./bionic-text.js";
+import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
+import { AppText, Label, MutedText, Stack } from "./primitives/index.js";
 import { useCompletionSound } from "./sound-effects.js";
-import { useADHDMode, BionicText } from "./bionic-text.js";
-import { AppText, MutedText, Label, Stack } from "./primitives/index.js";
+import { TypingText, WordByWord } from "./typing-text.js";
 
 /**
  * Force-break any run of non-whitespace longer than `width` chars.

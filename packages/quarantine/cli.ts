@@ -16,9 +16,9 @@
  *   cleanup          Remove old rejected skills
  */
 
+import { getSkillRegistry } from "../toolshed/skill-registry.js";
 import { getQuarantineManager } from "./index.js";
 import { formatScanResult } from "./scanner/security-scanner.js";
-import { getSkillRegistry } from "../toolshed/skill-registry.js";
 
 const HELP = `
 🔒 8gent Quarantine - Skill Security System
@@ -202,7 +202,7 @@ async function main() {
 			}
 
 			case "cleanup": {
-				const days = parseInt(args[1]) || 30;
+				const days = Number.parseInt(args[1]) || 30;
 				console.log(
 					`\n🧹 Cleaning up rejected skills older than ${days} days...`,
 				);

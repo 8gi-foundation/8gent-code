@@ -7,21 +7,21 @@
 
 import * as path from "path";
 import {
-	type CompletionReport,
-	type TaskContext,
-	type ToolInvocation,
-	type FileOperation,
-} from "./types";
-import {
-	CompletionReporter,
+	type CompletionReporter,
 	TaskContextTracker,
 	getCompletionReporter,
 } from "./completion";
 import {
 	getReportHistory,
-	handleReportsCommand,
 	handleReportCommand,
+	handleReportsCommand,
 } from "./history";
+import type {
+	CompletionReport,
+	FileOperation,
+	TaskContext,
+	ToolInvocation,
+} from "./types";
 
 // ============================================
 // Agent Reporting Wrapper
@@ -34,8 +34,8 @@ import {
 export class AgentReportingContext {
 	private tracker: TaskContextTracker;
 	private reporter: CompletionReporter;
-	private currentStepIndex: number = -1;
-	private toolCount: number = 0;
+	private currentStepIndex = -1;
+	private toolCount = 0;
 
 	constructor(
 		taskDescription: string,
@@ -90,7 +90,7 @@ export class AgentReportingContext {
 		args: Record<string, unknown>,
 		result: string,
 		startTime: number,
-		success: boolean = true,
+		success = true,
 	): void {
 		const invocation: ToolInvocation = {
 			name,

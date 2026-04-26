@@ -5,17 +5,17 @@
  * and music generation. Accessible via Shift+Tab cycle or /music player.
  */
 
-import React, { useState, useEffect } from "react";
+import { existsSync, readdirSync, statSync } from "fs";
+import { basename, join } from "path";
 import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect } from "react";
 import {
 	AppText,
-	MutedText,
-	Label,
-	Stack,
 	Divider,
+	Label,
+	MutedText,
+	Stack,
 } from "../components/primitives/index.js";
-import { readdirSync, statSync, existsSync } from "fs";
-import { join, basename } from "path";
 
 const CACHE_DIR = join(process.env.HOME || "~", ".8gent", "adhd-audio");
 

@@ -15,7 +15,7 @@
  * - Subprocess is started lazily on first stream() call, killed on stopServer()
  */
 
-import { execSync, spawn, type ChildProcess } from "child_process";
+import { type ChildProcess, execSync, spawn } from "child_process";
 import type WS from "ws";
 import type { FullDuplexProvider, VoiceBackend } from "../full-duplex-provider";
 import { MOSHI_HF_REPO } from "../full-duplex-provider";

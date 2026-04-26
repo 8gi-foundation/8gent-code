@@ -1,5 +1,5 @@
-import React from "react";
 import { Text } from "ink";
+import type React from "react";
 
 export interface BadgeProps {
 	label: string;

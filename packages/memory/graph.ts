@@ -8,7 +8,7 @@
  * All single-entity lookups target <10ms via indexed queries.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import * as crypto from "crypto";
 
 // ============================================
@@ -411,7 +411,7 @@ export class KnowledgeGraph {
 	 * Get the subgraph neighborhood around an entity up to a given depth.
 	 * Uses BFS. Returns all reachable entities and connecting relationships.
 	 */
-	getSubgraph(entityId: string, depth: number = 1): SubgraphResult {
+	getSubgraph(entityId: string, depth = 1): SubgraphResult {
 		const visitedEntities = new Set<string>();
 		const collectedRelationships: Relationship[] = [];
 		let frontier = [entityId];

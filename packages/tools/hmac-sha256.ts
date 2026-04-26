@@ -52,7 +52,7 @@ function hexToBuffer(hex: string): ArrayBuffer {
 	const buffer = new ArrayBuffer(length);
 	const dataView = new DataView(buffer);
 	for (let i = 0; i < hex.length; i += 2) {
-		const byte = parseInt(hex.substring(i, i + 2), 16);
+		const byte = Number.parseInt(hex.substring(i, i + 2), 16);
 		dataView.setUint8(i / 2, byte);
 	}
 	return buffer;

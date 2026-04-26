@@ -5,9 +5,9 @@ export class Spinner {
 	private intervalId: NodeJS.Timeout | null = null;
 	private startTime: number | null = null;
 	private frames: string[];
-	private currentFrame: number = 0;
-	private text: string = "";
-	private isRunning: boolean = false;
+	private currentFrame = 0;
+	private text = "";
+	private isRunning = false;
 
 	/**
 	 * Creates a new Spinner instance with the specified animation style.

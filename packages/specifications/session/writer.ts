@@ -12,21 +12,21 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import type {
-	SessionEntry,
-	SessionMeta,
-	ToolCall,
-	TokenUsage,
-	DetailedTokenUsage,
-	HookExecution,
-	SessionError,
-	SessionSummary,
 	ContentPart,
+	DetailedTokenUsage,
+	FinishReason,
+	HookExecution,
 	ModelInfo,
 	ResponseMeta,
-	FinishReason,
+	SessionEntry,
+	SessionError,
+	SessionMeta,
+	SessionSummary,
+	TokenUsage,
+	ToolCall,
 } from "./index.js";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
@@ -34,7 +34,7 @@ const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 export class SessionWriter {
 	private filePath: string;
 	private fd: number;
-	private seq: number = 0;
+	private seq = 0;
 	private sessionId: string;
 	private startTime: number;
 

@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import * as path from "path";
 import { evaluatePolicy } from "./policy-engine";
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "coppa-test-"));

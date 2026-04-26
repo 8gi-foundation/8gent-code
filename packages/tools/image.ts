@@ -81,8 +81,8 @@ export async function readImage(imagePath: string): Promise<ImageInfo> {
  */
 export async function resizeImage(
 	imagePath: string,
-	maxWidth: number = 800,
-	maxHeight: number = 800,
+	maxWidth = 800,
+	maxHeight = 800,
 ): Promise<ImageInfo> {
 	const absolutePath = path.isAbsolute(imagePath)
 		? imagePath
@@ -127,8 +127,8 @@ export async function resizeImage(
  */
 export async function describeImage(
 	imagePath: string,
-	prompt: string = "Describe this image in detail.",
-	model: string = "llava",
+	prompt = "Describe this image in detail.",
+	model = "llava",
 ): Promise<ImageDescription> {
 	// First read and resize the image for efficiency
 	const imageInfo = await resizeImage(imagePath, 1024, 1024);
@@ -201,7 +201,7 @@ export async function extractTextFromImage(
  */
 export async function analyzeCodeScreenshot(
 	imagePath: string,
-	model: string = "llava",
+	model = "llava",
 ): Promise<ImageDescription> {
 	return describeImage(
 		imagePath,
@@ -284,7 +284,7 @@ export async function convertImage(
  * Check if Ollama vision model is available
  */
 export async function isVisionModelAvailable(
-	model: string = "llava",
+	model = "llava",
 ): Promise<boolean> {
 	try {
 		const response = await fetch("http://localhost:11434/api/tags");

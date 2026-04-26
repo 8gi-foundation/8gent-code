@@ -5,9 +5,9 @@
  * maintains a persistent knowledge base, and generates Telegram digests.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
 
 // ── Types ───────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ export class GitHubIntelligence {
 	async fetchTrending(
 		query: string,
 		sort: "stars" | "updated",
-		limit: number = 30,
+		limit = 30,
 	): Promise<TrendingRepo[]> {
 		const perPage = Math.min(limit, 100);
 		const url = `${GITHUB_API}/search/repositories?q=${encodeURIComponent(query)}&sort=${sort}&order=desc&per_page=${perPage}`;
@@ -533,7 +533,7 @@ export class GitHubIntelligence {
 	/**
 	 * Get tracked repos sorted by relevance score.
 	 */
-	getTrackedRepos(limit: number = 15): string {
+	getTrackedRepos(limit = 15): string {
 		if (this.knowledgeBase.length === 0) {
 			return "*Tracked Repos*\n\n_Knowledge base is empty. Run /trending to populate._";
 		}

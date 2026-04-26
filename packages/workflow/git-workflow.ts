@@ -496,7 +496,7 @@ export function formatPRDescription(pr: PRDescription): string {
 // ============================================
 
 export class GitWorkflowManager {
-	private currentBranch: string = "main";
+	private currentBranch = "main";
 	private stagedFiles: string[] = [];
 	private commits: ConventionalCommit[] = [];
 

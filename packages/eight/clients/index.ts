@@ -2,19 +2,19 @@
  * LLM Client Factory & Exports
  */
 
-import type { AgentConfig, LLMClient } from "../types";
-import { OllamaClient } from "./ollama";
-import { LMStudioClient } from "./lmstudio";
-import { OpenRouterClient } from "./openrouter";
-import { AppleFoundationClient } from "./apple-foundation";
-import { ApfelClient } from "./apfel";
-import { DeepSeekClient } from "./deepseek";
 import {
-	loadRoleConfig,
 	type RoleModelAssignment,
 	type RoleName,
+	loadRoleConfig,
 } from "../../orchestration/role-config";
-import { getProviderManager, type ProviderName } from "../../providers";
+import { type ProviderName, getProviderManager } from "../../providers";
+import type { AgentConfig, LLMClient } from "../types";
+import { ApfelClient } from "./apfel";
+import { AppleFoundationClient } from "./apple-foundation";
+import { DeepSeekClient } from "./deepseek";
+import { LMStudioClient } from "./lmstudio";
+import { OllamaClient } from "./ollama";
+import { OpenRouterClient } from "./openrouter";
 
 export { OllamaClient } from "./ollama";
 export { LMStudioClient } from "./lmstudio";

@@ -10,13 +10,13 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
-	writeFileSync,
 	readdirSync,
 	statSync,
 	unlinkSync,
+	writeFileSync,
 } from "fs";
-import { join } from "path";
 import { homedir } from "os";
+import { join } from "path";
 
 const CACHE_DIR = join(
 	process.env.EIGHT_DATA_DIR || join(homedir(), ".8gent"),

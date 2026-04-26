@@ -62,7 +62,7 @@ function matchesCron(expr: string, now: Date): boolean {
 	return parts.every((part, i) => {
 		if (part === "*") return true;
 		if (part.startsWith("*/")) {
-			const step = parseInt(part.slice(2), 10);
+			const step = Number.parseInt(part.slice(2), 10);
 			return fields[i] % step === 0;
 		}
 		const vals = part.split(",").map(Number);
@@ -129,7 +129,7 @@ async function catchup(): Promise<void> {
 		const gapMinutes = (now.getTime() - lastRun.getTime()) / 60_000;
 		// If more than 2 intervals were missed, run once to catch up
 		if (job.expression.startsWith("*/")) {
-			const step = parseInt(job.expression.split("*/")[1], 10);
+			const step = Number.parseInt(job.expression.split("*/")[1], 10);
 			if (gapMinutes > step * 2) {
 				console.log(`[cron] catchup: running missed job ${job.name}`);
 				await executeJob(job);

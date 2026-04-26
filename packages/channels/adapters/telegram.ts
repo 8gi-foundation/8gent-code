@@ -1,7 +1,7 @@
 /** @8gent/channels - Telegram Adapter (wraps @8gent/telegram-bot) */
 
-import type { ChannelAdapter, ChannelMessage } from "../types";
 import { TelegramBot } from "../../telegram-bot";
+import type { ChannelAdapter, ChannelMessage } from "../types";
 
 export class TelegramChannelAdapter implements ChannelAdapter {
 	readonly name = "telegram" as const;

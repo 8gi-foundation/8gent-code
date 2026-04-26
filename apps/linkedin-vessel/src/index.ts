@@ -12,11 +12,11 @@
  *   Reconnects automatically on disconnect
  */
 
-import { handleMCPRequest, dispatchTool, TOOL_DEFINITIONS } from "./mcp-server";
 import { startReflectionLoop, stopReflectionLoop } from "./hyperagent";
+import { TOOL_DEFINITIONS, dispatchTool, handleMCPRequest } from "./mcp-server";
 import type { VesselManifest } from "./types";
 
-const PORT = parseInt(process.env.HEALTH_PORT || "8080");
+const PORT = Number.parseInt(process.env.HEALTH_PORT || "8080");
 const VESSEL_ID =
 	process.env.VESSEL_ID || `linkedin-vessel-${Date.now().toString(36)}`;
 const CONTROL_PLANE_URL =

@@ -5,11 +5,11 @@
  * Uses `gh` CLI for GitHub API and `git` for local operations.
  */
 
-import { registerTool } from "../../registry/register";
-import type { ExecutionContext } from "../../../types";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import type { ExecutionContext } from "../../../types";
+import { registerTool } from "../../registry/register";
 
 function run(cmd: string, cwd: string): string {
 	try {
@@ -155,8 +155,8 @@ registerTool(
 			staged,
 			modified,
 			untracked,
-			ahead: parseInt(ahead),
-			behind: parseInt(behind),
+			ahead: Number.parseInt(ahead),
+			behind: Number.parseInt(behind),
 			clean: lines.length === 0,
 			files: lines
 				.slice(0, 20)

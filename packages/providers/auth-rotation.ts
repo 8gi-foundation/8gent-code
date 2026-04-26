@@ -5,9 +5,9 @@
  * Profiles stored in ~/.8gent/auth-profiles.json.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
 
 export interface AuthProfile {
 	id: string;

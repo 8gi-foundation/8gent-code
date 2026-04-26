@@ -43,7 +43,7 @@ function applyBuiltin(
 			return value.trim();
 
 		case "truncate": {
-			const max = arg ? parseInt(arg, 10) : 80;
+			const max = arg ? Number.parseInt(arg, 10) : 80;
 			if (isNaN(max) || max < 0) return value;
 			return value.length > max ? value.slice(0, max) + "..." : value;
 		}

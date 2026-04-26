@@ -4,10 +4,10 @@
  * Token savings visualization with animations
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
-import { MutedText, Label, Inline } from "./primitives/index.js";
-import { formatTokens, formatPercentage } from "../lib/index.js";
+import React, { useState, useEffect } from "react";
+import { formatPercentage, formatTokens } from "../lib/index.js";
+import { Inline, Label, MutedText } from "./primitives/index.js";
 
 interface AnimatedProgressBarProps {
 	value: number; // 0-100

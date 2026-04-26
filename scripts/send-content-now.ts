@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { readFileSync } from "fs";
 import { execSync } from "child_process";
+import { readFileSync } from "fs";
 import { join } from "path";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;

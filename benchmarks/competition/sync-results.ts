@@ -6,9 +6,9 @@
  * updates 8gent-world benchmark pages, and optionally creates a GitHub gist.
  */
 
+import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
 
 // ── Paths ──────────────────────────────────────────────────────────────
 
@@ -291,7 +291,7 @@ function updateBenchmarkingPage(summary: SyncSummary): boolean {
 			let lastIter = 0;
 			let iterMatch;
 			while ((iterMatch = iterPattern.exec(match[1])) !== null) {
-				lastIter = Math.max(lastIter, parseInt(iterMatch[1]));
+				lastIter = Math.max(lastIter, Number.parseInt(iterMatch[1]));
 			}
 			const newIter = lastIter + 1;
 			const newEntry = `\n    { iter: ${newIter}, avg: ${tier5.score}, passing: "${tier5.passing}/${tier5.taskCount}" },\n  `;
@@ -315,7 +315,7 @@ function updateBenchmarkingPage(summary: SyncSummary): boolean {
 			let lastIter = 0;
 			let iterMatch;
 			while ((iterMatch = iterPattern.exec(match[1])) !== null) {
-				lastIter = Math.max(lastIter, parseInt(iterMatch[1]));
+				lastIter = Math.max(lastIter, Number.parseInt(iterMatch[1]));
 			}
 			const newIter = lastIter + 1;
 			const newEntry = `\n    { iter: ${newIter}, avg: ${tier.score}, passing: "${tier.passing}/${tier.taskCount}" },\n  `;

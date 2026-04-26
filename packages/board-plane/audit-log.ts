@@ -124,7 +124,7 @@ export class AuditLog {
 	}
 
 	/** Get recent audit entries */
-	getRecent(limit: number = 50): AuditEntry[] {
+	getRecent(limit = 50): AuditEntry[] {
 		return this.db
 			.prepare(`SELECT * FROM audit_log ORDER BY createdAt DESC LIMIT ?`)
 			.all(limit) as AuditEntry[];

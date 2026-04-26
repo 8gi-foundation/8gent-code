@@ -10,7 +10,7 @@
  * so callers can route to the next tier in the failover chain.
  */
 
-import type { Message, MessageContent, LLMResponse, LLMClient } from "../types";
+import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 

@@ -5,9 +5,9 @@
  * accumulated memories and answer questions about a user/agent.
  */
 
+import type { Database } from "bun:sqlite";
 import { generateText } from "ai";
 import { createModel } from "../ai/providers.js";
-import type { Database } from "bun:sqlite";
 
 interface AskConfig {
 	model?: string;

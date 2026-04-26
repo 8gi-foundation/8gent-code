@@ -5,29 +5,29 @@
  * Each command reads live state from disk and formats a rich response.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import type {
-	CommandDefinition,
-	SystemStatus,
-	CompetitionRound,
-	BenchmarkReport,
-	TierBreakdown,
-} from "./types";
+import { join } from "path";
 import {
-	formatScoreboard,
-	formatCompetitionRound,
-	formatMutationList,
-	formatSystemStatus,
-	formatComparison,
 	formatBenchmarkReport,
-	formatTierBreakdown,
+	formatComparison,
+	formatCompetitionRound,
 	formatDuration,
+	formatMutationList,
+	formatScoreboard,
+	formatSystemStatus,
+	formatTierBreakdown,
 	formatTokens,
 	progressBar,
 } from "./formatters";
 import { GitHubIntelligence } from "./intelligence";
+import type {
+	BenchmarkReport,
+	CommandDefinition,
+	CompetitionRound,
+	SystemStatus,
+	TierBreakdown,
+} from "./types";
 
 // ── State file paths ────────────────────────────────────
 
@@ -69,7 +69,7 @@ function readConfig(): any {
 	return {};
 }
 
-function readRecentLog(count: number = 5): string[] {
+function readRecentLog(count = 5): string[] {
 	try {
 		if (!existsSync(NIGHTLY_LOG)) return [];
 		const content = readFileSync(NIGHTLY_LOG, "utf-8");
@@ -82,7 +82,7 @@ function readRecentLog(count: number = 5): string[] {
 function isRunActive(): boolean {
 	try {
 		if (!existsSync(RUN_PID_FILE)) return false;
-		const pid = parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
+		const pid = Number.parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
 		process.kill(pid, 0); // Check if process exists (signal 0)
 		return true;
 	} catch {
@@ -216,7 +216,7 @@ async function handleRound(
 		return;
 	}
 
-	const roundNum = parseInt(args.trim(), 10);
+	const roundNum = Number.parseInt(args.trim(), 10);
 	const history = state.history;
 	const mutations = state.mutations || [];
 
@@ -419,7 +419,7 @@ async function handleStop(
 	}
 
 	try {
-		const pid = parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
+		const pid = Number.parseInt(readFileSync(RUN_PID_FILE, "utf-8").trim(), 10);
 		process.kill(pid, "SIGTERM");
 
 		// Clean up pid file
@@ -454,7 +454,7 @@ async function handleRepos(
 	chatId: number,
 	bot: any,
 ): Promise<void> {
-	const limit = parseInt(args.trim(), 10);
+	const limit = Number.parseInt(args.trim(), 10);
 	const intel = new GitHubIntelligence();
 	const list = intel.getTrackedRepos(isNaN(limit) ? 15 : limit);
 	await bot.sendMessage(list, { parseMode: "Markdown" });

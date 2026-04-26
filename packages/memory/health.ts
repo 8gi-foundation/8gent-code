@@ -2,7 +2,7 @@
  * Memory Health Introspection - composite health score for the memory store.
  */
 
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 
 export interface MemoryHealth {
 	totalCount: number;

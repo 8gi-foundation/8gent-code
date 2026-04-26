@@ -99,12 +99,12 @@ export class Mixer {
 	}
 
 	/** Make a track loop seamlessly by crossfading the end into the start */
-	makeLoop(inputPath: string, crossfadeSec: number = 2): string {
+	makeLoop(inputPath: string, crossfadeSec = 2): string {
 		const outPath = inputPath.replace(".wav", "-loop.wav");
 		try {
 			// Get duration
 			const durStr = execSync(`soxi -D "${inputPath}"`).toString().trim();
-			const duration = parseFloat(durStr);
+			const duration = Number.parseFloat(durStr);
 
 			if (duration < crossfadeSec * 3) {
 				// Track too short for crossfade, just copy
@@ -146,7 +146,7 @@ export class Mixer {
 	}
 
 	/** Convert WAV to MP3 for smaller file size */
-	toMp3(inputPath: string, bitrate: number = 192): string {
+	toMp3(inputPath: string, bitrate = 192): string {
 		const outPath = inputPath.replace(".wav", ".mp3");
 		try {
 			execSync(

@@ -8,9 +8,9 @@
  * Run: bun run apps/lil-eight/generate-sprites.ts
  */
 
-import { createCanvas } from "@napi-rs/canvas";
-import { writeFileSync, mkdirSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { createCanvas } from "@napi-rs/canvas";
 
 const FRAME_SIZE = 64;
 const SCALE = 1; // internal pixel scale (1 = true pixel art)

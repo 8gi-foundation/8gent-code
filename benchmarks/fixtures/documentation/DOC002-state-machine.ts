@@ -186,7 +186,7 @@ class StateMachine<TContext, TEvent extends { type: string }> {
 		const currentValue = this.currentState.value as string;
 		const stateConfig = this.getStateConfig(currentValue);
 
-		let transitionConfig =
+		const transitionConfig =
 			stateConfig?.on?.[event.type] || this.config.on?.[event.type];
 
 		if (!transitionConfig) {
@@ -258,10 +258,10 @@ function createMachine<TContext, TEvent extends { type: string }>(
 export {
 	StateMachine,
 	createMachine,
-	MachineConfig,
-	StateNodeConfig,
-	TransitionConfig,
-	State,
-	Action,
-	Guard,
+	type MachineConfig,
+	type StateNodeConfig,
+	type TransitionConfig,
+	type State,
+	type Action,
+	type Guard,
 };

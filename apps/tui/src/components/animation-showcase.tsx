@@ -5,28 +5,29 @@
  * Triggered via /animations command.
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
+import {
+	BouncingDots,
+	Confetti,
+	DNAHelix,
+	FireEffect,
+	GlitchText,
+	GradientWave,
+	MatrixRain,
+	Starfield,
+	Waveform,
+} from "./advanced-animations.js";
 import {
 	AppText,
-	MutedText,
-	Label,
-	ShortcutHint,
-	Inline,
-	Stack,
 	Divider,
+	Inline,
+	Label,
+	MutedText,
+	ShortcutHint,
+	Stack,
 } from "./primitives/index.js";
-import {
-	MatrixRain,
-	FireEffect,
-	DNAHelix,
-	Starfield,
-	BouncingDots,
-	GlitchText,
-	Confetti,
-	Waveform,
-	GradientWave,
-} from "./advanced-animations.js";
 
 // ============================================
 // Types

@@ -4,8 +4,8 @@
  * Animated "8" logo with breathing/pulse effects
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import React, { useState, useEffect } from "react";
 
 interface PulseLogoProps {
 	isIdle?: boolean;

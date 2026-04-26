@@ -13,14 +13,14 @@
  * 8. writeToDirectory creates files on disk
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	existsSync,
-	unlinkSync,
-	readdirSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
+	unlinkSync,
 } from "node:fs";
 import { KnowledgeGraph } from "./graph.js";
 import { WikiGenerator, slugify } from "./wiki.js";

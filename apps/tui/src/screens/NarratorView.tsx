@@ -1,14 +1,14 @@
-import React from "react";
 import { Box } from "ink";
-import { TaskCardList, type TaskItem } from "../components/task-card/index.js";
+import React from "react";
 import { Narrator } from "../components/narrator/index.js";
 import {
 	AppText,
-	MutedText,
 	Divider,
-	Stack,
+	MutedText,
 	Spacer,
+	Stack,
 } from "../components/primitives/index.js";
+import { TaskCardList, type TaskItem } from "../components/task-card/index.js";
 
 export interface NarratorViewProps {
 	tasks: TaskItem[];

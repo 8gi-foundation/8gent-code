@@ -21,10 +21,10 @@
  */
 
 import type {
-	HarnessConfig,
-	HarnessAction,
-	HarnessRunResult,
 	AuditEntry,
+	HarnessAction,
+	HarnessConfig,
+	HarnessRunResult,
 } from "./types";
 
 // SEC-H4: Redact vault sentinel patterns from values before logging

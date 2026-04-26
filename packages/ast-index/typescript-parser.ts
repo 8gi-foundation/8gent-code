@@ -5,10 +5,10 @@
  * Zero native dependencies, perfect accuracy.
  */
 
-import * as ts from "typescript";
 import * as fs from "fs";
 import * as path from "path";
-import type { Symbol, SymbolKind, FileOutline } from "../types";
+import * as ts from "typescript";
+import type { FileOutline, Symbol, SymbolKind } from "../types";
 
 /**
  * Parse a TypeScript/JavaScript file and extract symbols
@@ -33,7 +33,7 @@ export function parseTypeScriptFile(filePath: string): FileOutline {
 
 	const symbols: Symbol[] = [];
 
-	function visit(node: ts.Node, parentPath: string = "") {
+	function visit(node: ts.Node, parentPath = "") {
 		const symbol = extractSymbol(node, sourceFile, parentPath);
 		if (symbol) {
 			symbols.push(symbol);
@@ -270,7 +270,7 @@ export function getSymbolSource(
 	filePath: string,
 	startLine: number,
 	endLine: number,
-	contextLines: number = 0,
+	contextLines = 0,
 ): string {
 	const content = fs.readFileSync(filePath, "utf-8");
 	const lines = content.split("\n");

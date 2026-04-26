@@ -1,4 +1,4 @@
-import { BusinessIdea, Message } from "../types";
+import { BusinessIdea, type Message } from "../types";
 
 export class QuestioningEngine {
 	private questions: string[] = [];
@@ -44,7 +44,7 @@ export class QuestioningEngine {
 		this.questions = questionSets.industryAgnostic;
 	}
 
-	askSequential(startingSet: string = "industryAgnostic"): void {
+	askSequential(startingSet = "industryAgnostic"): void {
 		const set = Object.entries(questionSets)[0][1]; // For now, just use defaults
 		let i = 0;
 

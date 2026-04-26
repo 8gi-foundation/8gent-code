@@ -1,3 +1,4 @@
+import { Box, useInput } from "ink";
 /**
  * BackgroundPanel: a small, non-modal side panel listing tasks the user
  * sent to the background via Ctrl+G. Toggled with Ctrl+J ("jobs").
@@ -9,15 +10,14 @@
  * - Keyboard-only friendly: Escape returns focus to foreground input.
  */
 import React from "react";
-import { Box, useInput } from "ink";
+import type { BgTask } from "../lib/background-pool.js";
 import {
 	AppText,
-	MutedText,
-	Heading,
 	Divider,
+	Heading,
+	MutedText,
 	StatusDot,
 } from "./primitives/index.js";
-import type { BgTask } from "../lib/background-pool.js";
 
 interface BackgroundPanelProps {
 	tasks: BgTask[];

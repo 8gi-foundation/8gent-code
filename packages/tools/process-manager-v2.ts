@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn, ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn as nodeSpawn } from "node:child_process";
 
 export interface SpawnOptions {
 	cwd?: string;

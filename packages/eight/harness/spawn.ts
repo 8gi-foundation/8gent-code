@@ -10,10 +10,10 @@
  * Issue: #1406
  */
 
+import { execFile } from "child_process";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);

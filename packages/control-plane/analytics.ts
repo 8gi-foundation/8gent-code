@@ -8,11 +8,11 @@
 
 import type {
 	DataPoint,
+	PlanTier,
 	ReportPeriod,
+	SystemHealth,
 	UsageReport,
 	UserUsageStats,
-	SystemHealth,
-	PlanTier,
 } from "./types";
 
 // ============================================
@@ -25,7 +25,7 @@ import type {
  */
 export function calculateUserGrowth(
 	userCreationDates: number[],
-	days: number = 30,
+	days = 30,
 ): DataPoint[] {
 	const now = new Date();
 	const result: DataPoint[] = [];
@@ -77,7 +77,7 @@ export function getActiveSessionCount(
  */
 export function aggregateTokenUsage(
 	usageRecords: Array<{ date: string; tokensIn: number; tokensOut: number }>,
-	days: number = 30,
+	days = 30,
 ): DataPoint[] {
 	const now = new Date();
 	const result: DataPoint[] = [];
@@ -251,7 +251,7 @@ export function getTopUsers(
 		tokensOut: number;
 		sessions: number;
 	}>,
-	limit: number = 10,
+	limit = 10,
 ): UserUsageStats[] {
 	// Aggregate usage per user
 	const userUsage = new Map<

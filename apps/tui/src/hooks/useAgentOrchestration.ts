@@ -4,7 +4,7 @@
  * Subscribes to the OrchestratorBus and exposes agent state for rendering.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Types inline to avoid import issues with monorepo
 interface AgentInfo {

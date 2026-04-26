@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
 import { useStdout } from "ink";
+import { useEffect, useState } from "react";
 
 export interface Viewport {
 	width: number;

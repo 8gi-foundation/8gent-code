@@ -10,18 +10,18 @@
  */
 
 import {
-	mkdirSync,
-	writeFileSync,
-	rmSync,
-	existsSync,
 	copyFileSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	writeFileSync,
 } from "node:fs";
-import { join, resolve, dirname, basename } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type {
 	BenchmarkDefinition,
+	CombinedGradeResult,
 	ExecutionGradeResult,
 	KeywordGradeResult,
-	CombinedGradeResult,
 } from "../types";
 
 const BENCHMARKS_ROOT = resolve(dirname(import.meta.dir));
@@ -334,8 +334,8 @@ function parseBunTestOutput(output: string): {
 	const passMatch = output.match(/(\d+)\s+pass/i);
 	const failMatch = output.match(/(\d+)\s+fail/i);
 
-	if (passMatch) passed = parseInt(passMatch[1], 10);
-	if (failMatch) failed = parseInt(failMatch[1], 10);
+	if (passMatch) passed = Number.parseInt(passMatch[1], 10);
+	if (failMatch) failed = Number.parseInt(failMatch[1], 10);
 
 	if (passed === 0 && failed === 0) {
 		const lines = output.split("\n");

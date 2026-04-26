@@ -10,7 +10,7 @@ function parse(str: string): number {
 		const match = token.match(/^(-?\d+)([ywdhms]+)/);
 		if (!match) continue;
 		const [_, numStr, unit] = match;
-		const num = parseFloat(numStr);
+		const num = Number.parseFloat(numStr);
 		const unitValue = units[unit as keyof typeof units] || 0;
 		total += num * unitValue;
 	}
@@ -23,7 +23,7 @@ function parse(str: string): number {
  * @param precision - Number of decimal places (default: 0).
  * @returns The formatted duration string.
  */
-function format(ms: number, precision: number = 0): string {
+function format(ms: number, precision = 0): string {
 	const parts: string[] = [];
 	const unitOrder = ["y", "w", "d", "h", "m", "s", "ms"];
 	for (const unit of unitOrder) {

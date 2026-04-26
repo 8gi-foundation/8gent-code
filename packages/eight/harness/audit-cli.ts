@@ -13,7 +13,7 @@
  * Issue: #1402
  */
 
-import { openSession, listSessions, getSessionsDir } from "./session";
+import { getSessionsDir, listSessions, openSession } from "./session";
 import type { AuditEntry } from "./types";
 
 /** Format a single audit entry for terminal display. */
@@ -166,7 +166,7 @@ Sessions stored in: ${getSessionsDir()}
 		}
 
 		case "tail": {
-			const n = parseInt(args[2] || "10", 10);
+			const n = Number.parseInt(args[2] || "10", 10);
 			const start = Math.max(0, entries.length - n);
 			if (entries.length === 0) {
 				console.log(`Session ${sessionId}: empty`);

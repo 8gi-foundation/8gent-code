@@ -4,19 +4,19 @@
  */
 
 import { Database } from "bun:sqlite";
-import path from "path";
 import fs from "fs";
+import path from "path";
 import { SCHEMA } from "./schema";
 import type {
-	DesignSystem,
 	ColorPalette,
-	Typography,
 	Component,
-	StyleTag,
-	DesignStyle,
 	DesignMood,
+	DesignStyle,
+	DesignSystem,
 	ParsedColors,
 	ParsedTypography,
+	StyleTag,
+	Typography,
 } from "./schema";
 
 // Default database path
@@ -247,7 +247,7 @@ export function getComponentsBySystemId(systemId: string): Component[] {
 export function getComponentByType(
 	systemId: string,
 	componentType: string,
-	variant: string = "default",
+	variant = "default",
 ): Component | undefined {
 	const stmt = getDatabase().prepare(
 		"SELECT * FROM components WHERE system_id = ? AND component_type = ? AND variant = ?",
@@ -366,7 +366,9 @@ export function parseTypographyJson(json: string): ParsedTypography {
 
 export function hslToHex(hsl: string): string {
 	// Parse HSL string like "220 80% 55%"
-	const parts = hsl.split(" ").map((p) => parseFloat(p.replace("%", "")));
+	const parts = hsl
+		.split(" ")
+		.map((p) => Number.parseFloat(p.replace("%", "")));
 	if (parts.length < 3) return "#000000";
 
 	const h = parts[0];

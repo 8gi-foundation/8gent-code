@@ -179,7 +179,7 @@ export class StatusVerbs {
 	start(
 		type: StatusVerbType = this.type,
 		onChange?: (verb: string) => void,
-		intervalMs: number = 2000,
+		intervalMs = 2000,
 	): void {
 		this.stop(); // Clear any existing interval
 

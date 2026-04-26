@@ -6,10 +6,10 @@
  * using the same storage backend as the main auth token (different key).
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
 import * as crypto from "crypto";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { decodeJwt } from "./clerk.js";
 import type { TokenPayload } from "./types.js";
 

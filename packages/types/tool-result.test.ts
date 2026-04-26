@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { normalizeToolResult, type ToolResult } from "./tool-result";
+import { describe, expect, it } from "bun:test";
+import { type ToolResult, normalizeToolResult } from "./tool-result";
 
 describe("normalizeToolResult", () => {
 	it("normalizes a plain string result", () => {

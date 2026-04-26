@@ -9,8 +9,8 @@
  * - Voice speaks each question aloud during onboarding
  */
 
-import React, { useState, useEffect } from "react";
 import { Box, Text, useStdout } from "ink";
+import React, { useState, useEffect } from "react";
 
 interface OnboardingStep {
 	question: string;

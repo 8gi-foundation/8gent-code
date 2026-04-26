@@ -12,7 +12,7 @@
  */
 
 import { execSync } from "child_process";
-import { writeFileSync, mkdirSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 export interface ExecutionResult {

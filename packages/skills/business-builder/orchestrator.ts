@@ -5,7 +5,7 @@
 import { generateText } from "ai";
 import { createModel } from "../../ai/providers.ts";
 import { AGENT_MAP } from "./agents.ts";
-import type { AgentOutput, BusinessBlueprint, BuildOptions } from "./types.ts";
+import type { AgentOutput, BuildOptions, BusinessBlueprint } from "./types.ts";
 
 // Depth -> max tokens per agent call
 const DEPTH_TOKENS: Record<string, number> = {

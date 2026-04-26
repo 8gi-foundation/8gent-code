@@ -148,7 +148,7 @@ async function tgTyping(token: string, chatId: string): Promise<void> {
 }
 
 // Import CoS router lazily to avoid circular deps
-let CoSRouterClass: typeof import("./cos-router").CoSRouter | null = null;
+const CoSRouterClass: typeof import("./cos-router").CoSRouter | null = null;
 
 class TelegramDaemonBridge {
 	private config: BridgeConfig;

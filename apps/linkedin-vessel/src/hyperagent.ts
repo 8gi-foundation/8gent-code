@@ -11,13 +11,13 @@
  */
 
 import {
+	getCampaignStats,
 	getDb,
 	getTemplates,
 	upsertTemplate,
-	getCampaignStats,
 } from "./campaign-db";
-import { randomId } from "./utils";
 import type { MessageTemplate } from "./types";
+import { randomId } from "./utils";
 
 const MODEL_PROXY_URL =
 	process.env.MODEL_PROXY_URL || "http://8gi-model-proxy.internal:3200";

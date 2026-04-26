@@ -20,14 +20,14 @@ function nextFireDate(expr: string, after: Date, tz: string): Date {
 	function matches(field: string, value: number): boolean {
 		if (field === "*") return true;
 		if (field.startsWith("*/"))
-			return value % parseInt(field.slice(2), 10) === 0;
+			return value % Number.parseInt(field.slice(2), 10) === 0;
 		if (field.includes(","))
 			return field.split(",").some((p) => matches(p, value));
 		if (field.includes("-")) {
 			const [lo, hi] = field.split("-").map(Number);
 			return value >= lo && value <= hi;
 		}
-		return parseInt(field, 10) === value;
+		return Number.parseInt(field, 10) === value;
 	}
 
 	const candidate = new Date(after.getTime() + 60_000);
@@ -67,7 +67,7 @@ export class CronJob {
 		this.opts = {
 			timezone: opts.timezone ?? "UTC",
 			noOverlap: opts.noOverlap ?? false,
-			maxRuns: opts.maxRuns ?? Infinity,
+			maxRuns: opts.maxRuns ?? Number.POSITIVE_INFINITY,
 			onError:
 				opts.onError ??
 				((err) => console.error(`[CronJob:${this.id}] error:`, err)),

@@ -2,7 +2,7 @@
  * OpenRouter LLM Client (OpenAI-compatible)
  */
 
-import type { Message, LLMResponse, LLMClient } from "../types";
+import type { LLMClient, LLMResponse, Message } from "../types";
 
 export class OpenRouterClient implements LLMClient {
 	private baseUrl: string;
@@ -12,7 +12,7 @@ export class OpenRouterClient implements LLMClient {
 	constructor(
 		model: string,
 		apiKey: string,
-		baseUrl: string = "https://openrouter.ai/api/v1",
+		baseUrl = "https://openrouter.ai/api/v1",
 	) {
 		this.model = model;
 		this.baseUrl = baseUrl;

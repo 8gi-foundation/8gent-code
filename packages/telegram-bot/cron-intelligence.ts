@@ -8,8 +8,8 @@
  * and sends a formatted digest to the 8gent Telegram chat.
  */
 
-import { GitHubIntelligence } from "./intelligence";
 import { TelegramBot } from "./index";
+import { GitHubIntelligence } from "./intelligence";
 
 async function main(): Promise<void> {
 	const startTime = Date.now();

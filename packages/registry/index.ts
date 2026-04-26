@@ -4,9 +4,9 @@
  * SQLite-backed registry for design primitives, components, and patterns.
  */
 
-import Database from "better-sqlite3";
 import * as fs from "fs";
 import * as path from "path";
+import Database from "better-sqlite3";
 
 const DB_PATH =
 	process.env.EIGHTGENT_DB ||

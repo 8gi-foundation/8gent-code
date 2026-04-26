@@ -9,9 +9,9 @@
  * - Background agent execution with /spawn, /agents, /join commands
  */
 
-import * as path from "path";
-import * as os from "os";
 import { EventEmitter } from "events";
+import * as os from "os";
+import * as path from "path";
 
 // ============================================
 // Types
@@ -89,10 +89,10 @@ export class AgentPool extends EventEmitter {
 	private agents: Map<string, SpawnedAgent> = new Map();
 	private sharedContext: Map<string, SharedContext> = new Map();
 	private maxConcurrent: number;
-	private runningCount: number = 0;
-	private idCounter: number = 0;
+	private runningCount = 0;
+	private idCounter = 0;
 
-	constructor(maxConcurrent: number = 4) {
+	constructor(maxConcurrent = 4) {
 		super();
 		this.maxConcurrent = maxConcurrent;
 	}
@@ -244,10 +244,7 @@ export class AgentPool extends EventEmitter {
 	/**
 	 * Wait for an agent to complete
 	 */
-	async joinAgent(
-		agentId: string,
-		timeoutMs: number = 300000,
-	): Promise<SpawnedAgent> {
+	async joinAgent(agentId: string, timeoutMs = 300000): Promise<SpawnedAgent> {
 		const agent = this.agents.get(agentId);
 		if (!agent) {
 			throw new Error(`Agent not found: ${agentId}`);
@@ -434,8 +431,8 @@ export class TaskQueue extends EventEmitter {
 	private processing: Map<string, QueuedTask> = new Map();
 	private completed: Map<string, QueuedTask> = new Map();
 	private agentPool: AgentPool;
-	private isProcessing: boolean = false;
-	private idCounter: number = 0;
+	private isProcessing = false;
+	private idCounter = 0;
 
 	constructor(agentPool: AgentPool) {
 		super();

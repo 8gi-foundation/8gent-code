@@ -12,14 +12,14 @@
 
 import { execSync } from "child_process";
 import {
-	readFileSync,
-	writeFileSync,
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	statSync,
 	watch,
+	writeFileSync,
 } from "fs";
-import { join, basename } from "path";
+import { basename, join } from "path";
 
 const ROOT = join(import.meta.dir, "..");
 const AUDIO_DIR = join(ROOT, "docs", "audio");

@@ -8,6 +8,9 @@
  * Run: bun demos/multi-agent-demo.ts
  */
 
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
 	buildPlan,
 	createAction,
@@ -16,9 +19,6 @@ import {
 } from "../packages/orchestration/macro-actions";
 import { ThroughputTracker } from "../packages/orchestration/throughput-tracker";
 import { AbilityScorecardTracker } from "../packages/validation/ability-scorecard";
-import { join } from "path";
-import { mkdtempSync } from "fs";
-import { tmpdir } from "os";
 
 // Use a temp dir so the demo doesn't pollute real data
 const tmp = mkdtempSync(join(tmpdir(), "8gent-demo-"));
