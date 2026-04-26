@@ -99,11 +99,11 @@ export class ControlPlane {
   }
 
   checkUsageLimits(tenantId: string, dailyTokens: number, activeSessions: number) {
-    return checkUsageLimits(tenantId, dailyTokens, activeSessions);
+    return checkUsageLimits(getTenantById(tenantId), dailyTokens, activeSessions);
   }
 
   isFeatureEnabled(tenantId: string, feature: Parameters<typeof isFeatureEnabled>[1]): boolean {
-    return isFeatureEnabled(tenantId, feature);
+    return isFeatureEnabled(getTenantById(tenantId), feature);
   }
 
   resolveSubdomain(hostname: string): string | null {

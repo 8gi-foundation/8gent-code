@@ -8,6 +8,7 @@
  */
 
 import type { Symbol, SymbolKind, FileOutline, RepoIndex } from "../types";
+export type { RepoIndex, FileOutline, Symbol, SymbolKind };
 import { parseTypeScriptFile } from "./typescript-parser";
 import * as fs from "fs";
 import * as path from "path";

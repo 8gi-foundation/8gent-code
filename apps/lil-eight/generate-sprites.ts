@@ -375,7 +375,7 @@ for (const state of states) {
   for (let f = 0; f < state.frames; f++) {
     ctx.save()
     ctx.translate(f * FRAME_SIZE, 0)
-    state.draw(ctx, f)
+    state.draw(ctx as unknown as CanvasRenderingContext2D, f)
     ctx.restore()
   }
 
@@ -398,7 +398,7 @@ for (const state of states) {
   for (let f = 0; f < state.frames; f++) {
     atlasCtx.save()
     atlasCtx.translate((offset + f) * FRAME_SIZE, 0)
-    state.draw(atlasCtx, f)
+    state.draw(atlasCtx as unknown as CanvasRenderingContext2D, f)
     atlasCtx.restore()
   }
   offset += state.frames

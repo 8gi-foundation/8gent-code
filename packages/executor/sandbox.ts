@@ -55,9 +55,10 @@ export async function executeSecure(
       cwd: tmpDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: {
+        ...process.env,
         ...options.env,
         HOME: tmpDir,
-        PATH: process.env.PATH,
+        PATH: process.env.PATH ?? "",
       },
     });
 

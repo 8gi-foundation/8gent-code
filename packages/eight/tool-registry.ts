@@ -72,7 +72,7 @@ export class ToolRegistry {
 
   /** Register an external tool (e.g. from extensions) */
   registerExternalTool(name: string, handler: Function): void {
-    this.activeTools.set(name, handler as ToolSet[string]);
+    this.activeTools.set(name, handler as unknown as ToolSet[string]);
   }
 
   /** Which categories are currently loaded */
@@ -90,7 +90,7 @@ export class ToolRegistry {
     const registry = this;
     return tool({
       description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Call this to unlock a category before using its tools.`,
-      parameters: z.object({
+      inputSchema: z.object({
         category: z.string().describe(`Category to load. One of: ${CATEGORY_NAMES.join(", ")}`),
       }),
       execute: async ({ category }: { category: string }) => {

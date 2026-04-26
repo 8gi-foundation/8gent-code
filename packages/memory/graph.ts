@@ -300,10 +300,10 @@ export class KnowledgeGraph {
     const limit = query.limit ?? 50;
 
     const rows = this.db
-      .query<EntityRow, unknown[]>(
+      .query<EntityRow, import("bun:sqlite").SQLQueryBindings[]>(
         `SELECT * FROM knowledge_entities ${where} ORDER BY mention_count DESC, last_seen DESC LIMIT ?`
       )
-      .all(...params, limit);
+      .all(...(params as import("bun:sqlite").SQLQueryBindings[]), limit);
 
     return rows.map(rowToEntity);
   }

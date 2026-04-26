@@ -5,7 +5,7 @@
  * @returns SMA values array
  */
 export function sma(data: number[], period: number): number[] {
-  const result = [];
+  const result: number[] = [];
   for (let i = 0; i < data.length; i++) {
     if (i >= period - 1) {
       const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
@@ -24,7 +24,7 @@ export function sma(data: number[], period: number): number[] {
  * @returns EMA values array
  */
 export function ema(data: number[], period: number): number[] {
-  const result = [];
+  const result: number[] = [];
   if (data.length === 0) return result;
   const alpha = 2 / (period + 1);
   result.push(data[0]);
@@ -41,7 +41,7 @@ export function ema(data: number[], period: number): number[] {
  * @returns WMA values array
  */
 export function wma(data: number[], period: number): number[] {
-  const result = [];
+  const result: number[] = [];
   const weightSum = (period * (period + 1)) / 2;
   for (let i = 0; i < data.length; i++) {
     if (i >= period - 1) {

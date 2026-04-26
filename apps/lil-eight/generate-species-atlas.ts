@@ -170,7 +170,7 @@ async function generateSpeciesAtlas(species: string) {
       }
 
       // Draw state-specific decorations
-      drawDecorations(ctx, state, f)
+      drawDecorations(ctx as unknown as CanvasRenderingContext2D, state, f)
 
       ctx.restore()
     }

@@ -11,7 +11,7 @@ function parse(str: string): number {
     if (!match) continue;
     const [_, numStr, unit] = match;
     const num = parseFloat(numStr);
-    const unitValue = units[unit] || 0;
+    const unitValue = units[unit as keyof typeof units] || 0;
     total += num * unitValue;
   }
   return total;
@@ -27,7 +27,7 @@ function format(ms: number, precision: number = 0): string {
   const parts: string[] = [];
   const unitOrder = ['y', 'w', 'd', 'h', 'm', 's', 'ms'];
   for (const unit of unitOrder) {
-    const unitValue = units[unit];
+    const unitValue = units[unit as keyof typeof units];
     if (unitValue === undefined) continue;
     const value = ms / unitValue;
     if (value === 0) continue;
@@ -46,11 +46,11 @@ function format(ms: number, precision: number = 0): string {
 function humanize(ms: number): string {
   const unitOrder = ['y', 'w', 'd', 'h', 'm', 's', 'ms'];
   for (const unit of unitOrder) {
-    const unitValue = units[unit];
+    const unitValue = units[unit as keyof typeof units];
     if (unitValue === undefined) continue;
     const value = Math.floor(ms / unitValue);
     if (value > 0) {
-      const name = unitNames[unit];
+      const name = unitNames[unit as keyof typeof unitNames];
       const plural = value !== 1 ? 's' : '';
       return `${value} ${name}${plural}`;
     }

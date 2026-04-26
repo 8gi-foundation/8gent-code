@@ -199,7 +199,7 @@ function queryMemoriesByLevel(
       AND created_at >= ?
       AND deleted_at IS NULL
   `;
-  const params: unknown[] = [level, since];
+  const params: import("bun:sqlite").SQLQueryBindings[] = [level, since];
 
   if (userId) {
     sql += " AND json_extract(data, '$.userId') = ?";

@@ -24,7 +24,10 @@ export class SqlInjector {
     return {
       detected: matches.length > 0,
       patterns: matches.map(m => m.pattern),
-      severity: matches.reduce((s, m) => Math.max(s, m.severity as any), 'low') as any
+      severity: matches.reduce<string>((s, m) => {
+        const ranks: Record<string, number> = { low: 0, medium: 1, high: 2 };
+        return (ranks[m.severity] ?? 0) > (ranks[s] ?? 0) ? m.severity : s;
+      }, 'low')
     };
   }
 

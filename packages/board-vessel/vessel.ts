@@ -90,7 +90,7 @@ async function waitForInference(maxRetries = 30): Promise<boolean> {
 function getStatus(): VesselStatus {
   return {
     memberCode: MEMBER_CODE,
-    inferenceReady,
+    ollamaReady: inferenceReady,
     modelLoaded: inferenceReady,
     currentTaskId,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),

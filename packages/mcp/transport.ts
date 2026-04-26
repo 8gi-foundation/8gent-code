@@ -69,10 +69,11 @@ export class StdioTransport implements Transport {
   private async _readStdout(): Promise<void> {
     if (!this.proc?.stdout) return;
     const decoder = new TextDecoder();
-    this.reader = this.proc.stdout.getReader();
+    this.reader = (this.proc.stdout as ReadableStream<Uint8Array>).getReader();
 
     try {
       while (true) {
+        if (!this.reader) return;
         const { done, value } = await this.reader.read();
         if (done) break;
         this.buffer += decoder.decode(value, { stream: true });
@@ -86,7 +87,7 @@ export class StdioTransport implements Transport {
   private async _readStderr(): Promise<void> {
     if (!this.proc?.stderr) return;
     const decoder = new TextDecoder();
-    const reader = this.proc.stderr.getReader();
+    const reader = (this.proc.stderr as ReadableStream<Uint8Array>).getReader();
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -141,7 +142,7 @@ export class StdioTransport implements Transport {
         reject: (e) => { clearTimeout(timeout); reject(e); },
       });
 
-      const writer = this.proc!.stdin as WritableStream;
+      const writer = this.proc!.stdin as unknown as WritableStream;
       const w = writer.getWriter();
       w.write(new TextEncoder().encode(JSON.stringify(req) + "\n"));
       w.releaseLock();
@@ -151,7 +152,7 @@ export class StdioTransport implements Transport {
   notify(method: string, params?: unknown): void {
     if (!this.proc?.stdin) return;
     const req: JSONRPCRequest = { jsonrpc: "2.0", method, params };
-    const writer = (this.proc.stdin as WritableStream).getWriter();
+    const writer = (this.proc.stdin as unknown as WritableStream).getWriter();
     writer.write(new TextEncoder().encode(JSON.stringify(req) + "\n"));
     writer.releaseLock();
   }

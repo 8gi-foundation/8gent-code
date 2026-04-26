@@ -109,4 +109,5 @@ function match<T, E, R>(result: Result<T, E>, handlers: { ok: (value: T) => R; e
   return handlers.err(result.error);
 }
 
-export { Result, ok, err, map, flatMap, mapErr, unwrap, unwrapOr, match };
+export { ok, err, map, flatMap, mapErr, unwrap, unwrapOr, match };
+export type { Result };

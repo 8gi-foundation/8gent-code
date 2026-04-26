@@ -10,7 +10,7 @@ function debounce<TArgs, TReturn>(
   delayMs: number,
   options: { trailing?: boolean; leading?: boolean } = {}
 ): (...args: TArgs[]) => Promise<TReturn> {
-  let timeoutId: number | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
   let lastArgs: TArgs[] | null = null
 
   const wrapped = (...args: TArgs[]): Promise<TReturn> => {
@@ -29,7 +29,7 @@ function debounce<TArgs, TReturn>(
       lastArgs = args
 
       const execute = () => {
-        if (isCancelled) return
+        if (isCancelled || lastArgs === null) return
         try {
           resolve(fn(...lastArgs))
         } catch (e) {
@@ -69,7 +69,7 @@ function throttle<TArgs, TReturn>(
   intervalMs: number
 ): (...args: TArgs[]) => Promise<TReturn> {
   let lastExecuted: number | null = null
-  let timeoutId: number | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
 
   const wrapped = (...args: TArgs[]): Promise<TReturn> => {
     return new Promise<TReturn>((resolve, reject) => {

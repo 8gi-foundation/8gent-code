@@ -69,7 +69,13 @@ function parseConfig(config: MCPConfigFile): ServerConfig[] {
   const results: ServerConfig[] = [];
 
   // New format: { servers: { ... } }
-  const servers = config.servers || config.mcpServers || {};
+  const servers: Record<string, {
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
+  }> = config.servers || config.mcpServers || {};
 
   for (const [name, entry] of Object.entries(servers)) {
     if (entry.url) {
