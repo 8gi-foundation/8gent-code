@@ -10,27 +10,27 @@ export * from "./formatter";
 
 // Legacy completion reporter (still used by integration.ts)
 export {
-  CompletionReporter,
-  TaskContextTracker,
-  createReporter,
-  createTracker,
-  getCompletionReporter,
+	CompletionReporter,
+	TaskContextTracker,
+	createReporter,
+	createTracker,
+	getCompletionReporter,
 } from "./completion";
 
 // Report history (legacy — will be removed)
 export {
-  ReportHistory,
-  getReportHistory,
-  createHistory,
-  handleReportsCommand,
-  handleReportCommand,
-  type ReportStats,
+	ReportHistory,
+	getReportHistory,
+	createHistory,
+	handleReportsCommand,
+	handleReportCommand,
+	type ReportStats,
 } from "./history";
 
 // Agent integration (git helpers still used)
 export {
-  extractCommitHash,
-  extractBranchName,
+	extractCommitHash,
+	extractBranchName,
 } from "./integration";
 
 // Run log — the new hotness

@@ -43,39 +43,39 @@ import type { WebhookResult } from "./billing";
  * ```
  */
 export function createHonoWebhookHandler(callbacks?: WebhookCallbacks) {
-  return async (c: HonoContext): Promise<HonoResponse> => {
-    const signature = c.req.header("stripe-signature");
-    if (!signature) {
-      return c.json({ error: "Missing stripe-signature header" }, 400);
-    }
+	return async (c: HonoContext): Promise<HonoResponse> => {
+		const signature = c.req.header("stripe-signature");
+		if (!signature) {
+			return c.json({ error: "Missing stripe-signature header" }, 400);
+		}
 
-    let rawBody: string;
-    try {
-      rawBody = await c.req.text();
-    } catch {
-      return c.json({ error: "Failed to read request body" }, 400);
-    }
+		let rawBody: string;
+		try {
+			rawBody = await c.req.text();
+		} catch {
+			return c.json({ error: "Failed to read request body" }, 400);
+		}
 
-    const result = await handleStripeWebhook(rawBody, signature);
+		const result = await handleStripeWebhook(rawBody, signature);
 
-    if (result.error && result.event === "unknown") {
-      // Signature verification failed
-      return c.json({ error: result.error }, 400);
-    }
+		if (result.error && result.event === "unknown") {
+			// Signature verification failed
+			return c.json({ error: result.error }, 400);
+		}
 
-    // Fire callbacks if provided
-    if (callbacks && result.handled) {
-      try {
-        await dispatchCallbacks(callbacks, result);
-      } catch (err) {
-        console.error("[stripe-webhook] Callback error:", err);
-        // Don't fail the webhook — Stripe will retry
-      }
-    }
+		// Fire callbacks if provided
+		if (callbacks && result.handled) {
+			try {
+				await dispatchCallbacks(callbacks, result);
+			} catch (err) {
+				console.error("[stripe-webhook] Callback error:", err);
+				// Don't fail the webhook — Stripe will retry
+			}
+		}
 
-    // Always return 200 to Stripe (even for unhandled events) to prevent retries
-    return c.json({ received: true, event: result.event, handled: result.handled }, 200);
-  };
+		// Always return 200 to Stripe (even for unhandled events) to prevent retries
+		return c.json({ received: true, event: result.event, handled: result.handled }, 200);
+	};
 }
 
 // ============================================
@@ -98,38 +98,39 @@ export function createHonoWebhookHandler(callbacks?: WebhookCallbacks) {
  * ```
  */
 export function createExpressWebhookHandler(callbacks?: WebhookCallbacks) {
-  return async (req: ExpressRequest, res: ExpressResponse): Promise<void> => {
-    const signature = req.headers["stripe-signature"] as string | undefined;
-    if (!signature) {
-      res.status(400).json({ error: "Missing stripe-signature header" });
-      return;
-    }
+	return async (req: ExpressRequest, res: ExpressResponse): Promise<void> => {
+		const signature = req.headers["stripe-signature"] as string | undefined;
+		if (!signature) {
+			res.status(400).json({ error: "Missing stripe-signature header" });
+			return;
+		}
 
-    // Express with express.raw() gives us a Buffer in req.body
-    const rawBody: string | Buffer = typeof req.body === "string"
-      ? req.body
-      : Buffer.isBuffer(req.body)
-        ? req.body
-        : JSON.stringify(req.body); // Fallback, but signature verification may fail
+		// Express with express.raw() gives us a Buffer in req.body
+		const rawBody: string | Buffer =
+			typeof req.body === "string"
+				? req.body
+				: Buffer.isBuffer(req.body)
+					? req.body
+					: JSON.stringify(req.body); // Fallback, but signature verification may fail
 
-    const result = await handleStripeWebhook(rawBody, signature);
+		const result = await handleStripeWebhook(rawBody, signature);
 
-    if (result.error && result.event === "unknown") {
-      res.status(400).json({ error: result.error });
-      return;
-    }
+		if (result.error && result.event === "unknown") {
+			res.status(400).json({ error: result.error });
+			return;
+		}
 
-    // Fire callbacks if provided
-    if (callbacks && result.handled) {
-      try {
-        await dispatchCallbacks(callbacks, result);
-      } catch (err) {
-        console.error("[stripe-webhook] Callback error:", err);
-      }
-    }
+		// Fire callbacks if provided
+		if (callbacks && result.handled) {
+			try {
+				await dispatchCallbacks(callbacks, result);
+			} catch (err) {
+				console.error("[stripe-webhook] Callback error:", err);
+			}
+		}
 
-    res.status(200).json({ received: true, event: result.event, handled: result.handled });
-  };
+		res.status(200).json({ received: true, event: result.event, handled: result.handled });
+	};
 }
 
 // ============================================
@@ -141,21 +142,21 @@ export function createExpressWebhookHandler(callbacks?: WebhookCallbacks) {
  * Use this if your framework isn't Hono or Express.
  */
 export async function processStripeWebhook(
-  rawBody: string | Buffer,
-  signature: string,
-  callbacks?: WebhookCallbacks,
+	rawBody: string | Buffer,
+	signature: string,
+	callbacks?: WebhookCallbacks,
 ): Promise<WebhookResult> {
-  const result = await handleStripeWebhook(rawBody, signature);
+	const result = await handleStripeWebhook(rawBody, signature);
 
-  if (callbacks && result.handled) {
-    try {
-      await dispatchCallbacks(callbacks, result);
-    } catch (err) {
-      console.error("[stripe-webhook] Callback error:", err);
-    }
-  }
+	if (callbacks && result.handled) {
+		try {
+			await dispatchCallbacks(callbacks, result);
+		} catch (err) {
+			console.error("[stripe-webhook] Callback error:", err);
+		}
+	}
 
-  return result;
+	return result;
 }
 
 // ============================================
@@ -167,36 +168,39 @@ export async function processStripeWebhook(
  * All callbacks are optional — implement only what you need.
  */
 export interface WebhookCallbacks {
-  /** Fired on customer.subscription.created and customer.subscription.updated */
-  onSubscriptionChange?: (result: WebhookResult) => Promise<void>;
-  /** Fired on customer.subscription.deleted — user should be downgraded to free */
-  onSubscriptionDeleted?: (result: WebhookResult) => Promise<void>;
-  /** Fired on invoice.paid */
-  onPaymentSuccess?: (result: WebhookResult) => Promise<void>;
-  /** Fired on invoice.payment_failed */
-  onPaymentFailed?: (result: WebhookResult) => Promise<void>;
+	/** Fired on customer.subscription.created and customer.subscription.updated */
+	onSubscriptionChange?: (result: WebhookResult) => Promise<void>;
+	/** Fired on customer.subscription.deleted — user should be downgraded to free */
+	onSubscriptionDeleted?: (result: WebhookResult) => Promise<void>;
+	/** Fired on invoice.paid */
+	onPaymentSuccess?: (result: WebhookResult) => Promise<void>;
+	/** Fired on invoice.payment_failed */
+	onPaymentFailed?: (result: WebhookResult) => Promise<void>;
 }
 
 // ============================================
 // Internal
 // ============================================
 
-async function dispatchCallbacks(callbacks: WebhookCallbacks, result: WebhookResult): Promise<void> {
-  switch (result.event) {
-    case "customer.subscription.created":
-    case "customer.subscription.updated":
-      await callbacks.onSubscriptionChange?.(result);
-      break;
-    case "customer.subscription.deleted":
-      await callbacks.onSubscriptionDeleted?.(result);
-      break;
-    case "invoice.paid":
-      await callbacks.onPaymentSuccess?.(result);
-      break;
-    case "invoice.payment_failed":
-      await callbacks.onPaymentFailed?.(result);
-      break;
-  }
+async function dispatchCallbacks(
+	callbacks: WebhookCallbacks,
+	result: WebhookResult,
+): Promise<void> {
+	switch (result.event) {
+		case "customer.subscription.created":
+		case "customer.subscription.updated":
+			await callbacks.onSubscriptionChange?.(result);
+			break;
+		case "customer.subscription.deleted":
+			await callbacks.onSubscriptionDeleted?.(result);
+			break;
+		case "invoice.paid":
+			await callbacks.onPaymentSuccess?.(result);
+			break;
+		case "invoice.payment_failed":
+			await callbacks.onPaymentFailed?.(result);
+			break;
+	}
 }
 
 // ============================================
@@ -205,21 +209,21 @@ async function dispatchCallbacks(callbacks: WebhookCallbacks, result: WebhookRes
 // ============================================
 
 interface HonoContext {
-  req: {
-    header(name: string): string | undefined;
-    text(): Promise<string>;
-  };
-  json(data: unknown, status?: number): HonoResponse;
+	req: {
+		header(name: string): string | undefined;
+		text(): Promise<string>;
+	};
+	json(data: unknown, status?: number): HonoResponse;
 }
 
 type HonoResponse = unknown;
 
 interface ExpressRequest {
-  headers: Record<string, string | string[] | undefined>;
-  body: unknown;
+	headers: Record<string, string | string[] | undefined>;
+	body: unknown;
 }
 
 interface ExpressResponse {
-  status(code: number): ExpressResponse;
-  json(data: unknown): void;
+	status(code: number): ExpressResponse;
+	json(data: unknown): void;
 }

@@ -1,36 +1,36 @@
 {
-  "name": "@8gent/memory",
-  "version": "0.2.0",
-  "description": "Multi-layered memory system v2 — SQLite-backed with FTS5 search, optional vector embeddings, and knowledge graph for 8gent Code",
-  "main": "index.ts",
-  "types": "index.ts",
-  "type": "module",
-  "exports": {
-    ".": {
-      "import": "./index.ts",
-      "types": "./index.ts"
-    },
-    "./types": {
-      "import": "./types.ts",
-      "types": "./types.ts"
-    },
-    "./store": {
-      "import": "./store.ts",
-      "types": "./store.ts"
-    },
-    "./embeddings": {
-      "import": "./embeddings.ts",
-      "types": "./embeddings.ts"
-    },
-    "./migrate": {
-      "import": "./migrate.ts",
-      "types": "./migrate.ts"
-    }
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.0"
-  }
+	"name": "@8gent/memory",
+	"version": "0.2.0",
+	"description": "Multi-layered memory system v2 — SQLite-backed with FTS5 search, optional vector embeddings, and knowledge graph for 8gent Code",
+	"main": "index.ts",
+	"types": "index.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		},
+		"./types": {
+			"import": "./types.ts",
+			"types": "./types.ts"
+		},
+		"./store": {
+			"import": "./store.ts",
+			"types": "./store.ts"
+		},
+		"./embeddings": {
+			"import": "./embeddings.ts",
+			"types": "./embeddings.ts"
+		},
+		"./migrate": {
+			"import": "./migrate.ts",
+			"types": "./migrate.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
 }

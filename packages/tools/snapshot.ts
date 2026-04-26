@@ -1,5 +1,5 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 /**
  * Serializes a value to a deterministic string representation.
@@ -7,7 +7,7 @@ import * as path from 'path';
  * @returns The serialized string.
  */
 export function serialize(value: any): string {
-  return JSON.stringify(value, null, 2);
+	return JSON.stringify(value, null, 2);
 }
 
 /**
@@ -17,20 +17,20 @@ export function serialize(value: any): string {
  * @returns True if the value matches the snapshot, false otherwise.
  */
 export function matchSnapshot(value: any, name: string): boolean {
-  const serialized = serialize(value);
-  const snapshotPath = path.join(__dirname, '__snapshots__', `${name}.json`);
-  
-  try {
-    const storedSnapshot = fs.readFileSync(snapshotPath, 'utf-8');
-    if (storedSnapshot === serialized) return true;
-    
-    console.error(`Snapshot mismatch for ${name}`);
-    console.error(getDiff(storedSnapshot, serialized));
-    return false;
-  } catch (e) {
-    console.error(`Snapshot ${name} not found. Expected: ${serialized}`);
-    return false;
-  }
+	const serialized = serialize(value);
+	const snapshotPath = path.join(__dirname, "__snapshots__", `${name}.json`);
+
+	try {
+		const storedSnapshot = fs.readFileSync(snapshotPath, "utf-8");
+		if (storedSnapshot === serialized) return true;
+
+		console.error(`Snapshot mismatch for ${name}`);
+		console.error(getDiff(storedSnapshot, serialized));
+		return false;
+	} catch (e) {
+		console.error(`Snapshot ${name} not found. Expected: ${serialized}`);
+		return false;
+	}
 }
 
 /**
@@ -39,9 +39,9 @@ export function matchSnapshot(value: any, name: string): boolean {
  * @param value - The value to save as the new baseline.
  */
 export function updateSnapshot(name: string, value: any): void {
-  const serialized = serialize(value);
-  const snapshotPath = path.join(__dirname, '__snapshots__', `${name}.json`);
-  fs.writeFileSync(snapshotPath, serialized);
+	const serialized = serialize(value);
+	const snapshotPath = path.join(__dirname, "__snapshots__", `${name}.json`);
+	fs.writeFileSync(snapshotPath, serialized);
 }
 
 /**
@@ -51,17 +51,17 @@ export function updateSnapshot(name: string, value: any): void {
  * @returns The diff output.
  */
 function getDiff(a: string, b: string): string {
-  const aLines = a.split('\n');
-  const bLines = b.split('\n');
-  let diff = '';
-  
-  for (let i = 0; i < Math.max(aLines.length, bLines.length); i++) {
-    const lineA = aLines[i] || '';
-    const lineB = bLines[i] || '';
-    if (lineA !== lineB) {
-      diff += `Line ${i + 1}:\n  Expected: ${lineA}\n  Received: ${lineB}\n`;
-    }
-  }
-  
-  return diff;
+	const aLines = a.split("\n");
+	const bLines = b.split("\n");
+	let diff = "";
+
+	for (let i = 0; i < Math.max(aLines.length, bLines.length); i++) {
+		const lineA = aLines[i] || "";
+		const lineB = bLines[i] || "";
+		if (lineA !== lineB) {
+			diff += `Line ${i + 1}:\n  Expected: ${lineA}\n  Received: ${lineB}\n`;
+		}
+	}
+
+	return diff;
 }

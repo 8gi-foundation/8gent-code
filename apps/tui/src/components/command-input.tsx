@@ -12,13 +12,7 @@
 import { Box, Text, useInput } from "ink";
 import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
-import React, {
-	useState,
-	useEffect,
-	useCallback,
-	useRef,
-	useMemo,
-} from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
 	type ContextSuggestion,
 	getSuggestionSourceLabel,
@@ -32,19 +26,9 @@ import {
 	resolveSlashInput,
 	toGhostSuggestions,
 } from "../lib/slash-registry.js";
-import {
-	AnimatedSpinner,
-	StatusIndicator,
-	StepIndicator,
-} from "./animated-spinner.js";
+import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { Blink } from "./fade-transition.js";
-import {
-	AppText,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-} from "./primitives/index.js";
+import { AppText, Inline, Label, MutedText, ShortcutHint } from "./primitives/index.js";
 import { WaveProgress } from "./progress-bar.js";
 
 interface CommandInputProps {
@@ -115,17 +99,10 @@ export function CommandInput({
 	const [value, setValue] = useState("");
 	const [promptPulse, setPromptPulse] = useState(true);
 	const [showSlashHelp, setShowSlashHelp] = useState(false);
-	const [slashRegistryEntries, setSlashRegistryEntries] = useState<
-		SlashRegistryEntry[]
-	>([]);
-	const [slashByToken, setSlashByToken] = useState<
-		Map<string, SlashRegistryEntry>
-	>(new Map());
+	const [slashRegistryEntries, setSlashRegistryEntries] = useState<SlashRegistryEntry[]>([]);
+	const [slashByToken, setSlashByToken] = useState<Map<string, SlashRegistryEntry>>(new Map());
 
-	const builtInSlashGhosts = useMemo(
-		() => buildBuiltInSlashGhostSuggestions(),
-		[],
-	);
+	const builtInSlashGhosts = useMemo(() => buildBuiltInSlashGhostSuggestions(), []);
 	const extraSlashContext = useMemo(
 		() => [
 			...builtInSlashGhosts,
@@ -142,7 +119,7 @@ export function CommandInput({
 	useEffect(() => {
 		if (injectedText && injectedText !== lastInjectedRef.current) {
 			lastInjectedRef.current = injectedText;
-			setValue((prev) => (prev ? prev + " " + injectedText : injectedText));
+			setValue((prev) => (prev ? `${prev} ${injectedText}` : injectedText));
 		}
 	}, [injectedText]);
 
@@ -238,13 +215,7 @@ export function CommandInput({
 			onSubmit(input);
 			setValue("");
 		},
-		[
-			onSubmit,
-			onSlashCommand,
-			allowEmptySubmit,
-			slashRegistryEntries,
-			slashByToken,
-		],
+		[onSubmit, onSlashCommand, allowEmptySubmit, slashRegistryEntries, slashByToken],
 	);
 
 	// Get current step index
@@ -274,10 +245,8 @@ export function CommandInput({
 
 				const stats = [];
 				if (stepCount > 0) stats.push(`step ${stepCount}`);
-				if (toolCount > 0)
-					stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
-				if (totalTokens > 0)
-					stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
+				if (toolCount > 0) stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
+				if (totalTokens > 0) stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
 
 				return { label, stats };
 			})()
@@ -310,9 +279,7 @@ export function CommandInput({
 				<Box>
 					<TextInput
 						value={value}
-						onChange={(v) =>
-							setValue(transformInputValue ? transformInputValue(v) : v)
-						}
+						onChange={(v) => setValue(transformInputValue ? transformInputValue(v) : v)}
 						onSubmit={handleSubmit}
 						placeholder={
 							isProcessing
@@ -324,9 +291,7 @@ export function CommandInput({
 					/>
 
 					{/* Ghost suggestion text */}
-					{!isProcessing && isVisible && suggestion && (
-						<MutedText>{suggestion.text}</MutedText>
-					)}
+					{!isProcessing && isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
 				</Box>
 			</Box>
 
@@ -342,10 +307,7 @@ export function CommandInput({
 
 			{/* Slash command help */}
 			{!isProcessing && showSlashHelp && (
-				<SlashCommandHelp
-					filter={value.trimStart().slice(1)}
-					entries={slashRegistryEntries}
-				/>
+				<SlashCommandHelp filter={value.trimStart().slice(1)} entries={slashRegistryEntries} />
 			)}
 		</Box>
 	);
@@ -403,9 +365,7 @@ function SlashCommandHelp({
 	entries: SlashRegistryEntry[];
 }) {
 	const f = filter.toLowerCase();
-	const filtered = entries.filter((entry) =>
-		entry.name.toLowerCase().startsWith(f),
-	);
+	const filtered = entries.filter((entry) => entry.name.toLowerCase().startsWith(f));
 
 	const combined = filtered.map((entry) => ({
 		key: `${entry.kind}:${entry.token}`,
@@ -416,13 +376,7 @@ function SlashCommandHelp({
 	if (combined.length === 0) return null;
 
 	return (
-		<Box
-			flexDirection="column"
-			borderStyle="round"
-			borderColor="blue"
-			paddingX={1}
-			marginTop={1}
-		>
+		<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={1} marginTop={1}>
 			<MutedText>Commands:</MutedText>
 			{combined.slice(0, 14).map((row) => (
 				<Box key={row.key}>
@@ -438,10 +392,7 @@ function SlashCommandHelp({
 // Minimal Command Input
 // ============================================
 
-export function MinimalCommandInput({
-	onSubmit,
-	isProcessing,
-}: CommandInputProps) {
+export function MinimalCommandInput({ onSubmit, isProcessing }: CommandInputProps) {
 	const [value, setValue] = useState("");
 
 	const handleSubmit = (input: string) => {
@@ -483,10 +434,7 @@ interface MultiLineInputProps {
 	isProcessing: boolean;
 }
 
-export function MultiLineInput({
-	onSubmit,
-	isProcessing,
-}: MultiLineInputProps) {
+export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) {
 	const [lines, setLines] = useState<string[]>([""]);
 	const [currentLine, setCurrentLine] = useState(0);
 
@@ -513,10 +461,7 @@ interface CommandPaletteProps {
 	suggestions?: string[];
 }
 
-export function CommandPalette({
-	onSubmit,
-	suggestions = [],
-}: CommandPaletteProps) {
+export function CommandPalette({ onSubmit, suggestions = [] }: CommandPaletteProps) {
 	const [value, setValue] = useState("");
 	const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -526,9 +471,7 @@ export function CommandPalette({
 
 	useInput((input, key) => {
 		if (key.downArrow) {
-			setSelectedIndex((prev) =>
-				Math.min(prev + 1, filteredSuggestions.length - 1),
-			);
+			setSelectedIndex((prev) => Math.min(prev + 1, filteredSuggestions.length - 1));
 		} else if (key.upArrow) {
 			setSelectedIndex((prev) => Math.max(prev - 1, 0));
 		}
@@ -536,12 +479,7 @@ export function CommandPalette({
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
-			<Box
-				borderStyle="round"
-				borderColor="cyan"
-				paddingX={1}
-				flexDirection="column"
-			>
+			<Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
 				<Box>
 					<Label color="cyan">{"\u276F"} </Label>
 					<TextInput
@@ -625,14 +563,10 @@ export function getSlashCommands() {
 export function isSlashCommand(input: string): boolean {
 	if (!input.startsWith("/")) return false;
 	const cmdName = input.slice(1).split(/\s+/)[0].toLowerCase();
-	return getBuiltInSlashCommands().some(
-		(c) => c.name === cmdName || c.aliases.includes(cmdName),
-	);
+	return getBuiltInSlashCommands().some((c) => c.name === cmdName || c.aliases.includes(cmdName));
 }
 
-export function parseSlashCommand(
-	input: string,
-): { command: SlashCommand; args: string[] } | null {
+export function parseSlashCommand(input: string): { command: SlashCommand; args: string[] } | null {
 	if (!input.startsWith("/")) return null;
 
 	const parts = input.slice(1).split(/\s+/);

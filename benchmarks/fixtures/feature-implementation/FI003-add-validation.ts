@@ -13,19 +13,19 @@
 
 // Current: No validation
 interface UserInput {
-  name: string;
-  email: string;
-  age: number;
-  preferences?: {
-    theme: "light" | "dark";
-    notifications: boolean;
-  };
-  tags?: string[];
+	name: string;
+	email: string;
+	age: number;
+	preferences?: {
+		theme: "light" | "dark";
+		notifications: boolean;
+	};
+	tags?: string[];
 }
 
 function createUser(input: UserInput): void {
-  // No validation - just assumes input is correct
-  console.log("Creating user:", input);
+	// No validation - just assumes input is correct
+	console.log("Creating user:", input);
 }
 
 // TODO: Implement schema validation system

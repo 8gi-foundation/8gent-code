@@ -15,17 +15,14 @@
  * select({ a: 1, b: 2, c: 3 }, ['a', 'c'])
  * // { a: 1, c: 3 }
  */
-export function select<T extends object, K extends keyof T>(
-  obj: T,
-  fields: K[],
-): Pick<T, K> {
-  const result = {} as Pick<T, K>;
-  for (const key of fields) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      result[key] = obj[key];
-    }
-  }
-  return result;
+export function select<T extends object, K extends keyof T>(obj: T, fields: K[]): Pick<T, K> {
+	const result = {} as Pick<T, K>;
+	for (const key of fields) {
+		if (Object.prototype.hasOwnProperty.call(obj, key)) {
+			result[key] = obj[key];
+		}
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,25 +38,22 @@ export function select<T extends object, K extends keyof T>(
  * selectDeep({ user: { name: 'Alice', age: 30 }, id: 1 }, ['user.name', 'id'])
  * // { 'user.name': 'Alice', id: 1 }
  */
-export function selectDeep(
-  obj: Record<string, unknown>,
-  paths: string[],
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const path of paths) {
-    const parts = path.split('.');
-    let cursor: unknown = obj;
-    for (const part of parts) {
-      if (cursor !== null && typeof cursor === 'object') {
-        cursor = (cursor as Record<string, unknown>)[part];
-      } else {
-        cursor = undefined;
-        break;
-      }
-    }
-    result[path] = cursor;
-  }
-  return result;
+export function selectDeep(obj: Record<string, unknown>, paths: string[]): Record<string, unknown> {
+	const result: Record<string, unknown> = {};
+	for (const path of paths) {
+		const parts = path.split(".");
+		let cursor: unknown = obj;
+		for (const part of parts) {
+			if (cursor !== null && typeof cursor === "object") {
+				cursor = (cursor as Record<string, unknown>)[part];
+			} else {
+				cursor = undefined;
+				break;
+			}
+		}
+		result[path] = cursor;
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,18 +67,15 @@ export function selectDeep(
  * exclude({ a: 1, b: 2, c: 3 }, ['b'])
  * // { a: 1, c: 3 }
  */
-export function exclude<T extends object, K extends keyof T>(
-  obj: T,
-  fields: K[],
-): Omit<T, K> {
-  const excluded = new Set(fields as PropertyKey[]);
-  const result = {} as Omit<T, K>;
-  for (const key of Object.keys(obj) as Array<keyof T>) {
-    if (!excluded.has(key as PropertyKey)) {
-      (result as Record<PropertyKey, unknown>)[key as PropertyKey] = obj[key];
-    }
-  }
-  return result;
+export function exclude<T extends object, K extends keyof T>(obj: T, fields: K[]): Omit<T, K> {
+	const excluded = new Set(fields as PropertyKey[]);
+	const result = {} as Omit<T, K>;
+	for (const key of Object.keys(obj) as Array<keyof T>) {
+		if (!excluded.has(key as PropertyKey)) {
+			(result as Record<PropertyKey, unknown>)[key as PropertyKey] = obj[key];
+		}
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,15 +91,15 @@ export function exclude<T extends object, K extends keyof T>(
  * // { name: 'Alice', age: 30 }
  */
 export function rename<T extends object>(
-  obj: T,
-  map: Partial<Record<keyof T, string>>,
+	obj: T,
+	map: Partial<Record<keyof T, string>>,
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(obj) as Array<keyof T>) {
-    const newKey = (map[key] as string | undefined) ?? (key as string);
-    result[newKey] = obj[key];
-  }
-  return result;
+	const result: Record<string, unknown> = {};
+	for (const key of Object.keys(obj) as Array<keyof T>) {
+		const newKey = (map[key] as string | undefined) ?? (key as string);
+		result[newKey] = obj[key];
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,14 +115,14 @@ export function rename<T extends object>(
  * // { foobar: 1, bazqux: 2 }
  */
 export function mapKeys<T extends object>(
-  obj: T,
-  fn: (key: string) => string,
+	obj: T,
+	fn: (key: string) => string,
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(obj)) {
-    result[fn(key)] = (obj as Record<string, unknown>)[key];
-  }
-  return result;
+	const result: Record<string, unknown> = {};
+	for (const key of Object.keys(obj)) {
+		result[fn(key)] = (obj as Record<string, unknown>)[key];
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,12 +137,12 @@ export function mapKeys<T extends object>(
  * // { a: 2, b: 4, c: 6 }
  */
 export function mapValues<T extends object, V>(
-  obj: T,
-  fn: (value: T[keyof T], key: string) => V,
+	obj: T,
+	fn: (value: T[keyof T], key: string) => V,
 ): Record<string, V> {
-  const result: Record<string, V> = {};
-  for (const key of Object.keys(obj)) {
-    result[key] = fn((obj as Record<string, T[keyof T]>)[key], key);
-  }
-  return result;
+	const result: Record<string, V> = {};
+	for (const key of Object.keys(obj)) {
+		result[key] = fn((obj as Record<string, T[keyof T]>)[key], key);
+	}
+	return result;
 }
