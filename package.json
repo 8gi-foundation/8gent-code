@@ -45,6 +45,7 @@
 		"benchmark:swebench": "bun run benchmarks/swebench/run.ts",
 		"benchmark:loop": "bun run benchmarks/computer-use-bakeoff.ts",
 		"benchmark:bakeoff": "bun run benchmarks/computer-use-bakeoff.ts",
+		"benchmark:multi": "bun run benchmarks/autoresearch/multi-model-harness.ts",
 		"audit": "bun run packages/audit/cli.ts",
 		"demo": "bun run scripts/demo-savings.ts",
 		"harness": "bun run packages/harness-cli/index.ts",
