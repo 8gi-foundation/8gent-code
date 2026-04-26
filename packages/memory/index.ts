@@ -111,6 +111,19 @@ export { enqueue, acquireLease, completeLease, failLease, pendingCount, type Job
 export { createSharedMemoryBus, getSharedMemoryBus, resetSharedMemoryBus, type SharedMemoryBus, type MemorySource, type ScopedMemoryOptions, type ConversationEntry } from "./bus.js";
 export { lintMemory, lintReportToMarkdown, type LintReport, type OrphanEntity, type StaleMemory, type BrokenReference } from "./lint.js";
 export { WikiGenerator, slugify, type WikiPage, type WikiIndex, type WikiLog } from "./wiki.js";
+export {
+  ComputerUseTraceStore,
+  defaultTraceDbPath,
+  defaultTracesDir,
+  type TraceOutcome,
+  type PerceptionKind,
+  type TraceStartParams,
+  type TraceCloseParams,
+  type AppendStepParams,
+  type TraceRow,
+  type TraceStepRow,
+  type FullTrace,
+} from "./computer-use-traces.js";
 
 export type {
   PromotionResult,
