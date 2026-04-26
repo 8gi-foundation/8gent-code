@@ -17,6 +17,9 @@ const traceId = store.startTrace({
 	sessionId,
 	channel: "computer",
 	intent: "Open Calculator and type 2+2",
+	originatingChannel: "telegram",
+	dispatchSource: "telegram-bot:smoke-test-user",
+	dispatchId: `disp-${Date.now()}`,
 });
 
 const sessionDir = path.join(tracesDir, sessionId);
@@ -66,6 +69,12 @@ if (!recent.find((t) => t.id === traceId))
 const filteredOut = store.listRecent(5, "telegram");
 if (filteredOut.find((t) => t.id === traceId))
 	errors.push("channel filter leaked trace");
+
+if (full?.originatingChannel !== "telegram")
+	errors.push("originatingChannel not persisted");
+if (full?.dispatchSource !== "telegram-bot:smoke-test-user")
+	errors.push("dispatchSource not persisted");
+if (!full?.dispatchId) errors.push("dispatchId not persisted");
 
 console.log("trace id:", traceId);
 console.log("steps captured:", full?.steps.length ?? 0);
