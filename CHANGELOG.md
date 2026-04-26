@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Telegram multi-step task surface** (#1906, #1913) - the @eaborobot bot now runs multi-tool agent plans behind a single live-edited progress message instead of blocking single-shot prompts. New modules under `packages/telegram-bot/`: `task-runner` (lifecycle), `mobile-formatter` (concise tool summaries + chunking), `file-sender` (`sendDocument`/`sendPhoto` for screenshots and code files), `keyboards` (Cancel / Retry / Continue / Approve), `session-store` (per-chat persistence at `~/.8gent/telegram-sessions.json`), `daemon-client` (WebSocket wrapper with reconnect), and `bridge-adapter` (event glue). `packages/daemon/telegram-bridge.ts` opts into the new path by default; set `EIGHT_TG_LEGACY=1` to fall back. New `/cancel` command stops the in-flight task. 38 unit tests covering the 5-step end-to-end flow with a fake socket. See `docs/specs/TELEGRAM-MULTISTEP.md`.
+
 ### Fixed
 
 - **Final CJK comment cleanup in `packages/tools/option.ts`** - leftover `the值` in a JSDoc comment for `None.flatMap()`, last trace of the merge corruption that #1893 cleaned up in identifiers. `bun run typecheck` and `bun test packages/ apps/` (243 + 16 pass, 0 fail) confirm the repo-health work tracked in #1883 is complete.
