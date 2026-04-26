@@ -19,12 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import {
-	getAllSkills,
-	getDb,
-	getEvolutionSummary,
-	resetDb,
-} from "./evolution-db";
+import { getAllSkills, getDb, getEvolutionSummary, resetDb } from "./evolution-db";
 import {
 	type IterationResultLike,
 	recordIterationOutcome,
@@ -64,9 +59,7 @@ describe("recordIterationOutcome", () => {
 
 		const db = getDb();
 		const errors = db
-			.prepare(
-				"SELECT subject, value FROM evolution_events WHERE event_type = 'error_encountered'",
-			)
+			.prepare("SELECT subject, value FROM evolution_events WHERE event_type = 'error_encountered'")
 			.all() as any[];
 		expect(errors.length).toBe(1);
 		expect(errors[0].subject).toBe("FOO");
