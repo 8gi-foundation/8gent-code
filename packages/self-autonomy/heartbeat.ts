@@ -7,6 +7,8 @@
 
 import { EventEmitter } from "node:events";
 import { AutoGit, SelfAutonomy, SelfHeal, SessionMemory } from "./index";
+import { reflect } from "./reflection.js";
+import type { SessionData } from "./reflection.js";
 
 // ============================================
 // Types
@@ -21,6 +23,11 @@ export interface HeartbeatConfig {
 	memoryInterval: number;
 	/** Interval in ms for self-modify check */
 	modifyInterval: number;
+	/**
+	 * Interval in ms between reflection passes.
+	 * 0 disables reflection (default - keeps existing tests unaffected).
+	 */
+	reflectionInterval: number;
 	/** Working directory */
 	workingDirectory: string;
 	/** Verbose logging */
@@ -50,6 +57,11 @@ export interface HeartbeatStatus {
 		lastRun: Date | null;
 		pendingFixes: number;
 	};
+	reflection: {
+		running: boolean;
+		lastRun: Date | null;
+		reflectionsCompleted: number;
+	};
 }
 
 export type HeartbeatEvent =
@@ -62,7 +74,8 @@ export type HeartbeatEvent =
 	| "memory:prune"
 	| "modify:attempt"
 	| "modify:success"
-	| "modify:fail";
+	| "modify:fail"
+	| "reflection:complete";
 
 // ============================================
 // Heartbeat Agents
@@ -76,6 +89,7 @@ export class HeartbeatAgents extends EventEmitter {
 	private healTimer: NodeJS.Timeout | null = null;
 	private memoryTimer: NodeJS.Timeout | null = null;
 	private modifyTimer: NodeJS.Timeout | null = null;
+	private reflectionTimer: NodeJS.Timeout | null = null;
 
 	private status: HeartbeatStatus;
 	private running = false;
@@ -83,6 +97,14 @@ export class HeartbeatAgents extends EventEmitter {
 	// Track errors for self-heal
 	private recentErrors: Array<{ error: string; timestamp: number }> = [];
 	private pendingModifications: Array<{ file: string; reason: string }> = [];
+
+	// Reflection accumulator - populated by reportToolCall / reportError
+	private toolsUsed: string[] = [];
+	private successfulCalls = 0;
+	private totalCalls = 0;
+	private notes: string[] = [];
+	private reflectionSessionId: string = `heartbeat_${Date.now()}`;
+	private reflectionsCompleted = 0;
 
 	constructor(config: Partial<HeartbeatConfig> = {}) {
 		super();
@@ -92,6 +114,7 @@ export class HeartbeatAgents extends EventEmitter {
 			healInterval: config.healInterval ?? 3000, // 3s - check for error patterns
 			memoryInterval: config.memoryInterval ?? 10000, // 10s - sync memory
 			modifyInterval: config.modifyInterval ?? 15000, // 15s - check for self-modify needs
+			reflectionInterval: config.reflectionInterval ?? 0, // 0 disables - opt-in
 			workingDirectory: config.workingDirectory ?? process.cwd(),
 			verbose: config.verbose ?? false,
 		};
@@ -116,6 +139,7 @@ export class HeartbeatAgents extends EventEmitter {
 			},
 			memory: { running: false, lastRun: null, contextAge: 0 },
 			modify: { running: false, lastRun: null, pendingFixes: 0 },
+			reflection: { running: false, lastRun: null, reflectionsCompleted: 0 },
 		};
 	}
 
@@ -340,6 +364,68 @@ export class HeartbeatAgents extends EventEmitter {
 	}
 
 	// ============================================
+	// Reflection Heartbeat
+	// ============================================
+
+	/**
+	 * Report a tool call so the next reflection has data to work with.
+	 * Cheap; called from the agent loop on every tool invocation.
+	 */
+	reportToolCall(toolName: string, success: boolean): void {
+		this.toolsUsed.push(toolName);
+		this.totalCalls += 1;
+		if (success) this.successfulCalls += 1;
+	}
+
+	/**
+	 * Append a free-form note that will be picked up by the next reflection.
+	 * Use prefixes like "PATTERN:", "SKILL:", "LEARNED:" to be parsed by reflect().
+	 */
+	reportNote(note: string): void {
+		this.notes.push(note);
+	}
+
+	/**
+	 * Run reflection now using whatever has been accumulated since last call.
+	 * Resets the accumulator on success. Returns the persisted reflection
+	 * or null if there was nothing to reflect on.
+	 */
+	triggerReflection() {
+		if (this.totalCalls === 0 && this.notes.length === 0 && this.recentErrors.length === 0) {
+			return null;
+		}
+		const data: SessionData = {
+			sessionId: `${this.reflectionSessionId}_${this.reflectionsCompleted}`,
+			toolsUsed: [...this.toolsUsed],
+			errors: this.recentErrors.map((e) => e.error),
+			notes: [...this.notes],
+			successfulCalls: this.successfulCalls,
+			totalCalls: this.totalCalls,
+		};
+		try {
+			const reflection = reflect(data);
+			this.reflectionsCompleted += 1;
+			this.status.reflection.lastRun = new Date();
+			this.status.reflection.reflectionsCompleted = this.reflectionsCompleted;
+			// Reset session-scoped counters; keep recentErrors so heal still sees them.
+			this.toolsUsed = [];
+			this.successfulCalls = 0;
+			this.totalCalls = 0;
+			this.notes = [];
+			this.emit("reflection:complete", { reflection });
+			this.log("reflection", `Reflected on session ${data.sessionId}`);
+			return reflection;
+		} catch (err) {
+			// Silently handle - reflection should never crash the loop
+			return null;
+		}
+	}
+
+	private async reflectionHeartbeat(): Promise<void> {
+		this.triggerReflection();
+	}
+
+	// ============================================
 	// Control
 	// ============================================
 
@@ -360,6 +446,15 @@ export class HeartbeatAgents extends EventEmitter {
 		this.status.memory.running = true;
 		this.status.modify.running = true;
 
+		// Reflection is opt-in: only start the timer if interval > 0.
+		if (this.config.reflectionInterval > 0) {
+			this.reflectionTimer = setInterval(
+				() => this.reflectionHeartbeat(),
+				this.config.reflectionInterval,
+			);
+			this.status.reflection.running = true;
+		}
+
 		this.log("heartbeat", "All agents started");
 		this.emit("started");
 	}
@@ -375,14 +470,17 @@ export class HeartbeatAgents extends EventEmitter {
 		if (this.healTimer) clearInterval(this.healTimer);
 		if (this.memoryTimer) clearInterval(this.memoryTimer);
 		if (this.modifyTimer) clearInterval(this.modifyTimer);
+		if (this.reflectionTimer) clearInterval(this.reflectionTimer);
 
 		this.gitTimer = null;
 		this.healTimer = null;
 		this.memoryTimer = null;
 		this.modifyTimer = null;
+		this.reflectionTimer = null;
 
 		this.status.git.running = false;
 		this.status.heal.running = false;
+		this.status.reflection.running = false;
 		this.status.memory.running = false;
 		this.status.modify.running = false;
 

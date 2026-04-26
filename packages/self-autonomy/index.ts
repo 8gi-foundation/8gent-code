@@ -667,6 +667,15 @@ export {
 } from "./learned-skills.js";
 export type { LearnedSkill, SessionReflection } from "./evolution-db.js";
 
+// Re-export end-to-end improvement loop wiring
+export {
+	recordIterationOutcome,
+	runReflectionBetweenIterations,
+	type BenchmarkOutcome,
+	type IterationOutcome,
+	type IterationOutcomeReport,
+} from "./improvement-loop.js";
+
 // Re-export skill-as-experiment loop (issue #1792)
 export { compoundSkillWithExperiment } from "../skills/compound.js";
 export {

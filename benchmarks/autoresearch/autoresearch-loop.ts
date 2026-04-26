@@ -13,6 +13,10 @@ import { dirname, join, resolve } from "node:path";
 
 import type { BenchmarkDefinition, BenchmarkRun, TokenUsage } from "../types";
 
+import {
+	type BenchmarkOutcome,
+	recordIterationOutcome,
+} from "../../packages/self-autonomy/improvement-loop";
 import { agenticBenchmarks } from "../categories/agentic/benchmarks";
 import { battleTestBenchmarks } from "../categories/battle-test/benchmarks";
 import { battleTestProBenchmarks } from "../categories/battle-test/benchmarks-pro";
@@ -646,6 +650,7 @@ async function main(): Promise<void> {
 		const tokens: Record<string, number> = {};
 		const durations: Record<string, number> = {};
 		const newMutations: string[] = [];
+		const mutationsByBenchmark: Record<string, string[]> = {};
 		let totalScore = 0;
 		let iterTokens = 0;
 		let iterDuration = 0;
@@ -670,6 +675,9 @@ async function main(): Promise<void> {
 
 				// Analyze failures and derive mutations
 				const muts = analyzeAndMutate(benchmark, run);
+				if (muts.length > 0) {
+					mutationsByBenchmark[benchmark.id] = muts;
+				}
 				for (const m of muts) {
 					newMutations.push(m);
 					addMutation(m);
@@ -704,6 +712,34 @@ async function main(): Promise<void> {
 		state.history.push(iterResult);
 		state.lastRunAt = new Date().toISOString();
 		saveState(state);
+
+		// ── Persist outcome to evolution DB (issue #1911) ─────────────
+		// Failures land as error_encountered events; improvements persist
+		// as learned skills. Wrapped so a DB error never breaks the loop.
+		try {
+			const prev = state.history[state.history.length - 2];
+			const outcomes: BenchmarkOutcome[] = benchmarks.map((b) => ({
+				benchmarkId: b.id,
+				category: b.category,
+				score: scores[b.id] ?? 0,
+				previousScore: prev?.scores[b.id],
+				mutations: mutationsByBenchmark[b.id] ?? [],
+				failingPrompt: (scores[b.id] ?? 0) < PASS_THRESHOLD ? b.prompt : undefined,
+			}));
+			const report = recordIterationOutcome({
+				sessionId: `autoresearch_${state.startedAt}_iter${iter + 1}`,
+				iteration: iter + 1,
+				prevAvgScore: prev?.avgScore,
+				currAvgScore: avgScore,
+				passThreshold: PASS_THRESHOLD,
+				benchmarks: outcomes,
+			});
+			log(
+				`  💾 Evolution: ${report.improvedCount} improved, ${report.regressedCount} regressed, ${report.failedCount} failed, ${report.skillsLearned.length} new skills`,
+			);
+		} catch (err: any) {
+			log(`  ⚠ Evolution DB write failed: ${err.message}`);
+		}
 
 		// ── Iteration Summary ─────────────────────────────────────────
 		log(`\n  ── Iteration ${iter + 1} Summary ──`);
