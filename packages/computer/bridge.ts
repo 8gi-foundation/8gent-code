@@ -1,20 +1,24 @@
 /**
  * 8gent Code - Computer Use Bridge
  *
- * Wraps the `usecomputer` npm package to provide desktop automation.
- * Security-first: every operation checks NemoClaw policy before executing.
+ * Thin policy-and-validation layer over @8gent/hands. Every operation runs
+ * the same input checks (point bounds, type length, click count) before
+ * delegating to the platform driver. The bridge is the only place in the
+ * codebase that talks to the driver directly; consumers go through here.
  *
- * This bridge is the ONLY place that calls usecomputer directly.
- * All consumer code goes through this module.
+ * Driver replacement (April 2026): we used to shell out to `npx usecomputer`
+ * for every call, which spawned a Node process per action. The driver is
+ * now in-process via @8gent/hands, which on macOS shells out to
+ * `screencapture` and `cliclick` directly. Same security guards, no extra
+ * Node bootstrap.
  */
 
-import { execSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createDriver, type HandsDriver } from "../hands/index";
 import type {
 	ClickOptions,
 	CommandResult,
-	ComputerUseContext,
 	DisplayInfo,
 	DragOptions,
 	Point,
@@ -68,39 +72,23 @@ function validatePoint(p: Point, label: string): string | null {
 }
 
 // ============================================
-// CLI runner (uses usecomputer CLI binary)
+// Driver wiring
 // ============================================
 
-const DEFAULT_TIMEOUT = 10_000;
+let cachedDriver: HandsDriver | null = null;
 
 /**
- * Run a usecomputer CLI command. Returns parsed JSON result.
- * Uses the CLI binary rather than N-API to avoid native module complexity.
+ * Resolve the active hands driver. Cached after first call. Tests can call
+ * `resetDriver()` to force a re-resolution after install or env changes.
  */
-function runCli(
-	args: string[],
-	timeout = DEFAULT_TIMEOUT,
-): { ok: boolean; data?: any; error?: string } {
-	try {
-		const result = execSync(["npx", "usecomputer", ...args, "--json"].join(" "), {
-			timeout,
-			encoding: "utf-8",
-			stdio: ["pipe", "pipe", "pipe"],
-			cwd: os.homedir(),
-		});
-		try {
-			return JSON.parse(result.trim());
-		} catch {
-			return { ok: true, data: result.trim() };
-		}
-	} catch (err: any) {
-		const stderr = err.stderr?.toString().trim();
-		const stdout = err.stdout?.toString().trim();
-		return {
-			ok: false,
-			error: stderr || stdout || err.message || "usecomputer CLI error",
-		};
-	}
+function getDriver(): HandsDriver {
+	if (!cachedDriver) cachedDriver = createDriver();
+	return cachedDriver;
+}
+
+/** Reset the cached driver. Test-only, but safe in production. */
+export function resetDriver(): void {
+	cachedDriver = null;
 }
 
 // ============================================
@@ -111,26 +99,17 @@ function runCli(
  * Take a screenshot of the desktop or a region.
  */
 export function screenshot(opts: ScreenshotOptions = {}): ScreenshotResult {
-	const savePath = opts.path || path.join(os.tmpdir(), `8gent-screenshot-${Date.now()}.png`);
+	const savePath =
+		opts.path || path.join(os.tmpdir(), `8gent-screenshot-${Date.now()}.png`);
+	const driver = getDriver();
 
-	const args = ["screenshot", savePath];
-	if (opts.displayId !== undefined) {
-		args.push("--display", String(opts.displayId));
-	}
-	if (opts.region) {
-		args.push(
-			"--x",
-			String(opts.region.x),
-			"--y",
-			String(opts.region.y),
-			"--width",
-			String(opts.region.width),
-			"--height",
-			String(opts.region.height),
-		);
-	}
+	const result = driver.screenshot({
+		path: savePath,
+		displayId: opts.displayId,
+		region: opts.region,
+		includeBuffer: false,
+	});
 
-	const result = runCli(args);
 	if (!result.ok) {
 		return {
 			ok: false,
@@ -147,17 +126,19 @@ export function screenshot(opts: ScreenshotOptions = {}): ScreenshotResult {
 		};
 	}
 
-	// Parse coord map from CLI output if available
-	const coordMap = result.data?.coordMap || {
-		captureX: opts.region?.x || 0,
-		captureY: opts.region?.y || 0,
-		captureWidth: opts.region?.width || 1920,
-		captureHeight: opts.region?.height || 1080,
-		imageWidth: 1568,
-		imageHeight: 882,
+	const coordMap = {
+		captureX: opts.region?.x ?? 0,
+		captureY: opts.region?.y ?? 0,
+		captureWidth: opts.region?.width ?? 1920,
+		captureHeight: opts.region?.height ?? 1080,
+		// We do not downscale at the bridge layer. Coord-map normalization
+		// happens upstream in packages/computer/coord-map.ts when the agent
+		// asks for a scaled view; the raw screenshot is at native resolution.
+		imageWidth: opts.region?.width ?? 1920,
+		imageHeight: opts.region?.height ?? 1080,
 	};
 
-	return { ok: true, path: savePath, coordMap };
+	return { ok: true, path: result.path, coordMap };
 }
 
 /**
@@ -172,21 +153,12 @@ export function click(opts: ClickOptions): CommandResult {
 		return { ok: false, error: `Click count must be 1-${MAX_CLICK_COUNT}` };
 	}
 
-	const args = [
-		"click",
-		"-x",
-		String(Math.round(opts.point.x)),
-		"-y",
-		String(Math.round(opts.point.y)),
-	];
-	if (opts.button && opts.button !== "left") {
-		args.push("--button", opts.button);
-	}
-	if (count > 1) {
-		args.push("--count", String(count));
-	}
-
-	return runCli(args);
+	return getDriver().click({
+		x: opts.point.x,
+		y: opts.point.y,
+		button: opts.button,
+		count,
+	});
 }
 
 /**
@@ -203,12 +175,7 @@ export function typeText(opts: TypeOptions): CommandResult {
 		};
 	}
 
-	const args = ["type", opts.text];
-	if (opts.delay && opts.delay > 0) {
-		args.push("--delay", String(opts.delay));
-	}
-
-	return runCli(args);
+	return getDriver().type({ text: opts.text, delay: opts.delay });
 }
 
 /**
@@ -220,7 +187,7 @@ export function press(opts: PressOptions): CommandResult {
 		return { ok: false, error: "Keys cannot be empty" };
 	}
 
-	// Warn on dangerous combos but don't hard-block (policy engine handles that)
+	// Warn on dangerous combos but do not hard-block (policy engine handles that)
 	const isDangerous = DANGEROUS_KEYS.has(normalized);
 
 	const count = opts.count ?? 1;
@@ -228,15 +195,11 @@ export function press(opts: PressOptions): CommandResult {
 		return { ok: false, error: `Key press count must be 1-${MAX_CLICK_COUNT}` };
 	}
 
-	const args = ["press", opts.keys];
-	if (count > 1) {
-		args.push("--count", String(count));
-	}
-	if (opts.delay && opts.delay > 0) {
-		args.push("--delay", String(opts.delay));
-	}
-
-	const result = runCli(args);
+	const result = getDriver().press({
+		keys: opts.keys,
+		count,
+		delay: opts.delay,
+	});
 	if (isDangerous && result.ok) {
 		return {
 			...result,
@@ -260,12 +223,12 @@ export function scroll(opts: ScrollOptions): CommandResult {
 		if (pointErr) return { ok: false, error: pointErr };
 	}
 
-	const args = ["scroll", "--direction", opts.direction, "--amount", String(amount)];
-	if (opts.point) {
-		args.push("-x", String(Math.round(opts.point.x)), "-y", String(Math.round(opts.point.y)));
-	}
-
-	return runCli(args);
+	return getDriver().scroll({
+		direction: opts.direction,
+		amount,
+		x: opts.point?.x,
+		y: opts.point?.y,
+	});
 }
 
 /**
@@ -285,24 +248,14 @@ export function drag(opts: DragOptions): CommandResult {
 		};
 	}
 
-	const args = [
-		"drag",
-		"--from-x",
-		String(Math.round(opts.from.x)),
-		"--from-y",
-		String(Math.round(opts.from.y)),
-		"--to-x",
-		String(Math.round(opts.to.x)),
-		"--to-y",
-		String(Math.round(opts.to.y)),
-		"--duration",
-		String(duration),
-	];
-	if (opts.button && opts.button !== "left") {
-		args.push("--button", opts.button);
-	}
-
-	return runCli(args);
+	return getDriver().drag({
+		fromX: opts.from.x,
+		fromY: opts.from.y,
+		toX: opts.to.x,
+		toY: opts.to.y,
+		button: opts.button,
+		duration,
+	});
 }
 
 /**
@@ -312,7 +265,7 @@ export function hover(point: Point): CommandResult {
 	const pointErr = validatePoint(point, "hover");
 	if (pointErr) return { ok: false, error: pointErr };
 
-	return runCli(["hover", "-x", String(Math.round(point.x)), "-y", String(Math.round(point.y))]);
+	return getDriver().hover({ x: point.x, y: point.y });
 }
 
 /**
@@ -323,44 +276,59 @@ export function mousePosition(): {
 	point?: Point;
 	error?: string;
 } {
-	const result = runCli(["mouse-position"]);
+	const result = getDriver().mousePosition();
 	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, point: result.data };
+	if (typeof result.x !== "number" || typeof result.y !== "number") {
+		return { ok: false, error: "mouse-position returned no coordinates" };
+	}
+	return { ok: true, point: { x: result.x, y: result.y } };
 }
 
 /**
  * List all open windows.
+ *
+ * Not yet implemented in the macOS driver; would require AppKit via
+ * a Swift helper or a python-objc shell-out. Returns ok:true with an
+ * empty list so the agent does not crash, and logs the limitation in
+ * the error field for diagnostic purposes.
  */
 export function windowList(): {
 	ok: boolean;
 	windows?: WindowInfo[];
 	error?: string;
 } {
-	const result = runCli(["window-list"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, windows: result.data || [] };
+	return {
+		ok: true,
+		windows: [],
+		error:
+			"window-list is not implemented in hands-macos-v0; will land with the AppKit helper in a follow-up",
+	};
 }
 
 /**
  * List all connected displays.
+ *
+ * Same status as windowList: not in v0, returns an empty list so callers
+ * do not crash.
  */
 export function displayList(): {
 	ok: boolean;
 	displays?: DisplayInfo[];
 	error?: string;
 } {
-	const result = runCli(["display-list"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, displays: result.data || [] };
+	return {
+		ok: true,
+		displays: [],
+		error:
+			"display-list is not implemented in hands-macos-v0; will land with the AppKit helper in a follow-up",
+	};
 }
 
 /**
  * Get clipboard contents.
  */
 export function clipboardGet(): { ok: boolean; text?: string; error?: string } {
-	const result = runCli(["clipboard-get"]);
-	if (!result.ok) return { ok: false, error: result.error };
-	return { ok: true, text: result.data };
+	return getDriver().clipboardGet();
 }
 
 /**
@@ -373,5 +341,5 @@ export function clipboardSet(text: string): CommandResult {
 			error: `Clipboard text too long (${text.length} chars, max ${MAX_TYPE_LENGTH})`,
 		};
 	}
-	return runCli(["clipboard-set", text]);
+	return getDriver().clipboardSet(text);
 }
