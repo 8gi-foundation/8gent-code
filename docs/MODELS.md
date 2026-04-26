@@ -88,7 +88,27 @@ bun run packages/eight/scripts/smoke-apfel.ts --test-vision  # rejection path
 bun run packages/eight/scripts/smoke-qwen36.ts          # vision/tool tier
 bun run packages/eight/scripts/smoke-deepseek-v4.ts     # heavy cloud
 bun run packages/eight/scripts/smoke-failover-chain.ts  # resolver, no live calls
+bun run packages/eight/scripts/computer-use-suite.ts    # Phase 3 cua loop suite (issue #1867)
 ```
+
+## Vision prompt template
+
+Computer-use prompts go through `packages/eight/prompts/computer-use-vision.ts`.
+The template is tuned for the Qwen 3.6-27B vision/tool tier (default). The same
+text scaffolding works on the heavy cloud tier (DeepSeek V4-Flash, no vision):
+the runner calls `stripVisionParts()` to drop the image part and the model sees
+the perception summary as plain text plus a one-line "vision disabled" hint.
+
+What changes when the template is pointed at a non-Qwen vision model:
+- Image budget: tile arithmetic in `perception/screenshot.ts` assumes
+  512x512 tiles. Other vision models that use 384x384 or 768x768 tiles
+  need a tweak to `estimateScreenshotCost()`.
+- Tool-call format: the template assumes the chat-completions tool-call
+  shape used by Qwen 3.6 + DeepSeek V4. Models that emit tool calls in a
+  different shape need an adapter inside the LLM client, not the prompt.
+- Termination: the template requires the model to call `goal_complete` /
+  `goal_failed`. Models without reliable tool-call termination should be
+  wrapped with a regex parser in the loop (out of scope for v0).
 
 ## Adding a new model
 
