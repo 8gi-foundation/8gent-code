@@ -43,8 +43,7 @@ function makeInput(overrides: Partial<CreateSkillInput> = {}): CreateSkillInput 
 			{
 				input:
 					"TypeError: cannot read properties of undefined (reading 'name')\n  at /repo/user.ts:11:5",
-				output:
-					"error: TypeError reading 'name', file /repo/user.ts:11, framework lines dropped",
+				output: "error: TypeError reading 'name', file /repo/user.ts:11, framework lines dropped",
 			},
 		],
 		skillsRoot: tempRoot,
