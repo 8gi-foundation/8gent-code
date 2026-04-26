@@ -49,6 +49,7 @@ benchmark-results.json
 # 8gent local data (session-specific, not versioned)
 .8gent/context/
 .8gent/evolution.log
+.8gent/tenants/
 
 # But DO include skills and config:
 # .8gent/skills/*.md
