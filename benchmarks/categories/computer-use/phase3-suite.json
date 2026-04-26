@@ -1,0 +1,80 @@
+{
+  "category": "computer-use-phase3",
+  "version": "1",
+  "description": "End-to-end cua loop smoke for Phase 3 (issue #1867). Each task drives the perceive-decide-act loop with a deterministic mock LLM and asserts the final outcome plus the perception strategy. Headless, runs in CI.",
+  "tasks": [
+    {
+      "id": "P3-01",
+      "title": "Open app",
+      "goal": "Open the Finder application.",
+      "expect": {
+        "outcome": "goal_complete",
+        "minSteps": 1,
+        "calledTools": ["desktop_press", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-02",
+      "title": "Find file",
+      "goal": "Find the file 'README.md' inside the focused window.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_accessibility_tree", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-03",
+      "title": "Click button",
+      "goal": "Click the OK button in the active dialog.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_accessibility_tree", "desktop_click", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-04",
+      "title": "Screenshot region",
+      "goal": "Capture a screenshot of the desktop and report the path.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_screenshot", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-05",
+      "title": "Count items",
+      "goal": "Count the visible buttons in the focused window's accessibility tree.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_accessibility_tree", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-06",
+      "title": "Type into field",
+      "goal": "Type 'hello world' into the focused text field.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_accessibility_tree", "desktop_type", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-07",
+      "title": "Switch app",
+      "goal": "Switch to Safari.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_press", "goal_complete"]
+      }
+    },
+    {
+      "id": "P3-08",
+      "title": "Dismiss dialog",
+      "goal": "Press Escape to dismiss the open dialog.",
+      "expect": {
+        "outcome": "goal_complete",
+        "calledTools": ["desktop_press", "goal_complete"]
+      }
+    }
+  ]
+}

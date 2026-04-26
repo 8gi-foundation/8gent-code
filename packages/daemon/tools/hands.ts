@@ -33,6 +33,7 @@ import {
 	getToolDefinitions as getDesktopToolDefs,
 } from "../../computer";
 import { evaluatePolicy } from "../../permissions/policy-engine";
+import { dispatchAccessibilityTree } from "./accessibility-tree";
 
 export interface HandsToolCtx {
 	sessionId: string;
@@ -230,12 +231,7 @@ async function dispatch(tool: string, input: Record<string, unknown>): Promise<u
 			if (input.action === "remove") return desktopRemoveFromSafeList(String(input.app ?? ""));
 			return desktopLoadSafeList();
 		case "desktop_accessibility_tree":
-			// Driver-level a11y tree is not yet exposed in packages/computer; return a
-			// structured stub the agent can reason about until 8gent-hands lands.
-			return {
-				ok: false,
-				error: "accessibility_tree not yet available; use desktop_screenshot + desktop_windows",
-			};
+			return dispatchAccessibilityTree(input);
 		default:
 			throw new Error(`hands tool not implemented: ${tool}`);
 	}
