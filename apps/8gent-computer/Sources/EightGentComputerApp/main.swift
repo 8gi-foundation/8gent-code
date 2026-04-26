@@ -8,16 +8,12 @@ if args.contains("--headless") {
     if let idx = args.firstIndex(of: "--intent"), idx + 1 < args.count {
         intent = args[idx + 1]
     }
-    let payload: [String: Any] = [
-        "status": "noop",
-        "headless_phase": "scaffold",
-        "intent": intent
-    ]
-    if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-       let json = String(data: data, encoding: .utf8) {
-        print(json)
+    if intent.isEmpty {
+        FileHandle.standardError.write(Data("--headless requires --intent \"...\"\n".utf8))
+        exit(1)
     }
-    exit(0)
+    let code = HeadlessMode.run(intent: intent)
+    exit(code)
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
