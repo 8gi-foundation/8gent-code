@@ -16,10 +16,10 @@
  * Install:    pip install moshi && python3 -c "from huggingface_hub import snapshot_download; snapshot_download('kyutai/moshiko-pytorch-bf16')"
  */
 
-import { execSync } from "child_process";
-import { existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const MOSHI_HF_REPO = "kyutai/moshiko-pytorch-bf16";
 const MOSHI_HF_CACHE_PATH = join(

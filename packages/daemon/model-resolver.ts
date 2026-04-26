@@ -43,7 +43,7 @@ export async function resolveBestFreeModel(
 		"X-Title": "8gent Daemon",
 	};
 	if (apiKey) {
-		headers["Authorization"] = `Bearer ${apiKey}`;
+		headers.Authorization = `Bearer ${apiKey}`;
 	}
 
 	let models: OpenRouterModel[];

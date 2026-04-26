@@ -115,12 +115,12 @@ export class KittenTTSProvider implements TTSProvider {
 			.slice(0, 2000);
 
 		const script = [
-			`from kittentts import KittenTTS`,
+			"from kittentts import KittenTTS",
 			`m = KittenTTS("${KittenTTSProvider.MODEL}")`,
 			`m.generate_to_file("${escaped}", "${outPath}", voice="${voice}")`,
-			`import subprocess`,
+			"import subprocess",
 			`subprocess.run(["afplay", "${outPath}"])`,
-			`import os`,
+			"import os",
 			`os.remove("${outPath}")`,
 		].join("; ");
 

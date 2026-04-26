@@ -133,7 +133,7 @@ export class ContextManager {
 					const lastMsg = recentMessages[recentMessages.length - 1];
 					return `${other.agentId}: working on "${other.taskDescription}"${lastMsg ? ` (latest: ${lastMsg.content.slice(0, 80)}...)` : ""}`;
 				});
-				systemContext += "\n\nOther agents:\n" + summaries.join("\n");
+				systemContext += `\n\nOther agents:\n${summaries.join("\n")}`;
 			}
 		}
 
@@ -158,13 +158,12 @@ export class ContextManager {
 			const recentCount = ctx.messages.length;
 			const lastMessage = ctx.messages[ctx.messages.length - 1];
 			parts.push(
-				`[${ctx.agentId}] Task: ${ctx.taskDescription} | Messages: ${recentCount}` +
-					(lastMessage ? ` | Last: ${lastMessage.content.slice(0, 100)}` : ""),
+				`[${ctx.agentId}] Task: ${ctx.taskDescription} | Messages: ${recentCount}${lastMessage ? ` | Last: ${lastMessage.content.slice(0, 100)}` : ""}`,
 			);
 		}
 
 		return parts.length > 0
-			? "Agent Activity:\n" + parts.join("\n")
+			? `Agent Activity:\n${parts.join("\n")}`
 			: "No sub-agents active.";
 	}
 

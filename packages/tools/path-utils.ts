@@ -7,7 +7,7 @@
 /** Ensure a path ends with a forward slash. */
 export function ensureTrailingSlash(path: string): string {
 	if (!path) return "/";
-	return path.endsWith("/") ? path : path + "/";
+	return path.endsWith("/") ? path : `${path}/`;
 }
 
 /** Remove trailing slash(es) from a path, except for root "/". */
@@ -81,7 +81,7 @@ export function commonPrefix(paths: string[]): string {
 	}
 
 	if (segments.length === 0) return "";
-	return "/" + segments.join("/");
+	return `/${segments.join("/")}`;
 }
 
 /**
@@ -101,7 +101,7 @@ export function withExtension(path: string, ext: string): string {
 		dotIdx === -1
 			? normalized
 			: normalized.slice(0, normalized.lastIndexOf("."));
-	const newExt = ext.startsWith(".") ? ext : "." + ext;
+	const newExt = ext.startsWith(".") ? ext : `.${ext}`;
 	return base + newExt;
 }
 

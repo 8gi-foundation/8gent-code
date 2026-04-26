@@ -9,9 +9,9 @@
  * - Background agent execution with /spawn, /agents, /join commands
  */
 
-import { EventEmitter } from "events";
-import * as os from "os";
-import * as path from "path";
+import { EventEmitter } from "node:events";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -651,7 +651,7 @@ export class TaskQueue extends EventEmitter {
 		}
 
 		const processingTask = this.processing.get(taskId);
-		if (processingTask && processingTask.agentId) {
+		if (processingTask?.agentId) {
 			return this.agentPool.cancelAgent(processingTask.agentId);
 		}
 

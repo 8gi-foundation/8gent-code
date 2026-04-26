@@ -7,7 +7,7 @@
  * Inspired by the Blast Radius Engine concept — rebuilt from scratch.
  */
 
-import * as path from "path";
+import * as path from "node:path";
 import { type DepGraph, buildDepGraph } from "./dep-graph";
 import { findTestsFor } from "./test-map";
 

@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
-let pipeline: any, stage: any, runner: any;
+let pipeline: any;
+let stage: any;
+let runner: any;
 
 beforeEach(async () => {
 	try {

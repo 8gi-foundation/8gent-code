@@ -62,7 +62,7 @@ export function encodeCoordMap(cm: CoordMap): string {
  */
 export function decodeCoordMap(encoded: string): CoordMap {
 	const parts = encoded.split(",").map(Number);
-	if (parts.length !== 6 || parts.some(isNaN)) {
+	if (parts.length !== 6 || parts.some(Number.isNaN)) {
 		throw new Error(
 			`Invalid coord map: "${encoded}" - expected 6 comma-separated numbers`,
 		);

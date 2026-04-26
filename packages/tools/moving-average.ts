@@ -109,7 +109,7 @@ export class StreamingEMA {
 	 * @param value New value
 	 */
 	add(value: number): void {
-		if (isNaN(this.emaValue)) {
+		if (Number.isNaN(this.emaValue)) {
 			this.emaValue = value;
 		} else {
 			this.emaValue = this.emaValue * (1 - this.alpha) + value * this.alpha;

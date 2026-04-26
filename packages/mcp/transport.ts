@@ -151,9 +151,9 @@ export class StdioTransport implements Transport {
 				},
 			});
 
-			const writer = this.proc!.stdin as unknown as WritableStream;
+			const writer = this.proc?.stdin as unknown as WritableStream;
 			const w = writer.getWriter();
-			w.write(new TextEncoder().encode(JSON.stringify(req) + "\n"));
+			w.write(new TextEncoder().encode(`${JSON.stringify(req)}\n`));
 			w.releaseLock();
 		});
 	}
@@ -162,7 +162,7 @@ export class StdioTransport implements Transport {
 		if (!this.proc?.stdin) return;
 		const req: JSONRPCRequest = { jsonrpc: "2.0", method, params };
 		const writer = (this.proc.stdin as unknown as WritableStream).getWriter();
-		writer.write(new TextEncoder().encode(JSON.stringify(req) + "\n"));
+		writer.write(new TextEncoder().encode(`${JSON.stringify(req)}\n`));
 		writer.releaseLock();
 	}
 

@@ -5,10 +5,10 @@
  * Persists to ~/.8gent/bot-memory.json with atomic writes.
  */
 
-import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { dirname, join } from "path";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import type {
 	BotMemoryData,
 	ConversationEntry,
@@ -189,7 +189,7 @@ export class BotMemory {
 		}
 		if (filter?.category) {
 			repos = repos.filter(
-				(r) => r.category?.toLowerCase() === filter.category!.toLowerCase(),
+				(r) => r.category?.toLowerCase() === filter.category?.toLowerCase(),
 			);
 		}
 

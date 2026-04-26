@@ -5,10 +5,10 @@
  * assistant message, and error. The primary debugging tool.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as readline from "readline";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as readline from "node:readline";
 import type { SessionEntry } from "../../specifications/session/index.js";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
@@ -227,7 +227,7 @@ function formatEntry(entry: SessionEntry, index: number): string {
 			lines.push(header);
 			lines.push(`       Exit: ${sum?.exitReason ?? "?"}`);
 			lines.push(
-				`       Duration: ${sum?.durationMs ? (sum.durationMs / 1000).toFixed(1) + "s" : "?"}`,
+				`       Duration: ${sum?.durationMs ? `${(sum.durationMs / 1000).toFixed(1)}s` : "?"}`,
 			);
 			lines.push(`       Steps: ${sum?.totalSteps ?? sum?.totalTurns ?? "?"}`);
 			lines.push(`       Tool calls: ${sum?.totalToolCalls ?? "?"}`);
@@ -422,7 +422,7 @@ function printSummary(entries: SessionEntry[], sessionFilePath: string): void {
 	const summary = buildSummary(entries, sessionFilePath);
 
 	console.log("\n  Session Summary");
-	console.log("  " + "─".repeat(60));
+	console.log(`  ${"─".repeat(60)}`);
 	console.log(`  Entries: ${summary.entries}`);
 	console.log(
 		`  Types: ${Object.entries(summary.types)
@@ -438,7 +438,7 @@ function printSummary(entries: SessionEntry[], sessionFilePath: string): void {
 	if (summary.exitReason) {
 		console.log(`  Exit reason: ${summary.exitReason}`);
 		console.log(
-			`  Duration: ${summary.durationMs ? (summary.durationMs / 1000).toFixed(1) + "s" : "?"}`,
+			`  Duration: ${summary.durationMs ? `${(summary.durationMs / 1000).toFixed(1)}s` : "?"}`,
 		);
 		console.log(`  Steps: ${summary.steps || "?"}`);
 		console.log(`  Tool calls: ${summary.toolCalls || "?"}`);
@@ -449,7 +449,7 @@ function printSummary(entries: SessionEntry[], sessionFilePath: string): void {
 			console.log(`  Files modified: ${summary.filesModified.join(", ")}`);
 		}
 	} else {
-		console.log(`  Status: \x1b[33mRUNNING (no session_end found)\x1b[0m`);
+		console.log("  Status: \x1b[33mRUNNING (no session_end found)\x1b[0m");
 	}
 
 	console.log(`  Analysis JSON: ${summary.analysisAvailable}`);
@@ -480,7 +480,7 @@ export async function inspect(args: string[]): Promise<void> {
 	// Filter by entry type if requested
 	let filtered = entries;
 	if (opts.entryTypes) {
-		filtered = entries.filter((e) => opts.entryTypes!.includes(e.type));
+		filtered = entries.filter((e) => opts.entryTypes?.includes(e.type));
 	}
 
 	if (opts.summary && opts.json) {
@@ -501,7 +501,7 @@ export async function inspect(args: string[]): Promise<void> {
 	console.log(`\n  Session: ${opts.sessionId}`);
 	console.log(`  File: ${filePath}`);
 	console.log(`  Entries: ${entries.length}`);
-	console.log("  " + "─".repeat(60));
+	console.log(`  ${"─".repeat(60)}`);
 
 	for (let i = 0; i < filtered.length; i++) {
 		console.log(formatEntry(filtered[i], i));

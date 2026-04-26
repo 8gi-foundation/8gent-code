@@ -8,7 +8,7 @@
  * full AI SDK data (finishReason, reasoning, detailed token usage, etc.)
  */
 
-import * as crypto from "crypto";
+import * as crypto from "node:crypto";
 import { indexFolder as astIndexFolder } from "../ast-index";
 import { getExtensionManager } from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
@@ -228,7 +228,7 @@ export class Agent {
 				language: userData.identity.language,
 			});
 			if (userContextBlock) {
-				userContextBlock = "\n\n" + userContextBlock;
+				userContextBlock = `\n\n${userContextBlock}`;
 			}
 		}
 
@@ -242,17 +242,17 @@ When encountering errors, stay composed: "${getErrorPhrase()}"
 Maintain a tone that is sophisticated yet approachable — like a well-dressed engineer who happens to be brilliant.\n`;
 
 		// Inject orchestrator awareness into system prompt
-		const orchestratorBlock = "\n\n" + ORCHESTRATOR_SEGMENT;
+		const orchestratorBlock = `\n\n${ORCHESTRATOR_SEGMENT}`;
 
 		// Inject vessel context if running as a deployed instance (set by daemon at startup)
 		const vesselContext = process.env.EIGHT_VESSEL_CONTEXT
-			? "\n\n" + process.env.EIGHT_VESSEL_CONTEXT
+			? `\n\n${process.env.EIGHT_VESSEL_CONTEXT}`
 			: "";
 
 		// Inject deferred tool categories when not loading all tools upfront
 		const deferredToolBlock = config.allTools
 			? ""
-			: "\n\n" + getDeferredToolSegment();
+			: `\n\n${getDeferredToolSegment()}`;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -262,9 +262,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			runtimeName === "lmstudio" ||
 			runtimeName === "ollama" ||
 			runtimeName === "8gent";
-		const compactLocalPrompt =
-			"You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n" +
-			buildToolCatalogSegment({ concise: true });
+		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${buildToolCatalogSegment({ concise: true })}`;
 
 		this.messageHistory.push({
 			role: "system",
@@ -328,7 +326,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		this.orchestratorBus = getOrchestratorBus();
 
 		// Populate git info asynchronously
-		import("child_process")
+		import("node:child_process")
 			.then(({ exec }) => {
 				exec(
 					"git rev-parse --abbrev-ref HEAD",
@@ -455,7 +453,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			);
 
 			this.config.events?.onStepFinish?.({
-				text: `Image attached — vision interpreter running in the background.`,
+				text: "Image attached — vision interpreter running in the background.",
 				stepNumber: 0,
 				toolCalls: [],
 				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
@@ -511,7 +509,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			// it's the last user-turn content before generation starts.
 			this.messageHistory.push({
 				role: "user",
-				content: `[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute.`,
+				content:
+					"[PLANNING] Output a brief numbered plan (PLAN: 1. ... 2. ... 3. ...) then IMMEDIATELY start executing step 1 by calling the appropriate tool in the same response. Do not stop after planning - execute.",
 			});
 		} else {
 			// Simple / short messages go through without a planning gate
@@ -608,9 +607,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Inject appended context into instructions
 		let effectiveInstructions = systemPrompt || "";
 		if (tunedParams.appendedContext.length > 0) {
-			effectiveInstructions +=
-				"\n\n## Agent Self-Appended Context\n" +
-				tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n");
+			effectiveInstructions += `\n\n## Agent Self-Appended Context\n${tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n")}`;
 		}
 
 		const agentConfig: EightAgentConfig = {
@@ -670,7 +667,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 							providerConfig.name =
 								fallback.provider as typeof providerConfig.name;
 							providerConfig.model = fallback.model;
-							delete providerConfig.apiKey;
+							providerConfig.apiKey = undefined;
 						}
 					}
 				}
@@ -716,7 +713,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					console.log(
 						`\n⚠️  [LOOP DETECTED] Tool "${event.toolName}" has been called ${count} times with similar args and keeps failing.`,
 					);
-					console.log(`   Injecting guidance to try a different approach.\n`);
+					console.log("   Injecting guidance to try a different approach.\n");
 					// Inject a system-level nudge into the conversation
 					this.messageHistory.push({
 						role: "user",
@@ -911,8 +908,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
 				// Check for premature completion claims
 				if (
-					event.text &&
-					event.text.includes("🎯 COMPLETED") &&
+					event.text?.includes("🎯 COMPLETED") &&
 					event.finishReason === "stop"
 				) {
 					// The agent is claiming completion — this is fine, but log it for tracking
@@ -1100,7 +1096,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				try {
 					result = await agent.generate({
 						messages,
-						abortSignal: this.abortController!.signal,
+						abortSignal: this.abortController?.signal,
 					});
 					break; // Success
 				} catch (err: any) {
@@ -1113,7 +1109,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					if (isAborted) throw err; // User pressed ESC
 
 					if (isRateLimit && attempt < maxAttempts) {
-						const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+						const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
 						console.log(
 							`[agent] rate limited, retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`,
 						);
@@ -1156,7 +1152,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					try {
 						result = await retryAgent.generate({
 							messages: messages2,
-							abortSignal: this.abortController!.signal,
+							abortSignal: this.abortController?.signal,
 						});
 					} catch (retryErr: any) {
 						if (retryErr?.name === "AbortError") throw retryErr;
@@ -1498,8 +1494,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 	 */
 	private _readSyncToConvex(): boolean {
 		try {
-			const fs = require("fs");
-			const path = require("path");
+			const fs = require("node:fs");
+			const path = require("node:path");
 			const cwd = this.config.workingDirectory || process.cwd();
 			const configPath = path.join(cwd, ".8gent", "config.json");
 			const raw = fs.readFileSync(configPath, "utf-8");

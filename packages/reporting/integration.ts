@@ -5,7 +5,7 @@
  * Tracks tool invocations, file operations, and generates completion reports.
  */
 
-import * as path from "path";
+import * as path from "node:path";
 import {
 	type CompletionReporter,
 	TaskContextTracker,
@@ -148,7 +148,7 @@ export class AgentReportingContext {
 				};
 				break;
 
-			case "run_command":
+			case "run_command": {
 				// Check for file operations in commands
 				const command = args.command as string;
 				if (command?.includes("rm ") || command?.includes("rm -")) {
@@ -167,6 +167,7 @@ export class AgentReportingContext {
 					}
 				}
 				break;
+			}
 		}
 
 		if (operation) {
@@ -227,7 +228,7 @@ export class AgentReportingContext {
 		}
 
 		if (display) {
-			console.log("\n" + this.reporter.formatForTerminal(report));
+			console.log(`\n${this.reporter.formatForTerminal(report)}`);
 		}
 
 		return report;

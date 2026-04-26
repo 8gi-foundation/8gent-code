@@ -136,7 +136,7 @@ PORT 3000`;
 	describe("Variable Interpolation", () => {
 		test("parses variable references with defaults", async () => {
 			const { parse } = await loadModules();
-			const input = `PORT \${API_PORT:-3000}\nHOST \${HOST}`;
+			const input = "PORT ${API_PORT:-3000}\nHOST ${HOST}";
 			const ast = parse(input);
 			expect(ast).toBeTruthy();
 

@@ -5,7 +5,7 @@
  * Reads the learned-skills directory and ranks by relevance.
  */
 
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync } from "node:fs";
 import { listLearnedSkills } from "./compound.js";
 
 interface MatchedSkill {

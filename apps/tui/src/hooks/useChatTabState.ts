@@ -9,8 +9,8 @@
  * Messages persist to ~/.8gent/tabs/chat-{tabId}.json on each update.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Agent } from "../../../../packages/eight/index.js";
 import type {
@@ -300,7 +300,7 @@ export function useChatTabState(
 
 							// Do not append assistant bubbles per step (stacks N messages; Ink draws over itself).
 							// stepNumber 0 = vision/synthetic notices only, as one truncated system line.
-							if (event.text && event.text.trim() && event.stepNumber === 0) {
+							if (event.text?.trim() && event.stepNumber === 0) {
 								const t = event.text.trim();
 								const content = t.length > 720 ? `${t.slice(0, 717)}...` : t;
 								const sysMsg: Message = {
@@ -368,10 +368,9 @@ export function useChatTabState(
 				if (ready) {
 					updateTabState(tid, { agent: newAgent, agentReady: true });
 					return newAgent;
-				} else {
-					updateTabState(tid, { agentReady: false });
-					return null;
 				}
+				updateTabState(tid, { agentReady: false });
+				return null;
 			} catch (err) {
 				updateTabState(tid, { agentReady: false });
 				return null;

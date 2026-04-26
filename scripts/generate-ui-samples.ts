@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 const MODEL = "eight:latest";
@@ -80,6 +80,6 @@ console.log(`Files in: ${OUTPUT_DIR}`);
 
 // Open all in browser
 for (const path of results) {
-	const { execSync } = await import("child_process");
+	const { execSync } = await import("node:child_process");
 	execSync(`open "${path}"`);
 }

@@ -166,7 +166,7 @@ export class AccessAuditStore {
 	/** Total row count. Used by admin CLI and tests. */
 	count(): number {
 		const row = this.db
-			.prepare(`SELECT COUNT(*) AS n FROM access_audit_log`)
+			.prepare("SELECT COUNT(*) AS n FROM access_audit_log")
 			.get() as { n: number };
 		return row.n;
 	}

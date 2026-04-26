@@ -8,8 +8,8 @@
  * based on real tool start/end events, not predictions.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ============================================
@@ -152,7 +152,7 @@ function toolToIcon(toolName: string): string {
 
 function truncStr(s: string, max: number): string {
 	if (s.length <= max) return s;
-	return s.slice(0, max - 1) + "\u2026";
+	return `${s.slice(0, max - 1)}\u2026`;
 }
 
 // ============================================

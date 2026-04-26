@@ -258,8 +258,7 @@ export class LocalTrainer {
 
 		// Write GRPO pairs to JSONL for the Python script
 		const dataPath = join(this.config.dataDir, `${checkpointId}.jsonl`);
-		const jsonl =
-			this.state.grpoPairs.map((p) => JSON.stringify(p)).join("\n") + "\n";
+		const jsonl = `${this.state.grpoPairs.map((p) => JSON.stringify(p)).join("\n")}\n`;
 		writeFileSync(dataPath, jsonl);
 
 		// Clear consumed pairs
@@ -298,7 +297,7 @@ export class LocalTrainer {
 				checkpoint.status = "rolled_back";
 			}
 		} catch (err) {
-			console.error(`[local-trainer] Training failed:`, err);
+			console.error("[local-trainer] Training failed:", err);
 			checkpoint.status = "rolled_back";
 			checkpoint.benchmarkScore = 0;
 		} finally {
@@ -326,8 +325,8 @@ export class LocalTrainer {
 		const modelfile = [
 			`FROM ${this.config.ollamaModel}`,
 			`ADAPTER ${adapterDir}`,
-			`PARAMETER temperature 0.7`,
-			`PARAMETER top_p 0.9`,
+			"PARAMETER temperature 0.7",
+			"PARAMETER top_p 0.9",
 			`SYSTEM "You are an expert coding assistant fine-tuned for autonomous agent tasks."`,
 		].join("\n");
 		writeFileSync(modelfilePath, modelfile);

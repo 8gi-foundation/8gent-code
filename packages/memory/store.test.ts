@@ -20,7 +20,7 @@ import {
 	generateId,
 } from "./types.js";
 
-const TEST_DB = "/tmp/memory-store-test-" + Date.now() + ".db";
+const TEST_DB = `/tmp/memory-store-test-${Date.now()}.db`;
 
 function makeCoreMemory(overrides: Partial<CoreMemory> = {}): CoreMemory {
 	const now = Date.now();
@@ -103,7 +103,7 @@ describe("JSONB double-encoding guard", () => {
 		const retrieved = store.get(id);
 
 		expect(retrieved).not.toBeNull();
-		expect(retrieved!.type).toBe("core");
+		expect(retrieved?.type).toBe("core");
 		expect((retrieved as CoreMemory).content).toBe(
 			"Architecture uses microservices",
 		);
@@ -169,7 +169,7 @@ describe("JSONB double-encoding guard", () => {
 		const retrieved = store.get(id);
 		expect(retrieved).not.toBeNull();
 		expect(typeof retrieved).toBe("object");
-		expect(retrieved!.type).toBe("core");
+		expect(retrieved?.type).toBe("core");
 		expect((retrieved as CoreMemory).title).toBe(mem.title);
 	});
 
@@ -231,7 +231,7 @@ describe("JSONB double-encoding guard", () => {
 		const retrieved = store.get(id);
 		expect(retrieved).not.toBeNull();
 		expect(typeof retrieved).toBe("object");
-		expect(retrieved!.type).toBe("core");
+		expect(retrieved?.type).toBe("core");
 		expect((retrieved as CoreMemory).title).toBe(mem.title);
 	});
 

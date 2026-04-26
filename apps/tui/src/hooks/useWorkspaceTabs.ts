@@ -12,8 +12,8 @@
  * - Ordered: pinned first, then by lastAccessedAt
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunnerConfig } from "../../../../packages/orchestration/role-registry.js";
 

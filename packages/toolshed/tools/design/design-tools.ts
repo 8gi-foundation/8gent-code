@@ -5,8 +5,8 @@
  * and CSS/styling utilities.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -191,8 +191,8 @@ registerTool(
 			if (fs.existsSync(pkgPath)) {
 				const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 				const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-				if (deps["vue"]) fw = "vue";
-				else if (deps["svelte"]) fw = "svelte";
+				if (deps.vue) fw = "vue";
+				else if (deps.svelte) fw = "svelte";
 			}
 		}
 
@@ -282,8 +282,8 @@ registerTool(
 				for (const hex of hexes) {
 					const normalized = hex.toLowerCase();
 					if (!colors.has(normalized)) colors.set(normalized, []);
-					if (!colors.get(normalized)!.includes(relativePath)) {
-						colors.get(normalized)!.push(relativePath);
+					if (!colors.get(normalized)?.includes(relativePath)) {
+						colors.get(normalized)?.push(relativePath);
 					}
 				}
 
@@ -291,7 +291,7 @@ registerTool(
 				const vars = content.match(/--[\w-]*color[\w-]*:\s*[^;]+/gi) || [];
 				for (const v of vars) {
 					if (!colors.has(v.trim())) colors.set(v.trim(), []);
-					colors.get(v.trim())!.push(relativePath);
+					colors.get(v.trim())?.push(relativePath);
 				}
 			} catch {}
 		}

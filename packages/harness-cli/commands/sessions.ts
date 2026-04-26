@@ -59,15 +59,9 @@ export async function sessions(args: string[]): Promise<void> {
 
 	console.log(`\n  Sessions (${shown.length} of ${all.length})\n`);
 	console.log(
-		"  " +
-			"ID".padEnd(36) +
-			"Status".padEnd(12) +
-			"Steps".padEnd(7) +
-			"Duration".padEnd(10) +
-			"Model".padEnd(25) +
-			"Preview",
+		`  ${"ID".padEnd(36)}${"Status".padEnd(12)}${"Steps".padEnd(7)}${"Duration".padEnd(10)}${"Model".padEnd(25)}Preview`,
 	);
-	console.log("  " + "─".repeat(110));
+	console.log(`  ${"─".repeat(110)}`);
 
 	for (const s of shown) {
 		const status = s.completed
@@ -92,13 +86,7 @@ export async function sessions(args: string[]): Promise<void> {
 		const preview = s.firstUserMessage?.slice(0, 40) || "—";
 
 		console.log(
-			"  " +
-				s.sessionId.slice(0, 34).padEnd(36) +
-				`${statusColor}${status.padEnd(12)}${reset}` +
-				steps.padEnd(7) +
-				duration.padEnd(10) +
-				model.padEnd(25) +
-				preview,
+			`  ${s.sessionId.slice(0, 34).padEnd(36)}${statusColor}${status.padEnd(12)}${reset}${steps.padEnd(7)}${duration.padEnd(10)}${model.padEnd(25)}${preview}`,
 		);
 	}
 

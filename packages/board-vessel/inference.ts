@@ -81,7 +81,7 @@ export async function generateResponse(
 	}
 
 	if (reply.length > MAX_RESPONSE_LENGTH) {
-		reply = reply.slice(0, MAX_RESPONSE_LENGTH) + "...";
+		reply = `${reply.slice(0, MAX_RESPONSE_LENGTH)}...`;
 	}
 
 	return { response: reply, durationMs: Date.now() - start, tokensUsed };

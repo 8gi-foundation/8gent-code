@@ -5,8 +5,8 @@
  * Think: a virtual mixing desk.
  */
 
-import { execSync } from "child_process";
-import { existsSync, mkdirSync } from "fs";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
 import type { Layer } from "./types.js";
 
 export class Mixer {

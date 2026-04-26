@@ -5,7 +5,7 @@
  * Inspired by Hermes (ArcadeAI) self-evolution patterns, rebuilt from scratch.
  */
 
-import * as crypto from "crypto";
+import * as crypto from "node:crypto";
 import {
 	getAllSkills,
 	getSkillById,

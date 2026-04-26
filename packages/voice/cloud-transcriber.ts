@@ -5,7 +5,7 @@
  * Used when local whisper.cpp is not available or user prefers cloud mode.
  */
 
-import { existsSync } from "fs";
+import { existsSync } from "node:fs";
 import type { TranscriptEvent } from "./types.js";
 
 export interface CloudTranscriberOptions {

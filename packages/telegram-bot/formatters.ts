@@ -168,7 +168,7 @@ export function formatScoreboard(scores: Record<string, number>): string {
 	);
 	lines.push("└──────────────────────────────┘");
 
-	return "```\n" + lines.join("\n") + "\n```";
+	return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
 }
 
 /**
@@ -239,7 +239,7 @@ export function formatBenchmarkReport(report: BenchmarkReport): string {
 	const sections: string[] = [];
 
 	// Header
-	sections.push(`📊 *8GENT BENCHMARK REPORT*`);
+	sections.push("📊 *8GENT BENCHMARK REPORT*");
 	sections.push(`${horizontalRule()}`);
 	sections.push("");
 
@@ -309,7 +309,7 @@ export function formatMorningBrief(summary: OvernightSummary): string {
 
 	// Hero header
 	sections.push("☀️ *GOOD MORNING, JAMES*");
-	sections.push(`🤖 *8gent Overnight Report*`);
+	sections.push("🤖 *8gent Overnight Report*");
 	sections.push(`${horizontalRule()}`);
 	sections.push("");
 
@@ -320,7 +320,7 @@ export function formatMorningBrief(summary: OvernightSummary): string {
 		`│  🏁 Rounds:    ${padLeft(String(summary.totalRounds), 4)}          │`,
 	);
 	sections.push(
-		`│  ⏱  Duration:  ${padLeft(summary.totalDurationHours.toFixed(1) + "h", 5)}         │`,
+		`│  ⏱  Duration:  ${padLeft(`${summary.totalDurationHours.toFixed(1)}h`, 5)}         │`,
 	);
 	sections.push(
 		`│  🧠 Model:     ${padRight(summary.model.slice(0, 12), 12)}   │`,

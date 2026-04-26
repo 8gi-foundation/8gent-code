@@ -103,7 +103,7 @@ function loadConfig(): ControlPlaneConfig {
 
 	// Delete tokens from env after reading (security)
 	for (const def of BOARD_MEMBERS) delete process.env[def.envKey];
-	delete process.env.VESSEL_AUTH_TOKEN;
+	process.env.VESSEL_AUTH_TOKEN = undefined;
 
 	return {
 		dbPath: process.env.DB_PATH || "/data/board-plane.db",

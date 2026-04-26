@@ -20,8 +20,8 @@ import {
 	readdirSync,
 	unlinkSync,
 	writeFileSync,
-} from "fs";
-import { join } from "path";
+} from "node:fs";
+import { join } from "node:path";
 import { LEARNED_SKILLS_DIR } from "./compound.js";
 
 /**
@@ -49,9 +49,7 @@ export let runShellTest: (cmd: string) => { exitCode: number; stderr: string } =
 		}
 		// node fallback
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const { spawnSync } = require("child_process") as typeof import(
-			"child_process",
-		);
+		const { spawnSync } = require("node:child_process") as typeof import("child_process");
 		const result = spawnSync("sh", ["-c", cmd], { encoding: "utf-8" });
 		return { exitCode: result.status ?? 1, stderr: result.stderr ?? "" };
 	};

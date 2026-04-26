@@ -282,11 +282,11 @@ export async function dispatchTool(call: MCPToolCall): Promise<MCPToolResult> {
 				const result = await reflect();
 				return text(
 					[
-						`Reflection complete.`,
+						"Reflection complete.",
 						`Evolved: ${result.evolved} templates`,
 						`Skipped: ${result.skipped}`,
 						result.details.length > 0
-							? "\nDetails:\n" + result.details.join("\n")
+							? `\nDetails:\n${result.details.join("\n")}`
 							: "",
 					].join("\n"),
 				);

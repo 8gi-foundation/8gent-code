@@ -170,10 +170,7 @@ export class UnifiedPortal {
 		// If command requires confirmation, stage it
 		if (entry.requiresConfirmation) {
 			this.pendingConfirmations.set(chatId, { command, args });
-			return (
-				`*Confirm:* \`${command} ${args.join(" ")}\`\n\n` +
-				`Send /confirm to execute or /cancel to abort.`
-			);
+			return `*Confirm:* \`${command} ${args.join(" ")}\`\n\nSend /confirm to execute or /cancel to abort.`;
 		}
 
 		return entry.handler(args, chatId);
@@ -339,7 +336,7 @@ export class UnifiedPortal {
 					"battle-test |  --  |  --  |  --",
 					"```",
 					"",
-					`_Stub response. Wire to loop-state.json reader._`,
+					"_Stub response. Wire to loop-state.json reader._",
 				].join("\n");
 			},
 		});

@@ -7,9 +7,9 @@
  * @see https://github.com/8gi-foundation/8gent-code/issues/941
  */
 
-import { existsSync, readFileSync } from "fs";
-import { homedir } from "os";
-import { dirname, join, resolve } from "path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 /** File names to search for, in priority order (first match per directory wins) */
 const INSTRUCTION_FILES = ["8GENT.md", "AGENTS.md", "CLAUDE.md"] as const;

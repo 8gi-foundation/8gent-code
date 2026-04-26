@@ -5,10 +5,10 @@
  * (the format Whisper expects). Emits audio level events.
  */
 
-import { EventEmitter } from "events";
-import { existsSync, statSync, unlinkSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { EventEmitter } from "node:events";
+import { existsSync, statSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type Subprocess, spawn } from "bun";
 
 export interface RecorderOptions {

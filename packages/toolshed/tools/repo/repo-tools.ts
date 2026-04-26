@@ -5,8 +5,8 @@
  * file tree, and codebase statistics.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -137,14 +137,14 @@ registerTool(
 
 			// Detect framework
 			const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-			if (allDeps["next"]) info.framework = "Next.js";
-			else if (allDeps["react"]) info.framework = "React";
-			else if (allDeps["vue"]) info.framework = "Vue";
-			else if (allDeps["svelte"]) info.framework = "Svelte";
-			else if (allDeps["express"]) info.framework = "Express";
-			else if (allDeps["fastify"]) info.framework = "Fastify";
-			else if (allDeps["hono"]) info.framework = "Hono";
-			else if (allDeps["elysia"]) info.framework = "Elysia";
+			if (allDeps.next) info.framework = "Next.js";
+			else if (allDeps.react) info.framework = "React";
+			else if (allDeps.vue) info.framework = "Vue";
+			else if (allDeps.svelte) info.framework = "Svelte";
+			else if (allDeps.express) info.framework = "Express";
+			else if (allDeps.fastify) info.framework = "Fastify";
+			else if (allDeps.hono) info.framework = "Hono";
+			else if (allDeps.elysia) info.framework = "Elysia";
 
 			// Detect runtime
 			if (fs.existsSync(path.join(cwd, "bun.lockb"))) info.runtime = "Bun";
@@ -240,7 +240,7 @@ registerTool(
 			pattern: string;
 			limit?: number;
 		};
-		const { execSync } = require("child_process");
+		const { execSync } = require("node:child_process");
 
 		try {
 			// Use find with basic glob matching
@@ -296,7 +296,7 @@ registerTool(
 			fileType,
 			limit = 20,
 		} = input as { pattern: string; fileType?: string; limit?: number };
-		const { execSync } = require("child_process");
+		const { execSync } = require("node:child_process");
 
 		// Try ripgrep first, fall back to grep
 		let cmd: string;

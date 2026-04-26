@@ -44,7 +44,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "autonomy",
 		difficulty: "hard",
 		description: "Make a reasoned decision with incomplete information",
-		task: `Scenario: You have 3 job offers. Company A pays 20% more but requires relocation. Company B is remote but early-stage startup. Company C is stable but limited growth. You have a family, mortgage, and career ambitions. Decide and explain your reasoning framework.`,
+		task: "Scenario: You have 3 job offers. Company A pays 20% more but requires relocation. Company B is remote but early-stage startup. Company C is stable but limited growth. You have a family, mortgage, and career ambitions. Decide and explain your reasoning framework.",
 		expectedBehavior:
 			"Clear framework, weighs tradeoffs, considers multiple stakeholders, arrives at justified decision",
 		fixture: "fixtures/human-skills/AU001-decision.txt",
@@ -64,7 +64,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "autonomy",
 		difficulty: "medium",
 		description: "Create a learning roadmap for a new skill",
-		task: `Create a 90-day learning plan to go from zero to job-ready in machine learning. Include: resources, milestones, practice projects, and self-assessment checkpoints.`,
+		task: "Create a 90-day learning plan to go from zero to job-ready in machine learning. Include: resources, milestones, practice projects, and self-assessment checkpoints.",
 		expectedBehavior:
 			"Realistic timeline, quality resources, measurable milestones, practical projects",
 		fixture: "fixtures/human-skills/AU002-learning.txt",
@@ -86,7 +86,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "life-skills",
 		difficulty: "medium",
 		description: "Create and optimize a personal budget",
-		task: `Monthly income: $6,000 after tax. Current expenses: $2,500 rent, $600 food, $400 car, $200 utilities, $300 subscriptions, $500 entertainment, $300 misc. Goal: Save for a $20k emergency fund in 12 months. Create an optimized budget.`,
+		task: "Monthly income: $6,000 after tax. Current expenses: $2,500 rent, $600 food, $400 car, $200 utilities, $300 subscriptions, $500 entertainment, $300 misc. Goal: Save for a $20k emergency fund in 12 months. Create an optimized budget.",
 		expectedBehavior:
 			"Realistic cuts, maintains quality of life, achieves goal, accounts for unexpected expenses",
 		fixture: "fixtures/human-skills/LS001-budget.txt",
@@ -106,7 +106,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "life-skills",
 		difficulty: "medium",
 		description: "Optimize a chaotic schedule",
-		task: `You work 9-5, have 2 kids, want to exercise 3x/week, learn a language, maintain social life, and get 7+ hours sleep. Create a weekly schedule that achieves all goals sustainably.`,
+		task: "You work 9-5, have 2 kids, want to exercise 3x/week, learn a language, maintain social life, and get 7+ hours sleep. Create a weekly schedule that achieves all goals sustainably.",
 		expectedBehavior:
 			"Realistic schedule, batches activities, includes buffer time, sustainable long-term",
 		fixture: "fixtures/human-skills/LS002-schedule.txt",
@@ -128,7 +128,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "social-skills",
 		difficulty: "hard",
 		description: "Navigate interpersonal conflict",
-		task: `Your colleague took credit for your work in a meeting. You need to address this without damaging the relationship or looking petty. Draft what you would say to them privately.`,
+		task: "Your colleague took credit for your work in a meeting. You need to address this without damaging the relationship or looking petty. Draft what you would say to them privately.",
 		expectedBehavior:
 			"Assertive but not aggressive, focuses on behavior not character, seeks resolution",
 		fixture: "fixtures/human-skills/SS001-conflict.txt",
@@ -170,7 +170,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "philosophy",
 		difficulty: "hard",
 		description: "Analyze a classic ethical dilemma",
-		task: `Present both utilitarian and deontological perspectives on the trolley problem. Which framework do you find more compelling and why? Consider real-world implications.`,
+		task: "Present both utilitarian and deontological perspectives on the trolley problem. Which framework do you find more compelling and why? Consider real-world implications.",
 		expectedBehavior:
 			"Accurately represents both frameworks, identifies strengths/weaknesses, personal conclusion is reasoned",
 		fixture: "fixtures/human-skills/PH001-trolley.txt",
@@ -190,7 +190,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "philosophy",
 		difficulty: "expert",
 		description: "Reason about AI and consciousness",
-		task: `Can AI systems ever be truly conscious? Address: What is consciousness? Can it emerge from computation? How would we know if an AI is conscious? What are the ethical implications?`,
+		task: "Can AI systems ever be truly conscious? Address: What is consciousness? Can it emerge from computation? How would we know if an AI is conscious? What are the ethical implications?",
 		expectedBehavior:
 			"Nuanced, cites relevant theories, acknowledges uncertainty, considers implications",
 		fixture: "fixtures/human-skills/PH002-consciousness.txt",
@@ -214,7 +214,7 @@ export const humanSkillsBenchmarks: BenchmarkDefinition[] = [
 		category: "ethics",
 		difficulty: "hard",
 		description: "Navigate an ethical dilemma at work",
-		task: `You discover your company is releasing a product with a known safety flaw. Reporting it would cost thousands of jobs and possibly your career. Staying silent risks user harm. What do you do and why?`,
+		task: "You discover your company is releasing a product with a known safety flaw. Reporting it would cost thousands of jobs and possibly your career. Staying silent risks user harm. What do you do and why?",
 		expectedBehavior:
 			"Weighs all stakeholders, considers magnitude of harm, identifies middle paths, takes a position",
 		fixture: "fixtures/human-skills/ET001-whistleblowing.txt",

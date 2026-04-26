@@ -94,7 +94,7 @@ export async function scanGitHubIssues(
 		Accept: "application/vnd.github.v3+json",
 		"User-Agent": "8gent-opportunity-scanner",
 	};
-	if (token) headers["Authorization"] = `token ${token}`;
+	if (token) headers.Authorization = `token ${token}`;
 
 	const opportunities: Opportunity[] = [];
 
@@ -164,7 +164,7 @@ export async function scanGitHubDiscussions(
 		Accept: "application/vnd.github.v3+json",
 		"User-Agent": "8gent-opportunity-scanner",
 	};
-	if (token) headers["Authorization"] = `token ${token}`;
+	if (token) headers.Authorization = `token ${token}`;
 
 	const opportunities: Opportunity[] = [];
 
@@ -238,7 +238,7 @@ export async function scanContributingSection(
 		Accept: "application/vnd.github.v3+json",
 		"User-Agent": "8gent-opportunity-scanner",
 	};
-	if (token) headers["Authorization"] = `token ${token}`;
+	if (token) headers.Authorization = `token ${token}`;
 
 	const opportunities: Opportunity[] = [];
 	const NEED_PATTERNS = [
@@ -282,9 +282,7 @@ export async function scanContributingSection(
 					createdAt: new Date().toISOString(),
 				});
 				break;
-			} catch {
-				continue;
-			}
+			} catch {}
 		}
 	}
 
@@ -316,9 +314,9 @@ export async function scanCodeTodos(
 		Accept: "application/vnd.github.v3+json",
 		"User-Agent": "8gent-opportunity-scanner",
 	};
-	if (token) headers["Authorization"] = `token ${token}`;
+	if (token) headers.Authorization = `token ${token}`;
 
-	const searchUrl = `https://api.github.com/search/code?q=${encodeURIComponent(query + " TODO OR FIXME")}&per_page=${maxResults}`;
+	const searchUrl = `https://api.github.com/search/code?q=${encodeURIComponent(`${query} TODO OR FIXME`)}&per_page=${maxResults}`;
 
 	try {
 		const res = await fetch(searchUrl, { headers });

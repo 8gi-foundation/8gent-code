@@ -11,7 +11,7 @@
  *   producer.loop(track);
  */
 
-import { mkdirSync } from "fs";
+import { mkdirSync } from "node:fs";
 import { Mixer } from "./mixer.js";
 import { Player } from "./player.js";
 import { ReplicateBackend } from "./replicate.js";
@@ -84,7 +84,7 @@ export class MusicProducer {
 
 		// Strategy 1: Try AI generation via Replicate
 		if (this.replicate.available && durationSec <= 30) {
-			console.log(`[producer] Trying AI generation via Replicate...`);
+			console.log("[producer] Trying AI generation via Replicate...");
 			const aiTrack = await this.replicate.generate(fullConfig);
 			if (aiTrack) {
 				const mastered = this.mixer.master(aiTrack);
@@ -96,7 +96,7 @@ export class MusicProducer {
 		}
 
 		// Strategy 2: Layered sox synthesis (always available, deterministic)
-		console.log(`[producer] Using layered sox synthesis...`);
+		console.log("[producer] Using layered sox synthesis...");
 		const layers: Layer[] = [];
 
 		// Determine drum pattern based on genre
@@ -253,7 +253,7 @@ export class MusicProducer {
 
 	private getDuration(path: string): number {
 		try {
-			const { execSync } = require("child_process");
+			const { execSync } = require("node:child_process");
 			return Number.parseFloat(execSync(`soxi -D "${path}"`).toString().trim());
 		} catch {
 			return 0;

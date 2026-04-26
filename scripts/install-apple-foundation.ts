@@ -17,10 +17,10 @@
  *   4  install (copy) failed
  */
 
-import { spawnSync } from "child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from "fs";
-import { homedir, release } from "os";
-import { join, resolve } from "path";
+import { spawnSync } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { homedir, release } from "node:os";
+import { join, resolve } from "node:path";
 
 const BRIDGE_SOURCE_DIR = resolve(
 	import.meta.dir,
@@ -79,7 +79,7 @@ function checkSwiftToolchain(): void {
 	if (res.status !== 0) {
 		fail(
 			2,
-			`Swift toolchain not found. Install Xcode Command Line Tools: xcode-select --install`,
+			"Swift toolchain not found. Install Xcode Command Line Tools: xcode-select --install",
 		);
 	}
 	const firstLine = (res.stdout || "").split("\n")[0] || "swift";

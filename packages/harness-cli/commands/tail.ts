@@ -4,9 +4,9 @@
  * Live-tail a running session file, printing new entries as they appear.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 
@@ -35,7 +35,7 @@ export async function tail(args: string[]): Promise<void> {
 
 	const filePath = resolveSessionPath(sessionId);
 	console.log(`[tail] Watching: ${filePath}`);
-	console.log(`[tail] Press Ctrl+C to stop\n`);
+	console.log("[tail] Press Ctrl+C to stop\n");
 
 	let position = 0;
 	let buffer = "";

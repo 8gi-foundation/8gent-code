@@ -122,7 +122,7 @@ export class MCPServer {
 	}
 
 	private respond(response: JSONRPCResponse): void {
-		process.stdout.write(JSON.stringify(response) + "\n");
+		process.stdout.write(`${JSON.stringify(response)}\n`);
 	}
 
 	private async handleRequest(

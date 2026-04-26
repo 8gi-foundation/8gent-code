@@ -7,7 +7,7 @@
  * Inspired by: CashClaw (autonomous work lifecycle management)
  */
 
-import { join } from "path";
+import { join } from "node:path";
 import type { Opportunity } from "./opportunity-scanner.ts";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent");

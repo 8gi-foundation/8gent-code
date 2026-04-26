@@ -159,7 +159,7 @@ export function findParallelGroups(actions: MacroAction[]): string[][] {
 		for (const depId of a.dependencies) {
 			if (actionMap.has(depId)) {
 				deg++;
-				dependents.get(depId)!.push(a.id);
+				dependents.get(depId)?.push(a.id);
 			}
 		}
 		inDegree.set(a.id, deg);

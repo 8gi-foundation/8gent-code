@@ -17,9 +17,9 @@
  *   - Audit log entries include actor, timestamp, capability, scope, cwd
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 export type ApprovalScope = "once" | "session" | "project" | "always" | "deny";
 
@@ -98,7 +98,7 @@ function projectKey(capability: string, cwd: string): string {
 function writeAudit(entry: AuditEntry): void {
 	try {
 		ensureDir();
-		fs.appendFileSync(AUDIT_LOG_FILE, JSON.stringify(entry) + "\n");
+		fs.appendFileSync(AUDIT_LOG_FILE, `${JSON.stringify(entry)}\n`);
 	} catch (err) {
 		// Do not break permission flow on audit failure; log to stderr.
 		console.warn(`[user-policy] audit write failed: ${err}`);

@@ -8,8 +8,8 @@
  * Usage: bun run scripts/research-loop.ts
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const RESULTS_FILE = path.join(__dirname, "..", "research-results.tsv");
 const LOG_FILE = path.join(__dirname, "..", "research.log");
@@ -69,17 +69,16 @@ function recordResult(result: ExperimentResult): void {
 		fs.writeFileSync(RESULTS_FILE, header);
 	}
 
-	const line =
-		[
-			result.timestamp,
-			result.experiment,
-			result.system,
-			result.tokensUsed,
-			result.tokensSaved,
-			result.executionTime,
-			result.success,
-			result.notes,
-		].join("\t") + "\n";
+	const line = `${[
+		result.timestamp,
+		result.experiment,
+		result.system,
+		result.tokensUsed,
+		result.tokensSaved,
+		result.executionTime,
+		result.success,
+		result.notes,
+	].join("\t")}\n`;
 
 	fs.appendFileSync(RESULTS_FILE, line);
 }

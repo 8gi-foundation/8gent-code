@@ -7,7 +7,7 @@
  * Supports: open, state, screenshot, click, type, eval, task, scroll, wait, close, sessions
  */
 
-import { execSync } from "child_process";
+import { execSync } from "node:child_process";
 
 const BROWSER_USE = "browser-use";
 const DEFAULT_TIMEOUT = 30_000;

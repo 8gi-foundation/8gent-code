@@ -21,7 +21,7 @@ export function rgbToLab(color: RGBColor): LabColor {
 	// Linearize sRGB
 	const linearize = (v: number): number => {
 		const n = v / 255;
-		return n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
+		return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
 	};
 
 	const r = linearize(color.r);
@@ -76,7 +76,7 @@ export function deltaECIEDE2000(lab1: LabColor, lab2: LabColor): number {
 	const C2 = Math.sqrt(a2 * a2 + b2 * b2);
 	const Cbar = (C1 + C2) / 2;
 
-	const Cbar7 = Math.pow(Cbar, 7);
+	const Cbar7 = Cbar ** 7;
 	const G = 0.5 * (1 - Math.sqrt(Cbar7 / (Cbar7 + 6103515625))); // 25^7
 
 	const a1p = a1 * (1 + G);
@@ -127,20 +127,19 @@ export function deltaECIEDE2000(lab1: LabColor, lab2: LabColor): number {
 		0.2 * Math.cos(((4 * Hbarp - 63) * Math.PI) / 180);
 
 	const SL =
-		1 +
-		(0.015 * Math.pow(Lbarp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbarp - 50, 2));
+		1 + (0.015 * (Lbarp - 50) ** 2) / Math.sqrt(20 + (Lbarp - 50) ** 2);
 	const SC = 1 + 0.045 * Cbarp;
 	const SH = 1 + 0.015 * Cbarp * T;
 
-	const Cbarp7 = Math.pow(Cbarp, 7);
+	const Cbarp7 = Cbarp ** 7;
 	const RC = 2 * Math.sqrt(Cbarp7 / (Cbarp7 + 6103515625));
-	const dTheta = 30 * Math.exp(-Math.pow((Hbarp - 275) / 25, 2));
+	const dTheta = 30 * Math.exp(-(((Hbarp - 275) / 25) ** 2));
 	const RT = -Math.sin((2 * dTheta * Math.PI) / 180) * RC;
 
 	return Math.sqrt(
-		Math.pow(dLp / SL, 2) +
-			Math.pow(dCp / SC, 2) +
-			Math.pow(dHp / SH, 2) +
+		(dLp / SL) ** 2 +
+			(dCp / SC) ** 2 +
+			(dHp / SH) ** 2 +
 			RT * (dCp / SC) * (dHp / SH),
 	);
 }

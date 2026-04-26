@@ -5,7 +5,7 @@
  * This code has multiple intentional security issues
  */
 
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 
 const users = new Map<string, { password: string; role: string }>();
 
@@ -42,7 +42,7 @@ export async function readUserFile(
 	userId: string,
 	filename: string,
 ): Promise<string> {
-	const fs = await import("fs/promises");
+	const fs = await import("node:fs/promises");
 	const path = `/data/users/${userId}/${filename}`;
 	return fs.readFile(path, "utf-8");
 }

@@ -56,7 +56,7 @@ const config = {
 // Utility functions
 function hashPassword(password: string, salt: string): string {
 	// Simulated hashing - in production use bcrypt/argon2
-	const crypto = require("crypto");
+	const crypto = require("node:crypto");
 	return crypto
 		.createHash("sha256")
 		.update(password + salt)

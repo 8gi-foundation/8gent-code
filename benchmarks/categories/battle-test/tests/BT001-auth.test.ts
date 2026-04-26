@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
 // Dynamic imports from generated code
-let auth: any, rbac: any, rateLimiter: any, userStore: any;
+let auth: any;
+let rbac: any;
+let rateLimiter: any;
+let userStore: any;
 
 beforeEach(async () => {
 	try {

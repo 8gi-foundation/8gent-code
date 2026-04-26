@@ -27,9 +27,8 @@ export function pool<T>(
 						errorOccurred = true;
 						reject(e);
 						return;
-					} else {
-						results[index] = e as T;
 					}
+					results[index] = e as T;
 				} finally {
 					counter++;
 				}

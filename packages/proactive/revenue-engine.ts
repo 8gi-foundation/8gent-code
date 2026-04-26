@@ -8,7 +8,7 @@
  * and Durable 2.0 (agents that bring paying customers while you sleep).
  */
 
-import { join } from "path";
+import { join } from "node:path";
 
 export interface RevenueStream {
 	id: string;

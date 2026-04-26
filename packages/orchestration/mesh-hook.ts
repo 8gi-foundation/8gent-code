@@ -18,9 +18,9 @@
  * }
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { AgentMesh, joinMesh } from "./agent-mesh";
 
 const STATE_DIR = join(homedir(), ".8gent", "mesh");
@@ -63,7 +63,7 @@ if (command === "register") {
 				}
 			}
 			// Clean up state file
-			const { unlinkSync } = require("fs");
+			const { unlinkSync } = require("node:fs");
 			unlinkSync(MY_STATE);
 			console.log(`[mesh-hook] Deregistered ${state.agentId}`);
 		} catch {}

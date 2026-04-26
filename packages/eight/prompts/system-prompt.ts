@@ -605,8 +605,8 @@ export function buildContextualPrompt(state: {
 - Directory: ${state.workingDirectory}
 - Git: ${state.isGitRepo ? `Yes (${state.branch || "unknown"})` : "No"}
 ${state.modifiedFiles?.length ? `- Modified: ${state.modifiedFiles.slice(0, 5).join(", ")}` : ""}
-${state.currentPlan ? `- Plan in progress: Yes` : ""}
-${state.infiniteMode ? `- Mode: INFINITE (autonomous until done)` : ""}`;
+${state.currentPlan ? "- Plan in progress: Yes" : ""}
+${state.infiniteMode ? "- Mode: INFINITE (autonomous until done)" : ""}`;
 
 	const instructions = loadInstructions(state.workingDirectory);
 	const instructionSegment = instructions
@@ -635,11 +635,13 @@ export function getTaskSpecificPrompt(
 	taskType: "explore" | "modify" | "debug" | "test" | "git",
 ): string {
 	const prompts: Record<string, string> = {
-		explore: `Explore codebase. Use: get_outline → search_symbols → get_symbol. Report findings.`,
-		modify: `Modify code. Use: read_file → edit_file → verify. Commit changes.`,
-		debug: `Debug issue. Use: search_symbols → read_file → analyze. Fix and test.`,
-		test: `Run/create tests. Use: run_command → analyze output. Report results.`,
-		git: `Git operations. Use: git_status → git_add → git_commit. Conventional commits.`,
+		explore:
+			"Explore codebase. Use: get_outline → search_symbols → get_symbol. Report findings.",
+		modify: "Modify code. Use: read_file → edit_file → verify. Commit changes.",
+		debug:
+			"Debug issue. Use: search_symbols → read_file → analyze. Fix and test.",
+		test: "Run/create tests. Use: run_command → analyze output. Report results.",
+		git: "Git operations. Use: git_status → git_add → git_commit. Conventional commits.",
 	};
 
 	return prompts[taskType] || SUBAGENT_SYSTEM_PROMPT;

@@ -12,8 +12,8 @@ import {
 	readdirSync,
 	unlinkSync,
 	writeFileSync,
-} from "fs";
-import { join } from "path";
+} from "node:fs";
+import { join } from "node:path";
 import type { AgentMessage } from "./worktree-pool-types";
 
 export class WorktreeMessaging {

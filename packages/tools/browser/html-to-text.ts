@@ -70,7 +70,7 @@ export function htmlToText(html: string): {
 
 	// --- truncate ---
 	if (text.length > MAX_BYTES) {
-		text = text.slice(0, MAX_BYTES) + "\n\n[content truncated]";
+		text = `${text.slice(0, MAX_BYTES)}\n\n[content truncated]`;
 	}
 
 	return { title, text, links: dedupeLinks(links) };

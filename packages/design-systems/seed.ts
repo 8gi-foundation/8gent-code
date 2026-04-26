@@ -245,14 +245,14 @@ export function seedDatabase(dbPath?: string): {
 	// Get final stats
 	const stats = getDatabaseStats();
 
-	console.log(`\n=== Design Systems Database Seeded ===`);
+	console.log("\n=== Design Systems Database Seeded ===");
 	console.log(`Themes seeded: ${seeded}`);
 	console.log(`Total design systems: ${stats.totalSystems}`);
 	console.log(`Total color palettes: ${stats.totalPalettes}`);
 	console.log(`Total typography configs: ${stats.totalTypography}`);
 	console.log(`Total components: ${stats.totalComponents}`);
 	console.log(`Total style tags: ${stats.totalTags}`);
-	console.log(`=====================================\n`);
+	console.log("=====================================\n");
 
 	return {
 		themesSeeded: seeded,

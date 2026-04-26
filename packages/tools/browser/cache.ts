@@ -5,7 +5,7 @@
  * Stored in ~/.8gent/browser-cache/
  */
 
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -14,9 +14,9 @@ import {
 	statSync,
 	unlinkSync,
 	writeFileSync,
-} from "fs";
-import { homedir } from "os";
-import { join } from "path";
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const CACHE_DIR = join(
 	process.env.EIGHT_DATA_DIR || join(homedir(), ".8gent"),

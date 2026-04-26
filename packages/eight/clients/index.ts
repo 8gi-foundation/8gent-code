@@ -78,18 +78,21 @@ export function createClient(config: AgentConfig): LLMClient {
 	if (config.runtime === "openrouter") {
 		const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
 		return new OpenRouterClient(config.model, apiKey);
-	} else if (config.runtime === "lmstudio") {
+	}
+	if (config.runtime === "lmstudio") {
 		return new LMStudioClient(config.model);
-	} else if (config.runtime === "apple-foundation") {
+	}
+	if (config.runtime === "apple-foundation") {
 		return new AppleFoundationClient(config.model);
-	} else if (config.runtime === "apfel") {
+	}
+	if (config.runtime === "apfel") {
 		return new ApfelClient(config.model);
-	} else if (config.runtime === "deepseek") {
+	}
+	if (config.runtime === "deepseek") {
 		const apiKey = config.apiKey || process.env.DEEPSEEK_API_KEY || "";
 		return new DeepSeekClient(config.model, apiKey);
-	} else {
-		return new OllamaClient(config.model);
 	}
+	return new OllamaClient(config.model);
 }
 
 /**

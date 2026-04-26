@@ -4,8 +4,8 @@
  * Supports TS, JS, Python, Go, Rust comment styles.
  */
 
-import { readFileSync, readdirSync, statSync } from "fs";
-import { extname, join } from "path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { extname, join } from "node:path";
 
 export interface LineStats {
 	code: number;
@@ -65,10 +65,10 @@ export function countLines(filePath: string): LineStats | null {
 		return null;
 	}
 	const style = COMMENT_STYLES[lang];
-	let code = 0,
-		blank = 0,
-		comment = 0,
-		inBlock = false;
+	let code = 0;
+	let blank = 0;
+	let comment = 0;
+	let inBlock = false;
 	for (const rawLine of raw.split("\n")) {
 		const line = rawLine.trim();
 		if (line === "") {
@@ -141,7 +141,7 @@ export function countProject(
 ): ProjectStats {
 	const ignore = [...DEFAULT_IGNORE, ...(options.ignore ?? [])];
 	const exts = (options.extensions ?? Object.keys(EXT_TO_LANG)).map((e) =>
-		e.startsWith(".") ? e : "." + e,
+		e.startsWith(".") ? e : `.${e}`,
 	);
 	const byLanguage: ProjectStats["byLanguage"] = {};
 	const byDirectory: ProjectStats["byDirectory"] = {};

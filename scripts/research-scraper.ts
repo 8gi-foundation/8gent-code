@@ -8,9 +8,9 @@
  *   bun run scripts/research-scraper.ts --loop   -- run every 4 hours
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -481,8 +481,8 @@ const FEYNMAN_SPECS: UtilitySpec[] = [
 
 async function run(): Promise<void> {
 	const env = loadEnv();
-	const telegramToken = env["TELEGRAM_BOT_TOKEN"] ?? "";
-	const telegramChat = env["TELEGRAM_CHAT_ID"] ?? "5486040131";
+	const telegramToken = env.TELEGRAM_BOT_TOKEN ?? "";
+	const telegramChat = env.TELEGRAM_CHAT_ID ?? "5486040131";
 
 	console.log("Research scraper starting...");
 
@@ -519,7 +519,7 @@ async function run(): Promise<void> {
 			return;
 		}
 		if (isTooSimilar(spec.description, existingDescs)) {
-			skippedNames.push(spec.name + " (similar desc)");
+			skippedNames.push(`${spec.name} (similar desc)`);
 			return;
 		}
 		// Security: never execute - only text descriptions pass through
@@ -580,18 +580,16 @@ async function run(): Promise<void> {
 			`github-all: ${ghAllSpecs.length}`,
 			`hn: ${hnSpecs.length}`,
 		].join(", ");
-		const msg =
-			`Research scraper found <b>${newSpecs.length} new abilities</b> from 4 sources\n` +
-			`Sources: ${sourceBreakdown}\n` +
-			`Queue total: ${updatedQueue.length} specs\n` +
-			(newSpecs.length > 0
+		const msg = `Research scraper found <b>${newSpecs.length} new abilities</b> from 4 sources\nSources: ${sourceBreakdown}\nQueue total: ${updatedQueue.length} specs\n${
+			newSpecs.length > 0
 				? `Added: ${newSpecs
 						.slice(0, 8)
 						.map((s) => s.name)
 						.join(
 							", ",
 						)}${newSpecs.length > 8 ? ` +${newSpecs.length - 8} more` : ""}`
-				: "No new specs this run (all deduplicated)");
+				: "No new specs this run (all deduplicated)"
+		}`;
 		await sendTelegram(telegramToken, telegramChat, msg);
 		console.log("Telegram sent.");
 	} else {
@@ -610,7 +608,7 @@ const CYCLE_MS = 30 * 60 * 1000; // 30 minutes
 async function loopForever(): Promise<void> {
 	while (true) {
 		await run();
-		console.log(`\nSleeping 30 minutes until next cycle...`);
+		console.log("\nSleeping 30 minutes until next cycle...");
 		await new Promise((res) => setTimeout(res, CYCLE_MS));
 	}
 }

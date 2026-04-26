@@ -12,9 +12,9 @@
  *   bun run scripts/utility-factory.ts --dry-run
  */
 
-import { execSync, spawnSync } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { execSync, spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================
 // Config
@@ -372,7 +372,7 @@ async function sendPRNotification(
 	spec: UtilitySpec,
 	prUrl: string,
 ): Promise<void> {
-	const msg = generatePitch(spec) + `\n\n${prUrl}`;
+	const msg = `${generatePitch(spec)}\n\n${prUrl}`;
 	await sendTelegram(msg);
 
 	// Generate 60-second voice pitch - product-led, JTBD, safety case
@@ -386,7 +386,7 @@ async function sendPRNotification(
 
 Here's the job it solves. When a developer or agent needs to ${firstReq.toLowerCase()}, right now they have two options. Install an npm package and trust someone else's code, or write it from scratch every time. Neither is great.
 
-What Eight built instead. ${spec.description}. ${secondReq ? "It can also " + secondReq.toLowerCase() + "." : ""} All in ${lines} lines, zero dependencies, works completely offline.
+What Eight built instead. ${spec.description}. ${secondReq ? `It can also ${secondReq.toLowerCase()}.` : ""} All in ${lines} lines, zero dependencies, works completely offline.
 
 Now, should you merge it? Here's why I think yes. First, it passed the security gate. No eval, no require, no process dot env mutation, no code that runs on import. Second, it's on its own quarantine branch, completely isolated from main. Third, it's ${lines} lines. You can read the whole thing in two minutes. Fourth, zero external dependencies means zero supply chain risk.
 

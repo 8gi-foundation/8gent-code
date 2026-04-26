@@ -6,8 +6,8 @@
  * Falls back to devstral:latest if eight:latest times out.
  */
 
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 const PRIMARY_MODEL = "eight:latest";
@@ -101,10 +101,10 @@ function extractComponent(raw: string): string {
 
 	// Ensure it starts with "use client" if not present
 	if (!code.includes('"use client"') && !code.includes("'use client'")) {
-		code = '"use client";\n\n' + code;
+		code = `"use client";\n\n${code}`;
 	}
 
-	return code.trim() + "\n";
+	return `${code.trim()}\n`;
 }
 
 async function callOllama(

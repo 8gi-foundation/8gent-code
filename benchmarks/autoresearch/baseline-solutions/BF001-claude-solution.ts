@@ -42,7 +42,7 @@ export async function updateCounter(
 	} finally {
 		// Release lock
 		locks.delete(id);
-		releaseLock!();
+		releaseLock?.();
 	}
 }
 

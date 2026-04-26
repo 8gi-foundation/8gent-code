@@ -26,7 +26,7 @@ export function connectControlPlane(): void {
 			reconnectDelay = 2000;
 
 			// Register with the control plane
-			ws!.send(
+			ws?.send(
 				JSON.stringify({
 					type: "vessel:register",
 					manifest: buildManifest(),

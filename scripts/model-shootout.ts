@@ -155,7 +155,7 @@ async function setModel(model: string): Promise<void> {
 	);
 	await proc.exited;
 	// Wait for restart
-	console.log(`  Waiting for vessel to restart...`);
+	console.log("  Waiting for vessel to restart...");
 	const up = await waitForVessel();
 	if (!up) throw new Error("Vessel failed to restart");
 	// Extra settling time
@@ -311,7 +311,7 @@ async function main() {
 	}
 
 	// Scoreboard
-	console.log("\n\n" + "=".repeat(70));
+	console.log(`\n\n${"=".repeat(70)}`);
 	console.log("SCOREBOARD");
 	console.log("=".repeat(70));
 	console.log(

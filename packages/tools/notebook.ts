@@ -5,8 +5,8 @@
  * Notebooks are JSON files with a specific structure.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -242,7 +242,7 @@ export async function editCell(
 	// Update the cell source (convert to array of lines for standard format)
 	const sourceLines = newSource
 		.split("\n")
-		.map((line, i, arr) => (i < arr.length - 1 ? line + "\n" : line));
+		.map((line, i, arr) => (i < arr.length - 1 ? `${line}\n` : line));
 	notebook.cells[cellIndex].source = sourceLines;
 
 	// Clear outputs for code cells when source changes
@@ -281,7 +281,7 @@ export async function insertCell(
 	// Create new cell
 	const sourceLines = source
 		.split("\n")
-		.map((line, i, arr) => (i < arr.length - 1 ? line + "\n" : line));
+		.map((line, i, arr) => (i < arr.length - 1 ? `${line}\n` : line));
 
 	const newCell: NotebookCell = {
 		cell_type: cellType,
@@ -433,8 +433,8 @@ export async function changeCellType(
 		cell.outputs = [];
 	} else {
 		// Remove code-specific properties for non-code cells
-		delete cell.execution_count;
-		delete cell.outputs;
+		cell.execution_count = undefined;
+		cell.outputs = undefined;
 	}
 
 	await saveNotebook(absolutePath, notebook);

@@ -146,7 +146,7 @@ export function MusicPlayer({
 	const statusColor = isPaused ? "yellow" : "green";
 	const truncTitle =
 		trackTitle && trackTitle.length > width - 2
-			? trackTitle.slice(0, width - 5) + "..."
+			? `${trackTitle.slice(0, width - 5)}...`
 			: trackTitle || "---";
 
 	return (

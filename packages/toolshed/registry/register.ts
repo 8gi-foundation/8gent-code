@@ -33,7 +33,7 @@ export function registerTool(
 		if (!capabilityIndex.has(cap)) {
 			capabilityIndex.set(cap, new Set());
 		}
-		capabilityIndex.get(cap)!.add(tool.name);
+		capabilityIndex.get(cap)?.add(tool.name);
 	}
 
 	console.log(`[toolshed] Registered tool: ${tool.name}`);

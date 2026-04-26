@@ -4,8 +4,8 @@
  * SQLite-backed registry for design primitives, components, and patterns.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import Database from "better-sqlite3";
 
 const DB_PATH =

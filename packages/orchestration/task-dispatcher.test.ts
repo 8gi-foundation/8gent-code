@@ -9,7 +9,7 @@ describe("TaskDispatcher", () => {
 		const r2 = d.claim("task-1", "qa");
 		expect(r1).not.toBeNull();
 		expect(r2).toBeNull();
-		expect(r1!.claimedBy).toBe("engineer");
+		expect(r1?.claimedBy).toBe("engineer");
 	});
 
 	it("releaseStalled releases ghost claims", () => {

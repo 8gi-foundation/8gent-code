@@ -27,7 +27,7 @@ function strictIs(a: unknown, b: unknown): boolean {
 
 function looseIs(a: unknown, b: unknown): boolean {
 	// eslint-disable-next-line eqeqeq
-	return a == b;
+	return a === b;
 }
 
 function compareArrays(

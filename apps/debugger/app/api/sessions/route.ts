@@ -1,11 +1,11 @@
-import { createReadStream } from "fs";
-import { join } from "path";
-import { createInterface } from "readline";
-import { readdir, stat } from "fs/promises";
+import { createReadStream } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-import { homedir } from "os";
+import { homedir } from "node:os";
 
 export interface SessionInfo {
 	sessionId: string;

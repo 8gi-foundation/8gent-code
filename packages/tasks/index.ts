@@ -15,10 +15,10 @@
  * - Priority levels
  */
 
-import { EventEmitter } from "events";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { EventEmitter } from "node:events";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -413,7 +413,7 @@ export class TaskManager extends EventEmitter {
 
 			if (filter.tags && filter.tags.length > 0) {
 				tasks = tasks.filter((t) =>
-					filter.tags!.some((tag) => t.tags.includes(tag)),
+					filter.tags?.some((tag) => t.tags.includes(tag)),
 				);
 			}
 

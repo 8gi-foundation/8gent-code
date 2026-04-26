@@ -8,10 +8,10 @@
  * Usage: bun run scripts/nightly-train.ts [--iterations 5] [--model qwen3:14b]
  */
 
-import { spawn } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	type InferenceParams,
 	type RunCheckpoint,
@@ -55,7 +55,7 @@ for (const dir of [SESSIONS_DIR, CHECKPOINTS_DIR, TRAINING_DATA_DIR]) {
 function log(msg: string) {
 	const line = `[${new Date().toISOString()}] ${msg}`;
 	console.log(line);
-	fs.appendFileSync(NIGHTLY_LOG, line + "\n");
+	fs.appendFileSync(NIGHTLY_LOG, `${line}\n`);
 }
 
 // ============================================
@@ -383,7 +383,7 @@ Initialize with a 10x10 random grid seeded with seed=42 for reproducibility.`,
 
 			// Self-healing: if task failed, read the error, learn, retry once
 			if (!passed && useSequential) {
-				log(`  [HEAL] Task failed. Reading session log for error context...`);
+				log("  [HEAL] Task failed. Reading session log for error context...");
 				let failureContext = "";
 				if (sessionId) {
 					const failSessionPath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
@@ -466,8 +466,8 @@ Focus on getting working code with passing tests. Simplify if needed.`;
 								.readFileSync(data.sessionPath, "utf-8")
 								.split("\n")
 								.filter(Boolean);
-							let tt = 0,
-								ts = 0;
+							let tt = 0;
+							let ts = 0;
 							for (const l of sc) {
 								try {
 									const e = JSON.parse(l);
@@ -679,7 +679,7 @@ async function postToBoardroom(
 
 	// Truncate to Discord limit
 	const truncated =
-		message.length > 1900 ? message.slice(0, 1900) + "..." : message;
+		message.length > 1900 ? `${message.slice(0, 1900)}...` : message;
 
 	try {
 		const res = await fetch(

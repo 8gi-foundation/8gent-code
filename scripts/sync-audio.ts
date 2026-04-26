@@ -10,7 +10,7 @@
  *   bun run scripts/sync-audio.ts --watch  # watch for changes
  */
 
-import { execSync } from "child_process";
+import { execSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -18,8 +18,8 @@ import {
 	statSync,
 	watch,
 	writeFileSync,
-} from "fs";
-import { basename, join } from "path";
+} from "node:fs";
+import { basename, join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const AUDIO_DIR = join(ROOT, "docs", "audio");
@@ -83,7 +83,7 @@ function generateAudio(mdPath: string, force = false): boolean {
 	const content = readFileSync(fullPath, "utf-8");
 	const checksum = getChecksum(content);
 	const checksums = loadChecksums();
-	const audioFile = join(AUDIO_DIR, basename(mdPath, ".md") + ".aiff");
+	const audioFile = join(AUDIO_DIR, `${basename(mdPath, ".md")}.aiff`);
 
 	// Skip if unchanged
 	if (!force && checksums[mdPath] === checksum && existsSync(audioFile)) {
@@ -120,7 +120,7 @@ const isForce = process.argv.includes("--force");
 
 console.log("🔊 Audio Accessibility Sync");
 console.log(`   Files: ${TRACKED_FILES.length}`);
-console.log(`   Output: docs/audio/\n`);
+console.log("   Output: docs/audio/\n");
 
 let generated = 0;
 for (const file of TRACKED_FILES) {

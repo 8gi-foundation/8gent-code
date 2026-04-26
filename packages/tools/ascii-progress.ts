@@ -31,10 +31,10 @@ export function asciiBar(current: number, total: number, width = 10): string {
 		bar = "=".repeat(width);
 	} else if (filled === 0) {
 		// Nothing filled yet - just arrow at start
-		bar = ">" + " ".repeat(width - 1);
+		bar = `>${" ".repeat(width - 1)}`;
 	} else {
 		// Partial fill with arrow head
-		const body = "=".repeat(filled - 1) + ">";
+		const body = `${"=".repeat(filled - 1)}>`;
 		const empty = " ".repeat(width - filled);
 		bar = body + empty;
 	}

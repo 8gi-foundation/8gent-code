@@ -6,8 +6,8 @@
  * Data persists to ~/.8gent/tabs/notes.json
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -180,7 +180,7 @@ export function NotesView({
 					return;
 				}
 				if (key.return) {
-					setInputBuffer((prev) => prev + "\n");
+					setInputBuffer((prev) => `${prev}\n`);
 					return;
 				}
 				if (input && !key.ctrl && !key.meta) {

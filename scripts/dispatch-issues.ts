@@ -282,7 +282,7 @@ async function executeTask(
 			const { event: evt, payload } = msg;
 			switch (evt) {
 				case "agent:thinking":
-					console.log(`  [thinking...]`);
+					console.log("  [thinking...]");
 					break;
 				case "tool:start":
 					toolCalls++;
@@ -343,8 +343,8 @@ async function executeTask(
 async function main() {
 	console.log("8gent Issue Dispatcher");
 	console.log("=".repeat(70));
-	console.log(`Local model:  eight-1-q-14b:latest (Qwen 3 14B fine-tuned)`);
-	console.log(`Vessel model: nvidia/nemotron-3-super-120b-a12b:free`);
+	console.log("Local model:  eight-1-q-14b:latest (Qwen 3 14B fine-tuned)");
+	console.log("Vessel model: nvidia/nemotron-3-super-120b-a12b:free");
 	console.log(`Tasks: ${assignments.length} issues to dispatch`);
 	console.log(`Timeout: ${TIMEOUT_MS / 1000}s per task`);
 	console.log("=".repeat(70));
@@ -409,7 +409,7 @@ async function main() {
 	]);
 
 	// Summary
-	console.log("\n\n" + "=".repeat(70));
+	console.log(`\n\n${"=".repeat(70)}`);
 	console.log("DISPATCH RESULTS");
 	console.log("=".repeat(70));
 

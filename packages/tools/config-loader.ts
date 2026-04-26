@@ -7,8 +7,8 @@
  * Supports nested keys via dot notation ("server.port").
  */
 
-import { existsSync, readFileSync } from "fs";
-import { extname } from "path";
+import { existsSync, readFileSync } from "node:fs";
+import { extname } from "node:path";
 
 export type ConfigValue = string | number | boolean | null;
 export type ConfigMap = Record<string, unknown>;
@@ -65,7 +65,7 @@ function coerce(raw: string): ConfigValue {
 	if (raw === "false") return false;
 	if (raw === "null") return null;
 	const n = Number(raw);
-	if (!isNaN(n) && raw.trim() !== "") return n;
+	if (!Number.isNaN(n) && raw.trim() !== "") return n;
 	return raw;
 }
 

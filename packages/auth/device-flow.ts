@@ -231,7 +231,6 @@ async function pollForToken(
 					error: `Network error during polling: ${message}`,
 				};
 			}
-			continue;
 		}
 	}
 

@@ -7,10 +7,10 @@
  * This is the key tool for the feedback loop: run 8gent, then validate the result.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as readline from "readline";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as readline from "node:readline";
 import type { SessionEntry } from "../../specifications/session/index.js";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
@@ -201,11 +201,11 @@ export async function validate(args: string[]): Promise<void> {
 		if (e.type === "assistant_content") {
 			const parts = (e as any).parts ?? [];
 			for (const p of parts) {
-				if (p.type === "text") assistantOutput += (p.text ?? "") + "\n";
+				if (p.type === "text") assistantOutput += `${p.text ?? ""}\n`;
 			}
 		}
 		if (e.type === "assistant_message") {
-			assistantOutput += ((e as any).message?.content ?? "") + "\n";
+			assistantOutput += `${(e as any).message?.content ?? ""}\n`;
 		}
 	}
 
@@ -315,7 +315,7 @@ export async function validate(args: string[]): Promise<void> {
 	} else {
 		const icon = result.pass ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m";
 		console.log(`\n  Validation: ${icon}`);
-		console.log("  " + "─".repeat(50));
+		console.log(`  ${"─".repeat(50)}`);
 
 		for (const check of result.checks) {
 			const ci = check.pass ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
@@ -332,7 +332,7 @@ export async function validate(args: string[]): Promise<void> {
 		}
 
 		if (result.assistantOutput) {
-			console.log(`\n  Last output (first 500 chars):`);
+			console.log("\n  Last output (first 500 chars):");
 			console.log(`  ${result.assistantOutput.slice(0, 500)}`);
 		}
 		console.log();

@@ -173,7 +173,7 @@ export class NotificationDispatcher {
 		if (MACOS_NOTIFY_TYPES.has(type)) {
 			const meta = nativeNotifyMeta(type);
 			const short =
-				message.length > 200 ? message.slice(0, 197) + "..." : message;
+				message.length > 200 ? `${message.slice(0, 197)}...` : message;
 			sendNativeNotification(meta.title, short, { sound: meta.sound }).catch(
 				() => {},
 			);

@@ -7,9 +7,9 @@
  * Persists to ~/.8gent/scorecards/ as JSONL files (one per session).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -155,7 +155,7 @@ export class AbilityScorecardTracker {
 	/** List all session files in the scorecards directory. */
 	listSessions(): string[] {
 		if (!existsSync(SCORECARDS_DIR)) return [];
-		const { readdirSync } = require("fs") as typeof import("fs");
+		const { readdirSync } = require("node:fs") as typeof import("fs");
 		return readdirSync(SCORECARDS_DIR)
 			.filter((f: string) => f.endsWith(".jsonl"))
 			.sort();
@@ -170,8 +170,8 @@ export class AbilityScorecardTracker {
 	}
 
 	private appendToFile(metric: AbilityMetric): void {
-		const line = JSON.stringify(metric) + "\n";
-		const { appendFileSync } = require("fs") as typeof import("fs");
+		const line = `${JSON.stringify(metric)}\n`;
+		const { appendFileSync } = require("node:fs") as typeof import("fs");
 		appendFileSync(this.filePath, line, "utf-8");
 	}
 

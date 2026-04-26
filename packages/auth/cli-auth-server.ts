@@ -11,7 +11,7 @@
  * 5. CLI receives token, stores it, closes server
  */
 
-import { randomBytes } from "crypto";
+import { randomBytes } from "node:crypto";
 
 export interface CLIAuthResult {
 	success: boolean;

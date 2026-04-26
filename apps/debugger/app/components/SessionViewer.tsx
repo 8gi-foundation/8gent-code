@@ -246,7 +246,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 					.map((p) => p.text)
 					.join(" ")
 					.slice(0, 200);
-				const prefix = reasoningParts.length ? `[thinking] ` : "";
+				const prefix = reasoningParts.length ? "[thinking] " : "";
 				return `Step ${entry.stepNumber}: ${prefix}${text || "(tool calls only)"}`;
 			}
 			case "tool_call":

@@ -153,7 +153,7 @@ export class WikiGenerator {
 			for (const mem of memories) {
 				const snippet =
 					mem.content_text.length > 200
-						? mem.content_text.slice(0, 200) + "..."
+						? `${mem.content_text.slice(0, 200)}...`
 						: mem.content_text;
 				sections.push(`- ${snippet}`);
 			}
@@ -328,7 +328,7 @@ export class WikiGenerator {
 		const rows = this.queryMemories(entityName);
 		if (rows.length === 0) return "(no description)";
 		const text = rows[0].content_text;
-		return text.length > 80 ? text.slice(0, 80) + "..." : text;
+		return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 	}
 
 	private groupRelationships(

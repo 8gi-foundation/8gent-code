@@ -17,10 +17,10 @@
  *   bun run scripts/social-feed-research.ts --dry-run
  */
 
-import { execSync, spawnSync } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { execSync, spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const ROOT = path.resolve(import.meta.dir, "..");
 const LOG_PATH = path.join(os.homedir(), ".8gent", "social-research.log");
@@ -42,7 +42,7 @@ fs.mkdirSync(FINDINGS_DIR, { recursive: true });
 function log(msg: string) {
 	const line = `[${new Date().toISOString()}] ${msg}`;
 	console.log(line);
-	fs.appendFileSync(LOG_PATH, line + "\n");
+	fs.appendFileSync(LOG_PATH, `${line}\n`);
 }
 
 // ============================================
@@ -372,7 +372,7 @@ const { chromium } = require('playwright');
 					if (score < 20) continue; // Skip low-relevance posts
 
 					findings.push({
-						title: post.text.slice(0, 80).replace(/\n/g, " ") + "...",
+						title: `${post.text.slice(0, 80).replace(/\n/g, " ")}...`,
 						source: feed.name,
 						platform: feed.platform,
 						author: post.author,
@@ -624,33 +624,32 @@ ${finding.url !== finding.source ? `**Link:** ${finding.url}` : ""}
 			const url = result.stdout.trim();
 			log(`  Created issue: ${url}`);
 			return url;
-		} else {
-			// Label might not exist — try without label
-			const retryResult = spawnSync(
-				"gh",
-				[
-					"issue",
-					"create",
-					"--repo",
-					repo,
-					"--title",
-					`research: ${finding.title}`,
-					"--body",
-					body,
-				],
-				{ encoding: "utf-8", timeout: 15000 },
-			);
-
-			if (retryResult.status === 0) {
-				const url = retryResult.stdout.trim();
-				log(`  Created issue (no label): ${url}`);
-				return url;
-			}
-
-			log(
-				`  Issue creation failed: ${(result.stderr || retryResult.stderr || "").slice(0, 200)}`,
-			);
 		}
+		// Label might not exist — try without label
+		const retryResult = spawnSync(
+			"gh",
+			[
+				"issue",
+				"create",
+				"--repo",
+				repo,
+				"--title",
+				`research: ${finding.title}`,
+				"--body",
+				body,
+			],
+			{ encoding: "utf-8", timeout: 15000 },
+		);
+
+		if (retryResult.status === 0) {
+			const url = retryResult.stdout.trim();
+			log(`  Created issue (no label): ${url}`);
+			return url;
+		}
+
+		log(
+			`  Issue creation failed: ${(result.stderr || retryResult.stderr || "").slice(0, 200)}`,
+		);
 	} catch (err) {
 		log(`  Issue creation error: ${err}`);
 	}
@@ -670,7 +669,7 @@ async function notifyTelegram(
 	if (!token) return;
 
 	const text = [
-		`*Social Feed Research Complete*`,
+		"*Social Feed Research Complete*",
 		"",
 		`*Findings:* ${findings.length} relevant patterns`,
 		`*Issues created:* ${issues.length}`,
@@ -683,7 +682,7 @@ async function notifyTelegram(
 			),
 		findings.length > 5 ? `...and ${findings.length - 5} more` : "",
 		"",
-		`_Review in GitHub issues when you wake up._`,
+		"_Review in GitHub issues when you wake up._",
 	].join("\n");
 
 	try {
@@ -800,7 +799,7 @@ export async function runSocialResearch(): Promise<{
 	await notifyTelegram(analyzed, issues);
 
 	log("═══════════════════════════════════════════════════");
-	log(`Social Feed Research Complete`);
+	log("Social Feed Research Complete");
 	log(`  Findings: ${analyzed.length}`);
 	log(`  Issues: ${issues.length}`);
 	log("═══════════════════════════════════════════════════");

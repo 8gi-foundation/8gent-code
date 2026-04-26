@@ -13,9 +13,9 @@
  * ```
  */
 
-import { existsSync, unlinkSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { VoiceEngine } from "./index.js";
 import { type TTSEngine, getTTSEngine } from "./tts-engine.js";
 import type { TTSProcess } from "./tts-engine.js";
@@ -461,7 +461,7 @@ function splitIntoSentences(text: string): string[] {
 	let current = "";
 
 	for (const part of raw) {
-		if ((current + " " + part).length > 120 && current) {
+		if (`${current} ${part}`.length > 120 && current) {
 			chunks.push(current.trim());
 			current = part;
 		} else {

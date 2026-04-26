@@ -123,7 +123,7 @@ export async function runHarness(
 				success: true,
 				result:
 					result.length > 4096
-						? result.slice(0, 4096) + "...[truncated]"
+						? `${result.slice(0, 4096)}...[truncated]`
 						: result,
 			});
 

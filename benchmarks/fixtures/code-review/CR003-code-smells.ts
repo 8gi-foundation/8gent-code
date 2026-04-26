@@ -38,11 +38,13 @@ export function processUserData(
 		// Track analytics
 		console.log("Analytics: user_created");
 		return user;
-	} else if (action === "update") {
+	}
+	if (action === "update") {
 		// Update logic
 		console.log("Updating user:", userId, data);
 		return { updated: true };
-	} else if (action === "delete") {
+	}
+	if (action === "delete") {
 		// Delete logic
 		console.log("Deleting user:", userId);
 		// Send goodbye email
@@ -50,7 +52,8 @@ export function processUserData(
 		// Track analytics
 		console.log("Analytics: user_deleted");
 		return { deleted: true };
-	} else if (action === "verify") {
+	}
+	if (action === "verify") {
 		// Verification logic
 		console.log("Verifying user:", userId);
 		return { verified: true };

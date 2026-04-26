@@ -12,9 +12,9 @@
  * Issue: #1402
  */
 
-import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AuditEntry, AuditEntryType, Session } from "./types";
 
 const SESSIONS_DIR = path.join(process.env.HOME || "~", ".8gent", "audit");
@@ -35,7 +35,7 @@ export function computeHash(
 function parseLine(line: string): AuditEntry {
 	const entry = JSON.parse(line) as AuditEntry;
 	if (!entry.id || !entry.timestamp || !entry.type || !entry.hash) {
-		throw new Error(`Malformed audit entry: missing required fields`);
+		throw new Error("Malformed audit entry: missing required fields");
 	}
 	return entry;
 }
@@ -85,7 +85,7 @@ export function createSession(sessionId?: string): Session {
 				prevHash,
 				hash,
 			};
-			const line = JSON.stringify(entry) + "\n";
+			const line = `${JSON.stringify(entry)}\n`;
 
 			// Append-only write. O_APPEND ensures atomicity on POSIX.
 			// SEC-H1: Owner-only permissions on session files (0o600)

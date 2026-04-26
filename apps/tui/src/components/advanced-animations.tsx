@@ -858,7 +858,7 @@ export function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
 
 		// Top face
 		const topOffset = Math.abs(Math.sin(angle)) * 2;
-		lines.push(`    ${"╭" + "─".repeat(cubeSize * 2) + "╮"}`);
+		lines.push(`    ${`╭${"─".repeat(cubeSize * 2)}╮`}`);
 		lines.push(
 			`   ${"╱".padStart(2)} ${faceColors.top.repeat(cubeSize)} ${"╱"}│`,
 		);

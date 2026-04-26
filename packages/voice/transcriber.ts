@@ -5,9 +5,9 @@
  * Downloads the whisper.cpp binary if not available.
  */
 
-import { existsSync } from "fs";
-import { arch, homedir, platform } from "os";
-import { join } from "path";
+import { existsSync } from "node:fs";
+import { arch, homedir, platform } from "node:os";
+import { join } from "node:path";
 import { spawn } from "bun";
 import type { TranscriptEvent, WhisperModelName } from "./types.js";
 
@@ -178,60 +178,55 @@ export async function transcribeLocal(
 			reject(new Error(`Transcription timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 	});
+	const [stdout, stderr] = await Promise.race([
+		Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]),
+		timeoutPromise.then(() => ["", ""] as [string, string]),
+	]);
 
-	try {
-		const [stdout, stderr] = await Promise.race([
-			Promise.all([
-				new Response(proc.stdout).text(),
-				new Response(proc.stderr).text(),
-			]),
-			timeoutPromise.then(() => ["", ""] as [string, string]),
-		]);
+	const exitCode = await proc.exited;
 
-		const exitCode = await proc.exited;
-
-		if (exitCode !== 0) {
-			throw new Error(
-				`whisper.cpp exited with code ${exitCode}: ${stderr.trim()}`,
-			);
-		}
-
-		// Parse output — whisper.cpp outputs transcribed text to stdout
-		// Filter out whisper.cpp info lines (they start with "whisper_" or contain timing info)
-		const lines = stdout.split("\n");
-		const textLines = lines.filter((line) => {
-			const trimmed = line.trim();
-			if (!trimmed) return false;
-			if (trimmed.startsWith("whisper_")) return false;
-			if (trimmed.startsWith("[")) return false; // timestamp lines
-			if (trimmed.startsWith("output_")) return false;
-			return true;
-		});
-
-		const text = textLines.join(" ").trim();
-		const durationMs = Date.now() - startTime;
-
-		// Estimate audio duration from WAV file size
-		// WAV at 16kHz, 16-bit, mono = 32000 bytes per second
-		let audioDurationMs = 0;
-		try {
-			const file = Bun.file(wavPath);
-			const wavBytes = file.size - 44; // subtract WAV header
-			audioDurationMs = Math.round((wavBytes / 32000) * 1000);
-		} catch {
-			// ignore
-		}
-
-		return {
-			text: cleanTranscript(text),
-			isFinal: true,
-			durationMs,
-			model: extractModelName(modelPath),
-			audioDurationMs,
-		};
-	} catch (err) {
-		throw err;
+	if (exitCode !== 0) {
+		throw new Error(
+			`whisper.cpp exited with code ${exitCode}: ${stderr.trim()}`,
+		);
 	}
+
+	// Parse output — whisper.cpp outputs transcribed text to stdout
+	// Filter out whisper.cpp info lines (they start with "whisper_" or contain timing info)
+	const lines = stdout.split("\n");
+	const textLines = lines.filter((line) => {
+		const trimmed = line.trim();
+		if (!trimmed) return false;
+		if (trimmed.startsWith("whisper_")) return false;
+		if (trimmed.startsWith("[")) return false; // timestamp lines
+		if (trimmed.startsWith("output_")) return false;
+		return true;
+	});
+
+	const text = textLines.join(" ").trim();
+	const durationMs = Date.now() - startTime;
+
+	// Estimate audio duration from WAV file size
+	// WAV at 16kHz, 16-bit, mono = 32000 bytes per second
+	let audioDurationMs = 0;
+	try {
+		const file = Bun.file(wavPath);
+		const wavBytes = file.size - 44; // subtract WAV header
+		audioDurationMs = Math.round((wavBytes / 32000) * 1000);
+	} catch {
+		// ignore
+	}
+
+	return {
+		text: cleanTranscript(text),
+		isFinal: true,
+		durationMs,
+		model: extractModelName(modelPath),
+		audioDurationMs,
+	};
 }
 
 /**

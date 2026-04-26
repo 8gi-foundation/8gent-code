@@ -9,9 +9,9 @@
  *   bun run benchmarks/swebench/run.ts --output ./my-results
  *   bun run benchmarks/swebench/run.ts --refresh
  */
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { loadTasks, refreshDataset } from "./loader";
 import { type TaskResult, runAllTasks } from "./runner";
 import { printSummary, saveReport, score } from "./scorer";
@@ -33,8 +33,8 @@ function parseArgs(): CLIOptions {
 		refresh: false,
 	};
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i],
-			next = args[i + 1];
+		const arg = args[i];
+		const next = args[i + 1];
 		switch (arg) {
 			case "--subset":
 			case "-n":

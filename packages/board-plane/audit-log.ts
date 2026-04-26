@@ -63,13 +63,13 @@ export class AuditLog {
       )
     `);
 		this.db.exec(
-			`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, createdAt)`,
+			"CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, createdAt)",
 		);
 		this.db.exec(
-			`CREATE INDEX IF NOT EXISTS idx_audit_member ON audit_log(memberCode, createdAt)`,
+			"CREATE INDEX IF NOT EXISTS idx_audit_member ON audit_log(memberCode, createdAt)",
 		);
 		this.db.exec(
-			`CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(taskId)`,
+			"CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_log(taskId)",
 		);
 	}
 
@@ -126,7 +126,7 @@ export class AuditLog {
 	/** Get recent audit entries */
 	getRecent(limit = 50): AuditEntry[] {
 		return this.db
-			.prepare(`SELECT * FROM audit_log ORDER BY createdAt DESC LIMIT ?`)
+			.prepare("SELECT * FROM audit_log ORDER BY createdAt DESC LIMIT ?")
 			.all(limit) as AuditEntry[];
 	}
 
@@ -134,7 +134,7 @@ export class AuditLog {
 	getByTask(taskId: string): AuditEntry[] {
 		return this.db
 			.prepare(
-				`SELECT * FROM audit_log WHERE taskId = ? ORDER BY createdAt ASC`,
+				"SELECT * FROM audit_log WHERE taskId = ? ORDER BY createdAt ASC",
 			)
 			.all(taskId) as AuditEntry[];
 	}
@@ -143,7 +143,7 @@ export class AuditLog {
 	getStats(): Record<string, number> {
 		const rows = this.db
 			.prepare(
-				`SELECT action, COUNT(*) as count FROM audit_log GROUP BY action`,
+				"SELECT action, COUNT(*) as count FROM audit_log GROUP BY action",
 			)
 			.all() as Array<{ action: string; count: number }>;
 		const stats: Record<string, number> = {};

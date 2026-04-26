@@ -9,7 +9,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import * as crypto from "crypto";
+import * as crypto from "node:crypto";
 
 // ============================================
 // Types
@@ -251,14 +251,15 @@ export class KnowledgeGraph {
 				now,
 			);
 
-		// Return the actual row ID (may differ from `id` on conflict)
+		// Return the actual row ID (may differ from `id` on conflict).
+		// Row is guaranteed to exist because we just INSERTed (or updated on conflict).
 		const row = this.db
 			.query<{ id: string }, [string, string]>(
 				"SELECT id FROM knowledge_entities WHERE type = ? AND name = ?",
 			)
 			.get(type, name);
 
-		return row!.id;
+		return row?.id ?? id;
 	}
 
 	/**

@@ -145,7 +145,7 @@ export class VesselClient {
 		if (this.closed) return;
 		this.reconnectAttempts++;
 		const backoff = Math.min(
-			BASE_BACKOFF_MS * Math.pow(2, this.reconnectAttempts - 1),
+			BASE_BACKOFF_MS * 2 ** (this.reconnectAttempts - 1),
 			MAX_BACKOFF_MS,
 		);
 		console.log(`[vessel-client] Reconnecting in ${backoff}ms`);

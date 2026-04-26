@@ -72,40 +72,39 @@ async function callVisionModel(
 		if (!res.ok) throw new Error(`Ollama vision error: ${res.statusText}`);
 		const data = await res.json();
 		return data.message?.content || "";
-	} else {
-		// OpenRouter / OpenAI-compatible vision API
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-		};
-		if (apiKey) {
-			headers["Authorization"] = `Bearer ${apiKey}`;
-			headers["HTTP-Referer"] = "https://8gent.app";
-			headers["X-Title"] = "8gent-vision";
-		}
-
-		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-			method: "POST",
-			headers,
-			signal: AbortSignal.timeout(30000),
-			body: JSON.stringify({
-				model: model.model,
-				messages: [
-					{
-						role: "user",
-						content: [
-							{ type: "text", text: prompt },
-							{ type: "image_url", image_url: { url: imageUrl } },
-						],
-					},
-				],
-				max_tokens: 1024,
-			}),
-		});
-
-		if (!res.ok) throw new Error(`OpenRouter vision error: ${res.statusText}`);
-		const data = await res.json();
-		return data.choices?.[0]?.message?.content || "";
 	}
+	// OpenRouter / OpenAI-compatible vision API
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (apiKey) {
+		headers.Authorization = `Bearer ${apiKey}`;
+		headers["HTTP-Referer"] = "https://8gent.app";
+		headers["X-Title"] = "8gent-vision";
+	}
+
+	const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+		method: "POST",
+		headers,
+		signal: AbortSignal.timeout(30000),
+		body: JSON.stringify({
+			model: model.model,
+			messages: [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: prompt },
+						{ type: "image_url", image_url: { url: imageUrl } },
+					],
+				},
+			],
+			max_tokens: 1024,
+		}),
+	});
+
+	if (!res.ok) throw new Error(`OpenRouter vision error: ${res.statusText}`);
+	const data = await res.json();
+	return data.choices?.[0]?.message?.content || "";
 }
 
 const VISION_PROMPT = `Describe this image in detail for a coding agent. Focus on:
@@ -252,9 +251,9 @@ export class VisionInterpreter {
 	 * Get status of all pending interpretations.
 	 */
 	getStatus(): { pending: number; done: number; error: number } {
-		let pending = 0,
-			done = 0,
-			error = 0;
+		let pending = 0;
+		let done = 0;
+		let error = 0;
 		for (const entry of this.pending.values()) {
 			if (entry.status === "pending") pending++;
 			else if (entry.status === "done") done++;

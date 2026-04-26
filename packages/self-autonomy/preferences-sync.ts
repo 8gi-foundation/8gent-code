@@ -7,8 +7,8 @@
  * Merge strategy: updatedAt wins. Local-only fields stay local.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { UserConfig } from "./onboarding";
 
 /** Fields synced to/from Convex */

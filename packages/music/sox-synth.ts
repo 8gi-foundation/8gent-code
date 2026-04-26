@@ -6,8 +6,8 @@
  * This is the "instruments" layer of Eight's music production.
  */
 
-import { execSync } from "child_process";
-import { existsSync, mkdirSync } from "fs";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
 import type { LayerRole } from "./types.js";
 
 const SOX = "sox";
@@ -305,7 +305,7 @@ export class SoxSynth {
 
 		return intervals.map((semitone) => {
 			const midi = (octave + 1) * 12 + rootIdx + semitone;
-			return 440 * Math.pow(2, (midi - 69) / 12);
+			return 440 * 2 ** ((midi - 69) / 12);
 		});
 	}
 }

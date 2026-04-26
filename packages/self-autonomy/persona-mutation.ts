@@ -8,8 +8,8 @@
  * It returns the new content string. The caller decides whether to write.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
-import { dirname, join } from "path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // ============================================
 // Types
@@ -239,7 +239,7 @@ export class PersonaMutator {
 		if (!existsSync(FEEDBACK_DIR)) {
 			mkdirSync(FEEDBACK_DIR, { recursive: true });
 		}
-		appendFileSync(FEEDBACK_PATH, JSON.stringify(entry) + "\n");
+		appendFileSync(FEEDBACK_PATH, `${JSON.stringify(entry)}\n`);
 	}
 
 	private loadFeedback(): void {

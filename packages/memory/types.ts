@@ -339,7 +339,7 @@ export function effectiveImportance(
 
 	// Time decay: half-life of 30 days
 	const halfLife = 30;
-	const timeDecay = Math.pow(0.5, ageDays / halfLife);
+	const timeDecay = 0.5 ** (ageDays / halfLife);
 
 	// Access boost: each access extends effective half-life (max +50%)
 	const accessBoost = Math.min(1.0, memory.accessCount * 0.05);
@@ -348,7 +348,7 @@ export function effectiveImportance(
 	const lastAccessAge = memory.lastAccessed
 		? (Date.now() - memory.lastAccessed) / (24 * 60 * 60 * 1000)
 		: ageDays;
-	const accessRecency = Math.pow(0.5, lastAccessAge / (halfLife * 2));
+	const accessRecency = 0.5 ** (lastAccessAge / (halfLife * 2));
 
 	let effective = memory.importance * memory.decayFactor;
 	effective *= timeDecay * (1 - accessBoost) + accessRecency * accessBoost;

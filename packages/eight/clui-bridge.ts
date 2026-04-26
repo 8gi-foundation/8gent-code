@@ -6,10 +6,10 @@
  * Tokens appear in real-time as they're generated.
  */
 
-import * as readline from "readline";
+import * as readline from "node:readline";
 
 function emit(event: Record<string, any>) {
-	process.stdout.write(JSON.stringify(event) + "\n");
+	process.stdout.write(`${JSON.stringify(event)}\n`);
 }
 
 const model = process.env.EIGHT_MODEL || "eight:latest";
@@ -19,7 +19,8 @@ const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
 const history: Array<{ role: string; content: string }> = [
 	{
 		role: "system",
-		content: `You are Eight, the infinite gentleman — an autonomous coding agent. Refined, witty, confident, endlessly capable. Dry British wit. Help users write code, fix bugs, build software. Be concise.`,
+		content:
+			"You are Eight, the infinite gentleman — an autonomous coding agent. Refined, witty, confident, endlessly capable. Dry British wit. Help users write code, fix bugs, build software. Be concise.",
 	},
 ];
 

@@ -444,7 +444,7 @@ export function generateCssVariables(systemId: string): string | null {
 	if (!palette) return null;
 
 	const lines = [
-		`:root {`,
+		":root {",
 		`  --theme-background: ${palette.background_hsl};`,
 		`  --theme-foreground: ${palette.foreground_hsl};`,
 		`  --theme-card: ${palette.card_hsl};`,
@@ -466,7 +466,7 @@ export function generateCssVariables(systemId: string): string | null {
 		lines.push(`  --theme-font-heading: ${typo.heading_font};`);
 	}
 
-	lines.push(`}`);
+	lines.push("}");
 
 	return lines.join("\n");
 }

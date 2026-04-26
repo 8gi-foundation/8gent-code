@@ -5,8 +5,8 @@
  * with 8gent branding, syntax highlighting, and collapsible tool calls.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export interface ExportMessage {
 	role: string;

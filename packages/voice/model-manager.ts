@@ -5,10 +5,10 @@
  * Models are stored in ~/.8gent/models/whisper/ by default.
  */
 
-import { EventEmitter } from "events";
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	WHISPER_MODELS,
 	type WhisperModelInfo,

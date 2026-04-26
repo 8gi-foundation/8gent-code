@@ -29,7 +29,7 @@ interface TransitionConfig<TContext, TEvent extends { type: string }> {
 type Action<TContext, TEvent> = (
 	context: TContext,
 	event: TEvent,
-) => void | TContext | Partial<TContext>;
+) => undefined | TContext | Partial<TContext>;
 
 type Guard<TContext, TEvent> = (context: TContext, event: TEvent) => boolean;
 

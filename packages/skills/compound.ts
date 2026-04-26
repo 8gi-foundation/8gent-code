@@ -14,9 +14,9 @@ import {
 	readFileSync,
 	readdirSync,
 	writeFileSync,
-} from "fs";
-import { homedir } from "os";
-import { join } from "path";
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export const LEARNED_SKILLS_DIR = join(homedir(), ".8gent", "learned-skills");
 

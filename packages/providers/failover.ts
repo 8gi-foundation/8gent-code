@@ -10,9 +10,9 @@
  * → DeepSeek V4-Flash (heavy cloud) → OpenRouter `:free` (last resort).
  */
 
-import { existsSync, readFileSync } from "fs";
-import { homedir, release } from "os";
-import { join } from "path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir, release } from "node:os";
+import { join } from "node:path";
 
 /**
  * Apple Foundation Model is preferred at the top of every local chain when

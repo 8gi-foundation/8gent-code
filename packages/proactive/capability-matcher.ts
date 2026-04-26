@@ -221,7 +221,8 @@ export function evaluateOpportunity(
 		opp.estimatedEffort === "trivial" ||
 		opp.estimatedEffort === "small"
 	) {
-		reason = `Low complexity, likely approachable despite no direct keyword match`;
+		reason =
+			"Low complexity, likely approachable despite no direct keyword match";
 	} else {
 		reason = `No strong capability match — ${opp.estimatedEffort} effort`;
 	}

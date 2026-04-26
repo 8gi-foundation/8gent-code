@@ -195,7 +195,7 @@ export class LiveDashboard {
 		const lines: string[] = [];
 		lines.push("```");
 		lines.push("┌─────────────────────────┐");
-		lines.push(`│  LIVE COMPETITION       │`);
+		lines.push("│  LIVE COMPETITION       │");
 		lines.push(
 			`│ Round ${String(data.roundNumber).padStart(2)}/${String(data.totalRounds).padStart(2)} | ${timeStr.padEnd(8)} │`,
 		);

@@ -12,10 +12,10 @@
  * - Safe list is user-configurable via .8gent/safe-apps.json
  */
 
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { CommandResult } from "./types";
 
 // ============================================
@@ -178,7 +178,7 @@ export function listProcesses(sort: SortMode = "memory"): ProcessInfo[] {
 			const fullPath = parts.slice(4).join(" ");
 			const name = path.basename(fullPath);
 
-			if (isNaN(pid) || isNaN(rssKB)) continue;
+			if (Number.isNaN(pid) || Number.isNaN(rssKB)) continue;
 
 			// Skip kernel threads and very small processes
 			if (rssKB < 1024) continue; // less than 1MB

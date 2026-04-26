@@ -26,8 +26,7 @@ const DEFAULTS: Required<Omit<QdrantClientOptions, "apiKey">> = {
 class NotImplementedError extends Error {
 	constructor(method: string) {
 		super(
-			`@8gent/qdrant-client: ${method} is not implemented yet. ` +
-				`Scaffold only - see issue #1756 and security review #1748.`,
+			`@8gent/qdrant-client: ${method} is not implemented yet. Scaffold only - see issue #1756 and security review #1748.`,
 		);
 		this.name = "NotImplementedError";
 	}

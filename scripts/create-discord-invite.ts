@@ -3,8 +3,8 @@
  * Usage: bun run scripts/create-discord-invite.ts
  */
 
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const envPath = join(process.env.HOME!, "8gi-governance/.env");
 const envContent = readFileSync(envPath, "utf-8");

@@ -5,10 +5,10 @@
  * Supports both v1 and v2 session formats, and streaming (for live tailing).
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as readline from "readline";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as readline from "node:readline";
 import type {
 	AssistantContentEntry,
 	SessionEndEntry,

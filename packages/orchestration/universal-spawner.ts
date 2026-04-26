@@ -7,10 +7,10 @@
  * - "shell": spawns `sh -c "<task>"` for simple commands
  */
 
-import { type ChildProcess, spawn } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { type ChildProcess, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -136,7 +136,7 @@ export function spawnCLIAgent(
 				runtime,
 				exitCode: null,
 				stdout,
-				stderr: stderr + "\n[TIMEOUT after " + timeout / 1000 + "s]",
+				stderr: `${stderr}\n[TIMEOUT after ${timeout / 1000}s]`,
 				timedOut: true,
 				durationMs: Date.now() - startedAt.getTime(),
 				workingDirectory: cwd,
@@ -201,7 +201,7 @@ export function spawnCLIAgent(
 				runtime,
 				exitCode: -1,
 				stdout,
-				stderr: stderr + "\n[SPAWN ERROR] " + err.message,
+				stderr: `${stderr}\n[SPAWN ERROR] ${err.message}`,
 				timedOut: false,
 				durationMs: Date.now() - startedAt.getTime(),
 				workingDirectory: cwd,

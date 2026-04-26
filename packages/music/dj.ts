@@ -15,11 +15,11 @@
  * - Resume across sessions
  */
 
-import { type ChildProcess, execSync, spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import * as net from "net";
-import { homedir, platform, tmpdir } from "os";
-import { basename, join } from "path";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as net from "node:net";
+import { homedir, platform, tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 // ---- Platform ----
 const IS_MAC = platform() === "darwin";
@@ -75,7 +75,7 @@ function mpvIpc(cmd: Record<string, any>): Promise<any> {
 		const client = net.createConnection(IPC_PATH);
 		let buf = "";
 		client.setTimeout(1500);
-		client.on("connect", () => client.write(JSON.stringify(cmd) + "\n"));
+		client.on("connect", () => client.write(`${JSON.stringify(cmd)}\n`));
 		client.on("data", (d) => {
 			buf += d;
 		});

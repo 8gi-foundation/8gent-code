@@ -76,7 +76,7 @@ async function setModel(model: string): Promise<void> {
 		},
 	);
 	await proc.exited;
-	console.log(`  Waiting for vessel restart...`);
+	console.log("  Waiting for vessel restart...");
 	await waitForVessel();
 	await new Promise((r) => setTimeout(r, 5_000));
 }
@@ -240,7 +240,7 @@ async function main() {
 	}
 
 	// Scoreboard
-	console.log("\n\n" + "=".repeat(70));
+	console.log(`\n\n${"=".repeat(70)}`);
 	console.log("SCOREBOARD - Same task across 5 models");
 	console.log("=".repeat(70));
 	console.log(

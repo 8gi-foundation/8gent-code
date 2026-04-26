@@ -8,11 +8,11 @@
  * v1: non-streaming, single-turn per request, no tool calling, no vision.
  */
 
-import { spawn } from "child_process";
-import type { ChildProcessWithoutNullStreams } from "child_process";
-import { existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { spawn } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
 
 function flattenContent(content: MessageContent): string {
@@ -77,9 +77,7 @@ export class AppleFoundationClient implements LLMClient {
 
 		if (!existsSync(this.bridgePath)) {
 			throw new Error(
-				`Apple Foundation bridge binary not found at ${this.bridgePath}. ` +
-					`Run the installer (or \`swift build -c release\` inside ` +
-					`bin/apple-foundation-bridge/ and copy the artifact to ~/.8gent/bin/).`,
+				`Apple Foundation bridge binary not found at ${this.bridgePath}. Run the installer (or \`swift build -c release\` inside bin/apple-foundation-bridge/ and copy the artifact to ~/.8gent/bin/).`,
 			);
 		}
 
@@ -144,7 +142,7 @@ export class AppleFoundationClient implements LLMClient {
 		return new Promise((resolve, reject) => {
 			this.queue.push({ resolve, reject });
 			try {
-				proc.stdin.write(JSON.stringify(request) + "\n");
+				proc.stdin.write(`${JSON.stringify(request)}\n`);
 			} catch (err) {
 				this.queue.pop();
 				reject(err);

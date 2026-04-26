@@ -49,7 +49,7 @@ async function main() {
 			process.exit(1);
 		}
 		console.log(`[smoke-deepseek-v4] response: ${content.slice(0, 200)}`);
-		console.log(`[smoke-deepseek-v4] OK`);
+		console.log("[smoke-deepseek-v4] OK");
 		process.exit(0);
 	} catch (err) {
 		// Defensive: never echo the API key even if a stack trace bubbles up.

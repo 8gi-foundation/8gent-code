@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
-let cronParser: any,
-	priorityQueue: any,
-	workerPool: any,
-	circuitBreaker: any,
-	scheduler: any;
+let cronParser: any;
+let priorityQueue: any;
+let workerPool: any;
+let circuitBreaker: any;
+let scheduler: any;
 
 beforeEach(async () => {
 	try {

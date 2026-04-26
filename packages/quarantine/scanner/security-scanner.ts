@@ -6,8 +6,8 @@
  * Scans skill files for dangerous patterns before allowing installation.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================================================
 // Types
@@ -510,7 +510,7 @@ ${"━".repeat(50)}
 	}
 
 	if (result.findings.length === 0) {
-		output += `✨ No security issues detected!\n\n`;
+		output += "✨ No security issues detected!\n\n";
 	}
 
 	output += `${"─".repeat(50)}

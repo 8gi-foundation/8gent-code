@@ -68,7 +68,7 @@ export class Database {
 
 	put(collection: string, key: string, value: any): void {
 		if (!this.data.has(collection)) this.data.set(collection, new Map());
-		this.data.get(collection)!.set(key, structuredClone(value));
+		this.data.get(collection)?.set(key, structuredClone(value));
 	}
 
 	get(collection: string, key: string): any | null {
@@ -117,9 +117,5 @@ export function generateId(): string {
  * Generate a session token.
  */
 export function generateToken(): string {
-	return (
-		"tok_" +
-		Math.random().toString(36).slice(2) +
-		Math.random().toString(36).slice(2)
-	);
+	return `tok_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }

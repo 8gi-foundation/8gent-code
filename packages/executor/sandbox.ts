@@ -11,9 +11,9 @@
  *   else console.error(result.error);
  */
 
-import { execSync } from "child_process";
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { execSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface ExecutionResult {
 	success: boolean;

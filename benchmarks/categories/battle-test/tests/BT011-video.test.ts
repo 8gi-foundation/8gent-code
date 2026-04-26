@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
-let scene: any, timeline: any, exporter: any;
+let scene: any;
+let timeline: any;
+let exporter: any;
 
 beforeEach(async () => {
 	try {
@@ -111,10 +113,10 @@ describe("Timeline", () => {
 		tl.addScene(new Scene("s1", 3000, "intro"));
 		tl.addScene(new Scene("s2", 5000, "main"));
 		tl.addScene(new Scene("s3", 2000, "outro"));
-		expect(tl.getSceneAt(0)!.id).toBe("s1");
-		expect(tl.getSceneAt(2999)!.id).toBe("s1");
-		expect(tl.getSceneAt(3000)!.id).toBe("s2");
-		expect(tl.getSceneAt(8000)!.id).toBe("s3");
+		expect(tl.getSceneAt(0)?.id).toBe("s1");
+		expect(tl.getSceneAt(2999)?.id).toBe("s1");
+		expect(tl.getSceneAt(3000)?.id).toBe("s2");
+		expect(tl.getSceneAt(8000)?.id).toBe("s3");
 	});
 
 	it("getSceneAt returns null for time beyond total", () => {

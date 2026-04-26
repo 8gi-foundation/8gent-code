@@ -55,7 +55,7 @@ export function ensureConsolidationSchema(db: Database): void {
 		// Column already exists - this is expected after first run
 	}
 	db.exec(
-		`CREATE INDEX IF NOT EXISTS idx_memories_consolidation ON memories(consolidation_level)`,
+		"CREATE INDEX IF NOT EXISTS idx_memories_consolidation ON memories(consolidation_level)",
 	);
 }
 

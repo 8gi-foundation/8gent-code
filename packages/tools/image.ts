@@ -5,8 +5,8 @@
  * Uses sharp for image processing and Ollama vision models for description.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import sharp from "sharp";
 
 // ============================================

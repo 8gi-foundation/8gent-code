@@ -10,9 +10,9 @@
  *   bun run scripts/backfill-pr-notifications.ts --delay 30
  */
 
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const TELEGRAM_CHAT_ID = "5486040131";
 const DELAY_SECONDS = Number.parseInt(

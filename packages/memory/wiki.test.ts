@@ -160,22 +160,22 @@ describe("WikiGenerator", () => {
 		const page = wiki.generateEntityPage(personAlice);
 
 		expect(page).not.toBeNull();
-		expect(page!.slug).toBe("alice");
-		expect(page!.title).toBe("Alice");
-		expect(page!.entityId).toBe(personAlice);
-		expect(page!.entityType).toBe("person");
+		expect(page?.slug).toBe("alice");
+		expect(page?.title).toBe("Alice");
+		expect(page?.entityId).toBe(personAlice);
+		expect(page?.entityType).toBe("person");
 
 		// Frontmatter fields
-		expect(page!.frontmatter.type).toBe("person");
-		expect(page!.frontmatter.name).toBe("Alice");
-		expect(page!.frontmatter.mentionCount).toBeGreaterThanOrEqual(1);
-		expect(typeof page!.frontmatter.firstSeen).toBe("string");
-		expect(typeof page!.frontmatter.importance).toBe("number");
+		expect(page?.frontmatter.type).toBe("person");
+		expect(page?.frontmatter.name).toBe("Alice");
+		expect(page?.frontmatter.mentionCount).toBeGreaterThanOrEqual(1);
+		expect(typeof page?.frontmatter.firstSeen).toBe("string");
+		expect(typeof page?.frontmatter.importance).toBe("number");
 
 		// Markdown contains YAML block
-		expect(page!.markdown).toContain("---");
-		expect(page!.markdown).toContain("# Alice");
-		expect(page!.markdown).toContain("**Type:** person");
+		expect(page?.markdown).toContain("---");
+		expect(page?.markdown).toContain("# Alice");
+		expect(page?.markdown).toContain("**Type:** person");
 	});
 
 	// ── Test 2 ─────────────────────────────────────────────────────────
@@ -184,8 +184,8 @@ describe("WikiGenerator", () => {
 		const page = wiki.generateEntityPage(personAlice);
 
 		expect(page).not.toBeNull();
-		expect(page!.markdown).toContain("## Related Entities");
-		expect(page!.markdown).toContain("[Authentication](authentication.md)");
+		expect(page?.markdown).toContain("## Related Entities");
+		expect(page?.markdown).toContain("[Authentication](authentication.md)");
 	});
 
 	// ── Test 3 ─────────────────────────────────────────────────────────
@@ -195,8 +195,8 @@ describe("WikiGenerator", () => {
 		const page = wiki.generateEntityPage(conceptAuth);
 
 		expect(page).not.toBeNull();
-		expect(page!.markdown).toContain("## Backlinks");
-		expect(page!.markdown).toContain("[Alice](alice.md)");
+		expect(page?.markdown).toContain("## Backlinks");
+		expect(page?.markdown).toContain("[Alice](alice.md)");
 	});
 
 	// ── Test 4 ─────────────────────────────────────────────────────────

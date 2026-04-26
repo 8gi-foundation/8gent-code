@@ -4,9 +4,9 @@
  * No ceremony. Just the facts you'd scan in a terminal.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 export interface RunLogEntry {
 	/** ISO timestamp */
@@ -48,7 +48,7 @@ function ensureDir() {
 
 export function appendRun(entry: RunLogEntry): void {
 	ensureDir();
-	fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n");
+	fs.appendFileSync(LOG_PATH, `${JSON.stringify(entry)}\n`);
 }
 
 export function readRuns(limit = 20): RunLogEntry[] {

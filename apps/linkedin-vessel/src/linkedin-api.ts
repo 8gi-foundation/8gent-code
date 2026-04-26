@@ -246,8 +246,7 @@ export async function getRecentReplies(since?: string): Promise<ReplyEntry[]> {
 		})
 		.map((c: any) => ({
 			conversationUrn: c?.entityUrn,
-			senderName:
-				c?.participants?.[0]?.firstName + " " + c?.participants?.[0]?.lastName,
+			senderName: `${c?.participants?.[0]?.firstName} ${c?.participants?.[0]?.lastName}`,
 			lastMessage: c?.events?.[0]?.eventContent?.message?.body?.text || "",
 			timestamp: new Date(c?.lastActivityAt).toISOString(),
 			isUnread: c?.read === false,

@@ -145,7 +145,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
  */
 function emit(obj: Record<string, unknown>): void {
 	try {
-		process.stdout.write(JSON.stringify(obj) + "\n");
+		process.stdout.write(`${JSON.stringify(obj)}\n`);
 	} catch {
 		// If stdout is closed (parent died), nothing we can do.
 	}
@@ -202,7 +202,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 		if (opts.outputFormat === "stream-json") {
 			emit({ type: "error", subtype: "usage", message: err });
 		} else {
-			process.stderr.write(err + "\n");
+			process.stderr.write(`${err}\n`);
 		}
 		return 1;
 	}
@@ -237,8 +237,8 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 	// Goes to stderr so stdout stays clean NDJSON.
 	if (opts.outputFormat === "stream-json") {
 		process.stderr.write(
-			`[run] stream-json shape: {type, subtype?, session_id, ...fields}. ` +
-				`Types: session_start, assistant, tool_use, tool_result, result, error.\n`,
+			"[run] stream-json shape: {type, subtype?, session_id, ...fields}. " +
+				"Types: session_start, assistant, tool_use, tool_result, result, error.\n",
 		);
 	}
 
@@ -317,7 +317,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 	const originalConsoleInfo = console.info;
 	if (isStreamJson) {
 		console.log = (...args: unknown[]) => {
-			process.stderr.write(args.map(String).join(" ") + "\n");
+			process.stderr.write(`${args.map(String).join(" ")}\n`);
 		};
 		console.info = console.log;
 	}
@@ -348,7 +348,7 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 				final_text: finalText,
 			});
 		} else {
-			process.stdout.write(finalText + "\n");
+			process.stdout.write(`${finalText}\n`);
 		}
 
 		await agent.cleanup();

@@ -3,8 +3,8 @@
  * Supports play, stop, loop, and queue management.
  */
 
-import { type ChildProcess, execSync, spawn } from "child_process";
-import { existsSync } from "fs";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 
 export class Player {
 	private process: ChildProcess | null = null;

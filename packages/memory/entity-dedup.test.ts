@@ -67,7 +67,7 @@ describe("Entity dedup -- KnowledgeGraph", () => {
 
 		const entity = graph.getEntity(id);
 		expect(entity).not.toBeNull();
-		expect(entity!.mentionCount).toBe(3);
+		expect(entity?.mentionCount).toBe(3);
 	});
 
 	// -- Test 4: metadata merges on duplicate -----------------------------------
@@ -83,7 +83,7 @@ describe("Entity dedup -- KnowledgeGraph", () => {
 
 		const entity = graph.getEntity(id);
 		expect(entity).not.toBeNull();
-		expect(entity!.metadata).toEqual({ version: "1.0", runtime: "js" });
+		expect(entity?.metadata).toEqual({ version: "1.0", runtime: "js" });
 	});
 
 	// -- Test 5: description updates on duplicate -------------------------------
@@ -99,7 +99,7 @@ describe("Entity dedup -- KnowledgeGraph", () => {
 
 		const entity = graph.getEntity(id);
 		expect(entity).not.toBeNull();
-		expect(entity!.description).toBe("Confirmed after benchmarks");
+		expect(entity?.description).toBe("Confirmed after benchmarks");
 	});
 
 	// -- Test 6: UNIQUE constraint at DB level ----------------------------------

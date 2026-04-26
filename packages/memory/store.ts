@@ -532,12 +532,13 @@ export class MemoryStore {
 				now,
 			);
 
-		// Return the actual row ID (may differ from `id` on conflict)
+		// Return the actual row ID (may differ from `id` on conflict).
+		// Row is guaranteed to exist because we just INSERTed (or updated on conflict).
 		const row = this.db
 			.prepare("SELECT id FROM entities WHERE type = ? AND name = ?")
 			.get(entity.type, entity.name) as { id: string } | null;
 
-		return row!.id;
+		return row?.id ?? id;
 	}
 
 	getEntity(id: string): Entity | null {
@@ -564,7 +565,7 @@ export class MemoryStore {
 			sql += " AND name LIKE ?";
 			params.push(`%${query.name}%`);
 		}
-		sql += ` ORDER BY mention_count DESC LIMIT ?`;
+		sql += " ORDER BY mention_count DESC LIMIT ?";
 		params.push(query.limit ?? 20);
 
 		return (

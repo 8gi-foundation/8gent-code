@@ -6,8 +6,8 @@
  * planned -> delegated -> in-progress -> review -> done | failed
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const TASKS_PATH = join(process.env.HOME || "/root", ".8gent", "tasks.json");
 const MAX_TASKS = 100;

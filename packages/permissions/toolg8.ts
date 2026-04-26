@@ -7,9 +7,9 @@
  * Part of the G8WAY governance layer (#988).
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { evaluatePolicy } from "./policy-engine.js";
 import type {
 	PolicyActionType,
@@ -135,7 +135,7 @@ export class ToolG8 {
 			for (const [k, v] of Object.entries(context)) {
 				if (k === "content") continue;
 				safeContext[k] =
-					typeof v === "string" && v.length > 200 ? v.slice(0, 200) + "..." : v;
+					typeof v === "string" && v.length > 200 ? `${v.slice(0, 200)}...` : v;
 			}
 
 			const entry: AuditEntry = {
@@ -147,7 +147,7 @@ export class ToolG8 {
 				reason: result.reason,
 			};
 
-			fs.appendFileSync(AUDIT_PATH, JSON.stringify(entry) + "\n");
+			fs.appendFileSync(AUDIT_PATH, `${JSON.stringify(entry)}\n`);
 		} catch {
 			// Silent - audit failure must never block execution
 		}

@@ -101,6 +101,6 @@ describe("Version consistency", () => {
 		const binContent = await Bun.file("bin/8gent.ts").text();
 		const versionMatch = binContent.match(/const VERSION = "([^"]+)"/);
 		expect(versionMatch).not.toBeNull();
-		expect(versionMatch![1]).toBe(pkg.default.version);
+		expect(versionMatch?.[1]).toBe(pkg.default.version);
 	});
 });

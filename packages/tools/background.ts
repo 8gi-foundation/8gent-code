@@ -4,8 +4,8 @@
  * Run commands in the background and retrieve their status/output later.
  */
 
-import { type ChildProcess, spawn } from "child_process";
-import * as path from "path";
+import { type ChildProcess, spawn } from "node:child_process";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -295,7 +295,7 @@ export class BackgroundTaskManager {
 		if (options.stderr === false) stderr = "";
 
 		// Combined output (interleaved is not possible, so just concatenate)
-		const combined = stdout + (stderr ? "\n--- STDERR ---\n" + stderr : "");
+		const combined = stdout + (stderr ? `\n--- STDERR ---\n${stderr}` : "");
 
 		return {
 			id: taskId,
@@ -528,11 +528,11 @@ export function formatTaskOutput(output: TaskOutput, task: TaskInfo): string {
 	result += "\n\n";
 
 	if (output.stdout) {
-		result += "## stdout\n```\n" + output.stdout + "\n```\n\n";
+		result += `## stdout\n\`\`\`\n${output.stdout}\n\`\`\`\n\n`;
 	}
 
 	if (output.stderr) {
-		result += "## stderr\n```\n" + output.stderr + "\n```\n";
+		result += `## stderr\n\`\`\`\n${output.stderr}\n\`\`\`\n`;
 	}
 
 	return result;

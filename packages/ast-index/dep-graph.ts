@@ -5,8 +5,8 @@
  * regex-based import parsing - fast, no AST parser dependency.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export interface DepNode {
 	imports: string[]; // absolute paths this file imports

@@ -90,7 +90,7 @@ export function power(base: number, exponent: number): number {
 	if (exponent < 0 && base === 0) {
 		throw new Error("Cannot raise zero to negative power");
 	}
-	const result = Math.pow(base, exponent);
+	const result = base ** exponent;
 	recordResult({
 		value: result,
 		operation: "power",

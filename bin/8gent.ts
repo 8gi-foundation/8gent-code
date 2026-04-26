@@ -6,8 +6,8 @@
  * "Never hit usage caps again"
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const VERSION = "0.9.5";
 const BANNER = `
@@ -230,9 +230,7 @@ async function main() {
 						console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
 						break;
 					}
-				} catch {
-					continue;
-				}
+				} catch {}
 			} else {
 				fastModel = candidate.model;
 				console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
@@ -662,7 +660,7 @@ async function searchCommand(args: string[]) {
 async function benchmarkCommand(args: string[]) {
 	// Run the benchmark script
 	const benchmarkPath = path.join(__dirname, "../scripts/benchmark.ts");
-	const { spawn } = await import("child_process");
+	const { spawn } = await import("node:child_process");
 
 	const proc = spawn("bun", ["run", benchmarkPath, ...args], {
 		stdio: "inherit",
@@ -675,7 +673,7 @@ async function benchmarkCommand(args: string[]) {
 async function demoCommand(args: string[]) {
 	// Run the demo script
 	const demoPath = path.join(__dirname, "../scripts/demo-savings.ts");
-	const { spawn } = await import("child_process");
+	const { spawn } = await import("node:child_process");
 
 	const proc = spawn("bun", ["run", demoPath, ...args], {
 		stdio: "inherit",
@@ -687,7 +685,7 @@ async function demoCommand(args: string[]) {
 
 // Spawn Lil Eight dock pet (non-blocking, idempotent)
 async function spawnPet(sessionId?: string) {
-	const { spawn: spawnProc, execSync } = await import("child_process");
+	const { spawn: spawnProc, execSync } = await import("node:child_process");
 	const platform = process.platform; // darwin, win32, linux
 
 	// macOS: native Swift dock pet
@@ -874,7 +872,7 @@ async function tuiCommand(args: string[]) {
 
 	console.log("Launching TUI...\n");
 
-	const { spawn } = await import("child_process");
+	const { spawn } = await import("node:child_process");
 	const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
 
 	// Pass --name and --resume flags through to TUI
@@ -903,7 +901,7 @@ async function airdropCommand(args: string[]) {
 	}
 
 	const target = args.join(" ");
-	const { execSync } = await import("child_process");
+	const { execSync } = await import("node:child_process");
 
 	// Check if it's a file path
 	if (fs.existsSync(target) || fs.existsSync(path.resolve(target))) {
@@ -965,7 +963,7 @@ async function airdropCommand(args: string[]) {
 
 async function petCommand(args: string[]) {
 	const subCmd = args[0] || "start";
-	const { execSync } = await import("child_process");
+	const { execSync } = await import("node:child_process");
 	const lilEightScript = path.join(__dirname, "lil-eight.sh");
 
 	if (!fs.existsSync(lilEightScript)) {
@@ -1000,8 +998,8 @@ async function petCommand(args: string[]) {
 			});
 			break;
 		case "log":
-		case "logs":
-			const { spawn: sp } = await import("child_process");
+		case "logs": {
+			const { spawn: sp } = await import("node:child_process");
 			const logPath = path.join(
 				process.env.HOME || "~",
 				".8gent",
@@ -1009,6 +1007,7 @@ async function petCommand(args: string[]) {
 			);
 			sp("tail", ["-f", logPath], { stdio: "inherit" });
 			break;
+		}
 		case "status":
 			try {
 				execSync("pgrep -f LilEight", { stdio: "pipe" });
@@ -1167,7 +1166,7 @@ async function authCommand(args: string[]) {
 					);
 					console.log(`  Token:   expires in ${hours}h ${minutes}m`);
 				} else {
-					console.log(`  Token:   expired (will refresh on next use)`);
+					console.log("  Token:   expired (will refresh on next use)");
 				}
 
 				// Show proxy and vessel info
@@ -1202,8 +1201,6 @@ async function authCommand(args: string[]) {
 			}
 			break;
 		}
-
-		case "help":
 		default:
 			console.log(`
 8gent auth — Authentication Commands
@@ -1639,7 +1636,7 @@ async function sessionCommand(args: string[]) {
 				process.exit(1);
 			}
 			// Resume launches TUI with session context
-			const { spawn } = await import("child_process");
+			const { spawn } = await import("node:child_process");
 			const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
 			const proc = spawn("bun", ["run", tuiPath, "--resume", nameOrId], {
 				stdio: "inherit",
@@ -2003,7 +2000,7 @@ async function onboardCommand(args: string[]) {
 		console.log(
 			`Ollama models: ${detected.ollamaModels.length > 0 ? detected.ollamaModels.join(", ") : "none"}`,
 		);
-		console.log(`\nApplied to .8gent/user.json`);
+		console.log("\nApplied to .8gent/user.json");
 		if (!mgr.getUser().onboardingComplete) {
 			console.log("Run with --yes to auto-complete onboarding with defaults.");
 		}
@@ -2066,8 +2063,8 @@ async function statusCommand(args: string[]) {
 
 	// Check Ollama
 	try {
-		const { exec } = await import("child_process");
-		const { promisify } = await import("util");
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
 		const execAsync = promisify(exec);
 		const { stdout } = await execAsync("ollama list 2>/dev/null");
 		const models = stdout
@@ -2108,8 +2105,8 @@ async function statusCommand(args: string[]) {
 
 	// Git status
 	try {
-		const { exec } = await import("child_process");
-		const { promisify } = await import("util");
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
 		const execAsync = promisify(exec);
 		const { stdout: branch } = await execAsync(
 			"git rev-parse --abbrev-ref HEAD",
@@ -2127,7 +2124,7 @@ async function statusCommand(args: string[]) {
 		jsonOut(status);
 	} else {
 		console.log(`8gent Code v${VERSION}`);
-		console.log(`─────────────────────────`);
+		console.log("─────────────────────────");
 		for (const [key, val] of Object.entries(status)) {
 			if (key === "version") continue;
 			if (typeof val === "object" && val !== null) {
@@ -2166,7 +2163,7 @@ async function reviewCommand(args: string[]) {
 	const diffFile = flags.diff as string | undefined;
 
 	const { reviewDiff } = await import("../packages/ci/review");
-	const { execSync } = await import("child_process");
+	const { execSync } = await import("node:child_process");
 
 	let diff: string;
 	try {
@@ -2207,7 +2204,7 @@ async function reviewCommand(args: string[]) {
 }
 
 async function doctorCommand() {
-	const { execSync } = require("child_process");
+	const { execSync } = require("node:child_process");
 	const green = (s: string) => `\x1b[32m\u2713 ${s}\x1b[0m`;
 	const red = (s: string) => `\x1b[31m\u2717 ${s}\x1b[0m`;
 	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;

@@ -97,7 +97,7 @@ export class PersonalCollector {
 		};
 
 		this.ensureDir();
-		appendFileSync(this.pairsPath, JSON.stringify(fullPair) + "\n");
+		appendFileSync(this.pairsPath, `${JSON.stringify(fullPair)}\n`);
 
 		this.stats.totalCollected++;
 		this.stats.lastCollectedAt = Date.now();

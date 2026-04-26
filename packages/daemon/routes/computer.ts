@@ -20,7 +20,7 @@ import {
 
 /** Minimum surface we need from the underlying Bun.ServerWebSocket. */
 export interface ComputerWS {
-	send(data: string | ArrayBufferView | ArrayBuffer): number | -1 | void;
+	send(data: string | ArrayBufferView | ArrayBuffer): number | -1 | undefined;
 	close(code?: number, reason?: string): void;
 	readyState?: number;
 }

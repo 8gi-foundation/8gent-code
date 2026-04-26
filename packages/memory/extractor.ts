@@ -148,7 +148,7 @@ export function extractFromToolResult(
 			entities.push({
 				type: "concept",
 				name: pattern,
-				description: `Search pattern used`,
+				description: "Search pattern used",
 				metadata: { toolName },
 			});
 		}

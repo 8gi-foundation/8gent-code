@@ -6,7 +6,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 
 export interface Job {
 	id: string;

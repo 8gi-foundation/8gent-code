@@ -194,8 +194,8 @@ import type {
 } from "../../../packages/eight/index.js";
 
 // Load .env file if present
-import * as fs from "fs";
-import * as pathMod from "path";
+import * as fs from "node:fs";
+import * as pathMod from "node:path";
 import {
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
@@ -255,7 +255,7 @@ function loadProviderSettings(): { provider: string; model: string } {
  * Embedding-only providers are skipped.
  */
 function detectBestLocalProvider(): { provider: string; model: string } {
-	const { execSync } = require("child_process");
+	const { execSync } = require("node:child_process");
 
 	function fetchChatModels(
 		url: string,
@@ -756,7 +756,8 @@ export function App({
 					{
 						id: `welcome-${activeTabId}`,
 						role: "system",
-						content: `\u221E 8gent Code \u2014 The Infinite Gentleman\n\nNew thread. What shall we work on?`,
+						content:
+							"\u221E 8gent Code \u2014 The Infinite Gentleman\n\nNew thread. What shall we work on?",
 						timestamp: new Date(),
 					},
 				];
@@ -1396,7 +1397,8 @@ export function App({
 										inProgress: [...rest, ...nextReady],
 										done: [...prev.done, completed],
 									};
-								} else if (prev.ready.length > 0) {
+								}
+								if (prev.ready.length > 0) {
 									// Move first ready to in-progress → done
 									const [first, ...rest] = prev.ready;
 									return { ...prev, ready: rest, done: [...prev.done, first] };
@@ -1451,7 +1453,7 @@ export function App({
 							}
 
 							// TV Mode: narrate the step
-							if (event.text && event.text.trim()) {
+							if (event.text?.trim()) {
 								const planMatch = event.text.match(/PLAN:\s/i);
 								if (planMatch) {
 									setNarratorText(narratePlan(event.text));
@@ -1463,13 +1465,13 @@ export function App({
 							// Do not append an assistant bubble on every agent step — that stacks N full
 							// messages per run (Ink then draws over itself / repeats closings). One final
 							// assistant message is added when agent.chat() returns (see runAgent).
-							if (event.text && event.text.trim() && event.stepNumber === 0) {
+							if (event.text?.trim() && event.stepNumber === 0) {
 								const t = event.text.trim();
 								addSystemMessage(t.length > 720 ? `${t.slice(0, 717)}...` : t);
 							}
 
 							// Parse PLAN: output and populate kanban (uses step text, not the chat transcript)
-							if (event.text && event.text.trim()) {
+							if (event.text?.trim()) {
 								const planMatch = event.text.match(
 									/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i,
 								);
@@ -1562,17 +1564,17 @@ export function App({
 
 					// Check for personal LoRA
 					try {
-						const loraDir = require("path").join(
-							require("os").homedir(),
+						const loraDir = require("node:path").join(
+							require("node:os").homedir(),
 							".8gent",
 							"personal-lora",
 						);
-						const configPath = require("path").join(
-							require("os").homedir(),
+						const configPath = require("node:path").join(
+							require("node:os").homedir(),
 							".8gent",
 							"config.json",
 						);
-						const fs = require("fs");
+						const fs = require("node:fs");
 						if (fs.existsSync(loraDir) && fs.existsSync(configPath)) {
 							const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 							if (cfg.personal?.autoRetrain !== false) {
@@ -1626,7 +1628,7 @@ export function App({
 					setOnboardingStepIndex(0);
 					// Speak the first question
 					try {
-						require("child_process").execSync(
+						require("node:child_process").execSync(
 							`say -v Moira "${question.question.split("\\n")[0].slice(0, 80).replace(/"/g, "")}"`,
 							{ stdio: "ignore" },
 						);
@@ -1637,11 +1639,7 @@ export function App({
 						{
 							id: `onboard-${Date.now()}`,
 							role: "system" as const,
-							content:
-								"∞ Welcome to 8gent, The Infinite Gentleman.\n\n" +
-								"Before we begin, I'd like to learn about you.\n" +
-								"(Type /skip to skip any question, /skip all to skip onboarding)\n\n" +
-								question.question,
+							content: `∞ Welcome to 8gent, The Infinite Gentleman.\n\nBefore we begin, I'd like to learn about you.\n(Type /skip to skip any question, /skip all to skip onboarding)\n\n${question.question}`,
 							timestamp: new Date(),
 						},
 					]);
@@ -1691,29 +1689,16 @@ export function App({
 				);
 
 				addSystemMessage(
-					`Vision Settings:\n` +
-						`  Enabled: ${config.enabled ? "yes" : "no"}\n` +
-						`  Provider: ${config.provider}\n` +
-						`  Default model: ${config.defaultModel}\n` +
-						`  OCR model: ${config.ocrModel}\n` +
-						`  Prefer local: ${config.preferLocal ? "yes" : "no"}\n` +
-						`  Timeout: ${config.timeout}ms\n\n` +
-						`Active Vision: ${visionResult.model?.displayName || "none"}\n` +
-						`Active OCR: ${ocrResult.model?.displayName || "none"}\n\n` +
-						`Available vision models (${available.length}):\n` +
-						(available.length > 0
+					`Vision Settings:\n  Enabled: ${config.enabled ? "yes" : "no"}\n  Provider: ${config.provider}\n  Default model: ${config.defaultModel}\n  OCR model: ${config.ocrModel}\n  Prefer local: ${config.preferLocal ? "yes" : "no"}\n  Timeout: ${config.timeout}ms\n\nActive Vision: ${visionResult.model?.displayName || "none"}\nActive OCR: ${ocrResult.model?.displayName || "none"}\n\nAvailable vision models (${available.length}):\n${
+						available.length > 0
 							? available
 									.map(
 										(m: any) =>
 											`  ${m.ocrSpecialized ? "[OCR]" : "[VIS]"} ${m.displayName} ${m.free ? "(free)" : ""}`,
 									)
 									.join("\n")
-							: "  None found locally. Try: ollama pull qwen2.5-vl") +
-						`\n\nCommands:\n` +
-						`  /vision model <name>   — Set default vision model\n` +
-						`  /vision ocr <name>     — Set OCR model (or "auto")\n` +
-						`  /vision on|off         — Enable/disable vision\n` +
-						`  /vision pull           — Show recommended models to pull`,
+							: "  None found locally. Try: ollama pull qwen2.5-vl"
+					}\n\nCommands:\n  /vision model <name>   — Set default vision model\n  /vision ocr <name>     — Set OCR model (or "auto")\n  /vision on|off         — Enable/disable vision\n  /vision pull           — Show recommended models to pull`,
 				);
 			} else if (sub === "model" && args[1]) {
 				const model = args.slice(1).join(" ");
@@ -1746,23 +1731,18 @@ export function App({
 			} else if (sub === "pull") {
 				const recommended = getRecommendedOCRModels();
 				addSystemMessage(
-					"Recommended vision/OCR models to pull:\n\n" +
-						recommended
-							.map(
-								(m: any) =>
-									`  ollama pull ${m.model}  — ${m.description} (${m.size})`,
-							)
-							.join("\n") +
-						"\n\nGeneral vision (default):\n" +
-						"  ollama pull qwen2.5-vl     — Best general vision + OCR (~5GB)\n" +
-						"  ollama pull minicpm-v       — Mobile-friendly (~5GB)\n" +
-						"  ollama pull llava           — Classic, widely supported (~4GB)\n" +
-						"  ollama pull moondream       — Tiny and fast (~1.7GB)",
+					`Recommended vision/OCR models to pull:\n\n${recommended
+						.map(
+							(m: any) =>
+								`  ollama pull ${m.model}  — ${m.description} (${m.size})`,
+						)
+						.join(
+							"\n",
+						)}\n\nGeneral vision (default):\n  ollama pull qwen2.5-vl     — Best general vision + OCR (~5GB)\n  ollama pull minicpm-v       — Mobile-friendly (~5GB)\n  ollama pull llava           — Classic, widely supported (~4GB)\n  ollama pull moondream       — Tiny and fast (~1.7GB)`,
 				);
 			} else {
 				addSystemMessage(
-					`Unknown vision subcommand: "${sub}"\n` +
-						"Usage: /vision [status|model|ocr|on|off|local|cloud|pull]",
+					`Unknown vision subcommand: "${sub}"\nUsage: /vision [status|model|ocr|on|off|local|cloud|pull]`,
 				);
 			}
 		},
@@ -1833,38 +1813,24 @@ export function App({
 				case "plan":
 					if (autoKanban.stats.total > 0) {
 						addSystemMessage(
-							`Task board (auto):\n` +
-								`  Backlog: ${autoKanban.columns.backlog.length}\n` +
-								`  Ready: ${autoKanban.columns.ready.length}\n` +
-								`  In Progress: ${autoKanban.columns.inProgress.length}\n` +
-								`  Done: ${autoKanban.stats.done} | Failed: ${autoKanban.stats.failed}\n` +
-								`  Total: ${autoKanban.stats.total} tasks`,
+							`Task board (auto):\n  Backlog: ${autoKanban.columns.backlog.length}\n  Ready: ${autoKanban.columns.ready.length}\n  In Progress: ${autoKanban.columns.inProgress.length}\n  Done: ${autoKanban.stats.done} | Failed: ${autoKanban.stats.failed}\n  Total: ${autoKanban.stats.total} tasks`,
 						);
 					} else {
 						addSystemMessage(
-							`Current plan status:\n` +
-								`  Backlog: ${kanbanBoard.backlog.length} items\n` +
-								`  Ready: ${kanbanBoard.ready.length} items\n` +
-								`  In Progress: ${kanbanBoard.inProgress.length} items\n` +
-								`  Done: ${kanbanBoard.done.length} items`,
+							`Current plan status:\n  Backlog: ${kanbanBoard.backlog.length} items\n  Ready: ${kanbanBoard.ready.length} items\n  In Progress: ${kanbanBoard.inProgress.length} items\n  Done: ${kanbanBoard.done.length} items`,
 						);
 					}
 					break;
 
-				case "status":
+				case "status": {
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
 					addSystemMessage(
-						`Session Status:\n` +
-							`  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n` +
-							`  Tokens used: ${totalTokens.toLocaleString()}\n` +
-							`  Commands: ${recentCommands.length}\n` +
-							`  Branch: ${currentBranch || "N/A"}\n` +
-							`  Animations: ${showAnimations ? "on" : "off"}\n` +
-							`  Sound: ${soundEnabled ? "on" : "off"}`,
+						`Session Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}`,
 					);
 					break;
+				}
 
 				case "telegram": {
 					const sub = args[0]?.toLowerCase();
@@ -1872,12 +1838,11 @@ export function App({
 						const hasToken = !!process.env.TELEGRAM_BOT_TOKEN;
 						const chatId = process.env.TELEGRAM_CHAT_ID || "not set";
 						addSystemMessage(
-							`Telegram Bot Status:\n` +
-								`  Token: ${hasToken ? "configured" : "not configured"}\n` +
-								`  Chat ID: ${chatId}\n\n` +
-								(hasToken
+							`Telegram Bot Status:\n  Token: ${hasToken ? "configured" : "not configured"}\n  Chat ID: ${chatId}\n\n${
+								hasToken
 									? "Bot is running."
-									: "Run /telegram setup to connect a bot."),
+									: "Run /telegram setup to connect a bot."
+							}`,
 						);
 					} else if (sub === "setup") {
 						addSystemMessage(
@@ -1965,7 +1930,7 @@ export function App({
 							const active = b.id === tree.activeBranch ? " *" : "";
 							return `  ${b.id}${active} - ${b.label} (${b.messageCount} msgs)`;
 						});
-						addSystemMessage("Branches:\n" + lines.join("\n"));
+						addSystemMessage(`Branches:\n${lines.join("\n")}`);
 					} else if (sub === "switch" && args[1]) {
 						try {
 							const history = tree.switchBranch(args[1]);
@@ -2007,7 +1972,7 @@ export function App({
 									const s = j.enabled ? "ON" : "OFF";
 									return `[${s}] ${j.id}  ${j.name}  ${j.schedule} -> ${j.command}`;
 								});
-								addSystemMessage("Cron Jobs:\n" + lines.join("\n"));
+								addSystemMessage(`Cron Jobs:\n${lines.join("\n")}`);
 							}
 						} else if (sub === "add" && args.length >= 4) {
 							const job = mgr.add({
@@ -2073,7 +2038,7 @@ export function App({
 					}
 					break;
 
-				case "onboarding":
+				case "onboarding": {
 					// Start or restart onboarding
 					onboardingManager.reset();
 					setShowOnboarding(true);
@@ -2082,28 +2047,20 @@ export function App({
 					if (onboardQuestion) {
 						setCurrentOnboardingQuestion(onboardQuestion.question);
 						addSystemMessage(
-							"∞ Let's get to know each other.\n\n" + onboardQuestion.question,
+							`∞ Let's get to know each other.\n\n${onboardQuestion.question}`,
 						);
 					}
 					break;
+				}
 
-				case "preferences":
+				case "preferences": {
 					// Show current preferences
 					const user = onboardingManager.getUser();
 					addSystemMessage(
-						"∞ Your Preferences:\n\n" +
-							`Name: ${user.identity.name || "Not set"}\n` +
-							`Role: ${user.identity.role || "Not set"}\n` +
-							`Style: ${user.identity.communicationStyle || "Not set"}\n` +
-							`Language: ${user.identity.language}\n` +
-							`Model: ${user.preferences.model.default || currentModel}\n` +
-							`Provider: ${user.preferences.model.provider || currentProvider}\n` +
-							`Voice: ${user.preferences.voice.enabled ? "Enabled" : "Disabled"}\n` +
-							`Auto-commit: ${user.preferences.git.autoCommit ? "Yes" : "No"}\n` +
-							`Understanding: ${Math.round(user.understanding.confidenceScore * 100)}%\n\n` +
-							"Use /onboarding to reconfigure.",
+						`∞ Your Preferences:\n\nName: ${user.identity.name || "Not set"}\nRole: ${user.identity.role || "Not set"}\nStyle: ${user.identity.communicationStyle || "Not set"}\nLanguage: ${user.identity.language}\nModel: ${user.preferences.model.default || currentModel}\nProvider: ${user.preferences.model.provider || currentProvider}\nVoice: ${user.preferences.voice.enabled ? "Enabled" : "Disabled"}\nAuto-commit: ${user.preferences.git.autoCommit ? "Yes" : "No"}\nUnderstanding: ${Math.round(user.understanding.confidenceScore * 100)}%\n\nUse /onboarding to reconfigure.`,
 					);
 					break;
+				}
 
 				case "skip":
 					// Skip onboarding question
@@ -2154,7 +2111,7 @@ export function App({
 									ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
 								return `  ${s.id}  ${label.slice(0, 30).padEnd(30)}  ${s.messageCount} msgs  ${timeStr}`;
 							});
-							addSystemMessage("Recent sessions:\n" + lines.join("\n"));
+							addSystemMessage(`Recent sessions:\n${lines.join("\n")}`);
 						}
 					} else if (sub === "resume" && args[1]) {
 						const target = args.slice(1).join(" ");
@@ -2229,10 +2186,7 @@ export function App({
 									const messages = JSON.parse(convos[0].checkpointData);
 									agent.restoreFromCheckpoint(messages);
 									addSystemMessage(
-										`Restored session: "${convos[0].title}"\n` +
-											`  ${convos[0].messageCount} messages - ${convos[0].model}\n` +
-											`  Last active: ${new Date(convos[0].lastActiveAt).toLocaleString()}\n\n` +
-											"Context restored. Continue where you left off.",
+										`Restored session: "${convos[0].title}"\n  ${convos[0].messageCount} messages - ${convos[0].model}\n  Last active: ${new Date(convos[0].lastActiveAt).toLocaleString()}\n\nContext restored. Continue where you left off.`,
 									);
 								} catch {
 									addSystemMessage("Failed to parse checkpoint data.");
@@ -2295,8 +2249,7 @@ export function App({
 							const recentMsgs = history.slice(-4);
 							agent.restoreFromCheckpoint([systemMsg, ...recentMsgs]);
 							addSystemMessage(
-								`Compacted: ${userMsgs} user + ${assistantMsgs} assistant messages -> kept last 4.\n` +
-									"Context trimmed. Older messages removed from active memory.",
+								`Compacted: ${userMsgs} user + ${assistantMsgs} assistant messages -> kept last 4.\nContext trimmed. Older messages removed from active memory.`,
 							);
 						} else {
 							addSystemMessage("Conversation too short to compact.");
@@ -2311,14 +2264,12 @@ export function App({
 					} else {
 						orchestration.enterChatMode();
 						addSystemMessage(
-							"Chat mode enabled. Background work continues.\n" +
-								"Shift+Tab to cycle agents. ESC to exit chat mode.\n" +
-								`Currently addressing: ${orchestration.activeAgentName}`,
+							`Chat mode enabled. Background work continues.\nShift+Tab to cycle agents. ESC to exit chat mode.\nCurrently addressing: ${orchestration.activeAgentName}`,
 						);
 					}
 					break;
 
-				case "agent":
+				case "agent": {
 					const agentSub = args[0] || "list";
 					if (agentSub === "list") {
 						if (orchestration.agents.length === 0) {
@@ -2371,18 +2322,11 @@ export function App({
 						);
 					} else if (agentSub === "settings") {
 						addSystemMessage(
-							"Agent Settings:\n\n" +
-								`  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n` +
-								`  Active agents: ${orchestration.agents.length}\n` +
-								`  Pending spawns: ${orchestration.pendingSpawns.length}\n\n` +
-								"Commands:\n" +
-								"  /agent list       — Show active agents\n" +
-								"  /agent spawn <p>  — Spawn persona (winston/larry/curly/mo/doc)\n" +
-								"  /agent kill <id>  — Kill an agent\n" +
-								"  /agent auto       — Toggle auto-spawn",
+							`Agent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active agents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       — Show active agents\n  /agent spawn <p>  — Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  — Kill an agent\n  /agent auto       — Toggle auto-spawn`,
 						);
 					}
 					break;
+				}
 
 				case "animations":
 					// Show animation showcase
@@ -2393,8 +2337,7 @@ export function App({
 							setViewMode("animations");
 						} else {
 							addSystemMessage(
-								`Unknown animation: "${args[0]}"\n\n` +
-									"Available: matrix, fire, dna, stars, dots, glitch, confetti, wave, gradient, all",
+								`Unknown animation: "${args[0]}"\n\nAvailable: matrix, fire, dna, stars, dots, glitch, confetti, wave, gradient, all`,
 							);
 						}
 					} else {
@@ -2432,24 +2375,14 @@ export function App({
 					else if (sub === "stop" || sub === "pause") {
 						adhdAudio.stop();
 						addSystemMessage(
-							"Audio paused. Text mode still " +
-								(adhdMode ? "on" : "off") +
-								". Play again with /adhd lofi etc.",
+							`Audio paused. Text mode still ${adhdMode ? "on" : "off"}. Play again with /adhd lofi etc.`,
 						);
 					}
 					// Config: /adhd config, /adhd set <key> <value>
 					else if (sub === "config" || sub === "settings") {
 						const cfg = adhdAudio.config;
 						addSystemMessage(
-							"ADHD Audio Config\n\n" +
-								`  duration:       ${cfg.duration}s\n` +
-								`  bpm:            ${cfg.bpm ?? "auto (per preset)"}\n` +
-								`  inferenceSteps: ${cfg.inferenceSteps}\n` +
-								`  guidanceScale:  ${cfg.guidanceScale}\n` +
-								`  batchSize:      ${cfg.batchSize}\n` +
-								`  apiUrl:         ${cfg.apiUrl}\n\n` +
-								"Set with: /adhd set <key> <value>\n" +
-								"Example:  /adhd set duration 120",
+							`ADHD Audio Config\n\n  duration:       ${cfg.duration}s\n  bpm:            ${cfg.bpm ?? "auto (per preset)"}\n  inferenceSteps: ${cfg.inferenceSteps}\n  guidanceScale:  ${cfg.guidanceScale}\n  batchSize:      ${cfg.batchSize}\n  apiUrl:         ${cfg.apiUrl}\n\nSet with: /adhd set <key> <value>\nExample:  /adhd set duration 120`,
 						);
 					} else if (sub === "set" && args.length >= 3) {
 						const key = args[1].toLowerCase();
@@ -2481,7 +2414,7 @@ export function App({
 							addSystemMessage(`apiUrl set to ${updated.apiUrl}`);
 						} else {
 							const numVal = Number(val);
-							if (isNaN(numVal)) {
+							if (Number.isNaN(numVal)) {
 								addSystemMessage(`"${val}" isn't a number.`);
 							} else if (configKey === "bpm" && val === "auto") {
 								adhdAudio.setConfig({ bpm: null });
@@ -2524,21 +2457,7 @@ export function App({
 					} else {
 						const cfg = adhdAudio.config;
 						addSystemMessage(
-							"ADHD Mode — your focus toolkit\n\n" +
-								"  /adhd              Toggle text mode\n" +
-								"  /adhd on|off       Enable/disable\n\n" +
-								"  Audio:\n" +
-								"  /adhd lofi         Lofi beats\n" +
-								"  /adhd rainsound    Rain sounds\n" +
-								"  /adhd whitenoise   White noise\n" +
-								"  /adhd ambient      Ambient synths\n" +
-								"  /adhd classical    Soft piano\n" +
-								"  /adhd stop         Stop audio\n\n" +
-								"  Config:\n" +
-								"  /adhd config       Show current settings\n" +
-								"  /adhd set <k> <v>  Change a setting\n" +
-								"  /adhd regen        Clear cache & regenerate\n\n" +
-								`Status: text=${adhdMode ? "on" : "off"} · audio=${adhdAudio.isPlaying ? adhdAudio.current : "off"} · duration=${cfg.duration}s`,
+							`ADHD Mode — your focus toolkit\n\n  /adhd              Toggle text mode\n  /adhd on|off       Enable/disable\n\n  Audio:\n  /adhd lofi         Lofi beats\n  /adhd rainsound    Rain sounds\n  /adhd whitenoise   White noise\n  /adhd ambient      Ambient synths\n  /adhd classical    Soft piano\n  /adhd stop         Stop audio\n\n  Config:\n  /adhd config       Show current settings\n  /adhd set <k> <v>  Change a setting\n  /adhd regen        Clear cache & regenerate\n\nStatus: text=${adhdMode ? "on" : "off"} · audio=${adhdAudio.isPlaying ? adhdAudio.current : "off"} · duration=${cfg.duration}s`,
 						);
 					}
 					break;
@@ -2636,7 +2555,7 @@ export function App({
 						);
 					} else if (sub === "threshold" && args[1]) {
 						const val = Number.parseFloat(args[1]);
-						if (!isNaN(val)) {
+						if (!Number.isNaN(val)) {
 							router.setConfig({
 								confidenceThreshold: Math.max(0, Math.min(1, val)),
 							});
@@ -2649,7 +2568,7 @@ export function App({
 								addSystemMessage("No changes — slots already optimal.");
 							} else {
 								addSystemMessage(
-									"Auto-assigned:\n" + changes.map((c) => `  ${c}`).join("\n"),
+									`Auto-assigned:\n${changes.map((c) => `  ${c}`).join("\n")}`,
 								);
 							}
 						});
@@ -2674,7 +2593,7 @@ export function App({
 				case "debug": {
 					// Debug CLI inside TUI — runs bin/debug.ts and shows output
 					const debugCmd = args.length > 0 ? args.join(" ") : "sessions";
-					const debugScript = require("path").join(
+					const debugScript = require("node:path").join(
 						process.cwd(),
 						"bin",
 						"debug.ts",
@@ -2750,7 +2669,7 @@ export function App({
 							method: "POST",
 							headers: { "Content-Type": "application/json" },
 							body: JSON.stringify({
-								prompt: customPrompt + ", instrumental",
+								prompt: `${customPrompt}, instrumental`,
 								lyrics: "[instrumental]",
 								audio_duration: cfg.duration,
 								bpm: cfg.bpm || null,
@@ -2811,7 +2730,7 @@ export function App({
 														: `${cfg.apiUrl}${audioUrl}`;
 													const audioRes = await fetch(fullUrl);
 													const buf = await audioRes.arrayBuffer();
-													const { join } = await import("path");
+													const { join } = await import("node:path");
 													const cachePath = join(
 														process.env.HOME || "~",
 														".8gent",
@@ -2820,7 +2739,7 @@ export function App({
 													);
 													await Bun.write(cachePath, buf);
 													addSystemMessage(
-														`Track ready! Playing on loop. /music stop to end.`,
+														"Track ready! Playing on loop. /music stop to end.",
 													);
 													// Play via afplay loop
 													const { spawn } = await import("bun");
@@ -2871,13 +2790,7 @@ export function App({
 					} else if (musicSub === "config" || musicSub === "settings") {
 						const cfg = musicAudio.config;
 						addSystemMessage(
-							"Music Config\n\n" +
-								`  duration:  ${cfg.duration}s (${Math.round(cfg.duration / 60)}min)\n` +
-								`  bpm:       ${cfg.bpm ?? "auto"}\n` +
-								`  quality:   ${cfg.inferenceSteps} steps\n` +
-								`  guidance:  ${cfg.guidanceScale}\n` +
-								`  api:       ${cfg.apiUrl}\n\n` +
-								"Change with: /music set <key> <value>",
+							`Music Config\n\n  duration:  ${cfg.duration}s (${Math.round(cfg.duration / 60)}min)\n  bpm:       ${cfg.bpm ?? "auto"}\n  quality:   ${cfg.inferenceSteps} steps\n  guidance:  ${cfg.guidanceScale}\n  api:       ${cfg.apiUrl}\n\nChange with: /music set <key> <value>`,
 						);
 					} else if (musicSub === "set" && args.length >= 3) {
 						const key = args[1].toLowerCase();
@@ -2895,11 +2808,11 @@ export function App({
 						const configKey = keyMap[key];
 						if (!configKey) {
 							addSystemMessage(
-								`Unknown key. Use: duration, bpm, steps, guidance`,
+								"Unknown key. Use: duration, bpm, steps, guidance",
 							);
 						} else {
 							const numVal = Number(val);
-							if (isNaN(numVal)) {
+							if (Number.isNaN(numVal)) {
 								addSystemMessage(`"${val}" isn't a number.`);
 							} else {
 								musicAudio.setConfig({ [configKey]: numVal } as any);
@@ -2944,7 +2857,7 @@ export function App({
 								case "stop":
 									dj.stop();
 									try {
-										require("child_process").execSync(
+										require("node:child_process").execSync(
 											"pkill -f afplay 2>/dev/null",
 										);
 									} catch {}
@@ -2986,7 +2899,7 @@ export function App({
 									break;
 								case "presets":
 								case "genres":
-									result = "Radio: " + dj.radioPresets().join(", ");
+									result = `Radio: ${dj.radioPresets().join(", ")}`;
 									break;
 								case "doctor":
 								case "status": {
@@ -3027,10 +2940,10 @@ export function App({
 					import("../../../packages/pet/companion.js")
 						.then(async ({ generateCompanion, formatDeckSummary }) => {
 							const { execSync, spawn: spawnProc } = await import(
-								"child_process"
+								"node:child_process"
 							);
-							const fs = await import("fs");
-							const path = await import("path");
+							const fs = await import("node:fs");
+							const path = await import("node:path");
 
 							switch (petSub) {
 								case "start": {
@@ -3095,8 +3008,7 @@ export function App({
 											);
 										} else {
 											addSystemMessage(
-												"[pet] lil-eight.sh not found. Tried:\n  " +
-													candidates.join("\n  "),
+												`[pet] lil-eight.sh not found. Tried:\n  ${candidates.join("\n  ")}`,
 											);
 										}
 									} else {
@@ -3147,7 +3059,7 @@ export function App({
 					break;
 				}
 
-				case "design":
+				case "design": {
 					// Trigger design agent manually
 					const designTask =
 						args.length > 0 ? args.join(" ") : "create a new UI component";
@@ -3165,8 +3077,9 @@ export function App({
 						}
 					});
 					break;
+				}
 
-				case "evidence":
+				case "evidence": {
 					// Show full evidence breakdown
 					if (!agent) {
 						addSystemMessage(
@@ -3212,6 +3125,7 @@ export function App({
 					}
 					addSystemMessage(evLines.join("\n"));
 					break;
+				}
 
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
@@ -3410,31 +3324,30 @@ export function App({
 									gh.getUser()
 										.then((ghUser) => {
 											addSystemMessage(
-												`Auth Status: ${authStatus}\n` +
-													(authUser
+												`Auth Status: ${authStatus}\n${
+													authUser
 														? `User: ${authUser.displayName} (${authUser.plan})\n`
-														: "") +
-													(ghUser ? `GitHub: @${ghUser.username}\n` : "") +
-													"\nCommands: /auth login, /auth logout, /auth github",
+														: ""
+												}${ghUser ? `GitHub: @${ghUser.username}\n` : ""}\nCommands: /auth login, /auth logout, /auth github`,
 											);
 										})
 										.catch(() => {
 											addSystemMessage(
-												`Auth Status: ${authStatus}\n` +
-													(authUser
+												`Auth Status: ${authStatus}\n${
+													authUser
 														? `User: ${authUser.displayName} (${authUser.plan})\n`
-														: "") +
-													"\nCommands: /auth login, /auth logout, /auth github",
+														: ""
+												}\nCommands: /auth login, /auth logout, /auth github`,
 											);
 										});
 								})
 								.catch(() => {
 									addSystemMessage(
-										`Auth Status: ${authStatus}\n` +
-											(authUser
+										`Auth Status: ${authStatus}\n${
+											authUser
 												? `User: ${authUser.displayName} (${authUser.plan})\n`
-												: "") +
-											"\nCommands: /auth login, /auth logout, /auth github",
+												: ""
+										}\nCommands: /auth login, /auth logout, /auth github`,
 									);
 								});
 						}
@@ -4077,7 +3990,7 @@ export function App({
 				);
 				// Speak confirmation
 				try {
-					require("child_process").execSync(
+					require("node:child_process").execSync(
 						`say -v Moira "Telegram bot token saved. Brilliant."`,
 						{ stdio: "ignore" },
 					);
@@ -4092,7 +4005,7 @@ export function App({
 					setOnboardingSteps((prev) => [
 						...prev,
 						{
-							question: result.nextQuestion!.question,
+							question: result.nextQuestion?.question ?? "",
 							status: "active" as const,
 						},
 					]);
@@ -4104,7 +4017,7 @@ export function App({
 						const firstLine = result.nextQuestion.question
 							.split("\n")[0]
 							.slice(0, 100);
-						require("child_process").execSync(
+						require("node:child_process").execSync(
 							`say -v ${voice} "${firstLine.replace(/"/g, "")}"`,
 							{ stdio: "ignore" },
 						);
@@ -4116,13 +4029,12 @@ export function App({
 					const user = onboardingManager.getUser();
 					const name = user.identity.name || "friend";
 					addSystemMessage(
-						`Welcome, ${name}. I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\n` +
-							"Let's build something magnificent.",
+						`Welcome, ${name}. I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\nLet's build something magnificent.`,
 					);
 					// Speak the welcome
 					try {
 						const voice = user.preferences?.voice?.voiceId || "Moira";
-						require("child_process").execSync(
+						require("node:child_process").execSync(
 							`say -v ${voice} "Welcome ${name}. Let's build something magnificent."`,
 							{ stdio: "ignore" },
 						);
@@ -4650,12 +4562,11 @@ export function App({
 								if (result.success && result.selectedDesign) {
 									setSelectedDesign(result.selectedDesign);
 									addSystemMessage(
-										`\u2713 Design selected: **${result.selectedDesign.name}**\n\n` +
-											`Stack: ${result.selectedDesign.stack.join(", ")}\n\n` +
-											(result.commands.length > 0
+										`\u2713 Design selected: **${result.selectedDesign.name}**\n\nStack: ${result.selectedDesign.stack.join(", ")}\n\n${
+											result.commands.length > 0
 												? `Setup commands:\n${result.commands.map((c) => `  $ ${c}`).join("\n")}\n\n`
-												: "") +
-											"I'll use this design system for the implementation.",
+												: ""
+										}I'll use this design system for the implementation.`,
 									);
 								}
 								setViewMode("chat");
@@ -4704,8 +4615,6 @@ export function App({
 						}}
 					/>
 				);
-
-			case "chat":
 			default:
 				// Voice chat mode: minimal render to avoid Ink repaint collisions
 				// (audio level + timer + message updates all fire simultaneously → ghost text)

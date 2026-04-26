@@ -5,9 +5,9 @@
  * Evolution, not vibes.
  */
 
-import { execSync, spawn } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { execSync, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -598,7 +598,7 @@ export class SelfAutonomy {
 		// Retry with backoff for transient errors
 		if (severity === "transient") {
 			for (let i = 0; i < maxRetries; i++) {
-				const delay = Math.pow(2, i) * 1000;
+				const delay = 2 ** i * 1000;
 				await new Promise((r) => setTimeout(r, delay));
 
 				try {

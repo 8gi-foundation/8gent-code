@@ -122,10 +122,10 @@ describe("forget() — soft delete", () => {
 		rawDb.close();
 
 		expect(row).not.toBeNull();
-		expect(row!.id).toBe(id);
-		expect(row!.deleted_at).not.toBeNull();
-		expect(typeof row!.deleted_at).toBe("number");
-		expect(row!.deleted_at!).toBeGreaterThan(0);
+		expect(row?.id).toBe(id);
+		expect(row?.deleted_at).not.toBeNull();
+		expect(typeof row?.deleted_at).toBe("number");
+		expect(row?.deleted_at!).toBeGreaterThan(0);
 	});
 
 	it("makes forgotten memories invisible to normal get()", () => {
@@ -153,7 +153,7 @@ describe("forget() — soft delete", () => {
 		// includeDeleted returns the memory
 		const retrieved = store.get(id, true);
 		expect(retrieved).not.toBeNull();
-		expect(retrieved!.id).toBe(id);
+		expect(retrieved?.id).toBe(id);
 	});
 
 	it("returns false for non-existent memory", () => {
@@ -221,7 +221,7 @@ describe("forget() — soft delete", () => {
 		rawDb.close();
 
 		expect(version).not.toBeNull();
-		expect(version!.change_reason).toBe("deleted");
+		expect(version?.change_reason).toBe("deleted");
 	});
 
 	it("excludes forgotten memories from stats()", () => {
@@ -274,7 +274,7 @@ describe("update() — versioning", () => {
 		const updated = store.get("mem_ver_inc");
 		expect(updated).not.toBeNull();
 		// version should be 2 after one update
-		expect(updated!.version).toBe(2);
+		expect(updated?.version).toBe(2);
 	});
 
 	it("creates version snapshot of previous state", () => {
@@ -391,7 +391,7 @@ describe("update() — versioning", () => {
 		rawDb.close();
 
 		expect(row).not.toBeNull();
-		const snapshot = JSON.parse(row!.data_snapshot) as CoreMemory;
+		const snapshot = JSON.parse(row?.data_snapshot ?? "{}") as CoreMemory;
 
 		// All original fields should be preserved
 		expect(snapshot.id).toBe("mem_blob");
@@ -425,8 +425,8 @@ describe("update() — versioning", () => {
 		rawDb.close();
 
 		expect(row).not.toBeNull();
-		expect(row!.changed_by).toBe("compliance-agent");
-		expect(row!.change_reason).toBe("quarterly review");
+		expect(row?.changed_by).toBe("compliance-agent");
+		expect(row?.change_reason).toBe("quarterly review");
 	});
 
 	it("returns false for non-existent memory", () => {
@@ -477,10 +477,10 @@ describe("update() — versioning", () => {
 		rawDb.close();
 
 		expect(row).not.toBeNull();
-		expect(row!.version).toBe(2);
-		expect(row!.importance).toBe(0.99);
+		expect(row?.version).toBe(2);
+		expect(row?.importance).toBe(0.99);
 
-		const data = JSON.parse(row!.data) as CoreMemory;
+		const data = JSON.parse(row?.data ?? "{}") as CoreMemory;
 		expect(data.content).toBe("Merged content");
 		expect(data.importance).toBe(0.99);
 		expect(data.version).toBe(2);

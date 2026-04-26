@@ -5,7 +5,7 @@
  * Falls back to local sox synthesis if API is unavailable.
  */
 
-import { mkdirSync } from "fs";
+import { mkdirSync } from "node:fs";
 import type { Genre, LayerRole, MixConfig } from "./types.js";
 
 const REPLICATE_API = "https://api.replicate.com/v1/predictions";
@@ -90,7 +90,7 @@ export class ReplicateBackend {
 				}
 			}
 
-			console.log(`[music/replicate] Timeout waiting for generation`);
+			console.log("[music/replicate] Timeout waiting for generation");
 			return null;
 		} catch (err) {
 			console.log(`[music/replicate] Error: ${(err as Error).message}`);

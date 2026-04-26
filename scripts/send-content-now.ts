@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { execSync } from "child_process";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -46,7 +46,7 @@ async function sendAudio(text: string, label: string) {
 	}
 }
 
-const os = await import("os");
+const os = await import("node:os");
 const content = readFileSync(
 	join(
 		os.default.homedir(),
@@ -82,14 +82,14 @@ const artem =
 		.trim() || "";
 
 await send(
-	"DAY 1 CONTENT DRAFTS\n====================\n\nLINKEDIN:\n\n" + linkedin,
+	`DAY 1 CONTENT DRAFTS\n====================\n\nLINKEDIN:\n\n${linkedin}`,
 );
 await new Promise((r) => setTimeout(r, 1000));
-await send("X / TWITTER:\n\n" + twitter);
+await send(`X / TWITTER:\n\n${twitter}`);
 await new Promise((r) => setTimeout(r, 1000));
-await send("THREADS / INSTAGRAM:\n\n" + threads);
+await send(`THREADS / INSTAGRAM:\n\n${threads}`);
 await new Promise((r) => setTimeout(r, 1000));
-await send("ARTEM LUKO REPLY:\n\n" + artem);
+await send(`ARTEM LUKO REPLY:\n\n${artem}`);
 await new Promise((r) => setTimeout(r, 1000));
 
 await sendAudio(linkedin, "LinkedIn-Day1");

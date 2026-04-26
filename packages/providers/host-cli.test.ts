@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	HostCliClient,
 	HostCliRateLimitError,
@@ -53,7 +59,7 @@ beforeAll(() => {
 afterAll(() => {
 	process.env.PATH = originalPath;
 	if (originalFlag === undefined) {
-		delete process.env.PROVIDERS_ALLOW_HOST_CLI;
+		process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
 	} else {
 		process.env.PROVIDERS_ALLOW_HOST_CLI = originalFlag;
 	}
@@ -66,7 +72,7 @@ afterAll(() => {
 
 describe("host-CLI delegation: availability gating", () => {
 	it("reports unavailable when PROVIDERS_ALLOW_HOST_CLI is unset", () => {
-		delete process.env.PROVIDERS_ALLOW_HOST_CLI;
+		process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
 		const result = checkHostCliAvailability("stub-ok");
 		expect(result.available).toBe(false);
 		expect(result.reason).toContain("PROVIDERS_ALLOW_HOST_CLI");
@@ -97,14 +103,14 @@ describe("host-CLI delegation: availability gating", () => {
 		process.env.PROVIDERS_ALLOW_HOST_CLI = "1";
 		expect(isHostCliAvailable("stub-ok")).toBe(true);
 		expect(isHostCliAvailable("stub-does-not-exist-zzz")).toBe(false);
-		delete process.env.PROVIDERS_ALLOW_HOST_CLI;
+		process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
 		expect(isHostCliAvailable("stub-ok")).toBe(false);
 	});
 });
 
 describe("HostCliClient: primary-style spec (-p prompt, exit 7 rate limit)", () => {
 	it("throws HostCliUnavailableError when flag is not set", async () => {
-		delete process.env.PROVIDERS_ALLOW_HOST_CLI;
+		process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
 		const client = new HostCliClient({
 			spec: { binary: "stub-ok", rateLimitExitCode: 7 },
 		});
@@ -167,7 +173,7 @@ describe("HostCliClient: secondary-style spec (exec subcommand, auth via stderr)
 	});
 
 	it("availability check is false when flag is missing", () => {
-		delete process.env.PROVIDERS_ALLOW_HOST_CLI;
+		process.env.PROVIDERS_ALLOW_HOST_CLI = undefined;
 		expect(checkHostCliAvailability("stub-exec-ok").available).toBe(false);
 	});
 });

@@ -336,7 +336,7 @@ export class ProactiveCompression extends CompactionEngine {
 				...m,
 				content:
 					m.content.length > 500
-						? m.content.slice(0, 500) + "...[truncated]"
+						? `${m.content.slice(0, 500)}...[truncated]`
 						: m.content,
 			}));
 			const simplified = [systemMsg, ...thinned, ...last4];

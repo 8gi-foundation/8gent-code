@@ -54,7 +54,7 @@ describe("Turth feature flag", () => {
 	});
 
 	it("returns allowed:true when PERMISSIONS_INTERACTIVE is unset", async () => {
-		delete process.env.PERMISSIONS_INTERACTIVE;
+		process.env.PERMISSIONS_INTERACTIVE = undefined;
 		expect(isInteractiveEnabled()).toBe(false);
 		const dec = await requestApproval({
 			capability: "run_command:echo",

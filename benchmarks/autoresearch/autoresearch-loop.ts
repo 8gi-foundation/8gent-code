@@ -133,7 +133,7 @@ function log(msg: string): void {
 	const line = `[${new Date().toISOString()}] ${msg}`;
 	console.log(line);
 	try {
-		appendFileSync(LOG_FILE, line + "\n");
+		appendFileSync(LOG_FILE, `${line}\n`);
 	} catch {}
 }
 
@@ -180,7 +180,7 @@ async function callModel(
 	};
 
 	if (!isOllama) {
-		headers["Authorization"] = `Bearer ${API_KEY}`;
+		headers.Authorization = `Bearer ${API_KEY}`;
 		headers["HTTP-Referer"] = "https://8gent.app";
 		headers["X-Title"] = "8gent-autoresearch";
 	}
@@ -359,7 +359,7 @@ function analyzeAndMutate(
 	const exec = run.grade.execution;
 	const stderr = exec?.stderr ?? "";
 	const stdout = exec?.stdout ?? "";
-	const combined = stderr + "\n" + stdout;
+	const combined = `${stderr}\n${stdout}`;
 
 	// ── Multi-file extraction failures ────────────────────────────
 	if (benchmark.multiFile && !run.extractedCode) {
@@ -393,7 +393,7 @@ function analyzeAndMutate(
 		}
 		if (combined.includes("409") || combined.includes("duplicate")) {
 			newMutations.push(
-				`[FS001] Register must catch duplicate email errors from db.createUser() and return status 409.`,
+				"[FS001] Register must catch duplicate email errors from db.createUser() and return status 409.",
 			);
 		}
 	}
@@ -402,7 +402,7 @@ function analyzeAndMutate(
 	if (benchmark.id === "FS002") {
 		if (combined.includes("priority")) {
 			newMutations.push(
-				`[FS002] The queue must sort by priority (highest first). Use Array.sort or maintain a sorted structure. Dequeue always returns the highest-priority pending task.`,
+				"[FS002] The queue must sort by priority (highest first). Use Array.sort or maintain a sorted structure. Dequeue always returns the highest-priority pending task.",
 			);
 		}
 		if (combined.includes("dead") || combined.includes("DLQ")) {
@@ -416,12 +416,12 @@ function analyzeAndMutate(
 	if (benchmark.id === "FS003") {
 		if (combined.includes("guard") || combined.includes("transition")) {
 			newMutations.push(
-				`[FS003] The send() method must: 1) check if current state has a transition for the event, 2) run the guard function if present (block if false), 3) run the action to update context, 4) change state. Return { success: true/false, state, context }.`,
+				"[FS003] The send() method must: 1) check if current state has a transition for the event, 2) run the guard function if present (block if false), 3) run the action to update context, 4) change state. Return { success: true/false, state, context }.",
 			);
 		}
 		if (combined.includes("compensate") || combined.includes("reverse")) {
 			newMutations.push(
-				`[FS003] WorkflowEngine.execute() must run steps sequentially. On failure, compensate previously completed steps IN REVERSE ORDER (last completed first). Do NOT compensate the failed step itself.`,
+				"[FS003] WorkflowEngine.execute() must run steps sequentially. On failure, compensate previously completed steps IN REVERSE ORDER (last completed first). Do NOT compensate the failed step itself.",
 			);
 		}
 	}
@@ -438,27 +438,27 @@ function analyzeAndMutate(
 			(combined.includes("lazy") || combined.includes("getPlugin"))
 		) {
 			newMutations.push(
-				`[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.`,
+				"[AR001] getPlugin() must trigger lazy initialization: if the plugin is not yet loaded, resolve its dependency chain and init them in order before returning.",
 			);
 		}
 		if (benchmark.id === "MR001" && combined.includes("timeout")) {
 			newMutations.push(
-				`[MR001] Implement AC-3 arc consistency preprocessing BEFORE backtracking search. Without domain pruning, hard Sudoku will timeout. Use MCV (most-constrained-variable) heuristic.`,
+				"[MR001] Implement AC-3 arc consistency preprocessing BEFORE backtracking search. Without domain pruning, hard Sudoku will timeout. Use MCV (most-constrained-variable) heuristic.",
 			);
 		}
 		if (benchmark.id === "TC001" && combined.includes("roundtrip")) {
 			newMutations.push(
-				`[TC001] The serializer must preserve enough structure for roundtrip fidelity. parse(serialize(parse(input))) must produce structurally equivalent ASTs.`,
+				"[TC001] The serializer must preserve enough structure for roundtrip fidelity. parse(serialize(parse(input))) must produce structurally equivalent ASTs.",
 			);
 		}
 		if (benchmark.id === "SD001" && exec && exec.score < 50) {
 			newMutations.push(
-				`[SD001] Three bugs to fix: (1) broker.ts race condition — add mutex/lock for concurrent subscribe/unsubscribe, (2) history.ts memory leak — prune internal array to maxHistory after each add, (3) router.ts off-by-one — wildcard * must match zero or more chars, not one or more.`,
+				"[SD001] Three bugs to fix: (1) broker.ts race condition — add mutex/lock for concurrent subscribe/unsubscribe, (2) history.ts memory leak — prune internal array to maxHistory after each add, (3) router.ts off-by-one — wildcard * must match zero or more chars, not one or more.",
 			);
 		}
 		if (benchmark.id === "DP001" && combined.includes("BOM")) {
 			newMutations.push(
-				`[DP001] Strip BOM (\\uFEFF) from the start of CSV input. Handle mixed line endings (CRLF/LF). Parse quoted fields that contain commas.`,
+				"[DP001] Strip BOM (\\uFEFF) from the start of CSV input. Handle mixed line endings (CRLF/LF). Parse quoted fields that contain commas.",
 			);
 		}
 		if (benchmark.id === "CB001" && combined.includes("submodule")) {
@@ -482,7 +482,7 @@ function analyzeAndMutate(
 		}
 		if (benchmark.id === "UI002" && combined.includes("backdrop-filter")) {
 			newMutations.push(
-				`[UI002] backdrop-filter: blur() requires -webkit-backdrop-filter for Safari. Card backgrounds must be rgba() with alpha < 0.5, not hex colors.`,
+				"[UI002] backdrop-filter: blur() requires -webkit-backdrop-filter for Safari. Card backgrounds must be rgba() with alpha < 0.5, not hex colors.",
 			);
 		}
 		if (benchmark.id === "UI005" && !combined.includes("checked")) {
@@ -515,7 +515,7 @@ function analyzeAndMutate(
 			}
 			if (combined.includes("401") || combined.includes("unauthorized")) {
 				newMutations.push(
-					`[BT001] Auth middleware must: 1) read Authorization header (case-insensitive), 2) extract Bearer token, 3) validate JWT using the shared secret, 4) set req.user. Return 401 on any failure.`,
+					"[BT001] Auth middleware must: 1) read Authorization header (case-insensitive), 2) extract Bearer token, 3) validate JWT using the shared secret, 4) set req.user. Return 401 on any failure.",
 				);
 			}
 		}
@@ -524,7 +524,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT006") {
 			if (combined.includes("NaN") || combined.includes("Infinity")) {
 				newMutations.push(
-					`[BT006] All financial calculations must guard against division by zero. Return 0 or null for undefined ratios. Use Number.isFinite() to validate results.`,
+					"[BT006] All financial calculations must guard against division by zero. Return 0 or null for undefined ratios. Use Number.isFinite() to validate results.",
 				);
 			}
 		}
@@ -533,7 +533,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT007") {
 			if (combined.includes("parse") || combined.includes("HTML")) {
 				newMutations.push(
-					`[BT007] Parse HTML using regex patterns for meta tags, headings, links — do NOT use external HTML parsers. Extract: title, meta description, h1-h6 hierarchy, a[href] links, img[alt] attributes.`,
+					"[BT007] Parse HTML using regex patterns for meta tags, headings, links — do NOT use external HTML parsers. Extract: title, meta description, h1-h6 hierarchy, a[href] links, img[alt] attributes.",
 				);
 			}
 		}
@@ -542,7 +542,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT008") {
 			if (combined.includes("template") || combined.includes("merge")) {
 				newMutations.push(
-					`[BT008] Template engine must support {{variable}} placeholders, {{#if condition}}...{{/if}} conditionals, and {{#each array}}...{{/each}} loops. Use regex-based replacement.`,
+					"[BT008] Template engine must support {{variable}} placeholders, {{#if condition}}...{{/if}} conditionals, and {{#each array}}...{{/each}} loops. Use regex-based replacement.",
 				);
 			}
 		}
@@ -551,7 +551,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT009") {
 			if (combined.includes("dependency") || combined.includes("DAG")) {
 				newMutations.push(
-					`[BT009] Pipeline stages form a DAG. Resolve dependencies with topological sort. Stages with all deps satisfied run in parallel. Failed stages block all dependents.`,
+					"[BT009] Pipeline stages form a DAG. Resolve dependencies with topological sort. Stages with all deps satisfied run in parallel. Failed stages block all dependents.",
 				);
 			}
 		}
@@ -560,7 +560,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT010") {
 			if (combined.includes("transform") || combined.includes("CSS")) {
 				newMutations.push(
-					`[BT010] Token transformer must output: CSS custom properties (--color-primary: #hex), SCSS variables ($color-primary: #hex), and JSON flat map. Handle nested token groups with dot notation.`,
+					"[BT010] Token transformer must output: CSS custom properties (--color-primary: #hex), SCSS variables ($color-primary: #hex), and JSON flat map. Handle nested token groups with dot notation.",
 				);
 			}
 		}
@@ -569,7 +569,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT011") {
 			if (combined.includes("timeline") || combined.includes("frame")) {
 				newMutations.push(
-					`[BT011] Timeline must support addClip(start, duration, layer), removeClip(id), and render() which returns ordered frames. Handle overlapping clips on same layer by z-order.`,
+					"[BT011] Timeline must support addClip(start, duration, layer), removeClip(id), and render() which returns ordered frames. Handle overlapping clips on same layer by z-order.",
 				);
 			}
 		}
@@ -578,7 +578,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT012") {
 			if (combined.includes("interval") || combined.includes("chord")) {
 				newMutations.push(
-					`[BT012] Note names: C, C#, D, D#, E, F, F#, G, G#, A, A#, B (12 semitones). Intervals measured in semitones. Major chord = [0,4,7], Minor = [0,3,7], Dim = [0,3,6], Aug = [0,4,8].`,
+					"[BT012] Note names: C, C#, D, D#, E, F, F#, G, G#, A, A#, B (12 semitones). Intervals measured in semitones. Major chord = [0,4,7], Minor = [0,3,7], Dim = [0,3,6], Aug = [0,4,8].",
 				);
 			}
 		}
@@ -587,7 +587,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT013") {
 			if (combined.includes("scale") || combined.includes("axis")) {
 				newMutations.push(
-					`[BT013] Linear scale maps [domainMin, domainMax] → [rangeMin, rangeMax]. Implement: scale(value), invert(pixel), ticks(count). Handle edge case where domain span is 0.`,
+					"[BT013] Linear scale maps [domainMin, domainMax] → [rangeMin, rangeMax]. Implement: scale(value), invert(pixel), ticks(count). Handle edge case where domain span is 0.",
 				);
 			}
 		}
@@ -596,7 +596,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT014") {
 			if (combined.includes("readiness") || combined.includes("score")) {
 				newMutations.push(
-					`[BT014] AI readiness score formula: dataMaturity * 20 (max 100). Tier: 0-33=beginner, 34-66=intermediate, 67-100=advanced. Budget and tool count inform recommendations, not score.`,
+					"[BT014] AI readiness score formula: dataMaturity * 20 (max 100). Tier: 0-33=beginner, 34-66=intermediate, 67-100=advanced. Budget and tool count inform recommendations, not score.",
 				);
 			}
 		}
@@ -605,7 +605,7 @@ function analyzeAndMutate(
 		if (benchmark.id === "BT015") {
 			if (combined.includes("vulnerability") || combined.includes("scan")) {
 				newMutations.push(
-					`[BT015] Scanner must detect: SQL injection (string concat in queries), XSS (innerHTML/document.write), hardcoded secrets (password=, secret=, api_key=), insecure crypto (MD5/SHA1), eval() usage.`,
+					"[BT015] Scanner must detect: SQL injection (string concat in queries), XSS (innerHTML/document.write), hardcoded secrets (password=, secret=, api_key=), insecure crypto (MD5/SHA1), eval() usage.",
 				);
 			}
 		}
@@ -767,7 +767,7 @@ async function main(): Promise<void> {
 				log(`    📝 ${m}`);
 			}
 		} else {
-			log(`  No new mutations (all passing or no actionable failures)`);
+			log("  No new mutations (all passing or no actionable failures)");
 		}
 
 		// ── Convergence Check ─────────────────────────────────────────
@@ -783,7 +783,7 @@ async function main(): Promise<void> {
 			const prev = state.history[state.history.length - 2];
 			const curr = state.history[state.history.length - 1];
 			if (prev.avgScore === curr.avgScore && prev.passing === curr.passing) {
-				log(`\n⚠ Score stagnation detected (same as previous iteration)`);
+				log("\n⚠ Score stagnation detected (same as previous iteration)");
 				// Don't stop — mutations might help next round
 			}
 		}
@@ -791,7 +791,7 @@ async function main(): Promise<void> {
 
 	// ── Final Report ────────────────────────────────────────────────
 	log(`\n${"═".repeat(60)}`);
-	log(`  AUTORESEARCH COMPLETE`);
+	log("  AUTORESEARCH COMPLETE");
 	log(`${"═".repeat(60)}`);
 	log(`  Total iterations: ${state.history.length}`);
 	log(`  Total mutations:  ${getMutations().length}`);

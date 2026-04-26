@@ -217,7 +217,7 @@ export async function vercelGetDeploymentLogs(
  */
 export async function vercelDetectProject(): Promise<string | null> {
 	try {
-		const { execSync } = await import("child_process");
+		const { execSync } = await import("node:child_process");
 		const remote = execSync("git remote get-url origin", {
 			encoding: "utf-8",
 		}).trim();

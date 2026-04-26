@@ -114,15 +114,14 @@ export function SlideIn({
 
 	if (direction === "left") {
 		return <Text>{text.slice(0, visibleChars)}</Text>;
-	} else {
-		const start = text.length - visibleChars;
-		return (
-			<Text>
-				{" ".repeat(start)}
-				{text.slice(start)}
-			</Text>
-		);
 	}
+	const start = text.length - visibleChars;
+	return (
+		<Text>
+			{" ".repeat(start)}
+			{text.slice(start)}
+		</Text>
+	);
 }
 
 // Pop in effect (scale simulation)

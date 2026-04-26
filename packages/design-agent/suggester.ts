@@ -10,7 +10,7 @@
  * - Avenue tracking for multi-path suggestions
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { DesignCategory, DetectionResult } from "./detector.js";
 import type { ProjectType, UserDesignPreferences } from "./prompts.js";
 import {

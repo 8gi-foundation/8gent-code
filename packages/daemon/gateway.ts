@@ -403,7 +403,7 @@ export function startGateway(
 				return handleAuditAccess(req, config);
 			}
 
-			return new Response("Eight Daemon - ws://localhost:" + config.port, {
+			return new Response(`Eight Daemon - ws://localhost:${config.port}`, {
 				status: 200,
 			});
 		},

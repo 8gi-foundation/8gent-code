@@ -271,7 +271,7 @@ export class MockFileSystem {
 	async gitRoot(path: string): Promise<string> {
 		const normalized = path.replace(/\/+$/, "");
 		for (const repoPath of Object.keys(GIT_LOGS)) {
-			if (normalized === repoPath || normalized.startsWith(repoPath + "/")) {
+			if (normalized === repoPath || normalized.startsWith(`${repoPath}/`)) {
 				return repoPath;
 			}
 		}

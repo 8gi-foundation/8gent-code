@@ -408,18 +408,18 @@ export function generatePRDescription(
 	);
 
 	if (testFiles.length > 0) {
-		testPlan.push(`- [ ] Tests pass locally (\`npm test\`)`);
+		testPlan.push("- [ ] Tests pass locally (`npm test`)");
 	}
 
-	testPlan.push(`- [ ] Code compiles without errors (\`tsc --noEmit\`)`);
-	testPlan.push(`- [ ] Manual verification of changes`);
+	testPlan.push("- [ ] Code compiles without errors (`tsc --noEmit`)");
+	testPlan.push("- [ ] Manual verification of changes");
 
 	// Check for UI changes
 	const uiFiles = changes.files.filter(
 		(f) => f.endsWith(".tsx") || f.endsWith(".css") || f.endsWith(".scss"),
 	);
 	if (uiFiles.length > 0) {
-		testPlan.push(`- [ ] Visual inspection of UI changes`);
+		testPlan.push("- [ ] Visual inspection of UI changes");
 	}
 
 	// Check for breaking changes
@@ -612,7 +612,7 @@ export class GitWorkflowManager {
 
 		// Trim to reasonable length
 		if (desc.length > 50) {
-			desc = desc.slice(0, 47) + "...";
+			desc = `${desc.slice(0, 47)}...`;
 		}
 
 		return desc;

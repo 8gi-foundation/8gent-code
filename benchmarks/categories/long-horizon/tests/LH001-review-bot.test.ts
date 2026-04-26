@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
-let diffParser: any,
-	astAnalyzer: any,
-	securityScanner: any,
-	styleChecker: any,
-	reviewGenerator: any;
+let diffParser: any;
+let astAnalyzer: any;
+let securityScanner: any;
+let styleChecker: any;
+let reviewGenerator: any;
 
 beforeEach(async () => {
 	try {
@@ -179,7 +179,7 @@ function baz() { return 3; }
 		const fn =
 			astAnalyzer.calculateComplexity ||
 			astAnalyzer.default?.calculateComplexity;
-		const simpleCode = `function simple() { return 1; }`;
+		const simpleCode = "function simple() { return 1; }";
 		const complexCode = `
 function complex(x: number) {
   if (x > 0) {
@@ -282,7 +282,7 @@ const fn = new Function("return " + expr);
 describe("Style Checker", () => {
 	it("checkStyle detects lines too long", () => {
 		const fn = styleChecker.checkStyle || styleChecker.default?.checkStyle;
-		const longLine = "const x = " + "a".repeat(200) + ";";
+		const longLine = `const x = ${"a".repeat(200)};`;
 		const code = `function short() {\n  return 1;\n}\n${longLine}\n`;
 		const violations = fn(code);
 		expect(Array.isArray(violations)).toBe(true);
@@ -334,7 +334,7 @@ describe("Review Generator", () => {
 		const parseFn = diffParser.parseDiff || diffParser.default?.parseDiff;
 		const genFn =
 			reviewGenerator.generateReview || reviewGenerator.default?.generateReview;
-		const diffs = parseFn(UNIFIED_DIFF_ADD + "\n" + UNIFIED_DIFF_MODIFY);
+		const diffs = parseFn(`${UNIFIED_DIFF_ADD}\n${UNIFIED_DIFF_MODIFY}`);
 		const report = genFn(diffs);
 		expect(report).toBeDefined();
 		expect(typeof report.summary).toBe("string");

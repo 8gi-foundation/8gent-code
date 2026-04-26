@@ -8,9 +8,9 @@
  * All consumer code goes through this module.
  */
 
-import { execSync } from "child_process";
-import * as os from "os";
-import * as path from "path";
+import { execSync } from "node:child_process";
+import * as os from "node:os";
+import * as path from "node:path";
 import type {
 	ClickOptions,
 	CommandResult,
@@ -57,7 +57,7 @@ function validatePoint(p: Point, label: string): string | null {
 	if (typeof p.x !== "number" || typeof p.y !== "number") {
 		return `${label}: x and y must be numbers`;
 	}
-	if (!isFinite(p.x) || !isFinite(p.y)) {
+	if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) {
 		return `${label}: coordinates must be finite numbers`;
 	}
 	// Screen coords should be non-negative and within reason (16K pixels max)

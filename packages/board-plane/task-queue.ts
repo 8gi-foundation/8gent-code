@@ -53,13 +53,13 @@ export class TaskQueue {
       )
     `);
 		this.db.exec(
-			`CREATE INDEX IF NOT EXISTS idx_tasks_status ON board_tasks(status)`,
+			"CREATE INDEX IF NOT EXISTS idx_tasks_status ON board_tasks(status)",
 		);
 		this.db.exec(
-			`CREATE INDEX IF NOT EXISTS idx_tasks_member ON board_tasks(memberCode)`,
+			"CREATE INDEX IF NOT EXISTS idx_tasks_member ON board_tasks(memberCode)",
 		);
 		this.db.exec(
-			`CREATE INDEX IF NOT EXISTS idx_tasks_channel ON board_tasks(channelId)`,
+			"CREATE INDEX IF NOT EXISTS idx_tasks_channel ON board_tasks(channelId)",
 		);
 	}
 
@@ -119,7 +119,7 @@ export class TaskQueue {
 
 	failTask(taskId: string, error: string): void {
 		const row = this.db
-			.prepare(`SELECT retryCount FROM board_tasks WHERE id = ?`)
+			.prepare("SELECT retryCount FROM board_tasks WHERE id = ?")
 			.get(taskId) as any;
 		if (!row) return;
 
@@ -128,7 +128,7 @@ export class TaskQueue {
 
 		this.db
 			.prepare(
-				`UPDATE board_tasks SET status = ?, error = ?, retryCount = ?, vesselId = NULL, assignedAt = NULL WHERE id = ?`,
+				"UPDATE board_tasks SET status = ?, error = ?, retryCount = ?, vesselId = NULL, assignedAt = NULL WHERE id = ?",
 			)
 			.run(newStatus, error, newRetry, taskId);
 	}

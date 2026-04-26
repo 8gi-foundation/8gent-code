@@ -20,7 +20,7 @@ const SI_SUFFIXES = [
  * formatBytes(1073741824) => "1.0 GB"
  */
 export function formatBytes(bytes: number, decimals = 1): string {
-	if (!isFinite(bytes) || isNaN(bytes)) return "0 B";
+	if (!Number.isFinite(bytes) || Number.isNaN(bytes)) return "0 B";
 	if (bytes === 0) return "0 B";
 
 	const abs = Math.abs(bytes);
@@ -43,7 +43,7 @@ export function formatBytes(bytes: number, decimals = 1): string {
  * formatNumber(42)      => "42"
  */
 export function formatNumber(n: number, decimals = 1): string {
-	if (!isFinite(n) || isNaN(n)) return "0";
+	if (!Number.isFinite(n) || Number.isNaN(n)) return "0";
 
 	const abs = Math.abs(n);
 	const sign = n < 0 ? "-" : "";
@@ -65,7 +65,7 @@ export function formatNumber(n: number, decimals = 1): string {
  * formatWithCommas(42.5)    => "42.5"
  */
 export function formatWithCommas(n: number): string {
-	if (!isFinite(n) || isNaN(n)) return "0";
+	if (!Number.isFinite(n) || Number.isNaN(n)) return "0";
 	const [integer, decimal] = n.toString().split(".");
 	const withCommas = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 	return decimal !== undefined ? `${withCommas}.${decimal}` : withCommas;
@@ -78,7 +78,7 @@ export function formatWithCommas(n: number): string {
  * formatPercent(0.1234) => "12.3%"
  */
 export function formatPercent(n: number, decimals = 1): string {
-	if (!isFinite(n) || isNaN(n)) return "0%";
+	if (!Number.isFinite(n) || Number.isNaN(n)) return "0%";
 	return `${(n * 100).toFixed(decimals)}%`;
 }
 
@@ -90,7 +90,7 @@ export function formatPercent(n: number, decimals = 1): string {
  * formatDuration(90061000) => "1d 1h 1m 1s"
  */
 export function formatDuration(ms: number): string {
-	if (!isFinite(ms) || isNaN(ms) || ms < 0) return "0ms";
+	if (!Number.isFinite(ms) || Number.isNaN(ms) || ms < 0) return "0ms";
 
 	const totalSeconds = Math.floor(ms / 1000);
 	const days = Math.floor(totalSeconds / 86400);
@@ -139,7 +139,7 @@ export function formatOrdinal(n: number): string {
  * formatSignificant(0.9999, 2)   => "1.0"
  */
 export function formatSignificant(n: number, sigFigs = 3): string {
-	if (!isFinite(n) || isNaN(n)) return "0";
+	if (!Number.isFinite(n) || Number.isNaN(n)) return "0";
 	if (n === 0) return "0";
 	return Number.parseFloat(n.toPrecision(sigFigs)).toString();
 }

@@ -6,9 +6,9 @@
  * updates 8gent-world benchmark pages, and optionally creates a GitHub gist.
  */
 
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ── Paths ──────────────────────────────────────────────────────────────
 
@@ -166,8 +166,8 @@ function buildSummary(): SyncSummary {
 	for (const r of results) {
 		const tier = getTierFromId(r.taskId);
 		if (!tierMap.has(tier)) tierMap.set(tier, { scores: [], ids: [] });
-		tierMap.get(tier)!.scores.push(r.eightScore);
-		tierMap.get(tier)!.ids.push(r.taskId);
+		tierMap.get(tier)?.scores.push(r.eightScore);
+		tierMap.get(tier)?.ids.push(r.taskId);
 	}
 
 	// If competition didn't run or had no results, fall back to autoresearch battle-test data
@@ -177,8 +177,8 @@ function buildSummary(): SyncSummary {
 		for (const [id, score] of Object.entries(scores)) {
 			const tier = getTierFromId(id);
 			if (!tierMap.has(tier)) tierMap.set(tier, { scores: [], ids: [] });
-			tierMap.get(tier)!.scores.push(score);
-			tierMap.get(tier)!.ids.push(id);
+			tierMap.get(tier)?.scores.push(score);
+			tierMap.get(tier)?.ids.push(id);
 		}
 	}
 

@@ -49,9 +49,7 @@ async function main() {
 	const reachable = await client.isAvailable();
 	if (!reachable) {
 		console.error(
-			`[smoke-apfel] endpoint not reachable at ${baseUrl}. ` +
-				`Install apfel: https://github.com/Arthur-Ficial/apfel and start it ` +
-				`(recommended: \`apfel serve --port 11500\` then \`export APFEL_BASE_URL=http://localhost:11500/v1\`).`,
+			`[smoke-apfel] endpoint not reachable at ${baseUrl}. Install apfel: https://github.com/Arthur-Ficial/apfel and start it (recommended: \`apfel serve --port 11500\` then \`export APFEL_BASE_URL=http://localhost:11500/v1\`).`,
 		);
 		process.exit(1);
 	}
@@ -66,7 +64,7 @@ async function main() {
 			process.exit(1);
 		}
 		console.log(`[smoke-apfel] response: ${content.slice(0, 200)}`);
-		console.log(`[smoke-apfel] OK`);
+		console.log("[smoke-apfel] OK");
 		process.exit(0);
 	} catch (err) {
 		console.error(`[smoke-apfel] FAIL: ${(err as Error).message}`);

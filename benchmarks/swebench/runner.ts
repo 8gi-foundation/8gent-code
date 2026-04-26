@@ -4,8 +4,8 @@
  * Clone repo at base_commit, run agent, verify patch against gold tests.
  * Docker isolation deferred - uses temp dirs with git for now.
  */
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { SWEBenchTask } from "./loader";
 
 export interface TaskResult {

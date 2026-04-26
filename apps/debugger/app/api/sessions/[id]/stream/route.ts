@@ -1,7 +1,7 @@
-import { watch } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-import { readFile, stat } from "fs/promises";
+import { watch } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -54,11 +54,11 @@ export async function GET(
 
 				// Marker so client knows initial load is done
 				const marker = `data: ${JSON.stringify({ type: "__initial_load_complete__", lineCount: sentLines })}\n\n`;
-				console.log(`[Stream API] Sending initial_load_complete marker`);
+				console.log("[Stream API] Sending initial_load_complete marker");
 				controller.enqueue(encoder.encode(marker));
 
 				console.log(
-					`[Stream API] Initial batch sent, setting up file watcher...`,
+					"[Stream API] Initial batch sent, setting up file watcher...",
 				);
 
 				// Watch for new lines (live tailing)
@@ -83,7 +83,7 @@ export async function GET(
 							console.log(`[Stream API] No new lines (still ${sentLines})`);
 						}
 					} catch (err) {
-						console.error(`[Stream API] File watcher read error:`, err);
+						console.error("[Stream API] File watcher read error:", err);
 					}
 				});
 
@@ -95,7 +95,7 @@ export async function GET(
 					controller.close();
 				});
 			} catch (error) {
-				console.error(`[Stream API] Error in stream start:`, error);
+				console.error("[Stream API] Error in stream start:", error);
 				controller.enqueue(
 					encoder.encode(
 						`data: ${JSON.stringify({ type: "__error__", message: String(error) })}\n\n`,

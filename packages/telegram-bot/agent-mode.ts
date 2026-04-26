@@ -5,9 +5,9 @@
  * Receives natural language messages, detects intent, and executes actions.
  */
 
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	formatComparison,
 	formatDuration,
@@ -506,7 +506,7 @@ export class TelegramAgentMode {
 		}
 
 		try {
-			const { writeFileSync, mkdirSync } = await import("fs");
+			const { writeFileSync, mkdirSync } = await import("node:fs");
 
 			const proc = Bun.spawn(["bun", "run", scriptPath], {
 				cwd: join(HOME, "8gent-code"),
@@ -554,7 +554,7 @@ export class TelegramAgentMode {
 			process.kill(pid, "SIGTERM");
 
 			try {
-				const { unlinkSync } = await import("fs");
+				const { unlinkSync } = await import("node:fs");
 				unlinkSync(RUN_PID_FILE);
 			} catch {}
 

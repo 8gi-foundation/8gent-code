@@ -6,8 +6,8 @@
  * Perfect for README gifs and viral demos.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
 	getSymbolSource,
 	parseTypeScriptFile,
@@ -52,7 +52,7 @@ const outlineJson = JSON.stringify(
 
 const outlineTokens = Math.ceil(outlineJson.length / 4);
 
-console.log(`   Step 1: get_outline()`);
+console.log("   Step 1: get_outline()");
 console.log(`   → ${outline.symbols.length} symbols found`);
 console.log(`   → ~${outlineTokens.toLocaleString()} tokens\n`);
 
@@ -103,7 +103,7 @@ if (targetSymbol) {
 		`║  AST-first (outline+symbol):  ${totalAstTokens.toLocaleString().padStart(8)} tokens            ║`,
 	);
 	console.log(
-		`║                               ─────────                       ║`,
+		"║                               ─────────                       ║",
 	);
 	console.log(
 		`║  TOKENS SAVED:                ${savings.toLocaleString().padStart(8)} (${savingsPercent}%)          ║`,

@@ -7,8 +7,8 @@
  * as DISCORD_GITHUB_WEBHOOK_URL.
  */
 
-import { appendFileSync, readFileSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const ENV_PATH = resolve(import.meta.dir, "../.env");
 
@@ -94,7 +94,7 @@ const webhook = await api(`/channels/${prsChannel.id}/webhooks`, {
 });
 
 const webhookUrl = `https://discord.com/api/webhooks/${webhook.id}/${webhook.token}`;
-console.log(`\nWebhook created successfully!`);
+console.log("\nWebhook created successfully!");
 console.log(`Webhook ID: ${webhook.id}`);
 console.log(`Webhook URL: ${webhookUrl}`);
 console.log(`GitHub-compatible URL: ${webhookUrl}/github`);

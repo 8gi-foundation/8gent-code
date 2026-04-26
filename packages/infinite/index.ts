@@ -12,7 +12,7 @@
  * - Success validation before exit
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import { disableInfiniteMode, enableInfiniteMode } from "../permissions";
 
 // ============================================

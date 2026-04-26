@@ -7,10 +7,10 @@
  * Inspired by NemoClaw (https://github.com/nemo-claw) — rebuilt from scratch in <200 lines.
  */
 
-import * as crypto from "crypto";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type {
 	PolicyActionType,
@@ -98,9 +98,7 @@ function parseCondition(condition: string): ParsedCondition {
 			const parsed = parseClause(clause);
 			if (!parsed) {
 				throw new Error(
-					`Invalid condition syntax: "${clause}". ` +
-						`Expected: "field contains value", "field in [a, b]", "field equals value", ` +
-						`"field starts_with value", or "field ends_with value"`,
+					`Invalid condition syntax: "${clause}". Expected: "field contains value", "field in [a, b]", "field equals value", "field starts_with value", or "field ends_with value"`,
 				);
 			}
 			andClauses.push(parsed);
@@ -212,7 +210,7 @@ function verifyChecksum(yamlContent: string): string | null {
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
-		fs.writeFileSync(POLICY_CHECKSUM_PATH, hash + "\n");
+		fs.writeFileSync(POLICY_CHECKSUM_PATH, `${hash}\n`);
 		return null;
 	} catch (err) {
 		return `Policy checksum verification failed: ${err}`;

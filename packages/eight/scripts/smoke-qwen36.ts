@@ -45,9 +45,7 @@ async function main() {
 	const reachable = await client.isAvailable();
 	if (!reachable) {
 		console.error(
-			`[smoke-qwen36] backend ${backend} not reachable. ` +
-				`Install: \`ollama pull ${QWEN_ID}\` (Ollama 0.6.2+) ` +
-				`or load the GGUF in LM Studio 0.4.12+.`,
+			`[smoke-qwen36] backend ${backend} not reachable. Install: \`ollama pull ${QWEN_ID}\` (Ollama 0.6.2+) or load the GGUF in LM Studio 0.4.12+.`,
 		);
 		process.exit(1);
 	}
@@ -71,7 +69,7 @@ async function main() {
 			process.exit(1);
 		}
 		console.log(`[smoke-qwen36] vision response: ${content.slice(0, 200)}`);
-		console.log(`[smoke-qwen36] OK`);
+		console.log("[smoke-qwen36] OK");
 		process.exit(0);
 	} catch (err) {
 		const msg = (err as Error).message;

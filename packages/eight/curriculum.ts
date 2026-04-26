@@ -121,23 +121,23 @@ export class CurriculumRunner {
 			`## Step ${this.currentIndex + 1}/${this.curriculum.steps.length}: ${step.title}`,
 			`Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`,
 			"",
-			`### Objective`,
+			"### Objective",
 			step.objective,
 			"",
 		];
 
 		if (step.prerequisites.length > 0) {
-			lines.push(`### Prerequisites`, prereqNames, "");
+			lines.push("### Prerequisites", prereqNames, "");
 		}
 
 		lines.push(
-			`### Content`,
+			"### Content",
 			step.content,
 			"",
-			`### Exercises`,
+			"### Exercises",
 			...step.exercises.map((e, i) => `${i + 1}. ${e}`),
 			"",
-			`### Comprehension Check`,
+			"### Comprehension Check",
 			step.verifyUnderstanding,
 		);
 

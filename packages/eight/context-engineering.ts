@@ -137,7 +137,7 @@ export function compressMessage(content: string, maxTokens = 500): string {
 	// Strategy 2: Truncate long lines
 	const lines = compressed.split("\n");
 	compressed = lines
-		.map((line) => (line.length > 200 ? line.slice(0, 197) + "..." : line))
+		.map((line) => (line.length > 200 ? `${line.slice(0, 197)}...` : line))
 		.join("\n");
 
 	// Strategy 3: Remove repetitive content
@@ -146,7 +146,7 @@ export function compressMessage(content: string, maxTokens = 500): string {
 	// Strategy 4: Final truncation if needed
 	const targetChars = maxTokens * 4;
 	if (compressed.length > targetChars) {
-		compressed = compressed.slice(0, targetChars - 50) + "\n...[truncated]";
+		compressed = `${compressed.slice(0, targetChars - 50)}\n...[truncated]`;
 	}
 
 	return compressed;
@@ -164,7 +164,7 @@ export function compressToolResult(
 	if (currentTokens <= maxTokens) return result;
 
 	switch (toolName) {
-		case "read_file":
+		case "read_file": {
 			// Keep first and last parts
 			const lines = result.split("\n");
 			if (lines.length > 20) {
@@ -175,9 +175,10 @@ export function compressToolResult(
 				].join("\n");
 			}
 			break;
+		}
 
 		case "search_symbols":
-		case "list_files":
+		case "list_files": {
 			// Keep first N items
 			const items = result.split("\n").filter((l) => l.trim());
 			if (items.length > 20) {
@@ -187,8 +188,9 @@ export function compressToolResult(
 				].join("\n");
 			}
 			break;
+		}
 
-		case "run_command":
+		case "run_command": {
 			// Keep last N lines (usually the important output)
 			const outputLines = result.split("\n");
 			if (outputLines.length > 30) {
@@ -198,14 +200,16 @@ export function compressToolResult(
 				].join("\n");
 			}
 			break;
+		}
 
-		case "git_diff":
+		case "git_diff": {
 			// Summarize diff
 			const diffStats = extractDiffStats(result);
 			if (diffStats) {
 				return `${diffStats}\n\n[Full diff truncated]`;
 			}
 			break;
+		}
 	}
 
 	// Default compression

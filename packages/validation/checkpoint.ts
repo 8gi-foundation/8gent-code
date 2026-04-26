@@ -5,7 +5,7 @@
  * Create a named checkpoint before risky changes, restore if they fail.
  */
 
-import { spawnSync } from "child_process";
+import { spawnSync } from "node:child_process";
 
 export interface Checkpoint {
 	id: string; // Unique ID (timestamp-based)

@@ -17,9 +17,9 @@
  *   8. Report result via Telegram
  */
 
-import { execSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { basename, join } from "path";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import {
 	type ExecutionResult,
 	executeAndValidate,
@@ -238,10 +238,9 @@ export async function executeTask(
 					testsFailed = 0;
 					lastError = undefined;
 					break;
-				} else {
-					testsFailed = generated.tests.length;
-					lastError = result.error || "Tests failed";
 				}
+				testsFailed = generated.tests.length;
+				lastError = result.error || "Tests failed";
 			} else {
 				// No tests generated - verify code at least parses
 				const parseCheck = await executeSecure(
@@ -253,9 +252,8 @@ export async function executeTask(
 					testsPassed = 1;
 					lastError = undefined;
 					break;
-				} else {
-					lastError = parseCheck.error || "Code failed to parse";
 				}
+				lastError = parseCheck.error || "Code failed to parse";
 			}
 		}
 
@@ -365,13 +363,13 @@ function getRelevantContext(repoPath: string, taskDescription: string): string {
 	// Read README for context
 	const readmePath = join(repoPath, "README.md");
 	if (existsSync(readmePath)) {
-		context += readFileSync(readmePath, "utf-8").slice(0, 2000) + "\n\n";
+		context += `${readFileSync(readmePath, "utf-8").slice(0, 2000)}\n\n`;
 	}
 
 	// Read CLAUDE.md if exists
 	const claudePath = join(repoPath, "CLAUDE.md");
 	if (existsSync(claudePath)) {
-		context += readFileSync(claudePath, "utf-8").slice(0, 3000) + "\n\n";
+		context += `${readFileSync(claudePath, "utf-8").slice(0, 3000)}\n\n`;
 	}
 
 	return context;

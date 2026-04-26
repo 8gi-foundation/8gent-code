@@ -5,7 +5,7 @@
  * Linux: systemd user unit in ~/.config/systemd/user/
  */
 
-import { existsSync } from "fs";
+import { existsSync } from "node:fs";
 
 const SERVICE_NAME = "com.8gent.daemon";
 const DESCRIPTION = "Eight Agent Daemon - always-on AI agent process";
@@ -191,6 +191,6 @@ if (command && commands[command]) {
 	});
 } else if (import.meta.main) {
 	console.log(
-		`Usage: bun run service.ts <install|uninstall|start|stop|status>`,
+		"Usage: bun run service.ts <install|uninstall|start|stop|status>",
 	);
 }

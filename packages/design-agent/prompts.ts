@@ -189,7 +189,7 @@ Always explain WHY each option fits the project.`;
 export function generateAnalysisPrompt(context: DesignPromptContext): string {
 	const { task, projectType, keywords, projectName, preferences } = context;
 
-	let prompt = `Analyze this project and suggest design approaches:\n\n`;
+	let prompt = "Analyze this project and suggest design approaches:\n\n";
 	prompt += `**Task:** ${task}\n`;
 	prompt += `**Detected Type:** ${projectType}\n`;
 	prompt += `**Keywords:** ${keywords.join(", ")}\n`;
@@ -199,7 +199,7 @@ export function generateAnalysisPrompt(context: DesignPromptContext): string {
 	}
 
 	if (preferences) {
-		prompt += `\n**User Preferences:**\n`;
+		prompt += "\n**User Preferences:**\n";
 		if (preferences.preferredFrameworks?.length) {
 			prompt += `- Preferred frameworks: ${preferences.preferredFrameworks.join(", ")}\n`;
 		}
@@ -214,7 +214,8 @@ export function generateAnalysisPrompt(context: DesignPromptContext): string {
 		}
 	}
 
-	prompt += `\nSuggest 2-3 design system options with clear reasoning for each. Be conversational.`;
+	prompt +=
+		"\nSuggest 2-3 design system options with clear reasoning for each. Be conversational.";
 
 	return prompt;
 }

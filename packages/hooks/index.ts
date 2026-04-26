@@ -5,10 +5,10 @@
  * at key points in the agent workflow. Inspired by git hooks and Claude Code hooks.
  */
 
-import { exec, spawn } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { exec, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 
 // ============================================
@@ -300,7 +300,7 @@ export class HookManager {
 			const raw = fs.readFileSync(yamlPath, "utf-8");
 			const parsed = parseYaml(raw);
 			if (!Array.isArray(parsed)) {
-				console.warn(`[hooks] hooks.yaml should be an array of hook configs`);
+				console.warn("[hooks] hooks.yaml should be an array of hook configs");
 				return [];
 			}
 			// Validate each entry
@@ -308,7 +308,7 @@ export class HookManager {
 			for (const entry of parsed) {
 				if (!entry.event || !entry.command) {
 					console.warn(
-						`[hooks] Skipping invalid YAML hook (missing event or command):`,
+						"[hooks] Skipping invalid YAML hook (missing event or command):",
 						entry,
 					);
 					continue;

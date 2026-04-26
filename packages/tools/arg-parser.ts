@@ -72,7 +72,7 @@ export class ArgumentParser {
 					result[flag.name] = value === undefined ? flag.default : value;
 					break;
 				case "number":
-					result[flag.name] = isNaN(Number(value))
+					result[flag.name] = Number.isNaN(Number(value))
 						? flag.default
 						: Number(value);
 					break;

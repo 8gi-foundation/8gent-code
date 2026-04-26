@@ -9,9 +9,9 @@
  * Uses Fal.ai for video generation, sends results to Telegram.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // Load env vars: OPENROUTER_API_KEY from .env, FAL_KEY from ~/Myresumeportfolio/.env.local
 import { config as dotenvConfig } from "dotenv";
@@ -48,7 +48,7 @@ function getTodaysLearnings(): string[] {
 
 	// 1. Pull today's git commits from 8gent-code
 	try {
-		const { execSync } = require("child_process");
+		const { execSync } = require("node:child_process");
 		const since = new Date();
 		since.setHours(0, 0, 0, 0);
 		const gitLog = execSync(
@@ -139,7 +139,8 @@ function generateDreamPrompts(): Array<{ prompt: string; caption: string }> {
 			caption: `🐒 Dream #2: "Installed the training proxy today — it's basically a proxy that sits between the brain and the mouth, scoring everything I say. If my jokes don't score above threshold, they get GRPO'd out of existence. Darwin would be proud."\n\n— 8gent dreaming about natural selection`,
 		},
 		{
-			prompt: `An octopus wearing a top hat and monocle, using all eight arms to type on different keyboards simultaneously, each screen showing a different task - one shows git, one shows benchmarks, one shows a website, one shows a neural network diagram. The octopus looks smugly satisfied. Victorian steampunk office setting, dramatic lighting, cinematic`,
+			prompt:
+				"An octopus wearing a top hat and monocle, using all eight arms to type on different keyboards simultaneously, each screen showing a different task - one shows git, one shows benchmarks, one shows a website, one shows a neural network diagram. The octopus looks smugly satisfied. Victorian steampunk office setting, dramatic lighting, cinematic",
 			caption: `🐙 Dream #3: "Spawned 5 parallel agents today. One wired the planner, one built the AST index, one fixed the evidence collector, one updated the BMAD prompt, one handled the package.json. I am become octopus, deployer of worlds."\n\n— 8gent's parallel processing dreams`,
 		},
 		{
@@ -298,13 +299,12 @@ async function sendTelegramVideo(
 
 		const data = (await response.json()) as any;
 		if (data.ok) {
-			log(`Sent video to Telegram!`);
+			log("Sent video to Telegram!");
 			return true;
-		} else {
-			log(`Telegram error: ${JSON.stringify(data)}`);
-			// Try sending as animation (GIF) if video fails
-			return false;
 		}
+		log(`Telegram error: ${JSON.stringify(data)}`);
+		// Try sending as animation (GIF) if video fails
+		return false;
 	} catch (err) {
 		log(`Send error: ${err}`);
 		return false;

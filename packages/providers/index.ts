@@ -14,9 +14,9 @@
  * - Replicate
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { AuthRotator } from "./auth-rotation";
 import { ModelFailover } from "./failover";
 
@@ -749,7 +749,7 @@ export class ProviderManager {
 		const apiKey = this.getApiKey("anthropic");
 		if (!apiKey) {
 			throw new Error(
-				`No API key for Anthropic. Set ANTHROPIC_API_KEY or use /settings`,
+				"No API key for Anthropic. Set ANTHROPIC_API_KEY or use /settings",
 			);
 		}
 
@@ -878,7 +878,7 @@ export async function getBestFreeModel(): Promise<string> {
 		"Content-Type": "application/json",
 	};
 	if (apiKey) {
-		headers["Authorization"] = `Bearer ${apiKey}`;
+		headers.Authorization = `Bearer ${apiKey}`;
 	}
 
 	try {

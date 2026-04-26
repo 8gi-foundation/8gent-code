@@ -1,4 +1,4 @@
-import * as readline from "readline";
+import * as readline from "node:readline";
 /**
  * 8gent Code - JSON-RPC 2.0 Server
  * Headless mode for CI/IDE integration. Newline-delimited JSON on stdin/stdout.
@@ -13,7 +13,7 @@ import type { AgentEventCallbacks } from "./types";
 const sessions = new Map<string, { agent: Agent; id: string }>();
 
 function send(msg: RPCResponse | RPCNotification): void {
-	process.stdout.write(JSON.stringify(msg) + "\n");
+	process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
 function sendResult(id: number | string, result: unknown): void {
 	send({ jsonrpc: "2.0", id, result });
@@ -182,7 +182,7 @@ async function handleLine(line: string): Promise<void> {
 
 export async function startRPCServer(): Promise<void> {
 	// Redirect console to stderr so stdout stays clean for JSON-RPC
-	const stderrWrite = (data: string) => process.stderr.write(data + "\n");
+	const stderrWrite = (data: string) => process.stderr.write(`${data}\n`);
 	console.log = stderrWrite;
 	console.info = stderrWrite;
 	console.warn = stderrWrite;

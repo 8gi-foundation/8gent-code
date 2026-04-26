@@ -13,9 +13,9 @@
  *   /kill <task-id>
  */
 
-import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentPool } from "./agent-pool";
 import { bus } from "./events";
 import type { NotificationDispatcher } from "./notifications";
@@ -160,7 +160,7 @@ export class CoSRouter {
 				console.error("[cos-router] failed to create GitHub issue:", err);
 				await this.notifications.notify(
 					"task-progress",
-					`Could not create GitHub issue (continuing without it)`,
+					"Could not create GitHub issue (continuing without it)",
 				);
 			}
 		}
@@ -180,22 +180,22 @@ export class CoSRouter {
 				: "";
 
 		const delegationPrompt = [
-			`You are Eight, working on a delegated task from the CEO.`,
-			``,
+			"You are Eight, working on a delegated task from the CEO.",
+			"",
 			`Task: ${description}`,
 			`Repository: ${repoPath}`,
 			`GitHub Issue: ${issueUrl || "none"}`,
 			`Priority: ${priority}`,
 			goalsContext,
-			``,
-			`Instructions:`,
+			"",
+			"Instructions:",
 			`1. cd to ${repoPath}`,
-			`2. Create a feature branch for this work`,
-			`3. Implement the task`,
-			`4. Commit with conventional commit messages`,
-			`5. Push the branch`,
-			`6. Create a PR if code was changed`,
-			`7. Summarize what you did`,
+			"2. Create a feature branch for this work",
+			"3. Implement the task",
+			"4. Commit with conventional commit messages",
+			"5. Push the branch",
+			"6. Create a PR if code was changed",
+			"7. Summarize what you did",
 		].join("\n");
 
 		// Execute the delegation asynchronously

@@ -36,10 +36,9 @@ export function TypingText({
 				setDisplayedText(text.slice(0, displayedText.length + 1));
 			}, speed);
 			return () => clearTimeout(timeout);
-		} else {
-			setIsComplete(true);
-			onComplete?.();
 		}
+		setIsComplete(true);
+		onComplete?.();
 	}, [displayedText, text, speed, onComplete]);
 
 	// Cursor blink effect
@@ -90,11 +89,10 @@ export function StreamingText({
 				setCharIndex((prev) => prev + 1);
 			}, speed);
 			return () => clearTimeout(timeout);
-		} else {
-			// Move to next chunk
-			setCurrentChunkIndex((prev) => prev + 1);
-			setCharIndex(0);
 		}
+		// Move to next chunk
+		setCurrentChunkIndex((prev) => prev + 1);
+		setCharIndex(0);
 	}, [chunks, currentChunkIndex, charIndex, speed]);
 
 	return <AppText color={color}>{displayedText}</AppText>;
@@ -123,9 +121,8 @@ export function WordByWord({
 				setWordIndex((prev) => prev + 1);
 			}, speed);
 			return () => clearTimeout(timeout);
-		} else {
-			onComplete?.();
 		}
+		onComplete?.();
 	}, [wordIndex, words.length, speed, onComplete]);
 
 	return (
@@ -161,12 +158,11 @@ export function CodeTyping({ code, language, speed = 8 }: CodeTypingProps) {
 				setCharIndex((prev) => prev + 1);
 			}, speed);
 			return () => clearTimeout(timeout);
-		} else {
-			// Move to next line
-			setDisplayedCode((prev) => prev + "\n");
-			setLineIndex((prev) => prev + 1);
-			setCharIndex(0);
 		}
+		// Move to next line
+		setDisplayedCode((prev) => `${prev}\n`);
+		setLineIndex((prev) => prev + 1);
+		setCharIndex(0);
 	}, [lines, lineIndex, charIndex, speed]);
 
 	return (

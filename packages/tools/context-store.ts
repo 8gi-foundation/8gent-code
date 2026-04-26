@@ -5,7 +5,7 @@
  * Nested contexts inherit parent values; inner writes do not bleed upward.
  */
 
-import { AsyncLocalStorage } from "async_hooks";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 type ContextMap = Map<string, unknown>;
 

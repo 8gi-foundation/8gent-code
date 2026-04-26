@@ -6,10 +6,10 @@
  * interactive human-in-the-loop approval for scoped capabilities.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as readline from "readline";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as readline from "node:readline";
 
 // ============================================
 // Types
@@ -535,7 +535,7 @@ export class PermissionManager {
 		this.infiniteModeStartTime = Date.now();
 		this.infiniteModeAuditLog = [];
 		console.log(
-			`\x1b[33m[INF] Infinite Loop mode enabled (expires in 30 minutes)\x1b[0m`,
+			"\x1b[33m[INF] Infinite Loop mode enabled (expires in 30 minutes)\x1b[0m",
 		);
 	}
 
@@ -545,7 +545,7 @@ export class PermissionManager {
 	disableInfiniteMode(): void {
 		this.infiniteMode = false;
 		this.infiniteModeStartTime = null;
-		console.log(`\x1b[33m[INF] Infinite Loop mode disabled\x1b[0m`);
+		console.log("\x1b[33m[INF] Infinite Loop mode disabled\x1b[0m");
 	}
 
 	/**
@@ -559,7 +559,7 @@ export class PermissionManager {
 			const elapsed = Date.now() - this.infiniteModeStartTime;
 			if (elapsed >= INFINITE_MODE_MAX_DURATION_MS) {
 				console.log(
-					`\x1b[33m[INF] Infinite Loop mode expired after 30 minutes\x1b[0m`,
+					"\x1b[33m[INF] Infinite Loop mode expired after 30 minutes\x1b[0m",
 				);
 				this.infiniteMode = false;
 				this.infiniteModeStartTime = null;
@@ -599,7 +599,7 @@ export class PermissionManager {
 		const argsLower = parsed.args.map((a) => a.toLowerCase());
 
 		for (const rule of ALWAYS_BLOCKED_COMMANDS) {
-			if (cmd !== rule.command && !cmd.endsWith("/" + rule.command)) continue;
+			if (cmd !== rule.command && !cmd.endsWith(`/${rule.command}`)) continue;
 
 			// If rule has no args, just matching the command is enough
 			if (rule.args.length === 0) {
@@ -649,12 +649,11 @@ export class PermissionManager {
 
 		// Also write to log file if configured
 		if (this.config.logPath) {
-			const logLine =
-				JSON.stringify({
-					...entry,
-					timestamp: entry.timestamp.toISOString(),
-					mode: "infinite",
-				}) + "\n";
+			const logLine = `${JSON.stringify({
+				...entry,
+				timestamp: entry.timestamp.toISOString(),
+				mode: "infinite",
+			})}\n`;
 
 			try {
 				fs.appendFileSync(this.config.logPath, logLine);
@@ -729,7 +728,7 @@ export class PermissionManager {
 		// Token-based matching against dangerous command rules
 		for (const rule of DANGEROUS_COMMAND_RULES) {
 			// Check if the command (first token) matches the rule
-			if (cmdLower !== rule.command && !cmdLower.endsWith("/" + rule.command)) {
+			if (cmdLower !== rule.command && !cmdLower.endsWith(`/${rule.command}`)) {
 				continue;
 			}
 
@@ -980,16 +979,17 @@ export class PermissionManager {
 			});
 
 			// Build prompt message
-			let prompt = `\n\x1b[33m[PERMISSION REQUIRED]\x1b[0m\n`;
+			let prompt = "\n\x1b[33m[PERMISSION REQUIRED]\x1b[0m\n";
 			prompt += `Action: ${action}\n`;
 			prompt += `Details: ${details}\n`;
 			if (command) {
 				prompt += `Command: \x1b[36m${command}\x1b[0m\n`;
 				if (this.isDangerous(command)) {
-					prompt += `\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n`;
+					prompt +=
+						"\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n";
 				}
 			}
-			prompt += `\nAllow? [Y/n]: `;
+			prompt += "\nAllow? [Y/n]: ";
 
 			rl.question(prompt, (answer) => {
 				rl.close();
@@ -1128,11 +1128,10 @@ export class PermissionManager {
 
 		// Optionally write to log file
 		if (this.config.logPath) {
-			const logLine =
-				JSON.stringify({
-					...request,
-					timestamp: request.timestamp.toISOString(),
-				}) + "\n";
+			const logLine = `${JSON.stringify({
+				...request,
+				timestamp: request.timestamp.toISOString(),
+			})}\n`;
 
 			try {
 				fs.appendFileSync(this.config.logPath, logLine);
@@ -1187,7 +1186,7 @@ export async function requestCommandPermission(
 
 	return manager.requestPermission(
 		"Execute Command",
-		`The agent wants to run a shell command.`,
+		"The agent wants to run a shell command.",
 		command,
 	);
 }

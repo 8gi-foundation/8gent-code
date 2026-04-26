@@ -40,8 +40,6 @@ function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
 		case "fireworks":
 		case "replicate":
 			return "openrouter";
-		case "ollama":
-		case "8gent":
 		default:
 			return "ollama";
 	}

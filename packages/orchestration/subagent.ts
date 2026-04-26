@@ -5,7 +5,7 @@
  * Each subagent runs in its own context with isolated message history.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { ValidationReport } from "../validation/report";
 import type { Evidence, Step } from "../workflow/plan-validate";
 
@@ -549,8 +549,6 @@ Output ONLY the JSON array of steps:`;
 				agent.status === "planning" &&
 				this.runningCount < this.maxConcurrent
 			) {
-				// Already in planning but not yet executing
-				continue;
 			}
 		}
 	}

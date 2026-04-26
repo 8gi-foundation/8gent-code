@@ -5,8 +5,8 @@
  * and music generation. Accessible via Shift+Tab cycle or /music player.
  */
 
-import { existsSync, readdirSync, statSync } from "fs";
-import { basename, join } from "path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect } from "react";
 import {

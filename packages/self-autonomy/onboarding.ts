@@ -7,11 +7,11 @@
  * A proper gentleman knows his employer.
  */
 
-import { exec } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import { promisify } from "util";
+import { exec } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { promisify } from "node:util";
 import { getVault } from "../secrets";
 
 const execAsync = promisify(exec);
@@ -700,7 +700,7 @@ export class OnboardingManager {
 	clearPendingInstall(): void {
 		const voice = this.user.preferences.voice as any;
 		if (voice._pendingInstall) {
-			delete voice._pendingInstall;
+			voice._pendingInstall = undefined;
 			this.saveUserConfig();
 		}
 	}
@@ -806,7 +806,7 @@ export class OnboardingManager {
 		);
 		text = text.replace(
 			"{detected_email}",
-			this.user.integrations?.github?.username ? `(via git)` : "not detected",
+			this.user.integrations?.github?.username ? "(via git)" : "not detected",
 		);
 		text = text.replace(
 			"{detected_github}",

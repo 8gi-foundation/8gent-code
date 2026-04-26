@@ -5,9 +5,9 @@
  * Tracks files created/modified, tools used, duration, and provides evidence of completion.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	type TreeItem,
 	bold,
@@ -183,14 +183,14 @@ export class CompletionReporter {
 		}
 
 		if (context.gitCommits && context.gitCommits.length > 0) {
-			parts.push(`committed to git`);
+			parts.push("committed to git");
 		}
 
 		if (parts.length === 0) {
 			return context.taskDescription;
 		}
 
-		return parts.join(", ") + ".";
+		return `${parts.join(", ")}.`;
 	}
 
 	private generateEvidence(
@@ -211,7 +211,7 @@ export class CompletionReporter {
 
 		evidence.push({
 			type: "files_exist",
-			label: `Files exist`,
+			label: "Files exist",
 			status: existingFiles.length === allFiles.length ? "pass" : "fail",
 			details: `${existingFiles.length}/${allFiles.length}`,
 		});
@@ -501,8 +501,8 @@ export class CompletionReporter {
 
 		// Stats
 		lines.push("## Stats");
-		lines.push(`| Metric | Value |`);
-		lines.push(`|--------|-------|`);
+		lines.push("| Metric | Value |");
+		lines.push("|--------|-------|");
 		lines.push(`| Tools used | ${report.toolsUsed} |`);
 		lines.push(`| Duration | ${report.duration} |`);
 		lines.push(`| Confidence | ${report.confidence}% |`);

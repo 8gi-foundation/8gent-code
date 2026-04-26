@@ -64,13 +64,12 @@ export function PulseLogo({
 						return prev - 0.1;
 					}
 					return prev + 0.1;
-				} else {
-					if (prev <= 0.3) {
-						setBreathingIn(true);
-						return prev + 0.1;
-					}
-					return prev - 0.1;
 				}
+				if (prev <= 0.3) {
+					setBreathingIn(true);
+					return prev + 0.1;
+				}
+				return prev - 0.1;
 			});
 		}, 150);
 

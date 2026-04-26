@@ -8,8 +8,8 @@
  * (edge inference pattern - compute once, reuse often)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const CACHE_DIR = join(process.env.HOME || "~", ".8gent");
 const CACHE_PATH = join(CACHE_DIR, "embedding-cache.json");
@@ -91,9 +91,9 @@ export class EmbeddingCache {
 
 export function cosineSimilarity(a: number[], b: number[]): number {
 	if (a.length !== b.length || a.length === 0) return 0;
-	let dot = 0,
-		normA = 0,
-		normB = 0;
+	let dot = 0;
+	let normA = 0;
+	let normB = 0;
 	for (let i = 0; i < a.length; i++) {
 		dot += a[i] * b[i];
 		normA += a[i] * a[i];

@@ -11,8 +11,8 @@
  * - Configurable voice and rate
  */
 
-import { spawn } from "child_process";
-import { platform } from "os";
+import { spawn } from "node:child_process";
+import { platform } from "node:os";
 
 // ============================================
 // Types

@@ -5,9 +5,9 @@
  * manifest generation, and manifest diffing for incremental build pipelines.
  */
 
-import { createHash } from "crypto";
-import { readFileSync, readdirSync, statSync } from "fs";
-import { join, relative } from "path";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 export type HashAlgo = "sha256" | "sha1" | "md5";
 export type HashManifest = Record<string, string>;

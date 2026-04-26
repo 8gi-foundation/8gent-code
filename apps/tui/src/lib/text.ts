@@ -20,7 +20,7 @@ export function truncate(value: string, max: number): string {
 	if (max <= 0) return "";
 	if (max === 1) return value.length > 1 ? "\u2026" : value;
 	if (value.length <= max) return value;
-	return value.slice(0, max - 1) + "\u2026";
+	return `${value.slice(0, max - 1)}\u2026`;
 }
 
 /** Alias for truncate. */
@@ -82,7 +82,7 @@ export function wrapText(value: string, width: number): string[] {
 					current = word;
 				}
 			} else if (current.length + 1 + word.length <= width) {
-				current += " " + word;
+				current += ` ${word}`;
 			} else {
 				lines.push(current);
 				if (word.length > width) {

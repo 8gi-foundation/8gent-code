@@ -1,13 +1,13 @@
-import { execSync } from "child_process";
+import { execSync } from "node:child_process";
 // 8gi:200-exempt — ExtensionCrafter uses HyperAgent pipeline, inherently complex
 /**
  * ExtensionCrafter
  * Converts arbitrary source (local path or GitHub URL) into a working 8gent extension.
  * Uses Analyst→Critic→Implementer pipeline from @8gent/orchestration.
  */
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { inferenceChat } from "../orchestration/sequential-pipeline";
 import { collectExtensionTools, loadAllExtensions } from "./loader";
 import type { ExtensionManifest, ExtensionToolDef } from "./types";

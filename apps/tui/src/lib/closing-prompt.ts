@@ -27,10 +27,7 @@ export function appendClosingQuestionIfNeeded<
 
 	if (/\b(🎯\s*COMPLETED|🔴\s*INCOMPLETE)\b/.test(t)) return messages;
 
-	const followUp =
-		"\n\n" +
-		CLOSING_MARKER +
-		" - deeper here, another part of the repo, or start implementing something concrete?";
+	const followUp = `\n\n${CLOSING_MARKER} - deeper here, another part of the repo, or start implementing something concrete?`;
 
 	return messages.map((m, i) =>
 		i === lastAssistantIdx ? { ...m, content: m.content + followUp } : m,

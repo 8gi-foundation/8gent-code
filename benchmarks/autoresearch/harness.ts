@@ -11,8 +11,8 @@
  * NEVER STOP - runs indefinitely until manually interrupted
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 const MODEL = process.env.OLLAMA_MODEL || "glm-4.7-flash:latest";
@@ -125,7 +125,7 @@ async function get8gentSystemPrompt(): Promise<string> {
 		/export const FULL_SYSTEM_PROMPT = \[([\s\S]*?)\].join/,
 	);
 	if (fullMatch) {
-		prompt += fullMatch[1] + "\n\n";
+		prompt += `${fullMatch[1]}\n\n`;
 	}
 
 	// Get any enhanced patterns (BUG_FIXING_ENHANCED, etc.)
@@ -138,7 +138,7 @@ async function get8gentSystemPrompt(): Promise<string> {
 	for (const pattern of enhancedPatterns) {
 		const match = content.match(pattern);
 		if (match) {
-			prompt += match[1] + "\n\n";
+			prompt += `${match[1]}\n\n`;
 		}
 	}
 
@@ -395,7 +395,7 @@ class LRUCache<K, V> {
 
 	if (improvement) {
 		addedPatterns.add(patternType);
-		const newContent = currentPrompts + "\n" + improvement;
+		const newContent = `${currentPrompts}\n${improvement}`;
 		writePrompts(newContent);
 	}
 
@@ -444,10 +444,10 @@ async function runAutoresearchLoop(): Promise<void> {
 				if (eightgentScore >= claudeScore) {
 					iterationWins++;
 					status = "improved";
-					console.log(`   ✅ 8gent WINS this benchmark!`);
+					console.log("   ✅ 8gent WINS this benchmark!");
 				} else {
 					// 8gent lost - improve prompts
-					console.log(`   ❌ 8gent lost - improving prompts...`);
+					console.log("   ❌ 8gent lost - improving prompts...");
 					changes = await improvePrompts(task.id, gap);
 					status = "regressed";
 				}
@@ -459,7 +459,7 @@ async function runAutoresearchLoop(): Promise<void> {
 					eightgentScore,
 					gap,
 					status,
-					changes: changes.length > 50 ? changes.slice(0, 50) + "..." : changes,
+					changes: changes.length > 50 ? `${changes.slice(0, 50)}...` : changes,
 				});
 
 				// Wait between benchmarks to not overload Ollama

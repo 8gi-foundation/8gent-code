@@ -59,11 +59,7 @@ export function createModel(config: ProviderConfig): LanguageModel {
 							body.tools = (body.tools as Array<Record<string, unknown>>).map(
 								(t) => {
 									const fn = t.function as Record<string, unknown> | undefined;
-									if (
-										fn &&
-										fn.parameters &&
-										typeof fn.parameters === "object"
-									) {
+									if (fn?.parameters && typeof fn.parameters === "object") {
 										const params = fn.parameters as Record<string, unknown>;
 										if (!params.type) params.type = "object";
 									}

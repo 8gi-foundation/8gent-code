@@ -106,7 +106,7 @@ export function sanitizeResponse(response: string): string {
 
 	// Truncate to Discord limit
 	if (clean.length > MAX_RESPONSE_LENGTH) {
-		clean = clean.slice(0, MAX_RESPONSE_LENGTH - 3) + "...";
+		clean = `${clean.slice(0, MAX_RESPONSE_LENGTH - 3)}...`;
 	}
 
 	return clean;

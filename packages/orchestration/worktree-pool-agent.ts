@@ -5,15 +5,15 @@
  * Result written to: <worktree>/.8gent/result.json
  */
 
-import { type ChildProcess, execFileSync, spawn } from "child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
 	appendFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
 	writeFileSync,
-} from "fs";
-import { join } from "path";
+} from "node:fs";
+import { join } from "node:path";
 import type {
 	WorktreeResult,
 	WorktreeTask,

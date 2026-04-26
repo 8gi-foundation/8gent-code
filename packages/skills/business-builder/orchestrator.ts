@@ -173,7 +173,7 @@ export async function buildBusiness(
 	// Phases 1-4: Strategy solo, then parallel phases building on it
 	for (let i = 0; i < PHASES.length; i++) {
 		const phaseAgents = PHASES[i];
-		const blueprint = agentOutputs["strategy"]?.summary ?? "";
+		const blueprint = agentOutputs.strategy?.summary ?? "";
 
 		if (parallel && phaseAgents.length > 1) {
 			const results = await Promise.all(

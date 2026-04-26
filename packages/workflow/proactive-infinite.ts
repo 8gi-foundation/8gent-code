@@ -11,7 +11,7 @@
  * Maximum determinism through upfront clarity.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import {
 	type InfiniteConfig,
 	type InfiniteRunner,
@@ -276,9 +276,10 @@ export class ProactiveInfiniteWorkflow extends EventEmitter {
 				}
 				return "Analyzing task...";
 
-			case "confirming":
+			case "confirming": {
 				const confidence = this.gatherer?.getConfidence() ?? 0;
 				return `✅ Ready! Confidence: ${confidence}% | Waiting for confirmation...`;
+			}
 
 			case "executing":
 				if (this.state.infiniteState) {

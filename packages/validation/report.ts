@@ -239,13 +239,13 @@ export class ValidationReporter {
 		let summary = "";
 
 		if (confidence >= 90) {
-			summary = `Task completed successfully. `;
+			summary = "Task completed successfully. ";
 		} else if (confidence >= 70) {
-			summary = `Task completed with high confidence. `;
+			summary = "Task completed with high confidence. ";
 		} else if (confidence >= 50) {
-			summary = `Task completed with moderate confidence. `;
+			summary = "Task completed with moderate confidence. ";
 		} else {
-			summary = `Task completed with low confidence. `;
+			summary = "Task completed with low confidence. ";
 		}
 
 		summary += `${passed}/${total} steps passed. `;

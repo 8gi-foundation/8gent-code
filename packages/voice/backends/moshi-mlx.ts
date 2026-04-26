@@ -15,7 +15,7 @@
  * - Subprocess is started lazily on first stream() call, killed on stopServer()
  */
 
-import { type ChildProcess, execSync, spawn } from "child_process";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
 import type WS from "ws";
 import type { FullDuplexProvider, VoiceBackend } from "../full-duplex-provider";
 import { MOSHI_HF_REPO } from "../full-duplex-provider";
@@ -169,8 +169,7 @@ export class MoshiMLXProvider implements FullDuplexProvider {
 			}
 		}
 		throw new Error(
-			`Moshi server did not start within ${timeoutMs / 1000}s on port ${port}.\n` +
-				"Make sure moshi is installed: pip install moshi",
+			`Moshi server did not start within ${timeoutMs / 1000}s on port ${port}.\nMake sure moshi is installed: pip install moshi`,
 		);
 	}
 }

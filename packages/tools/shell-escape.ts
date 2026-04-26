@@ -27,7 +27,7 @@ const POSIX_UNSAFE = /[^a-zA-Z0-9@%_\-+=:,./]/;
 export function escapeArg(str: string): string {
 	if (str === "") return "''";
 	if (!POSIX_UNSAFE.test(str)) return str;
-	return "'" + str.replace(/'/g, "'\\''") + "'";
+	return `'${str.replace(/'/g, "'\\''")}'`;
 }
 
 /**

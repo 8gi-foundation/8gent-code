@@ -66,7 +66,7 @@ export function ProcessSidebar({
 				input === "k" &&
 				!key.ctrl &&
 				tasks[selectedIndex]?.status === "running" &&
-				!isAgentProcessTaskId(tasks[selectedIndex]!.id)
+				!isAgentProcessTaskId(tasks[selectedIndex]?.id)
 			) {
 				onKill();
 				return;
@@ -121,7 +121,7 @@ export function ProcessSidebar({
 						<ShortcutHint keys="↑↓" description="nav" />
 						<ShortcutHint keys="⏎" description="view" />
 						{tasks[selectedIndex]?.status === "running" &&
-							!isAgentProcessTaskId(tasks[selectedIndex]!.id) && (
+							!isAgentProcessTaskId(tasks[selectedIndex]?.id) && (
 								<ShortcutHint keys="k" description="kill" />
 							)}
 					</Box>

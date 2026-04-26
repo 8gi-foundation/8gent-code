@@ -154,13 +154,13 @@ export async function notifyDailySummary(stats: {
 	budgetRemaining: Record<string, number>;
 }): Promise<void> {
 	const lines = [
-		`*LinkedIn Daily Summary*`,
-		``,
+		"*LinkedIn Daily Summary*",
+		"",
 		`Sent: ${stats.sent}`,
 		`Replies: ${stats.replies} (${(stats.replyRate * 100).toFixed(1)}%)`,
 		`Qualified: ${stats.qualified}`,
-		``,
-		`*Budget remaining today:*`,
+		"",
+		"*Budget remaining today:*",
 		`- Connection requests: ${stats.budgetRemaining.connection_requests}`,
 		`- Messages: ${stats.budgetRemaining.messages}`,
 	];

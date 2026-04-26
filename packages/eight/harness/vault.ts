@@ -13,7 +13,7 @@
  * Issue: #1403
  */
 
-import * as fs from "fs";
+import * as fs from "node:fs";
 import type { CredentialVault } from "./types";
 
 /** Sentinel pattern: $VAULT{KEY_NAME} */

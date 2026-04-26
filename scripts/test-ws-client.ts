@@ -211,7 +211,7 @@ async function run(): Promise<void> {
 				switch (event) {
 					case "agent:thinking":
 						gotThinking = true;
-						log(`  event: agent:thinking`);
+						log("  event: agent:thinking");
 						break;
 					case "tool:start":
 						toolEvents++;
@@ -288,7 +288,7 @@ async function run(): Promise<void> {
 }
 
 function printSummary(): void {
-	console.log("\n" + "=".repeat(60));
+	console.log(`\n${"=".repeat(60)}`);
 	console.log("DAEMON PROTOCOL TEST RESULTS");
 	console.log("=".repeat(60));
 

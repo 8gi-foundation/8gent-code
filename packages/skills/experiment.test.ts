@@ -21,8 +21,8 @@ import {
 	rmSync,
 	unlinkSync,
 	writeFileSync,
-} from "fs";
-import { join } from "path";
+} from "node:fs";
+import { join } from "node:path";
 import {
 	LEARNED_SKILLS_DIR,
 	compoundSkill,
@@ -55,7 +55,7 @@ function cleanupSlug(slug: string): void {
 function cleanupAllTestSlugs(): void {
 	for (const dir of [LEARNED_SKILLS_DIR, EXPERIMENTS_DIR]) {
 		if (!existsSync(dir)) continue;
-		const fs = require("fs") as typeof import("fs");
+		const fs = require("node:fs") as typeof import("fs");
 		for (const f of fs.readdirSync(dir)) {
 			if (f.startsWith(TEST_PREFIX)) {
 				try {
@@ -236,12 +236,12 @@ describe("validateSpec", () => {
 describe("compoundSkillWithExperiment", () => {
 	beforeEach(() => {
 		mkdirSync(LEARNED_SKILLS_DIR, { recursive: true });
-		delete process.env.SKILLS_EXPERIMENTS;
+		process.env.SKILLS_EXPERIMENTS = undefined;
 	});
 
 	afterEach(() => {
 		cleanupAllTestSlugs();
-		delete process.env.SKILLS_EXPERIMENTS;
+		process.env.SKILLS_EXPERIMENTS = undefined;
 	});
 
 	it("skips the experiment when SKILLS_EXPERIMENTS is not set (default)", async () => {
@@ -280,7 +280,7 @@ describe("compoundSkillWithExperiment", () => {
 
 		expect(path).toBeNull();
 		expect(record).not.toBeNull();
-		expect(record!.rolledBack).toBe(true);
+		expect(record?.rolledBack).toBe(true);
 		expect(existsSync(join(LEARNED_SKILLS_DIR, `${slug}.md`))).toBe(false);
 	});
 
@@ -301,8 +301,8 @@ describe("compoundSkillWithExperiment", () => {
 
 		expect(path).not.toBeNull();
 		expect(record).not.toBeNull();
-		expect(record!.passed).toBe(true);
-		expect(record!.rolledBack).toBe(false);
+		expect(record?.passed).toBe(true);
+		expect(record?.rolledBack).toBe(false);
 		expect(existsSync(path!)).toBe(true);
 	});
 });

@@ -248,13 +248,13 @@ class TelegramDaemonBridge {
 
 				// Auth if needed
 				if (this.config.authToken) {
-					this.ws!.send(
+					this.ws?.send(
 						JSON.stringify({ type: "auth", token: this.config.authToken }),
 					);
 				}
 
 				// Create a session
-				this.ws!.send(
+				this.ws?.send(
 					JSON.stringify({ type: "session:create", channel: "telegram" }),
 				);
 			};
@@ -427,7 +427,7 @@ class TelegramDaemonBridge {
 		// Handle built-in commands
 		if (text === "/logs") {
 			try {
-				const { execSync } = await import("child_process");
+				const { execSync } = await import("node:child_process");
 				const logs = execSync(
 					"tail -30 /root/.8gent/daemon.log 2>/dev/null || echo 'No log file'",
 					{ encoding: "utf-8", timeout: 5000 },
@@ -460,10 +460,10 @@ class TelegramDaemonBridge {
 		if (text.startsWith("/status")) {
 			try {
 				const res = await fetch(
-					this.config.daemonUrl
+					`${this.config.daemonUrl
 						.replace("ws", "http")
 						.replace("wss", "https")
-						.replace(/:\d+/, ":18789") + "/health",
+						.replace(/:\d+/, ":18789")}/health`,
 				);
 				const health = await res.json();
 				await tgSend(

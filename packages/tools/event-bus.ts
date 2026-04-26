@@ -17,7 +17,7 @@ export class EventBus<EventMap> {
 		if (!this.handlers.has(event)) {
 			this.handlers.set(event, []);
 		}
-		this.handlers.get(event)!.push(handler);
+		this.handlers.get(event)?.push(handler);
 	}
 
 	/**

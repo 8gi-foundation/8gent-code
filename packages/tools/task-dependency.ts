@@ -19,7 +19,7 @@ export class DependencyResolver {
 			this.tasks.set(name, new Set());
 		}
 		for (const dep of deps) {
-			this.tasks.get(name)!.add(dep);
+			this.tasks.get(name)?.add(dep);
 			// Ensure dep is registered even if not explicitly added
 			if (!this.tasks.has(dep)) {
 				this.tasks.set(dep, new Set());
@@ -91,7 +91,7 @@ export class DependencyResolver {
 		for (const [task, deps] of this.tasks) {
 			for (const dep of deps) {
 				inDegree.set(task, (inDegree.get(task) ?? 0) + 1);
-				dependents.get(dep)!.add(task);
+				dependents.get(dep)?.add(task);
 			}
 		}
 

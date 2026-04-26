@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
-let schema: any, migration: any, executor: any, history: any;
+let schema: any;
+let migration: any;
+let executor: any;
+let history: any;
 
 beforeEach(async () => {
 	try {
@@ -326,7 +329,7 @@ describe("MigrationExecutor", () => {
 		const executed: string[] = [];
 		const exec = new ME({
 			onProgress: (step: any) =>
-				executed.push(step.migrationId + ":" + step.statement),
+				executed.push(`${step.migrationId}:${step.statement}`),
 		});
 		const migrations = [
 			{

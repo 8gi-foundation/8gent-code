@@ -73,7 +73,7 @@ export class TrainingProxy {
 
 		// Verify Ollama is reachable first
 		const ollamaUp = await this.checkEndpoint(
-			this.config.ollamaUrl + "/api/tags",
+			`${this.config.ollamaUrl}/api/tags`,
 		);
 		if (!ollamaUp) {
 			throw new Error(`Ollama not reachable at ${this.config.ollamaUrl}`);
@@ -142,7 +142,7 @@ export class TrainingProxy {
 	async getStatus(): Promise<ProxyStatus> {
 		const running = await this.isHealthy();
 		const ollamaReachable = await this.checkEndpoint(
-			this.config.ollamaUrl + "/api/tags",
+			`${this.config.ollamaUrl}/api/tags`,
 		);
 
 		let latency: LatencySnapshot | null = null;

@@ -44,7 +44,7 @@ export function formatNumber(
 	n: number,
 	options: FormatNumberOptions = {},
 ): string {
-	if (!isFinite(n) || isNaN(n)) return "0";
+	if (!Number.isFinite(n) || Number.isNaN(n)) return "0";
 
 	if (options.fileSize) return formatFileSize(n);
 	if (options.ordinal) return formatOrdinal(n);
@@ -172,7 +172,7 @@ export function formatOrdinal(n: number): string {
  * formatFileSize(1_073_741_824) => "1.0 GB"
  */
 export function formatFileSize(bytes: number, decimals = 1): string {
-	if (!isFinite(bytes) || isNaN(bytes) || bytes < 0) return "0 B";
+	if (!Number.isFinite(bytes) || Number.isNaN(bytes) || bytes < 0) return "0 B";
 	if (bytes === 0) return "0 B";
 
 	const units = ["B", "KB", "MB", "GB", "TB", "PB"] as const;

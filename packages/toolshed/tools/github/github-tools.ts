@@ -5,9 +5,9 @@
  * Uses `gh` CLI for GitHub API and `git` for local operations.
  */
 
-import { execSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 

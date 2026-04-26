@@ -44,8 +44,8 @@ describe("getProfile", () => {
 	it("returns a profile for qwen3:32b on ollama", () => {
 		const profile = getProfile(ollamaConfig("qwen3:32b"));
 		expect(profile).toBeDefined();
-		expect(profile!.displayName).toContain("Qwen");
-		expect(profile!.provider).toBe("ollama");
+		expect(profile?.displayName).toContain("Qwen");
+		expect(profile?.provider).toBe("ollama");
 	});
 
 	it("returns undefined for an unknown model", () => {
@@ -60,7 +60,7 @@ describe("getProfile", () => {
 		};
 		const profile = getProfile(config);
 		expect(profile).toBeDefined();
-		expect(profile!.modelPattern).toContain("llama-3.3");
+		expect(profile?.modelPattern).toContain("llama-3.3");
 	});
 });
 

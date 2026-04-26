@@ -20,7 +20,7 @@
  * - /design slash command
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import {
 	type DesignCategory,
 	DesignDecisionDetector,
@@ -232,7 +232,7 @@ export class DesignAgent extends EventEmitter {
 		} else {
 			// Try to match by name or number
 			const asNum = Number.parseInt(choiceInput, 10);
-			if (!isNaN(asNum)) {
+			if (!Number.isNaN(asNum)) {
 				selectedIndex = asNum - 1;
 			} else {
 				// Find by name

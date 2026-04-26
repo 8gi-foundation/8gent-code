@@ -10,8 +10,8 @@
  * 6. Never fail — always return a model or a clear error
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // Known vision-capable model families (Ollama) — general vision
 const OLLAMA_VISION_MODELS = [
@@ -127,7 +127,7 @@ export function saveVisionConfig(
 			data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 		}
 		data.vision = { ...((data.vision as object) || {}), ...config };
-		fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
+		fs.writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`);
 		return true;
 	} catch {
 		return false;
@@ -249,7 +249,7 @@ async function checkOpenRouterVision(apiKey?: string): Promise<VisionModel[]> {
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
 		};
-		if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
 		const res = await fetch("https://openrouter.ai/api/v1/models", {
 			headers,

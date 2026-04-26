@@ -8,8 +8,8 @@
  * Run: bun run apps/lil-eight/generate-sprites.ts
  */
 
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
 
 const FRAME_SIZE = 64;

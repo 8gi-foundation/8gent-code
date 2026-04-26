@@ -288,8 +288,8 @@ export async function research(
 	try {
 		const { MemoryStore } = await import("../memory/store.js");
 		const { generateId } = await import("../memory/types.js");
-		const os = await import("os");
-		const path = await import("path");
+		const os = await import("node:os");
+		const path = await import("node:path");
 		const dbPath = path.join(os.homedir(), ".8gent", "memory.db");
 		const store = new MemoryStore(dbPath);
 		const now = Date.now();

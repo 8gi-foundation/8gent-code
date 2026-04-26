@@ -21,10 +21,10 @@
  * 3. Create commit message
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Skill compounding: learned-skills directory
 const LEARNED_DIR = path.join(os.homedir(), ".8gent", "learned-skills");

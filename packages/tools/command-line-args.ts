@@ -28,7 +28,7 @@ function coerce(value: string, type: ArgType): string | number | boolean {
 	if (type === "boolean") return value === "true" || value === "1";
 	if (type === "number") {
 		const n = Number(value);
-		return isNaN(n) ? 0 : n;
+		return Number.isNaN(n) ? 0 : n;
 	}
 	return value;
 }

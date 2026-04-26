@@ -205,7 +205,7 @@ export async function gradeExecution(
 
 		const durationMs = Math.round(performance.now() - startMs);
 		const { passed, failed, total } = parseBunTestOutput(
-			stdout + "\n" + stderr,
+			`${stdout}\n${stderr}`,
 		);
 
 		return {
@@ -290,7 +290,7 @@ export async function gradeMultiFileExecution(
 
 		const durationMs = Math.round(performance.now() - startMs);
 		const { passed, failed, total } = parseBunTestOutput(
-			stdout + "\n" + stderr,
+			`${stdout}\n${stderr}`,
 		);
 
 		return {

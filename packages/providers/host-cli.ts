@@ -18,9 +18,9 @@
  * apply. The caller still owns any session credentials on the host; 8gent
  * never touches them.
  */
-import { spawnSync } from "child_process";
-import { existsSync } from "fs";
-import { delimiter, isAbsolute, join } from "path";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 import type { LLMClient, LLMResponse, Message } from "../eight/types.js";
 import { evaluatePolicy } from "../permissions/policy-engine.js";
 

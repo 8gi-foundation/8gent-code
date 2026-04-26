@@ -56,7 +56,8 @@ export function binarySearch(arr: number[], target: number): number {
 		const mid = Math.floor((left + right) / 2);
 		if (arr[mid] === target) {
 			return mid;
-		} else if (arr[mid] < target) {
+		}
+		if (arr[mid] < target) {
 			left = mid;
 		} else {
 			right = mid;

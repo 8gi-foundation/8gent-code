@@ -5,7 +5,7 @@
  * Structured task breakdown with clear acceptance criteria and Kanban integration.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { Evidence } from "../validation/evidence";
 import type { Step } from "./plan-validate";
 
@@ -574,18 +574,18 @@ export class KanbanBoard extends EventEmitter {
 	render(): string {
 		const lines: string[] = [];
 		lines.push(
-			`\n╔════════════════════════════════════════════════════════════╗`,
+			"\n╔════════════════════════════════════════════════════════════╗",
 		);
 		lines.push(`║  ${this.board.name.padEnd(56)}║`);
 		lines.push(
-			`╠════════════════════════════════════════════════════════════╣`,
+			"╠════════════════════════════════════════════════════════════╣",
 		);
 
 		for (const column of this.board.columns) {
 			const wipInfo = column.wipLimit
 				? ` (${column.tasks.length}/${column.wipLimit})`
 				: "";
-			lines.push(`║  ${column.name}${wipInfo}`.padEnd(61) + "║");
+			lines.push(`${`║  ${column.name}${wipInfo}`.padEnd(61)}║`);
 			lines.push(`║  ${"─".repeat(56)}  ║`);
 
 			if (column.tasks.length === 0) {
@@ -598,15 +598,15 @@ export class KanbanBoard extends EventEmitter {
 				}
 				if (column.tasks.length > 5) {
 					lines.push(
-						`║  ... and ${column.tasks.length - 5} more`.padEnd(61) + "║",
+						`${`║  ... and ${column.tasks.length - 5} more`.padEnd(61)}║`,
 					);
 				}
 			}
-			lines.push(`║  `.padEnd(61) + "║");
+			lines.push(`${"║  ".padEnd(61)}║`);
 		}
 
 		lines.push(
-			`╚════════════════════════════════════════════════════════════╝`,
+			"╚════════════════════════════════════════════════════════════╝",
 		);
 		return lines.join("\n");
 	}

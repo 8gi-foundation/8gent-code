@@ -21,7 +21,7 @@ const VESSEL_ID =
 	process.env.VESSEL_ID || `linkedin-vessel-${Date.now().toString(36)}`;
 const CONTROL_PLANE_URL =
 	process.env.CONTROL_PLANE_URL || "wss://8gi-board-plane.fly.dev";
-const PUBLIC_URL = process.env.PUBLIC_URL || `https://linkedin-vessel.fly.dev`;
+const PUBLIC_URL = process.env.PUBLIC_URL || "https://linkedin-vessel.fly.dev";
 
 // ── Control Plane WebSocket ───────────────────────────────────────────
 
@@ -49,7 +49,7 @@ function connectToControlPlane(): void {
 				registeredAt: new Date().toISOString(),
 			};
 
-			cpWs!.send(JSON.stringify({ type: "vessel:register", manifest }));
+			cpWs?.send(JSON.stringify({ type: "vessel:register", manifest }));
 		};
 
 		cpWs.onmessage = async (event) => {

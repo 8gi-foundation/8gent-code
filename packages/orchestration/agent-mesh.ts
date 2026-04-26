@@ -23,9 +23,9 @@ import {
 	statSync,
 	unlinkSync,
 	writeFileSync,
-} from "fs";
-import { homedir } from "os";
-import { join } from "path";
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // MARK: - Types
 

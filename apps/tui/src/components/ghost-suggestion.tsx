@@ -149,9 +149,8 @@ export function GhostText({ suggestion, animate = true }: GhostTextProps) {
 			// Fade in effect
 			const timeout = setTimeout(() => setOpacity(1), 50);
 			return () => clearTimeout(timeout);
-		} else {
-			setOpacity(0);
 		}
+		setOpacity(0);
 	}, [suggestion, animate]);
 
 	if (!suggestion) return null;

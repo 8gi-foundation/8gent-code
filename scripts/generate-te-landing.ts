@@ -4,8 +4,8 @@
  * using the eight:latest model, then open it in browser.
  */
 
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 const MODEL = process.env.MODEL || "qwen3.5:latest";
@@ -104,6 +104,6 @@ writeFileSync(OUTPUT, html.trim());
 console.log(`Saved to: ${OUTPUT}`);
 
 // Open in browser
-const { execSync } = await import("child_process");
+const { execSync } = await import("node:child_process");
 execSync(`open "${OUTPUT}"`);
 console.log("Opened in browser.");

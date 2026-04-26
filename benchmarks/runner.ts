@@ -13,8 +13,8 @@
  *   bun run benchmarks/runner.ts --dry-run
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { BenchmarkGrader } from "./grader";
 import type {
 	BenchmarkCategory,
@@ -312,7 +312,7 @@ async function runBenchmarks(
 
 		if (options.verbose) {
 			log(
-				`\n─────────────────────────────────────────────────────────────`,
+				"\n─────────────────────────────────────────────────────────────",
 				colors.dim,
 			);
 			log(`📋 ${benchmark.id}: ${benchmark.name}`, colors.bright);
@@ -339,7 +339,7 @@ async function runBenchmarks(
 		// Display result
 		const scoreColor = getScoreColor(result.scores.overall);
 		if (options.verbose) {
-			log(`\n   Results:`, colors.bright);
+			log("\n   Results:", colors.bright);
 			log(
 				`     Correctness:    ${scoreColor}${result.scores.correctness.toString().padStart(3)}%${colors.reset}`,
 			);
@@ -363,11 +363,11 @@ async function runBenchmarks(
 			);
 
 			if (result.errors.length > 0) {
-				log(`\n   Errors:`, colors.red);
+				log("\n   Errors:", colors.red);
 				result.errors.forEach((e) => log(`     - ${e}`, colors.red));
 			}
 			if (result.warnings.length > 0) {
-				log(`\n   Warnings:`, colors.yellow);
+				log("\n   Warnings:", colors.yellow);
 				result.warnings.forEach((w) => log(`     - ${w}`, colors.yellow));
 			}
 		} else {
@@ -467,8 +467,6 @@ function outputResults(
 		case "markdown":
 			outputMarkdown(suiteResult);
 			break;
-
-		case "terminal":
 		default:
 			outputTerminal(suiteResult);
 			break;

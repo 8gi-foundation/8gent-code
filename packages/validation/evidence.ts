@@ -13,9 +13,9 @@
  * - test_result: Test execution results
  */
 
-import { spawn } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Step, ToolCallRecord } from "../workflow/plan-validate";
 
 // ============================================
@@ -335,7 +335,7 @@ export class EvidenceCollector {
 
 			evidence.push({
 				type: "directory_listing",
-				description: `Directory contents summary`,
+				description: "Directory contents summary",
 				data: { files: fileCount, directories: dirCount, total: files.length },
 				path: targetDir,
 				timestamp: new Date(),
@@ -480,7 +480,7 @@ export class EvidenceCollector {
 	 * Hash file content for integrity verification
 	 */
 	private async hashContent(content: string): Promise<string> {
-		const crypto = await import("crypto");
+		const crypto = await import("node:crypto");
 		return crypto
 			.createHash(this.config.hashAlgorithm || "sha256")
 			.update(content)

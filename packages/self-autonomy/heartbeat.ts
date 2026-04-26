@@ -5,7 +5,7 @@
  * Deterministic, low-context, just heartbeats.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import { AutoGit, SelfAutonomy, SelfHeal, SessionMemory } from "./index";
 
 // ============================================

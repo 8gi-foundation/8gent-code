@@ -142,7 +142,7 @@ export function CommandInput({
 	useEffect(() => {
 		if (injectedText && injectedText !== lastInjectedRef.current) {
 			lastInjectedRef.current = injectedText;
-			setValue((prev) => (prev ? prev + " " + injectedText : injectedText));
+			setValue((prev) => (prev ? `${prev} ${injectedText}` : injectedText));
 		}
 	}, [injectedText]);
 

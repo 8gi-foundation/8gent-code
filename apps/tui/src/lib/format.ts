@@ -8,10 +8,10 @@ export function formatTokens(count: number): string {
 	if (count < 0) return "0";
 	if (count < 1000) return String(Math.round(count));
 	if (count < 1_000_000)
-		return (count / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+		return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}K`;
 	if (count < 1_000_000_000)
-		return (count / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-	return (count / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
+		return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+	return `${(count / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
 }
 
 /** Format a duration in milliseconds to a human-readable string. */
@@ -37,7 +37,7 @@ export function formatDuration(ms: number): string {
 
 	// Under 10 seconds: show one decimal
 	if (totalSeconds < 10) {
-		return (ms / 1000).toFixed(1) + "s";
+		return `${(ms / 1000).toFixed(1)}s`;
 	}
 
 	return `${seconds}s`;

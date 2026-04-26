@@ -51,7 +51,7 @@ function stringify(
 	const lines = Object.entries(data).map(([k, v]) => {
 		return format === "yaml" ? `${k}: ${v}` : `${k} = ${v}`;
 	});
-	const frontmatter = lines.join("\n") + "\n";
+	const frontmatter = `${lines.join("\n")}\n`;
 	const delimiter = format === "yaml" ? "---" : "+++";
 	return `${delimiter}\n${frontmatter}${delimiter}\n${body}`;
 }

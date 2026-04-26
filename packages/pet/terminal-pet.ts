@@ -10,8 +10,8 @@
  *   pet.start()
  */
 
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	type Companion,
 	endSession,
@@ -321,7 +321,7 @@ export class TerminalPet {
 
 	// Cross-platform TTS
 	static speak(text: string) {
-		const { spawn } = require("child_process");
+		const { spawn } = require("node:child_process");
 		const platform = process.platform;
 
 		const cleaned = text.slice(0, 350).replace(/"/g, "'").replace(/`/g, "");

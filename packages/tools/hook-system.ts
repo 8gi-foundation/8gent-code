@@ -7,7 +7,7 @@ export type HookPhase = "before" | "after";
 
 export type HookFn<T = Record<string, unknown>> = (
 	context: T,
-) => Promise<T | void> | T | void;
+) => Promise<T | undefined> | T | undefined;
 
 export interface HookEntry<T = Record<string, unknown>> {
 	id: string;

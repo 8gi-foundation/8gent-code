@@ -22,10 +22,10 @@ if (!createDesignSystem || typeof createDesignSystem !== "function") {
 }
 
 // Also import individual modules for targeted testing
-let TokenEngineClass: any,
-	ComponentRegistryClass: any,
-	ThemeEngineClass: any,
-	RendererClass: any;
+let TokenEngineClass: any;
+let ComponentRegistryClass: any;
+let ThemeEngineClass: any;
+let RendererClass: any;
 let runMigrations: Function;
 try {
 	const schemaMod = await import(`${workDir}/schema.ts`);

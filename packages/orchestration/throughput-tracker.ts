@@ -8,9 +8,9 @@
  * Dependencies: Bun builtins only (fs, path, os).
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -317,7 +317,7 @@ export class ThroughputTracker {
 
 			// Rewrite file with only kept events (prune old)
 			if (kept.length > 0) {
-				const pruned = kept.map((e) => JSON.stringify(e)).join("\n") + "\n";
+				const pruned = `${kept.map((e) => JSON.stringify(e)).join("\n")}\n`;
 				fs.writeFileSync(this.persistFile, pruned, "utf-8");
 			} else {
 				// Truncate if nothing kept
@@ -337,7 +337,7 @@ export class ThroughputTracker {
 			}
 			fs.appendFileSync(
 				this.persistFile,
-				JSON.stringify(event) + "\n",
+				`${JSON.stringify(event)}\n`,
 				"utf-8",
 			);
 		} catch {

@@ -8,7 +8,7 @@
  *   bun run install-cron.ts --remove # remove
  */
 
-const HOME = process.env.HOME || require("os").homedir();
+const HOME = process.env.HOME || require("node:os").homedir();
 const BUN_PATH = process.env.BUN_INSTALL
 	? `${process.env.BUN_INSTALL}/bin/bun`
 	: `${HOME}/.bun/bin/bun`;
@@ -80,7 +80,7 @@ async function remove(): Promise<void> {
 		.filter((line) => !line.includes(CRON_MARKER))
 		.join("\n");
 
-	await setCrontab(filtered.trimEnd() + "\n");
+	await setCrontab(`${filtered.trimEnd()}\n`);
 	console.log("[install-cron] Removed cron job.");
 }
 

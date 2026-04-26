@@ -299,7 +299,8 @@ export function table(
 		if (alignment === "center") {
 			const leftPad = Math.floor(padNeeded / 2);
 			return " ".repeat(leftPad) + text + " ".repeat(padNeeded - leftPad);
-		} else if (alignment === "right") {
+		}
+		if (alignment === "right") {
 			return " ".repeat(padNeeded) + text;
 		}
 		return text + " ".repeat(padNeeded);
@@ -379,7 +380,7 @@ export function numberedList(items: string[], startIndex = 1): string {
 	return items
 		.map((item, i) => {
 			const num = String(startIndex + i).padStart(numWidth, " ");
-			return `  ${muted(num + ".")} ${item}`;
+			return `  ${muted(`${num}.`)} ${item}`;
 		})
 		.join("\n");
 }
@@ -397,12 +398,12 @@ export function tree(items: TreeItem[], indent = 0): string {
 		);
 
 		if (item.children && item.children.length > 0) {
-			const childPrefix = isLast ? "    " : boxChars.treeVertical + "   ";
+			const childPrefix = isLast ? "    " : `${boxChars.treeVertical}   `;
 			const childTree = tree(item.children, indent + 4);
 			lines.push(
 				childTree.replace(
 					/^/gm,
-					prefix + (isLast ? "    " : muted(boxChars.treeVertical) + "   "),
+					prefix + (isLast ? "    " : `${muted(boxChars.treeVertical)}   `),
 				),
 			);
 		}
@@ -425,7 +426,7 @@ export function statusLine(
 	value: string,
 	valueColor: keyof typeof colors = "white",
 ): string {
-	return `${muted(label + ":")} ${colorize(value, valueColor)}`;
+	return `${muted(`${label}:`)} ${colorize(value, valueColor)}`;
 }
 
 export function keyValueLine(
@@ -559,7 +560,6 @@ export function stepIcon(
 			return info(boxChars.arrowRight);
 		case "skipped":
 			return warning("-");
-		case "pending":
 		default:
 			return muted(boxChars.emptyCircle);
 	}
@@ -645,10 +645,10 @@ export function formatDuration(ms: number): string {
 
 export function formatNumber(num: number): string {
 	if (num >= 1000000) {
-		return (num / 1000000).toFixed(1) + "M";
+		return `${(num / 1000000).toFixed(1)}M`;
 	}
 	if (num >= 1000) {
-		return (num / 1000).toFixed(1) + "K";
+		return `${(num / 1000).toFixed(1)}K`;
 	}
 	return num.toLocaleString();
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 function loadHTML(): string {
 	const dir = process.env.WORK_DIR ?? process.env.FIXTURE_PATH ?? "";
@@ -43,7 +43,7 @@ describe("UI005 - Skeuomorphic Toggle Switch & Rotary Knob", () => {
 	test(":checked selector present that changes transform or position", () => {
 		const checkedBlock = css.match(/:checked[^{]*\{([^}]*)\}/g);
 		expect(checkedBlock).not.toBeNull();
-		const combined = checkedBlock!.join(" ");
+		const combined = checkedBlock?.join(" ");
 		expect(combined).toMatch(/transform|left|translate/i);
 	});
 

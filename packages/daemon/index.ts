@@ -5,7 +5,7 @@
  * Logs to ~/.8gent/daemon.log. Graceful shutdown on SIGTERM/SIGINT.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import {
 	type TaskPayload,
 	type TaskResult,
@@ -103,7 +103,7 @@ function saveState(): void {
 		};
 		const data = JSON.stringify(state, null, 2);
 		// Sync write - we're shutting down, can't afford async
-		require("fs").writeFileSync(STATE_PATH, data);
+		require("node:fs").writeFileSync(STATE_PATH, data);
 		console.log(`[daemon] saved ${state.sessions.length} session(s) to disk`);
 	} catch (err) {
 		console.error("[daemon] failed to save state:", err);
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
 	const config = await loadConfig();
 	const poolConfig = await loadPoolConfig();
 
-	console.log(`[daemon] Eight Daemon starting...`);
+	console.log("[daemon] Eight Daemon starting...");
 	console.log(
 		`[daemon] port=${config.port} heartbeat=${config.heartbeatEnabled} auth=${config.authToken ? "enabled" : "disabled"}`,
 	);
@@ -142,7 +142,7 @@ async function main(): Promise<void> {
 	const modelValue = poolConfig.model || DEFAULT_MODEL;
 	if (modelValue === "auto:free" || modelValue === "auto") {
 		console.log(
-			`[daemon] model=auto:free - resolving best free model from OpenRouter...`,
+			"[daemon] model=auto:free - resolving best free model from OpenRouter...",
 		);
 		const resolved = await resolveBestFreeModel(poolConfig.apiKey);
 		poolConfig.model = resolved.id;
@@ -212,7 +212,7 @@ async function main(): Promise<void> {
 	// Lotus-Class Compute — peer mesh. OFF by default. Internal-only during spike.
 	if (process.env.GROVE_ENABLED === "1") {
 		const vesselId =
-			process.env.VESSEL_ID || `local-${require("os").hostname()}`;
+			process.env.VESSEL_ID || `local-${require("node:os").hostname()}`;
 		const vesselUrl = process.env.VESSEL_URL || `ws://localhost:${config.port}`;
 		const vesselRegion = process.env.VESSEL_REGION || "local";
 		const vesselName = process.env.VESSEL_NAME || vesselId;

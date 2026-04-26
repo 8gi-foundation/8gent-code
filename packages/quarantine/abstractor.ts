@@ -10,8 +10,8 @@
  * - Generate 8gent-native skill format
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================================================
 // Types
@@ -108,7 +108,7 @@ function extractDescription(
 
 	for (const pattern of descPatterns) {
 		const match = content.match(pattern);
-		if (match && match[1]) {
+		if (match?.[1]) {
 			return match[1].trim().slice(0, 200);
 		}
 	}
@@ -125,7 +125,7 @@ function extractInstructions(content: string): string {
 
 	for (const pattern of instructionPatterns) {
 		const match = content.match(pattern);
-		if (match && match[1]) {
+		if (match?.[1]) {
 			return match[1].trim().slice(0, 1000);
 		}
 	}
@@ -326,7 +326,7 @@ export async function abstractSkill(
 				walkDir(fullPath);
 			} else if (entry.isFile() && entry.name.endsWith(".md")) {
 				files.push(fullPath);
-				combinedContent += fs.readFileSync(fullPath, "utf-8") + "\n\n";
+				combinedContent += `${fs.readFileSync(fullPath, "utf-8")}\n\n`;
 			}
 		}
 	}

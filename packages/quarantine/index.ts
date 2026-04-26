@@ -14,10 +14,10 @@
  * └── rejected/     # Failed (kept for forensics)
  */
 
-import { execSync, spawn } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { execSync, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { type AbstractedSkill, abstractSkill } from "./abstractor.js";
 import {
 	type ScanResult,
@@ -423,15 +423,16 @@ export class QuarantineManager {
 				});
 				break;
 
-			case "local":
+			case "local": {
 				// Copy local directory
 				const realSource = source.replace("~", os.homedir());
 				execSync(`cp -r "${realSource}" "${targetDir}/source"`, {
 					stdio: "pipe",
 				});
 				break;
+			}
 
-			case "npm":
+			case "npm": {
 				// Download npm package
 				execSync(
 					`cd "${targetDir}" && npm pack "${source}" --pack-destination .`,
@@ -452,6 +453,7 @@ export class QuarantineManager {
 					);
 				}
 				break;
+			}
 
 			default:
 				throw new Error(`Unknown source type: ${type}`);

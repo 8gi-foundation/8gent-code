@@ -30,14 +30,11 @@ export function table(
 	const lines: string[] = [];
 	const separator = () =>
 		box
-			? "├" + columnWidths.map((w) => "─".repeat(w)).join("┼") + "┤"
-			: " | " +
-				columnWidths.map(() => "─".repeat(maxColumnWidth || 10)).join(" | ");
+			? `├${columnWidths.map((w) => "─".repeat(w)).join("┼")}┤`
+			: ` | ${columnWidths.map(() => "─".repeat(maxColumnWidth || 10)).join(" | ")}`;
 	const border = box
-		? "┌" + columnWidths.map((w) => "─".repeat(w)).join("┬") + "┐"
-		: " " +
-			columnWidths.map(() => "─".repeat(maxColumnWidth || 10)).join(" ") +
-			" ";
+		? `┌${columnWidths.map((w) => "─".repeat(w)).join("┬")}┐`
+		: ` ${columnWidths.map(() => "─".repeat(maxColumnWidth || 10)).join(" ")} `;
 	const alignCell = (
 		cell: string,
 		width: number,
@@ -59,7 +56,7 @@ export function table(
 		}
 	};
 	const truncate = (cell: string, width: number) => {
-		if (cell.length > width) return cell.substring(0, width - 3) + "...";
+		if (cell.length > width) return `${cell.substring(0, width - 3)}...`;
 		return cell;
 	};
 	if (header) lines.push(separator());

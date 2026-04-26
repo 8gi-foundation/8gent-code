@@ -329,7 +329,7 @@ function findBestSuggestion(
 	const inputLower = input.toLowerCase().trim();
 
 	// 1. Check if plan next step matches
-	if (planNextStep && planNextStep.toLowerCase().startsWith(inputLower)) {
+	if (planNextStep?.toLowerCase().startsWith(inputLower)) {
 		const completion = planNextStep.slice(input.length);
 		if (completion) {
 			return {
@@ -366,8 +366,7 @@ function findBestSuggestion(
 	// 3. Check history patterns
 	for (const pattern of historyPatterns) {
 		if (pattern.prefix.toLowerCase().startsWith(inputLower)) {
-			const completion =
-				pattern.prefix.slice(input.length) + " " + pattern.completion;
+			const completion = `${pattern.prefix.slice(input.length)} ${pattern.completion}`;
 			return {
 				text: completion,
 				source: "history",

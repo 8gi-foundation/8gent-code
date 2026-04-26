@@ -5,9 +5,9 @@
  * Supports: typescript-language-server, pyright, rust-analyzer
  */
 
-import { type ChildProcess, spawn } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { type ChildProcess, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -196,8 +196,7 @@ export class LSPClient {
 		const serverExists = await this.checkServerExists(config.command);
 		if (!serverExists) {
 			throw new Error(
-				`LSP server '${config.command}' not found. Install it first:\n` +
-					this.getInstallInstructions(this.language),
+				`LSP server '${config.command}' not found. Install it first:\n${this.getInstallInstructions(this.language)}`,
 			);
 		}
 
@@ -340,7 +339,8 @@ export class LSPClient {
 				return (result as DocumentSymbol[]).map((sym) =>
 					this.formatDocumentSymbol(sym),
 				);
-			} else if ("location" in result[0]) {
+			}
+			if ("location" in result[0]) {
 				// SymbolInformation format
 				return (result as SymbolInformation[]).map((sym) => ({
 					name: sym.name,
@@ -671,7 +671,7 @@ export class LSPClient {
 	}
 
 	private async checkServerExists(command: string): Promise<boolean> {
-		const { execSync } = await import("child_process");
+		const { execSync } = await import("node:child_process");
 		try {
 			execSync(`which ${command}`, { stdio: "ignore" });
 			return true;
@@ -816,15 +816,12 @@ export async function lspFindReferences(
 			return "No references found";
 		}
 
-		return (
-			`Found ${locations.length} references:\n` +
-			locations
-				.map(
-					(loc) =>
-						`  ${loc.uri}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`,
-				)
-				.join("\n")
-		);
+		return `Found ${locations.length} references:\n${locations
+			.map(
+				(loc) =>
+					`  ${loc.uri}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`,
+			)
+			.join("\n")}`;
 	} catch (err) {
 		return `Error: ${err instanceof Error ? err.message : String(err)}`;
 	}
@@ -886,17 +883,15 @@ export async function lspDocumentSymbols(
 			let result = `${prefix}${sym.kind}: ${sym.name} (line ${sym.range.start.line + 1})`;
 			if (sym.children && Array.isArray(sym.children)) {
 				for (const child of sym.children) {
-					result +=
-						"\n" +
-						formatSymbol(
-							child as {
-								name: string;
-								kind: string;
-								range: Range;
-								children?: unknown[];
-							},
-							indent + 1,
-						);
+					result += `\n${formatSymbol(
+						child as {
+							name: string;
+							kind: string;
+							range: Range;
+							children?: unknown[];
+						},
+						indent + 1,
+					)}`;
 				}
 			}
 			return result;
@@ -930,15 +925,12 @@ export async function lspDiagnostics(
 			return "No diagnostics (clean)";
 		}
 
-		return (
-			`Found ${diags.length} diagnostic(s):\n` +
-			diags
-				.map(
-					(d) =>
-						`  [${SEVERITY_MAP[d.severity || 1]}] line ${d.range.start.line + 1}: ${d.message}${d.source ? ` (${d.source})` : ""}`,
-				)
-				.join("\n")
-		);
+		return `Found ${diags.length} diagnostic(s):\n${diags
+			.map(
+				(d) =>
+					`  [${SEVERITY_MAP[d.severity || 1]}] line ${d.range.start.line + 1}: ${d.message}${d.source ? ` (${d.source})` : ""}`,
+			)
+			.join("\n")}`;
 	} catch (err) {
 		return `Error: ${err instanceof Error ? err.message : String(err)}`;
 	}

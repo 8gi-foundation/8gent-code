@@ -9,8 +9,8 @@
 
 import type { FileOutline, RepoIndex, Symbol, SymbolKind } from "../types";
 export type { RepoIndex, FileOutline, Symbol, SymbolKind };
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { parseTypeScriptFile } from "./typescript-parser";
 
 // Parser interface - will be implemented with tree-sitter or native TS parser

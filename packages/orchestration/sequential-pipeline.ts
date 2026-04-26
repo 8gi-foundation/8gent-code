@@ -3,9 +3,9 @@
 // Paper: arxiv 2603.28990v1 - fixed ordering + autonomous role selection
 // Three passes: Analyst -> Critic -> Implementer
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -255,7 +255,7 @@ IMPLEMENTATION RISKS: <what will go wrong when coding this>`,
 	// --- Critic rejection triggers analyst retry ---
 	if (critique.includes("REJECTED") && analystAttempt < MAX_ANALYST_RETRIES) {
 		console.log(
-			`  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback`,
+			"  [HYPER] Critic REJECTED analysis - retrying analyst with critique feedback",
 		);
 		const retryResult = await inferenceChat(
 			model,

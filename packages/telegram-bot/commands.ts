@@ -5,9 +5,9 @@
  * Each command reads live state from disk and formats a rich response.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	formatBenchmarkReport,
 	formatComparison,
@@ -221,7 +221,7 @@ async function handleRound(
 	const mutations = state.mutations || [];
 
 	// If no number given, show the latest round
-	const entry = isNaN(roundNum)
+	const entry = Number.isNaN(roundNum)
 		? history[history.length - 1]
 		: history.find((h: any) => h.iteration === roundNum);
 
@@ -331,7 +331,7 @@ async function handleModel(
 	if (config?.training_proxy?.enabled) {
 		lines.push("");
 		lines.push("⚡ *RL Fine-tuning Proxy:*");
-		lines.push(`  Status: Enabled`);
+		lines.push("  Status: Enabled");
 		if (config.training_proxy.checkpoint) {
 			lines.push(`  Checkpoint: \`${config.training_proxy.checkpoint}\``);
 		}
@@ -424,7 +424,7 @@ async function handleStop(
 
 		// Clean up pid file
 		try {
-			const { unlinkSync } = await import("fs");
+			const { unlinkSync } = await import("node:fs");
 			unlinkSync(RUN_PID_FILE);
 		} catch {}
 
@@ -456,7 +456,7 @@ async function handleRepos(
 ): Promise<void> {
 	const limit = Number.parseInt(args.trim(), 10);
 	const intel = new GitHubIntelligence();
-	const list = intel.getTrackedRepos(isNaN(limit) ? 15 : limit);
+	const list = intel.getTrackedRepos(Number.isNaN(limit) ? 15 : limit);
 	await bot.sendMessage(list, { parseMode: "Markdown" });
 }
 

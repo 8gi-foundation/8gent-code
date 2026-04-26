@@ -9,9 +9,9 @@
  * accidental overwrites of real project files.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Agent } from "../../eight/agent.js";
 import type { AgentConfig } from "../../eight/types.js";
 import { getPermissionManager } from "../../permissions/index.js";
@@ -188,10 +188,10 @@ export async function run(args: string[]): Promise<void> {
 		) {
 			console.error(`[SAFETY] Refusing to run inside a git repo: ${workdir}`);
 			console.error(
-				`         8gent writes files — this would overwrite your project.`,
+				"         8gent writes files — this would overwrite your project.",
 			);
 			console.error(
-				`         Use --workdir /tmp/something or omit --workdir for auto temp dir.`,
+				"         Use --workdir /tmp/something or omit --workdir for auto temp dir.",
 			);
 			process.exit(1);
 		}
@@ -244,7 +244,7 @@ export async function run(args: string[]): Promise<void> {
 			`[harness] Prompt: ${opts.prompt.slice(0, 120)}${opts.prompt.length > 120 ? "..." : ""}`,
 		);
 		console.log(`[harness] Session file: ${sessionPath}`);
-		console.log(`[harness] ─────────────────────────────────`);
+		console.log("[harness] ─────────────────────────────────");
 	}
 
 	const startTime = Date.now();
@@ -298,10 +298,10 @@ export async function run(args: string[]): Promise<void> {
 			),
 		);
 	} else {
-		console.log(`[harness] ─────────────────────────────────`);
+		console.log("[harness] ─────────────────────────────────");
 		if (success) {
 			console.log(`[harness] SUCCESS in ${(durationMs / 1000).toFixed(1)}s`);
-			console.log(`[harness] Result (first 2000 chars):`);
+			console.log("[harness] Result (first 2000 chars):");
 			console.log(result.slice(0, 2000));
 		} else {
 			console.log(`[harness] FAILED in ${(durationMs / 1000).toFixed(1)}s`);

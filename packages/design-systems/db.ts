@@ -4,8 +4,8 @@
  */
 
 import { Database } from "bun:sqlite";
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import { SCHEMA } from "./schema";
 import type {
 	ColorPalette,
@@ -379,9 +379,9 @@ export function hslToHex(hsl: string): string {
 	const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
 	const m = l - c / 2;
 
-	let r = 0,
-		g = 0,
-		b = 0;
+	let r = 0;
+	let g = 0;
+	let b = 0;
 
 	if (h >= 0 && h < 60) {
 		r = c;

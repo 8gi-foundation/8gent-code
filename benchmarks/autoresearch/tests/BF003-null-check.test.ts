@@ -42,9 +42,9 @@ describe("BF003: Null Check Fix", () => {
 		});
 		expect(result.valid).toBe(true);
 		expect(result.normalized).not.toBeNull();
-		expect(result.normalized!.id).toBe("abc123");
-		expect(result.normalized!.name).toBe("Jane Doe");
-		expect(result.normalized!.email).toBe("jane@example.com");
+		expect(result.normalized?.id).toBe("abc123");
+		expect(result.normalized?.name).toBe("Jane Doe");
+		expect(result.normalized?.email).toBe("jane@example.com");
 	});
 
 	test("missing optional email doesn't throw", () => {
@@ -63,7 +63,7 @@ describe("BF003: Null Check Fix", () => {
 			email: "test@example.com",
 		});
 		expect(result.valid).toBe(true);
-		expect(result.normalized!.metadata).toBeDefined();
+		expect(result.normalized?.metadata).toBeDefined();
 	});
 
 	test("invalid email format is caught", () => {

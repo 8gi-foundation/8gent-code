@@ -6,20 +6,20 @@ describe("CapabilityCatalog", () => {
 		const catalog = new CapabilityCatalog();
 		const cap = catalog.resolve("code:generate");
 		expect(cap).toBeDefined();
-		expect(cap!.id).toBe("code:generate");
-		expect(cap!.category).toBe("code");
-		expect(cap!.name).toBe("Generate Code");
+		expect(cap?.id).toBe("code:generate");
+		expect(cap?.category).toBe("code");
+		expect(cap?.name).toBe("Generate Code");
 	});
 
 	it("resolve() finds capability by alias", () => {
 		const catalog = new CapabilityCatalog();
 		const cap = catalog.resolve("coding");
 		expect(cap).toBeDefined();
-		expect(cap!.id).toBe("code:generate");
+		expect(cap?.id).toBe("code:generate");
 
 		const cap2 = catalog.resolve("write-code");
 		expect(cap2).toBeDefined();
-		expect(cap2!.id).toBe("code:generate");
+		expect(cap2?.id).toBe("code:generate");
 	});
 
 	it("resolve() returns undefined for unknown capability", () => {
@@ -109,11 +109,11 @@ describe("CapabilityCatalog", () => {
 
 		const cap = catalog.resolve("custom:magic");
 		expect(cap).toBeDefined();
-		expect(cap!.name).toBe("Magic Trick");
+		expect(cap?.name).toBe("Magic Trick");
 
 		const byAlias = catalog.resolve("wizardry");
 		expect(byAlias).toBeDefined();
-		expect(byAlias!.id).toBe("custom:magic");
+		expect(byAlias?.id).toBe("custom:magic");
 	});
 
 	it("built-in capabilities exist for code, test, infra, data, doc, security categories", () => {

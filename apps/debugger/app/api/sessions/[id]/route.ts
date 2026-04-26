@@ -1,6 +1,6 @@
-import { homedir } from "os";
-import { join } from "path";
-import { readFile, stat } from "fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { type NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";

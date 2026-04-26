@@ -27,16 +27,16 @@ const task: Task = {
 	priority: "medium",
 };
 
-console.log(`Eight - Autonomous Execution`);
+console.log("Eight - Autonomous Execution");
 console.log(`Task: ${task.title}`);
 console.log(`Repo: ${repoPath}`);
 console.log(`Model: ${model}`);
 console.log(`Dry run: ${dryRun}`);
-console.log(`---`);
+console.log("---");
 
 const result = await executeTask(task, repoPath, { dryRun, model });
 
-console.log(`\n---`);
+console.log("\n---");
 console.log(`Success: ${result.success}`);
 console.log(`Attempts: ${result.attempts}`);
 console.log(`Duration: ${(result.durationMs / 1000).toFixed(1)}s`);

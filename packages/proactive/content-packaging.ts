@@ -352,7 +352,8 @@ function evaluateRule(text: string, rule: PackagingRule): RuleScore {
 					rule: rule.name,
 					score: -10,
 					passed: false,
-					feedback: `Vague goal detected. Replace with a specific measurable outcome.`,
+					feedback:
+						"Vague goal detected. Replace with a specific measurable outcome.",
 				};
 			if (hasSpecific)
 				return {

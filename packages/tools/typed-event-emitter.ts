@@ -16,7 +16,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 		handler: (data: Events[Event]) => void,
 	): this {
 		if (!this._map.has(event)) this._map.set(event, []);
-		this._map.get(event)!.push(handler);
+		this._map.get(event)?.push(handler);
 		return this;
 	}
 

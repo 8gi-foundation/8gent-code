@@ -143,13 +143,13 @@ export class TaskQueue<T> {
 	private async _run(task: TaskItem<T>): Promise<void> {
 		try {
 			task.attempts++;
-			await this.handler!(task.payload);
+			await this.handler?.(task.payload);
 			this.processed++;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			task.lastError = msg;
 			if (task.attempts < task.maxRetries) {
-				const backoff = this.backoffMs * Math.pow(2, task.attempts - 1);
+				const backoff = this.backoffMs * 2 ** (task.attempts - 1);
 				await delay(backoff);
 				this.queue.unshift(task); // re-queue at front for retry
 			} else {

@@ -53,9 +53,8 @@ function median(arr: number[]): number {
 	const mid = Math.floor(sorted.length / 2);
 	if (sorted.length % 2 === 0) {
 		return (sorted[mid - 1] + sorted[mid]) / 2;
-	} else {
-		return sorted[mid];
 	}
+	return sorted[mid];
 }
 
 /**
@@ -86,7 +85,7 @@ function mode(arr: number[]): number | undefined {
  */
 function variance(arr: number[]): number {
 	const m = mean(arr);
-	return sum(arr.map((x) => Math.pow(x - m, 2))) / (arr.length - 1);
+	return sum(arr.map((x) => (x - m) ** 2)) / (arr.length - 1);
 }
 
 /**

@@ -97,7 +97,7 @@ async function main() {
 				} else if (result.verdict === "PASS") {
 					console.log(`\nNext: 8gent quarantine release ${id}`);
 				} else if (result.verdict === "REVIEW_REQUIRED") {
-					console.log(`\nNext: Review findings, then:`);
+					console.log("\nNext: Review findings, then:");
 					console.log(`  8gent quarantine release ${id}  (to approve)`);
 					console.log(`  8gent quarantine reject ${id}   (to reject)`);
 				}
@@ -110,8 +110,7 @@ async function main() {
 
 				if (entries.length === 0) {
 					console.log(
-						"\n📭 No skills in quarantine" +
-							(status ? ` with status: ${status}` : ""),
+						`\n📭 No skills in quarantine${status ? ` with status: ${status}` : ""}`,
 					);
 					process.exit(0);
 				}
@@ -180,7 +179,7 @@ async function main() {
 					registry.register(updatedEntry.abstractedSkill);
 				}
 
-				console.log(`\n✅ Skill released! Now available in 8gent.`);
+				console.log("\n✅ Skill released! Now available in 8gent.");
 				break;
 			}
 

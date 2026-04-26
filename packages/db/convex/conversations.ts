@@ -74,7 +74,7 @@ export const search = query({
 			.filter(
 				(c) =>
 					c.title.toLowerCase().includes(lower) ||
-					(c.summary && c.summary.toLowerCase().includes(lower)),
+					c.summary?.toLowerCase().includes(lower),
 			)
 			.sort((a, b) => b.lastActiveAt - a.lastActiveAt)
 			.slice(0, 20);

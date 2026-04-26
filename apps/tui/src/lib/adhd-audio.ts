@@ -14,8 +14,8 @@
  *   audio.setConfig({ duration: 120, bpm: 80 }); // Override settings
  */
 
-import { existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { type Subprocess, spawn } from "bun";
 
 // ============================================
@@ -111,7 +111,9 @@ const CONFIG_PATH = join(CACHE_DIR, "config.json");
 function loadConfig(): ADHDAudioConfig {
 	try {
 		if (existsSync(CONFIG_PATH)) {
-			const raw = JSON.parse(require("fs").readFileSync(CONFIG_PATH, "utf-8"));
+			const raw = JSON.parse(
+				require("node:fs").readFileSync(CONFIG_PATH, "utf-8"),
+			);
 			return { ...DEFAULT_CONFIG, ...raw };
 		}
 	} catch {
@@ -123,7 +125,10 @@ function loadConfig(): ADHDAudioConfig {
 function saveConfig(config: ADHDAudioConfig): void {
 	try {
 		if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
-		require("fs").writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+		require("node:fs").writeFileSync(
+			CONFIG_PATH,
+			JSON.stringify(config, null, 2),
+		);
 	} catch {
 		/* silent */
 	}
@@ -191,7 +196,7 @@ export class ADHDAudio {
 		for (const soundscape of Object.keys(SOUNDSCAPES) as ADHDSoundscape[]) {
 			const path = this.getCachePath(soundscape);
 			try {
-				if (existsSync(path)) require("fs").unlinkSync(path);
+				if (existsSync(path)) require("node:fs").unlinkSync(path);
 			} catch {
 				/* ok */
 			}
@@ -363,8 +368,8 @@ export class ADHDAudio {
 
 	/** Play any audio file directly on loop */
 	playFile(filePath: string): { ok: boolean; message: string } {
-		const { existsSync } = require("fs");
-		const { basename } = require("path");
+		const { existsSync } = require("node:fs");
+		const { basename } = require("node:path");
 		if (!existsSync(filePath)) {
 			return { ok: false, message: `File not found: ${filePath}` };
 		}

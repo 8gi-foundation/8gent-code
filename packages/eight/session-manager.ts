@@ -6,9 +6,9 @@
  * Supports naming, listing (sorted by recency), and fuzzy resume by name or ID.
  */
 
-import { randomUUID } from "crypto";
-import * as fs from "fs";
-import * as path from "path";
+import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export interface SessionInfo {
 	id: string;

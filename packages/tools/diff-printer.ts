@@ -34,8 +34,8 @@ function lcs(a: string[], b: string[]): boolean[][] {
 	const match: boolean[][] = Array.from({ length: m }, () =>
 		new Array(n).fill(false),
 	);
-	let i = m,
-		j = n;
+	let i = m;
+	let j = n;
 	while (i > 0 && j > 0) {
 		if (a[i - 1] === b[j - 1]) {
 			match[i - 1][j - 1] = true;
@@ -57,8 +57,8 @@ function buildHunks(a: string[], b: string[], context: number): Hunk[] {
 		bi: number;
 	};
 	const ops: Tag[] = [];
-	let ai = 0,
-		bi = 0;
+	let ai = 0;
+	let bi = 0;
 	while (ai < a.length || bi < b.length) {
 		if (ai < a.length && bi < b.length && match[ai][bi]) {
 			ops.push({ tag: "equal", line: a[ai], ai, bi });

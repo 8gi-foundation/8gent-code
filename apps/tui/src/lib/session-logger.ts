@@ -9,8 +9,8 @@
  *   step_finish, error, tab_switch, session_end
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -118,7 +118,7 @@ function scheduleFlush(): void {
 
 function writePending(): void {
 	if (!sessionFilePath || pendingLines.length === 0) return;
-	const chunk = pendingLines.join("\n") + "\n";
+	const chunk = `${pendingLines.join("\n")}\n`;
 	pendingLines = [];
 	try {
 		fs.appendFileSync(sessionFilePath, chunk, "utf-8");
@@ -195,7 +195,7 @@ export function initSessionLogger(
 	try {
 		fs.writeFileSync(
 			sessionFilePath,
-			JSON.stringify(startEvent) + "\n",
+			`${JSON.stringify(startEvent)}\n`,
 			"utf-8",
 		);
 	} catch {

@@ -11,9 +11,9 @@
  * as deprecated wrappers for backward compatibility.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type {
 	ContentPart,
 	DetailedTokenUsage,
@@ -71,7 +71,7 @@ export class SessionWriter {
 	// ============================================
 
 	private write(entry: SessionEntry): void {
-		const line = JSON.stringify(entry) + "\n";
+		const line = `${JSON.stringify(entry)}\n`;
 		fs.writeSync(this.fd, line);
 	}
 

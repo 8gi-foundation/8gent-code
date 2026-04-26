@@ -163,8 +163,8 @@ describe("SharedMemoryBus", () => {
 		const entity = graph.getEntity(entityId);
 
 		expect(entity).toBeTruthy();
-		expect(entity!.name).toBe("memory-bus");
-		expect(entity!.type).toBe("concept");
+		expect(entity?.name).toBe("memory-bus");
+		expect(entity?.type).toBe("concept");
 	});
 
 	// ── Test 7: health() returns valid MemoryHealth ────────────────────

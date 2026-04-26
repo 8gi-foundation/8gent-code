@@ -16,10 +16,10 @@
  * Smaller models that struggle with function schemas can compose CLI strings naturally.
  */
 
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -514,7 +514,7 @@ registerBuiltin({
 		switch (sub) {
 			case "help":
 				return {
-					stdout: builtins.get("8gent")!.handler([], "", ctx).stdout,
+					stdout: builtins.get("8gent")?.handler([], "", ctx).stdout ?? "",
 					stderr: "",
 					exitCode: 0,
 				};
@@ -826,7 +826,7 @@ function presentResult(result: CommandResult, durationMs: number): string {
 
 	// Attach stderr if present
 	if (result.stderr && result.exitCode !== 0) {
-		output += (output ? "\n" : "") + `[stderr] ${result.stderr}`;
+		output += `${output ? "\n" : ""}[stderr] ${result.stderr}`;
 	}
 
 	// Metadata footer

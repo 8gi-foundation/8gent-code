@@ -14,8 +14,8 @@
  *   bun run bin/debug.ts errors [id]           # Show errors
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ============================================
 // ANSI color helpers
@@ -377,20 +377,19 @@ function loadSessionQuick(
 		if (filePath.endsWith(".jsonl")) {
 			const s = parseJsonlSession(filePath, id);
 			return { name: s.name, model: s.model, stats: s.stats };
-		} else {
-			const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-			return {
-				name: raw.name || id,
-				model: raw.model || "?",
-				stats: raw.stats || {
-					messageCount: 0,
-					toolCalls: 0,
-					totalTokens: 0,
-					errors: 0,
-					durationMs: 0,
-				},
-			};
 		}
+		const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+		return {
+			name: raw.name || id,
+			model: raw.model || "?",
+			stats: raw.stats || {
+				messageCount: 0,
+				toolCalls: 0,
+				totalTokens: 0,
+				errors: 0,
+				durationMs: 0,
+			},
+		};
 	} catch {
 		return null;
 	}
@@ -416,7 +415,7 @@ function shortTimestamp(iso: string): string {
 
 function truncate(s: string, len: number): string {
 	if (s.length <= len) return s;
-	return s.slice(0, len - 3) + "...";
+	return `${s.slice(0, len - 3)}...`;
 }
 
 // ============================================
@@ -807,7 +806,7 @@ async function cmdHealth(): Promise<void> {
 	console.log(`${c.boldCyan}8gent Health Check${c.reset}\n`);
 
 	// 1. Ollama
-	process.stdout.write(`  Ollama: `);
+	process.stdout.write("  Ollama: ");
 	try {
 		const res = await fetch("http://localhost:11434/api/tags");
 		if (res.ok) {
@@ -824,7 +823,7 @@ async function cmdHealth(): Promise<void> {
 	}
 
 	// 2. LM Studio
-	process.stdout.write(`  LM Studio: `);
+	process.stdout.write("  LM Studio: ");
 	try {
 		const res = await fetch("http://localhost:1234/v1/models");
 		if (res.ok) {
@@ -837,7 +836,7 @@ async function cmdHealth(): Promise<void> {
 	}
 
 	// 3. OpenRouter API key
-	process.stdout.write(`  OpenRouter: `);
+	process.stdout.write("  OpenRouter: ");
 	if (process.env.OPENROUTER_API_KEY) {
 		console.log(`${c.green}API key set${c.reset}`);
 	} else {
@@ -845,7 +844,7 @@ async function cmdHealth(): Promise<void> {
 	}
 
 	// 4. Auth
-	process.stdout.write(`  Auth: `);
+	process.stdout.write("  Auth: ");
 	const authPath = path.join(DOT_8GENT, "auth.json");
 	if (fs.existsSync(authPath)) {
 		console.log(`${c.green}configured${c.reset}`);
@@ -854,7 +853,7 @@ async function cmdHealth(): Promise<void> {
 	}
 
 	// 5. Sessions dir
-	process.stdout.write(`  Sessions: `);
+	process.stdout.write("  Sessions: ");
 	const files = listSessionFiles();
 	const jsonlCount = files.filter((f) => f.endsWith(".jsonl")).length;
 	const jsonCount = files.filter((f) => f.endsWith(".json")).length;
@@ -863,7 +862,7 @@ async function cmdHealth(): Promise<void> {
 	);
 
 	// 6. Disk usage of ~/.8gent
-	process.stdout.write(`  ~/.8gent size: `);
+	process.stdout.write("  ~/.8gent size: ");
 	try {
 		const proc = Bun.spawn(["du", "-sh", DOT_8GENT], {
 			stdout: "pipe",
@@ -877,7 +876,7 @@ async function cmdHealth(): Promise<void> {
 	}
 
 	// 7. Bun version
-	process.stdout.write(`  Bun: `);
+	process.stdout.write("  Bun: ");
 	console.log(`${c.green}${Bun.version}${c.reset}`);
 
 	console.log();

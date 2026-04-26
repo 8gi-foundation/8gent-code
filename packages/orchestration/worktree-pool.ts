@@ -11,9 +11,9 @@
  *   await pool.cleanup(task.id);
  */
 
-import { execFileSync } from "child_process";
-import { existsSync, mkdirSync } from "fs";
-import { join, resolve } from "path";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { WorktreePoolAgent } from "./worktree-pool-agent";
 import type {
 	WorktreePoolOptions,

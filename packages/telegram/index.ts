@@ -19,9 +19,9 @@
  * - Proactive notifications
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ============================================
 // Types
@@ -249,7 +249,7 @@ function buildControlPanel(agent: any): { text: string; keyboard: any } {
 	const text = [
 		"🤖 *8gent Code — Control Panel*",
 		"",
-		`📡 Status: ✅ Online`,
+		"📡 Status: ✅ Online",
 		`🧠 Model: \`${model}\``,
 		`💬 History: ${history} messages`,
 		`⏱ Uptime: ${uptime}m`,
@@ -811,8 +811,7 @@ export class TelegramBot {
 			// Truncate if needed
 			const truncated =
 				response.length > this.config.maxMessageLength
-					? response.slice(0, this.config.maxMessageLength) +
-						"\n\n_... (truncated)_"
+					? `${response.slice(0, this.config.maxMessageLength)}\n\n_... (truncated)_`
 					: response;
 
 			await sendMsg(this.config.token, chat.id, truncated, buildQuickActions());

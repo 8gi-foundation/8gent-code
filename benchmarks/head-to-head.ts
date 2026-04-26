@@ -9,8 +9,8 @@
  * Judged by Vercel AI SDK (LLM judge) — no string matching.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const EIGHT_MODEL = process.env.EIGHT_MODEL || "eight:latest";
@@ -35,7 +35,8 @@ const TASKS: SWETask[] = [
 		difficulty: "hard",
 		category: "bug-fixing",
 		fixture: "benchmarks/fixtures/bug-fixing/BF001-async-race.ts",
-		prompt: `Fix the race condition in this TypeScript code. Multiple concurrent calls to updateCounter should produce correct results (10 concurrent +1 updates = final value of 10). Output ONLY the fixed TypeScript code.`,
+		prompt:
+			"Fix the race condition in this TypeScript code. Multiple concurrent calls to updateCounter should produce correct results (10 concurrent +1 updates = final value of 10). Output ONLY the fixed TypeScript code.",
 		judgePrompt: `Does this fix correctly prevent the race condition? Check for:
 1. Proper serialization/mutex of concurrent access (not just Promise.all)
 2. Atomic read-modify-write pattern
@@ -390,15 +391,15 @@ async function main() {
 	console.log(
 		`  Claude:       ${process.env.ANTHROPIC_API_KEY ? "Anthropic API" : "qwen3.5 (stand-in)"}`,
 	);
-	console.log(`  Judge:        qwen3.5:latest`);
+	console.log("  Judge:        qwen3.5:latest");
 	console.log(`  Tasks:        ${TASKS.length}\n`);
 
 	fs.mkdirSync(RESULTS_DIR, { recursive: true });
 
 	const results: BenchmarkResult[] = [];
-	let eightWins = 0,
-		claudeWins = 0,
-		ties = 0;
+	let eightWins = 0;
+	let claudeWins = 0;
+	let ties = 0;
 
 	for (const task of TASKS) {
 		console.log(`\n━━━ ${task.id}: ${task.name} (${task.difficulty}) ━━━`);
@@ -413,7 +414,7 @@ async function main() {
 			);
 		} catch (err: any) {
 			console.log(`  ✗ 8gent failed: ${err.message}`);
-			eightResult = { output: "ERROR: " + err.message, durationMs: 0 };
+			eightResult = { output: `ERROR: ${err.message}`, durationMs: 0 };
 		}
 
 		console.log("  Running Claude...");
@@ -425,7 +426,7 @@ async function main() {
 			);
 		} catch (err: any) {
 			console.log(`  ✗ Claude failed: ${err.message}`);
-			claudeResult = { output: "ERROR: " + err.message, durationMs: 0 };
+			claudeResult = { output: `ERROR: ${err.message}`, durationMs: 0 };
 		}
 
 		// Judge
@@ -475,25 +476,25 @@ async function main() {
 		results.reduce((s, r) => s + r.claudeScore, 0) / results.length;
 
 	console.log(
-		`║  8gent  Wins: ${eightWins}  |  Avg Score: ${eightAvg.toFixed(1)}/100`.padEnd(
+		`${`║  8gent  Wins: ${eightWins}  |  Avg Score: ${eightAvg.toFixed(1)}/100`.padEnd(
 			59,
-		) + "║",
+		)}║`,
 	);
 	console.log(
-		`║  Claude Wins: ${claudeWins}  |  Avg Score: ${claudeAvg.toFixed(1)}/100`.padEnd(
+		`${`║  Claude Wins: ${claudeWins}  |  Avg Score: ${claudeAvg.toFixed(1)}/100`.padEnd(
 			59,
-		) + "║",
+		)}║`,
 	);
-	console.log(`║  Ties:        ${ties}`.padEnd(59) + "║");
+	console.log(`${`║  Ties:        ${ties}`.padEnd(59)}║`);
 	console.log("╠══════════════════════════════════════════════════════════╣");
 
 	for (const r of results) {
 		const icon =
 			r.winner === "8gent" ? "🏆" : r.winner === "Claude" ? "🥈" : "🤝";
 		console.log(
-			`║  ${icon} ${r.task.id}: 8gent ${r.eightScore} vs Claude ${r.claudeScore} (${r.winner})`.padEnd(
+			`${`║  ${icon} ${r.task.id}: 8gent ${r.eightScore} vs Claude ${r.claudeScore} (${r.winner})`.padEnd(
 				59,
-			) + "║",
+			)}║`,
 		);
 	}
 
@@ -504,7 +505,7 @@ async function main() {
 				? "🥈 CLAUDE WINS"
 				: "🤝 TIE";
 	console.log("╠══════════════════════════════════════════════════════════╣");
-	console.log(`║  ${overall}`.padEnd(59) + "║");
+	console.log(`${`║  ${overall}`.padEnd(59)}║`);
 	console.log("╚══════════════════════════════════════════════════════════╝\n");
 
 	// Save results

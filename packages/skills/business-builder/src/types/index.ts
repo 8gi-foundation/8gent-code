@@ -109,7 +109,7 @@ export class JBTD {
   }
 
   executeAnalysis(): string {
-    const analysis = `${this.industry}\n\nJobs to be Done:\n`;
+    let analysis = `${this.industry}\n\nJobs to be Done:\n`;
     this.jobsToBeDone.forEach((job, i) => {
       analysis += `\n${i + 1}. ${job.customerSegment} - ${job.jobDescription}\n   Gaps: ${job.gapsPainPoints.join(', ')}`;
     });

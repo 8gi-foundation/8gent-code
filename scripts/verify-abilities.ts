@@ -155,8 +155,7 @@ async function run(): Promise<void> {
 		const storeResp = await sendAndWait(
 			ws,
 			sessionId,
-			"Remember this fact: the verification script ran successfully on " +
-				new Date().toISOString(),
+			`Remember this fact: the verification script ran successfully on ${new Date().toISOString()}`,
 		);
 		const stored =
 			storeResp.toLowerCase().includes("remember") ||

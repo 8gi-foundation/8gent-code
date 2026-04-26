@@ -56,7 +56,7 @@ export class ColorLogger {
 		this.namespace = options.namespace;
 		this.timestamps = options.timestamps ?? true;
 		this.output =
-			options.output ?? ((line) => process.stderr.write(line + "\n"));
+			options.output ?? ((line) => process.stderr.write(`${line}\n`));
 
 		// Auto-detect TTY: check if stderr is a terminal
 		if (options.tty !== undefined) {

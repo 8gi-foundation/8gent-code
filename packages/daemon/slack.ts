@@ -72,7 +72,7 @@ function formatBlocks(type: NotificationType, message: string): SlackBlock[] {
 
 	// Truncate message for Slack block limit (3000 chars)
 	const truncated =
-		message.length > 2800 ? message.slice(0, 2797) + "..." : message;
+		message.length > 2800 ? `${message.slice(0, 2797)}...` : message;
 
 	return [
 		{

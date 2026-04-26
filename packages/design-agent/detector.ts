@@ -11,7 +11,7 @@
  * 4. Absence of existing design system
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { ProjectType } from "./prompts.js";
 
 // ============================================
@@ -286,8 +286,8 @@ export class DesignDecisionDetector extends EventEmitter {
 	 */
 	private async checkExistingDesignSystem(): Promise<boolean> {
 		try {
-			const fs = await import("fs/promises");
-			const path = await import("path");
+			const fs = await import("node:fs/promises");
+			const path = await import("node:path");
 
 			const packageJsonPath = path.join(
 				this.config.workingDirectory,

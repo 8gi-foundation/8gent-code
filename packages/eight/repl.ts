@@ -5,10 +5,10 @@
  * This is the user-facing entry point for the CLI mode.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as readline from "readline";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as readline from "node:readline";
 import { getHookManager } from "../hooks";
 import { getMCPClient } from "../mcp";
 import {
@@ -362,7 +362,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 		const planner = getProactivePlanner();
 		const board = planner.getBoard();
 
-		console.log(`\n\x1b[36mKanban Board:\x1b[0m\n`);
+		console.log("\n\x1b[36mKanban Board:\x1b[0m\n");
 
 		const columns = [
 			{ name: "Backlog", items: board.backlog, color: "\x1b[90m" },
@@ -374,7 +374,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 		for (const col of columns) {
 			console.log(`  ${col.color}${col.name} (${col.items.length}):\x1b[0m`);
 			if (col.items.length === 0) {
-				console.log(`    (empty)`);
+				console.log("    (empty)");
 			} else {
 				for (const item of col.items.slice(0, 5)) {
 					const conf = `${Math.round(item.confidence * 100)}%`;
@@ -391,7 +391,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 		const ready = planner.getReadySteps();
 		const next = planner.getNextRecommendedStep();
 
-		console.log(`\n\x1b[36mPredictions:\x1b[0m\n`);
+		console.log("\n\x1b[36mPredictions:\x1b[0m\n");
 
 		if (ready.length === 0 && !next) {
 			console.log(
@@ -405,7 +405,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 				);
 			}
 			if (ready.length > 0) {
-				console.log(`  \x1b[36mReady steps:\x1b[0m`);
+				console.log("  \x1b[36mReady steps:\x1b[0m");
 				for (const step of ready) {
 					const score = (step.priority * step.confidence).toFixed(1);
 					console.log(
@@ -422,7 +422,7 @@ function handlePlannerCommands(trimmed: string): boolean {
 		const planner = getProactivePlanner();
 		const m = planner.getMomentum();
 
-		console.log(`\n\x1b[36mMomentum:\x1b[0m`);
+		console.log("\n\x1b[36mMomentum:\x1b[0m");
 		console.log(`  Steps completed: \x1b[32m${m.stepsCompleted}\x1b[0m`);
 		console.log(
 			`  Rate: \x1b[33m${m.stepsPerMinute.toFixed(1)} steps/min\x1b[0m`,
@@ -467,9 +467,7 @@ async function handleModelCommands(
 							fastModel = candidate;
 							break;
 						}
-					} catch {
-						continue;
-					}
+					} catch {}
 				} else {
 					fastModel = candidate;
 					break;
@@ -493,7 +491,7 @@ async function handleModelCommands(
 				agent.setModel(prev);
 				console.log(`\x1b[36mFast mode OFF\x1b[0m - restored: ${prev}`);
 			} else {
-				console.log(`\x1b[36mFast mode OFF\x1b[0m`);
+				console.log("\x1b[36mFast mode OFF\x1b[0m");
 			}
 		}
 		return true;
@@ -507,7 +505,7 @@ async function handleModelCommands(
 		const mm = getModeManager();
 		console.log(`Provider: \x1b[33m${p.displayName}\x1b[0m`);
 		console.log(`Model:    \x1b[36m${pm.getActiveModel()}\x1b[0m`);
-		if (mm.fastMode) console.log(`Fast:     \x1b[33mON\x1b[0m`);
+		if (mm.fastMode) console.log("Fast:     \x1b[33mON\x1b[0m");
 		return true;
 	}
 
@@ -565,7 +563,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 		const pm = getProviderManager();
 		const active = pm.getActiveProvider();
 
-		console.log(`\n\x1b[36mLLM Providers:\x1b[0m\n`);
+		console.log("\n\x1b[36mLLM Providers:\x1b[0m\n");
 		for (const name of PROVIDER_NAMES) {
 			const p = pm.getProvider(name);
 			const hasKey = pm.getApiKey(name)
@@ -575,9 +573,9 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 			const keyInfo = p.name === "ollama" ? "\x1b[32m✓ local\x1b[0m" : hasKey;
 			console.log(`  ${p.displayName.padEnd(20)} ${keyInfo}${isActive}`);
 		}
-		console.log(`\n  Use \x1b[36m/provider <name>\x1b[0m to switch`);
+		console.log("\n  Use \x1b[36m/provider <name>\x1b[0m to switch");
 		console.log(
-			`  Use \x1b[36m/provider key <api-key>\x1b[0m to set key for current provider\n`,
+			"  Use \x1b[36m/provider key <api-key>\x1b[0m to set key for current provider\n",
 		);
 		return true;
 	}
@@ -626,7 +624,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
-				console.log(`  Stored in ~/.8gent/providers.json`);
+				console.log("  Stored in ~/.8gent/providers.json");
 			}
 		}
 		return true;
@@ -653,7 +651,7 @@ async function handleProviderCommands(trimmed: string): Promise<boolean> {
 			console.log(`  Model: ${pm.getActiveModel()}`);
 
 			if (p.name !== "ollama" && !pm.getApiKey(p.name)) {
-				console.log(`\n  \x1b[33m⚠ No API key set.\x1b[0m`);
+				console.log("\n  \x1b[33m⚠ No API key set.\x1b[0m");
 				console.log(`  Set with: /provider key <your-${p.name}-api-key>`);
 				console.log(`  Or set env: export ${p.apiKeyEnv}=<key>`);
 			}
@@ -682,7 +680,7 @@ async function handlePlanCommands(
 	}
 
 	if (trimmed === "/status") {
-		console.log(`\n\x1b[36m8gent Status:\x1b[0m`);
+		console.log("\n\x1b[36m8gent Status:\x1b[0m");
 		console.log(`  Model: ${agent.getModel()}`);
 		console.log(`  Working Dir: ${process.cwd()}`);
 		console.log(`  History: ${agent.getHistoryLength()} messages`);
@@ -693,13 +691,13 @@ async function handlePlanCommands(
 		const nightlyLog = path.join(os.homedir(), ".8gent", "nightly.log");
 		const dreamsLog = path.join(os.homedir(), ".8gent", "dreams.log");
 
-		console.log(`\n\x1b[36m8gent Nightly Training Status:\x1b[0m\n`);
+		console.log("\n\x1b[36m8gent Nightly Training Status:\x1b[0m\n");
 
 		if (fs.existsSync(nightlyLog)) {
 			const content = fs.readFileSync(nightlyLog, "utf-8");
 			const lines = content.trim().split("\n");
 			const tail = lines.slice(-25);
-			console.log(`\x1b[33m── Last 25 lines of nightly.log ──\x1b[0m`);
+			console.log("\x1b[33m── Last 25 lines of nightly.log ──\x1b[0m");
 			for (const line of tail) {
 				// Color code based on content
 				if (line.includes("PASS")) {
@@ -717,26 +715,26 @@ async function handlePlanCommands(
 				}
 			}
 		} else {
-			console.log(`  \x1b[33mNo nightly training log found.\x1b[0m`);
-			console.log(`  Nightly training runs at 2:00 AM PST via cron.`);
+			console.log("  \x1b[33mNo nightly training log found.\x1b[0m");
+			console.log("  Nightly training runs at 2:00 AM PST via cron.");
 		}
 
 		if (fs.existsSync(dreamsLog)) {
 			const content = fs.readFileSync(dreamsLog, "utf-8");
 			const lines = content.trim().split("\n");
 			const tail = lines.slice(-10);
-			console.log(`\n\x1b[33m── Last 10 lines of dreams.log ──\x1b[0m`);
+			console.log("\n\x1b[33m── Last 10 lines of dreams.log ──\x1b[0m");
 			for (const line of tail) {
 				console.log(`  ${line}`);
 			}
 		}
 
 		// Show cron schedule
-		console.log(`\n\x1b[33m── Cron Schedule ──\x1b[0m`);
+		console.log("\n\x1b[33m── Cron Schedule ──\x1b[0m");
 		console.log(
-			`  Training: 2:00 AM PST daily (lockfile: /tmp/8gent-nightly.lock)`,
+			"  Training: 2:00 AM PST daily (lockfile: /tmp/8gent-nightly.lock)",
 		);
-		console.log(`  Dreams:   4:00 AM PST daily`);
+		console.log("  Dreams:   4:00 AM PST daily");
 
 		return true;
 	}
@@ -891,7 +889,7 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 	if (trimmed === "/voice voices") {
 		console.log("\x1b[36mListing available voices...\x1b[0m");
 		try {
-			const { execSync } = await import("child_process");
+			const { execSync } = await import("node:child_process");
 			const voices = execSync("say -v '?'", { encoding: "utf-8" });
 			const lines = voices
 				.split("\n")
@@ -914,7 +912,7 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 	if (trimmed.startsWith("/voice rate ")) {
 		const rateStr = trimmed.slice(12).trim();
 		const rate = Number.parseInt(rateStr, 10);
-		if (isNaN(rate) || rate < 50 || rate > 400) {
+		if (Number.isNaN(rate) || rate < 50 || rate > 400) {
 			console.log("\x1b[31mRate must be between 50-400 wpm\x1b[0m");
 		} else {
 			const { configureVoice } = await import("../hooks/voice.js");
@@ -927,7 +925,7 @@ async function handleVoiceCommands(trimmed: string): Promise<boolean> {
 	if (trimmed.startsWith("/voice maxlength ")) {
 		const lenStr = trimmed.slice(17).trim();
 		const maxLength = Number.parseInt(lenStr, 10);
-		if (isNaN(maxLength) || maxLength < 50 || maxLength > 1000) {
+		if (Number.isNaN(maxLength) || maxLength < 50 || maxLength > 1000) {
 			console.log("\x1b[31mMax length must be between 50-1000 chars\x1b[0m");
 		} else {
 			const { configureVoice } = await import("../hooks/voice.js");
@@ -979,34 +977,34 @@ function handlePersonalCommands(trimmed: string): boolean {
 		const metaPath = path.join(loraDir, "meta.json");
 
 		if (!fs.existsSync(loraDir) || !fs.existsSync(metaPath)) {
-			console.log(`\n\x1b[33mPersonal LoRA:\x1b[0m Not configured`);
+			console.log("\n\x1b[33mPersonal LoRA:\x1b[0m Not configured");
 			console.log(`  No personal LoRA found at ${loraDir}`);
-			console.log(`  Run \x1b[36m/personal train\x1b[0m to start training.\n`);
+			console.log("  Run \x1b[36m/personal train\x1b[0m to start training.\n");
 			return true;
 		}
 
 		try {
 			const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-			console.log(`\n\x1b[36mPersonal LoRA Status:\x1b[0m`);
+			console.log("\n\x1b[36mPersonal LoRA Status:\x1b[0m");
 			console.log(`  Path:            ${loraDir}`);
 			console.log(`  Base version:    ${meta.trainedOnVersion || "unknown"}`);
 			console.log(`  Last trained:    ${meta.lastTrained || "unknown"}`);
 			console.log(
 				`  Auto-retrain:    ${meta.autoRetrain !== false ? "enabled" : "disabled"}`,
 			);
-			console.log(``);
+			console.log("");
 		} catch {
-			console.log(`\n\x1b[31mError reading personal LoRA metadata.\x1b[0m\n`);
+			console.log("\n\x1b[31mError reading personal LoRA metadata.\x1b[0m\n");
 		}
 		return true;
 	}
 
 	if (trimmed === "/personal train") {
 		console.log(
-			`\n\x1b[33mPersonal LoRA training is not yet implemented.\x1b[0m`,
+			"\n\x1b[33mPersonal LoRA training is not yet implemented.\x1b[0m",
 		);
 		console.log(
-			`  This will fine-tune Eight on your coding style and preferences.\n`,
+			"  This will fine-tune Eight on your coding style and preferences.\n",
 		);
 		return true;
 	}
@@ -1016,10 +1014,10 @@ function handlePersonalCommands(trimmed: string): boolean {
 		if (fs.existsSync(loraDir)) {
 			fs.rmSync(loraDir, { recursive: true, force: true });
 			console.log(
-				`\x1b[32mPersonal LoRA reset. Reverted to base Eight.\x1b[0m`,
+				"\x1b[32mPersonal LoRA reset. Reverted to base Eight.\x1b[0m",
 			);
 		} else {
-			console.log(`No personal LoRA to reset.`);
+			console.log("No personal LoRA to reset.");
 		}
 		return true;
 	}
@@ -1036,8 +1034,8 @@ async function handleLanguageCommands(trimmed: string): Promise<boolean> {
 			`\n\x1b[36mCurrent Language:\x1b[0m ${lang.name} (${lang.nativeName})`,
 		);
 		console.log(`  Code: ${lang.code}`);
-		console.log(`\n  Use \x1b[36m/language <code>\x1b[0m to change`);
-		console.log(`  Use \x1b[36m/languages\x1b[0m to see all options\n`);
+		console.log("\n  Use \x1b[36m/language <code>\x1b[0m to change");
+		console.log("  Use \x1b[36m/languages\x1b[0m to see all options\n");
 		return true;
 	}
 
@@ -1047,14 +1045,14 @@ async function handleLanguageCommands(trimmed: string): Promise<boolean> {
 		const current = lm.getLanguageCode();
 		const languages = lm.listLanguages();
 
-		console.log(`\n\x1b[36mSupported Languages:\x1b[0m\n`);
+		console.log("\n\x1b[36mSupported Languages:\x1b[0m\n");
 		for (const lang of languages) {
 			const marker = lang.code === current ? " \x1b[32m← current\x1b[0m" : "";
 			console.log(
 				`  ${lang.code.padEnd(6)} ${lang.name.padEnd(25)} ${lang.nativeName}${marker}`,
 			);
 		}
-		console.log(`\n  Use \x1b[36m/language <code>\x1b[0m to switch\n`);
+		console.log("\n  Use \x1b[36m/language <code>\x1b[0m to switch\n");
 		return true;
 	}
 
@@ -1071,7 +1069,7 @@ async function handleLanguageCommands(trimmed: string): Promise<boolean> {
 			console.log(`  8gent will now respond in ${lang.name}.`);
 		} else {
 			console.log(`\x1b[31mUnknown language code: ${code}\x1b[0m`);
-			console.log(`  Use \x1b[36m/languages\x1b[0m to see available options.`);
+			console.log("  Use \x1b[36m/languages\x1b[0m to see available options.");
 		}
 		return true;
 	}
@@ -1115,7 +1113,7 @@ function handlePermissionCommands(trimmed: string): boolean {
 		const permManager = getPermissionManager();
 		const config = permManager.getConfig();
 		const log = permManager.getLog();
-		console.log(`\n\x1b[36mPermission Config:\x1b[0m`);
+		console.log("\n\x1b[36mPermission Config:\x1b[0m");
 		console.log(
 			`  Auto-approve: ${config.autoApprove ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`,
 		);
@@ -1130,7 +1128,7 @@ function handlePermissionCommands(trimmed: string): boolean {
 		for (const p of config.deniedPatterns) {
 			console.log(`    - ${p}`);
 		}
-		console.log(`\n\x1b[36mSession Stats:\x1b[0m`);
+		console.log("\n\x1b[36mSession Stats:\x1b[0m");
 		console.log(`  Approved: ${log.approvedCount}`);
 		console.log(`  Auto-approved: ${log.autoApprovedCount}`);
 		console.log(`  Denied: ${log.deniedCount}`);
@@ -1286,7 +1284,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 		const agents = pool.listAgents();
 		const stats = pool.getStats();
 
-		console.log(`\n\x1b[36mAgent Pool:\x1b[0m`);
+		console.log("\n\x1b[36mAgent Pool:\x1b[0m");
 		console.log(
 			`  Running: ${stats.running}/${pool.getMaxConcurrent()} | Completed: ${stats.completed} | Failed: ${stats.failed}\n`,
 		);
@@ -1328,7 +1326,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			console.log(`\x1b[33mWaiting for agent ${agentId} to complete...\x1b[0m`);
 			try {
 				const result = await pool.joinAgent(agentId, 300000);
-				console.log(`\n\x1b[32mAgent completed:\x1b[0m`);
+				console.log("\n\x1b[32mAgent completed:\x1b[0m");
 				if (result.task.result) {
 					console.log(String(result.task.result).slice(0, 500));
 				}
@@ -1369,7 +1367,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			if (!subAgent) {
 				console.log(`\x1b[31mSubagent not found: ${agentId}\x1b[0m`);
 			} else {
-				console.log(`\n\x1b[36mSubagent Details:\x1b[0m`);
+				console.log("\n\x1b[36mSubagent Details:\x1b[0m");
 				console.log(`  ${formatSubAgentStatus(subAgent)}`);
 				console.log(`\n  Task: ${subAgent.task}`);
 				console.log(`  Status: ${subAgent.status}`);
@@ -1377,7 +1375,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 				console.log(`\n${formatSubAgentEvidence(subAgent)}`);
 
 				if (subAgent.validationReport) {
-					console.log(`\n\x1b[36mValidation Report:\x1b[0m`);
+					console.log("\n\x1b[36mValidation Report:\x1b[0m");
 					console.log(`  Confidence: ${subAgent.validationReport.confidence}%`);
 					console.log(
 						`  Passed: ${subAgent.validationReport.passedSteps}/${subAgent.validationReport.totalSteps}`,
@@ -1402,7 +1400,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			const subAgentMgr = getSubAgentManager();
 			const agents = subAgentMgr.listAgents();
 
-			console.log(`\n\x1b[36mCollected Evidence:\x1b[0m\n`);
+			console.log("\n\x1b[36mCollected Evidence:\x1b[0m\n");
 
 			let totalEvidence: import("../validation/evidence").Evidence[] = [];
 			for (const agent of agents) {
@@ -1527,7 +1525,7 @@ function handleTaskCommands(trimmed: string): boolean {
 					if (task) {
 						console.log(`\n${formatTask(task, true)}`);
 						if (task.notes.length > 0) {
-							console.log(`\n  Notes:`);
+							console.log("\n  Notes:");
 							for (const note of task.notes) {
 								console.log(`    - ${note}`);
 							}
@@ -1551,7 +1549,7 @@ function handleTaskCommands(trimmed: string): boolean {
 					if (task) {
 						console.log(`\n\x1b[33mTask blocked:\x1b[0m ${formatTask(task)}`);
 					} else {
-						console.log(`\x1b[31mTask not found\x1b[0m`);
+						console.log("\x1b[31mTask not found\x1b[0m");
 					}
 				}
 				break;

@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
-let pipeline: any, schema: any, transforms: any;
+let pipeline: any;
+let schema: any;
+let transforms: any;
 
 beforeEach(async () => {
 	try {
@@ -175,8 +177,8 @@ describe("Transforms", () => {
 			{ type: "a", v: 3 },
 		];
 		const groups = fn(items, (x: any) => x.type);
-		expect(groups["a"].length).toBe(2);
-		expect(groups["b"].length).toBe(1);
+		expect(groups.a.length).toBe(2);
+		expect(groups.b.length).toBe(1);
 	});
 
 	it("sortBy sorts ascending", () => {

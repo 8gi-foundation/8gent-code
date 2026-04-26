@@ -147,7 +147,7 @@ function log(msg: string): void {
 	const line = `[${new Date().toISOString()}] ${msg}`;
 	console.log(line);
 	try {
-		appendFileSync(LOG_FILE, line + "\n");
+		appendFileSync(LOG_FILE, `${line}\n`);
 	} catch {}
 }
 
@@ -736,8 +736,8 @@ function identifyPersistentFailures(state: CompetitionState): Array<{
 	const scores: Record<string, { e: number[]; c: number[]; cat: string }> = {};
 	for (const round of state.rounds) {
 		for (let i = 0; i < round.eightResults.length; i++) {
-			const e = round.eightResults[i],
-				c = round.claudeResults[i];
+			const e = round.eightResults[i];
+			const c = round.claudeResults[i];
 			if (!scores[e.benchmarkId])
 				scores[e.benchmarkId] = { e: [], c: [], cat: round.category };
 			scores[e.benchmarkId].e.push(e.score);

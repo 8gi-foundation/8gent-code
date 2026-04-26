@@ -4,8 +4,8 @@
  * Comprehensive grading logic for all benchmark categories.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type {
 	BenchmarkDefinition,
 	BenchmarkResult,
@@ -119,7 +119,6 @@ export class BenchmarkGrader {
 				return await this.runExecutionCheck(check, output, benchmark);
 			case "llm":
 				return await this.runLLMCheck(check, output, benchmark);
-			case "manual":
 			default:
 				return this.createManualCheckResult(check);
 		}
@@ -377,7 +376,7 @@ export class BenchmarkGrader {
 		command: string,
 		timeout: number,
 	): Promise<ExecutionResult> {
-		const { spawn } = await import("child_process");
+		const { spawn } = await import("node:child_process");
 
 		return new Promise((resolve) => {
 			const startTime = Date.now();

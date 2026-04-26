@@ -4,9 +4,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import {
 	getEvolutionSummary,
@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => {
 	resetDb();
 	fs.rmSync(tmpDir, { recursive: true, force: true });
-	delete process.env.EIGHT_DATA_DIR;
+	process.env.EIGHT_DATA_DIR = undefined;
 });
 
 // ============================================

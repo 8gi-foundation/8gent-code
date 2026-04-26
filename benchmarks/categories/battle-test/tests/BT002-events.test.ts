@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
-let eventBus: any, retryHandler: any, dlq: any, backpressure: any;
+let eventBus: any;
+let retryHandler: any;
+let dlq: any;
+let backpressure: any;
 
 beforeEach(async () => {
 	try {
@@ -174,8 +177,8 @@ describe("DeadLetterQueue", () => {
 		const queue = new DLQ();
 		queue.enqueue("first", {}, new Error("e1"));
 		queue.enqueue("second", {}, new Error("e2"));
-		expect(queue.dequeue()!.event).toBe("first");
-		expect(queue.dequeue()!.event).toBe("second");
+		expect(queue.dequeue()?.event).toBe("first");
+		expect(queue.dequeue()?.event).toBe("second");
 	});
 
 	it("list returns entries", () => {

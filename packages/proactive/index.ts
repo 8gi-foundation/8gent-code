@@ -16,7 +16,7 @@
  * has all the context it needs before starting.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 
 // ============================================
 // Types
@@ -511,14 +511,12 @@ export function formatQuestion(q: ClarifyingQuestion): string {
 	let text = `❓ ${q.question}`;
 
 	if (q.options && q.options.length > 0) {
-		text +=
-			"\n" +
-			q.options
-				.map(
-					(opt, i) =>
-						`  ${i + 1}) ${opt}${opt === q.defaultAnswer ? " (default)" : ""}`,
-				)
-				.join("\n");
+		text += `\n${q.options
+			.map(
+				(opt, i) =>
+					`  ${i + 1}) ${opt}${opt === q.defaultAnswer ? " (default)" : ""}`,
+			)
+			.join("\n")}`;
 	}
 
 	if (q.defaultAnswer && (!q.options || q.options.length === 0)) {

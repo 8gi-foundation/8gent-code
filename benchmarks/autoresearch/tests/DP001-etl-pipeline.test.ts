@@ -54,7 +54,7 @@ describe("DP001: ETL Data Pipeline", () => {
 				: (result.rows ?? result.data);
 			expect(rows.length).toBeGreaterThanOrEqual(1);
 			const first = rows[0];
-			const bio = first.bio ?? first[1] ?? first["bio"];
+			const bio = first.bio ?? first[1] ?? first.bio;
 			expect(bio).toContain("coding");
 			expect(bio).toContain("hiking");
 		});
@@ -68,7 +68,7 @@ describe("DP001: ETL Data Pipeline", () => {
 			expect(rows.length).toBeGreaterThanOrEqual(1);
 			const first = rows[0];
 			// The key should be "id", not "\ufeffid"
-			const id = first.id ?? first["id"];
+			const id = first.id ?? first.id;
 			expect(id).toBeDefined();
 		});
 

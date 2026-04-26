@@ -24,9 +24,9 @@
  *     bun run benchmarks/computer-use-bakeoff.ts --dry-run
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ApfelClient } from "../packages/eight/clients/apfel";
 import { LMStudioClient } from "../packages/eight/clients/lmstudio";
 import { OllamaClient } from "../packages/eight/clients/ollama";
@@ -199,8 +199,6 @@ async function runTaskOnChain(
 			};
 		} catch (err) {
 			fo.markDown(entry.model, entry.provider);
-			// Try the next tier.
-			continue;
 		}
 	}
 

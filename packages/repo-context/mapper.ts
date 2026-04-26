@@ -99,7 +99,7 @@ export class RepoMapper {
 		const scored: { path: string; score: number }[] = [];
 
 		for (const [rel, entry] of this.files) {
-			const hay = (rel + " " + entry.exports.join(" ")).toLowerCase();
+			const hay = `${rel} ${entry.exports.join(" ")}`.toLowerCase();
 			const text =
 				terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0) /
 				Math.max(terms.length, 1);

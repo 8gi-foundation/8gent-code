@@ -5,7 +5,7 @@
  * Sub-agents communicate only through this bus — never peer-to-peer.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { BMADPersona } from "./personas";
 
 // ── Types ─────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ export class DiscordRest {
 
 		// Discord limit is 2000 chars
 		const body =
-			content.length > 1950 ? content.slice(0, 1950) + "..." : content;
+			content.length > 1950 ? `${content.slice(0, 1950)}...` : content;
 
 		try {
 			const res = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {

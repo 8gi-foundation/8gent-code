@@ -1,7 +1,7 @@
-import { readFileSync, readdirSync, statSync } from "fs";
-import { homedir } from "os";
-import { basename, join, relative, resolve } from "path";
-import { readFile, readdir, stat } from "fs/promises";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, join, relative, resolve } from "node:path";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";

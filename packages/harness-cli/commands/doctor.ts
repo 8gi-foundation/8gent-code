@@ -4,9 +4,9 @@
  * Health-check: verifies providers are available and tools are loadable.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".8gent", "sessions");
 

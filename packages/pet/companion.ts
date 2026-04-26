@@ -621,9 +621,9 @@ export function generateCompanion(sessionId?: string): Companion {
 		`${bold}  ${fullName}${reset}`,
 		`${dim}  ${element.name} ${element.symbol} - ${element.description}${reset}`,
 		`${dim}  ${accessory.name !== "None" ? `Wearing: ${accessory.name}` : "No accessory"}${reset}`,
-		``,
+		"",
 		`${dim}  "${species.lore}"${reset}`,
-		``,
+		"",
 		statBars,
 		`${rc}${bold}${"~".repeat(36)}${reset}`,
 	].join("\n");
@@ -648,8 +648,8 @@ export function generateCompanion(sessionId?: string): Companion {
 
 // -- Collection Deck (persistent session history) --
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface DeckEntry {
 	sessionId: string;

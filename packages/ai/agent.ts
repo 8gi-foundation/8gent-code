@@ -241,13 +241,13 @@ export function createEightAgent(
 							: undefined,
 						providerMetadata: event.providerMetadata || undefined,
 					};
-					return config.onStepFinish!(stepEvent);
+					return config.onStepFinish?.(stepEvent);
 				}
 			: undefined,
 
 		experimental_onToolCallStart: config.onToolCallStart
 			? (event: any) => {
-					return config.onToolCallStart!({
+					return config.onToolCallStart?.({
 						toolCallId: event.toolCall?.toolCallId ?? "",
 						toolName: event.toolCall?.toolName ?? "",
 						args: event.toolCall?.args ?? event.toolCall?.input ?? {},
@@ -258,7 +258,7 @@ export function createEightAgent(
 
 		experimental_onToolCallFinish: config.onToolCallFinish
 			? (event: any) => {
-					return config.onToolCallFinish!({
+					return config.onToolCallFinish?.({
 						toolCallId: event.toolCall?.toolCallId ?? "",
 						toolName: event.toolCall?.toolName ?? "",
 						args: event.toolCall?.args ?? event.toolCall?.input ?? {},
@@ -273,7 +273,7 @@ export function createEightAgent(
 
 		onFinish: config.onFinish
 			? (event: any) => {
-					return config.onFinish!({
+					return config.onFinish?.({
 						text: event.text ?? "",
 						finishReason: event.finishReason ?? "other",
 						usage: mapUsage(event.usage),

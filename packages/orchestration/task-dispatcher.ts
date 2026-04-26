@@ -86,7 +86,7 @@ export class TaskDispatcher {
 		task.state = "failed";
 		task.error = error;
 		const delay =
-			Math.pow(task.attempts, 2) * BASE_DELAY_MS + (idHash(taskId) % JITTER_MS);
+			task.attempts ** 2 * BASE_DELAY_MS + (idHash(taskId) % JITTER_MS);
 		setTimeout(() => {
 			if (task.state === "failed") {
 				task.state = "pending";

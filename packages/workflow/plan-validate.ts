@@ -10,9 +10,9 @@
  * The key principle: NOTHING is considered done without evidence.
  */
 
-import { EventEmitter } from "events";
-import * as fs from "fs";
-import * as path from "path";
+import { EventEmitter } from "node:events";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Evidence } from "../validation/evidence";
 
 // ============================================

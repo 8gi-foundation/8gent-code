@@ -5,8 +5,8 @@
  * This is the bridge between LLM tool calls and actual system operations.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
 	type RepoIndex,
 	getFileOutline as astGetFileOutline,
@@ -210,7 +210,7 @@ function sanitizeShellCommand(command: string): {
  */
 function spawnGit(args: string[], cwd: string): Promise<string> {
 	return new Promise(async (resolve) => {
-		const { spawn } = await import("child_process");
+		const { spawn } = await import("node:child_process");
 		const proc = spawn("git", args, { cwd });
 		let stdout = "";
 		let stderr = "";
@@ -1703,7 +1703,7 @@ export class ToolExecutor {
 		// Auto-open files on macOS for immediate viewing
 		if (process.platform === "darwin") {
 			try {
-				const { spawn } = await import("child_process");
+				const { spawn } = await import("node:child_process");
 				spawn("open", [absolutePath], {
 					detached: true,
 					stdio: "ignore",
@@ -1760,7 +1760,7 @@ export class ToolExecutor {
 	// ============================================
 
 	async runCommand(command: string, timeoutSec?: number): Promise<string> {
-		const { spawn } = await import("child_process");
+		const { spawn } = await import("node:child_process");
 
 		const permissionCheck = this.permissionManager.checkPermission(command);
 
@@ -1802,7 +1802,7 @@ export class ToolExecutor {
 			);
 		}
 		if (command.includes("npm init") && !command.includes("-y")) {
-			finalCommand = command + " -y";
+			finalCommand = `${command} -y`;
 		}
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
@@ -1853,7 +1853,7 @@ export class ToolExecutor {
 					command: finalCommand,
 					exitCode: -1,
 					stdout,
-					stderr: stderr + "\nTIMEOUT",
+					stderr: `${stderr}\nTIMEOUT`,
 					duration: Date.now() - startTime,
 					workingDirectory: this.workingDirectory,
 				});
@@ -1903,7 +1903,7 @@ export class ToolExecutor {
 	 * Use for commands with LLM-provided arguments to prevent injection.
 	 */
 	private async runSpawn(cmd: string, args: string[]): Promise<string> {
-		const { spawn } = await import("child_process");
+		const { spawn } = await import("node:child_process");
 		return new Promise((resolve) => {
 			let stdout = "";
 			let stderr = "";
@@ -1944,7 +1944,7 @@ export class ToolExecutor {
 					channels: imageInfo.channels,
 					hasAlpha: imageInfo.hasAlpha,
 					base64Length: imageInfo.base64.length,
-					base64Preview: imageInfo.base64.slice(0, 100) + "...",
+					base64Preview: `${imageInfo.base64.slice(0, 100)}...`,
 				},
 				null,
 				2,
@@ -1999,8 +1999,7 @@ export class ToolExecutor {
 			const maxTextLength = 10000;
 			const truncatedText =
 				pdfInfo.text.length > maxTextLength
-					? pdfInfo.text.slice(0, maxTextLength) +
-						`\n\n... [truncated, ${pdfInfo.text.length - maxTextLength} more chars]`
+					? `${pdfInfo.text.slice(0, maxTextLength)}\n\n... [truncated, ${pdfInfo.text.length - maxTextLength} more chars]`
 					: pdfInfo.text;
 
 			return JSON.stringify(
@@ -2091,7 +2090,7 @@ export class ToolExecutor {
 				executionCount: cell.executionCount,
 				source:
 					cell.source.length > 500
-						? cell.source.slice(0, 500) + "... [truncated]"
+						? `${cell.source.slice(0, 500)}... [truncated]`
 						: cell.source,
 				outputCount: cell.outputs.length,
 				outputs: cell.outputs.slice(0, 3).map((o) => ({
@@ -2743,12 +2742,7 @@ export class ToolExecutor {
 					console.log(`[infinite] Fatal error: ${err}`);
 				});
 
-			return (
-				`Infinite mode ENABLED for task: "${task}"\n` +
-				`Max iterations: ${maxIterations ?? 100}\n` +
-				`Max time: ${((maxTimeMs ?? 30 * 60 * 1000) / 1000 / 60).toFixed(0)} minutes\n` +
-				`The agent will now loop autonomously until the task is complete or limits are reached.`
-			);
+			return `Infinite mode ENABLED for task: "${task}"\nMax iterations: ${maxIterations ?? 100}\nMax time: ${((maxTimeMs ?? 30 * 60 * 1000) / 1000 / 60).toFixed(0)} minutes\nThe agent will now loop autonomously until the task is complete or limits are reached.`;
 		} catch (err) {
 			return `Failed to enable infinite mode: ${err}`;
 		}
@@ -2950,11 +2944,10 @@ export class ToolExecutor {
 				const result = computerClipboardSet(text);
 				if (!result.ok) return `desktop_clipboard failed: ${result.error}`;
 				return `Clipboard set (${text.length} chars)`;
-			} else {
-				const result = computerClipboardGet();
-				if (!result.ok) return `desktop_clipboard failed: ${result.error}`;
-				return `Clipboard contents:\n${result.text || "(empty)"}`;
 			}
+			const result = computerClipboardGet();
+			if (!result.ok) return `desktop_clipboard failed: ${result.error}`;
+			return `Clipboard contents:\n${result.text || "(empty)"}`;
 		} catch (err) {
 			return `desktop_clipboard failed: ${err}`;
 		}
@@ -2994,11 +2987,10 @@ export class ToolExecutor {
 				const result = computerQuitProcess(pid, strat);
 				if (!result.ok) return `desktop_quit_app failed: ${result.error}`;
 				return `Quit PID ${pid} (${strat})`;
-			} else {
-				const result = computerQuitByName(name!, strat);
-				if (!result.ok) return `desktop_quit_app failed: ${result.error}`;
-				return `Quit "${name}" (${strat})`;
 			}
+			const result = computerQuitByName(name!, strat);
+			if (!result.ok) return `desktop_quit_app failed: ${result.error}`;
+			return `Quit "${name}" (${strat})`;
 		} catch (err) {
 			return `desktop_quit_app failed: ${err}`;
 		}
@@ -3044,10 +3036,12 @@ export class ToolExecutor {
 				if (list.length === 0)
 					return "Safe list is empty. Add apps with action='add' to protect them from being quit.";
 				return `Safe list (${list.length} apps protected):\n${list.map((a, i) => `${i + 1}. ${a}`).join("\n")}`;
-			} else if (action === "add") {
+			}
+			if (action === "add") {
 				if (!app) return "desktop_safe_list add requires 'app' parameter";
 				return computerAddToSafeList(app);
-			} else if (action === "remove") {
+			}
+			if (action === "remove") {
 				if (!app) return "desktop_safe_list remove requires 'app' parameter";
 				return computerRemoveFromSafeList(app);
 			}

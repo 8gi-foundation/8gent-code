@@ -134,7 +134,9 @@ export function useDJ() {
 					dj.stop();
 					// Also kill any afplay from producer
 					try {
-						require("child_process").execSync("pkill -f afplay 2>/dev/null");
+						require("node:child_process").execSync(
+							"pkill -f afplay 2>/dev/null",
+						);
 					} catch {}
 					setState(INITIAL_STATE);
 					return "Stopped.";
@@ -199,7 +201,7 @@ export function useDJ() {
 				case "presets":
 				case "genres": {
 					const presets = dj.radioPresets();
-					return "Radio presets: " + presets.join(", ");
+					return `Radio presets: ${presets.join(", ")}`;
 				}
 
 				case "doctor":

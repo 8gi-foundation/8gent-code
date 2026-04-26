@@ -15,7 +15,7 @@ export function narrateToolStart(
 				return `Running git ${String(args.command).split(" ").slice(1, 3).join(" ")}...`;
 			if (cmd === "npm" || cmd === "bun")
 				return `Running ${String(args.command).slice(0, 40)}...`;
-			return `Executing command...`;
+			return "Executing command...";
 		}
 		case "read_file": {
 			const filename = String(args.path || "")
@@ -58,7 +58,7 @@ export function narrateToolEnd(
 		durationMs < 1000
 			? `${durationMs}ms`
 			: `${(durationMs / 1000).toFixed(1)}s`;
-	if (!success) return `Failed — trying another approach...`;
+	if (!success) return "Failed — trying another approach...";
 
 	switch (toolName) {
 		case "run_command":

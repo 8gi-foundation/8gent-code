@@ -15,8 +15,8 @@
  * If not available, falls back to macOS `say` command.
  */
 
-import { execSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 
 const TTS_SERVER_URL = process.env.TTS_SERVER_URL || "http://localhost:8000";
 
@@ -129,12 +129,12 @@ export async function speak(
 		if (audio) {
 			// Play the audio buffer
 			const tmpPath = `/tmp/8gent-tts-${Date.now()}.wav`;
-			require("fs").writeFileSync(tmpPath, audio);
+			require("node:fs").writeFileSync(tmpPath, audio);
 			try {
 				execSync(`afplay "${tmpPath}"`, { stdio: "pipe" });
 			} finally {
 				try {
-					require("fs").unlinkSync(tmpPath);
+					require("node:fs").unlinkSync(tmpPath);
 				} catch {}
 			}
 			return;

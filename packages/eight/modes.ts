@@ -5,9 +5,9 @@
  * 5 built-in modes + user-defined custom modes via ~/.8gent/modes.yaml
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 
 export interface AgentMode {
@@ -184,10 +184,9 @@ export class ModeManager {
 		if (this._fastMode) {
 			this.disableFastMode();
 			return false;
-		} else {
-			this.enableFastMode(currentModel);
-			return true;
 		}
+		this.enableFastMode(currentModel);
+		return true;
 	}
 
 	setActiveMode(name: string): boolean {

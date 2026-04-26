@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
-let analyzer: any, scorer: any, reporter: any;
+let analyzer: any;
+let scorer: any;
+let reporter: any;
 
 beforeEach(async () => {
 	try {
@@ -26,7 +28,7 @@ describe("SEO Analyzer", () => {
 
 	it("analyzeMeta reports missing meta tags", () => {
 		const analyzeMeta = analyzer.analyzeMeta || analyzer.default?.analyzeMeta;
-		const html = `<html><head></head><body><p>No meta</p></body></html>`;
+		const html = "<html><head></head><body><p>No meta</p></body></html>";
 		const result = analyzeMeta(html);
 		expect(result.title).toBeFalsy();
 		expect(result.description).toBeFalsy();

@@ -44,8 +44,8 @@ function applyBuiltin(
 
 		case "truncate": {
 			const max = arg ? Number.parseInt(arg, 10) : 80;
-			if (isNaN(max) || max < 0) return value;
-			return value.length > max ? value.slice(0, max) + "..." : value;
+			if (Number.isNaN(max) || max < 0) return value;
+			return value.length > max ? `${value.slice(0, max)}...` : value;
 		}
 
 		case "default":
@@ -54,7 +54,7 @@ function applyBuiltin(
 		case "date": {
 			// arg is a format string: "YYYY", "MM", "DD", "YYYY-MM-DD", "iso", "locale"
 			const d = value ? new Date(value) : new Date();
-			if (isNaN(d.getTime())) return value; // not a valid date — pass through
+			if (Number.isNaN(d.getTime())) return value; // not a valid date — pass through
 			const fmt = arg ?? "iso";
 			if (fmt === "iso") return d.toISOString();
 			if (fmt === "locale") return d.toLocaleDateString();

@@ -53,8 +53,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 
 		if (handlers.size >= this.maxListeners) {
 			console.warn(
-				`Warning: Event '${String(event)}' has ${handlers.size} listeners. ` +
-					"This might indicate a memory leak.",
+				`Warning: Event '${String(event)}' has ${handlers.size} listeners. This might indicate a memory leak.`,
 			);
 		}
 
@@ -77,7 +76,7 @@ export class TypedEventEmitter<Events extends Record<string, unknown>> {
 			this.onceHandlers.set(event, new Set());
 		}
 
-		this.onceHandlers.get(event)!.add(handler as EventHandler<unknown>);
+		this.onceHandlers.get(event)?.add(handler as EventHandler<unknown>);
 		this.stats.totalHandlers++;
 
 		return {

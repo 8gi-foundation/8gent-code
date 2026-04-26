@@ -4,9 +4,9 @@
  * Shell execution, process management, and environment tools.
  */
 
-import { execSync, spawn } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
+import { execSync, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -82,11 +82,11 @@ registerTool(
 			const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 			const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-			if (deps["vitest"]) {
+			if (deps.vitest) {
 				cmd = "npx vitest run";
 				if (file) cmd += ` ${file}`;
 				if (grep) cmd += ` -t "${grep}"`;
-			} else if (deps["jest"]) {
+			} else if (deps.jest) {
 				cmd = "npx jest";
 				if (file) cmd += ` ${file}`;
 				if (grep) cmd += ` -t "${grep}"`;
@@ -108,7 +108,7 @@ registerTool(
 		} catch (err: any) {
 			return {
 				passed: false,
-				output: ((err.stdout ?? "") + "\n" + (err.stderr ?? "")).slice(0, 8000),
+				output: `${err.stdout ?? ""}\n${err.stderr ?? ""}`.slice(0, 8000),
 				command: cmd,
 			};
 		}

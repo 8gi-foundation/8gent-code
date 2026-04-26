@@ -5,9 +5,9 @@
  * Used by the healer to avoid repeating the same mistakes.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 export interface FailureEntry {
 	timestamp: string;
@@ -32,7 +32,7 @@ function ensureLogDir(): void {
  */
 export function logFailure(entry: FailureEntry): void {
 	ensureLogDir();
-	const line = JSON.stringify(entry) + "\n";
+	const line = `${JSON.stringify(entry)}\n`;
 	fs.appendFileSync(LOG_FILE, line, "utf-8");
 }
 

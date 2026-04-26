@@ -6,11 +6,11 @@
  * only when the orchestrator (Eight) approves.
  */
 
-import { exec } from "child_process";
-import * as crypto from "crypto";
-import { existsSync, mkdirSync } from "fs";
-import { join, resolve } from "path";
-import { promisify } from "util";
+import { exec } from "node:child_process";
+import * as crypto from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 

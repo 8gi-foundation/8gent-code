@@ -22,7 +22,7 @@
  * ```
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import {
 	getApiKey,
 	isCloudAvailable,
@@ -317,7 +317,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			// Clean up the WAV file
 			MicRecorder.cleanupFile(wavPath);
 
-			if (transcript && transcript.text) {
+			if (transcript?.text) {
 				this.emit("final-transcript", transcript);
 			}
 
@@ -339,7 +339,8 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		if (this.state === "idle") {
 			await this.startRecording();
 			return null;
-		} else if (this.state === "recording") {
+		}
+		if (this.state === "recording") {
 			return this.stopRecording();
 		}
 		return null;

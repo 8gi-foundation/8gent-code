@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.dirname(process.env.FIXTURE_PATH || ".");
 
-let scanner: any, vulnerability: any, report: any;
+let scanner: any;
+let vulnerability: any;
+let report: any;
 
 beforeEach(async () => {
 	try {
@@ -69,7 +71,7 @@ describe("Scanner — scanCode", () => {
 
 	it("detects innerHTML as XSS risk", () => {
 		const scanCode = scanner.scanCode || scanner.default?.scanCode;
-		const result = scanCode(`element.innerHTML = userInput;`);
+		const result = scanCode("element.innerHTML = userInput;");
 		const xssVuln = result.vulnerabilities.find(
 			(v: any) => v.category === "xss",
 		);
@@ -87,7 +89,7 @@ describe("Scanner — scanCode", () => {
 	it("returns clean result for safe code", () => {
 		const scanCode = scanner.scanCode || scanner.default?.scanCode;
 		const result = scanCode(
-			`function add(a: number, b: number) { return a + b; }`,
+			"function add(a: number, b: number) { return a + b; }",
 		);
 		expect(result.vulnerabilities.length).toBe(0);
 	});

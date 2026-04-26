@@ -11,9 +11,9 @@
  * Backwards-compatible with v1 API (MemoryManager class with same method signatures).
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	type EmbeddingProvider,
 	NullEmbeddingProvider,
@@ -669,7 +669,7 @@ export class MemoryManager {
 			source: options?.source,
 		};
 		ensureDir(path.dirname(filePath));
-		fs.appendFileSync(filePath, JSON.stringify(v1Entry) + "\n", "utf-8");
+		fs.appendFileSync(filePath, `${JSON.stringify(v1Entry)}\n`, "utf-8");
 		return id;
 	}
 
@@ -1220,7 +1220,8 @@ export class MemoryManager {
 	async getGraph(): Promise<KnowledgeGraph> {
 		if (this.graph) return this.graph;
 		await this.init();
-		this.graph = new KnowledgeGraph(this.projectStore!.db);
+		if (!this.projectStore) throw new Error("projectStore not initialised");
+		this.graph = new KnowledgeGraph(this.projectStore.db);
 		return this.graph;
 	}
 

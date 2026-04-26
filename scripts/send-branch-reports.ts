@@ -3,9 +3,9 @@
  * Send branch reports to Telegram + generate TTS audio
  */
 
-import { execSync } from "child_process";
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { execSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;

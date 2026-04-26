@@ -90,11 +90,7 @@ export function attachTelegramTurthSurface(bot: TelegramBot): () => void {
 	registerPromptSurface(async (req: TurthRequest) => {
 		const token = newToken();
 
-		const body =
-			`Permission requested\n\n` +
-			`${req.summary}\n` +
-			(req.detail ? `\n${req.detail}\n` : "") +
-			`\nCapability: \`${req.capability}\``;
+		const body = `Permission requested\n\n${req.summary}\n${req.detail ? `\n${req.detail}\n` : ""}\nCapability: \`${req.capability}\``;
 
 		const buttons = [
 			SCOPE_BUTTONS.slice(0, 2).map(([label, scope]) => ({

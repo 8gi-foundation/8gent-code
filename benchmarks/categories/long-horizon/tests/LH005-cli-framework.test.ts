@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import * as path from "path";
+import * as path from "node:path";
 
 const WORK_DIR =
 	process.env.WORK_DIR || path.join(import.meta.dir, "../../autoresearch/work");
 
 // Dynamic imports from generated code
-let argParser: any,
-	commandRegistry: any,
-	helpGenerator: any,
-	progress: any,
-	formatter: any;
+let argParser: any;
+let commandRegistry: any;
+let helpGenerator: any;
+let progress: any;
+let formatter: any;
 
 beforeEach(async () => {
 	try {

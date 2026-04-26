@@ -82,5 +82,5 @@ const events = fo.drainEvents();
 console.log(`[smoke-failover] events recorded: ${events.length}`);
 assert(events.length >= 3, "expected at least 3 failover events");
 
-console.log(`[smoke-failover] OK`);
+console.log("[smoke-failover] OK");
 process.exit(0);

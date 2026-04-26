@@ -2,7 +2,7 @@
 // 8GI Discord Server Setup - Run by 8CO (Community Officer)
 // Creates channels, roles, and welcome message for the 8GI Foundation Discord
 
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
 
 // Load .env
 const envFile = readFileSync(`${import.meta.dir}/../.env`, "utf-8");
@@ -250,7 +250,8 @@ async function main() {
 
 	if (constitutionChannel) {
 		await api("POST", `/channels/${constitutionChannel.id}/messages`, {
-			content: `# 8GI. Constitution\n\nInfinite General Intelligence. A circle of engineers and their AI agents, building open source together.\n\n## The 10 Articles\n\n**1. No Evil.** No agent, no member, no code shall cause deliberate harm, manipulation, or deception.\n**2. No Hate.** No discrimination, no surveillance of individuals, no hateful content.\n**3. No Exploitation.** No content that exploits children. No violations of consent.\n**4. No Weapons.** No malware. No tools of violence.\n**5. No Theft.** No data theft. No intellectual property infringement.\n**6. Privacy is Sacred.** Personal data never leaves your machine without explicit opt-in.\n**7. Open Source by Default.** MIT licensed core. Knowledge compounds when shared.\n**8. Review Before Merge.** All AI-generated code through human review and security gate.\n**9. The 200-Line Discipline.** No single ability exceeds 200 lines. Break it up or justify it.\n**10. Transparency.** Every step logged. Every decision traceable. Every action reviewable.\n\nAgreement to all 10 articles is required for membership. Read them. Understand them. If any feel wrong, say so.\n\n**Full document:** https://8gent.world/constitution`,
+			content:
+				"# 8GI. Constitution\n\nInfinite General Intelligence. A circle of engineers and their AI agents, building open source together.\n\n## The 10 Articles\n\n**1. No Evil.** No agent, no member, no code shall cause deliberate harm, manipulation, or deception.\n**2. No Hate.** No discrimination, no surveillance of individuals, no hateful content.\n**3. No Exploitation.** No content that exploits children. No violations of consent.\n**4. No Weapons.** No malware. No tools of violence.\n**5. No Theft.** No data theft. No intellectual property infringement.\n**6. Privacy is Sacred.** Personal data never leaves your machine without explicit opt-in.\n**7. Open Source by Default.** MIT licensed core. Knowledge compounds when shared.\n**8. Review Before Merge.** All AI-generated code through human review and security gate.\n**9. The 200-Line Discipline.** No single ability exceeds 200 lines. Break it up or justify it.\n**10. Transparency.** Every step logged. Every decision traceable. Every action reviewable.\n\nAgreement to all 10 articles is required for membership. Read them. Understand them. If any feel wrong, say so.\n\n**Full document:** https://8gent.world/constitution",
 		});
 		console.log("  + Constitution posted");
 	}
@@ -261,7 +262,8 @@ async function main() {
 	);
 	if (gettingStarted) {
 		await api("POST", `/channels/${gettingStarted.id}/messages`, {
-			content: `# Welcome to the Circle\n\n## How to join\n1. A current member vouches for you\n2. Read and agree to the Constitution (see #constitution)\n3. Run the setup script: \`git clone https://github.com/8gent-foundation/8gi-setup && cd 8gi-setup && ./setup.sh\`\n4. Your vessel comes online. You are in.\n\n## What you get\n- Local AI coding agent (8gent Code, powered by Ollama)\n- Your own Telegram bot\n- A persistent vessel on Fly.io\n- Citizenship in the 8gent.games world (Dublin)\n- A companion that evolves with your coding\n\n## What you give\n- Pull requests and code review\n- Honest feedback\n- Anonymised usage patterns (opt-in only)\n\n## Links\n- Constitution: https://8gent.world/constitution\n- Source code: https://8gent.dev\n- Games world: https://8gent.games\n- GitHub org: https://github.com/8gent-foundation\n\nThe collective gets smarter every session. That includes yours.`,
+			content:
+				"# Welcome to the Circle\n\n## How to join\n1. A current member vouches for you\n2. Read and agree to the Constitution (see #constitution)\n3. Run the setup script: `git clone https://github.com/8gent-foundation/8gi-setup && cd 8gi-setup && ./setup.sh`\n4. Your vessel comes online. You are in.\n\n## What you get\n- Local AI coding agent (8gent Code, powered by Ollama)\n- Your own Telegram bot\n- A persistent vessel on Fly.io\n- Citizenship in the 8gent.games world (Dublin)\n- A companion that evolves with your coding\n\n## What you give\n- Pull requests and code review\n- Honest feedback\n- Anonymised usage patterns (opt-in only)\n\n## Links\n- Constitution: https://8gent.world/constitution\n- Source code: https://8gent.dev\n- Games world: https://8gent.games\n- GitHub org: https://github.com/8gent-foundation\n\nThe collective gets smarter every session. That includes yours.",
 		});
 		console.log("  + Getting started guide posted");
 	}

@@ -31,7 +31,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:latest";
 const HEALTH_PORT = Number.parseInt(process.env.HEALTH_PORT || "8080", 10);
 
 // Security: delete secrets from env after reading
-delete process.env.VESSEL_AUTH_TOKEN;
+process.env.VESSEL_AUTH_TOKEN = undefined;
 
 // -- Validate required config --
 if (!AUTH_TOKEN) {
@@ -72,27 +72,26 @@ async function waitForInference(maxRetries = 30): Promise<boolean> {
 		}
 		console.error("[vessel] Model proxy unreachable after max retries");
 		return false;
-	} else {
-		// Ollama mode - wait for local Ollama
-		for (let i = 0; i < maxRetries; i++) {
-			try {
-				const res = await fetch("http://localhost:11434/api/tags");
-				if (res.ok) {
-					const data = (await res.json()) as any;
-					console.log(
-						`[vessel] Ollama ready - ${data.models?.length ?? 0} models`,
-					);
-					return true;
-				}
-			} catch {
-				/* not ready */
-			}
-			console.log(`[vessel] Waiting for Ollama... (${i + 1}/${maxRetries})`);
-			await Bun.sleep(2000);
-		}
-		console.error("[vessel] Ollama failed to start");
-		return false;
 	}
+	// Ollama mode - wait for local Ollama
+	for (let i = 0; i < maxRetries; i++) {
+		try {
+			const res = await fetch("http://localhost:11434/api/tags");
+			if (res.ok) {
+				const data = (await res.json()) as any;
+				console.log(
+					`[vessel] Ollama ready - ${data.models?.length ?? 0} models`,
+				);
+				return true;
+			}
+		} catch {
+			/* not ready */
+		}
+		console.log(`[vessel] Waiting for Ollama... (${i + 1}/${maxRetries})`);
+		await Bun.sleep(2000);
+	}
+	console.error("[vessel] Ollama failed to start");
+	return false;
 }
 
 // -- Vessel status for heartbeats and health checks --

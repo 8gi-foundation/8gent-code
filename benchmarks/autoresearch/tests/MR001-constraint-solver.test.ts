@@ -350,7 +350,7 @@ describe("MR001: Constraint Solver", () => {
 		for (let r = 0; r < 9; r++) {
 			for (let c = 0; c < 9; c++) {
 				if (EASY_PUZZLE[r][c] === 0) {
-					initialEmptyDomainSizes.push(domains.get(`${r},${c}`)!.size);
+					initialEmptyDomainSizes.push(domains.get(`${r},${c}`)?.size);
 				}
 			}
 		}

@@ -7,8 +7,8 @@
  * Tools are split into groups and composed into a single ToolSet.
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
@@ -292,12 +292,12 @@ const listFiles = tool({
 			ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
 		});
 		// Mark directories with trailing /
-		const { stat: fsStat } = await import("fs/promises");
+		const { stat: fsStat } = await import("node:fs/promises");
 		const results: string[] = [];
 		for (const f of files.slice(0, 100)) {
 			try {
 				const s = await fsStat(path.join(absolutePath, f));
-				results.push(s.isDirectory() ? f + "/" : f);
+				results.push(s.isDirectory() ? `${f}/` : f);
 			} catch {
 				results.push(f);
 			}
@@ -541,7 +541,7 @@ const readImage = tool({
 					channels: imageInfo.channels,
 					hasAlpha: imageInfo.hasAlpha,
 					base64Length: imageInfo.base64.length,
-					base64Preview: imageInfo.base64.slice(0, 100) + "...",
+					base64Preview: `${imageInfo.base64.slice(0, 100)}...`,
 				},
 				null,
 				2,
@@ -641,7 +641,7 @@ const readNotebook = tool({
 				executionCount: cell.executionCount,
 				source:
 					cell.source.length > 500
-						? cell.source.slice(0, 500) + "... [truncated]"
+						? `${cell.source.slice(0, 500)}... [truncated]`
 						: cell.source,
 				outputCount: cell.outputs.length,
 				outputs: cell.outputs.slice(0, 3).map((o: any) => ({
@@ -928,10 +928,10 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = command.replace("create-next-app", "create-next-app --yes");
 	}
 	if (command.includes("npm init") && !command.includes("-y")) {
-		finalCommand = command + " -y";
+		finalCommand = `${command} -y`;
 	}
 
-	const { spawn } = await import("child_process");
+	const { spawn } = await import("node:child_process");
 
 	return new Promise((resolve) => {
 		const proc = spawn("sh", ["-c", finalCommand], {
@@ -995,11 +995,7 @@ async function runShellCommand(command: string): Promise<string> {
 
 				const partialOutput = (stdout + stderr).trim().slice(-500);
 				resolve(
-					`[STILL RUNNING - promoted to background task]\n` +
-						`Task ID: ${taskId}\n` +
-						`The command didn't exit within 10s, so it was moved to a background task.\n` +
-						`Use background_status("${taskId}") or background_output("${taskId}") to check on it.\n` +
-						(partialOutput ? `\nPartial output so far:\n${partialOutput}` : ""),
+					`[STILL RUNNING - promoted to background task]\nTask ID: ${taskId}\nThe command didn't exit within 10s, so it was moved to a background task.\nUse background_status("${taskId}") or background_output("${taskId}") to check on it.\n${partialOutput ? `\nPartial output so far:\n${partialOutput}` : ""}`,
 				);
 			} catch {
 				killProcessTree();
@@ -1018,7 +1014,7 @@ async function runShellCommand(command: string): Promise<string> {
 				command: finalCommand,
 				exitCode: -1,
 				stdout,
-				stderr: stderr + "\nTIMEOUT",
+				stderr: `${stderr}\nTIMEOUT`,
 				duration: Date.now() - startTime,
 				workingDirectory: _ctx.workingDirectory,
 			});
@@ -1458,9 +1454,9 @@ const writeNotesTool = tool({
 	}),
 	execute: async ({ title, content, append }) => {
 		const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import(
-			"fs"
+			"node:fs"
 		);
-		const { join } = await import("path");
+		const { join } = await import("node:path");
 		const dataDir = join(process.env.HOME || "~", ".8gent", "tabs");
 		const filepath = join(dataDir, "notes.json");
 		if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });

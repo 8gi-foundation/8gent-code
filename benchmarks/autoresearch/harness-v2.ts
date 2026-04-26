@@ -158,7 +158,7 @@ function log(msg: string): void {
 	const line = `[${new Date().toISOString()}] ${msg}`;
 	console.log(line);
 	try {
-		appendFileSync(config.logFile, line + "\n");
+		appendFileSync(config.logFile, `${line}\n`);
 	} catch {}
 }
 
@@ -339,7 +339,7 @@ function initResultsFile(): void {
 		"timestamp",
 	].join("\t");
 
-	writeFileSync(config.outputFile, header + "\n");
+	writeFileSync(config.outputFile, `${header}\n`);
 }
 
 function appendResult(benchmark: BenchmarkDefinition, run: BenchmarkRun): void {
@@ -364,7 +364,7 @@ function appendResult(benchmark: BenchmarkDefinition, run: BenchmarkRun): void {
 		new Date(run.timestamp).toISOString(),
 	].join("\t");
 
-	appendFileSync(config.outputFile, row + "\n");
+	appendFileSync(config.outputFile, `${row}\n`);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
