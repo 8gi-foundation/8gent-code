@@ -15,6 +15,7 @@
 			"**/_generated/**",
 			"**/*.min.js",
 			"**/bun.lock",
+			"**/.8gent/**",
 			"apps/8gent-computer/build/**",
 			"My-Brain-Is-Full-Crew/**",
 			"packages/skills/business-builder/**",
