@@ -503,6 +503,18 @@ export type {
 	Measurement,
 	MemorySink,
 } from "./experiment.js";
+export {
+	createSkill,
+	slugify,
+	extractKeywords,
+	renderSkillMarkdown,
+	scoreCoverage,
+} from "./creator.js";
+export type {
+	CreateSkillInput,
+	CreateSkillResult,
+	SkillExample,
+} from "./creator.js";
 
 // ============================================
 // Utility Functions
