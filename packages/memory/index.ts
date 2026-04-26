@@ -271,6 +271,8 @@ export class MemoryManager {
    * V1 compatible: recall(query, 10) — returns RecallResult[]
    * V2 enhanced:   recall(query, { types, scope, minImportance }) — returns SearchResult[]
    */
+  async recall(query: string, limit: number): Promise<RecallResult[]>;
+  async recall(query: string, options?: SearchOptions): Promise<SearchResult[]>;
   async recall(
     query: string,
     optionsOrLimit?: SearchOptions | number

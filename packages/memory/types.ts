@@ -26,7 +26,9 @@ export type SourceType =
   | "consolidation"
   | "extraction"
   | "import"
-  | "observation";
+  | "observation"
+  | `auto:${string}`
+  | `user:${string}`;
 
 export type SemanticCategory =
   | "preference"
