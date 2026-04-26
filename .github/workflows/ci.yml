@@ -43,7 +43,7 @@ jobs:
         run: bun run lint
 
       - name: Test
-        run: bun test
+        run: bun run test
 
       - name: Computer-use smoke (Phase 3)
         run: bun run packages/eight/scripts/computer-use-suite.ts
