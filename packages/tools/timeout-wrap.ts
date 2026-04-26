@@ -2,10 +2,10 @@
  * Error thrown when a timeout occurs.
  */
 class TimeoutError extends Error {
-  constructor(message?: string) {
-    super(message);
-    this.name = 'TimeoutError';
-  }
+	constructor(message?: string) {
+		super(message);
+		this.name = "TimeoutError";
+	}
 }
 
 /**
@@ -16,18 +16,20 @@ class TimeoutError extends Error {
  * @returns A new promise that resolves or rejects with the timeout.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, message?: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new TimeoutError(message || 'Timeout'));
-    }, ms);
-    promise.then((value) => {
-      clearTimeout(timeoutId);
-      resolve(value);
-    }).catch((error) => {
-      clearTimeout(timeoutId);
-      reject(error);
-    });
-  });
+	return new Promise((resolve, reject) => {
+		const timeoutId = setTimeout(() => {
+			reject(new TimeoutError(message || "Timeout"));
+		}, ms);
+		promise
+			.then((value) => {
+				clearTimeout(timeoutId);
+				resolve(value);
+			})
+			.catch((error) => {
+				clearTimeout(timeoutId);
+				reject(error);
+			});
+	});
 }
 
 /**
@@ -37,14 +39,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message?: string): Prom
  * @returns A promise that resolves when any of the input promises resolve, or rejects with a TimeoutError.
  */
 function raceWithTimeout<T>(promises: Promise<T>[], ms: number): Promise<T> {
-  return Promise.race<T>([
-    ...promises,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => {
-        reject(new TimeoutError('Timeout'));
-      }, ms);
-    })
-  ]);
+	return Promise.race<T>([
+		...promises,
+		new Promise<T>((_, reject) => {
+			setTimeout(() => {
+				reject(new TimeoutError("Timeout"));
+			}, ms);
+		}),
+	]);
 }
 
 export { TimeoutError, withTimeout, raceWithTimeout };

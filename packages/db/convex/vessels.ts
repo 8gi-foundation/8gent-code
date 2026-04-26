@@ -10,77 +10,77 @@
  * #1569 landing first.
  */
 
-import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
 const STALE_MS = 90_000;
 
 export const register = mutation({
-  args: {
-    vesselId: v.string(),
-    name: v.string(),
-    url: v.string(),
-    ownerId: v.string(),
-    capabilities: v.array(v.string()),
-    model: v.string(),
-    region: v.string(),
-    startedAt: v.number(),
-    activeSessions: v.number(),
-    maxSessions: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const existing = await ctx.db
-      .query("vessels")
-      .withIndex("by_vesselId", (q) => q.eq("vesselId", args.vesselId))
-      .unique();
+	args: {
+		vesselId: v.string(),
+		name: v.string(),
+		url: v.string(),
+		ownerId: v.string(),
+		capabilities: v.array(v.string()),
+		model: v.string(),
+		region: v.string(),
+		startedAt: v.number(),
+		activeSessions: v.number(),
+		maxSessions: v.number(),
+	},
+	handler: async (ctx, args) => {
+		const now = Date.now();
+		const existing = await ctx.db
+			.query("vessels")
+			.withIndex("by_vesselId", (q) => q.eq("vesselId", args.vesselId))
+			.unique();
 
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        ...args,
-        lastHeartbeat: now,
-      });
-      return existing._id;
-    }
-    return await ctx.db.insert("vessels", { ...args, lastHeartbeat: now });
-  },
+		if (existing) {
+			await ctx.db.patch(existing._id, {
+				...args,
+				lastHeartbeat: now,
+			});
+			return existing._id;
+		}
+		return await ctx.db.insert("vessels", { ...args, lastHeartbeat: now });
+	},
 });
 
 export const heartbeat = mutation({
-  args: {
-    vesselId: v.string(),
-    activeSessions: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const row = await ctx.db
-      .query("vessels")
-      .withIndex("by_vesselId", (q) => q.eq("vesselId", args.vesselId))
-      .unique();
-    if (!row) return null;
-    await ctx.db.patch(row._id, {
-      lastHeartbeat: Date.now(),
-      activeSessions: args.activeSessions,
-    });
-    return row._id;
-  },
+	args: {
+		vesselId: v.string(),
+		activeSessions: v.number(),
+	},
+	handler: async (ctx, args) => {
+		const row = await ctx.db
+			.query("vessels")
+			.withIndex("by_vesselId", (q) => q.eq("vesselId", args.vesselId))
+			.unique();
+		if (!row) return null;
+		await ctx.db.patch(row._id, {
+			lastHeartbeat: Date.now(),
+			activeSessions: args.activeSessions,
+		});
+		return row._id;
+	},
 });
 
 export const unregister = mutation({
-  args: { vesselId: v.string() },
-  handler: async (ctx, args) => {
-    const row = await ctx.db
-      .query("vessels")
-      .withIndex("by_vesselId", (q) => q.eq("vesselId", args.vesselId))
-      .unique();
-    if (row) await ctx.db.delete(row._id);
-  },
+	args: { vesselId: v.string() },
+	handler: async (ctx, args) => {
+		const row = await ctx.db
+			.query("vessels")
+			.withIndex("by_vesselId", (q) => q.eq("vesselId", args.vesselId))
+			.unique();
+		if (row) await ctx.db.delete(row._id);
+	},
 });
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    const cutoff = Date.now() - STALE_MS;
-    const rows = await ctx.db.query("vessels").collect();
-    return rows.filter((r) => r.lastHeartbeat >= cutoff);
-  },
+	args: {},
+	handler: async (ctx) => {
+		const cutoff = Date.now() - STALE_MS;
+		const rows = await ctx.db.query("vessels").collect();
+		return rows.filter((r) => r.lastHeartbeat >= cutoff);
+	},
 });

@@ -5,41 +5,41 @@
  */
 
 export class Calculator {
-  private result: number;
+	private result: number;
 
-  constructor(initial: number = 0) {
-    this.result = initial;
-  }
+	constructor(initial = 0) {
+		this.result = initial;
+	}
 
-  add(n: number): Calculator {
-    this.result += n;
-    return this;
-  }
+	add(n: number): Calculator {
+		this.result += n;
+		return this;
+	}
 
-  subtract(n: number): Calculator {
-    this.result -= n;
-    return this;
-  }
+	subtract(n: number): Calculator {
+		this.result -= n;
+		return this;
+	}
 
-  multiply(n: number): Calculator {
-    this.result *= n;
-    return this;
-  }
+	multiply(n: number): Calculator {
+		this.result *= n;
+		return this;
+	}
 
-  divide(n: number): Calculator {
-    if (n === 0) throw new Error("Division by zero");
-    this.result /= n;
-    return this;
-  }
+	divide(n: number): Calculator {
+		if (n === 0) throw new Error("Division by zero");
+		this.result /= n;
+		return this;
+	}
 
-  getResult(): number {
-    return this.result;
-  }
+	getResult(): number {
+		return this.result;
+	}
 
-  reset(): Calculator {
-    this.result = 0;
-    return this;
-  }
+	reset(): Calculator {
+		this.result = 0;
+		return this;
+	}
 }
 
 // Usage example:

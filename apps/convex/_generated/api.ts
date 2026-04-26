@@ -13,8 +13,11 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyApi = { [k: string]: { [k: string]: any } };
 
-export const api: AnyApi = new Proxy({}, {
-  get: () => new Proxy({}, { get: () => (() => null) }),
-}) as AnyApi;
+export const api: AnyApi = new Proxy(
+	{},
+	{
+		get: () => new Proxy({}, { get: () => () => null }),
+	},
+) as AnyApi;
 
 export const internal: AnyApi = api;

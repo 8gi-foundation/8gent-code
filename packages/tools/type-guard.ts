@@ -4,7 +4,7 @@
  * @returns True if val is a string.
  */
 export function isString(val: any): boolean {
-  return typeof val === 'string';
+	return typeof val === "string";
 }
 
 /**
@@ -13,7 +13,7 @@ export function isString(val: any): boolean {
  * @returns True if val is a number.
  */
 export function isNumber(val: any): boolean {
-  return typeof val === 'number';
+	return typeof val === "number";
 }
 
 /**
@@ -22,7 +22,7 @@ export function isNumber(val: any): boolean {
  * @returns True if val is a boolean.
  */
 export function isBoolean(val: any): boolean {
-  return typeof val === 'boolean';
+	return typeof val === "boolean";
 }
 
 /**
@@ -31,7 +31,7 @@ export function isBoolean(val: any): boolean {
  * @returns True if val is null.
  */
 export function isNull(val: any): boolean {
-  return val === null;
+	return val === null;
 }
 
 /**
@@ -40,7 +40,7 @@ export function isNull(val: any): boolean {
  * @returns True if val is undefined.
  */
 export function isUndefined(val: any): boolean {
-  return val === undefined;
+	return val === undefined;
 }
 
 /**
@@ -49,7 +49,7 @@ export function isUndefined(val: any): boolean {
  * @returns True if val is an array.
  */
 export function isArray(val: any): boolean {
-  return Array.isArray(val);
+	return Array.isArray(val);
 }
 
 /**
@@ -58,7 +58,7 @@ export function isArray(val: any): boolean {
  * @returns True if val is an object.
  */
 export function isObject(val: any): boolean {
-  return typeof val === 'object' && val !== null;
+	return typeof val === "object" && val !== null;
 }
 
 /**
@@ -67,7 +67,7 @@ export function isObject(val: any): boolean {
  * @returns True if val is non-null and non-undefined.
  */
 export function isNonNull<T>(val: T): val is NonNullable<T> {
-  return val !== null && val !== undefined;
+	return val !== null && val !== undefined;
 }
 
 /**
@@ -76,9 +76,9 @@ export function isNonNull<T>(val: T): val is NonNullable<T> {
  * @param message - The error message.
  */
 export function assert(condition: boolean, message: string): void {
-  if (!condition) {
-    throw new Error(message);
-  }
+	if (!condition) {
+		throw new Error(message);
+	}
 }
 
 /**
@@ -87,7 +87,7 @@ export function assert(condition: boolean, message: string): void {
  * @param message - The error message.
  */
 export function assertNonNull<T>(val: T, message: string): void {
-  assert(isNonNull(val), message);
+	assert(isNonNull(val), message);
 }
 
 /**
@@ -96,5 +96,5 @@ export function assertNonNull<T>(val: T, message: string): void {
  * @returns True if val is a record.
  */
 export function isRecord(val: any): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null && !Array.isArray(val);
+	return typeof val === "object" && val !== null && !Array.isArray(val);
 }

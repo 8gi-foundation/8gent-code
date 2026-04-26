@@ -15,68 +15,79 @@ let reconnectDelay = 2000;
 const MAX_RECONNECT_DELAY = 60_000;
 
 export function connectControlPlane(): void {
-  const code = process.env.VESSEL_CODE ?? "???";
+	const code = process.env.VESSEL_CODE ?? "???";
 
-  try {
-    ws = new WebSocket(CONTROL_PLANE_URL);
+	try {
+		ws = new WebSocket(CONTROL_PLANE_URL);
 
-    ws.onopen = () => {
-      console.log(`[${code}] Connected to control plane`);
-      reconnectDelay = 2000;
+		ws.onopen = () => {
+			console.log(`[${code}] Connected to control plane`);
+			reconnectDelay = 2000;
 
-      // Register with the control plane
-      ws!.send(JSON.stringify({
-        type: "vessel:register",
-        manifest: buildManifest(),
-      }));
-    };
+			// Register with the control plane
+			ws?.send(
+				JSON.stringify({
+					type: "vessel:register",
+					manifest: buildManifest(),
+				}),
+			);
+		};
 
-    ws.onmessage = async (event) => {
-      let msg: { type?: string; request_id?: string; task?: string; context?: string; from?: string } = {};
-      try {
-        msg = JSON.parse(event.data as string);
-      } catch {
-        return;
-      }
+		ws.onmessage = async (event) => {
+			let msg: {
+				type?: string;
+				request_id?: string;
+				task?: string;
+				context?: string;
+				from?: string;
+			} = {};
+			try {
+				msg = JSON.parse(event.data as string);
+			} catch {
+				return;
+			}
 
-      if (msg.type === "task:invoke") {
-        const result = await vesselInvoke({
-          task: msg.task ?? "",
-          context: msg.context,
-          from: msg.from,
-        });
+			if (msg.type === "task:invoke") {
+				const result = await vesselInvoke({
+					task: msg.task ?? "",
+					context: msg.context,
+					from: msg.from,
+				});
 
-        ws?.send(JSON.stringify({
-          type: "task:result",
-          request_id: msg.request_id,
-          ...result,
-        }));
-      }
+				ws?.send(
+					JSON.stringify({
+						type: "task:result",
+						request_id: msg.request_id,
+						...result,
+					}),
+				);
+			}
 
-      if (msg.type === "ping") {
-        ws?.send(JSON.stringify({ type: "pong", code }));
-      }
-    };
+			if (msg.type === "ping") {
+				ws?.send(JSON.stringify({ type: "pong", code }));
+			}
+		};
 
-    ws.onclose = (event) => {
-      console.log(`[${code}] Control plane disconnected (${event.code}). Reconnect in ${reconnectDelay / 1000}s`);
-      scheduleReconnect();
-    };
+		ws.onclose = (event) => {
+			console.log(
+				`[${code}] Control plane disconnected (${event.code}). Reconnect in ${reconnectDelay / 1000}s`,
+			);
+			scheduleReconnect();
+		};
 
-    ws.onerror = (err) => {
-      console.error(`[${code}] Control plane WS error:`, err);
-    };
-
-  } catch (err: any) {
-    console.error(`[${code}] Failed to connect to control plane:`, err.message);
-    scheduleReconnect();
-  }
+		ws.onerror = (err) => {
+			console.error(`[${code}] Control plane WS error:`, err);
+		};
+	} catch (err: any) {
+		console.error(`[${code}] Failed to connect to control plane:`, err.message);
+		scheduleReconnect();
+	}
 }
 
 function scheduleReconnect(): void {
-  setTimeout(() => {
-    connectControlPlane();
-  }, reconnectDelay);
+	setTimeout(() => {
+		connectControlPlane();
+	}, reconnectDelay);
 
-  reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+	reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
 }

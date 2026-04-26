@@ -27,85 +27,85 @@
 
 // Schema exports
 export {
-  SCHEMA,
-  type DesignSystem,
-  type ColorPalette,
-  type Typography,
-  type Component,
-  type StyleTag,
-  type DesignStyle,
-  type DesignMood,
-  type FontCategory,
-  type ParsedColors,
-  type ParsedTypography,
-} from './schema';
+	SCHEMA,
+	type DesignSystem,
+	type ColorPalette,
+	type Typography,
+	type Component,
+	type StyleTag,
+	type DesignStyle,
+	type DesignMood,
+	type FontCategory,
+	type ParsedColors,
+	type ParsedTypography,
+} from "./schema";
 
 // Database operations
 export {
-  initDatabase,
-  getDatabase,
-  closeDatabase,
-  insertDesignSystem,
-  getDesignSystemById,
-  getDesignSystemByName,
-  getAllDesignSystems,
-  getDesignSystemsByStyle,
-  getDesignSystemsByMood,
-  insertColorPalette,
-  getColorPaletteBySystemId,
-  insertTypography,
-  getTypographyBySystemId,
-  insertComponent,
-  getComponentsBySystemId,
-  getComponentByType,
-  insertStyleTag,
-  getTagsBySystemId,
-  getSystemsByTag,
-  searchDesignSystems,
-  insertDesignSystemWithRelations,
-  parseColorsJson,
-  parseTypographyJson,
-  hslToHex,
-  getDatabaseStats,
-} from './db';
+	initDatabase,
+	getDatabase,
+	closeDatabase,
+	insertDesignSystem,
+	getDesignSystemById,
+	getDesignSystemByName,
+	getAllDesignSystems,
+	getDesignSystemsByStyle,
+	getDesignSystemsByMood,
+	insertColorPalette,
+	getColorPaletteBySystemId,
+	insertTypography,
+	getTypographyBySystemId,
+	insertComponent,
+	getComponentsBySystemId,
+	getComponentByType,
+	insertStyleTag,
+	getTagsBySystemId,
+	getSystemsByTag,
+	searchDesignSystems,
+	insertDesignSystemWithRelations,
+	parseColorsJson,
+	parseTypographyJson,
+	hslToHex,
+	getDatabaseStats,
+} from "./db";
 
 // Extracted themes from portfolio
 export {
-  EXTRACTED_THEMES,
-  getAllThemes,
-  getThemeByName,
-  filterByStyle,
-  filterByMood,
-  searchByTag,
-  hslToCss,
-  type ExtractedTheme,
-} from './extractor';
+	EXTRACTED_THEMES,
+	getAllThemes,
+	getThemeByName,
+	filterByStyle,
+	filterByMood,
+	searchByTag,
+	hslToCss,
+	type ExtractedTheme,
+} from "./extractor";
 
 // Query interface (main API)
 export {
-  // Core queries
-  listAll,
-  getComplete,
-  findByStyle,
-  findByMood,
-  findByTag,
-  search,
-  // Suggestions
-  suggestForProject,
-  findSimilar,
-  // CSS generation
-  generateCssVariables,
-  generateTailwindConfig,
-  getHexPalette,
-  // Quick access
-  random,
-  featured,
-  listStyles,
-  listMoods,
-  // Types
-  type CompleteDesignSystem,
-  type DesignSuggestion,
-} from './query';
+	// Core queries
+	listAll,
+	getComplete,
+	findByStyle,
+	findByMood,
+	findByTag,
+	search,
+	// Suggestions
+	suggestForProject,
+	findSimilar,
+	// CSS generation
+	generateCssVariables,
+	generateTailwindConfig,
+	getHexPalette,
+	// Quick access
+	random,
+	featured,
+	listStyles,
+	listMoods,
+	// Types
+	type CompleteDesignSystem,
+	type DesignSuggestion,
+} from "./query";
 
 // Seeding function
-export { seedDatabase } from './seed';
+export { seedDatabase } from "./seed";

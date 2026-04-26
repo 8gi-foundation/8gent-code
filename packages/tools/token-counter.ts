@@ -13,9 +13,9 @@
 export type TokenMethod = "chars4" | "words" | "tiktoken-approx";
 
 export interface Message {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  name?: string;
+	role: "system" | "user" | "assistant" | "tool";
+	content: string;
+	name?: string;
 }
 
 /** Overhead tokens per message in chat-format models (role + delimiters). */
@@ -28,12 +28,12 @@ const REPLY_PRIMING_TOKENS = 3;
 // ---------------------------------------------------------------------------
 
 function byChars4(text: string): number {
-  return Math.ceil(text.length / 4);
+	return Math.ceil(text.length / 4);
 }
 
 function byWords(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  return Math.ceil(words.length * 1.3);
+	const words = text.trim().split(/\s+/).filter(Boolean);
+	return Math.ceil(words.length * 1.3);
 }
 
 /**
@@ -45,27 +45,26 @@ function byWords(text: string): number {
  *   - punctuation / whitespace tokens
  */
 function byTiktokenApprox(text: string): number {
-  if (!text) return 0;
+	if (!text) return 0;
 
-  // cl100k_base primary split pattern (simplified)
-  const pattern =
-    /(?:'s|'t|'re|'ve|'m|'ll|'d)|(?:[A-Za-z]+)|(?:[0-9]{1,3})|(?:[^\s\w])/g;
+	// cl100k_base primary split pattern (simplified)
+	const pattern = /(?:'s|'t|'re|'ve|'m|'ll|'d)|(?:[A-Za-z]+)|(?:[0-9]{1,3})|(?:[^\s\w])/g;
 
-  const matches = text.match(pattern);
-  if (!matches) return 0;
+	const matches = text.match(pattern);
+	if (!matches) return 0;
 
-  // Each match is approximately 1 token; long alpha runs may split further
-  let count = 0;
-  for (const token of matches) {
-    if (/^[A-Za-z]+$/.test(token)) {
-      // Rough subword split: every ~4 chars is a token for longer words
-      count += Math.ceil(token.length / 4);
-    } else {
-      count += 1;
-    }
-  }
+	// Each match is approximately 1 token; long alpha runs may split further
+	let count = 0;
+	for (const token of matches) {
+		if (/^[A-Za-z]+$/.test(token)) {
+			// Rough subword split: every ~4 chars is a token for longer words
+			count += Math.ceil(token.length / 4);
+		} else {
+			count += 1;
+		}
+	}
 
-  return count;
+	return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,21 +77,18 @@ function byTiktokenApprox(text: string): number {
  * @param text   - The text to measure.
  * @param method - Estimation method. Defaults to "tiktoken-approx".
  */
-export function countTokens(
-  text: string,
-  method: TokenMethod = "tiktoken-approx"
-): number {
-  if (!text) return 0;
-  switch (method) {
-    case "chars4":
-      return byChars4(text);
-    case "words":
-      return byWords(text);
-    case "tiktoken-approx":
-      return byTiktokenApprox(text);
-    default:
-      throw new Error(`Unknown token method: ${method}`);
-  }
+export function countTokens(text: string, method: TokenMethod = "tiktoken-approx"): number {
+	if (!text) return 0;
+	switch (method) {
+		case "chars4":
+			return byChars4(text);
+		case "words":
+			return byWords(text);
+		case "tiktoken-approx":
+			return byTiktokenApprox(text);
+		default:
+			throw new Error(`Unknown token method: ${method}`);
+	}
 }
 
 /**
@@ -104,21 +100,21 @@ export function countTokens(
  * @param method   - Estimation method. Defaults to "tiktoken-approx".
  */
 export function countMessages(
-  messages: Message[],
-  method: TokenMethod = "tiktoken-approx"
+	messages: Message[],
+	method: TokenMethod = "tiktoken-approx",
 ): number {
-  let total = REPLY_PRIMING_TOKENS;
+	let total = REPLY_PRIMING_TOKENS;
 
-  for (const msg of messages) {
-    total += MESSAGE_OVERHEAD;
-    total += countTokens(msg.content, method);
-    if (msg.name) {
-      // Named messages cost one extra token for the name field
-      total += countTokens(msg.name, method) + 1;
-    }
-  }
+	for (const msg of messages) {
+		total += MESSAGE_OVERHEAD;
+		total += countTokens(msg.content, method);
+		if (msg.name) {
+			// Named messages cost one extra token for the name field
+			total += countTokens(msg.name, method) + 1;
+		}
+	}
 
-  return total;
+	return total;
 }
 
 /**
@@ -130,9 +126,9 @@ export function countMessages(
  * @returns      - True if estimated tokens <= limit.
  */
 export function fitsContext(
-  text: string,
-  limit: number,
-  method: TokenMethod = "tiktoken-approx"
+	text: string,
+	limit: number,
+	method: TokenMethod = "tiktoken-approx",
 ): boolean {
-  return countTokens(text, method) <= limit;
+	return countTokens(text, method) <= limit;
 }
