@@ -145,3 +145,22 @@ EIGHT_DATA_DIR (default: ~/.8gent/)
   +-- evolution/
       +-- evolution.db (reflections + learned skills)
 ```
+
+---
+
+## Production state
+
+Snapshot of what is actually wired against the live Hetzner vessel at `wss://james.8gentos.com`. Mirrors §8 of the internal testing guide (`8gi-foundation/8gi-governance/docs/runbooks/2026-04-27-james-8gentos-com-testing.md`, private repo).
+
+| Surface | State | Notes |
+|:--------|:------|:------|
+| WS multiplexed gateway (`/`) | LIVE | Caddy basic-auth on the upgrade. |
+| WS `/computer` channel | LIVE (loopback-only v0) | Daemon rejects non-loopback peers with HTTP 403; the public hostname terminates at Caddy, which proxies to `127.0.0.1:18789`. |
+| HTTP `GET /health` | LIVE | The only path open without basic-auth. |
+| HTTP `GET /ops/agent-pool/status` | LIVE | Per-channel pool status. Auth required. |
+| HTTP `POST /audit/access` | LIVE | Audit access events captured to the daemon's audit log. |
+| Skills HTTP route | Pending PR | Tracked separately; cross-link will land when the PR opens. |
+| Telegram bridge | LIVE if `TELEGRAM_BOT_TOKEN` is set | Multi-step task support is open as [#1906](https://github.com/8gi-foundation/8gent-code/issues/1906). |
+| Multi-tenant (`<other>.8gentos.com`) | NOT shipped | Single-tenant in v0. Multi-tenant scaffolding is the next milestone. |
+
+The Fly.io vessel at `wss://eight-vessel.fly.dev` continues to run alongside the Hetzner deployment until the Hetzner stack is the chosen production target.

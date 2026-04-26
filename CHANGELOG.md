@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Documentation
+
+- docs: align README + DAEMON-PROTOCOL with live Hetzner vessel (`wss://james.8gentos.com`); add `VESSEL-ABILITIES.md` Production state section.
+
 ### Fixed
 
 - **Final CJK comment cleanup in `packages/tools/option.ts`** - leftover `the值` in a JSDoc comment for `None.flatMap()`, last trace of the merge corruption that #1893 cleaned up in identifiers. `bun run typecheck` and `bun test packages/ apps/` (243 + 16 pass, 0 fail) confirm the repo-health work tracked in #1883 is complete.
