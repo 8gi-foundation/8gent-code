@@ -14,24 +14,24 @@
 
 // Types (the contract)
 export type {
-  AuditEntry,
-  AuditEntryType,
-  Session,
-  Sandbox,
-  ToolHandler,
-  CredentialVault,
-  HarnessConfig,
-  HarnessAction,
-  HarnessRunResult,
+	AuditEntry,
+	AuditEntryType,
+	Session,
+	Sandbox,
+	ToolHandler,
+	CredentialVault,
+	HarnessConfig,
+	HarnessAction,
+	HarnessRunResult,
 } from "./types";
 
 // Session (append-only JSONL with checksum chain)
 export {
-  createSession,
-  openSession,
-  listSessions,
-  getSessionsDir,
-  computeHash,
+	createSession,
+	openSession,
+	listSessions,
+	getSessionsDir,
+	computeHash,
 } from "./session";
 
 // Harness (stateless loop)

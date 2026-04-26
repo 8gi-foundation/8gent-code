@@ -5,13 +5,13 @@
  * @returns The corresponding enum value or undefined.
  */
 function fromString<T>(enumObj: any, str: string): T | undefined {
-  for (const key of Object.keys(enumObj)) {
-    const value = enumObj[key];
-    if (value === str) {
-      return value as T;
-    }
-  }
-  return undefined;
+	for (const key of Object.keys(enumObj)) {
+		const value = enumObj[key];
+		if (value === str) {
+			return value as T;
+		}
+	}
+	return undefined;
 }
 
 /**
@@ -20,7 +20,7 @@ function fromString<T>(enumObj: any, str: string): T | undefined {
  * @returns Array of enum values.
  */
 function values<T>(enumObj: any): T[] {
-  return Object.values(enumObj) as T[];
+	return Object.values(enumObj) as T[];
 }
 
 /**
@@ -29,7 +29,7 @@ function values<T>(enumObj: any): T[] {
  * @returns Array of enum keys.
  */
 function keys(enumObj: any): string[] {
-  return Object.keys(enumObj);
+	return Object.keys(enumObj);
 }
 
 /**
@@ -39,7 +39,7 @@ function keys(enumObj: any): string[] {
  * @returns True if the value is a valid enum value.
  */
 function isEnumValue<T>(enumObj: any, val: any): val is T {
-  return Object.values(enumObj).includes(val);
+	return Object.values(enumObj).includes(val);
 }
 
 /**
@@ -50,11 +50,11 @@ function isEnumValue<T>(enumObj: any, val: any): val is T {
  * @throws Error if the string is not a valid enum value.
  */
 function parseEnum<T>(enumObj: any, str: string): T {
-  const result = fromString(enumObj, str);
-  if (result === undefined) {
-    throw new Error(`Invalid value: ${str}`);
-  }
-  return result as T;
+	const result = fromString(enumObj, str);
+	if (result === undefined) {
+		throw new Error(`Invalid value: ${str}`);
+	}
+	return result as T;
 }
 
 export { fromString, values, keys, isEnumValue, parseEnum };

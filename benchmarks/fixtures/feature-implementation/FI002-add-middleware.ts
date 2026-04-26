@@ -10,43 +10,43 @@
  */
 
 interface Request {
-  method: string;
-  path: string;
-  headers: Record<string, string>;
-  body?: unknown;
+	method: string;
+	path: string;
+	headers: Record<string, string>;
+	body?: unknown;
 }
 
 interface Response {
-  status: number;
-  headers: Record<string, string>;
-  body?: unknown;
+	status: number;
+	headers: Record<string, string>;
+	body?: unknown;
 }
 
 type Handler = (req: Request) => Promise<Response>;
 
 // Current simple implementation
 export class RequestHandler {
-  private routes: Map<string, Handler> = new Map();
+	private routes: Map<string, Handler> = new Map();
 
-  register(method: string, path: string, handler: Handler): void {
-    const key = `${method.toUpperCase()} ${path}`;
-    this.routes.set(key, handler);
-  }
+	register(method: string, path: string, handler: Handler): void {
+		const key = `${method.toUpperCase()} ${path}`;
+		this.routes.set(key, handler);
+	}
 
-  async handle(req: Request): Promise<Response> {
-    const key = `${req.method.toUpperCase()} ${req.path}`;
-    const handler = this.routes.get(key);
+	async handle(req: Request): Promise<Response> {
+		const key = `${req.method.toUpperCase()} ${req.path}`;
+		const handler = this.routes.get(key);
 
-    if (!handler) {
-      return {
-        status: 404,
-        headers: {},
-        body: { error: "Not found" },
-      };
-    }
+		if (!handler) {
+			return {
+				status: 404,
+				headers: {},
+				body: { error: "Not found" },
+			};
+		}
 
-    return handler(req);
-  }
+		return handler(req);
+	}
 }
 
 // TODO: Implement middleware system

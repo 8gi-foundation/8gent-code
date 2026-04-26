@@ -16,29 +16,29 @@ import { mutation, query } from "./_generated/server";
  * Get recent sessions for a user, sorted by start time descending.
  */
 export const getRecent = query({
-  args: {
-    userId: v.id("users"),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, { userId, limit }) => {
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_userId_startedAt", (q) => q.eq("userId", userId))
-      .order("desc")
-      .take(limit ?? 20);
+	args: {
+		userId: v.id("users"),
+		limit: v.optional(v.number()),
+	},
+	handler: async (ctx, { userId, limit }) => {
+		const sessions = await ctx.db
+			.query("sessions")
+			.withIndex("by_userId_startedAt", (q) => q.eq("userId", userId))
+			.order("desc")
+			.take(limit ?? 20);
 
-    return sessions;
-  },
+		return sessions;
+	},
 });
 
 /**
  * Get a specific session by ID.
  */
 export const getById = query({
-  args: { sessionId: v.id("sessions") },
-  handler: async (ctx, { sessionId }) => {
-    return await ctx.db.get(sessionId);
-  },
+	args: { sessionId: v.id("sessions") },
+	handler: async (ctx, { sessionId }) => {
+		return await ctx.db.get(sessionId);
+	},
 });
 
 /**
@@ -46,38 +46,36 @@ export const getById = query({
  * Used for crash recovery — these sessions were not properly ended.
  */
 export const getOpenSessions = query({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .collect();
+	args: { userId: v.id("users") },
+	handler: async (ctx, { userId }) => {
+		const sessions = await ctx.db
+			.query("sessions")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.collect();
 
-    // Filter for sessions without endedAt
-    return sessions.filter((s) => s.endedAt === undefined);
-  },
+		// Filter for sessions without endedAt
+		return sessions.filter((s) => s.endedAt === undefined);
+	},
 });
 
 /**
  * Get sessions within a date range for a user.
  */
 export const getByDateRange = query({
-  args: {
-    userId: v.id("users"),
-    startTime: v.number(),
-    endTime: v.number(),
-  },
-  handler: async (ctx, { userId, startTime, endTime }) => {
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_userId_startedAt", (q) =>
-        q.eq("userId", userId).gte("startedAt", startTime),
-      )
-      .collect();
+	args: {
+		userId: v.id("users"),
+		startTime: v.number(),
+		endTime: v.number(),
+	},
+	handler: async (ctx, { userId, startTime, endTime }) => {
+		const sessions = await ctx.db
+			.query("sessions")
+			.withIndex("by_userId_startedAt", (q) => q.eq("userId", userId).gte("startedAt", startTime))
+			.collect();
 
-    // Filter by end time (index only supports prefix equality + range on last field)
-    return sessions.filter((s) => s.startedAt <= endTime);
-  },
+		// Filter by end time (index only supports prefix equality + range on last field)
+		return sessions.filter((s) => s.startedAt <= endTime);
+	},
 });
 
 /**
@@ -85,20 +83,18 @@ export const getByDateRange = query({
  * Returns sessions that are open (no endedAt) and started on a different channel.
  */
 export const getActiveOnOtherSurfaces = query({
-  args: {
-    userId: v.id("users"),
-    currentChannel: v.string(),
-  },
-  handler: async (ctx, { userId, currentChannel }) => {
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .collect();
+	args: {
+		userId: v.id("users"),
+		currentChannel: v.string(),
+	},
+	handler: async (ctx, { userId, currentChannel }) => {
+		const sessions = await ctx.db
+			.query("sessions")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.collect();
 
-    return sessions.filter(
-      (s) => s.endedAt === undefined && s.channel !== currentChannel,
-    );
-  },
+		return sessions.filter((s) => s.endedAt === undefined && s.channel !== currentChannel);
+	},
 });
 
 // ============================================
@@ -112,26 +108,26 @@ export const getActiveOnOtherSurfaces = query({
  * @returns The new session ID
  */
 export const start = mutation({
-  args: {
-    userId: v.id("users"),
-    model: v.string(),
-    provider: v.string(),
-    channel: v.optional(v.string()),
-  },
-  handler: async (ctx, { userId, model, provider, channel }) => {
-    const sessionId = await ctx.db.insert("sessions", {
-      userId,
-      startedAt: Date.now(),
-      model,
-      provider,
-      channel: channel || "cli",
-      tokensIn: 0,
-      tokensOut: 0,
-      toolCalls: 0,
-    });
+	args: {
+		userId: v.id("users"),
+		model: v.string(),
+		provider: v.string(),
+		channel: v.optional(v.string()),
+	},
+	handler: async (ctx, { userId, model, provider, channel }) => {
+		const sessionId = await ctx.db.insert("sessions", {
+			userId,
+			startedAt: Date.now(),
+			model,
+			provider,
+			channel: channel || "cli",
+			tokensIn: 0,
+			tokensOut: 0,
+			toolCalls: 0,
+		});
 
-    return sessionId;
-  },
+		return sessionId;
+	},
 });
 
 /**
@@ -139,27 +135,27 @@ export const start = mutation({
  * Called when the agent loop exits (normally or on shutdown).
  */
 export const end = mutation({
-  args: {
-    sessionId: v.id("sessions"),
-    tokensIn: v.number(),
-    tokensOut: v.number(),
-    toolCalls: v.number(),
-    benchmarkScores: v.optional(v.record(v.string(), v.number())),
-  },
-  handler: async (ctx, { sessionId, tokensIn, tokensOut, toolCalls, benchmarkScores }) => {
-    const session = await ctx.db.get(sessionId);
-    if (!session) return null;
+	args: {
+		sessionId: v.id("sessions"),
+		tokensIn: v.number(),
+		tokensOut: v.number(),
+		toolCalls: v.number(),
+		benchmarkScores: v.optional(v.record(v.string(), v.number())),
+	},
+	handler: async (ctx, { sessionId, tokensIn, tokensOut, toolCalls, benchmarkScores }) => {
+		const session = await ctx.db.get(sessionId);
+		if (!session) return null;
 
-    await ctx.db.patch(sessionId, {
-      endedAt: Date.now(),
-      tokensIn,
-      tokensOut,
-      toolCalls,
-      ...(benchmarkScores !== undefined ? { benchmarkScores } : {}),
-    });
+		await ctx.db.patch(sessionId, {
+			endedAt: Date.now(),
+			tokensIn,
+			tokensOut,
+			toolCalls,
+			...(benchmarkScores !== undefined ? { benchmarkScores } : {}),
+		});
 
-    return sessionId;
-  },
+		return sessionId;
+	},
 });
 
 /**
@@ -167,24 +163,24 @@ export const end = mutation({
  * Called periodically (e.g., every 30s) or after each agent turn.
  */
 export const updateCounts = mutation({
-  args: {
-    sessionId: v.id("sessions"),
-    tokensInDelta: v.number(),
-    tokensOutDelta: v.number(),
-    toolCallsDelta: v.number(),
-  },
-  handler: async (ctx, { sessionId, tokensInDelta, tokensOutDelta, toolCallsDelta }) => {
-    const session = await ctx.db.get(sessionId);
-    if (!session) return null;
+	args: {
+		sessionId: v.id("sessions"),
+		tokensInDelta: v.number(),
+		tokensOutDelta: v.number(),
+		toolCallsDelta: v.number(),
+	},
+	handler: async (ctx, { sessionId, tokensInDelta, tokensOutDelta, toolCallsDelta }) => {
+		const session = await ctx.db.get(sessionId);
+		if (!session) return null;
 
-    await ctx.db.patch(sessionId, {
-      tokensIn: session.tokensIn + tokensInDelta,
-      tokensOut: session.tokensOut + tokensOutDelta,
-      toolCalls: session.toolCalls + toolCallsDelta,
-    });
+		await ctx.db.patch(sessionId, {
+			tokensIn: session.tokensIn + tokensInDelta,
+			tokensOut: session.tokensOut + tokensOutDelta,
+			toolCalls: session.toolCalls + toolCallsDelta,
+		});
 
-    return sessionId;
-  },
+		return sessionId;
+	},
 });
 
 /**
@@ -193,20 +189,20 @@ export const updateCounts = mutation({
  * Only works if the session is still open (no endedAt).
  */
 export const claim = mutation({
-  args: {
-    sessionId: v.id("sessions"),
-    newChannel: v.string(),
-  },
-  handler: async (ctx, { sessionId, newChannel }) => {
-    const session = await ctx.db.get(sessionId);
-    if (!session || session.endedAt !== undefined) return null;
+	args: {
+		sessionId: v.id("sessions"),
+		newChannel: v.string(),
+	},
+	handler: async (ctx, { sessionId, newChannel }) => {
+		const session = await ctx.db.get(sessionId);
+		if (!session || session.endedAt !== undefined) return null;
 
-    await ctx.db.patch(sessionId, {
-      channel: newChannel,
-    });
+		await ctx.db.patch(sessionId, {
+			channel: newChannel,
+		});
 
-    return sessionId;
-  },
+		return sessionId;
+	},
 });
 
 /**
@@ -214,27 +210,25 @@ export const claim = mutation({
  * Finds all open sessions older than the given threshold and marks them as ended.
  */
 export const closeStale = mutation({
-  args: {
-    userId: v.id("users"),
-    olderThanMs: v.number(),
-  },
-  handler: async (ctx, { userId, olderThanMs }) => {
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_userId", (q) => q.eq("userId", userId))
-      .collect();
+	args: {
+		userId: v.id("users"),
+		olderThanMs: v.number(),
+	},
+	handler: async (ctx, { userId, olderThanMs }) => {
+		const sessions = await ctx.db
+			.query("sessions")
+			.withIndex("by_userId", (q) => q.eq("userId", userId))
+			.collect();
 
-    const cutoff = Date.now() - olderThanMs;
-    const stale = sessions.filter(
-      (s) => s.endedAt === undefined && s.startedAt < cutoff,
-    );
+		const cutoff = Date.now() - olderThanMs;
+		const stale = sessions.filter((s) => s.endedAt === undefined && s.startedAt < cutoff);
 
-    for (const session of stale) {
-      await ctx.db.patch(session._id, {
-        endedAt: Date.now(),
-      });
-    }
+		for (const session of stale) {
+			await ctx.db.patch(session._id, {
+				endedAt: Date.now(),
+			});
+		}
 
-    return stale.length;
-  },
+		return stale.length;
+	},
 });

@@ -6,8 +6,8 @@
  * Falls back to devstral:latest if eight:latest times out.
  */
 
-import { writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 const PRIMARY_MODEL = "eight:latest";
@@ -18,10 +18,10 @@ const WORLD_DIR = join(import.meta.dir, "../../8gent-world");
 const VARIATIONS_DIR = join(WORLD_DIR, "src/app/variations");
 
 const TEMPERATURES = [
-  { temp: 0.25, label: "conservative", dir: "v1" },
-  { temp: 0.5, label: "balanced", dir: "v2" },
-  { temp: 0.75, label: "creative", dir: "v3" },
-  { temp: 1.0, label: "experimental", dir: "v4" },
+	{ temp: 0.25, label: "conservative", dir: "v1" },
+	{ temp: 0.5, label: "balanced", dir: "v2" },
+	{ temp: 0.75, label: "creative", dir: "v3" },
+	{ temp: 1.0, label: "experimental", dir: "v4" },
 ];
 
 const PROMPT = `You are a world-class React developer building a Next.js landing page.
@@ -59,122 +59,127 @@ OUTPUT: A single React component ("use client") that is a complete Next.js page.
 Be creative with the layout and animation choreography. Make the scroll experience feel premium.`;
 
 function extractComponent(raw: string): string {
-  // Strip markdown code fences if present
-  let code = raw;
+	// Strip markdown code fences if present
+	let code = raw;
 
-  // Remove ```tsx or ```typescript or ```jsx or ``` fences
-  code = code.replace(/^```(?:tsx|typescript|jsx|js)?\s*\n/gm, "");
-  code = code.replace(/\n```\s*$/gm, "");
-  code = code.replace(/^```\s*$/gm, "");
+	// Remove ```tsx or ```typescript or ```jsx or ``` fences
+	code = code.replace(/^```(?:tsx|typescript|jsx|js)?\s*\n/gm, "");
+	code = code.replace(/\n```\s*$/gm, "");
+	code = code.replace(/^```\s*$/gm, "");
 
-  // Find the start of actual React code
-  const markers = ['"use client"', "'use client'", "export default"];
-  let startIdx = -1;
-  for (const marker of markers) {
-    const idx = code.indexOf(marker);
-    if (idx !== -1 && (startIdx === -1 || idx < startIdx)) {
-      startIdx = idx;
-    }
-  }
+	// Find the start of actual React code
+	const markers = ['"use client"', "'use client'", "export default"];
+	let startIdx = -1;
+	for (const marker of markers) {
+		const idx = code.indexOf(marker);
+		if (idx !== -1 && (startIdx === -1 || idx < startIdx)) {
+			startIdx = idx;
+		}
+	}
 
-  if (startIdx > 0) {
-    // Include any imports that come before - scan back for import statements
-    const before = code.substring(0, startIdx);
-    const lines = before.split("\n");
-    let importStart = startIdx;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (line.startsWith("import ") || line.startsWith("'use client'") || line.startsWith('"use client"') || line === "") {
-        importStart = before.indexOf(lines[i]);
-        if (importStart === -1) importStart = startIdx;
-      } else if (line.length > 0) {
-        break;
-      }
-    }
-    code = code.substring(Math.min(importStart, startIdx));
-  }
+	if (startIdx > 0) {
+		// Include any imports that come before - scan back for import statements
+		const before = code.substring(0, startIdx);
+		const lines = before.split("\n");
+		let importStart = startIdx;
+		for (let i = lines.length - 1; i >= 0; i--) {
+			const line = lines[i].trim();
+			if (
+				line.startsWith("import ") ||
+				line.startsWith("'use client'") ||
+				line.startsWith('"use client"') ||
+				line === ""
+			) {
+				importStart = before.indexOf(lines[i]);
+				if (importStart === -1) importStart = startIdx;
+			} else if (line.length > 0) {
+				break;
+			}
+		}
+		code = code.substring(Math.min(importStart, startIdx));
+	}
 
-  // Ensure it starts with "use client" if not present
-  if (!code.includes('"use client"') && !code.includes("'use client'")) {
-    code = '"use client";\n\n' + code;
-  }
+	// Ensure it starts with "use client" if not present
+	if (!code.includes('"use client"') && !code.includes("'use client'")) {
+		code = `"use client";\n\n${code}`;
+	}
 
-  return code.trim() + "\n";
+	return `${code.trim()}\n`;
 }
 
 async function callOllama(
-  model: string,
-  temperature: number,
-  signal: AbortSignal
+	model: string,
+	temperature: number,
+	signal: AbortSignal,
 ): Promise<string> {
-  console.log(`  [ollama] Calling ${model} at temperature ${temperature}...`);
-  const start = Date.now();
+	console.log(`  [ollama] Calling ${model} at temperature ${temperature}...`);
+	const start = Date.now();
 
-  const res = await fetch(OLLAMA_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      prompt: PROMPT,
-      stream: false,
-      options: {
-        temperature,
-        num_predict: 16384,
-      },
-    }),
-    signal,
-  });
+	const res = await fetch(OLLAMA_URL, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			model,
+			prompt: PROMPT,
+			stream: false,
+			options: {
+				temperature,
+				num_predict: 16384,
+			},
+		}),
+		signal,
+	});
 
-  if (!res.ok) {
-    throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
-  }
+	if (!res.ok) {
+		throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
+	}
 
-  const data = (await res.json()) as { response: string };
-  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`  [ollama] ${model} responded in ${elapsed}s (${data.response.length} chars)`);
-  return data.response;
+	const data = (await res.json()) as { response: string };
+	const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+	console.log(`  [ollama] ${model} responded in ${elapsed}s (${data.response.length} chars)`);
+	return data.response;
 }
 
 async function generateVariation(
-  temp: number,
-  label: string,
-  dir: string
+	temp: number,
+	label: string,
+	dir: string,
 ): Promise<{ model: string; elapsed: number }> {
-  const outDir = join(VARIATIONS_DIR, dir);
-  mkdirSync(outDir, { recursive: true });
+	const outDir = join(VARIATIONS_DIR, dir);
+	mkdirSync(outDir, { recursive: true });
 
-  let model = PRIMARY_MODEL;
-  let raw: string;
-  const start = Date.now();
+	let model = PRIMARY_MODEL;
+	let raw: string;
+	const start = Date.now();
 
-  try {
-    const signal = AbortSignal.timeout(TIMEOUT_MS);
-    raw = await callOllama(PRIMARY_MODEL, temp, signal);
-  } catch (err: any) {
-    if (err.name === "AbortError" || err.name === "TimeoutError") {
-      console.log(`  [fallback] ${PRIMARY_MODEL} timed out, trying ${FALLBACK_MODEL}...`);
-      model = FALLBACK_MODEL;
-      const signal = AbortSignal.timeout(TIMEOUT_MS);
-      raw = await callOllama(FALLBACK_MODEL, temp, signal);
-    } else {
-      throw err;
-    }
-  }
+	try {
+		const signal = AbortSignal.timeout(TIMEOUT_MS);
+		raw = await callOllama(PRIMARY_MODEL, temp, signal);
+	} catch (err: any) {
+		if (err.name === "AbortError" || err.name === "TimeoutError") {
+			console.log(`  [fallback] ${PRIMARY_MODEL} timed out, trying ${FALLBACK_MODEL}...`);
+			model = FALLBACK_MODEL;
+			const signal = AbortSignal.timeout(TIMEOUT_MS);
+			raw = await callOllama(FALLBACK_MODEL, temp, signal);
+		} else {
+			throw err;
+		}
+	}
 
-  const component = extractComponent(raw);
-  const outPath = join(outDir, "page.tsx");
-  writeFileSync(outPath, component);
+	const component = extractComponent(raw);
+	const outPath = join(outDir, "page.tsx");
+	writeFileSync(outPath, component);
 
-  const elapsed = (Date.now() - start) / 1000;
-  console.log(`  [saved] ${outPath} (${label}, model: ${model}, ${elapsed.toFixed(1)}s)`);
-  return { model, elapsed };
+	const elapsed = (Date.now() - start) / 1000;
+	console.log(`  [saved] ${outPath} (${label}, model: ${model}, ${elapsed.toFixed(1)}s)`);
+	return { model, elapsed };
 }
 
 // ── Index page for browsing variations ──────────────────────────────
 
 function createIndexPage() {
-  const indexPath = join(VARIATIONS_DIR, "page.tsx");
-  const content = `"use client";
+	const indexPath = join(VARIATIONS_DIR, "page.tsx");
+	const content = `"use client";
 
 import Link from "next/link";
 
@@ -257,47 +262,55 @@ export default function VariationsIndex() {
   );
 }
 `;
-  writeFileSync(indexPath, content);
-  console.log(`[saved] Index page: ${indexPath}`);
+	writeFileSync(indexPath, content);
+	console.log(`[saved] Index page: ${indexPath}`);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("=== 8gent Landing Page Variation Generator ===");
-  console.log(`Models: ${PRIMARY_MODEL} (primary), ${FALLBACK_MODEL} (fallback)`);
-  console.log(`Timeout: ${TIMEOUT_MS / 1000}s per call`);
-  console.log(`Output: ${VARIATIONS_DIR}\n`);
+	console.log("=== 8gent Landing Page Variation Generator ===");
+	console.log(`Models: ${PRIMARY_MODEL} (primary), ${FALLBACK_MODEL} (fallback)`);
+	console.log(`Timeout: ${TIMEOUT_MS / 1000}s per call`);
+	console.log(`Output: ${VARIATIONS_DIR}\n`);
 
-  mkdirSync(VARIATIONS_DIR, { recursive: true });
+	mkdirSync(VARIATIONS_DIR, { recursive: true });
 
-  const results: Array<{ dir: string; label: string; temp: number; model: string; elapsed: number }> = [];
+	const results: Array<{
+		dir: string;
+		label: string;
+		temp: number;
+		model: string;
+		elapsed: number;
+	}> = [];
 
-  for (const { temp, label, dir } of TEMPERATURES) {
-    console.log(`\n--- Generating ${dir} (${label}, temp=${temp}) ---`);
-    try {
-      const { model, elapsed } = await generateVariation(temp, label, dir);
-      results.push({ dir, label, temp, model, elapsed });
-    } catch (err: any) {
-      console.error(`  [ERROR] Failed to generate ${dir}: ${err.message}`);
-    }
-  }
+	for (const { temp, label, dir } of TEMPERATURES) {
+		console.log(`\n--- Generating ${dir} (${label}, temp=${temp}) ---`);
+		try {
+			const { model, elapsed } = await generateVariation(temp, label, dir);
+			results.push({ dir, label, temp, model, elapsed });
+		} catch (err: any) {
+			console.error(`  [ERROR] Failed to generate ${dir}: ${err.message}`);
+		}
+	}
 
-  // Create index page
-  createIndexPage();
+	// Create index page
+	createIndexPage();
 
-  // Summary
-  console.log("\n=== Generation Summary ===");
-  for (const r of results) {
-    console.log(`  ${r.dir} (${r.label}): temp=${r.temp}, model=${r.model}, ${r.elapsed.toFixed(1)}s`);
-  }
-  console.log(`\nGenerated ${results.length}/4 variations.`);
-  if (results.length > 0) {
-    console.log("Open http://localhost:3000/variations to browse them.");
-  }
+	// Summary
+	console.log("\n=== Generation Summary ===");
+	for (const r of results) {
+		console.log(
+			`  ${r.dir} (${r.label}): temp=${r.temp}, model=${r.model}, ${r.elapsed.toFixed(1)}s`,
+		);
+	}
+	console.log(`\nGenerated ${results.length}/4 variations.`);
+	if (results.length > 0) {
+		console.log("Open http://localhost:3000/variations to browse them.");
+	}
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
+	console.error("Fatal error:", err);
+	process.exit(1);
 });

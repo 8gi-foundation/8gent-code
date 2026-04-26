@@ -6,7 +6,7 @@
  * @returns The clamped value.
  */
 export function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+	return Math.min(Math.max(value, min), max);
 }
 
 /**
@@ -17,7 +17,7 @@ export function clamp(value: number, min: number, max: number): number {
  * @returns Interpolated value.
  */
 export function lerp(a: number, b: number, t: number): number {
-  return a + t * (b - a);
+	return a + t * (b - a);
 }
 
 /**
@@ -30,13 +30,13 @@ export function lerp(a: number, b: number, t: number): number {
  * @returns Remapped value.
  */
 export function remap(
-  value: number,
-  inMin: number,
-  inMax: number,
-  outMin: number,
-  outMax: number
+	value: number,
+	inMin: number,
+	inMax: number,
+	outMin: number,
+	outMax: number,
 ): number {
-  return outMin + (value - inMin) * (outMax - outMin) / (inMax - inMin);
+	return outMin + ((value - inMin) * (outMax - outMin)) / (inMax - inMin);
 }
 
 /**
@@ -47,8 +47,8 @@ export function remap(
  * @returns Wrapped value.
  */
 export function wrap(value: number, min: number, max: number): number {
-  const range = max - min;
-  return ((value - min) % range + range) % range + min;
+	const range = max - min;
+	return ((((value - min) % range) + range) % range) + min;
 }
 
 /**
@@ -59,6 +59,6 @@ export function wrap(value: number, min: number, max: number): number {
  * @returns Smooth interpolation result.
  */
 export function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return 3 * t * t - 2 * t * t * t;
+	const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+	return 3 * t * t - 2 * t * t * t;
 }
