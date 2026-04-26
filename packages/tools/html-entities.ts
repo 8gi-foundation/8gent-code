@@ -4,14 +4,14 @@
  * @returns The encoded string.
  */
 export function encode(str: string): string {
-  const map: Record<string, string> = {
-    '<': '&lt;',
-    '>': '&gt;',
-    '&': '&amp;',
-    "'": '&apos;',
-    '"': '&quot;'
-  };
-  return str.replace(/[<>&'"]/g, (c) => map[c] ?? c);
+	const map: Record<string, string> = {
+		"<": "&lt;",
+		">": "&gt;",
+		"&": "&amp;",
+		"'": "&apos;",
+		'"': "&quot;",
+	};
+	return str.replace(/[<>&'"]/g, (c) => map[c] ?? c);
 }
 
 /**
@@ -20,9 +20,9 @@ export function encode(str: string): string {
  * @returns The decoded string.
  */
 export function decode(str: string): string {
-  const div = document.createElement('div');
-  div.innerHTML = str;
-  return div.textContent || '';
+	const div = document.createElement("div");
+	div.innerHTML = str;
+	return div.textContent || "";
 }
 
 /**
@@ -31,9 +31,9 @@ export function decode(str: string): string {
  * @returns The encoded string.
  */
 export function encodeAll(str: string): string {
-  return str.replace(/[\u0080-\uFFFF]/g, (c) => {
-    return `&#x${c.charCodeAt(0).toString(16)};`;
-  });
+	return str.replace(/[\u0080-\uFFFF]/g, (c) => {
+		return `&#x${c.charCodeAt(0).toString(16)};`;
+	});
 }
 
 /**
@@ -42,5 +42,5 @@ export function encodeAll(str: string): string {
  * @returns The string without HTML tags.
  */
 export function stripTags(html: string): string {
-  return html.replace(/<.*?>/g, '');
+	return html.replace(/<.*?>/g, "");
 }

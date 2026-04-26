@@ -9,71 +9,77 @@
 // ============================================
 
 export interface StepSummary {
-  index: number;
-  description: string;
-  status: "pending" | "running" | "completed" | "failed" | "skipped";
-  duration?: number; // milliseconds
-  toolsUsed?: string[];
-  filesAffected?: string[];
-  error?: string;
+	index: number;
+	description: string;
+	status: "pending" | "running" | "completed" | "failed" | "skipped";
+	duration?: number; // milliseconds
+	toolsUsed?: string[];
+	filesAffected?: string[];
+	error?: string;
 }
 
 export interface EvidenceSummary {
-  type: "files_exist" | "build_passes" | "tests_pass" | "git_committed" | "server_running" | "custom";
-  label: string;
-  status: "pass" | "fail" | "pending" | "skipped";
-  details?: string;
-  url?: string;
+	type:
+		| "files_exist"
+		| "build_passes"
+		| "tests_pass"
+		| "git_committed"
+		| "server_running"
+		| "custom";
+	label: string;
+	status: "pass" | "fail" | "pending" | "skipped";
+	details?: string;
+	url?: string;
 }
 
 export interface CompletionReport {
-  // Unique identifier
-  id: string;
-  taskId?: string;
+	// Unique identifier
+	id: string;
+	taskId?: string;
 
-  // Summary
-  summary: string;
-  detailedSummary?: string;
+	// Summary
+	summary: string;
+	detailedSummary?: string;
 
-  // File changes
-  filesCreated: string[];
-  filesModified: string[];
-  filesDeleted: string[];
+	// File changes
+	filesCreated: string[];
+	filesModified: string[];
+	filesDeleted: string[];
 
-  // Metrics
-  toolsUsed: number;
-  tokensUsed?: number;
-  tokensSaved?: number;
-  contextMax?: number;  // Max context window
-  duration: string; // formatted like "2m 34s"
-  durationMs: number;
+	// Metrics
+	toolsUsed: number;
+	tokensUsed?: number;
+	tokensSaved?: number;
+	contextMax?: number; // Max context window
+	duration: string; // formatted like "2m 34s"
+	durationMs: number;
 
-  // Steps taken
-  steps: StepSummary[];
+	// Steps taken
+	steps: StepSummary[];
 
-  // Evidence of completion
-  evidence: EvidenceSummary[];
+	// Evidence of completion
+	evidence: EvidenceSummary[];
 
-  // Git info
-  gitCommit?: string;
-  gitBranch?: string;
+	// Git info
+	gitCommit?: string;
+	gitBranch?: string;
 
-  // Confidence score (0-100)
-  confidence: number;
+	// Confidence score (0-100)
+	confidence: number;
 
-  // Timestamps
-  startedAt: Date;
-  completedAt: Date;
+	// Timestamps
+	startedAt: Date;
+	completedAt: Date;
 
-  // Working directory
-  workingDirectory: string;
+	// Working directory
+	workingDirectory: string;
 
-  // Error if failed
-  error?: string;
-  errorStack?: string;
+	// Error if failed
+	error?: string;
+	errorStack?: string;
 
-  // Status
-  status: "success" | "partial" | "failed";
+	// Status
+	status: "success" | "partial" | "failed";
 }
 
 // ============================================
@@ -81,67 +87,67 @@ export interface CompletionReport {
 // ============================================
 
 export interface FileOperation {
-  type: "create" | "modify" | "delete" | "read";
-  path: string;
-  timestamp: number;
+	type: "create" | "modify" | "delete" | "read";
+	path: string;
+	timestamp: number;
 }
 
 export interface ToolInvocation {
-  name: string;
-  arguments: Record<string, unknown>;
-  result: string;
-  duration: number;
-  timestamp: number;
-  success: boolean;
+	name: string;
+	arguments: Record<string, unknown>;
+	result: string;
+	duration: number;
+	timestamp: number;
+	success: boolean;
 }
 
 export interface TaskStep {
-  index: number;
-  description: string;
-  startTime: number;
-  endTime?: number;
-  tools: ToolInvocation[];
-  files: FileOperation[];
-  status: "pending" | "running" | "completed" | "failed" | "skipped";
-  error?: string;
+	index: number;
+	description: string;
+	startTime: number;
+	endTime?: number;
+	tools: ToolInvocation[];
+	files: FileOperation[];
+	status: "pending" | "running" | "completed" | "failed" | "skipped";
+	error?: string;
 }
 
 export interface TaskContext {
-  // Task info
-  taskId: string;
-  taskDescription: string;
+	// Task info
+	taskId: string;
+	taskDescription: string;
 
-  // Timing
-  startTime: number;
-  endTime?: number;
+	// Timing
+	startTime: number;
+	endTime?: number;
 
-  // Working directory
-  workingDirectory: string;
+	// Working directory
+	workingDirectory: string;
 
-  // Steps
-  steps: TaskStep[];
+	// Steps
+	steps: TaskStep[];
 
-  // All tool invocations
-  tools: ToolInvocation[];
+	// All tool invocations
+	tools: ToolInvocation[];
 
-  // All file operations
-  fileOperations: FileOperation[];
+	// All file operations
+	fileOperations: FileOperation[];
 
-  // Git info
-  gitBranch?: string;
-  gitCommits?: string[];
+	// Git info
+	gitBranch?: string;
+	gitCommits?: string[];
 
-  // Token usage
-  tokensUsed?: number;
-  tokensSaved?: number;
-  contextMax?: number;  // Max context window size
+	// Token usage
+	tokensUsed?: number;
+	tokensSaved?: number;
+	contextMax?: number; // Max context window size
 
-  // Final result
-  result?: string;
-  error?: string;
+	// Final result
+	result?: string;
+	error?: string;
 
-  // Model used
-  model?: string;
+	// Model used
+	model?: string;
 }
 
 // ============================================
@@ -149,24 +155,24 @@ export interface TaskContext {
 // ============================================
 
 export interface StoredReport extends CompletionReport {
-  version: number;
-  storedAt: Date;
+	version: number;
+	storedAt: Date;
 }
 
 export interface ReportQuery {
-  limit?: number;
-  offset?: number;
-  status?: CompletionReport["status"];
-  after?: Date;
-  before?: Date;
-  workingDirectory?: string;
+	limit?: number;
+	offset?: number;
+	status?: CompletionReport["status"];
+	after?: Date;
+	before?: Date;
+	workingDirectory?: string;
 }
 
 export interface ReportListItem {
-  id: string;
-  summary: string;
-  status: CompletionReport["status"];
-  duration: string;
-  completedAt: Date;
-  filesChanged: number;
+	id: string;
+	summary: string;
+	status: CompletionReport["status"];
+	duration: string;
+	completedAt: Date;
+	filesChanged: number;
 }

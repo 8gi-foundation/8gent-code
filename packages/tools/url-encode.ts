@@ -4,7 +4,7 @@
  * @returns The percent-encoded string.
  */
 export function encode(str: string): string {
-  return encodeURIComponent(str).replace(/%20/g, '+').replace(/%5B/g, '[').replace(/%5D/g, ']');
+	return encodeURIComponent(str).replace(/%20/g, "+").replace(/%5B/g, "[").replace(/%5D/g, "]");
 }
 
 /**
@@ -13,7 +13,7 @@ export function encode(str: string): string {
  * @returns The decoded string.
  */
 export function decode(str: string): string {
-  return decodeURIComponent(str);
+	return decodeURIComponent(str);
 }
 
 /**
@@ -22,7 +22,7 @@ export function decode(str: string): string {
  * @returns The encoded string.
  */
 export function encodeComponent(str: string): string {
-  return encodeURIComponent(str);
+	return encodeURIComponent(str);
 }
 
 /**
@@ -31,7 +31,7 @@ export function encodeComponent(str: string): string {
  * @returns The encoded string.
  */
 export function encodeForm(obj: Record<string, string>): string {
-  return new URLSearchParams(obj).toString();
+	return new URLSearchParams(obj).toString();
 }
 
 /**
@@ -40,10 +40,10 @@ export function encodeForm(obj: Record<string, string>): string {
  * @returns The decoded record.
  */
 export function decodeForm(str: string): Record<string, string> {
-  const params = new URLSearchParams(str);
-  const result: Record<string, string> = {};
-  for (const [key, value] of params.entries()) {
-    result[key] = value;
-  }
-  return result;
+	const params = new URLSearchParams(str);
+	const result: Record<string, string> = {};
+	for (const [key, value] of params.entries()) {
+		result[key] = value;
+	}
+	return result;
 }

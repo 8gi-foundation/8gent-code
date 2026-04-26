@@ -20,33 +20,33 @@ export { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
 export { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
 export { documentationBenchmarks } from "./categories/documentation/benchmarks";
 
+import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
+import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
+import { documentationBenchmarks } from "./categories/documentation/benchmarks";
+import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
 // Combined benchmarks
 import { fileManipulationBenchmarks } from "./categories/file-manipulation/benchmarks";
 import { multiFileBenchmarks } from "./categories/multi-file/benchmarks";
-import { bugFixingBenchmarks } from "./categories/bug-fixing/benchmarks";
-import { featureImplementationBenchmarks } from "./categories/feature-implementation/benchmarks";
-import { codeReviewBenchmarks } from "./categories/code-review/benchmarks";
 import { testGenerationBenchmarks } from "./categories/test-generation/benchmarks";
-import { documentationBenchmarks } from "./categories/documentation/benchmarks";
 
 export const ALL_BENCHMARKS = [
-  ...fileManipulationBenchmarks,
-  ...multiFileBenchmarks,
-  ...bugFixingBenchmarks,
-  ...featureImplementationBenchmarks,
-  ...codeReviewBenchmarks,
-  ...testGenerationBenchmarks,
-  ...documentationBenchmarks,
+	...fileManipulationBenchmarks,
+	...multiFileBenchmarks,
+	...bugFixingBenchmarks,
+	...featureImplementationBenchmarks,
+	...codeReviewBenchmarks,
+	...testGenerationBenchmarks,
+	...documentationBenchmarks,
 ];
 
 // Benchmark counts by category
 export const BENCHMARK_STATS = {
-  fileManipulation: fileManipulationBenchmarks.length,
-  multiFile: multiFileBenchmarks.length,
-  bugFixing: bugFixingBenchmarks.length,
-  featureImplementation: featureImplementationBenchmarks.length,
-  codeReview: codeReviewBenchmarks.length,
-  testGeneration: testGenerationBenchmarks.length,
-  documentation: documentationBenchmarks.length,
-  total: ALL_BENCHMARKS.length,
+	fileManipulation: fileManipulationBenchmarks.length,
+	multiFile: multiFileBenchmarks.length,
+	bugFixing: bugFixingBenchmarks.length,
+	featureImplementation: featureImplementationBenchmarks.length,
+	codeReview: codeReviewBenchmarks.length,
+	testGeneration: testGenerationBenchmarks.length,
+	documentation: documentationBenchmarks.length,
+	total: ALL_BENCHMARKS.length,
 };

@@ -8,7 +8,7 @@ import type { BenchmarkCategory } from "../types";
  */
 
 const FEW_SHOT_EXAMPLES: Record<BenchmarkCategory, string> = {
-  "bug-fixing": `<example>
+	"bug-fixing": `<example>
 TASK: Fix the race condition in this async counter that loses updates.
 
 \`\`\`typescript
@@ -43,7 +43,7 @@ class FixedCounter {
 KEY INSIGHT: The bug is a classic read-modify-write race. The fix serializes access with a promise-chain mutex so only one operation touches \`this.n\` at a time. Always use \`finally\` or chaining to guarantee lock release.
 </example>`,
 
-  "file-manipulation": `<example>
+	"file-manipulation": `<example>
 TASK: Validate that an email string is well-formed.
 
 \`\`\`typescript
@@ -74,7 +74,7 @@ function validateEmail(email: string): { valid: boolean; error?: string } {
 KEY INSIGHT: Always guard against null/undefined/empty inputs first, then validate structure. Return structured error objects, not thrown exceptions, so callers can aggregate multiple validation results.
 </example>`,
 
-  "feature-implementation": `<example>
+	"feature-implementation": `<example>
 TASK: Implement a simple key-value cache with a max size and LRU eviction.
 
 \`\`\`typescript
@@ -117,7 +117,7 @@ class SimpleCache<V> {
 KEY INSIGHT: JavaScript Maps maintain insertion order. Use delete-then-set to promote an entry to most-recent. The first key (\`keys().next().value\`) is always the least-recently-used. This gives O(1) LRU without a doubly-linked list.
 </example>`,
 
-  "fullstack": `<example>
+	fullstack: `<example>
 TASK: Given an existing Router and Database, build a TODO API with CRUD operations across multiple files.
 
 SOLUTION:
@@ -167,7 +167,7 @@ export default createApp;
 KEY INSIGHT: For multi-file tasks, output EACH file in a separate fenced block with the filename: \\\`\\\`\\\`typescript // filename.ts. Import from fixture files (database.ts, http.ts) using relative imports. Export a createApp() that wires everything together — tests will call it to get the router and db.
 </example>`,
 
-  "agentic": `<example>
+	agentic: `<example>
 TASK: Build a topological sort with cycle detection for dependency resolution.
 
 SOLUTION:
@@ -212,7 +212,7 @@ export default resolve;
 KEY INSIGHT: For agentic tasks, think architecturally. Use well-known algorithms (Kahn's for topological sort, AC-3 for constraint propagation). Handle edge cases defensively — cycle detection, empty inputs, missing optional deps. Always export both named AND default. For multi-file tasks, each file must import its dependencies with relative paths.
 </example>`,
 
-  "ui-design": `<example>
+	"ui-design": `<example>
 TASK: Create a neumorphic button with soft shadows and a pressed state.
 
 SOLUTION:
@@ -276,7 +276,7 @@ SOLUTION:
 KEY INSIGHT: Neumorphic design uses TWO box-shadows (one light, one dark) on a matching background to create a soft 3D raised effect. The pressed state inverts these with the \`inset\` keyword. Always use rgba colors — not hex — for shadow control. Output COMPLETE HTML with embedded <style> in a single file. No external CSS frameworks.
 </example>`,
 
-  "battle-test": `<example>
+	"battle-test": `<example>
 TASK: Build an auth system with JWT tokens, role-based access, rate limiting, and user storage.
 
 SOLUTION:
@@ -348,12 +348,12 @@ KEY INSIGHT: For multi-file battle-test tasks, output EACH file in a separate fe
  * Return the few-shot block for a category, or empty string if none.
  */
 export function getFewShot(category: BenchmarkCategory): string {
-  return FEW_SHOT_EXAMPLES[category] ?? "";
+	return FEW_SHOT_EXAMPLES[category] ?? "";
 }
 
 /**
  * All available few-shot categories.
  */
 export function listFewShotCategories(): BenchmarkCategory[] {
-  return Object.keys(FEW_SHOT_EXAMPLES) as BenchmarkCategory[];
+	return Object.keys(FEW_SHOT_EXAMPLES) as BenchmarkCategory[];
 }

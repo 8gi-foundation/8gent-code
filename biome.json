@@ -1,0 +1,72 @@
+{
+	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"ignoreUnknown": true,
+		"ignore": [
+			"**/node_modules/**",
+			"**/dist/**",
+			"**/.next/**",
+			"**/build/**",
+			"**/_generated/**",
+			"**/*.min.js",
+			"**/bun.lock",
+			"apps/8gent-computer/build/**",
+			"My-Brain-Is-Full-Crew/**",
+			"packages/skills/business-builder/**",
+			"packages/tools/markdown-parser.ts",
+			"packages/specifications/session/schema.json"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"lineWidth": 100
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noArrayIndexKey": "off",
+				"noAssignInExpressions": "off",
+				"noControlCharactersInRegex": "off",
+				"noImplicitAnyLet": "off",
+				"noShadowRestrictedNames": "off",
+				"noAsyncPromiseExecutor": "off",
+				"noSelfCompare": "off",
+				"noMisleadingCharacterClass": "off",
+				"noGlobalIsNan": "off"
+			},
+			"style": {
+				"noNonNullAssertion": "off",
+				"noParameterAssign": "off"
+			},
+			"complexity": {
+				"noBannedTypes": "off",
+				"noForEach": "off"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "off",
+				"noUnsafeOptionalChaining": "off"
+			},
+			"a11y": {
+				"useButtonType": "off",
+				"noLabelWithoutControl": "off",
+				"useKeyWithClickEvents": "off"
+			},
+			"security": {
+				"noGlobalEval": "off",
+				"noDangerouslySetInnerHtml": "off"
+			},
+			"performance": {
+				"noAccumulatingSpread": "off"
+			}
+		}
+	}
+}
