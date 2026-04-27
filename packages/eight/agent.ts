@@ -18,6 +18,7 @@ import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
+import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
@@ -554,7 +555,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			effectiveInstructions += `\n\n## Agent Self-Appended Context\n${tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n")}`;
 		}
 
-		const agentConfig: EightAgentConfig = {
+		let agentConfig: EightAgentConfig = {
 			provider: providerConfig,
 			instructions: effectiveInstructions,
 			maxSteps: tunedParams.maxSteps,
@@ -961,10 +962,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		};
 
 		try {
-			const agent = createEightAgent(agentConfig);
-
-			// Build messages array from conversation history (excluding system prompt,
-			// which is already passed as `instructions` to the ToolLoopAgent)
+			// Build messages array once - reused across every provider attempt.
 			const messages = this.messageHistory
 				.filter((m) => m.role !== "system")
 				.map((m) => ({
@@ -972,42 +970,100 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					content: m.content,
 				}));
 
-			// Create abort controller for ESC interruption
+			// Create abort controller for ESC interruption (shared across attempts)
 			this.abortController = new AbortController();
 
-			// Retry with exponential backoff for rate-limited free models
-			let result: any;
-			const maxAttempts = 8;
-			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-				try {
-					result = await agent.generate({
-						messages,
-						abortSignal: this.abortController?.signal,
-					});
-					break; // Success
-				} catch (err: any) {
-					const isRateLimit =
-						err?.message?.includes("429") ||
-						err?.message?.includes("rate") ||
-						err?.message?.includes("Provider returned error");
-					const isAborted = err?.name === "AbortError";
+			// Deterministic self-healing: walk the failover chain on ANY error
+			// (Bad Request, 5xx, network, schema, timeout). Within the same
+			// provider, keep exponential backoff for 429 rate limits.
+			const failover = new ModelFailover();
+			const channel = "text" as const;
+			const tried = new Set<string>();
+			const errors: Array<{ provider: string; model: string; error: string }> = [];
 
-					if (isAborted) throw err; // User pressed ESC
+			let currentEntry: FailoverEntry = {
+				model: agentConfig.provider.model,
+				provider: agentConfig.provider.name,
+			};
 
-					if (isRateLimit && attempt < maxAttempts) {
-						const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
+			let result: any = null;
+			let resolved = false;
+			const MAX_PROVIDERS = 6; // hard cap so a misconfigured chain can't loop forever
+			const RATE_LIMIT_ATTEMPTS = 4;
+
+			outer: for (let chainStep = 0; chainStep < MAX_PROVIDERS; chainStep++) {
+				const key = `${currentEntry.provider}::${currentEntry.model}`;
+				if (tried.has(key)) break;
+				tried.add(key);
+
+				// Build agent for the current provider in the chain
+				const stepConfig = {
+					...agentConfig,
+					provider: { name: currentEntry.provider as any, model: currentEntry.model },
+				};
+				const agent = createEightAgent(stepConfig);
+
+				for (let attempt = 1; attempt <= RATE_LIMIT_ATTEMPTS; attempt++) {
+					try {
+						result = await agent.generate({
+							messages,
+							abortSignal: this.abortController?.signal,
+						});
+						resolved = true;
+						// Update agentConfig so any downstream logic sees the provider that actually succeeded
+						agentConfig = stepConfig;
+						break outer;
+					} catch (err: any) {
+						if (err?.name === "AbortError") throw err; // User pressed ESC
+
+						const msg = String(err?.message ?? err);
+						const isRateLimit =
+							msg.includes("429") ||
+							/\brate[ -]?limit/i.test(msg) ||
+							msg.includes("Provider returned error");
+
+						if (isRateLimit && attempt < RATE_LIMIT_ATTEMPTS) {
+							const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
+							console.log(
+								`[agent] ${currentEntry.provider}/${currentEntry.model} rate limited, retry in ${delay / 1000}s (${attempt}/${RATE_LIMIT_ATTEMPTS})`,
+							);
+							await new Promise((r) => setTimeout(r, delay));
+							continue;
+						}
+
+						// Any other error -> mark provider down, advance chain, restart
 						console.log(
-							`[agent] rate limited, retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`,
+							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover`,
 						);
-						await new Promise((r) => setTimeout(r, delay));
-						continue;
+						errors.push({
+							provider: currentEntry.provider,
+							model: currentEntry.model,
+							error: msg.slice(0, 200),
+						});
+						failover.markDown(currentEntry.model, currentEntry.provider);
+						const next = failover.resolve(currentEntry.model, channel);
+						if (
+							next.model === currentEntry.model &&
+							next.provider === currentEntry.provider
+						) {
+							break outer; // chain exhausted
+						}
+						currentEntry = next;
+						break; // exit inner attempt loop, outer reuses new currentEntry
 					}
-
-					throw err; // Non-retryable error or max attempts reached
 				}
 			}
 
 			this.abortController = null;
+
+			if (!resolved) {
+				const summary = errors
+					.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`)
+					.join("\n");
+				throw new Error(
+					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
+				);
+			}
 
 			// ── Adaptive recovery: if the model planned but never called tools,
 			// it likely hit the output token limit mid-response. Retry once with
