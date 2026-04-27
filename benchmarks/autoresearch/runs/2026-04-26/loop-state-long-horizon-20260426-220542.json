@@ -1,0 +1,65 @@
+{
+  "iteration": 3,
+  "mutations": [],
+  "history": [
+    {
+      "iteration": 1,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 5,
+      "scores": {
+        "LH001": 0,
+        "LH002": 0,
+        "LH003": 0,
+        "LH004": 0,
+        "LH005": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:05:37.352Z"
+    },
+    {
+      "iteration": 2,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 5,
+      "scores": {
+        "LH001": 0,
+        "LH002": 0,
+        "LH003": 0,
+        "LH004": 0,
+        "LH005": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:05:39.978Z"
+    },
+    {
+      "iteration": 3,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 5,
+      "scores": {
+        "LH001": 0,
+        "LH002": 0,
+        "LH003": 0,
+        "LH004": 0,
+        "LH005": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:05:42.606Z"
+    }
+  ],
+  "startedAt": null,
+  "lastRunAt": "2026-04-26T21:05:42.606Z"
+}
