@@ -1774,6 +1774,139 @@ const queryDesignSystem = tool({
 	},
 });
 
+// ============================================================================
+// Desktop / Computer Use (hands)
+// ============================================================================
+// Wraps packages/computer/bridge.ts which already enforces caps + dangerous-key
+// detection. The agent gets a real screenshot/click/type surface so it can
+// drive its own TUI session or any other macOS app.
+
+const desktopScreenshot = tool({
+	description:
+		"Take a screenshot of the desktop. Returns the path on disk plus a coord-map (capture region + image dims) you'll need when calling desktop_click/desktop_hover. Always screenshot before clicking.",
+	inputSchema: z.object({
+		path: z
+			.string()
+			.optional()
+			.describe("Optional path to save screenshot. Auto-generated in tmpdir if omitted."),
+		displayId: z.number().optional().describe("Display index to capture (default: primary)."),
+	}),
+	execute: async ({ path: p, displayId }) => {
+		const { screenshot } = await import("../computer");
+		return screenshot({ path: p, displayId });
+	},
+});
+
+const desktopClick = tool({
+	description:
+		"Click at a (x, y) point on the desktop. Use coordinates from a recent desktop_screenshot. Supports left/right/middle and 1-5 click count.",
+	inputSchema: z.object({
+		x: z.number().describe("X coordinate on screen"),
+		y: z.number().describe("Y coordinate on screen"),
+		button: z.enum(["left", "right", "middle"]).optional().describe("Mouse button (default: left)"),
+		count: z.number().int().min(1).max(5).optional().describe("Click count, e.g. 2 for double-click"),
+	}),
+	execute: async ({ x, y, button, count }) => {
+		const { click } = await import("../computer");
+		return click({ point: { x, y }, button, count });
+	},
+});
+
+const desktopType = tool({
+	description:
+		"Type text at the current cursor position. Click a focusable field first. Max 2000 chars per call.",
+	inputSchema: z.object({
+		text: z.string().describe("Text to type"),
+		delay: z.number().optional().describe("Delay between keystrokes in ms (default: 0)"),
+	}),
+	execute: async ({ text, delay }) => {
+		const { typeText } = await import("../computer");
+		return typeText({ text, delay });
+	},
+});
+
+const desktopPress = tool({
+	description:
+		"Press a key combination. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape'. Dangerous combos (cmd+q, alt+f4) are flagged but still executed.",
+	inputSchema: z.object({
+		keys: z.string().describe("Key combo, e.g. 'cmd+s'"),
+		count: z.number().int().min(1).max(5).optional(),
+		delay: z.number().optional(),
+	}),
+	execute: async ({ keys, count, delay }) => {
+		const { press } = await import("../computer");
+		return press({ keys, count, delay });
+	},
+});
+
+const desktopScroll = tool({
+	description: "Scroll in a direction at an optional point. Amount 1-50 ticks.",
+	inputSchema: z.object({
+		direction: z.enum(["up", "down", "left", "right"]),
+		amount: z.number().int().min(1).max(50).optional(),
+		x: z.number().optional(),
+		y: z.number().optional(),
+	}),
+	execute: async ({ direction, amount, x, y }) => {
+		const { scroll } = await import("../computer");
+		const point = typeof x === "number" && typeof y === "number" ? { x, y } : undefined;
+		return scroll({ direction, amount, point });
+	},
+});
+
+const desktopDrag = tool({
+	description: "Drag from one point to another. Useful for resizing windows, moving files.",
+	inputSchema: z.object({
+		fromX: z.number(),
+		fromY: z.number(),
+		toX: z.number(),
+		toY: z.number(),
+		button: z.enum(["left", "right", "middle"]).optional(),
+		duration: z.number().int().min(0).max(5000).optional(),
+	}),
+	execute: async ({ fromX, fromY, toX, toY, button, duration }) => {
+		const { drag } = await import("../computer");
+		return drag({ from: { x: fromX, y: fromY }, to: { x: toX, y: toY }, button, duration });
+	},
+});
+
+const desktopHover = tool({
+	description: "Move the cursor to a point without clicking. Triggers hover states/tooltips.",
+	inputSchema: z.object({
+		x: z.number(),
+		y: z.number(),
+	}),
+	execute: async ({ x, y }) => {
+		const { hover } = await import("../computer");
+		return hover({ x, y });
+	},
+});
+
+const desktopWindows = tool({
+	description: "List all open windows with title, app, position, size. Use to find a target app.",
+	inputSchema: z.object({}),
+	execute: async () => {
+		const { windowList } = await import("../computer");
+		return windowList();
+	},
+});
+
+const desktopClipboard = tool({
+	description: "Get or set the system clipboard. action='get' reads, 'set' writes.",
+	inputSchema: z.object({
+		action: z.enum(["get", "set"]),
+		text: z.string().optional().describe("Required when action='set'"),
+	}),
+	execute: async ({ action, text }) => {
+		const computer = await import("../computer");
+		if (action === "get") return computer.clipboardGet();
+		if (typeof text !== "string") {
+			return { ok: false, error: "text is required when action='set'" };
+		}
+		return computer.clipboardSet(text);
+	},
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -1874,6 +2007,17 @@ export const agentTools = {
 	// Memory
 	remember: rememberTool,
 	recall: recallTool,
+
+	// Desktop / Computer Use (hands)
+	desktop_screenshot: desktopScreenshot,
+	desktop_click: desktopClick,
+	desktop_type: desktopType,
+	desktop_press: desktopPress,
+	desktop_scroll: desktopScroll,
+	desktop_drag: desktopDrag,
+	desktop_hover: desktopHover,
+	desktop_windows: desktopWindows,
+	desktop_clipboard: desktopClipboard,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;
