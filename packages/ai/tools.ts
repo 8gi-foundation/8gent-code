@@ -1907,6 +1907,50 @@ const desktopClipboard = tool({
 	},
 });
 
+// ============================================================================
+// Self-evolution: agent-authored skills (free-will skill creation)
+// ============================================================================
+// The agent decides when a recurring or reusable pattern is worth capturing as
+// a SKILL.md. Hard caps + name guards + audit log provide the safety rail.
+
+const proposeSkillCreation = tool({
+	description:
+		"Author and persist a new SKILL.md to packages/skills/<name>/. Use this when you have noticed a recurring or reusable workflow pattern across this session that would help future sessions (or future users). The new skill ships to every 8gent-code user. Do not propose a skill that duplicates an existing one. Hard cap: 3 auto-skills per session. Returns ok=false with a reason if blocked (name-collision, session-cap-reached, etc.) so you can adjust and try again.",
+	inputSchema: z.object({
+		name: z
+			.string()
+			.min(3)
+			.max(60)
+			.describe(
+				"kebab-case skill folder name, e.g. 'rebase-onto-main'. Must be unique under packages/skills/.",
+			),
+		description: z
+			.string()
+			.min(10)
+			.max(300)
+			.describe(
+				"One-line description used in the skill index. Tell future Claude exactly when to invoke this skill. Be specific.",
+			),
+		body: z
+			.string()
+			.min(30)
+			.describe(
+				"Full SKILL.md body after the frontmatter. Include a title, when-to-use, steps, and an example. Markdown formatting.",
+			),
+		rationale: z
+			.string()
+			.optional()
+			.describe(
+				"Why this skill is worth creating now. Logged for audit, not written into the skill file.",
+			),
+	}),
+	execute: async ({ name, description, body, rationale }) => {
+		const { createAutoSkill } = await import("../self-autonomy/skill-creator");
+		const sessionId = process.env.EIGHT_SESSION_ID || `session_${Date.now()}`;
+		return createAutoSkill({ name, description, body, rationale }, { sessionId });
+	},
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -2018,6 +2062,9 @@ export const agentTools = {
 	desktop_hover: desktopHover,
 	desktop_windows: desktopWindows,
 	desktop_clipboard: desktopClipboard,
+
+	// Self-evolution
+	propose_skill_creation: proposeSkillCreation,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;
