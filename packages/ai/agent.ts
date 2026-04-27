@@ -147,6 +147,16 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		"git_diff",
 		"git_add",
 		"git_commit",
+		// Desktop / hands - so local models can drive the screen too
+		"desktop_screenshot",
+		"desktop_click",
+		"desktop_type",
+		"desktop_press",
+		"desktop_scroll",
+		"desktop_drag",
+		"desktop_hover",
+		"desktop_windows",
+		"desktop_clipboard",
 	];
 	const defaultTools =
 		config.provider.name === "lmstudio" || config.provider.name === "ollama"
