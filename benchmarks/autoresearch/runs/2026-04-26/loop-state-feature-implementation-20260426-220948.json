@@ -1,0 +1,38 @@
+{
+  "iteration": 2,
+  "mutations": [],
+  "history": [
+    {
+      "iteration": 1,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 1,
+      "scores": {
+        "FI001": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:09:48.037Z"
+    },
+    {
+      "iteration": 2,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 1,
+      "scores": {
+        "FI001": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:09:48.576Z"
+    }
+  ],
+  "startedAt": null,
+  "lastRunAt": "2026-04-26T21:09:48.576Z"
+}
