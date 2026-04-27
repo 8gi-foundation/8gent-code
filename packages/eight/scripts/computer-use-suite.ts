@@ -26,11 +26,7 @@ import { join, resolve } from "node:path";
 
 import type { HandsToolCtx } from "../../daemon/tools/hands";
 import { ModelFailover } from "../../providers/failover";
-import {
-	type CuaLoopConfig,
-	type CuaStepRecord,
-	runComputerUseLoop,
-} from "../loops/computer-use";
+import { type CuaLoopConfig, type CuaStepRecord, runComputerUseLoop } from "../loops/computer-use";
 import type { LLMClient, LLMResponse, Message } from "../types";
 
 interface TaskExpectation {
@@ -295,11 +291,7 @@ async function runTask(task: TaskFixture): Promise<TaskOutcome> {
 				break;
 			}
 		}
-		if (
-			pass &&
-			task.expect.minSteps &&
-			result.steps.length < task.expect.minSteps
-		) {
+		if (pass && task.expect.minSteps && result.steps.length < task.expect.minSteps) {
 			pass = false;
 			reason = `expected at least ${task.expect.minSteps} steps, got ${result.steps.length}`;
 		}
@@ -321,10 +313,7 @@ function dateStamp(): string {
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function writeReport(
-	outcomes: TaskOutcome[],
-	channelEntry: { provider: string; model: string },
-) {
+function writeReport(outcomes: TaskOutcome[], channelEntry: { provider: string; model: string }) {
 	const repoRoot = resolve(__dirname, "..", "..", "..");
 	const auditsDir = join(repoRoot, "docs", "audits");
 	if (!existsSync(auditsDir)) mkdirSync(auditsDir, { recursive: true });
@@ -336,21 +325,15 @@ function writeReport(
 	lines.push("");
 	lines.push(`**Result:** ${passCount}/${outcomes.length} pass.`);
 	lines.push("");
-	lines.push(
-		`**Channel resolver:** computer -> ${channelEntry.provider}/${channelEntry.model}`,
-	);
+	lines.push(`**Channel resolver:** computer -> ${channelEntry.provider}/${channelEntry.model}`);
 	lines.push("");
-	lines.push(
-		"**Mode:** headless, mock hands + mock LLM. Production path unchanged.",
-	);
+	lines.push("**Mode:** headless, mock hands + mock LLM. Production path unchanged.");
 	lines.push("");
 	lines.push("| ID | Title | Pass | Steps | Tools called |");
 	lines.push("|----|-------|------|-------|--------------|");
 	for (const o of outcomes) {
 		const flag = o.pass ? "yes" : "no";
-		lines.push(
-			`| ${o.id} | ${o.title} | ${flag} | ${o.steps} | ${o.calledTools.join(", ")} |`,
-		);
+		lines.push(`| ${o.id} | ${o.title} | ${flag} | ${o.steps} | ${o.calledTools.join(", ")} |`);
 	}
 	lines.push("");
 	lines.push("## Failures");
@@ -367,9 +350,7 @@ function writeReport(
 	lines.push("## Notes");
 	lines.push("");
 	lines.push("- NemoClaw policy gate is preserved in the production path");
-	lines.push(
-		"  (`packages/daemon/tools/hands.ts`). The smoke suite swaps in a",
-	);
+	lines.push("  (`packages/daemon/tools/hands.ts`). The smoke suite swaps in a");
 	lines.push("  mock adapter via `CuaLoopConfig.handsAdapter` so CI does not");
 	lines.push("  need a real desktop, but the gate is exercised by");
 	lines.push("  `packages/permissions/policy-engine.test.ts`.");
@@ -385,9 +366,7 @@ async function main() {
 	);
 
 	const spec: SuiteSpec = JSON.parse(await Bun.file(SUITE_PATH).text());
-	console.log(
-		`[cua-suite] loaded ${spec.tasks.length} tasks from ${SUITE_PATH}`,
-	);
+	console.log(`[cua-suite] loaded ${spec.tasks.length} tasks from ${SUITE_PATH}`);
 
 	const outcomes: TaskOutcome[] = [];
 	for (const task of spec.tasks) {
@@ -415,10 +394,7 @@ async function main() {
 	process.exit(0);
 }
 
-if (
-	(typeof require !== "undefined" && require.main === module) ||
-	import.meta.main
-) {
+if ((typeof require !== "undefined" && require.main === module) || import.meta.main) {
 	main().catch((err) => {
 		console.error(`[cua-suite] crashed: ${err}`);
 		process.exit(1);

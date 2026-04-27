@@ -9,12 +9,12 @@
  *   6. CLI arg parser handles --handle, positional, and --apply
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { bucketName, subdomain, tenantId, validateHandle } from "./handle.ts";
 import { ADAPTERS, parseArgs, provisionTenant, summarize } from "./index.ts";
 import { renderMinute } from "./minute.ts";
-import { validateHandle, tenantId, subdomain, bucketName } from "./handle.ts";
 import type { Ctx, ProvisionOptions } from "./types.ts";
 
 const FIXED_NOW = new Date("2026-04-26T16:30:00.000Z");
@@ -34,7 +34,9 @@ interface FetchCall {
 	method: string;
 }
 
-function recordingFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): {
+function recordingFetch(
+	handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+): {
 	fetch: typeof fetch;
 	calls: FetchCall[];
 } {
@@ -48,7 +50,10 @@ function recordingFetch(handler: (url: string, init?: RequestInit) => Response |
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "Content-Type": "application/json" },
+	});
 }
 
 let tmp: string;
@@ -119,9 +124,14 @@ describe("parseArgs", () => {
 
 describe("provisionTenant dry-run with no env", () => {
 	test("plans creates for everything, mutates nothing remote, writes minute", async () => {
-		const { fetch, calls } = recordingFetch(() => new Response("should not be called", { status: 599 }));
+		const { fetch, calls } = recordingFetch(
+			() => new Response("should not be called", { status: 599 }),
+		);
 		const opts: ProvisionOptions = { handle: "james", apply: false, rootDir: tmp };
-		const { plan, minutePath } = await provisionTenant(opts, makeCtx({ rootDir: tmp, fetch, env: {} }));
+		const { plan, minutePath } = await provisionTenant(
+			opts,
+			makeCtx({ rootDir: tmp, fetch, env: {} }),
+		);
 
 		expect(plan.handle).toBe("james");
 		expect(plan.dryRun).toBe(true);
@@ -137,7 +147,9 @@ describe("provisionTenant dry-run with no env", () => {
 		// Dry-run with no env keys should not hit fetch at all.
 		expect(calls).toHaveLength(0);
 		// Telegram slot is the only step that writes locally even in dry-run? No - dry-run writes nothing.
-		expect(existsSync(join(tmp, ".8gent", "tenants", "james", "telegram-bot-token.placeholder"))).toBe(false);
+		expect(
+			existsSync(join(tmp, ".8gent", "tenants", "james", "telegram-bot-token.placeholder")),
+		).toBe(false);
 		// Minute draft is always written.
 		expect(existsSync(minutePath)).toBe(true);
 		const minute = readFileSync(minutePath, "utf8");
@@ -175,7 +187,10 @@ describe("provisionTenant --apply with mocked APIs", () => {
 			}
 			// Convex mutation
 			if (url.includes("/api/mutation")) {
-				return jsonResponse({ status: "success", value: { tenantId: "tenant_james", created: true } });
+				return jsonResponse({
+					status: "success",
+					value: { tenantId: "tenant_james", created: true },
+				});
 			}
 			// Hetzner S3 HEAD bucket -> 404
 			if (url.includes("your-objectstorage.com") && method === "HEAD") {
@@ -209,7 +224,9 @@ describe("provisionTenant --apply with mocked APIs", () => {
 		expect(byResource["bucket:tenant-james"].status).toBe("create");
 
 		// Telegram slot file exists in apply mode.
-		expect(existsSync(join(tmp, ".8gent", "tenants", "james", "telegram-bot-token.placeholder"))).toBe(true);
+		expect(
+			existsSync(join(tmp, ".8gent", "tenants", "james", "telegram-bot-token.placeholder")),
+		).toBe(true);
 
 		// Sanity: at least one POST went to Clerk and one POST to Hetzner DNS.
 		expect(calls.some((c) => c.method === "POST" && c.url.includes("clerk.com"))).toBe(true);
@@ -224,13 +241,20 @@ describe("provisionTenant --apply with mocked APIs", () => {
 				return jsonResponse({ zones: [{ id: "zone1", name: "8gentos.com" }] });
 			}
 			if (url.includes("dns.hetzner.com/api/v1/records?")) {
-				return jsonResponse({ records: [{ id: "rec1", name: "james", type: "A", value: "78.47.98.218", zone_id: "zone1" }] });
+				return jsonResponse({
+					records: [
+						{ id: "rec1", name: "james", type: "A", value: "78.47.98.218", zone_id: "zone1" },
+					],
+				});
 			}
 			if (url.includes("api.clerk.com/v1/organizations") && method === "GET") {
 				return jsonResponse({ data: [{ id: "org_xyz", slug: "james", name: "james" }] });
 			}
 			if (url.includes("/api/mutation")) {
-				return jsonResponse({ status: "success", value: { tenantId: "tenant_james", created: false } });
+				return jsonResponse({
+					status: "success",
+					value: { tenantId: "tenant_james", created: false },
+				});
 			}
 			if (url.includes("your-objectstorage.com") && method === "HEAD") {
 				return new Response("", { status: 200 });
@@ -241,7 +265,10 @@ describe("provisionTenant --apply with mocked APIs", () => {
 		// Pre-create the telegram slot file to simulate prior reservation.
 		const { mkdirSync, writeFileSync } = await import("node:fs");
 		mkdirSync(join(tmp, ".8gent", "tenants", "james"), { recursive: true });
-		writeFileSync(join(tmp, ".8gent", "tenants", "james", "telegram-bot-token.placeholder"), "old\n");
+		writeFileSync(
+			join(tmp, ".8gent", "tenants", "james", "telegram-bot-token.placeholder"),
+			"old\n",
+		);
 
 		const opts: ProvisionOptions = { handle: "james", apply: true, rootDir: tmp };
 		const env = {
@@ -267,7 +294,9 @@ describe("provisionTenant --apply with mocked APIs", () => {
 				return jsonResponse({ zones: [{ id: "zone1", name: "8gentos.com" }] });
 			}
 			if (url.includes("dns.hetzner.com/api/v1/records?")) {
-				return jsonResponse({ records: [{ id: "rec1", name: "james", type: "A", value: "1.2.3.4", zone_id: "zone1" }] });
+				return jsonResponse({
+					records: [{ id: "rec1", name: "james", type: "A", value: "1.2.3.4", zone_id: "zone1" }],
+				});
 			}
 			return new Response("ok", { status: 200 });
 		});

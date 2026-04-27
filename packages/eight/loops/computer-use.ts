@@ -22,10 +22,7 @@ import {
 } from "../../daemon/tools/hands";
 import { type FailoverEntry, ModelFailover } from "../../providers/failover";
 import { createClient } from "../clients";
-import {
-	type ScreenshotPerception,
-	captureScreenshot,
-} from "../perception/screenshot";
+import { type ScreenshotPerception, captureScreenshot } from "../perception/screenshot";
 import {
 	type AxNode,
 	type TokenCost,
@@ -69,11 +66,7 @@ export interface CuaLoopConfig {
 	handsAdapter?: HandsAdapter;
 }
 
-export type CuaTerminationReason =
-	| "goal_complete"
-	| "goal_failed"
-	| "max_steps"
-	| "internal_error";
+export type CuaTerminationReason = "goal_complete" | "goal_failed" | "max_steps" | "internal_error";
 
 export interface CuaStepRecord {
 	step: number;
@@ -194,9 +187,7 @@ async function screenshotToDataUrl(path: string): Promise<string | undefined> {
 function summarizePerception(p: TreePerception | ScreenshotPerception): string {
 	if (p.kind === "tree") {
 		if (!p.ok) return `tree-error: ${p.error ?? "unknown"}`;
-		const head = p.appName
-			? `${p.appName} -- ${p.windowTitle ?? ""}`
-			: "(focused window)";
+		const head = p.appName ? `${p.appName} -- ${p.windowTitle ?? ""}` : "(focused window)";
 		return `${head}\n${summarizeTree(p.root, 60)}`;
 	}
 	if (!p.ok) return `screenshot-error: ${p.error ?? "unknown"}`;
@@ -215,12 +206,7 @@ function resolveClient(
 ): { client: LLMClient; entry: FailoverEntry } {
 	const entry = failover.resolve(pinnedModel, "computer");
 	if (factory) return { client: factory(entry), entry };
-	const runtime:
-		| "ollama"
-		| "deepseek"
-		| "openrouter"
-		| "apple-foundation"
-		| "apfel" =
+	const runtime: "ollama" | "deepseek" | "openrouter" | "apple-foundation" | "apfel" =
 		entry.provider === "apfel"
 			? "apfel"
 			: entry.provider === "apple-foundation"
@@ -239,9 +225,7 @@ function resolveClient(
  * trips. The runner is responsible for streaming `CuaStepRecord`s out;
  * v0 collects them in an array and returns at the end.
  */
-export async function runComputerUseLoop(
-	config: CuaLoopConfig,
-): Promise<CuaLoopResult> {
+export async function runComputerUseLoop(config: CuaLoopConfig): Promise<CuaLoopResult> {
 	const maxSteps = config.maxSteps ?? DEFAULT_MAX_STEPS;
 	const failover = config.failover ?? new ModelFailover();
 	const pinnedModel = config.pinnedModel ?? "qwen3.6:27b";
@@ -251,10 +235,7 @@ export async function runComputerUseLoop(
 		approve: config.approve,
 	};
 	const hands = config.handsAdapter ?? executeHandsTool;
-	const tools = [
-		...getHandsToolDefinitions(),
-		...getTerminationToolDefinitions(),
-	];
+	const tools = [...getHandsToolDefinitions(), ...getTerminationToolDefinitions()];
 
 	const systemPrompt = buildComputerUseSystemPrompt({
 		goal: config.goal,
@@ -297,23 +278,14 @@ export async function runComputerUseLoop(
 			maxSteps,
 			perceptionSummary: summary,
 			screenshotDataUrl,
-			lastActionResult: [recall(history), lastActionResult]
-				.filter(Boolean)
-				.join(" | "),
+			lastActionResult: [recall(history), lastActionResult].filter(Boolean).join(" | "),
 		});
 
-		const { client, entry } = resolveClient(
-			failover,
-			pinnedModel,
-			config.clientFactory,
-		);
+		const { client, entry } = resolveClient(failover, pinnedModel, config.clientFactory);
 
 		let llmResp: Awaited<ReturnType<LLMClient["chat"]>>;
 		try {
-			llmResp = await client.chat(
-				[{ role: "system", content: systemPrompt }, userMessage],
-				tools,
-			);
+			llmResp = await client.chat([{ role: "system", content: systemPrompt }, userMessage], tools);
 		} catch (err) {
 			// Mark this entry down and let the next iteration pick the next tier.
 			failover.markDown(entry.model, entry.provider);
@@ -388,9 +360,7 @@ export async function runComputerUseLoop(
 
 		const exec = await hands(toolName, toolArgs, ctx);
 		const approved = exec.ok;
-		const preview = exec.ok
-			? previewResult(exec.result)
-			: `[denied] ${exec.reason}`;
+		const preview = exec.ok ? previewResult(exec.result) : `[denied] ${exec.reason}`;
 		lastActionResult = preview;
 		history.push({
 			step,

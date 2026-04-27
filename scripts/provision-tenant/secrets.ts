@@ -22,23 +22,38 @@ export const secretsAdapter: Adapter = {
 	async plan(handle, ctx): Promise<PlanStep> {
 		const path = slotPath(ctx.rootDir, handle);
 		if (existsSync(path)) {
-			return { resource: `telegram:${handle}`, status: "exists", detail: `slot already reserved at ${rel(ctx.rootDir, path)}` };
+			return {
+				resource: `telegram:${handle}`,
+				status: "exists",
+				detail: `slot already reserved at ${rel(ctx.rootDir, path)}`,
+			};
 		}
 		if (!ctx.apply) {
-			return { resource: `telegram:${handle}`, status: "create", detail: `would reserve slot at ${rel(ctx.rootDir, path)}` };
+			return {
+				resource: `telegram:${handle}`,
+				status: "create",
+				detail: `would reserve slot at ${rel(ctx.rootDir, path)}`,
+			};
 		}
 		try {
 			await mkdir(dirname(path), { recursive: true });
 			await writeFile(
 				path,
-				`# Telegram bot token slot for tenant "${handle}"\n` +
-					`# Reserved by Wave 4 B-2 at ${ctx.now().toISOString()}.\n` +
-					`# B-7 will replace this file with the BotFather token (kept off-box; secrets vault on the Hetzner host).\n`,
+				`# Telegram bot token slot for tenant "${handle}"\n# Reserved by Wave 4 B-2 at ${ctx.now().toISOString()}.\n# B-7 will replace this file with the BotFather token (kept off-box; secrets vault on the Hetzner host).\n`,
 				"utf8",
 			);
-			return { resource: `telegram:${handle}`, status: "create", detail: `reserved slot at ${rel(ctx.rootDir, path)}` };
+			return {
+				resource: `telegram:${handle}`,
+				status: "create",
+				detail: `reserved slot at ${rel(ctx.rootDir, path)}`,
+			};
 		} catch (e) {
-			return { resource: `telegram:${handle}`, status: "error", detail: "secrets step failed", error: (e as Error).message };
+			return {
+				resource: `telegram:${handle}`,
+				status: "error",
+				detail: "secrets step failed",
+				error: (e as Error).message,
+			};
 		}
 	},
 };

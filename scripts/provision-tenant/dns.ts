@@ -1,3 +1,4 @@
+import { subdomain } from "./handle.ts";
 /**
  * Hetzner DNS adapter. Creates an A record for <handle>.8gentos.com pointing
  * at the Wave 4 prod box (HETZNER_BOX_IP). Idempotent: existing records with
@@ -5,7 +6,6 @@
  * are flagged as "rotate" but never auto-overwritten in B-2 (B-3 owns rotation).
  */
 import type { Adapter, Ctx, PlanStep } from "./types.ts";
-import { subdomain } from "./handle.ts";
 
 const HETZNER_API = "https://dns.hetzner.com/api/v1";
 const ROOT_ZONE = "8gentos.com";
@@ -70,12 +70,20 @@ export const dnsAdapter: Adapter = {
 		if (!targetIp) {
 			return ctx.apply
 				? errStep(fqdn, "HETZNER_BOX_IP required for --apply")
-				: { resource: `dns:${fqdn}`, status: "create", detail: `would create A ${fqdn} (HETZNER_BOX_IP unset, dry-run)` };
+				: {
+						resource: `dns:${fqdn}`,
+						status: "create",
+						detail: `would create A ${fqdn} (HETZNER_BOX_IP unset, dry-run)`,
+					};
 		}
 		if (!token) {
 			return ctx.apply
 				? errStep(fqdn, "HETZNER_DNS_API_TOKEN required for --apply")
-				: { resource: `dns:${fqdn}`, status: "create", detail: `would create A ${fqdn} -> ${targetIp} (dry-run, no API call)` };
+				: {
+						resource: `dns:${fqdn}`,
+						status: "create",
+						detail: `would create A ${fqdn} -> ${targetIp} (dry-run, no API call)`,
+					};
 		}
 
 		try {
@@ -85,7 +93,11 @@ export const dnsAdapter: Adapter = {
 
 			if (existing) {
 				if (existing.value === targetIp) {
-					return { resource: `dns:${fqdn}`, status: "exists", detail: `A ${fqdn} -> ${targetIp} already present (id ${existing.id})` };
+					return {
+						resource: `dns:${fqdn}`,
+						status: "exists",
+						detail: `A ${fqdn} -> ${targetIp} already present (id ${existing.id})`,
+					};
 				}
 				return {
 					resource: `dns:${fqdn}`,
@@ -95,11 +107,19 @@ export const dnsAdapter: Adapter = {
 			}
 
 			if (!ctx.apply) {
-				return { resource: `dns:${fqdn}`, status: "create", detail: `would create A ${fqdn} -> ${targetIp}` };
+				return {
+					resource: `dns:${fqdn}`,
+					status: "create",
+					detail: `would create A ${fqdn} -> ${targetIp}`,
+				};
 			}
 
 			await createRecord(ctx, token, zoneId, recordName, targetIp);
-			return { resource: `dns:${fqdn}`, status: "create", detail: `created A ${fqdn} -> ${targetIp}` };
+			return {
+				resource: `dns:${fqdn}`,
+				status: "create",
+				detail: `created A ${fqdn} -> ${targetIp}`,
+			};
 		} catch (err) {
 			return errStep(fqdn, (err as Error).message);
 		}
