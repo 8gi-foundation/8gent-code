@@ -157,6 +157,8 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		"desktop_hover",
 		"desktop_windows",
 		"desktop_clipboard",
+		// Self-evolution - free will to author skills
+		"propose_skill_creation",
 	];
 	const defaultTools =
 		config.provider.name === "lmstudio" || config.provider.name === "ollama"
