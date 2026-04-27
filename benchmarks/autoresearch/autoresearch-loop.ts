@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 
 import type { BenchmarkDefinition, BenchmarkRun, TokenUsage } from "../types";
 
+import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
 import { agenticBenchmarks } from "../categories/agentic/benchmarks";
 import { battleTestBenchmarks } from "../categories/battle-test/benchmarks";
 import { battleTestProBenchmarks } from "../categories/battle-test/benchmarks-pro";
@@ -26,7 +27,6 @@ import { grade } from "./execution-grader";
 import { getFewShot } from "./few-shot";
 import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
-import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
 
 // ── Config ──────────────────────────────────────────────────────────
 

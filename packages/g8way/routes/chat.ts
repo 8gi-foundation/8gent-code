@@ -14,12 +14,7 @@ import type { Context, Hono } from "hono";
 import { getTenant } from "../auth";
 import type { OpenRouterClient } from "../openrouter";
 import type { RateLimiter } from "../rate-limit";
-import type {
-	G8wayConfig,
-	OpenAIChatRequest,
-	OpenAIUsage,
-	UsageRecord,
-} from "../types";
+import type { G8wayConfig, OpenAIChatRequest, OpenAIUsage, UsageRecord } from "../types";
 import type { UsageLogger } from "../usage";
 
 interface Deps {
@@ -30,22 +25,12 @@ interface Deps {
 }
 
 function badRequest(c: Context, message: string, code = "invalid_request") {
-	return c.json(
-		{ error: { message, type: "invalid_request_error", code } },
-		400,
-	);
+	return c.json({ error: { message, type: "invalid_request_error", code } }, 400);
 }
 
-function rateLimited(
-	c: Context,
-	message: string,
-	retryAfterSeconds: number,
-) {
+function rateLimited(c: Context, message: string, retryAfterSeconds: number) {
 	c.header("Retry-After", String(retryAfterSeconds));
-	return c.json(
-		{ error: { message, type: "rate_limit_error", code: "rate_limit_exceeded" } },
-		429,
-	);
+	return c.json({ error: { message, type: "rate_limit_error", code: "rate_limit_exceeded" } }, 429);
 }
 
 function pickModel(config: G8wayConfig, requested: string | undefined): string | null {

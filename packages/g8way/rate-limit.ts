@@ -82,11 +82,7 @@ export class RateLimiter {
 	 * from outpacing the limiter; the real total is accounted via
 	 * `chargeTokens()` after the upstream call returns.
 	 */
-	checkRequest(
-		tenantId: string,
-		plan: string,
-		estimatedTokens = 256,
-	): RateLimitDecision {
+	checkRequest(tenantId: string, plan: string, estimatedTokens = 256): RateLimitDecision {
 		const t = this.now();
 		const buckets = this.getBuckets(tenantId, plan);
 		refill(buckets.requests, t);
@@ -130,12 +126,7 @@ export class RateLimiter {
 	 * if the request used fewer tokens than estimated, refunding the
 	 * tenant).
 	 */
-	chargeTokens(
-		tenantId: string,
-		plan: string,
-		actualTokens: number,
-		estimatedTokens = 256,
-	): void {
+	chargeTokens(tenantId: string, plan: string, actualTokens: number, estimatedTokens = 256): void {
 		const buckets = this.getBuckets(tenantId, plan);
 		const delta = actualTokens - estimatedTokens;
 		buckets.tokens.tokens = Math.max(

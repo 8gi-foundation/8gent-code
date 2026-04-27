@@ -18,8 +18,8 @@ export function renderMinute(input: MinuteInput): string {
 	const lines: string[] = [];
 	lines.push(`# Tenant Provisioning Minute - ${handle}`);
 	lines.push("");
-	lines.push(`**Wave:** 4`);
-	lines.push(`**Track:** B-2 (Tenant Provisioning)`);
+	lines.push("**Wave:** 4");
+	lines.push("**Track:** B-2 (Tenant Provisioning)");
 	lines.push(`**Status:** ${plan.dryRun ? "DRAFT (dry-run)" : "DRAFT (applied)"}`);
 	lines.push(`**Chair:** ${chair}`);
 	lines.push(`**Officers consulted:** ${officers.join(", ")}`);
@@ -38,19 +38,25 @@ export function renderMinute(input: MinuteInput): string {
 	lines.push("## Notes");
 	lines.push("");
 	if (plan.dryRun) {
-		lines.push("- Dry-run only. No live infrastructure was mutated. Re-run with `--apply` to provision.");
+		lines.push(
+			"- Dry-run only. No live infrastructure was mutated. Re-run with `--apply` to provision.",
+		);
 	} else {
 		const errors = plan.steps.filter((s) => s.status === "error");
 		if (errors.length > 0) {
 			lines.push(`- ${errors.length} adapter(s) reported errors. Review before promoting tenant.`);
 		} else {
-			lines.push("- All adapters reported success or pre-existing resource. Tenant is ready for B-3 dogfood.");
+			lines.push(
+				"- All adapters reported success or pre-existing resource. Tenant is ready for B-3 dogfood.",
+			);
 		}
 	}
 	lines.push("");
 	lines.push("## Next steps");
 	lines.push("");
-	lines.push(`- Human PRs this minute into \`8gi-foundation/8gi-governance\` at \`docs/boardroom-minutes/${plan.finishedAt.slice(0, 10)}-tenant-${handle}.md\`.`);
+	lines.push(
+		`- Human PRs this minute into \`8gi-foundation/8gi-governance\` at \`docs/boardroom-minutes/${plan.finishedAt.slice(0, 10)}-tenant-${handle}.md\`.`,
+	);
 	lines.push("- B-7 mints the BotFather token and replaces the placeholder slot file.");
 	lines.push("- B-5 attribution telemetry begins tagging events with the new tenantId.");
 	lines.push("");
@@ -68,7 +74,11 @@ function esc(value: string): string {
 	return value.replace(/\|/g, "\\|");
 }
 
-export function buildMinuteInput(handle: string, plan: ProvisionPlan, env: Record<string, string | undefined>): MinuteInput {
+export function buildMinuteInput(
+	handle: string,
+	plan: ProvisionPlan,
+	env: Record<string, string | undefined>,
+): MinuteInput {
 	return {
 		handle,
 		plan,

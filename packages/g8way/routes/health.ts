@@ -10,7 +10,5 @@
 import type { Hono } from "hono";
 
 export function registerHealthRoute(app: Hono): void {
-	app.get("/healthz", (c) =>
-		c.json({ status: "ok", service: "g8way", version: "0.1.0" }),
-	);
+	app.get("/healthz", (c) => c.json({ status: "ok", service: "g8way", version: "0.1.0" }));
 }

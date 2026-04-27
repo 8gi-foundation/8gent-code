@@ -23,8 +23,7 @@ import { type SpanContext, newSpanContext, nowUnixNano } from "./otel";
 export class TelemetryAttributionError extends Error {
 	constructor(public readonly event: Partial<TelemetryEvent>) {
 		super(
-			`Telemetry event rejected: tenantId is required (kind=${event.kind ?? "?"}). ` +
-				"Wave 4 gate — every LLM/vessel/storage op must be tenant-attributed.",
+			`Telemetry event rejected: tenantId is required (kind=${event.kind ?? "?"}). Wave 4 gate — every LLM/vessel/storage op must be tenant-attributed.`,
 		);
 		this.name = "TelemetryAttributionError";
 	}
