@@ -1,0 +1,42 @@
+{
+  "iteration": 2,
+  "mutations": [],
+  "history": [
+    {
+      "iteration": 1,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 3,
+      "scores": {
+        "BF001": 0,
+        "BF002": 0,
+        "BF003": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:07:45.004Z"
+    },
+    {
+      "iteration": 2,
+      "avgScore": 0,
+      "passing": 0,
+      "total": 3,
+      "scores": {
+        "BF001": 0,
+        "BF002": 0,
+        "BF003": 0
+      },
+      "tokens": {},
+      "durations": {},
+      "totalTokens": 0,
+      "totalDurationMs": 0,
+      "mutationsAdded": [],
+      "timestamp": "2026-04-26T21:07:46.715Z"
+    }
+  ],
+  "startedAt": null,
+  "lastRunAt": "2026-04-26T21:07:46.715Z"
+}
