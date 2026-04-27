@@ -34,9 +34,7 @@ console.log(
 );
 
 const shutdown = (signal: string) => {
-	console.log(
-		JSON.stringify({ ts: new Date().toISOString(), type: "g8way.shutdown", signal }),
-	);
+	console.log(JSON.stringify({ ts: new Date().toISOString(), type: "g8way.shutdown", signal }));
 	stop();
 	process.exit(0);
 };

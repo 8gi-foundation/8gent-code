@@ -1,3 +1,4 @@
+import { tenantId } from "./handle.ts";
 /**
  * Convex tenant row adapter. Calls a Convex HTTP mutation to upsert a tenant
  * row keyed by handle. The mutation must be implemented on the Convex side as
@@ -8,7 +9,6 @@
  * should return the same tenantId rather than creating a duplicate.
  */
 import type { Adapter, Ctx, PlanStep } from "./types.ts";
-import { tenantId } from "./handle.ts";
 
 interface ConvexResult {
 	status: "success" | "error";
@@ -51,12 +51,23 @@ export const convexAdapter: Adapter = {
 
 		if (!url || !key) {
 			return ctx.apply
-				? errStep(handle, "NEXT_PUBLIC_CONVEX_URL and VESSEL_CONVEX_SERVICE_KEY (or CONVEX_DEPLOY_KEY) required for --apply")
-				: { resource: `convex:${id}`, status: "create", detail: `would upsert tenants row tenantId=${id} (dry-run, no API call)` };
+				? errStep(
+						handle,
+						"NEXT_PUBLIC_CONVEX_URL and VESSEL_CONVEX_SERVICE_KEY (or CONVEX_DEPLOY_KEY) required for --apply",
+					)
+				: {
+						resource: `convex:${id}`,
+						status: "create",
+						detail: `would upsert tenants row tenantId=${id} (dry-run, no API call)`,
+					};
 		}
 
 		if (!ctx.apply) {
-			return { resource: `convex:${id}`, status: "create", detail: `would upsert tenants row tenantId=${id}` };
+			return {
+				resource: `convex:${id}`,
+				status: "create",
+				detail: `would upsert tenants row tenantId=${id}`,
+			};
 		}
 
 		try {
@@ -64,7 +75,9 @@ export const convexAdapter: Adapter = {
 			return {
 				resource: `convex:${result.tenantId}`,
 				status: result.created ? "create" : "exists",
-				detail: result.created ? `created tenants row ${result.tenantId}` : `tenants row ${result.tenantId} already present`,
+				detail: result.created
+					? `created tenants row ${result.tenantId}`
+					: `tenants row ${result.tenantId} already present`,
 			};
 		} catch (e) {
 			return errStep(handle, (e as Error).message);
@@ -73,5 +86,10 @@ export const convexAdapter: Adapter = {
 };
 
 function errStep(handle: string, msg: string): PlanStep {
-	return { resource: `convex:${tenantId(handle)}`, status: "error", detail: "Convex step failed", error: msg };
+	return {
+		resource: `convex:${tenantId(handle)}`,
+		status: "error",
+		detail: "Convex step failed",
+		error: msg,
+	};
 }

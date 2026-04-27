@@ -14,15 +14,23 @@ interface ClerkOrg {
 }
 
 async function findOrg(ctx: Ctx, key: string, slug: string): Promise<ClerkOrg | null> {
-	const res = await ctx.fetch(`${CLERK_API}/organizations?query=${encodeURIComponent(slug)}&limit=50`, {
-		headers: { Authorization: `Bearer ${key}` },
-	});
+	const res = await ctx.fetch(
+		`${CLERK_API}/organizations?query=${encodeURIComponent(slug)}&limit=50`,
+		{
+			headers: { Authorization: `Bearer ${key}` },
+		},
+	);
 	if (!res.ok) throw new Error(`Clerk org lookup failed: ${res.status}`);
 	const data = (await res.json()) as { data?: ClerkOrg[] };
 	return data.data?.find((o) => o.slug === slug) ?? null;
 }
 
-async function createOrg(ctx: Ctx, key: string, handle: string, createdBy: string): Promise<ClerkOrg> {
+async function createOrg(
+	ctx: Ctx,
+	key: string,
+	handle: string,
+	createdBy: string,
+): Promise<ClerkOrg> {
 	const res = await ctx.fetch(`${CLERK_API}/organizations`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -44,19 +52,30 @@ export const clerkAdapter: Adapter = {
 		if (!key) {
 			return ctx.apply
 				? err(handle, "CLERK_SECRET_KEY required for --apply")
-				: { resource: `clerk:${handle}`, status: "create", detail: "would create Clerk org (dry-run, no API call)" };
+				: {
+						resource: `clerk:${handle}`,
+						status: "create",
+						detail: "would create Clerk org (dry-run, no API call)",
+					};
 		}
 
 		try {
 			const existing = await findOrg(ctx, key, handle);
 			if (existing) {
-				return { resource: `clerk:${handle}`, status: "exists", detail: `org ${existing.id} (slug=${existing.slug})` };
+				return {
+					resource: `clerk:${handle}`,
+					status: "exists",
+					detail: `org ${existing.id} (slug=${existing.slug})`,
+				};
 			}
 			if (!ctx.apply) {
 				return { resource: `clerk:${handle}`, status: "create", detail: "would create Clerk org" };
 			}
 			if (!createdBy) {
-				return err(handle, "CLERK_FOUNDATION_USER_ID required for org creation (Clerk requires a creator)");
+				return err(
+					handle,
+					"CLERK_FOUNDATION_USER_ID required for org creation (Clerk requires a creator)",
+				);
 			}
 			const org = await createOrg(ctx, key, handle, createdBy);
 			return { resource: `clerk:${handle}`, status: "create", detail: `created org ${org.id}` };

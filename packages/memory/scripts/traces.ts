@@ -65,9 +65,7 @@ try {
 		console.log(`  channel: ${t.channel}`);
 		console.log(`  intent:  ${t.intent}`);
 		console.log(`  started: ${new Date(t.startedAt).toISOString()}`);
-		console.log(
-			`  ended:   ${t.endedAt ? new Date(t.endedAt).toISOString() : "(open)"}`,
-		);
+		console.log(`  ended:   ${t.endedAt ? new Date(t.endedAt).toISOString() : "(open)"}`);
 		console.log(`  outcome: ${t.outcome ?? "-"}`);
 		console.log(`  summary: ${t.summary ?? "-"}`);
 		console.log(`  steps:   ${t.stepCount}`);
@@ -76,16 +74,11 @@ try {
 			console.log(
 				`  [${s.stepIndex}] ${s.perceptionKind} ${s.toolCallName ?? "(no tool)"}  ${s.ms}ms  tokens=${s.tokensUsed}`,
 			);
-			if (s.screenshotPath)
-				console.log(`      screenshot: ${s.screenshotPath}`);
+			if (s.screenshotPath) console.log(`      screenshot: ${s.screenshotPath}`);
 			if (s.toolCallArgs !== null)
-				console.log(
-					`      args: ${truncate(JSON.stringify(s.toolCallArgs), 200)}`,
-				);
+				console.log(`      args: ${truncate(JSON.stringify(s.toolCallArgs), 200)}`);
 			if (s.toolResult !== null)
-				console.log(
-					`      result: ${truncate(JSON.stringify(s.toolResult), 200)}`,
-				);
+				console.log(`      result: ${truncate(JSON.stringify(s.toolResult), 200)}`);
 		}
 	} else if (cmd === "replay") {
 		const id = args[1];
@@ -130,9 +123,7 @@ try {
 		}
 		const cutoff = Date.now() - ms;
 		const res = store.purgeOlderThan(cutoff);
-		console.log(
-			`purged ${res.traces} trace(s), ${res.files} screenshot file(s)`,
-		);
+		console.log(`purged ${res.traces} trace(s), ${res.files} screenshot file(s)`);
 	} else {
 		help();
 		process.exit(2);

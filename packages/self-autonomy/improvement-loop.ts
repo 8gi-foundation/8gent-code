@@ -19,9 +19,9 @@
  */
 
 import { recordEvent } from "./evolution-db.js";
-import { learnSkill, reinforceSkill, getRelevantSkills } from "./learned-skills.js";
-import { reflect, type SessionData } from "./reflection.js";
 import type { SessionReflection } from "./evolution-db.js";
+import { getRelevantSkills, learnSkill, reinforceSkill } from "./learned-skills.js";
+import { type SessionData, reflect } from "./reflection.js";
 
 // ============================================
 // Types - mirror autoresearch-loop.IterationResult so we don't import

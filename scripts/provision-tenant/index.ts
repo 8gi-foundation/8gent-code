@@ -1,3 +1,10 @@
+import { clerkAdapter } from "./clerk.ts";
+import { convexAdapter } from "./convex.ts";
+import { dnsAdapter } from "./dns.ts";
+import { validateHandle } from "./handle.ts";
+import { buildMinuteInput, writeMinute } from "./minute.ts";
+import { secretsAdapter } from "./secrets.ts";
+import { storageAdapter } from "./storage.ts";
 /**
  * Orchestrator for Wave 4 B-2 tenant provisioning.
  *
@@ -10,22 +17,24 @@
  *   bun run scripts/provision-tenant.ts --handle james --apply   # mutate live infra
  */
 import type { Adapter, Ctx, ProvisionOptions, ProvisionPlan } from "./types.ts";
-import { validateHandle } from "./handle.ts";
-import { dnsAdapter } from "./dns.ts";
-import { clerkAdapter } from "./clerk.ts";
-import { convexAdapter } from "./convex.ts";
-import { secretsAdapter } from "./secrets.ts";
-import { storageAdapter } from "./storage.ts";
-import { buildMinuteInput, writeMinute } from "./minute.ts";
 
-export const ADAPTERS: Adapter[] = [dnsAdapter, clerkAdapter, convexAdapter, secretsAdapter, storageAdapter];
+export const ADAPTERS: Adapter[] = [
+	dnsAdapter,
+	clerkAdapter,
+	convexAdapter,
+	secretsAdapter,
+	storageAdapter,
+];
 
 export interface ProvisionResult {
 	plan: ProvisionPlan;
 	minutePath: string;
 }
 
-export async function provisionTenant(opts: ProvisionOptions, ctxIn?: Partial<Ctx>): Promise<ProvisionResult> {
+export async function provisionTenant(
+	opts: ProvisionOptions,
+	ctxIn?: Partial<Ctx>,
+): Promise<ProvisionResult> {
 	const handle = validateHandle(opts.handle);
 	const startedAt = (ctxIn?.now ? ctxIn.now() : new Date()).toISOString();
 
@@ -44,7 +53,9 @@ export async function provisionTenant(opts: ProvisionOptions, ctxIn?: Partial<Ct
 	for (const adapter of ADAPTERS) {
 		ctx.logger.info(`> ${adapter.name}`);
 		const step = await adapter.plan(handle, ctx);
-		ctx.logger.info(`  ${step.status}: ${step.detail}${step.error ? ` (error: ${step.error})` : ""}`);
+		ctx.logger.info(
+			`  ${step.status}: ${step.detail}${step.error ? ` (error: ${step.error})` : ""}`,
+		);
 		steps.push(step);
 	}
 
@@ -78,10 +89,12 @@ export function parseArgs(argv: string[]): ProvisionOptions {
 		handle = remaining[0];
 	}
 	if (!handle) {
-		throw new Error('Missing --handle. Usage: bun run scripts/provision-tenant.ts --handle <name> [--apply]');
+		throw new Error(
+			"Missing --handle. Usage: bun run scripts/provision-tenant.ts --handle <name> [--apply]",
+		);
 	}
 	if (handle === "__help__") {
-		throw new Error('Usage: bun run scripts/provision-tenant.ts --handle <name> [--apply]');
+		throw new Error("Usage: bun run scripts/provision-tenant.ts --handle <name> [--apply]");
 	}
 	return { handle, apply, rootDir: process.cwd() };
 }

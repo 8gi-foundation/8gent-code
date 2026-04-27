@@ -147,20 +147,14 @@ export class ComputerUseTraceStore {
 					step.perceptionKind,
 					step.screenshotPath ?? null,
 					step.toolCallName ?? null,
-					step.toolCallArgs === undefined
-						? null
-						: safeJsonStringify(step.toolCallArgs),
-					step.toolResult === undefined
-						? null
-						: safeJsonStringify(step.toolResult),
+					step.toolCallArgs === undefined ? null : safeJsonStringify(step.toolCallArgs),
+					step.toolResult === undefined ? null : safeJsonStringify(step.toolResult),
 					step.tokensUsed ?? 0,
 					step.ms ?? 0,
 					now,
 				);
 			this.db
-				.prepare(
-					"UPDATE computer_use_traces SET step_count = step_count + 1 WHERE id = ?",
-				)
+				.prepare("UPDATE computer_use_traces SET step_count = step_count + 1 WHERE id = ?")
 				.run(traceId);
 		});
 		tx();
@@ -183,9 +177,7 @@ export class ComputerUseTraceStore {
 			.get(traceId) as Record<string, unknown> | null;
 		if (!row) return null;
 		const stepRows = this.db
-			.prepare(
-				"SELECT * FROM computer_use_trace_steps WHERE trace_id = ? ORDER BY step_index ASC",
-			)
+			.prepare("SELECT * FROM computer_use_trace_steps WHERE trace_id = ? ORDER BY step_index ASC")
 			.all(traceId) as Record<string, unknown>[];
 		return { ...rowToTrace(row), steps: stepRows.map(rowToStep) };
 	}
@@ -195,18 +187,14 @@ export class ComputerUseTraceStore {
 			? "SELECT * FROM computer_use_traces WHERE channel = ? ORDER BY started_at DESC LIMIT ?"
 			: "SELECT * FROM computer_use_traces ORDER BY started_at DESC LIMIT ?";
 		const rows = (
-			channel
-				? this.db.prepare(sql).all(channel, limit)
-				: this.db.prepare(sql).all(limit)
+			channel ? this.db.prepare(sql).all(channel, limit) : this.db.prepare(sql).all(limit)
 		) as Record<string, unknown>[];
 		return rows.map(rowToTrace);
 	}
 
 	purgeOlderThan(cutoffMs: number): { traces: number; files: number } {
 		const old = this.db
-			.prepare(
-				"SELECT id, session_id FROM computer_use_traces WHERE started_at < ?",
-			)
+			.prepare("SELECT id, session_id FROM computer_use_traces WHERE started_at < ?")
 			.all(cutoffMs) as { id: string; session_id: string }[];
 		let files = 0;
 		for (const t of old) {
@@ -254,10 +242,8 @@ function rowToStep(r: Record<string, unknown>): TraceStepRow {
 		perceptionKind: r.perception_kind as PerceptionKind,
 		screenshotPath: (r.screenshot_path as string | null) ?? null,
 		toolCallName: (r.tool_call_name as string | null) ?? null,
-		toolCallArgs:
-			r.tool_call_args == null ? null : safeJsonParse(String(r.tool_call_args)),
-		toolResult:
-			r.tool_result == null ? null : safeJsonParse(String(r.tool_result)),
+		toolCallArgs: r.tool_call_args == null ? null : safeJsonParse(String(r.tool_call_args)),
+		toolResult: r.tool_result == null ? null : safeJsonParse(String(r.tool_result)),
 		tokensUsed: Number(r.tokens_used ?? 0),
 		ms: Number(r.ms ?? 0),
 		createdAt: Number(r.created_at),

@@ -76,9 +76,7 @@ export interface PerceiveTreeInput {
 	hands?: HandsCallable;
 }
 
-export async function perceiveTree(
-	input: PerceiveTreeInput,
-): Promise<TreePerception> {
+export async function perceiveTree(input: PerceiveTreeInput): Promise<TreePerception> {
 	const { ctx, pid, maxBytes = 60_000, hands = executeHandsTool } = input;
 	const args: Record<string, unknown> = {};
 	if (pid !== undefined) args.pid = pid;

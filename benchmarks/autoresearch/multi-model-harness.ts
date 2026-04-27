@@ -21,7 +21,7 @@
  */
 
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { BenchmarkDefinition, BenchmarkRun, TokenUsage } from "../types";
 
@@ -34,7 +34,7 @@ import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
 import { getFewShot } from "./few-shot";
-import { recordResult, getExperienceSummary } from "./model-router";
+import { getExperienceSummary, recordResult } from "./model-router";
 import { getSystemPrompt } from "./system-prompt";
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -240,11 +240,7 @@ function log(msg: string): void {
 
 // ── Concurrency ─────────────────────────────────────────────────────
 
-async function pMap<T, R>(
-	items: T[],
-	limit: number,
-	fn: (item: T) => Promise<R>,
-): Promise<R[]> {
+async function pMap<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
 	const results: R[] = new Array(items.length);
 	let nextIndex = 0;
 	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -363,8 +359,12 @@ const ALL_BENCHMARKS: BenchmarkDefinition[] = [
 ];
 
 function selectBenchmarks(): BenchmarkDefinition[] {
-	const cats = process.env.CATEGORIES?.split(",").map((s) => s.trim()).filter(Boolean);
-	const ids = process.env.IDS?.split(",").map((s) => s.trim()).filter(Boolean);
+	const cats = process.env.CATEGORIES?.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	const ids = process.env.IDS?.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
 	let list = ALL_BENCHMARKS;
 	if (cats?.length) list = list.filter((b) => cats.includes(b.category));
 	if (ids?.length) list = list.filter((b) => ids.includes(b.id));
@@ -385,9 +385,7 @@ async function main(): Promise<void> {
 
 	const allEndpoints = buildEndpoints();
 	log(`  Probing ${allEndpoints.length} endpoints...`);
-	const probes = await Promise.all(
-		allEndpoints.map(async (e) => ({ e, ok: await e.probe() })),
-	);
+	const probes = await Promise.all(allEndpoints.map(async (e) => ({ e, ok: await e.probe() })));
 	const endpoints = probes.filter((p) => p.ok).map((p) => p.e);
 	for (const { e, ok } of probes) {
 		log(`  ${ok ? "✓" : "✗"} ${e.id}`);
@@ -409,9 +407,7 @@ async function main(): Promise<void> {
 	for (const benchmark of benchmarks) {
 		log(`┌─ ${benchmark.id} [${benchmark.category}/${benchmark.difficulty}] ${benchmark.title}`);
 
-		const outcomes = await pMap(endpoints, MAX_CONCURRENCY, (ep) =>
-			runOnEndpoint(benchmark, ep),
-		);
+		const outcomes = await pMap(endpoints, MAX_CONCURRENCY, (ep) => runOnEndpoint(benchmark, ep));
 
 		// Sort by score desc for readable log
 		outcomes.sort((a, b) => (b.run?.grade.score ?? -1) - (a.run?.grade.score ?? -1));

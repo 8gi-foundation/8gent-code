@@ -30,9 +30,7 @@ const ALWAYS_ALLOWED_PERCEPTION = [
 
 const TOOL_LIST = HANDS_TOOL_NAMES.join(", ");
 
-export function buildComputerUseSystemPrompt(
-	input: ComputerUseSystemPromptInput,
-): string {
+export function buildComputerUseSystemPrompt(input: ComputerUseSystemPromptInput): string {
 	const { goal, maxSteps, hostInfo } = input;
 	return [
 		"You are 8gent Computer, a voice-first agent that operates the user's machine.",
