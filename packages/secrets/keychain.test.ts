@@ -12,7 +12,9 @@ const cleanup = async () => {
 	}
 };
 
-afterAll(cleanup);
+if (!skipOnNonMac) {
+	afterAll(cleanup);
+}
 
 describe.skipIf(skipOnNonMac)("KeychainVault", () => {
 	test("stores and retrieves a secret", async () => {
