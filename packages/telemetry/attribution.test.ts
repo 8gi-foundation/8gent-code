@@ -13,9 +13,9 @@ import {
 	estimateCostUsd,
 	isLLMEvent,
 	isStorageEvent,
-	isVesselEvent,
 	isValidSpanId,
 	isValidTraceId,
+	isVesselEvent,
 	newSpanContext,
 	recordLLM,
 	recordStorage,
@@ -176,12 +176,9 @@ describe("wrapper API", () => {
 
 	it("emits an error event when the wrapped call throws", async () => {
 		await expect(
-			telemetry.llm(
-				{ tenantId: "james", provider: "openrouter", model: "x" },
-				async () => {
-					throw new Error("boom");
-				},
-			),
+			telemetry.llm({ tenantId: "james", provider: "openrouter", model: "x" }, async () => {
+				throw new Error("boom");
+			}),
 		).rejects.toThrow("boom");
 		expect(sink.events).toHaveLength(1);
 		const ev = sink.events[0];

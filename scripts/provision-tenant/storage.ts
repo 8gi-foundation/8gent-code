@@ -1,3 +1,4 @@
+import { bucketName } from "./handle.ts";
 /**
  * Hetzner Object Storage bucket adapter. Hetzner Object Storage is S3-compatible.
  * Bucket name = "tenant-<handle>" in the configured region (default fsn1).
@@ -8,7 +9,6 @@
  * Hetzner's documented form: https://<region>.your-objectstorage.com.
  */
 import type { Adapter, Ctx, PlanStep } from "./types.ts";
-import { bucketName } from "./handle.ts";
 
 interface SigV4Inputs {
 	method: "HEAD" | "PUT" | "GET";
@@ -24,7 +24,13 @@ interface SigV4Inputs {
 async function hmac(key: ArrayBuffer | string, data: string): Promise<ArrayBuffer> {
 	const enc = new TextEncoder();
 	const k = typeof key === "string" ? enc.encode(key) : key;
-	const cryptoKey = await crypto.subtle.importKey("raw", k, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+	const cryptoKey = await crypto.subtle.importKey(
+		"raw",
+		k,
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign"],
+	);
 	return crypto.subtle.sign("HMAC", cryptoKey, enc.encode(data));
 }
 
@@ -37,9 +43,14 @@ function hex(buf: ArrayBuffer): string {
 	return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function signRequest(inp: SigV4Inputs): Promise<{ url: string; headers: Record<string, string> }> {
+async function signRequest(
+	inp: SigV4Inputs,
+): Promise<{ url: string; headers: Record<string, string> }> {
 	const service = "s3";
-	const amzDate = inp.now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+	const amzDate = inp.now
+		.toISOString()
+		.replace(/[-:]/g, "")
+		.replace(/\.\d{3}/, "");
 	const dateStamp = amzDate.slice(0, 8);
 	const payloadHash = await sha256Hex(inp.body);
 
@@ -79,30 +90,64 @@ export const storageAdapter: Adapter = {
 		if (!accessKey || !secretKey) {
 			return ctx.apply
 				? err(bucket, "HETZNER_S3_ACCESS_KEY and HETZNER_S3_SECRET_KEY required for --apply")
-				: { resource: `bucket:${bucket}`, status: "create", detail: `would create bucket ${bucket} in ${region} (dry-run, no API call)` };
+				: {
+						resource: `bucket:${bucket}`,
+						status: "create",
+						detail: `would create bucket ${bucket} in ${region} (dry-run, no API call)`,
+					};
 		}
 
 		try {
-			const head = await signRequest({ method: "HEAD", host, path, region, accessKey, secretKey, now: ctx.now(), body: "" });
+			const head = await signRequest({
+				method: "HEAD",
+				host,
+				path,
+				region,
+				accessKey,
+				secretKey,
+				now: ctx.now(),
+				body: "",
+			});
 			const headRes = await ctx.fetch(head.url, { method: "HEAD", headers: head.headers });
 			if (headRes.status === 200) {
-				return { resource: `bucket:${bucket}`, status: "exists", detail: `bucket ${bucket} already present in ${region}` };
+				return {
+					resource: `bucket:${bucket}`,
+					status: "exists",
+					detail: `bucket ${bucket} already present in ${region}`,
+				};
 			}
 			if (headRes.status !== 404) {
 				return err(bucket, `HEAD bucket returned ${headRes.status}`);
 			}
 
 			if (!ctx.apply) {
-				return { resource: `bucket:${bucket}`, status: "create", detail: `would create bucket ${bucket} in ${region}` };
+				return {
+					resource: `bucket:${bucket}`,
+					status: "create",
+					detail: `would create bucket ${bucket} in ${region}`,
+				};
 			}
 
-			const put = await signRequest({ method: "PUT", host, path, region, accessKey, secretKey, now: ctx.now(), body: "" });
+			const put = await signRequest({
+				method: "PUT",
+				host,
+				path,
+				region,
+				accessKey,
+				secretKey,
+				now: ctx.now(),
+				body: "",
+			});
 			const putRes = await ctx.fetch(put.url, { method: "PUT", headers: put.headers });
 			if (!putRes.ok) {
 				const body = await putRes.text();
 				return err(bucket, `PUT bucket failed: ${putRes.status} ${body}`);
 			}
-			return { resource: `bucket:${bucket}`, status: "create", detail: `created bucket ${bucket} in ${region}` };
+			return {
+				resource: `bucket:${bucket}`,
+				status: "create",
+				detail: `created bucket ${bucket} in ${region}`,
+			};
 		} catch (e) {
 			return err(bucket, (e as Error).message);
 		}
@@ -110,5 +155,10 @@ export const storageAdapter: Adapter = {
 };
 
 function err(bucket: string, msg: string): PlanStep {
-	return { resource: `bucket:${bucket}`, status: "error", detail: "storage step failed", error: msg };
+	return {
+		resource: `bucket:${bucket}`,
+		status: "error",
+		detail: "storage step failed",
+		error: msg,
+	};
 }

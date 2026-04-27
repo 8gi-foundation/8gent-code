@@ -47,15 +47,8 @@ const FALLBACK_NOTE_NO_VISION =
  * consistent format across tiers.
  */
 export function buildVisionPrompt(input: VisionPromptInput): Message {
-	const {
-		goal,
-		step,
-		maxSteps,
-		perceptionSummary,
-		screenshotDataUrl,
-		region,
-		lastActionResult,
-	} = input;
+	const { goal, step, maxSteps, perceptionSummary, screenshotDataUrl, region, lastActionResult } =
+		input;
 
 	const headerLines = [`Step ${step} of ${maxSteps}.`, `Goal: ${goal}`];
 	if (lastActionResult) headerLines.push(`Last action: ${lastActionResult}`);
@@ -72,9 +65,7 @@ export function buildVisionPrompt(input: VisionPromptInput): Message {
 		"Reply by calling exactly one tool.",
 	];
 
-	const text = [...headerLines, "", ...perceptionLines, "", ...tailLines].join(
-		"\n",
-	);
+	const text = [...headerLines, "", ...perceptionLines, "", ...tailLines].join("\n");
 
 	if (!screenshotDataUrl) {
 		return {

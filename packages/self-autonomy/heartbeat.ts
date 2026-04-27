@@ -6,13 +6,13 @@
  */
 
 import { EventEmitter } from "node:events";
-import { AutoGit, SelfAutonomy, SelfHeal, SessionMemory } from "./index";
+import type { SessionReflection } from "./evolution-db";
 import {
+	type IterationResultLike,
 	recordIterationOutcome,
 	reflectOnIterations,
-	type IterationResultLike,
 } from "./improvement-loop";
-import type { SessionReflection } from "./evolution-db";
+import { AutoGit, SelfAutonomy, SelfHeal, SessionMemory } from "./index";
 
 // ============================================
 // Types

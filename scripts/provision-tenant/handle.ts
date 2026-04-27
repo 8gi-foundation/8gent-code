@@ -9,8 +9,7 @@ export function validateHandle(raw: string): string {
 	const handle = raw.trim().toLowerCase();
 	if (!HANDLE_RE.test(handle)) {
 		throw new Error(
-			`Invalid handle "${raw}". Must be 2-32 chars, lowercase alphanumeric or dash, ` +
-				`start with a letter, end with letter or digit.`,
+			`Invalid handle "${raw}". Must be 2-32 chars, lowercase alphanumeric or dash, start with a letter, end with letter or digit.`,
 		);
 	}
 	return handle;

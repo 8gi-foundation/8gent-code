@@ -44,11 +44,8 @@ export function resolveConfig(overrides?: Partial<G8wayConfig>): G8wayConfig {
 			process.env.OPENROUTER_BASE_URL ??
 			"https://openrouter.ai/api/v1",
 		clerkFrontendApi:
-			overrides?.clerkFrontendApi ??
-			process.env.CLERK_FRONTEND_API ??
-			"https://clerk.8gent.app",
-		clerkPublishableKey:
-			overrides?.clerkPublishableKey ?? process.env.CLERK_PUBLISHABLE_KEY ?? "",
+			overrides?.clerkFrontendApi ?? process.env.CLERK_FRONTEND_API ?? "https://clerk.8gent.app",
+		clerkPublishableKey: overrides?.clerkPublishableKey ?? process.env.CLERK_PUBLISHABLE_KEY ?? "",
 		allowedModels:
 			overrides?.allowedModels ?? envList("G8WAY_ALLOWED_MODELS", ALLOWED_MODELS_DEFAULT),
 		defaultModel:

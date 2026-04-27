@@ -53,25 +53,20 @@ const full = store.getTrace(traceId);
 const errors: string[] = [];
 if (!full) errors.push("getTrace returned null");
 if (full && full.outcome !== "ok") errors.push("outcome != ok");
-if (full && full.stepCount !== 2)
-	errors.push(`stepCount != 2 (got ${full.stepCount})`);
+if (full && full.stepCount !== 2) errors.push(`stepCount != 2 (got ${full.stepCount})`);
 if (full && full.steps.length !== 2) errors.push("steps.length != 2");
-if (full && full.steps[0].screenshotPath !== shotPath)
-	errors.push("screenshot path lost");
+if (full && full.steps[0].screenshotPath !== shotPath) errors.push("screenshot path lost");
 if (full && full.steps[0].stepIndex !== 0) errors.push("step 0 index wrong");
 if (full && full.steps[1].stepIndex !== 1) errors.push("step 1 index wrong");
 if (!fs.existsSync(shotPath)) errors.push("screenshot file missing on disk");
 
 const recent = store.listRecent(5, "computer");
-if (!recent.find((t) => t.id === traceId))
-	errors.push("listRecent did not surface trace");
+if (!recent.find((t) => t.id === traceId)) errors.push("listRecent did not surface trace");
 
 const filteredOut = store.listRecent(5, "telegram");
-if (filteredOut.find((t) => t.id === traceId))
-	errors.push("channel filter leaked trace");
+if (filteredOut.find((t) => t.id === traceId)) errors.push("channel filter leaked trace");
 
-if (full?.originatingChannel !== "telegram")
-	errors.push("originatingChannel not persisted");
+if (full?.originatingChannel !== "telegram") errors.push("originatingChannel not persisted");
 if (full?.dispatchSource !== "telegram-bot:smoke-test-user")
 	errors.push("dispatchSource not persisted");
 if (!full?.dispatchId) errors.push("dispatchId not persisted");
@@ -80,16 +75,8 @@ console.log("trace id:", traceId);
 console.log("steps captured:", full?.steps.length ?? 0);
 console.log("listRecent[computer] count:", recent.length);
 console.log("screenshot on disk:", fs.existsSync(shotPath));
-console.log(
-	"first tool:",
-	full?.steps[0].toolCallName,
-	full?.steps[0].toolCallArgs,
-);
-console.log(
-	"second tool:",
-	full?.steps[1].toolCallName,
-	full?.steps[1].toolCallArgs,
-);
+console.log("first tool:", full?.steps[0].toolCallName, full?.steps[0].toolCallArgs);
+console.log("second tool:", full?.steps[1].toolCallName, full?.steps[1].toolCallArgs);
 console.log("outcome:", full?.outcome, "summary:", full?.summary);
 
 store.close();
