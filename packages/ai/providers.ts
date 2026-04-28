@@ -8,7 +8,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 
-export type ProviderName = "ollama" | "lmstudio" | "openrouter";
+export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel";
 
 export interface ProviderConfig {
 	name: ProviderName;
@@ -22,6 +22,10 @@ const DEFAULT_URLS: Record<ProviderName, string> = {
 	ollama: "http://localhost:11434/v1",
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
+	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
+	// as an OpenAI-compatible HTTP server. Default port 11500 avoids the
+	// Ollama collision on 11434. Override via APFEL_BASE_URL.
+	apfel: process.env.APFEL_BASE_URL || "http://localhost:11500/v1",
 };
 
 /**
@@ -91,6 +95,9 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
 			return process.env.LM_STUDIO_API_KEY || "lm-studio";
 		case "ollama":
 			return undefined; // Local, no key needed
+		case "apfel":
+			// apfel optionally accepts a bearer token via APFEL_TOKEN. Default = none.
+			return process.env.APFEL_TOKEN || "apfel";
 	}
 }
 
