@@ -113,13 +113,33 @@ function migrateTab(raw: Record<string, unknown>): WorkspaceTab {
 	};
 }
 
+/**
+ * Reconcile chat-tab titles with the live settings.agents.names map. Persisted
+ * tab state (~/.8gent/tabs/state.json) was written with whatever title the
+ * user had at the time. When the user renames their agents during onboarding
+ * (or via /settings), settings.agents.names changes but the persisted state
+ * keeps the stale title forever. This pass overrides the title for any chat
+ * tab that has a known role, on every load. Non-chat tabs and tabs without
+ * roles are left alone.
+ */
+function reconcileTitlesWithSettings(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	return tabs.map((t) => {
+		if (t.type !== "chat") return t;
+		const role = (t.data as { role?: string } | undefined)?.role;
+		if (role !== "orchestrator" && role !== "engineer" && role !== "qa") return t;
+		const fresh = resolveRoleName(role as "orchestrator" | "engineer" | "qa");
+		return fresh && fresh !== t.title ? { ...t, title: fresh } : t;
+	});
+}
+
 function loadState(): WorkspaceTab[] | null {
 	try {
 		if (fs.existsSync(STATE_FILE)) {
 			const raw = fs.readFileSync(STATE_FILE, "utf-8");
 			const data = JSON.parse(raw);
 			if (Array.isArray(data) && data.length > 0) {
-				return data.map((item: Record<string, unknown>) => migrateTab(item));
+				const migrated = data.map((item: Record<string, unknown>) => migrateTab(item));
+				return reconcileTitlesWithSettings(migrated);
 			}
 		}
 	} catch {
