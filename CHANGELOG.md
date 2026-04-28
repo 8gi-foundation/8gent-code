@@ -9,7 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-(Empty — 0.11.13 just shipped.)
+### Added
+
+- **`/spawn` auto-installs missing external agent CLIs.** When the binary for a preset (claude, codex, hermes, openclaw, aider, 8gent) is not on `$PATH`, `/spawn` runs the preset's install recipe (npm/pip), waits for it, re-checks, and only then opens the chat tab. Long output from the installer is suppressed to keep the chat clean. Force-reinstall via `/spawn <id> install`. (`apps/tui/src/lib/external-agent-runner.ts`, `apps/tui/src/app.tsx`)
+
+## [0.11.14] - 2026-04-29
+
+### Changed
+
+- **Version + documentation sync.** No functional changes from 0.11.13. README badge bumped to 0.11.14 and CHANGELOG entries promoted from `Unreleased`. The `/spawn` auto-installer landed on `main` between this publish and the next; it ships in the following release.
 
 ## [0.11.13] - 2026-04-28
 
