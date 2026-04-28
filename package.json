@@ -1,6 +1,6 @@
 {
 	"name": "@8gi-foundation/8gent-code",
-	"version": "0.11.1",
+	"version": "0.11.2",
 	"private": false,
 	"description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
 	"type": "module",
