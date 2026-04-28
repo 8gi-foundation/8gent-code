@@ -62,9 +62,20 @@ export interface ProvidersSettings {
 	openrouter: ProviderEndpoint;
 }
 
+export interface ThinkingVisualiserSettings {
+	/** Master toggle. Default true. */
+	enabled: boolean;
+	/** Operator rotation interval in ms. Default 8000. */
+	operatorRotationMs: number;
+	/** Idle threshold (ms) before a boredom mutation fires. Default 30000. */
+	boredomThresholdMs: number;
+}
+
 export interface UISettings {
 	/** Reserved for future themes. Defaults to "amber". */
 	theme: string;
+	/** Procedural Thinking-box visualiser configuration. */
+	thinkingVisualiser: ThinkingVisualiserSettings;
 }
 
 export interface Settings {
