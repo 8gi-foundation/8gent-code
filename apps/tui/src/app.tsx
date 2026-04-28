@@ -1195,6 +1195,11 @@ export function App({
 		}>
 	>([]);
 	const [onboardingStepIndex, setOnboardingStepIndex] = useState(0);
+	// Choices for the active onboarding question when kind === "select".
+	// null = current question is free-text (CommandInput owns input).
+	const [onboardingSelectChoices, setOnboardingSelectChoices] = useState<
+		Array<{ label: string; value: string; description?: string }> | null
+	>(null);
 
 	// Animation showcase
 	const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
@@ -1357,6 +1362,7 @@ export function App({
 				// If escaping from onboarding, also clear onboarding state
 				if (viewMode === "onboarding") {
 					setShowOnboarding(false);
+					setOnboardingSelectChoices(null);
 					onboardingManager.skipAll();
 				}
 				setViewMode("chat");
@@ -1782,6 +1788,9 @@ export function App({
 				const question = onboardingManager.getNextQuestion();
 				if (question) {
 					setCurrentOnboardingQuestion(question.question);
+					setOnboardingSelectChoices(
+						question.kind === "select" && question.choices ? question.choices : null,
+					);
 					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
 					// Speak the first question
@@ -2180,6 +2189,11 @@ export function App({
 					const onboardQuestion = onboardingManager.getNextQuestion();
 					if (onboardQuestion) {
 						setCurrentOnboardingQuestion(onboardQuestion.question);
+						setOnboardingSelectChoices(
+							onboardQuestion.kind === "select" && onboardQuestion.choices
+								? onboardQuestion.choices
+								: null,
+						);
 						addSystemMessage(`∞ Let's get to know each other.\n\n${onboardQuestion.question}`);
 					}
 					break;
@@ -2208,9 +2222,13 @@ export function App({
 							const nextQ = onboardingManager.skipQuestion();
 							if (nextQ) {
 								setCurrentOnboardingQuestion(nextQ.question);
+								setOnboardingSelectChoices(
+									nextQ.kind === "select" && nextQ.choices ? nextQ.choices : null,
+								);
 								addSystemMessage(nextQ.question);
 							} else {
 								setShowOnboarding(false);
+								setOnboardingSelectChoices(null);
 								setViewMode("chat");
 								addSystemMessage("Onboarding complete. Let's begin.");
 							}
@@ -3978,6 +3996,11 @@ export function App({
 			if (result.success) {
 				if (result.nextQuestion) {
 					setCurrentOnboardingQuestion(result.nextQuestion.question);
+					setOnboardingSelectChoices(
+						result.nextQuestion.kind === "select" && result.nextQuestion.choices
+							? result.nextQuestion.choices
+							: null,
+					);
 					setOnboardingStepIndex((prev) => prev + 1);
 					setOnboardingSteps((prev) => [
 						...prev,
@@ -3998,6 +4021,7 @@ export function App({
 				} else {
 					// Onboarding complete
 					setShowOnboarding(false);
+					setOnboardingSelectChoices(null);
 					setViewMode("chat");
 					const user = onboardingManager.getUser();
 					const name = user.identity.name || "friend";
@@ -4557,6 +4581,10 @@ export function App({
 						agentName={
 							(onboardingManager.getUser()?.preferences?.voice as any)?.agentName || undefined
 						}
+						selectChoices={onboardingSelectChoices ?? undefined}
+						onSelect={
+							onboardingSelectChoices ? (value: string) => handleSubmit(value) : undefined
+						}
 					/>
 				);
 
@@ -4872,7 +4900,8 @@ export function App({
 							onSubmit={handleSubmit}
 							isProcessing={isProcessing}
 							focused={
-								(viewMode === "chat" && activeTabType === "chat") || viewMode === "onboarding"
+								(viewMode === "chat" && activeTabType === "chat") ||
+								(viewMode === "onboarding" && !onboardingSelectChoices)
 							}
 							processingStage={processingStage}
 							showAnimations={showAnimations}
