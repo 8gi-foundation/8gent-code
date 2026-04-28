@@ -109,6 +109,7 @@ import { useViewport } from "./hooks/useViewport.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
+import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
@@ -182,6 +183,7 @@ import {
 // Import the actual Agent for real execution
 import { Agent } from "../../../packages/eight/index.js";
 import type {
+	AgentEventCallbacks,
 	AgentEvidenceEvent,
 	AgentEvidenceSummaryEvent,
 	AgentStepEvent,
@@ -510,8 +512,13 @@ export function App({
 			timestamp: new Date(),
 		},
 	]);
-	const [isProcessingRaw, setIsProcessingRaw] = useState(false);
-	const processingTabIdRef = useRef<string | null>(null);
+	// Per-tab processing state lives in usePerTabAgents below. We still keep a
+	// stable derived `isProcessing` for the *active* tab so the rest of the UI
+	// (header, input gating, status verb) reads from a single boolean. A second
+	// helper `isTabProcessing(tabId)` is passed to TabBar for the inline busy
+	// indicator on background tabs.
+	// (perTabAgents declared after workspaceTabs so it can react to the active
+	//  tab id; processing helpers are then assigned to module-level closures.)
 
 	// Background task pool (Ctrl+G to background current, Ctrl+J to open panel)
 	const [bgPanelOpen, setBgPanelOpen] = useState(false);
@@ -538,8 +545,9 @@ export function App({
 		}
 		return process.env["8GENT_NO_INTRO"] !== "1" && process.env["8GENT_LITE"] !== "1";
 	});
-	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
-	const foregroundLabelRef = useRef<string>("");
+	// Legacy foreground refs migrated into perTabAgents.{trackPromise,
+	// getPromise, getLabel, clearPromise} - see Ctrl+G handler. Kept these
+	// names removed to make accidental cross-tab leaks compile-fail.
 
 	const [processingStage, setProcessingStage] = useState<ProcessingStage>("planning");
 	const [status, setStatus] = useState<AppStatus>("idle");
@@ -743,15 +751,18 @@ export function App({
 	const activeTabType = workspaceTabs.activeTab?.type || "chat";
 	const activeTabId = workspaceTabs.activeTab?.id || "default";
 
-	// Only show processing state when the active tab is the one that triggered it
-	const isProcessing = isProcessingRaw && processingTabIdRef.current === activeTabId;
+	// Per-tab agents (one Agent + processing flag per chat tab). This is the
+	// core of "feat/per-tab-concurrent": each chat tab can hold its own
+	// in-flight agent.chat() call simultaneously. The active tab still drives
+	// the foreground UI; other tabs' work continues in the background and
+	// shows up in tabMessagesRef when their chat() resolves.
+	const perTabAgents = usePerTabAgents();
+	const isProcessing = perTabAgents.isTabProcessing(activeTabId);
 	const setIsProcessing = useCallback(
 		(val: boolean) => {
-			setIsProcessingRaw(val);
-			if (val) processingTabIdRef.current = activeTabId;
-			else processingTabIdRef.current = null;
+			perTabAgents.setTabProcessing(activeTabId, val);
 		},
-		[activeTabId],
+		[activeTabId, perTabAgents.setTabProcessing],
 	);
 
 	// Background pool subscription: snapshot tasks + surface non-modal banner on settle
@@ -1068,7 +1079,9 @@ export function App({
 		},
 	]);
 
-	// Agent instance for real execution
+	// Active-tab Agent instance for real execution. Per-tab agents live in
+	// perTabAgents.agentsRef; this state mirrors the agent for the currently
+	// focused tab so voice-chat / ESC / status reads stay tab-correct.
 	const [agent, setAgent] = useState<Agent | null>(null);
 	const [agentReady, setAgentReady] = useState(false);
 
@@ -1099,9 +1112,19 @@ export function App({
 	const compactAgentModeBar = viewport.width < TUI_AGENT_MODE_COMPACT_BELOW;
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
 
-	// Message queue — user can type while agent is working
-	const messageQueueRef = useRef<string[]>([]);
-	const agentRunningRef = useRef(false);
+	// Per-tab message queue — each tab has its own pending-submission queue so
+	// typing on tab A while tab A's agent is busy stacks A's queue without
+	// affecting tab B's parallel submissions.
+	const messageQueuesRef = useRef<Map<string, string[]>>(new Map());
+	// Per-tab "agent currently running" guard. Replaces the legacy global
+	// boolean - now keyed by tab id so concurrent tabs no longer block each
+	// other on the same flag.
+	const agentRunningTabsRef = useRef<Set<string>>(new Set());
+	const isAgentRunningOnTab = (tabId: string) => agentRunningTabsRef.current.has(tabId);
+	const setAgentRunningOnTab = (tabId: string, val: boolean) => {
+		if (val) agentRunningTabsRef.current.add(tabId);
+		else agentRunningTabsRef.current.delete(tabId);
+	};
 
 	// Multi-agent orchestration
 	const orchestration = useAgentOrchestration();
@@ -1196,20 +1219,20 @@ export function App({
 		}
 
 		// Ctrl+G: background the current foreground task (send to pool).
-		// The agent.chat() Promise keeps running; we detach the UI.
+		// The agent.chat() Promise keeps running; we detach the UI for the
+		// active tab. Other tabs' parallel runs are unaffected.
 		if (key.ctrl && input === "g") {
-			const promise = foregroundPromiseRef.current;
-			if (promise && isProcessingRaw) {
-				const label = foregroundLabelRef.current || "background task";
+			const promise = perTabAgents.getPromise(activeTabId);
+			if (promise && isProcessing) {
+				const label = perTabAgents.getLabel(activeTabId) || "background task";
 				bgPool.track(label, promise);
-				foregroundPromiseRef.current = null;
-				foregroundLabelRef.current = "";
+				perTabAgents.clearPromise(activeTabId);
 				addSystemMessage(
 					`Sent to background: "${label}". Ctrl+J to review. Starting fresh foreground.`,
 				);
 				setIsProcessing(false);
 				setActiveTool(null);
-				agentRunningRef.current = false;
+				setAgentRunningOnTab(activeTabId, false);
 				setStatus("idle");
 			} else {
 				addSystemMessage("No foreground task running to background.");
@@ -1228,10 +1251,15 @@ export function App({
 			setViewMode("chat");
 		}
 
-		// Ctrl+W: close current tab
+		// Ctrl+W: close current tab. Per-tab Agent is aborted and dropped so
+		// closing a tab while it's mid-flight does not leak the chat() loop.
 		if (key.ctrl && input === "w") {
 			if (workspaceTabs.tabs.length > 1) {
-				workspaceTabs.removeTab(workspaceTabs.activeTab.id);
+				const closingId = workspaceTabs.activeTab.id;
+				perTabAgents.removeTabAgent(closingId);
+				setAgentRunningOnTab(closingId, false);
+				messageQueuesRef.current.delete(closingId);
+				workspaceTabs.removeTab(closingId);
 			}
 		}
 
@@ -1255,13 +1283,15 @@ export function App({
 			setViewMode("chat");
 		}
 
-		// Escape: abort generation if processing, otherwise switch to chat tab or close view
+		// Escape: abort generation if processing, otherwise switch to chat tab or close view.
+		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
+		// tabs' in-flight runs keep going.
 		if (key.escape) {
-			if (isProcessing && agent) {
-				agent.abort();
+			if (isProcessing) {
+				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
 				setActiveTool(null);
-				agentRunningRef.current = false;
+				setAgentRunningOnTab(activeTabId, false);
 				addSystemMessage("Generation interrupted.");
 			} else if (imageInput.currentImage && (viewMode === "chat" || viewMode === "onboarding")) {
 				imageInput.removeImage();
@@ -1293,14 +1323,282 @@ export function App({
 		]);
 	}, []);
 
-	// Initialize agent on mount and when model/provider changes
+	/**
+	 * Append a message to a specific tab's history. Always updates
+	 * tabMessagesRef so background tabs accumulate output silently. If the
+	 * target tab is the active tab, also mirror to the foreground messages
+	 * state so the user sees it live. This is the routing seam that makes
+	 * concurrent per-tab agent runs not clobber each other.
+	 *
+	 * For the active tab we use a functional setMessagesRaw update so the
+	 * initial welcome message (which lives only in foreground state on first
+	 * render) is preserved when the per-tab buffer is still empty.
+	 */
+	const appendToTab = useCallback(
+		(tabId: string, msg: Message) => {
+			if (tabId === activeTabId) {
+				setMessagesRaw((prev) => {
+					const next = [...prev, msg];
+					tabMessagesRef.current.set(tabId, next);
+					return next;
+				});
+			} else {
+				const cur = tabMessagesRef.current.get(tabId) ?? [];
+				const next = [...cur, msg];
+				tabMessagesRef.current.set(tabId, next);
+			}
+		},
+		[activeTabId],
+	);
+
+	/**
+	 * Build the AgentEventCallbacks bound to a specific tab id. Messages
+	 * stream into that tab's buffer (visible only when it is active);
+	 * narrator / activity-monitor / kanban side-effects are global and only
+	 * fire when the event belongs to the active tab so background runs do
+	 * not steal foreground attention.
+	 */
+	const buildEventsForTab = useCallback(
+		(tabId: string, tabTitle: string): AgentEventCallbacks => ({
+			onToolStart: (event: AgentToolStartEvent) => {
+				const isActive = tabId === activeTabId;
+				if (isActive) {
+					setActiveTool(event.toolName);
+					setProcessingStage("executing");
+					setStatus("executing");
+					pushActivity(event.toolName, event.toolCallId, event.args);
+				}
+				logToolStart(tabId, tabTitle, event.toolName, event.toolCallId, event.args);
+
+				autoKanban.onTaskStart(tabId, tabTitle, event.toolName, event.toolCallId, event.args);
+
+				if (isActive) {
+					setKanbanBoard((prev) => {
+						if (prev.inProgress.length === 0 && prev.ready.length > 0) {
+							const [next, ...rest] = prev.ready;
+							return { ...prev, ready: rest, inProgress: [next] };
+						}
+						return prev;
+					});
+					const narration = narrateToolStart(event.toolName, event.args);
+					setNarratorText(narration);
+					setTvTasks((prev) => [
+						...prev.map((t) => (t.status === "active" ? { ...t, status: "done" as const } : t)),
+						{
+							id: event.toolCallId,
+							title: narration,
+							status: "active" as const,
+						},
+					]);
+				}
+
+				const argsPreview = JSON.stringify(event.args).slice(0, 80);
+				appendToTab(tabId, {
+					id: `tool-start-${event.toolCallId}`,
+					role: "tool" as const,
+					content: `→ ${event.toolName}(${argsPreview})`,
+					timestamp: new Date(),
+				});
+			},
+			onToolEnd: (event: AgentToolEndEvent) => {
+				const isActive = tabId === activeTabId;
+				if (isActive) {
+					setToolCount((prev) => prev + 1);
+				}
+				completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
+				logToolEnd(
+					event.toolCallId,
+					event.success !== false,
+					event.durationMs || 0,
+					event.resultPreview,
+				);
+
+				autoKanban.onTaskComplete(
+					event.toolCallId,
+					event.success !== false,
+					event.durationMs || 0,
+				);
+
+				const isFailure =
+					!event.success ||
+					(event.resultPreview?.startsWith("Exit code ") &&
+						!event.resultPreview.startsWith("Exit code 0"));
+
+				if (isActive) {
+					setNarratorText(narrateToolEnd(event.toolName, !isFailure, event.durationMs));
+					setTvTasks((prev) =>
+						prev.map((t) =>
+							t.id === event.toolCallId
+								? {
+										...t,
+										status: isFailure ? ("error" as const) : ("done" as const),
+										duration: event.durationMs,
+										details: isFailure ? event.resultPreview?.slice(0, 120) : undefined,
+									}
+								: t,
+						),
+					);
+					setActiveTool(null);
+					setKanbanBoard((prev) => {
+						if (prev.inProgress.length > 0) {
+							const [completed, ...rest] = prev.inProgress;
+							const nextReady = prev.ready.length > 0 ? [prev.ready[0]] : [];
+							const remainingReady = prev.ready.slice(nextReady.length > 0 ? 1 : 0);
+							const pullFromBacklog =
+								remainingReady.length < 2 && prev.backlog.length > 0 ? [prev.backlog[0]] : [];
+							const remainingBacklog =
+								pullFromBacklog.length > 0 ? prev.backlog.slice(1) : prev.backlog;
+							return {
+								backlog: remainingBacklog,
+								ready: [...remainingReady, ...pullFromBacklog],
+								inProgress: [...rest, ...nextReady],
+								done: [...prev.done, completed],
+							};
+						}
+						if (prev.ready.length > 0) {
+							const [first, ...rest] = prev.ready;
+							return { ...prev, ready: rest, done: [...prev.done, first] };
+						}
+						return prev;
+					});
+				}
+
+				const isRealFailure =
+					!event.success ||
+					(event.resultPreview?.startsWith("Exit code ") &&
+						!event.resultPreview.startsWith("Exit code 0"));
+				const duration =
+					event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
+				let content: string;
+				if (isRealFailure && event.resultPreview) {
+					const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
+					content = `  ✗ ${errMsg}${duration}`;
+				} else {
+					content = `  ✓${duration}`;
+				}
+				appendToTab(tabId, {
+					id: `tool-end-${event.toolCallId}`,
+					role: "tool" as const,
+					content,
+					timestamp: new Date(),
+					toolSuccess: !isRealFailure,
+				});
+			},
+			onStepFinish: (event: AgentStepEvent) => {
+				const isActive = tabId === activeTabId;
+				if (isActive) {
+					setStepCount((prev) => prev + 1);
+					setTotalTokens((prev) => prev + event.usage.totalTokens);
+				}
+				logStep(tabId, tabTitle, event.stepNumber, event.usage.totalTokens, event.text);
+
+				if (isActive && event.text?.trim()) {
+					const planMatch = event.text.match(/PLAN:\s/i);
+					if (planMatch) {
+						setNarratorText(narratePlan(event.text));
+					} else {
+						setNarratorText(narrateStep(event.text));
+					}
+				}
+
+				if (event.text?.trim() && event.stepNumber === 0) {
+					const t = event.text.trim();
+					appendToTab(tabId, {
+						id: `system-step0-${Date.now()}`,
+						role: "system" as const,
+						content: t.length > 720 ? `${t.slice(0, 717)}...` : t,
+						timestamp: new Date(),
+					});
+				}
+
+				if (isActive && event.text?.trim()) {
+					const planMatch = event.text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
+					if (planMatch) {
+						const planText = planMatch[1];
+						const stepMatches = planText.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
+						if (stepMatches && stepMatches.length > 0) {
+							const steps = stepMatches.map((s, i) => ({
+								id: `plan-${Date.now()}-${i}`,
+								description: s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim(),
+								tool: "auto",
+								input: {},
+								priority: stepMatches.length - i,
+								confidence: 0.9,
+								category: "plan" as const,
+								predictedAt: new Date(),
+								basedOn: [],
+							}));
+							setKanbanBoard({
+								backlog: steps.slice(3) as any,
+								ready: steps.slice(0, 3) as any,
+								inProgress: [],
+								done: [],
+							});
+							setPredictedSteps(steps);
+							setPlanNextStep(steps[0]?.description || null);
+							setProcessingStage("executing");
+						}
+					}
+				}
+
+				if (isActive) {
+					const stepToolCalls = event.toolCalls ?? [];
+					if (stepToolCalls.length > 0) {
+						setProcessingStage("executing");
+						setStatus("executing");
+					} else {
+						setProcessingStage("toolshed");
+						setStatus("thinking");
+					}
+				}
+			},
+			onEvidence: (event: AgentEvidenceEvent) => {
+				const icon = event.verified ? "✓" : "✗";
+				const label = event.type.replace(/_/g, " ");
+				let desc = event.description;
+				if (event.path) {
+					const basename = event.path.split("/").pop() || event.path;
+					desc = basename;
+				} else if (event.command) {
+					desc = event.command.slice(0, 40);
+				}
+				appendToTab(tabId, {
+					id: `evidence-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+					role: "tool" as const,
+					content: `  ${icon} ${label}: ${desc}`,
+					timestamp: new Date(),
+					toolSuccess: event.verified,
+				});
+			},
+			onEvidenceSummary: (event: AgentEvidenceSummaryEvent) => {
+				if (tabId === activeTabId) {
+					setEvidenceSummary(event);
+				}
+				if (event.total > 0) {
+					appendToTab(tabId, {
+						id: `evidence-summary-${Date.now()}`,
+						role: "system" as const,
+						content: `[Evidence: ${event.verified}/${event.total} verified]`,
+						timestamp: new Date(),
+						toolSuccess: event.failed === 0,
+					});
+				}
+			},
+		}),
+		[activeTabId, appendToTab, autoKanban],
+	);
+
+	// Initialize agent for the active tab. Each chat tab owns its own Agent
+	// instance; the active-tab agent is mirrored into local `agent`/`agentReady`
+	// state so voice-chat / status-bar reads stay tab-correct without
+	// re-wiring those subsystems.
 	useEffect(() => {
 		const initAgent = async () => {
 			try {
 				// Auto-assign router slots from actually available models
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();
-					const changes = await router.autoAssign();
+					const _changes = await router.autoAssign();
 					// If current model is empty, use whatever autoAssign found
 					if (!currentModel) {
 						const cfg = router.getConfig();
@@ -1309,6 +1607,23 @@ export function App({
 							return; // Will re-trigger this effect with the new model
 						}
 					}
+				}
+
+				const _activeTab = workspaceTabs.activeTab;
+				const _initTabId = _activeTab?.id || "default";
+				const _initTabTitle = _activeTab?.title || "Chat";
+
+				// Reuse existing per-tab agent if its underlying model still matches.
+				// Otherwise abort + drop and rebuild with the new spec.
+				const _existing = perTabAgents.getAgent(_initTabId);
+				if (_existing) {
+					const _cfg = (_existing as unknown as { config?: { model?: string } }).config;
+					if (_cfg?.model === currentModel) {
+						setAgent(_existing);
+						setAgentReady(true);
+						return;
+					}
+					perTabAgents.removeTabAgent(_initTabId);
 				}
 
 				// Map provider to runtime
@@ -1325,276 +1640,13 @@ export function App({
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
 					apiKey: process.env.OPENROUTER_API_KEY,
-					events: {
-						onToolStart: (event: AgentToolStartEvent) => {
-							setActiveTool(event.toolName);
-							setProcessingStage("executing");
-							setStatus("executing");
-							pushActivity(event.toolName, event.toolCallId, event.args);
-							// Session logger
-							const _tab = workspaceTabs.activeTab;
-							logToolStart(
-								_tab?.id || "default",
-								_tab?.title || "Chat",
-								event.toolName,
-								event.toolCallId,
-								event.args,
-							);
-
-							// Auto-kanban: track real tool execution
-							const activeTab = workspaceTabs.activeTab;
-							autoKanban.onTaskStart(
-								activeTab?.id || "default",
-								activeTab?.title || "Chat",
-								event.toolName,
-								event.toolCallId,
-								event.args,
-							);
-
-							// Auto-advance kanban: move first Ready card to In Progress
-							setKanbanBoard((prev) => {
-								if (prev.inProgress.length === 0 && prev.ready.length > 0) {
-									const [next, ...rest] = prev.ready;
-									return { ...prev, ready: rest, inProgress: [next] };
-								}
-								return prev;
-							});
-							// TV Mode: narrator + task card
-							const narration = narrateToolStart(event.toolName, event.args);
-							setNarratorText(narration);
-							setTvTasks((prev) => [
-								...prev.map((t) => (t.status === "active" ? { ...t, status: "done" as const } : t)),
-								{
-									id: event.toolCallId,
-									title: narration,
-									status: "active" as const,
-								},
-							]);
-
-							// Show tool call in message stream
-							const argsPreview = JSON.stringify(event.args).slice(0, 80);
-							setMessages((prev) => [
-								...prev,
-								{
-									id: `tool-start-${event.toolCallId}`,
-									role: "tool" as const,
-									content: `→ ${event.toolName}(${argsPreview})`,
-									timestamp: new Date(),
-								},
-							]);
-						},
-						onToolEnd: (event: AgentToolEndEvent) => {
-							setToolCount((prev) => prev + 1);
-							completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
-							// Session logger
-							logToolEnd(
-								event.toolCallId,
-								event.success !== false,
-								event.durationMs || 0,
-								event.resultPreview,
-							);
-
-							// Auto-kanban: mark tool complete
-							autoKanban.onTaskComplete(
-								event.toolCallId,
-								event.success !== false,
-								event.durationMs || 0,
-							);
-
-							// TV Mode: mark task done/error + update narrator
-							const isFailure =
-								!event.success ||
-								(event.resultPreview?.startsWith("Exit code ") &&
-									!event.resultPreview.startsWith("Exit code 0"));
-							setNarratorText(narrateToolEnd(event.toolName, !isFailure, event.durationMs));
-							setTvTasks((prev) =>
-								prev.map((t) =>
-									t.id === event.toolCallId
-										? {
-												...t,
-												status: isFailure ? ("error" as const) : ("done" as const),
-												duration: event.durationMs,
-												details: isFailure ? event.resultPreview?.slice(0, 120) : undefined,
-											}
-										: t,
-								),
-							);
-							setActiveTool(null);
-
-							// Auto-advance kanban: move first Ready → Done on each tool completion
-							setKanbanBoard((prev) => {
-								if (prev.inProgress.length > 0) {
-									// Move in-progress to done
-									const [completed, ...rest] = prev.inProgress;
-									const nextReady = prev.ready.length > 0 ? [prev.ready[0]] : [];
-									const remainingReady = prev.ready.slice(nextReady.length > 0 ? 1 : 0);
-									// Pull next from backlog if ready is getting empty
-									const pullFromBacklog =
-										remainingReady.length < 2 && prev.backlog.length > 0 ? [prev.backlog[0]] : [];
-									const remainingBacklog =
-										pullFromBacklog.length > 0 ? prev.backlog.slice(1) : prev.backlog;
-									return {
-										backlog: remainingBacklog,
-										ready: [...remainingReady, ...pullFromBacklog],
-										inProgress: [...rest, ...nextReady],
-										done: [...prev.done, completed],
-									};
-								}
-								if (prev.ready.length > 0) {
-									// Move first ready to in-progress → done
-									const [first, ...rest] = prev.ready;
-									return { ...prev, ready: rest, done: [...prev.done, first] };
-								}
-								return prev;
-							});
-							// Detect command failures even when tool "succeeds"
-							const isRealFailure =
-								!event.success ||
-								(event.resultPreview?.startsWith("Exit code ") &&
-									!event.resultPreview.startsWith("Exit code 0"));
-							const duration =
-								event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
-							let content: string;
-							if (isRealFailure && event.resultPreview) {
-								// Show the error message so user knows what happened
-								const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
-								content = `  ✗ ${errMsg}${duration}`;
-							} else {
-								content = `  ✓${duration}`;
-							}
-							setMessages((prev) => [
-								...prev,
-								{
-									id: `tool-end-${event.toolCallId}`,
-									role: "tool" as const,
-									content,
-									timestamp: new Date(),
-									toolSuccess: !isRealFailure,
-								},
-							]);
-						},
-						onStepFinish: (event: AgentStepEvent) => {
-							setStepCount((prev) => prev + 1);
-							setTotalTokens((prev) => prev + event.usage.totalTokens);
-							// Session logger
-							{
-								const _tab = workspaceTabs.activeTab;
-								logStep(
-									_tab?.id || "default",
-									_tab?.title || "Chat",
-									event.stepNumber,
-									event.usage.totalTokens,
-									event.text,
-								);
-							}
-
-							// TV Mode: narrate the step
-							if (event.text?.trim()) {
-								const planMatch = event.text.match(/PLAN:\s/i);
-								if (planMatch) {
-									setNarratorText(narratePlan(event.text));
-								} else {
-									setNarratorText(narrateStep(event.text));
-								}
-							}
-
-							// Do not append an assistant bubble on every agent step — that stacks N full
-							// messages per run (Ink then draws over itself / repeats closings). One final
-							// assistant message is added when agent.chat() returns (see runAgent).
-							if (event.text?.trim() && event.stepNumber === 0) {
-								const t = event.text.trim();
-								addSystemMessage(t.length > 720 ? `${t.slice(0, 717)}...` : t);
-							}
-
-							// Parse PLAN: output and populate kanban (uses step text, not the chat transcript)
-							if (event.text?.trim()) {
-								const planMatch = event.text.match(/PLAN:\s*([\s\S]*?)(?:\n\n|$)/i);
-								if (planMatch) {
-									const planText = planMatch[1];
-									const stepMatches = planText.match(/(?:\d+[.)]\s*|[-•]\s+)([^\n]+)/g);
-									if (stepMatches && stepMatches.length > 0) {
-										const steps = stepMatches.map((s, i) => ({
-											id: `plan-${Date.now()}-${i}`,
-											description: s.replace(/^\d+[.)]\s*|^[-•]\s+/, "").trim(),
-											tool: "auto",
-											input: {},
-											priority: stepMatches.length - i,
-											confidence: 0.9,
-											category: "plan" as const,
-											predictedAt: new Date(),
-											basedOn: [],
-										}));
-										setKanbanBoard({
-											backlog: steps.slice(3) as any,
-											ready: steps.slice(0, 3) as any,
-											inProgress: [],
-											done: [],
-										});
-										setPredictedSteps(steps);
-										setPlanNextStep(steps[0]?.description || null);
-										setProcessingStage("executing");
-									}
-								}
-							}
-
-							// Determine stage from step content
-							const stepToolCalls = event.toolCalls ?? [];
-							if (stepToolCalls.length > 0) {
-								setProcessingStage("executing");
-								setStatus("executing");
-							} else {
-								setProcessingStage("toolshed");
-								setStatus("thinking");
-							}
-						},
-						onEvidence: (event: AgentEvidenceEvent) => {
-							// Show evidence collection in real-time as compact tool messages
-							const icon = event.verified ? "\u2713" : "\u2717";
-							const label = event.type.replace(/_/g, " ");
-							// Shorten description: use basename for paths, truncate commands
-							let desc = event.description;
-							if (event.path) {
-								const basename = event.path.split("/").pop() || event.path;
-								desc = basename;
-							} else if (event.command) {
-								desc = event.command.slice(0, 40);
-							}
-							setMessages((prev) => [
-								...prev,
-								{
-									id: `evidence-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-									role: "tool" as const,
-									content: `  ${icon} ${label}: ${desc}`,
-									timestamp: new Date(),
-									toolSuccess: event.verified,
-								},
-							]);
-						},
-						onEvidenceSummary: (event: AgentEvidenceSummaryEvent) => {
-							setEvidenceSummary(event);
-							// Show one-line summary at end of response
-							if (event.total > 0) {
-								setMessages((prev) => [
-									...prev,
-									{
-										id: `evidence-summary-${Date.now()}`,
-										role: "system" as const,
-										content: `[Evidence: ${event.verified}/${event.total} verified]`,
-										timestamp: new Date(),
-										toolSuccess: event.failed === 0,
-									},
-								]);
-							}
-						},
-					},
+					events: buildEventsForTab(_initTabId, _initTabTitle),
 				});
-				// Check if provider is available
-				const ready = await newAgent.isReady();
-				if (ready) {
+				const _readyOuter = await newAgent.isReady();
+				if (_readyOuter) {
+					perTabAgents.setAgent(_initTabId, newAgent);
 					setAgent(newAgent);
 					setAgentReady(true);
-
-					// Check for personal LoRA
 					try {
 						const loraDir = require("node:path").join(
 							require("node:os").homedir(),
@@ -1610,15 +1662,12 @@ export function App({
 						if (fs.existsSync(loraDir) && fs.existsSync(configPath)) {
 							const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 							if (cfg.personal?.autoRetrain !== false) {
-								setMessages((prev) => [
-									...prev,
-									{
-										id: `personal-lora-${Date.now()}`,
-										role: "system" as const,
-										content: `Personal LoRA detected. Loaded on top of ${currentModel}.`,
-										timestamp: new Date(),
-									},
-								]);
+								appendToTab(_initTabId, {
+									id: `personal-lora-${Date.now()}`,
+									role: "system" as const,
+									content: `Personal LoRA detected. Loaded on top of ${currentModel}.`,
+									timestamp: new Date(),
+								});
 							}
 						}
 					} catch {}
@@ -1631,7 +1680,20 @@ export function App({
 			}
 		};
 		initAgent();
-	}, [currentModel, currentProvider]);
+	}, [currentModel, currentProvider, activeTabId, buildEventsForTab]);
+
+	// When the active tab changes, surface its existing Agent (if any) into
+	// the foreground `agent` ref so ESC / voice-chat / status reads stay
+	// correct. The init effect above will build one when provider/model
+	// resolve for tabs that haven't submitted yet.
+	useEffect(() => {
+		const existing = perTabAgents.getAgent(activeTabId);
+		if (existing) {
+			setAgent(existing);
+			setAgentReady(true);
+		}
+	}, [activeTabId]);
+
 
 	// Check onboarding status on mount
 	useEffect(() => {
@@ -3762,8 +3824,14 @@ export function App({
 		return avenues.sort((a, b) => b.probability - a.probability);
 	}, []);
 
-	// Handle command submission
-	const handleSubmit = async (rawInput: string) => {
+	// Handle command submission. Defaults to the active tab; pass `submitTabId`
+	// explicitly to route a submission to a specific (potentially non-active)
+	// tab. With per-tab agents, each tab id has its own queue + Agent + ESC
+	// scope so concurrent submissions across Orchestrator / Engineer / QA do
+	// not block one another.
+	const handleSubmit = async (rawInput: string, submitTabId?: string) => {
+		const tabId = submitTabId ?? activeTabId;
+		const tabTitle = workspaceTabs.tabs.find((t) => t.id === tabId)?.title || "Chat";
 		const { text: afterPaths, image: pastedNow } = imageInput.processInput(rawInput);
 		const attached = pastedNow ?? imageInput.getAttachedImage();
 		const input = afterPaths.trim();
@@ -3871,250 +3939,275 @@ export function App({
 		// Track command history
 		setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
 
-		// Add user message to chat immediately
+		// Add user message to the target tab's history. If submitting on a
+		// non-active tab (future feature), this still streams correctly.
 		const userMsgId = `user-${Date.now()}`;
-		setMessages((prev) => [
-			...prev,
-			{
-				id: userMsgId,
-				role: "user" as const,
-				content: bubbleContent,
-				timestamp: new Date(),
-			},
-		]);
+		appendToTab(tabId, {
+			id: userMsgId,
+			role: "user" as const,
+			content: bubbleContent,
+			timestamp: new Date(),
+		});
 		// Track in session tree
 		sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "user", bubbleContent);
 		// Session logger: user message
-		logMessage(activeTabId, workspaceTabs.activeTab?.title || "Chat", "user", bubbleContent);
+		logMessage(tabId, tabTitle, "user", bubbleContent);
 
 		// Auto-kanban: create a card for this user message
-		const activeTab = workspaceTabs.activeTab;
-		autoKanban.onUserMessage(activeTab?.id || "default", activeTab?.title || "Chat", bubbleContent);
+		autoKanban.onUserMessage(tabId, tabTitle, bubbleContent);
 
-		// If agent is already running, queue this message
-		if (agentRunningRef.current) {
-			messageQueueRef.current.push(bubbleContent);
+		// If THIS tab's agent is already running, queue this message on that
+		// tab's queue. Other tabs are unaffected.
+		if (isAgentRunningOnTab(tabId)) {
+			const q = messageQueuesRef.current.get(tabId) ?? [];
+			q.push(bubbleContent);
+			messageQueuesRef.current.set(tabId, q);
 			addSystemMessage("Queued — will send after current task completes.");
 			return;
 		}
 
-		// Run the agent
+		// Run the agent for the captured tab id. All state updates, agent
+		// lookups, and event side-effects scope to `tabId` so concurrent
+		// submissions across tabs don't clobber each other.
 		const runAgent = async (message: string) => {
-			agentRunningRef.current = true;
-			setIsProcessing(true);
-			resetAgentProgress();
-
-			// Reset TV Mode for new task
-			setTvTasks([]);
-			setNarratorText("Thinking...");
+			setAgentRunningOnTab(tabId, true);
+			perTabAgents.setTabProcessing(tabId, true);
+			// Foreground-only resets - if the user submitted on the active tab,
+			// reset the per-tab progress meters. If they submitted on a
+			// background tab (future), leave the foreground UI alone.
+			if (tabId === activeTabId) {
+				resetAgentProgress();
+				setTvTasks([]);
+				setNarratorText("Thinking...");
+			}
 
 			const cmdStartTime = Date.now();
 			const messageForAgent = await expandSkillSlashCommand(message);
 			const routeHint = messageForAgent.trim() || "User attached an image.";
 
-			// External-agent divert: if the active tab was spawned via /spawn,
+			// External-agent divert: if the target tab was spawned via /spawn,
 			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
 			// instead of our own agent loop. Conversation history is replayed
 			// each turn since v1 is one-shot.
-			const activeTabData = workspaceTabs.activeTab?.data as
+			const targetTab = workspaceTabs.tabs.find((t) => t.id === tabId);
+			const targetTabData = targetTab?.data as
 				| { externalAgent?: { presetId: string } }
 				| undefined;
-			if (activeTabData?.externalAgent) {
-				const preset = getPreset(activeTabData.externalAgent.presetId);
+			if (targetTabData?.externalAgent) {
+				const preset = getPreset(targetTabData.externalAgent.presetId);
 				if (!preset) {
 					addSystemMessage(
-						`[external-agent] Unknown preset "${activeTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
+						`[external-agent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
 					);
-					agentRunningRef.current = false;
-					setIsProcessing(false);
+					setAgentRunningOnTab(tabId, false);
+					perTabAgents.setTabProcessing(tabId, false);
 					return;
 				}
-				setNarratorText(`Spawning ${preset.label}...`);
-				const history = messages
+				if (tabId === activeTabId) setNarratorText(`Spawning ${preset.label}...`);
+				// Pull this tab's messages from the per-tab buffer (or the
+				// foreground state if it's the active tab).
+				const tabMessages =
+					tabId === activeTabId ? messages : tabMessagesRef.current.get(tabId) ?? [];
+				const history = tabMessages
 					.filter((m) => m.role === "user" || m.role === "assistant")
 					.map((m) => ({ role: m.role, content: m.content }));
 				const composed = composePrompt(history, messageForAgent);
 				const result = await runExternalAgent(preset, composed);
 
 				if (result.ok && result.text) {
-					setMessages((prev) => [
-						...prev,
-						{
-							id: `assistant-${Date.now()}`,
-							role: "assistant" as const,
-							content: result.text,
-							timestamp: new Date(),
-						},
-					]);
+					appendToTab(tabId, {
+						id: `assistant-${Date.now()}`,
+						role: "assistant" as const,
+						content: result.text,
+						timestamp: new Date(),
+					});
 				} else {
-					addSystemMessage(
-						`[${preset.label}] ${result.error || "no output"}\n\nCommand: ${result.command}\nDuration: ${result.durationMs}ms${
+					appendToTab(tabId, {
+						id: `system-ext-${Date.now()}`,
+						role: "system" as const,
+						content: `[${preset.label}] ${result.error || "no output"}\n\nCommand: ${result.command}\nDuration: ${result.durationMs}ms${
 							result.exitCode !== null && result.exitCode !== undefined
 								? ` (exit ${result.exitCode})`
 								: ""
 						}`,
-					);
+						timestamp: new Date(),
+					});
 				}
 
-				agentRunningRef.current = false;
-				setIsProcessing(false);
-				setNarratorText("");
+				setAgentRunningOnTab(tabId, false);
+				perTabAgents.setTabProcessing(tabId, false);
+				if (tabId === activeTabId) setNarratorText("");
 				return;
 			}
 
-			// Generate predictions and avenues
-			const newPredictions = generatePredictions(routeHint);
-			setPredictedSteps(newPredictions);
-			setPlanNextStep(newPredictions[0]?.description || null);
-			const newAvenues = generateAvenues(routeHint);
-			setAvenues(newAvenues);
-			setKanbanBoard((prev) => ({
-				...prev,
-				ready: newPredictions.slice(0, 3) as any,
-				backlog: newPredictions.slice(3) as any,
-			}));
+			// Foreground-only: kanban / avenues only reset on active tab.
+			if (tabId === activeTabId) {
+				const newPredictions = generatePredictions(routeHint);
+				setPredictedSteps(newPredictions);
+				setPlanNextStep(newPredictions[0]?.description || null);
+				const newAvenues = generateAvenues(routeHint);
+				setAvenues(newAvenues);
+				setKanbanBoard((prev) => ({
+					...prev,
+					ready: newPredictions.slice(0, 3) as any,
+					backlog: newPredictions.slice(3) as any,
+				}));
+			}
 
 			if (!currentModel) {
-				addSystemMessage(
-					"[No model available] No Ollama models detected.\n" +
+				appendToTab(tabId, {
+					id: `system-no-model-${Date.now()}`,
+					role: "system" as const,
+					content:
+						"[No model available] No Ollama models detected.\n" +
 						"Pull a model first: ollama pull qwen3:14b\n" +
 						"Or switch provider with /provider",
-				);
-				agentRunningRef.current = false;
-				setIsProcessing(false);
+					timestamp: new Date(),
+				});
+				setAgentRunningOnTab(tabId, false);
+				perTabAgents.setTabProcessing(tabId, false);
 				return;
 			}
 
-			if (agent && agentReady) {
+			// Look up this tab's Agent. For the active tab the cached `agent`
+			// state already mirrors it; for any other tab, fetch from the
+			// per-tab map.
+			const targetAgent =
+				tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
+			const targetReady = tabId === activeTabId ? agentReady : Boolean(targetAgent);
+
+			if (targetAgent && targetReady) {
 				try {
-					// Task Router: classify and potentially switch model
-					const router = getTaskRouter();
-					const routerConfig = router.getConfig();
-					if (routerConfig.enabled) {
-						try {
-							const decision = await router.route(routeHint);
-							if (
-								decision.model !== currentModel &&
-								decision.confidence >= routerConfig.confidenceThreshold
-							) {
-								// Switch model for this task
-								setCurrentModel(decision.model);
-								addSystemMessage(
-									`Routed to ${decision.model} (${decision.category}, ${(decision.confidence * 100).toFixed(0)}%)`,
-								);
+					// Task Router: classify and potentially switch model. Only
+					// applies to active tab to avoid surprising background tabs.
+					if (tabId === activeTabId) {
+						const router = getTaskRouter();
+						const routerConfig = router.getConfig();
+						if (routerConfig.enabled) {
+							try {
+								const decision = await router.route(routeHint);
+								if (
+									decision.model !== currentModel &&
+									decision.confidence >= routerConfig.confidenceThreshold
+								) {
+									setCurrentModel(decision.model);
+									addSystemMessage(
+										`Routed to ${decision.model} (${decision.category}, ${(decision.confidence * 100).toFixed(0)}%)`,
+									);
+								}
+							} catch {
+								// Router failed silently
 							}
-						} catch {
-							// Router failed silently — continue with current model
 						}
 					}
 
 					// Inject agent mode context into the message
 					const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
-					// Capture the in-flight chat promise + label so Ctrl+G can
-					// hand this task to the background pool without interrupting it.
-					const chatPromise = agent.chat(
+					const chatPromise = targetAgent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,
 						img?.mimeType,
 					);
-					foregroundPromiseRef.current = chatPromise;
-					foregroundLabelRef.current = messageForAgent.trim().slice(0, 80);
+					// Track for Ctrl+G background-divert (per tab).
+					perTabAgents.trackPromise(tabId, chatPromise, messageForAgent.trim());
 					let reply: string;
 					try {
 						reply = await chatPromise;
 					} catch (err) {
 						// If backgrounded mid-flight, swallow: the pool surfaces errors.
-						if (foregroundPromiseRef.current !== chatPromise) return;
+						if (perTabAgents.getPromise(tabId) !== chatPromise) return;
 						throw err;
 					}
 					// If the user pressed Ctrl+G while this was in flight, the
 					// background pool has taken ownership. Don't also stamp the
 					// result onto the (now-stale) foreground tab.
-					if (foregroundPromiseRef.current !== chatPromise) {
+					if (perTabAgents.getPromise(tabId) !== chatPromise) {
 						return;
 					}
-					foregroundPromiseRef.current = null;
-					foregroundLabelRef.current = "";
-					setMessages((prev) => {
-						const trimmed = (reply ?? "").trim();
-						if (!trimmed) {
-							return appendClosingQuestionIfNeeded(prev);
+					perTabAgents.clearPromise(tabId);
+					const trimmed = (reply ?? "").trim();
+					if (trimmed) {
+						appendToTab(tabId, {
+							id: `assistant-${Date.now()}`,
+							role: "assistant" as const,
+							content: trimmed,
+							timestamp: new Date(),
+						});
+					}
+					// appendClosingQuestionIfNeeded reads the just-appended buffer
+					// and decides whether to add a follow-up bubble.
+					{
+						const cur = tabMessagesRef.current.get(tabId) ?? [];
+						const after = appendClosingQuestionIfNeeded(cur);
+						if (after !== cur) {
+							tabMessagesRef.current.set(tabId, after);
+							if (tabId === activeTabId) setMessagesRaw(after);
 						}
-						const withReply = [
-							...prev,
-							{
-								id: `assistant-${Date.now()}`,
-								role: "assistant" as const,
-								content: trimmed,
-								timestamp: new Date(),
-							},
-						];
-						return appendClosingQuestionIfNeeded(withReply);
-					});
+					}
 					// Clear image after sending
 					if (img) imageInput.removeImage();
 					const treePreview = (reply ?? "").trim().slice(0, 160) || "(tools only)";
 					sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "assistant", treePreview);
-					setLastResponseTime(Date.now() - cmdStartTime);
-					setStatus("success");
-					if (soundEnabled) playSound("success");
-				} catch (err) {
-					const errorMsg = err instanceof Error ? err.message : String(err);
-					logError(activeTabId, workspaceTabs.activeTab?.title || "Chat", errorMsg);
-					setMessages((prev) => [
-						...prev,
-						{
-							id: `assistant-error-${Date.now()}`,
-							role: "assistant" as const,
-							content: `[Error] ${errorMsg}`,
-							timestamp: new Date(),
-						},
-					]);
-					setStatus("error");
-					setTimeout(() => setStatus("idle"), 3000);
-				}
-			} else {
-				// Mock mode
-				setTimeout(
-					() => {
-						setMessages((prev) => [
-							...prev,
-							{
-								id: `assistant-${Date.now()}`,
-								role: "assistant" as const,
-								content: generateResponse(messageForAgent),
-								timestamp: new Date(),
-							},
-						]);
+					if (tabId === activeTabId) {
 						setLastResponseTime(Date.now() - cmdStartTime);
 						setStatus("success");
 						if (soundEnabled) playSound("success");
-						setTimeout(() => setStatus("idle"), 1500);
+					}
+				} catch (err) {
+					const errorMsg = err instanceof Error ? err.message : String(err);
+					logError(tabId, tabTitle, errorMsg);
+					appendToTab(tabId, {
+						id: `assistant-error-${Date.now()}`,
+						role: "assistant" as const,
+						content: `[Error] ${errorMsg}`,
+						timestamp: new Date(),
+					});
+					if (tabId === activeTabId) {
+						setStatus("error");
+						setTimeout(() => setStatus("idle"), 3000);
+					}
+				}
+			} else {
+				// Mock mode (per tab)
+				setTimeout(
+					() => {
+						appendToTab(tabId, {
+							id: `assistant-${Date.now()}`,
+							role: "assistant" as const,
+							content: generateResponse(messageForAgent),
+							timestamp: new Date(),
+						});
+						if (tabId === activeTabId) {
+							setLastResponseTime(Date.now() - cmdStartTime);
+							setStatus("success");
+							if (soundEnabled) playSound("success");
+							setTimeout(() => setStatus("idle"), 1500);
+						}
 					},
 					800 + Math.random() * 400,
 				);
 			}
 
-			setIsProcessing(false);
-			setActiveTool(null);
-			agentRunningRef.current = false;
+			perTabAgents.setTabProcessing(tabId, false);
+			if (tabId === activeTabId) {
+				setActiveTool(null);
+			}
+			setAgentRunningOnTab(tabId, false);
 
-			// Process queued messages
-			if (messageQueueRef.current.length > 0) {
-				const next = messageQueueRef.current.shift()!;
-				setMessages((prev) => [
-					...prev,
-					{
-						id: `user-queued-${Date.now()}`,
-						role: "user" as const,
-						content: next,
-						timestamp: new Date(),
-					},
-				]);
-				// Small delay so the UI can breathe
+			// Process queued messages for THIS tab only.
+			const q = messageQueuesRef.current.get(tabId) ?? [];
+			if (q.length > 0) {
+				const next = q.shift()!;
+				messageQueuesRef.current.set(tabId, q);
+				appendToTab(tabId, {
+					id: `user-queued-${Date.now()}`,
+					role: "user" as const,
+					content: next,
+					timestamp: new Date(),
+				});
 				setTimeout(() => runAgent(next), 100);
-			} else {
+			} else if (tabId === activeTabId) {
 				setTimeout(() => setStatus("idle"), 1500);
 			}
 		};
@@ -4531,9 +4624,15 @@ export function App({
 					)}
 				</Box>
 
-				{/* Workspace tab bar */}
+				{/* Workspace tab bar - shows an inline busy indicator on each tab
+				    whose Agent has an in-flight chat() call so the user can see
+				    parallel work even while looking at a different tab. */}
 				<Box flexShrink={0}>
-					<TabBar tabs={workspaceTabs.tabs} onSwitch={workspaceTabs.switchTab} />
+					<TabBar
+						tabs={workspaceTabs.tabs}
+						onSwitch={workspaceTabs.switchTab}
+						isTabProcessing={perTabAgents.isTabProcessing}
+					/>
 				</Box>
 
 				{/* Main content area with folder frame */}
