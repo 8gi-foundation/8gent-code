@@ -30,6 +30,15 @@ if (hasInfiniteFlag) {
 const command = parsed.positional[0] || "repl";
 const passthroughArgs = parsed.positional.slice(1);
 
+// Clear screen + home cursor so Ink's first frame paints at row 1.
+// Without this, any stdout writes that happened during module load (eg
+// async logs from agent construction or providers) leave the cursor below
+// row 1, which clips the rounded-box header off the top of the viewport.
+// Skip in non-TTY contexts (CI, smoke harness pipes) so test output stays clean.
+if (process.stdout.isTTY) {
+	process.stdout.write("\x1b[2J\x1b[H");
+}
+
 // Render the TUI
 render(
 	<App
