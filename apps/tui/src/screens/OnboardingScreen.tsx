@@ -210,10 +210,14 @@ export function OnboardingScreen({
 				</Box>
 			)}
 
-			{/* Active question - prompt body. One <Text> per line so Ink clears
-				each row independently between renders (prevents the overlap
-				artefact "(American)ilt-in):sive))" caused by multi-line text in
-				a single <Text> node failing to fully clear on rerender). */}
+			{/* Active question - prompt body. One flat <Text> per line so Ink clears
+				each row independently between renders. Earlier versions wrapped
+				colon-prefixed lines in nested <Text bold>label:</Text><Text>rest</Text>
+				to bold the label, but Ink v6 fails to clear those nested rows on
+				rerender. The previous frame's content composites under the new
+				one and produces artefacts like "podjamzetected:e Infinite Gentleman."
+				(value + tail-of-prior-line + tail-of-other-prior-line). Flat Text
+				per row avoids the bug entirely. */}
 			<Box
 				flexDirection="column"
 				paddingX={2}
@@ -223,18 +227,9 @@ export function OnboardingScreen({
 				borderColor="cyan"
 				width={maxWidth}
 			>
-				{currentQuestion.split("\n").map((line, i) => {
-					if (line.includes(":") && line.indexOf(":") < 20) {
-						const [label, ...rest] = line.split(":");
-						return (
-							<Text key={i}>
-								<Text bold>{label}:</Text>
-								<Text>{rest.join(":")}</Text>
-							</Text>
-						);
-					}
-					return <Text key={i}>{line}</Text>;
-				})}
+				{currentQuestion.split("\n").map((line, i) => (
+					<Text key={i}>{line}</Text>
+				))}
 			</Box>
 
 			{/* Active input region. Two modes: */}
