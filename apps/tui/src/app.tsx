@@ -379,6 +379,45 @@ function speakAgentReply(role: string | undefined, text: string): void {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Onboarding TTS helper. Speaks ONLY the first sentence/line of an onboarding
+// prompt so the auto-detect block + tagline body don't get read aloud. Gated
+// by voice.outputEnabled so users who turn TTS off don't hear startup banter.
+// ----------------------------------------------------------------------------
+function speakOnboardingLine(rawText: string, voiceOverride?: string | null): void {
+	if (process.platform !== "darwin") return;
+	const trimmed = (rawText ?? "").trim();
+	if (!trimmed) return;
+	let s: ReturnType<typeof loadAppSettings>;
+	try {
+		s = loadAppSettings();
+	} catch {
+		return;
+	}
+	if (!s.voice?.outputEnabled) return;
+	// First non-empty line only. Splitting on a real newline (not the literal
+	// "\n" string) keeps multi-paragraph prompts (auto-detect summary, voice
+	// pick descriptions) from being read aloud whole.
+	const firstLine =
+		trimmed
+			.split("\n")
+			.map((l) => l.trim())
+			.find((l) => l.length > 0) ?? trimmed;
+	const safe = firstLine.replace(/"/g, "").slice(0, 120);
+	const voice = (voiceOverride && voiceOverride.trim()) || "Moira";
+	try {
+		const { spawn } = require("node:child_process");
+		const proc = spawn("say", ["-v", voice, safe], {
+			stdio: "ignore",
+			detached: true,
+		});
+		proc.on("error", () => {});
+		proc.unref();
+	} catch {
+		// Fail silently
+	}
+}
+
 // Import design agent
 import {
 	DesignAgent,
@@ -1793,13 +1832,8 @@ export function App({
 					);
 					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
-					// Speak the first question
-					try {
-						require("node:child_process").execSync(
-							`say -v Moira "${question.question.split("\\n")[0].slice(0, 80).replace(/"/g, "")}"`,
-							{ stdio: "ignore" },
-						);
-					} catch {}
+					// Speak the first question (first line only, gated by voice.outputEnabled)
+					speakOnboardingLine(question.question);
 					// Use setMessages directly to avoid stale closure issue
 					setMessages((prev) => [
 						...prev,
@@ -3983,13 +4017,8 @@ export function App({
 			// Telegram token feedback
 			if (/^\d+:/.test(input.trim())) {
 				addSystemMessage("Telegram token received. Your bot will activate on next launch.");
-				// Speak confirmation
-				try {
-					require("node:child_process").execSync(
-						`say -v Moira "Telegram bot token saved. Brilliant."`,
-						{ stdio: "ignore" },
-					);
-				} catch {}
+				// Speak confirmation (gated by voice.outputEnabled)
+				speakOnboardingLine("Telegram bot token saved. Brilliant.");
 			}
 
 			const result = onboardingManager.processAnswer(input);
@@ -4009,15 +4038,11 @@ export function App({
 							status: "active" as const,
 						},
 					]);
-					// Speak each question aloud during onboarding
-					try {
-						const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId || "Moira";
-						const firstLine = result.nextQuestion.question.split("\n")[0].slice(0, 100);
-						require("node:child_process").execSync(
-							`say -v ${voice} "${firstLine.replace(/"/g, "")}"`,
-							{ stdio: "ignore" },
-						);
-					} catch {}
+					// Speak each question aloud during onboarding (gated by voice.outputEnabled)
+					{
+						const voice = onboardingManager.getUser()?.preferences?.voice?.voiceId;
+						speakOnboardingLine(result.nextQuestion.question, voice);
+					}
 				} else {
 					// Onboarding complete
 					setShowOnboarding(false);
@@ -4028,14 +4053,14 @@ export function App({
 					addSystemMessage(
 						`Welcome, ${name}. I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\nLet's build something magnificent.`,
 					);
-					// Speak the welcome
-					try {
-						const voice = user.preferences?.voice?.voiceId || "Moira";
-						require("node:child_process").execSync(
-							`say -v ${voice} "Welcome ${name}. Let's build something magnificent."`,
-							{ stdio: "ignore" },
+					// Speak the welcome (gated by voice.outputEnabled)
+					{
+						const voice = user.preferences?.voice?.voiceId;
+						speakOnboardingLine(
+							`Welcome ${name}. Let's build something magnificent.`,
+							voice,
 						);
-					} catch {}
+					}
 
 					// Apply user preferences to current session
 					if (user.preferences.model.provider) {
