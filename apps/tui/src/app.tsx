@@ -30,6 +30,7 @@ import {
 	pushActivity,
 } from "./components/ActivityMonitor.js";
 import { TabBar } from "./components/TabBar.js";
+import { IntroBanner } from "./components/IntroBanner.js";
 import { ThinkingView } from "./components/ThinkingView.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
 import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
@@ -468,6 +469,9 @@ export function App({
 		live: 0,
 		total: 1,
 	});
+	// One-shot intro banner shown for ~1.5s on launch, dismissable on any key.
+	// Skipped entirely if the user opts out via env (8GENT_NO_INTRO=1).
+	const [introVisible, setIntroVisible] = useState(() => process.env["8GENT_NO_INTRO"] !== "1");
 	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
 	const foregroundLabelRef = useRef<string>("");
 
@@ -876,6 +880,21 @@ export function App({
 							.map((m: any) => m.id as string)
 							.slice(0, 30);
 						if (!cancelled) setAvailableModels(models);
+					}
+				} else if (currentProvider === "apfel") {
+					// apfel exposes Apple Foundation as an OpenAI-compatible HTTP server.
+					// Default port 11500 (override via APFEL_BASE_URL).
+					const baseUrl = process.env.APFEL_BASE_URL || "http://localhost:11500/v1";
+					const res = await fetch(`${baseUrl}/models`);
+					if (res.ok) {
+						const data = await res.json();
+						const allModels = (data.data || [])
+							.map((m: any) => String(m.id ?? "").trim())
+							.filter((id: string) => id.length > 0);
+						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
+						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
+					} else if (!cancelled) {
+						setAvailableModels(["apple-foundationmodel"]);
 					}
 				} else {
 					// Other providers — show placeholder
@@ -4304,6 +4323,16 @@ export function App({
 	};
 
 	const PROCESS_DETAIL_CHROME_ROWS = 10;
+
+	if (introVisible) {
+		return (
+			<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
+				<FixedFrame>
+					<IntroBanner onDone={() => setIntroVisible(false)} />
+				</FixedFrame>
+			</ADHDModeContext.Provider>
+		);
+	}
 
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
