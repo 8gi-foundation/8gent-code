@@ -23,6 +23,7 @@ export type {
 	ProvidersSettings,
 	ProviderEndpoint,
 	UISettings,
+	ThinkingVisualiserSettings,
 } from "./schema.js";
 
 export { DEFAULT_SETTINGS } from "./defaults.js";
