@@ -429,6 +429,38 @@ export class DJ {
 		return Object.keys(RADIO_PRESETS);
 	}
 
+	/**
+	 * Structured playback status for UIs (HUD widget, dashboard, etc).
+	 * `position` and `duration` come from mpv IPC and may briefly be null
+	 * after a track change while mpv loads metadata.
+	 */
+	async status(): Promise<{
+		playing: boolean;
+		paused: boolean;
+		looping: boolean;
+		title: string;
+		url: string;
+		position: number | null;
+		duration: number | null;
+		volume: number | null;
+		queueSize: number;
+	}> {
+		const [pos, dur, vol] = ipcReady
+			? await Promise.all([mpvGet("time-pos"), mpvGet("duration"), mpvGet("volume")])
+			: [null, null, null];
+		return {
+			playing: isPlaying,
+			paused: isPaused,
+			looping: isLooping,
+			title: currentTrack.title,
+			url: currentTrack.url,
+			position: pos ? Number.parseFloat(pos) : null,
+			duration: dur ? Number.parseFloat(dur) : null,
+			volume: vol ? Number.parseFloat(vol) : null,
+			queueSize: trackQueue.length,
+		};
+	}
+
 	// ---- Private ----
 	private killMpv(): void {
 		ipcReady = false;

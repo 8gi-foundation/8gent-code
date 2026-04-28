@@ -12,6 +12,7 @@
 	"files": [
 		"dist/cli.js",
 		"dist/skills",
+		"dist/sounds",
 		"bin/8gent-run.js",
 		"README.md",
 		"LICENSE"
@@ -29,7 +30,7 @@
 		"install:apple-foundation": "bun run scripts/install-apple-foundation.ts",
 		"cli": "bun run bin/8gent.ts",
 		"dev": "next dev",
-		"build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node -e \"const fs=require('fs');const f='dist/cli.js';const c=fs.readFileSync(f,'utf-8');if(!c.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+c);\" && chmod +x dist/cli.js && bash scripts/copy-bundled-skills.sh",
+		"build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node -e \"const fs=require('fs');const f='dist/cli.js';const c=fs.readFileSync(f,'utf-8');if(!c.startsWith('#!'))fs.writeFileSync(f,'#!/usr/bin/env bun\\n'+c);\" && chmod +x dist/cli.js && bash scripts/copy-bundled-skills.sh && bash scripts/copy-bundled-sounds.sh",
 		"build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
 		"prepublishOnly": "npm run build",
 		"postinstall": "node -e \"console.log('\\n✨ 8gent installed! Just type: 8gent\\n\\n8gent auto-detects LM Studio, Ollama, and local models on first run.\\nIf no model is found, a setup menu will walk you through it.\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
