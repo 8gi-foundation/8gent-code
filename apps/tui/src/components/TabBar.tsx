@@ -13,6 +13,13 @@ import { MutedText } from "./primitives/index.js";
 interface TabBarProps {
 	tabs: WorkspaceTab[];
 	onSwitch: (tabId: string) => void;
+	/**
+	 * Optional predicate. Returning true marks a tab as currently processing
+	 * (in-flight agent.chat call). The tab gets a small inline pulse so the
+	 * user can see at a glance which tabs are still working while they're
+	 * looking at a different one.
+	 */
+	isTabProcessing?: (tabId: string) => boolean;
 }
 
 function getTabIcon(type: TabType): string {
@@ -20,7 +27,7 @@ function getTabIcon(type: TabType): string {
 	return found?.icon || ">>";
 }
 
-export function TabBar({ tabs, onSwitch }: TabBarProps) {
+export function TabBar({ tabs, onSwitch, isTabProcessing }: TabBarProps) {
 	if (tabs.length <= 1) return null;
 
 	const visibleTabs = tabs.filter((t) => t.type !== "kanban" || t.active);
@@ -32,7 +39,12 @@ export function TabBar({ tabs, onSwitch }: TabBarProps) {
 	for (const tab of visibleTabs) {
 		const icon = getTabIcon(tab.type);
 		const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
-		const label = `${icon} ${tab.title}${badge}`;
+		// Inline processing indicator: a single `*` next to the tab title when
+		// that tab has an in-flight agent.chat() call. Picked `*` because it
+		// is already used elsewhere in the app for the Ideas tab and renders
+		// reliably in any TTY without color cues.
+		const busy = isTabProcessing?.(tab.id) ? " *" : "";
+		const label = `${icon} ${tab.title}${badge}${busy}`;
 
 		if (tab.active) {
 			topRow += `┌ ${label} ┐`;
