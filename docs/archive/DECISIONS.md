@@ -123,7 +123,7 @@ CREATE VIRTUAL TABLE primitives_fts USING fts5(name, description, tags);
 **Seed Data:**
 - Components from `~/Myresumeportfolio/design`
 - Animation primitives from existing projects
-- Successful patterns from FoodstackOS, iris-observatory
+- Successful patterns from the prior internal memory system, iris-observatory
 
 ---
 
