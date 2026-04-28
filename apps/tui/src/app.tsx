@@ -476,8 +476,12 @@ export function App({
 		total: 1,
 	});
 	// One-shot intro banner shown for ~1.5s on launch, dismissable on any key.
-	// Skipped entirely if the user opts out via env (8GENT_NO_INTRO=1).
-	const [introVisible, setIntroVisible] = useState(() => process.env["8GENT_NO_INTRO"] !== "1");
+	// Skipped entirely if the user opts out (8GENT_NO_INTRO=1 or 8GENT_LITE=1).
+	// Lite mode in v0.11.1+ also disables auxiliary subsystems for jcode-style
+	// fast launch when the user prefers speed over polish.
+	const [introVisible, setIntroVisible] = useState(
+		() => process.env["8GENT_NO_INTRO"] !== "1" && process.env["8GENT_LITE"] !== "1",
+	);
 	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
 	const foregroundLabelRef = useRef<string>("");
 
