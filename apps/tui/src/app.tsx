@@ -35,7 +35,9 @@ import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
 import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
 import {
 	composePrompt,
+	ensureInstalled,
 	getPreset,
+	isInstalled,
 	listPresetIds,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
@@ -2011,9 +2013,11 @@ export function App({
 		[addSystemMessage],
 	);
 
-	// Handle slash commands
+	// Handle slash commands. Async so individual cases (e.g. /spawn with
+	// auto-install) can await long-running side effects without blocking
+	// or hacking around it via .then() chains.
 	const handleSlashCommand = useCallback(
-		(command: SlashCommand, args: string[]) => {
+		async (command: SlashCommand, args: string[]) => {
 			switch (command) {
 				case "help":
 					addSystemMessage(
@@ -2815,11 +2819,13 @@ export function App({
 				}
 
 				case "spawn": {
-					// /spawn <preset> — open a chat tab whose backing brain is an external CLI.
+					// /spawn <preset> [install] — open a chat tab whose backing brain is an external CLI.
+					// If the binary is not on $PATH, kick off the auto-install recipe before spawning.
 					const presetId = (args[0] || "").toLowerCase().trim();
+					const subCommand = (args[1] || "").toLowerCase().trim();
 					if (!presetId) {
 						addSystemMessage(
-							`Usage: /spawn <agent>\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude`,
+							`Usage: /spawn <agent> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
 						);
 						break;
 					}
@@ -2830,6 +2836,38 @@ export function App({
 						);
 						break;
 					}
+
+					// Force-install path: `/spawn <id> install` reinstalls even if already on PATH.
+					const force = subCommand === "install";
+					const needsInstall = force || !isInstalled(preset);
+					if (needsInstall) {
+						if (!preset.install) {
+							addSystemMessage(
+								`${preset.command} is not on $PATH and no auto-install recipe is configured. Install it manually then run /spawn ${preset.id} again.`,
+							);
+							break;
+						}
+						addSystemMessage(
+							`Installing ${preset.label} via \`${preset.install.command}\`. This may take 30-90 seconds...`,
+						);
+						const ok = await ensureInstalled(preset, (line, source) => {
+							if (source === "info") {
+								addSystemMessage(`[install] ${line}`);
+							}
+							// Verbose stdout/stderr is suppressed — npm/pip can be noisy.
+							// We only surface the summary lines via `source: "info"`.
+						});
+						if (!ok) {
+							addSystemMessage(
+								`Install of ${preset.label} did not complete. ${preset.install.notes ?? ""}`.trim(),
+							);
+							break;
+						}
+						addSystemMessage(
+							`Installed ${preset.label}.${preset.install.notes ? ` Note: ${preset.install.notes}` : ""}`,
+						);
+					}
+
 					const tab = workspaceTabs.addTab("chat", preset.label);
 					if (!tab) {
 						addSystemMessage("Could not create tab (max reached?)");
