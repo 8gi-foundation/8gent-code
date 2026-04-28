@@ -91,10 +91,10 @@ He prefers voice messages - transcribe and respond naturally.
 | **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children (Nick's project) | Concept |
 | **8gent World** | PodJamz/8gent-world | Ecosystem hub | Active |
 | **8gent Games** | PodJamz/8gent-games | AI civilisation simulator | Early |
-| **FoodstackOS** | Private | Multi-agent OS for food industry | Main focus |
-| **Brotherhood Tattoo** | Private | Tattoo studio app (Dublin, with Charles) | Ready |
-| **Veets (VoiceAISpace)** | Private | Video meetings + AR overlay | Has SDK |
-| **SCF Design Lab** | Private | UX/Design lab for Mark's compliance platform | Client project |
+| **the prior internal memory system** | Private | Multi-agent OS for food industry | Main focus |
+| **a partner project** | Private | Tattoo studio app | Ready |
+| **another partner project** | Private | Video meetings + AR overlay | Has SDK |
+| **a compliance-focused client engagement** | Private | UX/Design lab for Mark's compliance platform | Client project |
 | **Delphion** | Private | Research/IP platform | Active |
 
 ## Current Objectives (Q1 2026)
@@ -114,7 +114,7 @@ Built and deployed a LinkedIn outreach vessel in-house instead of paying for Goj
 - **James's LinkedIn:** linkedin.com/in/jameslawrencespalding
 - **Two campaigns planned** (not started yet - James wants to discuss first):
   1. 8gent early adopters - CTOs/founders hiring ML/AI engineers
-  2. FoodstackOS prospects - restaurant/food ops decision makers
+  2. the prior internal memory system prospects - restaurant/food ops decision makers
 - **Nothing sends until James approves each message draft**
 - Telegram notifications wired: you will ping James when replies come in or templates evolve
 
