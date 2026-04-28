@@ -1107,13 +1107,21 @@ async function testOnboardingAgentNamesDefaults(): Promise<SmokeResult> {
 			typeof names.qa === "string" && names.qa.length > 0,
 			`qa: got ${names.qa}`,
 		);
-		// Defaults must match the canonical role-registry names.
+		// Verify canonical defaults exist in the schema (not in the user's
+		// live settings — the user is allowed to rename their agents at any
+		// time via /settings or onboarding, and that's the whole feature).
 		assert(
-			names.orchestrator === "Orchestrator",
-			`orchestrator default: ${names.orchestrator}`,
+			DEFAULT_SETTINGS.agents?.names?.orchestrator === "Orchestrator",
+			`canonical default: ${DEFAULT_SETTINGS.agents?.names?.orchestrator}`,
 		);
-		assert(names.engineer === "Engineer", `engineer default: ${names.engineer}`);
-		assert(names.qa === "QA", `qa default: ${names.qa}`);
+		assert(
+			DEFAULT_SETTINGS.agents?.names?.engineer === "Engineer",
+			`canonical default: ${DEFAULT_SETTINGS.agents?.names?.engineer}`,
+		);
+		assert(
+			DEFAULT_SETTINGS.agents?.names?.qa === "QA",
+			`canonical default: ${DEFAULT_SETTINGS.agents?.names?.qa}`,
+		);
 		return {
 			ok: true,
 			detail: `${names.orchestrator}/${names.engineer}/${names.qa}`,
