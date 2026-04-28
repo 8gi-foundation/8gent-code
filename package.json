@@ -35,6 +35,8 @@
 		"postinstall": "node -e \"console.log('\\n✨ 8gent installed! Just type: 8gent\\n\\n8gent auto-detects LM Studio, Ollama, and local models on first run.\\nIf no model is found, a setup menu will walk you through it.\\n')\" && npx bmad-method init --no-interactive 2>/dev/null || true",
 		"test": "bun test packages/ apps/",
 		"test:benchmarks": "bun test benchmarks/",
+		"test:models": "bun scripts/test-models.ts",
+		"test:models:providers": "bun scripts/test-models.ts --providers",
 		"lint": "biome check .",
 		"typecheck": "tsc --noEmit",
 		"typecheck:tui": "tsc --noEmit -p apps/tui/tsconfig.json",
