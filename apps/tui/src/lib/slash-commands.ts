@@ -44,7 +44,8 @@ export type SlashCommand =
 	| "vercel"
 	| "telegram"
 	| "router"
-	| "rename";
+	| "rename"
+	| "spawn";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -301,6 +302,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["ren"],
 		description: "Rename current tab",
 		usage: "/rename <new name>",
+	},
+	{
+		name: "spawn",
+		aliases: [],
+		description: "Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, aider)",
+		usage: "/spawn <claude|codex|hermes|openclaw|aider>",
 	},
 ];
 
