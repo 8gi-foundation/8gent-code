@@ -4,15 +4,27 @@ Owner: 8GO (Solomon). Spec: `docs/specs/8GENT-0.1-BDH-ORCHESTRATOR.md` §4.4 and
 
 ## Purpose
 
-The ontology is a fixed, ordered list of concept identifiers that the BDH
-concept head is trained to predict. It is the foundation of monosemanticity
-in 8gent 0.1: each position in `CONCEPT_VOCAB` corresponds to one synapse in
-the concept head, and the multi-label binary cross-entropy loss during
-training pins that synapse to one human-readable concept. The contract is:
-`activations[i]` always refers to `CONCEPT_VOCAB[i]`. If the order changes,
-every saved checkpoint, every G8WAY audit record, and every downstream
-visualisation breaks. That is why this file is small, explicit, and
-versioned. We engineer monosemanticity rather than hoping it emerges.
+The ontology is a fixed, ordered **probe vocabulary**. Each position in
+`CONCEPT_VOCAB` is a candidate label for a BDH synapse position. After
+training, a probe runner correlates synapse activations against gold-set
+examples and assigns the most-co-firing concept name to each position.
+
+Boardroom decision 2026-04-28 (Option A) adopts the BDH paper's
+emergent-monosemanticity approach (arXiv 2509.26507): training is pure
+next-token cross-entropy with **no concept-BCE supervision**. The paper
+explicitly disables L1-regularization and any other training method that
+would guide synapses toward specific concepts. We follow the paper.
+
+The ontology is therefore **descriptive, not prescriptive**. Pre-training,
+it is our hypothesis about what concepts the model will learn. Post-training,
+the probe runner promotes hypotheses to verified labels (or reassigns them
+to reserve slots when reality and hypothesis disagree). The contract on
+positional mapping still holds: `activations[i]` always refers to
+`CONCEPT_VOCAB[i]`, so reordering this list is a breaking change.
+
+Re-evaluation clause: if Phase 1 probes show <50% per-concept synapse
+precision, we reopen the supervised-concept-head decision at L5 boardroom.
+Until that signal exists, paper-faithful.
 
 ## Category breakdown
 

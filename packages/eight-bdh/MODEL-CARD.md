@@ -17,9 +17,10 @@
 |---|---|
 | Family | `8gent` |
 | Version | `0.1.0` |
-| Architecture | BDH (Baby Dragon Hatchling, Pathway, MIT) |
+| Architecture | BDH (Baby Dragon Hatchling, Pathway, MIT). arXiv 2509.26507. |
+| Architecture deviations from paper | None. Training method deviation: NONE under Option A (paper-faithful, single-head next-token CE). |
 | Role | Routing / orchestration (`r`) |
-| Parameters | 10M (Phase 1 target). Phase 0 trains a 5M proxy. |
+| Parameters | 10M (Phase 1 target). Phase 0 trains a 5M proxy as a heartbeat check; **5M is below the paper's documented 10M-1B scaling range**, so Phase 0 success says "rig works", not "model is good". |
 | License (weights) | Apache 2.0 |
 | License (corpus manifest) | Apache 2.0 |
 | Canonical id | `8gent-0.1.0-bdh-r:10m` |
@@ -83,12 +84,22 @@ is unfalsifiable without it.
 
 ### 4.4 Auditability (the moat)
 
+Per spec §4.4 Option A: training is paper-faithful (single-head next-token CE,
+no concept-BCE supervision). Monosemanticity is emergent. The ontology is a
+post-training probe vocabulary; concept labels at each synapse position are
+**descriptive, not prescriptive**.
+
 | Metric | Target | Measurement |
 |---|---|---|
 | Decisions emitting non-empty AuditTrace | 100% | Runtime |
 | Traces rated "useful" by human grader (5-point rubric, useful = 4 of 5) | >= 70% | 200-decision sample, monthly |
-| Per-concept synapse precision (probe set) | >= 0.80 each, no concept below 0.50 | 30-example probe per concept, every checkpoint |
+| Per-concept synapse precision (post-training probe) | >= 0.80 each, no labelled concept below 0.50 | 30-example probe per concept, every checkpoint |
+| Reserve-slot promotion rate | <= 20% per ontology MINOR bump (most positions retain hypothesis labels) | Probe runner, every checkpoint |
 | Cohen's kappa between two labelers on gold set | >= 0.70 | Pre-training |
+
+**Re-evaluation gate.** If Phase 1 probes show <50% per-concept precision
+across the board, the boardroom reopens Option B (supervised concept head)
+at L5. Until that signal exists, we follow the paper.
 
 The 5-point usefulness rubric:
 1. >= 2 concepts fired
@@ -99,14 +110,15 @@ The 5-point usefulness rubric:
 
 ### 4.5 Sovereignty (corpus provenance)
 
-| Source | Floor | Ceiling |
-|---|---|---|
-| Closed-weight teacher (Anthropic / OpenAI / Gemini) | **0%** | **0%** (TOS-binding for Apache 2.0 release) |
-| Open-weight synthetic (Qwen / Llama / Mistral / DeepSeek) | 0% | 30% |
-| Real-session replays (`~/.8gent/sessions/`, scrubbed + k-anonymized) | 30% | n/a |
-| Adversarial / red-team (rule-based) | 15% | n/a |
-| Boardroom traces (multi-officer deliberations) | 10% | n/a |
-| Public benches (ToolBench, AgentBench, license-checked) | 10% | 20% |
+| Source | Floor | Ceiling | Notes |
+|---|---|---|---|
+| Closed-weight teacher (Anthropic / OpenAI / Gemini / Apple Foundation) | **0%** | **0%** | TOS-binding for Apache 2.0 release |
+| Open-weight synthetic (verified license-clean teachers; see §6.2) | 0% | 30% | Three sources for diversity, two licences |
+| Real-session replays (`~/.8gent/sessions/`, scrubbed + k-anonymized) | 30% | n/a | k >= 5 on quasi-identifier tuples |
+| Adversarial / red-team (rule-based) | 15% | n/a | Edge cases, not Claude-shaped surprises |
+| Boardroom traces (multi-officer deliberations) | 10% | n/a | High-quality, low-volume; upweighted in training |
+| Public benches (ToolBench, AgentBench, license-checked) | 10% | 20% | License confirmed per dataset |
+| Llama (any version) | **0%** | **0%** | 3.0-3.2 prohibit training other LLMs; 3.3+ requires "Llama" prefix in derivative model name, which conflicts with our canonical id |
 
 CI gate: `packages/eight-bdh/scripts/split.ts` refuses to emit a corpus whose
 provenance ratios drift outside these bounds. Ratios are recorded in
@@ -169,11 +181,35 @@ fully-loaded tenant vessel. Marketplace primitive in `packages/control-plane/`.
 | Phase 1 | 50k examples | Production model |
 | Phase 2 | 100k+ | Scale-up; tenant module training |
 
-### 6.2 Provenance manifest
+### 6.2 Provenance manifest and verified open-weight teachers
 
 Every example carries a `provenance` field with `source`, `model_used` (if
 synthetic), `seed`, `created_at`, `notes`. Manifest hashed and recorded in
 `data/manifest.json` per training run. Published alongside released weights.
+
+**Approved open-weight teachers (Phase 1):**
+
+| Model | Version pin | Licence | Distillation permitted? | Channel | Local availability |
+|---|---|---|---|---|---|
+| Qwen 3.6 27B | `qwen3.6:27b` (Ollama tag) | Apache 2.0 | Yes, no constraints | Ollama (local) | Already pulled on M2 Max as of 2026-04-28 |
+| Mistral 7B | `mistral:7b` (Ollama tag) | Apache 2.0 | Yes, no constraints | Ollama (local) | Pull required: `ollama pull mistral:7b` |
+| DeepSeek-R1 32B | `deepseek-r1:32b` (Ollama tag) **or** `deepseek-v4-flash` (DeepSeek API) | MIT (model and code); license explicitly permits distillation | Yes, explicit | Ollama (local, slower) **or** DeepSeek API (faster, paid) | Pull required for local: `ollama pull deepseek-r1:32b` |
+
+Three sources, two licences (Apache 2.0 + MIT). Volume distributed
+roughly equally across teachers to avoid single-teacher bias.
+
+**Phase 0 first run** (1k examples, heartbeat check): single-teacher OK
+since no quality claim is made. Default to Qwen 3.6 27B (already pulled).
+Mistral and DeepSeek-R1 pulls deferred to Phase 1.
+
+**Excluded teachers (with reasons):**
+
+| Model | Reason |
+|---|---|
+| Llama 3.0-3.2 | License prohibits using outputs to train other AI models |
+| Llama 3.3+ | License permits distillation but requires "Llama" prefix in derivative model name; conflicts with canonical id `8gent-0.1.0-bdh-r:10m` |
+| Claude / GPT / Gemini | Closed-weight, TOS prohibits training competing models on outputs |
+| Apple Foundation | Closed proprietary, on-device licence does not authorise distillation into a publicly-released model |
 
 ### 6.3 Sanitisation
 
@@ -212,6 +248,16 @@ The trace is the decision per spec section 7.1. Concrete contract:
 
 - **Phase 0 is hello-world.** 5M params on 1k examples. Heartbeat check, not a
   quality bar. Do not draw conclusions about Phase 1 from Phase 0.
+- **5M is below the BDH paper's documented 10M-1B scaling range.** Pathway
+  has not published evidence that BDH-GPU learns at 5M. Phase 0 may fail to
+  hit even the heartbeat target (loss curve descends, parseable Decision out)
+  for architectural reasons unrelated to corpus quality. If that happens, we
+  jump straight to 10M for the next run rather than tuning at 5M.
+- **Monosemanticity is emergent, not engineered.** Per spec section 4.4
+  Option A. The ontology is a probe vocabulary, not a training target.
+  Per-concept precision is measured post-training; if probes show <50%
+  precision across the board, we reopen the supervised-concept-head decision
+  at L5 boardroom (re-evaluation gate in section 4.4).
 - **Routing accuracy targets are gated on the eval harness.** Without the
   200-example dual-labeled gold set + heuristic baseline, every target in
   section 4.1 is unfalsifiable.
