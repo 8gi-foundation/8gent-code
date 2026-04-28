@@ -1,0 +1,83 @@
+{
+  "phase": 0,
+  "status": "FAIL",
+  "model_id": "8gent-0.1.0-bdh-r:5m",
+  "device": "mps",
+  "params_millions": 4.99712,
+  "config": {
+    "n_layer": 6,
+    "n_embd": 160,
+    "n_head": 4,
+    "mlp_internal_dim_multiplier": 64,
+    "dropout": 0.1,
+    "vocab_size": 256
+  },
+  "training": {
+    "max_iters": 2500,
+    "batch_size": 32,
+    "block_size": 512,
+    "lr": 0.001,
+    "weight_decay": 0.1,
+    "seed": 42,
+    "n_examples": 1000,
+    "device": "mps",
+    "train_seconds": 7747.527452945709,
+    "best_val_loss": 0.08000148832798004,
+    "final_train_loss": 0.06103667616844177,
+    "final_val_loss": 0.10541868209838867
+  },
+  "heartbeat_gates": {
+    "trains_end_to_end": true,
+    "loss_descended": true,
+    "val_loss_under_one": true,
+    "inference_works": true,
+    "latency_under_target": false
+  },
+  "latency": {
+    "avg_ms_per_token": 39.26,
+    "proxy_per_decision_ms": 3140.8,
+    "target_ms": 100
+  },
+  "samples": [
+    {
+      "prompt_id": "verify-1",
+      "prompt": "{\"id\":\"verify-1\",\"state\":{\"request\":\"rewrite this auth middleware to use the new policy engine\",\"context\":{",
+      "completion": "\"budget_remaining\":{\"ms\":600000,\"tokens\":200000},\"history_summary\":\"last attempt failed CI\",\"tools_available\":[\"Write\",\"",
+      "tokens_generated": 120,
+      "total_ms": 8384.2,
+      "ms_per_token": 69.87
+    },
+    {
+      "prompt_id": "verify-2",
+      "prompt": "{\"id\":\"verify-2\",\"state\":{\"request\":\"what files changed in the last commit\",\"context\":{\"tools_available\":[\"Read\",\"Bash\"],",
+      "completion": "\"vessels_available\":[\"8GO\",\"8CO\"]},\"policy\":{\"authority_level\":0,\"deny_actions\":[]},\"request\":\"rewrite this auth middlew",
+      "tokens_generated": 120,
+      "total_ms": 3765.4,
+      "ms_per_token": 31.38
+    },
+    {
+      "prompt_id": "verify-3",
+      "prompt": "{\"id\":\"verify-3\",\"state\":{\"request\":\"deploy to production\",\"context\":{\"vessels_available\":[\"8DO\",\"8SO\"],",
+      "completion": "\"policy\":{\"authority_level\":1,\"deny_actions\":[\"force_push\"]},\"request\":\"stress test the rate limiter with 1k concurrent ",
+      "tokens_generated": 120,
+      "total_ms": 3433.3,
+      "ms_per_token": 28.61
+    },
+    {
+      "prompt_id": "verify-4",
+      "prompt": "{\"id\":\"verify-4\",\"state\":{\"request\":\"summarise the project status\",\"context\":{\"history_summary\":\"fresh session, no prior turns\",\"budget_remaining\":{",
+      "completion": "\"ms\":5000,\"tokens\":4000},\"history_summary\":\"first interaction of the day\",\"tools_available\":[\"Read\",\"Edit\",\"Write\",\"WebF",
+      "tokens_generated": 120,
+      "total_ms": 4190.4,
+      "ms_per_token": 34.92
+    },
+    {
+      "prompt_id": "verify-5",
+      "prompt": "{\"id\":\"verify-5\",\"state\":{\"request\":\"add a darkmode toggle to the settings panel\",\"context\":{\"tools_available\":[\"Edit\",\"Read\"],\"vessels_available\":[\"8DO\"],",
+      "completion": "\"policy\":{\"authority-l2\",\"decision-agent\"],\"reasoning\":[\"context match against template\",\"policy check passed within aut",
+      "tokens_generated": 120,
+      "total_ms": 3782.6,
+      "ms_per_token": 31.52
+    }
+  ]
+}

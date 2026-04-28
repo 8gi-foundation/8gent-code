@@ -1,0 +1,162 @@
+{
+  "phase": 0,
+  "purpose": "demonstration of eval pattern; not a quality gate",
+  "device": "mps",
+  "checkpoint": "packages/eight-bdh/checkpoints/phase-0-5m.pt",
+  "n_samples": 8,
+  "summary": {
+    "bdh_decodable": 2,
+    "bdh_decodable_rate": 0.25,
+    "kind_agreement": 1,
+    "kind_agreement_rate": 0.125,
+    "target_agreement": 0,
+    "target_agreement_rate": 0.0,
+    "avg_bdh_inference_ms": 12207.270562648773
+  },
+  "samples": [
+    {
+      "id": "h1",
+      "request": "rewrite this auth middleware to use the new policy engine",
+      "heuristic": {
+        "kind": "agent",
+        "target": "8SO",
+        "budget": {
+          "tokens": 12000,
+          "ms": 90000
+        },
+        "confidence": 0.74
+      },
+      "bdh": {
+        "kind": "agent",
+        "target": "8CO",
+        "raw_completion": "\"budget\":{\"ms\":30000,\"tokens\":4000},\"confidence\":0.72,\"kind\":\"agent\",\"target\":\"8CO\"},\"id\":\"phase-0-seed-42-000608\",\"provenance\":{\"created_at\":\"2026-04-28T00:00:00Z\",\"model_used\":\"rule-based-phase-0\",\""
+      },
+      "bdh_inference_ms": 14010.5,
+      "agreed_kind": true,
+      "agreed_target": false
+    },
+    {
+      "id": "h2",
+      "request": "what files changed in the last commit",
+      "heuristic": {
+        "kind": "tool",
+        "target": "Bash",
+        "budget": {
+          "tokens": 500,
+          "ms": 5000
+        },
+        "confidence": 0.88
+      },
+      "bdh": null,
+      "bdh_inference_ms": 10116.2,
+      "agreed_kind": false,
+      "agreed_target": false
+    },
+    {
+      "id": "h3",
+      "request": "deploy to production",
+      "heuristic": {
+        "kind": "clarify",
+        "target": "destructive-low-authority",
+        "budget": {
+          "tokens": 1000,
+          "ms": 10000
+        },
+        "confidence": 0.85
+      },
+      "bdh": null,
+      "bdh_inference_ms": 7974.0,
+      "agreed_kind": false,
+      "agreed_target": false
+    },
+    {
+      "id": "h4",
+      "request": "summarise the project status",
+      "heuristic": {
+        "kind": "tool",
+        "target": "Read",
+        "budget": {
+          "tokens": 500,
+          "ms": 5000
+        },
+        "confidence": 0.88
+      },
+      "bdh": {
+        "kind": "agent",
+        "target": "8MO",
+        "raw_completion": "\"budget\":{\"ms\":30000,\"tokens\":500},\"confidence\":0.89,\"kind\":\"agent\",\"target\":\"8MO\"},\"id\":\"phase-0-seed-42-000131\",\"provenance\":{\"created_at\":\"2026-04-28T00:00:00Z\",\"model_used\":\"rule-based-phase-0\",\"n"
+      },
+      "bdh_inference_ms": 12134.5,
+      "agreed_kind": false,
+      "agreed_target": false
+    },
+    {
+      "id": "h5",
+      "request": "fix the failing test in packages/eight/agent.test.ts",
+      "heuristic": {
+        "kind": "agent",
+        "target": "8TO",
+        "budget": {
+          "tokens": 12000,
+          "ms": 90000
+        },
+        "confidence": 0.72
+      },
+      "bdh": null,
+      "bdh_inference_ms": 13925.0,
+      "agreed_kind": false,
+      "agreed_target": false
+    },
+    {
+      "id": "h6",
+      "request": "scan the repo for hardcoded credentials",
+      "heuristic": {
+        "kind": "tool",
+        "target": "Read",
+        "budget": {
+          "tokens": 500,
+          "ms": 5000
+        },
+        "confidence": 0.88
+      },
+      "bdh": null,
+      "bdh_inference_ms": 13074.7,
+      "agreed_kind": false,
+      "agreed_target": false
+    },
+    {
+      "id": "h7",
+      "request": "investigate why the daemon is running hot",
+      "heuristic": {
+        "kind": "agent",
+        "target": "8TO",
+        "budget": {
+          "tokens": 12000,
+          "ms": 90000
+        },
+        "confidence": 0.7
+      },
+      "bdh": null,
+      "bdh_inference_ms": 13457.1,
+      "agreed_kind": false,
+      "agreed_target": false
+    },
+    {
+      "id": "h8",
+      "request": "draft a changelog entry for v0.13",
+      "heuristic": {
+        "kind": "model",
+        "target": "8gent/eight-1.0-q3:14b",
+        "budget": {
+          "tokens": 4000,
+          "ms": 30000
+        },
+        "confidence": 0.74
+      },
+      "bdh": null,
+      "bdh_inference_ms": 12966.3,
+      "agreed_kind": false,
+      "agreed_target": false
+    }
+  ]
+}
