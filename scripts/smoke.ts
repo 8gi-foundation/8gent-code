@@ -1022,6 +1022,64 @@ async function testRoleRegistry(): Promise<SmokeResult> {
 	});
 }
 
+async function testVoiceForRole(): Promise<SmokeResult> {
+	return timeIt("voice/per-agent-defaults", async () => {
+		const { getVoiceForRole, DEFAULT_SETTINGS } = await import(
+			"../packages/settings"
+		);
+		// Each role resolves to a non-empty macOS voice via defaults.
+		for (const role of ["orchestrator", "engineer", "qa"]) {
+			const v = getVoiceForRole(role, DEFAULT_SETTINGS);
+			assert(typeof v === "string" && v.length > 0, `${role}: empty voice`);
+		}
+		// Per-agent map wins when set.
+		const custom = {
+			...DEFAULT_SETTINGS,
+			voice: {
+				...DEFAULT_SETTINGS.voice,
+				perAgent: {
+					orchestrator: "Tom",
+					engineer: "Karen",
+					qa: "Moira",
+				},
+			},
+		};
+		assert(
+			getVoiceForRole("orchestrator", custom) === "Tom",
+			"perAgent.orchestrator override ignored",
+		);
+		// Unknown role falls back to engineer slot.
+		const eng = getVoiceForRole("nonsense", DEFAULT_SETTINGS);
+		assert(
+			eng === DEFAULT_SETTINGS.voice.perAgent.engineer,
+			`unknown role should fall back to engineer voice, got ${eng}`,
+		);
+		// Empty per-agent entry falls through to ttsVoice.
+		const fallback = {
+			...DEFAULT_SETTINGS,
+			voice: {
+				...DEFAULT_SETTINGS.voice,
+				ttsVoice: "Samantha",
+				perAgent: { orchestrator: "", engineer: "", qa: "" },
+			},
+		};
+		assert(
+			getVoiceForRole("orchestrator", fallback) === "Samantha",
+			"empty perAgent should fall back to ttsVoice",
+		);
+		return {
+			ok: true,
+			detail: `defaults: ${getVoiceForRole(
+				"orchestrator",
+				DEFAULT_SETTINGS,
+			)}/${getVoiceForRole("engineer", DEFAULT_SETTINGS)}/${getVoiceForRole(
+				"qa",
+				DEFAULT_SETTINGS,
+			)}`,
+		};
+	});
+}
+
 // ============================================================================
 // L. TUI layout invariants
 //
@@ -1305,6 +1363,7 @@ async function main(): Promise<void> {
 
 	// Bonus
 	results.push(await testRoleRegistry());
+	results.push(await testVoiceForRole());
 
 	const totalMs = Math.round(performance.now() - t0);
 

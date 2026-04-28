@@ -9,13 +9,26 @@
  * bumping `version` and adding a migration path.
  */
 
+export interface PerAgentVoices {
+	/** macOS TTS voice for the Orchestrator tab. */
+	orchestrator: string;
+	/** macOS TTS voice for the Engineer tab. */
+	engineer: string;
+	/** macOS TTS voice for the QA tab. */
+	qa: string;
+}
+
 export interface VoiceSettings {
 	/** Silence detection threshold in milliseconds. Range 500-5000. */
 	silenceThresholdMs: number;
 	/** Whether the user can interrupt TTS by speaking. */
 	bargeIn: boolean;
-	/** macOS TTS voice name (e.g. "Ava", "Samantha"). */
+	/** macOS TTS voice name (e.g. "Ava", "Samantha"). Used as fallback when no per-agent voice is set. */
 	ttsVoice: string;
+	/** Whether the agent's text replies are spoken via TTS by default. */
+	outputEnabled: boolean;
+	/** Per-agent macOS voice overrides. Each tab role gets its own voice. */
+	perAgent: PerAgentVoices;
 }
 
 export type PerformanceMode = "auto" | "lite" | "full";
