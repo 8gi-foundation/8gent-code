@@ -393,6 +393,39 @@ Boardroom decision (2026-04-28, Option A): we adopt the paper's emergent-monosem
 
 Re-evaluation: if Phase 1 probes show <50% per-concept synapse precision (i.e. emergent monosemanticity is too noisy to be useful as audit evidence), we reopen the supervised-concept-head decision at L5 boardroom. Until then, paper-faithful.
 
+### 4.4b Decision target naming (Phase 1 amendment, 2026-04-28)
+
+Phase 0 corpus used the internal officer codes (`8EO`, `8TO`, `8PO`, `8DO`, `8SO`, `8CO`, `8MO`, `8GO`) as the `decision.target` value when `decision.kind == "agent"`. That was operationally convenient because the harness already uses these codes for vessel addressing.
+
+It is **wrong for the model.** The codes are 8GI-specific shorthand. End users, external labellers, Pathway, anyone outside the inner circle reads them as opaque symbols. A model trained from scratch on a byte-level vocab learns them as opaque too: there is no semantic structure to leverage.
+
+**Phase 1 amendment:** the corpus uses **role-name targets** as the user-visible string, with officer codes resolved to vessel addresses at dispatch time inside the harness.
+
+| Decision target (model output) | Harness vessel (runtime resolution) |
+|---|---|
+| `Executive` | `8EO` |
+| `Technical` | `8TO` |
+| `Product` | `8PO` |
+| `Design` | `8DO` |
+| `Security` | `8SO` |
+| `Community` | `8CO` |
+| `Marketing` | `8MO` |
+| `Governance` | `8GO` |
+
+The lookup table lives in `packages/orchestration/role-config.ts` (single source). The dispatcher consumes the model's string output, resolves to a vessel code, dispatches.
+
+**Trace concepts** carry both forms (e.g. `vessel-security-fits` AND `vessel-8SO-fits` as ontology synonyms) so audit records are human-readable and the dispatcher can match either.
+
+**Why this is right:**
+- Labellers grading the gold set read role names without translating; expected to lift Cohen's kappa.
+- Audit logs are readable without an officer-code glossary.
+- Externalisation: when 8gent 0.1 is described publicly or to Pathway, the model output uses common-knowledge words.
+- Future-proofing: if we add a role that does not have an officer (e.g. `Data`, `Infra`), role names accommodate it.
+
+**Why we did not retrofit Phase 0:** Phase 0 is already trained. The retraining cost (~2h on M2 Max) is real but the Phase 0 model is a heartbeat artifact that is not measured for routing quality, so the labels never mattered. Phase 1 corpus generator picks up the new schema; Phase 0 corpus stays as-is for reproducibility.
+
+**Authority:** Chair (James Spalding) decision 2026-04-28, informed by the question of whether the model should learn 8GI-internal codes or common-knowledge role names. Boardroom may reverse at L5 if Phase 1 evidence shows role-name targets hurt the kappa or accuracy gates.
+
 ### 4.5 What we are NOT including in the corpus (Phase 0+1)
 
 Explicit non-goals so the corpus stays focused:
