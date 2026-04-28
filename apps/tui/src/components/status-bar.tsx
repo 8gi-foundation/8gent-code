@@ -15,7 +15,7 @@
  * Also includes animated variants from original implementation.
  */
 
-import { Box, useStdout } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React, { useState, useEffect } from "react";
 import { formatDuration, formatTokens, truncate } from "../lib/index.js";
 import { TUI_STATUS_COMPACT_BELOW } from "../lib/layout-breakpoints.js";
@@ -208,7 +208,7 @@ export function EnhancedStatusBar({
 					<AgentStatusItem running={runningAgents} total={totalAgents} />
 				</Box>
 
-				<Box flexShrink={0} flexDirection="row" overflow="hidden">
+				<Box flexShrink={1} flexDirection="row" overflow="hidden">
 					<TokenSavingsItem saved={tokensSaved} percentage={savings} barWidth={barWidth} />
 					{displayBranch && (
 						<>
@@ -306,14 +306,18 @@ function PermissionStatusItem({ mode }: { mode: EnhancedStatusBarProps["permissi
 
 	const config = configs[mode || "ask"];
 
-	// Read-only status: avoid bracket badges that read like clickable controls (DesignExcellence)
+	// Hermes pattern: render the perm fragment as a single non-wrapping Text
+	// node. Inline laid out as React fragments inside flex parents previously
+	// allowed Ink to split the label mid-word ("ask" -> "as k") when the
+	// right cluster was squeezed at narrow widths. truncate-end on the
+	// wrapper keeps it on one row, period.
 	return (
-		<Inline gap={0}>
-			<MutedText>perm </MutedText>
-			<AppText color={config.color}>
+		<Text wrap="truncate-end">
+			<Text dimColor>perm </Text>
+			<Text color={config.color}>
 				{config.icon} {config.label}
-			</AppText>
-		</Inline>
+			</Text>
+		</Text>
 	);
 }
 
@@ -495,30 +499,17 @@ function ClaudeStyleCompactBar({
 
 	const permConfig = permissionIcons[permissionMode || "ask"];
 
+	// Hermes pattern: build the entire compact bar as a single Text node so
+	// terminal flow can never split a label mid-word (e.g. "ask" -> "as k").
+	// truncate-end + explicit width pin the row to one line. We lose colour
+	// per-segment in compact mode, but the user gets a row that always reads.
+	const dot = runningAgents > 0 ? "●" : "○";
+	const branchPart = showBranch ? `  ${branchShort}` : "";
+	const line = `[${modelShort}]  ${dot}  ${permConfig.icon}  ${savings}%${branchPart}  ${elapsed}`;
 	return (
-		<Inline paddingX={1} marginTop={1} gap={0} width={cols} flexShrink={0}>
-			<MutedText>[</MutedText>
-			<AppText color="cyan">{modelShort}</AppText>
-			<MutedText>] </MutedText>
-
-			<StatusDot status={runningAgents > 0 ? "info" : "idle"} />
-
-			<MutedText> </MutedText>
-			<AppText color={permConfig.color}>{permConfig.icon}</AppText>
-
-			<MutedText> </MutedText>
-			<AppText color="green">{savings}%</AppText>
-
-			{showBranch && (
-				<>
-					<MutedText> </MutedText>
-					<AppText color="yellow">{branchShort}</AppText>
-				</>
-			)}
-
-			<MutedText> </MutedText>
-			<MutedText>{elapsed}</MutedText>
-		</Inline>
+		<Box paddingX={1} marginTop={1} width={cols} flexShrink={0}>
+			<Text wrap="truncate-end">{line}</Text>
+		</Box>
 	);
 }
 

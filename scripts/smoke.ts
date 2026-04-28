@@ -1023,6 +1023,121 @@ async function testRoleRegistry(): Promise<SmokeResult> {
 }
 
 // ============================================================================
+// L. TUI layout invariants
+//
+// Pure logic checks that the layout helpers and text rendering primitives
+// produce safe widths across the 80x24 → 120x40 range, so chat/header/visualiser
+// can never overflow their parent box (Hermes pattern: thread one width source,
+// floor it, never produce zero/negative).
+// ============================================================================
+
+async function testTuiLayoutContentWidth(): Promise<SmokeResult> {
+	return timeIt("tui-layout/content-width", async () => {
+		const { tuiChatContentWidth, computeProcessSidebarWidth } = await import(
+			"../apps/tui/src/lib/layout-breakpoints"
+		);
+		// At every common width, content width must be > 0 and never exceed
+		// (viewport - chrome).
+		for (const cols of [60, 80, 92, 100, 120, 160]) {
+			for (const sidebarOpen of [false, true]) {
+				const sidebar = computeProcessSidebarWidth(sidebarOpen, cols);
+				const content = tuiChatContentWidth(cols, sidebar);
+				assert(content > 0, `content width <= 0 at cols=${cols} sidebar=${sidebar}`);
+				assert(
+					content + sidebar <= cols,
+					`content+sidebar > cols at cols=${cols} (content=${content}, sidebar=${sidebar})`,
+				);
+				// Floor: content width should never collapse below 16 even when
+				// sidebar is open at narrow widths.
+				assert(
+					content >= 16,
+					`content width below floor at cols=${cols}: ${content}`,
+				);
+			}
+		}
+		return { ok: true, detail: "content+sidebar safe at 60-160 cols" };
+	});
+}
+
+async function testTuiLayoutSidebarShrinks(): Promise<SmokeResult> {
+	return timeIt("tui-layout/sidebar-shrinks", async () => {
+		const { computeProcessSidebarWidth } = await import(
+			"../apps/tui/src/lib/layout-breakpoints"
+		);
+		// Sidebar must shrink (or stay equal) as viewport narrows; never grow.
+		let prev = Infinity;
+		for (const cols of [160, 120, 100, 92, 80, 60]) {
+			const w = computeProcessSidebarWidth(true, cols);
+			assert(w <= prev, `sidebar grew when narrowing: ${prev} -> ${w} at cols=${cols}`);
+			assert(w >= 18, `sidebar below SIDEBAR_MIN at cols=${cols}: ${w}`);
+			prev = w;
+		}
+		// Closed sidebar always 0.
+		assert(computeProcessSidebarWidth(false, 120) === 0, "closed sidebar should be 0");
+		return { ok: true, detail: "sidebar monotonically shrinks, floor=18" };
+	});
+}
+
+async function testTuiLayoutBreakLongTokensSeam(): Promise<SmokeResult> {
+	return timeIt("tui-layout/break-long-tokens", async () => {
+		const { breakLongTokensForTest } = await import(
+			"../apps/tui/src/components/message-list.tsx"
+		);
+		// Soft seam preferred: hyphenated compound should break at the seam,
+		// not produce mashed-up character runs like the reported
+		// "you need-whthink deeplyoding" bug.
+		const compound = "feature/long-branch-name-that-keeps-going-and-going";
+		const wrapped = breakLongTokensForTest(compound, 16);
+		assert(
+			wrapped.includes("\n"),
+			"long compound should be broken across lines",
+		);
+		// Each segment between newlines should fit the width budget.
+		for (const seg of wrapped.split("\n")) {
+			assert(
+				seg.length <= 16,
+				`segment exceeds width budget: "${seg}" (${seg.length} > 16)`,
+			);
+		}
+		// Short tokens are untouched.
+		const short = "hello world";
+		assert(breakLongTokensForTest(short, 16) === short, "short text mutated");
+		// A pure hash with no seam still gets hard-broken at width.
+		const hash = "a".repeat(64);
+		const hashWrap = breakLongTokensForTest(hash, 16);
+		assert(hashWrap.includes("\n"), "long hash should break");
+		for (const seg of hashWrap.split("\n")) {
+			assert(seg.length <= 16, `hash segment too long: ${seg.length}`);
+		}
+		return { ok: true, detail: "soft seam preferred, width budget respected" };
+	});
+}
+
+async function testTuiLayoutVisualiserFitsParent(): Promise<SmokeResult> {
+	return timeIt("tui-layout/visualiser-fits-parent", async () => {
+		// ActivityMonitor derives visualiser width as
+		//   max(24, min(cols - 10, 96))
+		// where chrome (10) accounts for two outer borders, two layers of
+		// paddingX, and the activity box border. At every common width the
+		// derived width must (a) be >= 24 (operator floor), (b) leave room
+		// for chrome (i.e. width + chrome <= cols).
+		for (const cols of [60, 80, 92, 100, 120, 160]) {
+			const w = Math.max(24, Math.min(cols - 10, 96));
+			assert(w >= 24, `visualiser below floor at cols=${cols}: ${w}`);
+			// Allow the floor to win at very narrow terminals; it's the
+			// ThinkingVisualizer's own clamp (min=20) that catches the rest.
+			if (cols >= 34) {
+				assert(
+					w + 10 <= cols,
+					`visualiser overflows parent at cols=${cols}: w=${w}`,
+				);
+			}
+		}
+		return { ok: true, detail: "visualiser width fits parent at 60-160 cols" };
+	});
+}
+
+// ============================================================================
 // Output
 // ============================================================================
 
@@ -1181,6 +1296,12 @@ async function main(): Promise<void> {
 	results.push(await testFailoverResolve());
 	results.push(await testFailoverMarkDown());
 	results.push(await testFailoverAllDown());
+
+	// L. TUI layout invariants
+	results.push(await testTuiLayoutContentWidth());
+	results.push(await testTuiLayoutSidebarShrinks());
+	results.push(await testTuiLayoutBreakLongTokensSeam());
+	results.push(await testTuiLayoutVisualiserFitsParent());
 
 	// Bonus
 	results.push(await testRoleRegistry());

@@ -9,7 +9,7 @@
  * making the agent's work visible and comprehensible.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React, { useState, useEffect, useRef } from "react";
 import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
 import { ThinkingVisualizer } from "./ThinkingVisualizer.js";
@@ -249,10 +249,25 @@ export function ActivityMonitor({
 	maxEntries = 12,
 	showAnimations = true,
 }: ActivityMonitorProps) {
+	const { stdout } = useStdout();
 	const [tick, setTick] = useState(0);
 	const [startTime] = useState(Date.now());
 	const [elapsed, setElapsed] = useState(0);
 	const [, forceRender] = useState(0);
+
+	// Hermes pattern: derive width from a single source (stdout columns),
+	// minus the chrome we can prove (left/right outer border + paddingX)
+	// so the visualiser canvas can never overflow its parent box. Floor
+	// at 24 so the operator still has a usable column on tiny terminals.
+	const cols = stdout?.columns ?? 80;
+	// Chrome consumed before the visualiser:
+	//   FixedFrame border │   = 1 (left) + 1 (right)
+	//   FixedFrame paddingX = 1 + 1
+	//   ActivityMonitor paddingX = 1 + 1
+	//   ActivityMonitor inner box paddingX = 1 + 1
+	//   activity box border = 1 + 1
+	//                              total = 10
+	const visualiserWidth = Math.max(24, Math.min(cols - 10, 96));
 
 	// Animation tick (activity list still refreshes when animations off)
 	useEffect(() => {
@@ -276,24 +291,34 @@ export function ActivityMonitor({
 	const scanChars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"];
 	const scanBar = showAnimations ? scanChars[tick % scanChars.length] : "·";
 
+	const stageLabel =
+		processingStage === "planning"
+			? "THINKING"
+			: processingStage === "executing"
+				? "WORKING"
+				: processingStage.toUpperCase();
+
 	return (
 		<Box flexDirection="column" flexGrow={1} paddingX={1}>
-			{/* Header */}
-			<Box marginBottom={1}>
-				<Text color="cyan" bold>
-					┌─ Agent Activity{" "}
-				</Text>
-				<Text dimColor>
-					step {stepCount} · {toolCount} tools · {elapsedStr}
-				</Text>
-				<Box flexGrow={1} flexShrink={1} />
-				<Text color={processingStage === "executing" ? "green" : "yellow"}>
-					{processingStage === "planning"
-						? "THINKING"
-						: processingStage === "executing"
-							? "WORKING"
-							: processingStage.toUpperCase()}
-				</Text>
+			{/* Header — Hermes pattern: title + meta share a flexShrink=1 box
+			    so the badge on the right is never pushed off-screen and can never
+			    be overlapped by the meta string. Single-line truncate-end for
+			    safety on narrow terminals. */}
+			<Box marginBottom={1} flexDirection="row" alignItems="center">
+				<Box flexShrink={1} flexDirection="row" overflow="hidden">
+					<Text color="cyan" bold wrap="truncate-end">
+						{`┌─ Agent Activity `}
+					</Text>
+					<Text dimColor wrap="truncate-end">
+						{`step ${stepCount} · ${toolCount} tools · ${elapsedStr}`}
+					</Text>
+				</Box>
+				<Box flexGrow={1} flexShrink={0} />
+				<Box flexShrink={0}>
+					<Text color={processingStage === "executing" ? "green" : "yellow"} wrap="truncate">
+						{stageLabel}
+					</Text>
+				</Box>
 			</Box>
 
 			{/* Activity feed — the "mini screen" */}
@@ -308,7 +333,12 @@ export function ActivityMonitor({
 				{visibleEntries.length === 0 ? (
 					<Box justifyContent="center" alignItems="center" flexGrow={1}>
 						{showAnimations ? (
-							<ThinkingVisualizer label={`Thinking${dots}`} width={70} height={6} active />
+							<ThinkingVisualizer
+								label={`Thinking${dots}`}
+								width={visualiserWidth}
+								height={6}
+								active
+							/>
 						) : (
 							<Text dimColor>Thinking…</Text>
 						)}
