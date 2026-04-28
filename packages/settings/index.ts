@@ -14,6 +14,7 @@ export type {
 	Settings,
 	SettingsKey,
 	VoiceSettings,
+	PerAgentVoices,
 	PerformanceSettings,
 	PerformanceMode,
 	IntroBannerMode,
@@ -25,6 +26,8 @@ export type {
 	UISettings,
 	ThinkingVisualiserSettings,
 } from "./schema.js";
+
+export { getVoiceForRole } from "./voice.js";
 
 export { DEFAULT_SETTINGS } from "./defaults.js";
 

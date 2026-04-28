@@ -9,6 +9,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Onboarding clarification questions no longer get cut off.** Single-line system messages that exceed the centered-hint budget now soft-wrap into a multi-line block instead of being sliced at 60 chars, so prompts like "I don't have your name on file. What should I call you?" render in full (`apps/tui/src/components/message-list.tsx`).
+- **Reasoning text no longer renders twice.** When a step finishes with no tool calls, its `event.text` IS the final assistant reply; we no longer also push it as a greyish system bubble in front of the cyan assistant bubble. Step-0 text is still surfaced when the step had tool calls (intermediate reasoning) (`apps/tui/src/app.tsx`).
+
+### Added
+
+- **TTS output on by default** via new `voice.outputEnabled` setting. Each agent's text reply is spoken through macOS `say` when the user is on darwin. Toggle live with `/voice on` / `/voice off`.
+- **Per-tab TTS voices** via new `voice.perAgent` settings map. Defaults: Orchestrator -> Daniel, Engineer -> Karen, QA -> Moira. Falls back to `voice.ttsVoice` when a role is missing. Editable from `/settings -> Voice`. Helper: `getVoiceForRole(role, settings?)` exported from `@8gent/settings`.
+- **`voice/per-agent-defaults` smoke test** asserts the helper resolves a non-empty voice for every role and respects fallbacks.
+
 ## [0.12.0] - 2026-04-28
 
 ### Changed
