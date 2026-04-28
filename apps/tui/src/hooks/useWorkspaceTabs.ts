@@ -30,7 +30,8 @@ export type TabType =
 	| "kanban"
 	| "music"
 	| "projects"
-	| "terminal";
+	| "terminal"
+	| "settings";
 
 export interface WorkspaceTab {
 	id: string;
@@ -60,6 +61,7 @@ export const TAB_ICONS: TabIcon[] = [
 	{ type: "music", icon: "~:", label: "Music" },
 	{ type: "projects", icon: "P:", label: "Projects" },
 	{ type: "terminal", icon: "$:", label: "Terminal" },
+	{ type: "settings", icon: "=:", label: "Settings" },
 ];
 
 /** Singleton tab types (only one instance allowed) */
@@ -72,6 +74,7 @@ const SINGLETON_TYPES: TabType[] = [
 	"music",
 	"projects",
 	"terminal", // one terminal tab max — reuse, never stack
+	"settings", // one settings tab max
 ];
 
 const MAX_TABS = 20;
