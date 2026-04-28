@@ -12,6 +12,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **`/spawn` auto-installs missing external agent CLIs.** When the binary for a preset (claude, codex, hermes, openclaw, aider, 8gent) is not on `$PATH`, `/spawn` runs the preset's install recipe (npm/pip), waits for it, re-checks, and only then opens the chat tab. Long output from the installer is suppressed to keep the chat clean. Force-reinstall via `/spawn <id> install`. (`apps/tui/src/lib/external-agent-runner.ts`, `apps/tui/src/app.tsx`)
+- **`8gent update` command.** Runs `npm install -g @8gi-foundation/8gent-code@latest --force`. The `--force` flag fixes the recurring `EEXIST` error when stale `bin/8` / `bin/8gent` / `bin/8gent-code` symlinks block re-install on npm 9+. Streams npm output, prints a restart hint when done. (`bin/8gent.ts`)
+- **`8gent permissions` command** (alias `8gent perms`). Diagnoses macOS Accessibility + Screen Recording grants for the host terminal. macOS attaches privacy permissions to the parent process (Terminal/iTerm/Warp/etc), not to bun, so the hands tools silently no-op when the terminal isn't trusted. The probe runs a tiny `osascript` AX query and a small `screencapture` (checks output bytes — denied permission writes a sub-2KB placeholder) to detect what's missing. With `--open`, also launches the relevant System Settings → Privacy panes. (`packages/hands/index.ts`, `bin/8gent.ts`)
 
 ## [0.11.14] - 2026-04-29
 
