@@ -25,9 +25,13 @@ export type {
 	ProviderEndpoint,
 	UISettings,
 	ThinkingVisualiserSettings,
+	AgentsSettings,
+	AgentNames,
 } from "./schema.js";
 
 export { getVoiceForRole } from "./voice.js";
+export { resolveRoleName } from "./agents.js";
+export type { AgentRoleKey } from "./agents.js";
 
 export { DEFAULT_SETTINGS } from "./defaults.js";
 
