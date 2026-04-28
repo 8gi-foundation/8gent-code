@@ -386,7 +386,7 @@ The primary personalization file. Created by onboarding, updated by preferences 
 
   "projects": {
     "primary": "8gent-code",
-    "all": ["8gent-code", "foodstack"],
+    "all": ["8gent-code", "internal-ref"],
     "descriptions": {
       "8gent-code": "Autonomous coding agent TUI"
     }

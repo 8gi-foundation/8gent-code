@@ -1,7 +1,7 @@
 /**
  * Memory v2 Type Taxonomy
  *
- * Five-layer memory model adapted from FoodstackOS:
+ * Five-layer memory model adapted from the prior internal memory system:
  *   Core       — project knowledge (architecture, conventions, dependencies)
  *   Episodic   — what happened (events, sessions, actions)
  *   Semantic   — what I know (facts, preferences, patterns)
