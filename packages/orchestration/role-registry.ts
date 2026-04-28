@@ -14,6 +14,9 @@ export const ROLE_REGISTRY: Record<string, RunnerConfig> = {
 			"You are the Orchestrator. Plan, delegate, and coordinate. Think before acting. No code — direct others.",
 		allowedTools: ["write_notes", "gh_issue_create", "gh_pr_list", "gh_issue_list"],
 		retryPolicy: { maxAttempts: 2, backoffMs: 1000 },
+		// Heavy reasoning model for planning + coordination.
+		inferenceMode: "ollama",
+		model: "qwen3.6:27b",
 	},
 	engineer: {
 		role: "engineer",
@@ -37,6 +40,9 @@ export const ROLE_REGISTRY: Record<string, RunnerConfig> = {
 			"search_symbols",
 		],
 		retryPolicy: { maxAttempts: 3, backoffMs: 2000 },
+		// LM Studio for tool-call density - gemma 4-26b is strong on code.
+		inferenceMode: "lmstudio",
+		model: "google/gemma-4-26b-a4b",
 	},
 	qa: {
 		role: "qa",
@@ -52,6 +58,9 @@ export const ROLE_REGISTRY: Record<string, RunnerConfig> = {
 			"get_outline",
 		],
 		retryPolicy: { maxAttempts: 2, backoffMs: 1000 },
+		// On-device fast review when the bridge is installed; failover handles the fall-back.
+		inferenceMode: "apple-foundation",
+		model: "apple-foundationmodel",
 	},
 };
 
