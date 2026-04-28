@@ -218,11 +218,27 @@ function MessageItem({
 				</Box>,
 			);
 		}
+		// Single-line system message: keep the centered hint look when it fits
+		// the column, otherwise fall back to the multi-line block so the full
+		// text can soft-wrap. Onboarding clarification questions are too
+		// important to truncate — show them in full even if they span 2 rows.
+		const hintBudget = Math.max(20, contentWidth - 10);
+		if (message.content.length <= hintBudget) {
+			return fadeWrap(
+				<Box justifyContent="center" marginBottom={1}>
+					<Text dimColor>{"─".repeat(3)} </Text>
+					<SystemMessageText content={message.content} />
+					<Text dimColor> {"─".repeat(3)}</Text>
+				</Box>,
+			);
+		}
 		return fadeWrap(
-			<Box justifyContent="center" marginBottom={1}>
-				<Text dimColor>{"─".repeat(3)} </Text>
-				<SystemMessageText content={message.content.slice(0, 60)} />
-				<Text dimColor> {"─".repeat(3)}</Text>
+			<Box flexDirection="column" marginBottom={1} paddingLeft={1}>
+				<Text dimColor>{"─".repeat(3)}</Text>
+				<Box width={contentWidth - 2}>
+					<SystemMessageText content={message.content} />
+				</Box>
+				<Text dimColor>{"─".repeat(3)}</Text>
 			</Box>,
 		);
 	}

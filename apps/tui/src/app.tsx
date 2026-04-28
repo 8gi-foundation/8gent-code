@@ -146,7 +146,10 @@ import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
-import { loadSettings as loadAppSettings } from "../../../packages/settings/index.js";
+import {
+	loadSettings as loadAppSettings,
+	getVoiceForRole,
+} from "../../../packages/settings/index.js";
 import { NarratorView } from "./screens/index.js";
 
 // Import auth + DB systems (lazy, non-blocking)
@@ -338,6 +341,43 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
+
+// ----------------------------------------------------------------------------
+// TTS helper — speak agent replies via macOS `say` when voice.outputEnabled.
+// Picks the per-agent voice from settings (Daniel / Karen / Moira by default)
+// and falls back to voice.ttsVoice. Fully fire-and-forget so TUI never blocks
+// on audio. macOS-only; silently no-ops on other platforms.
+// ----------------------------------------------------------------------------
+function speakAgentReply(role: string | undefined, text: string): void {
+	if (process.platform !== "darwin") return;
+	const trimmed = (text ?? "").trim();
+	if (!trimmed) return;
+	let s: ReturnType<typeof loadAppSettings>;
+	try {
+		s = loadAppSettings();
+	} catch {
+		return;
+	}
+	if (!s.voice?.outputEnabled) return;
+	const voice = getVoiceForRole(role || "engineer", s);
+	// Cap utterance length so we don't tie up `say` on long answers.
+	// macOS `say` handles long text fine, but anything past ~600 chars is
+	// just noise for the user.
+	const safe = trimmed.replace(/"/g, '\\"').slice(0, 600);
+	try {
+		const { spawn } = require("node:child_process");
+		const proc = spawn("say", ["-v", voice, safe], {
+			stdio: "ignore",
+			detached: true,
+		});
+		proc.on("error", () => {
+			// Voice unavailable on this machine. Stay silent.
+		});
+		proc.unref();
+	} catch {
+		// Spawn failed (no shell, restricted env). Fail silently.
+	}
+}
 
 // Import design agent
 import {
@@ -1515,7 +1555,19 @@ export function App({
 					}
 				}
 
-				if (event.text?.trim() && event.stepNumber === 0) {
+				// Only surface step-0 reasoning text as a system bubble when the
+				// step had tool calls — that means the text is intermediate
+				// reasoning the model emitted while choosing tools, and we want
+				// to show it. When step 0 has NO tool calls, `event.text` IS the
+				// final assistant reply; agent.chat() returns it and we render it
+				// as the assistant bubble at the chat boundary, so pushing it
+				// here would double-render the same content (greyish system bubble
+				// followed by the cyan assistant bubble).
+				if (
+					event.text?.trim() &&
+					event.stepNumber === 0 &&
+					(event.toolCalls?.length ?? 0) > 0
+				) {
 					const t = event.text.trim();
 					appendToTab(tabId, {
 						id: `system-step0-${Date.now()}`,
@@ -3187,6 +3239,31 @@ export function App({
 						} else {
 							addSystemMessage("Voice chat is not active.");
 						}
+					} else if (args[0] === "on" || args[0] === "off") {
+						// /voice on|off - toggle TTS output for agent replies.
+						// Persists to ~/.8gent/settings.json so the choice survives restarts.
+						(async () => {
+							const mod = await import(
+								"../../../packages/settings/index.js"
+							);
+							const next = args[0] === "on";
+							const cur = mod.loadSettings();
+							mod.saveSettings({
+								...cur,
+								voice: { ...cur.voice, outputEnabled: next },
+							});
+							addSystemMessage(
+								next
+									? "TTS output enabled. Agent replies will be spoken."
+									: "TTS output disabled. Agent replies will be silent.",
+							);
+						})().catch((err) => {
+							addSystemMessage(
+								`Could not update voice setting: ${
+									err instanceof Error ? err.message : String(err)
+								}`,
+							);
+						});
 					} else {
 						addSystemMessage(
 							"Voice commands:\n" +
@@ -4035,6 +4112,14 @@ export function App({
 						content: result.text,
 						timestamp: new Date(),
 					});
+					{
+						const targetTabRole = (
+							workspaceTabs.tabs.find((t) => t.id === tabId)?.data as
+								| { role?: string }
+								| undefined
+						)?.role;
+						speakAgentReply(targetTabRole, result.text);
+					}
 				} else {
 					appendToTab(tabId, {
 						id: `system-ext-${Date.now()}`,
@@ -4148,6 +4233,14 @@ export function App({
 							content: trimmed,
 							timestamp: new Date(),
 						});
+						{
+							const targetTabRole = (
+								workspaceTabs.tabs.find((t) => t.id === tabId)?.data as
+									| { role?: string }
+									| undefined
+							)?.role;
+							speakAgentReply(targetTabRole, trimmed);
+						}
 					}
 					// appendClosingQuestionIfNeeded reads the just-appended buffer
 					// and decides whether to add a follow-up bubble.
