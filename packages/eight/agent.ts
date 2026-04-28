@@ -140,6 +140,13 @@ export class Agent {
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
 
+		// Lite mode: opt-in cold-start trim. Skips the auxiliary subsystems
+		// that are background-only (kernel training, heartbeat agents, Convex
+		// session sync, AST indexing, orchestrator bus). The agent still
+		// answers turns; it just won't sync, learn, or self-heal until you
+		// remove the flag. Inspired by jcode's "lean by default" philosophy.
+		const LITE = process.env["8GENT_LITE"] === "1";
+
 		// Set working directory for hooks
 		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
 
@@ -152,15 +159,18 @@ export class Agent {
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
 		this.compaction = new ProactiveCompression();
 
-		// Fire-and-forget AST indexing of working directory for AST-first retrieval
+		// Fire-and-forget AST indexing of working directory for AST-first retrieval.
+		// Lite mode skips it — first AST tool call will index on demand.
 		const cwd = config.workingDirectory || process.cwd();
-		astIndexFolder(cwd)
-			.then((index) => {
-				console.log(`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`);
-			})
-			.catch(() => {
-				// AST indexing is best-effort, don't block agent startup
-			});
+		if (!LITE) {
+			astIndexFolder(cwd)
+				.then((index) => {
+					console.log(`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`);
+				})
+				.catch(() => {
+					// AST indexing is best-effort, don't block agent startup
+				});
+		}
 
 		// Initialize proactive planner and evidence collector
 		this.planner = getProactivePlanner();
@@ -272,18 +282,25 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			environment: env,
 		});
 
-		// Initialize Convex session sync (fire-and-forget, reads syncToConvex from config)
-		const syncEnabled = this._readSyncToConvex();
+		// Initialize Convex session sync (fire-and-forget, reads syncToConvex from config).
+		// Lite mode: construct a disabled sync manager, no Convex probe.
+		const syncEnabled = LITE ? false : this._readSyncToConvex();
 		this.sessionSync = new SessionSyncManager(syncEnabled);
-		this.sessionSync
-			.startSession(config.model, config.runtime, config.workingDirectory)
-			.catch(() => {});
+		if (!LITE && syncEnabled) {
+			this.sessionSync
+				.startSession(config.model, config.runtime, config.workingDirectory)
+				.catch(() => {});
+		}
 
-		// Initialize kernel manager for personal LoRA training
+		// Initialize kernel manager for personal LoRA training.
+		// Lite mode: construct it but don't start the training proxy.
 		this.kernel = KernelManager.fromProjectConfig(config.workingDirectory || process.cwd());
-		this.kernel.start().catch(() => {});
+		if (!LITE) {
+			this.kernel.start().catch(() => {});
+		}
 
-		// Initialize orchestrator bus for multi-agent coordination
+		// Initialize orchestrator bus for multi-agent coordination.
+		// (Singleton getter — cheap, no background loops kicked off here.)
 		this.orchestratorBus = getOrchestratorBus();
 
 		// Populate git info asynchronously
@@ -320,13 +337,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		}
 
 		// ── Self-Autonomy: Heartbeat ─────────────────────────────────────
-		// Start background heartbeat agents (git monitoring, self-heal, memory sync)
+		// Start background heartbeat agents (git monitoring, self-heal, memory sync).
+		// Lite mode: construct the manager but don't start the loops. Saves
+		// idle CPU/RAM and one of the slower cold-start steps.
 		this.heartbeat = getHeartbeatAgents({
 			workingDirectory: config.workingDirectory || process.cwd(),
 			verbose: false,
 		});
-		this.heartbeat.start();
-		this.heartbeat.updateContext({ currentTask: "Agent initialized" });
+		if (!LITE) {
+			this.heartbeat.start();
+			this.heartbeat.updateContext({ currentTask: "Agent initialized" });
+		}
 
 		// ── Telegram: Auto-start if token exists in vault ────────────────
 		const vault = getVault();
