@@ -33,7 +33,7 @@ What this means in practice:
 - **No hard Phase 1 ship gates against the routing rubric.** The +10pp F1, the gold-set kappa, the per-concept synapse precision targets in section 4 stay alive **only** for the moment we promote the model to a default-on path that affects user behaviour. During the exploratory phase, the ship-gate concept does not apply because there is nothing being shipped.
 - **No fixed ontology.** Section 4.4's 120-concept vocabulary becomes a probe vocabulary, not a prediction target. After training we run the probe runner and see what concepts the synapses actually carry. The ontology is descriptive of the model, not prescriptive over it.
 - **Post-training capability discovery.** Once trained on the harness stream, we probe what the model is unexpectedly good at: completing audit traces, suggesting next decisions, summarising sessions, answering "what just happened", whatever surfaces. Capabilities that surface are documented and (selectively) wired into the harness behind feature flags.
-- **The routing use case stays as a hypothesis, not a commitment.** If post-training probing shows the model routes well, great — Throne PRD W1 wires it up. If it shows the model is better at, say, session summarisation, we wire that instead. Or both. Or neither.
+- **The routing use case stays as a hypothesis, not a commitment.** If post-training probing shows the model routes well, great, Throne PRD W1 wires it up. If it shows the model is better at, say, session summarisation, we wire that instead. Or both. Or neither.
 
 What stays unchanged from the original spec:
 
