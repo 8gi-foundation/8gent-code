@@ -11,12 +11,8 @@
  * user can see at a glance which engines are warmed up.
  */
 
-import { existsSync } from "node:fs";
-import { homedir, platform, arch, release } from "node:os";
-import { join } from "node:path";
-
 export interface ProviderStatus {
-	name: "apple-foundation" | "lmstudio" | "ollama";
+	name: "apfel" | "lmstudio" | "ollama";
 	live: boolean;
 }
 
@@ -37,38 +33,34 @@ async function probeUrl(url: string): Promise<boolean> {
 	}
 }
 
-function appleFoundationConfigured(): boolean {
-	if (platform() !== "darwin") return false;
-	if (arch() !== "arm64") return false;
-	const major = Number.parseInt(release().split(".")[0] ?? "0", 10);
-	if (Number.isFinite(major) && major < 25) return false;
-	return existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"));
-}
-
 /**
- * Probe each provider that's configured on this host. Apple Foundation only
- * counts toward `total` when the host qualifies (Tahoe + arm64 + bridge bin).
+ * Probe each local inference provider over HTTP and report `live/total`.
+ * apfel (Apple Foundation), LM Studio, Ollama are the three local engines
+ * the TUI surfaces in its `X/Y agents` slot.
  */
 export async function probeProviders(): Promise<{
 	live: number;
 	total: number;
 	statuses: ProviderStatus[];
 }> {
-	const statuses: ProviderStatus[] = [];
-
-	if (appleFoundationConfigured()) {
-		// The bridge is a local binary; if the file is there we count it as live.
-		// A heartbeat probe could be added later if the bridge exposes one.
-		statuses.push({ name: "apple-foundation", live: true });
-	}
+	const apfelHost =
+		(process.env.APFEL_BASE_URL && process.env.APFEL_BASE_URL.replace(/\/v1$/, "")) ||
+		"http://localhost:11500";
+	const apfelLive = await probeUrl(`${apfelHost}/health`).catch(() => false);
+	// Some apfel builds only expose /v1/models, not /health.
+	const apfelOk = apfelLive || (await probeUrl(`${apfelHost}/v1/models`));
 
 	const lmStudioHost = process.env.LM_STUDIO_HOST || "http://localhost:1234";
 	const lmStudioLive = await probeUrl(`${lmStudioHost}/v1/models`);
-	statuses.push({ name: "lmstudio", live: lmStudioLive });
 
 	const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
 	const ollamaLive = await probeUrl(`${ollamaHost}/api/tags`);
-	statuses.push({ name: "ollama", live: ollamaLive });
+
+	const statuses: ProviderStatus[] = [
+		{ name: "apfel", live: apfelOk },
+		{ name: "lmstudio", live: lmStudioLive },
+		{ name: "ollama", live: ollamaLive },
+	];
 
 	const live = statuses.filter((s) => s.live).length;
 	return { live, total: statuses.length, statuses };
