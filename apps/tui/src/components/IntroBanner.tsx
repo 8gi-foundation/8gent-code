@@ -17,8 +17,41 @@
  * <120 LOC, brand amber per BRAND.md. No purple / pink / violet.
  */
 
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir, platform } from "node:os";
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useState } from "react";
+import { loadSettings } from "../../../../packages/settings/index.js";
+
+/**
+ * Play an intro sound on mount via macOS `afplay`. Fire-and-forget,
+ * detached from the TUI lifecycle so it never blocks the banner reveal
+ * or persists past TUI exit. Reads `ui.introSound` from settings.
+ * Path expansion: `~` → home dir. Empty string or missing file = silent.
+ * Non-macOS = silent (afplay is darwin-only).
+ */
+function playIntroSound(): void {
+	if (platform() !== "darwin") return;
+	let configured = "";
+	try {
+		configured = loadSettings()?.ui?.introSound ?? "";
+	} catch {
+		return;
+	}
+	if (!configured) return;
+	const path = configured.startsWith("~") ? configured.replace("~", homedir()) : configured;
+	if (!existsSync(path)) return;
+	try {
+		const proc = spawn("afplay", [path], { stdio: "ignore", detached: true });
+		proc.unref();
+		proc.on("error", () => {
+			/* missing afplay or denied — silently ignore */
+		});
+	} catch {
+		// best-effort; never break the banner
+	}
+}
 
 // Block-letter "8GENT" - 5 rows tall, fits in ~46 cols.
 const BANNER_LINES: readonly string[] = [
@@ -51,6 +84,12 @@ interface IntroBannerProps {
 
 export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 	const [elapsed, setElapsed] = useState(0);
+
+	// Heavenly-swell intro sound, played once on mount. Fire-and-forget;
+	// no-op when ui.introSound is empty or the file is missing.
+	useEffect(() => {
+		playIntroSound();
+	}, []);
 
 	useEffect(() => {
 		const start = performance.now();
