@@ -89,6 +89,14 @@ export interface UISettings {
 	theme: string;
 	/** Procedural Thinking-box visualiser configuration. */
 	thinkingVisualiser: ThinkingVisualiserSettings;
+	/**
+	 * Optional path to an audio file played once on TUI launch during the
+	 * intro splash. Empty string = silent (default). macOS only — uses the
+	 * built-in `afplay` so no extra deps. Drop a file at
+	 * `~/.8gent/sounds/intro.mp3` (or anywhere) and set this path to play it.
+	 * Fire-and-forget; never blocks the banner reveal.
+	 */
+	introSound: string;
 }
 
 export interface AgentNames {
