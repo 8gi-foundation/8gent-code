@@ -126,6 +126,7 @@ export const PROVIDER_INSTALL_HINTS: Record<ProviderCheckId, string> = {
 };
 
 export type CommunicationStyle =
+	| "sarcastic" // Dry-witted, seriously motivational, roasts you into greatness
 	| "concise" // Just the facts
 	| "detailed" // Teach me as we go
 	| "casual" // We're collaborators
@@ -327,24 +328,31 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 		question: "How should I communicate with you?",
 		kind: "select",
 		choices: [
-			{ label: "Concise & direct", value: "1", description: "Just the facts" },
-			{ label: "Detailed & explanatory", value: "2", description: "Teach me as we go" },
-			{ label: "Casual & friendly", value: "3", description: "We're collaborators" },
-			{ label: "Formal & precise", value: "4", description: "Professional tone" },
+			{
+				label: "Dry-witted, sarcastic, seriously motivational",
+				value: "1",
+				description: "Roast me into greatness",
+			},
+			{ label: "Concise & direct", value: "2", description: "Just the facts" },
+			{ label: "Detailed & explanatory", value: "3", description: "Teach me as we go" },
+			{ label: "Casual & friendly", value: "4", description: "We're collaborators" },
+			{ label: "Formal & precise", value: "5", description: "Professional tone" },
 		],
-		options: ["1", "2", "3", "4", "concise", "detailed", "casual", "formal"],
+		options: ["1", "2", "3", "4", "5", "sarcastic", "concise", "detailed", "casual", "formal"],
 		processor: (answer, user) => {
 			const styleMap: Record<string, CommunicationStyle> = {
-				"1": "concise",
-				"2": "detailed",
-				"3": "casual",
-				"4": "formal",
+				"1": "sarcastic",
+				"2": "concise",
+				"3": "detailed",
+				"4": "casual",
+				"5": "formal",
+				sarcastic: "sarcastic",
 				concise: "concise",
 				detailed: "detailed",
 				casual: "casual",
 				formal: "formal",
 			};
-			const style = styleMap[answer.toLowerCase()] || "concise";
+			const style = styleMap[answer.toLowerCase()] || "sarcastic";
 			return {
 				...user,
 				identity: { ...user.identity, communicationStyle: style },
