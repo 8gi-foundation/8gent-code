@@ -11,7 +11,14 @@ import * as path from "node:path";
 import type { TrainingExample } from "../types.ts";
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const PHONE_RE = /\+?\d[\d\s().-]{8,}\d/g;
+// Phone regex - tightened to avoid matching ISO 8601 timestamps. Old loose
+// pattern \+?\d[\d\s().-]{8,}\d matched "2026-04-28T07:46" because the
+// digit-hyphen-digit alternation matches the date format. Restricted to
+// real phone-number shapes only:
+//   - E.164:        +1 555-123-4567 / +44 20 7946 0958
+//   - NANP parens:  (555) 123-4567
+//   - Strict 3-3-4: 555-123-4567 (with consistent . or - separators)
+const PHONE_RE = /(?:\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{0,4})|(?:\(\d{3}\)\s*\d{3}[\s.-]?\d{4})|(?:\b\d{3}[.-]\d{3}[.-]\d{4}\b)/g;
 const CREDIT_CARD_RE = /\b(?:\d[ -]?){13,19}\b/g;
 const OPENAI_KEY_RE = /sk-[a-zA-Z0-9]{20,}/g;
 const GITHUB_PAT_RE = /ghp_[a-zA-Z0-9]{20,}/g;
