@@ -36,6 +36,7 @@ COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
   run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
   doctor                      Check system health (Ollama, models, tools, config)
+  update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -387,11 +388,54 @@ async function main() {
 			await doctorCommand();
 			break;
 
+		case "update":
+		case "upgrade":
+			await updateCommand();
+			break;
+
 		default:
 			console.error(`Unknown command: ${command}`);
 			console.log(`Run '8 --help' for usage information.`);
 			process.exit(1);
 	}
+}
+
+/**
+ * `8gent update` — pull the latest 8gent from npm. Uses --force to
+ * defeat the EEXIST collision on the `8` / `8gent` / `8gent-code`
+ * bin symlinks that npm refuses to overwrite by default.
+ *
+ * No flags. No surprises. Just: tell user what's about to happen,
+ * run npm install -g @latest --force, stream output, print restart
+ * hint when done.
+ */
+async function updateCommand(): Promise<void> {
+	const { spawn } = await import("node:child_process");
+	console.log(`Current: v${VERSION}`);
+	console.log(`Updating @8gi-foundation/8gent-code to latest from npm...`);
+	console.log(`(uses --force to overwrite stale bin symlinks)\n`);
+
+	const proc = spawn(
+		"npm",
+		["install", "-g", "@8gi-foundation/8gent-code@latest", "--force"],
+		{ stdio: "inherit" },
+	);
+
+	await new Promise<void>((resolve) => {
+		proc.on("exit", (code) => {
+			if (code === 0) {
+				console.log(`\nDone. Restart your terminal session, then run \`8gent\` to use the new version.`);
+			} else {
+				console.error(`\nUpdate failed (exit ${code}). Try manually:`);
+				console.error(`  npm install -g @8gi-foundation/8gent-code@latest --force`);
+			}
+			resolve();
+		});
+		proc.on("error", (err) => {
+			console.error(`\nCouldn't run npm: ${err.message}`);
+			resolve();
+		});
+	});
 }
 
 async function initCommand(args: string[]) {
