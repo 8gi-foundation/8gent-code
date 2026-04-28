@@ -28,10 +28,22 @@ import { TypingText, WordByWord } from "./typing-text.js";
  * Ink's wrap="wrap" only splits on whitespace, so long paths / URLs / hashes
  * can overflow their container. This inserts hard line breaks inside the
  * offending token so the normal wrap picks it up.
+ *
+ * Hermes pattern: prefer soft break points first. Real prose tokens that
+ * exceed `width` are usually compounds joined by `-`, `/`, `_`, `.` — splitting
+ * at those boundaries reads naturally. Falling through to hard mid-character
+ * breaks is reserved for hashes/URLs with no natural seam. We also enforce
+ * a sane minimum width (8) so we never produce 4-char fragments that mash
+ * back together visually as `need-whthink`.
  */
+// Exposed under a stable name for the smoke harness so we can lock in the
+// soft-seam behaviour without exporting the React module's identity.
+export const breakLongTokensForTest = (text: string, width: number): string =>
+	breakLongTokens(text, width);
+
 function breakLongTokens(text: string, width: number): string {
-	if (width < 4) return text;
-	const hardBreakWidth = Math.max(4, width);
+	const hardBreakWidth = Math.max(8, width);
+	if (text.length <= hardBreakWidth) return text;
 	return text
 		.split("\n")
 		.map((line) => {
@@ -39,10 +51,39 @@ function breakLongTokens(text: string, width: number): string {
 			for (const token of line.split(/(\s+)/)) {
 				if (!token) continue;
 				if (token.length > hardBreakWidth && !/^\s+$/.test(token)) {
-					for (let i = 0; i < token.length; i += hardBreakWidth) {
-						out.push(token.slice(i, i + hardBreakWidth));
-						if (i + hardBreakWidth < token.length) out.push("\n");
+					// First, try soft breaks at natural seams (-, /, _, .).
+					// Push each segment plus its separator on its own line if it
+					// would fit. This keeps `feature/long-branch-name` readable
+					// instead of mashing characters together.
+					const seamSplit = token.split(/([-/_.])/);
+					let buf = "";
+					const flush = () => {
+						if (!buf) return;
+						out.push(buf);
+						buf = "";
+					};
+					for (const part of seamSplit) {
+						if (!part) continue;
+						if ((buf + part).length > hardBreakWidth) {
+							if (buf) {
+								flush();
+								out.push("\n");
+							}
+							// Part itself may still exceed width (e.g. a long hash).
+							// Hard-break it character-wise as a last resort.
+							if (part.length > hardBreakWidth) {
+								for (let i = 0; i < part.length; i += hardBreakWidth) {
+									out.push(part.slice(i, i + hardBreakWidth));
+									if (i + hardBreakWidth < part.length) out.push("\n");
+								}
+							} else {
+								buf = part;
+							}
+						} else {
+							buf += part;
+						}
 					}
+					flush();
 				} else {
 					out.push(token);
 				}
