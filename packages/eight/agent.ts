@@ -71,10 +71,10 @@ import {
 } from "../personality/voice.js";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
+// (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
 import {
 	type BMadTask,
 	PROACTIVE_SYSTEM_ADDITION,
-	PlanValidateLoop,
 	type Step,
 	classifyTaskSize,
 	decomposeTask,
@@ -115,7 +115,9 @@ export class Agent {
 	private evidenceCollector: EvidenceCollector;
 	private sessionEvidence: Evidence[] = [];
 	private proactiveGatherer: ProactiveGatherer | null = null;
-	private workflowValidator: PlanValidateLoop;
+	// workflowValidator: removed in v0.11.1. PlanValidateLoop was constructed in
+	// the ctor but never invoked (only referenced in a comment). Eager init was
+	// pulling tree-sitter + 3 sub-modules into cold start for nothing.
 	private kanban = getKanbanBoard();
 	private currentBmadTask: BMadTask | null = null;
 	private heartbeat: HeartbeatAgents;
@@ -166,14 +168,8 @@ export class Agent {
 			workingDirectory: config.workingDirectory || process.cwd(),
 		});
 
-		// Initialize workflow validator (BMAD plan-validate loop)
-		this.workflowValidator = new PlanValidateLoop({
-			workingDirectory: config.workingDirectory || process.cwd(),
-			maxRetries: 2,
-			validateEachStep: true,
-			collectEvidence: true,
-			abortOnFailure: false,
-		});
+		// PlanValidateLoop construction removed in v0.11.1 — was never invoked,
+		// only the field assignment was alive (~ -50ms cold start, fewer imports).
 
 		// ── Self-Autonomy: Onboarding ────────────────────────────────────
 		// Check if first run — if .8gent/user.json doesn't exist, flag for onboarding

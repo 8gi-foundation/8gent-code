@@ -34,12 +34,14 @@ const TITLE = "The Infinite Gentleman";
 const SUBTITLE = "free. local. eight powers. no caps.";
 
 // Reveal offsets — each element appears at its T+ms tick.
+// Trimmed in v0.11.1 from a 1900ms total to 1300ms (-31%) for snappier launch.
+// Skip entirely with 8GENT_NO_INTRO=1 or 8GENT_LITE=1.
 const T_WORDMARK = 0;
-const T_FLOURISH = 250;
-const T_TITLE = 450;
-const T_SUBTITLE = 650;
-const T_HOLD_END = 1500;
-const T_DONE = 1900;
+const T_FLOURISH = 200;
+const T_TITLE = 350;
+const T_SUBTITLE = 500;
+const T_HOLD_END = 1000;
+const T_DONE = 1300;
 
 interface IntroBannerProps {
 	onDone: () => void;
