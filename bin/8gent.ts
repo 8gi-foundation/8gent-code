@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const VERSION = "0.11.0";
+const VERSION = "0.9.5";
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
