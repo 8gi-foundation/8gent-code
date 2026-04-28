@@ -99,7 +99,15 @@ print(f"[boot] config 5M: n_embd={MODEL_CFG.n_embd} mlp_mult={MODEL_CFG.mlp_inte
 # ── PII scrub (matches packages/eight-bdh/scripts/_shared.ts) ──────────
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PHONE_RE = re.compile(r"\+?\d[\d\s().-]{8,}\d")
+# Phone regex - tightened to avoid matching ISO 8601 timestamps. Requires
+# either a leading + (E.164) or a (NNN) area-code prefix or a strict
+# 3-3-4 NANP format with consistent separators. ISO dates like
+# "2026-04-28" no longer match.
+PHONE_RE = re.compile(
+    r"(?:\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{0,4})"
+    r"|(?:\(\d{3}\)\s*\d{3}[\s.-]?\d{4})"
+    r"|(?:\b\d{3}[.-]\d{3}[.-]\d{4}\b)"
+)
 OPENAI_KEY_RE = re.compile(r"sk-[a-zA-Z0-9]{20,}")
 GITHUB_PAT_RE = re.compile(r"ghp_[a-zA-Z0-9]{20,}")
 XAI_KEY_RE = re.compile(r"xai-[a-zA-Z0-9]{20,}")
