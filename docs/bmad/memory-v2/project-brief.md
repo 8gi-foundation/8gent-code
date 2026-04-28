@@ -52,13 +52,13 @@ Memory v2 transforms 8gent from a stateless coding tool into a continuously lear
 
 ---
 
-## 3. Lessons from FoodstackOS
+## 3. Lessons from the prior internal memory system
 
-James has already built a mature memory system in FoodstackOS (`lib/memory/`, `convex/memoryEnhanced.ts`, `convex/knowledgeBase.ts`, `convex/tenantMemory.ts`). This is the primary reference architecture. Key takeaways:
+James has already built a mature memory system in the prior internal memory system (`lib/memory/`, `convex/memoryEnhanced.ts`, `convex/knowledgeBase.ts`, `convex/tenantMemory.ts`). This is the primary reference architecture. Key takeaways:
 
 ### What to Reuse / Adapt
 
-| FoodstackOS Feature | 8gent Adaptation |
+| the prior internal memory system Feature | 8gent Adaptation |
 |---------------------|-----------------|
 | **5-layer taxonomy** (Platform KB, Tenant Core, Episodic, Semantic, Working) | Map to 4 layers: Core (project knowledge), Episodic (session events), Semantic (learned facts), Working (active context) — no "tenant" needed for a CLI tool |
 | **Type system** (`lib/memory/types.ts` — 585 lines of precise interfaces) | Port directly; types are framework-agnostic |
@@ -76,7 +76,7 @@ James has already built a mature memory system in FoodstackOS (`lib/memory/`, `c
 
 ### What NOT to Reuse
 
-| FoodstackOS Feature | Why Skip |
+| the prior internal memory system Feature | Why Skip |
 |---------------------|----------|
 | **Multi-tenant isolation** (organizationId boundaries) | 8gent is single-user; project-level scoping is sufficient |
 | **OpenAI embeddings** (text-embedding-3-small, 1536-dim, $0.02/1M tokens) | 8gent is local-first; use Ollama nomic-embed-text (768-dim, free, offline) |
@@ -86,7 +86,7 @@ James has already built a mature memory system in FoodstackOS (`lib/memory/`, `c
 
 ### Key Architectural Insight
 
-FoodstackOS proves that the `MemoryManager` class pattern works well as a facade over multiple storage backends. The `getFullContext()` method that assembles context from all layers with attribution and token budgeting is the most important pattern to replicate. The consolidation pipeline (daily -> weekly -> monthly -> archetype) with LLM-generated summaries is the second most important — it solves unbounded growth.
+the prior internal memory system proves that the `MemoryManager` class pattern works well as a facade over multiple storage backends. The `getFullContext()` method that assembles context from all layers with attribution and token budgeting is the most important pattern to replicate. The consolidation pipeline (daily -> weekly -> monthly -> archetype) with LLM-generated summaries is the second most important — it solves unbounded growth.
 
 ---
 
