@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunnerConfig } from "../../../../packages/orchestration/role-registry.js";
+import { resolveRoleName } from "../../../../packages/settings/index.js";
 
 // ============================================
 // Types
@@ -157,11 +158,15 @@ function sortTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
 
 function makeDefaultTabs(): WorkspaceTab[] {
 	const now = new Date().toISOString();
+	// Tab titles read from settings.agents.names so renaming during onboarding
+	// (steps 9-11) flows through to the tab strip on first launch. Falls back
+	// to the role-registry default ("Orchestrator", "Engineer", "QA") when the
+	// settings file is missing or the user kept defaults.
 	return [
 		{
 			id: "tab-orchestrator",
 			type: "chat",
-			title: "Orchestrator",
+			title: resolveRoleName("orchestrator"),
 			active: true,
 			createdAt: now,
 			lastAccessedAt: now,
@@ -175,7 +180,7 @@ function makeDefaultTabs(): WorkspaceTab[] {
 		{
 			id: "tab-engineer",
 			type: "chat",
-			title: "Engineer",
+			title: resolveRoleName("engineer"),
 			active: false,
 			createdAt: now,
 			lastAccessedAt: now,
@@ -189,7 +194,7 @@ function makeDefaultTabs(): WorkspaceTab[] {
 		{
 			id: "tab-qa",
 			type: "chat",
-			title: "QA",
+			title: resolveRoleName("qa"),
 			active: false,
 			createdAt: now,
 			lastAccessedAt: now,

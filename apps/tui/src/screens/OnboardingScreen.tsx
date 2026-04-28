@@ -18,6 +18,7 @@
 import { Box, Text, useInput, useStdout } from "ink";
 import SelectInput from "ink-select-input";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { probeProviders, type ProviderStatus } from "../lib/provider-health.js";
 
 interface OnboardingStep {
 	question: string;
@@ -30,6 +31,8 @@ export interface OnboardingChoice {
 	value: string;
 	description?: string;
 }
+
+export type OnboardingProviderId = "ollama" | "lmstudio" | "apfel";
 
 interface OnboardingScreenProps {
 	steps: OnboardingStep[];
@@ -47,6 +50,29 @@ interface OnboardingScreenProps {
 	/** Fired when the user picks a choice (Enter on an arrow-highlighted row OR
 	 * a digit-buffer + Enter shortcut). The string is the choice's `value`. */
 	onSelect?: (value: string) => void;
+	/**
+	 * For providerCheck steps: which engine to probe + the install hint to
+	 * show if it isn't running. The renderer probes once on entry, shows
+	 * status row + (if missing) install hint + Skip button. Pressing Enter
+	 * fires onProviderResolve("live") or onProviderResolve("skip").
+	 */
+	providerCheck?: {
+		provider: OnboardingProviderId;
+		installHint: string;
+	};
+	onProviderResolve?: (result: "live" | "skip") => void;
+	/**
+	 * For agentName steps: hint to show under the input. The user's actual
+	 * input still goes through the normal CommandInput; we just show the
+	 * default value so they know what Enter accepts.
+	 */
+	agentNameDefault?: string;
+}
+
+interface ProviderProbeState {
+	status: "loading" | "done" | "error";
+	statuses: ProviderStatus[];
+	models: string[];
 }
 
 /**
@@ -115,6 +141,69 @@ function useDigitShortcut(
 	return { buffer };
 }
 
+/**
+ * shouldShowInstallHint — exported pure helper used by both the renderer
+ * and the smoke harness. Returns true if the install hint should be
+ * rendered for the current probe state. Logic: show whenever the current
+ * provider isn't live (so the user has guidance), AND the probe finished.
+ * While loading, no hint. On error, show hint as a safe default.
+ */
+export function shouldShowInstallHint(
+	provider: OnboardingProviderId,
+	probe: ProviderProbeState,
+): boolean {
+	if (probe.status === "loading") return false;
+	if (probe.status === "error") return true;
+	const match = probe.statuses.find((s) => s.name === provider);
+	return !match?.live;
+}
+
+/**
+ * Probe one provider's chat models endpoint and return the list of model
+ * IDs (filtering obvious embedding models). Used by the providerCheck step
+ * so the user can see what's actually loaded, not just "live".
+ */
+async function fetchProviderModels(
+	provider: OnboardingProviderId,
+): Promise<string[]> {
+	const isEmbed = (id: string): boolean =>
+		/embed|embedding|nomic|bge-/i.test(id);
+	try {
+		if (provider === "ollama") {
+			const host = process.env.OLLAMA_HOST || "http://localhost:11434";
+			const ctrl = new AbortController();
+			const t = setTimeout(() => ctrl.abort(), 1500);
+			const res = await fetch(`${host}/api/tags`, { signal: ctrl.signal });
+			clearTimeout(t);
+			if (!res.ok) return [];
+			const data = (await res.json()) as { models?: Array<{ name: string }> };
+			return (data.models ?? [])
+				.map((m) => m.name)
+				.filter((n) => !isEmbed(n));
+		}
+		// lmstudio + apfel both expose /v1/models (OpenAI-compat)
+		const hostBase =
+			provider === "lmstudio"
+				? process.env.LM_STUDIO_HOST || "http://localhost:1234"
+				: (process.env.APFEL_BASE_URL?.replace(/\/v1$/, "") || "http://localhost:11500");
+		const ctrl = new AbortController();
+		const t = setTimeout(() => ctrl.abort(), 1500);
+		const res = await fetch(`${hostBase}/v1/models`, { signal: ctrl.signal });
+		clearTimeout(t);
+		if (!res.ok) return [];
+		const data = (await res.json()) as { data?: Array<{ id: string }> };
+		return (data.data ?? []).map((m) => m.id).filter((id) => !isEmbed(id));
+	} catch {
+		return [];
+	}
+}
+
+const PROVIDER_LABELS: Record<OnboardingProviderId, string> = {
+	ollama: "Ollama",
+	lmstudio: "LM Studio",
+	apfel: "apfel (Apple Foundation)",
+};
+
 export function OnboardingScreen({
 	steps,
 	currentQuestion,
@@ -124,14 +213,74 @@ export function OnboardingScreen({
 	agentName: _agentName,
 	selectChoices,
 	onSelect,
+	providerCheck,
+	onProviderResolve,
+	agentNameDefault,
 }: OnboardingScreenProps) {
 	const { stdout } = useStdout();
 	const termWidth = stdout?.columns ?? 80;
 	const maxWidth = Math.min(termWidth - 4, 80);
 
-	const isSelect = !!selectChoices && selectChoices.length > 0 && !!onSelect;
+	const isProviderCheck = !!providerCheck && !!onProviderResolve;
+	const isSelect =
+		!isProviderCheck && !!selectChoices && selectChoices.length > 0 && !!onSelect;
 
 	const { buffer: digitBuffer } = useDigitShortcut(selectChoices, onSelect, isSelect);
+
+	// ── Provider probe state ─────────────────────────────────
+	// Reset to "loading" whenever we land on a new providerCheck step so the
+	// user always sees a fresh probe (especially when restarting onboarding).
+	const [probe, setProbe] = useState<ProviderProbeState>({
+		status: "loading",
+		statuses: [],
+		models: [],
+	});
+	useEffect(() => {
+		if (!isProviderCheck) return;
+		let cancelled = false;
+		setProbe({ status: "loading", statuses: [], models: [] });
+		(async () => {
+			try {
+				const result = await probeProviders();
+				const live = result.statuses.find(
+					(s) => s.name === providerCheck?.provider,
+				)?.live;
+				const models =
+					live && providerCheck
+						? await fetchProviderModels(providerCheck.provider)
+						: [];
+				if (cancelled) return;
+				setProbe({
+					status: "done",
+					statuses: result.statuses,
+					models,
+				});
+			} catch {
+				if (cancelled) return;
+				setProbe({ status: "error", statuses: [], models: [] });
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [isProviderCheck, providerCheck?.provider]);
+
+	// ── Provider check input handling ────────────────────────
+	// Enter advances. We pass "live" if the engine responded, "skip" otherwise.
+	// The processor records the result; either way the flow continues.
+	useInput(
+		(_input, key) => {
+			if (!isProviderCheck || !onProviderResolve) return;
+			if (probe.status === "loading") return; // don't fire mid-probe
+			if (key.return) {
+				const live =
+					probe.statuses.find((s) => s.name === providerCheck?.provider)?.live ??
+					false;
+				onProviderResolve(live ? "live" : "skip");
+			}
+		},
+		{ isActive: isProviderCheck },
+	);
 
 	// SelectInput handles arrow-key paging; cap visible rows so long lists
 	// scroll within a fixed viewport instead of overflowing the box.
@@ -232,8 +381,76 @@ export function OnboardingScreen({
 				))}
 			</Box>
 
-			{/* Active input region. Two modes: */}
-			{isSelect ? (
+			{/* Active input region. Three modes: select, providerCheck, free text. */}
+			{isProviderCheck && providerCheck ? (
+				<Box flexDirection="column" paddingLeft={2}>
+					{probe.status === "loading" ? (
+						<Text color="cyan">
+							Probing {PROVIDER_LABELS[providerCheck.provider]}...
+						</Text>
+					) : (
+						<>
+							{(() => {
+								const live = probe.statuses.find(
+									(s) => s.name === providerCheck.provider,
+								)?.live;
+								const label = PROVIDER_LABELS[providerCheck.provider];
+								if (live) {
+									const modelLine =
+										probe.models.length > 0
+											? `, ${probe.models.length} chat model${probe.models.length === 1 ? "" : "s"} loaded`
+											: "";
+									return (
+										<Text color="green" bold>
+											{`* ${label} detected${modelLine}`}
+										</Text>
+									);
+								}
+								return (
+									<Text color="yellow" bold>{`x ${label} not running`}</Text>
+								);
+							})()}
+							{probe.status === "done" &&
+								probe.models.length > 0 && (
+									<Box flexDirection="column" marginTop={1}>
+										<Text dimColor>Available models:</Text>
+										{probe.models.slice(0, 5).map((m) => (
+											<Text key={m} dimColor>
+												{`  - ${m}`}
+											</Text>
+										))}
+										{probe.models.length > 5 && (
+											<Text dimColor>
+												{`  ... and ${probe.models.length - 5} more`}
+											</Text>
+										)}
+									</Box>
+								)}
+							{shouldShowInstallHint(providerCheck.provider, probe) && (
+								<Box flexDirection="column" marginTop={1}>
+									<Text color="cyan" bold>
+										Install hint:
+									</Text>
+									{providerCheck.installHint
+										.split("\n")
+										.map((line, i) => (
+											<Text key={i} dimColor>
+												{line}
+											</Text>
+										))}
+								</Box>
+							)}
+							<Box marginTop={1}>
+								<Text dimColor>
+									{shouldShowInstallHint(providerCheck.provider, probe)
+										? "Press Enter to skip and continue"
+										: "Press Enter to continue"}
+								</Text>
+							</Box>
+						</>
+					)}
+				</Box>
+			) : isSelect ? (
 				<Box flexDirection="column" paddingLeft={2}>
 					<SelectInput
 						items={items}
@@ -259,7 +476,11 @@ export function OnboardingScreen({
 				</Box>
 			) : (
 				<Box paddingLeft={2}>
-					<Text dimColor>Type your answer and press Enter</Text>
+					<Text dimColor>
+						{agentNameDefault
+							? `Type a name and press Enter, or Enter alone to keep "${agentNameDefault}"`
+							: "Type your answer and press Enter"}
+					</Text>
 				</Box>
 			)}
 		</Box>
