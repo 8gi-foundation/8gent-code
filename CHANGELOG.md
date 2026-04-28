@@ -9,6 +9,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-28
+
+### Changed
+
+- **Lite mode is now the default.** Cold start drops from ~4.5s to ~2.4s on the same hardware. The agent answers turns the same way; what gets skipped on launch is:
+  - AST indexing of the working directory (deferred to first AST tool call)
+  - Convex session sync probe
+  - Kernel training proxy `start()` (training itself was already opt-in via `~/.8gent/config.json`)
+  - Heartbeat agents (git monitoring, self-heal, memory sync background loops)
+
+  This aligns with Principle 2 ("free and local by default") and Principle 8 ("the work speaks for itself") — boot lean, layer features in only when the user asks for them.
+
+### Added
+
+- **`8GENT_FULL=1`** restores the old "everything on" behaviour for power users who depend on the heavies. Equivalent to the pre-0.12 default.
+- **`8GENT_LITE=0`** also restores full mode (for symmetry with the previous flag direction).
+
+### Migration
+
+If you were relying on background sync, kernel training collection, or heartbeat self-heal:
+
+```bash
+export 8GENT_FULL=1     # or add to your shell rc
+```
+
+Otherwise no action needed — your sessions, agent, tools, and `/spawn` all keep working exactly as before.
+
 ## [0.11.2] - 2026-04-28
 
 ### Performance
