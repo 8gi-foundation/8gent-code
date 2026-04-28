@@ -383,9 +383,23 @@ function speakAgentReply(role: string | undefined, text: string): void {
 // Onboarding TTS helper. Speaks ONLY the first sentence/line of an onboarding
 // prompt so the auto-detect block + tagline body don't get read aloud. Gated
 // by voice.outputEnabled so users who turn TTS off don't hear startup banter.
+//
+// Soft modulation:
+// - rate 150 wpm via `-r 150` (macOS `say` default ~180 wpm). Calmer pace
+//   than chat replies, less corporate cadence.
+// - `[[pbas 35]]` speech-command tag drops the pitch base from default 50 to
+//   35, giving the line a gentler, more inviting feel. The `[[rset 0]]` tag
+//   resets any prior modulation state on the same `say` voice so this stays
+//   consistent across calls.
+// - Both modulations apply ONLY to onboarding. Normal chat replies use the
+//   speakLine helper (above) at default rate/pitch.
 // ----------------------------------------------------------------------------
 function speakOnboardingLine(rawText: string, voiceOverride?: string | null): void {
 	if (process.platform !== "darwin") return;
+	// Skip TTS entirely in non-TTY/CI so the smoke harness and piped
+	// invocations don't fork off background `say` processes.
+	if (!process.stdout.isTTY) return;
+	if (process.env.CI) return;
 	const trimmed = (rawText ?? "").trim();
 	if (!trimmed) return;
 	let s: ReturnType<typeof loadAppSettings>;
@@ -403,11 +417,20 @@ function speakOnboardingLine(rawText: string, voiceOverride?: string | null): vo
 			.split("\n")
 			.map((l) => l.trim())
 			.find((l) => l.length > 0) ?? trimmed;
-	const safe = firstLine.replace(/"/g, "").slice(0, 120);
+	// Strip quotes (would terminate the shell argument) and inline `[[ ]]`
+	// tags from raw text so users can't accidentally inject speech commands.
+	const safe = firstLine
+		.replace(/"/g, "")
+		.replace(/\[\[[^\]]*\]\]/g, "")
+		.slice(0, 120);
 	const voice = (voiceOverride && voiceOverride.trim()) || "Moira";
+	// `[[rset 0]]` resets the voice state, then `[[pbas 35]]` lowers the
+	// pitch base for a softer delivery. Tags are inline speech commands; see
+	// `man say` (Speech Synthesis Manager).
+	const softText = `[[rset 0]] [[pbas 35]] ${safe}`;
 	try {
 		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-v", voice, safe], {
+		const proc = spawn("say", ["-r", "150", "-v", voice, softText], {
 			stdio: "ignore",
 			detached: true,
 		});
