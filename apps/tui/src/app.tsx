@@ -140,6 +140,7 @@ import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
+import { HudMusicPlayer } from "./components/HudMusicPlayer.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -5084,6 +5085,11 @@ export function App({
 						</Box>
 					</Box>
 				)}
+
+				{/* HUD music player — only renders when DJ has a track loaded */}
+				<Box flexShrink={0}>
+					<HudMusicPlayer />
+				</Box>
 
 				{/* Status bar */}
 				<Box flexShrink={0}>
