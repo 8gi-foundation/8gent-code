@@ -9,16 +9,34 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+(Empty — 0.11.13 just shipped.)
+
+## [0.11.13] - 2026-04-28
+
 ### Fixed
 
-- **Onboarding clarification questions no longer get cut off.** Single-line system messages that exceed the centered-hint budget now soft-wrap into a multi-line block instead of being sliced at 60 chars, so prompts like "I don't have your name on file. What should I call you?" render in full (`apps/tui/src/components/message-list.tsx`).
-- **Reasoning text no longer renders twice.** When a step finishes with no tool calls, its `event.text` IS the final assistant reply; we no longer also push it as a greyish system bubble in front of the cyan assistant bubble. Step-0 text is still surfaced when the step had tool calls (intermediate reasoning) (`apps/tui/src/app.tsx`).
+- **Intro music now fades out gradually instead of cutting abruptly** when the splash banner dismisses (any keypress OR auto-timeout) or when `/quiet` is run. afplay has no fade or seek support, so we delegate the fade to `ffplay` (ships with ffmpeg) using its `afade=t=out` filter — kills afplay, spawns ffplay starting at the same elapsed time with `volume=0.15,afade=t=out:st=0:d=2.4`, audio curves to silence over 2.4s. Falls back to abrupt cut if ffplay isn't on `$PATH`. (`apps/tui/src/components/IntroBanner.tsx`)
+
+## [0.11.12] - 2026-04-28
 
 ### Added
 
+- **Cinematic intro splash** with bundled launch instrumental. Splash schedule extended from 1300ms to 8500ms with typewriter slide-in for title, new subhead, and body line. Paces to a slow-building instrumental shipped at `apps/tui/sounds/launch.mp3` (auto-copied to `~/.8gent/sounds/launch.mp3` on first run; `ui.introSound` setting overrides). Volume 15% via `afplay -v 0.15` so the music sits under the splash text and any future narration.
+- **HUD music player widget** above the status bar — track / progress / volume / hotkey hints. Polls `dj.status()` every 700ms; hidden when nothing's playing. Hotkeys (all `Ctrl+Shift+` to avoid clashing with chat input): `⌃⇧P` play/pause, `⌃⇧B` prev, `⌃⇧N` next, `⌃⇧↑↓` volume, `⌃⇧M` mute. (`apps/tui/src/components/HudMusicPlayer.tsx`)
+- **`DJ.status()`** structured snapshot for any UI consumer (playing / paused / looping / title / position / duration / volume / queueSize). (`packages/music/dj.ts`)
+- **`/quiet` slash command** (aliases: `mute`, `shut`, `silence`) — kills any in-flight intro music, prints a system message confirming the kill. Splash dismiss also calls it automatically.
 - **TTS output on by default** via new `voice.outputEnabled` setting. Each agent's text reply is spoken through macOS `say` when the user is on darwin. Toggle live with `/voice on` / `/voice off`.
-- **Per-tab TTS voices** via new `voice.perAgent` settings map. Defaults: Orchestrator -> Daniel, Engineer -> Karen, QA -> Moira. Falls back to `voice.ttsVoice` when a role is missing. Editable from `/settings -> Voice`. Helper: `getVoiceForRole(role, settings?)` exported from `@8gent/settings`.
+- **Per-tab TTS voices** via new `voice.perAgent` settings map. Defaults: Orchestrator → Daniel, Engineer → Karen, QA → Moira. Falls back to `voice.ttsVoice` when a role is missing. Editable from `/settings → Voice`. Helper: `getVoiceForRole(role, settings?)` exported from `@8gent/settings`.
 - **`voice/per-agent-defaults` smoke test** asserts the helper resolves a non-empty voice for every role and respects fallbacks.
+- **Dry-witted sarcastic option** for the onboarding communication-style question (option 1) — replaces a vanilla "professional" tone for users who want the sarcastic-motivational vibe.
+- **SubscriptionControl skill** with Advisor / Copilot / Autopilot ladder for granular permission escalation.
+
+### Fixed
+
+- **Intro music now dies with the TUI under all exit paths.** Earlier versions used `{ detached: true }` + `proc.unref()` so afplay survived Ctrl+C, kill, and crashed sessions — only `pkill afplay` could stop it. Module-level child handle is tracked; `SIGINT` / `SIGTERM` / `exit` / `uncaughtException` hooks kill it; `detached` flag is gone.
+- **Tab title reconciliation on every load** so renamed agents from settings.agents.names actually apply. Previously renaming agents during onboarding had no effect on the persisted tab titles (`apps/tui/src/hooks/useWorkspaceTabs.ts`).
+- **Onboarding clarification questions no longer get cut off.** Single-line system messages that exceed the centered-hint budget soft-wrap into a multi-line block instead of being sliced at 60 chars (`apps/tui/src/components/message-list.tsx`).
+- **Reasoning text no longer renders twice.** When a step finishes with no tool calls, its `event.text` IS the final assistant reply; we no longer also push it as a greyish system bubble in front of the cyan assistant bubble (`apps/tui/src/app.tsx`).
 
 ## [0.12.0] - 2026-04-28
 
