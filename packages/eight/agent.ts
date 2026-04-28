@@ -851,6 +851,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 					messageHistoryLength: this.messageHistory.length,
 				});
 
+				// Feed the step's text to the Thinking-box visualiser so the
+				// param vector breathes with the live thoughts. No-op if no
+				// TUI is attached (CLI / harness / pipe-friendly modes).
+				try {
+					const { notifyVisualiserToken } = await import("./visualiser-bridge");
+					notifyVisualiserToken(event.text);
+				} catch {
+					// Bridge import failure: ignore. Agent loop unaffected.
+				}
+
 				this.events.onStepFinish?.({
 					stepNumber: event.stepNumber,
 					finishReason: event.finishReason,

@@ -31,6 +31,8 @@ import {
 } from "./components/ActivityMonitor.js";
 import { TabBar } from "./components/TabBar.js";
 import { IntroBanner } from "./components/IntroBanner.js";
+import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
+import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
 import {
 	composePrompt,
 	getPreset,
@@ -644,6 +646,18 @@ export function App({
 			}
 		},
 	});
+
+	// Wire the agent's token stream to the Thinking-box visualiser so live
+	// LLM tokens perturb the param vector. Sink registers once on mount,
+	// detaches on unmount. The bridge (packages/eight/visualiser-bridge.ts)
+	// is a no-op when no sink is registered, so harness/CLI modes are
+	// unaffected.
+	useEffect(() => {
+		setVisualiserTokenSink(pushVisualiserToken);
+		return () => {
+			setVisualiserTokenSink(null);
+		};
+	}, []);
 
 	// Initialize auth on mount (fire-and-forget, never blocks)
 	useEffect(() => {
