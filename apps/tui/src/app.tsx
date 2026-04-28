@@ -31,6 +31,12 @@ import {
 } from "./components/ActivityMonitor.js";
 import { TabBar } from "./components/TabBar.js";
 import { IntroBanner } from "./components/IntroBanner.js";
+import {
+	composePrompt,
+	getPreset,
+	listPresetIds,
+	runExternalAgent,
+} from "./lib/external-agent-runner.js";
 import { ThinkingView } from "./components/ThinkingView.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
 import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
@@ -2473,6 +2479,37 @@ export function App({
 					break;
 				}
 
+				case "spawn": {
+					// /spawn <preset> — open a chat tab whose backing brain is an external CLI.
+					const presetId = (args[0] || "").toLowerCase().trim();
+					if (!presetId) {
+						addSystemMessage(
+							`Usage: /spawn <agent>\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude`,
+						);
+						break;
+					}
+					const preset = getPreset(presetId);
+					if (!preset) {
+						addSystemMessage(
+							`Unknown agent "${presetId}". Available: ${listPresetIds().join(", ")}`,
+						);
+						break;
+					}
+					const tab = workspaceTabs.addTab("chat", preset.label);
+					if (!tab) {
+						addSystemMessage("Could not create tab (max reached?)");
+						break;
+					}
+					workspaceTabs.updateTabData(tab.id, {
+						externalAgent: { presetId: preset.id },
+						label: preset.label,
+					});
+					addSystemMessage(
+						`Spawned tab "${preset.label}" backed by \`${preset.command}\`. Type a prompt - 8gent will hand it to the nested CLI each turn.`,
+					);
+					break;
+				}
+
 				case "debug": {
 					// Debug CLI inside TUI — runs bin/debug.ts and shows output
 					const debugCmd = args.length > 0 ? args.join(" ") : "sessions";
@@ -3782,6 +3819,56 @@ export function App({
 			const cmdStartTime = Date.now();
 			const messageForAgent = await expandSkillSlashCommand(message);
 			const routeHint = messageForAgent.trim() || "User attached an image.";
+
+			// External-agent divert: if the active tab was spawned via /spawn,
+			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
+			// instead of our own agent loop. Conversation history is replayed
+			// each turn since v1 is one-shot.
+			const activeTabData = workspaceTabs.activeTab?.data as
+				| { externalAgent?: { presetId: string } }
+				| undefined;
+			if (activeTabData?.externalAgent) {
+				const preset = getPreset(activeTabData.externalAgent.presetId);
+				if (!preset) {
+					addSystemMessage(
+						`[external-agent] Unknown preset "${activeTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
+					);
+					agentRunningRef.current = false;
+					setIsProcessing(false);
+					return;
+				}
+				setNarratorText(`Spawning ${preset.label}...`);
+				const history = messages
+					.filter((m) => m.role === "user" || m.role === "assistant")
+					.map((m) => ({ role: m.role, content: m.content }));
+				const composed = composePrompt(history, messageForAgent);
+				const result = await runExternalAgent(preset, composed);
+
+				if (result.ok && result.text) {
+					setMessages((prev) => [
+						...prev,
+						{
+							id: `assistant-${Date.now()}`,
+							role: "assistant" as const,
+							content: result.text,
+							timestamp: new Date(),
+						},
+					]);
+				} else {
+					addSystemMessage(
+						`[${preset.label}] ${result.error || "no output"}\n\nCommand: ${result.command}\nDuration: ${result.durationMs}ms${
+							result.exitCode !== null && result.exitCode !== undefined
+								? ` (exit ${result.exitCode})`
+								: ""
+						}`,
+					);
+				}
+
+				agentRunningRef.current = false;
+				setIsProcessing(false);
+				setNarratorText("");
+				return;
+			}
 
 			// Generate predictions and avenues
 			const newPredictions = generatePredictions(routeHint);
