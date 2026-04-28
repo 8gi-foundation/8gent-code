@@ -37,6 +37,8 @@ COMMANDS:
   run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
   doctor                      Check system health (Ollama, models, tools, config)
   update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
+  permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
+                              Use --open to auto-launch System Settings panes for missing grants
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -393,6 +395,11 @@ async function main() {
 			await updateCommand();
 			break;
 
+		case "permissions":
+		case "perms":
+			await permissionsCommand(restArgs);
+			break;
+
 		default:
 			console.error(`Unknown command: ${command}`);
 			console.log(`Run '8 --help' for usage information.`);
@@ -436,6 +443,65 @@ async function updateCommand(): Promise<void> {
 			resolve();
 		});
 	});
+}
+
+/**
+ * `8gent permissions [--open]` — diagnose macOS TCC grants for the
+ * host terminal. macOS attaches privacy permissions to the parent
+ * process (Terminal/iTerm/Warp/etc), not to bun, so 8gent inherits
+ * whatever grants the terminal has. Without Accessibility +
+ * Screen Recording the hands tools (desktop_screenshot, click,
+ * type) silently no-op.
+ *
+ * With `--open`, this command also launches the relevant System
+ * Settings → Privacy panes for whichever permissions are missing,
+ * so the user can grant them in two clicks.
+ */
+async function permissionsCommand(args: string[]): Promise<void> {
+	const { checkPermissions, openPrivacyPane } = await import(
+		"../packages/hands/index.ts"
+	);
+	const shouldOpen = args.includes("--open") || args.includes("-o");
+	const report = checkPermissions();
+
+	const tick = (ok: boolean) => (ok ? "✓" : "✗");
+	console.log(`\n8gent permissions check (terminal: ${report.terminalApp})\n`);
+	console.log(
+		`  ${tick(report.accessibility.granted)} Accessibility       ${report.accessibility.detail}`,
+	);
+	console.log(
+		`  ${tick(report.screenRecording.granted)} Screen Recording    ${report.screenRecording.detail}`,
+	);
+	console.log("");
+
+	if (report.allGranted) {
+		console.log(`All permissions granted. The hands tools should work.\n`);
+		return;
+	}
+
+	console.log(
+		`To fix, grant ${report.terminalApp} the missing permission(s) in:`,
+	);
+	console.log(`  System Settings → Privacy & Security → ...`);
+	console.log("");
+	if (!report.accessibility.granted) {
+		console.log(`    Accessibility    (lets cliclick/osascript drive the cursor + keyboard)`);
+	}
+	if (!report.screenRecording.granted) {
+		console.log(`    Screen Recording (lets screencapture see the desktop)`);
+	}
+	console.log("");
+	console.log(
+		`Then **fully quit and relaunch ${report.terminalApp}** — macOS only re-checks permissions on relaunch.\n`,
+	);
+
+	if (shouldOpen) {
+		console.log(`Opening System Settings panes...`);
+		if (!report.accessibility.granted) openPrivacyPane("accessibility");
+		if (!report.screenRecording.granted) openPrivacyPane("screen-recording");
+	} else {
+		console.log(`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`);
+	}
 }
 
 async function initCommand(args: string[]) {

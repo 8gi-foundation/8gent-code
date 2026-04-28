@@ -560,6 +560,145 @@ export function _resetForTests(): void {
 	_caps = null;
 }
 
+// ============================================================================
+// Permissions probe — diagnoses macOS TCC grants for the host terminal.
+// ============================================================================
+
+/**
+ * Result of a permissions probe. macOS attaches privacy grants to the
+ * PARENT PROCESS (the terminal app — Terminal.app, iTerm, Warp, etc.),
+ * not to the script running inside it. This probe tries the smallest
+ * possible call gated by each permission and reports what's missing.
+ */
+export interface PermissionsReport {
+	/** Accessibility (cliclick + osascript "System Events" calls). */
+	accessibility: { granted: boolean; detail: string };
+	/** Screen Recording (screencapture, CGDisplayCreateImage). */
+	screenRecording: { granted: boolean; detail: string };
+	/** Best guess at the terminal app the user needs to grant in System Settings. */
+	terminalApp: string;
+	/** True iff every probe succeeded. */
+	allGranted: boolean;
+}
+
+/**
+ * Probe macOS for the permissions the hands driver needs. Cheap (~50ms
+ * total). Safe to call repeatedly — the underlying calls are idempotent
+ * and don't leak files.
+ */
+export function checkPermissions(): PermissionsReport {
+	// --- Accessibility probe ---
+	// `osascript -e 'tell application "System Events" to get name of first process'`
+	// requires Accessibility for the PARENT process. If Accessibility is
+	// denied, osascript exits with a (-1719 / -1743) error or stderr
+	// containing "not allowed".
+	let axGranted = false;
+	let axDetail = "";
+	try {
+		const r = spawnSync(
+			"/usr/bin/osascript",
+			["-e", 'tell application "System Events" to return name of first process whose frontmost is true'],
+			{ encoding: "utf-8", timeout: 3000 },
+		);
+		if (r.status === 0 && r.stdout.trim().length > 0) {
+			axGranted = true;
+			axDetail = `frontmost: ${r.stdout.trim()}`;
+		} else {
+			axDetail = (r.stderr || "").trim().slice(0, 200) || `osascript exited ${r.status}`;
+		}
+	} catch (err) {
+		axDetail = err instanceof Error ? err.message : "osascript spawn failed";
+	}
+
+	// --- Screen Recording probe ---
+	// `screencapture -x /tmp/...probe.png` succeeds (status 0) AND writes
+	// a non-trivial PNG only if Screen Recording is granted. When denied
+	// macOS still exits 0 but writes a tiny 167-byte placeholder image
+	// or a transparent 1x1 — we check file size as the real signal.
+	let srGranted = false;
+	let srDetail = "";
+	const probePath = join(tmpdir(), `8gent-hands-probe-${process.pid}.png`);
+	try {
+		const r = spawnSync("/usr/sbin/screencapture", ["-x", "-r", probePath], {
+			encoding: "utf-8",
+			timeout: 5000,
+		});
+		if (r.status === 0 && existsSync(probePath)) {
+			const buf = readFileSync(probePath);
+			// Real screen captures are >50KB even on a 1x1 region; placeholder
+			// images when permission is denied land at <2KB.
+			if (buf.length > 50_000) {
+				srGranted = true;
+				srDetail = `${(buf.length / 1024).toFixed(0)}KB capture`;
+			} else {
+				srDetail = `${buf.length}B placeholder — permission likely denied`;
+			}
+		} else {
+			srDetail = (r.stderr || "").trim().slice(0, 200) || `screencapture exited ${r.status}`;
+		}
+	} catch (err) {
+		srDetail = err instanceof Error ? err.message : "screencapture spawn failed";
+	} finally {
+		try {
+			if (existsSync(probePath)) unlinkSync(probePath);
+		} catch {
+			/* ignore */
+		}
+	}
+
+	// --- Terminal app guess ---
+	// Walk up the process tree to find the terminal emulator that owns
+	// this Bun/Node process. We use $TERM_PROGRAM which iTerm/Apple
+	// Terminal/Warp/Ghostty all set; fall back to /bin/ps -o comm= for
+	// the parent PID if env var is missing.
+	let terminalApp = process.env.TERM_PROGRAM || "";
+	if (!terminalApp) {
+		try {
+			const ppid = process.ppid;
+			const r = spawnSync("/bin/ps", ["-o", "comm=", "-p", String(ppid)], {
+				encoding: "utf-8",
+				timeout: 1500,
+			});
+			terminalApp = (r.stdout || "").trim();
+		} catch {
+			terminalApp = "your terminal";
+		}
+	}
+	// Pretty-print common values:
+	if (terminalApp === "iTerm.app") terminalApp = "iTerm";
+	if (terminalApp === "Apple_Terminal") terminalApp = "Terminal";
+	if (terminalApp === "vscode") terminalApp = "Visual Studio Code";
+
+	return {
+		accessibility: { granted: axGranted, detail: axDetail },
+		screenRecording: { granted: srGranted, detail: srDetail },
+		terminalApp: terminalApp || "your terminal",
+		allGranted: axGranted && srGranted,
+	};
+}
+
+/**
+ * Open the System Settings privacy pane the user needs. Returns true if
+ * it could be launched. Falls back to a printed deep-link the user can
+ * paste manually.
+ *
+ * Pane keys:
+ *   - "Privacy_Accessibility"
+ *   - "Privacy_ScreenCapture"  (macOS 13+; older was "Privacy_ScreenRecording")
+ *   - "Privacy_Camera", "Privacy_Microphone", etc.
+ */
+export function openPrivacyPane(pane: "accessibility" | "screen-recording"): boolean {
+	const key =
+		pane === "accessibility" ? "Privacy_Accessibility" : "Privacy_ScreenCapture";
+	const url = `x-apple.systempreferences:com.apple.preference.security?${key}`;
+	try {
+		const r = spawnSync("/usr/bin/open", [url], { timeout: 3000 });
+		return r.status === 0;
+	} catch {
+		return false;
+	}
+}
+
 /** Removes a screenshot file the driver wrote. Best-effort. */
 export function disposeScreenshot(p: string): void {
 	try {
