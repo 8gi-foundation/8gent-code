@@ -180,7 +180,11 @@ export class Agent {
 		if (!LITE) {
 			astIndexFolder(cwd)
 				.then((index) => {
-					console.log(`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`);
+					// Gated behind DEBUG: stdout writes after Ink mounts get buffered
+					// above the frame and push the rounded header out of the viewport.
+					if (process.env.DEBUG === "1") {
+						console.log(`[AST] Indexed ${index.fileCount} files, ${index.symbolCount} symbols`);
+					}
 				})
 				.catch(() => {
 					// AST indexing is best-effort, don't block agent startup
@@ -203,9 +207,13 @@ export class Agent {
 		if (this.onboarding.needsOnboarding()) {
 			// Detect integrations (Ollama, LM Studio, GitHub) in background
 			this.onboarding.detectIntegrations().catch(() => {});
-			console.log(
-				"[8gent] First run detected — onboarding available. The agent can ask setup questions.",
-			);
+			// Gated behind DEBUG so stdout writes don't push the TUI header
+			// out of the viewport on first launch.
+			if (process.env.DEBUG === "1") {
+				console.log(
+					"[8gent] First run detected - onboarding available. The agent can ask setup questions.",
+				);
+			}
 		}
 
 		// Build system prompt with personality voice injected
@@ -373,7 +381,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				startTelegramBot(telegramToken, this, {
 					allowedUsers: chatId ? [Number.parseInt(chatId, 10)] : undefined,
 				}).catch((err) => {
-					console.log(`[8gent] Telegram auto-start failed: ${err.message}`);
+					if (process.env.DEBUG === "1") {
+						console.log(`[8gent] Telegram auto-start failed: ${err.message}`);
+					}
 				});
 			}
 		}
@@ -390,13 +400,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 						// Register as AI SDK tools via the tool registry
 						this.toolRegistry.registerExternalTool(name, fn);
 					}
-					console.log(
-						`[ext] ${loaded.length} extension(s), ${Object.keys(extTools).length} tool(s) registered`,
-					);
+					if (process.env.DEBUG === "1") {
+						console.log(
+							`[ext] ${loaded.length} extension(s), ${Object.keys(extTools).length} tool(s) registered`,
+						);
+					}
 				}
 			})
 			.catch((err) => {
-				console.log(`[ext] Extension loading failed: ${err}`);
+				if (process.env.DEBUG === "1") {
+					console.log(`[ext] Extension loading failed: ${err}`);
+				}
 			});
 	}
 
