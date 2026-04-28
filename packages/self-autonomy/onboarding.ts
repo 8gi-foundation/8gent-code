@@ -108,9 +108,30 @@ export type CommunicationStyle =
 	| "casual" // We're collaborators
 	| "formal"; // Professional tone
 
+export interface OnboardingChoice {
+	/** Display label for the option (e.g. "Bruno (male, warm)") */
+	label: string;
+	/** Value passed back to the processor when selected (e.g. "1" or "Bruno") */
+	value: string;
+	/** Optional secondary text shown beneath the label in dim color */
+	description?: string;
+}
+
 export interface OnboardingQuestion {
 	step: OnboardingStep;
 	question: string;
+	/**
+	 * Render mode. "select" means the renderer should show a scrollable
+	 * arrow-key list with number-key shortcuts. "text" (default) is a free-text
+	 * prompt that goes through the normal CommandInput.
+	 */
+	kind?: "text" | "select";
+	/**
+	 * Structured choices for kind: "select". When present, the renderer uses
+	 * these to build the list. The free-text {options} array stays around for
+	 * back-compat input validation against typed answers.
+	 */
+	choices?: OnboardingChoice[];
 	options?: string[];
 	validator?: (answer: string) => boolean;
 	processor: (answer: string, user: UserConfig) => UserConfig;
@@ -163,12 +184,14 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	},
 	{
 		step: "communication",
-		question:
-			"How should I communicate with you?\n\n" +
-			"1. Concise & direct (just the facts)\n" +
-			"2. Detailed & explanatory (teach me as we go)\n" +
-			"3. Casual & friendly (we're collaborators)\n" +
-			"4. Formal & precise (professional tone)",
+		question: "How should I communicate with you?",
+		kind: "select",
+		choices: [
+			{ label: "Concise & direct", value: "1", description: "Just the facts" },
+			{ label: "Detailed & explanatory", value: "2", description: "Teach me as we go" },
+			{ label: "Casual & friendly", value: "3", description: "We're collaborators" },
+			{ label: "Formal & precise", value: "4", description: "Professional tone" },
+		],
 		options: ["1", "2", "3", "4", "concise", "detailed", "casual", "formal"],
 		processor: (answer, user) => {
 			const styleMap: Record<string, CommunicationStyle> = {
@@ -218,10 +241,20 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			"Would you like to install AI voice services?\n\n" +
 			"This downloads KittenTTS - a free, local neural text-to-speech engine.\n" +
 			"No API keys needed. Runs entirely on your machine.\n" +
-			"Download size: ~200MB (model + dependencies)\n\n" +
-			"1. Yes, install AI voices (recommended)\n" +
-			"2. No, use system voices only\n\n" +
-			"Choose 1-2:",
+			"Download size: ~200MB (model + dependencies)",
+		kind: "select",
+		choices: [
+			{
+				label: "Yes, install AI voices",
+				value: "1",
+				description: "Recommended. Free local neural TTS via KittenTTS.",
+			},
+			{
+				label: "No, use system voices only",
+				value: "2",
+				description: "Skip the download. Use macOS built-in voices.",
+			},
+		],
 		options: ["1", "2", "yes", "no", "y", "n"],
 		processor: (answer, user) => {
 			const wantsAI = ["1", "yes", "y"].includes(answer.toLowerCase());
@@ -256,24 +289,23 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	},
 	{
 		step: "voice-picker",
-		question:
-			"Pick a voice for your agent:\n\n" +
-			"  AI Voices (KittenTTS - neural, natural-sounding):\n" +
-			"  1. Bruno   (male, warm & authoritative - recommended)\n" +
-			"  2. Bella   (female, warm & clear)\n" +
-			"  3. Jasper  (male, crisp & technical)\n" +
-			"  4. Luna    (female, soft & creative)\n" +
-			"  5. Rosie   (female, bright & energetic)\n" +
-			"  6. Hugo    (male, neutral & steady)\n" +
-			"  7. Kiki    (female, light & friendly)\n" +
-			"  8. Leo     (male, rich & expressive)\n\n" +
-			"  System Voices (macOS built-in):\n" +
-			"  9.  Moira    (Irish)\n" +
-			"  10. Daniel   (British)\n" +
-			"  11. Samantha (American)\n" +
-			"  12. Karen    (Australian)\n" +
-			"  13. Rishi    (Indian)\n\n" +
-			"Choose 1-13 (default: 1 - Bruno):",
+		question: "Pick a voice for your agent.",
+		kind: "select",
+		choices: [
+			{ label: "Bruno", value: "1", description: "AI - male, warm & authoritative (recommended)" },
+			{ label: "Bella", value: "2", description: "AI - female, warm & clear" },
+			{ label: "Jasper", value: "3", description: "AI - male, crisp & technical" },
+			{ label: "Luna", value: "4", description: "AI - female, soft & creative" },
+			{ label: "Rosie", value: "5", description: "AI - female, bright & energetic" },
+			{ label: "Hugo", value: "6", description: "AI - male, neutral & steady" },
+			{ label: "Kiki", value: "7", description: "AI - female, light & friendly" },
+			{ label: "Leo", value: "8", description: "AI - male, rich & expressive" },
+			{ label: "Moira", value: "9", description: "System - Irish (macOS)" },
+			{ label: "Daniel", value: "10", description: "System - British (macOS)" },
+			{ label: "Samantha", value: "11", description: "System - American (macOS)" },
+			{ label: "Karen", value: "12", description: "System - Australian (macOS)" },
+			{ label: "Rishi", value: "13", description: "System - Indian (macOS)" },
+		],
 		options: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
 		processor: (answer, user) => {
 			const kittenVoices: Record<string, string> = {
@@ -323,7 +355,12 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			"- Provider: {provider}\n" +
 			"- Agent: {agent_name}\n" +
 			"- Voice: {voice}\n\n" +
-			"Ready to begin? (yes/no)\n",
+			"Ready to begin?",
+		kind: "select",
+		choices: [
+			{ label: "Yes, let's go", value: "yes" },
+			{ label: "No, restart later", value: "no" },
+		],
 		options: ["yes", "no", "y", "n"],
 		processor: (answer, user) => {
 			// Any answer (including "no") completes onboarding - user can always
