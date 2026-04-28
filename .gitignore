@@ -116,3 +116,7 @@ packages/eight-bdh/trainer/local/phase-0-train-log.json
 packages/eight-bdh/trainer/local/phase-0-full-run.log
 packages/eight-bdh/trainer/local/phase-1-explore-train-log.json
 packages/eight-bdh/trainer/local/phase-1-explore-full-run.log
+packages/eight-bdh/trainer/local/phase-2a-scale-train-log.json
+packages/eight-bdh/trainer/local/phase-2a-scale-full-run.log
+packages/eight-bdh/data/phase-2a-scale-corpus.bin
+packages/eight-bdh/checkpoints/phase-2a-scale-5m.pt
