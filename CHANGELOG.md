@@ -9,6 +9,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-04-28
+
+### Performance
+
+- **8GENT_LITE=1 now actually disables the heavies.** When set, the Agent constructor:
+  - Skips AST indexing (deferred to first AST tool call)
+  - Skips kernel.start() (training proxy stays asleep)
+  - Skips Convex session sync probe
+  - Skips heartbeat agent loops (git monitoring, self-heal, memory sync)
+  - Already skips the intro banner (from v0.11.1)
+
+  Measured Agent ctor cost on this host (qwen3.6:27b config):
+  - Normal: **~4.5s** (3 trials: 4864/4444/4532ms)
+  - LITE=1: **~2.4s** (3 trials: 2433/2414/2478ms)
+  - **47% reduction** in Agent construction time.
+
+  The agent still answers turns in lite mode — it just won't sync, learn, or self-heal until you remove the flag. Inspired by jcode's "lean by default" philosophy.
+
 ## [0.11.1] - 2026-04-28
 
 ### Performance
