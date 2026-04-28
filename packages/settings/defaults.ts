@@ -13,6 +13,20 @@ export const DEFAULT_SETTINGS: Settings = {
 		silenceThresholdMs: 2000,
 		bargeIn: true,
 		ttsVoice: "Ava",
+		// TTS plays agent responses out of the box. Toggle with `/voice off`.
+		outputEnabled: true,
+		// Each tab role speaks in its own macOS voice so multi-agent flows are
+		// audibly distinct. Defaults pick standard high-quality voices that
+		// ship on macOS:
+		//   - Daniel  (en-GB) — measured, fits an orchestrator
+		//   - Karen   (en-AU) — clear and technical, fits an engineer
+		//   - Moira   (en-IE) — auditor cadence, fits QA
+		// Fallback to `voice.ttsVoice` if a role is missing.
+		perAgent: {
+			orchestrator: "Daniel",
+			engineer: "Karen",
+			qa: "Moira",
+		},
 	},
 	performance: {
 		mode: "auto",
