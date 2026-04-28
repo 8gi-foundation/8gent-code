@@ -1,0 +1,9 @@
+{
+	"name": "@8gent/eight-bdh",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "8gent 0.1 BDH orchestrator - decide(), local + vessel inference clients, byte-stream decoder, and the trainer fork",
+	"main": "index.ts",
+	"types": "index.ts"
+}
