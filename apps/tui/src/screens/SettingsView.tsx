@@ -87,11 +87,64 @@ const CATEGORIES: Category[] = [
 			},
 			{
 				id: "voice.ttsVoice",
-				label: "TTS voice",
-				description: "macOS voice name (e.g. Ava, Samantha, Daniel).",
+				label: "TTS voice (fallback)",
+				description: "macOS voice name used when a tab has no per-agent voice (e.g. Ava, Samantha, Daniel).",
 				kind: "text",
 				get: (s) => s.voice.ttsVoice,
 				set: (s, v) => ({ ...s, voice: { ...s.voice, ttsVoice: String(v) } }),
+			},
+			{
+				id: "voice.outputEnabled",
+				label: "Speak agent replies",
+				description: "When on, agent responses are spoken via macOS TTS by default.",
+				kind: "toggle",
+				get: (s) => s.voice.outputEnabled,
+				set: (s, v) => ({
+					...s,
+					voice: { ...s.voice, outputEnabled: Boolean(v) },
+				}),
+			},
+			{
+				id: "voice.perAgent.orchestrator",
+				label: "Orchestrator voice",
+				description: "macOS voice for the Orchestrator tab.",
+				kind: "text",
+				get: (s) => s.voice.perAgent.orchestrator,
+				set: (s, v) => ({
+					...s,
+					voice: {
+						...s.voice,
+						perAgent: { ...s.voice.perAgent, orchestrator: String(v) },
+					},
+				}),
+			},
+			{
+				id: "voice.perAgent.engineer",
+				label: "Engineer voice",
+				description: "macOS voice for the Engineer tab.",
+				kind: "text",
+				get: (s) => s.voice.perAgent.engineer,
+				set: (s, v) => ({
+					...s,
+					voice: {
+						...s.voice,
+						perAgent: { ...s.voice.perAgent, engineer: String(v) },
+					},
+				}),
+			},
+			{
+				id: "voice.perAgent.qa",
+				label: "QA voice",
+				description: "macOS voice for the QA tab.",
+				kind: "text",
+				get: (s) => s.voice.perAgent.qa,
+				set: (s, v) => ({
+					...s,
+					voice: {
+						...s.voice,
+						perAgent: { ...s.voice.perAgent, qa: String(v) },
+					},
+				}),
 			},
 		],
 	},
