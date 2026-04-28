@@ -19,20 +19,20 @@
 
 ---
 
-## 0.5 Use case framing — implicit evolution (chair amendment 2026-04-28)
+## 0.5 Use case framing - implicit evolution (chair amendment 2026-04-28)
 
 The original framing of this spec was prescriptive: "8gent 0.1 is a routing core. Train it on 50k labelled routing triples. Measure it as a router. Ship when it beats the heuristic by 10pp."
 
 **Chair amendment 2026-04-28:** the model's purpose is left open. Phase 1 is not a labelled-corpus-driven router-training programme. Phase 1 is **implicit evolution on the harness's natural data stream**.
 
-The principle: do not explicitly define what the brain is for. Let it absorb the actual life of the harness — real session traces, real decisions, real audit logs, real conversations — and let its capabilities surface from what the data shapes it into. Quality of the stream is what matters, not curation against a hypothesised use case.
+The principle: do not explicitly define what the brain is for. Let it absorb the actual life of the harness, real session traces, real decisions, real audit logs, real conversations, and let its capabilities surface from what the data shapes it into. Quality of the stream is what matters, not curation against a hypothesised use case.
 
 What this means in practice:
 
 - **Corpus is the harness's reality, not a synthetic 50k.** Replays from `~/.8gent/sessions/`, audit traces from G8WAY, boardroom transcripts, 8gent.world content, anything that already exists in the world we want the brain to live in. PII scrub still mandatory; curation by intent is not.
 - **No hard Phase 1 ship gates against the routing rubric.** The +10pp F1, the gold-set kappa, the per-concept synapse precision targets in section 4 stay alive **only** for the moment we promote the model to a default-on path that affects user behaviour. During the exploratory phase, the ship-gate concept does not apply because there is nothing being shipped.
 - **No fixed ontology.** Section 4.4's 120-concept vocabulary becomes a probe vocabulary, not a prediction target. After training we run the probe runner and see what concepts the synapses actually carry. The ontology is descriptive of the model, not prescriptive over it.
-- **Post-training capability discovery.** Once trained on the harness stream, we probe what the model is unexpectedly good at: completing audit traces, suggesting next decisions, summarising sessions, answering "what just happened" — whatever surfaces. Capabilities that surface are documented and (selectively) wired into the harness behind feature flags.
+- **Post-training capability discovery.** Once trained on the harness stream, we probe what the model is unexpectedly good at: completing audit traces, suggesting next decisions, summarising sessions, answering "what just happened", whatever surfaces. Capabilities that surface are documented and (selectively) wired into the harness behind feature flags.
 - **The routing use case stays as a hypothesis, not a commitment.** If post-training probing shows the model routes well, great — Throne PRD W1 wires it up. If it shows the model is better at, say, session summarisation, we wire that instead. Or both. Or neither.
 
 What stays unchanged from the original spec:
