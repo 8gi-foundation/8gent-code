@@ -13,7 +13,7 @@
  * from stdout. Add a new agent by adding a preset — no core changes.
  */
 
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 
 // ============================================================================
 // Public types
@@ -40,6 +40,18 @@ export interface ExternalAgentPreset {
 	timeoutMs?: number;
 	/** Optional post-processor for stdout (strip ANSI, peel JSON envelope). */
 	parseStdout?: (raw: string) => string;
+	/**
+	 * Optional auto-install recipe. When the binary is not on $PATH,
+	 * `/spawn` runs this command so users don't have to leave the TUI.
+	 * - `command` is a single shell command (no arg array).
+	 * - `notes` is a human-readable hint shown in the chat for cases
+	 *   that need extra steps (auth, manual setup) the installer can't
+	 *   handle automatically.
+	 */
+	install?: {
+		command: string;
+		notes?: string;
+	};
 }
 
 export interface ExternalAgentResult {
@@ -69,6 +81,10 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: [],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		install: {
+			command: "npm install -g @anthropic-ai/claude-code",
+			notes: "After install, run `claude` once to authenticate with Anthropic.",
+		},
 	},
 	codex: {
 		id: "codex",
@@ -79,6 +95,10 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["exec"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		install: {
+			command: "npm install -g @openai/codex",
+			notes: "Requires an OpenAI API key in OPENAI_API_KEY.",
+		},
 	},
 	hermes: {
 		id: "hermes",
@@ -88,6 +108,10 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["--headless"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		install: {
+			command: "npm install -g hermes-agent",
+			notes: "Hermes is a community CLI; verify the npm package matches the project you want before running.",
+		},
 	},
 	openclaw: {
 		id: "openclaw",
@@ -97,6 +121,10 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["run", "--headless"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		install: {
+			command: "npm install -g openclaw",
+			notes: "OpenClaw is a community CLI; check the project's docs for any post-install auth.",
+		},
 	},
 	aider: {
 		id: "aider",
@@ -108,6 +136,12 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["--no-pretty", "--yes", "--no-stream"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		install: {
+			// Aider's official install path. `aider-install` then bootstraps a
+			// pinned Python env with all of Aider's deps.
+			command: "python3 -m pip install --user aider-install && aider-install",
+			notes: "Aider needs Python 3.10+. Set OPENAI_API_KEY or ANTHROPIC_API_KEY for it to talk to a model.",
+		},
 	},
 	"8gent": {
 		// 8gent inside 8gent. The bidirectional half: our own binary already has
@@ -120,6 +154,9 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["chat"],
 		timeoutMs: 180_000,
 		parseStdout: stripAnsi,
+		install: {
+			command: "npm install -g @8gi-foundation/8gent-code",
+		},
 	},
 };
 
@@ -129,6 +166,145 @@ export function getPreset(id: string): ExternalAgentPreset | null {
 
 export function listPresetIds(): string[] {
 	return Object.keys(EXTERNAL_AGENT_PRESETS);
+}
+
+/**
+ * True if the preset's binary is on $PATH right now. Cheap synchronous
+ * check via `command -v`. Returns false on any error.
+ */
+export function isInstalled(preset: ExternalAgentPreset): boolean {
+	try {
+		execSync(`command -v "${preset.command}"`, {
+			stdio: "ignore",
+			timeout: 1500,
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Result of running a preset's auto-install recipe.
+ */
+export interface InstallResult {
+	ok: boolean;
+	stdout: string;
+	stderr: string;
+	durationMs: number;
+	command: string;
+	error?: string;
+}
+
+/**
+ * Run the preset's install recipe and resolve with the outcome.
+ * Streams stdout/stderr to the optional `onLine` callback so the TUI
+ * can show live progress. Long-running (npm/pip install can take
+ * 30s-90s); we cap at 5 minutes which is generous but bounded.
+ */
+export async function installAgent(
+	preset: ExternalAgentPreset,
+	onLine?: (line: string, source: "stdout" | "stderr") => void,
+): Promise<InstallResult> {
+	const start = performance.now();
+	if (!preset.install) {
+		return {
+			ok: false,
+			stdout: "",
+			stderr: "",
+			durationMs: 0,
+			command: "",
+			error: `No install recipe for ${preset.id}. Install ${preset.command} manually and try again.`,
+		};
+	}
+	const command = preset.install.command;
+
+	return new Promise((resolve) => {
+		let stdout = "";
+		let stderr = "";
+		let exited = false;
+
+		const proc = spawn("bash", ["-lc", command], {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+		});
+
+		const finish = (result: Omit<InstallResult, "durationMs" | "command">) => {
+			if (exited) return;
+			exited = true;
+			clearTimeout(timer);
+			resolve({
+				...result,
+				durationMs: Math.round(performance.now() - start),
+				command,
+			});
+		};
+
+		const pipeLines = (chunk: Buffer | string, source: "stdout" | "stderr") => {
+			const text = chunk.toString();
+			if (source === "stdout") stdout += text;
+			else stderr += text;
+			if (onLine) {
+				for (const line of text.split(/\r?\n/)) {
+					if (line.trim().length > 0) onLine(line, source);
+				}
+			}
+		};
+
+		proc.stdout?.on("data", (c) => pipeLines(c, "stdout"));
+		proc.stderr?.on("data", (c) => pipeLines(c, "stderr"));
+
+		proc.on("error", (err) => {
+			finish({ ok: false, stdout, stderr, error: err.message });
+		});
+
+		proc.on("close", (code) => {
+			finish({
+				ok: code === 0,
+				stdout,
+				stderr,
+				error: code === 0 ? undefined : stderr.trim().slice(0, 800) || `installer exited with code ${code}`,
+			});
+		});
+
+		const timer = setTimeout(
+			() => {
+				proc.kill("SIGTERM");
+				finish({ ok: false, stdout, stderr, error: "install timed out after 5 minutes" });
+			},
+			5 * 60 * 1000,
+		);
+	});
+}
+
+/**
+ * Verify the preset's binary is on PATH; if missing AND an install
+ * recipe is configured, run the installer and re-check. Returns true
+ * if the binary is callable at the end.
+ */
+export async function ensureInstalled(
+	preset: ExternalAgentPreset,
+	onLine?: (line: string, source: "stdout" | "stderr" | "info") => void,
+): Promise<boolean> {
+	if (isInstalled(preset)) return true;
+	if (!preset.install) {
+		onLine?.(`${preset.command}: not installed and no auto-install recipe is configured.`, "info");
+		return false;
+	}
+	onLine?.(`${preset.command}: not installed — running ${preset.install.command}`, "info");
+	const result = await installAgent(preset, (line, source) => onLine?.(line, source));
+	if (!result.ok) {
+		onLine?.(`Install failed: ${result.error ?? "unknown error"}`, "info");
+		return false;
+	}
+	const stillThere = isInstalled(preset);
+	if (!stillThere) {
+		onLine?.(
+			`Install reported success but ${preset.command} is still not on $PATH. You may need to open a new shell or add the install dir to PATH.`,
+			"info",
+		);
+	}
+	return stillThere;
 }
 
 // ============================================================================
