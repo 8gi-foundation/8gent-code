@@ -52,6 +52,10 @@ export const DEFAULT_SETTINGS: Settings = {
 			operatorRotationMs: 8000,
 			boredomThresholdMs: 30000,
 		},
+		// Empty default = silent. Drop a sound file (e.g. ~/.8gent/sounds/intro.mp3)
+		// and set this path via /settings or by editing ~/.8gent/settings.json
+		// to play a heavenly swell on TUI launch. macOS afplay handles it.
+		introSound: "",
 	},
 	agents: {
 		// Default names match the canonical role-registry roles. Users can
