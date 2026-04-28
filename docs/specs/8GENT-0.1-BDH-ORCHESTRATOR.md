@@ -78,7 +78,7 @@ This is also a **trust story** for tenants. "Here are the 12 synapses that fired
 
 BDH's headline feature for our economics is **model merging by concatenation**: train a small expert module on a domain (legal drafting routing, gamedev routing, food-industry routing) and append it to the base. No retraining, no fine-tune drift, no quantisation hell.
 
-The product implication: each tenant on a vessel can have their **own** orchestrator, assembled from a base 8gent 0.1 plus the modules they have entitlement to. A FoodstackOS vessel concatenates the food-domain module. A SCF Design Lab vessel concatenates a compliance module. The base remains 10M params; the tenant-specific orchestrator might be 12-20M.
+The product implication: each tenant on a vessel can have their **own** orchestrator, assembled from a base 8gent 0.1 plus the modules they have entitlement to. A vertical-domain vessel concatenates a domain-specific module. A compliance-engaged vessel concatenates a compliance module. The base remains 10M params; the tenant-specific orchestrator might be 12-20M.
 
 This becomes a **marketplace primitive** for the control plane (`8gent.app`): expert modules as installable units.
 
@@ -456,9 +456,9 @@ NOW / NEXT / LATER per CLAUDE.md (no Q1/Q2/Q3).
 **Goal:** Validate concatenation in production. Three pilot modules.
 
 Pilot modules (in priority order):
-1. **`food-routing-0.1`** for FoodstackOS - "is this a recipe task / supplier task / compliance task / customer task?"
-2. **`compliance-0.1`** for SCF Design Lab and EasyRFP - "does this touch GDPR/SOC2/ISO?"
-3. **`gamedev-0.1`** for 8gent.games - "is this a world-state / agent-behaviour / rendering task?"
+1. **`vertical-domain-0.1`** for an internal vertical project - domain-specific routing classes (recipe / supplier / compliance / customer-style splits).
+2. **`compliance-0.1`** for compliance-focused engagements - regulatory framework routing (GDPR / SOC2 / ISO).
+3. **`gamedev-0.1`** for an internal games project - world-state / agent-behaviour / rendering routing classes.
 
 Each module is trained on ~5k domain-specific examples, concatenated to 8gent 0.1, evaluated on a domain benchmark. Module sizes target 1-2M each.
 
@@ -479,7 +479,7 @@ This is the commercial layer. We do not design the pricing or marketplace UX in 
 
 Open questions to resolve before committing to 0.2:
 
-- Multilingual orchestration (Portuguese first, given Sky / Brotherhood Tattoo context).
+- Multilingual orchestration (Portuguese first, partner-driven prioritisation).
 - Multimodal awareness (does the orchestrator need to see a screenshot to route well?).
 - Continuous learning from production (online updates vs nightly retrain).
 - 100M scale-up if the 10M plateau is real.
@@ -621,7 +621,7 @@ For honesty:
 
 - **No training loss curves.** None exist yet.
 - **No latency numbers from our infra.** Phase 0 produces them.
-- **No tenant commitments.** FoodstackOS, SCF, and EasyRFP are mentioned as candidate Phase 3 module hosts; none have been asked yet.
+- **No tenant commitments.** Three candidate Phase 3 module hosts identified privately; none have been asked yet.
 - **No commercial pricing.** Module marketplace pricing is a control-plane concern, not a model-spec concern.
 - **No legal review of corpus sources.** Phase 1 prerequisite.
 
