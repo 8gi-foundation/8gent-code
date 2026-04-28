@@ -1,0 +1,33 @@
+{
+	"name": "@8gent/settings",
+	"version": "0.1.0",
+	"description": "Typed settings store for 8gent Code — schema, defaults, and ~/.8gent/settings.json persistence",
+	"private": true,
+	"main": "index.ts",
+	"types": "index.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		},
+		"./schema": {
+			"import": "./schema.ts",
+			"types": "./schema.ts"
+		},
+		"./defaults": {
+			"import": "./defaults.ts",
+			"types": "./defaults.ts"
+		},
+		"./store": {
+			"import": "./store.ts",
+			"types": "./store.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}

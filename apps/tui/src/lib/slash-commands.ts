@@ -45,7 +45,8 @@ export type SlashCommand =
 	| "telegram"
 	| "router"
 	| "rename"
-	| "spawn";
+	| "spawn"
+	| "settings";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -308,6 +309,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, aider)",
 		usage: "/spawn <claude|codex|hermes|openclaw|aider>",
+	},
+	{
+		name: "settings",
+		aliases: [],
+		description: "Open settings view (toggle voice, performance, providers, models)",
+		usage: "/settings",
 	},
 ];
 

@@ -141,7 +141,9 @@ import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
+import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
+import { loadSettings as loadAppSettings } from "../../../packages/settings/index.js";
 import { NarratorView } from "./screens/index.js";
 
 // Import auth + DB systems (lazy, non-blocking)
@@ -427,6 +429,51 @@ interface Avenue {
 }
 
 // ============================================
+// Settings -> environment migration
+// ============================================
+//
+// Applies persisted settings from ~/.8gent/settings.json to the process
+// environment exactly once, BEFORE any subsystem (agent, providers, IntroBanner)
+// reads its env vars. Existing env vars take precedence over settings only
+// for the performance.mode = "auto" case; explicit "lite" / "full" / "on" /
+// "off" values always override env vars.
+//
+// Provider baseURLs only set the env var when settings hold a non-empty value
+// AND the env var isn't already present, so users can still override per-shell.
+//
+// This runs once at module import time.
+function applySettingsToEnv(): void {
+	try {
+		const s = loadAppSettings();
+		// Performance mode
+		if (s.performance.mode === "lite") {
+			process.env["8GENT_LITE"] = "1";
+			delete process.env["8GENT_FULL"];
+		} else if (s.performance.mode === "full") {
+			process.env["8GENT_FULL"] = "1";
+			process.env["8GENT_LITE"] = "0";
+		}
+		// Intro banner: explicit on/off overrides env vars
+		if (s.performance.introBanner === "off") {
+			process.env["8GENT_NO_INTRO"] = "1";
+		} else if (s.performance.introBanner === "on") {
+			delete process.env["8GENT_NO_INTRO"];
+		}
+		// Provider baseURLs - only set when env var is not already present
+		const setIfMissing = (key: string, value: string) => {
+			if (value && !process.env[key]) process.env[key] = value;
+		};
+		setIfMissing("APFEL_BASE_URL", s.providers.apfel.baseURL);
+		setIfMissing("OLLAMA_BASE_URL", s.providers.ollama.baseURL);
+		setIfMissing("LMSTUDIO_BASE_URL", s.providers.lmstudio.baseURL);
+		setIfMissing("OPENROUTER_BASE_URL", s.providers.openrouter.baseURL);
+	} catch {
+		// Best-effort: if settings are unreadable, fall through to existing defaults
+	}
+}
+applySettingsToEnv();
+
+// ============================================
 // Main App
 // ============================================
 
@@ -479,9 +526,18 @@ export function App({
 	// Skipped entirely if the user opts out (8GENT_NO_INTRO=1 or 8GENT_LITE=1).
 	// Lite mode in v0.11.1+ also disables auxiliary subsystems for jcode-style
 	// fast launch when the user prefers speed over polish.
-	const [introVisible, setIntroVisible] = useState(
-		() => process.env["8GENT_NO_INTRO"] !== "1" && process.env["8GENT_LITE"] !== "1",
-	);
+	// Persisted preference at performance.introBanner overrides env var detection
+	// when set to "on" or "off". "auto" falls back to env var logic.
+	const [introVisible, setIntroVisible] = useState(() => {
+		try {
+			const s = loadAppSettings();
+			if (s?.performance?.introBanner === "off") return false;
+			if (s?.performance?.introBanner === "on") return true;
+		} catch {
+			// Fall through to env var detection
+		}
+		return process.env["8GENT_NO_INTRO"] !== "1" && process.env["8GENT_LITE"] !== "1";
+	});
 	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
 	const foregroundLabelRef = useRef<string>("");
 
@@ -759,6 +815,22 @@ export function App({
 		const role = (tab.data as { role?: string } | undefined)?.role;
 		if (!role) return;
 		const cfg = ROLE_REGISTRY[role];
+		// Persisted settings override role-registry defaults for orchestrator/engineer/qa tabs.
+		try {
+			const s = loadAppSettings();
+			const tabsMap = s.models?.tabs as unknown as Record<
+				string,
+				{ provider: string; model: string }
+			>;
+			const tabSettings = tabsMap?.[role];
+			if (tabSettings?.provider && tabSettings?.model) {
+				setCurrentProvider(tabSettings.provider);
+				setCurrentModel(tabSettings.model);
+				return;
+			}
+		} catch {
+			// Fall through to role-registry default
+		}
 		if (!cfg?.inferenceMode || !cfg?.model) return;
 		setCurrentProvider(cfg.inferenceMode);
 		setCurrentModel(cfg.model);
@@ -2483,6 +2555,12 @@ export function App({
 					break;
 				}
 
+				case "settings": {
+					// Open the settings tab (singleton — switches if it already exists).
+					workspaceTabs.addTab("settings", "Settings");
+					break;
+				}
+
 				case "spawn": {
 					// /spawn <preset> — open a chat tab whose backing brain is an external CLI.
 					const presetId = (args[0] || "").toLowerCase().trim();
@@ -4179,6 +4257,8 @@ export function App({
 							onClose={closeTabView}
 						/>
 					);
+				case "settings":
+					return <SettingsView visible={true} onClose={closeTabView} />;
 			}
 		}
 
