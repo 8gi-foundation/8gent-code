@@ -58,9 +58,12 @@ export const ROLE_REGISTRY: Record<string, RunnerConfig> = {
 			"get_outline",
 		],
 		retryPolicy: { maxAttempts: 2, backoffMs: 1000 },
-		// On-device fast review when the bridge is installed; failover handles the fall-back.
-		inferenceMode: "apple-foundation",
-		model: "apple-foundationmodel",
+		// `packages/ai/providers.ts` only recognises ollama / lmstudio / openrouter.
+		// QA gets free cloud inference via OpenRouter auto:free so each tab still
+		// uses a distinct provider. Apple Foundation as a first-class TUI provider
+		// is a separate piece of work (needs an AI SDK adapter).
+		inferenceMode: "openrouter",
+		model: "auto:free",
 	},
 };
 
