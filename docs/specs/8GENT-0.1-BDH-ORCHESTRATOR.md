@@ -382,11 +382,16 @@ For BDH's monosemanticity to be useful, we need a fixed concept vocabulary the m
 | Output kind | `decision-model`, `decision-agent`, `decision-tool`, `decision-reject`, `decision-clarify` | ~5 |
 | Reserve / drift | unallocated synapses for emergent concepts (we monitor and label) | ~8 |
 
-The training loss has two heads:
-1. Decision prediction (cross-entropy over decision tokens)
-2. Concept prediction (multi-label binary cross-entropy over the ~120 concept vocabulary)
+The training loss is **single-head, paper-faithful**: standard next-token cross-entropy on serialised orchestration traces. **No concept-BCE supervision.**
 
-The concept head is what makes the synapses monosemantic. Without it, BDH gets monosemanticity by training-data luck. With it, we engineer it.
+Per the BDH paper (arXiv 2509.26507, §"BDH-GPU emergent properties"): "we did not apply any specific training method which would be known to guide the system towards any of the observed emergent properties. (In particular, L1-regularization was disabled.)" Monosemanticity in BDH-GPU is an emergent property of the architecture, not an engineered one.
+
+Boardroom decision (2026-04-28, Option A): we adopt the paper's emergent-monosemanticity approach. The concept ontology in section 4.4 above serves as a **post-training probe vocabulary**, not as a supervised training target. After Phase 0 / Phase 1 training:
+1. Run the probe runner against the gold set; for each synapse position, identify the concept (if any) it most reliably co-fires with.
+2. Label CONCEPT_VOCAB positions descriptively, post-hoc, based on probe evidence. Reserve slots stay reserve until probes name them.
+3. Update `ONTOLOGY_VERSION` per the drift policy in `packages/eight-bdh/ONTOLOGY-RATIONALE.md`.
+
+Re-evaluation: if Phase 1 probes show <50% per-concept synapse precision (i.e. emergent monosemanticity is too noisy to be useful as audit evidence), we reopen the supervised-concept-head decision at L5 boardroom. Until then, paper-faithful.
 
 ### 4.5 What we are NOT including in the corpus (Phase 0+1)
 
