@@ -3,7 +3,7 @@ export interface RunnerConfig {
 	systemPrompt: string;
 	allowedTools: string[];
 	retryPolicy: { maxAttempts: number; backoffMs: number };
-	inferenceMode?: "ollama" | "lmstudio" | "openrouter" | "apple-foundation";
+	inferenceMode?: "ollama" | "lmstudio" | "openrouter" | "apfel" | "apple-foundation";
 	model?: string;
 }
 
@@ -58,12 +58,12 @@ export const ROLE_REGISTRY: Record<string, RunnerConfig> = {
 			"get_outline",
 		],
 		retryPolicy: { maxAttempts: 2, backoffMs: 1000 },
-		// `packages/ai/providers.ts` only recognises ollama / lmstudio / openrouter.
-		// QA gets free cloud inference via OpenRouter auto:free so each tab still
-		// uses a distinct provider. Apple Foundation as a first-class TUI provider
-		// is a separate piece of work (needs an AI SDK adapter).
-		inferenceMode: "openrouter",
-		model: "auto:free",
+		// On-device review via apfel (Apple Foundation Model). apfel exposes an
+		// OpenAI-compatible HTTP server, so it slots into the AI SDK provider
+		// registry directly. Run with `apfel --serve --port 11500`.
+		// Override URL via APFEL_BASE_URL.
+		inferenceMode: "apfel",
+		model: "apple-foundationmodel",
 	},
 };
 
