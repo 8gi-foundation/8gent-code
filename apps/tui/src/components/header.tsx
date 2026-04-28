@@ -7,7 +7,7 @@
  * - Rainbow border animation
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import Gradient from "ink-gradient";
 import React, { useState, useEffect } from "react";
 import { AppText, Inline, MutedText } from "./primitives/index.js";
@@ -26,6 +26,15 @@ export function Header({
 	updateAvailable,
 }: HeaderProps) {
 	const [mounted, setMounted] = useState(false);
+	const { stdout } = useStdout();
+	const cols = stdout?.columns ?? 80;
+	// FixedFrame chrome (border + paddingX) consumes 4 cols; the header sits
+	// inside it. Pin the rainbow border width so it can never exceed the
+	// terminal and clip its corners. Floor at 24 so it stays usable on tiny
+	// terminals; cap at viewport so wide terminals don't grow unboundedly.
+	const headerWidth = Math.max(24, cols - 4);
+	// Drop the tagline on narrow terminals so the inline row never overflows.
+	const showTagline = cols >= 64;
 
 	useEffect(() => {
 		// Trigger mount animation
@@ -42,33 +51,38 @@ export function Header({
 	}
 
 	return (
-		<RainbowBorder animate={showAnimations} colorPalette="neon" speed={200} borderStyle="round">
-			<Inline gap={1}>
-				{/* Animated 8gent logo */}
-				<Box>
-					<PulseLogo isIdle={!isProcessing} isProcessing={isProcessing} />
-					<Gradient name="rainbow">
-						<AppText bold>gent</AppText>
-					</Gradient>
-				</Box>
+		<Box width={headerWidth} flexShrink={0}>
+			<RainbowBorder animate={showAnimations} colorPalette="neon" speed={200} borderStyle="round">
+				<Inline gap={1}>
+					{/* Animated 8gent logo */}
+					<Box>
+						<PulseLogo isIdle={!isProcessing} isProcessing={isProcessing} />
+						<Gradient name="rainbow">
+							<AppText bold>gent</AppText>
+						</Gradient>
+					</Box>
 
-				{/* Separator */}
-				<MutedText> Code</MutedText>
+					{/* Separator */}
+					<MutedText> Code</MutedText>
 
-				<MutedText>│</MutedText>
+					{showTagline && (
+						<>
+							<MutedText>│</MutedText>
+							{/* Tagline with subtle animation */}
+							<TaglineText animate={showAnimations} />
+						</>
+					)}
 
-				{/* Tagline with subtle animation */}
-				<TaglineText animate={showAnimations} />
-
-				{/* Update notification */}
-				{updateAvailable && (
-					<>
-						<MutedText>│</MutedText>
-						<AppText color="yellow"> ↑ v{updateAvailable.latest}</AppText>
-					</>
-				)}
-			</Inline>
-		</RainbowBorder>
+					{/* Update notification */}
+					{updateAvailable && (
+						<>
+							<MutedText>│</MutedText>
+							<AppText color="yellow"> ↑ v{updateAvailable.latest}</AppText>
+						</>
+					)}
+				</Inline>
+			</RainbowBorder>
+		</Box>
 	);
 }
 
