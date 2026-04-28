@@ -18,11 +18,11 @@ Concrete implementation plan for inheriting 8 abilities into the 8gent-code vess
 - `embeddings.ts` (201 lines) - Ollama + null providers
 - `recall.ts` (119 lines) - Hybrid FTS + vector search
 
-### What FoodstackOS Has That We Don't
+### What the prior internal memory system Has That We Don't
 
-Source: `~/Foodstackai/fsai-001-donna/src/memory/` (16,984 lines) + `convex/memoryEnhanced.ts` (13,723 lines)
+Source: `~/an internal vertical project/fsai-001-donna/src/memory/` (16,984 lines) + `convex/memoryEnhanced.ts` (13,723 lines)
 
-| Gap | FoodstackOS Pattern | 8gent-code Status |
+| Gap | the prior internal memory system Pattern | 8gent-code Status |
 |-----|---------------------|-------------------|
 | Consolidation pipeline | raw -> daily -> weekly -> monthly -> archetype | Missing entirely |
 | Tenant isolation | organizationId + userId on every mutation, enforced in DB indexes | Optional userId field, not enforced |

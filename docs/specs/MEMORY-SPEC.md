@@ -1,6 +1,6 @@
 # Memory Spec - Dual-Layer with Honcho Patterns
 
-Detailed implementation spec for the 8gent memory layer. Incorporates patterns from FoodstackOS, Honcho (plastic-labs), and Supermemory research.
+Detailed implementation spec for the 8gent memory layer. Incorporates patterns from the prior internal memory system, Honcho (plastic-labs), and Supermemory research.
 
 ## Architecture
 
@@ -469,7 +469,7 @@ During consolidation, memories with high `contributedToSuccess` get priority ove
 
 ## Inspired By
 
-- **FoodstackOS** memory manager (episodic + semantic, hybrid search, consolidation)
+- **the prior internal memory system** memory manager (episodic + semantic, hybrid search, consolidation)
 - **Honcho** by Plastic Labs (peer representations, natural language queries, token budgeting)
 - **Artale's openclaw-memory** (temporal decay, feedback loop prevention, auto-injection, sanitization, porter stemmer, "total memory" prompt framing, usage tracking)
 - **Supermemory** (99% SOTA, evaluate when open sourced)
