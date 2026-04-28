@@ -28,7 +28,7 @@
 
 ## 1. Memory Type Taxonomy
 
-Adapted from FoodstackOS's 5-layer model (`lib/memory/types.ts`) into 4 layers appropriate for a local-first CLI tool:
+Adapted from the prior internal memory system's 5-layer model (`lib/memory/types.ts`) into 4 layers appropriate for a local-first CLI tool:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -62,7 +62,7 @@ Adapted from FoodstackOS's 5-layer model (`lib/memory/types.ts`) into 4 layers a
 ### Type Definitions
 
 ```typescript
-// Ported and adapted from FoodstackOS lib/memory/types.ts
+// Ported and adapted from the prior internal memory system lib/memory/types.ts
 
 export type MemoryType = "core" | "episodic" | "semantic" | "procedural" | "working";
 
@@ -103,7 +103,7 @@ export type CoreCategory =
 ```typescript
 /**
  * Base fields shared by all memory types.
- * Mirrors FoodstackOS EpisodicMemory/SemanticMemory structure.
+ * Mirrors the prior internal memory system EpisodicMemory/SemanticMemory structure.
  */
 interface MemoryBase {
   id: string;                      // mem_<12-char-hex>
@@ -114,7 +114,7 @@ interface MemoryBase {
   embedding?: Float32Array;        // 768-dim nomic-embed-text
   embeddingModel?: string;         // "nomic-embed-text:latest"
 
-  // Importance and decay (from FoodstackOS)
+  // Importance and decay (from the prior internal memory system)
   importance: number;              // 0.0 - 1.0
   decayFactor: number;             // Multiplier applied over time
   accessCount: number;             // How many times retrieved
@@ -130,7 +130,7 @@ interface MemoryBase {
 
 /**
  * Core Memory — project knowledge base.
- * Analogous to FoodstackOS TenantCoreMemory.
+ * Analogous to the prior internal memory system TenantCoreMemory.
  */
 interface CoreMemory extends MemoryBase {
   type: "core";
@@ -146,7 +146,7 @@ interface CoreMemory extends MemoryBase {
 
 /**
  * Episodic Memory — what happened.
- * Direct port from FoodstackOS EpisodicMemory.
+ * Direct port from the prior internal memory system EpisodicMemory.
  */
 interface EpisodicMemory extends MemoryBase {
   type: "episodic";
@@ -161,7 +161,7 @@ interface EpisodicMemory extends MemoryBase {
 
 /**
  * Semantic Memory — what I know.
- * Direct port from FoodstackOS SemanticMemory.
+ * Direct port from the prior internal memory system SemanticMemory.
  */
 interface SemanticMemory extends MemoryBase {
   type: "semantic";
@@ -178,7 +178,7 @@ interface SemanticMemory extends MemoryBase {
 
 /**
  * Procedural Memory — how to do things.
- * New type not in FoodstackOS; captures learned workflows.
+ * New type not in the prior internal memory system; captures learned workflows.
  */
 interface ProceduralMemory extends MemoryBase {
   type: "procedural";
@@ -200,7 +200,7 @@ interface ProceduralStep {
 
 /**
  * Working Memory — active session context.
- * Direct port from FoodstackOS WorkingMemory.
+ * Direct port from the prior internal memory system WorkingMemory.
  */
 interface WorkingMemory extends MemoryBase {
   type: "working";
@@ -455,7 +455,7 @@ WAL mode allows concurrent readers with a single writer, which is sufficient for
 | **Cost** | Free, runs locally |
 | **Fallback** | FTS5-only search if Ollama unavailable |
 
-FoodstackOS uses OpenAI `text-embedding-3-small` (1536-dim, cloud). For 8gent, local generation is mandatory to maintain offline operation. `nomic-embed-text` is the best trade-off between quality and resource usage for local inference.
+the prior internal memory system uses OpenAI `text-embedding-3-small` (1536-dim, cloud). For 8gent, local generation is mandatory to maintain offline operation. `nomic-embed-text` is the best trade-off between quality and resource usage for local inference.
 
 ### Embedding Generation
 
@@ -525,7 +525,7 @@ Embeddings stored as raw `Float32Array` bytes in a BLOB column. For 768 dimensio
 
 ### Hybrid Search Pipeline
 
-Adapts FoodstackOS's hybrid search (`HybridSearchResult`, `HybridSearchOptions`) to SQLite:
+Adapts the prior internal memory system's hybrid search (`HybridSearchResult`, `HybridSearchOptions`) to SQLite:
 
 ```
 ┌──────────────┐
@@ -641,7 +641,7 @@ async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
 
 ### Entity Types
 
-Adapted from FoodstackOS's entity system (entities, entity_relationships, entity_mentions) for a code-centric context:
+Adapted from the prior internal memory system's entity system (entities, entity_relationships, entity_mentions) for a code-centric context:
 
 ```typescript
 type EntityType =
@@ -738,7 +738,7 @@ Text: ${text}`,
 
 ### Memory Versioning
 
-Every update creates a version snapshot (mirrors FoodstackOS's audit philosophy):
+Every update creates a version snapshot (mirrors the prior internal memory system's audit philosophy):
 
 ```typescript
 async function updateMemory(
@@ -786,7 +786,7 @@ async function rollbackMemory(id: string, toVersion: number): Promise<void> {
 
 ### Decay Model
 
-Adapted from FoodstackOS's `decayFactor` and `accessCount` system:
+Adapted from the prior internal memory system's `decayFactor` and `accessCount` system:
 
 ```typescript
 /**
@@ -842,7 +842,7 @@ Effective Importance < 0.01 AND  Age > 180 days  → Candidate for pruning (soft
 
 ## 7. Context Window Assembly
 
-The most important function in the memory system. Adapted from FoodstackOS's `getFullContext()` / `ContextWindow` / `ContextWindowArgs`.
+The most important function in the memory system. Adapted from the prior internal memory system's `getFullContext()` / `ContextWindow` / `ContextWindowArgs`.
 
 ```typescript
 interface ContextWindowOptions {
@@ -1036,7 +1036,7 @@ Not every turn needs extraction. Run extraction when:
 
 ## 9. Consolidation Pipeline
 
-Ported from FoodstackOS `lib/memory/consolidation.ts`:
+Ported from the prior internal memory system `lib/memory/consolidation.ts`:
 
 ```
 RAW MEMORIES
@@ -1240,7 +1240,7 @@ New `/memory` screen for the TUI:
 
 ### 10.5 CLUI Desktop App
 
-Memory browser panel in the Tauri desktop app with graph visualization (via `react-force-graph-2d`, same as FoodstackOS uses for evidence trails).
+Memory browser panel in the Tauri desktop app with graph visualization (via `react-force-graph-2d`, same as the prior internal memory system uses for evidence trails).
 
 ### 10.6 Convex Cloud Sync
 
@@ -1581,9 +1581,9 @@ Cron / Session End
 
 ---
 
-## Appendix A: FoodstackOS Reference Mapping
+## Appendix A: the prior internal memory system Reference Mapping
 
-| FoodstackOS Component | File | 8gent v2 Equivalent |
+| the prior internal memory system Component | File | 8gent v2 Equivalent |
 |----------------------|------|---------------------|
 | `MemoryManager` | `lib/memory/manager.ts` (1608 lines) | `packages/memory/index.ts` (MemoryManagerV2) |
 | Memory types | `lib/memory/types.ts` (585 lines) | `packages/memory/types.ts` |
