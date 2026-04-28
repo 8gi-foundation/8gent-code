@@ -9,6 +9,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-04-28
+
+### Performance
+
+- **Faster cold start.** Removed dead `PlanValidateLoop` construction from the `Agent` constructor — the field was assigned but never invoked at runtime, only referenced in a comment. Saves an import chain (tree-sitter + 3 sub-modules) and ~50ms per Agent instantiation.
+- **Trimmed intro banner.** Total reveal cut from 1900ms to 1300ms (-31%) for snappier launch. The cascade still feels intentional, just less of a wait.
+- **8GENT_LITE=1 env flag.** Skips the intro banner entirely. Reserved for future lazy-init of auxiliary subsystems (kernel, heartbeat, sessionSync) inspired by jcode's lean-by-default philosophy. v0.11.1 wires the flag; v0.12.0 will lazy-init the heavies.
+
+### Notes
+
+- jcode (Rust) hits ~28 MB RAM and sub-100ms cold start because it ships native binaries with no V8/Bun bootstrap. 8gent-code on Bun has a structural floor around 100ms, but there's still a lot of fat we can trim before claiming we're done.
+
 ## [0.11.0] - 2026-04-28
 
 ### Added
