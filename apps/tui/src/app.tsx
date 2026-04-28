@@ -2993,10 +2993,20 @@ export function App({
 					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
+							// Tell the agent voice chat is OFF so it stops adding the
+							// "you're in a phone call" segment to its system prompt.
+							import("../../../packages/ai/tools").then((m) =>
+								m.setRuntimeParams({ voiceChatActive: false }),
+							);
 						} else {
 							voiceChat.start().catch((err: Error) => {
 								addSystemMessage(`Voice chat error: ${err.message}`);
 							});
+							// Tell the agent voice chat is ON so it stops apologising for
+							// being "text-only" — its replies will be spoken via TTS.
+							import("../../../packages/ai/tools").then((m) =>
+								m.setRuntimeParams({ voiceChatActive: true }),
+							);
 						}
 					} else if (args[0] === "record" || args[0] === "listen" || args[0] === "stt") {
 						voice.toggle().catch((err: Error) => {

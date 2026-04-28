@@ -50,6 +50,10 @@ export interface RuntimeParams {
 	stepCount: number;
 	// Appendable context
 	appendedContext: string[];
+	// Voice chat: when true, the system prompt warns the agent it's in a
+	// voice loop (STT in, TTS out) so it doesn't apologise for being text-only.
+	// Set by the TUI when voice chat mode toggles on/off.
+	voiceChatActive: boolean;
 }
 
 const DEFAULT_RUNTIME: RuntimeParams = {
@@ -68,6 +72,7 @@ const DEFAULT_RUNTIME: RuntimeParams = {
 	messageHistoryLength: 0,
 	stepCount: 0,
 	appendedContext: [],
+	voiceChatActive: false,
 };
 
 let _runtime: RuntimeParams = { ...DEFAULT_RUNTIME };
