@@ -114,3 +114,5 @@ packages/eight-bdh/data/*.jsonl
 packages/eight-bdh/trainer/local/*.log
 packages/eight-bdh/trainer/local/phase-0-train-log.json
 packages/eight-bdh/trainer/local/phase-0-full-run.log
+packages/eight-bdh/trainer/local/phase-1-explore-train-log.json
+packages/eight-bdh/trainer/local/phase-1-explore-full-run.log
