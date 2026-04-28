@@ -1349,6 +1349,100 @@ async function testTuiLayoutVisualiserFitsParent(): Promise<SmokeResult> {
 }
 
 // ============================================================================
+// M. TUI animations (typewriter reveal used by OnboardingScreen)
+// ============================================================================
+
+async function testTypewriterProgresses(): Promise<SmokeResult> {
+	return timeIt("tui-anim/typewriter-progresses", async () => {
+		const { computeTypewriterCount, deriveTypewriterView } = await import(
+			"../apps/tui/src/hooks/useTypewriter"
+		);
+		const text = "Hello, eight.";
+		const msPerChar = 28;
+		// At t = msPerChar * 5, exactly 5 chars should be revealed.
+		const count = computeTypewriterCount(msPerChar * 5, text.length, msPerChar, true);
+		assert(
+			count === 5,
+			`expected count=5 after 5 ticks, got ${count}`,
+		);
+		const view = deriveTypewriterView(text, count, true);
+		assert(
+			view.displayed === text.slice(0, 5),
+			`displayed should be first 5 chars, got "${view.displayed}"`,
+		);
+		assert(view.isDone === false, "should not be done at 5/13 chars");
+		// At t = msPerChar * text.length, the reveal completes.
+		const fullCount = computeTypewriterCount(
+			msPerChar * text.length,
+			text.length,
+			msPerChar,
+			true,
+		);
+		const fullView = deriveTypewriterView(text, fullCount, true);
+		assert(fullView.isDone === true, "should be done after full duration");
+		assert(
+			fullView.displayed === text,
+			`displayed should equal fullText, got "${fullView.displayed}"`,
+		);
+		// Beyond the end, count stays clamped at fullText.length.
+		const overshoot = computeTypewriterCount(
+			msPerChar * text.length * 10,
+			text.length,
+			msPerChar,
+			true,
+		);
+		assert(
+			overshoot === text.length,
+			`overshoot should clamp to ${text.length}, got ${overshoot}`,
+		);
+		return { ok: true, detail: `5/${text.length} at t=${msPerChar * 5}ms` };
+	});
+}
+
+async function testTypewriterSkip(): Promise<SmokeResult> {
+	return timeIt("tui-anim/typewriter-skip", async () => {
+		const { deriveTypewriterView } = await import(
+			"../apps/tui/src/hooks/useTypewriter"
+		);
+		const text = "Pick a name";
+		// Mid-reveal state: count=3.
+		const partial = deriveTypewriterView(text, 3, true);
+		assert(partial.displayed === "Pic", `partial got "${partial.displayed}"`);
+		assert(partial.isDone === false, "partial should not be done");
+		// Simulating skip(): caller jumps count to fullText.length. Re-derive.
+		const skipped = deriveTypewriterView(text, text.length, true);
+		assert(
+			skipped.displayed === text,
+			`skipped should show full text, got "${skipped.displayed}"`,
+		);
+		assert(skipped.isDone === true, "skipped should be done");
+		return { ok: true, detail: "skip jumps count to fullText.length" };
+	});
+}
+
+async function testTypewriterDisabled(): Promise<SmokeResult> {
+	return timeIt("tui-anim/typewriter-disabled", async () => {
+		const { computeTypewriterCount, deriveTypewriterView } = await import(
+			"../apps/tui/src/hooks/useTypewriter"
+		);
+		const text = "Disabled path returns full text immediately.";
+		// computeTypewriterCount with enabled=false ignores elapsed time.
+		const count = computeTypewriterCount(0, text.length, 28, false);
+		assert(
+			count === text.length,
+			`disabled count should be ${text.length}, got ${count}`,
+		);
+		const view = deriveTypewriterView(text, 0, false);
+		assert(
+			view.displayed === text,
+			`disabled view should equal fullText, got "${view.displayed}"`,
+		);
+		assert(view.isDone === true, "disabled view should be done");
+		return { ok: true, detail: "enabled=false short-circuits to full text" };
+	});
+}
+
+// ============================================================================
 // Output
 // ============================================================================
 
@@ -1518,6 +1612,11 @@ async function main(): Promise<void> {
 	results.push(await testTuiLayoutSidebarShrinks());
 	results.push(await testTuiLayoutBreakLongTokensSeam());
 	results.push(await testTuiLayoutVisualiserFitsParent());
+
+	// M. TUI animations (typewriter reveal in OnboardingScreen)
+	results.push(await testTypewriterProgresses());
+	results.push(await testTypewriterSkip());
+	results.push(await testTypewriterDisabled());
 
 	// Bonus
 	results.push(await testRoleRegistry());
