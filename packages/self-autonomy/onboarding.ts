@@ -13,6 +13,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { getVault } from "../secrets";
+import {
+	loadSettings,
+	saveSettings,
+	DEFAULT_SETTINGS,
+} from "../settings/index.js";
 
 const execAsync = promisify(exec);
 
@@ -100,7 +105,25 @@ export type OnboardingStep =
 	| "telegram"
 	| "github"
 	| "mcps"
+	| "provider-check-ollama"
+	| "provider-check-lmstudio"
+	| "provider-check-apfel"
+	| "agent-name-orchestrator"
+	| "agent-name-engineer"
+	| "agent-name-qa"
 	| "confirmation";
+
+export type ProviderCheckId = "ollama" | "lmstudio" | "apfel";
+
+/** Per-provider install hints surfaced when a provider check fails. */
+export const PROVIDER_INSTALL_HINTS: Record<ProviderCheckId, string> = {
+	ollama:
+		"Install: https://ollama.ai (or `brew install ollama && ollama serve`). Then `ollama pull qwen3.6:27b`.",
+	lmstudio:
+		"Install: https://lmstudio.ai. Open it, load `google/gemma-4-26b-a4b`, click Start Server (port 1234).",
+	apfel:
+		"Install: `brew install arthur-ficial/tap/apfel`. Run: `apfel --serve --port 11500`.",
+};
 
 export type CommunicationStyle =
 	| "concise" // Just the facts
@@ -121,11 +144,15 @@ export interface OnboardingQuestion {
 	step: OnboardingStep;
 	question: string;
 	/**
-	 * Render mode. "select" means the renderer should show a scrollable
-	 * arrow-key list with number-key shortcuts. "text" (default) is a free-text
-	 * prompt that goes through the normal CommandInput.
+	 * Render mode.
+	 *   "text" (default)       — free-text prompt via CommandInput.
+	 *   "select"               — scrollable arrow-key list + digit shortcut.
+	 *   "providerCheck"        — probes a local inference engine and shows a
+	 *                            status row. Carries `provider` + `installHint`.
+	 *   "agentName"            — renames an agent role. Carries `roleKey` so
+	 *                            the renderer can show the current default.
 	 */
-	kind?: "text" | "select";
+	kind?: "text" | "select" | "providerCheck" | "agentName";
 	/**
 	 * Structured choices for kind: "select". When present, the renderer uses
 	 * these to build the list. The free-text {options} array stays around for
@@ -133,6 +160,25 @@ export interface OnboardingQuestion {
 	 */
 	choices?: OnboardingChoice[];
 	options?: string[];
+	/**
+	 * For kind === "providerCheck": which local engine to probe. The renderer
+	 * looks this up against `probeProviders()` and shows a status row.
+	 */
+	provider?: ProviderCheckId;
+	/**
+	 * For kind === "providerCheck": message shown if the engine isn't running.
+	 * Defaults to PROVIDER_INSTALL_HINTS[provider] when present.
+	 */
+	installHint?: string;
+	/**
+	 * For kind === "agentName": which role's display name we are setting.
+	 * Maps onto `settings.agents.names[roleKey]`.
+	 */
+	roleKey?: "orchestrator" | "engineer" | "qa";
+	/**
+	 * Default value to pre-fill / accept on Enter. Used by `agentName` steps.
+	 */
+	default?: string;
 	validator?: (answer: string) => boolean;
 	processor: (answer: string, user: UserConfig) => UserConfig;
 }
@@ -148,40 +194,134 @@ export interface AutoDetected {
 }
 
 // ============================================
+// Internal helpers
+// ============================================
+
+/**
+ * Persist a user-chosen agent display name to ~/.8gent/settings.json.
+ * Reads + merges so concurrent settings writes (e.g. /settings view) stay
+ * consistent. Best-effort: failures are swallowed by saveSettings.
+ */
+function persistAgentName(
+	roleKey: "orchestrator" | "engineer" | "qa",
+	name: string,
+): void {
+	const trimmed = (name ?? "").trim();
+	if (!trimmed) return;
+	try {
+		const current = loadSettings();
+		const next = {
+			...current,
+			agents: {
+				...current.agents,
+				names: {
+					...current.agents.names,
+					[roleKey]: trimmed,
+				},
+			},
+		};
+		saveSettings(next);
+	} catch {
+		// Best-effort - settings layer is forgiving by design.
+	}
+}
+
+// ============================================
 // Onboarding Questions
 // ============================================
 
 const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
+	// ── 1. Welcome banner ────────────────────────────────────
+	// Read-only summary of what auto-detect saw. The user just presses Enter
+	// (or picks the single "Continue" item) to advance. We keep this as a
+	// `select` with one option so the renderer treats it consistently with
+	// other steps and the user has an obvious affordance.
 	{
-		step: "identity",
+		step: "language",
 		question:
 			"Good day. I'm 8gent, The Infinite Gentleman.\n\n" +
-			"Here's what I detected:\n" +
+			"Here's what I detected from your environment:\n" +
 			"  Name: {detected_name}\n" +
 			"  Email: {detected_email}\n" +
 			"  GitHub: {detected_github}\n" +
 			"  Provider: {detected_provider}\n" +
 			"  Models: {detected_models}\n\n" +
-			"Press Enter to accept, or type your preferred name:",
+			"I'll walk you through a short setup so I can serve you properly.",
+		kind: "select",
+		choices: [{ label: "Press Enter to begin", value: "ok" }],
+		options: ["ok", "yes", "y"],
+		processor: (_answer, user) => ({
+			...user,
+			completedSteps: [...user.completedSteps, "language"],
+		}),
+	},
+	// ── 2. Your name ─────────────────────────────────────────
+	// Collects ONLY the user's name. Earlier versions of this step silently
+	// completed identity / role / projects / model / language / telegram /
+	// github / mcps in one Enter press; that's been broken back into proper
+	// per-decision steps below.
+	{
+		step: "identity",
+		question: "What should I call you? (default: {detected_name})",
 		processor: (answer, user) => {
 			const name = answer.trim() || user.identity.name;
 			return {
 				...user,
 				identity: { ...user.identity, name: name || user.identity.name },
-				completedSteps: [
-					...user.completedSteps,
-					"identity",
-					"role",
-					"projects",
-					"model",
-					"language",
-					"telegram",
-					"github",
-					"mcps",
-				],
+				completedSteps: [...user.completedSteps, "identity"],
 			};
 		},
 	},
+	// ── 3. Your role ─────────────────────────────────────────
+	{
+		step: "role",
+		question: "What best describes you?",
+		kind: "select",
+		choices: [
+			{ label: "Engineer", value: "engineer", description: "Builder of software" },
+			{ label: "Designer", value: "designer", description: "Crafter of interfaces" },
+			{ label: "Founder", value: "founder", description: "Wearer of many hats" },
+			{ label: "Hobbyist", value: "hobbyist", description: "Tinkerer, learner" },
+			{ label: "Other", value: "other", description: "Something else entirely" },
+		],
+		options: ["engineer", "designer", "founder", "hobbyist", "other"],
+		processor: (answer, user) => {
+			const role = answer.trim().toLowerCase() || "engineer";
+			return {
+				...user,
+				identity: { ...user.identity, role },
+				completedSteps: [...user.completedSteps, "role"],
+			};
+		},
+	},
+	// ── 4. Project description ───────────────────────────────
+	{
+		step: "projects",
+		question:
+			"What are you working on? (one short line, optional - press Enter to skip)",
+		processor: (answer, user) => {
+			const desc = answer.trim();
+			if (!desc) {
+				return {
+					...user,
+					completedSteps: [...user.completedSteps, "projects"],
+				};
+			}
+			return {
+				...user,
+				projects: {
+					...user.projects,
+					primary: desc,
+					all: user.projects.all.includes(desc)
+						? user.projects.all
+						: [...user.projects.all, desc],
+					descriptions: { ...user.projects.descriptions, [desc]: desc },
+				},
+				completedSteps: [...user.completedSteps, "projects"],
+			};
+		},
+	},
+	// ── 5. Communication style ───────────────────────────────
 	{
 		step: "communication",
 		question: "How should I communicate with you?",
@@ -209,6 +349,120 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 				...user,
 				identity: { ...user.identity, communicationStyle: style },
 				completedSteps: [...user.completedSteps, "communication"],
+			};
+		},
+	},
+	// ── 6-8. Provider checks ─────────────────────────────────
+	// Each step probes one local inference engine. The renderer calls
+	// probeProviders() once on entry, shows status + install hint if missing,
+	// and never blocks the flow. The processor records the result on user
+	// config so /diagnose can surface it later.
+	{
+		step: "provider-check-ollama",
+		question: "Provider check: Ollama (local LLM runtime)",
+		kind: "providerCheck",
+		provider: "ollama",
+		installHint: PROVIDER_INSTALL_HINTS.ollama,
+		processor: (answer, user) => {
+			const live = answer === "live";
+			return {
+				...user,
+				integrations: {
+					...user.integrations,
+					ollama: {
+						...user.integrations.ollama,
+						available: live || user.integrations.ollama.available,
+					},
+				},
+				completedSteps: [...user.completedSteps, "provider-check-ollama"],
+			};
+		},
+	},
+	{
+		step: "provider-check-lmstudio",
+		question: "Provider check: LM Studio (local LLM runtime)",
+		kind: "providerCheck",
+		provider: "lmstudio",
+		installHint: PROVIDER_INSTALL_HINTS.lmstudio,
+		processor: (answer, user) => {
+			const live = answer === "live";
+			return {
+				...user,
+				integrations: {
+					...user.integrations,
+					lmstudio: {
+						...user.integrations.lmstudio,
+						available: live || user.integrations.lmstudio.available,
+					},
+				},
+				completedSteps: [...user.completedSteps, "provider-check-lmstudio"],
+			};
+		},
+	},
+	{
+		step: "provider-check-apfel",
+		question: "Provider check: apfel (Apple Foundation Model)",
+		kind: "providerCheck",
+		provider: "apfel",
+		installHint: PROVIDER_INSTALL_HINTS.apfel,
+		processor: (_answer, user) => ({
+			...user,
+			completedSteps: [...user.completedSteps, "provider-check-apfel"],
+		}),
+	},
+	// ── 9-11. Agent naming ───────────────────────────────────
+	// Persist user-chosen display names to settings.agents.names.{role}. The
+	// TabBar (useWorkspaceTabs) and role-registry system prompt builder both
+	// read these via resolveRoleName(). Pressing Enter on an empty input keeps
+	// the current default.
+	{
+		step: "agent-name-orchestrator",
+		question:
+			"Name your Orchestrator agent. (default: Orchestrator)\n\n" +
+			"Press Enter to keep, or type a custom name (e.g. Architect, Plato):",
+		kind: "agentName",
+		roleKey: "orchestrator",
+		default: "Orchestrator",
+		processor: (answer, user) => {
+			const chosen = answer.trim() || DEFAULT_SETTINGS.agents.names.orchestrator;
+			persistAgentName("orchestrator", chosen);
+			return {
+				...user,
+				completedSteps: [...user.completedSteps, "agent-name-orchestrator"],
+			};
+		},
+	},
+	{
+		step: "agent-name-engineer",
+		question:
+			"Name your Engineer agent. (default: Engineer)\n\n" +
+			"Press Enter to keep, or type a custom name (e.g. Coder, Hephaestus):",
+		kind: "agentName",
+		roleKey: "engineer",
+		default: "Engineer",
+		processor: (answer, user) => {
+			const chosen = answer.trim() || DEFAULT_SETTINGS.agents.names.engineer;
+			persistAgentName("engineer", chosen);
+			return {
+				...user,
+				completedSteps: [...user.completedSteps, "agent-name-engineer"],
+			};
+		},
+	},
+	{
+		step: "agent-name-qa",
+		question:
+			"Name your QA agent. (default: QA)\n\n" +
+			"Press Enter to keep, or type a custom name (e.g. Reviewer, Cassandra):",
+		kind: "agentName",
+		roleKey: "qa",
+		default: "QA",
+		processor: (answer, user) => {
+			const chosen = answer.trim() || DEFAULT_SETTINGS.agents.names.qa;
+			persistAgentName("qa", chosen);
+			return {
+				...user,
+				completedSteps: [...user.completedSteps, "agent-name-qa"],
 			};
 		},
 	},
@@ -351,10 +605,15 @@ const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 		question:
 			"Excellent. All set:\n\n" +
 			"- Name: {name}\n" +
+			"- Role: {role}\n" +
+			"- Project: {project}\n" +
 			"- Style: {style}\n" +
 			"- Provider: {provider}\n" +
-			"- Agent: {agent_name}\n" +
-			"- Voice: {voice}\n\n" +
+			"- 8gent: {agent_name}\n" +
+			"- Voice: {voice}\n" +
+			"- Orchestrator: {agent_orchestrator}\n" +
+			"- Engineer: {agent_engineer}\n" +
+			"- QA: {agent_qa}\n\n" +
 			"Ready to begin?",
 		kind: "select",
 		choices: [
@@ -523,6 +782,15 @@ export class OnboardingManager {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Total number of questions in the onboarding flow. Used by the renderer
+	 * to display "Step X of N". Stays accurate when questions are added or
+	 * removed without anyone updating a hardcoded constant.
+	 */
+	getTotalSteps(): number {
+		return ONBOARDING_QUESTIONS.length;
 	}
 
 	/**
@@ -803,6 +1071,26 @@ export class OnboardingManager {
 			this.user.integrations.ollama.models.slice(0, 3).join(", ") || "none found",
 		);
 		text = text.replace("{agent_name}", (this.user.preferences.voice as any)?.agentName || "Eight");
+
+		// Agent role names — pull straight from settings so the recap reflects
+		// what the user just typed in steps 9-11.
+		try {
+			const s = loadSettings();
+			const names = s?.agents?.names ?? DEFAULT_SETTINGS.agents.names;
+			text = text.replace("{agent_orchestrator}", names.orchestrator);
+			text = text.replace("{agent_engineer}", names.engineer);
+			text = text.replace("{agent_qa}", names.qa);
+		} catch {
+			text = text.replace(
+				"{agent_orchestrator}",
+				DEFAULT_SETTINGS.agents.names.orchestrator,
+			);
+			text = text.replace(
+				"{agent_engineer}",
+				DEFAULT_SETTINGS.agents.names.engineer,
+			);
+			text = text.replace("{agent_qa}", DEFAULT_SETTINGS.agents.names.qa);
+		}
 
 		return { ...question, question: text };
 	}

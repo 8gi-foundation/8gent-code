@@ -53,4 +53,20 @@ export const DEFAULT_SETTINGS: Settings = {
 			boredomThresholdMs: 30000,
 		},
 	},
+	agents: {
+		// Default names match the canonical role-registry roles. Users can
+		// rename these during onboarding (steps 9-11) or via /settings later.
+		// The names show up in:
+		//   - TabBar tab titles (apps/tui/src/hooks/useWorkspaceTabs.ts)
+		//   - Agent system prompts (packages/orchestration/role-registry.ts via
+		//     resolveRoleName())
+		//   - Status bar role indicator
+		// Renaming is purely a display-layer change — the role itself stays the
+		// canonical "orchestrator" / "engineer" / "qa" key everywhere internally.
+		names: {
+			orchestrator: "Orchestrator",
+			engineer: "Engineer",
+			qa: "QA",
+		},
+	},
 };
