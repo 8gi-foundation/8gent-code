@@ -61,7 +61,56 @@ function resolveLaunchSound(): string | null {
 }
 
 /**
- * Play the launch sound once, fire-and-forget. Volume 65% via `afplay -v`.
+ * Tracked afplay child for the intro music. Module-level so we can
+ * kill it on TUI exit, on banner dismiss, or via the /quiet command.
+ *
+ * NOT detached, NOT unref'd — the child dies with the TUI. Earlier
+ * versions used `{ detached: true }` + `proc.unref()` which made the
+ * music outlive even Ctrl+C; that was the bug.
+ */
+import type { ChildProcess } from "node:child_process";
+
+let introProc: ChildProcess | null = null;
+let exitHooksInstalled = false;
+
+function stopIntroSound(): void {
+	const proc = introProc;
+	introProc = null;
+	if (!proc) return;
+	try {
+		proc.kill("SIGTERM");
+	} catch {
+		/* already gone */
+	}
+}
+
+function installIntroExitHooks(): void {
+	if (exitHooksInstalled) return;
+	exitHooksInstalled = true;
+	process.on("exit", stopIntroSound);
+	process.on("SIGINT", () => {
+		stopIntroSound();
+		process.exit(130);
+	});
+	process.on("SIGTERM", () => {
+		stopIntroSound();
+		process.exit(143);
+	});
+	process.on("uncaughtException", (err) => {
+		stopIntroSound();
+		throw err;
+	});
+}
+
+/**
+ * Play the launch sound once. Volume 15% (0.15) via `afplay -v` — the
+ * launch instrumental is mastered loud, so we keep it well below the
+ * splash text reveal and any narration we layer on top later.
+ *
+ * The child IS tracked and dies with the TUI under any exit path.
+ * Banner dismiss also calls stopIntroSound() so the music goes away
+ * once the splash is gone.
+ *
  * `ui.introSound` setting still wins if the user set an absolute path.
  * Non-macOS: silent.
  */
@@ -84,20 +133,27 @@ function playIntroSound(): void {
 	}
 	if (!path) return;
 	try {
-		// `afplay -v` accepts a 0–255 float; 1.0 = 100%, 0.4 ≈ 40%.
-		// Kept low — the launch instrumental should sit under, not over,
-		// the splash text reveal and any narration we layer on later.
-		const proc = spawn("afplay", ["-v", "0.4", path], {
+		installIntroExitHooks();
+		// Kill any prior intro proc — should never happen but defensive.
+		stopIntroSound();
+		const proc = spawn("afplay", ["-v", "0.15", path], {
 			stdio: "ignore",
-			detached: true,
 		});
-		proc.unref();
+		proc.on("exit", () => {
+			if (introProc === proc) introProc = null;
+		});
 		proc.on("error", () => {
-			/* missing afplay or denied — silently ignore */
+			if (introProc === proc) introProc = null;
 		});
+		introProc = proc;
 	} catch {
 		// best-effort; never break the banner
 	}
+}
+
+/** Exposed so app.tsx and slash commands can kill the music on demand. */
+export function stopIntroMusic(): void {
+	stopIntroSound();
 }
 
 // Block-letter "8GENT" - 5 rows tall, fits in ~46 cols.
@@ -146,6 +202,14 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 		playIntroSound();
 	}, []);
 
+	// Single dismiss handler — always kills the music, then runs onDone.
+	// Without this the slow instrumental would outlive the splash and have
+	// no in-TUI off switch except the /quiet slash command.
+	const dismiss = () => {
+		stopIntroSound();
+		onDone();
+	};
+
 	useEffect(() => {
 		const start = performance.now();
 		const tick = setInterval(() => {
@@ -153,7 +217,7 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 			setElapsed(ms);
 			if (ms >= T_DONE) {
 				clearInterval(tick);
-				onDone();
+				dismiss();
 			}
 		}, 40);
 		return () => clearInterval(tick);
@@ -161,7 +225,7 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 
 	useInput(() => {
 		// Any key dismisses early.
-		onDone();
+		dismiss();
 	});
 
 	if (elapsed >= T_DONE) return null;

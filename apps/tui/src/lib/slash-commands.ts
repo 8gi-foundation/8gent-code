@@ -46,7 +46,8 @@ export type SlashCommand =
 	| "router"
 	| "rename"
 	| "spawn"
-	| "settings";
+	| "settings"
+	| "quiet";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -315,6 +316,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Open settings view (toggle voice, performance, providers, models)",
 		usage: "/settings",
+	},
+	{
+		name: "quiet",
+		aliases: ["mute", "shut", "silence"],
+		description: "Stop the launch instrumental immediately (kills any in-flight intro music)",
+		usage: "/quiet",
 	},
 ];
 
