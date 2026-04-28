@@ -19,6 +19,45 @@
 
 ---
 
+## 0.5 Use case framing — implicit evolution (chair amendment 2026-04-28)
+
+The original framing of this spec was prescriptive: "8gent 0.1 is a routing core. Train it on 50k labelled routing triples. Measure it as a router. Ship when it beats the heuristic by 10pp."
+
+**Chair amendment 2026-04-28:** the model's purpose is left open. Phase 1 is not a labelled-corpus-driven router-training programme. Phase 1 is **implicit evolution on the harness's natural data stream**.
+
+The principle: do not explicitly define what the brain is for. Let it absorb the actual life of the harness — real session traces, real decisions, real audit logs, real conversations — and let its capabilities surface from what the data shapes it into. Quality of the stream is what matters, not curation against a hypothesised use case.
+
+What this means in practice:
+
+- **Corpus is the harness's reality, not a synthetic 50k.** Replays from `~/.8gent/sessions/`, audit traces from G8WAY, boardroom transcripts, 8gent.world content, anything that already exists in the world we want the brain to live in. PII scrub still mandatory; curation by intent is not.
+- **No hard Phase 1 ship gates against the routing rubric.** The +10pp F1, the gold-set kappa, the per-concept synapse precision targets in section 4 stay alive **only** for the moment we promote the model to a default-on path that affects user behaviour. During the exploratory phase, the ship-gate concept does not apply because there is nothing being shipped.
+- **No fixed ontology.** Section 4.4's 120-concept vocabulary becomes a probe vocabulary, not a prediction target. After training we run the probe runner and see what concepts the synapses actually carry. The ontology is descriptive of the model, not prescriptive over it.
+- **Post-training capability discovery.** Once trained on the harness stream, we probe what the model is unexpectedly good at: completing audit traces, suggesting next decisions, summarising sessions, answering "what just happened" — whatever surfaces. Capabilities that surface are documented and (selectively) wired into the harness behind feature flags.
+- **The routing use case stays as a hypothesis, not a commitment.** If post-training probing shows the model routes well, great — Throne PRD W1 wires it up. If it shows the model is better at, say, session summarisation, we wire that instead. Or both. Or neither.
+
+What stays unchanged from the original spec:
+
+- BDH architecture (paper-faithful, single-head next-token CE, no concept supervision).
+- 0% closed-weight teacher contamination. Apache 2.0 / MIT only.
+- Provenance manifest on every byte of corpus. PII scrub plus k-anonymity.
+- License compliance (NOTICES.md, the MIT-Apache combination).
+- Constant-memory inference, byte-level vocab=256.
+- The original boardroom commitments around audit-as-evidence, monosemanticity-as-emergent, and the L5 amendment process for any change at the constitutional layer.
+
+What is consciously deferred:
+
+- The 200-example dual-labelled gold set as a Phase 1 entry gate. It still has value as one possible probe surface, but it does not gate corpus generation or training.
+- The eval harness's hard ship gates. The harness as infrastructure (kappa, probe, holdout-discipline) still gets built per the Phase 1 prereq PRD, but its outputs become diagnostic, not gating.
+- The 10pp F1 target vs heuristic. The heuristic baseline remains useful as a comparison artefact; it does not function as a release gate during exploration.
+
+**Why this is the right call.** Phase 0 results showed two things: (1) BDH at 5M learns its corpus extremely fast, capacity is not the bottleneck, and (2) the rule-based corpus produced a model with no semantic content because the labels were random. Both findings point in the same direction: spend the energy on data quality, not on schema design. The harness already produces high-quality data every session. Use that.
+
+**Reversibility.** This amendment is reversible at L5. If the implicit-evolution approach fails to produce a useful capability after a meaningful amount of training (say, 3 to 5 Phase 1 runs across distinct corpus snapshots), the boardroom may reinstate the explicit routing-rubric path.
+
+**Authority:** Chair (James Spalding) decision 2026-04-28, recorded against this spec as a superseding framing for sections 4 (corpus), 9 (success metrics), and the eval-harness PRD's gate semantics. Sections 1, 2, 3, 5, 6, 7, 8, 10, 11 remain as written. Section 4.4b (role-name targets) still applies wherever the corpus DOES contain decision triples, but no longer obligates the corpus to be made of decision triples.
+
+---
+
 ## 1. What is 8gent 0.1
 
 8gent 0.1 is the **first custom-trained model in the 8gent family** and the first model in the new `8gent-*` namespace (distinct from the existing `eight-1.0-*` generalist line).
