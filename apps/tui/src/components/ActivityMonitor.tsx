@@ -12,6 +12,7 @@
 import { Box, Text } from "ink";
 import React, { useState, useEffect, useRef } from "react";
 import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
+import { ThinkingVisualizer } from "./ThinkingVisualizer.js";
 
 // ── Activity Types ──────────────────────────────────────────────────
 
@@ -306,7 +307,11 @@ export function ActivityMonitor({
 			>
 				{visibleEntries.length === 0 ? (
 					<Box justifyContent="center" alignItems="center" flexGrow={1}>
-						<Text dimColor>{showAnimations ? `Thinking${dots}` : "Thinking…"}</Text>
+						{showAnimations ? (
+							<ThinkingVisualizer label={`Thinking${dots}`} width={70} height={6} active />
+						) : (
+							<Text dimColor>Thinking…</Text>
+						)}
 					</Box>
 				) : (
 					visibleEntries.map((entry, i) => {

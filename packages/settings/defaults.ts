@@ -31,5 +31,12 @@ export const DEFAULT_SETTINGS: Settings = {
 		lmstudio: { baseURL: "http://localhost:1234/v1" },
 		openrouter: { baseURL: "https://openrouter.ai/api/v1" },
 	},
-	ui: { theme: "amber" },
+	ui: {
+		theme: "amber",
+		thinkingVisualiser: {
+			enabled: true,
+			operatorRotationMs: 8000,
+			boredomThresholdMs: 30000,
+		},
+	},
 };
