@@ -140,12 +140,13 @@ export class Agent {
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
 
-		// Lite mode: opt-in cold-start trim. Skips the auxiliary subsystems
-		// that are background-only (kernel training, heartbeat agents, Convex
-		// session sync, AST indexing, orchestrator bus). The agent still
-		// answers turns; it just won't sync, learn, or self-heal until you
-		// remove the flag. Inspired by jcode's "lean by default" philosophy.
-		const LITE = process.env["8GENT_LITE"] === "1";
+		// v0.12.0: lite mode is now the default. The agent boots fast and lean.
+		// Opt back into the heavy auxiliaries (kernel training, heartbeat agents,
+		// Convex sync, AST pre-indexing) by setting 8GENT_FULL=1 — or per-feature
+		// via the granular env flags below.
+		// Compat: 8GENT_LITE=0 explicitly forces the old "everything on" behaviour.
+		const LITE =
+			process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1" ? false : true;
 
 		// Set working directory for hooks
 		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
