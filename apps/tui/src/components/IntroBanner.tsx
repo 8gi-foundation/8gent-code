@@ -68,19 +68,101 @@ function resolveLaunchSound(): string | null {
  * versions used `{ detached: true }` + `proc.unref()` which made the
  * music outlive even Ctrl+C; that was the bug.
  */
+import { execSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
 let introProc: ChildProcess | null = null;
+let introPath: string | null = null;
+let introStartedAt = 0;
+const INTRO_VOLUME = 0.15;
 let exitHooksInstalled = false;
+
+/** True if `ffplay` is on $PATH — needed for the proper afade-based
+ * gradual fade-out. afplay (default macOS player) has no fade or seek
+ * support so we fall back to an abrupt cut without ffmpeg. */
+function hasFfplay(): boolean {
+	try {
+		execSync("command -v ffplay", { stdio: "ignore", timeout: 1500 });
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 function stopIntroSound(): void {
 	const proc = introProc;
 	introProc = null;
+	introPath = null;
 	if (!proc) return;
 	try {
 		proc.kill("SIGTERM");
 	} catch {
 		/* already gone */
+	}
+}
+
+/**
+ * Gradually fade out the intro music over `durationMs`, then stop.
+ * Strategy: kill the current afplay, then immediately spawn an
+ * `ffplay` continuation that picks up at the same position and applies
+ * an `afade=t=out` filter for a smooth fade. Falls back to abrupt cut
+ * if ffplay isn't available — better silence than a broken stream.
+ *
+ * Idempotent: calling while a fade is already in flight is a no-op.
+ */
+function fadeOutIntroSound(durationMs = 2400): void {
+	const proc = introProc;
+	const path = introPath;
+	if (!proc || !path) return;
+	const elapsedSec = (Date.now() - introStartedAt) / 1000;
+	if (!hasFfplay()) {
+		stopIntroSound();
+		return;
+	}
+	try {
+		proc.kill("SIGTERM");
+	} catch {
+		/* already gone */
+	}
+	introProc = null;
+	introPath = null;
+	const fadeSec = Math.max(0.5, durationMs / 1000);
+	try {
+		const fadeProc = spawn(
+			"ffplay",
+			[
+				"-nodisp",
+				"-autoexit",
+				"-loglevel",
+				"quiet",
+				"-ss",
+				String(elapsedSec),
+				"-i",
+				path,
+				"-af",
+				`volume=${INTRO_VOLUME},afade=t=out:st=0:d=${fadeSec}`,
+				"-t",
+				String(fadeSec),
+			],
+			{ stdio: "ignore" },
+		);
+		introProc = fadeProc;
+		introPath = path;
+		introStartedAt = Date.now() - elapsedSec * 1000;
+		fadeProc.on("exit", () => {
+			if (introProc === fadeProc) {
+				introProc = null;
+				introPath = null;
+			}
+		});
+		fadeProc.on("error", () => {
+			if (introProc === fadeProc) {
+				introProc = null;
+				introPath = null;
+			}
+		});
+	} catch {
+		/* ffplay spawn failed — leave silence, afplay already killed */
 	}
 }
 
@@ -136,24 +218,38 @@ function playIntroSound(): void {
 		installIntroExitHooks();
 		// Kill any prior intro proc — should never happen but defensive.
 		stopIntroSound();
-		const proc = spawn("afplay", ["-v", "0.15", path], {
+		const proc = spawn("afplay", ["-v", String(INTRO_VOLUME), path], {
 			stdio: "ignore",
 		});
 		proc.on("exit", () => {
-			if (introProc === proc) introProc = null;
+			if (introProc === proc) {
+				introProc = null;
+				introPath = null;
+			}
 		});
 		proc.on("error", () => {
-			if (introProc === proc) introProc = null;
+			if (introProc === proc) {
+				introProc = null;
+				introPath = null;
+			}
 		});
 		introProc = proc;
+		introPath = path;
+		introStartedAt = Date.now();
 	} catch {
 		// best-effort; never break the banner
 	}
 }
 
-/** Exposed so app.tsx and slash commands can kill the music on demand. */
-export function stopIntroMusic(): void {
-	stopIntroSound();
+/** Exposed so app.tsx and slash commands can stop the music on demand.
+ * Default behaviour fades over 2.4s; pass `{ abrupt: true }` for an
+ * instant kill (e.g. when the TUI itself is exiting). */
+export function stopIntroMusic(opts?: { abrupt?: boolean; durationMs?: number }): void {
+	if (opts?.abrupt) {
+		stopIntroSound();
+		return;
+	}
+	fadeOutIntroSound(opts?.durationMs ?? 2400);
 }
 
 // Block-letter "8GENT" - 5 rows tall, fits in ~46 cols.
@@ -202,11 +298,13 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 		playIntroSound();
 	}, []);
 
-	// Single dismiss handler — always kills the music, then runs onDone.
-	// Without this the slow instrumental would outlive the splash and have
-	// no in-TUI off switch except the /quiet slash command.
+	// Single dismiss handler — gracefully fades out the music, then runs
+	// onDone. The fade overlaps with the splash leaving so by the time
+	// the user is in chat, the music is already half-faded. Without this
+	// the slow instrumental would either outlive the splash or get cut
+	// abruptly mid-note.
 	const dismiss = () => {
-		stopIntroSound();
+		fadeOutIntroSound(2400);
 		onDone();
 	};
 
