@@ -297,7 +297,61 @@ const CATEGORIES: Category[] = [
 				description: "Reserved for future themes. Default amber.",
 				kind: "text",
 				get: (s) => s.ui.theme,
-				set: (s, v) => ({ ...s, ui: { theme: String(v) } }),
+				set: (s, v) => ({ ...s, ui: { ...s.ui, theme: String(v) } }),
+			},
+			{
+				id: "ui.thinkingVisualiser.enabled",
+				label: "Thinking Visualiser",
+				description: "Procedural canvas inside the Thinking box. Disable for plain text.",
+				kind: "toggle",
+				get: (s) => s.ui.thinkingVisualiser.enabled,
+				set: (s, v) => ({
+					...s,
+					ui: {
+						...s.ui,
+						thinkingVisualiser: { ...s.ui.thinkingVisualiser, enabled: Boolean(v) },
+					},
+				}),
+			},
+			{
+				id: "ui.thinkingVisualiser.operatorRotationMs",
+				label: "Operator rotation (ms)",
+				description: "Interval before the visualiser swaps to a new operator.",
+				kind: "number",
+				min: 1000,
+				max: 60000,
+				step: 500,
+				get: (s) => s.ui.thinkingVisualiser.operatorRotationMs,
+				set: (s, v) => ({
+					...s,
+					ui: {
+						...s.ui,
+						thinkingVisualiser: {
+							...s.ui.thinkingVisualiser,
+							operatorRotationMs: clampNumber(Number(v), 1000, 60000),
+						},
+					},
+				}),
+			},
+			{
+				id: "ui.thinkingVisualiser.boredomThresholdMs",
+				label: "Boredom threshold (ms)",
+				description: "Idle time before the visualiser mutates its parameters.",
+				kind: "number",
+				min: 5000,
+				max: 600000,
+				step: 1000,
+				get: (s) => s.ui.thinkingVisualiser.boredomThresholdMs,
+				set: (s, v) => ({
+					...s,
+					ui: {
+						...s.ui,
+						thinkingVisualiser: {
+							...s.ui.thinkingVisualiser,
+							boredomThresholdMs: clampNumber(Number(v), 5000, 600000),
+						},
+					},
+				}),
 			},
 		],
 	},
