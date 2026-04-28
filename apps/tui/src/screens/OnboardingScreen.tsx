@@ -19,6 +19,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import SelectInput from "ink-select-input";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { probeProviders, type ProviderStatus } from "../lib/provider-health.js";
+import { useTypewriter } from "../hooks/useTypewriter.js";
 
 interface OnboardingStep {
 	question: string;
@@ -225,7 +226,43 @@ export function OnboardingScreen({
 	const isSelect =
 		!isProviderCheck && !!selectChoices && selectChoices.length > 0 && !!onSelect;
 
-	const { buffer: digitBuffer } = useDigitShortcut(selectChoices, onSelect, isSelect);
+	// ── Typewriter reveal for the active question prompt ────────
+	// Subtle per-character reveal so the agent feels like it's writing the
+	// question to the user in real time. ~28ms/char (~36 chars/sec) reads
+	// "alive but not slow" in user testing. Disabled in non-TTY/CI so the
+	// smoke harness and piped invocations see the full text instantly.
+	const typewriterEnabled =
+		!!process.stdout.isTTY && !process.env.CI;
+	const {
+		displayed: revealedQuestion,
+		isDone: isQuestionRevealed,
+		skip: skipQuestionReveal,
+	} = useTypewriter(currentQuestion, {
+		msPerChar: 28,
+		enabled: typewriterEnabled,
+	});
+
+	// Skip-the-reveal: while the prompt is still typing, swallow Enter/Space
+	// and jump to the full text. This prevents impatient users from accidentally
+	// confirming a default before they've read the whole question, AND keeps
+	// the SelectInput / providerCheck handlers below silent during reveal.
+	useInput(
+		(input, key) => {
+			if (isQuestionRevealed) return;
+			if (key.return || input === " ") {
+				skipQuestionReveal();
+			}
+		},
+		{ isActive: !isQuestionRevealed },
+	);
+
+	// Digit-shortcut + SelectInput only activate AFTER the prompt is fully
+	// revealed. Same gate is applied to the providerCheck `useInput` below.
+	const { buffer: digitBuffer } = useDigitShortcut(
+		selectChoices,
+		onSelect,
+		isSelect && isQuestionRevealed,
+	);
 
 	// ── Provider probe state ─────────────────────────────────
 	// Reset to "loading" whenever we land on a new providerCheck step so the
@@ -268,6 +305,8 @@ export function OnboardingScreen({
 	// ── Provider check input handling ────────────────────────
 	// Enter advances. We pass "live" if the engine responded, "skip" otherwise.
 	// The processor records the result; either way the flow continues.
+	// Gated on isQuestionRevealed so a mid-reveal Enter skips the typewriter
+	// before resolving the provider check.
 	useInput(
 		(_input, key) => {
 			if (!isProviderCheck || !onProviderResolve) return;
@@ -279,7 +318,7 @@ export function OnboardingScreen({
 				onProviderResolve(live ? "live" : "skip");
 			}
 		},
-		{ isActive: isProviderCheck },
+		{ isActive: isProviderCheck && isQuestionRevealed },
 	);
 
 	// SelectInput handles arrow-key paging; cap visible rows so long lists
@@ -376,13 +415,20 @@ export function OnboardingScreen({
 				borderColor="cyan"
 				width={maxWidth}
 			>
-				{currentQuestion.split("\n").map((line, i) => (
+				{revealedQuestion.split("\n").map((line, i) => (
 					<Text key={i}>{line}</Text>
 				))}
+				{!isQuestionRevealed && (
+					<Box marginTop={1}>
+						<Text dimColor>(press Enter to skip)</Text>
+					</Box>
+				)}
 			</Box>
 
-			{/* Active input region. Three modes: select, providerCheck, free text. */}
-			{isProviderCheck && providerCheck ? (
+			{/* Active input region. Three modes: select, providerCheck, free text.
+				Only rendered AFTER the prompt has finished revealing, so the user
+				doesn't see options/inputs until the question is fully on screen. */}
+			{!isQuestionRevealed ? null : isProviderCheck && providerCheck ? (
 				<Box flexDirection="column" paddingLeft={2}>
 					{probe.status === "loading" ? (
 						<Text color="cyan">
