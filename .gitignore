@@ -106,3 +106,11 @@ docs/branch-audio/
 # Swift Package Manager build artifacts (rebuild with: bun run install:apple-foundation)
 bin/apple-foundation-bridge/.build/
 bin/apple-foundation-bridge/Package.resolved
+
+# BDH training artifacts (large binaries)
+packages/eight-bdh/checkpoints/*.pt
+packages/eight-bdh/data/*.bin
+packages/eight-bdh/data/*.jsonl
+packages/eight-bdh/trainer/local/*.log
+packages/eight-bdh/trainer/local/phase-0-train-log.json
+packages/eight-bdh/trainer/local/phase-0-full-run.log
