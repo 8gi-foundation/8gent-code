@@ -103,6 +103,8 @@ import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
+import { probeProviders } from "./lib/provider-health.js";
+import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatTokens, truncate } from "./lib/index.js";
@@ -462,6 +464,10 @@ export function App({
 	const [bgTasks, setBgTasks] = useState<bgPool.BgTask[]>(() => bgPool.list());
 	const [bgBanner, setBgBanner] = useState<string | null>(null);
 	const [bgRunning, setBgRunning] = useState(0);
+	const [providerHealth, setProviderHealth] = useState<{ live: number; total: number }>({
+		live: 0,
+		total: 1,
+	});
 	const foregroundPromiseRef = useRef<Promise<string> | null>(null);
 	const foregroundLabelRef = useRef<string>("");
 
@@ -728,6 +734,42 @@ export function App({
 			prevTabIdRef.current = activeTabId;
 		}
 	}, [activeTabId]);
+
+	// Per-tab model: when the active tab is a chat tab tied to a role, swap the
+	// currentProvider/currentModel to whatever the role registry says. Each
+	// agent tab (Orchestrator / Engineer / QA) gets its own backing inference
+	// engine - one model per agent.
+	useEffect(() => {
+		const tab = workspaceTabs.activeTab;
+		if (!tab || tab.type !== "chat") return;
+		const role = (tab.data as { role?: string } | undefined)?.role;
+		if (!role) return;
+		const cfg = ROLE_REGISTRY[role];
+		if (!cfg?.inferenceMode || !cfg?.model) return;
+		setCurrentProvider(cfg.inferenceMode);
+		setCurrentModel(cfg.model);
+	}, [activeTabId]);
+
+	// Provider health probe: count how many of the 3 local inference engines
+	// (Apple Foundation, LM Studio, Ollama) are currently up. Drives the
+	// status bar `X/Y agents` slot - reflects "all three inferences live".
+	useEffect(() => {
+		let cancelled = false;
+		const tick = async () => {
+			try {
+				const { live, total } = await probeProviders();
+				if (!cancelled) setProviderHealth({ live, total });
+			} catch {
+				// best-effort - status bar can stay stale rather than crash
+			}
+		};
+		tick();
+		const id = setInterval(tick, 8000);
+		return () => {
+			cancelled = true;
+			clearInterval(id);
+		};
+	}, []);
 
 	// setMessages wrapper that also updates the ref map for current tab
 	const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = useCallback(
@@ -4503,8 +4545,8 @@ export function App({
 					{showEnhancedStatus ? (
 						<EnhancedStatusBar
 							modelName={currentModel}
-							runningAgents={(isProcessing ? 1 : 0) + bgRunning}
-							totalAgents={1}
+							runningAgents={providerHealth.live}
+							totalAgents={providerHealth.total}
 							permissionMode={infiniteModeActive ? "infinite" : "ask"}
 							tokensSaved={totalTokens}
 							currentBranch={currentBranch}
