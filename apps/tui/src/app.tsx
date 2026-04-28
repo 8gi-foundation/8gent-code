@@ -30,7 +30,7 @@ import {
 	pushActivity,
 } from "./components/ActivityMonitor.js";
 import { TabBar } from "./components/TabBar.js";
-import { IntroBanner } from "./components/IntroBanner.js";
+import { IntroBanner, stopIntroMusic } from "./components/IntroBanner.js";
 import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
 import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
 import {
@@ -2804,6 +2804,13 @@ export function App({
 				case "settings": {
 					// Open the settings tab (singleton — switches if it already exists).
 					workspaceTabs.addTab("settings", "Settings");
+					break;
+				}
+
+				case "quiet": {
+					// Kill any in-flight launch instrumental from the intro splash.
+					stopIntroMusic();
+					addSystemMessage("Intro music stopped.");
 					break;
 				}
 
