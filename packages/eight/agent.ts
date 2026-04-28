@@ -573,6 +573,16 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			effectiveInstructions += `\n\n## Agent Self-Appended Context\n${tunedParams.appendedContext.map((c, i) => `[${i + 1}] ${c}`).join("\n")}`;
 		}
 
+		// Voice-chat awareness: when the TUI is in voice mode, tell the agent
+		// the modality so it doesn't waste a turn explaining it can't hear.
+		// The user speaks via STT; the agent's text reply is spoken via TTS.
+		if (tunedParams.voiceChatActive) {
+			effectiveInstructions += `
+
+## Voice Chat Mode (active)
+You are in a real-time voice conversation. The user is speaking to you; their words arrive as transcribed text (STT). Your written replies are spoken back to them via text-to-speech (TTS). You are NOT a text-only interface — you can hear them and they can hear you. Speak conversationally as if on a phone call. Do not apologise for being text-only or claim you cannot hear them — you can. Keep replies concise and natural since they will be spoken aloud. Avoid heavy markdown, code blocks, or long URLs — they don't read well in TTS.`;
+		}
+
 		let agentConfig: EightAgentConfig = {
 			provider: providerConfig,
 			instructions: effectiveInstructions,
