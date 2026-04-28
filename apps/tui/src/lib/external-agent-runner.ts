@@ -109,6 +109,18 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
 	},
+	"8gent": {
+		// 8gent inside 8gent. The bidirectional half: our own binary already has
+		// `8gent chat <msg>` (pipe-friendly) and `8gent run <prompt>` (one-shot
+		// for Orchestra/cmux). Lets the user /spawn 8gent in any 8gent tab.
+		id: "8gent",
+		label: "8gent (nested)",
+		command: "8gent",
+		promptMode: "arg",
+		args: ["chat"],
+		timeoutMs: 180_000,
+		parseStdout: stripAnsi,
+	},
 };
 
 export function getPreset(id: string): ExternalAgentPreset | null {
