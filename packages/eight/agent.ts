@@ -9,6 +9,9 @@
  */
 
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { indexFolder as astIndexFolder } from "../ast-index";
 import { getExtensionManager } from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
@@ -50,6 +53,7 @@ import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
+import { type Settings, computeAutoTune } from "./auto-tune";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -142,11 +146,21 @@ export class Agent {
 
 		// v0.12.0: lite mode is now the default. The agent boots fast and lean.
 		// Opt back into the heavy auxiliaries (kernel training, heartbeat agents,
-		// Convex sync, AST pre-indexing) by setting 8GENT_FULL=1 — or per-feature
+		// Convex sync, AST pre-indexing) by setting 8GENT_FULL=1 - or per-feature
 		// via the granular env flags below.
 		// Compat: 8GENT_LITE=0 explicitly forces the old "everything on" behaviour.
+		//
+		// v0.12.x: if `~/.8gent/settings.json` exists (sibling Settings View PR),
+		// `computeAutoTune` resolves the user's "auto"/"lite"/"full" preference
+		// against env + TTY state. Falls back to the original env-var rule when
+		// the settings file is absent or malformed.
+		const autoTuneSettings = readSettingsFileSync();
 		const LITE =
-			process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1" ? false : true;
+			autoTuneSettings !== null
+				? computeAutoTune(autoTuneSettings).liteMode
+				: process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1"
+					? false
+					: true;
 
 		// Set working directory for hooks
 		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
@@ -1528,5 +1542,37 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 		const manager = getLSPManager();
 		await manager.stopAll();
+	}
+}
+
+/**
+ * Synchronously load `~/.8gent/settings.json` for use in the Agent constructor.
+ *
+ * The sibling Settings View PR owns the canonical `loadSettings()` reader.
+ * Until that lands, we read the file directly here so the agent stays
+ * decoupled from `packages/settings`. Returns `null` on any failure - the
+ * caller falls back to the env-var-based detection.
+ */
+function readSettingsFileSync(): Settings | null {
+	try {
+		const file = path.join(os.homedir(), ".8gent", "settings.json");
+		if (!fs.existsSync(file)) return null;
+		const raw = fs.readFileSync(file, "utf8");
+		const parsed = JSON.parse(raw) as Settings;
+		// Minimal shape check - avoid throwing on partially-written files.
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			parsed.performance &&
+			typeof parsed.performance.mode === "string" &&
+			typeof parsed.performance.introBanner === "string" &&
+			parsed.voice &&
+			typeof parsed.voice.silenceThresholdMs === "number"
+		) {
+			return parsed;
+		}
+		return null;
+	} catch {
+		return null;
 	}
 }
