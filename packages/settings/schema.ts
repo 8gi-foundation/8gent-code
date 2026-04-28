@@ -91,6 +91,27 @@ export interface UISettings {
 	thinkingVisualiser: ThinkingVisualiserSettings;
 }
 
+export interface AgentNames {
+	/** User-friendly display name for the orchestrator role. */
+	orchestrator: string;
+	/** User-friendly display name for the engineer role. */
+	engineer: string;
+	/** User-friendly display name for the qa role. */
+	qa: string;
+}
+
+export interface AgentsSettings {
+	/**
+	 * Display names for the 3 chat tabs / role-registry roles.
+	 * Defaults match the canonical role names ("Orchestrator", "Engineer", "QA").
+	 * The user can rename these during onboarding or via `/settings`.
+	 *
+	 * Consumers (TabBar, status bar, agent system prompt builder) read these
+	 * lazily via `resolveRoleName()` so renaming is a soft, display-only change.
+	 */
+	names: AgentNames;
+}
+
 export interface Settings {
 	version: 1;
 	voice: VoiceSettings;
@@ -98,6 +119,7 @@ export interface Settings {
 	models: ModelsSettings;
 	providers: ProvidersSettings;
 	ui: UISettings;
+	agents: AgentsSettings;
 }
 
 export type SettingsKey = keyof Settings;

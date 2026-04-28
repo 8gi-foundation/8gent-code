@@ -1081,6 +1081,159 @@ async function testVoiceForRole(): Promise<SmokeResult> {
 }
 
 // ============================================================================
+// L0. Onboarding (agent names + provider check)
+//
+// Three checks for the onboarding flow rebuild:
+// - agent-names-defaults: settings ship with the canonical names
+// - agent-names-roundtrip: setSetting("agents", ...) survives load
+// - provider-check-shape: the renderer's "should I show install hint?" helper
+//   returns the expected boolean for live / not-live / loading probe states
+// ============================================================================
+
+async function testOnboardingAgentNamesDefaults(): Promise<SmokeResult> {
+	return timeIt("onboarding/agent-names-defaults", async () => {
+		const s = loadSettings();
+		const names = s.agents?.names;
+		assert(typeof names === "object" && names !== null, "agents.names missing");
+		assert(
+			typeof names.orchestrator === "string" && names.orchestrator.length > 0,
+			`orchestrator: got ${names.orchestrator}`,
+		);
+		assert(
+			typeof names.engineer === "string" && names.engineer.length > 0,
+			`engineer: got ${names.engineer}`,
+		);
+		assert(
+			typeof names.qa === "string" && names.qa.length > 0,
+			`qa: got ${names.qa}`,
+		);
+		// Defaults must match the canonical role-registry names.
+		assert(
+			names.orchestrator === "Orchestrator",
+			`orchestrator default: ${names.orchestrator}`,
+		);
+		assert(names.engineer === "Engineer", `engineer default: ${names.engineer}`);
+		assert(names.qa === "QA", `qa default: ${names.qa}`);
+		return {
+			ok: true,
+			detail: `${names.orchestrator}/${names.engineer}/${names.qa}`,
+		};
+	});
+}
+
+async function testOnboardingAgentNamesRoundtrip(): Promise<SmokeResult> {
+	return timeIt("onboarding/agent-names-roundtrip", async () => {
+		const filePath = getSettingsFilePath();
+		const backup = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : null;
+		try {
+			const before = loadSettings();
+			const custom = {
+				...before.agents,
+				names: {
+					orchestrator: "Plato",
+					engineer: "Hephaestus",
+					qa: "Cassandra",
+				},
+			};
+			setSetting("agents", custom);
+			const after = loadSettings();
+			assert(
+				after.agents.names.orchestrator === "Plato",
+				`got ${after.agents.names.orchestrator}, want Plato`,
+			);
+			assert(
+				after.agents.names.engineer === "Hephaestus",
+				`got ${after.agents.names.engineer}, want Hephaestus`,
+			);
+			assert(
+				after.agents.names.qa === "Cassandra",
+				`got ${after.agents.names.qa}, want Cassandra`,
+			);
+
+			// resolveRoleName must reflect the persisted custom names.
+			const { resolveRoleName } = await import("../packages/settings");
+			assert(
+				resolveRoleName("orchestrator") === "Plato",
+				`resolveRoleName orchestrator: got ${resolveRoleName("orchestrator")}`,
+			);
+			assert(
+				resolveRoleName("qa") === "Cassandra",
+				`resolveRoleName qa: got ${resolveRoleName("qa")}`,
+			);
+			return { ok: true, detail: "Plato / Hephaestus / Cassandra" };
+		} finally {
+			if (backup !== null) {
+				fs.writeFileSync(filePath, backup, "utf-8");
+			} else if (fs.existsSync(filePath)) {
+				fs.unlinkSync(filePath);
+			}
+		}
+	});
+}
+
+async function testOnboardingProviderCheckShape(): Promise<SmokeResult> {
+	return timeIt("onboarding/provider-check-shape", async () => {
+		const { shouldShowInstallHint } = await import(
+			"../apps/tui/src/screens/OnboardingScreen"
+		);
+		// Loading: never show hint.
+		assert(
+			shouldShowInstallHint("ollama", {
+				status: "loading",
+				statuses: [],
+				models: [],
+			}) === false,
+			"loading should hide hint",
+		);
+		// Done + live: hide hint.
+		assert(
+			shouldShowInstallHint("ollama", {
+				status: "done",
+				statuses: [
+					{ name: "ollama", live: true },
+					{ name: "lmstudio", live: false },
+					{ name: "apfel", live: false },
+				],
+				models: ["qwen3.6:27b"],
+			}) === false,
+			"live ollama should hide hint",
+		);
+		// Done + not live: show hint.
+		assert(
+			shouldShowInstallHint("lmstudio", {
+				status: "done",
+				statuses: [
+					{ name: "ollama", live: true },
+					{ name: "lmstudio", live: false },
+					{ name: "apfel", live: false },
+				],
+				models: [],
+			}) === true,
+			"missing lmstudio should show hint",
+		);
+		// Error state: show hint as a safe default.
+		assert(
+			shouldShowInstallHint("apfel", {
+				status: "error",
+				statuses: [],
+				models: [],
+			}) === true,
+			"error should show hint",
+		);
+		// Provider that wasn't even returned by probe: show hint.
+		assert(
+			shouldShowInstallHint("apfel", {
+				status: "done",
+				statuses: [{ name: "ollama", live: true }],
+				models: [],
+			}) === true,
+			"missing-from-statuses should show hint",
+		);
+		return { ok: true, detail: "5 cases pass" };
+	});
+}
+
+// ============================================================================
 // L. TUI layout invariants
 //
 // Pure logic checks that the layout helpers and text rendering primitives
@@ -1354,6 +1507,11 @@ async function main(): Promise<void> {
 	results.push(await testFailoverResolve());
 	results.push(await testFailoverMarkDown());
 	results.push(await testFailoverAllDown());
+
+	// L0. Onboarding (agent names + provider check)
+	results.push(await testOnboardingAgentNamesDefaults());
+	results.push(await testOnboardingAgentNamesRoundtrip());
+	results.push(await testOnboardingProviderCheckShape());
 
 	// L. TUI layout invariants
 	results.push(await testTuiLayoutContentWidth());

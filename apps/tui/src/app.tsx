@@ -1239,6 +1239,52 @@ export function App({
 	const [onboardingSelectChoices, setOnboardingSelectChoices] = useState<
 		Array<{ label: string; value: string; description?: string }> | null
 	>(null);
+	// kind === "providerCheck" payload: which engine to probe + install hint.
+	// The OnboardingScreen probes once on entry, shows status, and emits
+	// "live" or "skip" via onProviderResolve which we route into processAnswer.
+	const [onboardingProviderCheck, setOnboardingProviderCheck] = useState<
+		{ provider: "ollama" | "lmstudio" | "apfel"; installHint: string } | null
+	>(null);
+	// kind === "agentName" payload: default value to show as a hint and accept
+	// on empty Enter. The actual input still goes through CommandInput.
+	const [onboardingAgentDefault, setOnboardingAgentDefault] = useState<
+		string | null
+	>(null);
+	// Live total step count - set on first onboarding render so the
+	// "Step X of N" indicator reflects whatever the question list is.
+	const [onboardingTotalSteps, setOnboardingTotalSteps] = useState<number>(0);
+
+	/**
+	 * Apply an OnboardingQuestion to local screen state. Centralizes the
+	 * "set question text + select choices + providerCheck payload + agentName
+	 * default" logic so all four call sites (initial load, /onboarding, /skip,
+	 * processAnswer) stay in sync. Without this helper it's easy to miss
+	 * resetting one of the new kinds when transitioning between steps.
+	 */
+	const applyOnboardingQuestion = useCallback(
+		(q: {
+			question: string;
+			kind?: "text" | "select" | "providerCheck" | "agentName";
+			choices?: Array<{ label: string; value: string; description?: string }>;
+			provider?: "ollama" | "lmstudio" | "apfel";
+			installHint?: string;
+			default?: string;
+		}) => {
+			setCurrentOnboardingQuestion(q.question);
+			setOnboardingSelectChoices(
+				q.kind === "select" && q.choices ? q.choices : null,
+			);
+			setOnboardingProviderCheck(
+				q.kind === "providerCheck" && q.provider
+					? { provider: q.provider, installHint: q.installHint ?? "" }
+					: null,
+			);
+			setOnboardingAgentDefault(
+				q.kind === "agentName" && typeof q.default === "string" ? q.default : null,
+			);
+		},
+		[],
+	);
 
 	// Animation showcase
 	const [currentAnimation, setCurrentAnimation] = useState<AnimationType>("all");
@@ -1402,6 +1448,8 @@ export function App({
 				if (viewMode === "onboarding") {
 					setShowOnboarding(false);
 					setOnboardingSelectChoices(null);
+					setOnboardingProviderCheck(null);
+					setOnboardingAgentDefault(null);
 					onboardingManager.skipAll();
 				}
 				setViewMode("chat");
@@ -1824,12 +1872,10 @@ export function App({
 			if (onboardingManager.needsOnboarding()) {
 				setShowOnboarding(true);
 				setViewMode("onboarding");
+				setOnboardingTotalSteps(onboardingManager.getTotalSteps());
 				const question = onboardingManager.getNextQuestion();
 				if (question) {
-					setCurrentOnboardingQuestion(question.question);
-					setOnboardingSelectChoices(
-						question.kind === "select" && question.choices ? question.choices : null,
-					);
+					applyOnboardingQuestion(question);
 					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
 					// Speak the first question (first line only, gated by voice.outputEnabled)
@@ -1861,7 +1907,7 @@ export function App({
 			}
 		};
 		checkOnboarding();
-	}, [onboardingManager, cliAutoApprove]);
+	}, [onboardingManager, cliAutoApprove, applyOnboardingQuestion]);
 
 	// Handle /vision command — manage vision & OCR model settings
 	const handleVisionCommand = useCallback(
@@ -2220,14 +2266,11 @@ export function App({
 					onboardingManager.reset();
 					setShowOnboarding(true);
 					setViewMode("onboarding");
+					setOnboardingTotalSteps(onboardingManager.getTotalSteps());
+					setOnboardingStepIndex(0);
 					const onboardQuestion = onboardingManager.getNextQuestion();
 					if (onboardQuestion) {
-						setCurrentOnboardingQuestion(onboardQuestion.question);
-						setOnboardingSelectChoices(
-							onboardQuestion.kind === "select" && onboardQuestion.choices
-								? onboardQuestion.choices
-								: null,
-						);
+						applyOnboardingQuestion(onboardQuestion);
 						addSystemMessage(`∞ Let's get to know each other.\n\n${onboardQuestion.question}`);
 					}
 					break;
@@ -2255,14 +2298,13 @@ export function App({
 						} else {
 							const nextQ = onboardingManager.skipQuestion();
 							if (nextQ) {
-								setCurrentOnboardingQuestion(nextQ.question);
-								setOnboardingSelectChoices(
-									nextQ.kind === "select" && nextQ.choices ? nextQ.choices : null,
-								);
+								applyOnboardingQuestion(nextQ);
 								addSystemMessage(nextQ.question);
 							} else {
 								setShowOnboarding(false);
 								setOnboardingSelectChoices(null);
+								setOnboardingProviderCheck(null);
+								setOnboardingAgentDefault(null);
 								setViewMode("chat");
 								addSystemMessage("Onboarding complete. Let's begin.");
 							}
@@ -4024,12 +4066,7 @@ export function App({
 			const result = onboardingManager.processAnswer(input);
 			if (result.success) {
 				if (result.nextQuestion) {
-					setCurrentOnboardingQuestion(result.nextQuestion.question);
-					setOnboardingSelectChoices(
-						result.nextQuestion.kind === "select" && result.nextQuestion.choices
-							? result.nextQuestion.choices
-							: null,
-					);
+					applyOnboardingQuestion(result.nextQuestion);
 					setOnboardingStepIndex((prev) => prev + 1);
 					setOnboardingSteps((prev) => [
 						...prev,
@@ -4047,6 +4084,8 @@ export function App({
 					// Onboarding complete
 					setShowOnboarding(false);
 					setOnboardingSelectChoices(null);
+					setOnboardingProviderCheck(null);
+					setOnboardingAgentDefault(null);
 					setViewMode("chat");
 					const user = onboardingManager.getUser();
 					const name = user.identity.name || "friend";
@@ -4601,7 +4640,13 @@ export function App({
 						steps={onboardingSteps}
 						currentQuestion={currentOnboardingQuestion || ""}
 						stepIndex={onboardingStepIndex}
-						totalSteps={6}
+						// totalSteps reads from the manager so the indicator stays accurate
+						// when questions are added/removed without code churn.
+						totalSteps={
+							onboardingTotalSteps > 0
+								? onboardingTotalSteps
+								: onboardingManager.getTotalSteps()
+						}
 						userName={onboardingManager.getUser()?.identity?.name || undefined}
 						agentName={
 							(onboardingManager.getUser()?.preferences?.voice as any)?.agentName || undefined
@@ -4610,6 +4655,13 @@ export function App({
 						onSelect={
 							onboardingSelectChoices ? (value: string) => handleSubmit(value) : undefined
 						}
+						providerCheck={onboardingProviderCheck ?? undefined}
+						onProviderResolve={
+							onboardingProviderCheck
+								? (result: "live" | "skip") => handleSubmit(result)
+								: undefined
+						}
+						agentNameDefault={onboardingAgentDefault ?? undefined}
 					/>
 				);
 
