@@ -36,6 +36,15 @@ export {
 export type { NodeVersion, PlatformAsset, RuntimeLocator, RuntimeReadyOpts } from "./node-runtime.js";
 export { installRuntime, planInstall } from "./installer.js";
 export type { InstallInput, InstallPlan, InstallResult } from "./installer.js";
+export {
+	buildContract,
+	createValidator,
+	enforceRequest,
+	formatDenial,
+	matchTarget,
+	validateRequest,
+} from "./contract-validator.js";
+export type { BuildContractOptions } from "./contract-validator.js";
 
 /** The Node version we manage. Bump when an upstream LTS we care about changes.
  * 22.14.0 is the floor required by openclaw and a known-good 22 LTS as of
