@@ -8,7 +8,6 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { TAB_ICONS, type TabType, type WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
-import { MutedText } from "./primitives/index.js";
 
 interface TabBarProps {
 	tabs: WorkspaceTab[];
@@ -60,7 +59,6 @@ export function TabBar({ tabs, onSwitch, isTabProcessing }: TabBarProps) {
 			<Box>
 				<Text color="cyan">{topRow}</Text>
 				<Box flexGrow={1} />
-				<MutedText>^T:new ^W:close</MutedText>
 			</Box>
 			<Box>
 				<Text color="cyan">
