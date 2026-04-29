@@ -7,7 +7,7 @@
  * underneath, three groups justified across the width.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { theme } from "../theme.js";
 
@@ -22,6 +22,12 @@ export const MODES = ["Planning", "Researching", "Implementing", "Testing", "Deb
 export type FooterMode = (typeof MODES)[number];
 
 export function ModeFooter({ active }: { active: FooterMode }) {
+	const { stdout } = useStdout();
+	const rows = stdout?.rows ?? 40;
+	// On short terminals (< 42 rows) the hint row is the first thing to clip
+	// against the viewport bottom. Drop it; chips remain.
+	const showHints = rows >= 42;
+
 	return (
 		<Box width="100%" flexDirection="column" flexShrink={0}>
 			<Box gap={1} overflow="hidden">
@@ -49,11 +55,12 @@ export function ModeFooter({ active }: { active: FooterMode }) {
 					<Text color={ui.dim}>^Y MODE</Text>
 				</Box>
 			</Box>
-			<Box justifyContent="space-between" overflow="hidden">
-				<Text color={ui.muted}>^O expand  ^B processes  ^K kanban  ^P predict</Text>
-				<Text color={ui.muted}>^G bg this  ^J jobs</Text>
-				<Text color={ui.muted}>^A anim  ^S sound  ^C clear</Text>
-			</Box>
+			{showHints ? (
+				<Box justifyContent="space-between" overflow="hidden">
+					<Text color={ui.muted}>^O expand  ^B processes  ^K kanban</Text>
+					<Text color={ui.muted}>^A anim  ^S sound  ^C clear</Text>
+				</Box>
+			) : null}
 		</Box>
 	);
 }
