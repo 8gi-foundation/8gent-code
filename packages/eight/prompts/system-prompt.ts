@@ -128,7 +128,8 @@ const TOOL_CATEGORY_DESCRIPTIONS: Record<string, string> = {
 	terminal: "Write into the user's live terminal session.",
 	lsp: "Language-server queries: definitions, references, hover, diagnostics.",
 	media: "Images, PDFs, Jupyter notebooks — read and edit.",
-	orchestration: "Spawn and coordinate sub-agents. Delegate, message, merge work.",
+	orchestration:
+		"Spawn and coordinate sub-agents. Delegate, message, merge work. The `term_*` family lets you spawn external CLIs (claude, openclaw, pi…) in real Terminal.app windows via tmux, send them prompts, and read their replies — use it to parallelise compute across whichever LLM CLIs the user has installed.",
 	background: "Start long-running background tasks and stream their output.",
 	mcp: "List and call tools from connected MCP servers.",
 };
