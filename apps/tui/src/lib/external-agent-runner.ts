@@ -47,11 +47,19 @@ export interface ExternalAgentPreset {
 	 * - `notes` is a human-readable hint shown in the chat for cases
 	 *   that need extra steps (auth, manual setup) the installer can't
 	 *   handle automatically.
+	 *
+	 * IMPORTANT: only set this for packages we have verified actually
+	 * exist with the expected binary. A wrong recipe is worse than no
+	 * recipe — it confuses the user with a 404 or, worse, installs the
+	 * wrong project under a name-collision.
 	 */
 	install?: {
 		command: string;
 		notes?: string;
 	};
+	/** Project documentation URL — surfaced when no install recipe is
+	 * available, so the user knows where to find install steps. */
+	homepage?: string;
 }
 
 export interface ExternalAgentResult {
@@ -81,9 +89,11 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: [],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		homepage: "https://docs.claude.com/en/docs/claude-code",
 		install: {
 			command: "npm install -g @anthropic-ai/claude-code",
-			notes: "After install, run `claude` once to authenticate with Anthropic.",
+			notes:
+				"After install, run `claude` once outside the TUI to authenticate with Anthropic. Until that's done, /spawn'd Claude tabs will fail with auth errors.",
 		},
 	},
 	codex: {
@@ -95,9 +105,10 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["exec"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		homepage: "https://github.com/openai/codex",
 		install: {
 			command: "npm install -g @openai/codex",
-			notes: "Requires an OpenAI API key in OPENAI_API_KEY.",
+			notes: "Requires an OpenAI API key — `export OPENAI_API_KEY=sk-...` before /spawn.",
 		},
 	},
 	hermes: {
@@ -108,9 +119,16 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["--headless"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		homepage: "https://github.com/NousResearch/hermes-agent",
 		install: {
-			command: "npm install -g hermes-agent",
-			notes: "Hermes is a community CLI; verify the npm package matches the project you want before running.",
+			// Hermes ships an official curl|bash installer rather than an
+			// npm package. Works on macOS / Linux / WSL2 / Termux. The
+			// script writes a `hermes` binary to ~/.local/bin or similar
+			// and prints PATH instructions if needed.
+			command:
+				"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+			notes:
+				"Hermes installer writes to ~/.local/bin (or similar). If `hermes` isn't on PATH after install, follow the script's printed instructions. v0.11.0+ ships a React/Ink TUI (hermes --tui); we use --headless mode here.",
 		},
 	},
 	openclaw: {
@@ -121,9 +139,15 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["run", "--headless"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		homepage: "https://github.com/openclaw/openclaw",
 		install: {
-			command: "npm install -g openclaw",
-			notes: "OpenClaw is a community CLI; check the project's docs for any post-install auth.",
+			// OpenClaw's official install path. After install the user
+			// typically runs `openclaw onboard` once to set up the gateway,
+			// workspace, channels, and skills — that's not something we
+			// can fully automate from inside /spawn.
+			command: "npm install -g openclaw@latest",
+			notes:
+				"After install, run `openclaw onboard` outside the TUI once to set up the gateway, workspace, and skills. Until that's done, /spawn'd OpenClaw tabs will fail.",
 		},
 	},
 	aider: {
@@ -136,11 +160,14 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["--no-pretty", "--yes", "--no-stream"],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
+		homepage: "https://aider.chat",
 		install: {
-			// Aider's official install path. `aider-install` then bootstraps a
-			// pinned Python env with all of Aider's deps.
-			command: "python3 -m pip install --user aider-install && aider-install",
-			notes: "Aider needs Python 3.10+. Set OPENAI_API_KEY or ANTHROPIC_API_KEY for it to talk to a model.",
+			// Canonical PyPI package is `aider-chat`. The `--user` flag
+			// puts the binary in ~/.local/bin which may not be on PATH;
+			// the homepage notes cover the workaround.
+			command: "python3 -m pip install --user aider-chat",
+			notes:
+				"If `aider` is still not on PATH after install, ensure ~/.local/bin (or the equivalent for your Python) is in your shell's PATH. Then set OPENAI_API_KEY or ANTHROPIC_API_KEY before using it.",
 		},
 	},
 	"8gent": {
@@ -154,8 +181,11 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		args: ["chat"],
 		timeoutMs: 180_000,
 		parseStdout: stripAnsi,
+		homepage: "https://8gent.dev",
 		install: {
-			command: "npm install -g @8gi-foundation/8gent-code",
+			command: "npm install -g @8gi-foundation/8gent-code --force",
+			notes:
+				"--force overwrites stale `8` / `8gent` / `8gent-code` bin symlinks (the EEXIST issue on npm 9+).",
 		},
 	},
 };
