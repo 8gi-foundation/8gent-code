@@ -308,8 +308,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "spawn",
 		aliases: [],
-		description: "Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, aider)",
-		usage: "/spawn <claude|codex|hermes|openclaw|aider>",
+		description: "Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
+		usage: "/spawn <claude|codex|hermes|openclaw|pi|8gent>",
 	},
 	{
 		name: "settings",
