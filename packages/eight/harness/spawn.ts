@@ -15,6 +15,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import type { HarnessCapability, HarnessHostContract } from "@8gent/types";
+import { buildContract } from "@8gent/runtime";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,6 +58,23 @@ export interface SpawnScope {
 	allowedPaths?: string[];
 	/** Environment variables injected into the child process */
 	env?: Record<string, string>;
+	/**
+	 * Harness flavor for the child (e.g. "claude", "openclaw", "hermes").
+	 * Used to load the capability declaration and build a HarnessHostContract.
+	 * Defaults to "claude" when omitted.
+	 */
+	flavor?: string;
+	/**
+	 * Optional explicit capability override. When set, replaces the flavor's
+	 * declared capabilities entirely. Use sparingly — prefer `narrow` to
+	 * subset a known flavor's grants.
+	 */
+	capabilities?: HarnessCapability[];
+	/**
+	 * Optional narrowing hook applied to the flavor's required capabilities
+	 * before the contract is built.
+	 */
+	narrow?: (required: HarnessCapability[]) => HarnessCapability[];
 }
 
 export type SpawnStatus = "pending" | "running" | "completed" | "failed" | "timeout";
@@ -77,6 +96,32 @@ export interface SpawnResult {
 	worktreePath: string;
 	/** Wall-clock duration in ms */
 	durationMs: number;
+	/**
+	 * Harness/host contract built for the child at spawn time. Surfaces the
+	 * flavor and capabilities granted, so callers can audit what the child
+	 * was allowed to do.
+	 */
+	contract: HarnessHostContract;
+}
+
+/**
+ * Build the harness/host contract for a spawn. Honours `scope.capabilities`
+ * (explicit override) or `scope.flavor` + `scope.narrow` (declared flavor).
+ * Defaults to the "claude" flavor when nothing is specified.
+ */
+function buildSpawnContract(scope: SpawnScope, taskId: string): HarnessHostContract {
+	const flavor = scope.flavor ?? "claude";
+	if (scope.capabilities) {
+		return {
+			flavor,
+			capabilities: scope.capabilities,
+			metadata: { taskId, narrowed: false },
+		};
+	}
+	return buildContract(flavor, {
+		metadata: { taskId },
+		narrow: scope.narrow,
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -198,14 +243,17 @@ export async function spawn(task: SpawnTask, scope: SpawnScope): Promise<SpawnRe
 	const timeout = task.timeoutMs ?? 300_000;
 	const start = Date.now();
 	let handle: WorktreeHandle | undefined;
+	const contract = buildSpawnContract(scope, taskId);
 
 	try {
 		// 1. Create isolated worktree
 		handle = await createWorktree(scope, taskId);
 
-		// 2. Write task definition for the child
+		// 2. Write task definition + contract for the child. The contract is
+		//    embedded so the child can self-enforce its boundary, and so the
+		//    parent can audit what was granted by inspecting the worktree.
 		const taskFile = path.join(handle.path, ".8gent-spawn-task.json");
-		fs.writeFileSync(taskFile, JSON.stringify({ taskId, ...task }, null, 2));
+		fs.writeFileSync(taskFile, JSON.stringify({ taskId, contract, ...task }, null, 2));
 
 		// 3. Execute child process in the worktree
 		// SEC-S1: Use execFile with argument arrays — NO shell interpolation.
@@ -243,6 +291,7 @@ export async function spawn(task: SpawnTask, scope: SpawnScope): Promise<SpawnRe
 			branch: handle.branch,
 			worktreePath: handle.path,
 			durationMs: Date.now() - start,
+			contract,
 		};
 	} catch (err) {
 		const isTimeout =
@@ -257,6 +306,7 @@ export async function spawn(task: SpawnTask, scope: SpawnScope): Promise<SpawnRe
 			branch: handle?.branch || "",
 			worktreePath: handle?.path || "",
 			durationMs: Date.now() - start,
+			contract,
 		};
 	}
 }
