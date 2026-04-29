@@ -61,7 +61,7 @@ import {
 } from "./components/bionic-text.js";
 import { CommandInput } from "./components/command-input.js";
 import { FixedFrame } from "./components/fixed-frame/index.js";
-import { FancyHeader, Header } from "./components/header.js";
+import { HeaderBar } from "./components/HeaderBar.js";
 import {
 	ImageBadge,
 	consumeIfWholeValueIsImagePath,
@@ -99,9 +99,7 @@ import {
 	SelectInput,
 	type SelectOption,
 } from "./components/select-input.js";
-import { ShortcutDock } from "./components/shortcut-dock.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
-import { DetailedStatusBar, EnhancedStatusBar, StatusBar } from "./components/status-bar.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/index.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
@@ -121,7 +119,6 @@ import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { formatTokens, truncate } from "./lib/index.js";
 import {
-	TUI_AGENT_MODE_COMPACT_BELOW,
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
 } from "./lib/layout-breakpoints.js";
@@ -142,7 +139,8 @@ import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
-import { HudMusicPlayer } from "./components/HudMusicPlayer.js";
+import { BottomBar } from "./components/BottomBar.js";
+import { setDjDeckOpen } from "./components/DjDeck.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -483,13 +481,6 @@ export interface Message {
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
 type AgentMode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
-const AGENT_MODES: AgentMode[] = [
-	"Planning",
-	"Researching",
-	"Implementing",
-	"Testing",
-	"Debugging",
-];
 type AppStatus = "idle" | "thinking" | "executing" | "success" | "error";
 type ViewMode =
 	| "chat"
@@ -671,6 +662,12 @@ export function App({
 	const [totalTokens, setTotalTokens] = useState(0);
 	// tokensSaved removed — using real totalTokens from agent events
 	const [startTime] = useState(new Date());
+	// 1s ticker for the BottomBar session timer.
+	const [sessionTick, setSessionTick] = useState(0);
+	useEffect(() => {
+		const id = setInterval(() => setSessionTick((v) => v + 1), 1000);
+		return () => clearInterval(id);
+	}, []);
 	const [recentCommands, setRecentCommands] = useState<string[]>([]);
 
 	// Auth state (non-blocking)
@@ -833,7 +830,6 @@ export function App({
 	// Animation settings
 	const [showAnimations, setShowAnimations] = useState(true);
 	const [soundEnabled, setSoundEnabled] = useState(false);
-	const [fancyHeader, setFancyHeader] = useState(false);
 	const [showEnhancedStatus, setShowEnhancedStatus] = useState(true);
 	// Performance metrics
 	const [lastResponseTime, setLastResponseTime] = useState<number | undefined>();
@@ -1233,7 +1229,6 @@ export function App({
 
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
-	const compactAgentModeBar = viewport.width < TUI_AGENT_MODE_COMPACT_BELOW;
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
 
 	// Per-tab message queue — each tab has its own pending-submission queue so
@@ -1368,11 +1363,6 @@ export function App({
 			});
 		}
 
-		// Toggle fancy header with Ctrl+H
-		if (key.ctrl && input === "h") {
-			setFancyHeader((prev) => !prev);
-		}
-
 		// Toggle kanban with Ctrl+K (overlay, not a tab)
 		if (key.ctrl && input === "k") {
 			setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
@@ -1428,6 +1418,13 @@ export function App({
 		if (key.ctrl && input === "t") {
 			workspaceTabs.addTab("chat");
 			setViewMode("chat");
+		}
+
+		// Ctrl+Y: cycle agent modes. Y because Ctrl+M = Enter, Ctrl+I = Tab,
+		// Ctrl+S = XOFF — most single letters collide with TTY control codes.
+		if (key.ctrl && input === "y") {
+			const order: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
+			setAgentMode((prev) => order[(order.indexOf(prev) + 1) % order.length] ?? "Planning");
 		}
 
 		// Ctrl+W: close current tab. Per-tab Agent is aborted and dropped so
@@ -3111,6 +3108,17 @@ export function App({
 				case "dj": {
 					const djSub = args[0] || "";
 					const djArgs = args.slice(1);
+
+					// Deck visibility toggle, handled before delegating to the backend.
+					if (djSub === "close" || djSub === "hide") {
+						setDjDeckOpen(false);
+						break;
+					}
+					if (djSub === "open" || djSub === "show") {
+						setDjDeckOpen(true);
+						break;
+					}
+
 					// Lazy import the DJ hook handler
 					import("./hooks/useDJ.js")
 						.then(async ({ useDJ: _ }) => {
@@ -3195,9 +3203,15 @@ export function App({
 								}
 								default:
 									result =
-										"DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools";
+										"DJ Eight\n  /dj play <query>  - YouTube\n  /dj radio <genre>  - Internet radio\n  /dj produce <genre> - Generate track\n  /dj pause/stop/skip/np/vol/loop/queue\n  /dj dl <url> - Download\n  /dj bpm <file> - Detect BPM\n  /dj doctor - Check tools\n  /dj close|open - Toggle deck";
 							}
-							addSystemMessage(result);
+							// Transient playback feedback now lives in the DjDeck.
+							const playbackSubs = new Set(["play","radio","pause","stop","skip","np","vol","volume","loop","repeat","queue","resume","produce","gen"]);
+							const looksLikeFailure =
+								/^(mpv|yt-dlp|ffmpeg|sox)\b.*(not installed|missing)/i.test(result) ||
+								/^No (results|radio stations) found/i.test(result) ||
+								/^Nothing (playing|to resume)/i.test(result);
+							if (!playbackSubs.has(djSub) || looksLikeFailure) addSystemMessage(result);
 						})
 						.catch((err) => addSystemMessage(`DJ error: ${err.message}`));
 					break;
@@ -5002,15 +5016,7 @@ export function App({
 			<FixedFrame>
 				{/* Header */}
 				<Box flexShrink={0}>
-					{fancyHeader ? (
-						<FancyHeader isProcessing={isProcessing} />
-					) : (
-						<Header
-							isProcessing={isProcessing}
-							showAnimations={showAnimations}
-							updateAvailable={updateInfo}
-						/>
-					)}
+	<HeaderBar updateAvailable={updateInfo} />
 				</Box>
 
 				{/* Workspace tab bar - shows an inline busy indicator on each tab
@@ -5239,98 +5245,35 @@ export function App({
 					</Box>
 				)}
 
-				{/* HUD music player — only renders when DJ has a track loaded */}
-				<Box flexShrink={0}>
-					<HudMusicPlayer />
-				</Box>
-
-				{/* Status bar */}
-				<Box flexShrink={0}>
-					{showEnhancedStatus ? (
-						<EnhancedStatusBar
-							modelName={currentModel}
-							runningAgents={providerHealth.live}
-							totalAgents={providerHealth.total}
-							permissionMode={infiniteModeActive ? "infinite" : "ask"}
-							tokensSaved={totalTokens}
-							currentBranch={currentBranch}
-							startTime={startTime}
-							planStatus={
-								isProcessing
-									? activeTool
-										? "executing"
-										: "planning"
-									: stepCount > 0
-										? "completed"
-										: "idle"
-							}
-							planStepsCompleted={toolCount}
-							planStepsTotal={stepCount}
-							showAnimations={showAnimations}
-							adhdMode={adhdMode}
-							authStatus={authStatus}
-							authUser={authUser}
-							voiceState={(() => {
-								const raw = voiceChat.isActive ? voiceChat.state : voice.state;
-								return raw === "error" ? "idle" : raw;
-							})()}
-							voiceEnabled={Boolean(voice.isAvailable)}
-							voiceChatActive={voiceChat.isActive}
+				{/* BottomBar — DjDeck + AgentInstrumentStrip + ModeFooter, all live. */}
+				{(() => {
+					void sessionTick;
+					const elapsedSec = Math.floor((Date.now() - startTime.getTime()) / 1000);
+					const mins = Math.floor(elapsedSec / 60);
+					const secs = elapsedSec % 60;
+					const sessionTime = `${mins}m ${secs.toString().padStart(2, "0")}`;
+					const tokens =
+						totalTokens >= 1000
+							? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
+							: `${totalTokens} tok`;
+					const micOn =
+						Boolean(voice?.isAvailable) &&
+						(voice?.state === "recording" || voiceChat?.isActive);
+					return (
+						<BottomBar
+							model={currentModel || "—"}
+							ready={providerHealth.live}
+							total={providerHealth.total}
+							tokens={tokens}
+							branch={currentBranch || "—"}
+							agent={authUser?.displayName || "Guest"}
+							micOn={Boolean(micOn)}
+							permissions={infiniteModeActive ? "infinite" : "ask"}
+							sessionTime={sessionTime}
+							mode={agentMode}
 						/>
-					) : (
-						<StatusBar
-							tokensSaved={totalTokens}
-							status={status}
-							showAnimations={showAnimations}
-							soundEnabled={soundEnabled}
-						/>
-					)}
-				</Box>
-
-				{/* Agent mode — iOS segmented control.
-				    Active: ◆ + bold brand color. Inactive: ○ + muted. Dot carries state,
-				    label gives semantics, hint defers to the right edge. */}
-				<Box
-					paddingX={1}
-					marginTop={1}
-					flexDirection="row"
-					justifyContent="space-between"
-					alignItems="center"
-					flexShrink={0}
-					overflow="hidden"
-				>
-					{compactAgentModeBar ? (
-						<Box flexDirection="row" overflow="hidden" flexShrink={1}>
-							<AppText color="cyan" bold wrap="truncate-end">{`\u25C6 ${agentMode}`}</AppText>
-							<MutedText wrap="truncate-end">{"   \u2303T cycle"}</MutedText>
-							{!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
-						</Box>
-					) : (
-						<>
-							<Box flexDirection="row" overflow="hidden" flexShrink={1}>
-								{AGENT_MODES.map((mode, idx) => {
-									const isActive = agentMode === mode;
-									return (
-										<Box key={mode} flexShrink={0} flexDirection="row">
-											{idx > 0 && <MutedText>{"   "}</MutedText>}
-											{isActive ? (
-												<AppText color="cyan" bold>{`\u25C6 ${mode}`}</AppText>
-											) : (
-												<MutedText>{`\u25CB ${mode}`}</MutedText>
-											)}
-										</Box>
-									);
-								})}
-							</Box>
-							<Box flexDirection="row" flexShrink={0}>
-								<MutedText>{"\u2303T mode"}</MutedText>
-								{!processPanel.sidebarOpen && <ProcessBadge counts={processPanel.taskCounts} />}
-							</Box>
-						</>
-					)}
-				</Box>
-
-				{showAnimations && <ShortcutDock viewportWidth={viewport.width} />}
+					);
+				})()}
 			</FixedFrame>
 		</ADHDModeContext.Provider>
 	);
