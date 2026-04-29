@@ -3,6 +3,8 @@
  */
 
 export * from "./tool-result.js";
+export * from "./harness-host-contract.js";
+export * from "./harness-flavors.js";
 
 // ============================================
 // Thinking / Reasoning Budgets
