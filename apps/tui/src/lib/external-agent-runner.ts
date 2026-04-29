@@ -60,6 +60,14 @@ export interface ExternalAgentPreset {
 	/** Project documentation URL — surfaced when no install recipe is
 	 * available, so the user knows where to find install steps. */
 	homepage?: string;
+	/**
+	 * Minimum Node version this preset's binary requires AT RUNTIME
+	 * (not just at install). When set, /spawn checks the user's Node
+	 * version and uses our managed Node 22 runtime
+	 * (~/.8gent/runtime/) if the user's is too old. This unblocks
+	 * openclaw on machines stuck on Node 20 etc.
+	 */
+	requiresNodeVersion?: string;
 }
 
 export interface ExternalAgentResult {
@@ -151,8 +159,11 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		install: {
 			command: "npm install -g --prefix=$HOME/.npm-global openclaw@latest",
 			notes:
-				"Requires Node 22.12+ at runtime (not just at install). On nvm: `nvm install 22 && nvm use 22`. Binary at ~/.npm-global/bin/openclaw. Add `~/.npm-global/bin` to PATH if needed. After install run `openclaw onboard` outside the TUI to set up the gateway, workspace, and skills.",
+				"Binary at ~/.npm-global/bin/openclaw. Add `~/.npm-global/bin` to PATH if needed. After install run `openclaw onboard` outside the TUI to set up the gateway, workspace, and skills. (8gent now provides a managed Node 22 runtime automatically when needed; no separate nvm step required.)",
 		},
+		// OpenClaw refuses to run on Node < 22.14. 8gent's spawn flow
+		// detects this and uses the bundled @8gent/runtime instead.
+		requiresNodeVersion: "22.14.0",
 	},
 	pi: {
 		// Pi (badlogic/pi-mono) — minimal terminal coding harness.
@@ -390,6 +401,31 @@ export async function runExternalAgent(
 	}
 	// For "stdin" mode argv stays untouched; prompt goes to stdin below.
 
+	// If the preset requires a newer Node than the user has on PATH,
+	// transparently use our managed Node 22 runtime under
+	// ~/.8gent/runtime/ (downloaded on first need). This unblocks
+	// openclaw on Node 20 machines without forcing the user to nvm.
+	// Done BEFORE the Promise block since Promise executors can't await.
+	let pathPrefix = "";
+	if (preset.requiresNodeVersion) {
+		try {
+			const { ensureNodeFor } = await import("../../../../packages/runtime/index.js");
+			const binDir = await ensureNodeFor(preset.requiresNodeVersion);
+			if (binDir) pathPrefix = `${binDir}:`;
+		} catch (err) {
+			return {
+				ok: false,
+				text: "",
+				durationMs: Math.round(performance.now() - start),
+				command: `${preset.command} ${argv.join(" ")}`,
+				error: `managed Node runtime install failed: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+				exitCode: null,
+			};
+		}
+	}
+
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
@@ -399,6 +435,7 @@ export async function runExternalAgent(
 			stdio: ["pipe", "pipe", "pipe"],
 			env: {
 				...process.env,
+				PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
 				NO_COLOR: "1",
 				FORCE_COLOR: "0",
 				// Skip the splash banner when 8gent is invoked nested
