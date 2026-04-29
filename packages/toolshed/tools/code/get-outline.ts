@@ -63,6 +63,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:code"],
+		tiers: ["read"],
 	},
 	async (input: unknown, context: ExecutionContext): Promise<OutlineOutput> => {
 		const { filePath, kinds } = input as GetOutlineInput;

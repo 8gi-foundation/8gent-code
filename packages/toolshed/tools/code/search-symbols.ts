@@ -82,6 +82,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:code"],
+		tiers: ["read"],
 	},
 	async (input: unknown, context: ExecutionContext): Promise<SearchOutput> => {
 		const {

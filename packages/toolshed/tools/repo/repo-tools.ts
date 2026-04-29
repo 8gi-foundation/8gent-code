@@ -32,6 +32,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:fs"],
+		tiers: ["read"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { depth = 3, dir } = input as { depth?: number; dir?: string };
@@ -111,6 +112,7 @@ registerTool(
 			properties: {},
 		},
 		permissions: ["read:fs"],
+		tiers: ["read"],
 	},
 	async (_input: unknown, ctx: ExecutionContext) => {
 		const cwd = ctx.workingDirectory;
@@ -217,6 +219,7 @@ registerTool(
 			required: ["pattern"],
 		},
 		permissions: ["read:fs"],
+		tiers: ["read", "execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { pattern, limit = 50 } = input as {
@@ -270,6 +273,7 @@ registerTool(
 			required: ["pattern"],
 		},
 		permissions: ["read:code"],
+		tiers: ["read", "execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const {
