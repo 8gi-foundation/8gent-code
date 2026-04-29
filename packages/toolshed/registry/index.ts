@@ -8,7 +8,7 @@
  * and the planner queries for tools matching required capabilities.
  */
 
-import type { Capability, Permission, Tool } from "../../types";
+import type { Capability, Permission, Tool, ToolCapabilityTier } from "../../types";
 
 interface ToolRegistration {
 	tool: Tool;
@@ -227,6 +227,9 @@ class ToolRegistry {
 		if (!Array.isArray(tool.capabilities) || tool.capabilities.length === 0) {
 			throw new Error("Tool must have at least one capability");
 		}
+		if (!Array.isArray(tool.tiers) || tool.tiers.length === 0) {
+			throw new Error(`Tool '${tool.name}' must declare at least one capability tier`);
+		}
 		if (!tool.inputSchema || typeof tool.inputSchema !== "object") {
 			throw new Error("Tool must have an inputSchema");
 		}
@@ -280,4 +283,21 @@ export function resetToolRegistry(): void {
 }
 
 // Re-export types
-export type { Tool, Capability, Permission };
+export type { Tool, Capability, Permission, ToolCapabilityTier };
+
+// Re-export executor + audit so the public registry surface includes
+// the gating mechanism, not just registration.
+export {
+	executeTool,
+	checkCapability,
+	canInvoke,
+	isCapabilityDenial,
+	DEFAULT_GRANTED_TIERS,
+} from "./executor";
+export {
+	getCapabilityAuditLog,
+	clearCapabilityAuditLog,
+	onAuditEntry,
+	type CapabilityAuditEntry,
+} from "./audit";
+export { getToolsForTier } from "./register";
