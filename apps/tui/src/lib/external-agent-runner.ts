@@ -91,9 +91,12 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://docs.claude.com/en/docs/claude-code",
 		install: {
-			command: "npm install -g @anthropic-ai/claude-code",
+			// `--prefix` dodges EACCES when system Node owns /usr/local/lib
+			// and the user lacks sudo. Binary lands in ~/.npm-global/bin which
+			// the post-install note tells the user to add to PATH if needed.
+			command: "npm install -g --prefix=$HOME/.npm-global @anthropic-ai/claude-code",
 			notes:
-				"After install, run `claude` once outside the TUI to authenticate with Anthropic. Until that's done, /spawn'd Claude tabs will fail with auth errors.",
+				"Binary at ~/.npm-global/bin/claude. If `claude` isn't on PATH after install, add `export PATH=\"$HOME/.npm-global/bin:$PATH\"` to your shell rc. Then run `claude` once outside the TUI to authenticate with Anthropic.",
 		},
 	},
 	codex: {
@@ -107,8 +110,9 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://github.com/openai/codex",
 		install: {
-			command: "npm install -g @openai/codex",
-			notes: "Requires an OpenAI API key — `export OPENAI_API_KEY=sk-...` before /spawn.",
+			command: "npm install -g --prefix=$HOME/.npm-global @openai/codex",
+			notes:
+				"Binary at ~/.npm-global/bin/codex. Add `~/.npm-global/bin` to PATH if needed. Requires `export OPENAI_API_KEY=sk-...` before /spawn.",
 		},
 	},
 	hermes: {
@@ -121,14 +125,14 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://github.com/NousResearch/hermes-agent",
 		install: {
-			// Hermes ships an official curl|bash installer rather than an
-			// npm package. Works on macOS / Linux / WSL2 / Termux. The
-			// script writes a `hermes` binary to ~/.local/bin or similar
-			// and prints PATH instructions if needed.
+			// `--skip-setup --no-venv` are the official non-interactive flags.
+			// Without them the installer hangs forever waiting for keyboard
+			// input on read -p prompts that have no TTY in our spawned subprocess.
+			// Verified by reading the script source at install.sh:1566 lines.
 			command:
-				"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+				"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup --no-venv",
 			notes:
-				"Hermes installer writes to ~/.local/bin (or similar). If `hermes` isn't on PATH after install, follow the script's printed instructions. v0.11.0+ ships a React/Ink TUI (hermes --tui); we use --headless mode here.",
+				"Hermes installer clones to ~/.hermes/hermes-agent and may symlink the `hermes` command to ~/.local/bin. Add `~/.local/bin` to PATH if needed. v0.11.0+ ships a React/Ink TUI; we use --headless from /spawn.",
 		},
 	},
 	openclaw: {
@@ -141,13 +145,9 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://github.com/openclaw/openclaw",
 		install: {
-			// OpenClaw's official install path. After install the user
-			// typically runs `openclaw onboard` once to set up the gateway,
-			// workspace, channels, and skills — that's not something we
-			// can fully automate from inside /spawn.
-			command: "npm install -g openclaw@latest",
+			command: "npm install -g --prefix=$HOME/.npm-global openclaw@latest",
 			notes:
-				"After install, run `openclaw onboard` outside the TUI once to set up the gateway, workspace, and skills. Until that's done, /spawn'd OpenClaw tabs will fail.",
+				"Binary at ~/.npm-global/bin/openclaw. Add `~/.npm-global/bin` to PATH if needed. After install run `openclaw onboard` outside the TUI to set up the gateway, workspace, and skills.",
 		},
 	},
 	aider: {
@@ -183,9 +183,10 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://8gent.dev",
 		install: {
-			command: "npm install -g @8gi-foundation/8gent-code --force",
+			command:
+				"npm install -g --prefix=$HOME/.npm-global @8gi-foundation/8gent-code --force",
 			notes:
-				"--force overwrites stale `8` / `8gent` / `8gent-code` bin symlinks (the EEXIST issue on npm 9+).",
+				"Binary at ~/.npm-global/bin/8gent. --force overwrites stale `8` / `8gent` / `8gent-code` bin symlinks (npm 9+ EEXIST). Add `~/.npm-global/bin` to PATH if not already.",
 		},
 	},
 };
