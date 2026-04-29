@@ -244,3 +244,18 @@ export { KeychainVault, getKeychainVault } from "./keychain";
 export type { KeychainVaultOptions } from "./keychain";
 export { LibsecretVault, getLibsecretVault, getOSVault } from "./libsecret";
 export type { LibsecretVaultOptions } from "./libsecret";
+
+// Lightweight ~/.8gent/keys.env path (file-backed, user-editable, no
+// encryption). Complements the encrypted SecretVault above for users
+// who'd rather edit a plain .env file in their editor of choice.
+export {
+	KEYS_DIR,
+	KEYS_PATH,
+	ensureKeysFile,
+	loadKeysIntoEnv,
+	openKeysFile,
+	readKeysFile,
+	redactAndWarn,
+	redactKeys,
+} from "./keys";
+export type { RedactResult } from "./keys";
