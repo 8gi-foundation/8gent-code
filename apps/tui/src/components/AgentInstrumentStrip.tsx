@@ -17,6 +17,14 @@ import { Box, Text } from "ink";
 import React from "react";
 import { theme } from "../theme.js";
 
+function truncateMiddle(value: string, max: number): string {
+	if (value.length <= max) return value;
+	const keep = max - 1;
+	const left = Math.ceil(keep * 0.55);
+	const right = Math.floor(keep * 0.45);
+	return `${value.slice(0, left)}…${value.slice(value.length - right)}`;
+}
+
 const ui = {
 	cardBorder: theme.color.cardBorder,
 	muted: theme.color.muted,
@@ -53,7 +61,7 @@ export function AgentInstrumentStrip({
 }: AgentInstrumentStripProps) {
 	return (
 		<Box width="100%" flexShrink={0} gap={1} overflow="hidden">
-			<StatusCard label="Model" value={model} color={ui.cream} />
+			<StatusCard label="Model" value={truncateMiddle(model, 14)} color={ui.cream} />
 
 			<StatusCard label="Agents">
 				<Box>
