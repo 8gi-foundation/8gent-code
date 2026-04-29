@@ -438,7 +438,17 @@ export async function runExternalAgent(
 		});
 
 		proc.on("close", (code) => {
-			const text = preset.parseStdout ? preset.parseStdout(stdout).trim() : stdout.trim();
+			let text = preset.parseStdout ? preset.parseStdout(stdout).trim() : stdout.trim();
+			// Redact any API keys the nested CLI accidentally printed
+			// before they reach chat / Telegram / session export. Best-
+			// effort dynamic import so we don't load the secrets package
+			// when it's not needed.
+			try {
+				const { redactAndWarn } = require("../../../../packages/secrets/keys.ts");
+				if (text) text = redactAndWarn(text);
+			} catch {
+				/* secrets package unavailable — leave text unmodified */
+			}
 			if (code === 0 || (code !== null && text.length > 0)) {
 				finish({ ok: code === 0, text, exitCode: code, error: code === 0 ? undefined : stderr.trim().slice(0, 400) });
 			} else {
