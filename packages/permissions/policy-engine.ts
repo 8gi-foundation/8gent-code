@@ -12,6 +12,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+	checkCommandBoundary,
+	checkFilePathBoundary,
+} from "./src/workspace-boundary.js";
 import type {
 	PolicyActionType,
 	PolicyContext,
@@ -448,6 +452,95 @@ function coppaGate(action: string, context: PolicyContext): PolicyDecision | nul
 }
 
 // ============================================
+// Workspace boundary hard-deny (issue #2083)
+// ============================================
+
+/**
+ * File-system actions whose `path` field must stay inside the workspace root.
+ */
+const FILE_BOUNDARY_ACTIONS = new Set<string>(["write_file", "read_file", "delete_file"]);
+
+/**
+ * Default absolute prefixes that legitimate commands are allowed to touch
+ * even when they fall outside the workspace root (system binaries the agent
+ * shells out to, plus the user's writable home for tooling like git config).
+ * Callers can override via `context.allowedAbsolutePrefixes`.
+ */
+const DEFAULT_ALLOWED_PREFIXES = [
+	"/usr/bin",
+	"/usr/local/bin",
+	"/usr/local/lib",
+	"/usr/local/share",
+	"/bin",
+	"/opt/homebrew/bin",
+	"/opt/homebrew/lib",
+	"/opt/homebrew/share",
+	os.tmpdir(),
+];
+
+function resolveWorkspaceRoot(context: PolicyContext): string | null {
+	const fromContext = context.workspaceRoot;
+	if (typeof fromContext === "string" && fromContext.length > 0) return fromContext;
+	const fromEnv = process.env.EIGHT_WORKSPACE_ROOT;
+	if (fromEnv && fromEnv.length > 0) return fromEnv;
+	return null;
+}
+
+function resolveAllowedPrefixes(context: PolicyContext): string[] {
+	const fromContext = context.allowedAbsolutePrefixes;
+	if (Array.isArray(fromContext)) {
+		return [...DEFAULT_ALLOWED_PREFIXES, ...fromContext.filter((s) => typeof s === "string")];
+	}
+	return DEFAULT_ALLOWED_PREFIXES;
+}
+
+/**
+ * Pre-check gate that resolves paths through `realpathSync` and rejects any
+ * resolved path outside the workspace. Runs BEFORE YAML rule evaluation, so
+ * a misconfigured allow rule can't lift the boundary.
+ *
+ * Skipped when no workspace root is set (CLI startup, daemons that opt out)
+ * so existing tooling keeps working until a root is wired in.
+ */
+function workspaceBoundaryGate(
+	action: string,
+	context: PolicyContext,
+): PolicyDecision | null {
+	const workspaceRoot = resolveWorkspaceRoot(context);
+	if (!workspaceRoot) return null;
+
+	const allowedPrefixes = resolveAllowedPrefixes(context);
+
+	if (FILE_BOUNDARY_ACTIONS.has(action)) {
+		const filePath = typeof context.path === "string" ? context.path : "";
+		if (!filePath) return null;
+		const result = checkFilePathBoundary(filePath, workspaceRoot, allowedPrefixes);
+		if (!result.allowed) {
+			const v = result.violations[0];
+			return {
+				allowed: false,
+				reason: `[workspace-boundary] ${v.reason}: ${v.raw} -> ${v.resolved}`,
+			};
+		}
+	}
+
+	if (action === "run_command") {
+		const command = typeof context.command === "string" ? context.command : "";
+		if (!command) return null;
+		const result = checkCommandBoundary(command, workspaceRoot, allowedPrefixes);
+		if (!result.allowed) {
+			const v = result.violations[0];
+			return {
+				allowed: false,
+				reason: `[workspace-boundary] ${v.reason}: ${v.raw} -> ${v.resolved}`,
+			};
+		}
+	}
+
+	return null;
+}
+
+// ============================================
 // Core Evaluator
 // ============================================
 
@@ -456,6 +549,7 @@ function coppaGate(action: string, context: PolicyContext): PolicyDecision | nul
  *
  * Evaluation order (blocks take priority over allows):
  *   0. COPPA hard-deny - email/address-issuance for child accounts (not YAML-overridable)
+ *   0b. Workspace boundary - realpath-anchored confinement (issue #2083, not YAML-overridable)
  *   1. Disabled rules skipped
  *   2. "block" rules checked first - if matched, hard deny (no override possible)
  *   3. "require_approval" rules checked - if matched, soft deny
@@ -468,6 +562,9 @@ export function evaluatePolicy(
 ): PolicyDecision {
 	const coppa = coppaGate(action, context);
 	if (coppa) return coppa;
+
+	const boundary = workspaceBoundaryGate(action, context);
+	if (boundary) return boundary;
 
 	if (!_loaded) loadPolicies();
 
