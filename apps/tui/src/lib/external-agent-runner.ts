@@ -181,8 +181,13 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		id: "8gent",
 		label: "8gent (nested)",
 		command: "8gent",
+		// `run` is the documented one-shot pipe-friendly subcommand
+		// (`chat` boots the full TUI splash and isn't usable from a
+		// child process). Live-tested: `8gent run "<prompt>"` returns
+		// the agent's reply on stdout. First call may take 30-60s
+		// (cold Ollama model load); subsequent calls are fast.
 		promptMode: "arg",
-		args: ["chat"],
+		args: ["run"],
 		timeoutMs: 180_000,
 		parseStdout: stripAnsi,
 		homepage: "https://8gent.dev",
@@ -388,7 +393,16 @@ export async function runExternalAgent(
 
 		const proc = spawn(preset.command, argv, {
 			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+			env: {
+				...process.env,
+				NO_COLOR: "1",
+				FORCE_COLOR: "0",
+				// Skip the splash banner when 8gent is invoked nested
+				// (the user is in another agent's chat, not our TUI).
+				"8GENT_NO_INTRO": "1",
+				// Suppress noisy AI SDK warnings that pollute stdout.
+				AI_SDK_LOG_WARNINGS: "false",
+			},
 		});
 
 		const finish = (result: Omit<ExternalAgentResult, "durationMs" | "command">) => {
