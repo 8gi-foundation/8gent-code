@@ -12,26 +12,51 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { CapabilityAuditStore } from "./capability-store.js";
 import { AccessAuditStore } from "./store.js";
 import type {
 	AccessEvent,
 	AccessOperation,
 	ActorKind,
+	CapabilityEvent,
+	CapabilityOperation,
 	LogAccessInput,
+	LogCapabilityInput,
 	QueryAccessOptions,
+	QueryCapabilityOptions,
 } from "./types.js";
 
-export { AccessAuditStore };
-export type { AccessEvent, AccessOperation, ActorKind, LogAccessInput, QueryAccessOptions };
+export { AccessAuditStore, CapabilityAuditStore };
+export type {
+	AccessEvent,
+	AccessOperation,
+	ActorKind,
+	CapabilityEvent,
+	CapabilityOperation,
+	LogAccessInput,
+	LogCapabilityInput,
+	QueryAccessOptions,
+	QueryCapabilityOptions,
+};
 
 let _shared: AccessAuditStore | null = null;
 let _sharedPath: string | null = null;
+let _sharedCap: CapabilityAuditStore | null = null;
+let _sharedCapPath: string | null = null;
 
-function resolveDefaultPath(): string {
+function resolveAuditDir(): string {
 	const base = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 	const dir = path.join(base, "audit");
 	if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-	return path.join(dir, "access.db");
+	return dir;
+}
+
+function resolveDefaultPath(): string {
+	return path.join(resolveAuditDir(), "access.db");
+}
+
+function resolveDefaultCapabilityPath(): string {
+	return path.join(resolveAuditDir(), "capability.db");
 }
 
 /** Get the shared audit store. Opens it on first call. */
@@ -59,4 +84,31 @@ export function logAccess(input: LogAccessInput): string {
 /** Query the shared store. Read-only. */
 export function queryAccess(options: QueryAccessOptions = {}): AccessEvent[] {
 	return getAccessAuditStore().queryAccess(options);
+}
+
+/** Get the shared capability audit store. Opens it on first call. */
+export function getCapabilityAuditStore(dbPath?: string): CapabilityAuditStore {
+	const target = dbPath ?? _sharedCapPath ?? resolveDefaultCapabilityPath();
+	if (_sharedCap && _sharedCapPath === target) return _sharedCap;
+	if (_sharedCap) _sharedCap.close();
+	_sharedCap = new CapabilityAuditStore(target);
+	_sharedCapPath = target;
+	return _sharedCap;
+}
+
+/** Reset the shared capability store. Primarily for tests. */
+export function resetCapabilityAuditStore(): void {
+	if (_sharedCap) _sharedCap.close();
+	_sharedCap = null;
+	_sharedCapPath = null;
+}
+
+/** Convenience wrapper. Writes a single capability grant/revoke event. */
+export function logCapability(input: LogCapabilityInput): string {
+	return getCapabilityAuditStore().logCapability(input);
+}
+
+/** Query the shared capability log. Read-only. */
+export function queryCapability(options: QueryCapabilityOptions = {}): CapabilityEvent[] {
+	return getCapabilityAuditStore().queryCapability(options);
 }
