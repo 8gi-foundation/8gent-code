@@ -25,10 +25,18 @@
 		"./migrate": {
 			"import": "./migrate.ts",
 			"types": "./migrate.ts"
+		},
+		"./sqlite-vec": {
+			"import": "./sqlite-vec.ts",
+			"types": "./sqlite-vec.ts"
 		}
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"bench": "bun run bench/vec-search.ts"
+	},
+	"dependencies": {
+		"sqlite-vec": "^0.1.9"
 	},
 	"devDependencies": {
 		"typescript": "^5.3.0"
