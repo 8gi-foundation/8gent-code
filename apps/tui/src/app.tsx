@@ -2174,6 +2174,61 @@ export function App({
 					break;
 				}
 
+				case "create-app": {
+					if (args.length === 0) {
+						addSystemMessage(
+							"Usage: /create-app <name> [-- <description>] [--caps read,write,bash]\n" +
+								"Personal apps land in ~/.8gent/apps/<name>/ and never touch this repo.",
+						);
+						break;
+					}
+					void (async () => {
+						const { createApp, defaultAppsRoot } = await import(
+							"../../../packages/app-creator/index.js"
+						);
+						const name = args[0];
+						let description: string | undefined;
+						let capabilities: string[] | undefined;
+						for (let i = 1; i < args.length; i++) {
+							const a = args[i];
+							if (a === "--") {
+								description = args.slice(i + 1).join(" ");
+								break;
+							}
+							if (a === "--caps" && args[i + 1]) {
+								capabilities = args[i + 1]
+									.split(",")
+									.map((c) => c.trim())
+									.filter(Boolean);
+								i++;
+							}
+						}
+						const result = createApp({
+							name,
+							description,
+							capabilities: capabilities as never,
+							approved: true,
+						});
+						if (!result.persisted) {
+							addSystemMessage(
+								`/create-app failed:\n  ${result.errors.join("\n  ") || "(unknown error)"}`,
+							);
+							return;
+						}
+						const skillNote =
+							"Read SKILL.md inside the app dir and use the describe -> generate -> test -> refine loop to iterate.";
+						addSystemMessage(
+							`Scaffolded mini-app "${result.manifest.name}" v${result.manifest.version}\n` +
+								`Location: ${result.dir}\n` +
+								`Apps root: ${defaultAppsRoot()}\n` +
+								`Files: ${result.written.length} written\n` +
+								`Run: bun test ${result.dir.replace(/\\/g, "/")}/tests/\n` +
+								`\n${skillNote}`,
+						);
+					})();
+					break;
+				}
+
 				case "fork": {
 					const tree = sessionTreeRef.current;
 					const tip = tree.tipId;
