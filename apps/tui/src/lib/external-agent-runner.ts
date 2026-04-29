@@ -119,8 +119,12 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		id: "hermes",
 		label: "Hermes Agent",
 		command: "hermes",
-		promptMode: "arg",
-		args: ["--headless"],
+		// Verified against `hermes --help` on a real install: `-z PROMPT`
+		// is the one-shot non-interactive prompt flag. The previous
+		// `--headless` was wrong (no such flag in the current Hermes CLI).
+		promptMode: "flag",
+		flagName: "-z",
+		args: [],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
 		homepage: "https://github.com/NousResearch/hermes-agent",
@@ -132,7 +136,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 			command:
 				"curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup --no-venv",
 			notes:
-				"Hermes installer clones to ~/.hermes/hermes-agent and may symlink the `hermes` command to ~/.local/bin. Add `~/.local/bin` to PATH if needed. v0.11.0+ ships a React/Ink TUI; we use --headless from /spawn.",
+				"Hermes needs Python ≥ 3.11 (anaconda's default 3.10 won't work — use pyenv or brew install python@3.11). Installer symlinks `hermes` into ~/.local/bin; add it to PATH if needed. After install, run `hermes setup` or `hermes model` outside the TUI to configure a provider — without that, /spawn'd Hermes tabs will fail with auth errors (Bedrock is the default provider).",
 		},
 	},
 	openclaw: {
