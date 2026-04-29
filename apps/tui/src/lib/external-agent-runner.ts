@@ -151,27 +151,31 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		install: {
 			command: "npm install -g --prefix=$HOME/.npm-global openclaw@latest",
 			notes:
-				"Binary at ~/.npm-global/bin/openclaw. Add `~/.npm-global/bin` to PATH if needed. After install run `openclaw onboard` outside the TUI to set up the gateway, workspace, and skills.",
+				"Requires Node 22.12+ at runtime (not just at install). On nvm: `nvm install 22 && nvm use 22`. Binary at ~/.npm-global/bin/openclaw. Add `~/.npm-global/bin` to PATH if needed. After install run `openclaw onboard` outside the TUI to set up the gateway, workspace, and skills.",
 		},
 	},
-	aider: {
-		id: "aider",
-		label: "Aider",
-		command: "aider",
-		// Aider eats prompts via --message; --no-pretty silences ANSI.
+	pi: {
+		// Pi (badlogic/pi-mono) — minimal terminal coding harness.
+		// Replaces the previous Aider preset. Pi is the substrate that
+		// OpenClaw is built on, so adding it as a peer makes the spawn
+		// matrix more interesting (we can compare same-task on the
+		// raw pi vs OpenClaw's wrapper).
+		id: "pi",
+		label: "Pi (pi-mono)",
+		command: "pi",
+		// `pi -p "<prompt>"` is the documented headless one-shot mode
+		// (--print, prints reply and exits). Verified end-to-end via
+		// runExternalAgent against a real install.
 		promptMode: "flag",
-		flagName: "--message",
-		args: ["--no-pretty", "--yes", "--no-stream"],
+		flagName: "-p",
+		args: [],
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
-		homepage: "https://aider.chat",
+		homepage: "https://pi.dev",
 		install: {
-			// Canonical PyPI package is `aider-chat`. The `--user` flag
-			// puts the binary in ~/.local/bin which may not be on PATH;
-			// the homepage notes cover the workaround.
-			command: "python3 -m pip install --user aider-chat",
+			command: "npm install -g --prefix=$HOME/.npm-global @mariozechner/pi-coding-agent",
 			notes:
-				"If `aider` is still not on PATH after install, ensure ~/.local/bin (or the equivalent for your Python) is in your shell's PATH. Then set OPENAI_API_KEY or ANTHROPIC_API_KEY before using it.",
+				"Binary at ~/.npm-global/bin/pi. Add `~/.npm-global/bin` to PATH if needed. Default provider is Google (Gemini) — set GEMINI_API_KEY, or override with --provider/--model and the matching API key env var (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY).",
 		},
 	},
 	"8gent": {
@@ -449,6 +453,12 @@ export async function runExternalAgent(
 
 		if (preset.promptMode === "stdin" && proc.stdin) {
 			proc.stdin.write(prompt);
+			proc.stdin.end();
+		} else if (proc.stdin) {
+			// CLIs like pi, codex check whether stdin is a TTY. With a
+			// piped stdin that never closes, they assume more input is
+			// coming and hang. Closing stdin immediately tells them to
+			// process whatever's already on the command line and exit.
 			proc.stdin.end();
 		}
 
