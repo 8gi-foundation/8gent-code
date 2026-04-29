@@ -66,6 +66,8 @@ COMMANDS:
   cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
   rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
   mcp-server [--tools=safe]   Start MCP server (expose 8gent tools to external clients)
+  publish <app-dir>           Build a .8gent-app.tar.gz archive for marketplace submission
+                              Flags: --out=<path> --max-size=<mb> --allow-dangerous --strict-lint --json
 
 AGENT COMMANDS:
   agent list                  List active sub-agents
@@ -423,6 +425,10 @@ async function main() {
 
 		case "install":
 			await installCommand(restArgs);
+			break;
+
+		case "publish":
+			await publishCommand(restArgs);
 			break;
 
 		default:
@@ -2338,6 +2344,65 @@ async function reviewCommand(args: string[]) {
 	} else {
 		console.log(review);
 	}
+}
+
+async function publishCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+
+	const appDir = rest[0];
+	if (!appDir) {
+		const msg = "publish requires an app directory: 8gent publish <app-dir>";
+		if (isJson) jsonOut({ success: false, error: msg });
+		else console.error(msg);
+		process.exit(1);
+	}
+
+	const { runPublish } = await import("../packages/marketplace/index.ts");
+
+	const maxBytes = typeof flags["max-size"] === "string"
+		? Math.floor(Number(flags["max-size"]) * 1024 * 1024)
+		: undefined;
+	if (maxBytes !== undefined && (Number.isNaN(maxBytes) || maxBytes <= 0)) {
+		const msg = `--max-size must be a positive number of megabytes, got ${flags["max-size"]}`;
+		if (isJson) jsonOut({ success: false, error: msg });
+		else console.error(msg);
+		process.exit(1);
+	}
+
+	const result = await runPublish({
+		appDir: path.resolve(appDir),
+		outPath: typeof flags.out === "string" ? path.resolve(flags.out) : undefined,
+		maxBytes,
+		allowDangerous: !!flags["allow-dangerous"],
+		strictLint: !!flags["strict-lint"],
+	});
+
+	if (isJson) {
+		jsonOut({
+			success: result.ok,
+			exitCode: result.exitCode,
+			archive: result.archivePath ?? null,
+			manifest: result.manifest ?? null,
+			checks: result.checks,
+			errors: result.errors,
+		});
+	} else {
+		for (const c of result.checks) {
+			const tag =
+				c.level === "ok" ? "ok " : c.level === "warn" ? "warn" : "FAIL";
+			console.log(`[${tag}] ${c.name}: ${c.message}`);
+		}
+		if (result.ok && result.archivePath) {
+			console.log(`\nArchive: ${result.archivePath}`);
+		}
+		if (result.errors.length > 0) {
+			console.error("\nErrors:");
+			for (const e of result.errors) console.error(`  - ${e}`);
+		}
+	}
+
+	process.exit(result.exitCode);
 }
 
 async function doctorCommand() {
