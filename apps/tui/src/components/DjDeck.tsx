@@ -20,8 +20,6 @@ const ui = {
 	dim: theme.color.dim,
 	orange: theme.color.orange,
 	orangeDim: theme.color.orangeDim,
-	panel: theme.color.surface,
-	panel2: theme.color.surface2,
 } as const;
 
 interface DjStatus {
@@ -65,38 +63,78 @@ function truncateEnd(value: string, max: number): string {
 	return `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
-function useTicker(enabled: boolean, ms: number) {
-	const [tick, setTick] = useState(0);
-	useEffect(() => {
-		if (!enabled) return;
-		const id = setInterval(() => setTick((v) => v + 1), ms);
-		return () => clearInterval(id);
-	}, [enabled, ms]);
-	return tick;
-}
-
-function MiniReel({ spinning, reverse = false }: { spinning: boolean; reverse?: boolean }) {
-	const tick = useTicker(spinning, 180);
-	const frames = reverse ? ["◷", "◶", "◵", "◴"] : ["◴", "◵", "◶", "◷"];
+function ShortcutHintRow({ playing }: { playing: boolean }) {
 	return (
-		<Box width={3} justifyContent="center" flexShrink={0}>
-			<Text color={ui.orange}>{frames[tick % frames.length]}</Text>
+		<Box justifyContent="space-between" width="100%" overflow="hidden">
+			<Text color={ui.muted} wrap="truncate-end">
+				^B prev
+			</Text>
+			<Text color={ui.muted} wrap="truncate-end">
+				^P {playing ? "pause" : "play"}
+			</Text>
+			<Text color={ui.muted} wrap="truncate-end">
+				^N next
+			</Text>
+			<Text color={ui.muted} wrap="truncate-end">
+				^↑↓ vol
+			</Text>
+			<Text color={ui.muted} wrap="truncate-end">
+				^M mute
+			</Text>
 		</Box>
 	);
 }
 
-function Hint({ children }: { children: React.ReactNode }) {
-	return <Text color={ui.muted}>{children}</Text>;
+/** Strip emoji + collapse whitespace so terminal width math stays correct. */
+function sanitizeTrack(value: string): string {
+	return value
+		.replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
+		.replace(/\s+/g, " ")
+		.trim();
 }
 
-function ShortcutHintRow({ playing }: { playing: boolean }) {
+function StereoDisplay(props: {
+	playing: boolean;
+	track: string;
+	artist: string;
+	elapsed: string;
+	duration: string;
+	volume: number | null;
+	muted: boolean;
+}) {
 	return (
-		<Box marginTop={1} justifyContent="space-between" width="100%">
-			<Hint>^⇧B prev</Hint>
-			<Hint>^⇧P {playing ? "pause" : "play"}</Hint>
-			<Hint>^⇧N next</Hint>
-			<Hint>^⇧↑↓ vol</Hint>
-			<Hint>^⇧M mute</Hint>
+		<Box
+			width="100%"
+			borderStyle="single"
+			borderColor={ui.orangeDim}
+			paddingX={1}
+			flexDirection="column"
+		>
+			<Box justifyContent="space-between" width="100%">
+				<Box minWidth={0} flexGrow={1}>
+					<Text color={ui.orange}>{props.playing ? "◴ " : "○ "}</Text>
+					<Text color={ui.cream} wrap="truncate-end">
+						{props.track}
+					</Text>
+				</Box>
+				<Text color={ui.orange}>{props.playing ? " ◷" : " ○"}</Text>
+			</Box>
+
+			<Box justifyContent="space-between" width="100%">
+				<Text color={ui.orange} wrap="truncate-end">
+					{props.artist}
+				</Text>
+				<Text color={ui.orangeDim}>
+					{props.elapsed} / {props.duration}
+				</Text>
+			</Box>
+
+			<Box justifyContent="space-between" width="100%">
+				<Text color={ui.orangeDim}>▂▃▅▆▅▃▂ ━━━━━░░</Text>
+				<Text color={props.muted ? ui.dim : ui.orangeDim}>
+					{props.muted ? "muted" : props.volume == null ? "vol --" : `vol ${props.volume}%`}
+				</Text>
+			</Box>
 		</Box>
 	);
 }
@@ -157,25 +195,23 @@ export function DjDeck() {
 
 	useInput(
 		async (input, key) => {
-			// Require Ctrl+Shift (matches the on-screen hint "^⇧P pause" etc).
-			// We test the *uppercase character* rather than `key.shift` because
-			// some macOS terminals don't set the shift flag reliably on
-			// ctrl-shift combos, but they do deliver the uppercase letter.
-			// This also stops plain Ctrl+P from accidentally firing pause —
-			// previously a real collision with Ctrl+P (predict) in app.tsx.
+			// Ctrl + letter, no shift — matches the visible hints (^P, ^B, ^N, ^M).
+			// Gate `isActive` below ensures the chat input keeps Ctrl+P/B/N when
+			// no track is loaded; once a track is playing the deck owns these.
 			if (!key.ctrl) return;
 			const dj = djRef.current.instance;
 			if (!dj) return;
+			const k = (input || "").toLowerCase();
 			try {
-				if (input === "P") {
+				if (k === "p") {
 					await dj.pause();
-				} else if (input === "N") {
+				} else if (k === "n") {
 					await dj.skip();
-				} else if (input === "B") {
+				} else if (k === "b") {
 					const hist: { title: string; url: string }[] = dj.getHistory?.() ?? [];
 					const prev = hist[hist.length - 2];
 					if (prev?.url) await dj.play(prev.url);
-				} else if (input === "M") {
+				} else if (k === "m") {
 					const cur = status.volume ?? 80;
 					if (cur > 0) {
 						lastVolumeRef.current = cur;
@@ -202,14 +238,11 @@ export function DjDeck() {
 	const playing = status.playing && !status.paused;
 	const muted = status.volume != null && status.volume === 0;
 	const volume = status.volume == null ? null : Math.round(status.volume);
-	const station = "8GENT FM";
-	const track = truncateEnd(status.title || "(loading)", 82);
-	const artist = "Instrumental";
+	const track = truncateEnd(sanitizeTrack(status.title || "(loading)"), 82);
 
 	return (
 		<Box
 			width="100%"
-			height={8}
 			borderStyle="round"
 			borderColor={ui.orangeDim}
 			paddingX={1}
@@ -217,48 +250,25 @@ export function DjDeck() {
 			flexShrink={0}
 		>
 			<Box justifyContent="space-between" width="100%">
-				<Text color={ui.orange}>● {station}</Text>
+				<Text color={ui.orange}>● 8GENT FM</Text>
 				<Text color={ui.muted}>/dj close</Text>
 			</Box>
 
-			<Box marginTop={1} width="100%" alignItems="center">
-				<MiniReel spinning={playing} />
-
-				<Box
-					flexGrow={1}
-					minWidth={0}
-					marginX={1}
-					borderStyle="single"
-					borderColor={ui.panel2}
-					paddingX={1}
-					flexDirection="column"
-				>
-					<Box justifyContent="space-between" width="100%">
-						<Text color={ui.cream} wrap="truncate-end">
-							{track}
-						</Text>
-						<Text color={ui.orangeDim}>{fmt(status.position)}</Text>
-					</Box>
-
-					<Box justifyContent="space-between" width="100%">
-						<Text color={ui.orange} wrap="truncate-end">
-							{artist}
-						</Text>
-						<Text color={ui.orangeDim}>{fmt(status.duration)}</Text>
-					</Box>
-
-					<Box justifyContent="space-between" width="100%">
-						<Text color={ui.orangeDim}>▂▃▅▆▅▃▂ ━━━━━░░</Text>
-						<Text color={muted ? ui.dim : ui.orangeDim}>
-							{muted ? "muted" : volume == null ? "vol --" : `vol ${volume}%`}
-						</Text>
-					</Box>
-				</Box>
-
-				<MiniReel spinning={playing} reverse />
+			<Box marginTop={1}>
+				<StereoDisplay
+					playing={playing}
+					track={track}
+					artist="Instrumental"
+					elapsed={fmt(status.position)}
+					duration={fmt(status.duration)}
+					volume={volume}
+					muted={muted}
+				/>
 			</Box>
 
-			<ShortcutHintRow playing={playing} />
+			<Box marginTop={1}>
+				<ShortcutHintRow playing={playing} />
+			</Box>
 		</Box>
 	);
 }
