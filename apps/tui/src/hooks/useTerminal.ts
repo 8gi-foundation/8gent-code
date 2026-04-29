@@ -52,7 +52,15 @@ export interface TerminalState {
 	pid: number | null;
 }
 
-export function useTerminal(tabId: string, cwd?: string) {
+export interface TerminalSpawnOpts {
+	cwd?: string;
+	command?: string;
+	args?: string[];
+}
+
+export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpts) {
+	const opts: TerminalSpawnOpts =
+		typeof cwdOrOpts === "string" ? { cwd: cwdOrOpts } : (cwdOrOpts ?? {});
 	const [state, setState] = useState<TerminalState>({
 		lines: [],
 		isRunning: false,
@@ -87,10 +95,12 @@ export function useTerminal(tabId: string, cwd?: string) {
 	const spawn = useCallback(() => {
 		if (sessionRef.current) return; // already running
 
-		const workDir = cwd || process.cwd();
+		const workDir = opts.cwd || process.cwd();
+		const command = opts.command ?? SHELL;
+		const args = opts.args ?? (opts.command ? [] : ["-i"]);
 		const session = new PtySession({
-			command: SHELL,
-			args: ["-i"],
+			command,
+			args,
 			cwd: workDir,
 			cols: 120,
 			rows: 30,
@@ -112,7 +122,7 @@ export function useTerminal(tabId: string, cwd?: string) {
 		session.ready.then(() => {
 			setState({ lines: [], isRunning: true, pid: session.pid });
 		});
-	}, [tabId, cwd, appendOutput]);
+	}, [tabId, opts.cwd, opts.command, opts.args, appendOutput]);
 
 	// Spawn on mount, kill on unmount
 	useEffect(() => {
@@ -131,11 +141,18 @@ export function useTerminal(tabId: string, cwd?: string) {
 		};
 	}, [tabId, spawn]);
 
-	/** Write a command to the terminal (user-typed or agent-sent) */
+	/** Write a command line to the terminal (agent-sent — appends \n if missing). */
 	const write = useCallback((input: string) => {
 		const session = sessionRef.current;
 		if (!session) return;
 		session.write(input.endsWith("\n") ? input : `${input}\n`);
+	}, []);
+
+	/** Forward raw bytes to the PTY (user keystrokes — no newline injection). */
+	const writeRaw = useCallback((bytes: string) => {
+		const session = sessionRef.current;
+		if (!session) return;
+		session.write(bytes);
 	}, []);
 
 	/** Resize the PTY when terminal dimensions change */
@@ -163,5 +180,5 @@ export function useTerminal(tabId: string, cwd?: string) {
 		setTimeout(spawn, 50);
 	}, [tabId, spawn]);
 
-	return { ...state, write, resize, restart };
+	return { ...state, write, writeRaw, resize, restart };
 }
