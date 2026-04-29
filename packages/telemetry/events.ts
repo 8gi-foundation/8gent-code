@@ -11,7 +11,21 @@
  * traffic to Loki.
  */
 
-export type TelemetryKind = "llm" | "vessel" | "storage";
+export type TelemetryKind = "llm" | "vessel" | "storage" | "lifecycle";
+
+/**
+ * Mirror of `AgentLifecycleState` from `@8gent/types`. Duplicated as a string
+ * union here to avoid pulling a runtime dep on `@8gent/types` into telemetry.
+ * Keep in sync with `packages/types/agent-lifecycle.ts`.
+ */
+export type AgentLifecycleStateName =
+	| "spawning"
+	| "running"
+	| "suspended"
+	| "resumed"
+	| "completed"
+	| "failed"
+	| "terminated";
 
 /** Common envelope on every emitted event. */
 export interface TelemetryBase {
@@ -86,7 +100,24 @@ export interface StorageEvent extends TelemetryBase {
 	error?: string;
 }
 
-export type TelemetryEvent = LLMEvent | VesselEvent | StorageEvent;
+/**
+ * Lifecycle event — every agent state transition emits one of these.
+ * Powers the lifecycle audit trail and feeds the orchestration dashboard.
+ */
+export interface LifecycleEvent extends TelemetryBase {
+	kind: "lifecycle";
+	agentId: string;
+	state: AgentLifecycleStateName;
+	prevState?: AgentLifecycleStateName;
+	taskDescription?: string;
+	priority?: number;
+	reason?: string;
+	/** Wall-clock duration of the previous state, if known. */
+	durationMs?: number;
+	error?: string;
+}
+
+export type TelemetryEvent = LLMEvent | VesselEvent | StorageEvent | LifecycleEvent;
 
 /** Type guard helpers. */
 export function isLLMEvent(e: TelemetryEvent): e is LLMEvent {
@@ -97,4 +128,7 @@ export function isVesselEvent(e: TelemetryEvent): e is VesselEvent {
 }
 export function isStorageEvent(e: TelemetryEvent): e is StorageEvent {
 	return e.kind === "storage";
+}
+export function isLifecycleEvent(e: TelemetryEvent): e is LifecycleEvent {
+	return e.kind === "lifecycle";
 }

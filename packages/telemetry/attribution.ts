@@ -16,7 +16,13 @@
 
 import { estimateCostUsd } from "./cost";
 import { getSink } from "./emitter";
-import type { LLMEvent, StorageEvent, TelemetryEvent, VesselEvent } from "./events";
+import type {
+	LifecycleEvent,
+	LLMEvent,
+	StorageEvent,
+	TelemetryEvent,
+	VesselEvent,
+} from "./events";
 import { type SpanContext, newSpanContext, nowUnixNano } from "./otel";
 
 /** Thrown when an event is missing required attribution. */
@@ -93,6 +99,15 @@ export type StorageRecord = Omit<StorageEvent, "kind">;
 export function recordStorage(input: StorageRecord, span?: SpanContext): StorageEvent {
 	ensureAttributed({ ...input, kind: "storage" });
 	const event: StorageEvent = stamp({ ...input, kind: "storage" }, span);
+	getSink().write(event);
+	return event;
+}
+
+export type LifecycleRecord = Omit<LifecycleEvent, "kind">;
+
+export function recordLifecycle(input: LifecycleRecord, span?: SpanContext): LifecycleEvent {
+	ensureAttributed({ ...input, kind: "lifecycle" });
+	const event: LifecycleEvent = stamp({ ...input, kind: "lifecycle" }, span);
 	getSink().write(event);
 	return event;
 }

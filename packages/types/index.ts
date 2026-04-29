@@ -3,6 +3,7 @@
  */
 
 export * from "./tool-result.js";
+export * from "./agent-lifecycle.js";
 
 // ============================================
 // Tool System
