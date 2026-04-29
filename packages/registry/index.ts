@@ -219,6 +219,16 @@ export function getSessionStats(sessionId: string): {
 	};
 }
 
+export {
+	getInstalledApp,
+	installedAppsStorePath,
+	listInstalledApps,
+	registerInstalledApp,
+	setAppEnabled,
+	unregisterInstalledApp,
+} from "./installed-apps.js";
+export type { InstalledAppRow } from "./installed-apps.js";
+
 export function getTotalStats(): {
 	totalSessions: number;
 	totalTokensUsed: number;
