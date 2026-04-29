@@ -42,6 +42,9 @@ COMMANDS:
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
                               "keys reload" re-reads the file into the running env (default action)
                               "keys status" lists which provider keys are present (no values shown)
+  install <preset>            Interactively install a /spawn preset CLI (claude, codex,
+                              hermes, openclaw, pi, 8gent). Runs the install recipe with
+                              full stdio so you can answer prompts + complete OAuth.
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -418,6 +421,10 @@ async function main() {
 			await keysCommand(restArgs);
 			break;
 
+		case "install":
+			await installCommand(restArgs);
+			break;
+
 		default:
 			console.error(`Unknown command: ${command}`);
 			console.log(`Run '8 --help' for usage information.`);
@@ -578,6 +585,85 @@ async function keysCommand(args: string[]): Promise<void> {
 	console.error(`Unknown subcommand: keys ${sub}`);
 	console.error(`Try: keys open | keys reload | keys status`);
 	process.exit(1);
+}
+
+/**
+ * `8gent install <preset>` — interactive install for a /spawn preset.
+ *
+ * Runs the preset's install recipe with full stdio inheritance so the
+ * user sees real prompts, colored output, and can complete OAuth or
+ * setup wizards inline. Complements the silent auto-installer that
+ * runs from inside /spawn (which suppresses output to keep the chat
+ * clean) — same recipe, different UX.
+ *
+ * After the install command exits, we re-probe the preset's binary
+ * via isInstalled() and report success/failure with next steps.
+ */
+async function installCommand(args: string[]): Promise<void> {
+	const presetId = (args[0] || "").toLowerCase().trim();
+	if (!presetId) {
+		console.error(`Usage: 8gent install <preset>`);
+		console.error(`Available presets: claude, codex, hermes, openclaw, pi, 8gent`);
+		process.exit(1);
+	}
+
+	// Resolve the preset from the canonical registry. It lives in
+	// apps/tui (close to its consumer) but is plain data, so we pull
+	// it across package boundaries here. Layering can be tightened in
+	// a later PR by lifting the registry into its own package.
+	const { getPreset, isInstalled } = await import(
+		"../apps/tui/src/lib/external-agent-runner.ts"
+	);
+	const preset = getPreset(presetId);
+	if (!preset) {
+		console.error(`Unknown preset: ${presetId}`);
+		console.error(`Available: claude, codex, hermes, openclaw, pi, 8gent`);
+		process.exit(1);
+	}
+
+	const { formatInstallHeader, runInstall, planInstallRun } = await import(
+		"../packages/install-runner/index.ts"
+	);
+
+	const plan = planInstallRun({ preset });
+	if (!plan.canRun || !plan.command) {
+		console.error(plan.notes);
+		process.exit(1);
+	}
+
+	if (isInstalled(preset)) {
+		console.log(
+			`${preset.label} is already installed at ${preset.command}. Re-run with --force to reinstall.`,
+		);
+		const force = args.includes("--force") || args.includes("-f");
+		if (!force) return;
+	}
+
+	console.log(formatInstallHeader({ preset, command: plan.command }));
+	const result = await runInstall({ preset, stdio: "inherit" });
+
+	if (result.action !== "ran") {
+		console.error(`Install did not run (${result.action}).`);
+		process.exit(1);
+	}
+
+	if (result.exitCode !== 0) {
+		console.error(`\nInstall command exited ${result.exitCode}.`);
+		console.error(`Recipe was: ${result.command}`);
+		process.exit(result.exitCode ?? 1);
+	}
+
+	// Re-probe to confirm the binary is on PATH now.
+	const installed = isInstalled(preset);
+	if (installed) {
+		console.log(`\n✓ ${preset.label} installed and on PATH.`);
+	} else {
+		console.log(
+			`\n⚠ Install reported success but \`${preset.command}\` is not on PATH yet.`,
+		);
+		console.log(`  Open a new shell, or check the install notes:\n`);
+	}
+	if (plan.notes) console.log(`  ${plan.notes}`);
 }
 
 async function initCommand(args: string[]) {
