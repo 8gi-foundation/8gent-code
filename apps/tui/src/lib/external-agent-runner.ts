@@ -68,6 +68,14 @@ export interface ExternalAgentPreset {
 	 * openclaw on machines stuck on Node 20 etc.
 	 */
 	requiresNodeVersion?: string;
+	/**
+	 * When true, /term <preset> defaults to spawning a real Terminal.app
+	 * window via osascript instead of the in-tab line-streaming view.
+	 * Set on presets that build their UI with cursor positioning / box
+	 * drawing (claude, openclaw, hermes), which the in-tab view can't
+	 * render correctly. The user can override per-call with --in-tab.
+	 */
+	preferWindow?: boolean;
 }
 
 export interface ExternalAgentResult {
@@ -98,6 +106,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
 		homepage: "https://docs.claude.com/en/docs/claude-code",
+		preferWindow: true,
 		install: {
 			// `--prefix` dodges EACCES when system Node owns /usr/local/lib
 			// and the user lacks sudo. Binary lands in ~/.npm-global/bin which
@@ -117,6 +126,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		timeoutMs: 120_000,
 		parseStdout: stripAnsi,
 		homepage: "https://github.com/openai/codex",
+		preferWindow: true,
 		install: {
 			command: "npm install -g --prefix=$HOME/.npm-global @openai/codex",
 			notes:
@@ -127,6 +137,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		id: "hermes",
 		label: "Hermes Agent",
 		command: "hermes",
+		preferWindow: true,
 		// Verified against `hermes --help` on a real install: `-z PROMPT`
 		// is the one-shot non-interactive prompt flag. The previous
 		// `--headless` was wrong (no such flag in the current Hermes CLI).
@@ -151,6 +162,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		id: "openclaw",
 		label: "OpenClaw",
 		command: "openclaw",
+		preferWindow: true,
 		promptMode: "arg",
 		args: ["run", "--headless"],
 		timeoutMs: 120_000,
@@ -166,6 +178,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		requiresNodeVersion: "22.14.0",
 	},
 	pi: {
+		preferWindow: true,
 		// Pi (badlogic/pi-mono) — minimal terminal coding harness.
 		// Replaces the previous Aider preset. Pi is the substrate that
 		// OpenClaw is built on, so adding it as a peer makes the spawn
