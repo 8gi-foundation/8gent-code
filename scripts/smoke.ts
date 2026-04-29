@@ -591,7 +591,7 @@ async function testRequiredSkills(): Promise<SmokeResult> {
 
 async function testExternalAgentPresets(): Promise<SmokeResult> {
 	return timeIt("external-agents/presets", async () => {
-		const expected = ["claude", "codex", "hermes", "openclaw", "aider", "8gent"];
+		const expected = ["claude", "codex", "hermes", "openclaw", "pi", "8gent"];
 		const ids = listPresetIds();
 		const missing = expected.filter((e) => !ids.includes(e));
 		assert(missing.length === 0, `missing presets: ${missing.join(", ")}`);
@@ -1577,7 +1577,7 @@ async function main(): Promise<void> {
 
 	// F. External agents
 	results.push(await testExternalAgentPresets());
-	for (const id of ["claude", "codex", "hermes", "openclaw", "aider", "8gent"]) {
+	for (const id of ["claude", "codex", "hermes", "openclaw", "pi", "8gent"]) {
 		results.push(await testExternalAgentBinary(id));
 	}
 
