@@ -149,7 +149,11 @@ import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
-import { resolveTermCommand } from "../../../packages/terminal-tab/index.js";
+import { WindowTerminalView } from "./screens/WindowTerminalView.js";
+import {
+	resolveTermCommand,
+	spawnInWindow,
+} from "../../../packages/terminal-tab/index.js";
 import {
 	loadSettings as loadAppSettings,
 	getVoiceForRole,
@@ -3901,24 +3905,69 @@ export function App({
 					} else if (command === ("terminal" as any)) {
 						workspaceTabs.addTab("terminal", (args as any[])?.[0] || "Terminal");
 					} else if (command === ("term" as any)) {
-						const presets = listPresetIds()
-							.map((id) => {
-								const p = getPreset(id);
-								return p ? { id: p.id, label: p.label, command: p.command } : null;
-							})
-							.filter(
-								(x): x is { id: string; label: string; command: string } => x !== null,
-							);
+						type PresetForResolver = {
+							id: string;
+							label: string;
+							command: string;
+							preferWindow?: boolean;
+						};
+						const presets: PresetForResolver[] = [];
+						for (const id of listPresetIds()) {
+							const p = getPreset(id);
+							if (p) {
+								presets.push({
+									id: p.id,
+									label: p.label,
+									command: p.command,
+									preferWindow: p.preferWindow,
+								});
+							}
+						}
 						const resolved = resolveTermCommand({
 							args: (args as string[]) ?? [],
 							presets,
 						});
-						workspaceTabs.addTab("terminal", resolved.label, {
-							command: resolved.command,
-							args: resolved.args,
-							label: resolved.label,
-							source: resolved.source,
-						});
+
+						if (resolved.mode === "window") {
+							// Plan B: spawn a real Terminal.app window via osascript and
+							// open the tab as a status / control panel.
+							spawnInWindow({
+								command: resolved.command,
+								args: resolved.args,
+								label: resolved.label,
+								cwd: projectCwd,
+							})
+								.then((handle) => {
+									workspaceTabs.addTab("terminal", resolved.label, {
+										mode: "window",
+										sessionId: handle.sessionId,
+										pid: handle.pid,
+										command: handle.command,
+										args: handle.args,
+										label: handle.label,
+										startedAt: handle.startedAt,
+										source: resolved.source,
+									});
+									addSystemMessage(
+										`Opened ${resolved.label} in a new Terminal.app window (session ${handle.sessionId}, pid ${handle.pid}).`,
+									);
+								})
+								.catch((err) => {
+									addSystemMessage(
+										`Failed to spawn ${resolved.label} in a window: ${
+											err && err.message ? err.message : err
+										}`,
+									);
+								});
+						} else {
+							workspaceTabs.addTab("terminal", resolved.label, {
+								mode: "in-tab",
+								command: resolved.command,
+								args: resolved.args,
+								label: resolved.label,
+								source: resolved.source,
+							});
+						}
 					}
 					break;
 			}
@@ -4630,10 +4679,33 @@ export function App({
 					);
 				case "terminal": {
 					const tabData = (workspaceTabs.activeTab?.data ?? {}) as {
+						mode?: "in-tab" | "window";
 						command?: string;
 						args?: string[];
 						label?: string;
+						sessionId?: string;
+						pid?: number;
+						startedAt?: string;
 					};
+					if (tabData.mode === "window" && tabData.sessionId && tabData.pid) {
+						return (
+							<WindowTerminalView
+								sessionId={tabData.sessionId}
+								pid={tabData.pid}
+								command={tabData.command ?? ""}
+								args={tabData.args ?? []}
+								label={tabData.label ?? workspaceTabs.activeTab?.title ?? "Terminal"}
+								startedAt={tabData.startedAt ?? new Date().toISOString()}
+								visible={true}
+								onClose={closeTabView}
+								onKill={() => {
+									if (workspaceTabs.activeTab) {
+										workspaceTabs.removeTab(workspaceTabs.activeTab.id);
+									}
+								}}
+							/>
+						);
+					}
 					return (
 						<TerminalView
 							tabId={workspaceTabs.activeTab?.id || "terminal-default"}

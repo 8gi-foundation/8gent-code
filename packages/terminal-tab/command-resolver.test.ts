@@ -6,8 +6,8 @@ import { describe, expect, it } from "bun:test";
 import { type PresetEntry, resolveTermCommand } from "./command-resolver.js";
 
 const PRESETS: PresetEntry[] = [
-	{ id: "claude", label: "Claude Code", command: "claude" },
-	{ id: "openclaw", label: "OpenClaw", command: "openclaw" },
+	{ id: "claude", label: "Claude Code", command: "claude", preferWindow: true },
+	{ id: "openclaw", label: "OpenClaw", command: "openclaw", preferWindow: true },
 	{ id: "8gent", label: "8gent (nested)", command: "8gent" },
 ];
 
@@ -18,6 +18,7 @@ describe("resolveTermCommand — bare and shell", () => {
 		expect(r.args).toEqual(["-i"]);
 		expect(r.source).toBe("shell");
 		expect(r.label).toContain("zsh");
+		expect(r.mode).toBe("in-tab");
 	});
 
 	it("/term shell is identical to bare /term", () => {
@@ -87,5 +88,54 @@ describe("resolveTermCommand — raw passthrough", () => {
 		const r = resolveTermCommand({ args: long.split(" "), presets: PRESETS, shell: "/bin/zsh" });
 		expect(r.label.length).toBeLessThanOrEqual(40);
 		expect(r.label.endsWith("…")).toBe(true);
+	});
+});
+
+describe("resolveTermCommand — mode flags", () => {
+	it("--window forces window mode even for in-tab-friendly presets", () => {
+		const r = resolveTermCommand({
+			args: ["8gent", "--window"],
+			presets: PRESETS,
+			shell: "/bin/zsh",
+		});
+		expect(r.source).toBe("preset");
+		expect(r.mode).toBe("window");
+	});
+
+	it("-w is the short form of --window", () => {
+		const r = resolveTermCommand({ args: ["-w", "shell"], presets: PRESETS, shell: "/bin/zsh" });
+		expect(r.mode).toBe("window");
+	});
+
+	it("--in-tab forces in-tab even when the preset preferWindow is true", () => {
+		const r = resolveTermCommand({
+			args: ["claude", "--in-tab"],
+			presets: PRESETS,
+			shell: "/bin/zsh",
+		});
+		expect(r.source).toBe("preset");
+		expect(r.mode).toBe("in-tab");
+	});
+
+	it("preferWindow on a preset routes to window mode by default", () => {
+		const r = resolveTermCommand({ args: ["claude"], presets: PRESETS, shell: "/bin/zsh" });
+		expect(r.mode).toBe("window");
+	});
+
+	it("preferWindow false routes to in-tab by default", () => {
+		const r = resolveTermCommand({ args: ["8gent"], presets: PRESETS, shell: "/bin/zsh" });
+		expect(r.mode).toBe("in-tab");
+	});
+
+	it("--window flag works with raw commands too", () => {
+		const r = resolveTermCommand({
+			args: ["htop", "--window"],
+			presets: PRESETS,
+			shell: "/bin/zsh",
+		});
+		expect(r.source).toBe("raw");
+		expect(r.mode).toBe("window");
+		expect(r.command).toBe("/bin/zsh");
+		expect(r.args).toEqual(["-c", "htop"]);
 	});
 });
