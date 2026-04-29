@@ -107,19 +107,23 @@ export function HudMusicPlayer() {
 	}, []);
 
 	useInput(async (input, key) => {
+		// Require BOTH ctrl+shift AND uppercase letter input. Some macOS
+		// terminals don't reliably set `key.shift` for ctrl-shift combos,
+		// but they do deliver the uppercase character — so the upper-case
+		// guard is what actually keeps Ctrl+P alone from firing pause.
 		if (!key.ctrl || !key.shift) return;
 		const dj = djRef.current.instance;
 		if (!dj) return;
 		try {
-			if (input === "P" || input === "p") {
+			if (input === "P") {
 				await dj.pause();
-			} else if (input === "N" || input === "n") {
+			} else if (input === "N") {
 				await dj.skip();
-			} else if (input === "B" || input === "b") {
+			} else if (input === "B") {
 				const hist = dj.getHistory?.() ?? [];
 				const prev = hist[hist.length - 2];
 				if (prev?.url) await dj.play(prev.url);
-			} else if (input === "M" || input === "m") {
+			} else if (input === "M") {
 				const cur = status.volume ?? 80;
 				if (cur > 0) {
 					lastVolumeRef.current = cur;
@@ -146,13 +150,7 @@ export function HudMusicPlayer() {
 	const truncatedTitle = titleDisplay.length > 28 ? `${titleDisplay.slice(0, 27)}…` : titleDisplay;
 
 	return (
-		<Box
-			flexDirection="row"
-			gap={2}
-			paddingX={1}
-			borderStyle="single"
-			borderColor="yellow"
-		>
+		<Box flexDirection="row" gap={2} paddingX={1} borderStyle="single" borderColor="yellow">
 			<Text color="yellow" bold>
 				{icon}
 			</Text>
@@ -166,9 +164,7 @@ export function HudMusicPlayer() {
 				<Text color="yellow">{volumeBar(status.volume)}</Text>
 				<Text dimColor> {Math.round(status.volume ?? 0)}%</Text>
 			</Text>
-			<Text dimColor>
-				⌃⇧P ⏯ · ⌃⇧B ⏮ · ⌃⇧N ⏭ · ⌃⇧↑↓ vol · ⌃⇧M mute
-			</Text>
+			<Text dimColor>⌃⇧P ⏯ · ⌃⇧B ⏮ · ⌃⇧N ⏭ · ⌃⇧↑↓ vol · ⌃⇧M mute</Text>
 		</Box>
 	);
 }
