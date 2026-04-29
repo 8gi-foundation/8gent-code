@@ -14,10 +14,15 @@
 		"./types": {
 			"import": "./types.ts",
 			"types": "./types.ts"
+		},
+		"./workspace": {
+			"import": "./src/index.ts",
+			"types": "./src/index.ts"
 		}
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
+		"test": "bun test src/",
 		"dev": "npx convex dev",
 		"deploy": "npx convex deploy"
 	},
