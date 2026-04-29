@@ -36,3 +36,41 @@ export interface QueryAccessOptions {
 	until?: number;
 	limit?: number;
 }
+
+// ============================================
+// Capability audit (issue #2091)
+// ============================================
+
+export type CapabilityOperation = "grant" | "revoke";
+
+export interface LogCapabilityInput {
+	actor: string;
+	actorKind: ActorKind;
+	skill: string;
+	capability: string;
+	operation: CapabilityOperation;
+	reason: string;
+	sessionId?: string | null;
+}
+
+export interface CapabilityEvent {
+	id: string;
+	createdAt: number;
+	actor: string;
+	actorKind: ActorKind;
+	skill: string;
+	capability: string;
+	operation: CapabilityOperation;
+	reason: string;
+	sessionId: string | null;
+}
+
+export interface QueryCapabilityOptions {
+	skill?: string;
+	capability?: string;
+	actor?: string;
+	operation?: CapabilityOperation;
+	since?: number;
+	until?: number;
+	limit?: number;
+}

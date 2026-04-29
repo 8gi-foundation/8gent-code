@@ -25,6 +25,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import type {
+	ActorKind,
+	CapabilityAuditStore,
+	LogCapabilityInput,
+} from "../audit/index.js";
 
 // Skill compounding: learned-skills directory
 const LEARNED_DIR = path.join(os.homedir(), ".8gent", "learned-skills");
@@ -41,6 +46,17 @@ export interface Skill {
 	triggers?: string[];
 	examples?: string[];
 	filePath: string;
+	/**
+	 * Capabilities the skill needs to be active. Install fails if any are
+	 * missing from the active set. Empty by default for backward compatibility.
+	 */
+	requiredCapabilities: string[];
+	/**
+	 * Capabilities the skill widens the active set with on install. Reference
+	 * counted across skills, so the cap is only revoked when the last grantor
+	 * uninstalls. Empty by default for backward compatibility.
+	 */
+	grantedCapabilities: string[];
 }
 
 export interface SkillFrontmatter {
@@ -53,6 +69,34 @@ export interface SkillFrontmatter {
 	/** Alternate slash commands, e.g. [/bdb, /billionboard] */
 	aliases?: string[];
 	examples?: string[];
+	/** Capabilities the skill requires; declared in YAML as `[a, b, c]`. */
+	requiredCapabilities?: string[];
+	/** Capabilities the skill grants; declared in YAML as `[a, b, c]`. */
+	grantedCapabilities?: string[];
+}
+
+/** Outcome of installSkill / uninstallSkill. */
+export type CapabilityChangeResult =
+	| {
+			ok: true;
+			skill: string;
+			granted: string[];
+			revoked: string[];
+	  }
+	| {
+			ok: false;
+			skill: string;
+			missing: string[];
+			reason: string;
+	  };
+
+/** Optional audit hook injected at install time. */
+export interface CapabilityAuditOptions {
+	store?: CapabilityAuditStore;
+	actor?: string;
+	actorKind?: ActorKind;
+	sessionId?: string | null;
+	reason?: string;
 }
 
 export interface SkillInvocation {
@@ -126,6 +170,53 @@ function parseFrontmatter(content: string): {
 	};
 }
 
+/**
+ * Coerce a capabilities frontmatter field to a clean string[]. Accepts undefined,
+ * a single string ("network"), or an array. Trims, dedupes, drops empties.
+ */
+function normalizeCapabilities(value: unknown): string[] {
+	if (value == null) return [];
+	const raw = Array.isArray(value) ? value : [value];
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const entry of raw) {
+		if (typeof entry !== "string") continue;
+		const cap = entry.trim();
+		if (!cap || seen.has(cap)) continue;
+		seen.add(cap);
+		out.push(cap);
+	}
+	return out;
+}
+
+/**
+ * Write a capability event through the configured audit hook. No-op if no
+ * store is wired, so capability install/uninstall stays usable in unit tests
+ * and headless contexts without an audit DB.
+ */
+function writeCapabilityEvent(
+	audit: CapabilityAuditOptions | undefined,
+	operation: "grant" | "revoke",
+	skill: string,
+	capability: string,
+): void {
+	if (!audit?.store) return;
+	const input: LogCapabilityInput = {
+		actor: audit.actor ?? "system:skills",
+		actorKind: audit.actorKind ?? "system",
+		skill,
+		capability,
+		operation,
+		reason: audit.reason ?? `skill ${operation === "grant" ? "install" : "uninstall"}`,
+		sessionId: audit.sessionId ?? null,
+	};
+	try {
+		audit.store.logCapability(input);
+	} catch (err) {
+		console.warn(`[skills] capability audit write failed: ${(err as Error).message}`);
+	}
+}
+
 /** Each subfolder (or symlinked dir) may contain SKILL.md. */
 function collectNestedSkillMdPaths(skillsRoot: string): string[] {
 	if (!fs.existsSync(skillsRoot)) return [];
@@ -157,9 +248,20 @@ export class SkillManager {
 	private aliasToCanonical: Map<string, string> = new Map();
 	private skillsDirectory: string;
 	private invocations: Map<string, SkillInvocation> = new Map();
+	/** Names of currently installed skills. Install != load: load discovers, install activates capabilities. */
+	private installedSkills: Set<string> = new Set();
+	/** Capability -> install ref count. Cap is active when count > 0. */
+	private capabilityRefs: Map<string, number> = new Map();
+	/** Default audit hook applied when installSkill is called without an override. */
+	private defaultAuditOptions: CapabilityAuditOptions | undefined;
 
 	constructor(skillsDirectory?: string) {
 		this.skillsDirectory = skillsDirectory || path.join(os.homedir(), ".8gent", "skills");
+	}
+
+	/** Set a default audit sink so install/uninstall write capability events automatically. */
+	setCapabilityAudit(options: CapabilityAuditOptions | undefined): void {
+		this.defaultAuditOptions = options;
 	}
 
 	/**
@@ -235,6 +337,8 @@ export class SkillManager {
 			triggers: [...triggerExtras, ...(frontmatter.triggers || [])],
 			examples: frontmatter.examples || [],
 			filePath,
+			requiredCapabilities: normalizeCapabilities(frontmatter.requiredCapabilities),
+			grantedCapabilities: normalizeCapabilities(frontmatter.grantedCapabilities),
 		};
 	}
 
@@ -407,10 +511,130 @@ examples:
 	}
 
 	/**
-	 * Remove a skill
+	 * Remove a skill. If the skill is currently installed, it is uninstalled
+	 * first so capability ref counts stay correct.
 	 */
 	removeSkill(name: string): boolean {
+		if (this.installedSkills.has(name)) {
+			this.uninstallSkill(name);
+		}
 		return this.skills.delete(name);
+	}
+
+	// ============================================
+	// Capability install / uninstall (issue #2091)
+	// ============================================
+
+	/**
+	 * Install a skill: validate required capabilities are already active, then
+	 * widen the active set with the skill's grantedCapabilities. Idempotent: a
+	 * second install of the same skill is a no-op (returns ok with empty
+	 * granted/revoked).
+	 *
+	 * Existing skills with no capability declarations install cleanly and grant
+	 * nothing, preserving backward compatibility.
+	 */
+	installSkill(
+		name: string,
+		audit: CapabilityAuditOptions | undefined = this.defaultAuditOptions,
+	): CapabilityChangeResult {
+		const skill = this.getSkill(name);
+		if (!skill) {
+			return {
+				ok: false,
+				skill: name,
+				missing: [],
+				reason: `skill not found: ${name}`,
+			};
+		}
+
+		const canonical = skill.name;
+		if (this.installedSkills.has(canonical)) {
+			return { ok: true, skill: canonical, granted: [], revoked: [] };
+		}
+
+		const missing = skill.requiredCapabilities.filter((cap) => !this.hasCapability(cap));
+		if (missing.length > 0) {
+			return {
+				ok: false,
+				skill: canonical,
+				missing,
+				reason: `missing required capabilities: ${missing.join(", ")}`,
+			};
+		}
+
+		this.installedSkills.add(canonical);
+		const granted: string[] = [];
+		for (const cap of skill.grantedCapabilities) {
+			const next = (this.capabilityRefs.get(cap) ?? 0) + 1;
+			this.capabilityRefs.set(cap, next);
+			granted.push(cap);
+			writeCapabilityEvent(audit, "grant", canonical, cap);
+		}
+
+		return { ok: true, skill: canonical, granted, revoked: [] };
+	}
+
+	/**
+	 * Uninstall a skill: ref-count decrement each granted capability, audit a
+	 * revoke event per capability, and drop caps that hit zero from the active
+	 * set. No-op if the skill was never installed.
+	 */
+	uninstallSkill(
+		name: string,
+		audit: CapabilityAuditOptions | undefined = this.defaultAuditOptions,
+	): CapabilityChangeResult {
+		const skill = this.getSkill(name);
+		const canonical = skill?.name ?? name;
+
+		if (!this.installedSkills.has(canonical)) {
+			return { ok: true, skill: canonical, granted: [], revoked: [] };
+		}
+
+		this.installedSkills.delete(canonical);
+
+		const revoked: string[] = [];
+		const grantedCaps = skill?.grantedCapabilities ?? [];
+		for (const cap of grantedCaps) {
+			const current = this.capabilityRefs.get(cap) ?? 0;
+			const next = current - 1;
+			if (next <= 0) {
+				this.capabilityRefs.delete(cap);
+			} else {
+				this.capabilityRefs.set(cap, next);
+			}
+			revoked.push(cap);
+			writeCapabilityEvent(audit, "revoke", canonical, cap);
+		}
+
+		return { ok: true, skill: canonical, granted: [], revoked };
+	}
+
+	/** True if the named capability is currently active (any installed skill grants it). */
+	hasCapability(capability: string): boolean {
+		return (this.capabilityRefs.get(capability) ?? 0) > 0;
+	}
+
+	/** Snapshot of the active capability set. */
+	getActiveCapabilities(): string[] {
+		return Array.from(this.capabilityRefs.keys()).sort();
+	}
+
+	/** Internal ref count for a capability. Useful for tests and admin surfaces. */
+	getCapabilityRefCount(capability: string): number {
+		return this.capabilityRefs.get(capability) ?? 0;
+	}
+
+	/** Names of skills currently in the installed set. */
+	getInstalledSkills(): string[] {
+		return Array.from(this.installedSkills).sort();
+	}
+
+	/** True if the named skill (canonical name or alias) is currently installed. */
+	isInstalled(name: string): boolean {
+		const skill = this.getSkill(name);
+		const canonical = skill?.name ?? name;
+		return this.installedSkills.has(canonical);
 	}
 
 	/**
