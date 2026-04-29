@@ -17,8 +17,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { ThinkingLevel } from "../types/index.js";
 import { AuthRotator } from "./auth-rotation";
 import { ModelFailover } from "./failover";
+import {
+	type ThinkingResolution,
+	resolveThinkingForRouting,
+	resolveThinkingLevel,
+} from "./thinking-level";
 
 // ============================================
 // Types
@@ -54,6 +60,13 @@ export interface ProviderConfig {
 	supportsTools: boolean;
 	supportsStreaming: boolean;
 	supportsVision: boolean;
+	/**
+	 * Thinking-budget levels this provider accepts. Empty array = no thinking
+	 * support (router silently drops `thinking` for this provider). The router
+	 * downgrades unsupported requests via `resolveThinkingLevel()` before
+	 * dispatching. See `packages/providers/thinking-level.ts`.
+	 */
+	supportedThinkingLevels: readonly ThinkingLevel[];
 }
 
 export interface ChatMessage {
@@ -76,6 +89,12 @@ export interface ChatRequest {
 	temperature?: number;
 	maxTokens?: number;
 	stream?: boolean;
+	/**
+	 * Requested reasoning depth. The router resolves this against the active
+	 * provider's `supportedThinkingLevels` and downgrades silently when the
+	 * exact level is unsupported. Pass `undefined` for non-thinking calls.
+	 */
+	thinking?: ThinkingLevel;
 }
 
 export interface ToolDefinition {
@@ -97,6 +116,11 @@ export interface ChatResponse {
 		completionTokens: number;
 		totalTokens: number;
 	};
+	/**
+	 * Thinking-level routing outcome for this call. Present when the request
+	 * carried a `thinking` parameter so callers can detect downgrades.
+	 */
+	thinking?: ThinkingResolution;
 }
 
 export interface ProviderSettings {
@@ -170,6 +194,17 @@ export function getHostCliBinary(slot: "primary" | "secondary"): string {
 	return process.env[key]?.trim() || "";
 }
 
+/**
+ * Anthropic extended-thinking budget in output tokens, indexed by thinking
+ * level. Conservative defaults; per-model tuning is a follow-up.
+ */
+const ANTHROPIC_THINKING_BUDGET: Record<ThinkingLevel, number> = {
+	minimal: 1024,
+	low: 4096,
+	medium: 12288,
+	high: 32768,
+};
+
 const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 	"8gent": {
 		name: "8gent",
@@ -182,6 +217,9 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
+		// BDH thinking is not yet wired in the kernel. Empty until it lands;
+		// router will treat `thinking` requests as non-thinking.
+		supportedThinkingLevels: [],
 	},
 	ollama: {
 		name: "ollama",
@@ -194,6 +232,10 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
+		// Ollama silently strips `reasoning_effort` and has no native thinking
+		// API. Leave empty so the router never tries to forward a thinking
+		// payload that would be discarded.
+		supportedThinkingLevels: [],
 	},
 	"apple-foundation": {
 		name: "apple-foundation",
@@ -208,6 +250,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: false, // v1 - Apple Transcript API not wired yet
 		supportsStreaming: false, // v1 - non-streaming only
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	apfel: {
 		name: "apfel",
@@ -224,6 +267,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: false,
 		supportsStreaming: true,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	deepseek: {
 		name: "deepseek",
@@ -236,6 +280,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	openrouter: {
 		name: "openrouter",
@@ -254,6 +299,9 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
+		// Per-model. Conservative empty default; orchestration can override
+		// once we wire model-specific capability detection.
+		supportedThinkingLevels: [],
 	},
 	groq: {
 		name: "groq",
@@ -271,6 +319,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	grok: {
 		name: "grok",
@@ -283,6 +332,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
+		supportedThinkingLevels: [],
 	},
 	openai: {
 		name: "openai",
@@ -295,6 +345,9 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
+		// `reasoning_effort` accepts minimal/low/medium/high on o-series and
+		// gpt-5 reasoning models. Non-reasoning models silently ignore it.
+		supportedThinkingLevels: ["minimal", "low", "medium", "high"],
 	},
 	anthropic: {
 		name: "anthropic",
@@ -307,6 +360,9 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
+		// Extended-thinking budgets map cleanly to the four levels for Claude
+		// 3.7+ thinking-capable models. Non-thinking models ignore the field.
+		supportedThinkingLevels: ["minimal", "low", "medium", "high"],
 	},
 	mistral: {
 		name: "mistral",
@@ -324,6 +380,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	together: {
 		name: "together",
@@ -340,6 +397,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	fireworks: {
 		name: "fireworks",
@@ -355,6 +413,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	replicate: {
 		name: "replicate",
@@ -367,6 +426,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: false,
 		supportsStreaming: true,
 		supportsVision: true,
+		supportedThinkingLevels: [],
 	},
 	"host-cli-primary": {
 		name: "host-cli-primary",
@@ -381,6 +441,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: false, // v1 - text-only. Tool calls and thinking blocks TBD.
 		supportsStreaming: false, // v1 - single completion per invocation.
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 	"host-cli-secondary": {
 		name: "host-cli-secondary",
@@ -395,6 +456,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		supportsTools: false,
 		supportsStreaming: false,
 		supportsVision: false,
+		supportedThinkingLevels: [],
 	},
 };
 
@@ -541,15 +603,46 @@ export class ProviderManager {
 		const provider = this.getActiveProvider();
 		const model = request.model || this.settings.activeModel;
 
+		// Resolve the requested thinking level against this provider's
+		// capabilities. Downgrades silently when the exact level is unsupported;
+		// returns null when the provider has no thinking support at all.
+		const thinkingResolution = request.thinking
+			? resolveThinkingForRouting(request.thinking, provider.supportedThinkingLevels)
+			: undefined;
+		const resolvedRequest: ChatRequest = thinkingResolution
+			? {
+					...request,
+					thinking: thinkingResolution.level ?? undefined,
+				}
+			: request;
+
+		let response: ChatResponse;
 		switch (provider.name) {
 			case "ollama":
-				return this.chatOllama(request, model);
+				response = await this.chatOllama(resolvedRequest, model);
+				break;
 			case "anthropic":
-				return this.chatAnthropic(request, model);
+				response = await this.chatAnthropic(resolvedRequest, model);
+				break;
 			default:
 				// OpenAI-compatible providers
-				return this.chatOpenAICompatible(provider, request, model);
+				response = await this.chatOpenAICompatible(provider, resolvedRequest, model);
 		}
+
+		if (thinkingResolution) {
+			response.thinking = thinkingResolution;
+		}
+		return response;
+	}
+
+	/**
+	 * Resolve a thinking-level request against a provider without dispatching
+	 * a chat call. Orchestration uses this to forecast cost and pick a depth
+	 * before scheduling work. Defaults to the active provider.
+	 */
+	resolveThinking(level: ThinkingLevel, providerName?: ProviderName): ThinkingResolution {
+		const provider = providerName ? this.getProvider(providerName) : this.getActiveProvider();
+		return resolveThinkingForRouting(level, provider.supportedThinkingLevels);
 	}
 
 	private async chatOllama(request: ChatRequest, model: string): Promise<ChatResponse> {
@@ -648,6 +741,12 @@ export class ProviderManager {
 		if (request.maxTokens !== undefined) {
 			body.max_tokens = request.maxTokens;
 		}
+		// `request.thinking` is already resolved against this provider's
+		// supported set by `chat()`. Forward it as `reasoning_effort` for
+		// OpenAI-compatible reasoning models; non-reasoning models ignore it.
+		if (request.thinking) {
+			body.reasoning_effort = request.thinking;
+		}
 
 		const response = await fetch(`${provider.baseUrl}/chat/completions`, {
 			method: "POST",
@@ -732,6 +831,12 @@ export class ProviderManager {
 				description: t.function.description,
 				input_schema: t.function.parameters,
 			}));
+		}
+		// Map the resolved thinking level to an Anthropic extended-thinking
+		// budget. Numbers are conservative defaults; tune per-model later.
+		if (request.thinking) {
+			const budget = ANTHROPIC_THINKING_BUDGET[request.thinking];
+			body.thinking = { type: "enabled", budget_tokens: budget };
 		}
 
 		const response = await fetch(`${provider.baseUrl}/messages`, {
@@ -921,6 +1026,14 @@ export {
 	type FailoverChain,
 	type FailoverEntry,
 } from "./failover";
+export {
+	resolveThinkingLevel,
+	resolveThinkingForRouting,
+	thinkingTokenMultiplier,
+	THINKING_LEVELS_ORDERED,
+	type ThinkingLevel,
+	type ThinkingResolution,
+} from "./thinking-level";
 export {
 	HostCliClient,
 	checkHostCliAvailability,
