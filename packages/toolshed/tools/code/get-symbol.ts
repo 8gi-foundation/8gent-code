@@ -60,6 +60,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:code"],
+		tiers: ["read"],
 	},
 	async (input: unknown, context: ExecutionContext): Promise<SymbolOutput> => {
 		const { symbolId, contextLines = 0 } = input as GetSymbolInput;

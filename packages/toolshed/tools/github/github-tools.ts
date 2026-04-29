@@ -119,6 +119,7 @@ registerTool(
 			properties: {},
 		},
 		permissions: ["read:code"],
+		tiers: ["read", "execute"],
 	},
 	async (_input: unknown, ctx: ExecutionContext) => {
 		const branch = run("git rev-parse --abbrev-ref HEAD", ctx.workingDirectory);
@@ -168,6 +169,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:code"],
+		tiers: ["read", "execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { staged, file } = input as { staged?: boolean; file?: string };
@@ -197,6 +199,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:code"],
+		tiers: ["read", "execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { count = 10, file } = input as { count?: number; file?: string };
@@ -239,6 +242,7 @@ registerTool(
 			required: ["message"],
 		},
 		permissions: ["write:code"],
+		tiers: ["read", "write", "execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { message, files } = input as { message: string; files?: string[] };
@@ -270,6 +274,7 @@ registerTool(
 			},
 		},
 		permissions: ["github:write"],
+		tiers: ["execute", "network", "dangerous"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { setUpstream } = input as { setUpstream?: boolean };
@@ -307,6 +312,7 @@ registerTool(
 			required: ["title"],
 		},
 		permissions: ["github:write"],
+		tiers: ["execute", "network"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { title, body, base, draft } = input as {
@@ -354,6 +360,7 @@ registerTool(
 			},
 		},
 		permissions: ["github:read"],
+		tiers: ["execute", "network"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { state = "open", limit = 10 } = input as {
@@ -387,6 +394,7 @@ registerTool(
 			},
 		},
 		permissions: ["github:read"],
+		tiers: ["execute", "network"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const {
