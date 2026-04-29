@@ -41,6 +41,8 @@
 		"smoke": "bun scripts/smoke.ts",
 		"smoke:fast": "bun scripts/smoke.ts --skip-network",
 		"smoke:strict": "bun scripts/smoke.ts --strict",
+		"verify:presets": "bun scripts/verify-presets.ts",
+		"verify:presets:strict": "bun scripts/verify-presets.ts --strict",
 		"lint": "biome check .",
 		"typecheck": "tsc --noEmit",
 		"typecheck:tui": "tsc --noEmit -p apps/tui/tsconfig.json",
