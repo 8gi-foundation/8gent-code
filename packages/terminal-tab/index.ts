@@ -32,3 +32,23 @@ export {
 	spawnInWindow,
 } from "./window-session.js";
 export type { SpawnInWindowOpts, WindowSessionHandle } from "./window-session.js";
+export {
+	attachInTerminal,
+	buildPipePaneArgs,
+	buildSendKeysArgs,
+	buildTmuxNewSessionArgs,
+	hasSession as hasTmuxSession,
+	isTmuxAvailable,
+	killTmuxSession,
+	listTmuxSessions,
+	parseLogTail,
+	readSessionLog,
+	sendKeys as sendTmuxKeys,
+	spawnTmuxSession,
+	SESSIONS_LOG_DIR,
+} from "./tmux-session.js";
+export type {
+	ParsedLogTail,
+	TmuxSessionHandle,
+	TmuxSpawnOpts,
+} from "./tmux-session.js";
