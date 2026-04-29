@@ -810,6 +810,7 @@ registerTool(
 			required: ["command"],
 		},
 		permissions: ["exec:shell", "read:code", "read:fs"],
+		tiers: ["read", "write", "execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { command } = input as { command: string };

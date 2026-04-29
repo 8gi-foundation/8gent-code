@@ -29,6 +29,7 @@ registerTool(
 			required: ["command"],
 		},
 		permissions: ["exec:shell"],
+		tiers: ["execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { command, timeout = 30000 } = input as {
@@ -68,6 +69,7 @@ registerTool(
 			},
 		},
 		permissions: ["exec:shell"],
+		tiers: ["execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { file, grep } = input as { file?: string; grep?: string };
@@ -133,6 +135,7 @@ registerTool(
 			},
 		},
 		permissions: ["exec:shell", "write:fs"],
+		tiers: ["execute", "write", "network"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { packages, dev } = input as { packages?: string[]; dev?: boolean };
@@ -168,6 +171,7 @@ registerTool(
 			},
 		},
 		permissions: ["exec:shell"],
+		tiers: ["execute"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { filter, port } = input as { filter?: string; port?: number };
@@ -211,6 +215,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:fs"],
+		tiers: ["read", "admin"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { file = ".env" } = input as { file?: string };

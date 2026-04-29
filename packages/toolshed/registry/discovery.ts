@@ -4,7 +4,7 @@
  * Agents use this to find tools without loading them all into context.
  */
 
-import type { Capability, Permission, Tool } from "../../types";
+import type { Capability, Permission, Tool, ToolCapabilityTier } from "../../types";
 import { getAllTools, getTool } from "./register";
 
 export interface ToolSummary {
@@ -12,6 +12,7 @@ export interface ToolSummary {
 	description: string;
 	capabilities: Capability[];
 	permissions: Permission[];
+	tiers: ToolCapabilityTier[];
 }
 
 export interface DiscoveryQuery {
@@ -99,7 +100,17 @@ function toSummary(tool: Tool): ToolSummary {
 		description: tool.description,
 		capabilities: tool.capabilities,
 		permissions: tool.permissions,
+		tiers: [...tool.tiers],
 	};
+}
+
+/**
+ * List tools that require a given capability tier.
+ */
+export function listToolsByTier(tier: ToolCapabilityTier): ToolSummary[] {
+	return getAllTools()
+		.filter((tool) => tool.tiers.includes(tier))
+		.map(toSummary);
 }
 
 /**
