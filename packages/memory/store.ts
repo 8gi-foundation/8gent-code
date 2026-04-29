@@ -12,6 +12,12 @@ import { Database } from "bun:sqlite";
 import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
 import {
+	type VecLoadResult,
+	encodeVector,
+	ensureSqliteSupportsExtensions,
+	loadSqliteVec,
+} from "./sqlite-vec.js";
+import {
 	type Entity,
 	type EntityType,
 	type Memory,
@@ -176,8 +182,14 @@ CREATE INDEX IF NOT EXISTS idx_versions_memory ON memory_versions(memory_id, ver
 export class MemoryStore {
 	db: Database;
 	private embeddingProvider: EmbeddingProvider | null;
+	private vecLoaded = false;
+	private vecTableDimensions: number | null = null;
 
 	constructor(dbPath: string, embeddingProvider?: EmbeddingProvider) {
+		// Try to swap to a SQLite build that supports loadable extensions.
+		// Must run before the first Database is opened in this process.
+		ensureSqliteSupportsExtensions();
+
 		this.db = new Database(dbPath, { create: true });
 		this.embeddingProvider = embeddingProvider ?? null;
 
@@ -193,12 +205,25 @@ export class MemoryStore {
 			console.warn("[memory] PRAGMA init warning:", (err as Error).message);
 		}
 
+		// Load sqlite-vec extension (best-effort). On failure we silently
+		// fall back to the legacy JS cosine search path.
+		const vec: VecLoadResult = loadSqliteVec(this.db);
+		this.vecLoaded = vec.ok;
+
 		// Initialize schema
 		this.db.exec(SCHEMA_SQL);
 		this.db.exec(INDEXES_SQL);
 
 		// Migration: add new columns if they don't exist
 		this._migrateNewColumns();
+
+		// Create the vec0 virtual table eagerly when we already know the
+		// embedding dimensionality. Otherwise it will be created lazily
+		// the first time setEmbeddingProvider() is called or an embedding
+		// is written.
+		if (this.vecLoaded && this.embeddingProvider && this.embeddingProvider.dimensions > 0) {
+			this._ensureVecTable(this.embeddingProvider.dimensions);
+		}
 	}
 
 	/** Add consolidation, learning, and tenant columns if missing */
@@ -224,6 +249,77 @@ export class MemoryStore {
 	/** Set or update the embedding provider (e.g., after Ollama becomes available) */
 	setEmbeddingProvider(provider: EmbeddingProvider): void {
 		this.embeddingProvider = provider;
+		if (this.vecLoaded && provider.dimensions > 0) {
+			this._ensureVecTable(provider.dimensions);
+		}
+	}
+
+	/** Whether the sqlite-vec extension was loaded for SQL-native vector search. */
+	hasNativeVectorSearch(): boolean {
+		return this.vecLoaded && this.vecTableDimensions !== null;
+	}
+
+	/**
+	 * Idempotently create the vec0 virtual table for the given dimensionality.
+	 * Disables native vector search if a table at a different dimension already
+	 * exists (rather than dropping user data).
+	 */
+	private _ensureVecTable(dimensions: number): void {
+		if (!this.vecLoaded) return;
+		if (this.vecTableDimensions === dimensions) return;
+		if (this.vecTableDimensions !== null && this.vecTableDimensions !== dimensions) {
+			console.warn(
+				`[memory] sqlite-vec table already created at dim=${this.vecTableDimensions}; ` +
+					`skipping recreate at dim=${dimensions}`,
+			);
+			return;
+		}
+		try {
+			this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
+          memory_id TEXT PRIMARY KEY,
+          embedding float[${dimensions}] distance_metric=cosine
+        );
+      `);
+			this.vecTableDimensions = dimensions;
+			this._backfillVecTable(dimensions);
+		} catch (err) {
+			console.warn("[memory] vec0 table init failed:", (err as Error).message);
+			this.vecLoaded = false;
+		}
+	}
+
+	/**
+	 * Copy embeddings from the legacy BLOB table into vec0 when the vec0
+	 * table is empty. Lets pre-existing databases pick up native search
+	 * without re-embedding everything.
+	 */
+	private _backfillVecTable(dimensions: number): void {
+		const vecCount = (
+			this.db.prepare("SELECT COUNT(*) AS c FROM memories_vec").get() as { c: number }
+		).c;
+		if (vecCount > 0) return;
+
+		const rows = this.db
+			.prepare(
+				"SELECT memory_id, vector FROM embeddings WHERE dimensions = ?",
+			)
+			.all(dimensions) as Array<{ memory_id: string; vector: Buffer }>;
+		if (rows.length === 0) return;
+
+		const insert = this.db.prepare(
+			"INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)",
+		);
+		const txn = this.db.transaction(() => {
+			for (const row of rows) {
+				try {
+					insert.run(row.memory_id, row.vector);
+				} catch {
+					// Skip rows whose stored byte length doesn't match the configured dim.
+				}
+			}
+		});
+		txn();
 	}
 
 	// ── Write ─────────────────────────────────────────────────────────
@@ -776,6 +872,95 @@ export class MemoryStore {
 	// ── Private: Vector Search ────────────────────────────────────────
 
 	private _vectorSearch(queryEmbedding: Float32Array, options: SearchOptions): SearchResult[] {
+		if (this.hasNativeVectorSearch()) {
+			return this._vectorSearchNative(queryEmbedding, options);
+		}
+		return this._vectorSearchJs(queryEmbedding, options);
+	}
+
+	/**
+	 * SQL-native vector search via sqlite-vec's vec0 virtual table.
+	 * Uses cosine distance ordered KNN, then joins back to memories
+	 * for filtering by type/scope/importance.
+	 */
+	private _vectorSearchNative(
+		queryEmbedding: Float32Array,
+		options: SearchOptions,
+	): SearchResult[] {
+		const limit = (options.limit ?? 10) * 2;
+		const maxDistance = 0.7; // similarity >= 0.3 ↔ cosine_distance <= 0.7
+
+		// Pull a wider KNN set than `limit` so post-filters still leave headroom.
+		const knnK = Math.max(limit * 4, 32);
+
+		let sql = `
+      SELECT v.memory_id  AS memory_id,
+             v.distance   AS distance,
+             m.data       AS data,
+             m.importance AS importance
+      FROM memories_vec v
+      JOIN memories m ON m.id = v.memory_id
+      WHERE v.embedding MATCH ?
+        AND k = ?
+        AND v.distance <= ?
+        AND m.deleted_at IS NULL
+    `;
+		const params: import("bun:sqlite").SQLQueryBindings[] = [
+			encodeVector(queryEmbedding),
+			knnK,
+			maxDistance,
+		];
+
+		if (options.types && options.types.length > 0) {
+			sql += ` AND m.type IN (${options.types.map(() => "?").join(",")})`;
+			params.push(...options.types);
+		}
+		if (options.scope) {
+			sql += " AND m.scope = ?";
+			params.push(options.scope);
+		}
+		if (options.minImportance) {
+			sql += " AND m.importance >= ?";
+			params.push(options.minImportance);
+		}
+
+		sql += " ORDER BY v.distance ASC";
+
+		let rows: Array<{
+			memory_id: string;
+			distance: number;
+			data: string;
+			importance: number;
+		}>;
+		try {
+			rows = this.db.prepare(sql).all(...params) as typeof rows;
+		} catch (err) {
+			// MATCH on an empty / mis-indexed vec0 table can throw — fall back to JS.
+			console.warn("[memory] sqlite-vec query failed, falling back:", (err as Error).message);
+			return this._vectorSearchJs(queryEmbedding, options);
+		}
+
+		const results: SearchResult[] = rows.map((row) => {
+			const similarity = 1 - row.distance;
+			return {
+				memory: safeJsonParse<Memory>(row.data),
+				score: similarity * (0.7 + 0.3 * row.importance),
+				matchType: "vector" as const,
+			};
+		});
+
+		// MATCH already returns rows ordered by ascending distance, but the
+		// importance weighting can re-shuffle. Sort to be safe.
+		results.sort((a, b) => b.score - a.score);
+		return results.slice(0, limit);
+	}
+
+	/**
+	 * Legacy in-process cosine similarity over the embeddings BLOB table.
+	 * Kept as a fallback when sqlite-vec is unavailable (unsupported platform,
+	 * sandboxed runtime, or older databases that pre-date the migration).
+	 */
+	private _vectorSearchJs(queryEmbedding: Float32Array, options: SearchOptions): SearchResult[] {
 		let sql = `
       SELECT e.memory_id, e.vector, m.data, m.importance, m.type, m.scope
       FROM embeddings e
@@ -805,7 +990,7 @@ export class MemoryStore {
 		}>;
 
 		const results: SearchResult[] = [];
-		const minScore = 0.3; // Minimum cosine similarity threshold
+		const minScore = 0.3;
 
 		for (const row of rows) {
 			const vector = new Float32Array(
@@ -883,7 +1068,7 @@ export class MemoryStore {
 		const embedding = await this.embeddingProvider.generate(contentText);
 		if (embedding.length === 0) return;
 
-		const buffer = Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+		const buffer = encodeVector(embedding);
 
 		this.db
 			.prepare(
@@ -897,6 +1082,22 @@ export class MemoryStore {
 				buffer,
 				Date.now(),
 			);
+
+		// Mirror into the vec0 virtual table so SQL-native search can find it.
+		// vec0 has no UPSERT, so DELETE + INSERT in a single statement pair.
+		if (this.vecLoaded) {
+			this._ensureVecTable(this.embeddingProvider.dimensions);
+		}
+		if (this.hasNativeVectorSearch()) {
+			try {
+				this.db.prepare("DELETE FROM memories_vec WHERE memory_id = ?").run(memoryId);
+				this.db
+					.prepare("INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)")
+					.run(memoryId, buffer);
+			} catch (err) {
+				console.warn("[memory] vec0 upsert failed:", (err as Error).message);
+			}
+		}
 	}
 }
 
