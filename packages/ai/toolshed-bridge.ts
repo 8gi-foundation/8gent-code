@@ -8,7 +8,7 @@
  * the ToolRegistry class doesn't expose a public `has()` method.
  */
 
-import type { Capability, Permission, ToolRegistration } from "../types";
+import type { Capability, Permission, ToolCapabilityTier, ToolRegistration } from "../types";
 import { agentTools } from "./tools";
 
 /** Map AI SDK tool names to typed toolshed capabilities */
@@ -87,6 +87,54 @@ function getPermissionsForTool(name: string): Permission[] {
 }
 
 /**
+ * Map AI SDK tool names to capability tiers.
+ *
+ * Tiers are coarser than permissions and gate the executor. A push to a
+ * remote (`git_push`) needs `execute` AND `network` AND `dangerous`,
+ * whereas a local read (`get_outline`) only needs `read`. Anything that
+ * mutates the working tree gets `write`; anything that hits an external
+ * service gets `network`.
+ */
+function getTiersForTool(name: string): [ToolCapabilityTier, ...ToolCapabilityTier[]] {
+	// Network-bearing GitHub mutations
+	if (name === "git_push" || name === "git_force_push") {
+		return ["execute", "network", "dangerous"];
+	}
+	if (name.startsWith("gh_") && (name.includes("create") || name.includes("close"))) {
+		return ["execute", "network"];
+	}
+	if (name.startsWith("gh_")) return ["execute", "network"];
+	// Git commands that mutate locally
+	if (
+		name === "git_commit" ||
+		name === "git_add" ||
+		name === "git_checkout" ||
+		name === "git_create_branch"
+	) {
+		return ["read", "write", "execute"];
+	}
+	if (name.startsWith("git_")) return ["read", "execute"];
+	// Web fetch / MCP / external calls
+	if (name.startsWith("web_") || name.startsWith("mcp_")) return ["network"];
+	// Shell / background
+	if (name === "run_command" || name.startsWith("background_")) {
+		return ["execute"];
+	}
+	// Notebook edits
+	if (name.startsWith("notebook_") && (name.includes("edit") || name.includes("insert") || name.includes("delete"))) {
+		return ["read", "write"];
+	}
+	// File mutations
+	if (name.startsWith("write_") || name.startsWith("edit_")) {
+		return ["read", "write"];
+	}
+	// Memory writes
+	if (name === "remember") return ["write"];
+	// Default: pure read
+	return ["read"];
+}
+
+/**
  * Register all AI SDK tools into the toolshed registry.
  * Safe to call multiple times — skips already-registered tools.
  */
@@ -107,6 +155,7 @@ export async function registerToolsInToolshed(): Promise<{
 
 		const capabilities = TOOL_CAPABILITIES[name] || ["execution" as Capability];
 		const permissions = getPermissionsForTool(name);
+		const tiers = getTiersForTool(name);
 
 		const registration: ToolRegistration = {
 			name,
@@ -114,6 +163,7 @@ export async function registerToolsInToolshed(): Promise<{
 			capabilities,
 			inputSchema: { type: "object" }, // Zod schema is on the tool, this is a placeholder for the registry
 			permissions,
+			tiers,
 		};
 
 		const executor = async (input: unknown) => {

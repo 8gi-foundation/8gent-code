@@ -18,3 +18,20 @@ export type {
 	InstallRunResult,
 	RunInstallOpts,
 } from "./install-runner.js";
+
+export {
+	defaultAppsDir,
+	disableApp,
+	enableApp,
+	getApp,
+	InstallAppError,
+	installApp,
+	listApps,
+	uninstallApp,
+	updateApp,
+} from "./src/app-installer.js";
+export type {
+	AppManifest,
+	InstallAppOptions,
+	InstalledApp,
+} from "./src/app-installer.js";
