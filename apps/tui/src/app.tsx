@@ -2842,8 +2842,11 @@ export function App({
 					const needsInstall = force || !isInstalled(preset);
 					if (needsInstall) {
 						if (!preset.install) {
+							const homepageHint = preset.homepage
+								? `\nProject homepage: ${preset.homepage}`
+								: "";
 							addSystemMessage(
-								`${preset.command} is not on $PATH and no auto-install recipe is configured. Install it manually then run /spawn ${preset.id} again.`,
+								`${preset.command} is not on $PATH and no auto-install recipe is configured. Install it manually then run /spawn ${preset.id} again.${homepageHint}`,
 							);
 							break;
 						}
