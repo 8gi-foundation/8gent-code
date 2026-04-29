@@ -5,6 +5,26 @@
 export * from "./tool-result.js";
 
 // ============================================
+// Thinking / Reasoning Budgets
+// ============================================
+
+/**
+ * Discrete thinking-budget levels modeled after OpenAI `reasoning_effort` and
+ * Anthropic extended-thinking budgets. Ordered minimal -> high; routers
+ * downgrade toward `minimal` when a provider does not support the requested
+ * level. See `packages/providers/thinking-level.ts` for resolution logic.
+ */
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high";
+
+/** Canonical low-to-high ordering, used by the downgrade resolver. */
+export const THINKING_LEVELS_ORDERED: readonly ThinkingLevel[] = [
+	"minimal",
+	"low",
+	"medium",
+	"high",
+] as const;
+
+// ============================================
 // Tool System
 // ============================================
 
