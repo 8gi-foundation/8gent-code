@@ -48,7 +48,8 @@ export type SlashCommand =
 	| "spawn"
 	| "settings"
 	| "quiet"
-	| "term";
+	| "term"
+	| "create-app";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -331,6 +332,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description:
 			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive agent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
 		usage: "/term [shell|<preset>|<command...>]",
+	},
+	{
+		name: "create-app",
+		aliases: ["new-app", "scaffold-app"],
+		description:
+			"Scaffold a personal mini-app at ~/.8gent/apps/<name>/ (manifest, index.ts, SKILL.md, tests). Iteration is driven by the embedded SKILL.md.",
+		usage: "/create-app <name> [-- description text] [--caps read,write,bash]",
 	},
 ];
 
