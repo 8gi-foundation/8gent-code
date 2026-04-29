@@ -74,7 +74,8 @@ const SINGLETON_TYPES: TabType[] = [
 	"kanban",
 	"music",
 	"projects",
-	"terminal", // one terminal tab max — reuse, never stack
+	// "terminal" is intentionally NOT singleton — each /term spawn opens a
+	// new tab so users can run claude + openclaw side by side.
 	"settings", // one settings tab max
 ];
 
@@ -283,46 +284,49 @@ export function useWorkspaceTabs() {
 	// ----------------------------------------
 	// addTab
 	// ----------------------------------------
-	const addTab = useCallback((type: TabType, title?: string): WorkspaceTab | null => {
-		let newTab: WorkspaceTab | null = null;
+	const addTab = useCallback(
+		(type: TabType, title?: string, initialData?: Record<string, unknown>): WorkspaceTab | null => {
+			let newTab: WorkspaceTab | null = null;
 
-		setTabs((prev) => {
-			if (prev.length >= MAX_TABS) return prev;
+			setTabs((prev) => {
+				if (prev.length >= MAX_TABS) return prev;
 
-			// For singleton types, switch to existing instead of creating new
-			if (SINGLETON_TYPES.includes(type)) {
-				const existing = prev.find((t) => t.type === type);
-				if (existing) {
-					const now = new Date().toISOString();
-					return prev.map((t) => ({
-						...t,
-						active: t.id === existing.id,
-						lastAccessedAt: t.id === existing.id ? now : t.lastAccessedAt,
-					}));
+				// For singleton types, switch to existing instead of creating new
+				if (SINGLETON_TYPES.includes(type)) {
+					const existing = prev.find((t) => t.type === type);
+					if (existing) {
+						const now = new Date().toISOString();
+						return prev.map((t) => ({
+							...t,
+							active: t.id === existing.id,
+							lastAccessedAt: t.id === existing.id ? now : t.lastAccessedAt,
+						}));
+					}
 				}
-			}
 
-			const icon = TAB_ICONS.find((i) => i.type === type);
-			const chatCount = type === "chat" ? prev.filter((t) => t.type === "chat").length + 1 : 0;
-			const defaultTitle = type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
+				const icon = TAB_ICONS.find((i) => i.type === type);
+				const chatCount = type === "chat" ? prev.filter((t) => t.type === "chat").length + 1 : 0;
+				const defaultTitle = type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
 
-			const now = new Date().toISOString();
-			newTab = {
-				id: generateId(type),
-				type,
-				title: title || defaultTitle,
-				active: true,
-				createdAt: now,
-				lastAccessedAt: now,
-				pinned: false,
-				data: {},
-			};
+				const now = new Date().toISOString();
+				newTab = {
+					id: generateId(type),
+					type,
+					title: title || defaultTitle,
+					active: true,
+					createdAt: now,
+					lastAccessedAt: now,
+					pinned: false,
+					data: initialData ?? {},
+				};
 
-			return [...prev.map((t) => ({ ...t, active: false })), newTab];
-		});
+				return [...prev.map((t) => ({ ...t, active: false })), newTab];
+			});
 
-		return newTab;
-	}, []);
+			return newTab;
+		},
+		[],
+	);
 
 	// ----------------------------------------
 	// removeTab
