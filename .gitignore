@@ -120,3 +120,7 @@ packages/eight-bdh/trainer/local/phase-2a-scale-train-log.json
 packages/eight-bdh/trainer/local/phase-2a-scale-full-run.log
 packages/eight-bdh/data/phase-2a-scale-corpus.bin
 packages/eight-bdh/checkpoints/phase-2a-scale-5m.pt
+packages/eight-bdh/trainer/local/phase-2b-capacity-train-log.json
+packages/eight-bdh/trainer/local/phase-2b-capacity-full-run.log
+packages/eight-bdh/data/phase-2b-capacity-corpus.bin
+packages/eight-bdh/checkpoints/phase-2b-capacity-10m.pt
