@@ -1378,8 +1378,12 @@ export function App({
 			setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
 		}
 
-		// Toggle predict with Ctrl+P
-		if (key.ctrl && input === "p") {
+		// Toggle predict with Ctrl+E.  Was Ctrl+P, but that collided with
+		// the HUD music player's Ctrl+Shift+P pause: terminals don't
+		// always set key.shift consistently for that combo, so plain
+		// Ctrl+P could accidentally trigger pause too.  Ctrl+E is free,
+		// reads as "expect / estimate next steps".
+		if (key.ctrl && input === "e") {
 			setViewMode((prev) => (prev === "predict" ? "chat" : "predict"));
 		}
 
@@ -2028,7 +2032,7 @@ export function App({
 					addSystemMessage(
 						"Available commands:\n" +
 							"  /kanban (Ctrl+K) - Toggle kanban board\n" +
-							"  /predict (Ctrl+P) - Show predicted next steps\n" +
+							"  /predict (Ctrl+E) - Show predicted next steps\n" +
 							"  /avenues - Show planned avenues\n" +
 							"  /design [task] - Get design system suggestions\n" +
 							"  /evidence - Show full evidence breakdown\n" +
