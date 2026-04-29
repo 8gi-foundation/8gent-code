@@ -54,4 +54,5 @@ export const telemetry = {
 	recordLLM: attribution.recordLLM,
 	recordVessel: attribution.recordVessel,
 	recordStorage: attribution.recordStorage,
+	recordLifecycle: attribution.recordLifecycle,
 };

@@ -874,3 +874,12 @@ export type {
 	TaskPayload,
 	TaskResult,
 } from "./vessel-mesh";
+
+// Agent lifecycle — formal state machine, suspend/resume, priority queue
+export { LifecycleManager } from "./agent-lifecycle";
+export type {
+	SpawnOptions,
+	ExecutorContext,
+	Executor,
+	LifecycleManagerOptions,
+} from "./agent-lifecycle";
