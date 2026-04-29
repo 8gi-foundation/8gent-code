@@ -17,6 +17,11 @@ import * as path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunnerConfig } from "../../../../packages/orchestration/role-registry.js";
 import { resolveRoleName } from "../../../../packages/settings/index.js";
+import {
+	deleteSession as deleteWindowSession,
+	isPidAlive,
+	pruneDead as pruneDeadSessions,
+} from "../../../../packages/terminal-tab/index.js";
 
 // ============================================
 // Types
@@ -133,6 +138,37 @@ function reconcileTitlesWithSettings(tabs: WorkspaceTab[]): WorkspaceTab[] {
 	});
 }
 
+/**
+ * Drop window-mode terminal tabs whose backing OS process is no longer
+ * alive, and clean up the matching session-store JSON file. Runs once
+ * at boot so users don't see ghost tabs for windows they've closed.
+ */
+function pruneDeadWindowTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	// Best-effort sweep of the session store regardless of tab state —
+	// keeps ~/.8gent/sessions/ from accumulating stale files.
+	try {
+		pruneDeadSessions();
+	} catch {
+		/* best-effort */
+	}
+	return tabs.filter((t) => {
+		if (t.type !== "terminal") return true;
+		const data = t.data as { mode?: string; pid?: number; sessionId?: string };
+		if (data?.mode !== "window") return true;
+		if (typeof data.pid !== "number" || !isPidAlive(data.pid)) {
+			if (data.sessionId) {
+				try {
+					deleteWindowSession(data.sessionId);
+				} catch {
+					/* best-effort */
+				}
+			}
+			return false;
+		}
+		return true;
+	});
+}
+
 function loadState(): WorkspaceTab[] | null {
 	try {
 		if (fs.existsSync(STATE_FILE)) {
@@ -140,7 +176,7 @@ function loadState(): WorkspaceTab[] | null {
 			const data = JSON.parse(raw);
 			if (Array.isArray(data) && data.length > 0) {
 				const migrated = data.map((item: Record<string, unknown>) => migrateTab(item));
-				return reconcileTitlesWithSettings(migrated);
+				return pruneDeadWindowTabs(reconcileTitlesWithSettings(migrated));
 			}
 		}
 	} catch {
