@@ -1194,6 +1194,22 @@ export function isInfiniteMode(): boolean {
 export { ToolG8 } from "./toolg8.js";
 export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS } from "./policy-engine.js";
 export {
+	checkCommandBoundary,
+	checkFilePathBoundary,
+	checkPath as checkWorkspacePath,
+	extractAndCheckPaths,
+	isWithinWorkspace,
+	resolveSafe,
+	splitPipeline,
+	tokenize,
+} from "./src/workspace-boundary.js";
+export type {
+	BoundaryCheckResult,
+	BoundaryViolation,
+	CommandSegment,
+	ExtractOptions,
+} from "./src/workspace-boundary.js";
+export {
 	privacyGate,
 	isSensitiveContext,
 	forceLocalModel,
