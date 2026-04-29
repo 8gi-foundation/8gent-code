@@ -29,6 +29,7 @@ registerTool(
 			},
 		},
 		permissions: ["read:code"],
+		tiers: ["read"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const { scanPaths = ["src"] } = input as { scanPaths?: string[] };
@@ -147,6 +148,7 @@ registerTool(
 			required: ["name"],
 		},
 		permissions: ["write:code"],
+		tiers: ["read", "write"],
 	},
 	async (input: unknown, ctx: ExecutionContext) => {
 		const {
@@ -247,6 +249,7 @@ registerTool(
 			properties: {},
 		},
 		permissions: ["read:code"],
+		tiers: ["read"],
 	},
 	async (_input: unknown, ctx: ExecutionContext) => {
 		const cwd = ctx.workingDirectory;

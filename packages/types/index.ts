@@ -41,6 +41,32 @@ export type Permission =
 	| "github:read"
 	| "github:write";
 
+/**
+ * Tool capability tier — coarse classification of what a tool can do.
+ *
+ * Used as the primary gate before invocation. A user (or session) is granted
+ * a set of tiers; a tool may declare one or more required tiers and only
+ * runs if every required tier is in the grant.
+ *
+ * - read       — observe local state (filesystem, git, AST). No mutation.
+ * - write      — mutate local state (write files, edit, scaffold, commit).
+ * - execute    — run shell commands or arbitrary processes.
+ * - network    — reach external services (HTTP fetch, GitHub API, push, etc).
+ * - admin      — privileged ops affecting auth, secrets, identity, registry.
+ * - dangerous  — irreversible or destructive (force-push, rm -rf, etc).
+ *
+ * A tool with multi-tier reach declares ALL of its tiers, e.g. `git_push`
+ * needs `["execute", "network"]`; a destructive shell command needs
+ * `["execute", "dangerous"]`.
+ */
+export type ToolCapabilityTier =
+	| "read"
+	| "write"
+	| "execute"
+	| "network"
+	| "admin"
+	| "dangerous";
+
 export type Capability =
 	| "code"
 	| "code.symbol"
@@ -70,6 +96,11 @@ export interface Tool {
 	inputSchema: JSONSchema;
 	outputSchema: JSONSchema;
 	permissions: Permission[];
+	/**
+	 * Capability tiers required to invoke this tool. Must declare at least one.
+	 * The compiler refuses tool registration if this field is missing.
+	 */
+	tiers: [ToolCapabilityTier, ...ToolCapabilityTier[]];
 	execute: (input: unknown, context: ExecutionContext) => Promise<unknown>;
 }
 
@@ -80,6 +111,37 @@ export interface ToolRegistration {
 	inputSchema: JSONSchema;
 	outputSchema?: JSONSchema;
 	permissions: Permission[];
+	/**
+	 * Capability tiers required to invoke this tool. Must declare at least one.
+	 * Required at registration time — TypeScript will refuse to compile a tool
+	 * that omits its tiers.
+	 */
+	tiers: [ToolCapabilityTier, ...ToolCapabilityTier[]];
+}
+
+/**
+ * Result of a capability-tier check before a tool invocation.
+ */
+export interface CapabilityCheckResult {
+	allowed: boolean;
+	missing: ToolCapabilityTier[];
+}
+
+/**
+ * Structured response returned when a tool invocation is denied because
+ * the caller lacks the required capability tier(s).
+ *
+ * Surfaced through `ToolResult` so callers (LLM agents, RPC clients,
+ * test harnesses) can branch on `denied: "capability"` without parsing
+ * free-form error strings.
+ */
+export interface CapabilityDenial {
+	denied: "capability";
+	tool: string;
+	required: ToolCapabilityTier[];
+	missing: ToolCapabilityTier[];
+	granted: ToolCapabilityTier[];
+	message: string;
 }
 
 // ============================================
@@ -91,6 +153,12 @@ export interface ExecutionContext {
 	workingDirectory: string;
 	permissions: Permission[];
 	sandbox: SandboxConfig;
+	/**
+	 * Capability tiers granted to this session. Tools whose required tiers
+	 * are not all present are denied before invocation. When omitted, the
+	 * executor falls back to the registered default grant.
+	 */
+	grantedTiers?: ToolCapabilityTier[];
 }
 
 export interface SandboxConfig {
