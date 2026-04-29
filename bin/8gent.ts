@@ -39,6 +39,9 @@ COMMANDS:
   update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
                               Use --open to auto-launch System Settings panes for missing grants
+  keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
+                              "keys reload" re-reads the file into the running env (default action)
+                              "keys status" lists which provider keys are present (no values shown)
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -147,6 +150,16 @@ Learn more: https://github.com/8gi-foundation/8gent-code
 `;
 
 async function main() {
+	// Load API keys from ~/.8gent/keys.env into process.env BEFORE any
+	// subcommand reads provider config. Existing env vars win — a
+	// shell export or CI secret always overrides the file.
+	try {
+		const { loadKeysIntoEnv } = await import("../packages/secrets/keys.ts");
+		loadKeysIntoEnv();
+	} catch {
+		/* secrets package unavailable — proceed; subcommands handle their own env */
+	}
+
 	let args = process.argv.slice(2);
 
 	// --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
@@ -400,6 +413,11 @@ async function main() {
 			await permissionsCommand(restArgs);
 			break;
 
+		case "keys":
+		case "env":
+			await keysCommand(restArgs);
+			break;
+
 		default:
 			console.error(`Unknown command: ${command}`);
 			console.log(`Run '8 --help' for usage information.`);
@@ -502,6 +520,64 @@ async function permissionsCommand(args: string[]): Promise<void> {
 	} else {
 		console.log(`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`);
 	}
+}
+
+/**
+ * `8gent keys [open|reload|status]` — manage the ~/.8gent/keys.env file
+ * that holds API keys outside the chat. Default subcommand `open`
+ * launches the file in the user's default editor with placeholder
+ * lines pre-filled; the user drops keys in, saves, closes — no
+ * credentials in chat.
+ *
+ * `keys reload` re-reads the file into the running process env.
+ * `keys status` lists which provider keys are populated (names only,
+ *   never values — values are still secrets even from a status print).
+ */
+async function keysCommand(args: string[]): Promise<void> {
+	const sub = (args[0] || "open").toLowerCase();
+	const {
+		KEYS_PATH,
+		ensureKeysFile,
+		loadKeysIntoEnv,
+		openKeysFile,
+		readKeysFile,
+	} = await import("../packages/secrets/index.ts");
+
+	if (sub === "open" || sub === "edit" || sub === "") {
+		const path = openKeysFile();
+		console.log(`Opened ${path} in your default editor.`);
+		console.log(`Drop your API keys in, save, and close.`);
+		console.log(`Then run \`8gent keys reload\` (or just relaunch \`8gent\`) to apply.`);
+		return;
+	}
+
+	if (sub === "reload" || sub === "load") {
+		ensureKeysFile();
+		const merged = loadKeysIntoEnv();
+		console.log(`Reloaded ${KEYS_PATH}: merged ${merged} key${merged === 1 ? "" : "s"} into env.`);
+		return;
+	}
+
+	if (sub === "status" || sub === "list") {
+		ensureKeysFile();
+		const keys = readKeysFile();
+		const names = Object.keys(keys).sort();
+		if (names.length === 0) {
+			console.log(`No keys set in ${KEYS_PATH}. Run \`8gent keys\` to open the file.`);
+			return;
+		}
+		console.log(`Keys present in ${KEYS_PATH}:`);
+		for (const name of names) {
+			const v = keys[name] || "";
+			const preview = v.length > 8 ? `${v.slice(0, 4)}…${v.slice(-4)}` : "set";
+			console.log(`  ${name.padEnd(24)} ${preview}`);
+		}
+		return;
+	}
+
+	console.error(`Unknown subcommand: keys ${sub}`);
+	console.error(`Try: keys open | keys reload | keys status`);
+	process.exit(1);
 }
 
 async function initCommand(args: string[]) {
