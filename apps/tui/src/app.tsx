@@ -149,6 +149,7 @@ import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
+import { resolveTermCommand } from "../../../packages/terminal-tab/index.js";
 import {
 	loadSettings as loadAppSettings,
 	getVoiceForRole,
@@ -3899,6 +3900,25 @@ export function App({
 						workspaceTabs.addTab("projects");
 					} else if (command === ("terminal" as any)) {
 						workspaceTabs.addTab("terminal", (args as any[])?.[0] || "Terminal");
+					} else if (command === ("term" as any)) {
+						const presets = listPresetIds()
+							.map((id) => {
+								const p = getPreset(id);
+								return p ? { id: p.id, label: p.label, command: p.command } : null;
+							})
+							.filter(
+								(x): x is { id: string; label: string; command: string } => x !== null,
+							);
+						const resolved = resolveTermCommand({
+							args: (args as string[]) ?? [],
+							presets,
+						});
+						workspaceTabs.addTab("terminal", resolved.label, {
+							command: resolved.command,
+							args: resolved.args,
+							label: resolved.label,
+							source: resolved.source,
+						});
 					}
 					break;
 			}
@@ -4608,15 +4628,24 @@ export function App({
 							}}
 						/>
 					);
-				case "terminal":
+				case "terminal": {
+					const tabData = (workspaceTabs.activeTab?.data ?? {}) as {
+						command?: string;
+						args?: string[];
+						label?: string;
+					};
 					return (
 						<TerminalView
 							tabId={workspaceTabs.activeTab?.id || "terminal-default"}
 							cwd={projectCwd}
+							command={tabData.command}
+							args={tabData.args}
+							label={tabData.label ?? workspaceTabs.activeTab?.title}
 							visible={true}
 							onClose={closeTabView}
 						/>
 					);
+				}
 				case "settings":
 					return <SettingsView visible={true} onClose={closeTabView} />;
 			}
