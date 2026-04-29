@@ -47,7 +47,8 @@ export type SlashCommand =
 	| "rename"
 	| "spawn"
 	| "settings"
-	| "quiet";
+	| "quiet"
+	| "term";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -308,7 +309,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "spawn",
 		aliases: [],
-		description: "Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
+		description:
+			"Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
 		usage: "/spawn <claude|codex|hermes|openclaw|pi|8gent>",
 	},
 	{
@@ -322,6 +324,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["mute", "shut", "silence"],
 		description: "Stop the launch instrumental immediately (kills any in-flight intro music)",
 		usage: "/quiet",
+	},
+	{
+		name: "term",
+		aliases: [],
+		description:
+			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive agent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
+		usage: "/term [shell|<preset>|<command...>]",
 	},
 ];
 

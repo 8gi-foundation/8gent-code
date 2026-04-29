@@ -1,109 +1,111 @@
 /**
  * 8gent Code - Terminal View
  *
- * Renders a PTY-backed terminal tab in Ink.
- * Uses useTerminal hook to manage the shell process.
- * Input goes directly to the PTY (not the chat agent).
- * Agents can also write to the PTY via write_terminal tool.
+ * Renders a PTY-backed terminal tab. Each keystroke is forwarded
+ * directly to the PTY (raw mode) so interactive REPLs (claude,
+ * pi, openclaw, etc.) and line-editing inside the child app behave
+ * normally. The PTY itself echoes typed input back via onData, which
+ * is what the user sees on screen.
+ *
+ * Esc closes the tab. To send Esc to the child app, use Ctrl+[
+ * (the canonical equivalent).
  */
 
 import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTerminal } from "../hooks/useTerminal.js";
 
 interface TerminalViewProps {
 	tabId: string;
 	cwd?: string;
+	command?: string;
+	args?: string[];
+	label?: string;
 	visible?: boolean;
 	onClose?: () => void;
+}
+
+/**
+ * Translate Ink's key descriptor to the byte sequence the PTY expects.
+ * Returns null when the keystroke should be ignored.
+ */
+function keyToBytes(
+	input: string,
+	key: ReturnType<typeof useInput> extends never ? never : any,
+): string | null {
+	if (key.return) return "\r";
+	if (key.backspace) return "\x7f";
+	if (key.delete) return "\x1b[3~";
+	if (key.tab && !key.shift) return "\t";
+	if (key.upArrow) return "\x1b[A";
+	if (key.downArrow) return "\x1b[B";
+	if (key.rightArrow) return "\x1b[C";
+	if (key.leftArrow) return "\x1b[D";
+	if (key.pageUp) return "\x1b[5~";
+	if (key.pageDown) return "\x1b[6~";
+	if (key.ctrl && input) {
+		// Map a-z to 0x01-0x1a (Ctrl-A through Ctrl-Z).
+		const c = input.toLowerCase().charCodeAt(0);
+		if (c >= 97 && c <= 122) return String.fromCharCode(c - 96);
+	}
+	if (key.meta) return null; // ignore meta-prefixed keys for now
+	if (input && input.length > 0) return input;
+	return null;
 }
 
 export const TerminalView: React.FC<TerminalViewProps> = ({
 	tabId,
 	cwd,
+	command,
+	args,
+	label,
 	visible = true,
 	onClose,
 }) => {
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 120;
-	const rows = Math.max(10, (stdout?.rows ?? 30) - 6); // leave room for tab bar + input
+	const rows = Math.max(10, (stdout?.rows ?? 30) - 6);
 
-	const { lines, isRunning, pid, write, resize } = useTerminal(tabId, cwd);
+	const { lines, isRunning, pid, writeRaw, resize } = useTerminal(tabId, {
+		cwd,
+		command,
+		args,
+	});
 
-	const [inputBuf, setInputBuf] = useState("");
-
-	// Resize PTY when terminal dimensions change
 	useEffect(() => {
 		resize(cols, rows);
 	}, [cols, rows, resize]);
 
-	// Handle keyboard input — only active when this terminal tab is visible
 	useInput(
 		(input, key) => {
 			if (key.escape && onClose) {
 				onClose();
 				return;
 			}
-
-			if (key.return) {
-				write(inputBuf);
-				setInputBuf("");
-				return;
-			}
-
-			if (key.backspace || key.delete) {
-				setInputBuf((prev) => prev.slice(0, -1));
-				return;
-			}
-
-			if (key.ctrl && input === "c") {
-				// Send SIGINT (Ctrl+C) to PTY
-				write("\x03");
-				setInputBuf("");
-				return;
-			}
-
-			if (key.ctrl && input === "d") {
-				write("\x04");
-				return;
-			}
-
-			// Forward plain Tab to PTY for autocomplete; let Shift+Tab fall through for tab cycling
-			if (key.tab && !key.shift) {
-				write("\t");
-				return;
-			}
-
-			// Regular character input
-			if (input && !key.ctrl && !key.meta) {
-				setInputBuf((prev) => prev + input);
-			}
+			const bytes = keyToBytes(input, key);
+			if (bytes) writeRaw(bytes);
 		},
 		{ isActive: visible },
 	);
 
-	// Show last N lines that fit in the viewport
 	const visibleLines = lines.slice(-(rows - 2));
+	const headerLabel = label ?? "Terminal";
 
 	return (
 		<Box flexDirection="column" width="100%" height={rows + 4}>
-			{/* Header */}
 			<Box borderStyle="single" borderColor="cyan" paddingX={1}>
 				<Text color="cyan" bold>
-					$ Terminal
+					$ {headerLabel}
 				</Text>
-				<Text color="gray"> pid:{pid ?? "—"} </Text>
+				<Text dimColor> pid:{pid ?? "—"} </Text>
 				<Text color={isRunning ? "green" : "red"}>{isRunning ? "● running" : "○ stopped"}</Text>
-				<Text color="gray"> [Esc] back [Ctrl+C] interrupt [Ctrl+D] EOF</Text>
+				<Text dimColor> [Esc] back · keystrokes forwarded raw</Text>
 			</Box>
 
-			{/* Output area */}
 			<Box flexDirection="column" flexGrow={1} paddingX={1} height={rows} overflow="hidden">
 				{visibleLines.length === 0 ? (
-					<Text color="gray" dimColor>
-						(shell starting…)
-					</Text>
+					<Text dimColor>(starting…)</Text>
 				) : (
 					visibleLines.map((line, i) => (
 						<Text key={i} wrap="truncate-end">
@@ -111,15 +113,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 						</Text>
 					))
 				)}
-			</Box>
-
-			{/* Input prompt */}
-			<Box paddingX={1} borderStyle="single" borderColor="gray">
-				<Text color="green">❯ </Text>
-				<Text>{inputBuf}</Text>
-				<Text color="green" bold>
-					▌
-				</Text>
 			</Box>
 		</Box>
 	);
