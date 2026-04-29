@@ -10,7 +10,9 @@
  *   T+7500   hold completes
  *   T+8500   dismiss
  *
- * Skippable: any keypress dismisses immediately.
+ * Skippable: esc / q / Ctrl+C, but ONLY after the body line has finished
+ *            typing in. Stray terminal events during launch (paste markers,
+ *            focus reports, accidental keystrokes) cannot dismiss it early.
  * Opt-out:   set 8GENT_NO_INTRO=1 to skip entirely.
  *
  * Audio: bundled `apps/tui/sounds/launch.mp3` is played at 65% via afplay.
@@ -321,9 +323,17 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 		return () => clearInterval(tick);
 	}, []);
 
-	useInput(() => {
-		// Any key dismisses early.
-		dismiss();
+	useInput((input, key) => {
+		// Skip is gated: only Esc / q / Ctrl+C dismiss, and only AFTER the
+		// body line has finished animating in. Earlier launches died at ~3s
+		// because stray terminal events (bracketed-paste markers, focus
+		// reports, accidental keystrokes during heavy init) fired this
+		// callback while the user had not yet seen the subtitle or body.
+		const bodyDoneAt = T_BODY + (BODY.length / TYPE_CPS) * 1000;
+		if (elapsed < bodyDoneAt) return;
+		if (key.escape || input === "q" || (key.ctrl && input === "c")) {
+			dismiss();
+		}
 	});
 
 	if (elapsed >= T_DONE) return null;
@@ -377,7 +387,7 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 			</Box>
 			{!inFadeOut && elapsed > T_BODY + 400 && (
 				<Box marginTop={1}>
-					<Text dimColor>press any key to skip</Text>
+					<Text dimColor>esc / q to skip</Text>
 				</Box>
 			)}
 		</Box>
