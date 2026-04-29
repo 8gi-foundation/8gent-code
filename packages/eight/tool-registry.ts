@@ -11,7 +11,12 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { type AgentTools, agentTools } from "../ai/tools";
 
-export const TOOL_CATEGORIES: Record<string, (keyof AgentTools)[]> = {
+// `keyof AgentTools` is the AI-SDK tool registry (zod-typed).  We also
+// route some categories through the OpenAI-style `ToolExecutor.execute`
+// path in packages/eight/tools.ts (e.g. the term_* orchestration family
+// which lives in packages/eight/term-tools.ts). Allow plain strings so
+// both registries can co-exist while we continue migrating.
+export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 	core: [
 		"read_file",
 		"write_file",
@@ -62,6 +67,13 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools)[]> = {
 		"check_agents",
 		"message_agent",
 		"merge_agent_work",
+		// Windowed-session orchestration: drive external CLIs (claude,
+		// openclaw, pi…) running in real Terminal.app windows via tmux.
+		"term_spawn",
+		"term_send",
+		"term_read",
+		"term_list",
+		"term_kill",
 	],
 	background: ["background_start", "background_status", "background_output"],
 	mcp: ["mcp_list_tools", "mcp_call_tool"],
@@ -95,7 +107,7 @@ export class ToolRegistry {
 		const loaded: string[] = [];
 		for (const name of toolNames) {
 			if (!this.activeTools.has(name)) {
-				const def = agentTools[name];
+				const def = (agentTools as Record<string, AgentTools[keyof AgentTools]>)[name];
 				if (def) {
 					this.activeTools.set(name, def);
 					loaded.push(name);

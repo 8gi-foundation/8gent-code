@@ -88,6 +88,7 @@ import {
 	vercelSetEnv,
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
+import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -955,6 +956,8 @@ export class ToolExecutor {
 					},
 				},
 			},
+			// Windowed-session orchestration (term_*) — see packages/eight/term-tools.ts
+			...getTermToolDefs(),
 		];
 	}
 
@@ -986,6 +989,13 @@ export class ToolExecutor {
 		// Rate limit check - prevents LLM loops from exhausting resources
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
+
+		// Delegate windowed-session orchestration tools to their own module
+		// so the giant switch below stays focused on "operate on this repo"
+		// rather than "operate on a fleet of CLIs in tmux".
+		if (isTermTool(toolName)) {
+			return executeTermTool(toolName, args);
+		}
 
 		// ToolG8 gate - evaluate policy before execution
 		const policyAction = ToolExecutor.TOOL_ACTION_MAP[toolName];
