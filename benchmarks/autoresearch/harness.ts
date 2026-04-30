@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
-const MODEL = process.env.OLLAMA_MODEL || "glm-4.7-flash:latest";
+const MODEL = process.env.OLLAMA_MODEL || "qwen3.6:27b";
 const RESULTS_FILE = path.join(__dirname, "../results.tsv");
 const PROMPTS_FILE = path.join(__dirname, "../../packages/eight/prompts/system-prompt.ts");
 

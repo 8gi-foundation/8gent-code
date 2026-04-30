@@ -55,6 +55,7 @@
 		"benchmark:loop": "bun run benchmarks/computer-use-bakeoff.ts",
 		"benchmark:bakeoff": "bun run benchmarks/computer-use-bakeoff.ts",
 		"benchmark:multi": "bun run benchmarks/autoresearch/multi-model-harness.ts",
+		"benchmark:parallel": "bun run benchmarks/autoresearch/harness-parallel.ts",
 		"audit": "bun run packages/audit/cli.ts",
 		"demo": "bun run scripts/demo-savings.ts",
 		"provision-tenant": "bun run scripts/provision-tenant.ts",
