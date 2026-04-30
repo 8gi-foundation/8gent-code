@@ -740,6 +740,86 @@ const webFetchTool = tool({
 });
 
 // ============================================
+// Travel Tools
+// ============================================
+
+const travelResolveLocation = tool({
+	description:
+		"Resolve a city or airport name to IATA airport/city codes through LetsFG. Search-only: does not unlock, book, collect payment, or store passenger profiles.",
+	inputSchema: z.object({
+		query: z
+			.string()
+			.min(1)
+			.describe("City, airport name, or IATA code, for example London or JFK"),
+	}),
+	execute: async ({ query }) => {
+		try {
+			const { createDefaultFlightProvider } = await import("../travel");
+			const provider = createDefaultFlightProvider();
+			return JSON.stringify(await provider.resolveLocation({ query }), null, 2);
+		} catch (err) {
+			const { formatTravelError } = await import("../travel");
+			return `Travel location lookup failed: ${formatTravelError(err)}`;
+		}
+	},
+});
+
+const travelSearchFlights = tool({
+	description:
+		"Search live flight offers through LetsFG using IATA codes. Phase 1 is search-only: no unlock, booking, payment, or passenger profile storage.",
+	inputSchema: z.object({
+		origin: z
+			.string()
+			.length(3)
+			.describe("Origin IATA airport or city code, for example LHR or LON"),
+		destination: z
+			.string()
+			.length(3)
+			.describe("Destination IATA airport or city code, for example JFK"),
+		dateFrom: z
+			.string()
+			.regex(/^\d{4}-\d{2}-\d{2}$/)
+			.describe("Departure date in YYYY-MM-DD format"),
+		dateTo: z
+			.string()
+			.regex(/^\d{4}-\d{2}-\d{2}$/)
+			.optional()
+			.describe("Return date in YYYY-MM-DD format. Omit for one-way."),
+		adults: z
+			.number()
+			.int()
+			.min(1)
+			.max(9)
+			.optional()
+			.describe("Adult passenger count. Defaults to 1."),
+		cabin: z
+			.enum(["M", "W", "C", "F"])
+			.optional()
+			.describe("Cabin class: M economy, W premium economy, C business, F first."),
+		maxStops: z
+			.number()
+			.int()
+			.min(0)
+			.max(4)
+			.optional()
+			.describe("Maximum stopovers per direction."),
+		currency: z.string().length(3).optional().describe("3-letter currency code, for example EUR."),
+		limit: z.number().int().min(1).max(25).optional().describe("Maximum offers to return."),
+		sort: z.enum(["price", "duration"]).optional().describe("Sort preference."),
+	}),
+	execute: async (request) => {
+		try {
+			const { createDefaultFlightProvider } = await import("../travel");
+			const provider = createDefaultFlightProvider();
+			return JSON.stringify(await provider.searchFlights(request), null, 2);
+		} catch (err) {
+			const { formatTravelError } = await import("../travel");
+			return `Travel flight search failed: ${formatTravelError(err)}`;
+		}
+	},
+});
+
+// ============================================
 // MCP Tools
 // ============================================
 
@@ -1275,7 +1355,7 @@ const check_agents = tool({
 
 		const lines = agents.map(
 			(a) =>
-				`${a.persona.icon} ${a.persona.name} (${a.persona.role}) — ${a.status}\n  Task: ${a.task}\n  Since: ${a.spawnedAt.toLocaleTimeString()}`,
+				`${a.persona.icon} ${a.persona.name} (${a.persona.role}) - ${a.status}\n  Task: ${a.task}\n  Since: ${a.spawnedAt.toLocaleTimeString()}`,
 		);
 
 		return `Active agents (${agents.length}):\n\n${lines.join("\n\n")}`;
@@ -1434,7 +1514,7 @@ const writeNotesTool = tool({
 // ============================================
 
 /**
- * write_terminal — send a shell command or text to a terminal tab's PTY.
+ * write_terminal - send a shell command or text to a terminal tab's PTY.
  * The terminal tab must already be open (user opens it or /terminal slash command).
  * The command runs in the tab's live shell, so interactive programs work.
  */
@@ -1809,7 +1889,13 @@ const desktopClick = tool({
 		x: z.number().describe("X coordinate on screen"),
 		y: z.number().describe("Y coordinate on screen"),
 		button: z.enum(["left", "right", "middle"]).optional().describe("Mouse button (default: left)"),
-		count: z.number().int().min(1).max(5).optional().describe("Click count, e.g. 2 for double-click"),
+		count: z
+			.number()
+			.int()
+			.min(1)
+			.max(5)
+			.optional()
+			.describe("Click count, e.g. 2 for double-click"),
 	}),
 	execute: async ({ x, y, button, count }) => {
 		const { click } = await import("../computer");
@@ -2023,6 +2109,10 @@ export const agentTools = {
 	// Web
 	web_search: webSearchTool,
 	web_fetch: webFetchTool,
+
+	// Travel
+	travel_resolve_location: travelResolveLocation,
+	travel_search_flights: travelSearchFlights,
 
 	// MCP
 	mcp_list_tools: mcpListTools,
