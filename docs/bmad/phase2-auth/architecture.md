@@ -251,6 +251,8 @@ if (auth.state === "authenticated") {
 
 ### TUI Status Bar (`apps/tui/src/components/status-bar.tsx`)
 
+> Note: `StatusBar`/`EnhancedStatusBar` were retired in 0.13.0; replaced by `AgentInstrumentStrip`. The `authUser` prop should attach to that component instead.
+
 New prop:
 ```typescript
 interface EnhancedStatusBarProps {
