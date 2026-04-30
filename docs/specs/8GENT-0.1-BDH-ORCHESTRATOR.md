@@ -19,6 +19,45 @@
 
 ---
 
+## 0.5 Use case framing - implicit evolution (chair amendment 2026-04-28)
+
+The original framing of this spec was prescriptive: "8gent 0.1 is a routing core. Train it on 50k labelled routing triples. Measure it as a router. Ship when it beats the heuristic by 10pp."
+
+**Chair amendment 2026-04-28:** the model's purpose is left open. Phase 1 is not a labelled-corpus-driven router-training programme. Phase 1 is **implicit evolution on the harness's natural data stream**.
+
+The principle: do not explicitly define what the brain is for. Let it absorb the actual life of the harness, real session traces, real decisions, real audit logs, real conversations, and let its capabilities surface from what the data shapes it into. Quality of the stream is what matters, not curation against a hypothesised use case.
+
+What this means in practice:
+
+- **Corpus is the harness's reality, not a synthetic 50k.** Replays from `~/.8gent/sessions/`, audit traces from G8WAY, boardroom transcripts, 8gent.world content, anything that already exists in the world we want the brain to live in. PII scrub still mandatory; curation by intent is not.
+- **No hard Phase 1 ship gates against the routing rubric.** The +10pp F1, the gold-set kappa, the per-concept synapse precision targets in section 4 stay alive **only** for the moment we promote the model to a default-on path that affects user behaviour. During the exploratory phase, the ship-gate concept does not apply because there is nothing being shipped.
+- **No fixed ontology.** Section 4.4's 120-concept vocabulary becomes a probe vocabulary, not a prediction target. After training we run the probe runner and see what concepts the synapses actually carry. The ontology is descriptive of the model, not prescriptive over it.
+- **Post-training capability discovery.** Once trained on the harness stream, we probe what the model is unexpectedly good at: completing audit traces, suggesting next decisions, summarising sessions, answering "what just happened", whatever surfaces. Capabilities that surface are documented and (selectively) wired into the harness behind feature flags.
+- **The routing use case stays as a hypothesis, not a commitment.** If post-training probing shows the model routes well, great, Throne PRD W1 wires it up. If it shows the model is better at, say, session summarisation, we wire that instead. Or both. Or neither.
+
+What stays unchanged from the original spec:
+
+- BDH architecture (paper-faithful, single-head next-token CE, no concept supervision).
+- 0% closed-weight teacher contamination. Apache 2.0 / MIT only.
+- Provenance manifest on every byte of corpus. PII scrub plus k-anonymity.
+- License compliance (NOTICES.md, the MIT-Apache combination).
+- Constant-memory inference, byte-level vocab=256.
+- The original boardroom commitments around audit-as-evidence, monosemanticity-as-emergent, and the L5 amendment process for any change at the constitutional layer.
+
+What is consciously deferred:
+
+- The 200-example dual-labelled gold set as a Phase 1 entry gate. It still has value as one possible probe surface, but it does not gate corpus generation or training.
+- The eval harness's hard ship gates. The harness as infrastructure (kappa, probe, holdout-discipline) still gets built per the Phase 1 prereq PRD, but its outputs become diagnostic, not gating.
+- The 10pp F1 target vs heuristic. The heuristic baseline remains useful as a comparison artefact; it does not function as a release gate during exploration.
+
+**Why this is the right call.** Phase 0 results showed two things: (1) BDH at 5M learns its corpus extremely fast, capacity is not the bottleneck, and (2) the rule-based corpus produced a model with no semantic content because the labels were random. Both findings point in the same direction: spend the energy on data quality, not on schema design. The harness already produces high-quality data every session. Use that.
+
+**Reversibility.** This amendment is reversible at L5. If the implicit-evolution approach fails to produce a useful capability after a meaningful amount of training (say, 3 to 5 Phase 1 runs across distinct corpus snapshots), the boardroom may reinstate the explicit routing-rubric path.
+
+**Authority:** Chair (James Spalding) decision 2026-04-28, recorded against this spec as a superseding framing for sections 4 (corpus), 9 (success metrics), and the eval-harness PRD's gate semantics. Sections 1, 2, 3, 5, 6, 7, 8, 10, 11 remain as written. Section 4.4b (role-name targets) still applies wherever the corpus DOES contain decision triples, but no longer obligates the corpus to be made of decision triples.
+
+---
+
 ## 1. What is 8gent 0.1
 
 8gent 0.1 is the **first custom-trained model in the 8gent family** and the first model in the new `8gent-*` namespace (distinct from the existing `eight-1.0-*` generalist line).
@@ -78,7 +117,7 @@ This is also a **trust story** for tenants. "Here are the 12 synapses that fired
 
 BDH's headline feature for our economics is **model merging by concatenation**: train a small expert module on a domain (legal drafting routing, gamedev routing, food-industry routing) and append it to the base. No retraining, no fine-tune drift, no quantisation hell.
 
-The product implication: each tenant on a vessel can have their **own** orchestrator, assembled from a base 8gent 0.1 plus the modules they have entitlement to. A FoodstackOS vessel concatenates the food-domain module. A SCF Design Lab vessel concatenates a compliance module. The base remains 10M params; the tenant-specific orchestrator might be 12-20M.
+The product implication: each tenant on a vessel can have their **own** orchestrator, assembled from a base 8gent 0.1 plus the modules they have entitlement to. A vertical-domain vessel concatenates a domain-specific module. A compliance-engaged vessel concatenates a compliance module. The base remains 10M params; the tenant-specific orchestrator might be 12-20M.
 
 This becomes a **marketplace primitive** for the control plane (`8gent.app`): expert modules as installable units.
 
@@ -382,11 +421,49 @@ For BDH's monosemanticity to be useful, we need a fixed concept vocabulary the m
 | Output kind | `decision-model`, `decision-agent`, `decision-tool`, `decision-reject`, `decision-clarify` | ~5 |
 | Reserve / drift | unallocated synapses for emergent concepts (we monitor and label) | ~8 |
 
-The training loss has two heads:
-1. Decision prediction (cross-entropy over decision tokens)
-2. Concept prediction (multi-label binary cross-entropy over the ~120 concept vocabulary)
+The training loss is **single-head, paper-faithful**: standard next-token cross-entropy on serialised orchestration traces. **No concept-BCE supervision.**
 
-The concept head is what makes the synapses monosemantic. Without it, BDH gets monosemanticity by training-data luck. With it, we engineer it.
+Per the BDH paper (arXiv 2509.26507, §"BDH-GPU emergent properties"): "we did not apply any specific training method which would be known to guide the system towards any of the observed emergent properties. (In particular, L1-regularization was disabled.)" Monosemanticity in BDH-GPU is an emergent property of the architecture, not an engineered one.
+
+Boardroom decision (2026-04-28, Option A): we adopt the paper's emergent-monosemanticity approach. The concept ontology in section 4.4 above serves as a **post-training probe vocabulary**, not as a supervised training target. After Phase 0 / Phase 1 training:
+1. Run the probe runner against the gold set; for each synapse position, identify the concept (if any) it most reliably co-fires with.
+2. Label CONCEPT_VOCAB positions descriptively, post-hoc, based on probe evidence. Reserve slots stay reserve until probes name them.
+3. Update `ONTOLOGY_VERSION` per the drift policy in `packages/eight-bdh/ONTOLOGY-RATIONALE.md`.
+
+Re-evaluation: if Phase 1 probes show <50% per-concept synapse precision (i.e. emergent monosemanticity is too noisy to be useful as audit evidence), we reopen the supervised-concept-head decision at L5 boardroom. Until then, paper-faithful.
+
+### 4.4b Decision target naming (Phase 1 amendment, 2026-04-28)
+
+Phase 0 corpus used the internal officer codes (`8EO`, `8TO`, `8PO`, `8DO`, `8SO`, `8CO`, `8MO`, `8GO`) as the `decision.target` value when `decision.kind == "agent"`. That was operationally convenient because the harness already uses these codes for vessel addressing.
+
+It is **wrong for the model.** The codes are 8GI-specific shorthand. End users, external labellers, Pathway, anyone outside the inner circle reads them as opaque symbols. A model trained from scratch on a byte-level vocab learns them as opaque too: there is no semantic structure to leverage.
+
+**Phase 1 amendment:** the corpus uses **role-name targets** as the user-visible string, with officer codes resolved to vessel addresses at dispatch time inside the harness.
+
+| Decision target (model output) | Harness vessel (runtime resolution) |
+|---|---|
+| `Executive` | `8EO` |
+| `Technical` | `8TO` |
+| `Product` | `8PO` |
+| `Design` | `8DO` |
+| `Security` | `8SO` |
+| `Community` | `8CO` |
+| `Marketing` | `8MO` |
+| `Governance` | `8GO` |
+
+The lookup table lives in `packages/orchestration/role-config.ts` (single source). The dispatcher consumes the model's string output, resolves to a vessel code, dispatches.
+
+**Trace concepts** carry both forms (e.g. `vessel-security-fits` AND `vessel-8SO-fits` as ontology synonyms) so audit records are human-readable and the dispatcher can match either.
+
+**Why this is right:**
+- Labellers grading the gold set read role names without translating; expected to lift Cohen's kappa.
+- Audit logs are readable without an officer-code glossary.
+- Externalisation: when 8gent 0.1 is described publicly or to Pathway, the model output uses common-knowledge words.
+- Future-proofing: if we add a role that does not have an officer (e.g. `Data`, `Infra`), role names accommodate it.
+
+**Why we did not retrofit Phase 0:** Phase 0 is already trained. The retraining cost (~2h on M2 Max) is real but the Phase 0 model is a heartbeat artifact that is not measured for routing quality, so the labels never mattered. Phase 1 corpus generator picks up the new schema; Phase 0 corpus stays as-is for reproducibility.
+
+**Authority:** Chair (James Spalding) decision 2026-04-28, informed by the question of whether the model should learn 8GI-internal codes or common-knowledge role names. Boardroom may reverse at L5 if Phase 1 evidence shows role-name targets hurt the kappa or accuracy gates.
 
 ### 4.5 What we are NOT including in the corpus (Phase 0+1)
 
@@ -451,9 +528,9 @@ NOW / NEXT / LATER per CLAUDE.md (no Q1/Q2/Q3).
 **Goal:** Validate concatenation in production. Three pilot modules.
 
 Pilot modules (in priority order):
-1. **`food-routing-0.1`** for FoodstackOS - "is this a recipe task / supplier task / compliance task / customer task?"
-2. **`compliance-0.1`** for SCF Design Lab and EasyRFP - "does this touch GDPR/SOC2/ISO?"
-3. **`gamedev-0.1`** for 8gent.games - "is this a world-state / agent-behaviour / rendering task?"
+1. **`vertical-domain-0.1`** for an internal vertical project - domain-specific routing classes (recipe / supplier / compliance / customer-style splits).
+2. **`compliance-0.1`** for compliance-focused engagements - regulatory framework routing (GDPR / SOC2 / ISO).
+3. **`gamedev-0.1`** for an internal games project - world-state / agent-behaviour / rendering routing classes.
 
 Each module is trained on ~5k domain-specific examples, concatenated to 8gent 0.1, evaluated on a domain benchmark. Module sizes target 1-2M each.
 
@@ -474,7 +551,7 @@ This is the commercial layer. We do not design the pricing or marketplace UX in 
 
 Open questions to resolve before committing to 0.2:
 
-- Multilingual orchestration (Portuguese first, given Sky / Brotherhood Tattoo context).
+- Multilingual orchestration (Portuguese first, partner-driven prioritisation).
 - Multimodal awareness (does the orchestrator need to see a screenshot to route well?).
 - Continuous learning from production (online updates vs nightly retrain).
 - 100M scale-up if the 10M plateau is real.
@@ -616,7 +693,7 @@ For honesty:
 
 - **No training loss curves.** None exist yet.
 - **No latency numbers from our infra.** Phase 0 produces them.
-- **No tenant commitments.** FoodstackOS, SCF, and EasyRFP are mentioned as candidate Phase 3 module hosts; none have been asked yet.
+- **No tenant commitments.** Three candidate Phase 3 module hosts identified privately; none have been asked yet.
 - **No commercial pricing.** Module marketplace pricing is a control-plane concern, not a model-spec concern.
 - **No legal review of corpus sources.** Phase 1 prerequisite.
 

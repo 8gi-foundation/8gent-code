@@ -1,0 +1,27 @@
+{
+  "model": {
+    "n_layer": 6,
+    "n_embd": 160,
+    "n_head": 4,
+    "mlp_internal_dim_multiplier": 64,
+    "dropout": 0.1,
+    "vocab_size": 256
+  },
+  "train": {
+    "lr": 1e-3,
+    "weight_decay": 0.1,
+    "batch_size": 32,
+    "block_size": 512,
+    "max_iters": 3000,
+    "log_interval": 100,
+    "device_priority": ["cuda", "mps", "cpu"],
+    "dtype_priority_mps": ["float16", "float32"],
+    "compile_mps": false
+  },
+  "_meta": {
+    "phase": 0,
+    "param_count_target": 5000000,
+    "wall_clock_target_m2_max": "1-2h",
+    "spec_ref": "TRAINING-NOTES §4"
+  }
+}
