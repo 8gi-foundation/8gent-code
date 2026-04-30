@@ -9,7 +9,43 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-(Empty — promote items here as they land post-0.12.1.)
+(Empty — promote items here as they land post-0.13.0.)
+
+## [0.13.0] - 2026-04-30
+
+### Added
+
+- **Redesigned bottom bar** — full visual refresh of the TUI footer. New components:
+  - `DjDeck` — premium audio deck (3-row LCD: track/elapsed, artist/duration, waveform/vol; reels inside the LCD; `Ctrl+P/N/B/M/↑↓` transport; `/dj close|open` toggle).
+  - `AgentInstrumentStrip` — bordered status cards with stacked uppercase label / brighter value (MODEL · AGENTS · TOKENS · BRANCH · AGENT · MIC · APPROVAL · SESSION). Middle-truncation on long model names.
+  - `ModeFooter` — bordered cyan-active mode chips. `Ctrl+Y` cycles modes.
+  - `HeaderBar` — calm cyan brand pill (per-letter `8gent` colors) replacing the rainbow `Header`.
+  - `BottomBar` — wraps the new stack so `app.tsx` holds one render call.
+  - `theme.ts` + `typography.tsx` design-token foundation.
+  Transient DJ feedback (`Now playing` / `Stopped` / `Paused`) suppressed at the chat call site.
+- **Runtime capability grants** from skill manifests (#2104).
+- **App archive format** + publish CLI (#2103).
+- **Tool capability tiers** with granular permission gates (#2102).
+- **App installer** with sandbox + lifecycle (#2101).
+- **App creator** mini-app scaffolder with embedded skill iteration loop (#2100).
+- **Typed harness/host contract** boundary for the runtime (#2099).
+- **sqlite-vec** native vector search backing memory (#2098).
+- **Thinking-level budget routing** with downgrade fallback in providers (#2097).
+- **Workspace-shared SQLite** for cross-agent state persistence (#2096).
+- **Realpath workspace boundary** enforcement in permissions (#2095).
+- **tmux orchestration backend** + `term_*` agent tools (#2082).
+
+### Changed
+
+- `Ctrl+H` fancy-header toggle removed (rainbow header retired).
+- `Ctrl+T` is now unambiguously "new tab" (previously also displayed alongside the mode hint).
+- `Ctrl+Y` is the new mode-cycle hotkey (most single-letter Ctrl combos collide with TTY control codes).
+- `^T:new ^W:close` rendered once in `HeaderBar` (was duplicated by `TabBar`).
+
+### Removed
+
+- `HudMusicPlayer`, `EnhancedStatusBar`, `StatusBar`, `DetailedStatusBar`, `ShortcutDock` no longer rendered (source files left intact in case any external surface still imports them).
+- `AGENT_MODES` constant, `compactAgentModeBar`, `TUI_AGENT_MODE_COMPACT_BELOW`, `fancyHeader` state.
 
 ## [0.12.1] - 2026-04-29
 
