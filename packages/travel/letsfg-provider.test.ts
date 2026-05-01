@@ -48,6 +48,30 @@ describe("LetsFGFlightProvider", () => {
 		expect(calls[0].headers.get("x-api-key")).toBe("trav_test");
 	});
 
+	it("falls back to the live OpenAPI location path when resolve-location is unavailable", async () => {
+		const calls: string[] = [];
+		const provider = new LetsFGFlightProvider({
+			apiKey: "trav_test",
+			baseUrl: "https://api.test",
+			fetcher: async (input) => {
+				const request = input instanceof Request ? input : new Request(input);
+				calls.push(request.url);
+				if (request.url.includes("resolve-location")) {
+					return jsonResponse({ error: "not found" }, { status: 404 });
+				}
+				return jsonResponse([{ iata_code: "LHR", name: "Heathrow", type: "airport" }]);
+			},
+		});
+
+		const result = await provider.resolveLocation({ query: "London" });
+
+		expect(calls).toEqual([
+			"https://api.test/api/v1/flights/resolve-location?query=London",
+			"https://api.test/api/v1/flights/locations/London",
+		]);
+		expect(result.results[0]).toMatchObject({ iataCode: "LHR", name: "Heathrow" });
+	});
+
 	it("searches flights and returns normalized offers without booking passenger ids", async () => {
 		let requestBody: unknown;
 		const provider = new LetsFGFlightProvider({
