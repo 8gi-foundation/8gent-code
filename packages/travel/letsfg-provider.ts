@@ -65,7 +65,10 @@ interface LetsFGSearchResponse {
 }
 
 export class LetsFGProviderError extends Error {
-	constructor(message: string) {
+	constructor(
+		message: string,
+		readonly status?: number,
+	) {
 		super(message);
 		this.name = "LetsFGProviderError";
 	}
@@ -89,9 +92,7 @@ export class LetsFGFlightProvider implements FlightProvider {
 			throw new LetsFGProviderError("Location query is required.");
 		}
 
-		const locations = await this.request<LetsFGLocation[]>(
-			`/api/v1/flights/resolve-location?query=${encodeURIComponent(query)}`,
-		);
+		const locations = await this.resolveLocations(query);
 
 		return {
 			provider: "letsfg",
@@ -153,6 +154,7 @@ export class LetsFGFlightProvider implements FlightProvider {
 		if (!response.ok) {
 			throw new LetsFGProviderError(
 				`LetsFG API request failed (${response.status}): ${await safeText(response)}`,
+				response.status,
 			);
 		}
 
@@ -164,6 +166,21 @@ export class LetsFGFlightProvider implements FlightProvider {
 			throw new LetsFGProviderError(
 				"LETSFG_API_KEY is required for the LetsFG production API. Store it in the runtime environment, not in chat or source control.",
 			);
+		}
+	}
+
+	private async resolveLocations(query: string): Promise<LetsFGLocation[]> {
+		try {
+			return await this.request<LetsFGLocation[]>(
+				`/api/v1/flights/resolve-location?query=${encodeURIComponent(query)}`,
+			);
+		} catch (error) {
+			if (error instanceof LetsFGProviderError && (error.status === 404 || error.status === 405)) {
+				return this.request<LetsFGLocation[]>(
+					`/api/v1/flights/locations/${encodeURIComponent(query)}`,
+				);
+			}
+			throw error;
 		}
 	}
 }
