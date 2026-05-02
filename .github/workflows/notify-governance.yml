@@ -11,8 +11,10 @@ jobs:
       - name: Dispatch to 8gi-governance
         env:
           GH_TOKEN: ${{ secrets.GH_SYNC_PAT }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
         run: |
           gh api repos/8gi-foundation/8gi-governance/dispatches \
             --method POST \
             --field event_type="repo-push" \
-            --field client_payload='{"repo":"${{ github.repository }}","ref":"${{ github.ref }}"}'
+            --field client_payload="{\"repo\":\"$REPO\",\"ref\":\"$REF\"}"
