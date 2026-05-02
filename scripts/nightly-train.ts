@@ -649,8 +649,8 @@ async function postToBoardroom(results: BenchmarkResult[], iteration: number): P
 // Phase 2c: Send Telegram update
 // ============================================
 
-const TELEGRAM_BOT_TOKEN = "8064662731:AAEJ8bDvY9zpxP9ieBU2tBfcpCX81YkDyIs";
-const TELEGRAM_CHAT_ID = "5486040131";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN_AIJAMES || "";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID_AIJAMES || "5486040131";
 
 async function sendTelegramUpdate(
 	results: BenchmarkResult[],
