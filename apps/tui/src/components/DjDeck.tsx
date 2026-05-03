@@ -133,7 +133,7 @@ function ShortcutHintRow({ playing }: { playing: boolean }) {
 			<Text color={t.muted}>^B prev</Text>
 			<Text color={t.muted}>^P {playing ? "pause" : "play"}</Text>
 			<Text color={t.muted}>^N next</Text>
-			<Text color={t.muted}>^↑↓ vol</Text>
+			<Text color={t.muted}>^⇧↑↓ vol</Text>
 			<Text color={t.muted}>^M mute</Text>
 		</Box>
 	);
@@ -146,11 +146,13 @@ function sanitizeTrack(value: string): string {
 export function DjDeck() {
 	const [status, setStatus] = useState<DjStatus>(EMPTY);
 	const [open, setOpen] = useState(true);
-	// Local position that ticks every second, synced from poll
 	const [localPos, setLocalPos] = useState<number | null>(null);
-	// Waveform animation tick
 	const [tick, setTick] = useState(0);
-	const lastVolumeRef = useRef<number>(80);
+	// displayVolume: updates immediately for visual feedback; actual dj.volume() is debounced 1s
+	const [displayVolume, setDisplayVolume] = useState<number | null>(null);
+	const lastVolumeRef = useRef<number>(50);
+	const pendingVolumeRef = useRef<number | null>(null);
+	const volumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const djRef = useRef<{ instance: any; ready: boolean }>({ instance: null, ready: false });
 
 	useEffect(() => {
@@ -165,6 +167,9 @@ export function DjDeck() {
 				const mod = await import("../../../../packages/music/dj.js");
 				if (cancelled) return;
 				djRef.current = { instance: new mod.DJ(), ready: true };
+				// Start at 50% volume on open
+				try { await djRef.current.instance.volume(50); } catch {}
+				setDisplayVolume(50);
 			} catch { /* DJ unavailable */ }
 		})();
 		return () => { cancelled = true; };
@@ -178,9 +183,12 @@ export function DjDeck() {
 			try {
 				const s: DjStatus = await dj.status();
 				setStatus(s);
-				// Sync local position to real position on each poll
 				if (s.position != null) setLocalPos(s.position);
-				if (s.volume != null && s.volume > 0) lastVolumeRef.current = s.volume;
+				if (s.volume != null && s.volume > 0) {
+					lastVolumeRef.current = s.volume;
+					// Only sync display volume if not currently scrubbing
+					if (pendingVolumeRef.current == null) setDisplayVolume(s.volume);
+				}
 			} catch { /* keep last known status */ }
 		}, 1000);
 		return () => clearInterval(id);
@@ -203,6 +211,26 @@ export function DjDeck() {
 		return () => clearInterval(id);
 	}, [playing]);
 
+	// Adjust display volume immediately; debounce actual dj.volume() by 1s
+	const scrubVolume = (delta: number) => {
+		const base = displayVolume ?? status.volume ?? 50;
+		const next = Math.max(0, Math.min(150, base + delta));
+		setDisplayVolume(next);
+		pendingVolumeRef.current = next;
+		if (lastVolumeRef.current > 0) lastVolumeRef.current = next;
+		if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
+		volumeTimerRef.current = setTimeout(async () => {
+			const dj = djRef.current.instance;
+			const vol = pendingVolumeRef.current;
+			if (!dj || vol == null) return;
+			try {
+				await dj.volume(vol);
+				setStatus(s => ({ ...s, volume: vol }));
+			} catch {}
+			pendingVolumeRef.current = null;
+		}, 1000);
+	};
+
 	useInput(
 		async (input, key) => {
 			if (!key.ctrl) return;
@@ -219,21 +247,22 @@ export function DjDeck() {
 					const prev = hist[hist.length - 2];
 					if (prev?.url) await dj.play(prev.url);
 				} else if (k === "m") {
-					const cur = status.volume ?? 80;
+					const cur = displayVolume ?? status.volume ?? 50;
 					if (cur > 0) {
 						lastVolumeRef.current = cur;
+						setDisplayVolume(0);
 						await dj.volume(0);
 					} else {
-						await dj.volume(lastVolumeRef.current || 80);
+						const restore = lastVolumeRef.current || 50;
+						setDisplayVolume(restore);
+						await dj.volume(restore);
 					}
-				} else if (key.upArrow) {
-					const next = Math.min(150, (status.volume ?? 80) + 10);
-					await dj.volume(next);
-					setStatus(s => ({ ...s, volume: next }));
-				} else if (key.downArrow) {
-					const next = Math.max(0, (status.volume ?? 80) - 10);
-					await dj.volume(next);
-					setStatus(s => ({ ...s, volume: next }));
+				} else if (key.shift && key.upArrow) {
+					// Shift+Ctrl+Up: volume +1% with 1s debounced send
+					scrubVolume(1);
+				} else if (key.shift && key.downArrow) {
+					// Shift+Ctrl+Down: volume -1% with 1s debounced send
+					scrubVolume(-1);
 				}
 			} catch { /* never crash the TUI */ }
 		},
@@ -243,8 +272,9 @@ export function DjDeck() {
 	if (!status.playing && !status.title) return null;
 	if (!open) return <CollapsedDjDeck />;
 
-	const muted = status.volume != null && status.volume === 0;
-	const volume = status.volume == null ? null : Math.round(status.volume);
+	const effectiveVolume = displayVolume ?? status.volume;
+	const muted = effectiveVolume != null && effectiveVolume === 0;
+	const volume = effectiveVolume == null ? null : Math.round(effectiveVolume);
 	const track = truncateEnd(sanitizeTrack(status.title || "(loading)"), 82);
 
 	return (
