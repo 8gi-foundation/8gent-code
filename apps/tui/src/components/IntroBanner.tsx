@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useState } from "react";
 import { loadSettings } from "../../../../packages/settings/index.js";
+import { t } from "../theme.js";
 
 /**
  * Resolve the bundled launch sound. Looks (in order) at:
@@ -358,36 +359,36 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 	return (
 		<Box flexDirection="column" alignItems="center" paddingY={1}>
 			{BANNER_LINES.map((line, i) => (
-				<Text key={i} color="yellow" bold dimColor={wordmarkDim}>
+				<Text key={i} color={t.orange} bold dimColor={wordmarkDim}>
 					{line}
 				</Text>
 			))}
 			<Box marginTop={1} minHeight={1}>
-				<Text color="cyan" dimColor={flourishDim}>
+				<Text color={t.textPrimary} dimColor={flourishDim}>
 					{showFlourish ? FLOURISH : ""}
 				</Text>
 			</Box>
 			<Box marginTop={1} minHeight={1}>
-				<Text color="cyan" bold dimColor={inFadeOut}>
+				<Text color={t.textPrimary} bold dimColor={inFadeOut}>
 					{titleText}
 					{titleTyping ? "▌" : ""}
 				</Text>
 			</Box>
 			<Box marginTop={0} minHeight={1}>
-				<Text dimColor={inFadeOut} color="yellow">
+				<Text color={t.textSecondary} dimColor={inFadeOut}>
 					{subheadText}
 					{subheadTyping ? "▌" : ""}
 				</Text>
 			</Box>
 			<Box marginTop={0} minHeight={1}>
-				<Text dimColor>
+				<Text color={t.textTertiary} dimColor>
 					{bodyText}
 					{bodyTyping ? "▌" : ""}
 				</Text>
 			</Box>
 			{!inFadeOut && elapsed > T_BODY + 400 && (
 				<Box marginTop={1}>
-					<Text dimColor>esc / q to skip</Text>
+					<Text color={t.textDim}>esc / q to skip</Text>
 				</Box>
 			)}
 		</Box>

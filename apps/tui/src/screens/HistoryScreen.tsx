@@ -16,7 +16,7 @@ import {
 	Stack,
 } from "../components/primitives/index.js";
 
-interface ConversationEntry {
+export interface ConversationEntry {
 	_id: string;
 	sessionId: string;
 	title: string;

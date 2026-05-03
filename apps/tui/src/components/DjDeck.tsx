@@ -1,26 +1,13 @@
 /**
- * DjDeck — premium terminal audio deck. Flat 3-row LCD: track + elapsed,
- * artist + duration, waveform + vol. Mini reels flank the LCD; transport
- * hints sit underneath. Fixed height keeps the bottom stack stable.
- *
- * Hidden until something has been loaded. /dj close minimises to a ♪
- * chip via the exported `setDjDeckOpen()` handle. Keyboard transport is
- * wired through Ink's `useInput` — Ctrl-modifier only because terminals
- * cannot reliably distinguish Ctrl+Shift from Ctrl. The hint labels keep
- * the `^⇧` prefix purely as visual shorthand.
+ * DjDeck — premium terminal audio deck.
+ * - Timer ticks locally between polls so seconds advance smoothly
+ * - Animated pseudo-waveform centered on the artist row when playing
+ * - Volume slider updates in real time via Ctrl+Up/Down
  */
 
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useRef, useState } from "react";
-import { theme } from "../theme.js";
-
-const ui = {
-	cream: theme.color.cream,
-	muted: theme.color.muted,
-	dim: theme.color.dim,
-	orange: theme.color.orange,
-	orangeDim: theme.color.orangeDim,
-} as const;
+import { t } from "../theme.js";
 
 interface DjStatus {
 	playing: boolean;
@@ -35,15 +22,8 @@ interface DjStatus {
 }
 
 const EMPTY: DjStatus = {
-	playing: false,
-	paused: false,
-	looping: false,
-	title: "",
-	url: "",
-	position: null,
-	duration: null,
-	volume: null,
-	queueSize: 0,
+	playing: false, paused: false, looping: false,
+	title: "", url: "", position: null, duration: null, volume: null, queueSize: 0,
 };
 
 let setOpenExternal: ((v: boolean) => void) | null = null;
@@ -63,34 +43,31 @@ function truncateEnd(value: string, max: number): string {
 	return `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
-function ShortcutHintRow({ playing }: { playing: boolean }) {
-	return (
-		<Box justifyContent="space-between" width="100%" overflow="hidden">
-			<Text color={ui.muted} wrap="truncate-end">
-				^B prev
-			</Text>
-			<Text color={ui.muted} wrap="truncate-end">
-				^P {playing ? "pause" : "play"}
-			</Text>
-			<Text color={ui.muted} wrap="truncate-end">
-				^N next
-			</Text>
-			<Text color={ui.muted} wrap="truncate-end">
-				^↑↓ vol
-			</Text>
-			<Text color={ui.muted} wrap="truncate-end">
-				^M mute
-			</Text>
-		</Box>
-	);
+// Waveform chars — deterministic pseudo-random animation driven by tick
+const WAVE = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+const WAVE_IDLE = "▁▁▁▁▁▁▁▁▁▁▁▁";
+
+function waveFrame(tick: number, bars = 12): string {
+	return Array.from({ length: bars }, (_, i) => {
+		const idx = Math.abs((tick * 3 + i * 7 + i * i * 2) % WAVE.length);
+		return WAVE[idx];
+	}).join("");
 }
 
-/** Strip emoji + collapse whitespace so terminal width math stays correct. */
-function sanitizeTrack(value: string): string {
-	return value
-		.replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
-		.replace(/\s+/g, " ")
-		.trim();
+function VolumeSlider({ volume, muted, width }: { volume: number | null; muted: boolean; width: number }) {
+	if (muted) return <Text color={t.textDim}>muted</Text>;
+	if (volume == null) return <Text color={t.textDim}>vol --</Text>;
+	const pct = Math.min(150, Math.max(0, volume));
+	// Slider tracks 0-100 visually; over 100% shows fully filled + label
+	const displayPct = Math.min(100, pct);
+	const filled = Math.round((displayPct / 100) * width);
+	const bar = "█".repeat(filled) + "░".repeat(Math.max(0, width - filled));
+	return (
+		<Box>
+			<Text color={t.orange}>{bar}</Text>
+			<Text color={t.orangeDim}> {pct}%</Text>
+		</Box>
+	);
 }
 
 function StereoDisplay(props: {
@@ -101,39 +78,40 @@ function StereoDisplay(props: {
 	duration: string;
 	volume: number | null;
 	muted: boolean;
+	tick: number;
+	termWidth: number;
 }) {
+	const wave = props.playing ? waveFrame(props.tick) : WAVE_IDLE;
+	// Vol slider gets ~40% of available width minus label/padding
+	const sliderWidth = Math.max(8, Math.floor(props.termWidth * 0.3));
+
 	return (
 		<Box
 			width="100%"
 			borderStyle="single"
-			borderColor={ui.orangeDim}
+			borderColor={t.orangeDim}
 			paddingX={1}
 			flexDirection="column"
 		>
+			{/* Row 1: track name + clock icon */}
 			<Box justifyContent="space-between" width="100%">
 				<Box minWidth={0} flexGrow={1}>
-					<Text color={ui.orange}>{props.playing ? "◴ " : "○ "}</Text>
-					<Text color={ui.cream} wrap="truncate-end">
-						{props.track}
-					</Text>
+					<Text color={t.orange}>{props.playing ? "◴ " : "○ "}</Text>
+					<Text color={t.textPrimary} wrap="truncate-end">{props.track}</Text>
 				</Box>
-				<Text color={ui.orange}>{props.playing ? " ◷" : " ○"}</Text>
+				<Text color={t.orange}>{props.playing ? " ◷" : " ○"}</Text>
 			</Box>
 
+			{/* Row 2: artist | waveform (centered) | elapsed / duration */}
 			<Box justifyContent="space-between" width="100%">
-				<Text color={ui.orange} wrap="truncate-end">
-					{props.artist}
-				</Text>
-				<Text color={ui.orangeDim}>
-					{props.elapsed} / {props.duration}
-				</Text>
+				<Text color={t.orange}>{props.artist}</Text>
+				<Text color={props.playing ? t.orangeAlt : t.textDim}>{wave}</Text>
+				<Text color={t.orangeDim}>{props.elapsed} / {props.duration}</Text>
 			</Box>
 
-			<Box justifyContent="space-between" width="100%">
-				<Text color={ui.orangeDim}>▂▃▅▆▅▃▂ ━━━━━░░</Text>
-				<Text color={props.muted ? ui.dim : ui.orangeDim}>
-					{props.muted ? "muted" : props.volume == null ? "vol --" : `vol ${props.volume}%`}
-				</Text>
+			{/* Row 3: volume slider */}
+			<Box width="100%">
+				<VolumeSlider volume={props.volume} muted={props.muted} width={sliderWidth} />
 			</Box>
 		</Box>
 	);
@@ -142,24 +120,42 @@ function StereoDisplay(props: {
 function CollapsedDjDeck() {
 	return (
 		<Box justifyContent="flex-end" width="100%" flexShrink={0}>
-			<Box borderStyle="round" borderColor={ui.orangeDim} paddingX={1}>
-				<Text color={ui.orange}>♪</Text>
+			<Box borderStyle="round" borderColor={t.orangeDim} paddingX={1}>
+				<Text color={t.orange}>♪</Text>
 			</Box>
 		</Box>
 	);
 }
 
+function ShortcutHintRow({ playing }: { playing: boolean }) {
+	return (
+		<Box justifyContent="space-between" width="100%" overflow="hidden">
+			<Text color={t.muted}>^B prev</Text>
+			<Text color={t.muted}>^P {playing ? "pause" : "play"}</Text>
+			<Text color={t.muted}>^N next</Text>
+			<Text color={t.muted}>^↑↓ vol</Text>
+			<Text color={t.muted}>^M mute</Text>
+		</Box>
+	);
+}
+
+function sanitizeTrack(value: string): string {
+	return value.replace(/[\u{1F300}-\u{1FAFF}]/gu, "").replace(/\s+/g, " ").trim();
+}
+
 export function DjDeck() {
 	const [status, setStatus] = useState<DjStatus>(EMPTY);
 	const [open, setOpen] = useState(true);
+	// Local position that ticks every second, synced from poll
+	const [localPos, setLocalPos] = useState<number | null>(null);
+	// Waveform animation tick
+	const [tick, setTick] = useState(0);
 	const lastVolumeRef = useRef<number>(80);
 	const djRef = useRef<{ instance: any; ready: boolean }>({ instance: null, ready: false });
 
 	useEffect(() => {
 		setOpenExternal = setOpen;
-		return () => {
-			setOpenExternal = null;
-		};
+		return () => { setOpenExternal = null; };
 	}, []);
 
 	useEffect(() => {
@@ -169,15 +165,12 @@ export function DjDeck() {
 				const mod = await import("../../../../packages/music/dj.js");
 				if (cancelled) return;
 				djRef.current = { instance: new mod.DJ(), ready: true };
-			} catch {
-				/* DJ unavailable; deck stays hidden */
-			}
+			} catch { /* DJ unavailable */ }
 		})();
-		return () => {
-			cancelled = true;
-		};
+		return () => { cancelled = true; };
 	}, []);
 
+	// Poll real status every second
 	useEffect(() => {
 		const id = setInterval(async () => {
 			const dj = djRef.current.instance;
@@ -185,19 +178,33 @@ export function DjDeck() {
 			try {
 				const s: DjStatus = await dj.status();
 				setStatus(s);
+				// Sync local position to real position on each poll
+				if (s.position != null) setLocalPos(s.position);
 				if (s.volume != null && s.volume > 0) lastVolumeRef.current = s.volume;
-			} catch {
-				/* keep last known status */
-			}
+			} catch { /* keep last known status */ }
 		}, 1000);
 		return () => clearInterval(id);
 	}, []);
 
+	// Local 1-second ticker so time advances between polls
+	const playing = status.playing && !status.paused;
+	useEffect(() => {
+		if (!playing) return;
+		const id = setInterval(() => {
+			setLocalPos(prev => (prev == null ? null : prev + 1));
+		}, 1000);
+		return () => clearInterval(id);
+	}, [playing]);
+
+	// Waveform animation tick (250ms for smooth animation)
+	useEffect(() => {
+		if (!playing) return;
+		const id = setInterval(() => setTick(v => v + 1), 250);
+		return () => clearInterval(id);
+	}, [playing]);
+
 	useInput(
 		async (input, key) => {
-			// Ctrl + letter, no shift — matches the visible hints (^P, ^B, ^N, ^M).
-			// Gate `isActive` below ensures the chat input keeps Ctrl+P/B/N when
-			// no track is loaded; once a track is playing the deck owns these.
 			if (!key.ctrl) return;
 			const dj = djRef.current.instance;
 			if (!dj) return;
@@ -220,22 +227,22 @@ export function DjDeck() {
 						await dj.volume(lastVolumeRef.current || 80);
 					}
 				} else if (key.upArrow) {
-					await dj.volume(Math.min(150, (status.volume ?? 80) + 10));
+					const next = Math.min(150, (status.volume ?? 80) + 10);
+					await dj.volume(next);
+					setStatus(s => ({ ...s, volume: next }));
 				} else if (key.downArrow) {
-					await dj.volume(Math.max(0, (status.volume ?? 80) - 10));
+					const next = Math.max(0, (status.volume ?? 80) - 10);
+					await dj.volume(next);
+					setStatus(s => ({ ...s, volume: next }));
 				}
-			} catch {
-				/* swallow — HUD never crashes the TUI */
-			}
+			} catch { /* never crash the TUI */ }
 		},
 		{ isActive: status.playing || status.title.length > 0 },
 	);
 
 	if (!status.playing && !status.title) return null;
-
 	if (!open) return <CollapsedDjDeck />;
 
-	const playing = status.playing && !status.paused;
 	const muted = status.volume != null && status.volume === 0;
 	const volume = status.volume == null ? null : Math.round(status.volume);
 	const track = truncateEnd(sanitizeTrack(status.title || "(loading)"), 82);
@@ -244,14 +251,14 @@ export function DjDeck() {
 		<Box
 			width="100%"
 			borderStyle="round"
-			borderColor={ui.orangeDim}
+			borderColor={t.orangeDim}
 			paddingX={1}
 			flexDirection="column"
 			flexShrink={0}
 		>
 			<Box justifyContent="space-between" width="100%">
-				<Text color={ui.orange}>● 8GENT FM</Text>
-				<Text color={ui.muted}>/dj close</Text>
+				<Text color={t.orange}>● 8GENT FM</Text>
+				<Text color={t.muted}>/dj close</Text>
 			</Box>
 
 			<Box marginTop={1}>
@@ -259,10 +266,12 @@ export function DjDeck() {
 					playing={playing}
 					track={track}
 					artist="Instrumental"
-					elapsed={fmt(status.position)}
+					elapsed={fmt(localPos)}
 					duration={fmt(status.duration)}
 					volume={volume}
 					muted={muted}
+					tick={tick}
+					termWidth={80}
 				/>
 			</Box>
 
