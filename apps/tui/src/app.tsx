@@ -157,6 +157,9 @@ import {
 	getVoiceForRole,
 } from "../../../packages/settings/index.js";
 import { NarratorView } from "./screens/index.js";
+import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
+import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import { MessageViewer } from "./components/MessageViewer.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -493,7 +496,8 @@ type ViewMode =
 	| "animations"
 	| "design"
 	| "history"
-	| "music";
+	| "music"
+	| "message-viewer";
 
 // Inline types for planning (to avoid import issues)
 interface ProactiveStep {
@@ -784,6 +788,7 @@ export function App({
 	// Named session management
 	const sessionMgr = React.useMemo(() => new SessionManager(), []);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+	const [historyConversations, setHistoryConversations] = useState<ConversationEntry[]>([]);
 
 	// Initialize session logger on mount
 	useEffect(() => {
@@ -865,6 +870,11 @@ export function App({
 
 	// View state — now driven by workspace tabs
 	const [viewMode, setViewMode] = useState<ViewMode>("chat");
+
+	// Bubble navigation state (Ctrl+L enters, Esc/Ctrl+L exits)
+	const [isBubbleNavMode, setIsBubbleNavMode] = useState(false);
+	const [selectedBubbleIndex, setSelectedBubbleIndex] = useState(0);
+	const [messageViewerIndex, setMessageViewerIndex] = useState(0);
 
 	// Workspace tabs
 	const workspaceTabs = useWorkspaceTabs();
@@ -1030,7 +1040,7 @@ export function App({
 					provider: currentProvider,
 				});
 			}
-		}, 30_000);
+		}, 5_000);
 		return () => clearInterval(timer);
 	}, [activeSessionId, messages, currentModel, currentProvider]);
 
@@ -1227,6 +1237,40 @@ export function App({
 	// Background process panel
 	const processPanel = useProcessPanel();
 
+	// Auto-open the sidebar when the agent starts running so the tool log is visible
+	const autoOpenedSidebarRef = useRef(false);
+	useEffect(() => {
+		if (isProcessing && !processPanel.sidebarOpen && !autoOpenedSidebarRef.current) {
+			processPanel.toggleSidebar();
+			autoOpenedSidebarRef.current = true;
+		}
+		if (!isProcessing) {
+			autoOpenedSidebarRef.current = false;
+		}
+	}, [isProcessing, processPanel.sidebarOpen]);
+
+	// Completion hook — fires when agent finishes (isProcessing true → false).
+	// Plays a chime + speaks a short summary in the configured TTS voice.
+	const wasProcessingRef = useRef(false);
+	useEffect(() => {
+		const justFinished = wasProcessingRef.current && !isProcessing;
+		wasProcessingRef.current = isProcessing;
+		if (!justFinished) return;
+		if (process.platform !== "darwin") return;
+
+		// Chime: play macOS Glass sound as a non-intrusive "done" ping
+		if (soundEnabled) {
+			try {
+				const { spawn: sp } = require("node:child_process");
+				sp("afplay", ["/System/Library/Sounds/Glass.aiff"], {
+					stdio: "ignore",
+					detached: true,
+				}).unref();
+			} catch {}
+		}
+
+	}, [isProcessing, soundEnabled]);
+
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
@@ -1330,6 +1374,62 @@ export function App({
 
 	// Handle keyboard shortcuts
 	useInput((input, key) => {
+		// Ctrl+L: toggle bubble navigation mode
+		if (key.ctrl && input === "l") {
+			setIsBubbleNavMode((prev) => {
+				if (!prev) {
+					const chatMsgs = messages.filter((m) => m.role !== "tool");
+					setSelectedBubbleIndex(Math.max(0, chatMsgs.length - 1));
+				}
+				return !prev;
+			});
+			return;
+		}
+
+		// Ctrl+N: toggle Notes tab
+		if (key.ctrl && input === "n") {
+			const notesTab = workspaceTabs.tabs.find((t) => t.type === "notes");
+			if (notesTab && workspaceTabs.activeTab?.id === notesTab.id) {
+				// Already on notes — go back to most recent chat tab
+				const prevChat = [...workspaceTabs.tabs].reverse().find((t) => t.type === "chat");
+				if (prevChat) workspaceTabs.switchTab(prevChat.id);
+			} else if (notesTab) {
+				workspaceTabs.switchTab(notesTab.id);
+				setViewMode("chat");
+			} else {
+				workspaceTabs.addTab("notes");
+				setViewMode("chat");
+			}
+			return;
+		}
+
+		// Bubble navigation mode: intercept Up/Down/Enter/Esc before anything else
+		if (isBubbleNavMode && viewMode === "chat") {
+			const chatMsgs = messages.filter((m) => m.role !== "tool");
+			if (key.upArrow) {
+				setSelectedBubbleIndex((prev) => Math.max(0, prev - 1));
+				return;
+			}
+			if (key.downArrow) {
+				setSelectedBubbleIndex((prev) => Math.min(chatMsgs.length - 1, prev + 1));
+				return;
+			}
+			if (key.return) {
+				setMessageViewerIndex(selectedBubbleIndex);
+				setViewMode("message-viewer");
+				setIsBubbleNavMode(false);
+				return;
+			}
+			if (key.escape) {
+				setIsBubbleNavMode(false);
+				return;
+			}
+			// Any printable char exits bubble nav so the user can type
+			if (input && !key.ctrl && !key.meta) {
+				setIsBubbleNavMode(false);
+			}
+		}
+
 		if (key.ctrl && input === "c") {
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
@@ -2066,6 +2166,7 @@ export function App({
 							"  Shift+Tab - Cycle through tabs\n" +
 							"  Ctrl+A - Toggle animations\n" +
 							"  Ctrl+S - Toggle sound\n" +
+							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
 							"  Ctrl+H - Toggle fancy header",
 					);
 					break;
@@ -2455,86 +2556,77 @@ export function App({
 					break;
 				}
 
-				case "history":
-					// Show history screen
-					if (!agent) {
-						addSystemMessage("No agent active - start a session first.");
+				case "history": {
+					// Show local session history screen
+					const localSessions = sessionMgr.list(50);
+					if (localSessions.length === 0) {
+						addSystemMessage("No saved sessions found. Start chatting — sessions save automatically.");
 						break;
 					}
-					agent
-						.getSessionSync()
-						.getRecentConversations(20)
-						.then((convos) => {
-							if (convos.length === 0) {
-								addSystemMessage("No previous sessions found.");
-							} else {
-								addSystemMessage(
-									`Found ${convos.length} sessions. Use /resume to pick one or /continue to restore the latest.`,
-								);
-							}
-						})
-						.catch(() => {
-							addSystemMessage("Could not load session history.");
-						});
+					const convEntries: ConversationEntry[] = localSessions.map((s) => ({
+						_id: s.id,
+						sessionId: s.id,
+						title: s.name || `Session ${s.createdAt.slice(0, 10)}`,
+						messageCount: s.messageCount,
+						model: s.model,
+						workingDirectory: s.cwd,
+						gitBranch: s.branch,
+						startedAt: new Date(s.createdAt).getTime(),
+						lastActiveAt: new Date(s.lastActiveAt).getTime(),
+					}));
+					setHistoryConversations(convEntries);
+					setViewMode("history");
 					break;
+				}
 
-				case "continue":
-					// Continue most recent session
-					if (!agent) {
-						addSystemMessage("No agent active — start a session first.");
+				case "continue": {
+					// Continue most recent local session
+					const lastSession = sessionMgr.getLast();
+					if (!lastSession) {
+						addSystemMessage("No saved sessions found. Start chatting to create history.");
 						break;
 					}
-					agent
-						.getSessionSync()
-						.getRecentConversations(1)
-						.then((convos) => {
-							if (convos.length === 0 || !convos[0].checkpointData) {
-								addSystemMessage("No session to continue. Start chatting to create history.");
-							} else {
-								try {
-									const messages = JSON.parse(convos[0].checkpointData);
-									agent.restoreFromCheckpoint(messages);
-									addSystemMessage(
-										`Restored session: "${convos[0].title}"\n  ${convos[0].messageCount} messages - ${convos[0].model}\n  Last active: ${new Date(convos[0].lastActiveAt).toLocaleString()}\n\nContext restored. Continue where you left off.`,
-									);
-								} catch {
-									addSystemMessage("Failed to parse checkpoint data.");
-								}
-							}
-						})
-						.catch(() => {
-							addSystemMessage("Could not load session history.");
-						});
+					const resumedLast = sessionMgr.resume(lastSession.id);
+					if (!resumedLast || resumedLast.messages.length === 0) {
+						addSystemMessage(`Last session "${lastSession.name || lastSession.id}" has no messages to restore.`);
+						break;
+					}
+					setActiveSessionId(resumedLast.id);
+					const restoredMsgs = resumedLast.messages.map((m, i) => ({
+						id: `restored-${i}`,
+						role: m.role as "user" | "assistant" | "system",
+						content: m.content,
+						timestamp: new Date(),
+					}));
+					setMessages(restoredMsgs as Message[]);
+					addSystemMessage(
+						`Restored: "${resumedLast.name || resumedLast.id}"\n  ${resumedLast.messageCount} messages - ${resumedLast.model}\n  Last active: ${new Date(resumedLast.lastActiveAt).toLocaleString()}\n\nContext restored. Continue where you left off.`,
+					);
 					break;
+				}
 
-				case "resume":
-					// Show last 5 sessions to pick from
-					if (!agent) {
-						addSystemMessage("No agent active — start a session first.");
+				case "resume": {
+					// Show interactive session picker from local sessions
+					const resumeSessions = sessionMgr.list(50);
+					if (resumeSessions.length === 0) {
+						addSystemMessage("No saved sessions found. Start chatting — sessions save automatically.");
 						break;
 					}
-					agent
-						.getSessionSync()
-						.getRecentConversations(5)
-						.then((convos) => {
-							if (convos.length === 0) {
-								addSystemMessage("No previous sessions found.");
-							} else {
-								const lines = ["Recent sessions (reply with number to resume):\n"];
-								convos.forEach((c: any, i: number) => {
-									const ago = Math.floor((Date.now() - c.lastActiveAt) / 60000);
-									const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
-									lines.push(
-										`  ${i + 1}. ${c.title.slice(0, 50)} — ${c.model} - ${c.messageCount} msgs - ${timeStr}`,
-									);
-								});
-								addSystemMessage(lines.join("\n"));
-							}
-						})
-						.catch(() => {
-							addSystemMessage("Could not load session history.");
-						});
+					const resumeEntries: ConversationEntry[] = resumeSessions.map((s) => ({
+						_id: s.id,
+						sessionId: s.id,
+						title: s.name || `Session ${s.createdAt.slice(0, 10)}`,
+						messageCount: s.messageCount,
+						model: s.model,
+						workingDirectory: s.cwd,
+						gitBranch: s.branch,
+						startedAt: new Date(s.createdAt).getTime(),
+						lastActiveAt: new Date(s.lastActiveAt).getTime(),
+					}));
+					setHistoryConversations(resumeEntries);
+					setViewMode("history");
 					break;
+				}
 
 				case "compact":
 					// Summarize current conversation
@@ -4079,7 +4171,7 @@ export function App({
 		setProcessingStage("planning");
 		setStatus("thinking");
 		setEvidenceSummary(null);
-		clearActivity();
+		// clearActivity() removed — keep completed tools in the process log as history
 	}, []);
 
 	// Generate predictions based on input
@@ -4911,6 +5003,46 @@ export function App({
 					/>
 				);
 
+			case "message-viewer":
+				return (
+					<MessageViewer
+						messages={messages}
+						initialIndex={messageViewerIndex}
+						onClose={() => setViewMode("chat")}
+						contentWidth={chatContentWidth}
+						height={Math.max(10, viewport.height - 10)}
+					/>
+				);
+
+			case "history":
+				return (
+					<HistoryScreen
+						conversations={historyConversations}
+						onSelect={(conv) => {
+							const resumed = sessionMgr.resume(conv.sessionId);
+							if (resumed) {
+								setActiveSessionId(resumed.id);
+								if (resumed.messages.length > 0) {
+									const restoredHistory = resumed.messages.map((m, i) => ({
+										id: `restored-${i}`,
+										role: m.role as "user" | "assistant" | "system",
+										content: m.content,
+										timestamp: new Date(),
+									}));
+									setMessages(restoredHistory as Message[]);
+								}
+								addSystemMessage(
+									`Resumed: "${conv.title}"\n  ${conv.messageCount} messages - ${conv.model}\n  Last active: ${new Date(conv.lastActiveAt).toLocaleString()}`,
+								);
+							} else {
+								addSystemMessage(`Session "${conv.title}" could not be loaded.`);
+							}
+							setViewMode("chat");
+						}}
+						onBack={() => setViewMode("chat")}
+					/>
+				);
+
 			case "animations":
 				// Animation showcase/gallery
 				return (
@@ -5032,22 +5164,27 @@ export function App({
 				}
 				return (
 					<Box flexDirection="column" flexGrow={1} minHeight={0} overflow="hidden">
-						<MessageList
+						{/* Bubble strip — compact one-line-per-message view */}
+						<MessageBubbleStrip
 							messages={messages}
-							animateTyping={showAnimations}
-							showAnimations={showAnimations}
-							soundEnabled={soundEnabled}
+							isFocused={isBubbleNavMode}
+							selectedIndex={selectedBubbleIndex}
 							contentWidth={chatContentWidth}
-							maxVisible={Math.max(5, viewport.height - 10)}
+							maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
 						/>
+						{/* Thinking zone — strict 4-row compact box, full content width */}
 						{isProcessing && (
-							<ActivityMonitor
-								activeTool={activeTool}
-								stepCount={stepCount}
-								toolCount={toolCount}
-								processingStage={processingStage}
-								showAnimations={showAnimations}
-							/>
+							<Box flexShrink={0}>
+								<ActivityMonitor
+									activeTool={activeTool}
+									stepCount={stepCount}
+									toolCount={toolCount}
+									processingStage={processingStage}
+									showAnimations={showAnimations}
+									compact={true}
+									contentWidth={chatContentWidth}
+								/>
+							</Box>
 						)}
 					</Box>
 				);
@@ -5170,15 +5307,21 @@ export function App({
 
 				{/* Mini kanban removed — full board available via Ctrl+K */}
 
-				{/* Status verb - only shown while processing (idle hides to recover 2 rows) */}
+				{/* Ticker — single line showing current tool, max 7 rows total */}
 				{isProcessing && (
-					<Box paddingX={1} flexShrink={0} width={Math.max(20, viewport.width - 4)}>
-						<AnimatedStatusVerb
-							type={processingStage === "planning" ? "planning" : "executing"}
-							showIcon={true}
-							active={true}
-							maxWidth={Math.max(16, viewport.width - 10)}
-						/>
+					<Box
+						flexShrink={0}
+						flexDirection="column"
+						maxHeight={7}
+						overflow="hidden"
+						paddingX={1}
+					>
+						<Box>
+							<AppText color="cyan">{"◦ "}</AppText>
+							<MutedText>{activeTool || "thinking..."}</MutedText>
+							{stepCount > 0 && <MutedText>{`  step ${stepCount}`}</MutedText>}
+							{toolCount > 0 && <MutedText>{`  · ${toolCount} tool${toolCount !== 1 ? "s" : ""}`}</MutedText>}
+						</Box>
 					</Box>
 				)}
 
@@ -5215,8 +5358,9 @@ export function App({
 							onSubmit={handleSubmit}
 							isProcessing={isProcessing}
 							focused={
-								(viewMode === "chat" && activeTabType === "chat") ||
-								(viewMode === "onboarding" && !onboardingSelectChoices)
+								((viewMode === "chat" && activeTabType === "chat") ||
+									(viewMode === "onboarding" && !onboardingSelectChoices)) &&
+								!isBubbleNavMode
 							}
 							processingStage={processingStage}
 							showAnimations={showAnimations}
