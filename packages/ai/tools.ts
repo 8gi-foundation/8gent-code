@@ -1593,6 +1593,147 @@ const ghSyncFork = tool({
 });
 
 // ============================================
+// Video Analysis Tools
+// ============================================
+
+const watchVideo = tool({
+  description:
+    "Analyze a video from URL (YouTube, Vimeo, TikTok, etc.) or local path. " +
+    "Downloads with yt-dlp, extracts auto-scaled frames, pulls transcript from " +
+    "captions or Whisper fallback. Returns frame paths and timestamped transcript. " +
+    "Read each frame path to see the images.",
+  inputSchema: z.object({
+    source: z.string().describe("Video URL or local file path"),
+    maxFrames: z.number().optional().describe("Max frames (default: 80, hard max: 100)"),
+    resolution: z.number().optional().describe("Frame width px (default: 512, use 1024 for text)"),
+    fps: z.number().optional().describe("Override auto-fps (capped at 2)"),
+    start: z.string().optional().describe("Range start: SS, MM:SS, or HH:MM:SS"),
+    end: z.string().optional().describe("Range end: SS, MM:SS, or HH:MM:SS"),
+    noWhisper: z.boolean().optional().describe("Disable Whisper fallback"),
+    whisperBackend: z.enum(["groq", "openai"]).optional().describe("Force Whisper backend"),
+  }),
+  execute: async (opts) => {
+    try {
+      const { watch, formatReport } = await import("../video/watch");
+      const report = await watch(opts);
+      return formatReport(report);
+    } catch (err) {
+      return `Video analysis failed: ${err}`;
+    }
+  },
+});
+
+const videoMetadata = tool({
+  description: "Get video metadata: duration, resolution, codec. Fast probe, no download.",
+  inputSchema: z.object({
+    path: z.string().describe("Path to local video file"),
+  }),
+  execute: async ({ path: videoPath }) => {
+    try {
+      const { getMetadata, formatTime } = await import("../video/frames");
+      const meta = getMetadata(videoPath);
+      return JSON.stringify({
+        duration: meta.durationSeconds,
+        formatted: formatTime(meta.durationSeconds),
+        resolution: `${meta.width}x${meta.height}`,
+        codec: meta.codec,
+      });
+    } catch (err) {
+      return `Metadata probe failed: ${err}`;
+    }
+  },
+});
+
+const videoFrames = tool({
+  description: "Extract frames from a local video with adaptive fps budgeting",
+  inputSchema: z.object({
+    path: z.string().describe("Video file path"),
+    outDir: z.string().describe("Output directory for frames"),
+    maxFrames: z.number().optional().describe("Max frames (default: 80)"),
+    resolution: z.number().optional().describe("Frame width px (default: 512)"),
+    start: z.string().optional().describe("Start time"),
+    end: z.string().optional().describe("End time"),
+  }),
+  execute: async (opts) => {
+    try {
+      const { getMetadata, autoFps, autoFpsFocus, extractFrames, parseTime, formatTime, MAX_FPS } =
+        await import("../video/frames");
+      const meta = getMetadata(opts.path);
+      const startSec = parseTime(opts.start);
+      const endSec = parseTime(opts.end);
+      const focused = startSec != null || endSec != null;
+      const dur = (endSec ?? meta.durationSeconds) - (startSec ?? 0);
+      const budget = focused ? autoFpsFocus(dur, opts.maxFrames) : autoFps(dur, opts.maxFrames);
+      const frames = extractFrames(opts.path, opts.outDir, {
+        fps: budget.fps,
+        resolution: opts.resolution || 512,
+        maxFrames: opts.maxFrames || 80,
+        startSeconds: startSec,
+        endSeconds: endSec,
+      });
+      return JSON.stringify({
+        frameCount: frames.length,
+        fps: budget.fps.toFixed(3),
+        frames: frames.map(f => ({ path: f.path, t: formatTime(f.timestampSeconds) })),
+      });
+    } catch (err) {
+      return `Frame extraction failed: ${err}`;
+    }
+  },
+});
+
+const videoTranscribe = tool({
+  description: "Transcribe a video using native captions or Whisper API (Groq/OpenAI)",
+  inputSchema: z.object({
+    videoPath: z.string().describe("Path to video file"),
+    subtitlePath: z.string().optional().describe("Path to VTT subtitle file"),
+    noWhisper: z.boolean().optional().describe("Disable Whisper fallback"),
+    whisperBackend: z.enum(["groq", "openai"]).optional().describe("Force backend"),
+  }),
+  execute: async (opts) => {
+    try {
+      const { transcribe } = await import("../video/transcribe");
+      const os = await import("os");
+      const path = await import("path");
+      const fs = await import("fs");
+      const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-transcribe-"));
+      const result = await transcribe(opts.videoPath, opts.subtitlePath || null, workDir, {
+        noWhisper: opts.noWhisper,
+        whisperBackend: opts.whisperBackend,
+      });
+      return JSON.stringify({
+        source: result.source,
+        segments: result.segments.length,
+        transcript: result.text.slice(0, 5000),
+      });
+    } catch (err) {
+      return `Transcription failed: ${err}`;
+    }
+  },
+});
+
+const videoCheckDeps = tool({
+  description: "Check if video deps (yt-dlp, ffmpeg, ffprobe) are installed",
+  inputSchema: z.object({
+    install: z.boolean().optional().describe("Auto-install missing deps"),
+  }),
+  execute: async ({ install }) => {
+    try {
+      const { checkDeps, installDeps } = await import("../video/deps");
+      const status = checkDeps();
+      if (status.ready) return "All video dependencies installed.";
+      if (install) {
+        const result = installDeps();
+        return JSON.stringify({ installed: result.installed, failed: result.failed });
+      }
+      return `Missing: ${status.missing.join(", ")}. Use install:true to auto-install.`;
+    } catch (err) {
+      return `Dep check failed: ${err}`;
+    }
+  },
+});
+
+// ============================================
 // Composed ToolSet
 // ============================================
 
@@ -1680,6 +1821,13 @@ export const agentTools = {
   gh_repo_health: ghRepoHealth,
   gh_triage: ghTriage,
   gh_sync_fork: ghSyncFork,
+
+  // Video analysis
+  watch_video: watchVideo,
+  video_metadata: videoMetadata,
+  video_frames: videoFrames,
+  video_transcribe: videoTranscribe,
+  video_check_deps: videoCheckDeps,
 
   // Shell
   run_command: runCommand,
