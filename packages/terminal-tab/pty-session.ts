@@ -86,7 +86,7 @@ function spawnBridge(
 	// Bun-targeted build paths.
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const cp = require("node:child_process") as typeof import("node:child_process");
-	const proc = cp.spawn(cmd[0], cmd.slice(1), { stdio: ["pipe", "pipe", "pipe"], env });
+	const proc = cp.spawn(cmd[0], cmd.slice(1), { stdio: ["pipe", "pipe", "pipe"], env: env as NodeJS.ProcessEnv });
 	const stdoutStream = nodeReadableToWebStream(proc.stdout);
 	const stderrStream = nodeReadableToWebStream(proc.stderr);
 	const exited = new Promise<number>((resolve) => {

@@ -26,7 +26,7 @@ function truncateMiddle(value: string, max: number): string {
 }
 
 const ui = {
-	cardBorder: theme.color.cardBorder,
+	cardBorder: theme.color.border,
 	muted: theme.color.muted,
 	dim: theme.color.dim,
 	teal: theme.color.teal,
