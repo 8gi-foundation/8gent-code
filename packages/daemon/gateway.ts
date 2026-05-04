@@ -5,10 +5,15 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
+import { Database } from "bun:sqlite";
+import path from "node:path";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import { memoryHealth } from "../memory/health";
+import { MemoryStore } from "../memory/store";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
+import { getDataDir } from "./data-dir";
 import type {
 	DispatchHub,
 	DispatchLedger,
@@ -30,6 +35,31 @@ import {
 	handleDispatchMessage,
 	handleDispatchOpen,
 } from "./routes/dispatch";
+import { createTask, listTasks } from "./task-registry";
+
+// ── CORS helpers (module-level) ───────────────────────────────────────────────
+
+const CORS_HEADERS = {
+	"Access-Control-Allow-Origin": "*",
+	"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+	"Access-Control-Allow-Headers": "Content-Type, Authorization, x-tg-init-data",
+};
+
+function jsonCors(data: unknown, status = 200): Response {
+	return Response.json(data, { status, headers: CORS_HEADERS });
+}
+
+// Lazy read-only handle to the memory SQLite database.
+let _memDb: Database | null = null;
+function getMemDb(): Database {
+	if (!_memDb) {
+		_memDb = new Database(path.join(getDataDir(), "memory.db"), {
+			readonly: true,
+			create: false,
+		});
+	}
+	return _memDb;
+}
 
 export interface GatewayConfig {
 	port: number;
@@ -350,7 +380,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 	const server = Bun.serve({
 		port: config.port,
 		hostname,
-		fetch(req, server) {
+		async fetch(req, server) {
 			const url = new URL(req.url);
 
 			// Tag computer-route upgrades so the websocket open handler can branch.
@@ -412,6 +442,117 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			// Access audit log endpoint (DPIA G7). POST-only, metadata only.
 			if (url.pathname === "/audit/access" && req.method === "POST") {
 				return handleAuditAccess(req, config);
+			}
+
+			// ── Telegram Mini App REST routes ────────────────────────────────────
+
+			// CORS preflight
+			if (req.method === "OPTIONS") {
+				return new Response(null, { status: 204, headers: CORS_HEADERS });
+			}
+
+			// GET /api/status - active sessions, recent tasks, goals placeholder
+			if (url.pathname === "/api/status") {
+				return jsonCors({
+					tasks: listTasks(20),
+					goals: [],
+					sessions: config.pool.getActiveSessions(),
+				});
+			}
+
+			// GET /api/memory/health - composite health score for the memory store
+			if (url.pathname === "/api/memory/health") {
+				try {
+					return jsonCors(memoryHealth(getMemDb()));
+				} catch {
+					return jsonCors({ error: "memory db unavailable" }, 503);
+				}
+			}
+
+			// GET /api/memory/search?q= - FTS5 recall over the memory store
+			if (url.pathname === "/api/memory/search") {
+				const q = url.searchParams.get("q") || "";
+				try {
+					const store = new MemoryStore(path.join(getDataDir(), "memory.db"));
+					const results = await store.recall(q, { limit: 20 });
+					return jsonCors({ results });
+				} catch {
+					return jsonCors({ results: [] });
+				}
+			}
+
+			// POST /api/delegate - create a CEO task
+			if (url.pathname === "/api/delegate" && req.method === "POST") {
+				const body = (await req.json().catch(() => ({}))) as {
+					task?: string;
+					priority?: "p0" | "p1" | "p2";
+					repo?: string;
+				};
+				if (!body.task) return jsonCors({ error: "task required" }, 400);
+				const task = createTask(body.task, body.priority ?? "p1", body.repo);
+				return jsonCors(task, 201);
+			}
+
+			// POST /api/chat - SSE streaming chat via the agent pool
+			if (url.pathname === "/api/chat" && req.method === "POST") {
+				const body = (await req.json().catch(() => ({}))) as {
+					messages?: Array<{ role: string; content: string }>;
+				};
+				const messages = body.messages ?? [];
+				const lastUser = [...messages].reverse().find((m) => m.role === "user");
+				if (!lastUser) return jsonCors({ error: "no user message" }, 400);
+
+				const sessionId = `tg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+				const stream = new ReadableStream({
+					start(controller) {
+						const enc = new TextEncoder();
+
+						const streamSubId = bus.on("agent:stream", (payload) => {
+							if (payload.sessionId !== sessionId) return;
+							const chunk = payload.chunk ?? "";
+							if (chunk) controller.enqueue(enc.encode(`0:${JSON.stringify(chunk)}\n`));
+						});
+
+						const endSubId = bus.on("session:end", (payload) => {
+							if (payload.sessionId !== sessionId) return;
+							bus.off(streamSubId);
+							bus.off(endSubId);
+							try {
+								controller.close();
+							} catch {
+								// already closed
+							}
+							config.pool.destroySession(sessionId);
+						});
+
+						config.pool.createSession(sessionId, "telegram");
+						config.pool
+							.chat(sessionId, lastUser.content)
+							.then(() => {
+								bus.emit("session:end", { sessionId, reason: "turn-complete" });
+							})
+							.catch((err: unknown) => {
+								const msg = err instanceof Error ? err.message : String(err);
+								controller.enqueue(enc.encode(`0:${JSON.stringify("Error: " + msg)}\n`));
+								bus.off(streamSubId);
+								bus.off(endSubId);
+								try {
+									controller.close();
+								} catch {
+									// already closed
+								}
+							});
+					},
+				});
+
+				return new Response(stream, {
+					headers: {
+						...CORS_HEADERS,
+						"Content-Type": "text/event-stream",
+						"Cache-Control": "no-cache",
+					},
+				});
 			}
 
 			return new Response(`Eight Daemon - ws://localhost:${config.port}`, {
