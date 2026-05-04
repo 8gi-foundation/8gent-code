@@ -1,0 +1,9 @@
+{
+  "name": "@8gent/video",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "description": "Video analysis for 8gent Code — download, extract frames, transcribe, and analyze video content via yt-dlp + ffmpeg.",
+  "main": "index.ts",
+  "dependencies": {}
+}

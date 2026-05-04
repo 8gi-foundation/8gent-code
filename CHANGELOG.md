@@ -17,9 +17,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Knowledge graph** — SQLite entity/relationship store with BFS traversal, heuristic extraction from tool results, user preference detection, fire-and-forget ingestion
 - **Memory v2** — SQLite+FTS5+embeddings replacing JSONL, 5 memory types, hybrid search, knowledge graph tables, version history, v1 migration
 
-## [0.8.0] — 2026-03-19
+## [0.8.0] — 2026-05-04
 
 ### Added
+- **`@8gent/video` package** — Video analysis pipeline inspired by [bradautomates/claude-video](https://github.com/bradautomates/claude-video), adapted for TypeScript/Bun
+  - **Download** (`download.ts`) — yt-dlp wrapper for URL downloads (YouTube, Vimeo, TikTok, etc.) with native caption extraction; local file validation
+  - **Frame extraction** (`frames.ts`) — Adaptive fps budgeting by duration (dense for short, sparse for long, 100-frame cap, 2fps max); focused mode for time-range zoom
+  - **Transcription** (`transcribe.ts`) — VTT caption parser with rolling-duplicate dedup; Whisper API fallback via Groq (preferred) or OpenAI; audio extraction at mono 16kHz 64kbps
+  - **Watch pipeline** (`watch.ts`) — Full orchestration: download → extract → transcribe → structured report with frame paths and timestamped transcript
+  - **5 tools registered** — `watch_video` (full pipeline), `video_metadata` (quick probe), `video_frames` (extract only), `video_transcribe` (transcribe only), `video_check_deps` (verify/install deps)
+  - **Dependency management** (`deps.ts`) — Auto-detection and optional auto-install of yt-dlp, ffmpeg, ffprobe
 - **`@8gent/github` package** — Deep GitHub integration leveraging the full GitHub ecosystem via `gh` CLI
   - **GitHub Client** (`client.ts`) — Type-safe `gh` CLI wrapper with REST API, GraphQL, JSON parsing, singleton pattern
   - **Issues (8 tools)** — View, comment, close/reopen, assign, label, search, create with full options (milestones, projects)
