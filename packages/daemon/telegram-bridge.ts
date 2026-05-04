@@ -267,7 +267,88 @@ async function tgSendDocument(token: string, chatId: string, filePath: string, c
 	await fetch(`${TELEGRAM_API}${token}/sendDocument`, { method: "POST", body: form }).catch(() => {});
 }
 
-const APFEL_URL = process.env.APFEL_URL ?? "http://localhost:11435";
+// ── Model config: detected at startup, user-overridable via Mini App settings ──
+
+interface BridgeModelConfig {
+	chatModel: string;
+	routerModel: string;
+	taskModel: string;
+	apfelUrl: string;
+	ollamaUrl: string;
+	apfelAvailable: boolean;
+	ollamaModels: string[];
+}
+
+const CONFIG_PATH = `${process.env.HOME ?? ""}/.8gent/config.json`;
+const APFEL_URL_DEFAULT = process.env.APFEL_URL ?? "http://localhost:11435";
+const OLLAMA_URL_DEFAULT = process.env.OLLAMA_URL ?? "http://localhost:11434";
+
+const bridgeState: { config: BridgeModelConfig } = {
+	config: {
+		chatModel: "apple-foundationmodel",
+		routerModel: "apple-foundationmodel",
+		taskModel: "qwen3.6:27b",
+		apfelUrl: APFEL_URL_DEFAULT,
+		ollamaUrl: OLLAMA_URL_DEFAULT,
+		apfelAvailable: false,
+		ollamaModels: [],
+	},
+};
+
+async function detectModels(): Promise<void> {
+	// Load saved user preferences first
+	try {
+		const { readFileSync, existsSync } = await import("node:fs");
+		if (existsSync(CONFIG_PATH)) {
+			const saved = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as Partial<BridgeModelConfig>;
+			Object.assign(bridgeState.config, saved);
+		}
+	} catch {}
+
+	// Probe apfel
+	try {
+		const res = await fetch(`${bridgeState.config.apfelUrl}/v1/models`, {
+			signal: AbortSignal.timeout(1500),
+		});
+		bridgeState.config.apfelAvailable = res.ok;
+	} catch {
+		bridgeState.config.apfelAvailable = false;
+	}
+
+	// Probe Ollama
+	try {
+		const res = await fetch(`${bridgeState.config.ollamaUrl}/api/tags`, {
+			signal: AbortSignal.timeout(1500),
+		});
+		if (res.ok) {
+			const data = (await res.json()) as { models?: { name: string }[] };
+			bridgeState.config.ollamaModels = (data.models ?? []).map((m) => m.name);
+		}
+	} catch {
+		bridgeState.config.ollamaModels = [];
+	}
+
+	// Auto-assign roles if not user-configured: prefer apfel for chat/routing (fast, on-device)
+	if (!bridgeState.config.apfelAvailable) {
+		const firstOllama = bridgeState.config.ollamaModels[0] ?? "auto:free";
+		if (bridgeState.config.chatModel === "apple-foundationmodel") {
+			bridgeState.config.chatModel = firstOllama;
+		}
+		if (bridgeState.config.routerModel === "apple-foundationmodel") {
+			bridgeState.config.routerModel = firstOllama;
+		}
+	}
+
+	const models = [
+		bridgeState.config.apfelAvailable ? "apfel" : null,
+		...bridgeState.config.ollamaModels.slice(0, 3),
+	].filter(Boolean);
+	console.log(`[telegram-bridge] models: ${models.join(", ") || "none local - cloud fallback"}`);
+	console.log(`[telegram-bridge] config: router=${bridgeState.config.routerModel} chat=${bridgeState.config.chatModel} task=${bridgeState.config.taskModel}`);
+}
+
+// Convenience: get current apfel URL
+function apfelUrl(): string { return bridgeState.config.apfelUrl; }
 
 /**
  * Use Apple Foundation model as a fast intent router.
@@ -314,11 +395,11 @@ async function routeMessage(text: string): Promise<MessagePacket> {
 
 	// Apple Foundation tags the packet — on-device, ~200ms, no cost
 	try {
-		const res = await fetch(`${APFEL_URL}/v1/chat/completions`, {
+		const res = await fetch(`${apfelUrl()}/v1/chat/completions`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				model: "apple-foundationmodel",
+				model: bridgeState.config.routerModel,
 				stream: false,
 				max_tokens: 60,
 				response_format: { type: "json_object" },
@@ -365,7 +446,7 @@ async function routeMessage(text: string): Promise<MessagePacket> {
 	};
 }
 
-const MINI_APP_URL = process.env.MINI_APP_URL || "https://8gi.org/internal";
+const MINI_APP_URL = process.env.MINI_APP_URL || "https://8gi.org/internal/telegram";
 
 function miniAppButton(label = "📱 Open Dashboard"): object {
 	return { text: label, web_app: { url: MINI_APP_URL } };
@@ -397,6 +478,8 @@ class TelegramDaemonBridge {
 	}
 
 	async start(): Promise<void> {
+		// Detect available local models + load user config before anything else
+		await detectModels();
 		console.log("[telegram-bridge] starting...");
 
 		// Connect to daemon WebSocket
@@ -650,11 +733,26 @@ class TelegramDaemonBridge {
 
 	private async handleWebAppData(data: string, chatId: number): Promise<void> {
 		if (String(chatId) !== this.config.chatId) return;
-		// Parse JSON payload if present, otherwise treat as raw text
 		let text = data;
 		try {
 			const parsed = JSON.parse(data) as Record<string, unknown>;
-			// Support { action, payload } envelope from the Mini App
+			// Settings update from Mini App
+			if (parsed.action === "settings:update" && parsed.payload && typeof parsed.payload === "object") {
+				const payload = parsed.payload as Partial<BridgeModelConfig>;
+				Object.assign(bridgeState.config, payload);
+				// Persist to ~/.8gent/config.json
+				const { writeFileSync, mkdirSync } = await import("node:fs");
+				const { dirname } = await import("node:path");
+				mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+				writeFileSync(CONFIG_PATH, JSON.stringify(bridgeState.config, null, 2));
+				await tgSend(
+					this.config.telegramToken,
+					this.config.chatId,
+					`Settings saved. router=${bridgeState.config.routerModel} chat=${bridgeState.config.chatModel} task=${bridgeState.config.taskModel}`,
+				);
+				return;
+			}
+			// Generic { action, payload } envelope
 			if (typeof parsed.action === "string") {
 				text = parsed.payload ? `${parsed.action}: ${JSON.stringify(parsed.payload)}` : parsed.action;
 			} else if (typeof parsed.text === "string") {
@@ -830,9 +928,8 @@ class TelegramDaemonBridge {
 	 * Text streams into an edited placeholder message.
 	 */
 	private async handleChat(text: string): Promise<void> {
-		// Apple Foundation handles chat — on-device, near-instant, frees qwen for tasks
-		const chatUrl = `${APFEL_URL}/v1/chat/completions`;
-		const chatModel = "apple-foundationmodel";
+		const chatUrl = `${apfelUrl()}/v1/chat/completions`;
+		const chatModel = bridgeState.config.chatModel;
 
 		// Schedule a gap-filler audio nudge - only fires if model is slow
 		let nudgeFired = false;
