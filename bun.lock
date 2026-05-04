@@ -187,6 +187,10 @@
         "typescript": ">=5.0.0",
       },
     },
+    "packages/eight-bdh": {
+      "name": "@8gent/eight-bdh",
+      "version": "0.1.0",
+    },
     "packages/g8way": {
       "name": "@8gent/g8way",
       "version": "0.1.0",
@@ -268,6 +272,13 @@
       "name": "@8gent/secrets",
       "version": "0.1.0",
     },
+    "packages/settings": {
+      "name": "@8gent/settings",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^5.3.0",
+      },
+    },
     "packages/specifications": {
       "name": "@8gent/specifications",
       "version": "0.1.0",
@@ -310,6 +321,8 @@
 
     "@8gent/design-systems": ["@8gent/design-systems@workspace:packages/design-systems"],
 
+    "@8gent/eight-bdh": ["@8gent/eight-bdh@workspace:packages/eight-bdh"],
+
     "@8gent/g8way": ["@8gent/g8way@workspace:packages/g8way"],
 
     "@8gent/hands": ["@8gent/hands@workspace:packages/hands"],
@@ -331,6 +344,8 @@
     "@8gent/reporting": ["@8gent/reporting@workspace:packages/reporting"],
 
     "@8gent/secrets": ["@8gent/secrets@workspace:packages/secrets"],
+
+    "@8gent/settings": ["@8gent/settings@workspace:packages/settings"],
 
     "@8gent/specifications": ["@8gent/specifications@workspace:packages/specifications"],
 

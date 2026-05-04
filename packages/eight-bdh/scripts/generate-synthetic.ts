@@ -20,7 +20,7 @@ import {
 	parseArgs,
 	sanitiseExample,
 	writeJsonl,
-} from "./_shared.ts";
+} from "./_shared";
 
 const HELP = `
 generate-synthetic.ts - frontier-model synthetic corpus generator
