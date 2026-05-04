@@ -15,7 +15,7 @@ const ui = {
 	muted: theme.color.muted,
 	dim: theme.color.dim,
 	teal: theme.color.teal,
-	chipBorder: theme.color.cardBorder,
+	chipBorder: theme.color.border,
 } as const;
 
 export const MODES = ["Planning", "Researching", "Implementing", "Testing", "Debugging"] as const;
