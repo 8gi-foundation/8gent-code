@@ -33,6 +33,7 @@ interface TelegramUpdate {
 		text?: string;
 		voice?: { file_id: string; duration: number };
 		audio?: { file_id: string; duration: number };
+		web_app_data?: { data: string; button_text: string };
 	};
 	callback_query?: {
 		id: string;
@@ -92,7 +93,61 @@ async function tgSend(
 	}
 }
 
-/** Download a Telegram voice/audio file and transcribe it via OpenRouter Whisper */
+/** Send a local WAV/OGG file as a Telegram voice message */
+async function tgSendVoice(token: string, chatId: string, filePath: string, caption?: string): Promise<void> {
+	const { readFileSync } = await import("node:fs");
+	const { basename } = await import("node:path");
+	const form = new FormData();
+	form.append("chat_id", chatId);
+	const blob = new Blob([readFileSync(filePath)], { type: "audio/wav" });
+	form.append("voice", blob, basename(filePath));
+	if (caption) form.append("caption", caption);
+	await fetch(`${TELEGRAM_API}${token}/sendVoice`, { method: "POST", body: form }).catch(() => {});
+}
+
+/** Retrieve a GitHub issue, generate KittenTTS audio per section, send as voice messages */
+async function handleRetrieveIssue(
+	token: string,
+	chatId: string,
+	repo: string,
+	issueNumber: number,
+): Promise<void> {
+	const { fetchGithubIssue, buildAudioChunks, cleanupChunks } = await import(
+		"../tts/pipeline"
+	);
+
+	await tgSend(token, chatId, `Fetching issue #${issueNumber} from ${repo}...`);
+
+	let issue: { title: string; body: string };
+	try {
+		issue = await fetchGithubIssue(repo, issueNumber);
+	} catch (err: any) {
+		await tgSend(token, chatId, `Could not fetch issue: ${err.message}`);
+		return;
+	}
+
+	await tgSend(token, chatId, `*${issue.title}*\nGenerating audio...`);
+
+	let chunks;
+	try {
+		chunks = await buildAudioChunks(issue.title, issue.body);
+	} catch (err: any) {
+		await tgSend(token, chatId, `Audio generation failed: ${err.message}`);
+		return;
+	}
+
+	for (let i = 0; i < chunks.length; i++) {
+		const chunk = chunks[i];
+		await tgSendVoice(token, chatId, chunk.wavPath, `${chunk.officer} (${i + 1}/${chunks.length})`);
+		// Small gap between messages so they arrive in order
+		await new Promise((r) => setTimeout(r, 300));
+	}
+
+	cleanupChunks(chunks);
+	await tgSend(token, chatId, `Done. ${chunks.length} audio messages sent. Reply by voice to continue.`);
+}
+
+/** Download a Telegram voice/audio file and transcribe it locally via whisper CLI */
 async function transcribeVoice(token: string, fileId: string): Promise<string> {
 	// 1. Get file path from Telegram
 	const fileRes = await fetch(`${TELEGRAM_API}${token}/getFile`, {
@@ -105,54 +160,215 @@ async function transcribeVoice(token: string, fileId: string): Promise<string> {
 		return "[could not download voice message]";
 	}
 
-	// 2. Download the audio file
+	// 2. Download the audio file to a temp path
 	const audioUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
 	const audioRes = await fetch(audioUrl);
 	const audioBuffer = await audioRes.arrayBuffer();
 
-	// 3. Transcribe via Groq Whisper (free, fast) or OpenAI Whisper
-	const groqKey = process.env.GROQ_API_KEY;
-	const openaiKey = process.env.OPENAI_API_KEY;
-	const transcriptionKey = groqKey || openaiKey;
-	const transcriptionUrl = groqKey
-		? "https://api.groq.com/openai/v1/audio/transcriptions"
-		: "https://api.openai.com/v1/audio/transcriptions";
+	const { writeFileSync, unlinkSync, mkdirSync, existsSync } = await import("node:fs");
+	const { execSync } = await import("node:child_process");
+	const tmpDir = "/tmp/8gent-voice";
+	if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+	const tmpOgg = `${tmpDir}/voice-${Date.now()}.ogg`;
+	const tmpOut = tmpDir;
 
-	if (!transcriptionKey) {
-		return "[set GROQ_API_KEY or OPENAI_API_KEY for voice transcription]";
-	}
+	writeFileSync(tmpOgg, Buffer.from(audioBuffer));
 
 	try {
-		const formData = new FormData();
-		const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
-		formData.append("file", audioBlob, "voice.ogg");
-		formData.append("model", groqKey ? "whisper-large-v3" : "whisper-1");
-
-		const whisperRes = await fetch(transcriptionUrl, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${transcriptionKey}` },
-			body: formData,
-		});
-
-		if (whisperRes.ok) {
-			const result = await whisperRes.json();
-			return result.text || "[empty transcription]";
+		// 3a. Try local whisper CLI first (no network, no rate limits)
+		const whisperBin = "/opt/homebrew/bin/whisper";
+		if (existsSync(whisperBin)) {
+			execSync(
+				`${whisperBin} "${tmpOgg}" --model tiny --output_format txt --output_dir "${tmpOut}" --language en`,
+				{ timeout: 60_000, stdio: "pipe" },
+			);
+			const txtPath = tmpOgg.replace(".ogg", ".txt");
+			const { readFileSync } = await import("node:fs");
+			if (existsSync(txtPath)) {
+				const text = readFileSync(txtPath, "utf-8").trim();
+				try { unlinkSync(txtPath); } catch {}
+				try { unlinkSync(tmpOgg); } catch {}
+				return text || "[empty transcription]";
+			}
 		}
-		const errText = await whisperRes.text();
-		console.error("[telegram-bridge] transcription error:", errText);
+
+		// 3b. Fallback: Groq API (may fail on restricted networks)
+		const groqKey = process.env.GROQ_API_KEY;
+		const openaiKey = process.env.OPENAI_API_KEY;
+		const transcriptionKey = groqKey || openaiKey;
+		if (transcriptionKey) {
+			const transcriptionUrl = groqKey
+				? "https://api.groq.com/openai/v1/audio/transcriptions"
+				: "https://api.openai.com/v1/audio/transcriptions";
+			const { readFileSync } = await import("node:fs");
+			const formData = new FormData();
+			const audioBlob = new Blob([readFileSync(tmpOgg)], { type: "audio/ogg" });
+			formData.append("file", audioBlob, "voice.ogg");
+			formData.append("model", groqKey ? "whisper-large-v3" : "whisper-1");
+			const whisperRes = await fetch(transcriptionUrl, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${transcriptionKey}` },
+				body: formData,
+			});
+			if (whisperRes.ok) {
+				const result = await whisperRes.json();
+				try { unlinkSync(tmpOgg); } catch {}
+				return result.text || "[empty transcription]";
+			}
+		}
 	} catch (err) {
 		console.error("[telegram-bridge] transcription failed:", err);
+	} finally {
+		try { unlinkSync(tmpOgg); } catch {}
 	}
 
 	return "[voice message received - transcription failed, please send as text]";
 }
 
-async function tgTyping(token: string, chatId: string): Promise<void> {
+type ChatAction =
+	| "typing"
+	| "upload_document"
+	| "record_voice"
+	| "upload_voice"
+	| "record_video"
+	| "upload_video"
+	| "upload_photo"
+	| "find_location";
+
+async function tgTyping(token: string, chatId: string, action: ChatAction = "typing"): Promise<void> {
 	await fetch(`${TELEGRAM_API}${token}/sendChatAction`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+		body: JSON.stringify({ chat_id: chatId, action }),
 	}).catch(() => {});
+}
+
+async function tgReact(token: string, chatId: string, messageId: number, emoji: string): Promise<void> {
+	await fetch(`${TELEGRAM_API}${token}/setMessageReaction`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			chat_id: chatId,
+			message_id: messageId,
+			reaction: [{ type: "emoji", emoji }],
+			is_big: false,
+		}),
+	}).catch(() => {});
+}
+
+async function tgSendDocument(token: string, chatId: string, filePath: string, caption?: string): Promise<void> {
+	const { readFileSync } = await import("node:fs");
+	const { basename } = await import("node:path");
+	const form = new FormData();
+	form.append("chat_id", chatId);
+	const blob = new Blob([readFileSync(filePath)]);
+	form.append("document", blob, basename(filePath));
+	if (caption) form.append("caption", caption);
+	await fetch(`${TELEGRAM_API}${token}/sendDocument`, { method: "POST", body: form }).catch(() => {});
+}
+
+const APFEL_URL = process.env.APFEL_URL ?? "http://localhost:11435";
+
+/**
+ * Use Apple Foundation model as a fast intent router.
+ * Falls back to regex heuristic if apfel is unavailable.
+ */
+/**
+ * Message packet — the envelope Apple Foundation tags every incoming message with.
+ * Treat it like a network packet header: intent, priority, topic, delegate, background job.
+ */
+export interface MessagePacket {
+	/** Primary routing decision */
+	intent: "chat" | "task";
+	/** Which model handles the response */
+	delegate: "apfel" | "qwen" | "auto";
+	/** Rough topic for context-key selection */
+	topic: string;
+	/** Optional background job to fire alongside the main response */
+	background: "update_github_issue" | "log_to_memory" | "none";
+	/** Priority hint for the task queue */
+	priority: "low" | "normal" | "high";
+}
+
+async function routeMessage(text: string): Promise<MessagePacket> {
+	const t = text.trim().toLowerCase();
+
+	// Slash commands are always high-priority tasks
+	if (t.startsWith("/")) {
+		return { intent: "task", delegate: "qwen", topic: "command", background: "none", priority: "high" };
+	}
+
+	// Hard structural signals — skip model call entirely
+	const hardTaskSignals = [
+		/[/\\~][\w./]{3,}/,
+		/https?:\/\//,
+		/#\d+/,
+		/`[^`]+`/,
+		/\.(ts|js|py|json|md|tsx|jsx|sh|css|html)\b/,
+		/\b(repo|branch|pr|pull request|commit|diff|rebase)\b/,
+		/\b(error|bug|broken|failing|crash|exception|traceback|stacktrace)\b/,
+	];
+	if (hardTaskSignals.some((p) => p.test(t))) {
+		return { intent: "task", delegate: "qwen", topic: "code", background: "log_to_memory", priority: "high" };
+	}
+
+	// Apple Foundation tags the packet — on-device, ~200ms, no cost
+	try {
+		const res = await fetch(`${APFEL_URL}/v1/chat/completions`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				model: "apple-foundationmodel",
+				stream: false,
+				max_tokens: 60,
+				response_format: { type: "json_object" },
+				messages: [
+					{
+						role: "system",
+						content:
+							"You are a message packet router. Tag every message with a JSON envelope.\n" +
+							'Return: {"intent":"chat"|"task","delegate":"apfel"|"qwen","topic":"<one word>","background":"update_github_issue"|"log_to_memory"|"none","priority":"low"|"normal"|"high"}\n' +
+							"Rules: chat=casual/social→delegate apfel. task=do something specific→delegate qwen.\n" +
+							"background=update_github_issue when a task relates to tracked work. log_to_memory when new context/decisions mentioned.",
+					},
+					{ role: "user", content: text },
+				],
+			}),
+			signal: AbortSignal.timeout(2000),
+		});
+		if (res.ok) {
+			const data = await res.json() as { choices?: { message?: { content: string } }[] };
+			const raw = data.choices?.[0]?.message?.content ?? "";
+			const parsed = JSON.parse(raw) as Partial<MessagePacket>;
+			if (parsed.intent) {
+				return {
+					intent: parsed.intent,
+					delegate: parsed.delegate ?? (parsed.intent === "chat" ? "apfel" : "qwen"),
+					topic: parsed.topic ?? "general",
+					background: parsed.background ?? "none",
+					priority: parsed.priority ?? "normal",
+				};
+			}
+		}
+	} catch {}
+
+	// Regex fallback if apfel is down
+	const words = t.split(/\s+/).filter(Boolean);
+	const isTask = words.length > 15 ||
+		/^(fix|create|build|add|update|generate|write|make|install|configure|debug|refactor|implement|deploy|setup|launch|ship)\b.{5,}/.test(t);
+	return {
+		intent: isTask ? "task" : "chat",
+		delegate: isTask ? "qwen" : "apfel",
+		topic: "general",
+		background: "none",
+		priority: "normal",
+	};
+}
+
+const MINI_APP_URL = process.env.MINI_APP_URL || "https://8gi.org/internal";
+
+function miniAppButton(label = "📱 Open Dashboard"): object {
+	return { text: label, web_app: { url: MINI_APP_URL } };
 }
 
 // Import CoS router lazily to avoid circular deps
@@ -168,6 +384,7 @@ class TelegramDaemonBridge {
 	private agentBusy = false;
 	private pendingApprovals = new Map<string, { tool: string; input: unknown }>();
 	private cosRouter: InstanceType<typeof import("./cos-router").CoSRouter> | null = null;
+	private lastUserMessageId = 0;
 
 	// Multi-step task runtime (issue #1906 / #1913).
 	private multiStepEnabled: boolean = MULTI_STEP_ENABLED;
@@ -354,6 +571,9 @@ class TelegramDaemonBridge {
 					clearTimeout(this._retryTimer);
 					this._retryTimer = null;
 				}
+				if (this.lastUserMessageId) {
+					tgReact(this.config.telegramToken, this.config.chatId, this.lastUserMessageId, "👍");
+				}
 				break;
 
 			case "approval:required":
@@ -361,9 +581,16 @@ class TelegramDaemonBridge {
 				this.sendApprovalRequest(payload);
 				break;
 
-			case "tool:start":
-				tgTyping(this.config.telegramToken, this.config.chatId);
+			case "tool:start": {
+				// Use a contextual chat action based on the tool being invoked
+				const tool = (payload as any)?.tool as string | undefined;
+				let action: ChatAction = "typing";
+				if (tool === "Bash") action = "typing";
+				else if (tool === "Write" || tool === "Edit") action = "upload_document";
+				else if (tool === "WebFetch" || tool === "WebSearch") action = "typing";
+				tgTyping(this.config.telegramToken, this.config.chatId, action);
 				break;
+			}
 		}
 	}
 
@@ -379,13 +606,21 @@ class TelegramDaemonBridge {
 				if (data.ok && data.result) {
 					for (const update of data.result as TelegramUpdate[]) {
 						this.lastUpdateId = update.update_id;
+						if (update.message?.message_id) {
+							this.lastUserMessageId = update.message.message_id;
+						}
 						if (update.callback_query) {
 							await this.handleCallbackQuery(update.callback_query);
+						} else if (update.message?.web_app_data) {
+							// Mini App sending data back to the bot
+							const { data: waData } = update.message.web_app_data;
+							console.log(`[telegram-bridge] web_app_data: ${waData.slice(0, 100)}`);
+							await this.handleWebAppData(waData, update.message.chat.id);
 						} else if (update.message?.voice || update.message?.audio) {
 							// Voice/audio message - transcribe then process
 							const fileId = update.message.voice?.file_id || update.message.audio?.file_id;
 							if (fileId && update.message.chat) {
-								await tgTyping(this.config.telegramToken, this.config.chatId);
+								await tgTyping(this.config.telegramToken, this.config.chatId, "record_voice");
 								const transcript = await transcribeVoice(this.config.telegramToken, fileId);
 								console.log(`[telegram-bridge] voice transcription: "${transcript.slice(0, 100)}"`);
 								if (!transcript.startsWith("[")) {
@@ -413,9 +648,29 @@ class TelegramDaemonBridge {
 		}
 	}
 
+	private async handleWebAppData(data: string, chatId: number): Promise<void> {
+		if (String(chatId) !== this.config.chatId) return;
+		// Parse JSON payload if present, otherwise treat as raw text
+		let text = data;
+		try {
+			const parsed = JSON.parse(data) as Record<string, unknown>;
+			// Support { action, payload } envelope from the Mini App
+			if (typeof parsed.action === "string") {
+				text = parsed.payload ? `${parsed.action}: ${JSON.stringify(parsed.payload)}` : parsed.action;
+			} else if (typeof parsed.text === "string") {
+				text = parsed.text;
+			}
+		} catch {}
+		await this.handleTelegramMessage(text, chatId);
+	}
+
 	private async handleTelegramMessage(text: string, chatId: number): Promise<void> {
 		// Only respond to the configured chat
 		if (String(chatId) !== this.config.chatId) return;
+
+		// Route message through Apple Foundation packet tagger
+		const packet = await routeMessage(text);
+		const intent = packet.intent;
 
 		// Show typing
 		await tgTyping(this.config.telegramToken, this.config.chatId);
@@ -424,6 +679,16 @@ class TelegramDaemonBridge {
 		if (this.cosRouter) {
 			const handled = await this.cosRouter.handleCommand(text, chatId);
 			if (handled) return;
+		}
+
+		// "retrieve issue #N from org/repo" → KittenTTS audio pipeline
+		const issueMatch = text.match(/retrieve\s+issue\s+#?(\d+)\s+from\s+([\w.\-/]+)/i);
+		if (issueMatch) {
+			const issueNumber = parseInt(issueMatch[1], 10);
+			const repo = issueMatch[2];
+			await tgTyping(this.config.telegramToken, this.config.chatId, "record_voice");
+			await handleRetrieveIssue(this.config.telegramToken, this.config.chatId, repo, issueNumber);
+			return;
 		}
 
 		// Handle built-in commands
@@ -498,11 +763,24 @@ class TelegramDaemonBridge {
 		}
 
 		if (text === "/help") {
-			await tgSend(
-				this.config.telegramToken,
-				this.config.chatId,
-				"*Eight - Telegram Bridge*\n\nSend any message to start a multi-step task.\n\n/status - Daemon health\n/cancel - Stop the current task\n/unstick - Reset busy state\n/logs - Tail daemon logs\n/help - This message\n\nEight has full tool access: shell, git, file system, web browsing. Watch tasks stream live; use the inline buttons to cancel or retry.",
-			);
+			await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					chat_id: this.config.chatId,
+					text: "*Eight — Telegram OS*\n\nJust talk naturally — I'll figure out if you need a quick reply or a full task.\n\n*Commands*\n/status — Daemon health\n/cancel — Stop current task\n/unstick — Reset busy state\n/logs — Tail daemon logs\n/help — This message\n\n*Voice* — Send a voice message, I'll transcribe and act on it.\n\n*Issues* — \"retrieve issue #N from org/repo\" → audio briefing\n\nFull tool access: shell, git, files, web, GitHub.",
+					parse_mode: "Markdown",
+					reply_markup: {
+						inline_keyboard: [[miniAppButton()]],
+					},
+				}),
+			}).catch(() => {});
+			return;
+		}
+
+		// Casual chat: fast direct path with streaming display
+		if (intent === "chat") {
+			await this.handleChat(text);
 			return;
 		}
 
@@ -544,6 +822,127 @@ class TelegramDaemonBridge {
 
 		this.agentBusy = true;
 		this.retryPrompt(text, 1);
+	}
+
+	/**
+	 * Direct Ollama streaming call for casual chat.
+	 * Sends a gap-filler audio nudge only if Ollama takes > 3s to respond.
+	 * Text streams into an edited placeholder message.
+	 */
+	private async handleChat(text: string): Promise<void> {
+		// Apple Foundation handles chat — on-device, near-instant, frees qwen for tasks
+		const chatUrl = `${APFEL_URL}/v1/chat/completions`;
+		const chatModel = "apple-foundationmodel";
+
+		// Schedule a gap-filler audio nudge - only fires if model is slow
+		let nudgeFired = false;
+		const nudgeTimer = setTimeout(async () => {
+			nudgeFired = true;
+			const { classifyBucket, pickClip } = await import("../tts/audio-lib");
+			const clip = pickClip(classifyBucket(text));
+			if (clip) tgSendVoice(this.config.telegramToken, this.config.chatId, clip).catch(() => {});
+		}, 3000);
+
+		// Send text placeholder so user sees something right away
+		let msgId: number | null = null;
+		try {
+			const ph = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ chat_id: this.config.chatId, text: "▍" }),
+			});
+			const phData = await ph.json() as { ok: boolean; result?: { message_id: number } };
+			if (phData.ok) msgId = phData.result?.message_id ?? null;
+		} catch {}
+
+		try {
+			const res = await fetch(chatUrl, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					model: chatModel,
+					stream: true,
+					max_tokens: 150,
+					messages: [
+						{
+							role: "system",
+							content:
+								"You are 8gent, 8GI Foundation's personal AI running locally on his Mac. " +
+								"Respond naturally in 1-3 sentences. No markdown headers or lists. Just talk.",
+						},
+						{ role: "user", content: text },
+					],
+				}),
+			});
+
+			if (!res.ok || !res.body) throw new Error(`apfel ${res.status}`);
+
+			let accumulated = "";
+			let lastEdit = 0;
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				// OpenAI SSE format: "data: {...}" lines
+				const lines = decoder.decode(value).split("\n").filter(Boolean);
+				for (const line of lines) {
+					const raw = line.startsWith("data: ") ? line.slice(6) : line;
+					if (raw === "[DONE]") break;
+					try {
+						const chunk = JSON.parse(raw) as { choices?: { delta?: { content?: string } }[] };
+						const token = chunk.choices?.[0]?.delta?.content;
+						if (token) accumulated += token;
+					} catch {}
+				}
+				// Edit the placeholder every ~400ms to show streaming tokens
+				const now = Date.now();
+				if (msgId && accumulated && now - lastEdit > 400) {
+					lastEdit = now;
+					fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							chat_id: this.config.chatId,
+							message_id: msgId,
+							text: accumulated + " ▍",
+						}),
+					}).catch(() => {});
+				}
+			}
+
+			// Cancel nudge if model responded fast enough
+			clearTimeout(nudgeTimer);
+
+			// Final edit - clean cursor
+			const reply = accumulated.trim() || "Hey! What's up?";
+			if (msgId) {
+				await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ chat_id: this.config.chatId, message_id: msgId, text: reply }),
+				}).catch(() => {});
+			} else {
+				await tgSend(this.config.telegramToken, this.config.chatId, reply);
+			}
+
+			if (this.lastUserMessageId) {
+				tgReact(this.config.telegramToken, this.config.chatId, this.lastUserMessageId, "👍");
+			}
+		} catch {
+			clearTimeout(nudgeTimer);
+			const fallback = "Hey! What's on your mind?";
+			if (msgId) {
+				await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ chat_id: this.config.chatId, message_id: msgId, text: fallback }),
+				}).catch(() => {});
+			} else {
+				await tgSend(this.config.telegramToken, this.config.chatId, fallback);
+			}
+		}
 	}
 
 	/**
