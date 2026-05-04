@@ -12,18 +12,15 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { theme } from "../theme.js";
+import { t } from "../theme.js";
 
 const ui = {
-	cream: theme.color.cream,
-	muted: theme.color.muted,
-	dim: theme.color.dim,
-	orange: theme.color.orange,
-	teal: theme.color.teal,
-	cyan: "#00D7E8",
-	red: theme.color.red,
-	green: "#47A639",
-	pillBorder: "#00D7E8",
+	cream:      t.textPrimary,
+	muted:      t.textTertiary,
+	dim:        t.textDim,
+	orange:     t.orange,
+	teal:       t.teal,
+	pillBorder: t.orange,
 } as const;
 
 interface HeaderBarProps {
@@ -49,7 +46,9 @@ function BrandPill({
 	return (
 		<Box borderStyle="round" borderColor={ui.pillBorder} paddingX={1} flexShrink={0}>
 			<BrandWord />
-			<Text color={ui.dim}> Code </Text>
+			<Text color={ui.muted}> Code</Text>
+			<Text color={ui.orange} bold>.</Text>
+			<Text color={ui.dim}> </Text>
 			<Text color={ui.dim}>│</Text>
 			<Text color={ui.muted}> The Infinite </Text>
 			<Text color={ui.teal}>Gentleman</Text>
@@ -66,21 +65,8 @@ function BrandPill({
 function BrandWord() {
 	return (
 		<Box flexShrink={0}>
-			<Text color={ui.cream} bold>
-				8
-			</Text>
-			<Text color={ui.orange} bold>
-				g
-			</Text>
-			<Text color={ui.cyan} bold>
-				e
-			</Text>
-			<Text color={ui.green} bold>
-				n
-			</Text>
-			<Text color={ui.red} bold>
-				t
-			</Text>
+			<Text color={ui.orange} bold>8</Text>
+			<Text color={ui.cream} bold>gent</Text>
 		</Box>
 	);
 }
