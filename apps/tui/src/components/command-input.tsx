@@ -97,6 +97,9 @@ export function CommandInput({
 	allowEmptySubmit = false,
 }: CommandInputProps) {
 	const [value, setValue] = useState("");
+	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
+	const [historyIndex, setHistoryIndex] = useState(-1);
+	const draftRef = useRef("");
 	const [promptPulse, setPromptPulse] = useState(true);
 	const [showSlashHelp, setShowSlashHelp] = useState(false);
 	const [slashRegistryEntries, setSlashRegistryEntries] = useState<SlashRegistryEntry[]>([]);
@@ -184,6 +187,25 @@ export function CommandInput({
 				dismiss();
 				return;
 			}
+
+			// Up arrow: navigate to older history entry
+			if (key.upArrow && recentCommands.length > 0) {
+				const nextIndex = historyIndex < recentCommands.length - 1 ? historyIndex + 1 : historyIndex;
+				if (nextIndex !== historyIndex) {
+					if (historyIndex === -1) draftRef.current = value;
+					setHistoryIndex(nextIndex);
+					setValue(recentCommands[nextIndex] ?? "");
+				}
+				return;
+			}
+
+			// Down arrow: navigate to newer entry or restore draft
+			if (key.downArrow && historyIndex >= 0) {
+				const nextIndex = historyIndex - 1;
+				setHistoryIndex(nextIndex);
+				setValue(nextIndex < 0 ? draftRef.current : (recentCommands[nextIndex] ?? ""));
+				return;
+			}
 		},
 		{ isActive: !isProcessing && focused },
 	);
@@ -192,6 +214,10 @@ export function CommandInput({
 		(input: string) => {
 			const trimmed = input.trim();
 			if (!trimmed && !allowEmptySubmit) return;
+
+			// Reset history navigation on submit
+			setHistoryIndex(-1);
+			draftRef.current = "";
 
 			// Check for slash command
 			if (trimmed.startsWith("/")) {
@@ -279,7 +305,14 @@ export function CommandInput({
 				<Box>
 					<TextInput
 						value={value}
-						onChange={(v) => setValue(transformInputValue ? transformInputValue(v) : v)}
+						onChange={(v) => {
+							// Any manual edit exits history navigation and updates the draft
+							if (historyIndex !== -1) {
+								setHistoryIndex(-1);
+								draftRef.current = "";
+							}
+							setValue(transformInputValue ? transformInputValue(v) : v);
+						}}
 						onSubmit={handleSubmit}
 						placeholder={
 							isProcessing

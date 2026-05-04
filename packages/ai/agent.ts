@@ -182,7 +182,10 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		// Generation params (tunable via self_tune)
 		...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
 		...(config.topP !== undefined ? { topP: config.topP } : {}),
-		...(config.topK !== undefined ? { topK: config.topK } : {}),
+		// topK is only supported by Anthropic/Google — strip it for Ollama, LM Studio, OpenAI-compat providers
+		...(config.topK !== undefined && !isLocalProvider && config.provider.name !== "openrouter" && config.provider.name !== "openrouter-free"
+			? { topK: config.topK }
+			: {}),
 		...(config.frequencyPenalty !== undefined ? { frequencyPenalty: config.frequencyPenalty } : {}),
 		...(config.presencePenalty !== undefined ? { presencePenalty: config.presencePenalty } : {}),
 		tools,
