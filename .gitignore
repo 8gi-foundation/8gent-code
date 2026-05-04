@@ -124,3 +124,9 @@ packages/eight-bdh/trainer/local/phase-2b-capacity-train-log.json
 packages/eight-bdh/trainer/local/phase-2b-capacity-full-run.log
 packages/eight-bdh/data/phase-2b-capacity-corpus.bin
 packages/eight-bdh/checkpoints/phase-2b-capacity-10m.pt
+packages/eight-bdh/trainer/local/phase-3c-toolcalls-train-log.json
+packages/eight-bdh/trainer/local/phase-3c-toolcalls-full-run.log
+packages/eight-bdh/data/phase-3c-toolcalls-corpus.bin
+packages/eight-bdh/checkpoints/phase-3c-toolcalls-5m.pt
+packages/eight-bdh/checkpoints/phase-3c-toolcalls-5m-best-val.pt
+packages/eight-bdh/trainer/local/tinystories-pretrain-train-log.jsonl

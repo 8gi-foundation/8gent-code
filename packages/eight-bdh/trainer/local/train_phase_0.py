@@ -311,7 +311,11 @@ t_train_start = time.time()
 
 losses_log = []
 val_losses_log = []
-best_val_loss = float("inf")
+CHECKPOINT_PATH = CHECKPOINT_DIR / "phase-0-5m.pt"
+EARLY_STOP_PATIENCE = 300  # iters without val improvement before stopping
+best_val_loss_so_far = float("inf")
+patience_counter = 0
+best_val_ckpt_path = CHECKPOINT_PATH.parent / (CHECKPOINT_PATH.stem + "-best-val.pt")
 
 for iter_n in range(1, MAX_ITERS + 1):
     model.train()
@@ -338,12 +342,44 @@ for iter_n in range(1, MAX_ITERS + 1):
             f"val_loss={vloss.item():.4f}  rate={rate:.1f}it/s  eta={eta/60:.1f}min",
             flush=True,
         )
-        if vloss.item() < best_val_loss:
-            best_val_loss = vloss.item()
+        if vloss.item() < best_val_loss_so_far:
+            best_val_loss_so_far = vloss.item()
+            patience_counter = 0
+            torch.save({
+                "model_state_dict": model.state_dict(),
+                "config": {
+                    "n_layer": MODEL_CFG.n_layer,
+                    "n_embd": MODEL_CFG.n_embd,
+                    "n_head": MODEL_CFG.n_head,
+                    "mlp_internal_dim_multiplier": MODEL_CFG.mlp_internal_dim_multiplier,
+                    "dropout": MODEL_CFG.dropout,
+                    "vocab_size": MODEL_CFG.vocab_size,
+                },
+                "training": {
+                    "max_iters": MAX_ITERS,
+                    "batch_size": BATCH_SIZE,
+                    "block_size": BLOCK_SIZE,
+                    "lr": LR,
+                    "weight_decay": WEIGHT_DECAY,
+                    "seed": SEED,
+                    "n_examples": N_EXAMPLES,
+                    "device": str(DEVICE),
+                    "best_val_loss": best_val_loss_so_far,
+                    "saved_at_iter": iter_n,
+                },
+                "phase": 0,
+                "model_id": "8gent-0.1.0-bdh-r:5m",
+            }, best_val_ckpt_path)
+            print(f"[train] new best val {vloss.item():.4f} at iter {iter_n} — saved best-val checkpoint", flush=True)
+        else:
+            patience_counter += LOG_INTERVAL
+            if patience_counter >= EARLY_STOP_PATIENCE:
+                print(f"[train] early stop at iter {iter_n}: no val improvement in {EARLY_STOP_PATIENCE} iters. Best was {best_val_loss_so_far:.4f}", flush=True)
+                break
 
 t_train_end = time.time()
 train_seconds = t_train_end - t_train_start
-print(f"[train] done in {train_seconds/60:.1f}min, best val_loss={best_val_loss:.4f}", flush=True)
+print(f"[train] done in {train_seconds/60:.1f}min, best val_loss={best_val_loss_so_far:.4f}", flush=True)
 
 # ── 4. Save checkpoint ──────────────────────────────────────────────────
 
@@ -369,7 +405,7 @@ torch.save(
             "n_examples": N_EXAMPLES,
             "device": str(DEVICE),
             "train_seconds": train_seconds,
-            "best_val_loss": best_val_loss,
+            "best_val_loss": best_val_loss_so_far,
             "final_train_loss": losses_log[-1][1] if losses_log else None,
             "final_val_loss": val_losses_log[-1][1] if val_losses_log else None,
         },
@@ -396,7 +432,7 @@ with log_path.open("w") as fh:
             },
             "n_examples": N_EXAMPLES,
             "train_seconds": train_seconds,
-            "best_val_loss": best_val_loss,
+            "best_val_loss": best_val_loss_so_far,
             "loss_curve_train": losses_log,
             "loss_curve_val": val_losses_log,
             "data_bytes": len(data_bytes),
