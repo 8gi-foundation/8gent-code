@@ -13,6 +13,7 @@ import { Box, Text, useStdout } from "ink";
 import React, { useState, useEffect, useRef } from "react";
 import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
 import { ThinkingVisualizer } from "./ThinkingVisualizer.js";
+import { t } from "../theme.js";
 
 // ── Activity Types ──────────────────────────────────────────────────
 
@@ -145,6 +146,10 @@ interface ActivityMonitorProps {
 	maxEntries?: number;
 	/** When false, skip scan-line and footer pulse (matches global ^A anim toggle) */
 	showAnimations?: boolean;
+	/** Compact mode: strict fixed-height box for embedding in the chat view */
+	compact?: boolean;
+	/** Available width for the compact box (avoids reading stdout.columns) */
+	contentWidth?: number;
 }
 
 // ── Singleton activity log (persists across re-renders) ─────────────
@@ -248,6 +253,8 @@ export function ActivityMonitor({
 	processingStage,
 	maxEntries = 12,
 	showAnimations = true,
+	compact = false,
+	contentWidth,
 }: ActivityMonitorProps) {
 	const { stdout } = useStdout();
 	const [tick, setTick] = useState(0);
@@ -255,19 +262,12 @@ export function ActivityMonitor({
 	const [elapsed, setElapsed] = useState(0);
 	const [, forceRender] = useState(0);
 
-	// Hermes pattern: derive width from a single source (stdout columns),
-	// minus the chrome we can prove (left/right outer border + paddingX)
-	// so the visualiser canvas can never overflow its parent box. Floor
-	// at 24 so the operator still has a usable column on tiny terminals.
 	const cols = stdout?.columns ?? 80;
-	// Chrome consumed before the visualiser:
-	//   FixedFrame border │   = 1 (left) + 1 (right)
-	//   FixedFrame paddingX = 1 + 1
-	//   ActivityMonitor paddingX = 1 + 1
-	//   ActivityMonitor inner box paddingX = 1 + 1
-	//   activity box border = 1 + 1
-	//                              total = 10
-	const visualiserWidth = Math.max(24, Math.min(cols - 10, 96));
+	// In compact mode, use the caller-supplied width so we never exceed the container.
+	// In full mode, use the Hermes-derived terminal width minus chrome.
+	const visualiserWidth = compact
+		? Math.max(16, (contentWidth ?? 40) - 4)
+		: Math.max(24, Math.min(cols - 10, 96));
 
 	// Animation tick (activity list still refreshes when animations off)
 	useEffect(() => {
@@ -298,12 +298,43 @@ export function ActivityMonitor({
 				? "WORKING"
 				: processingStage.toUpperCase();
 
+	// Compact mode: strict fixed-height box aligned to the full content width, no overflow
+	if (compact) {
+		return (
+			<Box
+				flexDirection="row"
+				height={4}
+				overflow="hidden"
+				borderStyle="single"
+				borderColor={t.orange}
+				paddingX={1}
+				alignItems="center"
+			>
+				<Text color={t.orange} bold>{"8 "}</Text>
+				<Box flexGrow={1} flexDirection="column" overflow="hidden">
+					{visibleEntries.length === 0 ? (
+						<Box>
+							<Text color={t.orange} bold>{stageLabel}</Text>
+							{showAnimations && <Text color={t.textDim}>{dots}</Text>}
+						</Box>
+					) : (
+						visibleEntries.slice(-2).map((entry) => (
+							<Box key={entry.id}>
+								<Text color={entry.done ? t.green : t.orange}>{entry.done ? "✓ " : "◦ "}</Text>
+								<Text color={entry.color} wrap="truncate-end">{entry.action}</Text>
+								<Text color={t.textDim} wrap="truncate-end">{` ${entry.detail.slice(0, 50)}`}</Text>
+							</Box>
+						))
+					)}
+				</Box>
+				<Text color={t.textDim}>{stepCount > 0 ? `step ${stepCount}` : ""}</Text>
+			</Box>
+		);
+	}
+
 	return (
 		<Box flexDirection="column" flexGrow={1} paddingX={1}>
-			{/* Header — Hermes pattern: title + meta share a flexShrink=1 box
-			    so the badge on the right is never pushed off-screen and can never
-			    be overlapped by the meta string. Single-line truncate-end for
-			    safety on narrow terminals. */}
+			{/* Header */}
 			<Box marginBottom={1} flexDirection="row" alignItems="center">
 				<Box flexShrink={1} flexDirection="row" overflow="hidden">
 					<Text color="cyan" bold wrap="truncate-end">
