@@ -524,6 +524,16 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		let totalTokensUsed = 0;
 		let stepCount = 0;
 
+		// Session wall-clock guard: abort if any single turn runs > 30 minutes.
+		// Prevents git/shell hangs from silently blocking the agent loop forever.
+		const SESSION_MAX_MS = (this.config as any).maxSessionMs ?? 30 * 60 * 1000;
+		let sessionWatchdog: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+			console.log(
+				`\n[8gent] Session watchdog: turn exceeded ${SESSION_MAX_MS / 60000} min — aborting`,
+			);
+			this.abort();
+		}, SESSION_MAX_MS);
+
 		// Build provider config — main agent always uses its own model
 		const providerConfig: ProviderConfig = {
 			name: this.config.runtime as ProviderName,
@@ -1264,8 +1274,10 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				// Voice is optional
 			}
 
+			if (sessionWatchdog) { clearTimeout(sessionWatchdog); sessionWatchdog = null; }
 			return flavoredContent;
 		} catch (err) {
+			if (sessionWatchdog) { clearTimeout(sessionWatchdog); sessionWatchdog = null; }
 			const errMsg = err instanceof Error ? err.message : String(err);
 
 			// ── Self-Autonomy: Error Recovery ────────────────────────────────
