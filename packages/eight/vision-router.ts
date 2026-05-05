@@ -64,6 +64,11 @@ export interface VisionConfig {
 	ocrFallback: string[];
 	provider: "ollama" | "openrouter" | "auto";
 	timeout: number;
+	/** Model used by the computer-use loop. Defaults to qwen3.6:27b (text-only
+	 *  reasoning). Set to a vision-capable model (e.g. "llama3.2-vision:11b")
+	 *  to enable screenshot perception. Configurable in ~/.8gent/config.json
+	 *  under `vision.computerUseModel`. */
+	computerUseModel: string;
 }
 
 const DEFAULT_VISION_CONFIG: VisionConfig = {
@@ -75,6 +80,7 @@ const DEFAULT_VISION_CONFIG: VisionConfig = {
 	ocrFallback: ["deepseek-ocr:latest", "glm-ocr:latest", "dots.ocr:latest"],
 	provider: "ollama",
 	timeout: 60000,
+	computerUseModel: "qwen3.6:27b",
 };
 
 /**
