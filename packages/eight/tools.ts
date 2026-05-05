@@ -174,10 +174,30 @@ function sanitizeShellCommand(command: string): {
  * Execute a git command safely using spawn with argument arrays.
  * Prevents shell injection from LLM-generated arguments.
  */
+const GIT_NON_INTERACTIVE_ENV = {
+	GIT_TERMINAL_PROMPT: "0",
+	GIT_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS_REQUIRE: "force",
+	GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=no",
+};
+
+const SPAWN_NON_INTERACTIVE_ENV = {
+	...GIT_NON_INTERACTIVE_ENV,
+	DEBIAN_FRONTEND: "noninteractive",
+	NPM_CONFIG_YES: "true",
+};
+
 function spawnGit(args: string[], cwd: string): Promise<string> {
+	const TIMEOUT_MS = 30_000;
 	return new Promise(async (resolve) => {
 		const { spawn } = await import("node:child_process");
-		const proc = spawn("git", args, { cwd });
+		const proc = spawn("git", args, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			detached: true,
+			env: { ...process.env, ...GIT_NON_INTERACTIVE_ENV },
+		});
 		let stdout = "";
 		let stderr = "";
 		proc.stdout?.on("data", (d: Buffer) => {
@@ -186,10 +206,17 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 		proc.stderr?.on("data", (d: Buffer) => {
 			stderr += d.toString();
 		});
-		proc.on("close", (code: number | null) => {
+		const timer = setTimeout(() => {
+			try { process.kill(-proc.pid!, "SIGKILL"); } catch { try { proc.kill("SIGKILL"); } catch {} }
+			resolve(`TIMEOUT after ${TIMEOUT_MS / 1000}s: git ${args[0]}`);
+		}, TIMEOUT_MS);
+		const finish = (code: number | null) => {
+			clearTimeout(timer);
 			resolve(code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`);
-		});
-		proc.on("error", (err: Error) => resolve(`Error: ${err.message}`));
+		};
+		proc.on("close", finish);
+		proc.on("error", (err: Error) => { clearTimeout(timer); resolve(`Error: ${err.message}`); });
+		proc.unref();
 	});
 }
 
@@ -1720,8 +1747,9 @@ export class ToolExecutor {
 
 			const proc = spawn("sh", ["-c", finalCommand], {
 				cwd: this.workingDirectory,
-				stdio: ["pipe", "pipe", "pipe"],
+				stdio: ["ignore", "pipe", "pipe"],
 				detached: true,
+				env: { ...process.env, ...SPAWN_NON_INTERACTIVE_ENV },
 			});
 
 			let stdout = "";
