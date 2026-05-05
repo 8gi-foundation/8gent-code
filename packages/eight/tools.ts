@@ -868,6 +868,28 @@ export class ToolExecutor {
 			},
 			// Desktop Computer Use tools (Power #10)
 			...getComputerToolDefs(),
+			{
+				type: "function",
+				function: {
+					name: "run_computer_task",
+					description:
+						"[DESKTOP] Run an autonomous multi-step computer-use task. The agent perceives the screen (accessibility tree first, screenshot as fallback) and uses mouse/keyboard tools to complete the goal. Use for tasks that span multiple apps or require navigating a GUI. The vision model is configured via ~/.8gent/config.json vision.computerUseModel.",
+					parameters: {
+						type: "object",
+						properties: {
+							goal: {
+								type: "string",
+								description: "Plain-English description of what to accomplish on the desktop.",
+							},
+							maxSteps: {
+								type: "number",
+								description: "Maximum number of agent steps (default: 20, max: 50).",
+							},
+						},
+						required: ["goal"],
+					},
+				},
+			},
 			// Browser Use tools
 			{
 				type: "function",
@@ -1308,6 +1330,11 @@ export class ToolExecutor {
 				return this.handleDesktopSuggestQuit();
 			case "desktop_safe_list":
 				return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
+			case "run_computer_task":
+				return this.handleRunComputerTask(
+					args.goal as string,
+					args.maxSteps as number | undefined,
+				);
 
 			// Browser Use tools
 			case "browser_open":
@@ -2894,6 +2921,66 @@ export class ToolExecutor {
 			return browserScreenshot(filePath, session);
 		} catch (err) {
 			return `browser_screenshot failed: ${err}`;
+		}
+	}
+
+	private async handleRunComputerTask(goal: string, maxSteps?: number): Promise<string> {
+		if (!goal?.trim()) return "run_computer_task: goal is required";
+		const steps = Math.min(50, Math.max(1, maxSteps ?? 20));
+		try {
+			const { runComputerUseLoop } = await import("./loops/computer-use");
+			const { ModelFailover } = await import("../providers/failover");
+			const { loadVisionConfig } = await import("./vision-router");
+			const { existsSync } = await import("node:fs");
+			const { homedir } = await import("node:os");
+			const { join } = await import("node:path");
+			const { executeHandsTool } = await import("../daemon/tools/hands");
+
+			const visionCfg = loadVisionConfig();
+			const failover = new ModelFailover();
+
+			// Skip providers that lack credentials or aren't installed.
+			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-v4-flash", "deepseek");
+			if (!process.env.OPENROUTER_API_KEY) failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
+			if (!existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"))) {
+				failover.markDown("apple-foundationmodel", "apfel");
+			}
+
+			// Instant AX tree placeholder — lets the model ask for desktop_windows itself.
+			const handsAdapter: import("./loops/computer-use").HandsAdapter = async (toolName, args, ctx) => {
+				if (toolName === "desktop_accessibility_tree") {
+					return {
+						ok: true as const,
+						result: {
+							pid: 0,
+							appName: "desktop",
+							windowTitle: "AX tree unavailable - call desktop_windows to list open windows",
+							root: { role: "AXDesktop", title: "Call desktop_windows to enumerate open windows.", children: [] },
+						},
+					};
+				}
+				const r = await executeHandsTool(toolName, args, ctx);
+				if (r.ok) return { ok: true as const, result: r.result };
+				return { ok: false as const, reason: (r as any).error ?? "hands error" };
+			};
+
+			const result = await runComputerUseLoop({
+				goal: goal.trim(),
+				maxSteps: steps,
+				sessionId: `tools-cua-${Date.now()}`,
+				pinnedModel: visionCfg.computerUseModel,
+				failover,
+				handsAdapter,
+			});
+
+			const summary = [
+				`outcome: ${result.reason}`,
+				`steps: ${result.steps.length}/${steps}`,
+				result.finalMessage ?? "",
+			].filter(Boolean).join("\n");
+			return result.ok ? `Computer task complete.\n${summary}` : `Computer task failed.\n${summary}`;
+		} catch (err) {
+			return `run_computer_task error: ${err instanceof Error ? err.message : String(err)}`;
 		}
 	}
 }
