@@ -49,6 +49,12 @@ Historical documents kept for reference.
 | [DECISIONS.md](archive/DECISIONS.md) | Architecture decision log |
 | [REBUILD-PLAN.md](archive/REBUILD-PLAN.md) | Original rebuild plan |
 
+## Governance
+
+| Doc | Topic |
+|-----|--------|
+| [GOVERNANCE.md](GOVERNANCE.md) | Documentation governance — taxonomy, lifecycle, review, and duplicate prevention |
+
 ## Top-level docs (kept in place)
 
 | Doc | Topic |
