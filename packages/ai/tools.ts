@@ -2042,6 +2042,100 @@ const proposeSkillCreation = tool({
 	},
 });
 
+// ============================================================================
+// run_computer_task — high-level goal-based CUA loop ("hands")
+// ============================================================================
+// Use this when you want to accomplish a goal on the desktop without having
+// to drive each click/keystroke manually.  Say "use your hands to X" and call
+// this tool.  It runs the full CUA vision-model loop internally and returns a
+// summary.
+const runComputerTask = tool({
+	description:
+		"Run a goal-based computer-use task using the built-in CUA vision loop (8gent-hands). " +
+		"Accepts a natural-language goal and drives the desktop autonomously: screenshot → decide → act → repeat. " +
+		"Use this when a user says 'use your hands to …', 'open X', 'click …', or any task that requires " +
+		"controlling the desktop end-to-end rather than issuing individual desktop_click/desktop_type calls. " +
+		"Requires cua:setup to have been run once (run `bun run cua:setup` in the repo root).",
+	inputSchema: z.object({
+		goal: z.string().describe("Natural-language description of what to accomplish on the desktop."),
+		maxSteps: z
+			.number()
+			.int()
+			.min(1)
+			.max(50)
+			.optional()
+			.describe("Maximum number of CUA steps (default: 20, max: 50)."),
+	}),
+	execute: async ({ goal, maxSteps }) => {
+		if (!goal?.trim()) return "run_computer_task: goal is required";
+		const steps = Math.min(50, Math.max(1, maxSteps ?? 20));
+		try {
+			const { runComputerUseLoop } = await import("../eight/loops/computer-use");
+			const { ModelFailover } = await import("../providers/failover");
+			const { loadVisionConfig } = await import("../eight/vision-router");
+			const { existsSync } = await import("node:fs");
+			const { homedir } = await import("node:os");
+			const { join } = await import("node:path");
+			const { executeHandsTool } = await import("../daemon/tools/hands");
+
+			const visionCfg = loadVisionConfig();
+			const failover = new ModelFailover();
+
+			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-v4-flash", "deepseek");
+			if (!process.env.OPENROUTER_API_KEY)
+				failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
+			if (!existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"))) {
+				failover.markDown("apple-foundationmodel", "apfel");
+			}
+
+			const handsAdapter: import("../eight/loops/computer-use").HandsAdapter = async (
+				toolName,
+				args,
+				ctx,
+			) => {
+				if (toolName === "desktop_accessibility_tree") {
+					return {
+						ok: true as const,
+						result: {
+							pid: 0,
+							appName: "desktop",
+							windowTitle: "AX tree unavailable - call desktop_windows to list open windows",
+							root: {
+								role: "AXDesktop",
+								title: "Call desktop_windows to enumerate open windows.",
+								children: [],
+							},
+						},
+					};
+				}
+				const r = await executeHandsTool(toolName, args, ctx);
+				if (r.ok) return { ok: true as const, result: r.result };
+				return { ok: false as const, reason: (r as { error?: string }).error ?? "hands error" };
+			};
+
+			const result = await runComputerUseLoop({
+				goal: goal.trim(),
+				maxSteps: steps,
+				sessionId: `ai-tools-cua-${Date.now()}`,
+				pinnedModel: visionCfg.computerUseModel,
+				failover,
+				handsAdapter,
+			});
+
+			const summary = [
+				`outcome: ${result.reason}`,
+				`steps: ${result.steps.length}/${steps}`,
+				result.finalMessage ?? "",
+			]
+				.filter(Boolean)
+				.join("\n");
+			return result.ok ? `Computer task complete.\n${summary}` : `Computer task failed.\n${summary}`;
+		} catch (err) {
+			return `run_computer_task error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -2157,6 +2251,7 @@ export const agentTools = {
 	desktop_hover: desktopHover,
 	desktop_windows: desktopWindows,
 	desktop_clipboard: desktopClipboard,
+	run_computer_task: runComputerTask,
 
 	// Self-evolution
 	propose_skill_creation: proposeSkillCreation,
