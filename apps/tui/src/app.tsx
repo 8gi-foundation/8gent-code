@@ -615,7 +615,7 @@ export function App({
 		{
 			id: "welcome",
 			role: "system",
-			content: `\u221E 8gent Code \u2014 The Infinite Gentleman\n\n${randomGreeting}\n/help for commands, Tab for suggestions, or just ask.`,
+			content: `\u221E 8gent Code \u2014 The Infinite Gentleman\n\n${randomGreeting}\n/help for commands, Tab for suggestions, or just ask.\n\nTip: Computer Use is available. Run \`bun run cua:setup\` once, then ask me to run_computer_task with any goal.`,
 			timestamp: new Date(),
 		},
 	]);
