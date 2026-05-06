@@ -20,6 +20,7 @@ export type EntityType =
 	| "function"
 	| "package"
 	| "person"
+	| "session"
 	| "decision"
 	| "concept"
 	| "preference"
