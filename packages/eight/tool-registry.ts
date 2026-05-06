@@ -81,6 +81,18 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 	design: ["suggest_design", "query_design_system"],
 	self: ["self_inspect", "self_tune", "self_append_context"],
 	memory: ["remember", "recall"],
+	computer: [
+		"run_computer_task",
+		"desktop_screenshot",
+		"desktop_click",
+		"desktop_type",
+		"desktop_press",
+		"desktop_scroll",
+		"desktop_drag",
+		"desktop_hover",
+		"desktop_windows",
+		"desktop_clipboard",
+	],
 };
 
 const CATEGORY_NAMES = Object.keys(TOOL_CATEGORIES);

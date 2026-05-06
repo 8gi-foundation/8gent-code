@@ -117,7 +117,7 @@ describe("PtySession — lifecycle", () => {
 			// Bridge dispatches `exit` over JSON before its own subprocess
 			// closes; give the listener microtask one tick to run.
 			await new Promise((r) => setTimeout(r, 50));
-			expect(exitCode).toBe(7);
+			expect(exitCode as unknown as number).toBe(7);
 		},
 		5000,
 	);
