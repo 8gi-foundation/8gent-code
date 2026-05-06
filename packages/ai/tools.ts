@@ -16,6 +16,12 @@ import { z } from "zod";
 // Execution context passed to tools
 export interface ToolContext {
 	workingDirectory: string;
+	/** Active session model (e.g. "gemma4:latest") — used by tools that
+	 *  need to spawn child loops on the same backend the user has selected. */
+	activeModel?: string;
+	/** Active session runtime (e.g. "lmstudio", "ollama", "apfel"). Set by the
+	 *  agent before each tool call so child loops route to the same provider. */
+	activeRuntime?: string;
 }
 
 let _ctx: ToolContext = { workingDirectory: process.cwd() };
@@ -2089,26 +2095,38 @@ const runComputerTask = tool({
 				failover.markDown("apple-foundationmodel", "apfel");
 			}
 
-			// Detect the runtime from ~/.8gent/config.json so the CUA loop uses
-			// whatever backend the TUI is using (lmstudio, ollama, etc).
-			let configRuntime = "ollama";
-			try {
-				const { readFileSync } = await import("node:fs");
-				const cfgPath = join(homedir(), ".8gent", "config.json");
-				if (existsSync(cfgPath)) {
-					const raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
-					if (raw.runtime) configRuntime = raw.runtime;
-				}
-			} catch { /* use default */ }
-
-			// If the selected runtime is LM Studio, bypass the failover chain and
-			// create the client directly — it runs on a separate port from Ollama.
-			let clientFactory: import("../eight/loops/computer-use").CuaLoopConfig["clientFactory"] | undefined;
-			if (configRuntime === "lmstudio") {
-				const { createClient } = await import("../eight/clients");
-				const pinnedModel = visionCfg.computerUseModel;
-				clientFactory = () => createClient({ model: pinnedModel, runtime: "lmstudio" });
+			// Resolve the active model + runtime. Priority:
+			//   1. ToolContext (set by the agent each turn — reflects /model live)
+			//   2. ~/.8gent/config.json `runtime`/`model` (initialization defaults)
+			//   3. visionCfg.computerUseModel (DEFAULT_VISION_CONFIG fallback)
+			let activeModel = _ctx.activeModel ?? visionCfg.computerUseModel;
+			let activeRuntime = _ctx.activeRuntime ?? "ollama";
+			if (!_ctx.activeModel || !_ctx.activeRuntime) {
+				try {
+					const { readFileSync } = await import("node:fs");
+					const cfgPath = join(homedir(), ".8gent", "config.json");
+					if (existsSync(cfgPath)) {
+						const raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
+						if (!_ctx.activeModel && raw.model) activeModel = raw.model;
+						if (!_ctx.activeRuntime && raw.runtime) activeRuntime = raw.runtime;
+					}
+				} catch { /* use defaults */ }
 			}
+
+			// Build a client factory that routes to the active runtime directly.
+			// LM Studio runs on a separate port from Ollama, apfel is the on-device
+			// Apple Foundation bridge — none of these resolve through the failover
+			// chain's default Ollama path, so we bypass it when the runtime is known.
+			const { createClient } = await import("../eight/clients");
+			type Runtime = "ollama" | "lmstudio" | "openrouter" | "deepseek" | "apple-foundation" | "apfel";
+			const knownRuntimes: Runtime[] = [
+				"ollama", "lmstudio", "openrouter", "deepseek", "apple-foundation", "apfel",
+			];
+			const runtime: Runtime = knownRuntimes.includes(activeRuntime as Runtime)
+				? (activeRuntime as Runtime)
+				: "ollama";
+			const clientFactory: import("../eight/loops/computer-use").CuaLoopConfig["clientFactory"] = () =>
+				createClient({ model: activeModel, runtime });
 
 			const handsAdapter: import("../eight/loops/computer-use").HandsAdapter = async (
 				toolName,
@@ -2145,11 +2163,11 @@ const runComputerTask = tool({
 				goal: goal.trim(),
 				maxSteps: steps,
 				sessionId: `ai-tools-cua-${Date.now()}`,
-				pinnedModel: visionCfg.computerUseModel,
+				pinnedModel: activeModel,
 				failover,
 				handsAdapter,
 				approve: agentApprove,
-				...(clientFactory ? { clientFactory } : {}),
+				clientFactory,
 			});
 
 			const summary = [

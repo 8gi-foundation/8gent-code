@@ -170,9 +170,13 @@ export class Agent {
 		// Set working directory for hooks
 		this.hookManager.setWorkingDirectory(config.workingDirectory || process.cwd());
 
-		// Set tool context for AI SDK tools
+		// Set tool context for AI SDK tools — include the active model + runtime
+		// so child loops (e.g. run_computer_task) route to the same backend the
+		// user has selected (Ollama, LM Studio, apfel, etc).
 		setToolContext({
 			workingDirectory: config.workingDirectory || process.cwd(),
+			activeModel: config.model,
+			activeRuntime: config.runtime,
 		});
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
