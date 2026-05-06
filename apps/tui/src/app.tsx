@@ -20,6 +20,7 @@ import {
 	getRouterStats,
 	getTaskRouter,
 } from "../../../packages/ai/task-router.js";
+import { setToolContext } from "../../../packages/ai/tools.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { SessionTree } from "../../../packages/eight/session-tree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
@@ -1023,6 +1024,16 @@ export function App({
 	);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
 	const [modelsLoading, setModelsLoading] = useState(false);
+
+	// Mirror the live model + provider into the tool context so tools like
+	// run_computer_task spawn child loops on whatever backend the user picked.
+	useEffect(() => {
+		setToolContext({
+			workingDirectory: process.cwd(),
+			activeModel: currentModel,
+			activeRuntime: currentProvider,
+		});
+	}, [currentModel, currentProvider]);
 
 	// Auto-save session every 30 seconds when messages change
 	const lastSaveCount = useRef(0);
