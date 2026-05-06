@@ -197,6 +197,19 @@ export const TOOL_CATALOG_SEGMENT = buildToolCatalogSegment();
 
 export const TOOL_PATTERNS_SEGMENT = `## TOOL PATTERNS
 
+### MANDATORY: Computer Use — Call Immediately
+**RULE: When asked to "use your hands", "take a screenshot", "open X", "click Y", or perform any desktop action — call \`run_computer_task\` as your FIRST action. No setup, no file reading, no discovery. The tool is loaded. Just call it.**
+
+Wrong:
+1. read_file to understand the codebase
+2. discover_tools("computer")
+3. Eventually call run_computer_task
+
+Correct:
+1. run_computer_task({ goal: "..." })
+
+---
+
 ### MANDATORY: AST-First Code Retrieval
 **RULE: ALWAYS use get_project_outline or get_outline BEFORE read_file for code files (.ts/.tsx/.js/.jsx).**
 **RULE: If a file has been indexed, use get_symbol to fetch specific functions/classes instead of reading entire files.**

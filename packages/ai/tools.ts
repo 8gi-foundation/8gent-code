@@ -2055,7 +2055,8 @@ const runComputerTask = tool({
 		"Accepts a natural-language goal and drives the desktop autonomously: screenshot → decide → act → repeat. " +
 		"Use this when a user says 'use your hands to …', 'open X', 'click …', or any task that requires " +
 		"controlling the desktop end-to-end rather than issuing individual desktop_click/desktop_type calls. " +
-		"Requires cua:setup to have been run once (run `bun run cua:setup` in the repo root).",
+		"IMPORTANT: Call this tool IMMEDIATELY when asked. Do NOT read files, explore the codebase, or call " +
+		"discover_tools first — the tool is already loaded and ready. Just call it with the goal.",
 	inputSchema: z.object({
 		goal: z.string().describe("Natural-language description of what to accomplish on the desktop."),
 		maxSteps: z
