@@ -217,6 +217,7 @@ function resolveClient(
 	if (factory) return { client: factory(entry), entry };
 	const runtime:
 		| "ollama"
+		| "lmstudio"
 		| "deepseek"
 		| "openrouter"
 		| "apple-foundation"
@@ -229,7 +230,9 @@ function resolveClient(
 					? "deepseek"
 					: entry.provider === "openrouter"
 						? "openrouter"
-						: "ollama";
+						: entry.provider === "lmstudio"
+							? "lmstudio"
+							: "ollama";
 	const client = createClient({ model: entry.model, runtime });
 	return { client, entry };
 }

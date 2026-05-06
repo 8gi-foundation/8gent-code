@@ -2089,6 +2089,27 @@ const runComputerTask = tool({
 				failover.markDown("apple-foundationmodel", "apfel");
 			}
 
+			// Detect the runtime from ~/.8gent/config.json so the CUA loop uses
+			// whatever backend the TUI is using (lmstudio, ollama, etc).
+			let configRuntime = "ollama";
+			try {
+				const { readFileSync } = await import("node:fs");
+				const cfgPath = join(homedir(), ".8gent", "config.json");
+				if (existsSync(cfgPath)) {
+					const raw = JSON.parse(readFileSync(cfgPath, "utf-8"));
+					if (raw.runtime) configRuntime = raw.runtime;
+				}
+			} catch { /* use default */ }
+
+			// If the selected runtime is LM Studio, bypass the failover chain and
+			// create the client directly — it runs on a separate port from Ollama.
+			let clientFactory: import("../eight/loops/computer-use").CuaLoopConfig["clientFactory"] | undefined;
+			if (configRuntime === "lmstudio") {
+				const { createClient } = await import("../eight/clients");
+				const pinnedModel = visionCfg.computerUseModel;
+				clientFactory = () => createClient({ model: pinnedModel, runtime: "lmstudio" });
+			}
+
 			const handsAdapter: import("../eight/loops/computer-use").HandsAdapter = async (
 				toolName,
 				args,
@@ -2128,6 +2149,7 @@ const runComputerTask = tool({
 				failover,
 				handsAdapter,
 				approve: agentApprove,
+				...(clientFactory ? { clientFactory } : {}),
 			});
 
 			const summary = [
