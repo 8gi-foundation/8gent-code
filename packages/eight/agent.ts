@@ -19,6 +19,11 @@ import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from ".
 import { KernelManager } from "../kernel/manager";
 import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
+import {
+	generateSessionSummary,
+	recallPriorSessionsSync,
+	writeSessionToKG,
+} from "../memory/session-kg.js";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
@@ -256,6 +261,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Inject deferred tool categories when not loading all tools upfront
 		const deferredToolBlock = config.allTools ? "" : `\n\n${getDeferredToolSegment()}`;
 
+		// Inject prior session context from Knowledge Graph (best-effort, sync)
+		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
+
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
 		// no tools / no internet when it actually does. Closes #1082.
@@ -274,6 +282,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					personalityBlock +
 					orchestratorBlock +
 					deferredToolBlock +
+					priorSessionsBlock +
 					languageInstruction,
 		});
 
@@ -1575,6 +1584,21 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 		} catch {
 			// Session writer may already be closed
 		}
+
+		// Write session to Knowledge Graph (fire-and-forget, best-effort)
+		const allModified = [
+			...this.sessionWriter.getFilesCreated(),
+			...this.sessionWriter.getFilesModified(),
+		];
+		writeSessionToKG({
+			sessionId: this.sessionId,
+			summary: generateSessionSummary(this.messageHistory, allModified),
+			cwd: this.config.workingDirectory || process.cwd(),
+			filesCreated: this.sessionWriter.getFilesCreated(),
+			filesModified: this.sessionWriter.getFilesModified(),
+			durationMs: Date.now() - this.sessionStartTime,
+			branch: null,
+		}).catch(() => {});
 
 		const manager = getLSPManager();
 		await manager.stopAll();
