@@ -393,6 +393,38 @@ brew install sox whisper-cpp
 
 <br />
 
+## Computer Use
+
+Autonomous multi-step desktop agent. Give any model a plain-English goal and it plans, clicks, types, and reads the screen to get it done.
+
+**Setup (one time):**
+```bash
+bun run cua:setup
+```
+Grants Accessibility and Screen Recording permissions, installs `cliclick`.
+
+**Run standalone:**
+```bash
+bun run cua:run "open TextEdit and type hello"
+```
+
+**Use as a tool from the TUI:**
+
+Any model in the TUI can call `run_computer_task` directly:
+```
+run_computer_task: open Safari, search for "8gent", and screenshot the first result
+```
+
+**Configure the vision model:**
+
+Set `vision.computerUseModel` in `~/.8gent/config.json` (default: `qwen3.6:27b`).
+
+<br />
+
+---
+
+<br />
+
 ## How It Works
 
 ```
