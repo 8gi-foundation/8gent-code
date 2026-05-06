@@ -98,8 +98,14 @@ export function loadVisionConfig(projectDir?: string): VisionConfig {
 		try {
 			if (fs.existsSync(configPath)) {
 				const data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-				if (data.vision) {
-					return { ...DEFAULT_VISION_CONFIG, ...data.vision };
+				const visionOverrides = data.vision ?? {};
+				// If computerUseModel isn't explicitly set, inherit the globally-selected
+				// model (top-level `model` key) so the TUI model picker drives CUA.
+				if (!visionOverrides.computerUseModel && data.model) {
+					visionOverrides.computerUseModel = data.model;
+				}
+				if (data.vision || data.model) {
+					return { ...DEFAULT_VISION_CONFIG, ...visionOverrides };
 				}
 			}
 		} catch {
