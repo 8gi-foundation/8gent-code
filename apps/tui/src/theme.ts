@@ -36,7 +36,10 @@ export const theme = {
 
 		// Border
 		border: "#2E2A26",
-		cardBorder: "#2E2A26",
+		// cardBorder is intentionally lighter than `border` so HUD strip cards
+		// (AgentInstrumentStrip, ModeFooter) read as discrete cells against
+		// the dark bg. Was previously #2E2A26 which collapsed into the background.
+		cardBorder: "#4A453F",
 
 		// Semantic / UI colors (kept warm where possible)
 		teal:     "#7DA8A3",
