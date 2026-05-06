@@ -1,52 +1,83 @@
 /**
  * theme — single source of truth for all 8gent-code TUI color tokens.
  *
- * This IS the design token system. Every component must import from here.
- * Never hardcode hex values in components. If a color is missing, add it here.
+ * Two layers, both required:
+ *   1. `palette` — raw earth-tone primitives (the only place hex literals live)
+ *   2. `theme.color` — semantic tokens; every value MUST reference a palette
+ *      primitive. Never inline a hex here, and never inline one in a component.
  *
  * Mirrors the canonical brand palette from BRAND.md:
  *   Primary orange: #E8610A  |  Dark mode variant: #F07A28
  *   bg-0: #0A0908  |  text-primary: #FAF7F4  |  border: #2E2A26
  */
 
+// ── Layer 1: raw palette primitives ────────────────────────────────────
+// Earth-tone ramps. These are the only hex literals in the design system.
+const palette = {
+	// Warm neutrals (bg → text)
+	earth0: "#0A0908",  // bg-0          deepest
+	earth1: "#12100E",  // bg-1
+	earth2: "#1C1A17",  // bg-2
+	earth3: "#252220",  // bg-3
+	earth4: "#2E2A26",  // subtle border (matches BRAND.md `border`)
+	earth5: "#4A453F",  // visible border (cards, chips)
+	earth6: "#5F5A55",  // textDim
+	earth7: "#8A8078",  // textTertiary
+	earth8: "#C8C2BA",  // textSecondary
+	earth9: "#E6DFD7",  // prose
+	earth10: "#FAF7F4", // text-primary (cream)
+
+	// Brand orange
+	orange500: "#E8610A",
+	orange400: "#F07A28",
+	orange700: "#8B3F12",
+
+	// Cool accents (semantic only — keep usage minimal vs warm earth tones)
+	teal500:    "#7DA8A3",
+	steel500:   "#9DB5C8",
+	steel800:   "#334958",
+
+	// Status
+	red500:   "#D63A24",
+	green500: "#47A639",
+} as const;
+
+// ── Layer 2: semantic tokens (compose from palette only) ───────────────
 export const theme = {
 	color: {
 		// Backgrounds (dark mode default)
-		bg:       "#0A0908",  // bg-0
-		surface:  "#12100E",  // bg-1
-		surface2: "#1C1A17",  // bg-2
-		surface3: "#252220",  // bg-3
+		bg:       palette.earth0,
+		surface:  palette.earth1,
+		surface2: palette.earth2,
+		surface3: palette.earth3,
 
 		// Text hierarchy
-		textPrimary:   "#FAF7F4",  // text-primary   (cream)
-		textSecondary: "#C8C2BA",  // text-secondary
-		textTertiary:  "#8A8078",  // text-tertiary
-		textDim:       "#5F5A55",  // below tertiary
+		textPrimary:   palette.earth10,
+		textSecondary: palette.earth8,
+		textTertiary:  palette.earth7,
+		textDim:       palette.earth6,
 
 		// Aliases used by legacy code (same values, different names)
-		cream: "#FAF7F4",
-		prose: "#E6DFD7",
-		muted: "#8A8078",
-		dim:   "#5F5A55",
+		cream: palette.earth10,
+		prose: palette.earth9,
+		muted: palette.earth7,
+		dim:   palette.earth6,
 
 		// Brand accent
-		orange:    "#E8610A",  // primary orange (dark contexts)
-		orangeAlt: "#F07A28",  // dark mode variant
-		orangeDim: "#8B3F12",  // muted orange for backgrounds
+		orange:    palette.orange500,
+		orangeAlt: palette.orange400,
+		orangeDim: palette.orange700,
 
-		// Border
-		border: "#2E2A26",
-		// cardBorder is intentionally lighter than `border` so HUD strip cards
-		// (AgentInstrumentStrip, ModeFooter) read as discrete cells against
-		// the dark bg. Was previously #2E2A26 which collapsed into the background.
-		cardBorder: "#4A453F",
+		// Border ramp
+		border:     palette.earth4,  // page-level frames (subtle)
+		cardBorder: palette.earth5,  // HUD card cells (visible against bg)
 
 		// Semantic / UI colors (kept warm where possible)
-		teal:     "#7DA8A3",
-		steel:    "#9DB5C8",
-		steelDim: "#334958",
-		red:      "#D63A24",
-		green:    "#47A639",
+		teal:     palette.teal500,
+		steel:    palette.steel500,
+		steelDim: palette.steel800,
+		red:      palette.red500,
+		green:    palette.green500,
 	},
 } as const;
 
