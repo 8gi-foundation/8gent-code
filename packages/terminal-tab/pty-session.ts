@@ -86,9 +86,15 @@ function spawnBridge(
 	// Bun-targeted build paths.
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const cp = require("node:child_process") as typeof import("node:child_process");
-	const proc = cp.spawn(cmd[0], cmd.slice(1), { stdio: ["pipe", "pipe", "pipe"], env });
-	const stdoutStream = nodeReadableToWebStream(proc.stdout);
-	const stderrStream = nodeReadableToWebStream(proc.stderr);
+	// Double-cast through unknown: TypeScript collapses the spawn overload
+	// intersection to `never` due to conflicting stdin types on the union.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const proc = (cp.spawn as any)(cmd[0], cmd.slice(1), {
+		stdio: ["pipe", "pipe", "pipe"],
+		env,
+	}) as import("node:child_process").ChildProcess;
+	const stdoutStream = nodeReadableToWebStream(proc.stdout!);
+	const stderrStream = nodeReadableToWebStream(proc.stderr!);
 	const exited = new Promise<number>((resolve) => {
 		proc.on("exit", (code) => resolve(code ?? 0));
 	});
