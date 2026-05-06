@@ -226,9 +226,9 @@ describe("app_state", () => {
 		db.setAppState("tui", "windowSize", { cols: 120, rows: 40 });
 		db.setAppState("dashboard", "lastTab", "metrics");
 
-		expect(db.getAppState("tui", "lastTab")).toBe("chat");
+		expect(db.getAppState<string>("tui", "lastTab")).toBe("chat");
 		expect(db.getAppState<{ cols: number }>("tui", "windowSize")?.cols).toBe(120);
-		expect(db.getAppState("dashboard", "lastTab")).toBe("metrics");
+		expect(db.getAppState<string>("dashboard", "lastTab")).toBe("metrics");
 
 		const tuiAll = db.listAppState("tui");
 		expect(tuiAll.length).toBe(2);
@@ -340,8 +340,8 @@ describe("persistence across simulated restarts", () => {
 		first.close();
 
 		const second = new WorkspaceDb({ dbPath });
-		expect(second.kvGet("workspace.last_command")).toBe("bun run tui");
-		expect(second.getAppState("tui", "theme")).toBe("dark");
+		expect(second.kvGet<string>("workspace.last_command")).toBe("bun run tui");
+		expect(second.getAppState<string>("tui", "theme")).toBe("dark");
 		second.close();
 	});
 
@@ -377,13 +377,13 @@ describe("concurrent access (WAL)", () => {
 		writer.checkpoint();
 
 		const reader = new WorkspaceDb({ dbPath, skipMigrations: true });
-		expect(reader.kvGet("shared")).toBe("from-writer");
+		expect(reader.kvGet<string>("shared")).toBe("from-writer");
 
 		writer.kvSet("shared", "updated-from-writer");
 		writer.checkpoint();
 
 		// Reader sees the update on next query (WAL is shared via the DB file).
-		expect(reader.kvGet("shared")).toBe("updated-from-writer");
+		expect(reader.kvGet<string>("shared")).toBe("updated-from-writer");
 
 		writer.close();
 		reader.close();
@@ -427,8 +427,8 @@ describe("concurrent access (WAL)", () => {
 			db.kvSet("tx.b", 2);
 		});
 
-		expect(db.kvGet("tx.a")).toBe(1);
-		expect(db.kvGet("tx.b")).toBe(2);
+		expect(db.kvGet<number>("tx.a")).toBe(1);
+		expect(db.kvGet<number>("tx.b")).toBe(2);
 		db.close();
 	});
 });
