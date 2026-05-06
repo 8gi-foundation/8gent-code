@@ -592,9 +592,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			this.toolRegistry.loadCategory("self");
 			this.toolRegistry.loadCategory("memory");
 		}
+		// Load computer category when cua:setup has been run, regardless of provider.
+		const { existsSync } = await import("node:fs");
+		const { homedir } = await import("node:os");
+		const { join } = await import("node:path");
+		const cuaConfigured = existsSync(join(homedir(), ".8gent", "cua-configured"));
+		if (cuaConfigured) {
+			this.toolRegistry.loadCategory("computer");
+		}
 		const allTools = this.toolRegistry.getTools();
+		const localCoreTools = cuaConfigured ? [...CORE_TOOLS, "run_computer_task"] : CORE_TOOLS;
 		const effectiveTools = isLocalProvider
-			? Object.fromEntries(Object.entries(allTools).filter(([k]) => CORE_TOOLS.includes(k)))
+			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
 			: allTools;
 
 		// ── Populate runtime params for self-awareness tools ──────────
