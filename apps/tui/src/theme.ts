@@ -36,6 +36,7 @@ export const theme = {
 
 		// Border
 		border: "#2E2A26",
+		cardBorder: "#2E2A26",
 
 		// Semantic / UI colors (kept warm where possible)
 		teal:     "#7DA8A3",
