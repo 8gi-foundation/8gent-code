@@ -71,7 +71,7 @@ export class OllamaClient implements LLMClient {
 
 	async chat(messages: Message[], tools?: object[]): Promise<LLMResponse> {
 		const ac = new AbortController();
-		const timer = setTimeout(() => ac.abort(), 60_000); // 60s hard cap
+		const timer = setTimeout(() => ac.abort(), 180_000); // 180s — covers cold-start for large models (27B+)
 
 		let response: Response;
 		try {
@@ -88,7 +88,7 @@ export class OllamaClient implements LLMClient {
 			});
 		} catch (err: any) {
 			clearTimeout(timer);
-			if (err?.name === "AbortError") throw new Error("Ollama error: request timed out after 60s");
+			if (err?.name === "AbortError") throw new Error("Ollama error: request timed out after 180s");
 			throw err;
 		}
 		clearTimeout(timer);
