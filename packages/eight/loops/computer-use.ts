@@ -265,6 +265,9 @@ export async function runComputerUseLoop(
 	const history: CuaStepRecord[] = [];
 	let lastActionResult = "";
 	let totalCost = 0;
+	// Track consecutive model errors to detect all-providers-exhausted early.
+	let consecutiveModelErrors = 0;
+	const MAX_CONSECUTIVE_ERRORS = 4;
 
 	for (let step = 1; step <= maxSteps; step += 1) {
 		const t0 = Date.now();
@@ -302,11 +305,41 @@ export async function runComputerUseLoop(
 				.join(" | "),
 		});
 
-		const { client, entry } = resolveClient(
-			failover,
-			pinnedModel,
-			config.clientFactory,
-		);
+		// resolveClient + createClient can throw synchronously (e.g. missing API
+		// key). Wrap the whole block so a broken provider never kills the loop.
+		let client: LLMClient;
+		let entry: FailoverEntry;
+		try {
+			({ client, entry } = resolveClient(
+				failover,
+				pinnedModel,
+				config.clientFactory,
+			));
+		} catch (err) {
+			lastActionResult = `client-init error: ${(err as Error).message}`;
+			consecutiveModelErrors += 1;
+			history.push({
+				step,
+				perception,
+				perceptionMethod: method,
+				cost: perception.cost,
+				toolName: "_client_error",
+				toolArgs: {},
+				resultPreview: lastActionResult,
+				approved: false,
+				durationMs: Date.now() - t0,
+			});
+			if (consecutiveModelErrors >= MAX_CONSECUTIVE_ERRORS) {
+				return {
+					ok: false,
+					reason: "goal_failed",
+					steps: history,
+					finalMessage: `All model providers exhausted after ${consecutiveModelErrors} consecutive errors. Last: ${lastActionResult}`,
+					totalCost,
+				};
+			}
+			continue;
+		}
 
 		let llmResp: Awaited<ReturnType<LLMClient["chat"]>>;
 		try {
@@ -318,6 +351,7 @@ export async function runComputerUseLoop(
 			// Mark this entry down and let the next iteration pick the next tier.
 			failover.markDown(entry.model, entry.provider);
 			lastActionResult = `model error on ${entry.provider}/${entry.model}: ${(err as Error).message}`;
+			consecutiveModelErrors += 1;
 			history.push({
 				step,
 				perception,
@@ -329,8 +363,19 @@ export async function runComputerUseLoop(
 				approved: false,
 				durationMs: Date.now() - t0,
 			});
+			// All providers exhausted - stop burning steps on a dead chain.
+			if (consecutiveModelErrors >= MAX_CONSECUTIVE_ERRORS) {
+				return {
+					ok: false,
+					reason: "goal_failed",
+					steps: history,
+					finalMessage: `All model providers exhausted after ${consecutiveModelErrors} consecutive errors. Last: ${lastActionResult}`,
+					totalCost,
+				};
+			}
 			continue;
 		}
+		consecutiveModelErrors = 0; // reset on any successful model response
 
 		const toolCall = llmResp.message.tool_calls?.[0];
 		if (!toolCall) {

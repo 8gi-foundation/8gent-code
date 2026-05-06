@@ -5312,7 +5312,7 @@ export function App({
 					<Box
 						flexShrink={0}
 						flexDirection="column"
-						maxHeight={7}
+						height={7}
 						overflow="hidden"
 						paddingX={1}
 					>
