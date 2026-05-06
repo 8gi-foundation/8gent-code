@@ -132,6 +132,8 @@ const TOOL_CATEGORY_DESCRIPTIONS: Record<string, string> = {
 		"Spawn and coordinate sub-agents. Delegate, message, merge work. The `term_*` family lets you spawn external CLIs (claude, openclaw, pi…) in real Terminal.app windows via tmux, send them prompts, and read their replies — use it to parallelise compute across whichever LLM CLIs the user has installed.",
 	background: "Start long-running background tasks and stream their output.",
 	mcp: "List and call tools from connected MCP servers.",
+	computer:
+		"Control the desktop autonomously (8gent-hands). Use `run_computer_task` with a natural-language goal to drive the full vision-model CUA loop — 'use your hands to open X', 'click the button in Y', 'fill out the form at Z'. The low-level `desktop_*` tools (screenshot, click, type, press, scroll, drag, hover, windows, clipboard) are also available for fine-grained control. Requires `bun run cua:setup` once.",
 };
 
 export interface ToolCatalogOptions {
