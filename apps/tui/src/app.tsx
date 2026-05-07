@@ -5418,8 +5418,9 @@ export function App({
 				</Box>
 
 				<Box
-					borderStyle="round"
-					borderColor={t.cardBorder}
+					borderStyle="single"
+					borderColor={t.textTertiary}
+					paddingX={1}
 					flexGrow={1}
 					minHeight={0}
 				>
