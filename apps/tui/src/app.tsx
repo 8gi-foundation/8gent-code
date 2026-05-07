@@ -61,6 +61,7 @@ import {
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
 import { CommandInput } from "./components/command-input.js";
+import { CommandPalette } from "./components/CommandPalette.js";
 import { FixedFrame } from "./components/fixed-frame/index.js";
 import { HeaderBar } from "./components/HeaderBar.js";
 import {
@@ -135,7 +136,10 @@ import {
 	logToolStart,
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
-import type { SlashCommand } from "./lib/slash-commands.js";
+import {
+	BUILT_IN_SLASH_COMMANDS,
+	type SlashCommand,
+} from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
@@ -1449,6 +1453,9 @@ export function App({
 	const [adhdMode, setAdhdMode] = useState(false);
 	const [adhdSuggested, setAdhdSuggested] = useState(false);
 
+	// Command palette overlay (Ctrl+P).
+	const [paletteOpen, setPaletteOpen] = useState(false);
+
 	// Design agent state
 	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
 	const [designSuggestions, setDesignSuggestions] = useState<DesignSuggestion[]>([]);
@@ -1488,6 +1495,17 @@ export function App({
 		// from sleep promptly. Cheap; no React state when value is unchanged.
 		if (input || key.return || key.upArrow || key.downArrow || key.escape) {
 			setLastActivityAt(Date.now());
+		}
+
+		// Ctrl+P: toggle the command palette overlay.
+		// Palette has its own useInput listener so we early-return for
+		// every other key while it is open and let it own the input stream.
+		if (key.ctrl && input === "p") {
+			setPaletteOpen((o) => !o);
+			return;
+		}
+		if (paletteOpen) {
+			return;
 		}
 
 		// Ctrl+L: toggle bubble navigation mode
@@ -5442,6 +5460,22 @@ export function App({
 								maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
 							/>
 						</Box>
+
+						{paletteOpen && (
+							<Box justifyContent="center" flexShrink={0}>
+								<CommandPalette
+									isOpen={paletteOpen}
+									onClose={() => setPaletteOpen(false)}
+									onExecute={(name) => {
+										void handleSlashCommand(name as SlashCommand, []);
+									}}
+									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
+										name: c.name,
+										description: c.description,
+									}))}
+								/>
+							</Box>
+						)}
 
 						{approvalPending && (
 							<InlineApprovalPrompt target={approvalPending.target} />
