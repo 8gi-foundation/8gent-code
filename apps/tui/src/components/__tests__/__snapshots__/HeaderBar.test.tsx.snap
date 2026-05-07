@@ -1,0 +1,60 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`HeaderBar snapshot of V2 across mic / ask / state matrix is stable 1`] = `
+[
+  {
+    "approvalPending": false,
+    "idx": 0,
+    "justifyContent": undefined,
+    "lilEightState": "idle",
+    "localFirst": true,
+    "micOn": false,
+    "width": undefined,
+  },
+  {
+    "approvalPending": false,
+    "idx": 1,
+    "justifyContent": undefined,
+    "lilEightState": "idle",
+    "localFirst": true,
+    "micOn": true,
+    "width": undefined,
+  },
+  {
+    "approvalPending": true,
+    "idx": 2,
+    "justifyContent": undefined,
+    "lilEightState": "idle",
+    "localFirst": true,
+    "micOn": false,
+    "width": undefined,
+  },
+  {
+    "approvalPending": false,
+    "idx": 3,
+    "justifyContent": undefined,
+    "lilEightState": "idle",
+    "localFirst": false,
+    "micOn": false,
+    "width": undefined,
+  },
+  {
+    "approvalPending": false,
+    "idx": 4,
+    "justifyContent": undefined,
+    "lilEightState": "working",
+    "localFirst": true,
+    "micOn": false,
+    "width": undefined,
+  },
+  {
+    "approvalPending": false,
+    "idx": 5,
+    "justifyContent": undefined,
+    "lilEightState": "error",
+    "localFirst": true,
+    "micOn": false,
+    "width": undefined,
+  },
+]
+`;
