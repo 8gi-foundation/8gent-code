@@ -119,10 +119,18 @@ export function StereoDisplay(props: {
 	muted: boolean;
 	tick: number;
 	termWidth: number;
+	hasTrack?: boolean;
 }) {
-	const wave = props.playing ? waveFrame(props.tick) : WAVE_IDLE;
+	// hasTrack defaults true for backwards compatibility with prior call sites.
+	const hasTrack = props.hasTrack !== false;
+	const wave = !hasTrack ? WAVE_IDLE : props.playing ? waveFrame(props.tick) : WAVE_IDLE;
 	// Vol slider gets ~40% of available width minus label/padding
 	const sliderWidth = Math.max(8, Math.floor(props.termWidth * 0.3));
+
+	const trackText = hasTrack ? props.track : "(no track)";
+	const artistText = hasTrack ? props.artist : "";
+	const trackColor = hasTrack ? t.textPrimary : t.textDim;
+	const artistColor = hasTrack ? t.orange : t.textDim;
 
 	return (
 		<Box
@@ -136,19 +144,19 @@ export function StereoDisplay(props: {
 			<Box justifyContent="space-between" width="100%">
 				<Box minWidth={0} flexGrow={1}>
 					<Text color={t.orange}>{props.playing ? "◴ " : "○ "}</Text>
-					<Text color={t.textPrimary} wrap="truncate-end">{props.track}</Text>
+					<Text color={trackColor} wrap="truncate-end">{trackText}</Text>
 				</Box>
 				<Text color={t.orange}>{props.playing ? " ◷" : " ○"}</Text>
 			</Box>
 
 			{/* Row 2: artist | waveform (centered) | elapsed / duration */}
 			<Box justifyContent="space-between" width="100%">
-				<Text color={t.orange}>{props.artist}</Text>
-				<Text color={props.playing ? t.orangeAlt : t.textDim}>{wave}</Text>
+				<Text color={artistColor}>{artistText}</Text>
+				<Text color={props.playing && hasTrack ? t.orangeAlt : t.textDim}>{wave}</Text>
 				<Text color={t.orangeDim}>{props.elapsed} / {props.duration}</Text>
 			</Box>
 
-			{/* Row 3: volume slider */}
+			{/* Row 3: volume slider — stays visible even with no track */}
 			<Box width="100%">
 				<VolumeSlider volume={props.volume} muted={props.muted} width={sliderWidth} />
 			</Box>
@@ -362,7 +370,12 @@ export function DjDeck() {
 	const effectiveVolume = displayVolume ?? status.volume;
 	const muted = effectiveVolume != null && effectiveVolume === 0;
 	const volume = effectiveVolume == null ? null : Math.round(effectiveVolume);
-	const track = truncateEnd(sanitizeTrack(status.title || "(loading)"), 82);
+	// Distinguish "no track ever loaded" from "track loaded / loading a real track".
+	// A track exists when status.title is non-empty OR audio is actively playing.
+	const hasTrack = status.title.length > 0 || status.playing;
+	const track = hasTrack
+		? truncateEnd(sanitizeTrack(status.title || "(loading)"), 82)
+		: "";
 
 	// Always-on stereo: collapsed mode renders a one-line strip, never zero
 	// height. Auto-toggling is forbidden — only ^D / setDjDeckOpen flip this.
@@ -391,13 +404,14 @@ export function DjDeck() {
 				<StereoDisplay
 					playing={playing}
 					track={track}
-					artist="Instrumental"
-					elapsed={fmt(localPos)}
-					duration={fmt(status.duration)}
+					artist={hasTrack ? "Instrumental" : ""}
+					elapsed={hasTrack ? fmt(localPos) : "0:00"}
+					duration={hasTrack ? fmt(status.duration) : "0:00"}
 					volume={volume}
 					muted={muted}
 					tick={tick}
 					termWidth={80}
+					hasTrack={hasTrack}
 				/>
 			</Box>
 
