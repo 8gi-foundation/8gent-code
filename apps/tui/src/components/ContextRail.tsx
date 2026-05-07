@@ -9,14 +9,15 @@
  * Theme tokens only. No inline hex.
  *
  * Layout: section headings (WORKSPACE / STATE / CONTEXT / ACCESS) sit on their
- * own line in orange bold. Sub-labels share a row with their value so narrow
- * widths don't wrap and clip leading characters. Values use truncate-end so
- * long branch names don't break the rail.
+ * own line in orange bold. Data rows use the shared RailRow helper so labels
+ * and values can never collide at narrow widths (the bug that produced
+ * `mainch` and `ASKroval`).
  */
 
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
+import { RailRow } from "./RailRow.js";
 
 interface ContextRailProps {
 	branch: string;
@@ -26,29 +27,6 @@ interface ContextRailProps {
 	adhdMode: boolean;
 	/** Optional override; defaults to "8gent-code" until wired to real workspace. */
 	workspaceName?: string;
-}
-
-/**
- * Inline label + value row. Label takes its natural width, value takes the
- * remaining space and truncates from the end if too long.
- */
-function Row({
-	label,
-	value,
-	valueColor,
-}: {
-	label: string;
-	value: string;
-	valueColor: string;
-}) {
-	return (
-		<Box flexDirection="row">
-			<Text color={t.dim}>{label}  </Text>
-			<Box flexGrow={1}>
-				<Text color={valueColor} wrap="truncate-end">{value}</Text>
-			</Box>
-		</Box>
-	);
 }
 
 export function ContextRail({
@@ -78,30 +56,30 @@ export function ContextRail({
 		>
 			<Text color={t.orange} bold>WORKSPACE</Text>
 			<Text color={t.textSecondary} wrap="truncate-end">{workspaceName}</Text>
-			<Row label="branch" value={branch} valueColor={t.orange} />
+			<RailRow label="branch" value={branch} color={t.orange} />
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>STATE</Text>
-			<Row
+			<RailRow
 				label="approval"
 				value={permissions.toUpperCase()}
-				valueColor={permissions === "ask" ? t.orange : t.textSecondary}
+				color={permissions === "ask" ? t.orange : t.textSecondary}
 			/>
-			<Row label="risk" value={risk.toUpperCase()} valueColor={riskColor} />
+			<RailRow label="risk" value={risk.toUpperCase()} color={riskColor} />
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>CONTEXT</Text>
-			<Box flexDirection="row">
+			<Box justifyContent="space-between" width="100%" overflow="hidden">
 				<Text color={t.steel}>{contextBar}</Text>
-				<Text color={t.muted}> {contextPct}%</Text>
+				<Text color={t.muted}>{contextPct}%</Text>
 			</Box>
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>ACCESS</Text>
-			<Row
+			<RailRow
 				label="ADHD"
 				value={adhdMode ? "ON" : "OFF"}
-				valueColor={adhdMode ? t.teal : t.muted}
+				color={adhdMode ? t.teal : t.muted}
 			/>
 		</Box>
 	);
