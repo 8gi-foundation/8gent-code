@@ -26,6 +26,7 @@ import {
 	resolveSlashInput,
 	toGhostSuggestions,
 } from "../lib/slash-registry.js";
+import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { Blink } from "./fade-transition.js";
 import { AppText, Inline, Label, MutedText, ShortcutHint } from "./primitives/index.js";
@@ -285,7 +286,7 @@ export function CommandInput({
 				<Box marginBottom={0}>
 					<AnimatedSpinner
 						type="dots"
-						color="cyan"
+						color={t.teal}
 						label={processingStatusLine.label}
 						showDots={true}
 					/>
@@ -357,7 +358,10 @@ interface PromptIndicatorProps {
 
 function PromptIndicator({ pulse }: PromptIndicatorProps) {
 	const [colorIndex, setColorIndex] = useState(0);
-	const colors = ["cyan", "blue", "magenta", "cyan"];
+	// Warm pulse (was cyan/blue/magenta — magenta violated the brand
+	// prohibition on hues 270-350, and the whole cycle bled cool into
+	// the always-on prompt). Now: orange brand pulse with a dim ember.
+	const colors = [t.orange, t.orangeAlt, t.orangeDim, t.orange];
 
 	useEffect(() => {
 		const interval = setInterval(() => {
