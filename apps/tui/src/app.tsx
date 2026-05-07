@@ -160,6 +160,43 @@ import { NarratorView } from "./screens/index.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
+import { ContextRail } from "./components/ContextRail.js";
+import { LiveFocalStrip } from "./components/LiveFocalStrip.js";
+import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
+import {
+	ActivityRail,
+	type ActiveTask as ActivityRailTask,
+	type ToolStatus as ActivityRailToolStatus,
+	type ProviderRow as ActivityRailProviderRow,
+	type AgentRow as ActivityRailAgentRow,
+} from "./components/ActivityRail.js";
+
+/**
+ * Three-zone TUI shell flag. Read once at module load so the OFF path is
+ * bytewise identical to pre-V2 main. Set 8GENT_TUI_V2=1 to opt in.
+ */
+const TUI_V2_ENABLED = process.env["8GENT_TUI_V2"] === "1";
+
+// Stub data for V2 ActivityRail / ContextRail. Real wiring is a follow-up.
+const STUB_ACTIVE_TASKS: ReadonlyArray<ActivityRailTask> = [
+	{ id: "stub-1", label: "stub: idle", progress: 0 },
+];
+const STUB_TOOLS: ReadonlyArray<ActivityRailToolStatus> = [
+	{ name: "read", state: "idle" },
+	{ name: "patch", state: "idle" },
+	{ name: "test", state: "idle" },
+	{ name: "verify", state: "idle" },
+];
+const STUB_PROVIDERS: ReadonlyArray<ActivityRailProviderRow> = [
+	{ name: "stub local", state: "local", latency: "—" },
+];
+const STUB_MEMORY = { hits: 0, misses: 0, cache: "—" } as const;
+const STUB_AGENTS: ReadonlyArray<ActivityRailAgentRow> = [
+	{ name: "Core", state: "idle" },
+	{ name: "Research", state: "idle" },
+	{ name: "Tester", state: "idle" },
+	{ name: "Reviewer", state: "idle" },
+];
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -5193,6 +5230,151 @@ export function App({
 
 	const PROCESS_DETAIL_CHROME_ROWS = 10;
 
+	// V2 three-zone shell. Gated by 8GENT_TUI_V2=1 — when off, renderTuiV2
+	// is never invoked and the legacy return path runs unchanged.
+	const renderTuiV2 = () => {
+		const cols = viewport.width;
+		const showContextRail = cols >= 120;
+		const showActivityRail = cols >= 90;
+		const elapsedSec = Math.floor((Date.now() - startTime.getTime()) / 1000);
+		const mins = Math.floor(elapsedSec / 60);
+		const secs = elapsedSec % 60;
+		const sessionTime = `${mins}m ${secs.toString().padStart(2, "0")}`;
+		const tokenStr =
+			totalTokens >= 1000
+				? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
+				: `${totalTokens} tok`;
+		const micOn =
+			Boolean(voice?.isAvailable) &&
+			(voice?.state === "recording" || voiceChat?.isActive);
+		const approvalPending = false; // wiring is a follow-up issue
+		const lilEightState: "idle" | "thinking" | "working" | "done" | "error" = isProcessing
+			? "working"
+			: "idle";
+		const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
+		void sessionTick;
+		return (
+			<FixedFrame>
+				<Box flexShrink={0}>
+					<HeaderBar
+						updateAvailable={updateInfo}
+						v2={{
+							workspacePath: process.cwd(),
+							branch: currentBranch || "—",
+							syncStatus: "in sync",
+							micOn: Boolean(micOn),
+							approvalPending,
+							localFirst: true,
+							sessionTime,
+							lilEightState,
+						}}
+					/>
+				</Box>
+
+				<Box flexShrink={0}>
+					<TabBar
+						tabs={workspaceTabs.tabs}
+						onSwitch={workspaceTabs.switchTab}
+						isTabProcessing={perTabAgents.isTabProcessing}
+					/>
+				</Box>
+
+				<Box flexGrow={1} minHeight={0} gap={1}>
+					{showContextRail && (
+						<ContextRail
+							branch={currentBranch || "—"}
+							risk={infiniteModeActive ? "high" : "low"}
+							permissions={infiniteModeActive ? "infinite" : "ask"}
+							contextPct={contextPct}
+							adhdMode={adhdMode}
+						/>
+					)}
+
+					<Box flexGrow={1} flexDirection="column" minWidth={0}>
+						<LiveFocalStrip
+							mode={
+								agentMode === "Planning"
+									? "Planning"
+									: agentMode === "Implementing"
+										? "Implementing"
+										: agentMode === "Testing"
+											? "Testing"
+											: agentMode === "Debugging"
+												? "Debugging"
+												: "Researching"
+							}
+							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+							route={currentModel || "—"}
+							tokens={tokenStr}
+							contextPct={contextPct}
+							approvalPending={approvalPending}
+						/>
+
+						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+							<MessageList
+								messages={messages}
+								maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
+							/>
+						</Box>
+
+						{approvalPending && (
+							<InlineApprovalPrompt target="pending tool call" />
+						)}
+
+						<Box flexShrink={0}>
+							<CommandInput
+								onSubmit={handleSubmit}
+								isProcessing={isProcessing}
+								focused={
+									((viewMode === "chat" && activeTabType === "chat") ||
+										(viewMode === "onboarding" && !onboardingSelectChoices)) &&
+									!isBubbleNavMode
+								}
+								processingStage={processingStage}
+								showAnimations={showAnimations}
+								activeTool={activeTool}
+								stepCount={stepCount}
+								toolCount={toolCount}
+								totalTokens={totalTokens}
+								isGitRepo={isGitRepo}
+								currentBranch={currentBranch}
+								planNextStep={planNextStep}
+								recentCommands={recentCommands}
+								onSlashCommand={handleSlashCommand}
+								injectedText={voiceTranscript}
+								transformInputValue={transformChatInput}
+								allowEmptySubmit={!!imageInput.currentImage}
+							/>
+						</Box>
+					</Box>
+
+					{showActivityRail && (
+						<ActivityRail
+							tasks={STUB_ACTIVE_TASKS}
+							tools={STUB_TOOLS}
+							providers={STUB_PROVIDERS}
+							memory={STUB_MEMORY}
+							agents={STUB_AGENTS}
+						/>
+					)}
+				</Box>
+
+				<BottomBar
+					model={currentModel || "—"}
+					ready={providerHealth.live}
+					total={providerHealth.total}
+					tokens={tokenStr}
+					branch={currentBranch || "—"}
+					agent={authUser?.displayName || "Guest"}
+					micOn={Boolean(micOn)}
+					permissions={infiniteModeActive ? "infinite" : "ask"}
+					sessionTime={sessionTime}
+					mode={agentMode}
+				/>
+			</FixedFrame>
+		);
+	};
+
 	if (introVisible) {
 		return (
 			<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
@@ -5201,6 +5383,10 @@ export function App({
 				</FixedFrame>
 			</ADHDModeContext.Provider>
 		);
+	}
+
+	if (TUI_V2_ENABLED) {
+		return renderTuiV2();
 	}
 
 	return (
