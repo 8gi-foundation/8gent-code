@@ -1,0 +1,53 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`CommandPaletteView snapshot matrix - empty query / filtered / no-match / cursor moved 1`] = `
+[
+  {
+    "activeIndex": 0,
+    "borderStyle": "round",
+    "commandNames": [
+      "voice",
+      "kanban",
+      "predict",
+      "voiceprint",
+      "model",
+    ],
+    "label": "open with empty query, first active",
+    "query": "",
+    "width": 50,
+  },
+  {
+    "activeIndex": 0,
+    "borderStyle": "round",
+    "commandNames": [
+      "voice",
+      "voiceprint",
+    ],
+    "label": "open filter voice (prefix wins)",
+    "query": "voice",
+    "width": 50,
+  },
+  {
+    "activeIndex": 0,
+    "borderStyle": "round",
+    "commandNames": [],
+    "label": "open filter no match",
+    "query": "zzz",
+    "width": 50,
+  },
+  {
+    "activeIndex": 1,
+    "borderStyle": "round",
+    "commandNames": [
+      "voice",
+      "kanban",
+      "predict",
+      "voiceprint",
+      "model",
+    ],
+    "label": "after arrow-down, second row active",
+    "query": "",
+    "width": 50,
+  },
+]
+`;
