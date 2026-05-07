@@ -98,7 +98,7 @@ const stripAnsi = (s: string): string =>
 export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 	claude: {
 		id: "claude",
-		label: "Claude Code",
+		label: "Sparring",
 		command: "claude",
 		promptMode: "flag",
 		flagName: "-p",

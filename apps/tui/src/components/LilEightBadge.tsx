@@ -28,8 +28,8 @@ export function LilEightBadge({ state }: { state: LilEightState }) {
 	return (
 		<Box borderStyle="round" borderColor={stateColor[state]} paddingX={1} flexShrink={0}>
 			<Text color={t.orange}>8</Text>
-			<Text color={t.textPrimary}>▣</Text>
-			<Text color={stateColor[state]}> {state}</Text>
+			<Text color={t.textPrimary}>▣ </Text>
+			<Text color={stateColor[state]}>{state}</Text>
 		</Box>
 	);
 }
