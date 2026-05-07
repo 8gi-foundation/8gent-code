@@ -1,5 +1,5 @@
-import { Composition } from 'remotion';
-import { TokyoToSF } from './compositions/TokyoToSF';
+import { Composition } from "remotion";
+import { TokyoToSF } from "./compositions/TokyoToSF";
 
 export const RemotionRoot: React.FC = () => {
 	return (
