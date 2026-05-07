@@ -31,6 +31,9 @@ interface LiveFocalStripProps {
 	 *  knows manual approvals are off. Border also stays teal regardless of
 	 *  approvalPending because nothing is actually waiting on the user. */
 	autonomous?: boolean;
+	/** True when the agent is actively processing. Drives the NOW vs READY
+	 *  state label - we don't shout "NOW" at an idle TUI. */
+	isProcessing?: boolean;
 }
 
 /**
@@ -50,9 +53,11 @@ export function LiveFocalStrip({
 	contextPct,
 	approvalPending = false,
 	autonomous = false,
+	isProcessing = false,
 }: LiveFocalStripProps) {
 	const displayMode = autonomous ? "Autonomous" : mode;
 	const showApprovalBorder = approvalPending && !autonomous;
+	const stateLabel = isProcessing ? "NOW" : "READY";
 	return (
 		<Box
 			width="100%"
@@ -64,7 +69,7 @@ export function LiveFocalStrip({
 			overflow="hidden"
 		>
 			<Box minWidth={0}>
-				<Text color={t.teal}>◆ NOW </Text>
+				<Text color={t.teal}>◆ {stateLabel} </Text>
 				<Text color={t.textPrimary} bold wrap="truncate-end">
 					{displayMode}
 				</Text>

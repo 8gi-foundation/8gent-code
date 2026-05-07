@@ -5454,6 +5454,7 @@ export function App({
 							contextPct={contextPct}
 							approvalPending={isApprovalPending}
 							autonomous={infiniteModeActive}
+							isProcessing={isProcessing}
 						/>
 
 						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
@@ -5483,14 +5484,15 @@ export function App({
 							<InlineApprovalPrompt target={approvalPending.target} />
 						)}
 
-						<Box flexShrink={0}>
+						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
 							<CommandInput
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								focused={
 									((viewMode === "chat" && activeTabType === "chat") ||
 										(viewMode === "onboarding" && !onboardingSelectChoices)) &&
-									!isBubbleNavMode
+									!isBubbleNavMode &&
+									!paletteOpen
 								}
 								processingStage={processingStage}
 								showAnimations={showAnimations}
