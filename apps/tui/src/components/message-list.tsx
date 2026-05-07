@@ -17,6 +17,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
+import { t } from "../theme.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
 import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
 import { AppText, Label, MutedText, Stack } from "./primitives/index.js";
@@ -135,6 +136,16 @@ export function MessageList({
 	const visibleMessages =
 		chatMessages.length > maxVisible ? chatMessages.slice(-maxVisible) : chatMessages;
 
+	// Find the most recent assistant message — that's the only one that gets
+	// the live teal accent. Older assistant replies render in muted to keep
+	// the eye on the active response (no teal-everywhere wall).
+	const lastAssistantId = (() => {
+		for (let i = visibleMessages.length - 1; i >= 0; i--) {
+			if (visibleMessages[i].role === "assistant") return visibleMessages[i].id;
+		}
+		return null;
+	})();
+
 	return (
 		<Box flexDirection="column" flexGrow={1} minHeight={0}>
 			{visibleMessages.map((message, index) => (
@@ -147,6 +158,7 @@ export function MessageList({
 					index={index}
 					contentWidth={resolvedContentWidth}
 					showAnimations={showAnimations}
+					isLatestAssistant={message.id === lastAssistantId}
 				/>
 			))}
 		</Box>
@@ -161,6 +173,7 @@ interface MessageItemProps {
 	index: number;
 	contentWidth: number;
 	showAnimations: boolean;
+	isLatestAssistant?: boolean;
 }
 
 function MessageItem({
@@ -171,6 +184,7 @@ function MessageItem({
 	index,
 	contentWidth,
 	showAnimations,
+	isLatestAssistant = false,
 }: MessageItemProps) {
 	const [showContent, setShowContent] = useState(!isNew);
 	const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
@@ -268,11 +282,11 @@ function MessageItem({
 				{isUser ? (
 					<>
 						<MutedText>{formatTime(message.timestamp)} </MutedText>
-						<Label color="yellow">You</Label>
+						<Label color={t.orange}>You</Label>
 					</>
 				) : (
 					<>
-						<Label color="cyan">{"\u25C6 8gent"}</Label>
+						<Label color={isLatestAssistant ? t.teal : t.muted}>{"\u25C6 8gent"}</Label>
 						<MutedText> {formatTime(message.timestamp)}</MutedText>
 					</>
 				)}
