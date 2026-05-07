@@ -1,0 +1,48 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`LilEightBadge snapshot of all 6 states is stable 1`] = `
+[
+  {
+    "borderColor": "#8A8078",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "idle",
+  },
+  {
+    "borderColor": "#7DA8A3",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "thinking",
+  },
+  {
+    "borderColor": "#E8610A",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "working",
+  },
+  {
+    "borderColor": "#47A639",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "done",
+  },
+  {
+    "borderColor": "#D63A24",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "error",
+  },
+  {
+    "borderColor": "#5F5A55",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "state": "sleep",
+  },
+]
+`;
