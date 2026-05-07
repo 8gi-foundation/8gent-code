@@ -386,6 +386,26 @@ export function DjDeck() {
 		return <CollapsedDjDeckStrip playing={playing} track={stripTrack} tick={tick} />;
 	}
 
+	// Idle heartbeat: when no track is playing or loading, replace the full
+	// deck shell with a one-line strip. The full deck only appears when audio
+	// is actually playing or a track is loading.
+	if (!status.playing && !status.title) {
+		return (
+			<Box
+				width="100%"
+				borderStyle="round"
+				borderColor={t.orangeDim}
+				paddingX={1}
+				justifyContent="space-between"
+				flexShrink={0}
+			>
+				<Text color={t.orange}>● 8GENT FM</Text>
+				<Text color={t.dim}>idle</Text>
+				<Text color={t.muted}>/dj open</Text>
+			</Box>
+		);
+	}
+
 	return (
 		<Box
 			width="100%"
