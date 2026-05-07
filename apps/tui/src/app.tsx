@@ -140,7 +140,7 @@ import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { BottomBar } from "./components/BottomBar.js";
-import { setDjDeckOpen } from "./components/DjDeck.js";
+import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -1549,6 +1549,14 @@ export function App({
 		if (key.ctrl && input === "j") {
 			setBgPanelOpen((prev) => !prev);
 			setBgBanner(null);
+		}
+
+		// Ctrl+D: toggle DjDeck stereo between expanded and the single-line
+		// collapsed strip. Choice persists in workspace DB (#2341). ^D was
+		// free at time of binding; if it ever collides, swap to ^J would
+		// require relocating the background-jobs panel hotkey above first.
+		if (key.ctrl && input === "d") {
+			toggleDjDeckOpen();
 		}
 
 		// Ctrl+T: new chat tab
