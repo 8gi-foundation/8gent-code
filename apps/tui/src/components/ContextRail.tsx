@@ -55,7 +55,7 @@ export function ContextRail({
 			overflow="hidden"
 		>
 			<Text color={t.orange} bold>WORKSPACE</Text>
-			<Text color={t.textSecondary} wrap="truncate-end">{workspaceName}</Text>
+			<Text color={t.textPrimary} wrap="truncate-end">{workspaceName}</Text>
 			<RailRow label="branch" value={branch} color={t.orange} />
 
 			<Text color={t.dim}> </Text>
@@ -71,7 +71,7 @@ export function ContextRail({
 			<Text color={t.orange} bold>CONTEXT</Text>
 			<Box justifyContent="space-between" width="100%" overflow="hidden">
 				<Text color={t.steel}>{contextBar}</Text>
-				<Text color={t.muted}>{contextPct}%</Text>
+				<Text color={t.textSecondary}>{contextPct}%</Text>
 			</Box>
 
 			<Text color={t.dim}> </Text>
@@ -79,7 +79,7 @@ export function ContextRail({
 			<RailRow
 				label="ADHD"
 				value={adhdMode ? "ON" : "OFF"}
-				color={adhdMode ? t.teal : t.muted}
+				color={adhdMode ? t.teal : t.textSecondary}
 			/>
 		</Box>
 	);

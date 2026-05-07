@@ -24,7 +24,35 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
-import { RailRow } from "./RailRow.js";
+import { MetricRow, TruncatedValue } from "./RailRow.js";
+
+// NamedRow renders a primary name on the left (truncate-middle so head and
+// tail are both visible — important for `lmstudio:google/gemma-4-26b-a4b`)
+// and an optional trailing value on the right (latency, count, etc).
+function NamedRow({
+	name,
+	color,
+	trailing,
+	trailingColor = t.dim,
+}: {
+	name: string;
+	color: string;
+	trailing?: string;
+	trailingColor?: string;
+}) {
+	return (
+		<Box width="100%" overflow="hidden" justifyContent="space-between">
+			<Box flexGrow={1} minWidth={0}>
+				<TruncatedValue value={name} color={color} />
+			</Box>
+			{trailing ? (
+				<Box flexShrink={0} marginLeft={1}>
+					<Text color={trailingColor}>{trailing}</Text>
+				</Box>
+			) : null}
+		</Box>
+	);
+}
 
 type ToolState = "idle" | "running" | "ok" | "fail";
 type ProviderState = "local" | "fallback" | "offline";
@@ -126,12 +154,11 @@ export function ActivityRail({
 			) : (
 				tasks.map((task) => (
 					<Box key={task.id} flexDirection="column">
-						<Text color={t.textSecondary} wrap="truncate-end">{task.label}</Text>
-						<RailRow
-							label={bar(task.progress)}
-							value={`${task.progress}%`}
-							color={t.dim}
-						/>
+						<Text color={t.textPrimary} wrap="truncate-end">{task.label}</Text>
+						<Box width="100%" overflow="hidden" justifyContent="space-between">
+							<Text color={t.steel}>{bar(task.progress)}</Text>
+							<Text color={t.textSecondary}>{`${task.progress}%`}</Text>
+						</Box>
 					</Box>
 				))
 			)}
@@ -140,10 +167,9 @@ export function ActivityRail({
 				<Text color={t.orange} bold>TOOLS</Text>
 			</Box>
 			{tools.map((tool) => (
-				<RailRow
+				<NamedRow
 					key={tool.name}
-					label={`${TOOL_GLYPH[tool.state]} ${tool.name}`}
-					value=""
+					name={`${TOOL_GLYPH[tool.state]} ${tool.name}`}
 					color={TOOL_COLOR[tool.state]}
 				/>
 			))}
@@ -152,29 +178,28 @@ export function ActivityRail({
 				<Text color={t.orange} bold>PROVIDERS</Text>
 			</Box>
 			{providers.map((provider) => (
-				<RailRow
+				<NamedRow
 					key={provider.name}
-					label={`● ${provider.name}`}
-					value={provider.latency}
+					name={`● ${provider.name}`}
 					color={PROVIDER_COLOR[provider.state]}
+					trailing={provider.latency}
 				/>
 			))}
 
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>MEMORY</Text>
 			</Box>
-			<RailRow label="hits" value={String(memory.hits)} color={t.green} />
-			<RailRow label="misses" value={String(memory.misses)} color={t.orange} />
-			<RailRow label="cache" value={memory.cache} color={t.steel} />
+			<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
+			<MetricRow label="misses" value={String(memory.misses)} color={t.orange} />
+			<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
 
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>AGENTS</Text>
 			</Box>
 			{agents.map((agent) => (
-				<RailRow
+				<NamedRow
 					key={agent.name}
-					label={`● ${agent.name}`}
-					value=""
+					name={`● ${agent.name}`}
 					color={AGENT_COLOR[agent.state]}
 				/>
 			))}
