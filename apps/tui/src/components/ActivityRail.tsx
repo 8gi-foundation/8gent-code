@@ -12,15 +12,19 @@
  * Pure presentational: caller owns every value, no internal state, no
  * effects. Width pinned to 34 cols, single border. Theme tokens only.
  *
- * Section headings are wrapped in a Box with marginTop instead of an
- * empty Text spacer so Ink does not collapse the blank line in some
- * renderers (which previously caused MEMORY/cache labels to collide
- * with the preceding section's last data row).
+ * Section headings sit in a Box with marginTop instead of an empty Text
+ * spacer so Ink does not collapse the blank line in some renderers (which
+ * previously caused MEMORY/cache labels to collide with the preceding
+ * section's last data row).
+ *
+ * Data rows use the shared RailRow helper so labels and values can never
+ * fuse at narrow widths (the bug that produced `MEMORYrouter`).
  */
 
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
+import { RailRow } from "./RailRow.js";
 
 type ToolState = "idle" | "running" | "ok" | "fail";
 type ProviderState = "local" | "fallback" | "offline";
@@ -123,10 +127,11 @@ export function ActivityRail({
 				tasks.map((task) => (
 					<Box key={task.id} flexDirection="column">
 						<Text color={t.textSecondary} wrap="truncate-end">{task.label}</Text>
-						<Box>
-							<Text color={t.steel}>{bar(task.progress)}</Text>
-							<Text color={t.dim}> {task.progress}%</Text>
-						</Box>
+						<RailRow
+							label={bar(task.progress)}
+							value={`${task.progress}%`}
+							color={t.dim}
+						/>
 					</Box>
 				))
 			)}
@@ -135,49 +140,43 @@ export function ActivityRail({
 				<Text color={t.orange} bold>TOOLS</Text>
 			</Box>
 			{tools.map((tool) => (
-				<Box key={tool.name}>
-					<Text color={TOOL_COLOR[tool.state]}>{TOOL_GLYPH[tool.state]} </Text>
-					<Text color={t.textSecondary} wrap="truncate-end">{tool.name}</Text>
-				</Box>
+				<RailRow
+					key={tool.name}
+					label={`${TOOL_GLYPH[tool.state]} ${tool.name}`}
+					value=""
+					color={TOOL_COLOR[tool.state]}
+				/>
 			))}
 
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>PROVIDERS</Text>
 			</Box>
 			{providers.map((provider) => (
-				<Box key={provider.name} justifyContent="space-between">
-					<Box flexShrink={1}>
-						<Text color={PROVIDER_COLOR[provider.state]}>● </Text>
-						<Text color={t.textSecondary} wrap="truncate-end">{provider.name}</Text>
-					</Box>
-					<Text color={t.dim}>{provider.latency}</Text>
-				</Box>
+				<RailRow
+					key={provider.name}
+					label={`● ${provider.name}`}
+					value={provider.latency}
+					color={PROVIDER_COLOR[provider.state]}
+				/>
 			))}
 
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>MEMORY</Text>
 			</Box>
-			<Box justifyContent="space-between">
-				<Text color={t.muted}>hits</Text>
-				<Text color={t.green}>{memory.hits}</Text>
-			</Box>
-			<Box justifyContent="space-between">
-				<Text color={t.muted}>misses</Text>
-				<Text color={t.orange}>{memory.misses}</Text>
-			</Box>
-			<Box justifyContent="space-between">
-				<Text color={t.muted}>cache</Text>
-				<Text color={t.steel}>{memory.cache}</Text>
-			</Box>
+			<RailRow label="hits" value={String(memory.hits)} color={t.green} />
+			<RailRow label="misses" value={String(memory.misses)} color={t.orange} />
+			<RailRow label="cache" value={memory.cache} color={t.steel} />
 
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>AGENTS</Text>
 			</Box>
 			{agents.map((agent) => (
-				<Box key={agent.name}>
-					<Text color={AGENT_COLOR[agent.state]}>● </Text>
-					<Text color={t.textSecondary} wrap="truncate-end">{agent.name}</Text>
-				</Box>
+				<RailRow
+					key={agent.name}
+					label={`● ${agent.name}`}
+					value=""
+					color={AGENT_COLOR[agent.state]}
+				/>
 			))}
 		</Box>
 	);
