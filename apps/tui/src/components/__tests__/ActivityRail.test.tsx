@@ -54,7 +54,7 @@ describe("ActivityRail", () => {
 		expect(typeof ActivityRail).toBe("function");
 	});
 
-	test("top-level Box is 32 cols wide with single border", () => {
+	test("top-level Box is 34 cols wide with single border", () => {
 		const rendered = render(baseProps);
 		const props = rendered.props as {
 			width: number;
@@ -65,7 +65,7 @@ describe("ActivityRail", () => {
 			flexDirection: string;
 			overflow: string;
 		};
-		expect(props.width).toBe(32);
+		expect(props.width).toBe(34);
 		expect(props.flexShrink).toBe(0);
 		expect(props.borderStyle).toBe("single");
 		expect(props.borderColor).toBe(t.border);

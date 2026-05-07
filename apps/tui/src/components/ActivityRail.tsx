@@ -10,7 +10,12 @@
  *   - Agents row (Core/Research/Tester/Reviewer with LED dots)
  *
  * Pure presentational: caller owns every value, no internal state, no
- * effects. Width pinned to 32 cols, single border. Theme tokens only.
+ * effects. Width pinned to 34 cols, single border. Theme tokens only.
+ *
+ * Section headings are wrapped in a Box with marginTop instead of an
+ * empty Text spacer so Ink does not collapse the blank line in some
+ * renderers (which previously caused MEMORY/cache labels to collide
+ * with the preceding section's last data row).
  */
 
 import { Box, Text } from "ink";
@@ -99,7 +104,7 @@ export function ActivityRail({
 }: ActivityRailProps) {
 	return (
 		<Box
-			width={32}
+			width={34}
 			flexShrink={0}
 			borderStyle="single"
 			borderColor={t.border}
@@ -109,8 +114,9 @@ export function ActivityRail({
 		>
 			<Text color={t.orange} bold>AGENT ACTIVITY</Text>
 
-			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>TASKS</Text>
+			<Box marginTop={1}>
+				<Text color={t.orange} bold>TASKS</Text>
+			</Box>
 			{tasks.length === 0 ? (
 				<Text color={t.muted}>idle</Text>
 			) : (
@@ -125,20 +131,22 @@ export function ActivityRail({
 				))
 			)}
 
-			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>TOOLS</Text>
+			<Box marginTop={1}>
+				<Text color={t.orange} bold>TOOLS</Text>
+			</Box>
 			{tools.map((tool) => (
 				<Box key={tool.name}>
 					<Text color={TOOL_COLOR[tool.state]}>{TOOL_GLYPH[tool.state]} </Text>
-					<Text color={t.textSecondary}>{tool.name}</Text>
+					<Text color={t.textSecondary} wrap="truncate-end">{tool.name}</Text>
 				</Box>
 			))}
 
-			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>PROVIDERS</Text>
+			<Box marginTop={1}>
+				<Text color={t.orange} bold>PROVIDERS</Text>
+			</Box>
 			{providers.map((provider) => (
 				<Box key={provider.name} justifyContent="space-between">
-					<Box>
+					<Box flexShrink={1}>
 						<Text color={PROVIDER_COLOR[provider.state]}>● </Text>
 						<Text color={t.textSecondary} wrap="truncate-end">{provider.name}</Text>
 					</Box>
@@ -146,8 +154,9 @@ export function ActivityRail({
 				</Box>
 			))}
 
-			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>MEMORY</Text>
+			<Box marginTop={1}>
+				<Text color={t.orange} bold>MEMORY</Text>
+			</Box>
 			<Box justifyContent="space-between">
 				<Text color={t.muted}>hits</Text>
 				<Text color={t.green}>{memory.hits}</Text>
@@ -161,12 +170,13 @@ export function ActivityRail({
 				<Text color={t.steel}>{memory.cache}</Text>
 			</Box>
 
-			<Text color={t.dim}> </Text>
-			<Text color={t.orange} bold>AGENTS</Text>
+			<Box marginTop={1}>
+				<Text color={t.orange} bold>AGENTS</Text>
+			</Box>
 			{agents.map((agent) => (
 				<Box key={agent.name}>
 					<Text color={AGENT_COLOR[agent.state]}>● </Text>
-					<Text color={t.textSecondary}>{agent.name}</Text>
+					<Text color={t.textSecondary} wrap="truncate-end">{agent.name}</Text>
 				</Box>
 			))}
 		</Box>
