@@ -496,7 +496,7 @@ return out`;
 		// the default 10s. Pass 30s; runFile sends SIGTERM at that point.
 		const r = runFile("/usr/bin/osascript", ["-e", script], 30_000);
 		if (!r.ok) return { ok: false, error: r.stderr || "osascript failed" };
-		const lines = r.out.split("\n").filter((l) => l.trim().length > 0);
+		const lines = r.stdout.split("\n").filter((l: string) => l.trim().length > 0);
 		const windows: WindowInfo[] = [];
 		let id = 0;
 		for (const line of lines) {

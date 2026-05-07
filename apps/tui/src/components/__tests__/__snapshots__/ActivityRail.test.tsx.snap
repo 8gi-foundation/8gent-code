@@ -1,0 +1,17 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`ActivityRail snapshot of full rail is stable 1`] = `
+{
+  "agents": 4,
+  "borderColor": "#2E2A26",
+  "borderStyle": "single",
+  "flexDirection": "column",
+  "flexShrink": 0,
+  "overflow": "hidden",
+  "paddingX": 1,
+  "providers": 2,
+  "tasks": 2,
+  "tools": 4,
+  "width": 34,
+}
+`;

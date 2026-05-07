@@ -1,0 +1,60 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] = `
+[
+  {
+    "adhdMode": false,
+    "borderColor": "#2E2A26",
+    "borderStyle": "single",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "risk": "low",
+    "width": 28,
+  },
+  {
+    "adhdMode": true,
+    "borderColor": "#2E2A26",
+    "borderStyle": "single",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "risk": "low",
+    "width": 28,
+  },
+  {
+    "adhdMode": false,
+    "borderColor": "#2E2A26",
+    "borderStyle": "single",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "risk": "medium",
+    "width": 28,
+  },
+  {
+    "adhdMode": true,
+    "borderColor": "#2E2A26",
+    "borderStyle": "single",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "risk": "medium",
+    "width": 28,
+  },
+  {
+    "adhdMode": false,
+    "borderColor": "#2E2A26",
+    "borderStyle": "single",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "risk": "high",
+    "width": 28,
+  },
+  {
+    "adhdMode": true,
+    "borderColor": "#2E2A26",
+    "borderStyle": "single",
+    "flexShrink": 0,
+    "paddingX": 1,
+    "risk": "high",
+    "width": 28,
+  },
+]
+`;

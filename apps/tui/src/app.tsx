@@ -14,6 +14,7 @@
  */
 
 import { Box, useApp, useInput } from "ink";
+import { t } from "./theme.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
 	type TaskCategory,
@@ -60,6 +61,7 @@ import {
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
 import { CommandInput } from "./components/command-input.js";
+import { CommandPalette } from "./components/CommandPalette.js";
 import { FixedFrame } from "./components/fixed-frame/index.js";
 import { HeaderBar } from "./components/HeaderBar.js";
 import {
@@ -117,7 +119,7 @@ import { probeProviders } from "./lib/provider-health.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatTokens, truncate } from "./lib/index.js";
+import { formatSessionTime, formatTokens, truncate } from "./lib/index.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -134,13 +136,16 @@ import {
 	logToolStart,
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
-import type { SlashCommand } from "./lib/slash-commands.js";
+import {
+	BUILT_IN_SLASH_COMMANDS,
+	type SlashCommand,
+} from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { BottomBar } from "./components/BottomBar.js";
-import { setDjDeckOpen } from "./components/DjDeck.js";
+import { setDjDeckOpen, toggleDjDeckOpen } from "./components/DjDeck.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
@@ -160,6 +165,24 @@ import { NarratorView } from "./screens/index.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
+import { ContextRail } from "./components/ContextRail.js";
+import { LiveFocalStrip } from "./components/LiveFocalStrip.js";
+import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
+import { ActivityRail } from "./components/ActivityRail.js";
+import { useLilEightState } from "./hooks/useLilEightState.js";
+import { useGitSync } from "./hooks/useGitSync.js";
+import {
+	deriveTools,
+	deriveProviders,
+	deriveAgents,
+	deriveActiveTasks,
+	type OrchestrationAgentSnapshot,
+} from "./lib/activity-rail-derivation.js";
+import {
+	registerTuiApprovalHandler,
+	type TuiApprovalDecision,
+	type TuiApprovalRequest,
+} from "../../../packages/permissions/tui-approval-channel.js";
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -1249,12 +1272,66 @@ export function App({
 		}
 	}, [isProcessing, processPanel.sidebarOpen]);
 
+	// V2 chrome: track turn boundaries + the last user/agent activity tick so
+	// LilEightBadge can transition idle/done/error/sleep without polling app
+	// internals from the badge itself. Both update only on real transitions
+	// (true -> false for done/error, any user/agent event for activity).
+	const [lastTurnEndedAt, setLastTurnEndedAt] = useState<number | null>(null);
+	const [lastTurnSuccess, setLastTurnSuccess] = useState<boolean | null>(null);
+	const [lastActivityAt, setLastActivityAt] = useState<number>(() => Date.now());
+
+	// V2 chrome: approval-pending state. When non-null, the V2 layout renders
+	// InlineApprovalPrompt above CommandInput, flips the LiveFocalStrip border,
+	// and lights the [ASK] chip in HeaderBar. The keypress handler in
+	// `useInput` intercepts Y/N/E/S to settle the resolve callback.
+	const [approvalPending, setApprovalPending] = useState<{
+		target: string;
+		resolve: (decision: TuiApprovalDecision) => void;
+	} | null>(null);
+
+	// V2 approval handler registration. Headless callers see no handler and
+	// PermissionManager falls back to its existing stdin flow.
+	useEffect(() => {
+		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
+			return new Promise<TuiApprovalDecision>((resolve) => {
+				const target = request.command || request.action || "pending tool call";
+				setApprovalPending({
+					target,
+					resolve: (decision) => {
+						setApprovalPending(null);
+						resolve(decision);
+					},
+				});
+			});
+		};
+		registerTuiApprovalHandler(handler);
+		return () => {
+			registerTuiApprovalHandler(null);
+		};
+	}, []);
+
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
 	const wasProcessingRef = useRef(false);
 	useEffect(() => {
 		const justFinished = wasProcessingRef.current && !isProcessing;
 		wasProcessingRef.current = isProcessing;
+		if (justFinished) {
+			setLastTurnEndedAt(Date.now());
+			// Best-effort: scan the last few messages for an error tool result
+			// or an agent error message. Anything else counts as a clean turn.
+			const tail = messages.slice(-5);
+			const hadError = tail.some(
+				(m) =>
+					m.toolSuccess === false ||
+					(m.role === "system" && /error|failed/i.test(m.content)),
+			);
+			setLastTurnSuccess(!hadError);
+			setLastActivityAt(Date.now());
+		}
+		if (isProcessing) {
+			setLastActivityAt(Date.now());
+		}
 		if (!justFinished) return;
 		if (process.platform !== "darwin") return;
 
@@ -1291,6 +1368,16 @@ export function App({
 
 	// Multi-agent orchestration
 	const orchestration = useAgentOrchestration();
+
+	// V2 chrome data sources powering HeaderBar + LilEightBadge.
+	const gitSync = useGitSync(process.cwd(), 30_000);
+	const lilEightStateValue = useLilEightState({
+		messages,
+		isProcessing,
+		lastTurnEndedAt,
+		lastTurnSuccess,
+		idleSinceMs: Date.now() - lastActivityAt,
+	});
 
 	// Onboarding system
 	const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
@@ -1366,6 +1453,9 @@ export function App({
 	const [adhdMode, setAdhdMode] = useState(false);
 	const [adhdSuggested, setAdhdSuggested] = useState(false);
 
+	// Command palette overlay (Ctrl+P).
+	const [paletteOpen, setPaletteOpen] = useState(false);
+
 	// Design agent state
 	const [designAgent] = useState(() => createDesignAgent({ workingDirectory: process.cwd() }));
 	const [designSuggestions, setDesignSuggestions] = useState<DesignSuggestion[]>([]);
@@ -1374,6 +1464,50 @@ export function App({
 
 	// Handle keyboard shortcuts
 	useInput((input, key) => {
+		// V2 approval intercept: when an inline approval is pending, Y/N/E/S
+		// settle it. Anything else falls through to normal input handling so
+		// the user can keep typing if they want to ignore the prompt.
+		if (approvalPending && !key.ctrl && !key.meta) {
+			const ch = (input || "").toLowerCase();
+			if (ch === "y") {
+				approvalPending.resolve("approve");
+				setLastActivityAt(Date.now());
+				return;
+			}
+			if (ch === "n") {
+				approvalPending.resolve("deny");
+				setLastActivityAt(Date.now());
+				return;
+			}
+			if (ch === "e") {
+				approvalPending.resolve("edit");
+				setLastActivityAt(Date.now());
+				return;
+			}
+			if (ch === "s") {
+				approvalPending.resolve("skip");
+				setLastActivityAt(Date.now());
+				return;
+			}
+		}
+
+		// Touch the activity timestamp on any keypress so LilEightBadge wakes
+		// from sleep promptly. Cheap; no React state when value is unchanged.
+		if (input || key.return || key.upArrow || key.downArrow || key.escape) {
+			setLastActivityAt(Date.now());
+		}
+
+		// Ctrl+P: toggle the command palette overlay.
+		// Palette has its own useInput listener so we early-return for
+		// every other key while it is open and let it own the input stream.
+		if (key.ctrl && input === "p") {
+			setPaletteOpen((o) => !o);
+			return;
+		}
+		if (paletteOpen) {
+			return;
+		}
+
 		// Ctrl+L: toggle bubble navigation mode
 		if (key.ctrl && input === "l") {
 			setIsBubbleNavMode((prev) => {
@@ -1512,6 +1646,14 @@ export function App({
 		if (key.ctrl && input === "j") {
 			setBgPanelOpen((prev) => !prev);
 			setBgBanner(null);
+		}
+
+		// Ctrl+D: toggle DjDeck stereo between expanded and the single-line
+		// collapsed strip. Choice persists in workspace DB (#2341). ^D was
+		// free at time of binding; if it ever collides, swap to ^J would
+		// require relocating the background-jobs panel hotkey above first.
+		if (key.ctrl && input === "d") {
+			toggleDjDeckOpen();
 		}
 
 		// Ctrl+T: new chat tab
@@ -5203,17 +5345,70 @@ export function App({
 		);
 	}
 
+	// V2 three-zone shell - the only render path.
+	const cols = viewport.width;
+	const showContextRail = cols >= 120;
+	const showActivityRail = cols >= 90;
+	// Smart session timer (#2367). Resets on every TUI restart — startTime
+	// is held in useState (line 686) so the value is captured once at
+	// mount and never persisted across restarts.
+	const sessionTime = formatSessionTime(Date.now() - startTime.getTime());
+	const tokenStr =
+		totalTokens >= 1000
+			? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
+			: `${totalTokens} tok`;
+	const micOn =
+		Boolean(voice?.isAvailable) &&
+		(voice?.state === "recording" || voiceChat?.isActive);
+	const isApprovalPending = approvalPending !== null;
+	const lilEightState = lilEightStateValue;
+	const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
+	void sessionTick;
+	void renderMainContent;
+	void tokenMeterColWidth;
+
+	// Derived ActivityRail data. Memory store doesn't expose counters yet
+	// (#TODO upstream), so memory tile shows zeros + em-dash cache. Provider
+	// tile shows the active model as `local` and the env-driven fallback as
+	// `fallback` - latency is unknown until vision-router exposes it.
+	const activeTasks = deriveActiveTasks(
+		{
+			inProgress: kanbanBoard.inProgress.map((s) => ({ id: s.id, description: s.description })),
+			ready: kanbanBoard.ready,
+		},
+		activeTool,
+		isProcessing,
+	);
+	const recentTools = deriveTools(messages, activeTool, 5);
+	const providerRows = deriveProviders({
+		primary: { name: `${currentProvider}:${currentModel || "—"}` },
+		fallback: { name: "openrouter:free" },
+		offline: null,
+	});
+	const memoryStats = { hits: 0, misses: 0, cache: "—" };
+	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
+		id: a.id,
+		name: a.name,
+		status: a.status,
+	}));
+	const agentRows = deriveAgents(orchestrationAgents);
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 			<FixedFrame>
-				{/* Header */}
 				<Box flexShrink={0}>
-	<HeaderBar updateAvailable={updateInfo} />
+					<HeaderBar
+						updateAvailable={updateInfo}
+						workspacePath={process.cwd()}
+						branch={currentBranch || "—"}
+						syncStatus={gitSync.label}
+						micOn={Boolean(micOn)}
+						approvalPending={isApprovalPending}
+						localFirst={true}
+						sessionTime={sessionTime}
+						lilEightState={lilEightState}
+					/>
 				</Box>
 
-				{/* Workspace tab bar - shows an inline busy indicator on each tab
-				    whose Agent has an in-flight chat() call so the user can see
-				    parallel work even while looking at a different tab. */}
 				<Box flexShrink={0}>
 					<TabBar
 						tabs={workspaceTabs.tabs}
@@ -5222,257 +5417,124 @@ export function App({
 					/>
 				</Box>
 
-				{/* Main content area with folder frame */}
-				<Box flexDirection="row" flexGrow={1} minHeight={0}>
-					{/* Left border */}
-					<Box flexDirection="column">
-						<AppText color="cyan">│</AppText>
-					</Box>
-					{/* Main content (chat / kanban / etc.) or process detail */}
-					<Box flexDirection="column" flexGrow={1} paddingX={1} minHeight={0} overflow="hidden">
-						{processPanel.detailTaskId &&
-						processPanel.tasks.find((t) => t.id === processPanel.detailTaskId) ? (
-							<ProcessDetailView
-								task={processPanel.tasks.find((t) => t.id === processPanel.detailTaskId)!}
-								output={processPanel.detailOutput}
-								onClose={processPanel.closeDetail}
-								onKill={() => {
-									const killed = processPanel.killSelected();
-									if (killed) {
-										setMessages((prev) => [
-											...prev,
-											{
-												id: `system-kill-${Date.now()}`,
-												role: "system" as const,
-												content: `Process killed: "${killed.command.slice(0, 60)}"`,
-												timestamp: new Date(),
-											},
-										]);
-									}
-								}}
-								height={Math.max(10, viewport.height - PROCESS_DETAIL_CHROME_ROWS)}
+				<Box
+					borderStyle="single"
+					borderColor={t.textTertiary}
+					paddingX={1}
+					flexGrow={1}
+					minHeight={0}
+				>
+					<Box flexGrow={1} minHeight={0} gap={1}>
+						{showContextRail && (
+							<ContextRail
+								branch={currentBranch || "—"}
+								risk={infiniteModeActive ? "high" : "low"}
+								permissions={infiniteModeActive ? "infinite" : "ask"}
+								contextPct={contextPct}
+								adhdMode={adhdMode}
 							/>
-						) : (
-							renderMainContent()
+						)}
+
+					<Box flexGrow={1} flexDirection="column" minWidth={0}>
+						<LiveFocalStrip
+							mode={
+								agentMode === "Planning"
+									? "Planning"
+									: agentMode === "Implementing"
+										? "Implementing"
+										: agentMode === "Testing"
+											? "Testing"
+											: agentMode === "Debugging"
+												? "Debugging"
+												: "Researching"
+							}
+							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+							route={currentModel || "—"}
+							tokens={tokenStr}
+							contextPct={contextPct}
+							approvalPending={isApprovalPending}
+							autonomous={infiniteModeActive}
+							isProcessing={isProcessing}
+						/>
+
+						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+							<MessageList
+								messages={messages}
+								maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
+							/>
+						</Box>
+
+						{paletteOpen && (
+							<Box justifyContent="center" flexShrink={0}>
+								<CommandPalette
+									isOpen={paletteOpen}
+									onClose={() => setPaletteOpen(false)}
+									onExecute={(name) => {
+										void handleSlashCommand(name as SlashCommand, []);
+									}}
+									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
+										name: c.name,
+										description: c.description,
+									}))}
+								/>
+							</Box>
+						)}
+
+						{approvalPending && (
+							<InlineApprovalPrompt target={approvalPending.target} />
+						)}
+
+						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
+							<CommandInput
+								onSubmit={handleSubmit}
+								isProcessing={isProcessing}
+								focused={
+									((viewMode === "chat" && activeTabType === "chat") ||
+										(viewMode === "onboarding" && !onboardingSelectChoices)) &&
+									!isBubbleNavMode &&
+									!paletteOpen
+								}
+								processingStage={processingStage}
+								showAnimations={showAnimations}
+								activeTool={activeTool}
+								stepCount={stepCount}
+								toolCount={toolCount}
+								totalTokens={totalTokens}
+								isGitRepo={isGitRepo}
+								currentBranch={currentBranch}
+								planNextStep={planNextStep}
+								recentCommands={recentCommands}
+								onSlashCommand={handleSlashCommand}
+								injectedText={voiceTranscript}
+								transformInputValue={transformChatInput}
+								allowEmptySubmit={!!imageInput.currentImage}
+							/>
+						</Box>
+					</Box>
+
+						{showActivityRail && (
+							<ActivityRail
+								tasks={activeTasks}
+								tools={recentTools}
+								providers={providerRows}
+								memory={memoryStats}
+								agents={agentRows}
+							/>
 						)}
 					</Box>
-					{/* Right border */}
-					{!processPanel.sidebarOpen && (
-						<Box flexDirection="column">
-							<AppText color="cyan">│</AppText>
-						</Box>
-					)}
-
-					{/* Right: process sidebar */}
-					{processPanel.sidebarOpen && (
-						<ProcessSidebar
-							tasks={processPanel.tasks}
-							selectedIndex={processPanel.selectedIndex}
-							focused={processPanel.focusZone === "sidebar"}
-							taskCounts={processPanel.taskCounts}
-							width={processSidebarWidth}
-							onNext={processPanel.nextTask}
-							onPrev={processPanel.prevTask}
-							onOpen={processPanel.openDetail}
-							onKill={() => {
-								const killed = processPanel.killSelected();
-								if (killed) {
-									setMessages((prev) => [
-										...prev,
-										{
-											id: `system-kill-${Date.now()}`,
-											role: "system" as const,
-											content: `Process killed: "${killed.command.slice(0, 60)}"`,
-											timestamp: new Date(),
-										},
-									]);
-								}
-							}}
-							onUnfocus={processPanel.focusInput}
-						/>
-					)}
-
-					{/* Right: background jobs panel (Ctrl+J) */}
-					{bgPanelOpen && (
-						<BackgroundPanel
-							tasks={bgTasks}
-							onClose={() => {
-								setBgPanelOpen(false);
-								setBgBanner(null);
-							}}
-							width={Math.min(48, Math.max(36, processSidebarWidth))}
-						/>
-					)}
 				</Box>
 
-				{/* Mini kanban removed — full board available via Ctrl+K */}
-
-				{/* Ticker — single line showing current tool, max 7 rows total */}
-				{isProcessing && (
-					<Box
-						flexShrink={0}
-						flexDirection="column"
-						maxHeight={7}
-						overflow="hidden"
-						paddingX={1}
-					>
-						<Box>
-							<AppText color="cyan">{"◦ "}</AppText>
-							<MutedText>{activeTool || "thinking..."}</MutedText>
-							{stepCount > 0 && <MutedText>{`  step ${stepCount}`}</MutedText>}
-							{toolCount > 0 && <MutedText>{`  · ${toolCount} tool${toolCount !== 1 ? "s" : ""}`}</MutedText>}
-						</Box>
-					</Box>
-				)}
-
-				{/* Image attachment indicator */}
-				{imageInput.currentImage && (
-					<Box paddingX={1} flexShrink={0}>
-						<ImageBadge image={imageInput.currentImage} onRemove={imageInput.removeImage} />
-					</Box>
-				)}
-
-				{/* Background task completion banner (non-modal, no animation) */}
-				{bgBanner && (
-					<Box paddingX={1} flexShrink={0}>
-						<AppText color="cyan">[bg] </AppText>
-						<AppText>{bgBanner}</AppText>
-					</Box>
-				)}
-
-				{/* Top separator line */}
-				<Box paddingX={1} flexShrink={0}>
-					<Divider />
-				</Box>
-
-				{/* Input section with context window display */}
-				<Box paddingX={1} justifyContent="space-between" alignItems="center" flexShrink={0}>
-					{/* Left: Context used */}
-					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth}>
-						<MutedText>{formatTokens(totalTokens)}</MutedText>
-					</Box>
-
-					{/* Center: Command input */}
-					<Box flexGrow={1} minWidth={6}>
-						<CommandInput
-							onSubmit={handleSubmit}
-							isProcessing={isProcessing}
-							focused={
-								((viewMode === "chat" && activeTabType === "chat") ||
-									(viewMode === "onboarding" && !onboardingSelectChoices)) &&
-								!isBubbleNavMode
-							}
-							processingStage={processingStage}
-							showAnimations={showAnimations}
-							activeTool={activeTool}
-							stepCount={stepCount}
-							toolCount={toolCount}
-							totalTokens={totalTokens}
-							isGitRepo={isGitRepo}
-							currentBranch={currentBranch}
-							planNextStep={planNextStep}
-							recentCommands={recentCommands}
-							onSlashCommand={handleSlashCommand}
-							injectedText={voiceTranscript}
-							transformInputValue={transformChatInput}
-							allowEmptySubmit={!!imageInput.currentImage}
-						/>
-					</Box>
-
-					{/* Right: Context max */}
-					<Box minWidth={tokenMeterColWidth} width={tokenMeterColWidth} justifyContent="flex-end">
-						<MutedText>/{formatTokens(contextMax)}</MutedText>
-					</Box>
-				</Box>
-
-				{/* Bottom separator line */}
-				<Box paddingX={1} flexShrink={0}>
-					<Divider />
-				</Box>
-
-				{/* Expanded view panel (Ctrl+O) */}
-				{expandedView && (
-					<Box
-						flexDirection="column"
-						paddingX={1}
-						borderStyle="single"
-						borderColor="cyan"
-						marginX={1}
-						marginTop={1}
-					>
-						<Heading>∞ Extended Info</Heading>
-						<Box marginTop={1} flexDirection="column">
-							<MutedText>
-								Model: <AppText color="cyan">{currentModel}</AppText> via{" "}
-								<AppText color="magenta">{currentProvider}</AppText>
-							</MutedText>
-							<MutedText>
-								Agent:{" "}
-								<AppText color={agentReady ? "green" : "red"}>
-									{agentReady ? "ready" : "not connected"}
-								</AppText>
-							</MutedText>
-							<MutedText>
-								Tokens:{" "}
-								<AppText color="cyan">
-									{totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}k` : "—"}
-								</AppText>{" "}
-								· Steps: <AppText color="cyan">{stepCount}</AppText> · Tools:{" "}
-								<AppText color="cyan">{toolCount}</AppText>
-							</MutedText>
-							<MutedText>
-								Response time:{" "}
-								<AppText color="yellow">
-									{lastResponseTime ? `${(lastResponseTime / 1000).toFixed(1)}s` : "—"}
-								</AppText>
-							</MutedText>
-							{currentBranch && (
-								<MutedText>
-									Branch: <AppText color="yellow">{currentBranch}</AppText>
-								</MutedText>
-							)}
-							<MutedText>
-								Infinite:{" "}
-								<AppText color={infiniteModeActive ? "red" : "green"}>
-									{infiniteModeActive ? "∞ enabled" : "disabled"}
-								</AppText>
-							</MutedText>
-						</Box>
-						<Box marginTop={1}>
-							<MutedText>Press Ctrl+O to close</MutedText>
-						</Box>
-					</Box>
-				)}
-
-				{/* BottomBar — DjDeck + AgentInstrumentStrip + ModeFooter, all live. */}
-				{(() => {
-					void sessionTick;
-					const elapsedSec = Math.floor((Date.now() - startTime.getTime()) / 1000);
-					const mins = Math.floor(elapsedSec / 60);
-					const secs = elapsedSec % 60;
-					const sessionTime = `${mins}m ${secs.toString().padStart(2, "0")}`;
-					const tokens =
-						totalTokens >= 1000
-							? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
-							: `${totalTokens} tok`;
-					const micOn =
-						Boolean(voice?.isAvailable) &&
-						(voice?.state === "recording" || voiceChat?.isActive);
-					return (
-						<BottomBar
-							model={currentModel || "—"}
-							ready={providerHealth.live}
-							total={providerHealth.total}
-							tokens={tokens}
-							branch={currentBranch || "—"}
-							agent={authUser?.displayName || "Guest"}
-							micOn={Boolean(micOn)}
-							permissions={infiniteModeActive ? "infinite" : "ask"}
-							sessionTime={sessionTime}
-							mode={agentMode}
-						/>
-					);
-				})()}
+				<BottomBar
+					model={currentModel || "—"}
+					ready={providerHealth.live}
+					total={providerHealth.total}
+					tokens={tokenStr}
+					branch={currentBranch || "—"}
+					user={authUser?.displayName}
+					permissions={infiniteModeActive ? "infinite" : "ask"}
+					sessionTime={sessionTime}
+					mode={agentMode}
+				/>
 			</FixedFrame>
 		</ADHDModeContext.Provider>
 	);

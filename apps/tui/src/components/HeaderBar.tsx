@@ -1,18 +1,17 @@
 /**
- * HeaderBar — top-of-frame brand row.
+ * HeaderBar - top-of-frame brand row.
  *
- * Renders the rounded BrandPill on the left and `^T:new ^W:close`
- * shortcuts on the right. The actual tab strip lives in <TabBar/>
- * directly below; we don't render tabs here so we can preserve TabBar's
- * live data, switching logic, and per-tab busy indicators.
+ * V2 chrome only: BrandPill on the left; workspace path + branch + sync
+ * in the middle; ^P palette hint, MIC indicator, [ASK] chip,
+ * LOCAL-FIRST chip, session clock, and LilEightBadge on the right.
  *
- * Flex rules per Ink layout: BrandPill never shrinks; the spacer between
- * brand and shortcuts owns the slack via flexGrow=1.
+ * Pure presentational. Theme tokens only. No inline hex.
  */
 
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
+import { LilEightBadge, type LilEightState } from "./LilEightBadge.js";
 
 const ui = {
 	cream:      t.textPrimary,
@@ -25,14 +24,62 @@ const ui = {
 
 interface HeaderBarProps {
 	updateAvailable?: { latest: string; current: string } | null;
+	workspacePath: string;
+	branch: string;
+	/** "ahead 1", "behind 2", "in sync", etc. */
+	syncStatus: string;
+	micOn: boolean;
+	approvalPending: boolean;
+	localFirst: boolean;
+	sessionTime: string;
+	lilEightState: LilEightState;
 }
 
-export function HeaderBar({ updateAvailable }: HeaderBarProps) {
+export function HeaderBar({
+	updateAvailable,
+	workspacePath,
+	branch,
+	syncStatus,
+	micOn,
+	approvalPending,
+	localFirst,
+	sessionTime,
+	lilEightState,
+}: HeaderBarProps) {
 	return (
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0}>
 			<BrandPill updateAvailable={updateAvailable} />
+
+			<Box flexShrink={1} minWidth={0} paddingX={1}>
+				<Text color={ui.muted} wrap="truncate-middle">
+					{workspacePath}
+				</Text>
+				<Text color={ui.dim}>  </Text>
+				<Text color={ui.teal}>⎇ </Text>
+				<Text color={ui.orange} wrap="truncate-end">
+					{branch}
+				</Text>
+				<Text color={ui.dim}>  </Text>
+				<Text color={ui.muted}>{syncStatus}</Text>
+			</Box>
+
 			<Box flexShrink={0}>
-				<Text color={ui.muted}>^T:new  ^W:close</Text>
+				<Text color={ui.dim}>^P</Text>
+				<Text color={ui.muted}> palette</Text>
+				<Text color={ui.dim}>  </Text>
+				<Text color={micOn ? t.red : ui.dim}>{micOn ? "● MIC" : "○ MIC"}</Text>
+				<Text color={ui.dim}>  </Text>
+				{approvalPending ? (
+					<>
+						<Text color={t.orange} bold>[ASK]</Text>
+						<Text color={ui.dim}>  </Text>
+					</>
+				) : null}
+				<Text color={localFirst ? t.green : ui.dim}>LOCAL-FIRST</Text>
+				<Text color={ui.dim}>  </Text>
+				<Text color={ui.muted}>{sessionTime}</Text>
+				<Text color={ui.dim}>  </Text>
+				<LilEightBadge state={lilEightState} />
 			</Box>
 		</Box>
 	);
@@ -70,3 +117,5 @@ function BrandWord() {
 		</Box>
 	);
 }
+
+export type { HeaderBarProps };

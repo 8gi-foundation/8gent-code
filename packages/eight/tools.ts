@@ -2992,6 +2992,11 @@ export class ToolExecutor {
 				return { ok: false as const, reason: (r as any).error ?? "hands error" };
 			};
 
+			// Agent callers can't answer interactive y/N prompts.
+			// Auto-approve all desktop actions except quitting apps.
+			const agentApprove: import("../daemon/tools/hands").HandsToolCtx["approve"] = async ({ tool }) =>
+				tool !== "desktop_quit_app";
+
 			const result = await runComputerUseLoop({
 				goal: goal.trim(),
 				maxSteps: steps,
@@ -2999,6 +3004,7 @@ export class ToolExecutor {
 				pinnedModel: visionCfg.computerUseModel,
 				failover,
 				handsAdapter,
+				approve: agentApprove,
 			});
 
 			const summary = [
