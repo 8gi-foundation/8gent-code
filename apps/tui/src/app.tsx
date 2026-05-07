@@ -14,6 +14,7 @@
  */
 
 import { Box, useApp, useInput } from "ink";
+import { t } from "./theme.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
 	type TaskCategory,
@@ -5398,16 +5399,22 @@ export function App({
 					/>
 				</Box>
 
-				<Box flexGrow={1} minHeight={0} gap={1}>
-					{showContextRail && (
-						<ContextRail
-							branch={currentBranch || "—"}
-							risk={infiniteModeActive ? "high" : "low"}
-							permissions={infiniteModeActive ? "infinite" : "ask"}
-							contextPct={contextPct}
-							adhdMode={adhdMode}
-						/>
-					)}
+				<Box
+					borderStyle="round"
+					borderColor={t.cardBorder}
+					flexGrow={1}
+					minHeight={0}
+				>
+					<Box flexGrow={1} minHeight={0} gap={1}>
+						{showContextRail && (
+							<ContextRail
+								branch={currentBranch || "—"}
+								risk={infiniteModeActive ? "high" : "low"}
+								permissions={infiniteModeActive ? "infinite" : "ask"}
+								contextPct={contextPct}
+								adhdMode={adhdMode}
+							/>
+						)}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
 						<LiveFocalStrip
@@ -5467,15 +5474,16 @@ export function App({
 						</Box>
 					</Box>
 
-					{showActivityRail && (
-						<ActivityRail
-							tasks={activeTasks}
-							tools={recentTools}
-							providers={providerRows}
-							memory={memoryStats}
-							agents={agentRows}
-						/>
-					)}
+						{showActivityRail && (
+							<ActivityRail
+								tasks={activeTasks}
+								tools={recentTools}
+								providers={providerRows}
+								memory={memoryStats}
+								agents={agentRows}
+							/>
+						)}
+					</Box>
 				</Box>
 
 				<BottomBar
