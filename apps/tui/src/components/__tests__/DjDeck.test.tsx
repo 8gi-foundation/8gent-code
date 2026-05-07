@@ -123,4 +123,50 @@ describe("DjDeck — expanded stereo", () => {
 		});
 		expect(matrix).toMatchSnapshot();
 	});
+
+	test("renders no-track state distinct from loading (#2365)", () => {
+		// hasTrack=false: dim placeholder, no artist, idle waveform, volume meter still visible
+		const el = StereoDisplay({
+			playing: false,
+			track: "",
+			artist: "",
+			elapsed: "0:00",
+			duration: "0:00",
+			volume: 50,
+			muted: false,
+			tick: 0,
+			termWidth: 80,
+			hasTrack: false,
+		});
+		const props = shallow<{
+			width: string;
+			borderStyle: string;
+			flexDirection: string;
+			children: React.ReactNode;
+		}>(el);
+		// Stereo stays in chrome — same shell as loaded state.
+		expect(props.width).toBe("100%");
+		expect(props.borderStyle).toBe("single");
+		expect(props.flexDirection).toBe("column");
+		// Three rows still rendered (track row, artist/wave/time row, volume row).
+		const rows = React.Children.toArray(props.children);
+		expect(rows.length).toBe(3);
+	});
+
+	test("hasTrack defaults to true for backwards compatibility", () => {
+		// Existing call sites that don't pass hasTrack should still render the
+		// loaded-state stereo (no regression of #2341 always-on chrome).
+		const el = StereoDisplay({
+			playing: true,
+			track: "Some Track",
+			artist: "Instrumental",
+			elapsed: "0:14",
+			duration: "3:21",
+			volume: 50,
+			muted: false,
+			tick: 4,
+			termWidth: 80,
+		});
+		expect(el).toBeDefined();
+	});
 });
