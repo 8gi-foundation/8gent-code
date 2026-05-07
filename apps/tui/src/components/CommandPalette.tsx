@@ -191,14 +191,14 @@ export function CommandPaletteView({
 					const active = realIndex === activeIndex;
 					return (
 						<Box key={`${realIndex}-${cmd.name}`}>
-							<Text color={active ? t.orange : t.dim}>
+							<Text color={active ? t.orange : t.textTertiary}>
 								{active ? "◆ " : "○ "}
 							</Text>
-							<Text color={active ? t.cream : t.muted} bold={active}>
+							<Text color={active ? t.orange : t.textPrimary} bold={active}>
 								{padRight(`/${cmd.name}`, NAME_COL_WIDTH)}
 							</Text>
 							<Text color={t.muted}> </Text>
-							<Text color={active ? t.textSecondary : t.dim} wrap="truncate-end">
+							<Text color={active ? t.textPrimary : t.textSecondary} wrap="truncate-end">
 								{cmd.description}
 							</Text>
 						</Box>
