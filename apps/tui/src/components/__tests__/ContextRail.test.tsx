@@ -40,7 +40,7 @@ describe("ContextRail", () => {
 		expect(typeof ContextRail).toBe("function");
 	});
 
-	test("top-level Box has fixed width 24 and theme border", () => {
+	test("top-level Box has fixed width 28 and theme border", () => {
 		const rendered = render(baseProps);
 		const props = rendered.props as {
 			width: number;
@@ -51,7 +51,7 @@ describe("ContextRail", () => {
 			flexDirection: string;
 			overflow: string;
 		};
-		expect(props.width).toBe(24);
+		expect(props.width).toBe(28);
 		expect(props.flexShrink).toBe(0);
 		expect(props.borderStyle).toBe("single");
 		expect(props.borderColor).toBe(t.border);
@@ -85,13 +85,15 @@ describe("ContextRail", () => {
 			const children = React.Children.toArray(
 				(rendered.props as { children: React.ReactNode }).children,
 			) as React.ReactElement[];
-			// Risk value Text is the last child of the STATE section.
 			// Layout (per component): [0] WORKSPACE header, [1] workspace name,
-			// [2] "branch", [3] branch value, [4] spacer, [5] STATE header,
-			// [6] "approval", [7] approval value, [8] "risk", [9] risk value, ...
-			const riskNode = children[9] as React.ReactElement<{ color: string; children: string }>;
-			expect(riskNode.props.color).toBe(expectedRiskColor[risk]);
-			expect(riskNode.props.children).toBe(risk.toUpperCase());
+			// [2] branch Row, [3] spacer, [4] STATE header,
+			// [5] approval Row, [6] risk Row, ...
+			const riskRow = children[6] as React.ReactElement<{
+				valueColor: string;
+				value: string;
+			}>;
+			expect(riskRow.props.valueColor).toBe(expectedRiskColor[risk]);
+			expect(riskRow.props.value).toBe(risk.toUpperCase());
 		});
 	}
 
@@ -100,10 +102,10 @@ describe("ContextRail", () => {
 		const children = React.Children.toArray(
 			(rendered.props as { children: React.ReactNode }).children,
 		) as React.ReactElement[];
-		const adhdNode = children[children.length - 1] as React.ReactElement<{
-			color: string;
+		const adhdRow = children[children.length - 1] as React.ReactElement<{
+			valueColor: string;
 		}>;
-		expect(adhdNode.props.color).toBe(t.muted);
+		expect(adhdRow.props.valueColor).toBe(t.muted);
 	});
 
 	test("ADHD on renders teal label", () => {
@@ -111,10 +113,10 @@ describe("ContextRail", () => {
 		const children = React.Children.toArray(
 			(rendered.props as { children: React.ReactNode }).children,
 		) as React.ReactElement[];
-		const adhdNode = children[children.length - 1] as React.ReactElement<{
-			color: string;
+		const adhdRow = children[children.length - 1] as React.ReactElement<{
+			valueColor: string;
 		}>;
-		expect(adhdNode.props.color).toBe(t.teal);
+		expect(adhdRow.props.valueColor).toBe(t.teal);
 	});
 
 	test("snapshot across all risk levels x ADHD modes is stable", () => {
