@@ -1,7 +1,7 @@
 /**
  * 8gent Code - Enhanced Status Bar Component
  *
- * Multiple colored status indicators like Claude Code:
+ * Multiple colored status indicators in a single row.
  * Layout: [status1] . [status2] . [status3]
  *
  * Status items:
@@ -102,7 +102,7 @@ interface StatusBarProps {
 }
 
 // ============================================
-// Enhanced Status Bar (Claude Code Style)
+// Enhanced Status Bar
 // ============================================
 
 export function EnhancedStatusBar({
