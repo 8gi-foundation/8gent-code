@@ -117,7 +117,7 @@ import { probeProviders } from "./lib/provider-health.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatTokens, truncate } from "./lib/index.js";
+import { formatSessionTime, formatTokens, truncate } from "./lib/index.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -5330,10 +5330,10 @@ export function App({
 	const cols = viewport.width;
 	const showContextRail = cols >= 120;
 	const showActivityRail = cols >= 90;
-	const elapsedSec = Math.floor((Date.now() - startTime.getTime()) / 1000);
-	const mins = Math.floor(elapsedSec / 60);
-	const secs = elapsedSec % 60;
-	const sessionTime = `${mins}m ${secs.toString().padStart(2, "0")}`;
+	// Smart session timer (#2367). Resets on every TUI restart — startTime
+	// is held in useState (line 686) so the value is captured once at
+	// mount and never persisted across restarts.
+	const sessionTime = formatSessionTime(Date.now() - startTime.getTime());
 	const tokenStr =
 		totalTokens >= 1000
 			? `${(totalTokens / 1000).toFixed(totalTokens >= 10000 ? 0 : 1)}K tok`
@@ -5484,8 +5484,7 @@ export function App({
 					total={providerHealth.total}
 					tokens={tokenStr}
 					branch={currentBranch || "—"}
-					agent={authUser?.displayName || "Guest"}
-					micOn={Boolean(micOn)}
+					user={authUser?.displayName}
 					permissions={infiniteModeActive ? "infinite" : "ask"}
 					sessionTime={sessionTime}
 					mode={agentMode}

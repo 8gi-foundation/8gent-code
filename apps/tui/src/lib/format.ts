@@ -41,6 +41,43 @@ export function formatDuration(ms: number): string {
 	return `${seconds}s`;
 }
 
+/**
+ * Format an elapsed-since-mount duration for the bottom-HUD SESSION
+ * card. Distinct from `formatDuration` because the contract is fixed
+ * by spec (#2367):
+ *   <60s:  "Ns"
+ *   <60m:  "Nm Ss"
+ *   <24h:  "Hh Mm"
+ *   >=24h: "Dd Hh"
+ *
+ * Always reports the elapsed delta from the timestamp the TUI captured
+ * at mount; resets on every TUI restart by design (no persistence).
+ */
+export function formatSessionTime(elapsedMs: number): string {
+	if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+	const totalSeconds = Math.floor(elapsedMs / 1000);
+
+	if (totalSeconds < 60) {
+		return `${totalSeconds}s`;
+	}
+
+	const totalMinutes = Math.floor(totalSeconds / 60);
+	if (totalMinutes < 60) {
+		const seconds = totalSeconds % 60;
+		return `${totalMinutes}m ${seconds}s`;
+	}
+
+	const totalHours = Math.floor(totalMinutes / 60);
+	if (totalHours < 24) {
+		const minutes = totalMinutes % 60;
+		return `${totalHours}h ${minutes}m`;
+	}
+
+	const days = Math.floor(totalHours / 24);
+	const hours = totalHours % 24;
+	return `${days}d ${hours}h`;
+}
+
 /** Format a value/total as a percentage string. */
 export function formatPercentage(value: number, total: number): string {
 	if (total <= 0) return "0%";
