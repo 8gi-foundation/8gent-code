@@ -12,6 +12,6 @@ exports[`ActivityRail snapshot of full rail is stable 1`] = `
   "providers": 2,
   "tasks": 2,
   "tools": 4,
-  "width": 32,
+  "width": 34,
 }
 `;
