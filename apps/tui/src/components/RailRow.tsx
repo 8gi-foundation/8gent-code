@@ -31,7 +31,7 @@ export function MetricRow({
 }) {
 	return (
 		<Box width="100%" overflow="hidden">
-			<Box width={10} flexShrink={0}>
+			<Box width={9} flexShrink={0}>
 				<Text color={t.dim} wrap="truncate-end">{label}</Text>
 			</Box>
 			<Box flexGrow={1} minWidth={0}>

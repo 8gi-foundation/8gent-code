@@ -26,6 +26,11 @@ interface LiveFocalStripProps {
 	tokens: string;
 	contextPct: number;
 	approvalPending?: boolean;
+	/** When the agent is running unattended (auto-approve all), the focal
+	 *  strip swaps the mode label for "Autonomous" so the operator instantly
+	 *  knows manual approvals are off. Border also stays teal regardless of
+	 *  approvalPending because nothing is actually waiting on the user. */
+	autonomous?: boolean;
 }
 
 /**
@@ -44,12 +49,15 @@ export function LiveFocalStrip({
 	tokens,
 	contextPct,
 	approvalPending = false,
+	autonomous = false,
 }: LiveFocalStripProps) {
+	const displayMode = autonomous ? "Autonomous" : mode;
+	const showApprovalBorder = approvalPending && !autonomous;
 	return (
 		<Box
 			width="100%"
 			borderStyle="round"
-			borderColor={approvalPending ? t.orange : t.teal}
+			borderColor={showApprovalBorder ? t.orange : t.teal}
 			paddingX={1}
 			justifyContent="space-between"
 			flexShrink={0}
@@ -58,7 +66,7 @@ export function LiveFocalStrip({
 			<Box minWidth={0}>
 				<Text color={t.teal}>◆ NOW </Text>
 				<Text color={t.textPrimary} bold wrap="truncate-end">
-					{mode}
+					{displayMode}
 				</Text>
 				<Text color={t.muted}> / </Text>
 				<Text color={t.textSecondary} wrap="truncate-end">

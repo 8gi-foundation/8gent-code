@@ -8,6 +8,16 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { TAB_ICONS, type TabType, type WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
+import { t } from "../theme.js";
+
+// Strip external-AI-vendor names from existing-session tab titles at render
+// time. Persisted sessions still carry the old "Claude Code" string; this
+// rewrites them on the fly so we never expose vendor names to the user.
+function sanitizeTabTitle(title: string): string {
+	if (title === "Claude Code") return "Sparring";
+	if (title.toLowerCase().includes("claude")) return "Peer";
+	return title;
+}
 
 interface TabBarProps {
 	tabs: WorkspaceTab[];
@@ -43,7 +53,7 @@ export function TabBar({ tabs, onSwitch, isTabProcessing }: TabBarProps) {
 		// is already used elsewhere in the app for the Ideas tab and renders
 		// reliably in any TTY without color cues.
 		const busy = isTabProcessing?.(tab.id) ? " *" : "";
-		const label = `${icon} ${tab.title}${badge}${busy}`;
+		const label = `${icon} ${sanitizeTabTitle(tab.title)}${badge}${busy}`;
 
 		if (tab.active) {
 			topRow += `┌ ${label} ┐`;
@@ -57,11 +67,11 @@ export function TabBar({ tabs, onSwitch, isTabProcessing }: TabBarProps) {
 	return (
 		<Box flexDirection="column" marginBottom={0}>
 			<Box>
-				<Text color="cyan">{topRow}</Text>
+				<Text color={t.teal}>{topRow}</Text>
 				<Box flexGrow={1} />
 			</Box>
 			<Box>
-				<Text color="cyan">
+				<Text color={t.teal}>
 					{botRow}
 					{"─".repeat(80)}
 				</Text>
