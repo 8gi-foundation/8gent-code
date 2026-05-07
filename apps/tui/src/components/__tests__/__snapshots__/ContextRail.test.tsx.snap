@@ -9,7 +9,7 @@ exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] 
     "flexShrink": 0,
     "paddingX": 1,
     "risk": "low",
-    "width": 24,
+    "width": 28,
   },
   {
     "adhdMode": true,
@@ -18,7 +18,7 @@ exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] 
     "flexShrink": 0,
     "paddingX": 1,
     "risk": "low",
-    "width": 24,
+    "width": 28,
   },
   {
     "adhdMode": false,
@@ -27,7 +27,7 @@ exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] 
     "flexShrink": 0,
     "paddingX": 1,
     "risk": "medium",
-    "width": 24,
+    "width": 28,
   },
   {
     "adhdMode": true,
@@ -36,7 +36,7 @@ exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] 
     "flexShrink": 0,
     "paddingX": 1,
     "risk": "medium",
-    "width": 24,
+    "width": 28,
   },
   {
     "adhdMode": false,
@@ -45,7 +45,7 @@ exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] 
     "flexShrink": 0,
     "paddingX": 1,
     "risk": "high",
-    "width": 24,
+    "width": 28,
   },
   {
     "adhdMode": true,
@@ -54,7 +54,7 @@ exports[`ContextRail snapshot across all risk levels x ADHD modes is stable 1`] 
     "flexShrink": 0,
     "paddingX": 1,
     "risk": "high",
-    "width": 24,
+    "width": 28,
   },
 ]
 `;

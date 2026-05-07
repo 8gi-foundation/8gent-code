@@ -7,6 +7,11 @@
  * left of the message area + right inspector.
  *
  * Theme tokens only. No inline hex.
+ *
+ * Layout: section headings (WORKSPACE / STATE / CONTEXT / ACCESS) sit on their
+ * own line in orange bold. Sub-labels share a row with their value so narrow
+ * widths don't wrap and clip leading characters. Values use truncate-end so
+ * long branch names don't break the rail.
  */
 
 import { Box, Text } from "ink";
@@ -23,6 +28,29 @@ interface ContextRailProps {
 	workspaceName?: string;
 }
 
+/**
+ * Inline label + value row. Label takes its natural width, value takes the
+ * remaining space and truncates from the end if too long.
+ */
+function Row({
+	label,
+	value,
+	valueColor,
+}: {
+	label: string;
+	value: string;
+	valueColor: string;
+}) {
+	return (
+		<Box flexDirection="row">
+			<Text color={t.dim}>{label}  </Text>
+			<Box flexGrow={1}>
+				<Text color={valueColor} wrap="truncate-end">{value}</Text>
+			</Box>
+		</Box>
+	);
+}
+
 export function ContextRail({
 	branch,
 	risk,
@@ -34,11 +62,13 @@ export function ContextRail({
 	const riskColor =
 		risk === "high" ? t.red : risk === "medium" ? t.orange : t.green;
 
-	const contextBlocks = "█".repeat(Math.max(0, Math.min(10, Math.round(contextPct / 10))));
+	const filled = Math.max(0, Math.min(10, Math.round(contextPct / 10)));
+	const empty = 10 - filled;
+	const contextBar = "█".repeat(filled) + "░".repeat(empty);
 
 	return (
 		<Box
-			width={24}
+			width={28}
 			flexShrink={0}
 			borderStyle="single"
 			borderColor={t.border}
@@ -48,28 +78,31 @@ export function ContextRail({
 		>
 			<Text color={t.orange} bold>WORKSPACE</Text>
 			<Text color={t.textSecondary} wrap="truncate-end">{workspaceName}</Text>
-			<Text color={t.dim}>branch</Text>
-			<Text color={t.orange} wrap="truncate-end">{branch}</Text>
+			<Row label="branch" value={branch} valueColor={t.orange} />
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>STATE</Text>
-			<Text color={t.dim}>approval</Text>
-			<Text color={permissions === "ask" ? t.orange : t.textSecondary}>
-				{permissions.toUpperCase()}
-			</Text>
-			<Text color={t.dim}>risk</Text>
-			<Text color={riskColor}>{risk.toUpperCase()}</Text>
+			<Row
+				label="approval"
+				value={permissions.toUpperCase()}
+				valueColor={permissions === "ask" ? t.orange : t.textSecondary}
+			/>
+			<Row label="risk" value={risk.toUpperCase()} valueColor={riskColor} />
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>CONTEXT</Text>
-			<Text color={t.steel}>{contextBlocks}</Text>
-			<Text color={t.muted}>{contextPct}% used</Text>
+			<Box flexDirection="row">
+				<Text color={t.steel}>{contextBar}</Text>
+				<Text color={t.muted}> {contextPct}%</Text>
+			</Box>
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>ACCESS</Text>
-			<Text color={adhdMode ? t.teal : t.muted}>
-				ADHD {adhdMode ? "ON" : "OFF"}
-			</Text>
+			<Row
+				label="ADHD"
+				value={adhdMode ? "ON" : "OFF"}
+				valueColor={adhdMode ? t.teal : t.muted}
+			/>
 		</Box>
 	);
 }
