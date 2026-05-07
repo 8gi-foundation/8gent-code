@@ -43,6 +43,26 @@ const PALETTE_WIDTH = 50;
 const MAX_VISIBLE_ROWS = 10;
 const NAME_COL_WIDTH = 12;
 
+/**
+ * Compute a sliding window over the filtered command list that always
+ * includes activeIndex. Returns the absolute start/end bounds plus the
+ * sliced window so callers can derive realIndex = start + i.
+ */
+export function computeWindow(
+	total: number,
+	activeIndex: number,
+	visible: number = MAX_VISIBLE_ROWS,
+): { start: number; end: number } {
+	if (total <= visible) {
+		return { start: 0, end: total };
+	}
+	const half = Math.floor(visible / 2);
+	const rawStart = activeIndex - half;
+	const start = Math.max(0, Math.min(rawStart, total - visible));
+	const end = Math.min(total, start + visible);
+	return { start, end };
+}
+
 export function CommandPalette({
 	isOpen,
 	onClose,
@@ -81,8 +101,12 @@ export function CommandPalette({
 			if (key.return) {
 				const active = filtered[activeIndex];
 				if (active) {
-					onExecute(active.name);
+					// Close FIRST so this palette's useInput unmounts before
+					// any sub-flow (e.g. /resume, /voice, /model menus) mounts
+					// its own useInput. Otherwise both handlers race on the
+					// next keypress. See issue #2388.
 					onClose();
+					onExecute(active.name);
 				}
 				return;
 			}
@@ -129,8 +153,11 @@ export function CommandPaletteView({
 	activeIndex,
 	commands,
 }: CommandPaletteViewProps): React.ReactElement {
-	const visible = commands.slice(0, MAX_VISIBLE_ROWS);
-	const overflow = commands.length - visible.length;
+	const total = commands.length;
+	const { start, end } = computeWindow(total, activeIndex, MAX_VISIBLE_ROWS);
+	const visible = commands.slice(start, end);
+	const hiddenAbove = start;
+	const hiddenBelow = total - end;
 
 	return (
 		<Box
@@ -149,15 +176,21 @@ export function CommandPaletteView({
 			<Box>
 				<Text color={t.border}>──────────────────────────────────────────</Text>
 			</Box>
+			{hiddenAbove > 0 ? (
+				<Box>
+					<Text color={t.dim}>  ↑ {hiddenAbove} more</Text>
+				</Box>
+			) : null}
 			{visible.length === 0 ? (
 				<Box>
 					<Text color={t.dim}>no matches</Text>
 				</Box>
 			) : (
-				visible.map((cmd, idx) => {
-					const active = idx === activeIndex;
+				visible.map((cmd, i) => {
+					const realIndex = start + i;
+					const active = realIndex === activeIndex;
 					return (
-						<Box key={cmd.name}>
+						<Box key={`${realIndex}-${cmd.name}`}>
 							<Text color={active ? t.orange : t.dim}>
 								{active ? "◆ " : "○ "}
 							</Text>
@@ -172,9 +205,9 @@ export function CommandPaletteView({
 					);
 				})
 			)}
-			{overflow > 0 ? (
+			{hiddenBelow > 0 ? (
 				<Box>
-					<Text color={t.dim}>  +{overflow} more - refine query</Text>
+					<Text color={t.dim}>  ↓ {hiddenBelow} more</Text>
 				</Box>
 			) : null}
 			<Box>

@@ -14,12 +14,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import React from "react";
 import {
 	CommandPalette,
 	CommandPaletteView,
 	type CommandPaletteCommand,
 	type CommandPaletteViewProps,
+	computeWindow,
 	filterAndSortCommands,
 } from "../CommandPalette";
 
@@ -154,5 +157,112 @@ describe("filterAndSortCommands", () => {
 
 	test("returns empty list when nothing matches", () => {
 		expect(filterAndSortCommands(COMMANDS, "zzz")).toEqual([]);
+	});
+});
+
+describe("Enter dispatch order (issue #2388)", () => {
+	// We can't render the stateful CommandPalette without an Ink test
+	// runtime, so we verify the contract at the source level: when Enter
+	// fires, onClose() must be called BEFORE onExecute() so the palette's
+	// useInput unmounts before any sub-flow's useInput (e.g. /resume,
+	// /voice menu) mounts. Otherwise both handlers race on the next key.
+	test("Enter handler calls onClose before onExecute", () => {
+		const src = readFileSync(
+			join(__dirname, "..", "CommandPalette.tsx"),
+			"utf8",
+		);
+		const enterBlock = src
+			.split("if (key.return) {")[1]
+			?.split("return;")[0];
+		expect(enterBlock).toBeDefined();
+		const closeIdx = enterBlock!.indexOf("onClose()");
+		const execIdx = enterBlock!.indexOf("onExecute(");
+		expect(closeIdx).toBeGreaterThan(-1);
+		expect(execIdx).toBeGreaterThan(-1);
+		expect(closeIdx).toBeLessThan(execIdx);
+	});
+});
+
+describe("computeWindow (palette scrolling)", () => {
+	test("total <= visible returns the full range", () => {
+		expect(computeWindow(5, 0, 10)).toEqual({ start: 0, end: 5 });
+		expect(computeWindow(10, 4, 10)).toEqual({ start: 0, end: 10 });
+	});
+
+	test("active at index 0 with 50 total renders 0..9", () => {
+		expect(computeWindow(50, 0, 10)).toEqual({ start: 0, end: 10 });
+	});
+
+	test("active at index 25 with 50 total renders 20..29 (centred)", () => {
+		expect(computeWindow(50, 25, 10)).toEqual({ start: 20, end: 30 });
+	});
+
+	test("active at last index renders the last 10", () => {
+		expect(computeWindow(50, 49, 10)).toEqual({ start: 40, end: 50 });
+	});
+
+	test("active near top stays anchored at 0 (no negative start)", () => {
+		expect(computeWindow(50, 2, 10)).toEqual({ start: 0, end: 10 });
+	});
+});
+
+describe("CommandPaletteView windowing markers", () => {
+	const MANY: CommandPaletteCommand[] = Array.from({ length: 30 }, (_, i) => ({
+		name: `cmd${i}`,
+		description: `command number ${i}`,
+	}));
+
+	function flatten(node: unknown): string {
+		if (node == null || typeof node === "boolean") return "";
+		if (typeof node === "string" || typeof node === "number") return String(node);
+		if (Array.isArray(node)) return node.map(flatten).join("");
+		if (typeof node === "object" && "props" in (node as { props?: unknown })) {
+			const el = node as { props: { children?: unknown } };
+			return flatten(el.props.children);
+		}
+		return "";
+	}
+
+	test("active at 0 of 30: no up marker, down marker shows 20 hidden", () => {
+		const rendered = invokeView({ query: "", activeIndex: 0, commands: MANY });
+		const text = flatten(rendered);
+		expect(text).not.toMatch(/↑ \d+ more/);
+		expect(text).toContain("↓ 20 more");
+		// Active row visible
+		expect(text).toContain("/cmd0");
+		expect(text).toContain("/cmd9");
+		expect(text).not.toContain("/cmd10");
+	});
+
+	test("active at 25 of 30: only up marker (window already at end)", () => {
+		const rendered = invokeView({ query: "", activeIndex: 25, commands: MANY });
+		const text = flatten(rendered);
+		expect(text).toContain("↑ 20 more");
+		expect(text).toContain("/cmd25");
+		// 20..30 window means hiddenBelow=0, so no down marker line
+		expect(text).not.toMatch(/↓ \d+ more/);
+	});
+
+	test("active at last index of 30: up marker only", () => {
+		const rendered = invokeView({ query: "", activeIndex: 29, commands: MANY });
+		const text = flatten(rendered);
+		expect(text).toContain("↑ 20 more");
+		expect(text).not.toMatch(/↓ \d+ more/);
+		expect(text).toContain("/cmd29");
+	});
+
+	test("middle position with markers above AND below", () => {
+		// 30 items, active at 12 -> half=5, start=7, end=17. Hidden above=7, below=13.
+		const rendered = invokeView({ query: "", activeIndex: 12, commands: MANY });
+		const text = flatten(rendered);
+		expect(text).toContain("↑ 7 more");
+		expect(text).toContain("↓ 13 more");
+		expect(text).toContain("/cmd12");
+	});
+
+	test("legacy '+N more - refine query' hint is gone", () => {
+		const rendered = invokeView({ query: "", activeIndex: 0, commands: MANY });
+		const text = flatten(rendered);
+		expect(text).not.toContain("refine query");
 	});
 });
