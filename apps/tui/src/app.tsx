@@ -5453,6 +5453,7 @@ export function App({
 							tokens={tokenStr}
 							contextPct={contextPct}
 							approvalPending={isApprovalPending}
+							autonomous={infiniteModeActive}
 						/>
 
 						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">

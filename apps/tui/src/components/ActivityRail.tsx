@@ -166,13 +166,26 @@ export function ActivityRail({
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>TOOLS</Text>
 			</Box>
-			{tools.map((tool) => (
-				<NamedRow
-					key={tool.name}
-					name={`${TOOL_GLYPH[tool.state]} ${tool.name}`}
-					color={TOOL_COLOR[tool.state]}
-				/>
-			))}
+			{(() => {
+				const active = tools.find((t) => t.state === "running")?.name ?? null;
+				const done = tools.filter((t) => t.state === "ok").length;
+				const queued = tools.filter((t) => t.state === "idle").length;
+				return (
+					<>
+						<MetricRow
+							label="active"
+							value={active ?? "none"}
+							color={active ? t.teal : t.dim}
+						/>
+						<MetricRow label="done" value={String(done)} color={t.textSecondary} />
+						<MetricRow
+							label="queued"
+							value={String(queued)}
+							color={queued > 0 ? t.orange : t.dim}
+						/>
+					</>
+				);
+			})()}
 
 			<Box marginTop={1}>
 				<Text color={t.orange} bold>PROVIDERS</Text>
