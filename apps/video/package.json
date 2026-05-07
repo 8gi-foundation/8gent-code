@@ -1,0 +1,26 @@
+{
+	"name": "@8gent/video",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Remotion compositions for 8gent. Cinematic travel maps for LetsFG and other geo videos.",
+	"scripts": {
+		"start": "remotion studio src/index.ts",
+		"build": "remotion bundle src/index.ts",
+		"render": "remotion render src/index.ts TokyoToSF out/tokyo-sf.mp4 --gl=angle --concurrency=1",
+		"upgrade": "remotion upgrade",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@remotion/cli": "4.0.250",
+		"@turf/turf": "^7.1.0",
+		"maplibre-gl": "^4.7.1",
+		"react": "19.2.4",
+		"react-dom": "19.2.4",
+		"remotion": "4.0.250"
+	},
+	"devDependencies": {
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"typescript": "^5"
+	}
+}
