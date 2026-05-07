@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
+import { requestTuiApproval } from "./tui-approval-channel.js";
 
 // ============================================
 // Types
@@ -939,6 +940,15 @@ export class PermissionManager {
 			// Auto-approve non-dangerous commands in headless mode
 			console.log(`[permissions] AUTO-APPROVED (headless): ${command || action}`);
 			return true;
+		}
+
+		// Interactive: prefer a registered TUI handler so we can render the
+		// inline approval card instead of dumping a readline prompt over the
+		// alternate-screen buffer. If no handler is registered (legacy chrome,
+		// non-TUI callers), fall back to the existing stdin flow.
+		const tuiResult = await requestTuiApproval({ action, details, command });
+		if (tuiResult !== null) {
+			return tuiResult;
 		}
 
 		return new Promise((resolve) => {

@@ -163,40 +163,27 @@ import { MessageViewer } from "./components/MessageViewer.js";
 import { ContextRail } from "./components/ContextRail.js";
 import { LiveFocalStrip } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
+import { ActivityRail } from "./components/ActivityRail.js";
+import { useLilEightState } from "./hooks/useLilEightState.js";
+import { useGitSync } from "./hooks/useGitSync.js";
 import {
-	ActivityRail,
-	type ActiveTask as ActivityRailTask,
-	type ToolStatus as ActivityRailToolStatus,
-	type ProviderRow as ActivityRailProviderRow,
-	type AgentRow as ActivityRailAgentRow,
-} from "./components/ActivityRail.js";
+	deriveTools,
+	deriveProviders,
+	deriveAgents,
+	deriveActiveTasks,
+	type OrchestrationAgentSnapshot,
+} from "./lib/activity-rail-derivation.js";
+import {
+	registerTuiApprovalHandler,
+	type TuiApprovalDecision,
+	type TuiApprovalRequest,
+} from "../../../packages/permissions/tui-approval-channel.js";
 
 /**
  * Three-zone TUI shell flag. Read once at module load so the OFF path is
  * bytewise identical to pre-V2 main. Set 8GENT_TUI_V2=1 to opt in.
  */
 const TUI_V2_ENABLED = process.env["8GENT_TUI_V2"] === "1";
-
-// Stub data for V2 ActivityRail / ContextRail. Real wiring is a follow-up.
-const STUB_ACTIVE_TASKS: ReadonlyArray<ActivityRailTask> = [
-	{ id: "stub-1", label: "stub: idle", progress: 0 },
-];
-const STUB_TOOLS: ReadonlyArray<ActivityRailToolStatus> = [
-	{ name: "read", state: "idle" },
-	{ name: "patch", state: "idle" },
-	{ name: "test", state: "idle" },
-	{ name: "verify", state: "idle" },
-];
-const STUB_PROVIDERS: ReadonlyArray<ActivityRailProviderRow> = [
-	{ name: "stub local", state: "local", latency: "—" },
-];
-const STUB_MEMORY = { hits: 0, misses: 0, cache: "—" } as const;
-const STUB_AGENTS: ReadonlyArray<ActivityRailAgentRow> = [
-	{ name: "Core", state: "idle" },
-	{ name: "Research", state: "idle" },
-	{ name: "Tester", state: "idle" },
-	{ name: "Reviewer", state: "idle" },
-];
 
 // Import auth + DB systems (lazy, non-blocking)
 let authManager: any = null;
@@ -1286,12 +1273,68 @@ export function App({
 		}
 	}, [isProcessing, processPanel.sidebarOpen]);
 
+	// V2 chrome: track turn boundaries + the last user/agent activity tick so
+	// LilEightBadge can transition idle/done/error/sleep without polling app
+	// internals from the badge itself. Both update only on real transitions
+	// (true -> false for done/error, any user/agent event for activity).
+	const [lastTurnEndedAt, setLastTurnEndedAt] = useState<number | null>(null);
+	const [lastTurnSuccess, setLastTurnSuccess] = useState<boolean | null>(null);
+	const [lastActivityAt, setLastActivityAt] = useState<number>(() => Date.now());
+
+	// V2 chrome: approval-pending state. When non-null, the V2 layout renders
+	// InlineApprovalPrompt above CommandInput, flips the LiveFocalStrip border,
+	// and lights the [ASK] chip in HeaderBar. The keypress handler in
+	// `useInput` intercepts Y/N/E/S to settle the resolve callback.
+	const [approvalPending, setApprovalPending] = useState<{
+		target: string;
+		resolve: (decision: TuiApprovalDecision) => void;
+	} | null>(null);
+
+	// V2 approval handler registration. Headless / non-V2 callers see no
+	// handler and PermissionManager falls back to its existing stdin flow,
+	// so this is purely additive.
+	useEffect(() => {
+		if (!TUI_V2_ENABLED) return;
+		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
+			return new Promise<TuiApprovalDecision>((resolve) => {
+				const target = request.command || request.action || "pending tool call";
+				setApprovalPending({
+					target,
+					resolve: (decision) => {
+						setApprovalPending(null);
+						resolve(decision);
+					},
+				});
+			});
+		};
+		registerTuiApprovalHandler(handler);
+		return () => {
+			registerTuiApprovalHandler(null);
+		};
+	}, []);
+
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
 	const wasProcessingRef = useRef(false);
 	useEffect(() => {
 		const justFinished = wasProcessingRef.current && !isProcessing;
 		wasProcessingRef.current = isProcessing;
+		if (justFinished) {
+			setLastTurnEndedAt(Date.now());
+			// Best-effort: scan the last few messages for an error tool result
+			// or an agent error message. Anything else counts as a clean turn.
+			const tail = messages.slice(-5);
+			const hadError = tail.some(
+				(m) =>
+					m.toolSuccess === false ||
+					(m.role === "system" && /error|failed/i.test(m.content)),
+			);
+			setLastTurnSuccess(!hadError);
+			setLastActivityAt(Date.now());
+		}
+		if (isProcessing) {
+			setLastActivityAt(Date.now());
+		}
 		if (!justFinished) return;
 		if (process.platform !== "darwin") return;
 
@@ -1328,6 +1371,22 @@ export function App({
 
 	// Multi-agent orchestration
 	const orchestration = useAgentOrchestration();
+
+	// V2 chrome data sources. Always called so hook order is stable, even
+	// when 8GENT_TUI_V2 is off; the OFF render path simply ignores them so
+	// the legacy chrome stays bytewise identical. The git polling subprocess
+	// only fires when V2 is on - the legacy header doesn't read it.
+	const gitSync = useGitSync(process.cwd(), 30_000, TUI_V2_ENABLED);
+	const lilEightStateValue = useLilEightState(
+		{
+			messages,
+			isProcessing,
+			lastTurnEndedAt,
+			lastTurnSuccess,
+			idleSinceMs: Date.now() - lastActivityAt,
+		},
+		TUI_V2_ENABLED,
+	);
 
 	// Onboarding system
 	const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
@@ -1411,6 +1470,39 @@ export function App({
 
 	// Handle keyboard shortcuts
 	useInput((input, key) => {
+		// V2 approval intercept: when an inline approval is pending, Y/N/E/S
+		// settle it. Anything else falls through to normal input handling so
+		// the user can keep typing if they want to ignore the prompt.
+		if (approvalPending && !key.ctrl && !key.meta) {
+			const ch = (input || "").toLowerCase();
+			if (ch === "y") {
+				approvalPending.resolve("approve");
+				setLastActivityAt(Date.now());
+				return;
+			}
+			if (ch === "n") {
+				approvalPending.resolve("deny");
+				setLastActivityAt(Date.now());
+				return;
+			}
+			if (ch === "e") {
+				approvalPending.resolve("edit");
+				setLastActivityAt(Date.now());
+				return;
+			}
+			if (ch === "s") {
+				approvalPending.resolve("skip");
+				setLastActivityAt(Date.now());
+				return;
+			}
+		}
+
+		// Touch the activity timestamp on any keypress so LilEightBadge wakes
+		// from sleep promptly. Cheap; no React state when value is unchanged.
+		if (input || key.return || key.upArrow || key.downArrow || key.escape) {
+			setLastActivityAt(Date.now());
+		}
+
 		// Ctrl+L: toggle bubble navigation mode
 		if (key.ctrl && input === "l") {
 			setIsBubbleNavMode((prev) => {
@@ -5255,12 +5347,36 @@ export function App({
 		const micOn =
 			Boolean(voice?.isAvailable) &&
 			(voice?.state === "recording" || voiceChat?.isActive);
-		const approvalPending = false; // wiring is a follow-up issue
-		const lilEightState: "idle" | "thinking" | "working" | "done" | "error" = isProcessing
-			? "working"
-			: "idle";
+		const isApprovalPending = approvalPending !== null;
+		const lilEightState = lilEightStateValue;
 		const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
 		void sessionTick;
+
+		// Derived ActivityRail data. Memory store doesn't expose counters yet
+		// (#TODO upstream), so memory tile shows zeros + em-dash cache. Provider
+		// tile shows the active model as `local` and the env-driven fallback as
+		// `fallback` - latency is unknown until vision-router exposes it.
+		const activeTasks = deriveActiveTasks(
+			{
+				inProgress: kanbanBoard.inProgress.map((s) => ({ id: s.id, description: s.description })),
+				ready: kanbanBoard.ready,
+			},
+			activeTool,
+			isProcessing,
+		);
+		const recentTools = deriveTools(messages, activeTool, 5);
+		const providerRows = deriveProviders({
+			primary: { name: `${currentProvider}:${currentModel || "—"}` },
+			fallback: { name: "openrouter:free" },
+			offline: null,
+		});
+		const memoryStats = { hits: 0, misses: 0, cache: "—" };
+		const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
+			id: a.id,
+			name: a.name,
+			status: a.status,
+		}));
+		const agentRows = deriveAgents(orchestrationAgents);
 		return (
 			<FixedFrame>
 				<Box flexShrink={0}>
@@ -5269,9 +5385,9 @@ export function App({
 						v2={{
 							workspacePath: process.cwd(),
 							branch: currentBranch || "—",
-							syncStatus: "in sync",
+							syncStatus: gitSync.label,
 							micOn: Boolean(micOn),
-							approvalPending,
+							approvalPending: isApprovalPending,
 							localFirst: true,
 							sessionTime,
 							lilEightState,
@@ -5315,7 +5431,7 @@ export function App({
 							route={currentModel || "—"}
 							tokens={tokenStr}
 							contextPct={contextPct}
-							approvalPending={approvalPending}
+							approvalPending={isApprovalPending}
 						/>
 
 						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
@@ -5326,7 +5442,7 @@ export function App({
 						</Box>
 
 						{approvalPending && (
-							<InlineApprovalPrompt target="pending tool call" />
+							<InlineApprovalPrompt target={approvalPending.target} />
 						)}
 
 						<Box flexShrink={0}>
@@ -5358,11 +5474,11 @@ export function App({
 
 					{showActivityRail && (
 						<ActivityRail
-							tasks={STUB_ACTIVE_TASKS}
-							tools={STUB_TOOLS}
-							providers={STUB_PROVIDERS}
-							memory={STUB_MEMORY}
-							agents={STUB_AGENTS}
+							tasks={activeTasks}
+							tools={recentTools}
+							providers={providerRows}
+							memory={memoryStats}
+							agents={agentRows}
 						/>
 					)}
 				</Box>
