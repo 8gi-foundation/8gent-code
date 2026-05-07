@@ -1,0 +1,24 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`InlineApprovalPrompt snapshot of short and long targets is stable 1`] = `
+[
+  {
+    "borderColor": "#E8610A",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "justifyContent": "space-between",
+    "marginTop": 1,
+    "paddingX": 1,
+    "target": "write foo.ts",
+  },
+  {
+    "borderColor": "#E8610A",
+    "borderStyle": "round",
+    "flexShrink": 0,
+    "justifyContent": "space-between",
+    "marginTop": 1,
+    "paddingX": 1,
+    "target": "write /home/operator/8gent-code/apps/tui/src/components/very/deeply/nested/path/to/file/that/will/definitely/exceed/the/visible/width/of/the/inline/approval/card.ts",
+  },
+]
+`;
