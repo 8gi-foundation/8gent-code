@@ -3,11 +3,46 @@
  * - Timer ticks locally between polls so seconds advance smoothly
  * - Animated pseudo-waveform centered on the artist row when playing
  * - Volume slider updates in real time via Ctrl+Up/Down
+ *
+ * Stereo behaviour (#2341):
+ * - Default = expanded on first run.
+ * - User collapses via ^D to a single thin line (track + tiny waveform + play icon).
+ * - Never auto-hides, never auto-expands, never collapses to zero height.
+ * - Choice persists in workspace DB at app_state(`tui`, `djDeckExpanded`).
  */
 
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../theme.js";
+
+// ── Persistence helpers ───────────────────────────────────────────────
+// Lazy + best-effort: never let a DB error crash the deck. If the workspace
+// DB is unavailable (e.g. tests, sandboxed CI), we silently fall back to the
+// in-memory default (expanded).
+
+const PERSIST_APP_ID = "tui";
+const PERSIST_KEY = "djDeckExpanded";
+
+async function loadPersistedExpanded(): Promise<boolean | null> {
+	try {
+		const mod = await import("../../../../packages/db/src/index.js");
+		const db = mod.getWorkspaceDb();
+		const value = db.getAppState<boolean>(PERSIST_APP_ID, PERSIST_KEY);
+		return typeof value === "boolean" ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+async function persistExpanded(value: boolean): Promise<void> {
+	try {
+		const mod = await import("../../../../packages/db/src/index.js");
+		const db = mod.getWorkspaceDb();
+		db.setAppState(PERSIST_APP_ID, PERSIST_KEY, value);
+	} catch {
+		/* best effort */
+	}
+}
 
 interface DjStatus {
 	playing: boolean;
@@ -27,8 +62,12 @@ const EMPTY: DjStatus = {
 };
 
 let setOpenExternal: ((v: boolean) => void) | null = null;
+let toggleOpenExternal: (() => void) | null = null;
 export function setDjDeckOpen(open: boolean): void {
 	setOpenExternal?.(open);
+}
+export function toggleDjDeckOpen(): void {
+	toggleOpenExternal?.();
 }
 
 function fmt(s: number | null): string {
@@ -70,7 +109,7 @@ function VolumeSlider({ volume, muted, width }: { volume: number | null; muted: 
 	);
 }
 
-function StereoDisplay(props: {
+export function StereoDisplay(props: {
 	playing: boolean;
 	track: string;
 	artist: string;
@@ -117,14 +156,44 @@ function StereoDisplay(props: {
 	);
 }
 
-function CollapsedDjDeck() {
+/**
+ * Single-line stereo strip. Height 1, full width. Stays in chrome so the
+ * deck never auto-hides — even when no track is loaded we still render the
+ * placeholder strip so the user sees their stereo is on.
+ *
+ * Layout:  ▶ Track Name (truncate-end)        ▁▂▃▂   ◷
+ *          [---------- track region ---------][wave][play]
+ */
+export function CollapsedDjDeckStrip(props: {
+	playing: boolean;
+	track: string;
+	tick: number;
+}) {
+	const playIcon = props.playing ? "▶" : "■";
+	const wave = props.playing
+		? miniWaveFrame(props.tick)
+		: "▁▁▁▁";
+	const trackLabel = props.track || "8GENT FM idle";
 	return (
-		<Box justifyContent="flex-end" width="100%" flexShrink={0}>
-			<Box borderStyle="round" borderColor={t.orangeDim} paddingX={1}>
-				<Text color={t.orange}>♪</Text>
+		<Box width="100%" flexShrink={0} height={1}>
+			<Box flexGrow={1} minWidth={0}>
+				<Text color={t.orange}>{playIcon} </Text>
+				<Text color={t.textPrimary} wrap="truncate-end">
+					{trackLabel}
+				</Text>
 			</Box>
+			<Text color={props.playing ? t.orangeAlt : t.textDim}>{wave}</Text>
+			<Text color={t.orange}> {props.playing ? "◷" : "○"}</Text>
 		</Box>
 	);
+}
+
+// 4-bar mini waveform for the collapsed strip
+function miniWaveFrame(tick: number): string {
+	return Array.from({ length: 4 }, (_, i) => {
+		const idx = Math.abs((tick * 3 + i * 7 + i * i * 2) % WAVE.length);
+		return WAVE[idx];
+	}).join("");
 }
 
 function ShortcutHintRow({ playing }: { playing: boolean }) {
@@ -157,8 +226,29 @@ export function DjDeck() {
 
 	useEffect(() => {
 		setOpenExternal = setOpen;
-		return () => { setOpenExternal = null; };
+		toggleOpenExternal = () => setOpen(prev => !prev);
+		return () => {
+			setOpenExternal = null;
+			toggleOpenExternal = null;
+		};
 	}, []);
+
+	// Hydrate from workspace DB once on mount. Default = expanded if absent.
+	const hydratedRef = useRef(false);
+	useEffect(() => {
+		(async () => {
+			const persisted = await loadPersistedExpanded();
+			if (persisted !== null) setOpen(persisted);
+			hydratedRef.current = true;
+		})();
+	}, []);
+
+	// Persist on every toggle, but skip the initial render so we don't write
+	// the default value back before hydration completes.
+	useEffect(() => {
+		if (!hydratedRef.current) return;
+		void persistExpanded(open);
+	}, [open]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -269,13 +359,19 @@ export function DjDeck() {
 		{ isActive: status.playing || status.title.length > 0 },
 	);
 
-	if (!status.playing && !status.title) return null;
-	if (!open) return <CollapsedDjDeck />;
-
 	const effectiveVolume = displayVolume ?? status.volume;
 	const muted = effectiveVolume != null && effectiveVolume === 0;
 	const volume = effectiveVolume == null ? null : Math.round(effectiveVolume);
 	const track = truncateEnd(sanitizeTrack(status.title || "(loading)"), 82);
+
+	// Always-on stereo: collapsed mode renders a one-line strip, never zero
+	// height. Auto-toggling is forbidden — only ^D / setDjDeckOpen flip this.
+	if (!open) {
+		const stripTrack = status.title
+			? sanitizeTrack(status.title)
+			: "";
+		return <CollapsedDjDeckStrip playing={playing} track={stripTrack} tick={tick} />;
+	}
 
 	return (
 		<Box

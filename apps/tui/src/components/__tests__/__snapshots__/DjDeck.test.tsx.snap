@@ -1,0 +1,87 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`DjDeck — collapsed strip matrix snapshot across playing / track-length / tick 1`] = `
+[
+  {
+    "flexShrink": 0,
+    "height": 1,
+    "idx": 0,
+    "playing": true,
+    "trackLen": 5,
+    "width": "100%",
+  },
+  {
+    "flexShrink": 0,
+    "height": 1,
+    "idx": 1,
+    "playing": true,
+    "trackLen": 5,
+    "width": "100%",
+  },
+  {
+    "flexShrink": 0,
+    "height": 1,
+    "idx": 2,
+    "playing": false,
+    "trackLen": 5,
+    "width": "100%",
+  },
+  {
+    "flexShrink": 0,
+    "height": 1,
+    "idx": 3,
+    "playing": true,
+    "trackLen": 70,
+    "width": "100%",
+  },
+  {
+    "flexShrink": 0,
+    "height": 1,
+    "idx": 4,
+    "playing": false,
+    "trackLen": 0,
+    "width": "100%",
+  },
+]
+`;
+
+exports[`DjDeck — expanded stereo matrix snapshot across playing / muted / volume 1`] = `
+[
+  {
+    "borderStyle": "single",
+    "flexDirection": "column",
+    "idx": 0,
+    "muted": false,
+    "playing": false,
+    "volume": 50,
+    "width": "100%",
+  },
+  {
+    "borderStyle": "single",
+    "flexDirection": "column",
+    "idx": 1,
+    "muted": false,
+    "playing": true,
+    "volume": 50,
+    "width": "100%",
+  },
+  {
+    "borderStyle": "single",
+    "flexDirection": "column",
+    "idx": 2,
+    "muted": true,
+    "playing": true,
+    "volume": 0,
+    "width": "100%",
+  },
+  {
+    "borderStyle": "single",
+    "flexDirection": "column",
+    "idx": 3,
+    "muted": false,
+    "playing": true,
+    "volume": 120,
+    "width": "100%",
+  },
+]
+`;
