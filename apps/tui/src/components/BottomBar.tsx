@@ -21,8 +21,9 @@ interface BottomBarProps {
 	total: number;
 	tokens: string;
 	branch: string;
-	agent: string;
-	micOn: boolean;
+	/** Optional auth display-name override; falls back to env-driven
+	 *  resolution inside AgentInstrumentStrip. (#2366) */
+	user?: string;
 	permissions: string;
 	sessionTime: string;
 	mode: FooterMode;
@@ -38,8 +39,7 @@ export function BottomBar(props: BottomBarProps) {
 				total={props.total}
 				tokens={props.tokens}
 				branch={props.branch}
-				agent={props.agent}
-				micOn={props.micOn}
+				user={props.user}
 				permissions={props.permissions}
 				sessionTime={props.sessionTime}
 			/>
