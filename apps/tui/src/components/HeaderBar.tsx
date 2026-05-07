@@ -2,7 +2,7 @@
  * HeaderBar - top-of-frame brand row.
  *
  * V2 chrome only: BrandPill on the left; workspace path + branch + sync
- * in the middle; command-palette hint, MIC indicator, [ASK] chip,
+ * in the middle; ^P palette hint, MIC indicator, [ASK] chip,
  * LOCAL-FIRST chip, session clock, and LilEightBadge on the right.
  *
  * Pure presentational. Theme tokens only. No inline hex.
@@ -64,7 +64,8 @@ export function HeaderBar({
 			</Box>
 
 			<Box flexShrink={0}>
-				<Text color={ui.muted}>⌘K</Text>
+				<Text color={ui.dim}>^P</Text>
+				<Text color={ui.muted}> palette</Text>
 				<Text color={ui.dim}>  </Text>
 				<Text color={micOn ? t.red : ui.dim}>{micOn ? "● MIC" : "○ MIC"}</Text>
 				<Text color={ui.dim}>  </Text>
