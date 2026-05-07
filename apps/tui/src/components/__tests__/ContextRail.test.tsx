@@ -97,7 +97,7 @@ describe("ContextRail", () => {
 		});
 	}
 
-	test("ADHD off renders muted label", () => {
+	test("ADHD off renders textSecondary label", () => {
 		const rendered = render({ ...baseProps, adhdMode: false });
 		const children = React.Children.toArray(
 			(rendered.props as { children: React.ReactNode }).children,
@@ -105,7 +105,7 @@ describe("ContextRail", () => {
 		const adhdRow = children[children.length - 1] as React.ReactElement<{
 			color: string;
 		}>;
-		expect(adhdRow.props.color).toBe(t.muted);
+		expect(adhdRow.props.color).toBe(t.textSecondary);
 	});
 
 	test("ADHD on renders teal label", () => {
