@@ -42,10 +42,19 @@ export interface AgentInstrumentStripProps {
 	total: number;
 	tokens: string;
 	branch: string;
-	agent: string;
-	micOn: boolean;
+	/** Optional user override. When omitted, the card reads
+	 *  `process.env.USER` / `process.env.LOGNAME` / "Guest". (#2366) */
+	user?: string;
 	permissions: string;
 	sessionTime: string;
+}
+
+/** Resolve the bottom-HUD USER label. Env-driven so the card reads as the
+ *  human at the keyboard, not the literal string "Guest". (#2366) */
+function resolveUser(override?: string): string {
+	if (override && override.trim().length > 0) return override;
+	const fromEnv = process.env.USER || process.env.LOGNAME;
+	return fromEnv && fromEnv.trim().length > 0 ? fromEnv : "Guest";
 }
 
 export function AgentInstrumentStrip({
@@ -54,11 +63,12 @@ export function AgentInstrumentStrip({
 	total,
 	tokens,
 	branch,
-	agent,
-	micOn,
+	user,
 	permissions,
 	sessionTime,
 }: AgentInstrumentStripProps) {
+	// MIC indicator lives in HeaderBar (single source of truth, top-right
+	// one-glance read). Do NOT add it back here. (#2368)
 	return (
 		<Box width="100%" flexShrink={0} gap={1} overflow="hidden">
 			<StatusCard label="Model" value={truncateMiddle(model, 14)} color={ui.cream} />
@@ -87,12 +97,7 @@ export function AgentInstrumentStrip({
 			</StatusCard>
 
 			<StatusCard label="Branch" value={branch} color={ui.orange} />
-			<StatusCard label="Agent" value={agent} color={ui.cream} />
-			<StatusCard
-				label="Mic"
-				value={micOn ? "on" : "off"}
-				color={micOn ? ui.teal : ui.muted}
-			/>
+			<StatusCard label="User" value={resolveUser(user)} color={ui.cream} />
 			<StatusCard
 				label="Approval"
 				value={permissions === "ask" ? "?" : permissions}

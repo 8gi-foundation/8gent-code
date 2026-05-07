@@ -19,6 +19,7 @@ export {
 export {
 	formatTokens,
 	formatDuration,
+	formatSessionTime,
 	formatPercentage,
 	formatBytes,
 	formatRelativeTime,
