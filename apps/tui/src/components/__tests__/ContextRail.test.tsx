@@ -86,13 +86,13 @@ describe("ContextRail", () => {
 				(rendered.props as { children: React.ReactNode }).children,
 			) as React.ReactElement[];
 			// Layout (per component): [0] WORKSPACE header, [1] workspace name,
-			// [2] branch Row, [3] spacer, [4] STATE header,
-			// [5] approval Row, [6] risk Row, ...
+			// [2] branch RailRow, [3] spacer, [4] STATE header,
+			// [5] approval RailRow, [6] risk RailRow, ...
 			const riskRow = children[6] as React.ReactElement<{
-				valueColor: string;
+				color: string;
 				value: string;
 			}>;
-			expect(riskRow.props.valueColor).toBe(expectedRiskColor[risk]);
+			expect(riskRow.props.color).toBe(expectedRiskColor[risk]);
 			expect(riskRow.props.value).toBe(risk.toUpperCase());
 		});
 	}
@@ -103,9 +103,9 @@ describe("ContextRail", () => {
 			(rendered.props as { children: React.ReactNode }).children,
 		) as React.ReactElement[];
 		const adhdRow = children[children.length - 1] as React.ReactElement<{
-			valueColor: string;
+			color: string;
 		}>;
-		expect(adhdRow.props.valueColor).toBe(t.muted);
+		expect(adhdRow.props.color).toBe(t.muted);
 	});
 
 	test("ADHD on renders teal label", () => {
@@ -114,9 +114,9 @@ describe("ContextRail", () => {
 			(rendered.props as { children: React.ReactNode }).children,
 		) as React.ReactElement[];
 		const adhdRow = children[children.length - 1] as React.ReactElement<{
-			valueColor: string;
+			color: string;
 		}>;
-		expect(adhdRow.props.valueColor).toBe(t.teal);
+		expect(adhdRow.props.color).toBe(t.teal);
 	});
 
 	test("snapshot across all risk levels x ADHD modes is stable", () => {
