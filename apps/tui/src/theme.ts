@@ -69,6 +69,7 @@ const dark = {
 	surface2: "#1C1A17",
 	surface3: "#252220",
 
+
 	// Text hierarchy (cream descending)
 	textPrimary:   "#FAF7F4",
 	textSecondary: "#C8C2BA",
