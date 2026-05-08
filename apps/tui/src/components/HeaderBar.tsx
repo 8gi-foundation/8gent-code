@@ -60,34 +60,34 @@ export function HeaderBar({
 	lilEightState,
 }: HeaderBarProps) {
 	return (
-		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0}>
-			<BrandPill updateAvailable={updateAvailable} />
-
-			<Box flexShrink={1} minWidth={0} paddingX={1} overflow="hidden">
-				<Text color={ui.muted}>{truncateMiddle(workspacePath, 28)}</Text>
-				<Text color={ui.dim}>  </Text>
-				<Text color={ui.teal}>⎇ </Text>
-				<Text color={ui.orange}>{truncateEnd(branch, 18)}</Text>
-				<Text color={ui.dim}>  </Text>
-				<Text color={ui.muted}>{truncateEnd(syncStatus, 14)}</Text>
+		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0} overflow="hidden">
+			<Box width={38} flexShrink={0}>
+				<BrandPill updateAvailable={updateAvailable} />
 			</Box>
 
-			<Box flexShrink={0}>
+			<Box flexGrow={1} minWidth={0} paddingX={1} justifyContent="center" overflow="hidden">
+				<Text color={ui.muted} wrap="truncate-middle">{truncateMiddle(workspacePath, 24)}</Text>
+				<Text color={ui.teal}> ⎇ </Text>
+				<Text color={ui.orange}>{truncateEnd(branch, 14)}</Text>
+				<Text color={ui.dim}> </Text>
+				<Text color={ui.muted}>{truncateEnd(syncStatus, 10)}</Text>
+			</Box>
+
+			<Box width={36} flexShrink={0} justifyContent="flex-end">
 				<Text color={ui.dim}>^P</Text>
-				<Text color={ui.muted}> palette</Text>
-				<Text color={ui.dim}>  </Text>
+				<Text color={ui.muted}> palette  </Text>
 				<Text color={micOn ? t.red : ui.dim}>{micOn ? "● MIC" : "○ MIC"}</Text>
 				<Text color={ui.dim}>  </Text>
 				{approvalPending ? (
 					<>
 						<Text color={t.orange} bold>[ASK]</Text>
-						<Text color={ui.dim}>  </Text>
+						<Text color={ui.dim}> </Text>
 					</>
 				) : null}
-				<Text color={localFirst ? t.green : ui.dim}>LOCAL-FIRST</Text>
-				<Text color={ui.dim}>  </Text>
+				<Text color={localFirst ? t.green : ui.dim}>LOCAL</Text>
+				<Text color={ui.dim}> </Text>
 				<Text color={ui.muted}>{sessionTime}</Text>
-				<Text color={ui.dim}>  </Text>
+				<Text color={ui.dim}> </Text>
 				<LilEightBadge state={lilEightState} />
 			</Box>
 		</Box>
