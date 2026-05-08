@@ -1,0 +1,48 @@
+version: "1"
+agent: base
+
+# Base policy. All other agent policies inherit from this. Defines the
+# safe defaults that apply to every vessel unless an agent explicitly
+# overrides. `deny` lists are sticky: a child cannot remove anything
+# from this file. `allow` lists are inherited as a starting point and
+# may be narrowed by children.
+
+permissions:
+  tools:
+    # Empty allow = all tools allowed except those in deny.
+    deny:
+      - shell_destructive
+      - send_unsolicited_email
+
+  data:
+    read:
+      - workspace/**
+      - memory/**
+      - .8gent/**
+    write:
+      - workspace/**
+      - .8gent/sessions/**
+    deny:
+      - /etc/**
+      - /root/**
+      - /var/log/**
+      - /Users/*/Library/**
+      - /Users/*/.ssh/**
+      - "**/.env"
+      - "**/.env.*"
+      - "**/id_rsa"
+      - "**/id_ed25519"
+
+  rate_limits:
+    prompts_per_minute: 60
+    tool_calls_per_minute: 120
+
+guardrails:
+  max_output_tokens: 8192
+  require_approval_for: []
+  blocked_patterns:
+    - "rm -rf /"
+    - "DROP TABLE"
+    - "TRUNCATE TABLE"
+    - "shutdown -h"
+    - "mkfs."

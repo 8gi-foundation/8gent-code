@@ -32,6 +32,11 @@ import {
 	windowList as desktopWindowList,
 	getToolDefinitions as getDesktopToolDefs,
 } from "../../computer";
+import {
+	AgentPolicyEngine,
+	isEnforcing as agentPolicyEnforcing,
+	logViolation,
+} from "../../permissions/agent-policy";
 import { evaluatePolicy } from "../../permissions/policy-engine";
 import { dispatchAccessibilityTree } from "./accessibility-tree";
 
@@ -46,6 +51,35 @@ export interface HandsToolCtx {
 		input: unknown;
 		reason: string;
 	}) => Promise<boolean>;
+	/**
+	 * Resolved agent profile (issue #2423). When set, tool calls are
+	 * additionally gated by the per-agent YAML policy. When unset, only
+	 * the legacy NemoClaw rules apply. Lazy-loaded by the caller; the
+	 * dispatcher does not parse YAML on every call.
+	 */
+	agentPolicy?: AgentPolicyEngine;
+}
+
+/**
+ * Lazy resolved agent-policy engines, keyed by agent name. The daemon
+ * loads each profile on first use and reuses the engine for subsequent
+ * calls so YAML is parsed once. Exposed for callers that already have
+ * an agent name but not an engine instance.
+ */
+const agentPolicyCache = new Map<string, AgentPolicyEngine>();
+
+export function getAgentPolicyEngine(agentName: string): AgentPolicyEngine | undefined {
+	if (!agentName) return undefined;
+	const cached = agentPolicyCache.get(agentName);
+	if (cached) return cached;
+	try {
+		const engine = AgentPolicyEngine.load(agentName);
+		agentPolicyCache.set(agentName, engine);
+		return engine;
+	} catch (err) {
+		console.warn(`[agent-policy] failed to load policy for "${agentName}": ${err}`);
+		return undefined;
+	}
 }
 
 /**
@@ -129,6 +163,49 @@ export async function executeHandsTool(
 	input: Record<string, unknown>,
 	ctx: HandsToolCtx,
 ): Promise<{ ok: true; result: unknown } | { ok: false; reason: string }> {
+	// Agent-policy gate (issue #2423). Runs BEFORE NemoClaw rules so a
+	// per-agent profile can deny tools that the global rule-set allows.
+	// Defaults to warn-only: violations are logged but not enforced
+	// unless EIGHT_AGENT_POLICY_ENFORCE=1 is set.
+	if (ctx.agentPolicy) {
+		const decision = ctx.agentPolicy.checkAction({
+			tool,
+			path: typeof input.path === "string" ? input.path : undefined,
+			mode: tool.includes("write") || tool === "desktop_type" ? "write" : "read",
+			rawInput: typeof input.text === "string" ? input.text : undefined,
+		});
+		if (!decision.allowed) {
+			logViolation({
+				timestamp: Date.now(),
+				agent: ctx.agentPolicy.policy.agent,
+				tool,
+				path: typeof input.path === "string" ? input.path : undefined,
+				reason: decision.reason,
+				category: decision.category,
+				enforced: agentPolicyEnforcing(),
+			});
+			if (agentPolicyEnforcing()) {
+				return { ok: false, reason: `[agent-policy] ${decision.reason}` };
+			}
+			console.warn(`[agent-policy:warn] ${decision.reason}`);
+		}
+		const rate = ctx.agentPolicy.checkRateLimit("tool_call");
+		if (!rate.allowed) {
+			logViolation({
+				timestamp: Date.now(),
+				agent: ctx.agentPolicy.policy.agent,
+				tool,
+				reason: rate.reason,
+				category: rate.category,
+				enforced: agentPolicyEnforcing(),
+			});
+			if (agentPolicyEnforcing()) {
+				return { ok: false, reason: `[agent-policy] ${rate.reason}` };
+			}
+			console.warn(`[agent-policy:warn] ${rate.reason}`);
+		}
+	}
+
 	const policyCtx = policyActionFor(tool, input);
 	const decision = evaluatePolicy("desktop_use", policyCtx);
 

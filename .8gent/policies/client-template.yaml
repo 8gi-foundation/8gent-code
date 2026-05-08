@@ -1,0 +1,66 @@
+version: "1"
+# Rename this file to `<your-agent-name>.yaml` and edit the values
+# below. Anything you do not touch falls back to the parent policy.
+agent: client-template
+
+# Inherit from `base` for safe defaults, or `eightgent` for the locked-
+# down developer agent, or `aijames` if you want a full-trust assistant.
+# The chain is resolved at load time and a child can never relax a
+# `deny` rule from its parents — those are sticky.
+inherit: base
+
+permissions:
+  tools:
+    # Whitelist: only the tools listed here will be callable. Empty or
+    # missing means "inherit parent's allow list." Add tools your agent
+    # genuinely needs and nothing else.
+    allow:
+      - file_read
+      - file_write
+      - web_search
+
+    # Blacklist: always wins over allow. Use for tools you NEVER want
+    # this agent to touch, regardless of inheritance.
+    deny:
+      - shell_exec
+      - send_email
+      - delegate
+
+  data:
+    # Glob-like prefixes. `**` matches any depth, `*` matches one
+    # segment. Patterns are joined with the parent's lists.
+    read:
+      - "client-data/**"
+      - "workspace/**"
+    write:
+      - "workspace/outputs/**"
+    # Sticky deny — no child can override these.
+    deny:
+      - "client-data/secrets/**"
+      - "client-data/contracts/**"
+
+  rate_limits:
+    # Per-minute caps. Set to a positive integer to enforce, or remove
+    # the field entirely to inherit from parent.
+    prompts_per_minute: 20
+    tool_calls_per_minute: 40
+
+guardrails:
+  # Hard ceiling on agent output tokens per turn. The daemon clamps
+  # the model's max_tokens parameter to this value.
+  max_output_tokens: 2048
+
+  # Tools listed here always trigger a user-approval prompt before
+  # execution, even if they are in the allow-list above.
+  require_approval_for:
+    - file_write
+    - web_fetch
+
+  # Case-insensitive substrings. If a tool's input contains any of
+  # these, the call is denied. Use sparingly — the rule-based
+  # PolicyEngine in default-policies.yaml already handles the obvious
+  # destructive patterns. This list is for client-specific phrases
+  # (proprietary product names, internal codewords, etc.).
+  blocked_patterns:
+    - "internal-codename-redacted"
+    - "client-confidential-string"
