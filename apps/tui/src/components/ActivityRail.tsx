@@ -94,6 +94,26 @@ interface ActivityRailProps {
 	providers: ReadonlyArray<ProviderRow>;
 	memory: MemoryStats;
 	agents: ReadonlyArray<AgentRow>;
+	/** Live turn signals — when set, the TOOLS section reflects the active
+	 *  turn (chat-truth) instead of the stale tools array. */
+	isProcessing?: boolean;
+	activeTool?: string | null;
+	toolsCompleted?: number;
+}
+
+// Short-name a long provider:model string for the rail. The full
+// identifier is fine in chat metadata; the rail wants a compact label.
+//   "lmstudio:google/gemma-4-26b-a4b" -> "lmstudio:gemma"
+//   "ollama:qwen3.6:27b"              -> "ollama:qwen"
+function shortProvider(name: string): string {
+	const families = ["gemma", "qwen", "llama", "deepseek", "mistral", "phi", "claude"];
+	for (const fam of families) {
+		if (name.toLowerCase().includes(fam)) {
+			const tier = name.split(":")[0];
+			return `${tier}:${fam}`;
+		}
+	}
+	return name;
 }
 
 const TOOL_GLYPH: Record<ToolState, string> = {
@@ -133,6 +153,9 @@ export function ActivityRail({
 	providers,
 	memory,
 	agents,
+	isProcessing = false,
+	activeTool = null,
+	toolsCompleted,
 }: ActivityRailProps) {
 	return (
 		<Box
@@ -167,9 +190,13 @@ export function ActivityRail({
 				<Text color={t.orange} bold>TOOLS</Text>
 			</Box>
 			{(() => {
-				const active = tools.find((t) => t.state === "running")?.name ?? null;
-				const done = tools.filter((t) => t.state === "ok").length;
-				const queued = tools.filter((t) => t.state === "idle").length;
+				// Prefer live turn state (chat-truth) over the stale tools array.
+				// Falls back to the array when no isProcessing signal is wired.
+				const liveActive = isProcessing ? (activeTool ?? "reasoning") : null;
+				const arrayActive = tools.find((tl) => tl.state === "running")?.name ?? null;
+				const active = liveActive ?? arrayActive;
+				const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
+				const queued = tools.filter((tl) => tl.state === "idle").length;
 				return (
 					<>
 						<MetricRow
@@ -193,7 +220,7 @@ export function ActivityRail({
 			{providers.map((provider) => (
 				<NamedRow
 					key={provider.name}
-					name={`● ${provider.name}`}
+					name={`● ${shortProvider(provider.name)}`}
 					color={PROVIDER_COLOR[provider.state]}
 					trailing={provider.latency}
 				/>
