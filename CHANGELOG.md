@@ -11,6 +11,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Incremental context compression** (#2420). New `packages/eight/context/`
+  module orchestrates session compression with three additions over the existing
+  `ProactiveCompression` engine:
+  - `ArtifactRegistry` — never-compressed, per-category LRU index of files,
+    decisions, code snippets, errors, and commands. Re-injected into the system
+    prompt slot after every compression cycle so paths and decisions survive
+    the summarization pass that all three surveyed approaches (Facto, OpenAI,
+    Anthropic SDK) lost.
+  - `MilestoneDetector` — emits structured signals for natural breakpoints
+    (file written, test passed/failed, command succeeded, decision recorded,
+    task complete). Compressing at semantic boundaries yields cleaner summaries
+    than at arbitrary token offsets.
+  - `IncrementalContextCompressor` — preset-driven (`interactive` /
+    `long_running` / `telegram` / `computer`) orchestrator that picks between
+    `milestone` and `token_pressure` triggers, calls through to the existing
+    proactive 4-stage pipeline, and emits per-cycle metrics (compression ratio,
+    artifact retention, reference retention) to JSONL via
+    `EIGHT_COMPRESSION_METRICS_LOG`.
+  - Wired into `Agent` (`onToolCallFinish` + assistant-text path); replaces the
+    direct `ProactiveCompression` invocation. Exposed via
+    `agent.getContextCompressor()` for ops surfaces. New env vars:
+    `EIGHT_SESSION_TYPE`, `EIGHT_COMPRESSION_METRICS_LOG`.
+  - Fixes a pre-existing crash in `compaction.ts:findCutPoint` when history was
+    smaller than `keepRecentTokens`.
 - **Strict linting pipeline** (#2419). Tightened `biome.json` to flag `noExplicitAny`,
   `useImportType`, `noUnusedVariables`, `useTemplate`, `useArrowFunction`,
   `useOptionalChain`, `noControlCharactersInRegex`, `noDelete`, `useExponentiationOperator`,

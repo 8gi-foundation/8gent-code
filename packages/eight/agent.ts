@@ -51,6 +51,7 @@ import {
 	ProactiveCompression,
 	type ProactiveResult,
 } from "./compaction";
+import { IncrementalContextCompressor, type SessionType } from "./context";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
@@ -140,6 +141,8 @@ export class Agent {
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
+	/** Issue #2420 — milestone-aware compressor with artifact registry + metrics. */
+	private contextCompressor: IncrementalContextCompressor;
 	private recentFilePaths: string[] = [];
 
 	constructor(config: AgentConfig) {
@@ -179,6 +182,21 @@ export class Agent {
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
 		this.compaction = new ProactiveCompression();
+		// Issue #2420: milestone-aware compressor with artifact registry. Session type
+		// is inferred from the channel hint; defaults to interactive.
+		const sessionType: SessionType =
+			config.channel === "computer"
+				? "computer"
+				: process.env.EIGHT_SESSION_TYPE === "telegram"
+					? "telegram"
+					: process.env.EIGHT_SESSION_TYPE === "long_running"
+						? "long_running"
+						: "interactive";
+		const metricsLog = process.env.EIGHT_COMPRESSION_METRICS_LOG ?? null;
+		this.contextCompressor = new IncrementalContextCompressor(this.sessionId, {
+			sessionType,
+			metricsLogFile: metricsLog,
+		});
 
 		// Fire-and-forget AST indexing of working directory for AST-first retrieval.
 		// Lite mode skips it — first AST tool call will index on demand.
@@ -792,6 +810,15 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 					resultPreview: resultStr.slice(0, 200),
 				});
 
+				// Issue #2420: feed tool call into the milestone-aware compressor.
+				// Registry tracks files/commands/errors; detector decides milestones.
+				this.contextCompressor.noteToolCall({
+					name: event.toolName,
+					args: event.args as Record<string, unknown>,
+					resultPreview: resultStr.slice(0, 500),
+					success: event.success,
+				});
+
 				// Record tool call for Convex session sync
 				this.sessionSync.recordToolCall();
 
@@ -1222,19 +1249,24 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				this.sessionSync.saveCheckpoint(this.messageHistory).catch(() => {});
 			}
 
-			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
-			// Monitors token pressure and escalates through 4 stages:
-			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
-			if (this.compaction.shouldCompact(this.messageHistory)) {
+			// Issue #2420: incremental, milestone-aware context compression.
+			// Feeds the assistant's reply into the milestone detector, then asks the
+			// orchestrator whether to compress. The orchestrator preserves the
+			// artifact registry across cycles and emits per-cycle metrics.
+			this.contextCompressor.noteAssistantText(flavoredContent);
+			const trigger = this.contextCompressor.decideTrigger(this.messageHistory);
+			if (trigger) {
 				try {
-					const stage = this.compaction.getStage(this.messageHistory);
 					const compactModel = createModel(providerConfig);
 					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(this.messageHistory, compactModel);
+						await this.contextCompressor.compress(this.messageHistory, compactModel, {
+							trigger,
+						});
 					this.messageHistory = compacted;
 					console.log(
-						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
-							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
+						`  [COMPRESSION:${trigger}/${compactionResult.stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
+							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens, ` +
+							`registry=${this.contextCompressor.registry.size()} artifacts`,
 					);
 					this.events.onCompaction?.(compactionResult);
 				} catch (err) {
@@ -1388,6 +1420,14 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			this.abortController = null;
 			console.log("[8gent] Generation aborted by user");
 		}
+	}
+
+	/**
+	 * Issue #2420: expose the milestone-aware compressor for ops/dashboards.
+	 * Read-only — callers should not mutate state through this handle.
+	 */
+	getContextCompressor(): IncrementalContextCompressor {
+		return this.contextCompressor;
 	}
 
 	private async collectToolEvidence(event: {
