@@ -44,7 +44,7 @@ describe("LiveFocalStrip exports", () => {
 		expect(typeof LiveFocalStrip).toBe("function");
 	});
 
-	test("default state (no approvalPending) is callable", () => {
+	test("idle state uses subtle border color", () => {
 		const element = LiveFocalStrip({
 			mode: "Planning",
 			activeStep: "Drafting strip",
@@ -53,6 +53,19 @@ describe("LiveFocalStrip exports", () => {
 			contextPct: 35,
 		});
 		expect(element).toBeDefined();
+		// When not processing, border uses page-level border tone (subtle).
+		expect(element.props.borderColor).toBe("#2E2A26");
+	});
+
+	test("processing flips border to teal", () => {
+		const element = LiveFocalStrip({
+			mode: "Planning",
+			activeStep: "Drafting strip",
+			route: "auto",
+			tokens: "2.4k",
+			contextPct: 35,
+			isProcessing: true,
+		});
 		expect(element.props.borderColor).toBe("#7DA8A3");
 	});
 

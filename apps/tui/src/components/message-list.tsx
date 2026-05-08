@@ -148,6 +148,15 @@ export function MessageList({
 
 	return (
 		<Box flexDirection="column" flexGrow={1} minHeight={0}>
+			{visibleMessages.length === 0 ? (
+				<Box flexGrow={1} alignItems="center" justifyContent="center">
+					<Text color={t.dim}>
+						<Text color={t.orange}>8</Text>
+						<Text color={t.textPrimary}>▣ </Text>
+						<Text color={t.dim}>waiting with you</Text>
+					</Text>
+				</Box>
+			) : null}
 			{visibleMessages.map((message, index) => (
 				<MessageItem
 					key={message.id}
