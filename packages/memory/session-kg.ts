@@ -138,6 +138,40 @@ export async function writeSessionToKG(input: SessionKGInput): Promise<void> {
 
 // ── Sync recall for system-prompt injection ───────────────────────────
 
+/**
+ * Injects top global memories (personal facts) into the system prompt.
+ * Reads synchronously so it can be called during agent construction.
+ */
+export function recallGlobalMemoriesSync(limit = 10): string {
+	try {
+		const { existsSync } = require("node:fs") as typeof import("node:fs");
+		if (!existsSync(GLOBAL_DB_PATH)) return "";
+
+		const db = new Database(GLOBAL_DB_PATH);
+		db.run("PRAGMA journal_mode=WAL");
+
+		const rows = db
+			.query<{ content_text: string; importance: number; created_at: number }, []>(
+				`SELECT content_text, importance, created_at
+         FROM memories
+         WHERE scope = 'global'
+           AND deleted_at IS NULL
+         ORDER BY importance DESC, created_at DESC
+         LIMIT ${limit}`,
+			)
+			.all();
+
+		db.close();
+
+		if (rows.length === 0) return "";
+
+		const lines = rows.map((row) => `- ${row.content_text.slice(0, 200)}`);
+		return `\n\n## What I know about you\n${lines.join("\n")}`;
+	} catch {
+		return "";
+	}
+}
+
 export function recallPriorSessionsSync(cwd: string, limit = 3): string {
 	try {
 		const { existsSync } = require("node:fs") as typeof import("node:fs");
