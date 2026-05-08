@@ -48,6 +48,13 @@ interface BridgeConfig {
 	daemonUrl: string; // ws://localhost:18789 (same container)
 	authToken?: string;
 	devGroupId?: string; // Optional dev group for verbose logs
+	/**
+	 * Optional explicit chat_id allowlist. Used in local mode so a stolen
+	 * bot token can't be used to drive the local daemon from a chat that
+	 * isn't James's. When set, ANY chat_id outside the list is rejected
+	 * before reaching the agent loop.
+	 */
+	authorizedChatIds?: string[];
 }
 
 async function tgSend(
@@ -379,6 +386,18 @@ class TelegramDaemonBridge {
 				if (data.ok && data.result) {
 					for (const update of data.result as TelegramUpdate[]) {
 						this.lastUpdateId = update.update_id;
+						// Drop messages from unauthorized chats before any side effect
+						// (transcription, typing indicators, agent dispatch).
+						const incomingChatId = update.message?.chat?.id;
+						if (
+							typeof incomingChatId === "number" &&
+							!this.isAuthorizedChat(incomingChatId)
+						) {
+							console.warn(
+								`[telegram-bridge] dropped update from unauthorized chat ${incomingChatId}`,
+							);
+							continue;
+						}
 						if (update.callback_query) {
 							await this.handleCallbackQuery(update.callback_query);
 						} else if (update.message?.voice || update.message?.audio) {
@@ -413,9 +432,23 @@ class TelegramDaemonBridge {
 		}
 	}
 
+	private isAuthorizedChat(chatId: number): boolean {
+		const incoming = String(chatId);
+		const allowlist = this.config.authorizedChatIds;
+		if (allowlist && allowlist.length > 0) {
+			return allowlist.includes(incoming);
+		}
+		return incoming === this.config.chatId;
+	}
+
 	private async handleTelegramMessage(text: string, chatId: number): Promise<void> {
-		// Only respond to the configured chat
-		if (String(chatId) !== this.config.chatId) return;
+		// Only respond to authorized chats. In local mode this is the
+		// hard boundary that prevents a leaked token from driving the
+		// daemon from a chat that isn't James's.
+		if (!this.isAuthorizedChat(chatId)) {
+			console.warn(`[telegram-bridge] rejected message from unauthorized chat ${chatId}`);
+			return;
+		}
 
 		// Show typing
 		await tgTyping(this.config.telegramToken, this.config.chatId);
@@ -723,6 +756,58 @@ class TelegramDaemonBridge {
 		}
 	}
 }
+
+// ── Local-mode programmatic launcher ─────────────────────────────────
+
+/**
+ * Start the Telegram bridge wired against the local-mode daemon.
+ *
+ * Reads:
+ *   - TELEGRAM_BOT_TOKEN              required
+ *   - TELEGRAM_AUTHORIZED_CHAT_IDS    required, comma-separated allowlist
+ *
+ * Always connects to ws://127.0.0.1:<port> regardless of DAEMON_URL, so a
+ * stale Fly URL in the env can't accidentally redirect a local bridge to
+ * a remote vessel.
+ *
+ * Throws on missing env so the daemon launcher can surface the failure
+ * loudly rather than silently running an unauthenticated bridge.
+ */
+export async function startLocalTelegramBridge(opts: {
+	port: number;
+}): Promise<TelegramDaemonBridge> {
+	const token = process.env.TELEGRAM_BOT_TOKEN;
+	if (!token) {
+		throw new Error("TELEGRAM_BOT_TOKEN is required to start the local Telegram bridge");
+	}
+	const allowlistRaw = process.env.TELEGRAM_AUTHORIZED_CHAT_IDS || "";
+	const authorizedChatIds = allowlistRaw
+		.split(",")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
+	if (authorizedChatIds.length === 0) {
+		throw new Error(
+			"TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode",
+		);
+	}
+	// The first allowlisted chat is the default destination for outbound
+	// messages. Inbound messages from any chat in the allowlist are
+	// accepted; everything else is dropped in handleTelegramMessage.
+	const primaryChatId = authorizedChatIds[0];
+
+	const bridge = new TelegramDaemonBridge({
+		telegramToken: token,
+		chatId: primaryChatId,
+		daemonUrl: `ws://127.0.0.1:${opts.port}`,
+		authToken: process.env.DAEMON_AUTH_TOKEN,
+		devGroupId: process.env.TELEGRAM_DEV_GROUP_ID,
+		authorizedChatIds,
+	});
+	await bridge.start();
+	return bridge;
+}
+
+export { TelegramDaemonBridge };
 
 // ── Entry point ──────────────────────────────────────────────────────
 
