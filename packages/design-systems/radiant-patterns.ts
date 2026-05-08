@@ -1,10 +1,9 @@
 /**
  * Radiant Visual Patterns Reference
  *
- * Extracted from https://github.com/8gi-foundation/radiant.git
+ * Reference for the open-source Radiant project by Paul Bakaus (MIT licensed).
  * Radiant is an open-source collection of 94 production-ready shaders and
  * visual effects for the web, built with SvelteKit 5, Canvas 2D, and WebGL.
- * Created by Paul Bakaus, MIT licensed.
  *
  * This file captures every visual pattern, color scheme, layout technique,
  * animation, component pattern, and typography decision from the Radiant

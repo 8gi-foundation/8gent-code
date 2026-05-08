@@ -61,9 +61,9 @@ After detection, onboarding presents what it found and asks only what it could n
 Good day. I'm 8gent, The Infinite Gentleman.
 
 Here's what I detected:
-  Name: 8GI Foundation
-  Email: (via git)
-  GitHub: 8gi-foundation
+  Name: (detected from git config)
+  Email: (detected from git config)
+  GitHub: (detected from gh CLI)
   Provider: ollama
   Models: deepseek-coder-v2, qwen2.5-coder, llama3.2
 
@@ -419,7 +419,7 @@ The primary personalization file. Created by onboarding, updated by preferences 
   "integrations": {
     "github": {
       "authenticated": true,
-      "username": "8gi-foundation"
+      "username": "your-gh-username"
     },
     "mcps": [],
     "ollama": {

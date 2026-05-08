@@ -158,7 +158,7 @@ Step 7: On success, Clerk returns JWT. CLI stores in Keychain:
 Step 8: CLI creates/updates user in Convex with Clerk identity
   |
   v
-Step 9: CLI displays: "Logged in as [REDACTED] (Pro plan)"
+Step 9: CLI displays: "Logged in as @your-handle (Pro plan)"
 ```
 
 ## Token Storage Strategy
