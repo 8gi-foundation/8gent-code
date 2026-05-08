@@ -272,7 +272,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		const runtimeName = this.config.runtime as string;
 		const isLocalRuntime =
 			runtimeName === "lmstudio" || runtimeName === "ollama" || runtimeName === "8gent";
-		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${buildToolCatalogSegment({ concise: true })}`;
+		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true })}`;
 
 		this.messageHistory.push({
 			role: "system",
