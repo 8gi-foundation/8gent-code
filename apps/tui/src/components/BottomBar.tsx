@@ -27,12 +27,15 @@ interface BottomBarProps {
 	permissions: string;
 	sessionTime: string;
 	mode: FooterMode;
+	/** When true, the DjDeck idle line shows "agent pulse" instead of
+	 *  "idle" so the bottom heartbeat reflects the live turn. */
+	isProcessing?: boolean;
 }
 
 export function BottomBar(props: BottomBarProps) {
 	return (
 		<Box flexDirection="column" width="100%" flexShrink={0}>
-			<DjDeck />
+			<DjDeck isProcessing={props.isProcessing} />
 			<AgentInstrumentStrip
 				model={props.model}
 				ready={props.ready}
