@@ -10,6 +10,7 @@ export type SlashCommand =
 	| "model"
 	| "provider"
 	| "voice"
+	| "theme"
 	| "language"
 	| "infinite"
 	| "onboarding"
@@ -96,6 +97,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["v"],
 		description: "Voice TTS settings",
 		usage: "/voice [on|off|test]",
+	},
+	{
+		name: "theme",
+		aliases: ["t"],
+		description: "Set TUI theme (light / dark / auto)",
+		usage: "/theme [light|dark|auto]",
 	},
 	{
 		name: "language",
