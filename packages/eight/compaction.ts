@@ -120,6 +120,8 @@ export class CompactionEngine {
 			}
 		}
 		if (cutIdx <= 1) return 1;
+		// Clamp so we never index past the end (history smaller than keepRecentTokens).
+		if (cutIdx >= messages.length) cutIdx = messages.length - 1;
 		// Never split tool call/result pairs
 		if (messages[cutIdx].role === "tool") cutIdx = Math.max(1, cutIdx - 1);
 		// Never split user/assistant turn pairs
