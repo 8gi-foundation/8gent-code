@@ -1,0 +1,32 @@
+{
+	"name": "@8gent/evals",
+	"version": "0.1.0",
+	"description": "Golden test sets and measurement baselines for 8gent agent output. Issue #2421.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		},
+		"./runner": {
+			"import": "./runner.ts",
+			"types": "./runner.ts"
+		},
+		"./scorer": {
+			"import": "./scorer.ts",
+			"types": "./scorer.ts"
+		},
+		"./baseline": {
+			"import": "./baseline.ts",
+			"types": "./baseline.ts"
+		},
+		"./types": {
+			"import": "./types.ts",
+			"types": "./types.ts"
+		}
+	},
+	"author": "8GI Foundation",
+	"license": "Apache-2.0"
+}
