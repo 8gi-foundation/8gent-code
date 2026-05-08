@@ -7,9 +7,9 @@
  * All operations are best-effort: never throws, never blocks cleanup.
  */
 
+import { Database } from "bun:sqlite";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Database } from "bun:sqlite";
 import { KnowledgeGraph } from "./graph.js";
 
 const GLOBAL_DB_PATH = path.join(
@@ -22,11 +22,36 @@ const GLOBAL_DB_PATH = path.join(
 
 const PERSON_RE = /\b([A-Z][a-z]{1,20}(?:\s[A-Z][a-z]{1,20})+)\b/g;
 const SKIP_NAMES = new Set([
-	"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-	"January", "February", "March", "April", "May", "June", "July",
-	"August", "September", "October", "November", "December",
-	"TypeScript", "JavaScript", "GitHub", "GitLab", "Vercel", "Convex",
-	"Claude Code", "Visual Studio", "New York", "Los Angeles", "San Francisco",
+	"Monday",
+	"Tuesday",
+	"Wednesday",
+	"Thursday",
+	"Friday",
+	"Saturday",
+	"Sunday",
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+	"TypeScript",
+	"JavaScript",
+	"GitHub",
+	"GitLab",
+	"Vercel",
+	"Convex",
+	"Claude Code",
+	"Visual Studio",
+	"New York",
+	"Los Angeles",
+	"San Francisco",
 ]);
 
 function extractPeople(text: string): string[] {
@@ -49,7 +74,10 @@ export function generateSessionSummary(messages: MsgHistory, filesModified: stri
 	const firstTask = userMessages[0] || "";
 	const fileList =
 		filesModified.length > 0
-			? ` Touched: ${filesModified.slice(0, 5).map((f) => path.basename(f)).join(", ")}${filesModified.length > 5 ? "..." : ""}.`
+			? ` Touched: ${filesModified
+					.slice(0, 5)
+					.map((f) => path.basename(f))
+					.join(", ")}${filesModified.length > 5 ? "..." : ""}.`
 			: "";
 
 	return `${firstTask.trim()}.${fileList}`.slice(0, 500);
