@@ -20,18 +20,45 @@
 
 type Mode = "dark" | "light";
 
+function readConfigTheme(): Mode | "auto" | null {
+	// Reading sync at module load is intentional - the active palette must be
+	// frozen before any component imports `t`. Failures fall through silently.
+	try {
+		const fs = require("node:fs") as typeof import("node:fs");
+		const path = require("node:path") as typeof import("node:path");
+		const home = process.env.HOME ?? "";
+		if (!home) return null;
+		const cfgPath = path.join(home, ".8gent", "config.json");
+		if (!fs.existsSync(cfgPath)) return null;
+		const raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as { theme?: string };
+		const v = (raw.theme ?? "").toLowerCase();
+		if (v === "light" || v === "dark" || v === "auto") return v;
+		return null;
+	} catch {
+		return null;
+	}
+}
+
 function detectMode(): Mode {
+	// 1. Hard env override (highest priority — useful for one-off launches)
 	const override = (process.env.EIGHT_THEME ?? process.env["8GENT_THEME"] ?? "")
 		.toLowerCase();
 	if (override === "light") return "light";
 	if (override === "dark") return "dark";
 
-	// COLORFGBG = "<fg>;<bg>"; bg=15 (white) → light terminal, bg=0/8 → dark.
+	// 2. Persisted setting in ~/.8gent/config.json (explicit user choice)
+	const fromConfig = readConfigTheme();
+	if (fromConfig === "light") return "light";
+	if (fromConfig === "dark") return "dark";
+	// "auto" or null → fall through to terminal detection
+
+	// 3. COLORFGBG = "<fg>;<bg>"; bg=15 (white) → light terminal, bg=0/8 → dark.
 	const fgbg = process.env.COLORFGBG ?? "";
 	const parts = fgbg.split(";");
 	const bg = parts[parts.length - 1];
 	if (bg === "15" || bg === "7") return "light";
 
+	// 4. Default
 	return "dark";
 }
 
@@ -41,6 +68,7 @@ const dark = {
 	surface:  "#12100E",
 	surface2: "#1C1A17",
 	surface3: "#252220",
+
 
 	// Text hierarchy (cream descending)
 	textPrimary:   "#FAF7F4",
