@@ -16,6 +16,8 @@
 			"**/*.min.js",
 			"**/bun.lock",
 			"**/.8gent/**",
+			"**/.claude/**",
+			"**/quarantine/**",
 			"apps/8gent-computer/build/**",
 			"My-Brain-Is-Full-Crew/**",
 			"packages/skills/business-builder/**",
@@ -33,10 +35,10 @@
 		"rules": {
 			"recommended": true,
 			"suspicious": {
-				"noExplicitAny": "off",
+				"noExplicitAny": "warn",
 				"noArrayIndexKey": "off",
 				"noAssignInExpressions": "off",
-				"noControlCharactersInRegex": "off",
+				"noControlCharactersInRegex": "warn",
 				"noImplicitAnyLet": "off",
 				"noShadowRestrictedNames": "off",
 				"noAsyncPromiseExecutor": "off",
@@ -46,15 +48,25 @@
 			},
 			"style": {
 				"noNonNullAssertion": "off",
-				"noParameterAssign": "off"
+				"noParameterAssign": "off",
+				"useImportType": "warn",
+				"useTemplate": "warn",
+				"noUnusedTemplateLiteral": "warn",
+				"useExponentiationOperator": "warn",
+				"useNumberNamespace": "warn",
+				"useConst": "error"
 			},
 			"complexity": {
 				"noBannedTypes": "off",
-				"noForEach": "off"
+				"noForEach": "off",
+				"useArrowFunction": "warn",
+				"useOptionalChain": "warn",
+				"noUselessTernary": "warn"
 			},
 			"correctness": {
 				"useExhaustiveDependencies": "off",
-				"noUnsafeOptionalChaining": "off"
+				"noUnsafeOptionalChaining": "off",
+				"noUnusedVariables": "warn"
 			},
 			"a11y": {
 				"useButtonType": "off",
@@ -66,7 +78,8 @@
 				"noDangerouslySetInnerHtml": "off"
 			},
 			"performance": {
-				"noAccumulatingSpread": "off"
+				"noAccumulatingSpread": "off",
+				"noDelete": "warn"
 			}
 		}
 	}

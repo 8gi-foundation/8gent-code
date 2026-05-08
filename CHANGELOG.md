@@ -9,7 +9,36 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-(Empty — promote items here as they land post-0.13.0.)
+### Added
+
+- **Strict linting pipeline** (#2419). Tightened `biome.json` to flag `noExplicitAny`,
+  `useImportType`, `noUnusedVariables`, `useTemplate`, `useArrowFunction`,
+  `useOptionalChain`, `noControlCharactersInRegex`, `noDelete`, `useExponentiationOperator`,
+  `useNumberNamespace`, `noUnusedTemplateLiteral`, `noUselessTernary` as warnings;
+  promoted `useConst` to error. Existing violations stay visible as warnings (1100+) so
+  the gate is unblocked while creating sustained pressure to fix them. New code with
+  these issues will surface in PR review.
+- **`bun run lint` rules-only script.** Split formatter/import-sort out of `lint` into
+  separate `format` / `format:check` / `check` scripts so the lint gate is about code
+  rules, not whitespace. New scripts: `lint:fix`, `format`, `format:check`, `check`,
+  `check:fix`.
+- **Pre-commit Biome hook.** `.pre-commit-config.yaml` runs `biome check --staged` on
+  staged TS/TSX/JS/JSX/JSON files. Catches new errors at commit time without blocking
+  on legacy warnings in untouched files.
+- **Dedicated `lint.yml` CI workflow.** Runs on push to `main` and all PRs, with
+  concurrency cancellation. `format:check` runs as advisory (non-blocking) until the
+  large existing format diff is auditioned in a follow-up PR.
+- **Ignored `.claude/` and `quarantine/`** in `biome.json` — those directories hold
+  third-party skill artifacts and quarantined code, not first-party source.
+
+### Notes
+
+- `tsconfig.json` is already `strict: true`. `noUncheckedIndexedAccess` and
+  `exactOptionalPropertyTypes` not enabled in this PR — both produce hundreds of
+  errors across the existing codebase. Tracked for incremental adoption.
+- "Agent-generated code linted before delivery" (acceptance item 4 of #2419) is
+  out-of-scope here; that hook belongs in the daemon/agent loop and warrants a
+  separate PR.
 
 ## [0.13.0] - 2026-04-30
 
