@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8gent Code - Autonomous coding. Local-first. Zero cost.</title>
+<meta name="description" content="Open source autonomous coding agent powered by local LLMs. No API keys. No subscriptions. Just code.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --orange:#E8610A;--orange-light:#F07A28;
+  --bg-0:#0A0908;--bg-1:#12100E;--bg-2:#1C1A17;--bg-3:#252220;
+  --text-1:#FAF7F4;--text-2:#C8C2BA;--text-3:#8A8078;
+  --border:#2E2A26;
+  --font-brand:'Fraunces',serif;--font-body:'Inter',sans-serif;--font-code:'JetBrains Mono',monospace;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg-0);color:var(--text-1);font-family:var(--font-body);line-height:1.6;overflow-x:hidden}
+a{color:var(--orange-light);text-decoration:none;transition:color .2s}
+a:hover{color:var(--orange)}
+
+/* Layout */
+.container{max-width:1080px;margin:0 auto;padding:0 clamp(1rem,4vw,2rem)}
+section{padding:clamp(3rem,8vw,6rem) 0}
+
+/* Hero */
+.hero{min-height:90vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1.5rem}
+.hero-wordmark{font-family:var(--font-brand);font-weight:800;font-size:clamp(2.8rem,8vw,5rem);letter-spacing:-0.02em;color:var(--text-1)}
+.hero-wordmark .dot{color:var(--orange)}
+.hero-tagline{font-size:clamp(1.1rem,3vw,1.5rem);color:var(--text-2);max-width:480px;font-weight:400}
+.hero-install{margin-top:1rem;display:flex;align-items:center;gap:.75rem;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:.75rem 1.25rem;font-family:var(--font-code);font-size:clamp(.8rem,2vw,.95rem);color:var(--text-2);cursor:pointer;transition:border-color .2s}
+.hero-install:hover{border-color:var(--orange)}
+.hero-install .prompt{color:var(--orange);user-select:none}
+.hero-install .copied{position:absolute;color:var(--orange);font-family:var(--font-body);font-size:.8rem;transform:translateY(-2rem);opacity:0;transition:opacity .3s}
+.hero-install .copied.show{opacity:1}
+.hero-links{display:flex;gap:1.5rem;margin-top:.5rem;font-size:.95rem}
+
+/* Powers Grid */
+.powers{background:var(--bg-1)}
+.section-title{font-family:var(--font-brand);font-weight:700;font-size:clamp(1.6rem,4vw,2.2rem);margin-bottom:.5rem}
+.section-sub{color:var(--text-3);margin-bottom:2.5rem;font-size:clamp(.9rem,2vw,1.05rem)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem}
+.power-card{background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:1.25rem 1.5rem;transition:border-color .25s,transform .25s}
+.power-card:hover{border-color:var(--orange);transform:translateY(-2px)}
+.power-card h3{font-family:var(--font-brand);font-weight:700;font-size:1.05rem;margin-bottom:.35rem;display:flex;align-items:center;gap:.5rem}
+.power-card h3 .icon{font-size:1.2rem;opacity:.8}
+.power-card p{color:var(--text-3);font-size:.88rem;line-height:1.5}
+
+/* Mascot */
+.mascot-section{text-align:center}
+.mascot-section svg{width:clamp(120px,20vw,180px);height:auto;margin-bottom:1.5rem}
+.mascot-section .name{font-family:var(--font-brand);font-weight:700;font-size:1.3rem;color:var(--text-2);margin-bottom:.5rem}
+.mascot-section .desc{color:var(--text-3);max-width:400px;margin:0 auto;font-size:.95rem}
+
+/* Footer */
+footer{border-top:1px solid var(--border);padding:2rem 0;text-align:center;color:var(--text-3);font-size:.85rem}
+footer a{color:var(--text-2)}
+
+/* Animations */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .5s ease,transform .5s ease}
+.reveal.visible{opacity:1;transform:translateY(0)}
+.stagger-1{transition-delay:.05s}.stagger-2{transition-delay:.1s}.stagger-3{transition-delay:.15s}
+.stagger-4{transition-delay:.2s}.stagger-5{transition-delay:.25s}.stagger-6{transition-delay:.3s}
+.stagger-7{transition-delay:.35s}.stagger-8{transition-delay:.4s}.stagger-9{transition-delay:.45s}
+
+/* Mobile */
+@media(max-width:600px){
+  .grid{grid-template-columns:1fr}
+  .hero{min-height:80vh}
+}
+</style>
+</head>
+<body>
+
+<section class="hero container">
+  <h1 class="hero-wordmark reveal">8gent Code<span class="dot">.</span></h1>
+  <p class="hero-tagline reveal" style="transition-delay:.1s">Autonomous coding. Local-first. Zero cost.</p>
+  <div class="hero-install reveal" style="transition-delay:.2s;position:relative" onclick="copyInstall(this)" role="button" tabindex="0" aria-label="Copy install command">
+    <span class="prompt">$</span>
+    <span>npm install -g @podjamz/8gent-code</span>
+    <span class="copied" id="copied-msg">Copied!</span>
+  </div>
+  <div class="hero-links reveal" style="transition-delay:.3s">
+    <a href="https://github.com/AiJamesOS/8gent-code" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://8gent.world" target="_blank" rel="noopener">Docs</a>
+    <a href="https://8gentos.com" target="_blank" rel="noopener">8gent OS</a>
+  </div>
+</section>
+
+<section class="powers">
+  <div class="container">
+    <h2 class="section-title reveal">9 Powers</h2>
+    <p class="section-sub reveal">Every capability is self-contained, CLI-callable, and usable by any agent.</p>
+    <div class="grid">
+      <div class="power-card reveal stagger-1">
+        <h3><span class="icon">&#x1F9E0;</span> Memory</h3>
+        <p>SQLite + FTS5 full-text search with Ollama embeddings. Episodic, semantic, and procedural memory that persists across sessions.</p>
+      </div>
+      <div class="power-card reveal stagger-2">
+        <h3><span class="icon">&#x1F3B5;</span> DJ &amp; Music</h3>
+        <p>YouTube streaming, 30k+ internet radio stations, 15-genre synth engine, AI music generation, BPM detection, and mixing.</p>
+      </div>
+      <div class="power-card reveal stagger-3">
+        <h3><span class="icon">&#x1F333;</span> Worktree</h3>
+        <p>Up to 4 concurrent git worktrees with filesystem messaging, macro-actions, and sub-agent delegation.</p>
+      </div>
+      <div class="power-card reveal stagger-4">
+        <h3><span class="icon">&#x1F6E1;</span> Policy</h3>
+        <p>NemoClaw YAML engine with deny-by-default rules, approval gates, headless mode, and infinite mode for trusted flows.</p>
+      </div>
+      <div class="power-card reveal stagger-5">
+        <h3><span class="icon">&#x1F52C;</span> Evolution</h3>
+        <p>Post-session reflection, Bayesian skill confidence tracking, HyperAgent meta-mutation, and self-improvement database.</p>
+      </div>
+      <div class="power-card reveal stagger-6">
+        <h3><span class="icon">&#x1F3E5;</span> Healing</h3>
+        <p>Checkpoint-verify-revert loop with git stash atomic snapshots and structured failure logging.</p>
+      </div>
+      <div class="power-card reveal stagger-7">
+        <h3><span class="icon">&#x1F4BC;</span> Entrepreneurship</h3>
+        <p>GitHub bounty scanner, capability matcher, opportunity pipeline, and autonomous business agents.</p>
+      </div>
+      <div class="power-card reveal stagger-8">
+        <h3><span class="icon">&#x1F3D7;</span> AST</h3>
+        <p>Import dependency graph, test file mapping, and change impact estimation for precise code navigation.</p>
+      </div>
+      <div class="power-card reveal stagger-9">
+        <h3><span class="icon">&#x1F310;</span> Browser</h3>
+        <p>Fetch + DuckDuckGo HTML scraper with disk cache. No headless browser dependencies required.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mascot-section container">
+  <div class="reveal">
+    <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Lil Eight mascot">
+      <circle cx="100" cy="70" r="52" stroke="#F07A28" stroke-width="5" fill="none" opacity=".9"/>
+      <circle cx="100" cy="135" r="45" stroke="#F07A28" stroke-width="5" fill="none" opacity=".9"/>
+      <circle cx="85" cy="58" r="5" fill="#FAF7F4"/>
+      <circle cx="115" cy="58" r="5" fill="#FAF7F4"/>
+      <path d="M88 76 Q100 86 112 76" stroke="#FAF7F4" stroke-width="3" stroke-linecap="round" fill="none"/>
+      <line x1="60" y1="46" x2="50" y2="32" stroke="#F07A28" stroke-width="3" stroke-linecap="round"/>
+      <line x1="140" y1="46" x2="150" y2="32" stroke="#F07A28" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <p class="name reveal" style="transition-delay:.1s">Lil Eight</p>
+  <p class="desc reveal" style="transition-delay:.2s">Your local coding companion. Runs on your machine, learns your style, evolves every session.</p>
+</section>
+
+<section class="container" style="text-align:center">
+  <div class="reveal">
+    <h2 class="section-title" style="margin-bottom:1rem">Get started in 30 seconds</h2>
+    <pre style="display:inline-block;text-align:left;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:1.25rem 1.75rem;font-family:var(--font-code);font-size:clamp(.8rem,2vw,.9rem);color:var(--text-2);line-height:1.8"><span style="color:var(--text-3)"># Install</span>
+<span style="color:var(--orange)">$</span> npm install -g @podjamz/8gent-code
+
+<span style="color:var(--text-3)"># Launch</span>
+<span style="color:var(--orange)">$</span> 8gent
+
+<span style="color:var(--text-3)"># That's it. No API keys. No config.</span></pre>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>8gent Code is open source under MIT. Part of the <a href="https://8gentos.com">8gent</a> ecosystem.</p>
+  </div>
+</footer>
+
+<script>
+function copyInstall(el){
+  navigator.clipboard.writeText('npm install -g @podjamz/8gent-code').then(function(){
+    var msg=document.getElementById('copied-msg');
+    msg.classList.add('show');
+    setTimeout(function(){msg.classList.remove('show')},1500);
+  });
+}
+
+// Reveal on scroll
+var reveals=document.querySelectorAll('.reveal');
+var observer=new IntersectionObserver(function(entries){
+  entries.forEach(function(e){
+    if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}
+  });
+},{threshold:0.15});
+reveals.forEach(function(el){observer.observe(el)});
+</script>
+</body>
+</html>
