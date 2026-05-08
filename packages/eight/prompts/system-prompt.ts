@@ -371,7 +371,8 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 6. If tool fails 2x, SKIP and continue
 7. Prefer bun over npm/npx
 8. **AST-FIRST IS MANDATORY**: ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific symbols. read_file is for config/non-code files only.
-9. **DESIGN-FIRST FOR UI**: When creating UI components, ALWAYS check the design system first. Use suggest_design to get recommendations before writing UI code.`;
+9. **DESIGN-FIRST FOR UI**: When creating UI components, ALWAYS check the design system first. Use suggest_design to get recommendations before writing UI code.
+10. **PROACTIVE MEMORY**: When the user shares ANY personal fact (name, preferences, habits, goals, constraints), IMMEDIATELY call \`remember\` with layer \`global\` — do not wait to be asked. These persist across sessions.`;
 
 // ============================================
 // Composed Prompts
