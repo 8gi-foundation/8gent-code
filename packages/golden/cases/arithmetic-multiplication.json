@@ -1,0 +1,11 @@
+{
+	"id": "arithmetic-multiplication",
+	"title": "Basic arithmetic - multiplication",
+	"tags": ["reasoning", "smoke"],
+	"prompt": "What is 12 times 12? Answer with just the number.",
+	"expect": {
+		"substrings": [{ "value": "144", "mode": "present" }],
+		"latency": { "wallMs": 30000 },
+		"minLength": 1
+	}
+}

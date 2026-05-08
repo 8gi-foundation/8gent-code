@@ -1,0 +1,10 @@
+{
+	"id": "reasoning-date-arithmetic",
+	"title": "Reasoning - day of the week arithmetic",
+	"tags": ["reasoning"],
+	"prompt": "If today is Wednesday, what day of the week will it be 10 days from now? Answer with just the day name.",
+	"expect": {
+		"substrings": [{ "value": "Saturday", "mode": "present", "caseSensitive": false }],
+		"latency": { "wallMs": 30000 }
+	}
+}

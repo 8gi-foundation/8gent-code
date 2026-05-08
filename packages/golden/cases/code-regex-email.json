@@ -1,0 +1,11 @@
+{
+	"id": "code-regex-email",
+	"title": "Code - basic email regex",
+	"tags": ["code", "regex"],
+	"prompt": "Provide a JavaScript regex literal that matches a simple email address of the form name@example.com. Return only the literal between forward slashes, with no flags.",
+	"expect": {
+		"regexes": [{ "pattern": "/.*@.*\\\\..*/|/.*@.*\\..*/", "mode": "present" }],
+		"substrings": [{ "value": "@", "mode": "present" }],
+		"latency": { "wallMs": 60000 }
+	}
+}

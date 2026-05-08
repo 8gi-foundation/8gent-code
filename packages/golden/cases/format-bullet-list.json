@@ -1,0 +1,15 @@
+{
+	"id": "format-bullet-list",
+	"title": "Format - emit a markdown bullet list",
+	"tags": ["format"],
+	"prompt": "Give me a markdown bullet list of the three primary colors. One color per bullet.",
+	"expect": {
+		"regexes": [{ "pattern": "^[-*]\\s+(red|blue|yellow)", "flags": "im", "mode": "present" }],
+		"substrings": [
+			{ "value": "red", "mode": "present" },
+			{ "value": "blue", "mode": "present" },
+			{ "value": "yellow", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 }
+	}
+}

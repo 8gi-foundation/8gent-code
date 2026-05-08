@@ -1,0 +1,14 @@
+{
+	"id": "explain-git-rebase",
+	"title": "Explain - git rebase vs merge",
+	"tags": ["explanation", "developer"],
+	"prompt": "Briefly explain the difference between git rebase and git merge in three sentences or fewer.",
+	"expect": {
+		"substrings": [
+			{ "value": "rebase", "mode": "present", "caseSensitive": false },
+			{ "value": "merge", "mode": "present", "caseSensitive": false }
+		],
+		"latency": { "wallMs": 60000 },
+		"minLength": 50
+	}
+}

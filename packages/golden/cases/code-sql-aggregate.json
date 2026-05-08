@@ -1,0 +1,15 @@
+{
+	"id": "code-sql-aggregate",
+	"title": "SQL - count rows by group",
+	"tags": ["code", "sql"],
+	"prompt": "Write a SQL query that returns the count of orders per customer_id from a table named orders, ordered by count descending. Return only the SQL.",
+	"expect": {
+		"regexes": [
+			{ "pattern": "select", "flags": "i", "mode": "present" },
+			{ "pattern": "group\\s+by\\s+customer_id", "flags": "i", "mode": "present" },
+			{ "pattern": "order\\s+by", "flags": "i", "mode": "present" },
+			{ "pattern": "count\\s*\\(", "flags": "i", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 }
+	}
+}

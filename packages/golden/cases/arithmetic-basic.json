@@ -1,0 +1,12 @@
+{
+	"id": "arithmetic-basic",
+	"title": "Basic arithmetic - sum of two integers",
+	"tags": ["reasoning", "smoke"],
+	"prompt": "What is 47 plus 53? Reply with only the number.",
+	"expect": {
+		"substrings": [{ "value": "100", "mode": "present" }],
+		"latency": { "wallMs": 30000 },
+		"minLength": 1,
+		"maxLength": 200
+	}
+}

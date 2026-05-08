@@ -1,0 +1,14 @@
+{
+	"id": "code-reverse-string",
+	"title": "Code - reverse a string in JavaScript",
+	"tags": ["code", "javascript"],
+	"prompt": "Write a JavaScript function reverse(s) that returns the input string reversed. Return only the function inside a single fenced code block.",
+	"expect": {
+		"substrings": [
+			{ "value": "function", "mode": "present" },
+			{ "value": "reverse", "mode": "present" }
+		],
+		"regexes": [{ "pattern": "split|\\.\\.\\.", "mode": "present" }],
+		"latency": { "wallMs": 60000 }
+	}
+}

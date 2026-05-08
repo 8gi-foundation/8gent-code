@@ -1,0 +1,10 @@
+{
+	"id": "reasoning-chain-mary",
+	"title": "Reasoning - simple deduction",
+	"tags": ["reasoning"],
+	"prompt": "Mary is older than Tom. Tom is older than Sue. Who is the youngest? Answer with just the name.",
+	"expect": {
+		"substrings": [{ "value": "Sue", "mode": "present", "caseSensitive": false }],
+		"latency": { "wallMs": 30000 }
+	}
+}

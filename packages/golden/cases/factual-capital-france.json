@@ -1,0 +1,11 @@
+{
+	"id": "factual-capital-france",
+	"title": "Factual recall - capital of France",
+	"tags": ["factual", "smoke"],
+	"prompt": "What is the capital of France?",
+	"expect": {
+		"substrings": [{ "value": "Paris", "mode": "present" }],
+		"latency": { "wallMs": 30000 },
+		"minLength": 1
+	}
+}
