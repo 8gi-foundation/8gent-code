@@ -417,6 +417,28 @@ export class DispatchHub {
 	}
 }
 
+/**
+ * In local mode (`EIGHT_DAEMON_LOCAL=1`), if an explicit channel target has
+ * a matching registered surface for the same user, prefer that surface.
+ * This lets a phone Telegram message route to the TUI session James is
+ * actually typing in instead of spawning a fresh detached session.
+ *
+ * Additive: if no local surface is registered, falls through to the
+ * existing channel-only routing path.
+ */
+function pickLocalSurfaceForChannel(
+	registry: SurfaceRegistry,
+	userId: string,
+	channel: DaemonChannel,
+): SurfaceRegistration | null {
+	if (process.env.EIGHT_DAEMON_LOCAL !== "1") return null;
+	const candidates = registry.byUser(userId).filter((r) => r.channel === channel);
+	if (candidates.length === 0) return null;
+	// Most-recently-active wins, same as `auto` resolution.
+	candidates.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+	return candidates[0];
+}
+
 /** Resolves where a dispatch should land. */
 function resolveTarget(
 	env: DispatchEnvelope,
@@ -443,6 +465,14 @@ function resolveTarget(
 		candidates.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 		const winner = candidates[0];
 		return { ok: true, targetChannel: winner.channel, targetSurfaceId: winner.surfaceId };
+	}
+
+	// Local-mode preference: route to a registered local surface if one
+	// matches the requested channel. Falls through to channel-only
+	// execution when no surface is registered.
+	const localPick = pickLocalSurfaceForChannel(registry, originator.userId, env.targetChannel);
+	if (localPick) {
+		return { ok: true, targetChannel: localPick.channel, targetSurfaceId: localPick.surfaceId };
 	}
 
 	// Explicit channel target. We don't require a registered surface on
