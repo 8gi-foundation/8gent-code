@@ -1,0 +1,155 @@
+{
+  "version": "0.1.0",
+  "createdAt": "2026-05-08T20:08:05.613Z",
+  "executor": "mock-no-api-key",
+  "perCase": {
+    "TC001": {
+      "passed": false,
+      "score": 40,
+      "latencyMs": 7
+    },
+    "TC002": {
+      "passed": true,
+      "score": 100,
+      "latencyMs": 6
+    },
+    "TC003": {
+      "passed": false,
+      "score": 40,
+      "latencyMs": 6
+    },
+    "TC004": {
+      "passed": false,
+      "score": 50,
+      "latencyMs": 6
+    },
+    "TC005": {
+      "passed": false,
+      "score": 60,
+      "latencyMs": 6
+    },
+    "TC006": {
+      "passed": false,
+      "score": 60,
+      "latencyMs": 7
+    },
+    "TC007": {
+      "passed": false,
+      "score": 0,
+      "latencyMs": 6
+    },
+    "TC008": {
+      "passed": false,
+      "score": 0,
+      "latencyMs": 6
+    },
+    "TC009": {
+      "passed": false,
+      "score": 0,
+      "latencyMs": 6
+    },
+    "TC010": {
+      "passed": false,
+      "score": 42.9,
+      "latencyMs": 6
+    },
+    "TC011": {
+      "passed": false,
+      "score": 50,
+      "latencyMs": 6
+    },
+    "TC012": {
+      "passed": false,
+      "score": 60,
+      "latencyMs": 7
+    },
+    "TC013": {
+      "passed": false,
+      "score": 66.7,
+      "latencyMs": 6
+    },
+    "TC014": {
+      "passed": false,
+      "score": 33.3,
+      "latencyMs": 6
+    },
+    "TC015": {
+      "passed": false,
+      "score": 0,
+      "latencyMs": 7
+    },
+    "TC016": {
+      "passed": false,
+      "score": 0,
+      "latencyMs": 6
+    },
+    "TC017": {
+      "passed": false,
+      "score": 40,
+      "latencyMs": 6
+    },
+    "TC018": {
+      "passed": false,
+      "score": 50,
+      "latencyMs": 6
+    },
+    "TC019": {
+      "passed": false,
+      "score": 33.3,
+      "latencyMs": 5
+    },
+    "TC020": {
+      "passed": false,
+      "score": 0,
+      "latencyMs": 7
+    },
+    "TC021": {
+      "passed": true,
+      "score": 100,
+      "latencyMs": 6
+    },
+    "TC022": {
+      "passed": false,
+      "score": 33.3,
+      "latencyMs": 6
+    }
+  },
+  "summary": {
+    "total": 22,
+    "passed": 2,
+    "failed": 20,
+    "passRate": 0.09090909090909091,
+    "meanScore": 39.1,
+    "latency": {
+      "count": 22,
+      "mean": 6.2,
+      "p50": 6,
+      "p95": 7,
+      "p99": 7,
+      "min": 5,
+      "max": 7
+    },
+    "categoryBreakdown": {
+      "reasoning": {
+        "passed": 1,
+        "total": 4
+      },
+      "tool_use": {
+        "passed": 0,
+        "total": 5
+      },
+      "code_gen": {
+        "passed": 0,
+        "total": 5
+      },
+      "memory": {
+        "passed": 0,
+        "total": 3
+      },
+      "multi_step": {
+        "passed": 1,
+        "total": 5
+      }
+    }
+  }
+}
