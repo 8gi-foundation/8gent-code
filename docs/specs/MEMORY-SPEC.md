@@ -254,10 +254,10 @@ mem.unlearn(id, { soft: true })  // Confidence decay
 mem.consolidate("daily")         // Background summarization
 
 // Personalize
-const rep = await mem.getRepresentation("james")
-// -> "James is a full-stack engineer focused on building personal AI systems.
-//     He prefers dark mode, direct communication, and values local-first
-//     architecture. His top priorities are 8gent OS launch and Nick's Jr app."
+const rep = await mem.getRepresentation("operator")
+// -> "Operator is a full-stack engineer focused on building personal AI systems.
+//     They prefer dark mode, direct communication, and value local-first
+//     architecture. Top priorities: 8gent OS launch and the Jr app."
 ```
 
 ## Dependencies

@@ -98,7 +98,7 @@ What stays off the public /abilities page today. Three customer-visible holds, p
 **Internal-only, do NOT appear on public docs yet:**
 
 1. **HyperAgent RL kernel.** packages/kernel contains the RL fine-tuning pipeline. Off by default. Still experimental. Exposing it publicly invites expectations we cannot yet meet. Hold until the pipeline has one documented success.
-2. **8gent Computer security internals.** Qdrant encrypted volume at `~/.8gent/qdrant/`, Keychain bundle id, sensitivity tiers, COPPA isolation schema for [REDACTED-CHILD]. These are implementation details that belong in the PRD and Karen's threat model, not on a public capability page.
+2. **8gent Computer security internals.** Qdrant encrypted volume at `~/.8gent/qdrant/`, Keychain bundle id, sensitivity tiers, COPPA child-user isolation schema. These are implementation details that belong in the PRD and Karen's threat model, not on a public capability page.
 3. **aidhd.dev product surface.** Memory-locked stealth per project_aidhd_stealth. Never include in any public deck, roadmap, or ecosystem listing until James lifts the hold.
 
 **Total customer-visible hold-backs: 3.**

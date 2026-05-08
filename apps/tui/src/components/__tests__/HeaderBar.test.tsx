@@ -12,7 +12,7 @@ function render(props: HeaderBarProps): React.ReactElement {
 
 const base: HeaderBarProps = {
 	updateAvailable: null,
-	workspacePath: "/home/operator/8gent-code",
+	workspacePath: "/Users/dev/8gent-code",
 	branch: "feat/tui-v2-default",
 	syncStatus: "in sync",
 	micOn: false,

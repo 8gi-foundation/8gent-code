@@ -212,9 +212,9 @@ describe("path traversal attack vectors are all blocked", () => {
 	});
 
 	// Vector 12: mixed-case file with .. and tilde
-	test("vector 12: write_file with ../../../home/8gi-foundation/.ssh/id_rsa", () => {
+	test("vector 12: write_file with ../../../home/victim/.ssh/id_rsa", () => {
 		const decision = evaluatePolicy("write_file", {
-			path: "../../../home/8gi-foundation/.ssh/id_rsa",
+			path: "../../../home/victim/.ssh/id_rsa",
 			content: "stolen",
 		});
 		expect(decision.allowed).toBe(false);
