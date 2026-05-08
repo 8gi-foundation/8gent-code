@@ -1,0 +1,39 @@
+version: "1"
+agent: aijames
+inherit: base
+
+# AI James — full-trust digital twin. Inherits the safe defaults from
+# `base.yaml` and grants broad tool/data access for orchestration work.
+
+permissions:
+  tools:
+    allow:
+      - file_read
+      - file_write
+      - file_delete
+      - shell_exec
+      - web_search
+      - web_fetch
+      - git
+      - agent_mail_send
+      - agent_mail_read
+      - delegate
+      - voice_speak
+
+  data:
+    read:
+      - "/home/operator/**"
+    write:
+      - "/home/operator/8gent-code/**"
+      - "/home/operator/Foodstackai/**"
+      - "/home/operator/personal-os/**"
+
+  rate_limits:
+    prompts_per_minute: 120
+    tool_calls_per_minute: 240
+
+guardrails:
+  max_output_tokens: 16384
+  require_approval_for:
+    - file_delete
+    - send_email

@@ -1243,3 +1243,26 @@ export {
 	getAuditLogPath as getTurthAuditLogPath,
 	getUserPolicyPath as getTurthUserPolicyPath,
 } from "./user-policy.js";
+
+// ============================================
+// Re-exports: Agent Policy (issue #2423)
+// ============================================
+
+export {
+	AgentPolicyEngine,
+	loadAgentPolicy,
+	resolvePoliciesDir,
+	logViolation as logAgentPolicyViolation,
+	isEnforcing as isAgentPolicyEnforcing,
+} from "./agent-policy.js";
+export type { AgentPolicyViolation } from "./agent-policy.js";
+export type {
+	AgentPolicyFile,
+	ResolvedAgentPolicy,
+	AgentPolicyCheckInput,
+	AgentPolicyDecision,
+	AgentPolicyToolPermissions,
+	AgentPolicyDataPermissions,
+	AgentPolicyRateLimits,
+	AgentPolicyGuardrails,
+} from "./types.js";

@@ -1,0 +1,32 @@
+version: "1"
+agent: eightgent
+inherit: base
+
+# 8gent — the default open-source kernel agent. Tighter than AI James:
+# no email, no agent-to-agent messaging, no destructive shell, deletes
+# always require approval. Designed to be safe-by-default for any user
+# running `8gent` locally without further configuration.
+
+permissions:
+  tools:
+    allow:
+      - file_read
+      - file_write
+      - shell_exec
+      - web_search
+      - web_fetch
+      - git
+    deny:
+      - send_email
+      - agent_mail_send
+      - delegate
+
+  rate_limits:
+    prompts_per_minute: 30
+    tool_calls_per_minute: 60
+
+guardrails:
+  max_output_tokens: 4096
+  require_approval_for:
+    - shell_exec
+    - file_delete
