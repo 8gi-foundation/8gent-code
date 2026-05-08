@@ -88,11 +88,13 @@ export function AgentInstrumentStrip({
 			</StatusCard>
 
 			<StatusCard label="Tokens">
-				<Box justifyContent="space-between">
-					<Text color={ui.steel}>▁▂▃▄▅▆</Text>
-					<Text color={ui.steel} wrap="truncate-end">
-						{tokens}
-					</Text>
+				<Box width="100%" overflow="hidden">
+					<Box width={8} flexShrink={0}>
+						<Text color={ui.steel}>▁▂▃▄▅▆</Text>
+					</Box>
+					<Box flexGrow={1} minWidth={0} justifyContent="flex-end">
+						<Text color={ui.cream} wrap="truncate-end">{tokens}</Text>
+					</Box>
 				</Box>
 			</StatusCard>
 

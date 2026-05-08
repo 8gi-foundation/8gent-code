@@ -68,21 +68,20 @@ export function LiveFocalStrip({
 			flexShrink={0}
 			overflow="hidden"
 		>
-			<Box width={28} flexShrink={0}>
-				<Text color={t.teal}>◆ {stateLabel} </Text>
+			<Box width={22} flexShrink={0}>
+				<Text color={isProcessing ? t.teal : t.muted}>◆ {stateLabel} </Text>
 				<Text color={t.textPrimary} bold wrap="truncate-end">
 					{displayMode}
 				</Text>
 			</Box>
 
 			<Box flexGrow={1} minWidth={0} paddingX={1}>
-				<Text color={t.muted}>/ </Text>
-				<Text color={t.textSecondary} wrap="truncate-middle">
-					{activeStep}
+				<Text color={t.textSecondary} wrap="truncate-end">
+					{isProcessing ? activeStep : "idle"}
 				</Text>
 			</Box>
 
-			<Box width={34} flexShrink={0} justifyContent="flex-end">
+			<Box width={42} flexShrink={0} justifyContent="flex-end">
 				<Text color={t.steel} wrap="truncate-middle">{route}</Text>
 				<Text color={t.dim}> ctx </Text>
 				<Text color={t.steel}>{meter(contextPct)}</Text>
