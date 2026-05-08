@@ -26,6 +26,18 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
+  # Biome - lint staged TypeScript / TSX files
+  # Runs only on what you're about to commit, so existing
+  # warnings in untouched files don't block your commit.
+  - repo: local
+    hooks:
+      - id: biome-lint-staged
+        name: Biome lint (staged)
+        entry: bunx biome check --staged --no-errors-on-unmatched
+        language: system
+        types_or: [ts, tsx, js, jsx, json]
+        pass_filenames: false
+
 # Exclude patterns
 exclude: |
   (?x)^(
