@@ -727,13 +727,22 @@ class TelegramDaemonBridge {
 // ── Entry point ──────────────────────────────────────────────────────
 
 if (import.meta.main) {
-	const token = process.env.TELEGRAM_BOT_TOKEN;
-	const chatId = process.env.TELEGRAM_CHAT_ID;
+	// BOT_NAME selects which env-var pair holds this bridge's credentials.
+	// "aijames" (default) reads TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID — existing
+	// behaviour. "eightgent" reads EIGHT_BOT_TOKEN / EIGHT_CHAT_ID, matching the
+	// 8gi-governance webhook convention so a single secrets file can drive both
+	// bridges without per-service variable mapping.
+	const botName = (process.env.BOT_NAME || "").toLowerCase();
+	const tokenVar = botName === "eightgent" ? "EIGHT_BOT_TOKEN" : "TELEGRAM_BOT_TOKEN";
+	const chatVar = botName === "eightgent" ? "EIGHT_CHAT_ID" : "TELEGRAM_CHAT_ID";
+	const token = process.env[tokenVar];
+	const chatId = process.env[chatVar];
 
 	if (!token || !chatId) {
-		console.error("[telegram-bridge] TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required");
+		console.error(`[telegram-bridge] ${tokenVar} and ${chatVar} required`);
 		process.exit(1);
 	}
+	console.log(`[telegram-bridge] BOT_NAME=${botName || "aijames"} (reading ${tokenVar})`);
 
 	const bridge = new TelegramDaemonBridge({
 		telegramToken: token,
