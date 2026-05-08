@@ -65,6 +65,17 @@ yarn.lock
 # Claude worktrees (isolated agent workspaces, never commit)
 .claude/worktrees/
 
+# Local-only Claude/Claire settings + sub-agent worktrees (never commit)
+.claude/settings.local.json
+.claire/
+
+# Personal Claude skills (not part of the public agent kernel)
+.claude/skills/babysit-8gent.md
+.claude/skills/billiondollarboardroom/
+
+# Plan exports (one-off dumps)
+.exports/
+
 # Audio files (too large for git, regenerate with sync-audio.ts)
 docs/audio/*.aiff
 docs/branch-audio/*.aiff
