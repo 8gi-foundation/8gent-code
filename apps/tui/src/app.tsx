@@ -3672,6 +3672,52 @@ export function App({
 					break;
 				}
 
+				case "theme": {
+					// /theme           → show current resolved mode + how it was chosen
+					// /theme light     → persist light in ~/.8gent/config.json
+					// /theme dark      → persist dark
+					// /theme auto      → clear setting, defer to terminal/COLORFGBG
+					const fs = await import("node:fs");
+					const path = await import("node:path");
+					const home = process.env.HOME ?? "";
+					const cfgPath = path.join(home, ".8gent", "config.json");
+					const choice = (args[0] ?? "").toLowerCase();
+					if (!choice) {
+						const themeMod = await import("./theme.js");
+						addSystemMessage(
+							`Theme: ${themeMod.theme.mode}. Set with /theme [light|dark|auto]. Restart the TUI for the change to take effect.`,
+						);
+						break;
+					}
+					if (choice !== "light" && choice !== "dark" && choice !== "auto") {
+						addSystemMessage(
+							"Theme must be light, dark, or auto. Example: /theme light",
+						);
+						break;
+					}
+					try {
+						let raw: Record<string, unknown> = {};
+						if (fs.existsSync(cfgPath)) {
+							raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as Record<
+								string,
+								unknown
+							>;
+						} else {
+							fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+						}
+						raw.theme = choice;
+						fs.writeFileSync(cfgPath, `${JSON.stringify(raw, null, 2)}\n`);
+						addSystemMessage(
+							`Theme set to ${choice}. Restart the TUI to apply.`,
+						);
+					} catch (err) {
+						addSystemMessage(
+							`Could not write ${cfgPath}: ${(err as Error).message}`,
+						);
+					}
+					break;
+				}
+
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
 					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
