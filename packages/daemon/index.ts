@@ -3,6 +3,21 @@
  *
  * Starts WebSocket gateway, heartbeat, cron scheduler, and event bus.
  * Logs to ~/.8gent/daemon.log. Graceful shutdown on SIGTERM/SIGINT.
+ *
+ * Local mode (`--local` flag or `EIGHT_DAEMON_LOCAL=1`):
+ *   - Binds the WebSocket gateway to 127.0.0.1 (loopback only).
+ *   - Disables remote vessel mesh registration even if GROVE_ENABLED=1.
+ *   - Optional Telegram bridge auto-starts when EIGHT_TELEGRAM_LOCAL=1.
+ *
+ * Required env vars for the local Telegram bridge:
+ *   - TELEGRAM_BOT_TOKEN              Bot token for the local bridge.
+ *   - TELEGRAM_AUTHORIZED_CHAT_IDS    Comma-separated chat_id allowlist.
+ *                                     Only James's chat_id should appear here.
+ *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
+ *
+ * Secrets are read from process.env or any pre-loaded env file. The daemon
+ * never prints token contents. See `packages/daemon/scripts/start-local.ts`
+ * for the canonical launcher.
  */
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
@@ -136,10 +151,34 @@ async function shutdown(signal: string): Promise<void> {
 	process.exit(0);
 }
 
-async function main(): Promise<void> {
+/**
+ * Detect local-mode flag. CLI: `bun run packages/daemon/index.ts --local`.
+ * Also honors EIGHT_DAEMON_LOCAL=1 set by the canonical launcher.
+ */
+function isLocalMode(argv: string[]): boolean {
+	if (process.env.EIGHT_DAEMON_LOCAL === "1") return true;
+	return argv.includes("--local");
+}
+
+export async function main(): Promise<void> {
+	const localMode = isLocalMode(process.argv.slice(2));
+	if (localMode) {
+		// Set both env vars so child modules (gateway, telegram-bridge,
+		// dispatch) can branch on a single signal without re-parsing argv.
+		process.env.EIGHT_DAEMON_LOCAL = "1";
+		// Lock the WebSocket gateway to loopback. The gateway already reads
+		// DAEMON_HOSTNAME, so this is the only knob we need to flip.
+		if (!process.env.DAEMON_HOSTNAME) {
+			process.env.DAEMON_HOSTNAME = "127.0.0.1";
+		}
+	}
+
 	const config = await loadConfig();
 	const poolConfig = await loadPoolConfig();
 
+	if (localMode) {
+		console.log("[daemon-local] starting in local mode (loopback only)");
+	}
 	console.log("[daemon] Eight Daemon starting...");
 	console.log(
 		`[daemon] port=${config.port} heartbeat=${config.heartbeatEnabled} auth=${config.authToken ? "enabled" : "disabled"}`,
@@ -285,8 +324,26 @@ async function main(): Promise<void> {
 	console.log(`[daemon] ready - ws://localhost:${config.port}`);
 	console.log(`[daemon] health check: http://localhost:${config.port}/health`);
 
+	if (localMode) {
+		console.log(`[daemon-local] listening on ws://127.0.0.1:${config.port}`);
+		// Auto-start the local Telegram bridge when explicitly opted in.
+		// Gated on EIGHT_TELEGRAM_LOCAL so users running TUI-only sessions
+		// don't pay the cost of a bot poller they don't need.
+		if (process.env.EIGHT_TELEGRAM_LOCAL === "1") {
+			try {
+				const { startLocalTelegramBridge } = await import("./telegram-bridge");
+				await startLocalTelegramBridge({ port: config.port });
+				console.log("[daemon-local] telegram bridge attached");
+			} catch (err) {
+				console.error("[daemon-local] telegram bridge failed:", err);
+			}
+		}
+	}
+
 	// Lotus-Class Compute — peer mesh. OFF by default. Internal-only during spike.
-	if (process.env.GROVE_ENABLED === "1") {
+	// In local mode we never register with the remote mesh even if the env var
+	// leaks through, because the daemon is loopback-only.
+	if (process.env.GROVE_ENABLED === "1" && !localMode) {
 		const vesselId = process.env.VESSEL_ID || `local-${require("node:os").hostname()}`;
 		const vesselUrl = process.env.VESSEL_URL || `ws://localhost:${config.port}`;
 		const vesselRegion = process.env.VESSEL_REGION || "local";

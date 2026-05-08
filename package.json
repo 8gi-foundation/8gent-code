@@ -21,6 +21,8 @@
 	"scripts": {
 		"start": "bun run packages/eight/index.ts",
 		"agent": "bun run packages/eight/index.ts",
+		"daemon": "bun run packages/daemon/index.ts",
+		"daemon:local": "bun run packages/daemon/scripts/start-local.ts",
 		"tui": "bun run apps/tui/src/index.tsx",
 		"pet": "bash apps/lil-eight/build.sh && open 'apps/lil-eight/build/Lil Eight.app'",
 		"pet:build": "bash apps/lil-eight/build.sh",
