@@ -1,0 +1,17 @@
+[Unit]
+Description=Eight daemon (WebSocket gateway on :18789)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/8gent/daemon.env
+WorkingDirectory=/opt/8gent
+ExecStart=/usr/local/bin/bun run packages/daemon/index.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/8gent/daemon.log
+StandardError=append:/var/log/8gent/daemon.log
+
+[Install]
+WantedBy=multi-user.target
