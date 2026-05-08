@@ -21,13 +21,14 @@ import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
 import {
 	generateSessionSummary,
+	recallGlobalMemoriesSync,
 	recallPriorSessionsSync,
 	writeSessionToKG,
 } from "../memory/session-kg.js";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
-import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
+import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -42,6 +43,7 @@ import type {
 import { SessionWriter } from "../specifications/session/writer.js";
 import { getActiveTelegramBot, startTelegramBot } from "../telegram";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
+import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
 	type CompressionStage,
@@ -58,7 +60,6 @@ import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
-import { type Settings, computeAutoTune } from "./auto-tune";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -261,8 +262,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Inject deferred tool categories when not loading all tools upfront
 		const deferredToolBlock = config.allTools ? "" : `\n\n${getDeferredToolSegment()}`;
 
-		// Inject prior session context from Knowledge Graph (best-effort, sync)
+		// Inject prior session context and global user memories (best-effort, sync)
 		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
+		const globalMemoriesBlock = recallGlobalMemoriesSync();
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -282,6 +284,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					personalityBlock +
 					orchestratorBlock +
 					deferredToolBlock +
+					globalMemoriesBlock +
 					priorSessionsBlock +
 					languageInstruction,
 		});
@@ -1136,10 +1139,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
 						const next = failover.resolve(currentEntry.model, channel);
-						if (
-							next.model === currentEntry.model &&
-							next.provider === currentEntry.provider
-						) {
+						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
 						currentEntry = next;
@@ -1151,9 +1151,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			this.abortController = null;
 
 			if (!resolved) {
-				const summary = errors
-					.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`)
-					.join("\n");
+				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
 				throw new Error(
 					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
 				);
@@ -1292,10 +1290,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				// Voice is optional
 			}
 
-			if (sessionWatchdog) { clearTimeout(sessionWatchdog); sessionWatchdog = null; }
+			if (sessionWatchdog) {
+				clearTimeout(sessionWatchdog);
+				sessionWatchdog = null;
+			}
 			return flavoredContent;
 		} catch (err) {
-			if (sessionWatchdog) { clearTimeout(sessionWatchdog); sessionWatchdog = null; }
+			if (sessionWatchdog) {
+				clearTimeout(sessionWatchdog);
+				sessionWatchdog = null;
+			}
 			const errMsg = err instanceof Error ? err.message : String(err);
 
 			// ── Self-Autonomy: Error Recovery ────────────────────────────────
