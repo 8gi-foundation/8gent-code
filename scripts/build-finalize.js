@@ -17,9 +17,7 @@ if (!contents.startsWith("#!")) {
 
 // chmod +x (Unix only - no-op on Windows)
 if (platform() !== "win32") {
-	try {
-		chmodSync(cliPath, 0o755);
-	} catch {}
+	chmodSync(cliPath, 0o755);
 }
 
 // copy-bundled-skills: packages/skills/*/SKILL.md -> dist/skills/*/SKILL.md
