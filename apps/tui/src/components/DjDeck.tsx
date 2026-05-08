@@ -220,7 +220,7 @@ function sanitizeTrack(value: string): string {
 	return value.replace(/[\u{1F300}-\u{1FAFF}]/gu, "").replace(/\s+/g, " ").trim();
 }
 
-export function DjDeck() {
+export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}) {
 	const [status, setStatus] = useState<DjStatus>(EMPTY);
 	const [open, setOpen] = useState(true);
 	const [localPos, setLocalPos] = useState<number | null>(null);
@@ -390,7 +390,14 @@ export function DjDeck() {
 	// Loading / paused / no-track all collapse to a one-line strip — five rows
 	// of stereo chrome for a track that isn't playing was eating the viewport.
 	if (!status.playing) {
-		const idleLabel = status.title ? "loading" : "idle";
+		// When the agent is mid-turn but no music is playing, show "agent pulse"
+		// so the bottom heartbeat reflects the active turn instead of looking dead.
+		const idleLabel = status.title
+			? "loading"
+			: isProcessing
+				? "agent pulse"
+				: "idle";
+		const idleColor = isProcessing ? t.teal : t.dim;
 		return (
 			<Box
 				width="100%"
@@ -401,7 +408,7 @@ export function DjDeck() {
 				flexShrink={0}
 			>
 				<Text color={t.orange}>● 8GENT FM</Text>
-				<Text color={t.dim}>{idleLabel}</Text>
+				<Text color={idleColor}>{idleLabel}</Text>
 				<Text color={t.muted}>/dj open</Text>
 			</Box>
 		);

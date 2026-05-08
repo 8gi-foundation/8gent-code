@@ -273,7 +273,7 @@ function MessageItem({
 	const bubble = (
 		<Box
 			flexDirection="column"
-			alignItems={isUser ? "flex-end" : "flex-start"}
+			alignItems="flex-start"
 			marginBottom={1}
 			width={contentWidth}
 		>
