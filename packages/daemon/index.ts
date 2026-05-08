@@ -38,8 +38,15 @@ import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { ComputerUseTraceStore, defaultTraceDbPath } from "../memory/computer-use-traces";
 import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
+import { HandoffAuditLog, defaultHandoffLogPath } from "./audit/handoff-log";
 import { addJob, getJobs, startCron, stopCron } from "./cron";
 import { getDataDir } from "./data-dir";
+import {
+	type AgentHandoff,
+	HandoffDispatcher,
+	type HandoffExecutor,
+	type HandoffResult,
+} from "./handoff";
 import {
 	type DispatchExecutor,
 	DispatchHub,
@@ -128,6 +135,12 @@ const STATE_PATH = `${DATA_DIR}/daemon-state.json`;
 let server: ReturnType<typeof startGateway> | null = null;
 let pool: AgentPool | null = null;
 let mesh: VesselMesh | null = null;
+let handoffDispatcher: HandoffDispatcher | null = null;
+
+/** Public accessor for the daemon's handoff dispatcher (issue #2422). */
+export function getHandoffDispatcher(): HandoffDispatcher | null {
+	return handoffDispatcher;
+}
 
 /** Save active session IDs to disk so they can be resumed after restart */
 function saveState(): void {
@@ -292,6 +305,64 @@ export async function main(): Promise<void> {
 				}
 			: undefined,
 	});
+
+	// Wire the agent-to-agent handoff protocol (issue #2422).
+	// Flat dispatch, depth-enforced, every handoff audited. Lives beside
+	// the cross-surface DispatchRouter; existing /delegate flow untouched.
+	const handoffAudit = new HandoffAuditLog(defaultHandoffLogPath());
+	const handoffExecutor: HandoffExecutor = async (handoff: AgentHandoff, signal) => {
+		const sessionId = `handoff_${handoff.id}`;
+		const startMs = Date.now();
+		pool!.createSession(sessionId, "delegation");
+		const prompt = [
+			`You are ${handoff.to}. ${handoff.from} has delegated this task to you.`,
+			"",
+			`Task: ${handoff.task}`,
+			handoff.context_summary ? `\nContext:\n${handoff.context_summary}` : "",
+			handoff.expected_output ? `\nExpected output:\n${handoff.expected_output}` : "",
+			handoff.artifacts.length ? `\nArtifacts in scope: ${handoff.artifacts.join(", ")}` : "",
+			"",
+			"Complete the task and return a clear result. Do not delegate further.",
+		]
+			.filter(Boolean)
+			.join("\n");
+
+		const abortPromise = new Promise<HandoffResult>((resolve) => {
+			signal.addEventListener("abort", () => {
+				resolve({
+					handoff_id: handoff.id,
+					status: "timeout",
+					output: "",
+					artifacts_produced: [],
+					tokens_used: 0,
+					duration_ms: Date.now() - startMs,
+					error: "aborted by dispatcher",
+				});
+			});
+		});
+
+		const work = pool!
+			.chat(sessionId, prompt)
+			.then<HandoffResult>((output) => ({
+				handoff_id: handoff.id,
+				status: output.startsWith("[error]") ? "failed" : "completed",
+				output,
+				artifacts_produced: [],
+				tokens_used: Math.ceil((prompt.length + output.length) / 4),
+				duration_ms: Date.now() - startMs,
+				error: output.startsWith("[error]") ? output : undefined,
+			}))
+			.finally(() => {
+				pool?.destroySession(sessionId);
+			});
+
+		return Promise.race([work, abortPromise]);
+	};
+	handoffDispatcher = new HandoffDispatcher({
+		executor: handoffExecutor,
+		auditLog: handoffAudit,
+	});
+	console.log(`[daemon] handoff protocol ready (audit=${handoffAudit.filePath})`);
 
 	// Start WebSocket gateway with agent pool + dispatch
 	server = startGateway({
