@@ -26,6 +26,27 @@ import React from "react";
 import { t } from "../theme.js";
 import { MetricRow, TruncatedValue } from "./RailRow.js";
 
+// RailSection wraps a heading and its rows in a discrete column block.
+// Without this, Ink can fuse the heading line with the next row at narrow
+// widths (the `hitsRY` bug — MEMORY heading running into a cache row tail).
+// Explicit column + marginTop + width=100% guarantees row separation.
+function RailSection({
+	title,
+	children,
+}: {
+	title: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<Box flexDirection="column" marginTop={1} width="100%">
+			<Text color={t.orange} bold>{title}</Text>
+			<Box flexDirection="column" width="100%">
+				{children}
+			</Box>
+		</Box>
+	);
+}
+
 // NamedRow renders a primary name on the left (truncate-middle so head and
 // tail are both visible — important for `lmstudio:google/gemma-4-26b-a4b`)
 // and an optional trailing value on the right (latency, count, etc).
@@ -179,80 +200,74 @@ export function ActivityRail({
 		>
 			<Text color={t.orange} bold>AGENT ACTIVITY</Text>
 
-			<Box marginTop={1}>
-				<Text color={t.orange} bold>TASKS</Text>
-			</Box>
-			{tasks.length === 0 ? (
-				<Text color={t.muted}>idle</Text>
-			) : (
-				tasks.map((task) => (
-					<Box key={task.id} flexDirection="column">
-						<Text color={t.textPrimary} wrap="truncate-end">{task.label}</Text>
-						<Box width="100%" overflow="hidden" justifyContent="space-between">
-							<Text color={t.steel}>{bar(task.progress)}</Text>
-							<Text color={t.textSecondary}>{`${task.progress}%`}</Text>
+			<RailSection title="TASKS">
+				{tasks.length === 0 ? (
+					<Text color={t.muted}>idle</Text>
+				) : (
+					tasks.map((task) => (
+						<Box key={task.id} flexDirection="column">
+							<Text color={t.textPrimary} wrap="truncate-end">{task.label}</Text>
+							<Box width="100%" overflow="hidden" justifyContent="space-between">
+								<Text color={t.steel}>{bar(task.progress)}</Text>
+								<Text color={t.textSecondary}>{`${task.progress}%`}</Text>
+							</Box>
 						</Box>
-					</Box>
-				))
-			)}
+					))
+				)}
+			</RailSection>
 
-			<Box marginTop={1}>
-				<Text color={t.orange} bold>TOOLS</Text>
-			</Box>
-			{(() => {
-				// Prefer live turn state (chat-truth) over the stale tools array.
-				// Falls back to the array when no isProcessing signal is wired.
-				const liveActive = isProcessing ? (activeTool ?? "reasoning") : null;
-				const arrayActive = tools.find((tl) => tl.state === "running")?.name ?? null;
-				const active = liveActive ?? arrayActive;
-				const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
-				const queued = tools.filter((tl) => tl.state === "idle").length;
-				return (
-					<>
-						<MetricRow
-							label="active"
-							value={active ?? "none"}
-							color={active ? t.teal : t.dim}
-						/>
-						<MetricRow label="done" value={String(done)} color={t.textSecondary} />
-						<MetricRow
-							label="queued"
-							value={String(queued)}
-							color={queued > 0 ? t.orange : t.dim}
-						/>
-					</>
-				);
-			})()}
+			<RailSection title="TOOLS">
+				{(() => {
+					// Prefer live turn state (chat-truth) over the stale tools array.
+					const liveActive = isProcessing ? (activeTool ?? "reasoning") : null;
+					const arrayActive = tools.find((tl) => tl.state === "running")?.name ?? null;
+					const active = liveActive ?? arrayActive;
+					const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
+					const queued = tools.filter((tl) => tl.state === "idle").length;
+					return (
+						<>
+							<MetricRow
+								label="active"
+								value={active ?? "none"}
+								color={active ? t.teal : t.dim}
+							/>
+							<MetricRow label="done" value={String(done)} color={t.textSecondary} />
+							<MetricRow
+								label="queued"
+								value={String(queued)}
+								color={queued > 0 ? t.orange : t.dim}
+							/>
+						</>
+					);
+				})()}
+			</RailSection>
 
-			<Box marginTop={1}>
-				<Text color={t.orange} bold>PROVIDERS</Text>
-			</Box>
-			{providers.map((provider) => (
-				<NamedRow
-					key={provider.name}
-					name={`● ${providerDisplay(provider.name)}`}
-					color={PROVIDER_COLOR[provider.state]}
-					trailing={provider.latency}
-				/>
-			))}
+			<RailSection title="PROVIDERS">
+				{providers.map((provider) => (
+					<NamedRow
+						key={provider.name}
+						name={`● ${providerDisplay(provider.name)}`}
+						color={PROVIDER_COLOR[provider.state]}
+						trailing={provider.latency}
+					/>
+				))}
+			</RailSection>
 
-			<Box marginTop={1}>
-				<Text color={t.orange} bold>MEMORY</Text>
-			</Box>
-			<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
-			<MetricRow label="misses" value={String(memory.misses)} color={t.orange} />
-			<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
+			<RailSection title="MEMORY">
+				<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
+				<MetricRow label="misses" value={String(memory.misses)} color={t.orange} />
+				<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
+			</RailSection>
 
-			<Box marginTop={1}>
-				<Text color={t.orange} bold>AGENTS</Text>
-			</Box>
-			{agents.map((agent) => (
-				<NamedRow
-					key={agent.name}
-					name={`● ${agent.name}`}
-					color={AGENT_COLOR[agent.state]}
-				/>
-			))}
+			<RailSection title="AGENTS">
+				{agents.map((agent) => (
+					<NamedRow
+						key={agent.name}
+						name={`● ${agent.name}`}
+						color={AGENT_COLOR[agent.state]}
+					/>
+				))}
+			</RailSection>
 		</Box>
 	);
 }
