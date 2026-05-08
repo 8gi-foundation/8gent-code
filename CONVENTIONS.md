@@ -207,6 +207,20 @@ Consult the design system before building any UI.
 
 ---
 
+## Linting Stack
+
+| Tool | Scope | Script | CI status |
+|------|-------|--------|-----------|
+| Biome | TS / TSX / JS / JSX / JSON rules | `bun run lint` | Required |
+| Biome | Formatting | `bun run format:check` | Advisory |
+| react-doctor | React-specific anti-patterns (TSX/JSX) | `bun run lint:react` | Advisory |
+
+Biome is the single source of truth for general lint and formatting (1.9.4, ~500ms across 1100+ files). react-doctor (`millionco/react-doctor`) catches React anti-patterns Biome doesn't: array index as key, components defined inside components, derived state in `useEffect`. It runs as an **advisory** check in CI (`continue-on-error: true`) and as an advisory pre-commit hook on staged TSX/JSX (`bun run lint:react:staged`). Both never block; they surface.
+
+Pre-commit setup: `pip install pre-commit && pre-commit install`. The hook runs Biome (rules) on staged files plus react-doctor (advisory) on staged React files.
+
+---
+
 ## Writing Rules
 
 - **No em dashes.** Use hyphens or rewrite.
