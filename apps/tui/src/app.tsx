@@ -5519,6 +5519,9 @@ export function App({
 								providers={providerRows}
 								memory={memoryStats}
 								agents={agentRows}
+								isProcessing={isProcessing}
+								activeTool={activeTool || (isProcessing ? "reasoning" : null)}
+								toolsCompleted={toolCount}
 							/>
 						)}
 					</Box>
@@ -5534,6 +5537,7 @@ export function App({
 					permissions={infiniteModeActive ? "infinite" : "ask"}
 					sessionTime={sessionTime}
 					mode={agentMode}
+					isProcessing={isProcessing}
 				/>
 			</FixedFrame>
 		</ADHDModeContext.Provider>

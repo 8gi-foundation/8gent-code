@@ -13,6 +13,19 @@ import React from "react";
 import { t } from "../theme.js";
 import { LilEightBadge, type LilEightState } from "./LilEightBadge.js";
 
+// Pre-truncate header strings so the chrome row never wraps to a second
+// line. Once the middle Box is allowed to wrap, the whole header collapses.
+function truncateMiddle(s: string, max: number): string {
+	if (s.length <= max) return s;
+	const half = Math.max(1, Math.floor((max - 1) / 2));
+	return `${s.slice(0, half)}…${s.slice(s.length - half)}`;
+}
+
+function truncateEnd(s: string, max: number): string {
+	if (s.length <= max) return s;
+	return `${s.slice(0, Math.max(1, max - 1))}…`;
+}
+
 const ui = {
 	cream:      t.textPrimary,
 	muted:      t.textTertiary,
@@ -50,17 +63,13 @@ export function HeaderBar({
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0}>
 			<BrandPill updateAvailable={updateAvailable} />
 
-			<Box flexShrink={1} minWidth={0} paddingX={1}>
-				<Text color={ui.muted} wrap="truncate-middle">
-					{workspacePath}
-				</Text>
+			<Box flexShrink={1} minWidth={0} paddingX={1} overflow="hidden">
+				<Text color={ui.muted}>{truncateMiddle(workspacePath, 28)}</Text>
 				<Text color={ui.dim}>  </Text>
 				<Text color={ui.teal}>⎇ </Text>
-				<Text color={ui.orange} wrap="truncate-end">
-					{branch}
-				</Text>
+				<Text color={ui.orange}>{truncateEnd(branch, 18)}</Text>
 				<Text color={ui.dim}>  </Text>
-				<Text color={ui.muted}>{syncStatus}</Text>
+				<Text color={ui.muted}>{truncateEnd(syncStatus, 14)}</Text>
 			</Box>
 
 			<Box flexShrink={0}>
