@@ -1,0 +1,10 @@
+{
+	"id": "factual-largest-ocean",
+	"title": "Factual recall - largest ocean on Earth",
+	"tags": ["factual"],
+	"prompt": "Which ocean is the largest by area? Reply with just the ocean's name.",
+	"expect": {
+		"substrings": [{ "value": "Pacific", "mode": "present", "caseSensitive": false }],
+		"latency": { "wallMs": 30000 }
+	}
+}

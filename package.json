@@ -39,6 +39,8 @@
 		"postinstall": "node scripts/postinstall.js",
 		"test": "bun test packages/ apps/",
 		"test:benchmarks": "bun test benchmarks/",
+		"test:golden": "bun run packages/golden/cli.ts",
+		"test:golden:dry": "bun run packages/golden/cli.ts --dry-run --no-store",
 		"test:models": "bun scripts/test-models.ts",
 		"test:models:providers": "bun scripts/test-models.ts --providers",
 		"cua:setup": "bun run packages/eight/scripts/cua-setup.ts",

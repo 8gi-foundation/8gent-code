@@ -1,0 +1,19 @@
+{
+	"id": "code-typescript-interface",
+	"title": "Code - TypeScript interface for a User",
+	"tags": ["code", "typescript"],
+	"prompt": "Define a TypeScript interface named User with three fields: id (string), name (string), and age (number). Provide just the interface inside a fenced code block.",
+	"expect": {
+		"substrings": [
+			{ "value": "interface User", "mode": "present" },
+			{ "value": "id", "mode": "present" },
+			{ "value": "name", "mode": "present" },
+			{ "value": "age", "mode": "present" }
+		],
+		"regexes": [
+			{ "pattern": ":\\s*string", "mode": "present" },
+			{ "pattern": ":\\s*number", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 }
+	}
+}

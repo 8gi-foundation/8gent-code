@@ -1,0 +1,11 @@
+{
+	"id": "code-shell-find-files",
+	"title": "Shell - find all .ts files modified in last day",
+	"tags": ["code", "shell"],
+	"prompt": "Write a single shell command using find that lists all .ts files in the current directory tree modified in the last 24 hours.",
+	"expect": {
+		"substrings": [{ "value": "find", "mode": "present" }, { "value": ".ts", "mode": "present" }],
+		"regexes": [{ "pattern": "-mtime|-newer|-mmin", "mode": "present" }],
+		"latency": { "wallMs": 60000 }
+	}
+}

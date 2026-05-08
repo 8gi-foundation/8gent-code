@@ -1,0 +1,10 @@
+{
+	"id": "reasoning-counting-letters",
+	"title": "Reasoning - count letters in a word",
+	"tags": ["reasoning"],
+	"prompt": "How many times does the letter 'r' appear in the word 'strawberry'? Answer with just a single digit.",
+	"expect": {
+		"substrings": [{ "value": "3", "mode": "present" }],
+		"latency": { "wallMs": 30000 }
+	}
+}

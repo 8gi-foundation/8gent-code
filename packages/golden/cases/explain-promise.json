@@ -1,0 +1,16 @@
+{
+	"id": "explain-promise",
+	"title": "Explain - JavaScript Promises in one paragraph",
+	"tags": ["explanation", "developer"],
+	"prompt": "Explain what a JavaScript Promise is in one short paragraph. Mention pending, fulfilled, and rejected states.",
+	"expect": {
+		"substrings": [
+			{ "value": "promise", "mode": "present", "caseSensitive": false },
+			{ "value": "pending", "mode": "present", "caseSensitive": false },
+			{ "value": "fulfilled", "mode": "present", "caseSensitive": false },
+			{ "value": "rejected", "mode": "present", "caseSensitive": false }
+		],
+		"latency": { "wallMs": 60000 },
+		"minLength": 80
+	}
+}

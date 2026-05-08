@@ -1,0 +1,13 @@
+{
+	"id": "code-python-hello",
+	"title": "Code - Python hello world",
+	"tags": ["code", "python"],
+	"prompt": "Write a Python program that prints exactly: Hello, world! Provide only the code in a fenced block.",
+	"expect": {
+		"substrings": [
+			{ "value": "print", "mode": "present" },
+			{ "value": "Hello, world!", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 }
+	}
+}

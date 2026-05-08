@@ -1,0 +1,11 @@
+{
+	"id": "instruction-following-csv",
+	"title": "Instruction following - emit CSV row",
+	"tags": ["instruction-following", "format"],
+	"prompt": "Output exactly one line of CSV with three fields: name=Alice, age=30, city=Berlin. No header, no quotes, just one line.",
+	"expect": {
+		"regexes": [{ "pattern": "alice\\s*,\\s*30\\s*,\\s*berlin", "flags": "i", "mode": "present" }],
+		"latency": { "wallMs": 30000 },
+		"maxLength": 200
+	}
+}

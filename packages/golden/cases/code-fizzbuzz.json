@@ -1,0 +1,19 @@
+{
+	"id": "code-fizzbuzz",
+	"title": "Code - write FizzBuzz in TypeScript",
+	"tags": ["code", "typescript"],
+	"prompt": "Write a TypeScript function fizzbuzz(n: number): string that returns 'Fizz' if n is divisible by 3, 'Buzz' if divisible by 5, 'FizzBuzz' if divisible by both, otherwise the number as a string. Provide a single fenced code block.",
+	"expect": {
+		"substrings": [
+			{ "value": "function", "mode": "present" },
+			{ "value": "Fizz", "mode": "present" },
+			{ "value": "Buzz", "mode": "present" }
+		],
+		"regexes": [
+			{ "pattern": "%\\s*3", "mode": "present" },
+			{ "pattern": "%\\s*5", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 },
+		"minLength": 40
+	}
+}

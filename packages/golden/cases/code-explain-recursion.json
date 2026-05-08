@@ -1,0 +1,12 @@
+{
+	"id": "code-explain-recursion",
+	"title": "Explain recursion in plain English",
+	"tags": ["explanation"],
+	"prompt": "Explain what recursion is in two sentences, in plain English, without code.",
+	"expect": {
+		"substrings": [{ "value": "recursion", "mode": "present", "caseSensitive": false }],
+		"latency": { "wallMs": 60000 },
+		"minLength": 30,
+		"maxLength": 800
+	}
+}

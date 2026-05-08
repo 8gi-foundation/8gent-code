@@ -1,0 +1,13 @@
+{
+	"id": "format-code-fence",
+	"title": "Format - emit code inside a fenced block",
+	"tags": ["format"],
+	"prompt": "Show me the SQL statement to select all rows from a table named users. Wrap the SQL in a fenced code block.",
+	"expect": {
+		"regexes": [
+			{ "pattern": "```", "mode": "present" },
+			{ "pattern": "select\\s+\\*\\s+from\\s+users", "flags": "i", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 }
+	}
+}

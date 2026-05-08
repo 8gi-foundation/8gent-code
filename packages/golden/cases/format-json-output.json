@@ -1,0 +1,13 @@
+{
+	"id": "format-json-output",
+	"title": "Format - emit valid JSON object",
+	"tags": ["format", "structured-output"],
+	"prompt": "Reply with a single JSON object that has exactly two fields: name (string) set to \"Eight\" and version (string) set to \"1.0\". No prose, no markdown, just the JSON.",
+	"expect": {
+		"regexes": [
+			{ "pattern": "\"name\"\\s*:\\s*\"Eight\"", "mode": "present" },
+			{ "pattern": "\"version\"\\s*:\\s*\"1\\.0\"", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 }
+	}
+}

@@ -1,0 +1,10 @@
+{
+	"id": "code-bash-env",
+	"title": "Shell - print env var safely",
+	"tags": ["code", "shell"],
+	"prompt": "Show me a single bash line that prints the value of the HOME environment variable using echo.",
+	"expect": {
+		"regexes": [{ "pattern": "echo\\s+\\\"?\\$\\{?HOME\\}?\\\"?", "mode": "present" }],
+		"latency": { "wallMs": 60000 }
+	}
+}

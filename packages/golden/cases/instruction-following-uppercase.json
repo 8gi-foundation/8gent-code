@@ -1,0 +1,10 @@
+{
+	"id": "instruction-following-uppercase",
+	"title": "Instruction following - uppercase a phrase",
+	"tags": ["instruction-following"],
+	"prompt": "Convert this exact phrase to uppercase and return only the converted phrase, no quotes, no preamble: hello world",
+	"expect": {
+		"substrings": [{ "value": "HELLO WORLD", "mode": "present", "caseSensitive": true }],
+		"latency": { "wallMs": 30000 }
+	}
+}

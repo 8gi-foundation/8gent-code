@@ -1,0 +1,10 @@
+{
+	"id": "factual-water-formula",
+	"title": "Factual recall - chemical formula for water",
+	"tags": ["factual"],
+	"prompt": "What is the chemical formula for water?",
+	"expect": {
+		"substrings": [{ "value": "H2O", "mode": "present", "caseSensitive": false }],
+		"latency": { "wallMs": 30000 }
+	}
+}

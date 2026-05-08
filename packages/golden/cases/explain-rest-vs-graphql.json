@@ -1,0 +1,14 @@
+{
+	"id": "explain-rest-vs-graphql",
+	"title": "Explain - REST vs GraphQL",
+	"tags": ["explanation", "developer"],
+	"prompt": "What is one key difference between REST and GraphQL? Answer in one sentence.",
+	"expect": {
+		"substrings": [
+			{ "value": "REST", "mode": "present" },
+			{ "value": "GraphQL", "mode": "present" }
+		],
+		"latency": { "wallMs": 60000 },
+		"minLength": 30
+	}
+}
