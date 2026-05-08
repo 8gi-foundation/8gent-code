@@ -99,10 +99,36 @@ async function tgSend(
 	}
 }
 
-/** Download a Telegram voice/audio file and transcribe it via OpenRouter Whisper */
-async function transcribeVoice(token: string, fileId: string): Promise<string> {
+/**
+ * Download a Telegram voice/audio file and transcribe it.
+ *
+ * Uses Groq (preferred, free tier, fast) when GROQ_API_KEY is set; falls
+ * back to OpenAI Whisper when only OPENAI_API_KEY is set. Local mode
+ * inherits this exact path; no local-only branch.
+ *
+ * Returns the transcript on success, or a bracketed `[error reason]`
+ * string on failure. Callers should treat any leading `[` as an error
+ * message and not feed it to the agent.
+ *
+ * Exported for tests and for the local-mode launcher to confirm the
+ * pipeline is reachable. NOT for direct use elsewhere; call only
+ * inside the bridge poll loop.
+ */
+export async function transcribeVoiceMessage(
+	token: string,
+	fileId: string,
+	fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+	return transcribeVoice(token, fileId, fetchImpl);
+}
+
+async function transcribeVoice(
+	token: string,
+	fileId: string,
+	fetchImpl: typeof fetch = fetch,
+): Promise<string> {
 	// 1. Get file path from Telegram
-	const fileRes = await fetch(`${TELEGRAM_API}${token}/getFile`, {
+	const fileRes = await fetchImpl(`${TELEGRAM_API}${token}/getFile`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ file_id: fileId }),
@@ -114,7 +140,7 @@ async function transcribeVoice(token: string, fileId: string): Promise<string> {
 
 	// 2. Download the audio file
 	const audioUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
-	const audioRes = await fetch(audioUrl);
+	const audioRes = await fetchImpl(audioUrl);
 	const audioBuffer = await audioRes.arrayBuffer();
 
 	// 3. Transcribe via Groq Whisper (free, fast) or OpenAI Whisper
@@ -135,7 +161,7 @@ async function transcribeVoice(token: string, fileId: string): Promise<string> {
 		formData.append("file", audioBlob, "voice.ogg");
 		formData.append("model", groqKey ? "whisper-large-v3" : "whisper-1");
 
-		const whisperRes = await fetch(transcriptionUrl, {
+		const whisperRes = await fetchImpl(transcriptionUrl, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${transcriptionKey}` },
 			body: formData,
@@ -406,7 +432,13 @@ class TelegramDaemonBridge {
 							if (fileId && update.message.chat) {
 								await tgTyping(this.config.telegramToken, this.config.chatId);
 								const transcript = await transcribeVoice(this.config.telegramToken, fileId);
-								console.log(`[telegram-bridge] voice transcription: "${transcript.slice(0, 100)}"`);
+								// Stable log format for ops + smoke-test grep:
+								// `[voice-in] transcribed: "..."`. Keep the older
+								// `[telegram-bridge]` prefix on the same line for
+								// continuity with existing log dashboards.
+								console.log(
+									`[voice-in] transcribed: "${transcript.slice(0, 200)}" [telegram-bridge]`,
+								);
 								if (!transcript.startsWith("[")) {
 									await tgSend(
 										this.config.telegramToken,
