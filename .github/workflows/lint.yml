@@ -32,3 +32,7 @@ jobs:
       - name: Format check (advisory)
         run: bun run format:check
         continue-on-error: true
+
+      - name: React lint (advisory)
+        run: bunx react-doctor -y --offline --annotations .
+        continue-on-error: true

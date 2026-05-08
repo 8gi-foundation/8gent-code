@@ -38,6 +38,17 @@ repos:
         types_or: [ts, tsx, js, jsx, json]
         pass_filenames: false
 
+      # react-doctor - React-specific anti-pattern checks on staged files.
+      # Advisory: never blocks the commit, but surfaces issues like
+      # array-index keys, components defined inside components, and
+      # derived state in useEffect that Biome doesn't catch.
+      - id: react-doctor-staged
+        name: react-doctor (staged, advisory)
+        entry: bash -c 'bunx --bun react-doctor -y --staged --fail-on none || true'
+        language: system
+        types_or: [tsx, jsx]
+        pass_filenames: false
+
 # Exclude patterns
 exclude: |
   (?x)^(

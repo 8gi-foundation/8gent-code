@@ -11,6 +11,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **react-doctor as advisory React lint.** Adds `react-doctor` (millionco/react-doctor)
+  as a devDependency, plus `lint:react` and `lint:react:staged` scripts. Wired into
+  `.github/workflows/lint.yml` as a non-blocking step (`continue-on-error: true`,
+  `--annotations` for inline PR diagnostics) and into `.pre-commit-config.yaml` on
+  staged TSX/JSX (advisory, never blocks). Catches React-specific anti-patterns Biome
+  doesn't: array index as key, components defined inside components, derived state in
+  `useEffect`. Scores surface in CI logs; fixes are opt-in.
 - **Strict linting pipeline** (#2419). Tightened `biome.json` to flag `noExplicitAny`,
   `useImportType`, `noUnusedVariables`, `useTemplate`, `useArrowFunction`,
   `useOptionalChain`, `noControlCharactersInRegex`, `noDelete`, `useExponentiationOperator`,
