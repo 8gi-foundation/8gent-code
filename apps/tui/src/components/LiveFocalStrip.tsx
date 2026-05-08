@@ -61,8 +61,9 @@ export function LiveFocalStrip({
 	return (
 		<Box
 			width="100%"
-			borderStyle="round"
-			borderColor={showApprovalBorder ? t.orange : t.teal}
+			minHeight={isProcessing ? 3 : 1}
+			borderStyle={isProcessing ? "round" : "single"}
+			borderColor={showApprovalBorder ? t.orange : isProcessing ? t.teal : t.border}
 			paddingX={1}
 			justifyContent="space-between"
 			flexShrink={0}
