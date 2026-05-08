@@ -1,0 +1,20 @@
+[Unit]
+Description=Eight Telegram bridge ([REDACTED-BOT])
+After=eight-daemon.service network-online.target
+Wants=eight-daemon.service network-online.target
+
+[Service]
+Type=simple
+Environment=BOT_NAME=aijames
+Environment=EIGHT_TG_SESSIONS=/var/lib/8gent/telegram-sessions-aijames.json
+EnvironmentFile=/etc/8gent/daemon.env
+EnvironmentFile=/etc/8gent/bots.env
+WorkingDirectory=/opt/8gent
+ExecStart=/usr/local/bin/bun run packages/daemon/telegram-bridge.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/8gent/bridge-aijames.log
+StandardError=append:/var/log/8gent/bridge-aijames.log
+
+[Install]
+WantedBy=multi-user.target
