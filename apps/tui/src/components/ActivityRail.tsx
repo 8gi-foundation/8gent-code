@@ -101,19 +101,29 @@ interface ActivityRailProps {
 	toolsCompleted?: number;
 }
 
-// Short-name a long provider:model string for the rail. The full
-// identifier is fine in chat metadata; the rail wants a compact label.
-//   "lmstudio:google/gemma-4-26b-a4b" -> "lmstudio:gemma"
-//   "ollama:qwen3.6:27b"              -> "ollama:qwen"
-function shortProvider(name: string): string {
-	const families = ["gemma", "qwen", "llama", "deepseek", "mistral", "phi", "claude"];
-	for (const fam of families) {
-		if (name.toLowerCase().includes(fam)) {
-			const tier = name.split(":")[0];
-			return `${tier}:${fam}`;
-		}
+// Friendly route label. The rail surfaces the agent's tiering, not the
+// vendor SKU. Translates raw provider:model identifiers to operator
+// vocabulary: local / fallback / remote.
+function providerDisplay(value: string): string {
+	const v = value.toLowerCase();
+	if (v.includes("lmstudio")) {
+		if (v.includes("gemma")) return "local:gemma";
+		if (v.includes("qwen")) return "local:qwen";
+		if (v.includes("llama")) return "local:llama";
+		return "local:lm";
 	}
-	return name;
+	if (v.includes("ollama")) {
+		if (v.includes("qwen")) return "local:qwen";
+		if (v.includes("llama")) return "local:llama";
+		if (v.includes("gemma")) return "local:gemma";
+		return "local:ollama";
+	}
+	if (v.includes("openrouter")) return "fallback:free";
+	if (v.includes("apfel") || v.includes("apple")) return "local:apfel";
+	if (v.includes("deepseek")) return "remote:deepseek";
+	if (v.includes("anthropic") || v.includes("claude")) return "remote:standby";
+	if (v.includes("openai") || v.includes("gpt")) return "remote:standby";
+	return "route:available";
 }
 
 const TOOL_GLYPH: Record<ToolState, string> = {
@@ -220,7 +230,7 @@ export function ActivityRail({
 			{providers.map((provider) => (
 				<NamedRow
 					key={provider.name}
-					name={`● ${shortProvider(provider.name)}`}
+					name={`● ${providerDisplay(provider.name)}`}
 					color={PROVIDER_COLOR[provider.state]}
 					trailing={provider.latency}
 				/>
