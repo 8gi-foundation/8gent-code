@@ -56,6 +56,7 @@ import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orches
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
 import { ToolLoopDetector } from "./tool-loop-detector";
+import { TurnJournal } from "./turn-journal";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import {
@@ -146,6 +147,11 @@ export class Agent {
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
 	private recentFilePaths: string[] = [];
+	// TurnJournal (#2470): per-turn replayable record for debug + audit.
+	private turnJournal: TurnJournal;
+	private turnIndex = 0;
+	private systemPromptHashFull = "";
+	private systemPromptLengthFull = 0;
 	private preToolRouter: PreToolRouter = new PreToolRouter({
 		astAvailable: true,
 		vectorAvailable: true,
@@ -302,6 +308,12 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		this.sessionWriter = new SessionWriter(this.sessionId);
 		const systemPromptFull =
 			basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
+		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
+		// TurnRecord with it. Avoids re-hashing per turn for large prompts.
+		this.turnJournal = new TurnJournal(this.sessionId);
+		const sysPromptDigest = TurnJournal.hashSystemPrompt(systemPromptFull);
+		this.systemPromptHashFull = sysPromptDigest.hash;
+		this.systemPromptLengthFull = sysPromptDigest.length;
 		const agentInfo: AgentInfo = {
 			model: config.model,
 			runtime: config.runtime,
@@ -1313,6 +1325,31 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				clearTimeout(sessionWatchdog);
 				sessionWatchdog = null;
 			}
+			// TurnJournal (#2470): per-turn replayable record. Last line of the
+			// post-turn block so any compactor.observe() / router work upstream
+			// has already settled. Best-effort: never block the return.
+			try {
+				const _idx = this.turnIndex++;
+				const _now = new Date().toISOString();
+				await this.turnJournal.write({
+					sessionId: this.sessionId,
+					turnIndex: _idx,
+					startedAt: new Date(chatStartTime).toISOString(),
+					finishedAt: _now,
+					input: { role: "user", content: textForAgent },
+					systemPromptHash: this.systemPromptHashFull,
+					systemPromptLength: this.systemPromptLengthFull,
+					toolCalls: [],
+					modelOutput: {
+						content: flavoredContent,
+						tokens: { in: 0, out: 0, total: totalTokensUsed },
+					},
+					latencyMs: Date.now() - chatStartTime,
+					status: "ok",
+				});
+			} catch {
+				/* journal is best-effort; never break the turn */
+			}
 			return flavoredContent;
 		} catch (err) {
 			if (sessionWatchdog) {
@@ -1393,6 +1430,31 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				duration: Date.now() - chatStartTime,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
+
+			// TurnJournal (#2470): partial record for errored turn so audit + replay
+			// can reconstruct what blew up. Best-effort.
+			try {
+				const _idx = this.turnIndex++;
+				await this.turnJournal.write({
+					sessionId: this.sessionId,
+					turnIndex: _idx,
+					startedAt: new Date(chatStartTime).toISOString(),
+					finishedAt: new Date().toISOString(),
+					input: { role: "user", content: textForAgent },
+					systemPromptHash: this.systemPromptHashFull,
+					systemPromptLength: this.systemPromptLengthFull,
+					toolCalls: [],
+					modelOutput: {
+						content: "",
+						tokens: { in: 0, out: 0, total: totalTokensUsed },
+					},
+					latencyMs: Date.now() - chatStartTime,
+					status: "errored",
+					error: errMsg.slice(0, 500),
+				});
+			} catch {
+				/* journal is best-effort */
+			}
 
 			throw err;
 		}
