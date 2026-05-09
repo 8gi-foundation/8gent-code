@@ -8,8 +8,10 @@
  */
 
 import { useMutation, useQuery } from "convex/react";
+import Image from "next/image";
+import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -22,6 +24,7 @@ export default function UserDetailPage() {
 	});
 	const updatePlan = useMutation(api.users.updatePlan);
 
+	const planSelectId = useId();
 	const [planUpdating, setPlanUpdating] = useState(false);
 
 	if (!detail) {
@@ -46,9 +49,9 @@ export default function UserDetailPage() {
 				<main className="mx-auto max-w-7xl px-6 py-8">
 					<div className="rounded-lg border border-[var(--8gent-error)]/30 bg-[var(--8gent-bg-elevated)] p-8 text-center">
 						<p className="text-[var(--8gent-error)]">User not found</p>
-						<a href="/users" className="mt-2 inline-block text-sm text-[var(--8gent-accent)]">
+						<Link href="/users" className="mt-2 inline-block text-sm text-[var(--8gent-accent)]">
 							Back to users
-						</a>
+						</Link>
 					</div>
 				</main>
 			</div>
@@ -73,9 +76,9 @@ export default function UserDetailPage() {
 			<main className="mx-auto max-w-7xl px-6 py-8 space-y-6">
 				{/* Breadcrumb */}
 				<div className="text-sm text-[var(--8gent-text-muted)]">
-					<a href="/users" className="hover:text-[var(--8gent-accent)] transition-colors">
+					<Link href="/users" className="hover:text-[var(--8gent-accent)] transition-colors">
 						Users
-					</a>
+					</Link>
 					<span className="mx-2">/</span>
 					<span className="text-[var(--8gent-text)]">{user.displayName}</span>
 				</div>
@@ -83,12 +86,22 @@ export default function UserDetailPage() {
 				{/* Profile Card */}
 				<div className="rounded-lg border border-[var(--8gent-border)] bg-[var(--8gent-bg-elevated)] p-6">
 					<div className="flex items-start gap-6">
-						{user.avatar && <img src={user.avatar} alt="" className="h-16 w-16 rounded-full" />}
+						{user.avatar && (
+							<Image
+								src={user.avatar}
+								alt=""
+								width={64}
+								height={64}
+								className="size-16 rounded-full"
+							/>
+						)}
 						<div className="flex-1">
+							{/* Profile heading weight 700 is the locked detail-page style; downgrading is a visual change James did not request. */}
+							{/* react-doctor-disable-next-line react-doctor/design-no-bold-heading */}
 							<h2 className="text-xl font-bold text-[var(--8gent-text)]">{user.displayName}</h2>
 							<p className="text-sm text-[var(--8gent-text-muted)]">@{user.githubUsername}</p>
 							<p className="text-sm text-[var(--8gent-text-secondary)]">{user.email}</p>
-							<p className="mt-1 text-xs text-[var(--8gent-text-muted)]">
+							<p className="mt-1 text-xs text-[var(--8gent-text-muted)]" suppressHydrationWarning>
 								Joined{" "}
 								{new Date(user.createdAt).toLocaleDateString("en-US", {
 									year: "numeric",
@@ -100,8 +113,11 @@ export default function UserDetailPage() {
 
 						{/* Plan Management */}
 						<div className="text-right">
-							<label className="text-xs text-[var(--8gent-text-muted)]">Plan</label>
+							<label htmlFor={planSelectId} className="text-xs text-[var(--8gent-text-muted)]">
+								Plan
+							</label>
 							<select
+								id={planSelectId}
 								value={user.plan}
 								onChange={(e) => handlePlanChange(e.target.value as "free" | "pro" | "team")}
 								disabled={planUpdating}
@@ -191,7 +207,12 @@ export default function UserDetailPage() {
 												<td className="px-6 py-3 text-sm text-[var(--8gent-text-secondary)]">
 													{formatDuration(session.startedAt, session.endedAt)}
 												</td>
-												<td className="px-6 py-3 text-sm text-[var(--8gent-text-muted)]">
+												<td
+													className="px-6 py-3 text-sm text-[var(--8gent-text-muted)]"
+													suppressHydrationWarning
+												>
+													{/* This file is "use client"; useQuery returns undefined on first paint (Skeleton above), so this Date is only formatted client-side after hydration. suppressHydrationWarning above guards the runtime; the disable below silences the static linter. */}
+													{/* react-doctor-disable-next-line react-doctor/rendering-hydration-mismatch-time */}
 													{new Date(session.startedAt).toLocaleString("en-US", {
 														month: "short",
 														day: "numeric",
@@ -280,22 +301,24 @@ function Header() {
 			<div className="mx-auto max-w-7xl px-6 py-4">
 				<div className="flex items-center justify-between">
 					<div>
+						{/* Heading weight 700 is the locked dashboard header style; downgrading to 600 is a visual change James did not request. */}
+						{/* react-doctor-disable-next-line react-doctor/design-no-bold-heading */}
 						<h1 className="text-lg font-bold text-[var(--8gent-text)]">8gent Dashboard</h1>
 						<p className="text-xs text-[var(--8gent-text-muted)]">Admin Control Plane</p>
 					</div>
 					<nav className="flex gap-4">
-						<a
+						<Link
 							href="/"
 							className="text-sm text-[var(--8gent-text-muted)] hover:text-[var(--8gent-text-secondary)] transition-colors pb-1"
 						>
 							Overview
-						</a>
-						<a
+						</Link>
+						<Link
 							href="/users"
 							className="text-sm text-[var(--8gent-accent)] border-b-2 border-[var(--8gent-accent)] pb-1"
 						>
 							Users
-						</a>
+						</Link>
 					</nav>
 				</div>
 			</div>

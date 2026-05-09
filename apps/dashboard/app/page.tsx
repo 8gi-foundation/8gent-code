@@ -9,6 +9,7 @@
 
 import { PLAN_DEFINITIONS } from "@8gent/control-plane";
 import { useQuery } from "convex/react";
+import Link from "next/link";
 import { api } from "../../convex/_generated/api";
 import { SessionTable, SessionTableSkeleton } from "./components/SessionTable";
 import { StatsCard, StatsCardSkeleton } from "./components/StatsCard";
@@ -37,22 +38,24 @@ export default function DashboardPage() {
 				<div className="mx-auto max-w-7xl px-6 py-4">
 					<div className="flex items-center justify-between">
 						<div>
+							{/* Heading weight 700 is the locked dashboard header style; downgrading to 600 is a visual change James did not request. */}
+							{/* react-doctor-disable-next-line react-doctor/design-no-bold-heading */}
 							<h1 className="text-lg font-bold text-[var(--8gent-text)]">8gent Dashboard</h1>
 							<p className="text-xs text-[var(--8gent-text-muted)]">Admin Control Plane</p>
 						</div>
 						<nav className="flex gap-4">
-							<a
+							<Link
 								href="/"
 								className="text-sm text-[var(--8gent-accent)] border-b-2 border-[var(--8gent-accent)] pb-1"
 							>
 								Overview
-							</a>
-							<a
+							</Link>
+							<Link
 								href="/users"
 								className="text-sm text-[var(--8gent-text-muted)] hover:text-[var(--8gent-text-secondary)] transition-colors pb-1"
 							>
 								Users
-							</a>
+							</Link>
 						</nav>
 					</div>
 				</div>
