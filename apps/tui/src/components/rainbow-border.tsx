@@ -196,12 +196,14 @@ export function AnimatedSeparator({ width = 50, speed = 80, char = "─" }: Anim
 	}, [width, speed]);
 
 	const line = [];
+	// Animated border row: a fixed-width line of identical chars whose color is index-driven; index IS the column position.
 	for (let i = 0; i < width; i++) {
 		const distance = Math.abs(i - glowIndex);
 		const color =
 			distance === 0 ? "white" : distance <= 2 ? "cyan" : distance <= 4 ? "blue" : "gray";
 
 		line.push(
+			// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 			<Text key={i} color={color}>
 				{char}
 			</Text>,

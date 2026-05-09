@@ -176,8 +176,8 @@ export function CompletionReport({
 						{report.filesCreated.length > 0 && (
 							<Stack marginBottom={1}>
 								<Label color="green">Created ({report.filesCreated.length})</Label>
-								{report.filesCreated.map((file, i) => (
-									<SuccessText key={i}>
+								{report.filesCreated.map((file) => (
+									<SuccessText key={`created:${file}`}>
 										{" "}
 										{boxChars.bullet} {file}
 									</SuccessText>
@@ -187,8 +187,8 @@ export function CompletionReport({
 						{report.filesModified.length > 0 && (
 							<Stack>
 								<Label color="yellow">Modified ({report.filesModified.length})</Label>
-								{report.filesModified.map((file, i) => (
-									<WarningText key={i}>
+								{report.filesModified.map((file) => (
+									<WarningText key={`modified:${file}`}>
 										{" "}
 										{boxChars.bullet} {file}
 									</WarningText>
@@ -206,8 +206,8 @@ export function CompletionReport({
 					onToggle={() => toggleSection("steps")}
 					hotkey="2"
 				>
-					{report.steps.map((step, i) => (
-						<StepItem key={i} step={step} />
+					{report.steps.map((step) => (
+						<StepItem key={`step:${step.index}:${step.description}`} step={step} />
 					))}
 				</CollapsibleSection>
 			)}
@@ -221,7 +221,11 @@ export function CompletionReport({
 					hotkey="3"
 				>
 					{report.evidence.map((evidence, i) => (
-						<EvidenceItem key={i} evidence={evidence} isLast={i === report.evidence.length - 1} />
+						<EvidenceItem
+							key={`evidence:${evidence.type}:${evidence.label}`}
+							evidence={evidence}
+							isLast={i === report.evidence.length - 1}
+						/>
 					))}
 				</CollapsibleSection>
 			)}
@@ -452,8 +456,8 @@ function StatsGrid({ report }: { report: CompletionReportData }) {
 
 	return (
 		<Stack>
-			{stats.map((stat, i) => (
-				<Inline key={i} gap={0}>
+			{stats.map((stat) => (
+				<Inline key={`stat:${stat.label}`} gap={0}>
 					<MutedText>{stat.label.padEnd(15)}</MutedText>
 					{"dim" in stat ? (
 						<Text dimColor>{stat.value}</Text>

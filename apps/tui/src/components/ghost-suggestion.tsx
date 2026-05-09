@@ -268,8 +268,8 @@ export function SuggestionPreview({ suggestions, maxItems = 3 }: SuggestionPrevi
 	return (
 		<Stack paddingX={1} marginTop={1}>
 			<MutedText>Suggestions:</MutedText>
-			{suggestions.slice(0, maxItems).map((s, i) => (
-				<Inline key={i} paddingLeft={1} gap={0}>
+			{suggestions.slice(0, maxItems).map((s) => (
+				<Inline key={`${s.source}:${s.text}`} paddingLeft={1} gap={0}>
 					<MutedText>
 						{"\u2022"} {s.text}
 					</MutedText>

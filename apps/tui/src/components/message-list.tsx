@@ -461,6 +461,7 @@ function FormattedContent({
 
 	return (
 		<Box flexDirection="column" width={wrapWidth}>
+			{/* parts come from a deterministic regex split of the message content into code-fence + prose segments; positional and never reordered for a given content string. */}
 			{parts.map((part, index) => {
 				if (part.startsWith("```")) {
 					// Extract language and code
@@ -469,6 +470,7 @@ function FormattedContent({
 						const [, language, code] = match;
 						const fenceInner = Math.max(8, wrapWidth - 8);
 						return (
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 							<Box
 								key={index}
 								flexDirection="column"
@@ -493,12 +495,14 @@ function FormattedContent({
 				// Apply bionic reading to non-code parts if ADHD mode is enabled
 				if (adhdMode) {
 					return (
+						// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 						<Box key={index} width={wrapWidth}>
 							<BionicText>{part}</BionicText>
 						</Box>
 					);
 				}
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Box key={index} width={wrapWidth}>
 						<AppText wrap="wrap">{part}</AppText>
 					</Box>

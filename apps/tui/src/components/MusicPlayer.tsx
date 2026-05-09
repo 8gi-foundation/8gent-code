@@ -66,7 +66,9 @@ function Equalizer({ playing, width = 12 }: { playing: boolean; width?: number }
 
 	return (
 		<Box flexDirection="row" gap={0}>
+			{/* bars is a fixed-length numeric level array rendered positionally as an audio meter; index IS the visual bar slot. */}
 			{bars.map((level, i) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Text key={i} color={level > 5 ? "#F07A28" : level > 2 ? "cyan" : "blue"}>
 					{BARS[level]}
 				</Text>

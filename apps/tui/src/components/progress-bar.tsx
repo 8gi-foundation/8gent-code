@@ -82,9 +82,11 @@ export function AnimatedProgressBar({
 		const filled = [];
 		const empty = [];
 
+		// Filled and empty cells of a fixed-width progress bar; index IS the visual cell slot. Prefixes namespace filled vs empty within the same bar.
 		for (let i = 0; i < filledWidth; i++) {
 			const isShimmer = i === shimmerIndex || i === shimmerIndex - 1;
 			filled.push(
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Text key={`f${i}`} color={isShimmer ? undefined : barColor} bold={isShimmer}>
 					█
 				</Text>,
@@ -93,6 +95,7 @@ export function AnimatedProgressBar({
 
 		for (let i = 0; i < emptyWidth; i++) {
 			empty.push(
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Text key={`e${i}`} color={backgroundColor} dimColor>
 					░
 				</Text>,
@@ -174,10 +177,12 @@ export function Sparkline({ values, width = 20, color = "cyan" }: SparklineProps
 
 	return (
 		<Box>
+			{/* displayValues is a fixed-length sliding window of recent samples; index IS the column position in the sparkline. */}
 			{displayValues.map((value, index) => {
 				const normalized = (value - min) / range;
 				const charIndex = Math.floor(normalized * (SPARK_CHARS.length - 1));
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text key={index} color={color}>
 						{SPARK_CHARS[charIndex]}
 					</Text>
@@ -205,11 +210,13 @@ export function WaveProgress({ width = 30, speed = 100 }: WaveProgressProps) {
 	}, [width, speed]);
 
 	const wave = [];
+	// Wave-progress: a fixed-width row of intensity cells; index IS the column position.
 	for (let i = 0; i < width; i++) {
 		const distance = Math.abs(i - offset);
 		const intensity = Math.max(0, 3 - distance);
 		const chars = ["░", "▒", "▓", "█"];
 		wave.push(
+			// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 			<Text key={i} color="cyan">
 				{chars[intensity]}
 			</Text>,

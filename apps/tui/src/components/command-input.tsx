@@ -481,7 +481,9 @@ export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) 
 	return (
 		<Box flexDirection="column" paddingX={1}>
 			<MutedText>Multi-line mode (Ctrl+Enter to submit)</MutedText>
+			{/* Placeholder multi-line buffer (not fully implemented). Lines are positional rows of a draft and re-render-from-state on every change; no stable per-line identity exists in current schema. */}
 			{lines.map((line, index) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Box key={index}>
 					<MutedText>{index === currentLine ? "\u276F" : " "} </MutedText>
 					<Text>{line}</Text>

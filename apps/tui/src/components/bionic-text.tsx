@@ -105,14 +105,17 @@ export function BionicText({
 
 	return (
 		<Text>
+			{/* tokens come from a deterministic split of the input string; positional and never reordered. */}
 			{tokens.map((token, index) => {
 				// Preserve whitespace as-is
 				if (/^\s+$/.test(token)) {
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					return <Text key={index}>{token}</Text>;
 				}
 
 				// For words, apply bionic styling
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<BionicWord
 						key={index}
 						word={token}
@@ -150,7 +153,9 @@ function BionicParagraph({
 
 	return (
 		<>
+			{/* lines come from a deterministic split of the input string by newline; positional and never reordered. */}
 			{lines.map((line, index) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<React.Fragment key={index}>
 					<BionicText
 						ratio={ratio}
