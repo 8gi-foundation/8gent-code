@@ -94,6 +94,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"desktop_windows",
 		"desktop_clipboard",
 	],
+	perception: ["eyes_see", "eyes_find", "eyes_describe", "eyes_wait_for"],
 };
 
 const CATEGORY_NAMES = Object.keys(TOOL_CATEGORIES);
