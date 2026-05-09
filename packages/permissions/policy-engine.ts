@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { validatePath } from "./path-guard.js";
 import {
 	checkCommandBoundary,
 	checkFilePathBoundary,
@@ -452,6 +453,40 @@ function coppaGate(action: string, context: PolicyContext): PolicyDecision | nul
 }
 
 // ============================================
+// Path guard hard-deny (issue #2465)
+// ============================================
+
+/**
+ * Filesystem actions whose `path` field must clear the static path-guard
+ * deny-list (credential dirs, UNC paths, device files, protected basenames).
+ * Includes glob/list since those can enumerate sensitive locations too.
+ */
+const PATH_GUARDED_ACTIONS = new Set<string>([
+	"read_file",
+	"write_file",
+	"delete_file",
+	"edit_file",
+	"apply_patch",
+	"glob",
+	"list_files",
+]);
+
+function pathGuardGate(action: string, context: PolicyContext): PolicyDecision | null {
+	if (!PATH_GUARDED_ACTIONS.has(action)) return null;
+	const filePath = typeof context.path === "string" ? context.path : "";
+	if (!filePath) return null;
+	const cwd =
+		(typeof context.workingDirectory === "string" && context.workingDirectory) ||
+		(typeof context.workspaceRoot === "string" && context.workspaceRoot) ||
+		process.cwd();
+	const result = validatePath(filePath, cwd);
+	if (!result.ok) {
+		return { allowed: false, reason: `[path-guard] ${result.reason}: ${filePath}` };
+	}
+	return null;
+}
+
+// ============================================
 // Workspace boundary hard-deny (issue #2083)
 // ============================================
 
@@ -548,8 +583,9 @@ function workspaceBoundaryGate(
  * Evaluate all loaded policies for a given action + context.
  *
  * Evaluation order (blocks take priority over allows):
- *   0. COPPA hard-deny - email/address-issuance for child accounts (not YAML-overridable)
- *   0b. Workspace boundary - realpath-anchored confinement (issue #2083, not YAML-overridable)
+ *   0a. Path guard - credential / UNC / device deny-list (issue #2465, not YAML-overridable)
+ *   0b. COPPA hard-deny - email/address-issuance for child accounts (not YAML-overridable)
+ *   0c. Workspace boundary - realpath-anchored confinement (issue #2083, not YAML-overridable)
  *   1. Disabled rules skipped
  *   2. "block" rules checked first - if matched, hard deny (no override possible)
  *   3. "require_approval" rules checked - if matched, soft deny
@@ -560,6 +596,9 @@ export function evaluatePolicy(
 	action: PolicyActionType | string,
 	context: PolicyContext,
 ): PolicyDecision {
+	const guard = pathGuardGate(action, context);
+	if (guard) return guard;
+
 	const coppa = coppaGate(action, context);
 	if (coppa) return coppa;
 

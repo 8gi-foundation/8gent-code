@@ -70,6 +70,7 @@ import {
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
 import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
+import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { ToolG8 } from "../permissions/toolg8.js";
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
@@ -88,6 +89,7 @@ import {
 	vercelSetEnv,
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
+import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
 /**
@@ -96,6 +98,13 @@ import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
 function safePath(userPath: string, workingDirectory: string): string {
+	// Static credential / UNC / device guard runs FIRST so a misconfigured
+	// workspace boundary cannot expose protected paths. Issue #2465.
+	const guard = guardPath(userPath, workingDirectory);
+	if (!guard.ok) {
+		throw new Error(`Path blocked by path-guard: ${guard.reason} ("${userPath}")`);
+	}
+
 	// Normalize first to collapse ../ sequences before resolving
 	const normalized = path.normalize(userPath);
 	const absolutePath = path.isAbsolute(normalized)
@@ -1035,6 +1044,22 @@ export class ToolExecutor {
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+		const raw = await this.executeRaw(toolName, args);
+		// Post-tool-execution scrubbing boundary (issue #2464).
+		// Wave 2 will add ToolResultCache (#2462) and ArtifactStore (#2463)
+		// hooks alongside this single labelled call. Order matters: scrub
+		// BEFORE cache/artifact persist so secrets never reach disk.
+		const result = scrubSecrets(raw);
+		if (result.redactedCount > 0) {
+			// Log redaction event to telemetry (no secret values, just metadata).
+			console.warn(
+				`[secret-scanner] tool=${toolName} redacted=${result.redactedCount} rules=${result.rules.join(",")}`,
+			);
+		}
+		return result.scrubbed;
+	}
+
+	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
 		// Rate limit check - prevents LLM loops from exhausting resources
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
@@ -1114,8 +1139,11 @@ export class ToolExecutor {
 				const safe = safePath(args.path as string, this.workingDirectory);
 				return this.editFile(safe, args.oldText as string, args.newText as string);
 			}
-			case "list_files":
-				return this.listFiles(args.path as string, args.pattern as string);
+			case "list_files": {
+				const dir = (args.path as string) || ".";
+				const safeDir = safePath(dir, this.workingDirectory);
+				return this.listFiles(safeDir, args.pattern as string);
+			}
 
 			// Git operations
 			case "git_status":
