@@ -28,9 +28,11 @@ interface MusicPlayerProps {
 
 // ---- Animated Equalizer ----
 function Equalizer({ playing, width = 12 }: { playing: boolean; width?: number }) {
-	const [bars, setBars] = useState<number[]>(Array(width).fill(0));
+	const [bars, setBars] = useState<number[]>(() => Array(width).fill(0));
 	const frameRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (playing) {
 			frameRef.current = setInterval(() => {

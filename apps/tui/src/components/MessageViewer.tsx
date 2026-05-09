@@ -48,7 +48,7 @@ export function MessageViewer({
 }: MessageViewerProps) {
 	const viewable = messages.filter((m) => m.role !== "tool");
 	const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-	const [idx, setIdx] = useState(clamp(initialIndex, 0, Math.max(0, viewable.length - 1)));
+	const [idx, setIdx] = useState(() => clamp(initialIndex, 0, Math.max(0, viewable.length - 1)));
 	const [scrollLine, setScrollLine] = useState(0);
 
 	// header(1) + sep(1) + footer(1) + sep(1) = 4 chrome rows

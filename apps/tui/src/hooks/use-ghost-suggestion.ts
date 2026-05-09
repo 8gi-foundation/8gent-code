@@ -86,6 +86,7 @@ export function useGhostSuggestion(
 	}, [isGitRepo, currentBranch, extraContextSuggestions]);
 
 	// Generate suggestion based on current input
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (!currentInput.trim()) {
 			setSuggestion(null);

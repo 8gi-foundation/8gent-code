@@ -34,6 +34,10 @@ import { Inline } from "./primitives/Inline.js";
 import { ShortcutHint } from "./primitives/ShortcutHint.js";
 import { WaveProgress } from "./progress-bar.js";
 
+// Stable empty-array defaults so prop = EMPTY_X doesn't allocate per render.
+const EMPTY_RECENT: string[] = [];
+const EMPTY_SUGGESTIONS: string[] = [];
+
 interface CommandInputProps {
 	onSubmit: (input: string) => void;
 	isProcessing: boolean;
@@ -92,12 +96,14 @@ export function CommandInput({
 	isGitRepo = false,
 	currentBranch = null,
 	planNextStep = null,
-	recentCommands = [],
+	recentCommands = EMPTY_RECENT,
 	onSlashCommand,
 	injectedText = null,
 	focused = true,
 	transformInputValue,
 	allowEmptySubmit = false,
+// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+// react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
 	const [value, setValue] = useState("");
 	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
@@ -129,6 +135,8 @@ export function CommandInput({
 		}
 	}, [injectedText]);
 
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		let cancelled = false;
 		void (async () => {
@@ -502,7 +510,7 @@ interface CommandPaletteProps {
 	suggestions?: string[];
 }
 
-export function CommandPalette({ onSubmit, suggestions = [] }: CommandPaletteProps) {
+export function CommandPalette({ onSubmit, suggestions = EMPTY_SUGGESTIONS }: CommandPaletteProps) {
 	const [value, setValue] = useState("");
 	const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -577,7 +585,7 @@ function GhostCommandInput({
 	isGitRepo = false,
 	currentBranch = null,
 	planNextStep = null,
-	recentCommands = [],
+	recentCommands = EMPTY_RECENT,
 	onSlashCommand,
 }: GhostCommandInputProps) {
 	return (

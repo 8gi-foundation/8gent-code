@@ -13,7 +13,7 @@
  *   <Text dimColor={theme.text.muted === theme.MUTED}>Subtle note</Text>
  */
 
-import React, { createContext, useContext } from "react";
+import React, { createContext, use } from "react";
 import { semanticTheme } from "./semantic.js";
 import type { SemanticTheme } from "./semantic.js";
 
@@ -46,5 +46,5 @@ export function ThemeProvider({ children, value }: ThemeProviderProps): React.Re
  * Must be called inside a <ThemeProvider>.
  */
 export function useTheme(): SemanticTheme {
-	return useContext(ThemeContext);
+	return use(ThemeContext);
 }

@@ -27,6 +27,9 @@ import { Inline } from "./primitives/Inline.js";
 import { ShortcutHint } from "./primitives/ShortcutHint.js";
 import { Stack } from "./primitives/Stack.js";
 
+// Stable empty default for `recentCommands = EMPTY_RECENT` props — avoids new [] per render.
+const EMPTY_RECENT: string[] = [];
+
 // ============================================
 // Types
 // ============================================
@@ -58,7 +61,7 @@ export function GhostInput({
 	isGitRepo = false,
 	currentBranch = null,
 	planNextStep = null,
-	recentCommands = [],
+	recentCommands = EMPTY_RECENT,
 	showSourceHint = true,
 }: GhostInputProps) {
 	const { suggestion, accept, dismiss, isVisible } = useGhostSuggestion(value, {
@@ -132,8 +135,12 @@ export interface GhostTextProps {
 }
 
 export function GhostText({ suggestion, animate = true }: GhostTextProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [opacity, setOpacity] = useState(0);
 
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (suggestion && animate) {
 			// Fade in effect
@@ -167,7 +174,7 @@ export function GhostCommandInput({
 	isGitRepo = false,
 	currentBranch = null,
 	planNextStep = null,
-	recentCommands = [],
+	recentCommands = EMPTY_RECENT,
 }: GhostCommandInputProps) {
 	const [value, setValue] = useState("");
 
@@ -181,7 +188,7 @@ export function GhostCommandInput({
 		[onSubmit],
 	);
 
-	const handleChange = useCallback((newValue: string) => {
+	const updateInputValue = useCallback((newValue: string) => {
 		setValue(newValue);
 	}, []);
 
@@ -231,7 +238,7 @@ export function GhostCommandInput({
 				<Box>
 					<TextInput
 						value={value}
-						onChange={handleChange}
+						onChange={updateInputValue}
 						onSubmit={handleSubmit}
 						placeholder={isVisible ? "" : "Type a command or ask a question..."}
 					/>

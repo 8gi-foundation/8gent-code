@@ -206,7 +206,11 @@ function MessageItem({
 	showAnimations,
 	isLatestAssistant = false,
 }: MessageItemProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [showContent, setShowContent] = useState(!isNew);
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
 	// Messages occupy up to 78% of the content column, leaving a margin of
@@ -224,6 +228,7 @@ function MessageItem({
 	useCompletionSound(typingComplete && message.role === "assistant" && isNew, soundEnabled);
 
 	// Fade in the message header
+	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
 	useEffect(() => {
 		if (isNew) {
 			const timeout = setTimeout(() => setShowContent(true), 50);

@@ -22,6 +22,9 @@ import { Inline } from "./primitives/Inline.js";
 import { ShortcutHint } from "./primitives/ShortcutHint.js";
 import { Stack } from "./primitives/Stack.js";
 
+// Stable empty default — keeps prop reference identity for `recentCommands = EMPTY_RECENT`.
+const EMPTY_RECENT: string[] = [];
+
 // ============================================
 // Types
 // ============================================
@@ -55,7 +58,7 @@ export function GentlemanInput({
 	isGitRepo = false,
 	currentBranch = null,
 	planNextStep = null,
-	recentCommands = [],
+	recentCommands = EMPTY_RECENT,
 	modelName = "8gent",
 	tokensSaved = 0,
 	elapsed = "0:00",

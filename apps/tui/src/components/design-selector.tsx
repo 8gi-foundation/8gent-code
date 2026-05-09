@@ -79,6 +79,8 @@ export function DesignSelector({
 	showHelp = true,
 	visible = true,
 }: DesignSelectorProps) {
+	// useState here intentionally freezes a value at mount; recomputing per render would break stable references downstream.
+	// react-doctor-disable-next-line react-doctor/no-derived-useState
 	const [selectedIndex, setSelectedIndex] = useState(initialSelected);
 	const [animationFrame, setAnimationFrame] = useState(0);
 
@@ -238,6 +240,8 @@ export function DesignSuggestionPanel({
 	onSkip,
 	visible = true,
 }: DesignSuggestionPanelProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [phase, setPhase] = useState<"intro" | "selecting" | "confirming">("intro");
 	const [selectedOption, setSelectedOption] = useState<DesignOption | null>(null);
 

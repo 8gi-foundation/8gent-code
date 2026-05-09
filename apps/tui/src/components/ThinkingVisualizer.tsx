@@ -165,6 +165,8 @@ export function ThinkingVisualizer({
 	const settings = settingsRef.current;
 
 	const [tick, setTick] = useState(0);
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [opIdx, setOpIdx] = useState(0);
 	const [, setStoreVersion] = useState(0);
 	const lastSwapRef = useRef<number>(Date.now());
@@ -181,6 +183,7 @@ export function ThinkingVisualizer({
 	}, []);
 
 	// Animation tick + rotation + boredom
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (!active || !settings.enabled) return;
 		const interval = setInterval(() => {

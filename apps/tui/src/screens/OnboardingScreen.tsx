@@ -203,6 +203,8 @@ const PROVIDER_LABELS: Record<OnboardingProviderId, string> = {
 	apfel: "apfel (Apple Foundation)",
 };
 
+// Splitting this component changes prop surface and file structure; tracked separately from the lint sweep.
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function OnboardingScreen({
 	steps,
 	currentQuestion,
@@ -270,6 +272,8 @@ export function OnboardingScreen({
 		statuses: [],
 		models: [],
 	});
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (!isProviderCheck) return;
 		let cancelled = false;

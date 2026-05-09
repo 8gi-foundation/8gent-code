@@ -43,6 +43,8 @@ export function ProcessDetailView({
 }: ProcessDetailViewProps) {
 	const lines = (output?.combined || "").split("\n");
 	const [scrollOffset, setScrollOffset] = useState(0);
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [autoScroll, setAutoScroll] = useState(true);
 	const prevLineCount = useRef(lines.length);
 

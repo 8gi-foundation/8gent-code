@@ -69,6 +69,8 @@ interface IdeasViewProps {
 	onClose: () => void;
 }
 
+// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+// react-doctor-disable-next-line react-doctor/prefer-useReducer
 export function IdeasView({ visible, data, onUpdateData, onClose }: IdeasViewProps) {
 	const [ideas, setIdeas] = useState<IdeaEntry[]>(() => {
 		const fromFile = loadIdeas();

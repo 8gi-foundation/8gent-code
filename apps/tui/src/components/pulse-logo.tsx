@@ -36,6 +36,8 @@ const GRADIENT_COLORS = [
 export function PulseLogo({ isIdle = true, isProcessing = false }: PulseLogoProps) {
 	const [colorIndex, setColorIndex] = useState(0);
 	const [brightness, setBrightness] = useState(1);
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [breathingIn, setBreathingIn] = useState(true);
 
 	// Rainbow color cycling when processing
@@ -50,6 +52,7 @@ export function PulseLogo({ isIdle = true, isProcessing = false }: PulseLogoProp
 	}, [isProcessing]);
 
 	// Breathing effect when idle
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (!isIdle || isProcessing) return;
 

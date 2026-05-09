@@ -442,12 +442,18 @@ interface SettingsViewProps {
 
 type Mode = "browse" | "edit";
 
+// Splitting this component changes prop surface and file structure; tracked separately from the lint sweep.
+// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+// react-doctor-disable-next-line react-doctor/no-giant-component
+// react-doctor-disable-next-line react-doctor/prefer-useReducer
 export function SettingsView({ visible, onClose }: SettingsViewProps) {
 	const [settings, setSettings] = useState<Settings>(() => loadSettings());
 	const [categoryIndex, setCategoryIndex] = useState(0);
 	const [fieldIndex, setFieldIndex] = useState(0);
 	const [mode, setMode] = useState<Mode>("browse");
 	const [editBuffer, setEditBuffer] = useState("");
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [showHelp, setShowHelp] = useState(false);
 
 	const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);

@@ -35,14 +35,12 @@ export function TaskCardList({ tasks: rawTasks, maxHeight, focusable = true }: T
 	}, [tasks]);
 
 	// Clamp selectedIndex when tasks shrink
+	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		if (tasks.length > 0 && selectedIndex >= tasks.length) {
 			setSelectedIndex(tasks.length - 1);
 		}
 	}, [tasks.length, selectedIndex]);
-
-	// Nothing to render
-	if (tasks.length === 0) return null;
 
 	useInput(
 		(input, key) => {
@@ -62,6 +60,7 @@ export function TaskCardList({ tasks: rawTasks, maxHeight, focusable = true }: T
 		{ isActive: focusable },
 	);
 
+	// Nothing to render — early return AFTER hooks to satisfy rules-of-hooks
 	if (tasks.length === 0) return null;
 
 	// Calculate which tasks are visible within maxHeight

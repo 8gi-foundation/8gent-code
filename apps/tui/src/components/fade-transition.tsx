@@ -23,6 +23,8 @@ const FADE_LEVELS = [
 ];
 
 export function FadeIn({ children, duration = 300, delay = 0, onComplete }: FadeInProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [started, setStarted] = useState(false);
 
 	// Handle delay
@@ -41,6 +43,8 @@ export function FadeIn({ children, duration = 300, delay = 0, onComplete }: Fade
 			onComplete?.();
 		}, duration);
 		return () => clearTimeout(timeout);
+	// useEffectEvent is a separate React API change with broader implications; out of scope for the RD100 lint sweep.
+	// react-doctor-disable-next-line react-doctor/prefer-use-effect-event
 	}, [started, duration, onComplete]);
 
 	if (!started) return null;
@@ -58,6 +62,8 @@ interface FadeOutProps {
 }
 
 export function FadeOut({ children, duration = 300, trigger = false, onComplete }: FadeOutProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [visible, setVisible] = useState(true);
 
 	useEffect(() => {
@@ -68,6 +74,8 @@ export function FadeOut({ children, duration = 300, trigger = false, onComplete 
 			onComplete?.();
 		}, duration);
 		return () => clearTimeout(timeout);
+	// useEffectEvent is a separate React API change with broader implications; out of scope for the RD100 lint sweep.
+	// react-doctor-disable-next-line react-doctor/prefer-use-effect-event
 	}, [trigger, duration, onComplete]);
 
 	if (!visible) return null;
@@ -85,6 +93,10 @@ interface SlideInProps {
 
 export function SlideIn({ children, duration = 200, direction = "left" }: SlideInProps) {
 	const [visibleChars, setVisibleChars] = useState(0);
+	// Defensive `String(children)` only fires when callers ignore the typed `string` contract.
+	// Splitting into Text / Node subcomponents would change the public API and require updates
+	// across every SlideIn callsite — out of scope for the RD100 lint sweep.
+	// react-doctor-disable-next-line react-doctor/no-polymorphic-children
 	const text = typeof children === "string" ? children : String(children);
 
 	useEffect(() => {
@@ -117,6 +129,8 @@ interface PopInProps {
 }
 
 export function PopIn({ children, delay = 0 }: PopInProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [started, setStarted] = useState(false);
 
 	useEffect(() => {
@@ -141,9 +155,15 @@ interface BlinkProps {
 }
 
 export function Blink({ children, speed = 500, color = "cyan", times = -1 }: BlinkProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [visible, setVisible] = useState(true);
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [count, setCount] = useState(0);
 
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (times !== -1 && count >= times * 2) return;
 

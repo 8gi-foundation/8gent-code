@@ -127,10 +127,10 @@ export function EvidencePanel({
 	// Navigate with arrow keys
 	useInput((input, key) => {
 		if (key.upArrow && selectedIndex > 0) {
-			setSelectedIndex(selectedIndex - 1);
+			setSelectedIndex((prev) => prev - 1);
 		}
 		if (key.downArrow && selectedIndex < evidence.length - 1) {
-			setSelectedIndex(selectedIndex + 1);
+			setSelectedIndex((prev) => prev + 1);
 		}
 		if (key.return) {
 			if (expandedIndex === selectedIndex) {
@@ -379,10 +379,10 @@ export function StepPanel({ steps, onStepSelect }: StepPanelProps): React.ReactE
 
 	useInput((input, key) => {
 		if (key.upArrow && selectedIndex > 0) {
-			setSelectedIndex(selectedIndex - 1);
+			setSelectedIndex((prev) => prev - 1);
 		}
 		if (key.downArrow && selectedIndex < steps.length - 1) {
-			setSelectedIndex(selectedIndex + 1);
+			setSelectedIndex((prev) => prev + 1);
 		}
 		if (key.return && onStepSelect) {
 			onStepSelect(steps[selectedIndex]);
