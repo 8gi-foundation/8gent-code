@@ -89,6 +89,7 @@ import {
 	vercelSetEnv,
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
+import { ArtifactStore } from "./artifact-store";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
@@ -238,14 +239,20 @@ export class ToolExecutor {
 	private astIndexReady = false;
 	private astRepoId: string | null = null;
 	private astIndexPromise: Promise<RepoIndex> | null = null;
+	private artifactStore: ArtifactStore;
 
-	constructor(workingDirectory: string = process.cwd(), agentId = "primary") {
+	constructor(workingDirectory: string = process.cwd(), agentId = "primary", sessionId?: string) {
 		this.workingDirectory = workingDirectory;
 		this.agentId = agentId;
 		this.toolG8 = ToolG8.instance();
 		this.permissionManager = getPermissionManager();
 		this.hookManager = getHookManager();
 		this.hookManager.setWorkingDirectory(workingDirectory);
+		// Per-executor artifact store. Default sessionId derives from
+		// agentId + pid so two long-lived executors in one process never
+		// collide. Callers (agent.ts, mcp/server.ts) can pass an explicit
+		// sessionId to thread it through to disk for later inspection.
+		this.artifactStore = new ArtifactStore(sessionId ?? `${agentId}-${process.pid}`);
 
 		// Fire-and-forget AST indexing of the working directory
 		this.astIndexPromise = astIndexFolder(this.workingDirectory)
@@ -1046,9 +1053,9 @@ export class ToolExecutor {
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
 		const raw = await this.executeRaw(toolName, args);
 		// Post-tool-execution scrubbing boundary (issue #2464).
-		// Wave 2 will add ToolResultCache (#2462) and ArtifactStore (#2463)
-		// hooks alongside this single labelled call. Order matters: scrub
-		// BEFORE cache/artifact persist so secrets never reach disk.
+		// Order is contract: SecretScanner -> [Cache lookup, #2462] -> execute
+		// -> ArtifactStore persist (#2463). Scrub MUST run before persist so
+		// no secret value ever lands on disk.
 		const result = scrubSecrets(raw);
 		if (result.redactedCount > 0) {
 			// Log redaction event to telemetry (no secret values, just metadata).
@@ -1056,7 +1063,13 @@ export class ToolExecutor {
 				`[secret-scanner] tool=${toolName} redacted=${result.redactedCount} rules=${result.rules.join(",")}`,
 			);
 		}
-		return result.scrubbed;
+		// ArtifactStore (#2463): swap large successful results for a chip
+		// reference. Failed results bypass via the `isError` flag - here the
+		// scrubbed string is the model-visible payload and we have no error
+		// signal at this boundary, so we treat all returns as successful.
+		// The cache (#2462) sits BEFORE executeRaw and is independent of this
+		// step; both can co-exist without touching each other.
+		return this.artifactStore.persistAndReplace(result.scrubbed, toolName);
 	}
 
 	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
