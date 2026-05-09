@@ -1,12 +1,22 @@
 /**
  * 8gent Code - Chat Interface
  *
- * iMessage-style, alignment-only (no borders):
- * - User messages: right-aligned, yellow label
- * - 8gent messages: left-aligned, cyan label
+ * Left-bar style, alignment-neutral (both roles left-aligned):
+ * - User messages: orange left-bar, "You" label
+ * - 8gent messages: teal left-bar (latest assistant) or muted (older), "8gent" label
+ * - Footer (assistant only, when metadata present): "Xs · N tok" in muted
  * - Tool calls: NEVER rendered in chat — they live in the ^B processes panel.
  *   The agent's in-flight activity surfaces via the status bar's plan verb.
  * - System messages: compact centered hints (single line) or blocks (multi-line)
+ *
+ * Width math: outer Box uses contentWidth; borderLeft consumes 1 col,
+ * paddingLeft={1} consumes 1 col → inner content gets contentWidth-2.
+ * The bubble width and textWrapWidth each subtract 2 to keep the existing
+ * forceBreakLongRuns guarantees intact.
+ *
+ * Why the bar instead of a full bordered box: adjacent borders can fuse
+ * at narrow widths (the hitsRY bug, PR #2407). marginBottom={1} between
+ * turns + only-left border avoids any shared edge.
  *
  * Overflow protection: long unbreakable runs (paths, URLs, hashes) are
  * force-broken at wrapWidth before handing to Ink, so nothing can escape
@@ -199,8 +209,12 @@ function MessageItem({
 	const [typingComplete, setTypingComplete] = useState(!isNew || !animate);
 
 	// Messages occupy up to 78% of the content column, leaving a margin of
-	// empty space on the opposite side so alignment reads clearly (iMessage rule).
-	const maxBubbleWidth = Math.max(16, Math.floor(contentWidth * 0.78));
+	// empty space on the opposite side so alignment reads clearly.
+	// The outer Box reserves 2 cols for borderLeft (1) + paddingLeft (1),
+	// so the actual content column is contentWidth-2. The bubble width and
+	// wrap width each subtract 2 to preserve the existing overflow guarantees.
+	const innerContentWidth = Math.max(16, contentWidth - 2);
+	const maxBubbleWidth = Math.max(16, Math.floor(innerContentWidth * 0.78));
 	// Text wraps strictly within that width. 2 chars slack keeps us safe from
 	// edge-case character-width quirks.
 	const textWrapWidth = Math.max(8, maxBubbleWidth - 2);
@@ -279,14 +293,45 @@ function MessageItem({
 	// Pre-break long unbreakable tokens so Ink's wrap can't escape the column
 	const safeContent = breakLongTokens(message.content, textWrapWidth);
 
+	// Bar color: orange for user, teal for the latest assistant, muted for
+	// older assistant turns (echoes the existing label-color contract).
+	const barColor = isUser
+		? t.orange
+		: isLatestAssistant
+			? t.teal
+			: t.muted;
+
+	// Footer renders only on assistant turns and only when the data exists.
+	// Phase 2 will plumb latencyMs+tokens from the agent's onStepFinish event
+	// onto the Message at completion. For now this is a no-op until the data
+	// is present — keeps this PR purely visual.
+	const showFooter =
+		!isUser &&
+		typeof message.latencyMs === "number" &&
+		typeof message.tokens === "number";
+	const footerLatency =
+		message.latencyMs && message.latencyMs >= 1000
+			? `${(message.latencyMs / 1000).toFixed(1)}s`
+			: `${message.latencyMs ?? 0}ms`;
+	const footerTokens =
+		(message.tokens ?? 0) >= 1000
+			? `${((message.tokens ?? 0) / 1000).toFixed((message.tokens ?? 0) >= 10000 ? 0 : 1)}k tok`
+			: `${message.tokens ?? 0} tok`;
+
 	const bubble = (
 		<Box
 			flexDirection="column"
 			alignItems="flex-start"
 			marginBottom={1}
 			width={contentWidth}
+			borderStyle="single"
+			borderTop={false}
+			borderRight={false}
+			borderBottom={false}
+			borderColor={barColor}
+			paddingLeft={1}
 		>
-			{/* Sender label — compact header, no border noise */}
+			{/* Sender label — the left-bar carries the visual frame */}
 			<Box>
 				{isUser ? (
 					<>
@@ -301,7 +346,7 @@ function MessageItem({
 				)}
 			</Box>
 
-			{/* Message body — alignment-only, no border, strict width */}
+			{/* Message body — left-bar carries the visual frame, strict width */}
 			<Box width={maxBubbleWidth} flexShrink={1} flexDirection="column">
 				<MessageContent
 					content={safeContent}
@@ -313,6 +358,13 @@ function MessageItem({
 					accentColor={isUser ? "yellow" : "cyan"}
 				/>
 			</Box>
+
+			{/* Footer (assistant + metadata present): "Xs · N tok" */}
+			{showFooter && (
+				<Box>
+					<MutedText>{`${footerLatency} · ${footerTokens}`}</MutedText>
+				</Box>
+			)}
 		</Box>
 	);
 
