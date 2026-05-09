@@ -58,6 +58,11 @@ import { SessionSyncManager } from "./session-sync";
 import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
+import {
+	PreToolRouter,
+	formatPreFetchedContext,
+	type RouterDecision,
+} from "./pre-tool-router";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
 
@@ -141,6 +146,10 @@ export class Agent {
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
 	private recentFilePaths: string[] = [];
+	private preToolRouter: PreToolRouter = new PreToolRouter({
+		astAvailable: true,
+		vectorAvailable: true,
+	});
 
 	constructor(config: AgentConfig) {
 		this.config = config;
@@ -499,6 +508,16 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			});
 			this.kanban.moveTask(this.currentBmadTask.id, "ready");
 			this.kanban.moveTask(this.currentBmadTask.id, "in_progress");
+		}
+
+		// ── Pre-Tool Router (issue #2471) ─────────────────────────────
+		// Deterministic harness routing: classify the user's request and
+		// pre-fetch the obvious retrieval (ast/grep/glob/vector/fileread)
+		// BEFORE the LLM turn. Model-agnostic — small local models get the
+		// same correct routing as frontier models. Skipped if the proactive
+		// gatherer already injected a clarifying question.
+		if (!this.proactiveGatherer) {
+			await this.tryRunPreToolRouter(textForAgent);
 		}
 
 		// ── Planning Gate ──────────────────────────────────────────────
@@ -1615,6 +1634,84 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 		const manager = getLSPManager();
 		await manager.stopAll();
+	}
+
+	/**
+	 * Pre-Tool Router (issue #2471) — model-agnostic deterministic routing.
+	 *
+	 * Classifies the user's request and, if confidence > 0.6, runs the
+	 * implied retrieval through the existing tool dispatch path so the
+	 * SecretScanner (and Wave 2 Cache + ArtifactStore wrappers) apply.
+	 * The result is injected as a system message before the LLM turn.
+	 *
+	 * Failures are swallowed: routing is a best-effort optimisation, not
+	 * a hard dependency of the agent loop.
+	 */
+	private async tryRunPreToolRouter(userMessage: string): Promise<void> {
+		const cwd = this.config.workingDirectory || process.cwd();
+		let decision: RouterDecision;
+		try {
+			decision = this.preToolRouter.classify(userMessage, { cwd });
+		} catch {
+			return;
+		}
+		if (decision.strategy === "none" || decision.confidence <= 0.6) return;
+
+		const dispatch = mapStrategyToTool(decision);
+		if (!dispatch) return;
+
+		try {
+			const result = await this.executor.execute(dispatch.tool, dispatch.args);
+			if (!result || result.length === 0) return;
+			this.messageHistory.push({
+				role: "system",
+				content: formatPreFetchedContext(decision, result),
+			});
+		} catch {
+			// Silent: pre-fetch is best-effort.
+		}
+	}
+}
+
+/**
+ * Map a router decision to a tool name + args understood by ToolExecutor.
+ * Centralised here so the strategy taxonomy stays in pre-tool-router.ts and
+ * the dispatch concerns stay in agent.ts.
+ */
+function mapStrategyToTool(
+	decision: RouterDecision,
+): { tool: string; args: Record<string, unknown> } | null {
+	switch (decision.strategy) {
+		case "ast": {
+			const symbol = String(decision.args.symbol ?? "");
+			if (!symbol) return null;
+			return { tool: "search_symbols", args: { query: symbol } };
+		}
+		case "grep": {
+			const pattern = String(decision.args.pattern ?? "");
+			if (!pattern) return null;
+			// Quote the pattern; rely on rg if present, else grep -RIn.
+			const safe = pattern.replace(/(["\\$`])/g, "\\$1");
+			const cmd = `command -v rg >/dev/null 2>&1 && rg -n --no-heading "${safe}" || grep -RInE "${safe}" .`;
+			return { tool: "run_command", args: { command: cmd } };
+		}
+		case "glob": {
+			const pattern = String(decision.args.pattern ?? "");
+			if (!pattern) return null;
+			return { tool: "list_files", args: { pattern } };
+		}
+		case "vector": {
+			const query = String(decision.args.query ?? "");
+			if (!query) return null;
+			return { tool: "recall", args: { query } };
+		}
+		case "fileread": {
+			const filePath = String(decision.args.path ?? "");
+			if (!filePath) return null;
+			return { tool: "read_file", args: { path: filePath } };
+		}
+		default:
+			return null;
 	}
 }
 
