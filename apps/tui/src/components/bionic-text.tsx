@@ -139,7 +139,7 @@ interface BionicParagraphProps {
 	dimNormal?: boolean;
 }
 
-export function BionicParagraph({
+function BionicParagraph({
 	children,
 	ratio = 0.5,
 	boldColor,
@@ -174,7 +174,7 @@ export function BionicParagraph({
 /**
  * Returns an array of { text, bold } segments for manual rendering
  */
-export function parseBionicText(text: string, ratio = 0.5): Array<{ text: string; bold: boolean }> {
+function parseBionicText(text: string, ratio = 0.5): Array<{ text: string; bold: boolean }> {
 	const result: Array<{ text: string; bold: boolean }> = [];
 	const tokens = text.split(/(\s+)/);
 
@@ -222,7 +222,7 @@ interface SmartTextProps {
 	color?: string;
 }
 
-export function SmartText({ children, color }: SmartTextProps) {
+function SmartText({ children, color }: SmartTextProps) {
 	const { enabled, ratio } = useADHDMode();
 
 	if (!enabled) {

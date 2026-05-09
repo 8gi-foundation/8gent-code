@@ -10,7 +10,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import { AppText, Divider, Heading, MutedText, Stack } from "../components/primitives/index.js";
+import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Stack } from "../components/primitives/Stack.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 
@@ -283,7 +285,7 @@ export function NotesView({
 			<Box marginBottom={1}>
 				<Heading>Notes</Heading>
 				<MutedText>
-					{"  "}Scratchpad — {notes.length} note{notes.length !== 1 ? "s" : ""}
+					{"  "}Scratchpad: {notes.length} note{notes.length !== 1 ? "s" : ""}
 					{lastModified
 						? ` | last modified ${lastModified.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
 						: ""}

@@ -13,22 +13,14 @@
 
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import { truncate } from "../lib/index.js";
-import {
-	AppText,
-	Badge,
-	Card,
-	Divider,
-	ErrorText,
-	Heading,
-	Inline,
-	Label,
-	MutedText,
-	Stack,
-	StatusDot,
-	SuccessText,
-	WarningText,
-} from "./primitives/index.js";
+import { truncate } from "../lib/text.js";
+import { AppText, ErrorText, Heading, Label, MutedText, SuccessText, WarningText } from "./primitives/AppText.js";
+import { Badge } from "./primitives/Badge.js";
+import { Card } from "./primitives/Card.js";
+import { Divider } from "./primitives/Divider.js";
+import { Inline } from "./primitives/Inline.js";
+import { Stack } from "./primitives/Stack.js";
+import { StatusDot } from "./primitives/StatusDot.js";
 
 // ============================================
 // Types
@@ -391,15 +383,3 @@ export function InlineDesignPrompt({ message, compact = false }: InlineDesignPro
 		</Stack>
 	);
 }
-
-// ============================================
-// Exports
-// ============================================
-
-export default {
-	DesignSelector,
-	DesignSuggestionPanel,
-	DesignConfirmation,
-	DesignBadge,
-	InlineDesignPrompt,
-};

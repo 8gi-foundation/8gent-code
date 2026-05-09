@@ -7,7 +7,9 @@
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import React, { useState, useEffect } from "react";
-import { Inline, Label, MutedText, StatusDot } from "./primitives/index.js";
+import { Label, MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
+import { StatusDot } from "./primitives/StatusDot.js";
 
 type SpinnerStyle = "dots" | "line" | "arc" | "bouncingBar" | "moon" | "runner";
 

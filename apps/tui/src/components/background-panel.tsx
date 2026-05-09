@@ -11,7 +11,9 @@ import { Box, useInput } from "ink";
  */
 import React from "react";
 import type { BgTask } from "../lib/background-pool.js";
-import { AppText, Divider, Heading, MutedText, StatusDot } from "./primitives/index.js";
+import { AppText, Heading, MutedText } from "./primitives/AppText.js";
+import { Divider } from "./primitives/Divider.js";
+import { StatusDot } from "./primitives/StatusDot.js";
 
 interface BackgroundPanelProps {
 	tasks: BgTask[];

@@ -13,6 +13,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { PtySession, RingBuffer, stripControl } from "../../../../packages/terminal-tab/index.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
@@ -37,7 +41,12 @@ export function writeToTerminal(tabId: string, input: string): string {
 	return `Sent to terminal tab ${tabId}`;
 }
 
-/** List open terminal tabs */
+/**
+ * List open terminal tabs.
+ *
+ * @public Used cross-workspace by packages/ai/tools.ts via dynamic import; do
+ * not drop the export.
+ */
 export function listTerminals(): string[] {
 	return [..._registry.keys()];
 }

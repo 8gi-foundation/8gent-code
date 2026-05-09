@@ -11,8 +11,6 @@
  *   - Use TruncatedValue (truncate-middle) inside the value column for long
  *     identifier strings like provider/model names where both ends matter.
  *
- * `RailRow` is kept as an alias for back-compat. New code should use MetricRow.
- *
  * Theme tokens only. No inline hex.
  */
 
@@ -51,5 +49,3 @@ export function TruncatedValue({
 	return <Text color={color} wrap="truncate-middle">{value}</Text>;
 }
 
-// Back-compat alias. Existing imports keep working; new code should use MetricRow.
-export const RailRow = MetricRow;

@@ -21,7 +21,7 @@
  */
 
 /** Primary amber gradient - low to high intensity. Reads as a heat map. */
-export const AMBER_RAMP: readonly string[] = [
+const AMBER_RAMP: readonly string[] = [
 	"#3D1A05", // ember low
 	"#5C2807",
 	"#7A370A",
@@ -37,7 +37,7 @@ export const AMBER_RAMP: readonly string[] = [
 ] as const;
 
 /** Cool accents - cyan and blue. Used by cross-fade operators for contrast. */
-export const COOL_ACCENTS: readonly string[] = [
+const COOL_ACCENTS: readonly string[] = [
 	"#0D4A60",
 	"#126A85",
 	"#178AA9",
@@ -47,10 +47,10 @@ export const COOL_ACCENTS: readonly string[] = [
 ] as const;
 
 /** Idle / muted token. Subtle low-luminance amber for "asleep" state. */
-export const MUTED_AMBER = "#3D1A05";
+const MUTED_AMBER = "#3D1A05";
 
 /** Brand amber. Use as fallback. */
-export const BRAND_AMBER = "#E8610A";
+const BRAND_AMBER = "#E8610A";
 
 /**
  * Sample the amber ramp by a 0..1 intensity. Values outside the range clamp.

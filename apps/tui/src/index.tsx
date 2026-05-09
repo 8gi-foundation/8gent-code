@@ -8,6 +8,10 @@
 
 import { render } from "ink";
 import React from "react";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { App } from "./app.js";
 import { parseTuiArgv } from "./lib/tui-cli.js";

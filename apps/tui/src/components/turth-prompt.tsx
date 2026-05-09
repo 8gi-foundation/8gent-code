@@ -18,7 +18,9 @@ import {
 	type TurthRequest,
 	registerPromptSurface,
 } from "../../../../packages/permissions/turth.js";
-import { AppText, Card, Heading, MutedText, Stack } from "./primitives/index.js";
+import { AppText, Heading, MutedText } from "./primitives/AppText.js";
+import { Card } from "./primitives/Card.js";
+import { Stack } from "./primitives/Stack.js";
 import { SelectInput, type SelectOption } from "./select-input.js";
 
 interface PendingPrompt extends TurthRequest {
@@ -111,5 +113,3 @@ export function TurthPrompt(): React.JSX.Element | null {
 		</Box>
 	);
 }
-
-export default TurthPrompt;

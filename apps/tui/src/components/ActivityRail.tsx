@@ -279,7 +279,6 @@ export type {
 	ToolState,
 	ProviderRow,
 	ProviderState,
-	MemoryStats,
 	AgentRow,
 	AgentState,
 };

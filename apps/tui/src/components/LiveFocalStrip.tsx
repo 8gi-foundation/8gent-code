@@ -92,4 +92,4 @@ export function LiveFocalStrip({
 	);
 }
 
-export type { Mode, LiveFocalStripProps };
+export type { LiveFocalStripProps };

@@ -12,7 +12,7 @@
  * - No cancellation. The task runs to completion wherever it was started.
  * - No persistence across TUI restarts. Best-effort UX helper.
  */
-export type BgStatus = "running" | "done" | "error";
+type BgStatus = "running" | "done" | "error";
 
 export interface BgTask {
 	id: string;
@@ -84,7 +84,7 @@ export function list(): BgTask[] {
 	return Array.from(tasks.values()).sort((a, b) => b.startedAt - a.startedAt);
 }
 
-export function get(id: string): BgTask | undefined {
+function get(id: string): BgTask | undefined {
 	return tasks.get(id);
 }
 
@@ -94,7 +94,7 @@ export function runningCount(): number {
 	return n;
 }
 
-export function clear(id: string): void {
+function clear(id: string): void {
 	tasks.delete(id);
 }
 

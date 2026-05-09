@@ -95,7 +95,7 @@ const stripAnsi = (s: string): string =>
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI is exactly the point
 	s.replace(/\[[0-9;?]*[a-zA-Z]/g, "").replace(/\][^]*/g, "");
 
-export const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
+const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 	claude: {
 		id: "claude",
 		label: "Sparring",
@@ -255,7 +255,7 @@ export function isInstalled(preset: ExternalAgentPreset): boolean {
 /**
  * Result of running a preset's auto-install recipe.
  */
-export interface InstallResult {
+interface InstallResult {
 	ok: boolean;
 	stdout: string;
 	stderr: string;
@@ -270,7 +270,7 @@ export interface InstallResult {
  * can show live progress. Long-running (npm/pip install can take
  * 30s-90s); we cap at 5 minutes which is generous but bounded.
  */
-export async function installAgent(
+async function installAgent(
 	preset: ExternalAgentPreset,
 	onLine?: (line: string, source: "stdout" | "stderr") => void,
 ): Promise<InstallResult> {

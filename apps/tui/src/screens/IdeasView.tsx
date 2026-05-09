@@ -9,14 +9,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import {
-	AppText,
-	Badge,
-	Divider,
-	Heading,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
+import { Badge } from "../components/primitives/Badge.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Stack } from "../components/primitives/Stack.js";
 
 const DATA_DIR = join(process.env.HOME || "~", ".8gent", "tabs");
 
@@ -226,7 +222,7 @@ export function IdeasView({ visible, data, onUpdateData, onClose }: IdeasViewPro
 			<Box marginBottom={1}>
 				<Heading>Ideas</Heading>
 				<MutedText>
-					{"  "}Idea capture — {ideas.length} idea
+					{"  "}Idea capture: {ideas.length} idea
 					{ideas.length !== 1 ? "s" : ""}
 					{filterTag
 						? ` | filtered: #${filterTag} (${filtered.length} match${filtered.length !== 1 ? "es" : ""})`

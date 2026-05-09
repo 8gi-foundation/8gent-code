@@ -751,7 +751,7 @@ const FACE_COLORS: Record<string, string> = {
 	O: "magenta", // Orange (using magenta)
 };
 
-export function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
+function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
 	const [rotation, setRotation] = useState(0);
 	const [frameIndex, setFrameIndex] = useState(0);
 
@@ -882,7 +882,7 @@ interface LoadingAnimationProps {
 	height?: number;
 }
 
-export function LoadingAnimation({ type, width, height }: LoadingAnimationProps) {
+function LoadingAnimation({ type, width, height }: LoadingAnimationProps) {
 	switch (type) {
 		case "matrix":
 			return <MatrixRain width={width} height={height} />;
@@ -902,21 +902,3 @@ export function LoadingAnimation({ type, width, height }: LoadingAnimationProps)
 			return <MatrixRain width={width} height={height} />;
 	}
 }
-
-// ============================================
-// Exports
-// ============================================
-
-export default {
-	MatrixRain,
-	FireEffect,
-	DNAHelix,
-	Starfield,
-	BouncingDots,
-	GlitchText,
-	Confetti,
-	Waveform,
-	RubiksCube,
-	GradientWave,
-	LoadingAnimation,
-};

@@ -1,6 +1,6 @@
 import React from "react";
 import type { TaskStatus } from "../../../../../packages/tools/background.js";
-import { Badge } from "../primitives/index.js";
+import { Badge } from "../primitives/Badge.js";
 
 interface ProcessBadgeProps {
 	counts: Record<TaskStatus, number>;

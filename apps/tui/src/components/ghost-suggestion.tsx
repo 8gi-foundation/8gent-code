@@ -21,15 +21,11 @@ import {
 	getSuggestionSourceLabel,
 	useGhostSuggestion,
 } from "../hooks/use-ghost-suggestion.js";
-import {
-	AppText,
-	Badge,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Stack,
-} from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Badge } from "./primitives/Badge.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
+import { Stack } from "./primitives/Stack.js";
 
 // ============================================
 // Types
@@ -94,7 +90,7 @@ export function GhostInput({
 				<Text color="cyan">
 					<Spinner type="dots" />
 				</Text>
-				<MutedText> Processing...</MutedText>
+				<MutedText> Processing…</MutedText>
 			</Inline>
 		);
 	}
@@ -223,7 +219,7 @@ export function GhostCommandInput({
 				<Text color="cyan">
 					<Spinner type="dots" />
 				</Text>
-				<MutedText> Processing...</MutedText>
+				<MutedText> Processing…</MutedText>
 			</Inline>
 		);
 	}
