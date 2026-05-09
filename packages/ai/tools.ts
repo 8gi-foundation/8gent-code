@@ -2158,6 +2158,279 @@ const runComputerTask = tool({
 	},
 });
 
+// ============================================================================
+// Eyes (perception): capture, annotate, locate, describe, wait_for
+// ============================================================================
+// Body-part sibling to hands. Eyes perceive what's on screen; hands act on
+// what eyes locate. Backend selection (peekaboo today, ax-native + remote-vlm
+// later) routes through @8gent/eyes' DEFAULT_FAILOVER. perception:remote tier
+// is enforced inside the eyes backend on actual data egress, not on backend
+// identity (spec §8.4).
+
+let _eyesInstance: import("@8gent/eyes").Eyes | null = null;
+let _eyesUnavailableReason: string | null = null;
+
+async function getEyes(): Promise<
+	{ ok: true; eyes: import("@8gent/eyes").Eyes } | { ok: false; reason: string }
+> {
+	if (_eyesInstance) return { ok: true, eyes: _eyesInstance };
+	if (_eyesUnavailableReason) return { ok: false, reason: _eyesUnavailableReason };
+
+	const eyesPkg = await import("@8gent/eyes");
+	const backend = await eyesPkg.selectEyesBackend([...eyesPkg.DEFAULT_FAILOVER]);
+	if (!backend) {
+		_eyesUnavailableReason =
+			"eyes: no perception backend available. On macOS, install with `brew install steipete/tap/peekaboo` and grant Screen Recording + Accessibility.";
+		return { ok: false, reason: _eyesUnavailableReason };
+	}
+
+	// v0 VisionProvider adapter. Local-only (Ollama) by design: fixes the
+	// privacy bug in #2508 inherently because we never call a remote provider
+	// in v0. Remote VLM wiring + the runtime egress check both ship in a
+	// follow-up that wires through packages/eight/vision-router properly.
+	const visionProvider: import("@8gent/eyes").VisionProvider = async ({ frame, prompt }) => {
+		const { describeImage } = await import("../tools/image");
+		const { loadVisionConfig } = await import("../eight/vision-router");
+		const cfg = loadVisionConfig();
+		const model = cfg.defaultModel?.split(":")[0] ?? "llava";
+		const r = await describeImage(frame.path, prompt, model);
+		return {
+			provider: "ollama",   // hardcoded local; remote routing in follow-up #2511
+			model: r.model,
+			text: r.description,
+		};
+	};
+
+	_eyesInstance = backend.create({
+		visionProvider,
+		sessionId: process.env.EIGHT_SESSION_ID ?? `session_${Date.now()}`,
+		actor: "agent",
+	} as import("@8gent/eyes").PeekabooBackendOpts);
+	return { ok: true, eyes: _eyesInstance };
+}
+
+const MAX_ANNOTATED_ELEMENTS = 80;
+
+function summarizeFrame(frame: import("@8gent/eyes").Frame) {
+	return {
+		id: frame.id,
+		path: frame.path,
+		width: frame.width,
+		height: frame.height,
+		displayId: frame.displayId,
+		scale: frame.scale,
+		platform: frame.platform,
+	};
+}
+
+const eyesSee = tool({
+	description:
+		"See what's on the screen. Captures a screenshot of the focused display, walks the macOS Accessibility tree, and returns the frame metadata + a list of interactable UI elements (id, role, label, bbox). Use the bbox center coordinates with desktop_click. Returns at most 80 elements; use eyes_find with a label/role query if you need more specific targeting.",
+	inputSchema: z.object({
+		display: z
+			.union([z.number().int(), z.literal("primary"), z.literal("all")])
+			.optional()
+			.describe("Display to capture: index (0-based), 'primary', or 'all'. Default: focused display."),
+		region: z
+			.object({
+				x: z.number(),
+				y: z.number(),
+				width: z.number(),
+				height: z.number(),
+			})
+			.optional()
+			.describe("Optional sub-region in logical coords."),
+	}),
+	execute: async ({ display, region }) => {
+		const got = await getEyes();
+		if (!got.ok) return got.reason;
+		try {
+			const frame = await got.eyes.capture({
+				displayId: display as import("@8gent/eyes").CaptureOpts["displayId"],
+				region,
+			});
+			const annotated = await got.eyes.annotate(frame);
+			const elements = annotated.elements.slice(0, MAX_ANNOTATED_ELEMENTS).map((e) => ({
+				id: e.id,
+				role: e.role,
+				label: e.label,
+				value: e.value,
+				bbox: e.bbox,
+				enabled: e.enabled,
+			}));
+			return JSON.stringify(
+				{
+					frame: summarizeFrame(frame),
+					elements,
+					truncated: annotated.elements.length > MAX_ANNOTATED_ELEMENTS,
+					totalElements: annotated.elements.length,
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `eyes_see error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const eyesFind = tool({
+	description:
+		"Find a UI element on screen by label, role, or natural-language description. Returns one or more locators with bbox + center point you can pass to desktop_click. Captures a fresh frame if none provided.",
+	inputSchema: z.object({
+		kind: z.enum(["label", "role", "id", "describe", "coords"]).describe("Locator kind."),
+		text: z
+			.string()
+			.optional()
+			.describe(
+				"For kind=label: substring/exact match. For kind=describe: natural-language target. For kind=id: element id from a prior eyes_see.",
+			),
+		role: z.string().optional().describe("For kind=role or to filter kind=label results."),
+		index: z.number().int().optional().describe("For kind=role: 0-based index of the matching element."),
+		x: z.number().optional().describe("For kind=coords."),
+		y: z.number().optional().describe("For kind=coords."),
+	}),
+	execute: async ({ kind, text, role, index, x, y }) => {
+		const got = await getEyes();
+		if (!got.ok) return got.reason;
+		try {
+			let query: import("@8gent/eyes").LocatorQuery;
+			switch (kind) {
+				case "label":
+					if (!text) return "eyes_find: kind=label requires text";
+					query = { kind: "label", text, role };
+					break;
+				case "role":
+					if (!role) return "eyes_find: kind=role requires role";
+					query = { kind: "role", role, index };
+					break;
+				case "id":
+					if (!text) return "eyes_find: kind=id requires text (the element id)";
+					query = { kind: "id", id: text };
+					break;
+				case "describe":
+					if (!text) return "eyes_find: kind=describe requires text";
+					query = { kind: "describe", text };
+					break;
+				case "coords":
+					if (typeof x !== "number" || typeof y !== "number")
+						return "eyes_find: kind=coords requires x and y";
+					query = { kind: "coords", x, y };
+					break;
+			}
+			const hits = await got.eyes.locate(query);
+			return JSON.stringify(
+				{
+					found: hits.length > 0,
+					count: hits.length,
+					locators: hits.map((h) => ({
+						target: h.target,
+						confidence: h.confidence,
+						source: h.source,
+						bbox: h.bbox,
+						rationale: h.rationale,
+					})),
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `eyes_find error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const eyesDescribe = tool({
+	description:
+		"Describe what's on screen using a vision model. Captures a frame, sends it through the perception pipeline, and returns a natural-language summary. v0 routes through local Ollama only (perception:remote tier never trips). Use this for 'what's happening on screen?' or for verification ('does the screen show X?').",
+	inputSchema: z.object({
+		prompt: z
+			.string()
+			.optional()
+			.describe("Custom prompt for the vision model. Default: 'Describe what is on screen.'"),
+	}),
+	execute: async ({ prompt }) => {
+		const got = await getEyes();
+		if (!got.ok) return got.reason;
+		try {
+			const frame = await got.eyes.capture();
+			const desc = await got.eyes.describe(frame, prompt);
+			return JSON.stringify(
+				{
+					frame: summarizeFrame(frame),
+					summary: desc.summary,
+					model: desc.model,
+					tokens: desc.tokens,
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `eyes_describe error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const eyesWaitFor = tool({
+	description:
+		"Wait until a screen condition becomes true. Polls eyes_see internally. Times out cleanly with elapsed time so the agent can decide whether to retry, give up, or proceed. Use to wait for dialogs, page loads, or text to appear.",
+	inputSchema: z.object({
+		predicate: z
+			.enum(["element_visible", "element_gone", "text_present"])
+			.describe("Condition to wait for."),
+		query_kind: z
+			.enum(["label", "role", "id"])
+			.optional()
+			.describe("For predicate=element_visible/element_gone: locator kind."),
+		query_text: z.string().optional().describe("For label/id queries."),
+		query_role: z.string().optional().describe("For role queries."),
+		text: z.string().optional().describe("For predicate=text_present: substring to search for."),
+		case_sensitive: z.boolean().optional().describe("For predicate=text_present (default false)."),
+		timeout_ms: z.number().int().min(100).max(60_000).optional().describe("Default 10000."),
+		poll_ms: z.number().int().min(50).max(5_000).optional().describe("Default 350."),
+	}),
+	execute: async (args) => {
+		const got = await getEyes();
+		if (!got.ok) return got.reason;
+		try {
+			let predicate: import("@8gent/eyes").Predicate;
+			if (args.predicate === "text_present") {
+				if (!args.text) return "eyes_wait_for: predicate=text_present requires text";
+				predicate = {
+					kind: "text_present",
+					text: args.text,
+					caseSensitive: args.case_sensitive,
+				};
+			} else {
+				if (!args.query_kind) return `eyes_wait_for: predicate=${args.predicate} requires query_kind`;
+				let q: import("@8gent/eyes").LocatorQuery;
+				switch (args.query_kind) {
+					case "label":
+						if (!args.query_text) return "eyes_wait_for: query_kind=label requires query_text";
+						q = { kind: "label", text: args.query_text, role: args.query_role };
+						break;
+					case "role":
+						if (!args.query_role) return "eyes_wait_for: query_kind=role requires query_role";
+						q = { kind: "role", role: args.query_role };
+						break;
+					case "id":
+						if (!args.query_text) return "eyes_wait_for: query_kind=id requires query_text";
+						q = { kind: "id", id: args.query_text };
+						break;
+				}
+				predicate = { kind: args.predicate, query: q };
+			}
+			const r = await got.eyes.wait_for(predicate, {
+				timeoutMs: args.timeout_ms,
+				pollMs: args.poll_ms,
+			});
+			return JSON.stringify({ ok: r.ok, elapsedMs: r.elapsedMs, matched: r.matched }, null, 2);
+		} catch (err) {
+			return `eyes_wait_for error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -2274,6 +2547,12 @@ export const agentTools = {
 	desktop_windows: desktopWindows,
 	desktop_clipboard: desktopClipboard,
 	run_computer_task: runComputerTask,
+
+	// Eyes (perception)
+	eyes_see: eyesSee,
+	eyes_find: eyesFind,
+	eyes_describe: eyesDescribe,
+	eyes_wait_for: eyesWaitFor,
 
 	// Self-evolution
 	propose_skill_creation: proposeSkillCreation,
