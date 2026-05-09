@@ -107,6 +107,6 @@ Integration tests against the real Peekaboo CLI run when the binary is installed
 - #2496 - perception capability spec
 - #2497 - spec + scaffold (merged)
 - #2500 - §8 RFC decisions (merged)
-- #2501 - Peekaboo backend (this PR)
-- #2502 - `apps/8gent-eyes` headless CLI (follow-up)
-- #2503 - tool registration in `packages/ai/tools.ts` (follow-up)
+- #2501 - Peekaboo backend (closed by PR #2502)
+- #2503 - `apps/8gent-eyes` headless CLI (follow-up)
+- #2504 - tool registration in `packages/ai/tools.ts` + agent-loop wiring (follow-up)
