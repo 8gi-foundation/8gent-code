@@ -7,6 +7,21 @@
 
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 
+const CARD_FONT_FAMILY = 'system-ui, -apple-system, "Inter", sans-serif';
+
+const CARD_BASE_STYLE: React.CSSProperties = {
+	position: "absolute",
+	left: "50%",
+	padding: "32px 40px",
+	borderRadius: 20,
+	background: "linear-gradient(180deg, rgba(11,30,63,0.86), rgba(11,30,63,0.94))",
+	border: "1px solid rgba(245,158,11,0.35)",
+	boxShadow: "0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(254,243,199,0.06) inset",
+	fontFamily: CARD_FONT_FAMILY,
+	color: "#FEF3C7",
+	textAlign: "center",
+};
+
 export type EndCardProps = {
 	enterFrame: number;
 	title: string;
@@ -41,20 +56,11 @@ export const EndCard: React.FC<EndCardProps> = ({
 	return (
 		<div
 			style={{
-				position: "absolute",
-				left: "50%",
+				...CARD_BASE_STYLE,
 				bottom: height * 0.12,
 				transform: `translate(-50%, 0) translateY(${yLift}px)`,
 				opacity: enterT,
 				width: cardWidth,
-				padding: "32px 40px",
-				borderRadius: 20,
-				background: "linear-gradient(180deg, rgba(11,30,63,0.86), rgba(11,30,63,0.94))",
-				border: "1px solid rgba(245,158,11,0.35)",
-				boxShadow: "0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(254,243,199,0.06) inset",
-				fontFamily: 'system-ui, -apple-system, "Inter", sans-serif',
-				color: "#FEF3C7",
-				textAlign: "center",
 			}}
 		>
 			{brandMark ? (
@@ -74,7 +80,7 @@ export const EndCard: React.FC<EndCardProps> = ({
 				style={{
 					fontSize: 56,
 					fontWeight: 700,
-					letterSpacing: 1,
+					letterSpacing: 0.5,
 					lineHeight: 1.05,
 				}}
 			>
@@ -87,7 +93,7 @@ export const EndCard: React.FC<EndCardProps> = ({
 						color: "#FCD34D",
 						marginTop: 14,
 						fontWeight: 500,
-						letterSpacing: 1,
+						letterSpacing: 0.5,
 					}}
 				>
 					{subtitle}
