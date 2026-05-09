@@ -283,6 +283,9 @@ export class ADHDAudio {
 			}
 
 			try {
+				// Polling loop: each iteration depends on the previous result and we throttle
+				// between polls. Sequential await is intentional here.
+				// react-doctor-disable-next-line react-doctor/async-await-in-loop
 				const res = await fetch(`${this._config.apiUrl}/query_result`, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },

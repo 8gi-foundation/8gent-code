@@ -29,6 +29,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useState } from "react";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { loadSettings } from "../../../../packages/settings/index.js";
 import { t } from "../theme.js";
 

@@ -1,6 +1,5 @@
 export {
 	truncate,
-	ellipsis,
 	padRight,
 	padCenter,
 	repeatChar,

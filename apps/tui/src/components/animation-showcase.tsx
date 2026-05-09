@@ -19,15 +19,11 @@ import {
 	Starfield,
 	Waveform,
 } from "./advanced-animations.js";
-import {
-	AppText,
-	Divider,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Stack,
-} from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Divider } from "./primitives/Divider.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
+import { Stack } from "./primitives/Stack.js";
 
 // ============================================
 // Types
@@ -227,7 +223,7 @@ interface MiniAnimationProps {
 	width?: number;
 }
 
-export function MiniAnimation({ type, width = 20 }: MiniAnimationProps) {
+function MiniAnimation({ type, width = 20 }: MiniAnimationProps) {
 	switch (type) {
 		case "wave":
 			return <Waveform width={width} active />;
@@ -263,7 +259,7 @@ export function AnimationList() {
 // Export Animation Names
 // ============================================
 
-export const ANIMATION_NAMES = ANIMATIONS.map((a) => a.id);
+const ANIMATION_NAMES = ANIMATIONS.map((a) => a.id);
 
 export function isValidAnimation(name: string): name is AnimationType {
 	return ANIMATION_NAMES.includes(name as AnimationType) || name === "all";

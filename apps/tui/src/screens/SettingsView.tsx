@@ -16,12 +16,18 @@
 
 import { Box, Text, useInput } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import {
 	loadSettings,
 	saveSettings,
 	type Settings,
 } from "../../../../packages/settings/index.js";
-import { AppText, Divider, Heading, MutedText, Stack } from "../components/primitives/index.js";
+import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Stack } from "../components/primitives/Stack.js";
 
 // ----------------------------------------------------------------------------
 // Field descriptors

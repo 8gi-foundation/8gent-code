@@ -16,6 +16,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunnerConfig } from "../../../../packages/orchestration/role-registry.js";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { resolveRoleName } from "../../../../packages/settings/index.js";
 import {
 	deleteSession as deleteWindowSession,
@@ -200,7 +204,7 @@ function saveState(tabs: WorkspaceTab[]): void {
 
 /** Sort tabs: pinned first, then by lastAccessedAt descending */
 function sortTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
-	return [...tabs].sort((a, b) => {
+	return tabs.toSorted((a, b) => {
 		// Pinned first
 		if (a.pinned && !b.pinned) return -1;
 		if (!a.pinned && b.pinned) return 1;
@@ -445,13 +449,15 @@ export function useWorkspaceTabs() {
 			const activeIdx = sorted.findIndex((t) => t.active);
 			if (activeIdx === -1) return prev;
 
-			// Find next tab that isn't in skipTypes, wrapping around
+			const skipSet = skipTypes ? new Set(skipTypes) : null;
+
+			// Find next tab that isn't in skipSet, wrapping around
 			let offset = direction;
 			let attempts = 0;
 			while (attempts < sorted.length) {
 				const candidateIdx = (activeIdx + offset + sorted.length) % sorted.length;
 				const candidate = sorted[candidateIdx];
-				if (!skipTypes || !skipTypes.includes(candidate.type)) {
+				if (!skipSet || !skipSet.has(candidate.type)) {
 					const targetId = candidate.id;
 					const now = new Date().toISOString();
 					return prev.map((t) => ({

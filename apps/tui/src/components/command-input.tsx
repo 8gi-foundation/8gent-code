@@ -29,7 +29,9 @@ import {
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { Blink } from "./fade-transition.js";
-import { AppText, Inline, Label, MutedText, ShortcutHint } from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
 import { WaveProgress } from "./progress-bar.js";
 
 interface CommandInputProps {
@@ -445,7 +447,7 @@ export function MinimalCommandInput({ onSubmit, isProcessing }: CommandInputProp
 					<AppText color="cyan">
 						<Spinner type="dots" />
 					</AppText>
-					<MutedText> Working...</MutedText>
+					<MutedText> Working…</MutedText>
 				</Box>
 			) : (
 				<Box>
@@ -557,7 +559,7 @@ export function CommandPalette({ onSubmit, suggestions = [] }: CommandPalettePro
 // Ghost-Enhanced Command Input
 // ============================================
 
-export interface GhostCommandInputProps {
+interface GhostCommandInputProps {
 	onSubmit: (input: string) => void;
 	isProcessing: boolean;
 	isGitRepo?: boolean;
@@ -567,7 +569,7 @@ export interface GhostCommandInputProps {
 	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
 }
 
-export function GhostCommandInput({
+function GhostCommandInput({
 	onSubmit,
 	isProcessing,
 	isGitRepo = false,
@@ -593,17 +595,17 @@ export function GhostCommandInput({
 // Export Slash Commands for External Use
 // ============================================
 
-export function getSlashCommands() {
+function getSlashCommands() {
 	return getBuiltInSlashCommands();
 }
 
-export function isSlashCommand(input: string): boolean {
+function isSlashCommand(input: string): boolean {
 	if (!input.startsWith("/")) return false;
 	const cmdName = input.slice(1).split(/\s+/)[0].toLowerCase();
 	return getBuiltInSlashCommands().some((c) => c.name === cmdName || c.aliases.includes(cmdName));
 }
 
-export function parseSlashCommand(input: string): { command: SlashCommand; args: string[] } | null {
+function parseSlashCommand(input: string): { command: SlashCommand; args: string[] } | null {
 	if (!input.startsWith("/")) return null;
 
 	const parts = input.slice(1).split(/\s+/);

@@ -5,7 +5,9 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { AppText, Divider, MutedText, Stack } from "../primitives/index.js";
+import { AppText, MutedText } from "../primitives/AppText.js";
+import { Divider } from "../primitives/Divider.js";
+import { Stack } from "../primitives/Stack.js";
 
 interface AgentEntry {
 	id: string;

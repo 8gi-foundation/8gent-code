@@ -10,7 +10,8 @@
 import { Box, Text, useStdout } from "ink";
 import Gradient from "ink-gradient";
 import React, { useState, useEffect } from "react";
-import { AppText, Inline, MutedText } from "./primitives/index.js";
+import { AppText, MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
 import { AnimatedWordmark, PulseLogo } from "./pulse-logo.js";
 import { AnimatedSeparator, RainbowBorder } from "./rainbow-border.js";
 
@@ -45,7 +46,7 @@ export function Header({
 	if (!mounted && showAnimations) {
 		return (
 			<Box paddingX={1} marginBottom={1}>
-				<MutedText>Loading...</MutedText>
+				<MutedText>Loading…</MutedText>
 			</Box>
 		);
 	}

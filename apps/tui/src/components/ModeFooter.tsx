@@ -18,7 +18,7 @@ const ui = {
 	chipBorder: theme.color.cardBorder,
 } as const;
 
-export const MODES = ["Planning", "Researching", "Implementing", "Testing", "Debugging"] as const;
+const MODES = ["Planning", "Researching", "Implementing", "Testing", "Debugging"] as const;
 export type FooterMode = (typeof MODES)[number];
 
 export function ModeFooter({ active }: { active: FooterMode }) {

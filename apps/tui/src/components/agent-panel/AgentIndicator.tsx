@@ -5,7 +5,9 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { Badge, Inline, MutedText } from "../primitives/index.js";
+import { MutedText } from "../primitives/AppText.js";
+import { Badge } from "../primitives/Badge.js";
+import { Inline } from "../primitives/Inline.js";
 
 interface AgentIndicatorProps {
 	agentName: string;

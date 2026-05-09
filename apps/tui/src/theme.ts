@@ -140,7 +140,7 @@ export const theme = {
 	color: mode === "light" ? light : dark,
 } as const;
 
-export type ThemeColor = keyof typeof dark;
+type ThemeColor = keyof typeof dark;
 
 // Shorthand for the most common pattern: `import { t } from "../theme.js"`
 export const t = theme.color;

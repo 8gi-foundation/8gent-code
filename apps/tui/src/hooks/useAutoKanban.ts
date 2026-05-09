@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Types
 // ============================================
 
-export interface KanbanCard {
+interface KanbanCard {
 	id: string;
 	title: string;
 	description: string;
@@ -32,14 +32,14 @@ export interface KanbanCard {
 	icon: string;
 }
 
-export interface AutoKanbanColumns {
+interface AutoKanbanColumns {
 	backlog: KanbanCard[];
 	ready: KanbanCard[];
 	inProgress: KanbanCard[];
 	done: KanbanCard[];
 }
 
-export interface AutoKanbanStats {
+interface AutoKanbanStats {
 	total: number;
 	active: number;
 	done: number;

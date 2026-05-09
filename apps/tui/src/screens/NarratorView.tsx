@@ -1,8 +1,11 @@
 import { Box } from "ink";
 import React from "react";
-import { Narrator } from "../components/narrator/index.js";
-import { AppText, Divider, MutedText, Spacer, Stack } from "../components/primitives/index.js";
-import { TaskCardList, type TaskItem } from "../components/task-card/index.js";
+import { Narrator } from "../components/narrator/Narrator.js";
+import { AppText, MutedText } from "../components/primitives/AppText.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Spacer } from "../components/primitives/Spacer.js";
+import { Stack } from "../components/primitives/Stack.js";
+import { TaskCardList, type TaskItem } from "../components/task-card/TaskCardList.js";
 
 export interface NarratorViewProps {
 	tasks: TaskItem[];
@@ -18,7 +21,7 @@ export function NarratorView({ tasks, narratorText, maxHeight }: NarratorViewPro
 			<Box flexDirection="column" alignItems="center" justifyContent="center" height={maxHeight}>
 				<Box>
 					<AppText color="cyan">✦</AppText>
-					<MutedText> Awaiting your command...</MutedText>
+					<MutedText> Awaiting your command…</MutedText>
 				</Box>
 			</Box>
 		);

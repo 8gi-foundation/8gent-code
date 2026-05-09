@@ -6,7 +6,8 @@
 
 import { Box, Text } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import { AppText, MutedText, Stack } from "./primitives/index.js";
+import { AppText, MutedText } from "./primitives/AppText.js";
+import { Stack } from "./primitives/Stack.js";
 
 interface TypingTextProps {
 	text: string;

@@ -15,16 +15,12 @@ import Spinner from "ink-spinner";
 import TextInput from "ink-text-input";
 import React, { useState, useEffect, useCallback } from "react";
 import { getSuggestionSourceLabel, useGhostSuggestion } from "../hooks/use-ghost-suggestion.js";
-import {
-	AppText,
-	Badge,
-	Divider,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Stack,
-} from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Badge } from "./primitives/Badge.js";
+import { Divider } from "./primitives/Divider.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
+import { Stack } from "./primitives/Stack.js";
 
 // ============================================
 // Types
@@ -310,7 +306,7 @@ export function GentlemanInputMinimal({
 						<Text color="cyan">
 							<Spinner type="dots" />
 						</Text>
-						<MutedText> Working...</MutedText>
+						<MutedText> Working…</MutedText>
 					</Inline>
 				) : (
 					<Inline gap={0}>

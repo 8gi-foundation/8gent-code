@@ -15,7 +15,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Box, useInput } from "ink";
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { AppText, Inline, Label, MutedText, ShortcutHint, Stack } from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
+import { Stack } from "./primitives/Stack.js";
 
 // ============================================
 // Types
@@ -66,7 +69,7 @@ export function isImagePath(inputPath: string): boolean {
 /**
  * Normalize a path token from terminal paste / drag-drop (file URLs, quotes, %20).
  */
-export function normalizePathToken(raw: string): string {
+function normalizePathToken(raw: string): string {
 	let s = raw.trim().replace(/^["'`]|["'`]$/g, "");
 	if (!s) return s;
 	if (s.startsWith("file:")) {
@@ -156,7 +159,7 @@ export function extractImagePaths(text: string): string[] {
 /**
  * Strip a filesystem path from text without regex metacharacter issues.
  */
-export function stripPathFromText(text: string, resolvedPath: string): string {
+function stripPathFromText(text: string, resolvedPath: string): string {
 	let s = text;
 	for (const p of [resolvedPath, resolvedPath.replace(/\\/g, "/")]) {
 		if (p) s = s.split(p).join("");
@@ -462,19 +465,3 @@ export function useImageInput(options: UseImageInputOptions = {}) {
 		hasImage: !!currentImage,
 	};
 }
-
-// ============================================
-// Exports
-// ============================================
-
-export default {
-	ImageInput,
-	ImageBadge,
-	ImageIndicator,
-	useImageInput,
-	isImagePath,
-	extractImagePaths,
-	readImageFile,
-	generateIterm2Image,
-	supportsIterm2Images,
-};

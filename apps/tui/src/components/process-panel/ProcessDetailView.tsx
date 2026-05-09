@@ -1,20 +1,15 @@
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useRef } from "react";
 import type { TaskInfo, TaskOutput } from "../../../../../packages/tools/background.js";
-import { formatDuration } from "../../lib/index.js";
+import { formatDuration } from "../../lib/format.js";
 import { truncate } from "../../lib/text.js";
 import { isAgentProcessTaskId } from "../ActivityMonitor.js";
-import {
-	AppText,
-	Badge,
-	Divider,
-	Heading,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Stack,
-} from "../primitives/index.js";
+import { AppText, Heading, Label, MutedText } from "../primitives/AppText.js";
+import { Badge } from "../primitives/Badge.js";
+import { Divider } from "../primitives/Divider.js";
+import { Inline } from "../primitives/Inline.js";
+import { ShortcutHint } from "../primitives/ShortcutHint.js";
+import { Stack } from "../primitives/Stack.js";
 
 function statusColor(status: string): "green" | "red" | "yellow" | "cyan" {
 	switch (status) {
@@ -135,7 +130,7 @@ export function ProcessDetailView({
 			{/* Output */}
 			<Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
 				{visibleLines.length === 0 ? (
-					<MutedText>Waiting for output...</MutedText>
+					<MutedText>Waiting for output…</MutedText>
 				) : (
 					visibleLines.map((line, i) => (
 						<Text key={scrollOffset + i} wrap="truncate">

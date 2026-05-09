@@ -17,19 +17,16 @@
 
 import { Box, Text, useStdout } from "ink";
 import React, { useState, useEffect } from "react";
-import { formatDuration, formatTokens, truncate } from "../lib/index.js";
+import { formatDuration, formatTokens } from "../lib/format.js";
+import { truncate } from "../lib/text.js";
 import { TUI_STATUS_COMPACT_BELOW } from "../lib/layout-breakpoints.js";
 import { StatusIndicator } from "./animated-spinner.js";
-import {
-	AppText,
-	Badge,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Spacer,
-	StatusDot,
-} from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Badge } from "./primitives/Badge.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
+import { Spacer } from "./primitives/Spacer.js";
+import { StatusDot } from "./primitives/StatusDot.js";
 import { Sparkline, TokenSavingsBar } from "./progress-bar.js";
 import { AnimatedSeparator, RainbowBorder } from "./rainbow-border.js";
 import { AnimatedStatusVerb, type StatusVerbType } from "./status-verb.js";

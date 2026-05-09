@@ -10,23 +10,18 @@
 
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect } from "react";
-import { truncate } from "../lib/index.js";
-import {
-	AppText,
-	Badge,
-	Card,
-	Divider,
-	Heading,
-	Inline,
-	Label,
-	MutedText,
-	Spacer,
-	Stack,
-	StatusDot,
-} from "./primitives/index.js";
+import { truncate } from "../lib/text.js";
+import { AppText, Heading, Label, MutedText } from "./primitives/AppText.js";
+import { Badge } from "./primitives/Badge.js";
+import { Card } from "./primitives/Card.js";
+import { Divider } from "./primitives/Divider.js";
+import { Inline } from "./primitives/Inline.js";
+import { Spacer } from "./primitives/Spacer.js";
+import { Stack } from "./primitives/Stack.js";
+import { StatusDot } from "./primitives/StatusDot.js";
 
 // Inline types to avoid import issues
-export type StepCategory =
+type StepCategory =
 	| "exploration"
 	| "modification"
 	| "search"
@@ -36,7 +31,7 @@ export type StepCategory =
 	| "refactor"
 	| "documentation";
 
-export interface ProactiveStep {
+interface ProactiveStep {
 	id: string;
 	description: string;
 	tool: string;
@@ -48,14 +43,14 @@ export interface ProactiveStep {
 	basedOn: string[];
 }
 
-export interface KanbanBoard {
+interface KanbanBoard {
 	backlog: ProactiveStep[];
 	ready: ProactiveStep[];
 	inProgress: ProactiveStep[];
 	done: ProactiveStep[];
 }
 
-export interface PreGeneratedStep {
+interface PreGeneratedStep {
 	id: string;
 	description: string;
 	tool: string;
@@ -64,7 +59,7 @@ export interface PreGeneratedStep {
 	optional: boolean;
 }
 
-export interface Avenue {
+interface Avenue {
 	id: string;
 	name: string;
 	description: string;
@@ -142,7 +137,7 @@ const priorityColors: Record<number, string> = {
 // Auto-Kanban Types (from useAutoKanban hook)
 // ============================================
 
-export interface AutoKanbanCard {
+interface AutoKanbanCard {
 	id: string;
 	title: string;
 	description: string;
@@ -158,14 +153,14 @@ export interface AutoKanbanCard {
 	icon: string;
 }
 
-export interface AutoKanbanColumns {
+interface AutoKanbanColumns {
 	backlog: AutoKanbanCard[];
 	ready: AutoKanbanCard[];
 	inProgress: AutoKanbanCard[];
 	done: AutoKanbanCard[];
 }
 
-export interface AutoKanbanStats {
+interface AutoKanbanStats {
 	total: number;
 	active: number;
 	done: number;
@@ -366,7 +361,7 @@ function KanbanColumn({
 
 			{hiddenCount > 0 && (
 				<Box paddingX={1}>
-					<MutedText>+{hiddenCount} more...</MutedText>
+					<MutedText>+{hiddenCount} more…</MutedText>
 				</Box>
 			)}
 		</Stack>
@@ -570,7 +565,7 @@ export function PredictedSteps({
 			))}
 
 			{steps.length > maxItems && (
-				<MutedText>+{steps.length - maxItems} more predictions...</MutedText>
+				<MutedText>+{steps.length - maxItems} more predictions…</MutedText>
 			)}
 
 			{/* Help */}
@@ -738,7 +733,7 @@ function AutoKanbanColumn({ items, width, maxItems, compact }: AutoKanbanColumnP
 
 			{hiddenCount > 0 && (
 				<Box paddingX={1}>
-					<MutedText>+{hiddenCount} more...</MutedText>
+					<MutedText>+{hiddenCount} more…</MutedText>
 				</Box>
 			)}
 		</Stack>

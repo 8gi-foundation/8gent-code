@@ -1,6 +1,10 @@
 import { Box, Text } from "ink";
 import React from "react";
-import { AppText, Badge, Inline, MutedText, Stack, StatusDot } from "../primitives/index.js";
+import { AppText, MutedText } from "../primitives/AppText.js";
+import { Badge } from "../primitives/Badge.js";
+import { Inline } from "../primitives/Inline.js";
+import { Stack } from "../primitives/Stack.js";
+import { StatusDot } from "../primitives/StatusDot.js";
 
 export interface TaskCardProps {
 	title: string;

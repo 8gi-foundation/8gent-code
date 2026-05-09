@@ -23,9 +23,6 @@ export function truncate(value: string, max: number): string {
 	return `${value.slice(0, max - 1)}\u2026`;
 }
 
-/** Alias for truncate. */
-export const ellipsis = truncate;
-
 /** Pad a string with trailing spaces to a fixed width. */
 export function padRight(value: string, width: number): string {
 	const visible = visibleLength(value);

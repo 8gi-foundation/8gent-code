@@ -12,8 +12,9 @@
 
 import { Box, Text } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import { truncate } from "../lib/index.js";
-import { Inline, MutedText } from "./primitives/index.js";
+import { truncate } from "../lib/text.js";
+import { MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
 
 // Import from personality package (relative path for monorepo)
 // In production, this would be: import { ... } from "@8gent/personality";
@@ -108,7 +109,7 @@ export interface AnimatedStatusVerbProps {
 	maxWidth?: number;
 }
 
-export interface StatusLineProps {
+interface StatusLineProps {
 	/** Type of verbs to cycle through */
 	type: StatusVerbType;
 	/** Elapsed time string */
@@ -338,5 +339,3 @@ export function InlineStatus({
 
 	return <MutedText color="yellow">{verb.replace("...", "")}</MutedText>;
 }
-
-export default AnimatedStatusVerb;

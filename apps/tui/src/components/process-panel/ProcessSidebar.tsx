@@ -2,17 +2,13 @@ import { Box, useInput } from "ink";
 import React from "react";
 import type { TaskInfo, TaskStatus } from "../../../../../packages/tools/background.js";
 import { isAgentProcessTaskId } from "../ActivityMonitor.js";
-import {
-	AppText,
-	Badge,
-	Divider,
-	Heading,
-	Inline,
-	MutedText,
-	ShortcutHint,
-	Spacer,
-	Stack,
-} from "../primitives/index.js";
+import { AppText, Heading, MutedText } from "../primitives/AppText.js";
+import { Badge } from "../primitives/Badge.js";
+import { Divider } from "../primitives/Divider.js";
+import { Inline } from "../primitives/Inline.js";
+import { ShortcutHint } from "../primitives/ShortcutHint.js";
+import { Spacer } from "../primitives/Spacer.js";
+import { Stack } from "../primitives/Stack.js";
 import { ProcessListItem } from "./ProcessListItem.js";
 
 interface ProcessSidebarProps {

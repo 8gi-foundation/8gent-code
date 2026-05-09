@@ -9,7 +9,7 @@
  * Theme tokens only. No inline hex.
  *
  * Layout: section headings (WORKSPACE / STATE / CONTEXT / ACCESS) sit on their
- * own line in orange bold. Data rows use the shared RailRow helper so labels
+ * own line in orange bold. Data rows use the shared MetricRow helper so labels
  * and values can never collide at narrow widths (the bug that produced
  * `mainch` and `ASKroval`).
  */
@@ -17,7 +17,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
-import { RailRow } from "./RailRow.js";
+import { MetricRow } from "./RailRow.js";
 
 interface ContextRailProps {
 	branch: string;
@@ -56,16 +56,16 @@ export function ContextRail({
 		>
 			<Text color={t.orange} bold>WORKSPACE</Text>
 			<Text color={t.textPrimary} wrap="truncate-end">{workspaceName}</Text>
-			<RailRow label="branch" value={branch} color={t.orange} />
+			<MetricRow label="branch" value={branch} color={t.orange} />
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>STATE</Text>
-			<RailRow
+			<MetricRow
 				label="approval"
 				value={permissions.toUpperCase()}
 				color={permissions === "ask" ? t.orange : t.textSecondary}
 			/>
-			<RailRow label="risk" value={risk.toUpperCase()} color={riskColor} />
+			<MetricRow label="risk" value={risk.toUpperCase()} color={riskColor} />
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>CONTEXT</Text>
@@ -76,7 +76,7 @@ export function ContextRail({
 
 			<Text color={t.dim}> </Text>
 			<Text color={t.orange} bold>ACCESS</Text>
-			<RailRow
+			<MetricRow
 				label="ADHD"
 				value={adhdMode ? "ON" : "OFF"}
 				color={adhdMode ? t.teal : t.textSecondary}

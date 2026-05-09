@@ -9,7 +9,9 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect } from "react";
-import { AppText, Divider, Label, MutedText, Stack } from "../components/primitives/index.js";
+import { AppText, Label, MutedText } from "../components/primitives/AppText.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Stack } from "../components/primitives/Stack.js";
 
 const CACHE_DIR = join(process.env.HOME || "~", ".8gent", "adhd-audio");
 
