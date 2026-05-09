@@ -9,8 +9,8 @@
  *
  * Card-specific deviations:
  *   AGENTS — value is a row of LED dots + "n/n" so the indicator reads
- *            at a glance. TOKENS — meter glyph row left, count right
- *            (justifyContent="space-between") per design feedback.
+ *            at a glance. TOKENS — total count, optionally suffixed with
+ *            live tokens-per-second from the last streamed step.
  */
 
 import { Box, Text } from "ink";
@@ -104,28 +104,17 @@ export function AgentInstrumentStrip({
 			</StatusCard>
 
 			<StatusCard label="Tokens">
-				<Box width="100%" overflow="hidden">
-					{/* Meter only shown when the cell has space for it; with tps
-					 *  visible we drop it entirely to make room for "n · 61t/s". */}
-					{!tpsLabel && (
-						<Box width={6} flexShrink={0}>
-							<Text color={ui.steel}>▁▂▃▄▅▆</Text>
-						</Box>
+				<Text color={ui.cream} wrap="truncate-end">
+					{tpsLabel ? (
+						<>
+							{tokens.replace(/ tok$/, "")}
+							<Text color={ui.steel}> · </Text>
+							<Text color={ui.teal}>{tpsLabel}</Text>
+						</>
+					) : (
+						tokens
 					)}
-					<Box flexGrow={1} minWidth={0} justifyContent="flex-end">
-						<Text color={ui.cream} wrap="truncate-end">
-							{tpsLabel ? (
-								<>
-									{tokens.replace(/ tok$/, "")}
-									<Text color={ui.steel}> · </Text>
-									<Text color={ui.teal}>{tpsLabel}</Text>
-								</>
-							) : (
-								tokens
-							)}
-						</Text>
-					</Box>
-				</Box>
+				</Text>
 			</StatusCard>
 
 			<StatusCard label="Branch" value={branch} color={ui.orange} />
