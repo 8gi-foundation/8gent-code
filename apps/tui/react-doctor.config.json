@@ -1,0 +1,16 @@
+{
+  "ignore": {
+    "rules": [
+      "react-doctor/rendering-hydration-mismatch-time",
+      "react-doctor/nextjs-no-a-element",
+      "react-doctor/nextjs-no-img-element",
+      "react-doctor/design-no-default-tailwind-palette",
+      "react-doctor/design-no-redundant-size-axes",
+      "react-doctor/design-no-bold-heading",
+      "react-doctor/no-wide-letter-spacing",
+      "react-doctor/server-hoist-static-io",
+      "react-doctor/server-sequential-independent-await",
+      "react-doctor/no-fetch-in-effect"
+    ]
+  }
+}
