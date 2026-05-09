@@ -9,7 +9,42 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
+### Added — v0.14 "Hardened Kernel" (extracted from OpenMonoAgent under CleanRoomPort, no AGPL source copied)
+
+Trust primitives:
+- **DoomLoopDetector hardening** (#2461 → #2472). Period-1 to period-4 cycle detection on a sliding 12-call window with normalized JSON args. Catches `AAA`, `ABAB`, `ABCABC`, `ABCDABCD` patterns. 13 tests. `packages/eight/tool-loop-detector.ts`.
+- **SecretScanner** (#2464 → #2477). Scrubs known provider secrets (AWS, GCP, Anthropic, OpenAI, DigitalOcean, GitHub, Slack) from tool output before the model sees it. 53 tests, 1MB scrub <50ms. Wired in `packages/eight/tools.ts` post-execution. Format: `[REDACTED:<rule-id>]`.
+- **PathGuard** (#2465 → #2476). Static deny-list for ~/.ssh, ~/.aws, ~/.kube, .gitconfig, .netrc, id_rsa, id_ed25519 + UNC paths + device files. Runs before NemoClaw. 30 tests + 1049 permissions-suite green. `packages/permissions/path-guard.ts`.
+- **BashParser** (#2466 → #2483). Parses bash into segments + redirections + subshells (recursion capped at 50) so policy engine evaluates per-subcommand. 23 new + 93 permissions tests. `packages/tools/bash-parser.ts`. Runtime spawn-site wiring in follow-up #2484.
+
+Context engineering:
+- **ToolResultCache** (#2462 → #2478). LRU 500 entries / 30-min TTL / mtime-validated cache for read-only tool results. Exposes `resultCache` + `isReadOnlyTool()` helpers from `tool-registry.ts`. 13 tests.
+- **ArtifactStore** (#2463 → #2479). Tool outputs over 50KB persist to `~/.8gent/artifacts/{sessionId}/{hash}.txt`; model gets `[ARTIFACT a3f9 132KB]` reference + 1KB preview. PathGuard write-path symlink protection. 19 tests.
+- **TwoStageCompactor** (#2467 → #2481). At 65% context: cheap LLM-summarized checkpoint stored alongside live history. At 80%: hard compact (replace with summary + last 4 turns). Provider context size respected. Env-gated via `8GENT_TWO_STAGE_COMPACT`. 8 tests + 107 package suite green.
+
+Model-agnostic routing:
+- **PreToolRouter** (#2471 → #2480). Deterministic harness routing of retrieval strategy (AST / Grep / Glob / vector / FileRead / none) classified BEFORE the LLM is invoked. Heuristic-only, no LLM calls in the router. Helps weak local models (small Qwens, Gemma) by pre-fetching context. 14 tests.
+
+Audit:
+- **TurnJournal** (#2470 → #2482). Per-turn replayable JSON record at `~/.8gent/turns/{sessionId}/{turnIndex}.json`. System prompt hashed (sha256, not full text). Tool result previews capped at 1KB; full content lives in ArtifactStore. 13 tests.
+
+### Closed without implementation
+- **AgentDefinition consolidation** (#2468). Closed not-applicable. Our `packages/orchestration/subagent.ts` uses ad-hoc `SubAgentConfig` per spawn, not Anthropic-style named profile literals — there's nothing scattered to consolidate.
+- **AnsiPainter renderer** (#2469). Filed as NOT-TO-BUILD strategic note. Owning the renderer would be a multi-month rewrite touching every TUI component; deferred until Ink limitations cost measurable user-visible UX.
+
+### Process
+- **Constitutional amendment** (#2475). Any multi-agent extraction, refactor, or feature touching MORE THAN 3 GitHub issues now requires boardroom alignment + signed PRD + minutes filed at `docs/boardroom-minutes/{date}-{slug}.md` BEFORE Wave 1 dispatch.
+- **CleanRoomPort skill** at `~/.claude/skills/CleanRoomPort/SKILL.md`. AGPL-safe extraction discipline: no source copy, test-first, branch-from-origin-main, no TUI touches, no co-author trailers, sub-300 LOC per port, mandatory PR credit line.
+
+### P0 follow-ups (filed during extraction, separate PRs)
+- **#2473** Built-in slash command registry race on TUI startup (silent fallthrough). Restart fixes; code fix in this issue.
+- **#2474** TUI frame buffer corruption (text from prior turns overlays new content). Splash → chat transition + per-turn frame-clear needed.
+
+### Notes
+- Wave 2 + Wave 3 used isolated git worktrees to prevent the working-tree collision Wave 1 hit (Karen's flag). Pattern documented for future multi-agent dispatches.
+- Boardroom convened mid-flight on 2026-05-09. Minutes captured in `docs/boardroom-minutes/2026-05-09-openmonoagent-extraction.md` and cross-posted to 8gi-governance for cross-repo audit.
+
+### Added (other)
 
 - **Strict linting pipeline** (#2419). Tightened `biome.json` to flag `noExplicitAny`,
   `useImportType`, `noUnusedVariables`, `useTemplate`, `useArrowFunction`,
