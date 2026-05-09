@@ -30,6 +30,9 @@ interface BottomBarProps {
 	/** When true, the DjDeck idle line shows "agent pulse" instead of
 	 *  "idle" so the bottom heartbeat reflects the live turn. */
 	isProcessing?: boolean;
+	/** Smoothed output tokens-per-second from the most recent agent step.
+	 *  0/undefined hides the indicator. */
+	tokensPerSecond?: number;
 }
 
 export function BottomBar(props: BottomBarProps) {
@@ -45,6 +48,7 @@ export function BottomBar(props: BottomBarProps) {
 				user={props.user}
 				permissions={props.permissions}
 				sessionTime={props.sessionTime}
+				tokensPerSecond={props.tokensPerSecond}
 			/>
 			<ModeFooter active={props.mode} />
 		</Box>

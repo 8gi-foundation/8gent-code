@@ -48,6 +48,13 @@ export interface RuntimeParams {
 	systemPromptLength: number;
 	messageHistoryLength: number;
 	stepCount: number;
+	// Live throughput — populated by createEightAgent on each onStepFinish.
+	// `lastTokensPerSecond` is the instantaneous rate of the most recent step.
+	// `avgTokensPerSecond` is an EWMA (alpha=0.3) so the value reads stable
+	// across short bursts. The agent can read these via self_inspect to
+	// answer "how fast am I going right now?" without a benchmark.
+	lastTokensPerSecond?: number;
+	avgTokensPerSecond?: number;
 	// Appendable context
 	appendedContext: string[];
 	// Voice chat: when true, the system prompt warns the agent it's in a
@@ -1555,7 +1562,7 @@ const writeTerminalTool = tool({
 
 const selfInspect = tool({
 	description:
-		"[SELF] Inspect your own runtime parameters: model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, and any appended context. Use this when you need to understand your own configuration or diagnose why something isn't working.",
+		"[SELF] Inspect your own runtime parameters: model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, live tokens-per-second throughput, and any appended context. Use this when you need to understand your own configuration, answer questions about how fast you're generating, or diagnose why something isn't working.",
 	inputSchema: z.object({}),
 	execute: async () => {
 		const p = getRuntimeParams();
@@ -1577,6 +1584,14 @@ const selfInspect = tool({
 				systemPromptLength: p.systemPromptLength,
 				messageHistoryLength: p.messageHistoryLength,
 				stepCount: p.stepCount,
+				throughput: {
+					lastTokensPerSecond: p.lastTokensPerSecond ?? null,
+					avgTokensPerSecond: p.avgTokensPerSecond ?? null,
+					note:
+						p.avgTokensPerSecond
+							? `Currently generating ~${p.avgTokensPerSecond.toFixed(1)} tok/s on ${p.provider}/${p.model} (last step: ${(p.lastTokensPerSecond ?? 0).toFixed(1)} tok/s)`
+							: "No throughput data yet — measured after the first LLM step finishes",
+				},
 			},
 			appendedContextCount: p.appendedContext.length,
 			appendedContext:

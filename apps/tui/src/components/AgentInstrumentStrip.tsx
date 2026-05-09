@@ -47,6 +47,19 @@ export interface AgentInstrumentStripProps {
 	user?: string;
 	permissions: string;
 	sessionTime: string;
+	/** Smoothed output tokens-per-second from the most recent agent step.
+	 *  Rendered as compact shorthand in the Tokens card (e.g. "61t/s"). */
+	tokensPerSecond?: number;
+}
+
+/** Format tokens-per-second into a compact 4-5 char string for the cell.
+ *  Avoids decimals over 100 (where ±1 tok/s is noise) and keeps the unit
+ *  inline so it reads at a glance: "61 t/s", "234 t/s", "9.8 t/s". */
+function formatTps(tps: number): string {
+	if (tps <= 0) return "";
+	if (tps >= 100) return `${Math.round(tps)} t/s`;
+	if (tps >= 10) return `${tps.toFixed(0)} t/s`;
+	return `${tps.toFixed(1)} t/s`;
 }
 
 /** Resolve the bottom-HUD USER label. Env-driven so the card reads as the
@@ -66,7 +79,9 @@ export function AgentInstrumentStrip({
 	user,
 	permissions,
 	sessionTime,
+	tokensPerSecond,
 }: AgentInstrumentStripProps) {
+	const tpsLabel = tokensPerSecond ? formatTps(tokensPerSecond) : "";
 	// MIC indicator lives in HeaderBar (single source of truth, top-right
 	// one-glance read). Do NOT add it back here. (#2368)
 	return (
@@ -89,11 +104,21 @@ export function AgentInstrumentStrip({
 
 			<StatusCard label="Tokens">
 				<Box width="100%" overflow="hidden">
-					<Box width={8} flexShrink={0}>
+					<Box width={6} flexShrink={0}>
 						<Text color={ui.steel}>▁▂▃▄▅▆</Text>
 					</Box>
 					<Box flexGrow={1} minWidth={0} justifyContent="flex-end">
-						<Text color={ui.cream} wrap="truncate-end">{tokens}</Text>
+						<Text color={ui.cream} wrap="truncate-end">
+							{tpsLabel ? (
+								<>
+									{tokens}
+									<Text color={ui.steel}> · </Text>
+									<Text color={ui.teal}>{tpsLabel}</Text>
+								</>
+							) : (
+								tokens
+							)}
+						</Text>
 					</Box>
 				</Box>
 			</StatusCard>
