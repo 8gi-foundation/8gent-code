@@ -62,7 +62,7 @@ import {
 } from "./components/bionic-text.js";
 import { CommandInput } from "./components/command-input.js";
 import { CommandPalette } from "./components/CommandPalette.js";
-import { FixedFrame } from "./components/fixed-frame/index.js";
+import { FixedFrame } from "./components/fixed-frame/FixedFrame.js";
 import { HeaderBar } from "./components/HeaderBar.js";
 import {
 	ImageBadge,
@@ -78,22 +78,15 @@ import {
 	PlanKanban,
 	PredictedSteps,
 } from "./components/plan-kanban.js";
-import {
-	AppText,
-	Divider,
-	Heading,
-	Inline,
-	Label,
-	MutedText,
-	ShortcutHint,
-	Spacer,
-	Stack,
-} from "./components/primitives/index.js";
-import {
-	ProcessBadge,
-	ProcessDetailView,
-	ProcessSidebar,
-} from "./components/process-panel/index.js";
+import { AppText, Heading, Label, MutedText } from "./components/primitives/AppText.js";
+import { Divider } from "./components/primitives/Divider.js";
+import { Inline } from "./components/primitives/Inline.js";
+import { ShortcutHint } from "./components/primitives/ShortcutHint.js";
+import { Spacer } from "./components/primitives/Spacer.js";
+import { Stack } from "./components/primitives/Stack.js";
+import { ProcessBadge } from "./components/process-panel/ProcessBadge.js";
+import { ProcessDetailView } from "./components/process-panel/ProcessDetailView.js";
+import { ProcessSidebar } from "./components/process-panel/ProcessSidebar.js";
 import {
 	ModelSelector,
 	type ProviderOption,
@@ -103,7 +96,7 @@ import {
 } from "./components/select-input.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
-import type { TaskItem } from "./components/task-card/index.js";
+import type { TaskItem } from "./components/task-card/TaskCardList.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
@@ -119,7 +112,8 @@ import { probeProviders } from "./lib/provider-health.js";
 import { ROLE_REGISTRY } from "../../../packages/orchestration/role-registry.js";
 import * as bgPool from "./lib/background-pool.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatSessionTime, formatTokens, truncate } from "./lib/index.js";
+import { formatSessionTime, formatTokens } from "./lib/format.js";
+import { truncate } from "./lib/text.js";
 import {
 	computeProcessSidebarWidth,
 	tuiChatContentWidth,
@@ -153,6 +147,10 @@ import { QuestionsView } from "./screens/QuestionsView.js";
 import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
 import { WindowTerminalView } from "./screens/WindowTerminalView.js";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import {
 	resolveTermCommand,
 	spawnInWindow,
@@ -161,7 +159,7 @@ import {
 	loadSettings as loadAppSettings,
 	getVoiceForRole,
 } from "../../../packages/settings/index.js";
-import { NarratorView } from "./screens/index.js";
+import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
@@ -251,6 +249,9 @@ function loadEnvFile() {
 				for (const line of content.split("\n")) {
 					const trimmed = line.trim();
 					if (trimmed && !trimmed.startsWith("#")) {
+						// String.indexOf for first-occurrence of a single char in a string,
+						// not Array.indexOf membership test — Set conversion does not apply.
+						// react-doctor-disable-next-line react-doctor/js-set-map-lookups
 						const eqIdx = trimmed.indexOf("=");
 						if (eqIdx > 0) {
 							const key = trimmed.slice(0, eqIdx).trim();
@@ -298,9 +299,10 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 				timeout: 3000,
 			}).toString();
 			const data = JSON.parse(raw);
-			const all = extract(data)
-				.map((s: string) => s.trim())
-				.filter(Boolean);
+			const all = extract(data).flatMap((s: string) => {
+				const trimmed = s.trim();
+				return trimmed ? [trimmed] : [];
+			});
 			return all.filter((id: string) => !isLikelyEmbeddingModelId(id));
 		} catch {
 			return [];
@@ -1083,8 +1085,10 @@ export function App({
 					if (res.ok) {
 						const data = await res.json();
 						const allModels = (data.models || [])
-							.map((m: any) => String(m.name ?? "").trim())
-							.filter((id: string) => id.length > 0);
+							.flatMap((m: any) => {
+					const id = String(m.name ?? "").trim();
+					return id.length > 0 ? [id] : [];
+				});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
@@ -1095,8 +1099,10 @@ export function App({
 					if (res.ok) {
 						const data = await res.json();
 						const allModels = (data.data || [])
-							.map((m: any) => String(m.id ?? "").trim())
-							.filter((id: string) => id.length > 0);
+							.flatMap((m: any) => {
+					const id = String(m.id ?? "").trim();
+					return id.length > 0 ? [id] : [];
+				});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
@@ -1109,9 +1115,8 @@ export function App({
 					if (res.ok) {
 						const data = await res.json();
 						const freeModels = (data.data || [])
-							.filter((m: any) => m.id?.endsWith(":free"))
-							.map((m: any) => m.id as string)
-							.sort();
+							.flatMap((m: any) => (m.id?.endsWith(":free") ? [m.id as string] : []))
+							.toSorted();
 						if (!cancelled)
 							setAvailableModels(
 								freeModels.length > 0 ? freeModels : ["google/gemini-2.5-flash:free"],
@@ -1126,8 +1131,7 @@ export function App({
 					if (res.ok) {
 						const data = await res.json();
 						const models = (data.data || [])
-							.filter((m: any) => !m.id?.endsWith(":free"))
-							.map((m: any) => m.id as string)
+							.flatMap((m: any) => (m.id?.endsWith(":free") ? [] : [m.id as string]))
 							.slice(0, 30);
 						if (!cancelled) setAvailableModels(models);
 					}
@@ -1139,8 +1143,10 @@ export function App({
 					if (res.ok) {
 						const data = await res.json();
 						const allModels = (data.data || [])
-							.map((m: any) => String(m.id ?? "").trim())
-							.filter((id: string) => id.length > 0);
+							.flatMap((m: any) => {
+					const id = String(m.id ?? "").trim();
+					return id.length > 0 ? [id] : [];
+				});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					} else if (!cancelled) {
@@ -2443,10 +2449,10 @@ export function App({
 								break;
 							}
 							if (a === "--caps" && args[i + 1]) {
-								capabilities = args[i + 1]
-									.split(",")
-									.map((c) => c.trim())
-									.filter(Boolean);
+								capabilities = args[i + 1].split(",").flatMap((c) => {
+									const trimmed = c.trim();
+									return trimmed ? [trimmed] : [];
+								});
 								i++;
 							}
 						}
@@ -3291,6 +3297,9 @@ export function App({
 										}
 
 										try {
+											// Polling loop: each iteration depends on the previous result and we throttle
+											// between polls. Sequential await is intentional here.
+											// react-doctor-disable-next-line react-doctor/async-await-in-loop
 											const res = await fetch(`${cfg.apiUrl}/query_result`, {
 												method: "POST",
 												headers: { "Content-Type": "application/json" },
@@ -4685,9 +4694,11 @@ export function App({
 				// foreground state if it's the active tab).
 				const tabMessages =
 					tabId === activeTabId ? messages : tabMessagesRef.current.get(tabId) ?? [];
-				const history = tabMessages
-					.filter((m) => m.role === "user" || m.role === "assistant")
-					.map((m) => ({ role: m.role, content: m.content }));
+				const history = tabMessages.flatMap((m) =>
+					m.role === "user" || m.role === "assistant"
+						? [{ role: m.role, content: m.content }]
+						: [],
+				);
 				const composed = composePrompt(history, messageForAgent);
 				const result = await runExternalAgent(preset, composed);
 
@@ -5321,7 +5332,7 @@ export function App({
 						<Stack minHeight={0} flexGrow={1}>
 							<Box paddingX={1} paddingY={1} flexDirection="column" gap={1}>
 								<AppText color="cyan" bold>
-									🎙 Voice Chat —{" "}
+									🎙 Voice Chat:{" "}
 									{voiceChat.state === "listening"
 										? "Listening..."
 										: voiceChat.state === "transcribing"

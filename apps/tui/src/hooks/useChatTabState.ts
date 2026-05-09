@@ -12,6 +12,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { useCallback, useEffect, useRef, useState } from "react";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { Agent } from "../../../../packages/eight/index.js";
 import type {
 	AgentEvidenceEvent,

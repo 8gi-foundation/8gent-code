@@ -167,5 +167,3 @@ export function ThinkingView({
 		</Box>
 	);
 }
-
-export default ThinkingView;

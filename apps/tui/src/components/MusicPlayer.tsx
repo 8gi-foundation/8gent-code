@@ -197,5 +197,3 @@ export function MusicPlayer({
 		</Box>
 	);
 }
-
-export default MusicPlayer;

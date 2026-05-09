@@ -6,8 +6,9 @@
 
 import { Box, Text } from "ink";
 import React, { useState, useEffect } from "react";
-import { formatPercentage, formatTokens } from "../lib/index.js";
-import { Inline, Label, MutedText } from "./primitives/index.js";
+import { formatPercentage, formatTokens } from "../lib/format.js";
+import { Label, MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
 
 interface AnimatedProgressBarProps {
 	value: number; // 0-100

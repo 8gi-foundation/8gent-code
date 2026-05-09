@@ -33,6 +33,10 @@ import {
 	type ParamVector,
 } from "../lib/visualiser-params.js";
 import { sampleAmber } from "../lib/amber-palette.js";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { loadSettings } from "../../../../packages/settings/index.js";
 import { NoiseField } from "./operators/NoiseField.js";
 import { ParticleDrift } from "./operators/ParticleDrift.js";
@@ -106,7 +110,7 @@ export function pushVisualiserToken(token: string): void {
 }
 
 /** Force a boredom mutation - exposed for tests / debugging. */
-export function forceBoredomMutation(seed: number, nextOperator: OperatorName, prevOperator: OperatorName): void {
+function forceBoredomMutation(seed: number, nextOperator: OperatorName, prevOperator: OperatorName): void {
 	const previous = store.params;
 	const next = mutateForBoredom(previous, seed);
 	store.params = next;
@@ -263,5 +267,3 @@ export function ThinkingVisualizer({
 		</Box>
 	);
 }
-
-export default ThinkingVisualizer;

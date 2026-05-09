@@ -149,7 +149,7 @@ function useDigitShortcut(
  * provider isn't live (so the user has guidance), AND the probe finished.
  * While loading, no hint. On error, show hint as a safe default.
  */
-export function shouldShowInstallHint(
+function shouldShowInstallHint(
 	provider: OnboardingProviderId,
 	probe: ProviderProbeState,
 ): boolean {
@@ -178,9 +178,7 @@ async function fetchProviderModels(
 			clearTimeout(t);
 			if (!res.ok) return [];
 			const data = (await res.json()) as { models?: Array<{ name: string }> };
-			return (data.models ?? [])
-				.map((m) => m.name)
-				.filter((n) => !isEmbed(n));
+			return (data.models ?? []).flatMap((m) => (isEmbed(m.name) ? [] : [m.name]));
 		}
 		// lmstudio + apfel both expose /v1/models (OpenAI-compat)
 		const hostBase =
@@ -193,7 +191,7 @@ async function fetchProviderModels(
 		clearTimeout(t);
 		if (!res.ok) return [];
 		const data = (await res.json()) as { data?: Array<{ id: string }> };
-		return (data.data ?? []).map((m) => m.id).filter((id) => !isEmbed(id));
+		return (data.data ?? []).flatMap((m) => (isEmbed(m.id) ? [] : [m.id]));
 	} catch {
 		return [];
 	}
@@ -371,6 +369,8 @@ export function OnboardingScreen({
 			</Box>
 
 			{/* Completed steps - compact */}
+			{/* Bounded onboarding steps (≤8 items); chained filter+map preserves filtered-index semantics for keys. */}
+			{/* react-doctor-disable-next-line react-doctor/js-combine-iterations */}
 			{steps
 				.filter((s) => s.status === "done")
 				.map((step, i) => (

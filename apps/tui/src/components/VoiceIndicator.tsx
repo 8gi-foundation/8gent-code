@@ -8,7 +8,9 @@
 import type { RecordingState, WhisperModelName } from "@8gent/voice";
 import { Box, Text } from "ink";
 import React, { useState, useEffect } from "react";
-import { AppText, Badge, Inline, Label, MutedText } from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Badge } from "./primitives/Badge.js";
+import { Inline } from "./primitives/Inline.js";
 
 // ============================================
 // Types
@@ -306,7 +308,7 @@ function ErrorIndicator({ message }: { message: string }) {
 /**
  * Minimal voice badge for embedding in the status bar.
  */
-export function VoiceStatusBadge({
+function VoiceStatusBadge({
 	enabled,
 	state,
 }: {

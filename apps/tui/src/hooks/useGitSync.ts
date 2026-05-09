@@ -16,7 +16,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export type GitSyncStatus =
+type GitSyncStatus =
 	| "up-to-date"
 	| "ahead"
 	| "behind"

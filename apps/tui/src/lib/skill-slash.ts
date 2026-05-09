@@ -1,3 +1,7 @@
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { getSkillManager, parseSkillCommand } from "../../../../packages/skills/index.js";
 
 /**

@@ -5,7 +5,9 @@
 
 import { Box, Text, useInput } from "ink";
 import React from "react";
-import { AppText, Inline, MutedText, Stack } from "../primitives/index.js";
+import { AppText, MutedText } from "../primitives/AppText.js";
+import { Inline } from "../primitives/Inline.js";
+import { Stack } from "../primitives/Stack.js";
 
 interface SpawnRequestCardProps {
 	personaName: string;

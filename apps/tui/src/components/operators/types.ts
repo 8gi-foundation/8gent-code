@@ -27,7 +27,7 @@ export interface OperatorProps {
 
 export type OperatorComponent = (props: OperatorProps) => React.ReactElement;
 
-export const OPERATOR_NAMES = [
+const OPERATOR_NAMES = [
 	"NoiseField",
 	"ParticleDrift",
 	"GradientSpectrum",

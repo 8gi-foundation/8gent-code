@@ -7,14 +7,10 @@
 
 import { Box, Text, useInput } from "ink";
 import React, { useState } from "react";
-import {
-	AppText,
-	Divider,
-	Heading,
-	Inline,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Inline } from "../components/primitives/Inline.js";
+import { Stack } from "../components/primitives/Stack.js";
 
 export interface ConversationEntry {
 	_id: string;
@@ -120,5 +116,3 @@ export function HistoryScreen({ conversations, onSelect, onBack }: HistoryScreen
 		</Stack>
 	);
 }
-
-export default HistoryScreen;

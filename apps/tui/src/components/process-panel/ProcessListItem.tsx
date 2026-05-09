@@ -2,9 +2,11 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../theme.js";
 import type { TaskInfo } from "../../../../../packages/tools/background.js";
-import { formatBytes, formatDuration } from "../../lib/index.js";
+import { formatBytes, formatDuration } from "../../lib/format.js";
 import { truncate } from "../../lib/text.js";
-import { AppText, Inline, MutedText, StatusDot } from "../primitives/index.js";
+import { AppText, MutedText } from "../primitives/AppText.js";
+import { Inline } from "../primitives/Inline.js";
+import { StatusDot } from "../primitives/StatusDot.js";
 
 function statusToDot(status: string): "success" | "error" | "warning" | "info" | "idle" {
 	switch (status) {

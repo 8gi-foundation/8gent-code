@@ -349,6 +349,6 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	},
 ];
 
-export function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
+function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 	return BUILT_IN_SLASH_COMMANDS;
 }

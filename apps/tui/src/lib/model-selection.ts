@@ -39,7 +39,10 @@ function scoreChatModelCandidate(id: string): number {
  */
 export function pickBestChatModel(modelIds: string[], opts?: { preference?: string }): string {
 	if (modelIds.length === 0) return "";
-	const unique = [...new Set(modelIds.map((x) => x.trim()).filter(Boolean))];
+	const unique = Array.from(new Set(modelIds.flatMap((x) => {
+		const t = x.trim();
+		return t ? [t] : [];
+	})));
 	const chatOnly = unique.filter((id) => !isLikelyEmbeddingModelId(id));
 	const pool = chatOnly.length > 0 ? chatOnly : unique;
 

@@ -11,15 +11,11 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useState, useEffect, useCallback } from "react";
-import {
-	AppText,
-	Badge,
-	Divider,
-	Heading,
-	Inline,
-	MutedText,
-	Stack,
-} from "../components/primitives/index.js";
+import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
+import { Badge } from "../components/primitives/Badge.js";
+import { Divider } from "../components/primitives/Divider.js";
+import { Inline } from "../components/primitives/Inline.js";
+import { Stack } from "../components/primitives/Stack.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -332,7 +328,7 @@ export function ProjectsView({
 			<Inline gap={1}>
 				<Heading>Projects</Heading>
 				{!isLoading && <MutedText>({projects.length} found)</MutedText>}
-				{isLoading && <MutedText>scanning...</MutedText>}
+				{isLoading && <MutedText>scanning…</MutedText>}
 			</Inline>
 
 			<MutedText>↑↓ Navigate · Enter Switch · a Add · d Remove · r Refresh · Esc Close</MutedText>
@@ -405,5 +401,3 @@ export function ProjectsView({
 		</Box>
 	);
 }
-
-export default ProjectsView;

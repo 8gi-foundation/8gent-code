@@ -10,7 +10,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../theme.js";
 
-export interface BubbleMessage {
+interface BubbleMessage {
 	id: string;
 	role: "user" | "assistant" | "system" | "tool";
 	content: string;

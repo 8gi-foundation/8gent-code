@@ -10,7 +10,7 @@
 import { Box, Text, useInput } from "ink";
 import React, { useState } from "react";
 
-export interface ViewerMessage {
+interface ViewerMessage {
 	id: string;
 	role: "user" | "assistant" | "system" | "tool";
 	content: string;

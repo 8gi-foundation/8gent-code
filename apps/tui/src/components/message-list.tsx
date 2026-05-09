@@ -30,7 +30,8 @@ import type { Message } from "../app.js";
 import { t } from "../theme.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
 import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
-import { AppText, Label, MutedText, Stack } from "./primitives/index.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Stack } from "./primitives/Stack.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 
@@ -49,7 +50,7 @@ import { TypingText, WordByWord } from "./typing-text.js";
  */
 // Exposed under a stable name for the smoke harness so we can lock in the
 // soft-seam behaviour without exporting the React module's identity.
-export const breakLongTokensForTest = (text: string, width: number): string =>
+const breakLongTokensForTest = (text: string, width: number): string =>
 	breakLongTokens(text, width);
 
 function breakLongTokens(text: string, width: number): string {

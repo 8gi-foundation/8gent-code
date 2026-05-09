@@ -1,3 +1,7 @@
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
 import { getSkillManager } from "../../../../packages/skills/index.js";
 import {
 	BUILT_IN_SLASH_COMMANDS,
@@ -5,7 +9,7 @@ import {
 	type SlashCommand,
 } from "./slash-commands.js";
 
-export type SlashRegistryKind = "builtin" | "skill";
+type SlashRegistryKind = "builtin" | "skill";
 
 export interface SlashRegistryEntry {
 	token: string;
@@ -40,7 +44,7 @@ export function mergeSlashEntries(
 		byToken.set(entry.token, entry);
 	}
 	return {
-		entries: [...byToken.values()].sort((a, b) => b.token.length - a.token.length),
+		entries: Array.from(byToken.values()).toSorted((a, b) => b.token.length - a.token.length),
 		byToken,
 	};
 }
@@ -158,5 +162,5 @@ export function getSkillSummary(registry: SlashRegistry): {
 			});
 		}
 	}
-	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+	return Array.from(byName.values()).toSorted((a, b) => a.name.localeCompare(b.name));
 }

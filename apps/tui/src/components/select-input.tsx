@@ -17,7 +17,10 @@
 
 import { Box, type TextProps, useInput } from "ink";
 import React, { useState, useEffect, useMemo } from "react";
-import { AppText, Card, Heading, Inline, Label, MutedText, Stack } from "./primitives/index.js";
+import { AppText, Heading, Label, MutedText } from "./primitives/AppText.js";
+import { Card } from "./primitives/Card.js";
+import { Inline } from "./primitives/Inline.js";
+import { Stack } from "./primitives/Stack.js";
 
 function clampScrollOffset(selectedIndex: number, total: number, maxVisible: number): number {
 	if (total <= maxVisible) return 0;
@@ -486,15 +489,3 @@ export function ProviderSelector({
 		/>
 	);
 }
-
-// ============================================
-// Exports
-// ============================================
-
-export default {
-	SelectInput,
-	ConfirmDialog,
-	QuickMenu,
-	ModelSelector,
-	ProviderSelector,
-};

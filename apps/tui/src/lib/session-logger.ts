@@ -16,14 +16,14 @@ import * as path from "node:path";
 // Types
 // ============================================
 
-export interface SessionEvent {
+interface SessionEvent {
 	type: string;
 	timestamp: string;
 	sequenceNumber: number;
 	[key: string]: unknown;
 }
 
-export interface SessionLog {
+interface SessionLog {
 	id: string;
 	name: string;
 	startedAt: string;
@@ -337,7 +337,7 @@ export function logTabSwitch(fromTabId: string, toTabId: string, toTabName: stri
 	});
 }
 
-export function getSessionLog(): SessionLog {
+function getSessionLog(): SessionLog {
 	if (!sessionId) {
 		throw new Error("Session logger not initialized");
 	}
@@ -361,14 +361,14 @@ export function getSessionLog(): SessionLog {
 	};
 }
 
-export function getSessionPath(): string {
+function getSessionPath(): string {
 	if (!sessionFilePath) {
 		throw new Error("Session logger not initialized");
 	}
 	return sessionFilePath;
 }
 
-export function getSessionSummary(): string {
+function getSessionSummary(): string {
 	if (!sessionId) return "No active session";
 	const dur = (getDurationMs() / 1000 / 60).toFixed(1);
 	return [

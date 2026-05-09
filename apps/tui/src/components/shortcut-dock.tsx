@@ -8,8 +8,8 @@
 
 import { Box } from "ink";
 import React from "react";
-import { truncate } from "../lib/index.js";
-import { AppText, MutedText } from "./primitives/index.js";
+import { truncate } from "../lib/text.js";
+import { AppText, MutedText } from "./primitives/AppText.js";
 
 interface Shortcut {
 	key: string;
