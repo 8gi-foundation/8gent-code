@@ -88,6 +88,7 @@ import {
 	vercelSetEnv,
 } from "../tools/vercel";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
+import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 
 /**
@@ -1035,6 +1036,22 @@ export class ToolExecutor {
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+		const raw = await this.executeRaw(toolName, args);
+		// Post-tool-execution scrubbing boundary (issue #2464).
+		// Wave 2 will add ToolResultCache (#2462) and ArtifactStore (#2463)
+		// hooks alongside this single labelled call. Order matters: scrub
+		// BEFORE cache/artifact persist so secrets never reach disk.
+		const result = scrubSecrets(raw);
+		if (result.redactedCount > 0) {
+			// Log redaction event to telemetry (no secret values, just metadata).
+			console.warn(
+				`[secret-scanner] tool=${toolName} redacted=${result.redactedCount} rules=${result.rules.join(",")}`,
+			);
+		}
+		return result.scrubbed;
+	}
+
+	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
 		// Rate limit check - prevents LLM loops from exhausting resources
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
