@@ -674,7 +674,7 @@ function getDeckPath(): string {
 	return join(home, ".8gent", "companion-deck.json");
 }
 
-export function loadDeck(): CompanionDeck {
+function loadDeck(): CompanionDeck {
 	const deckPath = getDeckPath();
 	try {
 		if (existsSync(deckPath)) {
@@ -766,6 +766,12 @@ export function endSession(
 	}
 }
 
+/**
+ * @public
+ * Cross-workspace dynamic import: consumed by apps/tui/src/app.tsx via
+ * `.then(async ({ formatDeckSummary }) => ...)`. Knip cannot detect this
+ * pattern, hence the explicit @public tag to mark the export as kept.
+ */
 export function formatDeckSummary(): string {
 	const deck = loadDeck();
 	const reset = "\x1b[0m";
