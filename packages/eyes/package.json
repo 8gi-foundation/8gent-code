@@ -17,7 +17,11 @@
 		}
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@8gent/audit": "workspace:*"
 	},
 	"devDependencies": {
 		"typescript": "^5.3.0"

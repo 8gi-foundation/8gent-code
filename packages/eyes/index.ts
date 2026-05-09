@@ -1,17 +1,18 @@
 /**
  * @8gent/eyes - perception capability.
  *
- * This package defines the Eyes contract and a backend registry. It does not
- * include any backend implementation; the first backend (Peekaboo) lands in
- * a follow-up PR per docs/specs/EYES-BACKEND-PEEKABOO.md.
+ * This package defines the Eyes contract, a backend registry, and the
+ * Peekaboo backend (#1). Additional backends (ax-native, remote-vlm,
+ * Windows UIA, Linux AT-SPI) slot into the same registry per spec §8.5.
  *
  * Spec: docs/specs/EYES-SPEC.md
+ * Backend rationale: docs/specs/EYES-BACKEND-PEEKABOO.md
  *
  * Hands and eyes are independent body-parts. Eyes does not import from
  * @8gent/hands at type level; the agent loop wires Locator -> Point when
  * hands needs to act on what eyes located.
  *
- * Closes nothing yet (spec PR). Issue: #2496.
+ * Closes #2501 (Peekaboo backend impl).
  */
 
 import type {
@@ -133,3 +134,40 @@ export const DEFAULT_FAILOVER: readonly string[] = Object.freeze([
 	"peekaboo",
 	"remote-vlm",
 ]);
+
+// ---------------------------------------------------------------------------
+// First-party backends + perception-tier API. Re-exported here so consumers
+// import a single surface.
+// ---------------------------------------------------------------------------
+
+export {
+	createPeekabooEyes,
+	peekabooBackend,
+	probePermissions as probePeekabooPermissions,
+	type PeekabooBackendOpts,
+	type VisionProvider,
+	type VisionRequest,
+	type VisionResponse,
+} from "./backends/peekaboo.js";
+
+export {
+	checkPerceptionRemote,
+	findActiveGrant,
+	grantPerceptionRemote,
+	isRemoteProvider,
+	LOCAL_PROVIDERS,
+	resetPerceptionTier,
+	revokePerceptionRemote,
+	type CheckArgs as PerceptionCheckArgs,
+	type CheckResult as PerceptionCheckResult,
+	type PerceptionGrant,
+	type PerceptionTierScope,
+} from "./perception-tier.js";
+
+export { AnnotationCache, annotationKey } from "./cache.js";
+
+// Auto-register the Peekaboo backend on first import. Backends gate themselves
+// via available(); registering here means selectEyesBackend(DEFAULT_FAILOVER)
+// just works without consumers having to wire each backend manually.
+import { peekabooBackend as _peekabooBackend } from "./backends/peekaboo.js";
+registerEyesBackend(_peekabooBackend);
