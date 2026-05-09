@@ -503,6 +503,10 @@ export interface Message {
 	timestamp: Date;
 	/** For tool messages: whether the tool succeeded */
 	toolSuccess?: boolean;
+	/** For assistant messages: total ms from request to last token (footer) */
+	latencyMs?: number;
+	/** For assistant messages: total tokens used by this turn (footer) */
+	tokens?: number;
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
