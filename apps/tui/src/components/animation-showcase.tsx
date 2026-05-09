@@ -173,9 +173,9 @@ export function AnimationShowcase({ animation = "all", onClose }: AnimationShowc
 
 			{/* Navigation dots */}
 			<Inline justifyContent="center" marginBottom={1} gap={0}>
-				{ANIMATIONS.map((_, i) => (
+				{ANIMATIONS.map((anim, i) => (
 					<AppText
-						key={i}
+						key={anim.id}
 						color={i === currentIndex ? "cyan" : undefined}
 						dimColor={i !== currentIndex}
 					>

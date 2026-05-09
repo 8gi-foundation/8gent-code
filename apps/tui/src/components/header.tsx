@@ -119,6 +119,7 @@ function TaglineText({ animate = true }: TaglineTextProps) {
 
 	return (
 		<Box>
+			{/* Per-character render of header text; index is column position, never reordered. */}
 			{text.split("").map((char, index) => {
 				const distance = Math.abs(index - glowIndex);
 				const color =
@@ -127,6 +128,7 @@ function TaglineText({ animate = true }: TaglineTextProps) {
 				const bold = distance === 0;
 
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text key={index} color={color} dimColor={dimColor} bold={bold}>
 						{char}
 					</Text>

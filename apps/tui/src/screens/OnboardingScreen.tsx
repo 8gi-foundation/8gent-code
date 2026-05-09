@@ -373,8 +373,8 @@ export function OnboardingScreen({
 			{/* react-doctor-disable-next-line react-doctor/js-combine-iterations */}
 			{steps
 				.filter((s) => s.status === "done")
-				.map((step, i) => (
-					<Box key={i} marginBottom={0} paddingLeft={2}>
+				.map((step) => (
+					<Box key={`done:${step.question}`} marginBottom={0} paddingLeft={2}>
 						<Text color="green" bold>
 							{"* "}
 						</Text>
@@ -415,7 +415,9 @@ export function OnboardingScreen({
 				borderColor="cyan"
 				width={maxWidth}
 			>
+				{/* Per-line render of the revealed question text; rows come from a deterministic newline split and are positional. */}
 				{revealedQuestion.split("\n").map((line, i) => (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text key={i}>{line}</Text>
 				))}
 				{!isQuestionRevealed && (
@@ -477,9 +479,11 @@ export function OnboardingScreen({
 									<Text color="cyan" bold>
 										Install hint:
 									</Text>
+									{/* Per-line render of the install-hint string; rows come from a deterministic newline split and are positional. */}
 									{providerCheck.installHint
 										.split("\n")
 										.map((line, i) => (
+											// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 											<Text key={i} dimColor>
 												{line}
 											</Text>

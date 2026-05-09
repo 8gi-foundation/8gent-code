@@ -172,7 +172,9 @@ interface CascadeFadeProps {
 export function CascadeFade({ items, delay = 100, itemDuration = 200 }: CascadeFadeProps) {
 	return (
 		<Box flexDirection="column">
+			{/* CascadeFade renders the parent-supplied items array positionally with index-based stagger; index IS the visual order and the delay input. */}
 			{items.map((item, index) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<FadeIn key={index} delay={index * delay} duration={itemDuration}>
 					{item}
 				</FadeIn>
@@ -202,12 +204,14 @@ export function GlowText({ children, color = "cyan", speed = 200 }: GlowTextProp
 
 	return (
 		<Box>
+			{/* Per-character render of the input string; index is the column position and the array is a string-split, never reordered. */}
 			{text.split("").map((char, index) => {
 				const distance = Math.abs(index - glowIndex);
 				const isGlowing = distance <= 1;
 				const isFading = distance <= 3;
 
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text
 						key={index}
 						color={isGlowing ? "white" : isFading ? color : "gray"}

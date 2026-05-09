@@ -186,7 +186,7 @@ export function EvidencePanel({
 				) : (
 					evidence.map((ev, index) => (
 						<EvidenceItem
-							key={`${ev.type}-${index}`}
+							key={`${ev.type}:${ev.timestamp instanceof Date ? ev.timestamp.getTime() : ev.timestamp}:${ev.description}`}
 							evidence={ev}
 							isSelected={index === selectedIndex}
 							isExpanded={index === expandedIndex}
@@ -552,8 +552,8 @@ function SummaryTab({
 			{report.warnings.length > 0 && (
 				<Stack marginTop={1}>
 					<Label color="yellow">Warnings:</Label>
-					{report.warnings.map((warning: string, i: number) => (
-						<WarningText key={i}>⚠ {warning}</WarningText>
+					{report.warnings.map((warning: string) => (
+						<WarningText key={`warn:${warning}`}>⚠ {warning}</WarningText>
 					))}
 				</Stack>
 			)}
@@ -562,8 +562,8 @@ function SummaryTab({
 			{report.suggestions.length > 0 && (
 				<Stack marginTop={1}>
 					<Heading>Suggestions:</Heading>
-					{report.suggestions.map((suggestion: string, i: number) => (
-						<MutedText key={i}>💡 {suggestion}</MutedText>
+					{report.suggestions.map((suggestion: string) => (
+						<MutedText key={`suggest:${suggestion}`}>💡 {suggestion}</MutedText>
 					))}
 				</Stack>
 			)}

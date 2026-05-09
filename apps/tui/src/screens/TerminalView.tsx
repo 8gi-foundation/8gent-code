@@ -107,7 +107,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 				{visibleLines.length === 0 ? (
 					<Text dimColor>(starting…)</Text>
 				) : (
+					/* visibleLines is a fixed-height window over the terminal output buffer; index IS the row position on screen and lines are not identifiable items (raw stdout strings can repeat). */
 					visibleLines.map((line, i) => (
+						// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 						<Text key={i} wrap="truncate-end">
 							{line}
 						</Text>

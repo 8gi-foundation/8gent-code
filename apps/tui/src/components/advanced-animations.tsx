@@ -658,9 +658,11 @@ export function Waveform({ width = 30, height = 4, speed = 100, active = true }:
 	if (!active) {
 		return (
 			<Box>
+				{/* Idle waveform: a fixed-width array of identical placeholder bars; positions are stable per render and never reordered. */}
 				{Array(width)
 					.fill(0)
 					.map((_, i) => (
+						// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 						<Text key={i} dimColor>
 							▁
 						</Text>
@@ -671,11 +673,13 @@ export function Waveform({ width = 30, height = 4, speed = 100, active = true }:
 
 	return (
 		<Box>
+			{/* levels is a fixed-length numeric sample buffer rendered positionally; index IS the visual slot. */}
 			{levels.map((level, i) => {
 				const charIndex = Math.floor(level * (WAVEFORM_CHARS.length - 1));
 				const hue = (i / width) * 360;
 				const color = level > 0.7 ? "greenBright" : level > 0.4 ? "green" : "gray";
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text key={i} color={color}>
 						{WAVEFORM_CHARS[charIndex]}
 					</Text>
@@ -802,17 +806,22 @@ function RubiksCube({ size = 1, speed = 200 }: RubiksCubeProps) {
 
 	return (
 		<Box flexDirection="column">
+			{/* cubeLines is a regenerated frame of the rotating cube; each entry is a positional row, not an identifiable item. */}
 			{cubeLines.map((line, i) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Box key={i}>
+					{/* Per-row character grid; index is the column position and never changes within a frame. */}
 					{line.split("").map((char, j) => {
 						if (FACE_COLORS[char]) {
 							return (
+								// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 								<Text key={j} color={FACE_COLORS[char] as any}>
 									█
 								</Text>
 							);
 						}
 						return (
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 							<Text key={j} dimColor>
 								{char}
 							</Text>
@@ -860,9 +869,11 @@ export function GradientWave({ text, speed = 150 }: GradientWaveProps) {
 
 	return (
 		<Box>
+			{/* Character-by-character gradient rendering; index is the visual column and the array is the input text split, not a reorderable list. */}
 			{text.split("").map((char, i) => {
 				const colorIndex = (i + offset) % GRADIENT_COLORS.length;
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text key={i} color={GRADIENT_COLORS[colorIndex]} bold>
 						{char}
 					</Text>

@@ -362,7 +362,9 @@ export function IntroBanner({ onDone, speed = 1 }: IntroBannerProps) {
 
 	return (
 		<Box flexDirection="column" alignItems="center" paddingY={1}>
+			{/* BANNER_LINES is a module-level constant ASCII banner; rows are positional and never reorder. */}
 			{BANNER_LINES.map((line, i) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Text key={i} color={t.orange} bold dimColor={wordmarkDim}>
 					{line}
 				</Text>
