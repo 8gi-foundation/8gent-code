@@ -10,6 +10,7 @@ import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
 import { type AgentTools, agentTools } from "../ai/tools";
+import { ToolResultCache } from "./cache/tool-result-cache";
 
 // `keyof AgentTools` is the AI-SDK tool registry (zod-typed).  We also
 // route some categories through the OpenAI-style `ToolExecutor.execute`
@@ -97,9 +98,57 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 
 const CATEGORY_NAMES = Object.keys(TOOL_CATEGORIES);
 
+/**
+ * Read-only tools whose results are safe to memoise within a session.
+ * Used by the optional ToolResultCache wired in below. Write-effecting tools
+ * (write_file, edit_file, run_command, git_*, term_*, desktop_*) are NEVER
+ * cached. Keep this list conservative.
+ */
+const READONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+	"read_file",
+	"list_files",
+	"get_outline",
+	"get_symbol",
+	"search_symbols",
+	"web_fetch",
+	"web_search",
+	"lsp_goto_definition",
+	"lsp_find_references",
+	"lsp_hover",
+	"lsp_document_symbols",
+	"lsp_diagnostics",
+	"read_image",
+	"read_pdf",
+	"read_pdf_page",
+	"read_notebook",
+	"git_status",
+	"git_diff",
+	"git_log",
+	"git_branch",
+	"gh_pr_list",
+	"gh_pr_view",
+	"gh_issue_list",
+	"recall",
+	"mcp_list_tools",
+	"query_design_system",
+]);
+
+/** True when the named tool is safe to serve from ToolResultCache. */
+export function isReadOnlyTool(toolName: string): boolean {
+	return READONLY_TOOL_NAMES.has(toolName);
+}
+
 export class ToolRegistry {
 	private activeTools: Map<string, ToolSet[string]> = new Map();
 	private loadedCategories: Set<string> = new Set();
+	/**
+	 * Per-session result cache. Exposed so callers (agent loop, future
+	 * PreToolRouter in #2471) can compose:
+	 *   cache.tryGet(name, input) ?? router.classify(...) ?? execute()
+	 * The registry itself does not invoke execute paths, so wiring the cache
+	 * at the dispatch site is the caller's responsibility.
+	 */
+	readonly resultCache: ToolResultCache = new ToolResultCache();
 
 	constructor(allTools = false) {
 		if (allTools) {
