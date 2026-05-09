@@ -2,60 +2,111 @@
 
 Perception layer for the 8gent body-parts taxonomy. Eyes capture, annotate, locate, describe, wait, diff, and observe. Hands act on what eyes locate.
 
-This package contains the contract only. The first backend (Peekaboo, MIT, macOS 15+) lands in a follow-up PR.
-
 ## Status
 
-Draft RFC. See:
+Contract: shipped (#2497, #2500).
+First backend: Peekaboo (#2501, this package).
 
-- [`docs/specs/EYES-SPEC.md`](../../docs/specs/EYES-SPEC.md) - full contract, types, failover chain, headless CLI parity, open questions.
-- [`docs/specs/EYES-BACKEND-PEEKABOO.md`](../../docs/specs/EYES-BACKEND-PEEKABOO.md) - first backend rationale, what we adopt vs rebuild, swap path.
+See:
+
+- [`docs/specs/EYES-SPEC.md`](../../docs/specs/EYES-SPEC.md) - full contract, types, decisions, headless CLI parity.
+- [`docs/specs/EYES-BACKEND-PEEKABOO.md`](../../docs/specs/EYES-BACKEND-PEEKABOO.md) - first backend rationale, swap path.
 
 ## Why a separate package
 
-Hands act, eyes perceive. The split mirrors motor cortex vs visual cortex. Today `packages/hands` does both because screenshot lived next to click. Eyes makes perception its own thing so we can add real perception primitives - locate by description, vision-model describe, wait_for, frame diff, change observation - without piling them onto the motor layer.
+Hands act, eyes perceive. The split mirrors motor cortex vs visual cortex. `packages/hands` keeps motor primitives; eyes owns perception. This keeps body-parts independent and individually testable.
 
-The screenshot duplication between hands and eyes is acknowledged. Eyes initially calls into `hands.screenshot()`; the migration is a follow-up issue.
-
-## Install
-
-```bash
-bun install
-```
-
-This package is workspace-internal. Consumers import from `@8gent/eyes`:
+## Quick start
 
 ```ts
-import { selectEyesBackend, DEFAULT_FAILOVER, type Eyes } from "@8gent/eyes";
+import {
+  selectEyesBackend,
+  DEFAULT_FAILOVER,
+  grantPerceptionRemote,
+  type Eyes,
+  type VisionProvider,
+} from "@8gent/eyes";
 
+// 1. Pick the first available backend (peekaboo on Mac).
 const backend = await selectEyesBackend([...DEFAULT_FAILOVER]);
 if (!backend) {
-	console.log("Eyes: no backend available. Install one of: peekaboo, ax-native.");
-} else {
-	const eyes: Eyes = backend.create();
-	const frame = await eyes.capture();
-	const description = await eyes.describe(frame);
-	console.log(description.summary);
+  console.log("Eyes: install peekaboo with `brew install steipete/tap/peekaboo`");
+  process.exit(0);
+}
+
+// 2. Inject a vision provider (used by describe + locate kind:"describe").
+//    Wire your provider chain here. The eyes backend NEVER calls models
+//    directly; it relays through this function and applies the
+//    perception:remote tier check on the resolved provider id.
+const visionProvider: VisionProvider = async ({ frame, prompt }) => {
+  // ... call your provider chain, return { provider, model, text }
+  return { provider: "ollama", model: "qwen2.5-vl", text: "..." };
+};
+
+// 3. (Optional) grant perception:remote for this session if the chain
+//    resolves to a remote VLM. The control plane normally does this in
+//    response to a 3-button consent UX per spec §4.2.
+grantPerceptionRemote("session", { sessionId: "current-session" });
+
+const eyes: Eyes = backend.create({ visionProvider, sessionId: "current-session" });
+
+// 4. Use eyes.
+const frame = await eyes.capture();           // focused display by default
+const annotated = await eyes.annotate(frame); // AX walk -> elements w/ ids + bboxes
+const hits = await eyes.locate(
+  { kind: "label", text: "Sign in" },
+  annotated,
+);
+if (hits[0]?.target && "point" in hits[0].target) {
+  // hand the point off to @8gent/hands
 }
 ```
 
+## Permission model
+
+| Operation | Tier required |
+|---|---|
+| `capture`, `captureAll`, `annotate`, `locate` (id/label/role), `wait_for` (most), `diff`, `observe` | base `computer-use` (gated upstream by control plane) |
+| `describe`, `locate({kind:"describe"})`, `wait_for({kind:"describe_matches"})` AND resolved provider is remote | additional `perception:remote` (gated by `grantPerceptionRemote()`) |
+| same calls AND resolved provider is local (`8gent`, `ollama`, `apfel`, `apple-foundation`, `lm-studio`) | base only |
+
+The remote check fires on the **runtime resolved provider id**, not on backend identity. A `describe()` call that the failover chain happens to satisfy locally never trips the remote tier.
+
+Every call is audit-logged via `@8gent/audit`. See `~/.8gent/audit/access.db`.
+
 ## Backend authors
 
-Implement `EyesBackend` and call `registerEyesBackend(b)` at module load. See the spec §7 for the contract.
+Implement `EyesBackend` and call `registerEyesBackend(b)`. Mirror the Peekaboo descriptor shape:
 
 ```ts
 import { registerEyesBackend, type EyesBackend } from "@8gent/eyes";
 
 const myBackend: EyesBackend = {
-	id: "my-backend",
-	platforms: ["darwin"],
-	available: async () => /* probe */ true,
-	create: () => /* return Eyes impl */,
+  id: "ax-native",
+  platforms: ["darwin"],
+  minOSVersion: "13.0",
+  available: async () => /* probe */ true,
+  create: () => /* return Eyes impl against the spec */,
 };
 
 registerEyesBackend(myBackend);
 ```
 
-## Issue
+## Tests
 
-[#2496](https://github.com/8gi-foundation/8gent-code/issues/2496)
+```bash
+cd packages/eyes
+bun run typecheck
+bun test
+```
+
+Integration tests against the real Peekaboo CLI run when the binary is installed AND Screen Recording + Accessibility entitlements are granted. Otherwise they self-skip with a console note.
+
+## Issues
+
+- #2496 - perception capability spec
+- #2497 - spec + scaffold (merged)
+- #2500 - §8 RFC decisions (merged)
+- #2501 - Peekaboo backend (this PR)
+- #2502 - `apps/8gent-eyes` headless CLI (follow-up)
+- #2503 - tool registration in `packages/ai/tools.ts` (follow-up)
