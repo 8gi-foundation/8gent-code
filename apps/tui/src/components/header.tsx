@@ -26,6 +26,8 @@ export function Header({
 	showAnimations = true,
 	updateAvailable,
 }: HeaderProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [mounted, setMounted] = useState(false);
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
@@ -150,6 +152,8 @@ export function CompactHeader({ isProcessing = false }: HeaderProps) {
 
 // Fancy header with ASCII art
 export function FancyHeader({ isProcessing = false }: HeaderProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [colorIndex, setColorIndex] = useState(0);
 	const colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD"];
 

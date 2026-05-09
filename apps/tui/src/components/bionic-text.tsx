@@ -202,7 +202,7 @@ function parseBionicText(text: string, ratio = 0.5): Array<{ text: string; bold:
 // ADHD Mode Context
 // ============================================
 
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 
 interface ADHDModeContextType {
 	enabled: boolean;
@@ -215,7 +215,7 @@ export const ADHDModeContext = createContext<ADHDModeContextType>({
 });
 
 export function useADHDMode() {
-	return useContext(ADHDModeContext);
+	return use(ADHDModeContext);
 }
 
 // ============================================

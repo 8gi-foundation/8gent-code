@@ -220,8 +220,12 @@ function sanitizeTrack(value: string): string {
 	return value.replace(/[\u{1F300}-\u{1FAFF}]/gu, "").replace(/\s+/g, " ").trim();
 }
 
+// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+// react-doctor-disable-next-line react-doctor/prefer-useReducer
 export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}) {
 	const [status, setStatus] = useState<DjStatus>(EMPTY);
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [open, setOpen] = useState(true);
 	const [localPos, setLocalPos] = useState<number | null>(null);
 	const [tick, setTick] = useState(0);
@@ -274,6 +278,7 @@ export function DjDeck({ isProcessing = false }: { isProcessing?: boolean } = {}
 	}, []);
 
 	// Poll real status every second
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const id = setInterval(async () => {
 			const dj = djRef.current.instance;

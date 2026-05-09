@@ -58,8 +58,14 @@ export function useAgentOrchestration(): AgentOrchestrationState & AgentOrchestr
 	const busRef = useRef<any>(null);
 
 	// Lazily resolve the orchestrator bus
+	// no-cascading-set-state in this effect is intentional: each handler updates its own slice
+	// in response to a different bus event class — consolidating into a reducer would lose the
+	// per-event identity needed by handleSpawnResolved (filter by id).
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		let mounted = true;
+		// Holds unsubscribe handles registered after dynamic import resolves
+		const unsubscribers: Array<() => void> = [];
 
 		(async () => {
 			try {
@@ -108,13 +114,23 @@ export function useAgentOrchestration(): AgentOrchestrationState & AgentOrchestr
 					refreshAgents();
 				};
 
-				bus.on("agent:spawned", refreshAgents);
-				bus.on("agent:completed", refreshAgents);
-				bus.on("agent:failed", refreshAgents);
-				bus.on("agent:killed", refreshAgents);
-				bus.on("spawn:request", handleSpawnRequest);
-				bus.on("spawn:approved", handleSpawnResolved);
-				bus.on("spawn:rejected", handleSpawnResolved);
+				const subs: Array<[string, (...args: any[]) => void]> = [
+					["agent:spawned", refreshAgents],
+					["agent:completed", refreshAgents],
+					["agent:failed", refreshAgents],
+					["agent:killed", refreshAgents],
+					["spawn:request", handleSpawnRequest],
+					["spawn:approved", handleSpawnResolved],
+					["spawn:rejected", handleSpawnResolved],
+				];
+				for (const [event, handler] of subs) {
+					bus.on(event, handler);
+					unsubscribers.push(() => {
+						if (typeof bus.off === "function") bus.off(event, handler);
+						else if (typeof bus.removeListener === "function")
+							bus.removeListener(event, handler);
+					});
+				}
 
 				refreshAgents();
 			} catch {
@@ -124,6 +140,13 @@ export function useAgentOrchestration(): AgentOrchestrationState & AgentOrchestr
 
 		return () => {
 			mounted = false;
+			for (const unsub of unsubscribers) {
+				try {
+					unsub();
+				} catch {
+					/* swallow */
+				}
+			}
 		};
 	}, []);
 

@@ -5,7 +5,7 @@
  */
 
 import { Box, Text } from "ink";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AppText, MutedText } from "./primitives/AppText.js";
 import { Stack } from "./primitives/Stack.js";
 
@@ -30,7 +30,16 @@ export function TypingText({
 	const [showCursor, setShowCursor] = useState(true);
 	const [isComplete, setIsComplete] = useState(false);
 
+	// Stash latest onComplete in a ref so identity changes don't restart the typewriter.
+	const onCompleteRef = useRef(onComplete);
+	useEffect(() => {
+		onCompleteRef.current = onComplete;
+	}, [onComplete]);
+
 	// Typing effect
+	// no-cascading-set-state here is intentional: setIsComplete + invoking the callback
+	// fires once when text finishes, distinct from the per-character setDisplayedText.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (displayedText.length < text.length) {
 			const timeout = setTimeout(() => {
@@ -39,8 +48,8 @@ export function TypingText({
 			return () => clearTimeout(timeout);
 		}
 		setIsComplete(true);
-		onComplete?.();
-	}, [displayedText, text, speed, onComplete]);
+		onCompleteRef.current?.();
+	}, [displayedText, text, speed]);
 
 	// Cursor blink effect
 	useEffect(() => {
@@ -69,10 +78,17 @@ interface StreamingTextProps {
 }
 
 export function StreamingText({ chunks, speed = 10, color = "white" }: StreamingTextProps) {
+	// All three pieces of state are read in the effect below to compute the next character
+	// AND the resulting displayedText is rendered to the screen — useRef would break the
+	// per-character reveal. Cascading sets are intentional sequencing across chunk boundaries.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [displayedText, setDisplayedText] = useState("");
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [charIndex, setCharIndex] = useState(0);
 
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (currentChunkIndex >= chunks.length) return;
 
@@ -105,6 +121,12 @@ export function WordByWord({ text, speed = 50, color = "white", onComplete }: Wo
 	const words = text.split(" ");
 	const [wordIndex, setWordIndex] = useState(0);
 
+	// Stash latest onComplete in a ref so callback identity changes don't restart animation.
+	const onCompleteRef = useRef(onComplete);
+	useEffect(() => {
+		onCompleteRef.current = onComplete;
+	}, [onComplete]);
+
 	useEffect(() => {
 		if (wordIndex < words.length) {
 			const timeout = setTimeout(() => {
@@ -112,8 +134,8 @@ export function WordByWord({ text, speed = 50, color = "white", onComplete }: Wo
 			}, speed);
 			return () => clearTimeout(timeout);
 		}
-		onComplete?.();
-	}, [wordIndex, words.length, speed, onComplete]);
+		onCompleteRef.current?.();
+	}, [wordIndex, words.length, speed]);
 
 	return (
 		<AppText color={color} wrap="wrap">
@@ -131,12 +153,19 @@ interface CodeTypingProps {
 }
 
 export function CodeTyping({ code, language, speed = 8 }: CodeTypingProps) {
+	// displayedCode is rendered; lineIndex / charIndex feed the per-tick reveal logic in the
+	// effect AND the rendered slice. useRef would break the typewriter. Cascading sets across
+	// line boundaries are intentional sequencing.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [displayedCode, setDisplayedCode] = useState("");
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [lineIndex, setLineIndex] = useState(0);
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [charIndex, setCharIndex] = useState(0);
 
 	const lines = code.split("\n");
 
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (lineIndex >= lines.length) return;
 

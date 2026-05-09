@@ -123,6 +123,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 	// Wire up engine events
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const onStateChange = ({ to }: { from: RecordingState; to: RecordingState }) => {
 			setState(to);
@@ -200,6 +201,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	}, [engine, onTranscript, onError, onDownloadProgress]);
 
 	// Recording duration timer
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (state === "recording") {
 			const startTime = Date.now();

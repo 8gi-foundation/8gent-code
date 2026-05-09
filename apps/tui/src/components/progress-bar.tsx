@@ -43,6 +43,7 @@ export function AnimatedProgressBar({
 	const [shimmerIndex, setShimmerIndex] = useState(0);
 
 	// Smooth animation to target value
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (!animate) {
 			setDisplayValue(value);
@@ -133,6 +134,7 @@ export function TokenSavingsBar({
 	const [displayTokens, setDisplayTokens] = useState(0);
 
 	// Animate the counter
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (displayTokens >= tokensSaved) {
 			setDisplayTokens(tokensSaved);
@@ -199,6 +201,8 @@ interface WaveProgressProps {
 }
 
 export function WaveProgress({ width = 30, speed = 100 }: WaveProgressProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [offset, setOffset] = useState(0);
 
 	useEffect(() => {

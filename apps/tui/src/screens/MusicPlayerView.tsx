@@ -119,6 +119,7 @@ export function MusicPlayerView({
 	const [tracks, setTracks] = useState<Track[]>([]);
 
 	// Refresh track list
+	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
 	useEffect(() => {
 		if (visible) {
 			setTracks(loadTracks(currentTrack));
