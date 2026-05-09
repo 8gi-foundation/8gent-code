@@ -115,7 +115,9 @@ export function BigLogo({ animate = true, size = "small" }: BigLogoProps) {
 
 	return (
 		<Box flexDirection="column">
+			{/* logo is a fixed ASCII-art frame; rows are positional and never reordered. */}
 			{logo.map((line, index) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 				<Text
 					key={index}
 					color={GRADIENT_COLORS[(colorIndex + index * 2) % GRADIENT_COLORS.length]}
@@ -168,6 +170,7 @@ export function AnimatedWordmark({ isProcessing = false }: AnimatedWordmarkProps
 
 	return (
 		<Box>
+			{/* Per-character render of the wordmark; index is column position, never reordered. */}
 			{text.split("").map((char, index) => {
 				const isGlowing = index === glowIndex || index === glowIndex - 1;
 				const color =
@@ -180,6 +183,7 @@ export function AnimatedWordmark({ isProcessing = false }: AnimatedWordmarkProps
 							: "gray";
 
 				return (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Text key={index} bold={index === 0 || isGlowing} color={color}>
 						{char}
 					</Text>
