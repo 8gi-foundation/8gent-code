@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.13.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.13.0" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.14.0--rc-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.14.0-rc Hardened Kernel" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -506,42 +506,59 @@ packages/
 
 ## Roadmap
 
+See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
+
 <table>
 <tr>
 <td valign="top" width="33%">
 
-### Now
+### Just shipped (v0.14 "Hardened Kernel")
 
-- **Per-tab model routing** - each agent tab (Orchestrator/Engineer/QA) gets its own provider and model, with Apple Foundation as lightweight chat option
-- **Documentation sweep** - aligning all docs, README, and live sites with audited feature set
-- **PR cleanup** - merging 12+ pending PRs with verification
-- **Voice hardening** - KittenTTS integration, full-duplex Moshi backend stabilization
+Trust primitives + context engineering + model-agnostic routing. Concept-extracted from StartupHakk/OpenMonoAgent under CleanRoomPort discipline; no AGPL source copied.
+
+- DoomLoopDetector hardened (#2461)
+- SecretScanner (#2464)
+- PathGuard (#2465)
+- BashParser primitive (#2466)
+- ToolResultCache (#2462)
+- ArtifactStore (#2463)
+- TwoStageCompactor (#2467)
+- PreToolRouter (#2471)
+- TurnJournal (#2470)
 
 </td>
 <td valign="top" width="33%">
 
 ### Next
 
-- **MCP server support** - expose 8gent tools as MCP servers for external agent consumption
-- **Context window compaction** - smarter compression beyond token threshold
-- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation
-- [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
-- [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
+- **v0.14 launch bundle** (#2485) — CHANGELOG, post, 60s AdPitchVideo demoing live doom-loop protection
+- **BashParser runtime wiring** (#2484) — wire `gateBashCommand` into the spawn site so compound deny actually fires at runtime
+- **TUI bug fixes** — slash registry race (#2473), frame buffer corruption (#2474)
+- **Per-tab model routing** — each agent tab (Orchestrator/Engineer/QA) gets its own provider/model
+- **Voice hardening** — KittenTTS integration, full-duplex Moshi backend stabilization
 
 </td>
 <td valign="top" width="33%">
 
-### Later
+### Later / under evaluation
 
+- **Virtuoso + OPAL eval** (#2486) — federated knowledge-graph substrate for Lotus / 8gentOS data spaces. 1-week scoped spike, decision criteria filed.
+- **MCP server support** — expose 8gent tools as MCP servers for external agent consumption
+- **Extension system** — ExtensionCrafter for autonomous source-to-extension generation
+- [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
+- [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
 - Desktop client (Swift AppKit, `apps/lil-eight/`)
 - Multi-tenant control plane via 8GI gateway
-- Full autonomous issue resolution
 - Personal LoRA from session training pairs
-- Dead code cleanup (music/DJ package)
 
 </td>
 </tr>
 </table>
+
+### Process amendments
+- **#2475** Constitutional amendment (2026-05-09): any extraction / refactor / feature touching MORE THAN 3 GitHub issues requires boardroom alignment + signed PRD + minutes filed BEFORE Wave 1 dispatch.
+- **CleanRoomPort skill** at `~/.claude/skills/CleanRoomPort/SKILL.md` for AGPL-safe pattern porting.
+- **Strategic note** #2469 — owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
 
 <br />
 
