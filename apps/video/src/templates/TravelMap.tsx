@@ -106,9 +106,16 @@ export const TravelMap: React.FC<TravelMapProps> = ({
 	const frame = useCurrentFrame();
 
 	const [loadHandle] = useState(() => delayRender("Loading map..."));
+	// `map` IS read in render-affecting code: the per-frame camera-update effect
+	// (below) depends on it, so useRef would not trigger that effect when the map
+	// becomes available. Keep useState.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [map, setMap] = useState<MaplibreMap | null>(null);
 
 	// First-load: create the map exactly once.
+	// Intentionally no cleanup. Remotion forbids map.remove() here; the map
+	// instance is owned by the Remotion frame lifecycle, not React unmount.
+	// react-doctor-disable-next-line react-doctor/effect-needs-cleanup
 	useEffect(() => {
 		if (!ref.current) return;
 		const initial = camera[0] ?? {
@@ -170,6 +177,10 @@ export const TravelMap: React.FC<TravelMapProps> = ({
 	);
 };
 
-/** Re-export the lerp helpers for templates that need world<->screen math. */
+/**
+ * Re-export the lerp helpers for templates that need world<->screen math.
+ * @public
+ */
 export const _lerp = lerp;
+/** @public */
 export const _lerpLngLat = lerpLngLat;
