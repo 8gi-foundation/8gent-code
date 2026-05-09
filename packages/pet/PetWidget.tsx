@@ -47,7 +47,9 @@ export function PetWidget({ sessionId = "eight", daemon }: PetWidgetProps) {
 	return (
 		<Box flexDirection="column" marginTop={1}>
 			<Box flexDirection="column">
+				{/* frame.lines is a static sprite frame replaced atomically each tick — indices are stable within a frame and the array is never reordered or filtered. */}
 				{frame.lines.map((line, i) => (
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 					<Box key={i}>
 						<Text>{" ".repeat(Math.max(0, frame.x))}</Text>
 						<Text>{stripAnsi(line)}</Text>
