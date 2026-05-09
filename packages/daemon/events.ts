@@ -25,6 +25,13 @@ export interface DaemonEvents {
 	};
 	"session:start": { sessionId: string; channel: string };
 	"session:end": { sessionId: string; reason: string };
+	"session:compressed": {
+		sessionId: string;
+		trigger: "near-limit" | "milestone" | "manual" | "none";
+		tokensBefore: number;
+		tokensAfter: number;
+		messagesRemoved: number;
+	};
 	// CEO task lifecycle events
 	"task:created": { taskId: string; description: string };
 	"task:delegated": { taskId: string; description: string };

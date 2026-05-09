@@ -15,6 +15,20 @@
  *                                     Only James's chat_id should appear here.
  *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
  *
+ * Optional env vars for the local voice loop:
+ *   - EIGHT_VOICE_OUT_LOCAL=1         Speak agent replies on Mac speakers
+ *                                     when the originating channel is
+ *                                     telegram. KittenTTS preferred,
+ *                                     `say -v Daniel` fallback.
+ *   - EIGHT_VOICE_OUT_VOICE           Override the KittenTTS voice id
+ *                                     (default expr-voice-2-m).
+ *   - GROQ_API_KEY  or  OPENAI_API_KEY
+ *                                     Required for Telegram voice-message
+ *                                     transcription. Groq is preferred
+ *                                     (free tier, faster). Used by the
+ *                                     existing transcription pipeline in
+ *                                     packages/daemon/telegram-bridge.ts.
+ *
  * Secrets are read from process.env or any pre-loaded env file. The daemon
  * never prints token contents. See `packages/daemon/scripts/start-local.ts`
  * for the canonical launcher.
@@ -326,6 +340,19 @@ export async function main(): Promise<void> {
 
 	if (localMode) {
 		console.log(`[daemon-local] listening on ws://127.0.0.1:${config.port}`);
+		// Voice-out: speak the agent's final reply on Mac speakers when
+		// the originating channel was telegram. Opt-in via
+		// EIGHT_VOICE_OUT_LOCAL=1. KittenTTS preferred, `say -v Daniel`
+		// fallback. Fire-and-forget; the text reply is unaffected.
+		if (process.env.EIGHT_VOICE_OUT_LOCAL === "1") {
+			try {
+				const { installVoiceOutForBus } = await import("./voice-out");
+				installVoiceOutForBus({ bus });
+				console.log("[daemon-local] voice-out attached (telegram replies will be spoken)");
+			} catch (err) {
+				console.error("[daemon-local] voice-out install failed:", err);
+			}
+		}
 		// Auto-start the local Telegram bridge when explicitly opted in.
 		// Gated on EIGHT_TELEGRAM_LOCAL so users running TUI-only sessions
 		// don't pay the cost of a bot poller they don't need.

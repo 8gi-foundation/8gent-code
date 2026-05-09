@@ -5,9 +5,16 @@
  * to agent.chat() and bridges agent events back to the daemon EventBus.
  */
 
+import { generateText } from "ai";
+import { createModel } from "../ai/providers";
 import { Agent } from "../eight/agent";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
+import {
+	type Message as ContextMessage,
+	SessionContextManager,
+	type SummarizerCall,
+} from "./context";
 import { bus } from "./events";
 
 export interface PoolConfig {
@@ -34,7 +41,12 @@ interface SessionEntry {
 	tenantId: string;
 	/** Optional Clerk ID — useful when tenantId is internal. */
 	clerkId?: string;
+	/** Per-session compression infrastructure (issue #2420). */
+	context: SessionContextManager;
 }
+
+/** Default context window assumed when the model doesn't expose one. */
+const DEFAULT_CONTEXT_WINDOW = Number(process.env.EIGHT_CONTEXT_WINDOW ?? 32768);
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
 const DEFAULT_RUNTIME = "ollama" as const;
@@ -185,6 +197,10 @@ export class AgentPool {
 		// "system" only for legacy callers — production paths must pass
 		// the resolved tenantId explicitly.
 		const tenantId = overrides?.tenantId ?? process.env.EIGHGENT_DEFAULT_TENANT ?? "system";
+		const context = new SessionContextManager({
+			contextWindow: DEFAULT_CONTEXT_WINDOW,
+			summarize: this.buildSummarizer(),
+		});
 		this.sessions.set(sessionId, {
 			agent,
 			channel,
@@ -194,6 +210,7 @@ export class AgentPool {
 			busy: false,
 			tenantId,
 			clerkId: overrides?.clerkId,
+			context,
 		});
 
 		console.log(
@@ -258,6 +275,14 @@ export class AgentPool {
 				promptTokens,
 				completionTokens,
 				latencyMs: Date.now() - startMs,
+			});
+
+			// Per-session context tracking + transparent compression (#2420).
+			// Token pressure or pending milestones trigger an artifact-preserving
+			// compression pass that updates the agent's history in place.
+			entry.context.recordExchange(promptTokens, completionTokens);
+			await this.maybeCompressSession(sessionId, entry).catch((err) => {
+				console.error(`[agent-pool] compression failed for ${sessionId}:`, (err as Error).message);
 			});
 
 			// Emit the full final response (distinct from stream chunks)
@@ -364,6 +389,69 @@ export class AgentPool {
 		return result;
 	}
 
+	/**
+	 * Record a milestone event (e.g. file saved, test passed) on a session
+	 * so the next compression check considers it a natural breakpoint.
+	 * Public so dispatchers and tool handlers can call it.
+	 */
+	recordMilestone(
+		sessionId: string,
+		event: Parameters<SessionContextManager["recordMilestone"]>[0],
+	): void {
+		const entry = this.sessions.get(sessionId);
+		if (!entry) return;
+		entry.context.recordMilestone(event);
+	}
+
+	/** Inspect a session's context status (token usage, registry sizes, checkpoints). */
+	getContextStatus(sessionId: string): ReturnType<SessionContextManager["getStatus"]> | null {
+		const entry = this.sessions.get(sessionId);
+		if (!entry) return null;
+		return entry.context.getStatus();
+	}
+
+	/**
+	 * Construct a SummarizerCall bound to the pool's current model. Each
+	 * call creates its own LanguageModel so we don't hold one stale handle
+	 * for the lifetime of a session.
+	 */
+	private buildSummarizer(): SummarizerCall {
+		const runtime = this.config.runtime;
+		const model = this.config.model;
+		const apiKey = this.config.apiKey;
+		return async ({ prompt, maxOutputTokens }) => {
+			const lm = createModel({ name: runtime, model, apiKey });
+			const { text } = await generateText({ model: lm, prompt, maxOutputTokens });
+			return { text };
+		};
+	}
+
+	/**
+	 * Run a compression pass on a session if the tracker is near its limit
+	 * or a milestone event is pending. On success, the agent's message
+	 * history is replaced with the compressed version.
+	 */
+	private async maybeCompressSession(sessionId: string, entry: SessionEntry): Promise<void> {
+		const history = entry.agent.getMessageHistory() as ContextMessage[];
+		if (history.length < 4) return;
+		const attempt = await entry.context.maybeCompress(history);
+		if (!attempt.checkpointed || !attempt.messages || !attempt.checkpoint) return;
+		entry.agent.restoreFromCheckpoint(attempt.messages);
+		const ckpt = attempt.checkpoint;
+		console.log(
+			`[agent-pool] compressed session ${sessionId} (trigger=${attempt.reason}): ` +
+				`${ckpt.tokensBefore} -> ${ckpt.tokensAfter} tokens, ` +
+				`removed ${ckpt.messagesRemoved} messages`,
+		);
+		bus.emit("session:compressed", {
+			sessionId,
+			trigger: attempt.reason,
+			tokensBefore: ckpt.tokensBefore,
+			tokensAfter: ckpt.tokensAfter,
+			messagesRemoved: ckpt.messagesRemoved,
+		});
+	}
+
 	/** Build event callbacks that bridge Agent events to the daemon EventBus */
 	private buildEventCallbacks(sessionId: string): AgentEventCallbacks {
 		return {
@@ -382,6 +470,14 @@ export class AgentPool {
 					output: event.resultPreview || "",
 					durationMs: event.durationMs,
 				});
+				// Successful tool calls are natural compression breakpoints.
+				const sessionEntry = this.sessions.get(sessionId);
+				if (sessionEntry) {
+					sessionEntry.context.recordMilestone({
+						type: "tool-success",
+						toolName: event.toolName,
+					});
+				}
 			},
 
 			onStepFinish: (event) => {
