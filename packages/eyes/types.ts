@@ -13,7 +13,10 @@ export type Point = { x: number; y: number };
 export type Disposable = { dispose: () => void };
 
 export interface CaptureOpts {
-	displayId?: number;
+	// Default: focused display (the one containing the focused window) per §8.2.
+	// "primary" targets the OS primary display. "all" returns one Frame per
+	// display via captureAll(); never a stitched composite.
+	displayId?: number | "all" | "primary";
 	region?: Region;
 	includeCursor?: boolean;
 	format?: "png" | "jpeg";
@@ -23,10 +26,12 @@ export interface Frame {
 	id: string;
 	path: string;
 	buffer?: Buffer;
-	width: number;
-	height: number;
+	width: number;          // logical (DPI-independent) pixels per §8.1
+	height: number;         // logical
 	displayId: number;
 	capturedAt: number;
+	scale: number;          // backing scale factor (e.g. 2 on retina). raw_pixels = width * scale.
+	platform: "darwin" | "win32" | "linux";  // for cross-platform locator dispatch per §8.5
 }
 
 export interface AnnotatedElement {
