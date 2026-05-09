@@ -1,0 +1,20 @@
+{
+	"name": "@8gi-foundation/8gent-eyes",
+	"version": "0.1.0",
+	"description": "Headless CLI for the eyes (perception) capability. Capture, find, describe, wait. AgentCLIDesign-compliant: --json default, deterministic exit codes, no telemetry.",
+	"type": "module",
+	"bin": {
+		"8gent-eyes": "src/index.ts"
+	},
+	"scripts": {
+		"start": "bun run src/index.ts",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@8gent/eyes": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^5.3.0"
+	}
+}
