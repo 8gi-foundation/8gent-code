@@ -51,6 +51,12 @@ import {
 	ProactiveCompression,
 	type ProactiveResult,
 } from "./compaction";
+import {
+	type AgentState as TwoStageAgentState,
+	type CheckpointEntry,
+	type Summarizer,
+	TwoStageCompactor,
+} from "./two-stage-compactor";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
@@ -145,6 +151,8 @@ export class Agent {
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
+	private twoStageCompactor: TwoStageCompactor | null = null;
+	private twoStageCheckpoints: CheckpointEntry[] = [];
 	private recentFilePaths: string[] = [];
 	private preToolRouter: PreToolRouter = new PreToolRouter({
 		astAvailable: true,
@@ -188,6 +196,14 @@ export class Agent {
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
 		this.compaction = new ProactiveCompression();
+
+		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
+		// rather than replacing it: the legacy single-threshold engine still
+		// guards hard limits; the two-stage path produces cheap mid-pressure
+		// checkpoints so context loss is gradual instead of cliff-edged.
+		// Summariser is a thin wrapper around the active provider's chat client;
+		// constructed lazily on first observe so providerConfig is in scope.
+		this.twoStageCompactor = null;
 
 		// Fire-and-forget AST indexing of working directory for AST-first retrieval.
 		// Lite mode skips it — first AST tool call will index on demand.
@@ -1258,6 +1274,51 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 					this.events.onCompaction?.(compactionResult);
 				} catch (err) {
 					console.error("  [COMPRESSION] Failed:", (err as Error).message);
+				}
+			}
+
+			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
+			// above. Cheap checkpoint at 65%, hard compact at 80%. Provider context
+			// size resolved per-provider; defaults applied conservatively when the
+			// provider definition does not expose contextSize.
+			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
+				try {
+					if (!this.twoStageCompactor) {
+						const summarizer: Summarizer = async (msgs) => {
+							const compactModel = createModel(providerConfig);
+							const serialised = msgs
+								.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`)
+								.join("\n\n");
+							const { generateText } = await import("ai");
+							const { text } = await generateText({
+								model: compactModel,
+								prompt: `Summarise the following conversation into a concise structured checkpoint another agent can resume from. Preserve file paths, function names, and decisions verbatim.\n\n<conversation>\n${serialised}\n</conversation>\n\n## Goal\n## Progress\n## Decisions\n## Next Steps`,
+								maxOutputTokens: 800,
+							});
+							return text;
+						};
+						this.twoStageCompactor = new TwoStageCompactor({
+							checkpointPct: 0.65,
+							compactPct: 0.8,
+							keepLastN: 4,
+							summarizer,
+						});
+					}
+					const ctxSize =
+						(providerConfig as unknown as { contextSize?: number }).contextSize ?? 32_768;
+					const state: TwoStageAgentState = {
+						messages: this.messageHistory,
+						checkpoints: this.twoStageCheckpoints,
+						provider: { contextSize: ctxSize },
+					};
+					const result = await this.twoStageCompactor.observe(state);
+					if (result.action !== "none") {
+						console.log(
+							`  [TWO_STAGE:${result.action}] tokens ${result.report?.tokensBefore} -> ${result.report?.tokensAfter}, removed ${result.report?.messagesRemoved}`,
+						);
+					}
+				} catch (err) {
+					console.error("  [TWO_STAGE] Failed:", (err as Error).message);
 				}
 			}
 
