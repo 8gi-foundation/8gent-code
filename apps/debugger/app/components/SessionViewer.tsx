@@ -296,18 +296,19 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				}
 			}}
 		>
-			<div
-				role="button"
-				tabIndex={0}
+			<button
+				type="button"
 				aria-expanded={expanded}
-				className="flex items-start gap-2 cursor-pointer"
-				onClick={() => setExpanded(!expanded)}
-				onKeyDown={(e) => {
-					if (e.key === "Enter" || e.key === " ") {
-						e.preventDefault();
-						setExpanded((prev) => !prev);
-					}
+				className="flex items-start gap-2 cursor-pointer w-full text-left"
+				style={{
+					background: "transparent",
+					border: 0,
+					padding: 0,
+					margin: 0,
+					font: "inherit",
+					color: "inherit",
 				}}
+				onClick={() => setExpanded(!expanded)}
 			>
 				<span className="text-[10px] mt-0.5 shrink-0 w-5" style={{ color: "var(--muted)" }}>
 					{expanded ? "▼" : "▶"}
@@ -332,7 +333,7 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				{(entry.type === "step_end" || entry.type === "assistant_content") && (
 					<UsageBadge usage={entry.usage} />
 				)}
-			</div>
+			</button>
 
 			{/* v2: Render content parts inline for assistant_content */}
 			{entry.type === "assistant_content" && entry.parts && !expanded && (
