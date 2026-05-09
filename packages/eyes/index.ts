@@ -62,7 +62,11 @@ export interface Eyes {
 	readonly available: boolean;
 	readonly backend: string;
 
+	// Default targets the focused display per spec §8.2. Pass `displayId: "all"`
+	// to use captureAll() instead; stitched composites are not supported.
 	capture(opts?: CaptureOpts): Promise<Frame>;
+	captureAll(opts?: Omit<CaptureOpts, "displayId">): Promise<Frame[]>;
+
 	annotate(frame: Frame): Promise<AnnotatedFrame>;
 	locate(query: LocatorQuery, frame?: AnnotatedFrame): Promise<Locator[]>;
 	describe(frame: Frame, prompt?: string): Promise<Description>;

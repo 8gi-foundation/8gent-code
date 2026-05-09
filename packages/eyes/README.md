@@ -8,12 +8,12 @@ This package contains the contract only. The first backend (Peekaboo, MIT, macOS
 
 Draft RFC. See:
 
-- [`docs/specs/EYES-SPEC.md`](../../docs/specs/EYES-SPEC.md) — full contract, types, failover chain, headless CLI parity, open questions.
-- [`docs/specs/EYES-BACKEND-PEEKABOO.md`](../../docs/specs/EYES-BACKEND-PEEKABOO.md) — first backend rationale, what we adopt vs rebuild, swap path.
+- [`docs/specs/EYES-SPEC.md`](../../docs/specs/EYES-SPEC.md) - full contract, types, failover chain, headless CLI parity, open questions.
+- [`docs/specs/EYES-BACKEND-PEEKABOO.md`](../../docs/specs/EYES-BACKEND-PEEKABOO.md) - first backend rationale, what we adopt vs rebuild, swap path.
 
 ## Why a separate package
 
-Hands act, eyes perceive. The split mirrors motor cortex vs visual cortex. Today `packages/hands` does both because screenshot lived next to click. Eyes makes perception its own thing so we can add real perception primitives — locate by description, vision-model describe, wait_for, frame diff, change observation — without piling them onto the motor layer.
+Hands act, eyes perceive. The split mirrors motor cortex vs visual cortex. Today `packages/hands` does both because screenshot lived next to click. Eyes makes perception its own thing so we can add real perception primitives - locate by description, vision-model describe, wait_for, frame diff, change observation - without piling them onto the motor layer.
 
 The screenshot duplication between hands and eyes is acknowledged. Eyes initially calls into `hands.screenshot()`; the migration is a follow-up issue.
 
