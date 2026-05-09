@@ -6,6 +6,8 @@
  * Shows sessions across all users with model, duration, tokens, and status.
  */
 
+import Image from "next/image";
+
 interface SessionRow {
 	_id: string;
 	startedAt: number;
@@ -106,7 +108,13 @@ export function SessionTable({ sessions, title = "Recent Sessions" }: SessionTab
 									<td className="px-6 py-3">
 										<div className="flex items-center gap-2">
 											{session.userAvatar && (
-												<img src={session.userAvatar} alt="" className="h-6 w-6 rounded-full" />
+												<Image
+													src={session.userAvatar}
+													alt=""
+													width={24}
+													height={24}
+													className="size-6 rounded-full"
+												/>
 											)}
 											<span className="text-sm text-[var(--8gent-text)]">
 												{session.userDisplayName}
@@ -130,7 +138,7 @@ export function SessionTable({ sessions, title = "Recent Sessions" }: SessionTab
 									<td className="px-6 py-3">
 										{session.endedAt === undefined ? (
 											<span className="inline-flex items-center gap-1 rounded-full bg-[var(--8gent-success)]/10 px-2 py-0.5 text-xs text-[var(--8gent-success)]">
-												<span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--8gent-success)] animate-pulse" />
+												<span className="inline-block size-1.5 rounded-full bg-[var(--8gent-success)] animate-pulse" />
 												Active
 											</span>
 										) : (

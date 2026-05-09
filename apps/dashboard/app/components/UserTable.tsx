@@ -6,6 +6,7 @@
  * Shows users with their plan, usage stats, and last activity.
  */
 
+import Image from "next/image";
 import Link from "next/link";
 
 interface UserRow {
@@ -116,7 +117,13 @@ export function UserTable({
 									<td className="px-6 py-3">
 										<Link href={`/users/${user._id}`} className="flex items-center gap-3 group">
 											{user.avatar && (
-												<img src={user.avatar} alt="" className="h-8 w-8 rounded-full" />
+												<Image
+													src={user.avatar}
+													alt=""
+													width={32}
+													height={32}
+													className="size-8 rounded-full"
+												/>
 											)}
 											<div>
 												<div className="text-sm text-[var(--8gent-text)] group-hover:text-[var(--8gent-accent)]">
@@ -144,7 +151,7 @@ export function UserTable({
 									<td className="px-6 py-3">
 										{user.activeSessionCount > 0 ? (
 											<span className="inline-flex items-center gap-1 text-xs text-[var(--8gent-success)]">
-												<span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--8gent-success)] animate-pulse" />
+												<span className="inline-block size-1.5 rounded-full bg-[var(--8gent-success)] animate-pulse" />
 												{user.activeSessionCount}
 											</span>
 										) : (
@@ -186,7 +193,7 @@ export function UserTableSkeleton() {
 			<div className="p-6 space-y-3">
 				{Array.from({ length: 5 }).map((_, i) => (
 					<div key={i} className="flex items-center gap-3">
-						<div className="h-8 w-8 rounded-full bg-[var(--8gent-bg-hover)]" />
+						<div className="size-8 rounded-full bg-[var(--8gent-bg-hover)]" />
 						<div className="flex-1 space-y-1">
 							<div className="h-4 w-32 rounded bg-[var(--8gent-bg-hover)]" />
 							<div className="h-3 w-20 rounded bg-[var(--8gent-bg-hover)]" />
