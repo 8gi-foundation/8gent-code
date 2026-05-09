@@ -9,6 +9,15 @@
 
 import { interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 
+const OVERLAY_BASE_STYLE: React.CSSProperties = {
+	position: "absolute",
+	top: 0,
+	left: 0,
+	pointerEvents: "none",
+	overflow: "hidden",
+	mixBlendMode: "screen",
+};
+
 export type CloudOverlayProps = {
 	/** Drift speed in screen pixels per second. */
 	driftPxPerSec?: number;
@@ -54,18 +63,7 @@ export const CloudOverlay: React.FC<CloudOverlayProps> = ({
 	const breathe = interpolate(Math.sin(t * 0.6), [-1, 1], [0.85, 1.05]);
 
 	return (
-		<div
-			style={{
-				position: "absolute",
-				top: 0,
-				left: 0,
-				width,
-				height,
-				pointerEvents: "none",
-				overflow: "hidden",
-				mixBlendMode: "screen",
-			}}
-		>
+		<div style={{ ...OVERLAY_BASE_STYLE, width, height }}>
 			<svg
 				width={width}
 				height={height}
@@ -85,11 +83,13 @@ export const CloudOverlay: React.FC<CloudOverlayProps> = ({
 					</filter>
 				</defs>
 				<g filter="url(#cloudBlur)" opacity={intensity * breathe}>
+					{/* blobs is generated from a deterministic seeded RNG each render; the array is the same length and in the same order every frame, never reordered or filtered. Index keys are stable. */}
 					{blobs.map((b, i) => {
 						const drift = (t * driftPxPerSec * b.speed) % (width + 600);
 						const cx = ((b.x + drift) % (width + 600)) - 200;
 						const cy = b.y + Math.sin(t * 0.4 + b.phase) * 20;
 						return (
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 							<circle
 								key={i}
 								cx={cx}
