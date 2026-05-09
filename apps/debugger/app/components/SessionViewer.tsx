@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { SessionInfo } from "../api/sessions/route";
 
 interface SessionEntry {
@@ -147,20 +147,25 @@ function UsageBadge({ usage }: { usage: SessionEntry["usage"] }) {
 }
 
 function ContentParts({ parts }: { parts: NonNullable<SessionEntry["parts"]> }) {
+	// Parts within an entry are positional and frozen at parse time — they never reorder or filter on the client.
+	// Index keys are the correct stable identity here; per-part ids would need to be synthesized from content.
 	return (
 		<div className="ml-7 mt-1 space-y-1">
 			{parts.map((part, i) => {
+				const k = `part-${i}`;
 				switch (part.type) {
 					case "text":
 						return (
-							<div key={i} className="text-xs" style={{ color: "var(--foreground)" }}>
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<div key={k} className="text-xs" style={{ color: "var(--foreground)" }}>
 								{part.text}
 							</div>
 						);
 					case "reasoning":
 						return (
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
 							<div
-								key={i}
+								key={k}
 								className="text-xs text-amber-400/70 border-l-2 border-amber-500/30 pl-2"
 							>
 								<span className="text-[9px] text-amber-500/50 mr-1">thinking:</span>
@@ -169,32 +174,37 @@ function ContentParts({ parts }: { parts: NonNullable<SessionEntry["parts"]> }) 
 						);
 					case "source":
 						return (
-							<div key={i} className="text-[10px] text-cyan-400/60">
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<div key={k} className="text-[10px] text-cyan-400/60">
 								source: {part.title || part.id} {part.url && `(${part.url})`}
 							</div>
 						);
 					case "file":
 						return (
-							<div key={i} className="text-[10px] text-purple-400/60">
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<div key={k} className="text-[10px] text-purple-400/60">
 								file: {part.mediaType} (
 								{part.data ? `${Math.round((part.data.length * 0.75) / 1024)}KB` : "?"})
 							</div>
 						);
 					case "tool-call":
 						return (
-							<div key={i} className="text-[10px] text-cyan-400/60">
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<div key={k} className="text-[10px] text-cyan-400/60">
 								call: {part.toolName}({JSON.stringify(part.args || {}).slice(0, 60)})
 							</div>
 						);
 					case "tool-result":
 						return (
-							<div key={i} className="text-[10px] text-teal-400/60">
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<div key={k} className="text-[10px] text-teal-400/60">
 								result: {part.toolName} = {JSON.stringify(part.result).slice(0, 80)}
 							</div>
 						);
 					case "tool-error":
 						return (
-							<div key={i} className="text-[10px] text-red-400/60">
+							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+							<div key={k} className="text-[10px] text-red-400/60">
 								error: {part.toolName} - {part.error}
 							</div>
 						);
@@ -286,7 +296,19 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 				}
 			}}
 		>
-			<div className="flex items-start gap-2 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+			<div
+				role="button"
+				tabIndex={0}
+				aria-expanded={expanded}
+				className="flex items-start gap-2 cursor-pointer"
+				onClick={() => setExpanded(!expanded)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						setExpanded((prev) => !prev);
+					}
+				}}
+			>
 				<span className="text-[10px] mt-0.5 shrink-0 w-5" style={{ color: "var(--muted)" }}>
 					{expanded ? "▼" : "▶"}
 				</span>
@@ -333,23 +355,51 @@ function EntryContent({ entry }: { entry: SessionEntry }) {
 	);
 }
 
+interface StreamState {
+	entries: SessionEntry[];
+	initialLoaded: boolean;
+}
+
+type StreamAction =
+	| { type: "reset" }
+	| { type: "append"; entries: SessionEntry[] }
+	| { type: "initial-load-complete" };
+
+function streamReducer(state: StreamState, action: StreamAction): StreamState {
+	switch (action.type) {
+		case "reset":
+			return { entries: [], initialLoaded: false };
+		case "append":
+			return { ...state, entries: [...state.entries, ...action.entries] };
+		case "initial-load-complete":
+			return { ...state, initialLoaded: true };
+		default:
+			return state;
+	}
+}
+
 export default function SessionViewer({
 	session,
 }: {
 	session: SessionInfo;
 }) {
-	const [entries, setEntries] = useState<SessionEntry[]>([]);
+	const [stream, dispatchStream] = useReducer(streamReducer, {
+		entries: [] as SessionEntry[],
+		initialLoaded: false,
+	});
+	// isLive drives the auto-scroll effect (it is read by the effect dep array, not the JSX).
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [isLive, setIsLive] = useState(true);
-	const [initialLoaded, setInitialLoaded] = useState(false);
 	const [typeFilter, setTypeFilter] = useState<string | null>(null);
 	const [copiedJson, setCopiedJson] = useState(false);
 	const [copiedUrl, setCopiedUrl] = useState(false);
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 
+	const { entries, initialLoaded } = stream;
+
 	useEffect(() => {
-		setEntries([]);
-		setInitialLoaded(false);
+		dispatchStream({ type: "reset" });
 
 		const url = `/api/sessions/${session.sessionId}/stream`;
 		const es = new EventSource(url);
@@ -362,7 +412,7 @@ export default function SessionViewer({
 				const data = JSON.parse(event.data);
 
 				if (data.type === "__initial_load_complete__") {
-					setInitialLoaded(true);
+					dispatchStream({ type: "initial-load-complete" });
 					return;
 				}
 				if (data.type === "__error__") {
@@ -374,7 +424,7 @@ export default function SessionViewer({
 				if (!batchTimeout) {
 					batchTimeout = setTimeout(() => {
 						const flushing = batch.splice(0);
-						setEntries((prev) => [...prev, ...flushing]);
+						dispatchStream({ type: "append", entries: flushing });
 						batchTimeout = null;
 					}, 50);
 				}
@@ -493,7 +543,7 @@ export default function SessionViewer({
 							{copiedJson ? "✓ Copied JSON" : "Copy as JSON"}
 						</button>
 						{!initialLoaded && (
-							<span className="text-[10px] text-amber-400 animate-pulse">Loading...</span>
+							<span className="text-[10px] text-amber-400 animate-pulse">Loading&hellip;</span>
 						)}
 						{initialLoaded && (
 							<span
@@ -549,7 +599,13 @@ export default function SessionViewer({
 			{/* Entries */}
 			<div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
 				{filtered.map((entry, i) => (
-					<EntryContent key={`${entry.sequenceNumber ?? i}-${i}`} entry={entry} />
+					// Entries are append-only (live tail). sequenceNumber is the natural key when present;
+					// fall back to a synthetic stable key when older v1 sessions lack it.
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+					<EntryContent
+						key={entry.sequenceNumber ?? `idx-${i}-${entry.type}`}
+						entry={entry}
+					/>
 				))}
 				<div ref={bottomRef} />
 			</div>

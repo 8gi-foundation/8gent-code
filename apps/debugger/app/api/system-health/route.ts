@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { NextResponse } from "next/server";
@@ -23,10 +24,10 @@ let _parser: ((filePath: string) => ParseResult) | null | undefined = undefined;
 function getParser(): ((filePath: string) => ParseResult) | null {
 	if (_parser !== undefined) return _parser;
 	try {
-		// Use eval to prevent Turbopack from statically analyzing this import
-		const mod = eval(
-			`require("${join(PROJECT_ROOT, "packages/ast-index/typescript-parser").replace(/\\/g, "/")}")`,
-		);
+		// createRequire bypasses Turbopack static analysis without resorting to eval.
+		// The path is a fixed constant under PROJECT_ROOT, not user input.
+		const requireFn = createRequire(import.meta.url);
+		const mod = requireFn(join(PROJECT_ROOT, "packages/ast-index/typescript-parser"));
 		_parser = mod.parseTypeScriptFile ?? null;
 	} catch {
 		_parser = null;
@@ -104,13 +105,13 @@ function getASTStats(): ASTStats {
 	};
 
 	const extensions = [".ts", ".tsx", ".js", ".jsx"];
-	const ignoreDirs = ["node_modules", "dist", ".git", ".next", "coverage"];
+	const ignoreDirs = new Set(["node_modules", "dist", ".git", ".next", "coverage"]);
 
 	function walk(dir: string): void {
 		try {
 			const entries = readdirSync(dir, { withFileTypes: true });
 			for (const entry of entries) {
-				if (ignoreDirs.includes(entry.name) || entry.name.startsWith(".")) continue;
+				if (ignoreDirs.has(entry.name) || entry.name.startsWith(".")) continue;
 				const full = join(dir, entry.name);
 				if (entry.isDirectory()) {
 					walk(full);
@@ -121,8 +122,9 @@ function getASTStats(): ASTStats {
 					}
 
 					stats.filesIndexed++;
+					const name = entry.name;
 					const lang =
-						entry.name.endsWith(".ts") || entry.name.endsWith(".tsx") ? "typescript" : "javascript";
+						name.endsWith(".ts") || name.endsWith(".tsx") ? "typescript" : "javascript";
 					stats.languages[lang] = (stats.languages[lang] || 0) + 1;
 
 					try {
@@ -189,36 +191,50 @@ async function getSessionStats(): Promise<SessionStats> {
 		const files = (await readdir(sessionsDir)).filter((f) => f.endsWith(".jsonl"));
 		stats.totalSessions = files.length;
 
-		// Sample last 10 sessions for stats
+		// Sample last 10 sessions for stats — read in parallel, merge into shared stats once each resolves.
 		const recent = files.slice(-10);
-		for (const file of recent) {
-			try {
-				const content = await readFile(join(sessionsDir, file), "utf-8");
-				const lines = content.split("\n").filter(Boolean);
-
-				let isLive = true;
-				for (const line of lines) {
-					try {
-						const entry = JSON.parse(line);
-						if (entry.type === "session_start" && entry.meta?.agent?.model) {
-							const model = entry.meta.agent.model;
-							stats.models[model] = (stats.models[model] || 0) + 1;
+		const perFile = await Promise.all(
+			recent.map(async (file) => {
+				const out = {
+					isLive: true,
+					tokens: 0,
+					toolCalls: 0,
+					models: [] as string[],
+				};
+				try {
+					const content = await readFile(join(sessionsDir, file), "utf-8");
+					for (const line of content.split("\n")) {
+						if (!line) continue;
+						try {
+							const entry = JSON.parse(line);
+							if (entry.type === "session_start" && entry.meta?.agent?.model) {
+								out.models.push(entry.meta.agent.model);
+							}
+							if (entry.type === "session_end") {
+								out.isLive = false;
+								if (entry.summary?.totalTokens) out.tokens += entry.summary.totalTokens;
+								if (entry.summary?.totalUsage?.totalTokens)
+									out.tokens += entry.summary.totalUsage.totalTokens;
+								if (entry.summary?.totalToolCalls)
+									out.toolCalls += entry.summary.totalToolCalls;
+							}
+						} catch {
+							/* skip malformed line */
 						}
-						if (entry.type === "session_end") {
-							isLive = false;
-							if (entry.summary?.totalTokens) stats.totalTokens += entry.summary.totalTokens;
-							if (entry.summary?.totalUsage?.totalTokens)
-								stats.totalTokens += entry.summary.totalUsage.totalTokens;
-							if (entry.summary?.totalToolCalls)
-								stats.totalToolCalls += entry.summary.totalToolCalls;
-						}
-					} catch {
-						/* skip */
 					}
+				} catch {
+					/* unreadable file */
 				}
-				if (isLive) stats.liveSessions++;
-			} catch {
-				/* skip */
+				return out;
+			}),
+		);
+
+		for (const r of perFile) {
+			if (r.isLive) stats.liveSessions++;
+			stats.totalTokens += r.tokens;
+			stats.totalToolCalls += r.toolCalls;
+			for (const model of r.models) {
+				stats.models[model] = (stats.models[model] || 0) + 1;
 			}
 		}
 	} catch {
