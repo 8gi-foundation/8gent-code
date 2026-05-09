@@ -146,6 +146,13 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	// onStepFinish. The first measurement covers the initial step; subsequent
 	// measurements cover only the LLM portion (tool execution time excluded).
 	let stepStartedAt = Date.now();
+	// Some AI SDK providers report per-step output tokens; others return the
+	// running cumulative across the whole generateText run. Treat the figure
+	// as cumulative-since-last-measurement: keep the previous value, take a
+	// non-negative delta, reset on a downward jump (new turn / new run). This
+	// behaves correctly under either semantic without the harness having to
+	// know which one the provider chose.
+	let lastSeenOutputTokens = 0;
 	// Exponentially-weighted rolling tps so the bottom-bar number doesn't
 	// jitter on tiny one-token chunks. Alpha 0.3 keeps it responsive but stable.
 	let smoothedTps = 0;
@@ -209,8 +216,23 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		onStepFinish: config.onStepFinish
 			? (event: any) => {
 					const durationMs = Math.max(1, Date.now() - stepStartedAt);
-					const completionTokens = mapUsage(event.usage).completionTokens || 0;
-					const instantTps = completionTokens > 0 ? (completionTokens / durationMs) * 1000 : 0;
+					const cumulativeOutputTokens = mapUsage(event.usage).completionTokens || 0;
+					// Detect a downward jump (new generateText run): reset the
+					// baseline so we don't flag a negative delta as "no progress".
+					if (cumulativeOutputTokens < lastSeenOutputTokens) {
+						lastSeenOutputTokens = 0;
+					}
+					const stepOutputTokens = cumulativeOutputTokens - lastSeenOutputTokens;
+					lastSeenOutputTokens = cumulativeOutputTokens;
+					// Gate: ignore "tool-result" intermediate steps that emit
+					// no new tokens, and ignore implausibly fast measurements
+					// (durationMs < 200ms typically means the timer was reset
+					// by an upstream callback after the LLM already started).
+					// Cap at 5000 t/s — well above any real provider — so a
+					// stale measurement can never poison the EWMA.
+					const isPlausible =
+						stepOutputTokens >= 5 && durationMs >= 200;
+					const instantTps = isPlausible ? Math.min(5000, (stepOutputTokens / durationMs) * 1000) : 0;
 					if (instantTps > 0) {
 						smoothedTps = smoothedTps === 0 ? instantTps : smoothedTps * 0.7 + instantTps * 0.3;
 						setRuntimeParams({

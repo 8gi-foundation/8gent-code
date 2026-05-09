@@ -52,14 +52,15 @@ export interface AgentInstrumentStripProps {
 	tokensPerSecond?: number;
 }
 
-/** Format tokens-per-second into a compact 4-5 char string for the cell.
- *  Avoids decimals over 100 (where ±1 tok/s is noise) and keeps the unit
- *  inline so it reads at a glance: "61 t/s", "234 t/s", "9.8 t/s". */
+/** Format tokens-per-second into a compact 5-7 char string for the cell.
+ *  Drops the space before the unit so it stays inside narrow card widths:
+ *  "61t/s", "234t/s", "9.8t/s". The Tokens card is the most squeezed
+ *  cell in the strip, so every character matters. */
 function formatTps(tps: number): string {
 	if (tps <= 0) return "";
-	if (tps >= 100) return `${Math.round(tps)} t/s`;
-	if (tps >= 10) return `${tps.toFixed(0)} t/s`;
-	return `${tps.toFixed(1)} t/s`;
+	if (tps >= 100) return `${Math.round(tps)}t/s`;
+	if (tps >= 10) return `${tps.toFixed(0)}t/s`;
+	return `${tps.toFixed(1)}t/s`;
 }
 
 /** Resolve the bottom-HUD USER label. Env-driven so the card reads as the
@@ -104,14 +105,18 @@ export function AgentInstrumentStrip({
 
 			<StatusCard label="Tokens">
 				<Box width="100%" overflow="hidden">
-					<Box width={6} flexShrink={0}>
-						<Text color={ui.steel}>▁▂▃▄▅▆</Text>
-					</Box>
+					{/* Meter only shown when the cell has space for it; with tps
+					 *  visible we drop it entirely to make room for "n · 61t/s". */}
+					{!tpsLabel && (
+						<Box width={6} flexShrink={0}>
+							<Text color={ui.steel}>▁▂▃▄▅▆</Text>
+						</Box>
+					)}
 					<Box flexGrow={1} minWidth={0} justifyContent="flex-end">
 						<Text color={ui.cream} wrap="truncate-end">
 							{tpsLabel ? (
 								<>
-									{tokens}
+									{tokens.replace(/ tok$/, "")}
 									<Text color={ui.steel}> · </Text>
 									<Text color={ui.teal}>{tpsLabel}</Text>
 								</>
