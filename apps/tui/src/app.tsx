@@ -705,6 +705,11 @@ export function App({
 	const [stepCount, setStepCount] = useState(0);
 	const [toolCount, setToolCount] = useState(0);
 	const [totalTokens, setTotalTokens] = useState(0);
+	// Smoothed output tok/s from the most recent agent step. Resets to 0
+	// when the next prompt fires, so the bottom bar always reflects the
+	// turn the user just saw stream rather than a stale figure from
+	// hours ago.
+	const [tokensPerSecond, setTokensPerSecond] = useState(0);
 	// tokensSaved removed — using real totalTokens from agent events
 	const [startTime] = useState(new Date());
 	// 1s ticker for the BottomBar session timer.
@@ -1977,6 +1982,13 @@ export function App({
 				if (isActive) {
 					setStepCount((prev) => prev + 1);
 					setTotalTokens((prev) => prev + event.usage.totalTokens);
+					if (event.tokensPerSecond && event.tokensPerSecond > 0) {
+						// Same EWMA shape as packages/ai/agent.ts so the TUI
+						// reading matches what self_inspect reports to the agent.
+						setTokensPerSecond((prev) =>
+							prev === 0 ? event.tokensPerSecond! : prev * 0.7 + event.tokensPerSecond! * 0.3,
+						);
+					}
 				}
 				logStep(tabId, tabTitle, event.stepNumber, event.usage.totalTokens, event.text);
 
@@ -5666,6 +5678,7 @@ export function App({
 					sessionTime={sessionTime}
 					mode={agentMode}
 					isProcessing={isProcessing}
+					tokensPerSecond={tokensPerSecond}
 				/>
 			</FixedFrame>
 		</ADHDModeContext.Provider>

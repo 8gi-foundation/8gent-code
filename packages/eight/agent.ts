@@ -966,6 +966,8 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 						completionTokens: event.usage.completionTokens,
 						totalTokens: event.usage.totalTokens,
 					},
+					durationMs: (event as any).durationMs,
+					tokensPerSecond: (event as any).tokensPerSecond,
 				});
 
 				// Check for premature completion claims

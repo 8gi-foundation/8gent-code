@@ -12,7 +12,7 @@
 import { ToolLoopAgent, stepCountIs } from "ai";
 import type { GenerateTextResult, LanguageModel, ToolSet } from "ai";
 import { type ProviderConfig, createModel } from "./providers";
-import { type AgentTools, agentTools, setToolContext } from "./tools";
+import { type AgentTools, agentTools, setRuntimeParams, setToolContext } from "./tools";
 
 export interface EightAgentConfig {
 	/** Provider configuration */
@@ -54,6 +54,12 @@ export interface StepFinishEvent {
 	finishReason: string;
 	/** Raw finish reason from provider */
 	rawFinishReason?: string;
+	/** Wall-clock duration of the LLM call for this step (ms). Excludes
+	 *  tool execution time when a tool ran in the previous step. */
+	durationMs?: number;
+	/** Output tokens per second observed for this step (instantaneous,
+	 *  not smoothed). 0 if the step generated no completion tokens. */
+	tokensPerSecond?: number;
 	/** Reasoning/thinking content if model supports it */
 	reasoning?: Array<{ type: string; text: string; signature?: string }>;
 	/** Reasoning as flat text */
@@ -135,6 +141,15 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 
 	const model = createModel(config.provider);
 
+	// Track per-step timing for tokens-per-second measurement. Reset at the
+	// start of each LLM call: build start, after tool returns, and after each
+	// onStepFinish. The first measurement covers the initial step; subsequent
+	// measurements cover only the LLM portion (tool execution time excluded).
+	let stepStartedAt = Date.now();
+	// Exponentially-weighted rolling tps so the bottom-bar number doesn't
+	// jitter on tiny one-token chunks. Alpha 0.3 keeps it responsive but stable.
+	let smoothedTps = 0;
+
 	// LM Studio has limited context — 49 tools blows the context window.
 	// For local providers, use only the core coding tools.
 	const CORE_TOOLS = [
@@ -193,12 +208,25 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 
 		onStepFinish: config.onStepFinish
 			? (event: any) => {
+					const durationMs = Math.max(1, Date.now() - stepStartedAt);
+					const completionTokens = mapUsage(event.usage).completionTokens || 0;
+					const instantTps = completionTokens > 0 ? (completionTokens / durationMs) * 1000 : 0;
+					if (instantTps > 0) {
+						smoothedTps = smoothedTps === 0 ? instantTps : smoothedTps * 0.7 + instantTps * 0.3;
+						setRuntimeParams({
+							lastTokensPerSecond: instantTps,
+							avgTokensPerSecond: smoothedTps,
+						});
+					}
+					stepStartedAt = Date.now();
 					const stepEvent: StepFinishEvent = {
 						stepNumber: event.stepNumber ?? 0,
 						stepType: event.stepType ?? "unknown",
 						text: event.text ?? "",
 						finishReason: event.finishReason ?? "other",
 						rawFinishReason: event.rawFinishReason,
+						durationMs,
+						tokensPerSecond: instantTps,
 						reasoning: event.reasoning?.length
 							? event.reasoning.map((r: any) => ({
 									type: r.type ?? "reasoning",
@@ -262,20 +290,21 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 				}
 			: undefined,
 
-		experimental_onToolCallFinish: config.onToolCallFinish
-			? (event: any) => {
-					return config.onToolCallFinish?.({
-						toolCallId: event.toolCall?.toolCallId ?? "",
-						toolName: event.toolCall?.toolName ?? "",
-						args: event.toolCall?.args ?? event.toolCall?.input ?? {},
-						success: event.success ?? true,
-						result: event.output,
-						error: event.error,
-						durationMs: event.durationMs ?? 0,
-						stepNumber: event.stepNumber,
-					});
-				}
-			: undefined,
+		experimental_onToolCallFinish: (event: any) => {
+				// Tool finished → next LLM step is about to start. Reset the timer
+				// so the next durationMs measures only that LLM call, not the gap.
+				stepStartedAt = Date.now();
+				return config.onToolCallFinish?.({
+					toolCallId: event.toolCall?.toolCallId ?? "",
+					toolName: event.toolCall?.toolName ?? "",
+					args: event.toolCall?.args ?? event.toolCall?.input ?? {},
+					success: event.success ?? true,
+					result: event.output,
+					error: event.error,
+					durationMs: event.durationMs ?? 0,
+					stepNumber: event.stepNumber,
+				});
+			},
 
 		onFinish: config.onFinish
 			? (event: any) => {

@@ -56,6 +56,11 @@ export interface AgentStepEvent {
 		completionTokens: number;
 		totalTokens: number;
 	};
+	/** Wall-clock duration of the LLM call for this step (ms). Excludes the
+	 *  preceding tool-execution gap so the figure reflects model speed only. */
+	durationMs?: number;
+	/** Output tokens per second observed for this step. */
+	tokensPerSecond?: number;
 }
 
 /** Event emitted when evidence is collected */
