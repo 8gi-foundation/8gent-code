@@ -1,0 +1,6 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"entry": ["app/**/page.{ts,tsx}", "app/**/layout.{ts,tsx}", "app/**/route.ts", "public/theme-init.js"],
+	"project": ["app/**/*.{ts,tsx}", "public/theme-init.js"],
+	"ignore": ["public/trivia.html"]
+}

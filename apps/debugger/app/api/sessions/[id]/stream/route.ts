@@ -16,6 +16,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 	console.log(`[Stream API] Request for session: ${sessionId}`);
 	console.log(`[Stream API] Looking for file: ${filePath}`);
 
+	// Per-request session file derived from sessionId param; not a static asset, cannot hoist.
+	// react-doctor-disable-next-line react-doctor/server-hoist-static-io
 	const fileStat = await stat(filePath).catch(() => null);
 	if (!fileStat?.isFile()) {
 		console.error(`[Stream API] File not found: ${filePath}`);
@@ -32,7 +34,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 	const stream = new ReadableStream({
 		async start(controller) {
 			try {
-				// Send full file first
+				// Send full file first. Per-request live JSONL, mutates while connection is open.
+				// react-doctor-disable-next-line react-doctor/server-hoist-static-io
 				const content = await readFile(filePath, "utf-8");
 				const lines = content.split("\n").filter(Boolean);
 				let sentLines = lines.length;
@@ -58,6 +61,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 				const watcher = watch(filePath, async (eventType) => {
 					console.log(`[Stream API] File watcher fired: eventType=${eventType}`);
 					try {
+						// Live tail: re-read on every fs.watch event to capture appended lines.
+						// react-doctor-disable-next-line react-doctor/server-hoist-static-io
 						const newContent = await readFile(filePath, "utf-8");
 						const newLines = newContent.split("\n").filter(Boolean);
 

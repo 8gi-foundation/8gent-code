@@ -1,11 +1,14 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-import { homedir } from "node:os";
+
+const SESSIONS_DIR = join(homedir(), ".8gent", "sessions");
+const JSONL_SUFFIX = ".jsonl";
 
 export interface SessionInfo {
 	sessionId: string;
@@ -28,9 +31,7 @@ export interface SessionInfo {
 	totalSteps: number | null;
 }
 
-const SESSIONS_DIR = join(homedir(), ".8gent", "sessions");
-
-async function getSessionMeta(filePath: string): Promise<{
+interface SessionMeta {
 	startedAt: string | null;
 	firstUserMessage: string | null;
 	model: string | null;
@@ -43,21 +44,23 @@ async function getSessionMeta(filePath: string): Promise<{
 	lineCount: number;
 	version: number;
 	totalSteps: number | null;
-}> {
+}
+
+async function getSessionMeta(filePath: string): Promise<SessionMeta> {
 	return new Promise((resolve) => {
-		const result = {
-			startedAt: null as string | null,
-			firstUserMessage: null as string | null,
-			model: null as string | null,
-			runtime: null as string | null,
-			gitBranch: null as string | null,
-			workingDirectory: null as string | null,
+		const result: SessionMeta = {
+			startedAt: null,
+			firstUserMessage: null,
+			model: null,
+			runtime: null,
+			gitBranch: null,
+			workingDirectory: null,
 			completed: false,
-			exitReason: null as string | null,
-			durationMs: null as number | null,
+			exitReason: null,
+			durationMs: null,
 			lineCount: 0,
-			version: 1 as number,
-			totalSteps: null as number | null,
+			version: 1,
+			totalSteps: null,
 		};
 
 		let lastLine: string | null = null;
@@ -115,45 +118,50 @@ async function getSessionMeta(filePath: string): Promise<{
 	});
 }
 
+async function buildSessionInfo(file: string): Promise<SessionInfo> {
+	const filePath = join(SESSIONS_DIR, file);
+	const fileStat = await stat(filePath);
+	const sessionId = file.replace(JSONL_SUFFIX, "");
+	const meta = await getSessionMeta(filePath);
+
+	return {
+		sessionId,
+		filePath,
+		startedAt: meta.startedAt || fileStat.birthtime.toISOString(),
+		modifiedAt: fileStat.mtime.toISOString(),
+		sizeBytes: fileStat.size,
+		lineCount: meta.lineCount,
+		firstUserMessage: meta.firstUserMessage,
+		model: meta.model,
+		runtime: meta.runtime,
+		gitBranch: meta.gitBranch,
+		workingDirectory: meta.workingDirectory,
+		completed: meta.completed,
+		exitReason: meta.exitReason,
+		durationMs: meta.durationMs,
+		version: meta.version,
+		totalSteps: meta.totalSteps,
+	};
+}
+
 export async function GET() {
 	console.log(`[Sessions API] Listing sessions from ${SESSIONS_DIR}`);
 	try {
-		let files: string[] = [];
+		let entries: string[] = [];
 		try {
-			files = (await readdir(SESSIONS_DIR)).filter((f) => f.endsWith(".jsonl"));
-			console.log(`[Sessions API] Found ${files.length} .jsonl files:`, files);
+			// Live directory: contents change between requests as new sessions land. Cannot hoist.
+			// react-doctor-disable-next-line react-doctor/server-hoist-static-io
+			entries = await readdir(SESSIONS_DIR);
 		} catch (dirErr) {
 			console.log(`[Sessions API] Directory not found: ${SESSIONS_DIR}`, dirErr);
 			return NextResponse.json([]);
 		}
 
-		const sessions: SessionInfo[] = [];
+		const files = entries.filter((f) => f.endsWith(JSONL_SUFFIX));
+		console.log(`[Sessions API] Found ${files.length} .jsonl files:`, files);
 
-		for (const file of files) {
-			const filePath = join(SESSIONS_DIR, file);
-			const fileStat = await stat(filePath);
-			const sessionId = file.replace(".jsonl", "");
-			const meta = await getSessionMeta(filePath);
-
-			sessions.push({
-				sessionId,
-				filePath,
-				startedAt: meta.startedAt || fileStat.birthtime.toISOString(),
-				modifiedAt: fileStat.mtime.toISOString(),
-				sizeBytes: fileStat.size,
-				lineCount: meta.lineCount,
-				firstUserMessage: meta.firstUserMessage,
-				model: meta.model,
-				runtime: meta.runtime,
-				gitBranch: meta.gitBranch,
-				workingDirectory: meta.workingDirectory,
-				completed: meta.completed,
-				exitReason: meta.exitReason,
-				durationMs: meta.durationMs,
-				version: meta.version,
-				totalSteps: meta.totalSteps,
-			});
-		}
+		// Parallel read so the route is bounded by the slowest file, not the sum.
+		const sessions = await Promise.all(files.map(buildSessionInfo));
 
 		// Newest first
 		sessions.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());

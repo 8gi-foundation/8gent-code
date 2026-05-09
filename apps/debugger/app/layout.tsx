@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -20,18 +21,8 @@ export default function RootLayout({
 	return (
 		<html lang="en" suppressHydrationWarning>
 			<head>
-				<script
-					dangerouslySetInnerHTML={{
-						__html: `
-          (function() {
-            var theme = localStorage.getItem('8gent-debugger-theme');
-            if (theme === 'dark') document.documentElement.classList.add('dark');
-            else if (theme === 'light') document.documentElement.classList.remove('dark');
-            else if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
-          })();
-        `,
-					}}
-				/>
+				{/* Theme bootstrap loads before hydration to prevent flash. Static file, no runtime input. */}
+				<Script src="/theme-init.js" strategy="beforeInteractive" />
 			</head>
 			<body className={`${geistMono.variable} font-mono antialiased`}>{children}</body>
 		</html>
