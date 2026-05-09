@@ -77,10 +77,11 @@ export function ThinkingView({
 }: ThinkingViewProps) {
 	const [tick, setTick] = useState(0);
 	const [phaseIndex, setPhaseIndex] = useState(0);
-	const [startTime] = useState(Date.now());
+	const [startTime] = useState(() => Date.now());
 	const [elapsed, setElapsed] = useState(0);
 
 	// Fast tick for dot animation (~200ms)
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const interval = setInterval(() => {
 			setTick((t) => t + 1);

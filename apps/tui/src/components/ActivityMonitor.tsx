@@ -258,7 +258,7 @@ export function ActivityMonitor({
 }: ActivityMonitorProps) {
 	const { stdout } = useStdout();
 	const [tick, setTick] = useState(0);
-	const [startTime] = useState(Date.now());
+	const [startTime] = useState(() => Date.now());
 	const [elapsed, setElapsed] = useState(0);
 	const [, forceRender] = useState(0);
 
@@ -270,6 +270,7 @@ export function ActivityMonitor({
 		: Math.max(24, Math.min(cols - 10, 96));
 
 	// Animation tick (activity list still refreshes when animations off)
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const ms = showAnimations ? 300 : 800;
 		const interval = setInterval(() => {

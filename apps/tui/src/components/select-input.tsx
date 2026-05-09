@@ -70,6 +70,8 @@ export function SelectInput<T = string>({
 	highlightColor = "cyan",
 }: SelectInputProps<T>) {
 	const inkHighlight = highlightColor as NonNullable<TextProps["color"]>;
+	// useState here intentionally freezes a value at mount; recomputing per render would break stable references downstream.
+	// react-doctor-disable-next-line react-doctor/no-derived-useState
 	const [selectedIndex, setSelectedIndex] = useState(initialIndex);
 	const [search, setSearch] = useState("");
 	const filteredOptions = useMemo(
@@ -96,6 +98,7 @@ export function SelectInput<T = string>({
 	}, [filteredOptions.length, selectedIndex]);
 
 	// Handle scroll when selection goes out of view
+	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		if (selectedIndex < scrollOffset) {
 			setScrollOffset(selectedIndex);

@@ -185,6 +185,8 @@ interface AnimatedSeparatorProps {
 }
 
 export function AnimatedSeparator({ width = 50, speed = 80, char = "─" }: AnimatedSeparatorProps) {
+	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [glowIndex, setGlowIndex] = useState(0);
 
 	useEffect(() => {

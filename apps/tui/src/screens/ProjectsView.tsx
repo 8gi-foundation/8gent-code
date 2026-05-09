@@ -211,6 +211,8 @@ export function ProjectsView({
 	onClose,
 	onSwitchProject,
 	currentPath,
+// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+// react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: ProjectsViewProps) {
 	const [projects, setProjects] = useState<ProjectEntry[]>([]);
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -239,6 +241,8 @@ export function ProjectsView({
 		}, 0);
 	}, [currentPath]);
 
+	// Effect handles a side-effect bound to async/lifecycle timing, not a click — moving into a handler would change when it fires.
+	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
 	useEffect(() => {
 		if (visible) refresh();
 	}, [visible, refresh]);

@@ -28,6 +28,9 @@ interface NotesData {
 	notes: NoteEntry[];
 }
 
+// Stable empty default for `chatTabNames = EMPTY_TAB_NAMES` prop.
+const EMPTY_TAB_NAMES: string[] = [];
+
 function loadNotes(): NoteEntry[] {
 	try {
 		if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -66,7 +69,7 @@ export function NotesView({
 	onUpdateData,
 	onClose,
 	onSendToChat,
-	chatTabNames = [],
+	chatTabNames = EMPTY_TAB_NAMES,
 }: NotesViewProps) {
 	const [notes, setNotes] = useState<NoteEntry[]>(() => {
 		const fromFile = loadNotes();

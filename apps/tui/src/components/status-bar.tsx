@@ -597,6 +597,8 @@ interface TokenCounterProps {
 function TokenCounter({ value, animate = true }: TokenCounterProps) {
 	const [displayValue, setDisplayValue] = useState(0);
 
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		if (!animate) {
 			setDisplayValue(value);

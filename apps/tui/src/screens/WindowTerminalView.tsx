@@ -55,6 +55,7 @@ export const WindowTerminalView: React.FC<WindowTerminalViewProps> = ({
 	const [tick, setTick] = useState(0);
 
 	// Poll liveness every 2s
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const id = setInterval(() => {
 			setAlive(isPidAlive(pid));

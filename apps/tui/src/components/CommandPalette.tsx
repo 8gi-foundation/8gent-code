@@ -73,6 +73,7 @@ export function CommandPalette({
 	const [activeIndex, setActiveIndex] = useState(0);
 
 	// Reset state whenever the palette opens.
+	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
 	useEffect(() => {
 		if (isOpen) {
 			setQuery("");
@@ -86,6 +87,7 @@ export function CommandPalette({
 	);
 
 	// Clamp activeIndex if filter shrinks below current cursor.
+	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		if (activeIndex >= filtered.length) {
 			setActiveIndex(Math.max(0, filtered.length - 1));

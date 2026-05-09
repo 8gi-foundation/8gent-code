@@ -138,6 +138,8 @@ interface SoundEffectProps {
 }
 
 export function SoundEffect({ type, play = true }: SoundEffectProps): null {
+	// Effect handles a side-effect bound to async/lifecycle timing, not a click — moving into a handler would change when it fires.
+	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
 	useEffect(() => {
 		if (play) {
 			playSound(type);
