@@ -143,3 +143,107 @@ export class ToolLoopDetector {
 		this.totalCalls = 0;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DoomLoopDetector: period 1 to 4 cycle detection on a sliding 12-call window
+// with normalized JSON-arg signatures. See issue #2461.
+// ---------------------------------------------------------------------------
+
+export interface DoomToolCall {
+	toolName: string;
+	args: unknown;
+}
+
+export interface DoomLoopDetectorConfig {
+	/** Sliding window length (default 12). */
+	windowSize?: number;
+	/** Max period to scan (default 4). */
+	maxPeriod?: number;
+}
+
+/**
+ * Stable JSON serializer with deterministic key order. Used to canonicalize
+ * tool-call args so cosmetic differences (key order, whitespace) do not
+ * register as distinct signatures.
+ */
+function stableStringify(value: unknown): string {
+	if (value === null || typeof value !== "object") {
+		return JSON.stringify(value);
+	}
+	if (Array.isArray(value)) {
+		return `[${value.map(stableStringify).join(",")}]`;
+	}
+	const obj = value as Record<string, unknown>;
+	const keys = Object.keys(obj).sort();
+	return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
+}
+
+function normalizeArgs(args: unknown): string {
+	if (args === undefined) return "";
+	if (typeof args === "string") {
+		// If it parses as JSON, normalize; otherwise use raw string.
+		try {
+			return stableStringify(JSON.parse(args));
+		} catch {
+			return JSON.stringify(args);
+		}
+	}
+	return stableStringify(args);
+}
+
+function signature(call: DoomToolCall): string {
+	return `${call.toolName}:${normalizeArgs(call.args)}`;
+}
+
+/**
+ * Detects repeating cycles in a stream of tool calls. Build the signature
+ * stream, truncate to the sliding window, then scan periods 1..maxPeriod for
+ * a tail that repeats `reps` times (reps = 3 for period 1, else 2).
+ */
+export class DoomLoopDetector {
+	private history: string[] = [];
+	private windowSize: number;
+	private maxPeriod: number;
+
+	constructor(config: DoomLoopDetectorConfig = {}) {
+		this.windowSize = config.windowSize ?? 12;
+		this.maxPeriod = config.maxPeriod ?? 4;
+	}
+
+	reset(): void {
+		this.history = [];
+	}
+
+	/**
+	 * Append `calls` to history (truncating to windowSize) and return true
+	 * if a period-1..maxPeriod cycle is detected at the tail.
+	 */
+	check(calls: DoomToolCall[]): boolean {
+		for (const c of calls) {
+			this.history.push(signature(c));
+		}
+		if (this.history.length > this.windowSize) {
+			this.history = this.history.slice(this.history.length - this.windowSize);
+		}
+
+		const hist = this.history;
+		const len = hist.length;
+
+		for (let period = 1; period <= this.maxPeriod; period++) {
+			const reps = period === 1 ? 3 : 2;
+			const needed = period * reps;
+			if (len < needed) continue;
+
+			const tail = hist.slice(len - needed);
+			let isCycle = true;
+			for (let i = 0; i < needed; i++) {
+				if (tail[i] !== tail[i % period]) {
+					isCycle = false;
+					break;
+				}
+			}
+			if (isCycle) return true;
+		}
+		return false;
+	}
+}
