@@ -683,6 +683,36 @@ export function checkCommand(command: string): PolicyDecision {
 	return evaluatePolicy("run_command", { command });
 }
 
+/**
+ * Vector evaluation for parsed bash commands (issue #2466).
+ *
+ * Each capability is mapped to its appropriate PolicyActionType and evaluated
+ * independently. The first hard-deny short-circuits and is returned. If every
+ * capability is allowed, the result is allowed.
+ *
+ * Caller is the bash tool, which calls this BEFORE spawning. Path-based
+ * capabilities flow through the existing path-guard gate automatically.
+ */
+export interface BashCapabilityLike {
+	kind: "run_command" | "write_file" | "read_file";
+	command?: string;
+	path?: string;
+}
+
+export function evaluateCapabilities(
+	caps: BashCapabilityLike[],
+	agentId?: string,
+): PolicyDecision {
+	for (const cap of caps) {
+		const ctx: PolicyContext = { agentId };
+		if (cap.command !== undefined) ctx.command = cap.command;
+		if (cap.path !== undefined) ctx.path = cap.path;
+		const decision = evaluatePolicy(cap.kind, ctx);
+		if (!decision.allowed) return decision;
+	}
+	return { allowed: true };
+}
+
 /** Quick check: is pushing to this branch allowed? */
 export function checkGitPush(branch: string): PolicyDecision {
 	return evaluatePolicy("git_push", { branch });
