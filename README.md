@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.14.0--rc-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.14.0-rc Hardened Kernel" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.17.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.17.0 Body Parts" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -259,6 +259,52 @@ bun run tui
 
 <br />
 
+## The Body Parts
+
+The agent has hands, eyes, and the cortex that coordinates them. Body-part naming is the brand: customer-facing surfaces always say *hands* / *eyes* / *handeyes*. Underlying engines are implementation details.
+
+<table>
+<tr>
+<td valign="top" width="33%">
+
+**Hands** (motor)<br />
+<sub><code>packages/hands/</code></sub><br />
+<sub>macOS desktop driver: click, type, scroll, drag, hover, press, screenshot, windows, clipboard. Backed by `cliclick` + `osascript` fallback. Used by the `desktop_*` agent tools and the `run_computer_task` CUA loop.</sub>
+
+</td>
+<td valign="top" width="33%">
+
+**Eyes** (perception)<br />
+<sub><code>packages/eyes/</code></sub><br />
+<sub>Capture, annotate, locate, describe, wait_for, diff, observe. Bundled native AX bridge at `~/.8gent/bin/8gent-ax-bridge` (Swift, no Homebrew dep). Real perceptual diff (pngjs). Two-phase VisionProvider: resolve provider id, then tier-check, then call. Agent tools `eyes_see` / `eyes_find` / `eyes_describe` / `eyes_wait_for`. Headless `apps/8gent-eyes/` CLI.</sub>
+
+</td>
+<td valign="top" width="33%">
+
+**Handeyes** (sensorimotor coordination)<br />
+<sub><code>packages/handeyes/</code></sub><br />
+<sub>Third body-part. Selectively engaged when the agent is observably stuck on a hands-only or eyes-only flow. 5 compound tools (`handeyes_locate_and_click`, `handeyes_click_and_verify`, `handeyes_type_and_confirm`, `handeyes_engage_struggle_mode`, `handeyes_exit_struggle_mode`). 4 trigger heuristics (3 live in v0.17, trigger 4 from DoomLoopDetector emitter wired pending shared accessor).</sub>
+
+</td>
+</tr>
+</table>
+
+To use end-to-end on macOS:
+
+```bash
+bun install                                           # postinstall builds the AX bridge
+# Grant Screen Recording + Accessibility once in System Settings
+ollama pull qwen2.5-vl                                # local vision (optional; enables eyes_describe)
+```
+
+Conceptual ancestry for the AX bridge: Peekaboo (MIT, Peter Steinberger 2025); see `packages/eyes/native/NOTICE`.
+
+<br />
+
+---
+
+<br />
+
 ## The 8 Powers
 
 <table>
@@ -429,7 +475,7 @@ User prompt
 | BT012 | Music Technology | Notes, Chords, Scales, Progressions | **81** |
 | BT014 | AI Consulting | Assessment Report Generator | **95** |
 
-<sub>Additional categories: long-horizon (LH001–LH005), agentic (TC001–MR001), fullstack (FS001–FS003), UI design (UI001–UI008), ability showcase.</sub>
+<sub>Additional categories: long-horizon (LH001-LH005), agentic (TC001-MR001), fullstack (FS001-FS003), UI design (UI001-UI008), ability showcase.</sub>
 
 ```bash
 bun run benchmark:v2                    # single pass
@@ -512,39 +558,42 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 <tr>
 <td valign="top" width="33%">
 
-### Just shipped (v0.14 "Hardened Kernel")
+### Just shipped (v0.17.0)
 
-Trust primitives + context engineering + model-agnostic routing. Concept-extracted from StartupHakk/OpenMonoAgent under CleanRoomPort discipline; no AGPL source copied.
+**Body-parts taxonomy** - the agent now sees and selectively coordinates eyes+hands when stuck.
 
-- DoomLoopDetector hardened (#2461)
-- SecretScanner (#2464)
-- PathGuard (#2465)
-- BashParser primitive (#2466)
-- ToolResultCache (#2462)
-- ArtifactStore (#2463)
-- TwoStageCompactor (#2467)
-- PreToolRouter (#2471)
-- TurnJournal (#2470)
+- Eyes: spec + bundled native AX bridge + perceptual diff + vision-router + agent tools + CLI
+- Handeyes: third body-part (#2526), 5 compound tools, 3 of 4 triggers live
+- DoomLoopDetector EventEmitter (#2527, RFC Option A)
+
+**v0.14 hardened kernel** (folded into this release):
+
+- DoomLoopDetector / SecretScanner / PathGuard / BashParser
+- ToolResultCache / ArtifactStore / TwoStageCompactor
+- PreToolRouter / TurnJournal
 
 </td>
 <td valign="top" width="33%">
 
 ### Next
 
-- **v0.14 launch bundle** (#2485) — CHANGELOG, post, 60s AdPitchVideo demoing live doom-loop protection
-- **BashParser runtime wiring** (#2484) — wire `gateBashCommand` into the spawn site so compound deny actually fires at runtime
-- **TUI bug fixes** — slash registry race (#2473), frame buffer corruption (#2474)
-- **Per-tab model routing** — each agent tab (Orchestrator/Engineer/QA) gets its own provider/model
-- **Voice hardening** — KittenTTS integration, full-duplex Moshi backend stabilization
+- **Trigger 4 wire** (#2537) - one line in agent.ts when shared DoomLoopDetector accessor lands
+- **`apps/8gent-handeyes` CLI** (#2538) - headless parity per dispatch-everywhere rule
+- **Mid-click re-locate** (#2539) - auto-invoke the wired hook in hands-queue
+- **BashParser runtime wiring** (#2484) - wire `gateBashCommand` into the spawn site
+- **TUI bug fixes** - slash registry race (#2473), frame buffer corruption (#2474)
+- **Per-tab model routing** - each agent tab gets its own provider/model
+- **Voice hardening** - KittenTTS integration, full-duplex Moshi backend stabilization
+- **Keychain test fix** (#2510) - clear the perpetual Validate-red blocker
 
 </td>
 <td valign="top" width="33%">
 
 ### Later / under evaluation
 
-- **Virtuoso + OPAL eval** (#2486) — federated knowledge-graph substrate for Lotus / 8gentOS data spaces. 1-week scoped spike, decision criteria filed.
-- **MCP server support** — expose 8gent tools as MCP servers for external agent consumption
-- **Extension system** — ExtensionCrafter for autonomous source-to-extension generation
+- **Virtuoso + OPAL eval** (#2486) - federated knowledge-graph substrate for Lotus / 8gentOS data spaces. 1-week scoped spike, decision criteria filed.
+- **MCP server support** - expose 8gent tools as MCP servers for external agent consumption
+- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation
 - [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
 - [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
 - Desktop client (Swift AppKit, `apps/lil-eight/`)
@@ -558,7 +607,7 @@ Trust primitives + context engineering + model-agnostic routing. Concept-extract
 ### Process amendments
 - **#2475** Constitutional amendment (2026-05-09): any extraction / refactor / feature touching MORE THAN 3 GitHub issues requires boardroom alignment + signed PRD + minutes filed BEFORE Wave 1 dispatch.
 - **CleanRoomPort skill** at `~/.claude/skills/CleanRoomPort/SKILL.md` for AGPL-safe pattern porting.
-- **Strategic note** #2469 — owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
+- **Strategic note** #2469 - owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
 
 <br />
 
