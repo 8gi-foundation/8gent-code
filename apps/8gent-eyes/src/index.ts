@@ -9,9 +9,9 @@
  *   - --json by default (always parseable, never narrative)
  *   - Deterministic exit codes:
  *       0 = ok
- *       1 = backend error (peekaboo crash, AX failure, etc.)
+ *       1 = backend error (bridge crash, AX failure, etc.)
  *       2 = perception:remote tier denied
- *       3 = peekaboo binary missing (or eyes unavailable)
+ *       3 = bridge binary missing (or eyes unavailable)
  *       64 = usage error (bad flags, missing args)
  *   - No telemetry beyond the @8gent/audit trace store
  *   - Headless parity: every Eyes method has a CLI form
@@ -150,7 +150,7 @@ async function getEyes(): Promise<Eyes> {
 	if (!backend) {
 		fail(
 			EXIT_BACKEND_UNAVAILABLE,
-			"no perception backend available. On macOS install: brew install steipete/tap/peekaboo",
+			"no perception backend available. On macOS build the bundled bridge: bash packages/eyes/native/build.sh",
 		);
 	}
 

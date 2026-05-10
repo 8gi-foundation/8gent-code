@@ -2,8 +2,8 @@
  * Smoke tests for the eyes CLI.
  *
  * These run the binary as a subprocess against the local checkout. Real
- * Peekaboo invocations are NOT exercised here (no binary in CI); we verify
- * argument parsing, exit codes, and the help/missing-backend paths.
+ * AX bridge invocations are NOT exercised here (no binary in CI); we
+ * verify argument parsing, exit codes, and the help/missing-backend paths.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -73,26 +73,35 @@ describe("eyes CLI:flag parsing", () => {
 });
 
 describe("eyes CLI:backend unavailable path", () => {
-	// When peekaboo is not installed (CI default), commands that need the
-	// backend exit 3 with an actionable install prompt.
-	it("capture exits 3 when peekaboo is missing", () => {
-		// Skip on hosts where peekaboo is installed (would actually succeed).
-		const probe = spawnSync("/usr/bin/which", ["peekaboo"], { encoding: "utf-8" });
-		if (probe.status === 0) return;
+	// When the bridge is not built (CI default), commands that need the
+	// backend exit 3 with an actionable build prompt.
+	it("capture exits 3 when 8gent-ax-bridge is missing", () => {
+		// Skip on hosts where the bridge is already built (would actually succeed).
+		const candidates = [
+			`${process.env.HOME}/.8gent/bin/8gent-ax-bridge`,
+			process.env.EIGHT_AX_BRIDGE_BIN ?? "",
+		].filter(Boolean);
+		for (const c of candidates) {
+			const probe = spawnSync(c, ["--version"], { encoding: "utf-8" });
+			if (probe.status === 0) return;
+		}
 		const r = run(["capture"]);
 		expect(r.code).toBe(3);
 		const lines = r.stdout.trim().split("\n");
 		const last = JSON.parse(lines[lines.length - 1] ?? "{}");
 		expect(last.ok).toBe(false);
-		expect(last.reason).toContain("peekaboo");
+		expect(last.reason).toMatch(/bridge|build/i);
 	});
 });
 
 describe("eyes CLI:--intent routing", () => {
 	it("\"describe the screen\" intent routes without crashing arg parser", () => {
-		// Will exit 3 (no backend) but the routing must succeed first.
+		// Possible outcomes:
+		//   0 -> bridge installed + perception:remote granted, real describe ran
+		//   1 -> backend error
+		//   2 -> bridge installed but perception:remote tier denied
+		//   3 -> bridge missing (CI default)
 		const r = run(["--intent", "describe the screen"]);
-		// Exit code 3 (backend unavailable) when peekaboo missing; 0 if installed.
-		expect([0, 1, 3]).toContain(r.code ?? -1);
+		expect([0, 1, 2, 3]).toContain(r.code ?? -1);
 	});
 });
