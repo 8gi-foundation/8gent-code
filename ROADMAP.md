@@ -19,16 +19,6 @@ Body-part sibling to hands. Eyes perceive what's on screen; hands act on what ey
 | 2512 | Vision-router wiring: shared `eyesVisionProvider` for both Ollama (local) and OpenRouter (remote); two-phase VisionProvider contract closes #2508 privacy bug (resolve-then-tier-check-then-call) | #2524 | +1 (denial-without-inference) | `packages/ai/eyes-vision-provider.ts` is canonical adapter; both agent tool and CLI consume it |
 | 2525 | Real perceptual diff replaces v0 byte-equality: pngjs-based, downscale-then-flood-fill, ~144ms on 4K, returns true changed-region bboxes for `observe()` events | #2528 | +6 | Logical-coord conversion via `Frame.scale`; threshold + downscale + minRegionPixels named constants |
 
-### Handeyes (sensorimotor coordination) - in flight
-
-| # | Module | PR | Tests | Notes |
-|---|--------|----|-------|-------|
-| 2526 | Spec + contract scaffold for the third body-part. Sensorimotor-coordination as its own package depending on hands AND eyes. | #2531 | n/a (contract PR) | Engagement loop selectively engaged when agent observably stuck; reuses spawn_agent + check_agent + merge_agent_work primitives, no new orchestration substrate |
-| 2527 | DoomLoopDetector EventEmitter hook (RFC Option A): `detector.on("stuck", { period, reps, signatures, ... })` for push-style cycle detection. Closes HANDEYES-SPEC §8 Q3. | this PR | +7 | Sync `check(): boolean` API preserved unchanged for backward compat |
-
-Open follow-ups:
-- **Engagement loop** (#2526 follow-up): the actual orchestrator, eyes-worker, hands-queue, 5 compound tools, agent-loop wiring. In flight by 8TO Rishi.
-
 To use end-to-end on macOS:
 
 ```bash
@@ -41,6 +31,27 @@ Open follow-ups (not blocking the capability):
 
 - **#2510** keychain test crashes on Linux CI (P2). Currently the only thing keeping Validate red on every eyes PR.
 - **Tail (no issue yet):** hands.screenshot migration into eyes per spec §9; Windows UIA backend; Linux X11 + Wayland backends per §8.5 ordering. (Real perceptual diff shipped via #2528 above; no longer in tail.)
+
+
+
+### Handeyes (sensorimotor coordination, third body-part) - shipped 2026-05-10
+
+The third body-part. Where hands is motor-only and eyes is perception-only, handeyes is the only package in the spine that depends on both. Default path stays the cheap sequential one (`eyes.find` → `hands.click`); the coordinator engages selectively when one of four triggers fires. Architecturally a thin coordinator over the existing `spawn_agent` / `check_agent` / `message_agent` / `merge_agent_work` primitives - no new orchestration substrate. Spec lives at `docs/specs/HANDEYES-SPEC.md`; all five §8 RFC items resolved as decisions.
+
+| # | Module | PR | Tests | Notes |
+|---|--------|----|-------|-------|
+| 2526 | Spec + contract scaffold (interface, types, adapter registry) | #2531 | n/a (scaffold PR) | Contract surface in `packages/handeyes/index.ts` + `types.ts`; locked before the loop landed |
+| 2527 | DoomLoopDetector EventEmitter hook (RFC Option A): `detector.on("stuck", DoomStuckEvent)` for push-style cycle detection. Closes HANDEYES-SPEC §8 Q3. | #2534 | +7 | Sync `check(): boolean` API preserved unchanged for backward compat |
+| 2526 | Engagement loop: 3 in-loop trigger detectors (find-zero-hits-twice, wait-for-timeout, click-no-change), DoomLoopDetector subscription via typed `.on('stuck', ...)`, struggle-mode lifecycle (open / step / forward-progress streak / ttl exhaustion / explicit / sub-agent error), per-trigger cooldown on exit | this PR | 39 | `packages/handeyes/engagement-loop.ts`. Defaults: ttl=8 steps, forward-progress streak=3, cooldown=1.5s, material-change similarity=0.95 |
+| - | Eyes worker (in-process wrapper around `eyes.observe()` publishing diff events to the orchestrator bus under `handeyes:{sessionId}:observation`) + Hands queue (FIFO motor-call serialisation, mid-click animation re-locate per spec §7.1) | this PR | (covered by 39) | `packages/handeyes/eyes-worker.ts`, `packages/handeyes/hands-queue.ts` |
+| - | Orchestrator-backed Handeyes impl wiring all five contract methods + adapter registration via `configureOrchestratorAdapter()` (lazy, avoids cycle with `index.ts`) | this PR | (covered by 39) | `packages/handeyes/handeyes-impl.ts` |
+| - | Agent tool wiring: `handeyes_locate_and_click`, `handeyes_click_and_verify`, `handeyes_type_and_confirm`, `handeyes_engage_struggle_mode`, `handeyes_exit_struggle_mode` + `coordination` category in tool-registry | this PR | (delegated to backend) | Lazy singleton `getHandeyes()` so eyes / hands boot cost is paid only when handeyes engages |
+
+Trigger 3 ("click followed by no observe-detected screen change") fires reliably on the real perceptual diff shipped in #2528 (above). Trigger 4 ("DoomLoopDetector caught a cycle") is duck-typed against the detector's `'stuck'` event so the engagement loop is independent of the agent loop's detector wiring schedule; coordinator built against an older detector simply receives no trigger-4 fires while the other three triggers still fire.
+
+Open follow-ups (not blocking the capability):
+
+- **Tail (no issue yet):** `apps/8gent-handeyes` headless CLI for `--intent` parity with `apps/8gent-eyes`; trace-store `session_id` column wiring per spec §8.5; promote tools out of the `coordination` discovery category once trigger-fire rate stabilises post-launch.
 
 
 
@@ -84,10 +95,6 @@ Per 8MO Zara boardroom recommendation 2026-05-09:
 - **#2484** wire `gateBashCommand` from BashParser into the runtime spawn site in `packages/eight/tools.ts`. Karen's flag - primitive shipped + tested, runtime integration deferred per blast-radius rule.
 - **#2473** built-in slash command registry race on TUI startup (silent fallthrough). P0.
 - **#2474** TUI frame buffer corruption (text from prior turns overlays new content). P0.
-
-### Handeyes (sensorimotor coordination, third body-part) - in flight
-
-Spec + contract scaffold landing under #2526. Adds `@8gent/handeyes` as the only package in the body-parts spine that depends on both hands and eyes; engages selectively when the agent is observably stuck (4 trigger heuristics including a DoomLoopDetector hook into #2461). Architecturally a thin coordinator over the existing `spawn_agent` / `check_agent` / `message_agent` / `merge_agent_work` primitives - no new orchestration substrate. Engagement-loop implementation lands in a follow-up PR after the perceptual-diff work in #2525 ships, since trigger heuristic 3 ("click + no observable change") needs region-aware diff events to fire usefully. Spec: `docs/specs/HANDEYES-SPEC.md`.
 
 ### Existing in flight
 
