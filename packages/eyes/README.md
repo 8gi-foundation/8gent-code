@@ -35,12 +35,24 @@ if (!backend) {
 }
 
 // 2. Inject a vision provider (used by describe + locate kind:"describe").
-//    Wire your provider chain here. The eyes backend NEVER calls models
-//    directly; it relays through this function and applies the
-//    perception:remote tier check on the resolved provider id.
-const visionProvider: VisionProvider = async ({ frame, prompt }) => {
-  // ... call your provider chain, return { provider, model, text }
-  return { provider: "ollama", model: "qwen2.5-vl", text: "..." };
+//    Two-phase contract per spec §4.2:
+//      resolveProviderId(req) -> provider id (no inference call)
+//      describe(req)          -> actual inference (after tier check)
+//    The eyes backend uses resolveProviderId to gate perception:remote
+//    BEFORE the model is called, so frame bytes never leave the device
+//    when the tier denies. The shared `eyesVisionProvider` adapter at
+//    packages/ai/eyes-vision-provider.ts is the canonical impl; build
+//    your own only if you need a custom routing policy.
+const visionProvider: VisionProvider = {
+  async resolveProviderId(_req) {
+    // Return the provider id that WILL handle this request.
+    // No model call here.
+    return "ollama";
+  },
+  async describe(req) {
+    // Actual inference. Caller (eyes backend) has already done the tier check.
+    return { provider: "ollama", model: "qwen2.5-vl", text: "..." };
+  },
 };
 
 // 3. (Optional) grant perception:remote for this session if the chain

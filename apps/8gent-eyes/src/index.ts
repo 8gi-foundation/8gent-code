@@ -154,27 +154,20 @@ async function getEyes(): Promise<Eyes> {
 		);
 	}
 
-	// v0 vision provider: local Ollama via packages/tools/image. Mirrors the
-	// adapter used by the agent loop in #2511. Remote VLM routing + the runtime
-	// egress check land in #2512.
-	const visionProvider: VisionProvider = async ({ frame, prompt }) => {
-		try {
-			// Dynamic import: the CLI keeps zero hard dep on root packages so it
-			// can be bundled standalone if needed later.
-			const mod = await import(
-				/* @vite-ignore */ "../../../packages/tools/image"
-			).catch(() => null);
-			if (!mod || typeof mod.describeImage !== "function") {
-				throw new Error("describeImage helper not found; install peekaboo + run from monorepo");
-			}
-			const r = await mod.describeImage(frame.path, prompt, "llava");
-			return { provider: "ollama", model: r.model, text: r.description };
-		} catch (e) {
-			throw new Error(
-				`vision provider failed: ${e instanceof Error ? e.message : String(e)}. Try: ollama pull llava`,
-			);
-		}
-	};
+	// VisionProvider adapter (post-#2512): shared `eyesVisionProvider` resolves
+	// via packages/eight/vision-router and dispatches inference to Ollama or
+	// OpenRouter. Two-phase contract lets the eyes backend gate perception:remote
+	// BEFORE the model is called (closes #2508).
+	const adapter = await import(
+		/* @vite-ignore */ "../../../packages/ai/eyes-vision-provider"
+	).catch(() => null);
+	if (!adapter || typeof adapter.eyesVisionProvider?.describe !== "function") {
+		fail(
+			EXIT_BACKEND_ERROR,
+			"vision adapter not found; CLI must be run from the monorepo (packages/ai/eyes-vision-provider.ts).",
+		);
+	}
+	const visionProvider: VisionProvider = adapter.eyesVisionProvider;
 
 	_eyes = backend.create({
 		visionProvider,

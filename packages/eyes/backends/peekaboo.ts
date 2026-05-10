@@ -117,12 +117,29 @@ export interface VisionRequest {
 	prompt: string;
 }
 export interface VisionResponse {
-	provider: string;        // resolved provider id, used for egress check
+	provider: string;        // actual provider that ran (may differ from resolved id if failover happened)
 	model: string;
 	text: string;
 	tokens?: number;
 }
-export type VisionProvider = (req: VisionRequest) => Promise<VisionResponse>;
+
+/**
+ * Two-phase contract per spec §4.2 / §8.4 (post-#2512).
+ *
+ * The eyes backend MUST call `resolveProviderId()` first, run the
+ * perception:remote tier check on that id, and ONLY then call `describe()`.
+ * This eliminates the v0 privacy bug (#2508) where the inference call
+ * happened before the tier check, leaking frames to remote providers even
+ * when the tier denied them.
+ *
+ * Implementations MUST cache the resolution so the inference call hits the
+ * same provider that was tier-checked. The shared adapter at
+ * `packages/ai/eyes-vision-provider.ts` is the canonical impl.
+ */
+export interface VisionProvider {
+	resolveProviderId(req: VisionRequest): Promise<string>;
+	describe(req: VisionRequest): Promise<VisionResponse>;
+}
 
 export interface PeekabooBackendOpts extends BackendOpts {
 	visionProvider?: VisionProvider;
@@ -444,27 +461,27 @@ class PeekabooEyes implements Eyes {
 			);
 		}
 
-		// We do NOT know the resolved provider id until after the call. Strategy
-		// per spec §8.4: ask the provider chain, then check egress on the
-		// returned provider id BEFORE returning the response to the caller.
-		// If egress is blocked, we discard the response and return an error
-		// shape upstream. The provider chain MUST be configured to route to a
-		// local provider first; if it landed remote without a grant, that's a
-		// configuration drift.
-		const resp = await provider({ frame, prompt });
+		// Two-phase per spec §4.2 / §8.4 (closes #2508):
+		//   1. Resolve the provider id WITHOUT calling the model.
+		//   2. Check perception:remote tier on that id.
+		//   3. Only on grant, call the inference. Frame bytes never leave the
+		//      device when the tier denies.
+		const req: VisionRequest = { frame, prompt };
+		const resolvedProviderId = await provider.resolveProviderId(req);
 		const check: PerceptionCheck = checkPerceptionRemote({
 			sessionId: this.opts.sessionId,
 			app: this.opts.app,
-			provider: resp.provider,
+			provider: resolvedProviderId,
 			calledFrom: "eyes.describe",
 			actor: this.opts.actor,
 		});
 		if (!check.ok) {
 			throw new Error(
-				`eyes/peekaboo: describe blocked by perception:remote tier (resolved provider="${resp.provider}"). ${check.reason}`,
+				`eyes/peekaboo: describe blocked by perception:remote tier (resolved provider="${resolvedProviderId}"). ${check.reason}`,
 			);
 		}
 
+		const resp = await provider.describe(req);
 		return {
 			summary: resp.text,
 			tokens: resp.tokens,

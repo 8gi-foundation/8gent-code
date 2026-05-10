@@ -2184,22 +2184,13 @@ async function getEyes(): Promise<
 		return { ok: false, reason: _eyesUnavailableReason };
 	}
 
-	// v0 VisionProvider adapter. Local-only (Ollama) by design: fixes the
-	// privacy bug in #2508 inherently because we never call a remote provider
-	// in v0. Remote VLM wiring + the runtime egress check both ship in a
-	// follow-up that wires through packages/eight/vision-router properly.
-	const visionProvider: import("@8gent/eyes").VisionProvider = async ({ frame, prompt }) => {
-		const { describeImage } = await import("../tools/image");
-		const { loadVisionConfig } = await import("../eight/vision-router");
-		const cfg = loadVisionConfig();
-		const model = cfg.defaultModel?.split(":")[0] ?? "llava";
-		const r = await describeImage(frame.path, prompt, model);
-		return {
-			provider: "ollama",   // hardcoded local; remote routing in follow-up #2511
-			model: r.model,
-			text: r.description,
-		};
-	};
+	// VisionProvider adapter (post-#2512): the shared `eyesVisionProvider`
+	// resolves the provider via packages/eight/vision-router, then dispatches
+	// inference to Ollama (local) or OpenRouter (remote). Two-phase contract
+	// means the eyes backend can check perception:remote tier on the resolved
+	// provider id BEFORE the inference call (closes privacy bug #2508).
+	const { eyesVisionProvider } = await import("./eyes-vision-provider");
+	const visionProvider = eyesVisionProvider;
 
 	_eyesInstance = backend.create({
 		visionProvider,
