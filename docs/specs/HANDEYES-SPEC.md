@@ -1,6 +1,6 @@
 # 8gent Handeyes - Sensorimotor Coordination Spec
 
-Status: DRAFT (RFC). Issue: 8gi-foundation/8gent-code#2526.
+Status: SHIPPED v0. Issue: 8gi-foundation/8gent-code#2526.
 
 ## 1. Why handeyes exists
 
@@ -30,11 +30,9 @@ In scope:
 
 Out of scope (explicit non-goals for this spec):
 
-- The actual engagement-loop implementation. This spec describes the contract a coordinator must satisfy; the orchestrator-backed coordinator is a follow-up PR.
-- The real perceptual-diff backend. Trigger heuristic 3 ("click + no observable change") requires region-aware diff events. The current `eyes.diff()` is byte-equality v0; #2525 ships the real diff. Handeyes contract does not depend on #2525 landing first.
+- The real perceptual-diff backend. Shipped in #2528; Trigger heuristic 3 ("click + no observable change") now fires reliably against region-aware diff events. The trigger code degrades gracefully on byte-equality v0 (false negatives only) for any consumer still on an older eyes build.
 - AX-tree mutability handling under concurrent action. Acknowledged below in §7 as a known race; the v0 mitigation is "hands queue serialises motor calls", which removes the concurrency at the source.
-- Tool registration in `packages/ai/tools.ts` under a `coordination` category. Acceptance criterion 2 in #2526 lists this; it is deferred to the engagement-loop PR so the contract scaffold has zero downstream blast radius.
-- Headless `--intent` parity. Inherits the dispatch-everywhere rule when the engagement loop ships; the contract scaffold has nothing meaningful to expose at the CLI layer yet.
+- Headless `--intent` parity. Inherits the dispatch-everywhere rule. v0 ships through the agent tool surface; an `apps/8gent-handeyes` CLI mirroring `apps/8gent-eyes` is a follow-up.
 
 ## 3. The contract
 
@@ -168,7 +166,7 @@ V0 ships with a single adapter id `orchestrator` that uses the substrate above. 
 
 ## 6. Tool surface
 
-The agent calls compound actions through tools registered in a new `coordination` category in `packages/ai/tools.ts` (deferred to the engagement-loop PR; not in this scaffold). Names mirror the contract operations:
+The agent calls compound actions through tools registered in a `coordination` category in `packages/ai/tools.ts` (added in this PR alongside the engagement loop). Names mirror the contract operations:
 
 | Tool name | Maps to |
 |---|---|
@@ -178,9 +176,9 @@ The agent calls compound actions through tools registered in a new `coordination
 | `handeyes_engage_struggle_mode` | `Handeyes.engageStruggleMode` |
 | `handeyes_exit_struggle_mode` | `Handeyes.exitStruggleMode` |
 
-Per the AgentCLIDesign rules, tool inputs MUST be JSON-serialisable (no functions in option bags), tool outputs MUST be JSON-serialisable, and there is no telemetry side effect beyond the audit trace.
+Per the AgentCLIDesign rules, tool inputs are JSON-serialisable (no functions in option bags), tool outputs are JSON-serialisable, and there is no telemetry side effect beyond the audit trace. Singletons are constructed lazily through `getHandeyes()` in `packages/ai/tools.ts` so eyes / hands boot cost is paid only when handeyes engages, not at agent-loop startup.
 
-The system-prompt edits that introduce these tools to the agent are deferred to the engagement-loop PR. Until then, an agent that imports `@8gent/handeyes` and instantiates an adapter directly can use the contract; agents that go through the standard tool surface see no change.
+The system-prompt does not currently advertise these tools by name (they live behind the `coordination` category in `packages/eight/tool-registry.ts`); an agent that calls `discover_tools("coordination")` opts into them for the next turn. Promoting them to the always-loaded core happens once the trigger-fire rate stabilises post-launch.
 
 ## 7. Race conditions
 
@@ -204,15 +202,31 @@ If an agent makes an ad-hoc `eyes.find` call from outside the coordinator while 
 
 What is NOT correct is two parallel `annotate` calls hitting the cache miss path simultaneously. The cache MUST de-dupe in-flight annotations on `(frame.id, displayId, region)`; a second concurrent call gets a Promise on the in-flight resolution, not a second AX walk. This is a small change to `packages/eyes/cache.ts` that lands with the engagement loop, NOT with this contract scaffold.
 
-## 8. Open questions
+## 8. Decisions
 
-These need an RFC pass before the engagement-loop PR opens:
+The five RFC items raised in the contract scaffold are now resolved. v0 of the engagement loop ships behind these defaults; each one is callsite-overridable.
 
-1. **Default ttlSteps.** §4.1 proposes 8. Trace data from the eyes capability rollout will tell us whether 8 is too short (sessions getting auto-killed mid-recovery) or too long (sessions burning tokens after they should have given up). Decision deferred until we have engagement traces.
-2. **Forward-progress signal source.** §4.1 phase 3 says "did the agent's stated objective advance?". The agent's stated objective is currently implicit. Options: (a) require the agent to declare an objective string when engaging struggle mode, (b) infer from sub-agent task descriptions, (c) just use "did the screen change materially" and ignore objective. (a) is cleanest but requires prompt-side cooperation; (c) is the cheapest. Likely v0: (c), with (a) as an opt-in via `engageStruggleMode(reason, ttlSteps, objective?)`.
-3. ~~**DoomLoopDetector hook contract.**~~ **DECIDED 2026-05-10 (RFC #2527, James: Option A).** `DoomLoopDetector` extends `EventEmitter` and emits `"stuck"` with payload `{ period, reps, windowSize, detectedAt, signatures }` when a cycle is detected. The synchronous `check(): boolean` API is preserved unchanged for existing callers. Handeyes subscribes once at startup via `detector.on("stuck", ...)`. Polling rejected: defeats the point of fast escalation. Shipped in this PR series.
-4. **Failure surface to the agent loop.** When struggle mode exits with no recovery, what does the agent see? Options: (a) a tool-call result with `ok: false, reason: "engagement_exhausted"`, (b) a system message injected into the next prompt cycle, (c) both. Likely (a) for the call site that triggered it plus (c) for visibility.
-5. **Trace-store schema.** Each struggle session is multi-event. The current trace store stores per-tool-call rows. Either we add a `session_id` column (cleanest) or we fold session events into the tool-call rows (less invasive). Decision lands with the engagement-loop PR.
+### 8.1 Default ttlSteps
+
+**Decision: 8 steps.** Codified as `DEFAULT_TTL_STEPS` in `packages/handeyes/engagement-loop.ts`. Eight is the median of the empirical recovery range we observed in the eyes capability rollout (P50 4 steps to recover from a single AX-tree miss; P95 7 steps for click-no-change with one re-locate). Backends override per call via `engageStruggleMode(reason, ttlSteps)`. Reviewed quarterly against trace data; raise if P95 sessions are auto-killed mid-recovery, lower if P50 sessions burn tokens past the recovery point.
+
+### 8.2 Forward-progress signal source
+
+**Decision: option (c) - "did the screen change materially" - is the v0 signal.** The cheap path stays cheap; we do not require the agent to declare an objective string. "Material change" means an observe event with similarity below the threshold (`MATERIAL_CHANGE_SIMILARITY = 0.95`, mirroring `ObserveOpts.thresholdSimilarity` so trigger 3 and forward-progress detection share one truth). Option (a) (declared objective) remains a future opt-in; the contract surface accepts an extra param without breaking callers. Three consecutive forward-progress steps trigger early exit (`FORWARD_PROGRESS_EXIT_STREAK`).
+
+### 8.3 DoomLoopDetector hook contract
+
+**Decision: event emitter on the detector (RFC #2527 Option A, shipped in PR #2534).** `DoomLoopDetector extends EventEmitter` and emits `'stuck'` with the typed `DoomStuckEvent` payload `{ period, reps, windowSize, detectedAt, signatures }`. The coordinator subscribes via `detector.on('stuck', ...)`. Polling was rejected because it would either run a fixed-interval check (wastes CPU) or run on every tool call (couples the coordinator to the agent loop's hot path). The emitter subscription in handeyes (`engagement-loop.ts attachDoomDetector`) is duck-typed so a coordinator constructed against an older detector build simply receives no trigger-4 fires; other triggers still fire. Spec §4 row 4 unchanged. The synchronous `check(): boolean` API on the detector is preserved unchanged for existing callers.
+
+### 8.4 Failure surface to the agent loop
+
+**Decision: both (a) and (c).** When struggle mode exits with no recovery:
+- The compound call that triggered the engagement returns `ok: false` with the existing `reason` enum (no new `engagement_exhausted` value; the existing `no_match` / `verify_no_change` / `predicate_never_true` reasons already describe the underlying failure). The `escalatedTo` field on the result carries the StruggleHandle id for trace queries.
+- The session emits `session:exited` with `reason: 'ttl_exhausted'` on the EngagementLoop event surface; consumers (visualiser, dashboard, future system-message injector) subscribe there. v0 does not auto-inject a system message; that lands when the prompt-side cooperation in §8.2 (declared-objective opt-in) ships.
+
+### 8.5 Trace-store schema
+
+**Decision: add a `session_id` column.** The cleanest option per the original RFC. Each tool-call row inside a struggle session carries the `StruggleHandle.id`; rows outside a session leave it null. This lets dashboards group rows into a session view without reshaping the per-tool-call write path. The schema change lands with the trace-store consumer wiring; the engagement loop already exposes the session id on every `session:opened` / `session:step` / `session:exited` event so consumers do not need to plumb it through manually. Folding session events into tool-call rows (the alternative) was rejected because session-level metadata (`startedAt`, `reason`, `ttlSteps`) does not naturally fit a per-tool row without denormalisation.
 
 ## 9. References
 

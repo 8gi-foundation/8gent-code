@@ -2422,6 +2422,324 @@ const eyesWaitFor = tool({
 	},
 });
 
+// ============================================================================
+// Handeyes (coordination): the third body-part. Compound actions over hands +
+// eyes that engage struggle mode when the agent is observably stuck.
+// ============================================================================
+// Spec: docs/specs/HANDEYES-SPEC.md. Surface mirrors the contract operations
+// in packages/handeyes/index.ts. Singleton lazily-constructed; eyes + hands
+// dependencies resolved through getEyes() and getDriver().
+
+let _handeyesInstance: import("@8gent/handeyes").Handeyes | null = null;
+let _handeyesUnavailableReason: string | null = null;
+
+async function getHandeyes(): Promise<
+	{ ok: true; handeyes: import("@8gent/handeyes").Handeyes } | { ok: false; reason: string }
+> {
+	if (_handeyesInstance) return { ok: true, handeyes: _handeyesInstance };
+	if (_handeyesUnavailableReason) return { ok: false, reason: _handeyesUnavailableReason };
+
+	const got = await getEyes();
+	if (!got.ok) {
+		_handeyesUnavailableReason = `handeyes: eyes unavailable - ${got.reason}`;
+		return { ok: false, reason: _handeyesUnavailableReason };
+	}
+
+	const handsPkg = await import("@8gent/hands");
+	const driver = handsPkg.getDriver();
+	if (!driver.available) {
+		_handeyesUnavailableReason =
+			"handeyes: hands driver unavailable. Install cliclick (`brew install cliclick`) or grant Accessibility on macOS.";
+		return { ok: false, reason: _handeyesUnavailableReason };
+	}
+
+	const handeyesPkg = await import("@8gent/handeyes");
+	// Trigger 4 (DoomLoopDetector hook) needs the agent loop's live detector
+	// instance; that wiring lands when the agent loop adopts the detector
+	// EventEmitter mixin (PR #2534) at its construction site. Until then
+	// the coordinator runs without trigger 4 and the other three fire as
+	// usual. Setting `doomDetector` once a shared accessor exists is a
+	// one-line follow-up here.
+	handeyesPkg.configureOrchestratorAdapter({
+		eyes: got.eyes,
+		hands: driver,
+	});
+
+	const adapter = await handeyesPkg.selectHandeyesAdapter([
+		...handeyesPkg.DEFAULT_ADAPTER_ORDER,
+	]);
+	if (!adapter) {
+		_handeyesUnavailableReason = "handeyes: no adapter available after configure (unexpected)";
+		return { ok: false, reason: _handeyesUnavailableReason };
+	}
+
+	_handeyesInstance = adapter.create();
+	return { ok: true, handeyes: _handeyesInstance };
+}
+
+const handeyesLocateAndClick = tool({
+	description:
+		"Locate a UI element by query, then click it. Compound action over eyes+hands. Retries the locate up to locate_retries times before declaring no_match. Set verify_changed=true to wait for an observe-detected screen change after the click. Auto-engages struggle mode when the locate fires the find-zero-hits-twice trigger; the result includes escalated_to with the struggle handle id.",
+	inputSchema: z.object({
+		kind: z.enum(["label", "role", "id", "describe", "coords"]),
+		text: z.string().optional(),
+		role: z.string().optional(),
+		index: z.number().int().optional(),
+		x: z.number().optional(),
+		y: z.number().optional(),
+		button: z.enum(["left", "right", "middle"]).optional(),
+		locate_retries: z.number().int().min(1).max(5).optional(),
+		verify_changed: z.boolean().optional(),
+		timeout_ms: z.number().int().min(100).max(30_000).optional(),
+	}),
+	execute: async (args) => {
+		const got = await getHandeyes();
+		if (!got.ok) return got.reason;
+		try {
+			let query: import("@8gent/eyes").LocatorQuery;
+			switch (args.kind) {
+				case "label":
+					if (!args.text) return "handeyes_locate_and_click: kind=label requires text";
+					query = { kind: "label", text: args.text, role: args.role };
+					break;
+				case "role":
+					if (!args.role) return "handeyes_locate_and_click: kind=role requires role";
+					query = { kind: "role", role: args.role, index: args.index };
+					break;
+				case "id":
+					if (!args.text) return "handeyes_locate_and_click: kind=id requires text (element id)";
+					query = { kind: "id", id: args.text };
+					break;
+				case "describe":
+					if (!args.text) return "handeyes_locate_and_click: kind=describe requires text";
+					query = { kind: "describe", text: args.text };
+					break;
+				case "coords":
+					if (typeof args.x !== "number" || typeof args.y !== "number")
+						return "handeyes_locate_and_click: kind=coords requires x and y";
+					query = { kind: "coords", x: args.x, y: args.y };
+					break;
+			}
+			const result = await got.handeyes.locateAndClick(query, {
+				button: args.button,
+				locateRetries: args.locate_retries,
+				verifyChanged: args.verify_changed,
+				timeoutMs: args.timeout_ms,
+			});
+			return JSON.stringify(
+				{
+					ok: result.ok,
+					clicked_at: result.clickedAt,
+					confidence: result.confidence,
+					attempts: result.attempts,
+					elapsed_ms: result.elapsedMs,
+					reason: result.reason,
+					escalated_to: result.escalatedTo?.id,
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `handeyes_locate_and_click error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const handeyesClickAndVerify = tool({
+	description:
+		"Click a known point, then poll a predicate to verify the click had the intended effect. Retries up to max_retries on failure. Use this for 'did anything actually happen?' loops where hands.click returning ok is not enough.",
+	inputSchema: z.object({
+		x: z.number(),
+		y: z.number(),
+		predicate: z.enum(["element_visible", "element_gone", "text_present"]),
+		query_kind: z.enum(["label", "role", "id"]).optional(),
+		query_text: z.string().optional(),
+		query_role: z.string().optional(),
+		text: z.string().optional(),
+		case_sensitive: z.boolean().optional(),
+		max_retries: z.number().int().min(1).max(5).optional(),
+		timeout_ms: z.number().int().min(100).max(30_000).optional(),
+		escalate_on_fail: z.boolean().optional(),
+	}),
+	execute: async (args) => {
+		const got = await getHandeyes();
+		if (!got.ok) return got.reason;
+		try {
+			let predicate: import("@8gent/eyes").Predicate;
+			if (args.predicate === "text_present") {
+				if (!args.text) return "handeyes_click_and_verify: predicate=text_present requires text";
+				predicate = { kind: "text_present", text: args.text, caseSensitive: args.case_sensitive };
+			} else {
+				if (!args.query_kind)
+					return `handeyes_click_and_verify: predicate=${args.predicate} requires query_kind`;
+				let q: import("@8gent/eyes").LocatorQuery;
+				switch (args.query_kind) {
+					case "label":
+						if (!args.query_text)
+							return "handeyes_click_and_verify: query_kind=label requires query_text";
+						q = { kind: "label", text: args.query_text, role: args.query_role };
+						break;
+					case "role":
+						if (!args.query_role)
+							return "handeyes_click_and_verify: query_kind=role requires query_role";
+						q = { kind: "role", role: args.query_role };
+						break;
+					case "id":
+						if (!args.query_text)
+							return "handeyes_click_and_verify: query_kind=id requires query_text";
+						q = { kind: "id", id: args.query_text };
+						break;
+				}
+				predicate = { kind: args.predicate, query: q };
+			}
+			const result = await got.handeyes.clickAndVerify({ x: args.x, y: args.y }, predicate, {
+				maxRetries: args.max_retries,
+				timeoutMs: args.timeout_ms,
+				escalateOnFail: args.escalate_on_fail,
+			});
+			return JSON.stringify(
+				{
+					ok: result.ok,
+					attempts: result.attempts,
+					elapsed_ms: result.elapsedMs,
+					reason: result.reason,
+					escalated_to: result.escalatedTo?.id,
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `handeyes_click_and_verify error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const handeyesTypeAndConfirm = tool({
+	description:
+		"Type into the focused field, then optionally re-locate the field and confirm its value reflects what was typed. Catches IME / focus-stolen / wrong-field-focused failure modes that look identical to success at the hands layer.",
+	inputSchema: z.object({
+		text: z.string(),
+		expected_field_kind: z.enum(["label", "role", "id"]).optional(),
+		expected_field_text: z.string().optional(),
+		expected_field_role: z.string().optional(),
+		trim_whitespace: z.boolean().optional(),
+		case_insensitive: z.boolean().optional(),
+		timeout_ms: z.number().int().min(100).max(30_000).optional(),
+	}),
+	execute: async (args) => {
+		const got = await getHandeyes();
+		if (!got.ok) return got.reason;
+		try {
+			let expected: import("@8gent/eyes").LocatorQuery | undefined;
+			if (args.expected_field_kind) {
+				switch (args.expected_field_kind) {
+					case "label":
+						if (!args.expected_field_text)
+							return "handeyes_type_and_confirm: expected_field_kind=label requires expected_field_text";
+						expected = {
+							kind: "label",
+							text: args.expected_field_text,
+							role: args.expected_field_role,
+						};
+						break;
+					case "role":
+						if (!args.expected_field_role)
+							return "handeyes_type_and_confirm: expected_field_kind=role requires expected_field_role";
+						expected = { kind: "role", role: args.expected_field_role };
+						break;
+					case "id":
+						if (!args.expected_field_text)
+							return "handeyes_type_and_confirm: expected_field_kind=id requires expected_field_text";
+						expected = { kind: "id", id: args.expected_field_text };
+						break;
+				}
+			}
+			const result = await got.handeyes.typeAndConfirm(args.text, expected, {
+				trimWhitespace: args.trim_whitespace,
+				caseInsensitive: args.case_insensitive,
+				timeoutMs: args.timeout_ms,
+			});
+			return JSON.stringify(
+				{
+					ok: result.ok,
+					attempts: result.attempts,
+					elapsed_ms: result.elapsedMs,
+					reason: result.reason,
+					escalated_to: result.escalatedTo?.id,
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `handeyes_type_and_confirm error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const handeyesEngageStruggleMode = tool({
+	description:
+		"Explicit self-rescue. Call this when you have self-diagnosed that you are stuck and want the eyes-worker / hands-queue / coordinator triad spun up immediately, without waiting for any auto-trigger to fire. Returns a struggle handle id you must pass back to handeyes_exit_struggle_mode. Engagement is also bounded by ttl_steps.",
+	inputSchema: z.object({
+		reason: z
+			.enum([
+				"explicit_self_diagnosis",
+				"find_zero_hits_repeated",
+				"wait_for_timeout",
+				"click_no_observable_change",
+				"doom_loop_detected",
+			])
+			.optional()
+			.describe("Standard reason. Defaults to explicit_self_diagnosis."),
+		ttl_steps: z.number().int().min(1).max(32).optional(),
+	}),
+	execute: async (args) => {
+		const got = await getHandeyes();
+		if (!got.ok) return got.reason;
+		try {
+			const handle = await got.handeyes.engageStruggleMode(
+				args.reason ?? "explicit_self_diagnosis",
+				args.ttl_steps,
+			);
+			return JSON.stringify(
+				{
+					id: handle.id,
+					started_at: handle.startedAt,
+					reason: handle.reason,
+					ttl_steps: handle.ttlSteps,
+				},
+				null,
+				2,
+			);
+		} catch (err) {
+			return `handeyes_engage_struggle_mode error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
+const handeyesExitStruggleMode = tool({
+	description:
+		"Tear down a struggle session by handle id. Idempotent on already-exited handles. Backends also auto-exit when forward progress resumes; this call is for the explicit agent-driven exit path.",
+	inputSchema: z.object({
+		id: z.string(),
+	}),
+	execute: async (args) => {
+		const got = await getHandeyes();
+		if (!got.ok) return got.reason;
+		try {
+			// Reconstruct a minimal handle. Backends compare by id only.
+			await got.handeyes.exitStruggleMode({
+				id: args.id,
+				startedAt: 0,
+				reason: "explicit_self_diagnosis",
+				ttlSteps: 0,
+			});
+			return JSON.stringify({ ok: true, id: args.id });
+		} catch (err) {
+			return `handeyes_exit_struggle_mode error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	},
+});
+
 /**
  * All 8gent tools in AI SDK format.
  * Pass this directly to generateText() or streamText().
@@ -2544,6 +2862,14 @@ export const agentTools = {
 	eyes_find: eyesFind,
 	eyes_describe: eyesDescribe,
 	eyes_wait_for: eyesWaitFor,
+
+	// Handeyes (coordination): the third body-part. Compound actions over
+	// hands + eyes; auto-engages struggle mode on the spec §4 triggers.
+	handeyes_locate_and_click: handeyesLocateAndClick,
+	handeyes_click_and_verify: handeyesClickAndVerify,
+	handeyes_type_and_confirm: handeyesTypeAndConfirm,
+	handeyes_engage_struggle_mode: handeyesEngageStruggleMode,
+	handeyes_exit_struggle_mode: handeyesExitStruggleMode,
 
 	// Self-evolution
 	propose_skill_creation: proposeSkillCreation,
