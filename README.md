@@ -259,6 +259,52 @@ bun run tui
 
 <br />
 
+## The Body Parts
+
+The agent has hands, eyes, and the cortex that coordinates them. Body-part naming is the brand: customer-facing surfaces always say *hands* / *eyes* / *handeyes*. Underlying engines are implementation details.
+
+<table>
+<tr>
+<td valign="top" width="33%">
+
+**Hands** (motor)<br />
+<sub><code>packages/hands/</code></sub><br />
+<sub>macOS desktop driver: click, type, scroll, drag, hover, press, screenshot, windows, clipboard. Backed by `cliclick` + `osascript` fallback. Used by the `desktop_*` agent tools and the `run_computer_task` CUA loop.</sub>
+
+</td>
+<td valign="top" width="33%">
+
+**Eyes** (perception)<br />
+<sub><code>packages/eyes/</code></sub><br />
+<sub>Capture, annotate, locate, describe, wait_for, diff, observe. Bundled native AX bridge at `~/.8gent/bin/8gent-ax-bridge` (Swift, no Homebrew dep). Real perceptual diff (pngjs). Two-phase VisionProvider: resolve provider id, then tier-check, then call. Agent tools `eyes_see` / `eyes_find` / `eyes_describe` / `eyes_wait_for`. Headless `apps/8gent-eyes/` CLI.</sub>
+
+</td>
+<td valign="top" width="33%">
+
+**Handeyes** (sensorimotor coordination)<br />
+<sub><code>packages/handeyes/</code></sub><br />
+<sub>Third body-part. Selectively engaged when the agent is observably stuck on a hands-only or eyes-only flow. 5 compound tools (`handeyes_locate_and_click`, `handeyes_click_and_verify`, `handeyes_type_and_confirm`, `handeyes_engage_struggle_mode`, `handeyes_exit_struggle_mode`). 4 trigger heuristics (3 live in v0.17, trigger 4 from DoomLoopDetector emitter wired pending shared accessor).</sub>
+
+</td>
+</tr>
+</table>
+
+To use end-to-end on macOS:
+
+```bash
+bun install                                           # postinstall builds the AX bridge
+# Grant Screen Recording + Accessibility once in System Settings
+ollama pull qwen2.5-vl                                # local vision (optional; enables eyes_describe)
+```
+
+Conceptual ancestry for the AX bridge: Peekaboo (MIT, Peter Steinberger 2025); see `packages/eyes/native/NOTICE`.
+
+<br />
+
+---
+
+<br />
+
 ## The 8 Powers
 
 <table>
@@ -512,30 +558,33 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 <tr>
 <td valign="top" width="33%">
 
-### Just shipped (v0.14 "Hardened Kernel")
+### Just shipped (v0.17.0)
 
-Trust primitives + context engineering + model-agnostic routing. Concept-extracted from StartupHakk/OpenMonoAgent under CleanRoomPort discipline; no AGPL source copied.
+**Body-parts taxonomy** — the agent now sees and selectively coordinates eyes+hands when stuck.
 
-- DoomLoopDetector hardened (#2461)
-- SecretScanner (#2464)
-- PathGuard (#2465)
-- BashParser primitive (#2466)
-- ToolResultCache (#2462)
-- ArtifactStore (#2463)
-- TwoStageCompactor (#2467)
-- PreToolRouter (#2471)
-- TurnJournal (#2470)
+- Eyes: spec + bundled native AX bridge + perceptual diff + vision-router + agent tools + CLI
+- Handeyes: third body-part (#2526), 5 compound tools, 3 of 4 triggers live
+- DoomLoopDetector EventEmitter (#2527, RFC Option A)
+
+**v0.14 hardened kernel** (folded into this release):
+
+- DoomLoopDetector / SecretScanner / PathGuard / BashParser
+- ToolResultCache / ArtifactStore / TwoStageCompactor
+- PreToolRouter / TurnJournal
 
 </td>
 <td valign="top" width="33%">
 
 ### Next
 
-- **v0.14 launch bundle** (#2485) — CHANGELOG, post, 60s AdPitchVideo demoing live doom-loop protection
-- **BashParser runtime wiring** (#2484) — wire `gateBashCommand` into the spawn site so compound deny actually fires at runtime
+- **Trigger 4 wire** (#2537) — one line in agent.ts when shared DoomLoopDetector accessor lands
+- **`apps/8gent-handeyes` CLI** (#2538) — headless parity per dispatch-everywhere rule
+- **Mid-click re-locate** (#2539) — auto-invoke the wired hook in hands-queue
+- **BashParser runtime wiring** (#2484) — wire `gateBashCommand` into the spawn site
 - **TUI bug fixes** — slash registry race (#2473), frame buffer corruption (#2474)
-- **Per-tab model routing** — each agent tab (Orchestrator/Engineer/QA) gets its own provider/model
+- **Per-tab model routing** — each agent tab gets its own provider/model
 - **Voice hardening** — KittenTTS integration, full-duplex Moshi backend stabilization
+- **Keychain test fix** (#2510) — clear the perpetual Validate-red blocker
 
 </td>
 <td valign="top" width="33%">

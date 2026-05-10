@@ -7,9 +7,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [0.17.0] - 2026-05-10
 
-### Added — v0.14 "Hardened Kernel" (extracted from OpenMonoAgent under CleanRoomPort, no AGPL source copied)
+### Added - Body-parts taxonomy (eyes + handeyes shipped end-to-end)
+
+The agent now sees and selectively coordinates eyes+hands when stuck. Three body-parts in the public spine: hands (motor), eyes (perception), handeyes (sensorimotor coordination).
+
+**Eyes** (perception) - shipped across 7 PRs (#2497 + #2500 + #2502 + #2511 + #2513 + #2524 + #2528 + #2532 + #2535):
+- Spec + decisions: capture, annotate, locate, describe, wait_for, diff, observe; permission model; failover chain. RFC §8 closed (logical coords + Frame.scale, focused-display default, 2s/16-frame annotation cache, perception:remote tier on data egress, macOS-first cross-platform path).
+- **Bundled native AX bridge** at `~/.8gent/bin/8gent-ax-bridge` - drops the Homebrew peekaboo dependency. Conceptual ancestry: Peekaboo (MIT, Peter Steinberger 2025); full attribution at `packages/eyes/native/NOTICE`. Built via `bash packages/eyes/native/build.sh` or `bun install` postinstall.
+- **Real perceptual diff** via pngjs - downscale then flood-fill into bounding rects, ~144ms on 4K. observe() events now carry meaningful changed regions.
+- **Vision-router wiring** with two-phase VisionProvider contract (`resolveProviderId` then tier-check then `describe`). Closes #2508 privacy bug. Routes via Ollama (local) or OpenRouter (remote).
+- **Agent tools**: `eyes_see`, `eyes_find`, `eyes_describe`, `eyes_wait_for`. New `perception` category in tool-registry. Singleton Eyes instance per process.
+- **Headless CLI**: `apps/8gent-eyes/` with 7 subcommands + `--intent` natural-language routing. AgentCLIDesign-compliant (--json default, deterministic exit codes 0/1/2/3/64, no telemetry beyond audit).
+- **Tail polish** (#2535): async PNG I/O on observe hot path; structured PNG-parse error guard with 3-strike auto-dispose; `thresholdDelta` rename with deprecated `thresholdPx` alias; build.sh kebab-case fix.
+
+**Handeyes** (sensorimotor coordination) - shipped across 2 PRs (#2531 + #2536):
+- Third body-part. Depends on hands AND eyes. Selectively engaged when the agent is observably stuck on a hands-only or eyes-only flow.
+- 5 compound tools: `handeyes_locate_and_click`, `handeyes_click_and_verify`, `handeyes_type_and_confirm`, `handeyes_engage_struggle_mode`, `handeyes_exit_struggle_mode`. New `coordination` category in tool-registry.
+- Engagement loop with 3 of 4 triggers live: zero-hits-twice, wait-for-timeout, click-without-screen-change. Trigger 4 (DoomLoopDetector emitter) wired but pending shared-instance accessor in agent loop.
+- Architectural anchor: multi-agent orchestration applied to body-parts. Reuses existing OrchestratorBus; eyes-worker and hands-queue are in-process typed objects rather than spawned sub-agents (rationale: tight observe loops would burn a model slot per session).
+
+**DoomLoopDetector** (#2534, RFC #2527 Option A):
+- Now extends EventEmitter and emits `'stuck'` with `{ period, reps, windowSize, detectedAt, signatures }` payload when a cycle is detected. Synchronous `check(): boolean` API preserved unchanged. Typed `on/off/once` overloads.
+
+Tests across this release: 32 (eyes) + 9 (eyes-cli) + 39 (handeyes) + 20 (doomloop) + 47 (eyes-polish) = 147+ across the body-parts work, all green.
+
+### Added - v0.14 "Hardened Kernel" (extracted from OpenMonoAgent under CleanRoomPort, no AGPL source copied)
 
 Trust primitives:
 - **DoomLoopDetector hardening** (#2461 → #2472). Period-1 to period-4 cycle detection on a sliding 12-call window with normalized JSON args. Catches `AAA`, `ABAB`, `ABCABC`, `ABCDABCD` patterns. 13 tests. `packages/eight/tool-loop-detector.ts`.
