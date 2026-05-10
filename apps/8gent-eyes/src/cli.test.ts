@@ -93,6 +93,6 @@ describe("eyes CLI:--intent routing", () => {
 		// Will exit 3 (no backend) but the routing must succeed first.
 		const r = run(["--intent", "describe the screen"]);
 		// Exit code 3 (backend unavailable) when peekaboo missing; 0 if installed.
-		expect([0, 1, 3]).toContain(r.code);
+		expect([0, 1, 3]).toContain(r.code ?? -1);
 	});
 });

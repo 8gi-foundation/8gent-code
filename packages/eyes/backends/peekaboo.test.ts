@@ -45,7 +45,7 @@ describe("peekabooBackend descriptor", () => {
 	});
 });
 
-describe("integration — peekaboo subprocess", () => {
+describe("integration - peekaboo subprocess", () => {
 	it("end-to-end capture + annotate (skipped if peekaboo not installed)", async () => {
 		const ok = await peekabooBackend.available();
 		if (!ok) {
@@ -74,7 +74,7 @@ describe("integration — peekaboo subprocess", () => {
 	});
 });
 
-describe("describe() — perception:remote tier wiring", () => {
+describe("describe() - perception:remote tier wiring", () => {
 	it("throws when no visionProvider injected", async () => {
 		const eyes = peekabooBackend.create();
 		const frame = {
@@ -92,11 +92,14 @@ describe("describe() — perception:remote tier wiring", () => {
 
 	it("blocks when provider resolves remote without grant", async () => {
 		const eyes = createPeekabooEyes({
-			visionProvider: async () => ({
-				provider: "openrouter",
-				model: "vision-test",
-				text: "irrelevant",
-			}),
+			visionProvider: {
+				resolveProviderId: async () => "openrouter",
+				describe: async () => ({
+					provider: "openrouter",
+					model: "vision-test",
+					text: "irrelevant",
+				}),
+			},
 			sessionId: "test-s",
 		});
 		const frame = {
@@ -112,13 +115,42 @@ describe("describe() — perception:remote tier wiring", () => {
 		await expect(eyes.describe(frame)).rejects.toThrow(/perception:remote/);
 	});
 
+	it("does NOT call describe() when remote tier denies - closes #2508 privacy bug", async () => {
+		let inferenceCalls = 0;
+		const eyes = createPeekabooEyes({
+			visionProvider: {
+				resolveProviderId: async () => "openrouter",
+				describe: async () => {
+					inferenceCalls++;
+					return { provider: "openrouter", model: "vision-test", text: "frame leaked" };
+				},
+			},
+			sessionId: "privacy-test",
+		});
+		const frame = {
+			id: "frm_priv",
+			path: "/tmp/none.png",
+			width: 100,
+			height: 100,
+			displayId: 0,
+			capturedAt: 0,
+			scale: 1,
+			platform: "darwin" as const,
+		};
+		await expect(eyes.describe(frame)).rejects.toThrow(/perception:remote/);
+		expect(inferenceCalls).toBe(0);
+	});
+
 	it("allows local-resolved provider with no grant required", async () => {
 		const eyes = createPeekabooEyes({
-			visionProvider: async () => ({
-				provider: "ollama",
-				model: "qwen2.5-vl",
-				text: "a screen",
-			}),
+			visionProvider: {
+				resolveProviderId: async () => "ollama",
+				describe: async () => ({
+					provider: "ollama",
+					model: "qwen2.5-vl",
+					text: "a screen",
+				}),
+			},
 			sessionId: "test-s",
 		});
 		const frame = {

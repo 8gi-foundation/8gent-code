@@ -187,7 +187,20 @@ Hands does not depend on eyes. Eyes does not depend on hands at type level. The 
 Perception is sensitive: a screenshot of the screen can contain anything. The contract enforces four rules.
 
 1. **Base capability tier.** Local eyes operations (`capture`, `annotate`, `locate` via AX, `describe` via local vision, `wait_for`, `diff`, `observe`) require the same capability tier as hands: `computer-use` enabled, user-confirmed. The control plane gates this; eyes does not invent its own permission UI.
-2. **Egress-gated tier for remote vision.** A separate `perception:remote` tier is required when, and only when, the resolved provider for a `describe()` or `locate({kind:"describe"})` call sends frame bytes off-device. The gate fires on actual data egress at runtime, not on the active backend's identity, because the same call can land on a local or remote model depending on failover state. Consent surface: `[Once] [This session] [Always for this app]`. While `perception:remote` is active, a persistent header indicator stays visible (small amber dot, never red, never violet) per the accessibility-primitives rule that state must be visible without hover.
+2. **Egress-gated tier for remote vision (resolve-first contract).** A separate `perception:remote` tier is required when, and only when, the resolved provider for a `describe()` or `locate({kind:"describe"})` call sends frame bytes off-device. The gate fires on actual data egress at runtime, not on the active backend's identity, because the same call can land on a local or remote model depending on failover state.
+
+   The `VisionProvider` interface enforces this with a two-phase contract:
+
+   ```ts
+   interface VisionProvider {
+     resolveProviderId(req: VisionRequest): Promise<string>;  // no inference call
+     describe(req: VisionRequest): Promise<VisionResponse>;   // actual inference
+   }
+   ```
+
+   The eyes backend MUST call `resolveProviderId()` first, run the tier check on that id, and ONLY then call `describe()`. Frame bytes never leave the device when the tier denies. Implementations MUST cache the resolution so the inference call hits the same provider that was tier-checked.
+
+   Consent surface: `[Once] [This session] [Always for this app]`. While `perception:remote` is active, a persistent header indicator stays visible (small amber dot, never red, never violet) per the accessibility-primitives rule that state must be visible without hover.
 3. **OS-level entitlements live with the backend.** macOS Screen Recording and Accessibility permissions are owned by the backend (e.g. Peekaboo, native AVFoundation). The Eyes interface exposes an `available` boolean and a `backend` name; if `available` is false, operations return `{ ok: false }` rather than throwing.
 4. **Audit trail.** Every capture, locate, and describe call writes to the trace store with frame id, backend, timestamp, calling tool, and (for `describe`) the resolved model destination. Eyes never silently reads the screen.
 
