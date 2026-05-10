@@ -91,6 +91,19 @@ export interface WaitResult {
 
 export interface DiffOpts {
 	region?: Region;
+	/**
+	 * Per-channel R/G/B delta in 0..255. A downscaled cell is considered
+	 * "different" when any channel delta exceeds this value. Default: 30.
+	 *
+	 * Name reflects semantics: this is a per-channel intensity delta, not a
+	 * pixel count. Tune lower for higher sensitivity.
+	 */
+	thresholdDelta?: number;
+	/**
+	 * @deprecated Use `thresholdDelta`. Same semantics (per-channel R/G/B
+	 * delta in 0..255), retained as a back-compat alias. Will be removed in
+	 * a future major. If both are set, `thresholdDelta` wins.
+	 */
 	thresholdPx?: number;
 }
 

@@ -42,18 +42,15 @@ mkdir -p "$INSTALL_DIR"
 
 cd "$SWIFT_DIR"
 echo "8gent-ax-bridge: building (this may take a minute on first run)..." >&2
-swift build -c release --product eight-ax-bridge >&2 || swift build -c release >&2
+# Package.swift target is PascalCase EightAxBridge; pass it directly to avoid
+# a noisy first-attempt error on the kebab-case alias.
+swift build -c release --product EightAxBridge >&2
 
 BUILT_BIN="$SWIFT_DIR/.build/release/EightAxBridge"
 if [[ ! -x "$BUILT_BIN" ]]; then
-  # Swift PM may name the binary after the executable target.
-  if [[ -x "$SWIFT_DIR/.build/release/eight-ax-bridge" ]]; then
-    BUILT_BIN="$SWIFT_DIR/.build/release/eight-ax-bridge"
-  else
-    echo "8gent-ax-bridge: build succeeded but binary not found in .build/release/" >&2
-    ls -la "$SWIFT_DIR/.build/release/" >&2 || true
-    exit 1
-  fi
+  echo "8gent-ax-bridge: build succeeded but binary not found at $BUILT_BIN" >&2
+  ls -la "$SWIFT_DIR/.build/release/" >&2 || true
+  exit 1
 fi
 
 cp "$BUILT_BIN" "$INSTALL_PATH"

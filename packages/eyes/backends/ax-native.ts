@@ -575,9 +575,12 @@ class AxNativeEyes implements Eyes {
 				}
 			: undefined;
 
+		// thresholdDelta is the canonical name; thresholdPx is a deprecated
+		// alias kept for back-compat. Canonical wins when both are set.
+		const threshold = opts.thresholdDelta ?? opts.thresholdPx;
 		const result = await perceptualDiff(a.path, b.path, {
 			region: rawRegion,
-			threshold: opts.thresholdPx,
+			threshold,
 		});
 
 		const regions = result.regions.map((r) => ({
@@ -603,8 +606,18 @@ class AxNativeEyes implements Eyes {
 	observe(handler: (e: ObservationEvent) => void, opts: ObserveOpts = {}): Disposable {
 		const interval = opts.intervalMs ?? 1_000;
 		const threshold = opts.thresholdSimilarity ?? 0.98;
+		const MAX_PARSE_FAILURES = 3;
 		let prev: Frame | undefined;
 		let stopped = false;
+		let consecutiveParseFailures = 0;
+		let lastParseFailure: Error | undefined;
+
+		const dispose = () => {
+			if (stopped) return;
+			stopped = true;
+			clearTimeout(timer);
+			this.trace("observe", "stop", `disposed`, "derive");
+		};
 
 		const tick = async () => {
 			if (stopped) return;
@@ -618,8 +631,68 @@ class AxNativeEyes implements Eyes {
 					}
 				}
 				prev = frame;
-			} catch {
-				// swallow individual tick failures; observe is best-effort.
+				// Reset only on a fully successful tick so transient parse storms
+				// can't be masked by an intervening capture-only success.
+				consecutiveParseFailures = 0;
+				lastParseFailure = undefined;
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				const isParseError = /png parse failed/i.test(msg);
+				if (isParseError) {
+					consecutiveParseFailures++;
+					lastParseFailure = err instanceof Error ? err : new Error(msg);
+					this.trace(
+						"observe",
+						prev?.id ?? "no-prev",
+						`png-parse failure ${consecutiveParseFailures}/${MAX_PARSE_FAILURES}: ${msg}`,
+						"derive",
+					);
+					if (consecutiveParseFailures >= MAX_PARSE_FAILURES) {
+						this.trace(
+							"observe",
+							"abort",
+							`disposed after ${MAX_PARSE_FAILURES} consecutive png-parse failures (last: ${lastParseFailure?.message ?? msg})`,
+							"derive",
+						);
+						dispose();
+						// Surface to the handler as a structured event so the agent
+						// loop can react. Frame is a synthetic placeholder; diff
+						// carries similarity=0 with empty regions and zero pixels
+						// as the signal that this is an error event, not a real
+						// perceptual diff. The handler MUST tolerate this shape.
+						try {
+							handler({
+								at: Date.now(),
+								diff: { similarity: 0, regions: [], pixelsDifferent: 0 },
+								frame: prev ?? {
+									id: "frm_observe_abort",
+									path: "",
+									width: 0,
+									height: 0,
+									displayId: -1,
+									capturedAt: Date.now(),
+									scale: 1,
+									platform: PLATFORM,
+								},
+							});
+						} catch {
+							// handler must not break dispose; swallow.
+						}
+						// Do NOT throw here. tick() is invoked via setTimeout with
+						// no awaiter, so a throw becomes an unhandled rejection.
+						// dispose() + structured event is the contract; the audit
+						// trace above carries the diagnostic detail.
+					}
+				} else {
+					// Non-parse failure (capture error, permission flap, etc.).
+					// Best-effort: log to audit but don't reset the parse counter.
+					this.trace(
+						"observe",
+						prev?.id ?? "no-prev",
+						`tick error: ${msg}`,
+						"derive",
+					);
+				}
 			} finally {
 				if (!stopped) timer = setTimeout(tick, interval);
 			}
@@ -628,13 +701,7 @@ class AxNativeEyes implements Eyes {
 		let timer: ReturnType<typeof setTimeout> = setTimeout(tick, interval);
 		this.trace("observe", "start", `interval=${interval}ms threshold=${threshold}`, "derive");
 
-		return {
-			dispose: () => {
-				stopped = true;
-				clearTimeout(timer);
-				this.trace("observe", "stop", `disposed`, "derive");
-			},
-		};
+		return { dispose };
 	}
 }
 
