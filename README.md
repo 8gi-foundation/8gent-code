@@ -475,7 +475,7 @@ User prompt
 | BT012 | Music Technology | Notes, Chords, Scales, Progressions | **81** |
 | BT014 | AI Consulting | Assessment Report Generator | **95** |
 
-<sub>Additional categories: long-horizon (LH001–LH005), agentic (TC001–MR001), fullstack (FS001–FS003), UI design (UI001–UI008), ability showcase.</sub>
+<sub>Additional categories: long-horizon (LH001-LH005), agentic (TC001-MR001), fullstack (FS001-FS003), UI design (UI001-UI008), ability showcase.</sub>
 
 ```bash
 bun run benchmark:v2                    # single pass
@@ -560,7 +560,7 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 
 ### Just shipped (v0.17.0)
 
-**Body-parts taxonomy** — the agent now sees and selectively coordinates eyes+hands when stuck.
+**Body-parts taxonomy** - the agent now sees and selectively coordinates eyes+hands when stuck.
 
 - Eyes: spec + bundled native AX bridge + perceptual diff + vision-router + agent tools + CLI
 - Handeyes: third body-part (#2526), 5 compound tools, 3 of 4 triggers live
@@ -577,23 +577,23 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 
 ### Next
 
-- **Trigger 4 wire** (#2537) — one line in agent.ts when shared DoomLoopDetector accessor lands
-- **`apps/8gent-handeyes` CLI** (#2538) — headless parity per dispatch-everywhere rule
-- **Mid-click re-locate** (#2539) — auto-invoke the wired hook in hands-queue
-- **BashParser runtime wiring** (#2484) — wire `gateBashCommand` into the spawn site
-- **TUI bug fixes** — slash registry race (#2473), frame buffer corruption (#2474)
-- **Per-tab model routing** — each agent tab gets its own provider/model
-- **Voice hardening** — KittenTTS integration, full-duplex Moshi backend stabilization
-- **Keychain test fix** (#2510) — clear the perpetual Validate-red blocker
+- **Trigger 4 wire** (#2537) - one line in agent.ts when shared DoomLoopDetector accessor lands
+- **`apps/8gent-handeyes` CLI** (#2538) - headless parity per dispatch-everywhere rule
+- **Mid-click re-locate** (#2539) - auto-invoke the wired hook in hands-queue
+- **BashParser runtime wiring** (#2484) - wire `gateBashCommand` into the spawn site
+- **TUI bug fixes** - slash registry race (#2473), frame buffer corruption (#2474)
+- **Per-tab model routing** - each agent tab gets its own provider/model
+- **Voice hardening** - KittenTTS integration, full-duplex Moshi backend stabilization
+- **Keychain test fix** (#2510) - clear the perpetual Validate-red blocker
 
 </td>
 <td valign="top" width="33%">
 
 ### Later / under evaluation
 
-- **Virtuoso + OPAL eval** (#2486) — federated knowledge-graph substrate for Lotus / 8gentOS data spaces. 1-week scoped spike, decision criteria filed.
-- **MCP server support** — expose 8gent tools as MCP servers for external agent consumption
-- **Extension system** — ExtensionCrafter for autonomous source-to-extension generation
+- **Virtuoso + OPAL eval** (#2486) - federated knowledge-graph substrate for Lotus / 8gentOS data spaces. 1-week scoped spike, decision criteria filed.
+- **MCP server support** - expose 8gent tools as MCP servers for external agent consumption
+- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation
 - [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
 - [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
 - Desktop client (Swift AppKit, `apps/lil-eight/`)
@@ -607,7 +607,7 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 ### Process amendments
 - **#2475** Constitutional amendment (2026-05-09): any extraction / refactor / feature touching MORE THAN 3 GitHub issues requires boardroom alignment + signed PRD + minutes filed BEFORE Wave 1 dispatch.
 - **CleanRoomPort skill** at `~/.claude/skills/CleanRoomPort/SKILL.md` for AGPL-safe pattern porting.
-- **Strategic note** #2469 — owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
+- **Strategic note** #2469 - owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
 
 <br />
 

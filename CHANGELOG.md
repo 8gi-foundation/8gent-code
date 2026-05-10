@@ -53,7 +53,7 @@ Audit:
 - **TurnJournal** (#2470 → #2482). Per-turn replayable JSON record at `~/.8gent/turns/{sessionId}/{turnIndex}.json`. System prompt hashed (sha256, not full text). Tool result previews capped at 1KB; full content lives in ArtifactStore. 13 tests.
 
 ### Closed without implementation
-- **AgentDefinition consolidation** (#2468). Closed not-applicable. Our `packages/orchestration/subagent.ts` uses ad-hoc `SubAgentConfig` per spawn, not Anthropic-style named profile literals — there's nothing scattered to consolidate.
+- **AgentDefinition consolidation** (#2468). Closed not-applicable. Our `packages/orchestration/subagent.ts` uses ad-hoc `SubAgentConfig` per spawn, not Anthropic-style named profile literals - there's nothing scattered to consolidate.
 - **AnsiPainter renderer** (#2469). Filed as NOT-TO-BUILD strategic note. Owning the renderer would be a multi-month rewrite touching every TUI component; deferred until Ink limitations cost measurable user-visible UX.
 
 ### Process
@@ -87,13 +87,13 @@ Audit:
 - **Dedicated `lint.yml` CI workflow.** Runs on push to `main` and all PRs, with
   concurrency cancellation. `format:check` runs as advisory (non-blocking) until the
   large existing format diff is auditioned in a follow-up PR.
-- **Ignored `.claude/` and `quarantine/`** in `biome.json` — those directories hold
+- **Ignored `.claude/` and `quarantine/`** in `biome.json` - those directories hold
   third-party skill artifacts and quarantined code, not first-party source.
 
 ### Notes
 
 - `tsconfig.json` is already `strict: true`. `noUncheckedIndexedAccess` and
-  `exactOptionalPropertyTypes` not enabled in this PR — both produce hundreds of
+  `exactOptionalPropertyTypes` not enabled in this PR - both produce hundreds of
   errors across the existing codebase. Tracked for incremental adoption.
 - "Agent-generated code linted before delivery" (acceptance item 4 of #2419) is
   out-of-scope here; that hook belongs in the daemon/agent loop and warrants a
@@ -103,12 +103,12 @@ Audit:
 
 ### Added
 
-- **Redesigned bottom bar** — full visual refresh of the TUI footer. New components:
-  - `DjDeck` — premium audio deck (3-row LCD: track/elapsed, artist/duration, waveform/vol; reels inside the LCD; `Ctrl+P/N/B/M/↑↓` transport; `/dj close|open` toggle).
-  - `AgentInstrumentStrip` — bordered status cards with stacked uppercase label / brighter value (MODEL · AGENTS · TOKENS · BRANCH · AGENT · MIC · APPROVAL · SESSION). Middle-truncation on long model names.
-  - `ModeFooter` — bordered cyan-active mode chips. `Ctrl+Y` cycles modes.
-  - `HeaderBar` — calm cyan brand pill (per-letter `8gent` colors) replacing the rainbow `Header`.
-  - `BottomBar` — wraps the new stack so `app.tsx` holds one render call.
+- **Redesigned bottom bar** - full visual refresh of the TUI footer. New components:
+  - `DjDeck` - premium audio deck (3-row LCD: track/elapsed, artist/duration, waveform/vol; reels inside the LCD; `Ctrl+P/N/B/M/↑↓` transport; `/dj close|open` toggle).
+  - `AgentInstrumentStrip` - bordered status cards with stacked uppercase label / brighter value (MODEL · AGENTS · TOKENS · BRANCH · AGENT · MIC · APPROVAL · SESSION). Middle-truncation on long model names.
+  - `ModeFooter` - bordered cyan-active mode chips. `Ctrl+Y` cycles modes.
+  - `HeaderBar` - calm cyan brand pill (per-letter `8gent` colors) replacing the rainbow `Header`.
+  - `BottomBar` - wraps the new stack so `app.tsx` holds one render call.
   - `theme.ts` + `typography.tsx` design-token foundation.
   Transient DJ feedback (`Now playing` / `Stopped` / `Paused`) suppressed at the chat call site.
 - **Runtime capability grants** from skill manifests (#2104).
@@ -141,7 +141,7 @@ Audit:
 
 - **`/spawn` auto-installs missing external agent CLIs.** When the binary for a preset (claude, codex, hermes, openclaw, aider, 8gent) is not on `$PATH`, `/spawn` runs the preset's install recipe (npm/pip), waits for it, re-checks, and only then opens the chat tab. Long output from the installer is suppressed to keep the chat clean. Force-reinstall via `/spawn <id> install`. (`apps/tui/src/lib/external-agent-runner.ts`, `apps/tui/src/app.tsx`)
 - **`8gent update` command.** Runs `npm install -g @8gi-foundation/8gent-code@latest --force`. The `--force` flag fixes the recurring `EEXIST` error when stale `bin/8` / `bin/8gent` / `bin/8gent-code` symlinks block re-install on npm 9+. Streams npm output, prints a restart hint when done. (`bin/8gent.ts`)
-- **`8gent permissions` command** (alias `8gent perms`). Diagnoses macOS Accessibility + Screen Recording grants for the host terminal. macOS attaches privacy permissions to the parent process (Terminal/iTerm/Warp/etc), not to bun, so the hands tools silently no-op when the terminal isn't trusted. The probe runs a tiny `osascript` AX query and a small `screencapture` (checks output bytes — denied permission writes a sub-2KB placeholder) to detect what's missing. With `--open`, also launches the relevant System Settings → Privacy panes. (`packages/hands/index.ts`, `bin/8gent.ts`)
+- **`8gent permissions` command** (alias `8gent perms`). Diagnoses macOS Accessibility + Screen Recording grants for the host terminal. macOS attaches privacy permissions to the parent process (Terminal/iTerm/Warp/etc), not to bun, so the hands tools silently no-op when the terminal isn't trusted. The probe runs a tiny `osascript` AX query and a small `screencapture` (checks output bytes - denied permission writes a sub-2KB placeholder) to detect what's missing. With `--open`, also launches the relevant System Settings → Privacy panes. (`packages/hands/index.ts`, `bin/8gent.ts`)
 
 ## [0.11.14] - 2026-04-29
 
@@ -153,25 +153,25 @@ Audit:
 
 ### Fixed
 
-- **Intro music now fades out gradually instead of cutting abruptly** when the splash banner dismisses (any keypress OR auto-timeout) or when `/quiet` is run. afplay has no fade or seek support, so we delegate the fade to `ffplay` (ships with ffmpeg) using its `afade=t=out` filter — kills afplay, spawns ffplay starting at the same elapsed time with `volume=0.15,afade=t=out:st=0:d=2.4`, audio curves to silence over 2.4s. Falls back to abrupt cut if ffplay isn't on `$PATH`. (`apps/tui/src/components/IntroBanner.tsx`)
+- **Intro music now fades out gradually instead of cutting abruptly** when the splash banner dismisses (any keypress OR auto-timeout) or when `/quiet` is run. afplay has no fade or seek support, so we delegate the fade to `ffplay` (ships with ffmpeg) using its `afade=t=out` filter - kills afplay, spawns ffplay starting at the same elapsed time with `volume=0.15,afade=t=out:st=0:d=2.4`, audio curves to silence over 2.4s. Falls back to abrupt cut if ffplay isn't on `$PATH`. (`apps/tui/src/components/IntroBanner.tsx`)
 
 ## [0.11.12] - 2026-04-28
 
 ### Added
 
 - **Cinematic intro splash** with bundled launch instrumental. Splash schedule extended from 1300ms to 8500ms with typewriter slide-in for title, new subhead, and body line. Paces to a slow-building instrumental shipped at `apps/tui/sounds/launch.mp3` (auto-copied to `~/.8gent/sounds/launch.mp3` on first run; `ui.introSound` setting overrides). Volume 15% via `afplay -v 0.15` so the music sits under the splash text and any future narration.
-- **HUD music player widget** above the status bar — track / progress / volume / hotkey hints. Polls `dj.status()` every 700ms; hidden when nothing's playing. Hotkeys (all `Ctrl+Shift+` to avoid clashing with chat input): `⌃⇧P` play/pause, `⌃⇧B` prev, `⌃⇧N` next, `⌃⇧↑↓` volume, `⌃⇧M` mute. (`apps/tui/src/components/HudMusicPlayer.tsx`)
+- **HUD music player widget** above the status bar - track / progress / volume / hotkey hints. Polls `dj.status()` every 700ms; hidden when nothing's playing. Hotkeys (all `Ctrl+Shift+` to avoid clashing with chat input): `⌃⇧P` play/pause, `⌃⇧B` prev, `⌃⇧N` next, `⌃⇧↑↓` volume, `⌃⇧M` mute. (`apps/tui/src/components/HudMusicPlayer.tsx`)
 - **`DJ.status()`** structured snapshot for any UI consumer (playing / paused / looping / title / position / duration / volume / queueSize). (`packages/music/dj.ts`)
-- **`/quiet` slash command** (aliases: `mute`, `shut`, `silence`) — kills any in-flight intro music, prints a system message confirming the kill. Splash dismiss also calls it automatically.
+- **`/quiet` slash command** (aliases: `mute`, `shut`, `silence`) - kills any in-flight intro music, prints a system message confirming the kill. Splash dismiss also calls it automatically.
 - **TTS output on by default** via new `voice.outputEnabled` setting. Each agent's text reply is spoken through macOS `say` when the user is on darwin. Toggle live with `/voice on` / `/voice off`.
 - **Per-tab TTS voices** via new `voice.perAgent` settings map. Defaults: Orchestrator → Daniel, Engineer → Karen, QA → Moira. Falls back to `voice.ttsVoice` when a role is missing. Editable from `/settings → Voice`. Helper: `getVoiceForRole(role, settings?)` exported from `@8gent/settings`.
 - **`voice/per-agent-defaults` smoke test** asserts the helper resolves a non-empty voice for every role and respects fallbacks.
-- **Dry-witted sarcastic option** for the onboarding communication-style question (option 1) — replaces a vanilla "professional" tone for users who want the sarcastic-motivational vibe.
+- **Dry-witted sarcastic option** for the onboarding communication-style question (option 1) - replaces a vanilla "professional" tone for users who want the sarcastic-motivational vibe.
 - **SubscriptionControl skill** with Advisor / Copilot / Autopilot ladder for granular permission escalation.
 
 ### Fixed
 
-- **Intro music now dies with the TUI under all exit paths.** Earlier versions used `{ detached: true }` + `proc.unref()` so afplay survived Ctrl+C, kill, and crashed sessions — only `pkill afplay` could stop it. Module-level child handle is tracked; `SIGINT` / `SIGTERM` / `exit` / `uncaughtException` hooks kill it; `detached` flag is gone.
+- **Intro music now dies with the TUI under all exit paths.** Earlier versions used `{ detached: true }` + `proc.unref()` so afplay survived Ctrl+C, kill, and crashed sessions - only `pkill afplay` could stop it. Module-level child handle is tracked; `SIGINT` / `SIGTERM` / `exit` / `uncaughtException` hooks kill it; `detached` flag is gone.
 - **Tab title reconciliation on every load** so renamed agents from settings.agents.names actually apply. Previously renaming agents during onboarding had no effect on the persisted tab titles (`apps/tui/src/hooks/useWorkspaceTabs.ts`).
 - **Onboarding clarification questions no longer get cut off.** Single-line system messages that exceed the centered-hint budget soft-wrap into a multi-line block instead of being sliced at 60 chars (`apps/tui/src/components/message-list.tsx`).
 - **Reasoning text no longer renders twice.** When a step finishes with no tool calls, its `event.text` IS the final assistant reply; we no longer also push it as a greyish system bubble in front of the cyan assistant bubble (`apps/tui/src/app.tsx`).
@@ -186,7 +186,7 @@ Audit:
   - Kernel training proxy `start()` (training itself was already opt-in via `~/.8gent/config.json`)
   - Heartbeat agents (git monitoring, self-heal, memory sync background loops)
 
-  This aligns with Principle 2 ("free and local by default") and Principle 8 ("the work speaks for itself") — boot lean, layer features in only when the user asks for them.
+  This aligns with Principle 2 ("free and local by default") and Principle 8 ("the work speaks for itself") - boot lean, layer features in only when the user asks for them.
 
 ### Added
 
@@ -201,7 +201,7 @@ If you were relying on background sync, kernel training collection, or heartbeat
 export 8GENT_FULL=1     # or add to your shell rc
 ```
 
-Otherwise no action needed — your sessions, agent, tools, and `/spawn` all keep working exactly as before.
+Otherwise no action needed - your sessions, agent, tools, and `/spawn` all keep working exactly as before.
 
 ## [0.11.2] - 2026-04-28
 
@@ -219,13 +219,13 @@ Otherwise no action needed — your sessions, agent, tools, and `/spawn` all kee
   - LITE=1: **~2.4s** (3 trials: 2433/2414/2478ms)
   - **47% reduction** in Agent construction time.
 
-  The agent still answers turns in lite mode — it just won't sync, learn, or self-heal until you remove the flag. Inspired by jcode's "lean by default" philosophy.
+  The agent still answers turns in lite mode - it just won't sync, learn, or self-heal until you remove the flag. Inspired by jcode's "lean by default" philosophy.
 
 ## [0.11.1] - 2026-04-28
 
 ### Performance
 
-- **Faster cold start.** Removed dead `PlanValidateLoop` construction from the `Agent` constructor — the field was assigned but never invoked at runtime, only referenced in a comment. Saves an import chain (tree-sitter + 3 sub-modules) and ~50ms per Agent instantiation.
+- **Faster cold start.** Removed dead `PlanValidateLoop` construction from the `Agent` constructor - the field was assigned but never invoked at runtime, only referenced in a comment. Saves an import chain (tree-sitter + 3 sub-modules) and ~50ms per Agent instantiation.
 - **Trimmed intro banner.** Total reveal cut from 1900ms to 1300ms (-31%) for snappier launch. The cascade still feels intentional, just less of a wait.
 - **8GENT_LITE=1 env flag.** Skips the intro banner entirely. Reserved for future lazy-init of auxiliary subsystems (kernel, heartbeat, sessionSync) inspired by jcode's lean-by-default philosophy. v0.11.1 wires the flag; v0.12.0 will lazy-init the heavies.
 
@@ -430,88 +430,88 @@ Otherwise no action needed — your sessions, agent, tools, and `/spawn` all kee
 - **Text overlap in message list** - Hardcoded `marginLeft={20}` replaced with responsive terminal-width-based indent
 - **Security** - Removed all hardcoded Telegram tokens, moved to .env
 
-## [0.7.0] — 2026-03-18
+## [0.7.0] - 2026-03-18
 
 ### Added
-- **Smart onboarding** — auto-detects git config, Ollama models, GitHub auth; reduces from 8 questions to 3
-- **Preferences cloud sync** — `PreferencesSyncManager` pulls/pushes preferences via Convex after auth; `updatedAt` wins merge strategy
-- **Adaptive system prompt** — `USER_CONTEXT_SEGMENT` injects user name, role, communication style into system prompt
-- **Session history & resume** — `/history`, `/continue`, `/resume`, `/compact` slash commands; checkpoints every 5 messages
-- **Conversations table** — Convex schema for cross-device session persistence with checkpoint data
-- **Personal LoRA collector** — `PersonalCollector` quality-filters session traces for fine-tuning (score >= 0.7, no corrections)
-- **ESC to interrupt** — pressing Escape during generation aborts the AI SDK stream immediately
-- **User-scoped memory** — `userId` field on `MemoryBase` and `SearchOptions` for per-user memory recall
-- **HistoryScreen** — TUI screen for browsing and resuming past sessions with keyboard navigation
-- **Comprehensive personalization docs** — `docs/PERSONALIZATION.md` covering all 5 phases
+- **Smart onboarding** - auto-detects git config, Ollama models, GitHub auth; reduces from 8 questions to 3
+- **Preferences cloud sync** - `PreferencesSyncManager` pulls/pushes preferences via Convex after auth; `updatedAt` wins merge strategy
+- **Adaptive system prompt** - `USER_CONTEXT_SEGMENT` injects user name, role, communication style into system prompt
+- **Session history & resume** - `/history`, `/continue`, `/resume`, `/compact` slash commands; checkpoints every 5 messages
+- **Conversations table** - Convex schema for cross-device session persistence with checkpoint data
+- **Personal LoRA collector** - `PersonalCollector` quality-filters session traces for fine-tuning (score >= 0.7, no corrections)
+- **ESC to interrupt** - pressing Escape during generation aborts the AI SDK stream immediately
+- **User-scoped memory** - `userId` field on `MemoryBase` and `SearchOptions` for per-user memory recall
+- **HistoryScreen** - TUI screen for browsing and resuming past sessions with keyboard navigation
+- **Comprehensive personalization docs** - `docs/PERSONALIZATION.md` covering all 5 phases
 
-## [0.6.0] — 2026-03-17
+## [0.6.0] - 2026-03-17
 
 ### Added
-- **`apps/clui/` — Tauri 2.0 desktop overlay** — branded 8gent desktop app with Alt+Space toggle, multi-tab sessions, transparent floating overlay, Rust backend for process management, React 19 frontend with Tailwind CSS 4, real-time NDJSON streaming from agent subprocess, permission server for human-in-the-loop tool approval
-- **`packages/auth/` — Clerk authentication** — device code flow for CLI login (`8gent auth login`), macOS Keychain token storage with AES-256-GCM encrypted file fallback, JWT validation via `jose`, automatic token refresh, non-blocking anonymous mode (auth never blocks local usage)
-- **`packages/db/` — Convex database** — reactive database with users, sessions, usage, and preferences tables; real-time sync; Clerk auth integration; offline mutation queuing; ConvexClient wrapper for Bun
-- **`packages/voice/` — Speech-to-Text via Whisper** — local transcription via whisper.cpp CLI (no cloud dependency), sox-based mic recording, model manager with streaming downloads from Hugging Face (tiny/base/small), voice activity detection, OpenAI Whisper API cloud fallback, VoiceEngine with EventEmitter API
-- **`packages/control-plane/` — Multi-tenant management** — tenant provisioning with subdomain routing (username.8gent.app), usage analytics, billing plan definitions (free/pro/team), Stripe integration stubs, admin dashboard data layer
-- **`apps/dashboard/` — Admin dashboard** — Next.js 16 admin panel with Clerk auth + RBAC, user management with search/filter, session monitoring, usage charts (recharts), system health, model distribution, plan management
-- **CLUI integration components** — ThinkingView, EvidencePanel, PlanKanban, AuthGate, SettingsPanel adapted from TUI to React DOM with Framer Motion animations
-- **TUI voice components** — `useVoiceInput` hook (Ctrl+Space toggle) and `VoiceIndicator` component with recording status, audio levels, and download progress
-- **CLI auth commands** — `8gent auth login`, `8gent auth logout`, `8gent auth status`, `8gent auth whoami`
-- **20 BMAD planning documents** — project briefs, PRDs, architecture docs, and epics for all 5 phases across `docs/bmad/`
-- **Local vision & OCR model support** — vision router now auto-discovers OCR-specialized models (dots.ocr, deepseek-ocr, glm-ocr) alongside general vision models (qwen2.5-vl, minicpm-v, internvl2)
-- **`/vision` slash command** — configure vision/OCR models from TUI: `/vision status`, `/vision model <name>`, `/vision ocr <name>`, `/vision pull` for recommendations
-- **Vision config in `.8gent/config.json`** — user-configurable `defaultModel`, `ocrModel`, fallback chains, provider preference (local/cloud), timeout
-- **OCR-specific routing** — `findOCRModel()` prefers dedicated OCR models for text extraction, falls back to general vision models with strong OCR
-- **OCR prompt in VisionInterpreter** — dedicated OCR prompt preserves formatting, tables, code indentation, and LaTeX formulas
-- **OpenRouter free vision fallback** — vision router now checks OpenRouter free models even without API key as additional fallback
+- **`apps/clui/` - Tauri 2.0 desktop overlay** - branded 8gent desktop app with Alt+Space toggle, multi-tab sessions, transparent floating overlay, Rust backend for process management, React 19 frontend with Tailwind CSS 4, real-time NDJSON streaming from agent subprocess, permission server for human-in-the-loop tool approval
+- **`packages/auth/` - Clerk authentication** - device code flow for CLI login (`8gent auth login`), macOS Keychain token storage with AES-256-GCM encrypted file fallback, JWT validation via `jose`, automatic token refresh, non-blocking anonymous mode (auth never blocks local usage)
+- **`packages/db/` - Convex database** - reactive database with users, sessions, usage, and preferences tables; real-time sync; Clerk auth integration; offline mutation queuing; ConvexClient wrapper for Bun
+- **`packages/voice/` - Speech-to-Text via Whisper** - local transcription via whisper.cpp CLI (no cloud dependency), sox-based mic recording, model manager with streaming downloads from Hugging Face (tiny/base/small), voice activity detection, OpenAI Whisper API cloud fallback, VoiceEngine with EventEmitter API
+- **`packages/control-plane/` - Multi-tenant management** - tenant provisioning with subdomain routing (username.8gent.app), usage analytics, billing plan definitions (free/pro/team), Stripe integration stubs, admin dashboard data layer
+- **`apps/dashboard/` - Admin dashboard** - Next.js 16 admin panel with Clerk auth + RBAC, user management with search/filter, session monitoring, usage charts (recharts), system health, model distribution, plan management
+- **CLUI integration components** - ThinkingView, EvidencePanel, PlanKanban, AuthGate, SettingsPanel adapted from TUI to React DOM with Framer Motion animations
+- **TUI voice components** - `useVoiceInput` hook (Ctrl+Space toggle) and `VoiceIndicator` component with recording status, audio levels, and download progress
+- **CLI auth commands** - `8gent auth login`, `8gent auth logout`, `8gent auth status`, `8gent auth whoami`
+- **20 BMAD planning documents** - project briefs, PRDs, architecture docs, and epics for all 5 phases across `docs/bmad/`
+- **Local vision & OCR model support** - vision router now auto-discovers OCR-specialized models (dots.ocr, deepseek-ocr, glm-ocr) alongside general vision models (qwen2.5-vl, minicpm-v, internvl2)
+- **`/vision` slash command** - configure vision/OCR models from TUI: `/vision status`, `/vision model <name>`, `/vision ocr <name>`, `/vision pull` for recommendations
+- **Vision config in `.8gent/config.json`** - user-configurable `defaultModel`, `ocrModel`, fallback chains, provider preference (local/cloud), timeout
+- **OCR-specific routing** - `findOCRModel()` prefers dedicated OCR models for text extraction, falls back to general vision models with strong OCR
+- **OCR prompt in VisionInterpreter** - dedicated OCR prompt preserves formatting, tables, code indentation, and LaTeX formulas
+- **OpenRouter free vision fallback** - vision router now checks OpenRouter free models even without API key as additional fallback
 
 ### Fixed
-- **Installer color violations** — replaced forbidden `color="gray"` and `color="white"` with `dimColor` and default text in `apps/installer/src/index.tsx`
-- **write_file path bug** — models sometimes pass absolute-looking paths like `/8gent-code/server.ts` that resolve outside the working directory; these are now auto-stripped to relative paths instead of throwing a path-traversal error; tool description and system prompt updated to instruct models to use relative paths
+- **Installer color violations** - replaced forbidden `color="gray"` and `color="white"` with `dimColor` and default text in `apps/installer/src/index.tsx`
+- **write_file path bug** - models sometimes pass absolute-looking paths like `/8gent-code/server.ts` that resolve outside the working directory; these are now auto-stripped to relative paths instead of throwing a path-traversal error; tool description and system prompt updated to instruct models to use relative paths
 
 ### Added
-- **Dynamic free model router** — `getBestFreeModel()` in `packages/providers/index.ts` queries OpenRouter's `/api/v1/models` endpoint to find the best available free model (filtered by `:free` suffix, sorted by context length); results cached for 1 hour; `spawn_agent` now accepts `model: "auto:free"` to automatically pick the best free model
-- **Evidence collection visible in TUI** — real-time evidence badges (pass/fail) appear in the chat stream after write_file, edit_file, run_command, and git_commit; one-line summary shown at end of each response; `/evidence` command shows full session breakdown with per-type counts
-- **Three-layer model architecture** — base model (qwen3) + Eight LoRA (centralized training from benchmarks) + Personal LoRA (user's local fine-tune on their patterns); personal module retrains when a new Eight version releases
-- **Eight model version manager** (`version-manager.ts`) — manages model promotion lifecycle with naming convention `eight-{major.minor.patch}-q{gen}:{params}`, Gemini Flash judge validates checkpoints before promotion
-- **8gent as default provider** — `eight-1.0-q3:14b` is now the primary recommended model across all documentation and quick-start guides
-- **Auto-open files on macOS** — files referenced in agent output are opened automatically in the default editor
-- **TUI accepts any model name** — `/model` command now accepts arbitrary model identifiers, not just predefined options
+- **Dynamic free model router** - `getBestFreeModel()` in `packages/providers/index.ts` queries OpenRouter's `/api/v1/models` endpoint to find the best available free model (filtered by `:free` suffix, sorted by context length); results cached for 1 hour; `spawn_agent` now accepts `model: "auto:free"` to automatically pick the best free model
+- **Evidence collection visible in TUI** - real-time evidence badges (pass/fail) appear in the chat stream after write_file, edit_file, run_command, and git_commit; one-line summary shown at end of each response; `/evidence` command shows full session breakdown with per-type counts
+- **Three-layer model architecture** - base model (qwen3) + Eight LoRA (centralized training from benchmarks) + Personal LoRA (user's local fine-tune on their patterns); personal module retrains when a new Eight version releases
+- **Eight model version manager** (`version-manager.ts`) - manages model promotion lifecycle with naming convention `eight-{major.minor.patch}-q{gen}:{params}`, Gemini Flash judge validates checkpoints before promotion
+- **8gent as default provider** - `eight-1.0-q3:14b` is now the primary recommended model across all documentation and quick-start guides
+- **Auto-open files on macOS** - files referenced in agent output are opened automatically in the default editor
+- **TUI accepts any model name** - `/model` command now accepts arbitrary model identifiers, not just predefined options
 
 ### Fixed
-- **Security fixes ported to `packages/eight`** — hardened command execution, input sanitization, and permission checks carried over from agent package
+- **Security fixes ported to `packages/eight`** - hardened command execution, input sanitization, and permission checks carried over from agent package
 
 ### Added (prior)
-- **`@8gent/kernel` package** — full 4-phase RL fine-tuning pipeline via training proxy
-  - **Phase 1: Proxy manager** (`proxy.ts`) — start/stop training proxy, health checks, latency overhead monitoring with configurable threshold
-  - **Phase 2: Judge scoring** (`judge.ts`) — PRM wiring via Gemini Flash (free), score distribution tracking, per-model stats, daily trend analysis
-  - **Phase 3: Training orchestration** (`training.ts`) — GRPO batch collection with score filtering, checkpoint creation, benchmark validation gate, auto-rollback on regression
-  - **Phase 4: Production loop** (`loop.ts`) — MadMax scheduling (sleep/idle windows), auto-promotion of improved checkpoints into model-router, health monitoring, score trend alerts
-  - **Kernel manager** (`manager.ts`) — unified entry point, reads `.8gent/config.json`, safe no-op when disabled
-- **RL fine-tuning exploration** — architecture doc, proxy config, and integration plan for continuous GRPO fine-tuning of local Ollama models via training proxy
-- **Training proxy toggle** — `TRAINING_PROXY_URL` env var and `.8gent/config.json` training_proxy section to route Ollama calls through the OpenAI-compatible training proxy
-- **RL checkpoint validation gate** — `benchmarks/autoresearch/validate-checkpoint.ts` runs benchmark suite against fine-tuned models and compares against baseline scores to prevent regressions
-- **Kernel Fine-Tuning section in README** — documents proxy architecture, base model recommendations, and how to enable
-- **Remotion video demos** (`apps/demos/`) — React-based video generation for product reels and landing page content
+- **`@8gent/kernel` package** - full 4-phase RL fine-tuning pipeline via training proxy
+  - **Phase 1: Proxy manager** (`proxy.ts`) - start/stop training proxy, health checks, latency overhead monitoring with configurable threshold
+  - **Phase 2: Judge scoring** (`judge.ts`) - PRM wiring via Gemini Flash (free), score distribution tracking, per-model stats, daily trend analysis
+  - **Phase 3: Training orchestration** (`training.ts`) - GRPO batch collection with score filtering, checkpoint creation, benchmark validation gate, auto-rollback on regression
+  - **Phase 4: Production loop** (`loop.ts`) - MadMax scheduling (sleep/idle windows), auto-promotion of improved checkpoints into model-router, health monitoring, score trend alerts
+  - **Kernel manager** (`manager.ts`) - unified entry point, reads `.8gent/config.json`, safe no-op when disabled
+- **RL fine-tuning exploration** - architecture doc, proxy config, and integration plan for continuous GRPO fine-tuning of local Ollama models via training proxy
+- **Training proxy toggle** - `TRAINING_PROXY_URL` env var and `.8gent/config.json` training_proxy section to route Ollama calls through the OpenAI-compatible training proxy
+- **RL checkpoint validation gate** - `benchmarks/autoresearch/validate-checkpoint.ts` runs benchmark suite against fine-tuned models and compares against baseline scores to prevent regressions
+- **Kernel Fine-Tuning section in README** - documents proxy architecture, base model recommendations, and how to enable
+- **Remotion video demos** (`apps/demos/`) - React-based video generation for product reels and landing page content
   - 3 ready-to-render compositions: HeroIntro, FeatureShowcase, CostComparison
   - 9:16 vertical (reels) and 16:9 landscape variants for each
   - Reusable component library: Logo, TerminalWindow, GlowCard, CodeBlock, Background
   - Animation utilities: fade-in, scale-in, typewriter, glow pulse, counter
   - Branded design tokens matching 8gent visual identity
   - Scripts: `studio`, `render:hero`, `render:features`, `render:cost`, `render:all`
-  - **Media preview page** (`bun run demos:media`) — Vite-powered browser preview with Remotion Player
+  - **Media preview page** (`bun run demos:media`) - Vite-powered browser preview with Remotion Player
 
-## [0.5.0] — 2026-03-14
+## [0.5.0] - 2026-03-14
 
 ### Added
-- **Universal BMAD planning** — system prompt now classifies tasks as Code, Creative, Research, Planning, or Communication with tailored approaches for each
-- **Proactive planner wired into agent loop** — updates prediction context on every tool call, tracks modified files and errors
-- **Evidence collection in agent core** — fire-and-forget evidence gathering after file writes, commands, and git commits; session summary on finish
-- **AST `indexFolder()` implementation** — recursively parses TS/JS files, populates symbol maps and file outlines
-- **AST `getSymbolSource()` implementation** — reads file and extracts lines for a specific symbol with optional context
-- **AST `estimateTokenSavings()` implementation** — calculates full-file vs symbol-only token estimates
-- **Momentum tracking** in ProactivePlanner — tracks steps completed, rate (steps/min), and streak
-- **Universal step categories** — added `creative`, `research`, `communication`, `planning` to StepCategory
-- **Creative/research prediction methods** — `predictCreativeSteps()` and `predictResearchSteps()` for non-code tasks
+- **Universal BMAD planning** - system prompt now classifies tasks as Code, Creative, Research, Planning, or Communication with tailored approaches for each
+- **Proactive planner wired into agent loop** - updates prediction context on every tool call, tracks modified files and errors
+- **Evidence collection in agent core** - fire-and-forget evidence gathering after file writes, commands, and git commits; session summary on finish
+- **AST `indexFolder()` implementation** - recursively parses TS/JS files, populates symbol maps and file outlines
+- **AST `getSymbolSource()` implementation** - reads file and extracts lines for a specific symbol with optional context
+- **AST `estimateTokenSavings()` implementation** - calculates full-file vs symbol-only token estimates
+- **Momentum tracking** in ProactivePlanner - tracks steps completed, rate (steps/min), and streak
+- **Universal step categories** - added `creative`, `research`, `communication`, `planning` to StepCategory
+- **Creative/research prediction methods** - `predictCreativeSteps()` and `predictResearchSteps()` for non-code tasks
 - **REPL commands**: `/board` (kanban view), `/predict` (confidence-scored predictions), `/momentum` (velocity stats)
 - **bmad-method** as devDependency (v6.1.0) with auto-init on postinstall
 
@@ -526,49 +526,49 @@ Otherwise no action needed — your sessions, agent, tools, and `/spawn` all kee
 
 ---
 
-## [0.3.1] — 2026-03-14
+## [0.3.1] - 2026-03-14
 
 ### Added
 - Agent mode cycling (Ctrl+T): Planning, Researching, Implementing, Testing, Debugging
-- Kanban auto-population from agent PLAN: output — parses numbered steps into cards
+- Kanban auto-population from agent PLAN: output - parses numbered steps into cards
 - Kanban auto-advancement: Ready → In Progress on tool start, → Done on tool end
 - Dynamic model fetching per provider (Ollama, OpenRouter, LM Studio)
 
 ### Fixed
-- ADHD mode toggle (stale closure — only toggled on, never off)
-- Scroll jumping — removed overflow:hidden, capped visible messages to 50
-- Re-planning loop — agent now plans once then executes immediately
+- ADHD mode toggle (stale closure - only toggled on, never off)
+- Scroll jumping - removed overflow:hidden, capped visible messages to 50
+- Re-planning loop - agent now plans once then executes immediately
 - Replaced "Demoing" mode with "Debugging"
 
 ---
 
-## [0.3.0] — 2026-03-14
+## [0.3.0] - 2026-03-14
 
 ### Added
-- **packages/eight/** — New core agent engine (replaces packages/agent/)
+- **packages/eight/** - New core agent engine (replaces packages/agent/)
   - Non-blocking agent with always-visible input and message queue
   - Real-time streaming of assistant reasoning into chat
   - Ollama, LM Studio, and OpenRouter client modules
   - Context engineering and prompt system
   - Full REPL with tool loop
-- **packages/ai/** — Vercel AI SDK integration
+- **packages/ai/** - Vercel AI SDK integration
   - ToolLoopAgent with multi-turn conversation support
   - Provider abstraction (Ollama, OpenRouter, LM Studio)
   - Toolshed bridge for dynamic tool loading
-- **packages/harness-cli/** — Headless CLI for running and inspecting 8gent sessions
+- **packages/harness-cli/** - Headless CLI for running and inspecting 8gent sessions
   - `harness run` / `harness inspect` / `harness doctor` / `harness sessions`
-- **packages/specifications/** — Session spec v2 with full AI SDK data model
+- **packages/specifications/** - Session spec v2 with full AI SDK data model
   - JSON schema, reader, writer for session persistence
-- **apps/debugger/** — Next.js session debugger app
+- **apps/debugger/** - Next.js session debugger app
   - Session list, viewer, streaming, copy-as-JSON
-- **benchmarks/** — Full v2 benchmark suite (39 benchmarks, 7 categories)
+- **benchmarks/** - Full v2 benchmark suite (39 benchmarks, 7 categories)
   - Autoresearch harness with Ollama + OpenRouter fallback
   - Experience-based model router (learns best model per domain)
   - Execution grader (SWE-bench style, 70% exec + 30% keyword)
   - 15 battle-test benchmarks across professional domains
   - Prompt mutation system with failure analysis
   - Overnight runner for continuous improvement
-- **packages/dreams/** — Creative scripts for video generation
+- **packages/dreams/** - Creative scripts for video generation
 - **TUI overhaul**
   - Design-system-first architecture with primitives layer
   - Process sidebar (Ctrl+B) for background tasks
@@ -608,7 +608,7 @@ Otherwise no action needed — your sessions, agent, tools, and `/spawn` all kee
 
 ---
 
-## [0.2.0] — 2026-03-10
+## [0.2.0] - 2026-03-10
 
 ### Added
 - OpenRouter provider wired into TUI and agent runtime
@@ -626,7 +626,7 @@ Otherwise no action needed — your sessions, agent, tools, and `/spawn` all kee
 
 ---
 
-## [0.1.0] — 2026-02-28
+## [0.1.0] - 2026-02-28
 
 ### Added
 - Initial release
