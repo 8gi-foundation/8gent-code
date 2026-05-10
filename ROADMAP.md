@@ -6,29 +6,30 @@ Living document. Last updated 2026-05-10.
 
 ### Eyes (perception capability) - shipped 2026-05-09 / 2026-05-10
 
-Body-part sibling to hands. Eyes perceive what's on screen; hands act on what eyes locate. Spec lives at `docs/specs/EYES-SPEC.md`; backend rationale at `docs/specs/EYES-BACKEND-PEEKABOO.md`.
+Body-part sibling to hands. Eyes perceive what's on screen; hands act on what eyes locate. Spec lives at `docs/specs/EYES-SPEC.md`; backend rationale at `docs/specs/EYES-BACKEND-AX-NATIVE.md`.
 
 | # | Module | PR | Tests | Notes |
 |---|--------|----|-------|-------|
 | 2496 | Spec + decisions (capture, annotate, locate, describe, wait_for, diff, observe; permission model; failover chain) | #2497 + #2500 | n/a (spec PRs) | RFC §8 closed: logical coords + Frame.scale, focused-display default, 2s/16-frame annotation cache, perception:remote tier on data egress, macOS-first cross-platform path |
-| 2501 | Peekaboo backend (#1): full Eyes impl, annotation cache, perception:remote tier with audit logging | #2502 | 25 | Concept-extraction from Peekaboo (MIT, macOS 15+); subprocess only, no upstream code merged |
+| 2501 | Peekaboo subprocess backend (v0, dropped 2026-05-10) | #2502 | 25 | Replaced by bundled native AX bridge - see row below |
+| - | Native AX bridge backend: bundled Swift helper at `~/.8gent/bin/8gent-ax-bridge`; full Eyes impl, annotation cache, perception:remote tier with audit logging; no Homebrew dependency | this PR | 8 | Conceptual ancestry: Peekaboo (MIT, Peter Steinberger) - see `packages/eyes/native/NOTICE`. Build via `bash packages/eyes/native/build.sh`. |
 | 2499 | Main lint debt cleared (3 Biome errors blocking CI) | #2509 | n/a | Unblocks clean CI on all downstream PRs |
 | 2504 | Agent tool wiring: `eyes_see`, `eyes_find`, `eyes_describe`, `eyes_wait_for` + `perception` category in tool-registry | #2511 | (delegated to backend) | Singleton Eyes per process; v0 wired to local Ollama only |
 | 2503 | `apps/8gent-eyes` headless CLI per spec §6 (dispatch-everywhere): 7 subcommands + `--intent` routing, AgentCLIDesign-compliant exit codes | #2513 | 9 | Token-cheap JSON-out default, no telemetry beyond audit |
-| 2512 | Vision-router wiring: shared `eyesVisionProvider` for both Ollama (local) and OpenRouter (remote); two-phase VisionProvider contract closes #2508 privacy bug (resolve-then-tier-check-then-call) | this PR | +1 (denial-without-inference) | `packages/ai/eyes-vision-provider.ts` is canonical adapter; both agent tool and CLI consume it |
+| 2512 | Vision-router wiring: shared `eyesVisionProvider` for both Ollama (local) and OpenRouter (remote); two-phase VisionProvider contract closes #2508 privacy bug (resolve-then-tier-check-then-call) | #2502 | +1 (denial-without-inference) | `packages/ai/eyes-vision-provider.ts` is canonical adapter; both agent tool and CLI consume it |
 
 To use end-to-end on macOS:
 
 ```bash
-brew install steipete/tap/peekaboo
-# Grant Screen Recording + Accessibility entitlements
-ollama pull qwen2.5-vl    # local vision; OR set OPENROUTER_API_KEY for remote (requires perception:remote grant)
+bash packages/eyes/native/build.sh    # one-time build of the bundled AX bridge (also runs on `bun install` outside CI)
+# Grant Screen Recording + Accessibility entitlements in System Settings
+ollama pull qwen2.5-vl                # local vision; OR set OPENROUTER_API_KEY for remote (requires perception:remote grant)
 ```
 
 Open follow-ups (not blocking the capability):
 
 - **#2510** keychain test crashes on Linux CI (P2). Currently the only thing keeping Validate red on every eyes PR.
-- **Tail (no issue yet):** hands.screenshot migration into eyes per spec §9; real perceptual diff (current diff is byte-equality v0); native AX backend (replaces peekaboo subprocess); Windows UIA backend; Linux X11 + Wayland backends per §8.5 ordering.
+- **Tail (no issue yet):** hands.screenshot migration into eyes per spec §9; real perceptual diff (current diff is byte-equality v0); Windows UIA backend; Linux X11 + Wayland backends per §8.5 ordering.
 
 
 

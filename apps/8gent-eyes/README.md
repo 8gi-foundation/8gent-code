@@ -4,7 +4,7 @@ Headless CLI for the eyes (perception) capability. Spec §6 parity.
 
 ## Status
 
-Ships with the eyes backend (#2503). v0 supports macOS via the peekaboo binary; cross-platform backends queued.
+Ships with the eyes backend (#2503). v0 supports macOS via the bundled native AX bridge; cross-platform backends queued.
 
 ## Install
 
@@ -25,8 +25,9 @@ bun run apps/8gent-eyes/src/index.ts <subcommand> [flags]
 Prerequisites on macOS:
 
 ```bash
-brew install steipete/tap/peekaboo
-# Grant Screen Recording + Accessibility in System Settings -> Privacy & Security
+# Build the bundled Swift bridge once (installs to ~/.8gent/bin/8gent-ax-bridge).
+bash packages/eyes/native/build.sh
+# Grant Screen Recording + Accessibility in System Settings -> Privacy & Security.
 ```
 
 ## Conventions (per AgentCLIDesign)
@@ -36,7 +37,7 @@ brew install steipete/tap/peekaboo
   - `0` ok
   - `1` backend error
   - `2` perception:remote tier denied
-  - `3` peekaboo missing / backend unavailable
+  - `3` AX bridge missing / backend unavailable
   - `64` usage error
 - No telemetry beyond the audit trace store
 - Headless parity: every Eyes method has a CLI form
@@ -81,7 +82,7 @@ Every successful invocation prints exactly one JSON line:
 Errors print one JSON line then exit non-zero:
 
 ```json
-{"ok": false, "exit": 3, "reason": "no perception backend available. On macOS install: brew install steipete/tap/peekaboo"}
+{"ok": false, "exit": 3, "reason": "no perception backend available. On macOS build the bundled bridge: bash packages/eyes/native/build.sh"}
 ```
 
 ## Issues

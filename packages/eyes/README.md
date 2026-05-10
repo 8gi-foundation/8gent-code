@@ -5,12 +5,13 @@ Perception layer for the 8gent body-parts taxonomy. Eyes capture, annotate, loca
 ## Status
 
 Contract: shipped (#2497, #2500).
-First backend: Peekaboo (#2501, this package).
+Active backend: native AX bridge (bundled Swift helper, no external CLI).
 
 See:
 
 - [`docs/specs/EYES-SPEC.md`](../../docs/specs/EYES-SPEC.md) - full contract, types, decisions, headless CLI parity.
-- [`docs/specs/EYES-BACKEND-PEEKABOO.md`](../../docs/specs/EYES-BACKEND-PEEKABOO.md) - first backend rationale, swap path.
+- [`docs/specs/EYES-BACKEND-AX-NATIVE.md`](../../docs/specs/EYES-BACKEND-AX-NATIVE.md) - native bridge rationale, conceptual ancestry, swap path.
+- [`native/NOTICE`](native/NOTICE) - third-party attribution for the Swift bridge.
 
 ## Why a separate package
 
@@ -27,10 +28,10 @@ import {
   type VisionProvider,
 } from "@8gent/eyes";
 
-// 1. Pick the first available backend (peekaboo on Mac).
+// 1. Pick the first available backend (ax-native on Mac).
 const backend = await selectEyesBackend([...DEFAULT_FAILOVER]);
 if (!backend) {
-  console.log("Eyes: install peekaboo with `brew install steipete/tap/peekaboo`");
+  console.log("Eyes: build the bundled bridge with `bash packages/eyes/native/build.sh`");
   process.exit(0);
 }
 
@@ -112,13 +113,24 @@ bun run typecheck
 bun test
 ```
 
-Integration tests against the real Peekaboo CLI run when the binary is installed AND Screen Recording + Accessibility entitlements are granted. Otherwise they self-skip with a console note.
+Integration tests against the real bundled AX bridge run when the binary exists AND Screen Recording + Accessibility entitlements are granted. Otherwise they self-skip with a console note.
+
+## Native bridge
+
+The macOS backend ships with a Swift helper at `native/swift/`. Build it once:
+
+```bash
+bash packages/eyes/native/build.sh
+# installs to ~/.8gent/bin/8gent-ax-bridge
+```
+
+No Homebrew formula, no external CLI. The bridge wraps Apple system frameworks (CoreGraphics, NSScreen, AXUIElement, /usr/sbin/screencapture). Conceptual ancestry: Peekaboo (MIT, Peter Steinberger) - see [`native/NOTICE`](native/NOTICE).
 
 ## Issues
 
 - #2496 - perception capability spec
 - #2497 - spec + scaffold (merged)
 - #2500 - §8 RFC decisions (merged)
-- #2501 - Peekaboo backend (closed by PR #2502)
-- #2503 - `apps/8gent-eyes` headless CLI (follow-up)
-- #2504 - tool registration in `packages/ai/tools.ts` + agent-loop wiring (follow-up)
+- #2501 - Peekaboo backend (v0, dropped 2026-05-10)
+- #2503 - `apps/8gent-eyes` headless CLI
+- #2504 - tool registration in `packages/ai/tools.ts` + agent-loop wiring

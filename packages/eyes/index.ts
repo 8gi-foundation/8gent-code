@@ -2,17 +2,20 @@
  * @8gent/eyes - perception capability.
  *
  * This package defines the Eyes contract, a backend registry, and the
- * Peekaboo backend (#1). Additional backends (ax-native, remote-vlm,
- * Windows UIA, Linux AT-SPI) slot into the same registry per spec §8.5.
+ * native AX backend (#1). Additional backends (remote-vlm, Windows UIA,
+ * Linux AT-SPI) slot into the same registry per spec §8.5.
  *
  * Spec: docs/specs/EYES-SPEC.md
- * Backend rationale: docs/specs/EYES-BACKEND-PEEKABOO.md
+ * Backend rationale: docs/specs/EYES-BACKEND-AX-NATIVE.md
  *
  * Hands and eyes are independent body-parts. Eyes does not import from
  * @8gent/hands at type level; the agent loop wires Locator -> Point when
  * hands needs to act on what eyes located.
  *
- * Closes #2501 (Peekaboo backend impl).
+ * History: the v0 backend (#2501) shelled out to the Homebrew `peekaboo`
+ * binary. v0.2 replaces it with a bundled Swift bridge built from
+ * packages/eyes/native/swift/ and installed at ~/.8gent/bin/8gent-ax-bridge.
+ * No external CLI dependency.
  */
 
 import type {
@@ -123,15 +126,13 @@ export async function selectEyesBackend(
 
 /**
  * Default failover order, mirroring the spec §5.
- *   1. ax-native (lowest latency, no install)
- *   2. peekaboo (subprocess, install required)
- *   3. remote-vlm (cloud, lowest fidelity for AX-driven locate)
+ *   1. ax-native (bundled Swift bridge, no install ceremony)
+ *   2. remote-vlm (cloud, lowest fidelity for AX-driven locate)
  *
  * Backends not yet registered are skipped silently.
  */
 export const DEFAULT_FAILOVER: readonly string[] = Object.freeze([
 	"ax-native",
-	"peekaboo",
 	"remote-vlm",
 ]);
 
@@ -141,14 +142,19 @@ export const DEFAULT_FAILOVER: readonly string[] = Object.freeze([
 // ---------------------------------------------------------------------------
 
 export {
-	createPeekabooEyes,
-	peekabooBackend,
-	probePermissions as probePeekabooPermissions,
-	type PeekabooBackendOpts,
+	axNativeBackend,
+	createAxNativeEyes,
+	probePermissions as probeAxNativePermissions,
+	type AxNativeBackendOpts,
 	type VisionProvider,
 	type VisionRequest,
 	type VisionResponse,
-} from "./backends/peekaboo.js";
+} from "./backends/ax-native.js";
+
+// Compatibility re-export: existing call sites that imported the
+// PeekabooBackendOpts shape get a same-shape type without churning every
+// downstream import. New code should use AxNativeBackendOpts.
+export type { AxNativeBackendOpts as PeekabooBackendOpts } from "./backends/ax-native.js";
 
 export {
 	checkPerceptionRemote,
@@ -166,8 +172,9 @@ export {
 
 export { AnnotationCache, annotationKey } from "./cache.js";
 
-// Auto-register the Peekaboo backend on first import. Backends gate themselves
-// via available(); registering here means selectEyesBackend(DEFAULT_FAILOVER)
-// just works without consumers having to wire each backend manually.
-import { peekabooBackend as _peekabooBackend } from "./backends/peekaboo.js";
-registerEyesBackend(_peekabooBackend);
+// Auto-register the ax-native backend on first import. Backends gate
+// themselves via available(); registering here means
+// selectEyesBackend(DEFAULT_FAILOVER) just works without consumers having to
+// wire each backend manually.
+import { axNativeBackend as _axNativeBackend } from "./backends/ax-native.js";
+registerEyesBackend(_axNativeBackend);
