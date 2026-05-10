@@ -209,4 +209,160 @@ export default defineSchema({
 		.index("by_vesselId", ["vesselId"])
 		.index("by_ownerId", ["ownerId"])
 		.index("by_lastHeartbeat", ["lastHeartbeat"]),
+
+	// ============================================
+	// Governance tables (ported from steady-possum-557, 2026-05-10)
+	// Powers 8gi.org public + internal surfaces:
+	//   /submissions, /internal/inbox, /internal/agents, /internal/share-analytics
+	// Source of truth: 8gi-governance repo. See docs/2026-05-10-convex-consolidation-plan.md.
+	// ============================================
+
+	submissions: defineTable({
+		slug: v.string(),
+		title: v.string(),
+		subtitle: v.string(),
+		href: v.union(v.string(), v.null()),
+		jurisdiction: v.string(),
+		committee: v.string(),
+		committee_chair: v.union(v.string(), v.null()),
+		inquiry_url: v.union(v.string(), v.null()),
+		deadline: v.string(),
+		deadline_iso: v.union(v.string(), v.null()),
+		submitted_at: v.union(v.string(), v.null()),
+		submitted_via: v.union(v.string(), v.null()),
+		status: v.union(
+			v.literal("Draft"),
+			v.literal("In progress"),
+			v.literal("Submitted"),
+			v.literal("Published"),
+			v.literal("Withdrawn"),
+		),
+		source_file: v.union(v.string(), v.null()),
+		pdf: v.union(v.string(), v.null()),
+		docx: v.union(v.string(), v.null()),
+		sort_order: v.number(),
+	})
+		.index("by_slug", ["slug"])
+		.index("by_status", ["status"])
+		.index("by_jurisdiction", ["jurisdiction"])
+		.index("by_sort_order", ["sort_order"]),
+
+	agent_mail: defineTable({
+		source_id: v.number(),
+		from_agent: v.string(),
+		to_agent: v.string(),
+		subject: v.string(),
+		body: v.string(),
+		read: v.boolean(),
+		timestamp: v.number(),
+		delivered_to_local: v.optional(v.boolean()),
+	})
+		.index("by_source_id", ["source_id"])
+		.index("by_to_agent", ["to_agent", "timestamp"])
+		.index("by_timestamp", ["timestamp"])
+		.index("by_pending_outbound", ["delivered_to_local", "timestamp"]),
+
+	agentTranscripts: defineTable({
+		roomId: v.string(),
+		agentId: v.string(),
+		agentName: v.string(),
+		messages: v.array(
+			v.object({
+				id: v.string(),
+				timestamp: v.number(),
+				speaker: v.string(),
+				text: v.string(),
+			}),
+		),
+		startedAt: v.number(),
+		endedAt: v.optional(v.number()),
+		metadata: v.optional(
+			v.object({
+				userContext: v.optional(v.string()),
+				agentVersion: v.optional(v.string()),
+				modelUsed: v.optional(v.string()),
+			}),
+		),
+	})
+		.index("by_room", ["roomId"])
+		.index("by_agent", ["agentId"])
+		.index("by_started", ["startedAt"]),
+
+	agentSessions: defineTable({
+		roomId: v.string(),
+		agentIds: v.array(v.string()),
+		participantCount: v.number(),
+		startedAt: v.number(),
+		endedAt: v.optional(v.number()),
+		transcriptIds: v.array(v.id("agentTranscripts")),
+	})
+		.index("by_room", ["roomId"])
+		.index("by_started", ["startedAt"]),
+
+	agentContext: defineTable({
+		agentId: v.string(),
+		userId: v.optional(v.string()),
+		calendar: v.optional(
+			v.array(
+				v.object({
+					title: v.string(),
+					start: v.number(),
+					end: v.number(),
+				}),
+			),
+		),
+		projects: v.optional(v.array(v.string())),
+		memory: v.optional(v.string()),
+		lastUpdated: v.number(),
+	})
+		.index("by_agent", ["agentId"])
+		.index("by_user", ["userId"]),
+
+	shareLinks: defineTable({
+		token: v.string(),
+		deckSlug: v.string(),
+		label: v.string(),
+		note: v.optional(v.string()),
+		createdAt: v.number(),
+		createdBy: v.string(),
+		expiresAt: v.optional(v.number()),
+		revoked: v.boolean(),
+	})
+		.index("by_token", ["token"])
+		.index("by_deck", ["deckSlug"])
+		.index("by_created", ["createdAt"]),
+
+	shareViewers: defineTable({
+		token: v.string(),
+		name: v.string(),
+		email: v.string(),
+		firstSeenAt: v.number(),
+		lastSeenAt: v.number(),
+		userAgent: v.optional(v.string()),
+		country: v.optional(v.string()),
+		region: v.optional(v.string()),
+		city: v.optional(v.string()),
+		ip: v.optional(v.string()),
+	})
+		.index("by_token", ["token"])
+		.index("by_token_email", ["token", "email"]),
+
+	shareEvents: defineTable({
+		viewerId: v.id("shareViewers"),
+		token: v.string(),
+		type: v.union(
+			v.literal("session_start"),
+			v.literal("session_end"),
+			v.literal("slide_view"),
+			v.literal("media_play"),
+			v.literal("media_pause"),
+			v.literal("media_complete"),
+		),
+		slideIndex: v.optional(v.number()),
+		durationMs: v.optional(v.number()),
+		timestamp: v.number(),
+		meta: v.optional(v.string()),
+	})
+		.index("by_viewer", ["viewerId", "timestamp"])
+		.index("by_token", ["token", "timestamp"]),
 });
