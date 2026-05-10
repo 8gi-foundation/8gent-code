@@ -147,7 +147,16 @@ export class ToolLoopDetector {
 // ---------------------------------------------------------------------------
 // DoomLoopDetector: period 1 to 4 cycle detection on a sliding 12-call window
 // with normalized JSON-arg signatures. See issue #2461.
+//
+// Event surface (RFC #2527 Option A, James 2026-05-10):
+//   detector.on("stuck", (event: DoomStuckEvent) => { ... })
+// fires immediately when a cycle is detected. Mirrors the existing `check()`
+// return value but lets consumers like @8gent/handeyes subscribe once at
+// startup instead of polling. `check()` still returns the boolean for
+// backward compat with the agent loop's existing usage.
 // ---------------------------------------------------------------------------
+
+import { EventEmitter } from "node:events";
 
 export interface DoomToolCall {
 	toolName: string;
@@ -159,6 +168,30 @@ export interface DoomLoopDetectorConfig {
 	windowSize?: number;
 	/** Max period to scan (default 4). */
 	maxPeriod?: number;
+}
+
+/**
+ * Payload emitted on the "stuck" event when DoomLoopDetector detects a
+ * repeating cycle in the tool stream.
+ */
+export interface DoomStuckEvent {
+	/** Cycle period detected (1..maxPeriod). */
+	period: number;
+	/** How many full repetitions were observed at the tail (3 for period-1, 2 otherwise). */
+	reps: number;
+	/** Sliding-window length at the moment of detection. */
+	windowSize: number;
+	/** Epoch ms when the cycle was detected. */
+	detectedAt: number;
+	/** The repeating tail signatures (length = period * reps). */
+	signatures: string[];
+}
+
+/**
+ * Strongly-typed event names. Add new events here as they ship.
+ */
+export interface DoomLoopDetectorEvents {
+	stuck: (event: DoomStuckEvent) => void;
 }
 
 /**
@@ -199,13 +232,18 @@ function signature(call: DoomToolCall): string {
  * Detects repeating cycles in a stream of tool calls. Build the signature
  * stream, truncate to the sliding window, then scan periods 1..maxPeriod for
  * a tail that repeats `reps` times (reps = 3 for period 1, else 2).
+ *
+ * Extends EventEmitter so consumers can subscribe to the "stuck" event for
+ * push-style notification on detection. The classic `check(): boolean` API
+ * is preserved unchanged for existing callers.
  */
-export class DoomLoopDetector {
+export class DoomLoopDetector extends EventEmitter {
 	private history: string[] = [];
-	private windowSize: number;
-	private maxPeriod: number;
+	private readonly windowSize: number;
+	private readonly maxPeriod: number;
 
 	constructor(config: DoomLoopDetectorConfig = {}) {
+		super();
 		this.windowSize = config.windowSize ?? 12;
 		this.maxPeriod = config.maxPeriod ?? 4;
 	}
@@ -214,9 +252,30 @@ export class DoomLoopDetector {
 		this.history = [];
 	}
 
+	// Typed overloads for `on` so handeyes (and any future consumer) gets
+	// inferred event-payload types without `as any`.
+	on<E extends keyof DoomLoopDetectorEvents>(event: E, listener: DoomLoopDetectorEvents[E]): this;
+	on(event: string | symbol, listener: (...args: unknown[]) => void): this;
+	on(event: string | symbol, listener: (...args: unknown[]) => void): this {
+		return super.on(event, listener);
+	}
+
+	once<E extends keyof DoomLoopDetectorEvents>(event: E, listener: DoomLoopDetectorEvents[E]): this;
+	once(event: string | symbol, listener: (...args: unknown[]) => void): this;
+	once(event: string | symbol, listener: (...args: unknown[]) => void): this {
+		return super.once(event, listener);
+	}
+
+	off<E extends keyof DoomLoopDetectorEvents>(event: E, listener: DoomLoopDetectorEvents[E]): this;
+	off(event: string | symbol, listener: (...args: unknown[]) => void): this;
+	off(event: string | symbol, listener: (...args: unknown[]) => void): this {
+		return super.off(event, listener);
+	}
+
 	/**
 	 * Append `calls` to history (truncating to windowSize) and return true
-	 * if a period-1..maxPeriod cycle is detected at the tail.
+	 * if a period-1..maxPeriod cycle is detected at the tail. Also emits
+	 * a "stuck" event with full payload when a cycle is detected.
 	 */
 	check(calls: DoomToolCall[]): boolean {
 		for (const c of calls) {
@@ -242,7 +301,17 @@ export class DoomLoopDetector {
 					break;
 				}
 			}
-			if (isCycle) return true;
+			if (isCycle) {
+				const event: DoomStuckEvent = {
+					period,
+					reps,
+					windowSize: this.windowSize,
+					detectedAt: Date.now(),
+					signatures: tail,
+				};
+				this.emit("stuck", event);
+				return true;
+			}
 		}
 		return false;
 	}

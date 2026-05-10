@@ -16,7 +16,18 @@ Body-part sibling to hands. Eyes perceive what's on screen; hands act on what ey
 | 2499 | Main lint debt cleared (3 Biome errors blocking CI) | #2509 | n/a | Unblocks clean CI on all downstream PRs |
 | 2504 | Agent tool wiring: `eyes_see`, `eyes_find`, `eyes_describe`, `eyes_wait_for` + `perception` category in tool-registry | #2511 | (delegated to backend) | Singleton Eyes per process; v0 wired to local Ollama only |
 | 2503 | `apps/8gent-eyes` headless CLI per spec §6 (dispatch-everywhere): 7 subcommands + `--intent` routing, AgentCLIDesign-compliant exit codes | #2513 | 9 | Token-cheap JSON-out default, no telemetry beyond audit |
-| 2512 | Vision-router wiring: shared `eyesVisionProvider` for both Ollama (local) and OpenRouter (remote); two-phase VisionProvider contract closes #2508 privacy bug (resolve-then-tier-check-then-call) | #2502 | +1 (denial-without-inference) | `packages/ai/eyes-vision-provider.ts` is canonical adapter; both agent tool and CLI consume it |
+| 2512 | Vision-router wiring: shared `eyesVisionProvider` for both Ollama (local) and OpenRouter (remote); two-phase VisionProvider contract closes #2508 privacy bug (resolve-then-tier-check-then-call) | #2524 | +1 (denial-without-inference) | `packages/ai/eyes-vision-provider.ts` is canonical adapter; both agent tool and CLI consume it |
+| 2525 | Real perceptual diff replaces v0 byte-equality: pngjs-based, downscale-then-flood-fill, ~144ms on 4K, returns true changed-region bboxes for `observe()` events | #2528 | +6 | Logical-coord conversion via `Frame.scale`; threshold + downscale + minRegionPixels named constants |
+
+### Handeyes (sensorimotor coordination) - in flight
+
+| # | Module | PR | Tests | Notes |
+|---|--------|----|-------|-------|
+| 2526 | Spec + contract scaffold for the third body-part. Sensorimotor-coordination as its own package depending on hands AND eyes. | #2531 | n/a (contract PR) | Engagement loop selectively engaged when agent observably stuck; reuses spawn_agent + check_agent + merge_agent_work primitives, no new orchestration substrate |
+| 2527 | DoomLoopDetector EventEmitter hook (RFC Option A): `detector.on("stuck", { period, reps, signatures, ... })` for push-style cycle detection. Closes HANDEYES-SPEC §8 Q3. | this PR | +7 | Sync `check(): boolean` API preserved unchanged for backward compat |
+
+Open follow-ups:
+- **Engagement loop** (#2526 follow-up): the actual orchestrator, eyes-worker, hands-queue, 5 compound tools, agent-loop wiring. In flight by 8TO Rishi.
 
 To use end-to-end on macOS:
 
@@ -29,7 +40,7 @@ ollama pull qwen2.5-vl                # local vision; OR set OPENROUTER_API_KEY 
 Open follow-ups (not blocking the capability):
 
 - **#2510** keychain test crashes on Linux CI (P2). Currently the only thing keeping Validate red on every eyes PR.
-- **Tail (no issue yet):** hands.screenshot migration into eyes per spec §9; real perceptual diff (current diff is byte-equality v0); Windows UIA backend; Linux X11 + Wayland backends per §8.5 ordering.
+- **Tail (no issue yet):** hands.screenshot migration into eyes per spec §9; Windows UIA backend; Linux X11 + Wayland backends per §8.5 ordering. (Real perceptual diff shipped via #2528 above; no longer in tail.)
 
 
 

@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { DoomLoopDetector, type DoomToolCall } from "../tool-loop-detector";
+import { DoomLoopDetector, type DoomStuckEvent, type DoomToolCall } from "../tool-loop-detector";
 
 const call = (name: string, args: Record<string, unknown> = {}): DoomToolCall => ({
 	toolName: name,
@@ -134,5 +134,86 @@ describe("DoomLoopDetector", () => {
 		expect(d.check([a1, a2, a1])).toBe(false);
 		// but a1, a2, a1, a2 IS period-2
 		expect(d.check([a1, a2, a1, a2])).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Event-emitter surface (RFC #2527 Option A, James 2026-05-10).
+// Push notifications for handeyes engagement loop and any future consumer.
+// ---------------------------------------------------------------------------
+
+describe("DoomLoopDetector emitter", () => {
+	it("emits 'stuck' when a period-1 cycle is detected", () => {
+		const d = new DoomLoopDetector();
+		const events: DoomStuckEvent[] = [];
+		d.on("stuck", (e) => events.push(e));
+		expect(d.check([call("A"), call("A"), call("A")])).toBe(true);
+		expect(events).toHaveLength(1);
+		expect(events[0]?.period).toBe(1);
+		expect(events[0]?.reps).toBe(3);
+		expect(events[0]?.signatures).toHaveLength(3);
+		expect(events[0]?.windowSize).toBe(12);
+		expect(typeof events[0]?.detectedAt).toBe("number");
+	});
+
+	it("emits 'stuck' with the right period for a period-2 cycle", () => {
+		const d = new DoomLoopDetector();
+		let captured: DoomStuckEvent | undefined;
+		d.on("stuck", (e) => (captured = e));
+		expect(d.check([call("A"), call("B"), call("A"), call("B")])).toBe(true);
+		expect(captured?.period).toBe(2);
+		expect(captured?.reps).toBe(2);
+		expect(captured?.signatures).toHaveLength(4);
+	});
+
+	it("does NOT emit 'stuck' when no cycle is detected", () => {
+		const d = new DoomLoopDetector();
+		const events: DoomStuckEvent[] = [];
+		d.on("stuck", (e) => events.push(e));
+		expect(d.check([call("A"), call("B"), call("C")])).toBe(false);
+		expect(events).toHaveLength(0);
+	});
+
+	it("fires multiple subscribers on the same detection", () => {
+		const d = new DoomLoopDetector();
+		let s1 = 0;
+		let s2 = 0;
+		d.on("stuck", () => s1++);
+		d.on("stuck", () => s2++);
+		d.check([call("X"), call("X"), call("X")]);
+		expect(s1).toBe(1);
+		expect(s2).toBe(1);
+	});
+
+	it("once('stuck') fires only on the first detection", () => {
+		const d = new DoomLoopDetector();
+		let fires = 0;
+		d.once("stuck", () => fires++);
+		d.check([call("A"), call("A"), call("A")]); // detects
+		d.check([call("A")]); // detects again because tail still AAA in window
+		expect(fires).toBe(1);
+	});
+
+	it("off() removes a subscriber", () => {
+		const d = new DoomLoopDetector();
+		let fires = 0;
+		const handler = () => fires++;
+		d.on("stuck", handler);
+		d.check([call("A"), call("A"), call("A")]);
+		expect(fires).toBe(1);
+		d.off("stuck", handler);
+		d.reset();
+		d.check([call("B"), call("B"), call("B")]);
+		expect(fires).toBe(1); // unchanged
+	});
+
+	it("emits 'stuck' even when caller does not check the boolean return value", () => {
+		// Models the handeyes-style consumer that subscribes once and never
+		// inspects the boolean return.
+		const d = new DoomLoopDetector();
+		let fired = false;
+		d.on("stuck", () => (fired = true));
+		d.check([call("A"), call("A"), call("A")]); // ignore return
+		expect(fired).toBe(true);
 	});
 });
