@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { logAccess } from "@8gent/audit";
@@ -28,6 +28,7 @@ import {
 	checkPerceptionRemote,
 	type CheckResult as PerceptionCheck,
 } from "../perception-tier.js";
+import { perceptualDiff } from "../utils/perceptual-diff.js";
 import type {
 	AnnotatedElement,
 	AnnotatedFrame,
@@ -171,16 +172,6 @@ function frameOutputPath(displayId: number): string {
 	const path = join(dir, file);
 	ensureDir(path);
 	return path;
-}
-
-function pngFileSimilarity(a: string, b: string): { similarity: number; pixelsDifferent: number } {
-	if (!existsSync(a) || !existsSync(b)) return { similarity: 0, pixelsDifferent: -1 };
-	const sa = statSync(a).size;
-	const sb = statSync(b).size;
-	if (sa !== sb) return { similarity: 0, pixelsDifferent: -1 };
-	const ba = createHash("sha256").update(readFileSync(a)).digest("hex");
-	const bb = createHash("sha256").update(readFileSync(b)).digest("hex");
-	return ba === bb ? { similarity: 1, pixelsDifferent: 0 } : { similarity: 0, pixelsDifferent: -1 };
 }
 
 function frameFromImageResult(
@@ -561,19 +552,55 @@ class PeekabooEyes implements Eyes {
 	// diff
 	// -------------------------------------------------------------------------
 
-	async diff(a: Frame, b: Frame, _opts: DiffOpts = {}): Promise<FrameDiff> {
-		// v0: byte-equality similarity (1 or 0). Real perceptual diff is a
-		// follow-up (would need pngjs / sharp). regions covers the whole frame
-		// when changed, which is honest for byte-equality.
-		const cmp = pngFileSimilarity(a.path, b.path);
-		if (cmp.similarity === 1) {
-			return { similarity: 1, regions: [], pixelsDifferent: 0 };
+	async diff(a: Frame, b: Frame, opts: DiffOpts = {}): Promise<FrameDiff> {
+		// Real perceptual diff (closes #2525). Replaces the v0 byte-equality
+		// helper. Returns a 0..1 similarity, real changed regions in LOGICAL
+		// coords (raw px / scale), and an exact pixelsDifferent count.
+		//
+		// opts.region is in LOGICAL coords per the rest of the eyes API; we
+		// convert to RAW for the underlying diff and convert returned regions
+		// back to LOGICAL before yielding to the caller.
+		if (!existsSync(a.path) || !existsSync(b.path)) {
+			return {
+				similarity: 0,
+				regions: [{ x: 0, y: 0, width: a.width, height: a.height }],
+				pixelsDifferent: a.width * a.height,
+			};
 		}
-		const region = { x: 0, y: 0, width: a.width, height: a.height };
+
+		const scale = a.scale > 0 ? a.scale : 1;
+		const rawRegion = opts.region
+			? {
+					x: Math.round(opts.region.x * scale),
+					y: Math.round(opts.region.y * scale),
+					width: Math.round(opts.region.width * scale),
+					height: Math.round(opts.region.height * scale),
+				}
+			: undefined;
+
+		const result = await perceptualDiff(a.path, b.path, {
+			region: rawRegion,
+			threshold: opts.thresholdPx,
+		});
+
+		// Convert RAW pixel regions back to LOGICAL coords. Round outward so
+		// regions still cover all changed pixels after the conversion.
+		const regions = result.regions.map((r) => ({
+			x: Math.floor(r.x / scale),
+			y: Math.floor(r.y / scale),
+			width: Math.ceil(r.width / scale),
+			height: Math.ceil(r.height / scale),
+		}));
+
+		// pixelsDifferent is reported in RAW pixel-equivalent area; convert to
+		// logical-pixel equivalent so it stays consistent with frame.width *
+		// frame.height (which are logical).
+		const pixelsDifferent = Math.round(result.pixelsDifferent / (scale * scale));
+
 		return {
-			similarity: 0,
-			regions: [region],
-			pixelsDifferent: cmp.pixelsDifferent < 0 ? a.width * a.height : cmp.pixelsDifferent,
+			similarity: result.similarity,
+			regions,
+			pixelsDifferent,
 		};
 	}
 
