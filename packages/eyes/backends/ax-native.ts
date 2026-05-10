@@ -1,14 +1,14 @@
 /**
- * @8gent/eyes - Peekaboo backend (#1).
+ * @8gent/eyes - native AX backend.
+ *
+ * Replaces the v0 Peekaboo subprocess backend (#2501) with a bundled Swift
+ * helper at ~/.8gent/bin/8gent-ax-bridge. No Homebrew dependency, no
+ * external CLI to install. The bridge is built locally from
+ * packages/eyes/native/swift/ via packages/eyes/native/build.sh and copied
+ * into the user's bin dir on first run.
  *
  * Spec: docs/specs/EYES-SPEC.md
- * Rationale: docs/specs/EYES-BACKEND-PEEKABOO.md
- * Issue: #2501.
- *
- * Adopts Peekaboo's `image`, `see`, `list screens`, and `permissions` commands
- * by concept-extraction (subprocess invocation). Does NOT adopt Peekaboo's
- * action commands (click, type, drag) because hands owns those, nor its
- * `agent` and `mcp` subcommands because we have our own equivalents.
+ * Backend rationale: docs/specs/EYES-BACKEND-AX-NATIVE.md
  *
  * Permission model:
  *   - capture, annotate, locate (AX), wait_for, diff, observe
@@ -16,6 +16,12 @@
  *   - describe, locate(kind: "describe") routed to a remote provider
  *     -> additionally gated by perception:remote tier per §4.2 / §8.4.
  *     The egress check fires on RUNTIME provider identity, not backend.
+ *
+ * The backend talks to a single bundled Swift binary that wraps Apple system
+ * frameworks directly (CGDisplay*, NSScreen, AXUIElement*, /usr/sbin/screencapture).
+ * No third-party Swift packages, no AXorcist, no Homebrew formula. Conceptual
+ * ancestor of the bridge: Peekaboo (MIT, Peter Steinberger) - see
+ * packages/eyes/native/NOTICE.
  */
 
 import { createHash } from "node:crypto";
@@ -49,19 +55,23 @@ import type {
 	WaitOpts,
 	WaitResult,
 } from "../index.js";
-import { getFocusedScreen, listScreens, type ScreenInfo } from "../utils/display.js";
 import {
-	isPeekabooAvailable,
-	resolvePeekabooBinary,
-	runPeekaboo,
-	type RunOpts,
-} from "../utils/peekaboo-cli.js";
+	getFocusedScreen,
+	listScreens,
+	type ScreenInfo,
+} from "../utils/display.js";
+import {
+	isBridgeAvailable,
+	resolveBridgeBinary,
+	runBridge,
+	type BridgeRunOpts,
+} from "../utils/ax-bridge.js";
 
 // ---------------------------------------------------------------------------
-// Peekaboo response shapes (subset we actually parse).
+// Bridge response shapes (subset we actually parse).
 // ---------------------------------------------------------------------------
 
-interface PeekabooImageData {
+interface BridgeImageData {
 	files: Array<{
 		path: string;
 		mime_type: string;
@@ -69,15 +79,16 @@ interface PeekabooImageData {
 		window_title?: string | null;
 		item_label?: string | null;
 		window_index?: number | null;
+		logical_size?: { width: number; height: number };
+		scale_factor?: number;
 	}>;
-	analysis?: { provider: string; model: string; text: string };
 }
 
-interface PeekabooSeeData {
+interface BridgeSeeData {
 	snapshot_id: string;
 	screenshot_raw: string;
 	screenshot_annotated?: string;
-	ui_map?: string;
+	ui_map?: string | null;
 	application_name?: string | null;
 	window_title?: string | null;
 	is_dialog?: boolean;
@@ -101,7 +112,7 @@ interface PeekabooSeeData {
 	}>;
 }
 
-interface PeekabooPermission {
+interface BridgePermission {
 	name: string;
 	isRequired: boolean;
 	isGranted: boolean;
@@ -118,31 +129,26 @@ export interface VisionRequest {
 	prompt: string;
 }
 export interface VisionResponse {
-	provider: string;        // actual provider that ran (may differ from resolved id if failover happened)
+	provider: string;
 	model: string;
 	text: string;
 	tokens?: number;
 }
 
 /**
- * Two-phase contract per spec §4.2 / §8.4 (post-#2512).
+ * Two-phase contract per spec §4.2 / §8.4.
  *
  * The eyes backend MUST call `resolveProviderId()` first, run the
  * perception:remote tier check on that id, and ONLY then call `describe()`.
  * This eliminates the v0 privacy bug (#2508) where the inference call
- * happened before the tier check, leaking frames to remote providers even
- * when the tier denied them.
- *
- * Implementations MUST cache the resolution so the inference call hits the
- * same provider that was tier-checked. The shared adapter at
- * `packages/ai/eyes-vision-provider.ts` is the canonical impl.
+ * happened before the tier check.
  */
 export interface VisionProvider {
 	resolveProviderId(req: VisionRequest): Promise<string>;
 	describe(req: VisionRequest): Promise<VisionResponse>;
 }
 
-export interface PeekabooBackendOpts extends BackendOpts {
+export interface AxNativeBackendOpts extends BackendOpts {
 	visionProvider?: VisionProvider;
 	sessionId?: string;
 	app?: string;            // bundle id of the active app, used in tier checks
@@ -175,11 +181,11 @@ function frameOutputPath(displayId: number): string {
 }
 
 function frameFromImageResult(
-	res: PeekabooImageData,
+	res: BridgeImageData,
 	screen: ScreenInfo,
 ): Frame {
 	const file = res.files[0];
-	if (!file) throw new Error("peekaboo image returned no files");
+	if (!file) throw new Error("8gent-ax-bridge image returned no files");
 	return {
 		id: newFrameId(),
 		path: file.path,
@@ -193,7 +199,7 @@ function frameFromImageResult(
 }
 
 function elementToAnnotated(
-	e: PeekabooSeeData["ui_elements"][number],
+	e: BridgeSeeData["ui_elements"][number],
 	app?: string,
 	window?: string,
 ): AnnotatedElement {
@@ -225,15 +231,15 @@ function locatorFromElement(
 	};
 }
 
-class PeekabooEyes implements Eyes {
-	readonly id = "peekaboo";
-	readonly backend = "peekaboo";
+class AxNativeEyes implements Eyes {
+	readonly id = "ax-native";
+	readonly backend = "ax-native";
 	readonly available: boolean;
 
-	private readonly opts: PeekabooBackendOpts;
+	private readonly opts: AxNativeBackendOpts;
 	private readonly cache: AnnotationCache;
 
-	constructor(opts: PeekabooBackendOpts, available: boolean) {
+	constructor(opts: AxNativeBackendOpts, available: boolean) {
 		this.opts = opts;
 		this.available = available;
 		this.cache = new AnnotationCache({
@@ -242,7 +248,7 @@ class PeekabooEyes implements Eyes {
 		});
 	}
 
-	private runOpts(): RunOpts {
+	private runOpts(): BridgeRunOpts {
 		return { binaryPath: this.opts.binaryPath };
 	}
 
@@ -275,23 +281,18 @@ class PeekabooEyes implements Eyes {
 
 		const screen = await this.resolveTargetScreen(opts.displayId);
 		const out = frameOutputPath(screen.index);
-		const args = [
-			"image",
-			"--mode",
-			"screen",
-			"--screen-index",
-			String(screen.index),
-			"--path",
-			out,
-			"--format",
-			opts.format === "jpeg" ? "jpg" : "png",
-		];
+		const args: Record<string, unknown> = {
+			mode: opts.region ? "area" : "screen",
+			screenIndex: screen.index,
+			path: out,
+			format: opts.format === "jpeg" ? "jpg" : "png",
+		};
 		if (opts.region) {
 			const r = opts.region;
-			args.push("--region", `${r.x},${r.y},${r.width},${r.height}`);
+			args.region = `${r.x},${r.y},${r.width},${r.height}`;
 		}
-		const r = await runPeekaboo<PeekabooImageData>(args, this.runOpts());
-		if (!r.ok) throw new Error(`peekaboo image failed: ${r.reason}`);
+		const r = await runBridge<BridgeImageData>("image", args, this.runOpts());
+		if (!r.ok) throw new Error(`8gent-ax-bridge image failed: ${r.reason}`);
 		const frame = frameFromImageResult(r.data, screen);
 		this.trace("capture", frame.id, `display=${screen.index} scale=${screen.scaleFactor}`);
 		return frame;
@@ -346,15 +347,17 @@ class PeekabooEyes implements Eyes {
 		const cached = this.cache.get(key);
 		if (cached) return cached;
 
-		const args = ["see", "--mode", "screen", "--screen-index"];
 		// Map displayID back to index by re-listing; rare path, accept the cost.
 		const screens = await listScreens(this.runOpts());
 		const s = screens.find((x) => x.displayID === frame.displayId) ?? screens[0];
 		if (!s) throw new Error("annotate: no screens enumerated");
-		args.push(String(s.index));
 
-		const r = await runPeekaboo<PeekabooSeeData>(args, this.runOpts());
-		if (!r.ok) throw new Error(`peekaboo see failed: ${r.reason}`);
+		const r = await runBridge<BridgeSeeData>(
+			"see",
+			{ screenIndex: s.index, path: frame.path },
+			this.runOpts(),
+		);
+		if (!r.ok) throw new Error(`8gent-ax-bridge see failed: ${r.reason}`);
 		const elements = r.data.ui_elements.map((e) =>
 			elementToAnnotated(
 				e,
@@ -421,8 +424,6 @@ class PeekabooEyes implements Eyes {
 		if (query.kind === "describe") {
 			// Vision fallback. Routes through describe() under perception tier check.
 			const desc = await this.describe(af, `Find: ${query.text}`);
-			// We do not synthesize a Point from a free-text vision response in v0;
-			// fall back to AX label match against the description's element list.
 			const haystack = (desc.elements ?? []).map((e) => e.label.toLowerCase());
 			const want = query.text.toLowerCase();
 			for (let i = 0; i < haystack.length; i++) {
@@ -448,7 +449,7 @@ class PeekabooEyes implements Eyes {
 		const provider = this.opts.visionProvider;
 		if (!provider) {
 			throw new Error(
-				"eyes/peekaboo: describe() requires visionProvider in BackendOpts. Wire packages/providers and inject the chat call.",
+				"eyes/ax-native: describe() requires visionProvider in BackendOpts. Wire packages/providers and inject the chat call.",
 			);
 		}
 
@@ -468,7 +469,7 @@ class PeekabooEyes implements Eyes {
 		});
 		if (!check.ok) {
 			throw new Error(
-				`eyes/peekaboo: describe blocked by perception:remote tier (resolved provider="${resolvedProviderId}"). ${check.reason}`,
+				`eyes/ax-native: describe blocked by perception:remote tier (resolved provider="${resolvedProviderId}"). ${check.reason}`,
 			);
 		}
 
@@ -477,7 +478,7 @@ class PeekabooEyes implements Eyes {
 			summary: resp.text,
 			tokens: resp.tokens,
 			model: `${resp.provider}/${resp.model}`,
-			elements: undefined, // populated when a structured-output prompt is used
+			elements: undefined,
 		};
 	}
 
@@ -553,13 +554,9 @@ class PeekabooEyes implements Eyes {
 	// -------------------------------------------------------------------------
 
 	async diff(a: Frame, b: Frame, opts: DiffOpts = {}): Promise<FrameDiff> {
-		// Real perceptual diff (closes #2525). Replaces the v0 byte-equality
-		// helper. Returns a 0..1 similarity, real changed regions in LOGICAL
-		// coords (raw px / scale), and an exact pixelsDifferent count.
-		//
-		// opts.region is in LOGICAL coords per the rest of the eyes API; we
-		// convert to RAW for the underlying diff and convert returned regions
-		// back to LOGICAL before yielding to the caller.
+		// Real perceptual diff (closes #2525). Returns a 0..1 similarity, real
+		// changed regions in LOGICAL coords (raw px / scale), and an exact
+		// pixelsDifferent count. Region coord conversion mirrors the v0 backend.
 		if (!existsSync(a.path) || !existsSync(b.path)) {
 			return {
 				similarity: 0,
@@ -583,8 +580,6 @@ class PeekabooEyes implements Eyes {
 			threshold: opts.thresholdPx,
 		});
 
-		// Convert RAW pixel regions back to LOGICAL coords. Round outward so
-		// regions still cover all changed pixels after the conversion.
 		const regions = result.regions.map((r) => ({
 			x: Math.floor(r.x / scale),
 			y: Math.floor(r.y / scale),
@@ -592,9 +587,6 @@ class PeekabooEyes implements Eyes {
 			height: Math.ceil(r.height / scale),
 		}));
 
-		// pixelsDifferent is reported in RAW pixel-equivalent area; convert to
-		// logical-pixel equivalent so it stays consistent with frame.width *
-		// frame.height (which are logical).
 		const pixelsDifferent = Math.round(result.pixelsDifferent / (scale * scale));
 
 		return {
@@ -650,12 +642,13 @@ class PeekabooEyes implements Eyes {
 // Backend descriptor.
 // ---------------------------------------------------------------------------
 
-async function probePermissions(opts: RunOpts): Promise<{
+async function probePermissions(opts: BridgeRunOpts): Promise<{
 	ok: boolean;
 	reason?: string;
 }> {
-	const r = await runPeekaboo<{ permissions: PeekabooPermission[] }>(
-		["permissions"],
+	const r = await runBridge<{ permissions: BridgePermission[] }>(
+		"permissions",
+		{},
 		opts,
 	);
 	if (!r.ok) return { ok: false, reason: r.reason };
@@ -669,28 +662,26 @@ async function probePermissions(opts: RunOpts): Promise<{
 
 /**
  * Direct factory for callers who need to inject visionProvider, sessionId,
- * app, or other Peekaboo-specific options. The descriptor's `create()`
- * delegates here with whatever subset of opts came through the public
- * BackendOpts shape.
+ * app, or other ax-native-specific options.
  */
-export function createPeekabooEyes(opts: PeekabooBackendOpts = {}): Eyes {
-	return new PeekabooEyes(opts, true);
+export function createAxNativeEyes(opts: AxNativeBackendOpts = {}): Eyes {
+	return new AxNativeEyes(opts, true);
 }
 
-export const peekabooBackend: EyesBackend = {
-	id: "peekaboo",
+export const axNativeBackend: EyesBackend = {
+	id: "ax-native",
 	platforms: ["darwin"],
-	minOSVersion: "15.0",
+	minOSVersion: "13.0",
 	available: async () => {
 		if (process.platform !== "darwin") return false;
-		const bin = resolvePeekabooBinary();
+		const bin = resolveBridgeBinary();
 		if (!bin) return false;
-		const ok = await isPeekabooAvailable();
+		const ok = await isBridgeAvailable();
 		if (!ok) return false;
 		const perms = await probePermissions({});
 		return perms.ok;
 	},
-	create: (opts: BackendOpts = {}) => createPeekabooEyes(opts as PeekabooBackendOpts),
+	create: (opts: BackendOpts = {}) => createAxNativeEyes(opts as AxNativeBackendOpts),
 };
 
 export { probePermissions };

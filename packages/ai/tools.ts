@@ -2162,8 +2162,8 @@ const runComputerTask = tool({
 // Eyes (perception): capture, annotate, locate, describe, wait_for
 // ============================================================================
 // Body-part sibling to hands. Eyes perceive what's on screen; hands act on
-// what eyes locate. Backend selection (peekaboo today, ax-native + remote-vlm
-// later) routes through @8gent/eyes' DEFAULT_FAILOVER. perception:remote tier
+// what eyes locate. Backend selection (ax-native today, remote-vlm later)
+// routes through @8gent/eyes' DEFAULT_FAILOVER. perception:remote tier
 // is enforced inside the eyes backend on actual data egress, not on backend
 // identity (spec §8.4).
 
@@ -2180,7 +2180,7 @@ async function getEyes(): Promise<
 	const backend = await eyesPkg.selectEyesBackend([...eyesPkg.DEFAULT_FAILOVER]);
 	if (!backend) {
 		_eyesUnavailableReason =
-			"eyes: no perception backend available. On macOS, install with `brew install steipete/tap/peekaboo` and grant Screen Recording + Accessibility.";
+			"eyes: no perception backend available. On macOS, build the bundled bridge with `bash packages/eyes/native/build.sh` and grant Screen Recording + Accessibility.";
 		return { ok: false, reason: _eyesUnavailableReason };
 	}
 

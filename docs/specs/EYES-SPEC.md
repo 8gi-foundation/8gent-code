@@ -20,7 +20,7 @@ In scope:
 
 Out of scope (explicit non-goals for this spec):
 
-- Backend implementation. The Peekaboo backend rationale lives in `EYES-BACKEND-PEEKABOO.md`; the actual adapter is a follow-up PR.
+- Backend implementation. The native AX backend rationale lives in `EYES-BACKEND-AX-NATIVE.md`; the adapter ships in `packages/eyes/backends/ax-native.ts`.
 - Migrating `hands.screenshot()` into eyes. Acknowledged as duplication, tracked separately. Eyes will initially call into hands for capture so we ship a working contract without touching hands.
 - Tool registration in `packages/eight/tools.ts` or system-prompt edits. Contract first; tool surface follows once a backend exists.
 
@@ -201,7 +201,7 @@ Perception is sensitive: a screenshot of the screen can contain anything. The co
    The eyes backend MUST call `resolveProviderId()` first, run the tier check on that id, and ONLY then call `describe()`. Frame bytes never leave the device when the tier denies. Implementations MUST cache the resolution so the inference call hits the same provider that was tier-checked.
 
    Consent surface: `[Once] [This session] [Always for this app]`. While `perception:remote` is active, a persistent header indicator stays visible (small amber dot, never red, never violet) per the accessibility-primitives rule that state must be visible without hover.
-3. **OS-level entitlements live with the backend.** macOS Screen Recording and Accessibility permissions are owned by the backend (e.g. Peekaboo, native AVFoundation). The Eyes interface exposes an `available` boolean and a `backend` name; if `available` is false, operations return `{ ok: false }` rather than throwing.
+3. **OS-level entitlements live with the backend.** macOS Screen Recording and Accessibility permissions are owned by the backend (today: the bundled native AX bridge). The Eyes interface exposes an `available` boolean and a `backend` name; if `available` is false, operations return `{ ok: false }` rather than throwing.
 4. **Audit trail.** Every capture, locate, and describe call writes to the trace store with frame id, backend, timestamp, calling tool, and (for `describe`) the resolved model destination. Eyes never silently reads the screen.
 
 Eyes never:
@@ -236,7 +236,7 @@ The CLI is a thin wrapper around the Eyes interface, deterministic, JSON-out by 
 
 ```ts
 export interface EyesBackend {
-	readonly id: string;            // "peekaboo" | "ax-native" | "remote-vlm" | ...
+	readonly id: string;            // "ax-native" | "remote-vlm" | ...
 	readonly platforms: Array<"darwin" | "linux" | "win32">;
 	readonly minOSVersion?: string;
 	readonly available: () => Promise<boolean>;
@@ -270,7 +270,7 @@ Backends MUST cache `annotate()` results, keyed by `(frame.id, displayId, region
 
 Backend implementation order:
 
-1. **macOS** (Peekaboo first, native AX backend follow-up). v0 target.
+1. **macOS** (bundled native AX bridge). v0 target.
 2. **Windows** - UI Automation (UIA) COM API + `BitBlt`. UIA gives a real accessibility tree comparable to AX, and the install base justifies it.
 3. **Linux X11** - AT-SPI2 + `xdotool`/`scrot`. Universal click path exists.
 4. **Linux Wayland** - AT-SPI2 + per-compositor `xdg-desktop-portal` screencast. No portable click backend; locator vision fallback (`LocatorQuery.kind: "describe"`) is the safety valve when the AT-SPI tree returns nothing.

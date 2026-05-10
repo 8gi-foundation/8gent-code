@@ -31,6 +31,7 @@
 		"pet:log": "tail -f ~/.8gent/lil-eight.log",
 		"install-wizard": "bun run scripts/install-wizard.tsx",
 		"install:apple-foundation": "bun run scripts/install-apple-foundation.ts",
+		"build:eyes-bridge": "bash packages/eyes/native/build.sh",
 		"cli": "bun run bin/8gent.ts",
 		"dev": "next dev",
 		"build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node scripts/build-finalize.js",
