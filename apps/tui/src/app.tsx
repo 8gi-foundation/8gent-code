@@ -5002,8 +5002,13 @@ export function App({
 
 	// Render main content based on view mode + active tab type
 	const renderMainContent = () => {
-		// Tab-driven views: when viewMode is "chat", check if the active tab is a utility tab
-		if (viewMode === "chat" && activeTabType !== "chat") {
+		// Utility tabs (settings, notes, music, kanban, terminal, etc.) render
+		// their dedicated view regardless of viewMode. They are workspace-scoped,
+		// not mode-scoped: a Settings tab should show settings whether the agent
+		// is in PLANNING, RESEARCHING, IMPLEMENTING, TESTING, or DEBUGGING.
+		// (Reported by James 2026-05-10: opening /settings while viewMode was
+		// "planning" rendered the chat shell instead of SettingsView.)
+		if (activeTabType !== "chat") {
 			switch (activeTabType) {
 				case "notes":
 					return (
