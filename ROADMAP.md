@@ -73,6 +73,10 @@ Per 8MO Zara boardroom recommendation 2026-05-09:
 - **#2473** built-in slash command registry race on TUI startup (silent fallthrough). P0.
 - **#2474** TUI frame buffer corruption (text from prior turns overlays new content). P0.
 
+### Handeyes (sensorimotor coordination, third body-part) - in flight
+
+Spec + contract scaffold landing under #2526. Adds `@8gent/handeyes` as the only package in the body-parts spine that depends on both hands and eyes; engages selectively when the agent is observably stuck (4 trigger heuristics including a DoomLoopDetector hook into #2461). Architecturally a thin coordinator over the existing `spawn_agent` / `check_agent` / `message_agent` / `merge_agent_work` primitives - no new orchestration substrate. Engagement-loop implementation lands in a follow-up PR after the perceptual-diff work in #2525 ships, since trigger heuristic 3 ("click + no observable change") needs region-aware diff events to fire usefully. Spec: `docs/specs/HANDEYES-SPEC.md`.
+
 ### Existing in flight
 
 - **Per-tab model routing** - each agent tab (Orchestrator/Engineer/QA) gets its own provider and model, with Apple Foundation as lightweight chat option

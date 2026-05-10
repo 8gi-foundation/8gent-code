@@ -245,6 +245,17 @@
         "typescript": "^5.3.0",
       },
     },
+    "packages/handeyes": {
+      "name": "@8gent/handeyes",
+      "version": "0.1.0",
+      "dependencies": {
+        "@8gent/eyes": "workspace:*",
+        "@8gent/hands": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^5.3.0",
+      },
+    },
     "packages/hands": {
       "name": "@8gent/hands",
       "version": "0.1.0",
@@ -365,6 +376,8 @@
     "@8gent/eyes": ["@8gent/eyes@workspace:packages/eyes"],
 
     "@8gent/g8way": ["@8gent/g8way@workspace:packages/g8way"],
+
+    "@8gent/handeyes": ["@8gent/handeyes@workspace:packages/handeyes"],
 
     "@8gent/hands": ["@8gent/hands@workspace:packages/hands"],
 
