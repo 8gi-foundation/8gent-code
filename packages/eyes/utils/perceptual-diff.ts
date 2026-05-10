@@ -33,7 +33,8 @@
  * Performance budget: <200ms on a 3840x2160 RAW frame on M-series.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { PNG } from "pngjs";
 
 export interface Region {
@@ -60,11 +61,27 @@ const DEFAULT_THRESHOLD = 30;
 const DEFAULT_DOWNSCALE = 8;
 const DEFAULT_MIN_REGION_PIXELS = 4;
 
-function readPng(path: string): PNG {
+/**
+ * Async PNG read: non-blocking file read + non-blocking parse. Keeps the
+ * observe() hot path off the event loop's single thread so concurrent
+ * captures or annotation calls aren't stalled while we decode the previous
+ * frame. Old sync path used readFileSync + PNG.sync.read.
+ */
+async function readPng(path: string): Promise<PNG> {
 	if (!existsSync(path)) {
 		throw new Error(`perceptualDiff: file not found: ${path}`);
 	}
-	return PNG.sync.read(readFileSync(path));
+	const buf = await readFile(path);
+	return await new Promise<PNG>((resolve, reject) => {
+		const png = new PNG();
+		png.parse(buf, (err, parsed) => {
+			if (err) {
+				reject(new Error(`perceptualDiff: png parse failed for ${path}: ${err.message}`));
+				return;
+			}
+			resolve(parsed);
+		});
+	});
 }
 
 /**
@@ -229,8 +246,10 @@ export async function perceptualDiff(
 	const scale = Math.max(1, Math.floor(opts.downscale ?? DEFAULT_DOWNSCALE));
 	const minPixels = opts.minRegionPixels ?? DEFAULT_MIN_REGION_PIXELS;
 
-	const pngA = readPng(pathA);
-	const pngB = readPng(pathB);
+	// Read + parse both PNGs concurrently. PNG.parse is non-blocking;
+	// readFile is non-blocking; doing them in parallel halves wall-clock
+	// for the I/O + decode portion vs the old sync sequential path.
+	const [pngA, pngB] = await Promise.all([readPng(pathA), readPng(pathB)]);
 
 	// Mismatched raw dimensions: cannot align pixel-for-pixel. Honest fallback
 	// is "totally different, whole frame is the region".

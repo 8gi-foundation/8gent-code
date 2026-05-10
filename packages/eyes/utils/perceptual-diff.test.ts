@@ -150,6 +150,17 @@ describe("perceptualDiff", () => {
 		expect(r.pixelsDifferent).toBe(512 * 256);
 	});
 
+	it("malformed PNG yields a structured 'png parse failed' error", async () => {
+		const goodPath = writePng("good.png", makePng(64, 64, { r: 0, g: 0, b: 0 }));
+		const badPath = join(TMP_ROOT, "bad.png");
+		writeFileSync(badPath, Buffer.from("not actually a png"));
+
+		// The matcher specifically catches "png parse failed", which the
+		// observe() loop in ax-native.ts uses to differentiate parse failures
+		// from capture/permission/IO errors before tripping the 3-strike abort.
+		await expect(perceptualDiff(goodPath, badPath)).rejects.toThrow(/png parse failed/);
+	});
+
 	it("region opt restricts the comparison area", async () => {
 		// Difference is OUTSIDE the region; should report no change.
 		const baseFill = { r: 0, g: 0, b: 0 };
