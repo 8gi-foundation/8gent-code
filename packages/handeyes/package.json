@@ -1,0 +1,29 @@
+{
+	"name": "@8gent/handeyes",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Sensorimotor coordination for the 8gent body-parts taxonomy. Thin orchestrator over hands (motor) and eyes (perception); engages selectively when the agent is observably stuck. Spec: docs/specs/HANDEYES-SPEC.md.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		},
+		"./types": {
+			"import": "./types.ts",
+			"types": "./types.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@8gent/eyes": "workspace:*",
+		"@8gent/hands": "workspace:*"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}
