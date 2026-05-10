@@ -179,11 +179,48 @@ export async function selectHandeyesAdapter(
 }
 
 /**
- * Default preference order for the v0 adapter set. Currently empty; the
- * orchestrator-backed adapter registers itself in the follow-up PR that
- * lands the engagement loop. Keeping the constant here so consumers do not
- * have to change their wiring when the first adapter ships.
+ * Default preference order for the v0 adapter set. The orchestrator-backed
+ * adapter (handeyes-impl.ts) registers itself at module load when imported,
+ * so consumers should import `./handeyes-impl` (or the convenience
+ * `configureOrchestratorAdapter` re-exported below) before calling
+ * `selectHandeyesAdapter(DEFAULT_ADAPTER_ORDER)`.
  */
 export const DEFAULT_ADAPTER_ORDER: readonly string[] = Object.freeze([
 	"orchestrator",
 ]);
+
+/**
+ * Convenience entrypoint. Importing this triggers registration of the
+ * orchestrator adapter as a side effect; calling it wires the eyes / hands
+ * dependencies the adapter needs. Consumers that want a fully wired Handeyes
+ * with one call go through here.
+ */
+export {
+	configureOrchestratorAdapter,
+	orchestratorAdapter,
+	OrchestratorHandeyes,
+} from "./handeyes-impl.js";
+
+// Side-effect re-export of the engagement-loop primitives so tests and
+// future inline-coordinator adapters can build on the same trigger
+// detectors without reaching into private files.
+export {
+	ClickWithoutChangeDetector,
+	DEFAULT_TTL_STEPS,
+	EngagementLoop,
+	FindZeroHitsTwiceDetector,
+	FORWARD_PROGRESS_EXIT_STREAK,
+	POST_EXIT_COOLDOWN_MS,
+	WaitForTimeoutDetector,
+} from "./engagement-loop.js";
+
+export type {
+	EngagementLoopHooks,
+	EngagementLoopOpts,
+	SessionExitedPayload,
+	SessionExitReason,
+	SessionOpenedPayload,
+	SessionStepPayload,
+	SessionWorkers,
+	TriggerFiredPayload,
+} from "./engagement-loop.js";

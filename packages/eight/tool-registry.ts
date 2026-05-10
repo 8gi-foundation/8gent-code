@@ -95,6 +95,13 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"desktop_clipboard",
 	],
 	perception: ["eyes_see", "eyes_find", "eyes_describe", "eyes_wait_for"],
+	coordination: [
+		"handeyes_locate_and_click",
+		"handeyes_click_and_verify",
+		"handeyes_type_and_confirm",
+		"handeyes_engage_struggle_mode",
+		"handeyes_exit_struggle_mode",
+	],
 };
 
 const CATEGORY_NAMES = Object.keys(TOOL_CATEGORIES);
