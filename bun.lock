@@ -165,8 +165,9 @@
     },
     "packages/db": {
       "name": "@8gent/db",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
+        "@8gi/data": "git+ssh://git@github.com:8gi-foundation/8gi-data.git#main",
         "convex": "^1.17.0",
       },
       "devDependencies": {
@@ -393,6 +394,8 @@
     "@8gi-foundation/8gent-bot": ["@8gi-foundation/8gent-bot@workspace:apps/8gent-bot"],
 
     "@8gi-foundation/8gent-eyes": ["@8gi-foundation/8gent-eyes@workspace:apps/8gent-eyes"],
+
+    "@8gi/data": ["@8gi/data@git+ssh://git@github.com:8gi-foundation/8gi-data.git#88d927a5a1b5e9d8b2e951119e94e1271c4ac8a4", { "dependencies": { "convex": "^1.35.1" } }, "88d927a5a1b5e9d8b2e951119e94e1271c4ac8a4"],
 
     "@8gi/linkedin-vessel": ["@8gi/linkedin-vessel@workspace:apps/linkedin-vessel"],
 
@@ -2858,6 +2861,8 @@
 
     "@8gi-foundation/8gent-eyes/@types/bun": ["@types/bun@1.3.13", "", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
 
+    "@8gi/data/convex": ["convex@1.38.0", "", { "dependencies": { "esbuild": "0.27.0", "prettier": "^3.0.0", "ws": "8.18.0" }, "peerDependencies": { "@auth0/auth0-react": "^2.0.1", "@clerk/clerk-react": "^4.12.8 || ^5.0.0", "@clerk/react": "^6.4.3", "react": "^18.0.0 || ^19.0.0-0 || ^19.0.0" }, "optionalPeers": ["@auth0/auth0-react", "@clerk/clerk-react", "@clerk/react", "react"], "bin": { "convex": "bin/main.js" } }, "sha512-122AC6y5lUS7mr39cluLw9+TOtRX5d/XxeivHhHObs/NTXoVvOnIgDzexVcxaz6Rk0oLFSoydSR1rDCltEz/0A=="],
+
     "@8gi/linkedin-vessel/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
 
     "@babel/code-frame/js-tokens": ["js-tokens@4.0.0", "", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
@@ -3179,6 +3184,8 @@
     "@8gi-foundation/8gent-bot/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
     "@8gi-foundation/8gent-eyes/@types/bun/bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
+
+    "@8gi/data/convex/ws": ["ws@8.18.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw=="],
 
     "@8gi/linkedin-vessel/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
