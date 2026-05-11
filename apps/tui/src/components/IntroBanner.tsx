@@ -4,9 +4,9 @@
  * Sequence over ~8500ms (paced to the slow-starting launch instrumental):
  *   T+0      wordmark begins fade-in
  *   T+1500   flourish rule + ∞ appears
- *   T+2500   title ("The Infinite Gentleman") types in
- *   T+4000   subhead ("Your kernel for autonomous code") types in
- *   T+5800   body line ("free. local. eight powers. no caps.") types in
+ *   T+2500   title ("Your intelligence shouldn't be a subscription.") types in
+ *   T+4000   subhead ("Take back custody of your cognition.") types in
+ *   T+5800   body line ("Infinite General Intelligence. free. local. open.") types in
  *   T+7500   hold completes
  *   T+8500   dismiss
  *
@@ -269,9 +269,9 @@ const BANNER_LINES: readonly string[] = [
 ] as const;
 
 const FLOURISH = "─────────────  ∞  ─────────────";
-const TITLE = "The Infinite Gentleman";
-const SUBHEAD = "Your kernel for autonomous code";
-const BODY = "free. local. eight powers. no caps.";
+const TITLE = "Your intelligence shouldn't be a subscription.";
+const SUBHEAD = "Take back custody of your cognition.";
+const BODY = "Infinite General Intelligence. free. local. open.";
 
 // Cinematic schedule — paced to the slow-starting launch instrumental.
 // Skip entirely with 8GENT_NO_INTRO=1 or 8GENT_LITE=1.
