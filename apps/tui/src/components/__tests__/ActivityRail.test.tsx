@@ -13,12 +13,18 @@ import {
 	type ToolState,
 	type ProviderState,
 	type AgentState,
+	type BodyPartState,
 } from "../ActivityRail";
 import { t } from "../../theme.js";
+import {
+	bodyPartForToolName,
+	detectDefaultBodyPartsState,
+} from "../../hooks/useBodyParts.js";
 
 const TOOL_STATES: ToolState[] = ["idle", "running", "ok", "fail"];
 const PROVIDER_STATES: ProviderState[] = ["local", "fallback", "offline"];
 const AGENT_STATES: AgentState[] = ["idle", "active", "blocked"];
+const BODY_PART_STATES: BodyPartState[] = ["disabled", "idle", "inFlight"];
 
 const baseProps: ActivityRailProps = {
 	tasks: [
@@ -109,6 +115,29 @@ describe("ActivityRail", () => {
 		}
 	});
 
+	test("renders without crashing when bodyParts prop is omitted", () => {
+		const rendered = render(baseProps);
+		expect(rendered).toBeDefined();
+	});
+
+	test("each body-part state renders without crashing", () => {
+		for (const state of BODY_PART_STATES) {
+			const rendered = render({
+				...baseProps,
+				bodyParts: { hands: state, eyes: state, handeyes: state },
+			});
+			expect(rendered).toBeDefined();
+		}
+	});
+
+	test("body-parts mixed-state render is stable", () => {
+		const rendered = render({
+			...baseProps,
+			bodyParts: { hands: "idle", eyes: "inFlight", handeyes: "disabled" },
+		});
+		expect(rendered).toBeDefined();
+	});
+
 	test("snapshot of full rail is stable", () => {
 		const rendered = render(baseProps);
 		const top = rendered.props as {
@@ -133,5 +162,43 @@ describe("ActivityRail", () => {
 			providers: baseProps.providers.length,
 			agents: baseProps.agents.length,
 		}).toMatchSnapshot();
+	});
+});
+
+describe("useBodyParts helpers", () => {
+	test("bodyPartForToolName maps desktop_ prefix to hands", () => {
+		expect(bodyPartForToolName("desktop_click")).toBe("hands");
+		expect(bodyPartForToolName("desktop_type_text")).toBe("hands");
+	});
+
+	test("bodyPartForToolName maps eyes_ prefix to eyes", () => {
+		expect(bodyPartForToolName("eyes_read")).toBe("eyes");
+		expect(bodyPartForToolName("eyes_screenshot")).toBe("eyes");
+	});
+
+	test("bodyPartForToolName maps handeyes_ prefix to handeyes", () => {
+		expect(bodyPartForToolName("handeyes_loop")).toBe("handeyes");
+		expect(bodyPartForToolName("handeyes_engage")).toBe("handeyes");
+	});
+
+	test("bodyPartForToolName returns null for unrelated tools", () => {
+		expect(bodyPartForToolName("read")).toBeNull();
+		expect(bodyPartForToolName("bash")).toBeNull();
+		expect(bodyPartForToolName(null)).toBeNull();
+		expect(bodyPartForToolName(undefined)).toBeNull();
+		expect(bodyPartForToolName("")).toBeNull();
+	});
+
+	test("detectDefaultBodyPartsState returns valid states for all parts", () => {
+		const state = detectDefaultBodyPartsState();
+		const allowed: BodyPartState[] = ["disabled", "idle", "inFlight"];
+		expect(allowed).toContain(state.hands);
+		expect(allowed).toContain(state.eyes);
+		expect(allowed).toContain(state.handeyes);
+		// handeyes is only enabled when both hands and eyes are.
+		if (state.handeyes === "idle") {
+			expect(state.hands).toBe("idle");
+			expect(state.eyes).toBe("idle");
+		}
 	});
 });
