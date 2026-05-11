@@ -1,14 +1,14 @@
 /**
  * IntroBanner — cinematic 8GENT wordmark on TUI launch with cascade reveal.
  *
- * Sequence over ~8500ms (paced to the slow-starting launch instrumental):
- *   T+0      wordmark begins fade-in
+ * Sequence over ~13500ms (paced to the KittenTTS Jasper narration track):
+ *   T+0      wordmark begins fade-in + music + narration both start
  *   T+1500   flourish rule + ∞ appears
  *   T+2500   title ("Your intelligence shouldn't be a subscription.") types in
- *   T+4000   subhead ("Take back custody of your cognition.") types in
- *   T+5800   body line ("Infinite General Intelligence. free. local. open.") types in
- *   T+7500   hold completes
- *   T+8500   dismiss
+ *   T+5500   subhead ("Take back custody of your cognition.") types in
+ *   T+9000   body line ("Infinite General Intelligence. free. local. open.") types in
+ *   T+12500  hold completes
+ *   T+13500  dismiss (fades music + narration together over 2.4s)
  *
  * Skippable: esc / q / Ctrl+C, but ONLY after the body line has finished
  *            typing in. Stray terminal events during launch (paste markers,
@@ -68,6 +68,36 @@ function resolveLaunchSound(): string | null {
 }
 
 /**
+ * Resolve the bundled splash narration MP3. Same lookup pattern as
+ * resolveLaunchSound — user override + dev source + built dist. Pre-rendered
+ * via KittenTTS (Jasper voice) at build time; never regenerated at runtime
+ * to avoid Python + KittenTTS being a runtime dep of the TUI.
+ */
+function resolveNarrationSound(): string | null {
+	const userPath = join(homedir(), ".8gent", "sounds", "splash-narration.mp3");
+	if (existsSync(userPath)) return userPath;
+
+	const here = dirname(fileURLToPath(import.meta.url));
+	const candidates = [
+		resolve(here, "../../sounds/splash-narration.mp3"),
+		resolve(here, "../sounds/splash-narration.mp3"),
+		resolve(here, "./sounds/splash-narration.mp3"),
+	];
+	for (const c of candidates) {
+		if (existsSync(c)) {
+			try {
+				mkdirSync(dirname(userPath), { recursive: true });
+				copyFileSync(c, userPath);
+				return userPath;
+			} catch {
+				return c;
+			}
+		}
+	}
+	return null;
+}
+
+/**
  * Tracked afplay child for the intro music. Module-level so we can
  * kill it on TUI exit, on banner dismiss, or via the /quiet command.
  *
@@ -81,7 +111,16 @@ import type { ChildProcess } from "node:child_process";
 let introProc: ChildProcess | null = null;
 let introPath: string | null = null;
 let introStartedAt = 0;
-const INTRO_VOLUME = 0.15;
+// Music sits under the narration. Lowered from 0.15 to 0.10 when the
+// splash-narration track was added so Jasper's voice can speak clearly
+// over it without the music drowning him.
+const INTRO_VOLUME = 0.10;
+
+// Pre-rendered narration via KittenTTS (Jasper voice). Plays in parallel
+// with the music. Bundled at apps/tui/sounds/splash-narration.mp3.
+// KittenTTS-only per the no-ElevenLabs rule.
+let narrationProc: ChildProcess | null = null;
+const NARRATION_VOLUME = 0.55;
 let exitHooksInstalled = false;
 
 /** True if `ffplay` is on $PATH — needed for the proper afade-based
@@ -100,11 +139,22 @@ function stopIntroSound(): void {
 	const proc = introProc;
 	introProc = null;
 	introPath = null;
-	if (!proc) return;
-	try {
-		proc.kill("SIGTERM");
-	} catch {
-		/* already gone */
+	if (proc) {
+		try {
+			proc.kill("SIGTERM");
+		} catch {
+			/* already gone */
+		}
+	}
+	// Also kill any in-flight narration. Both tracks live or die together.
+	const nproc = narrationProc;
+	narrationProc = null;
+	if (nproc) {
+		try {
+			nproc.kill("SIGTERM");
+		} catch {
+			/* already gone */
+		}
 	}
 }
 
@@ -133,6 +183,18 @@ function fadeOutIntroSound(durationMs = 2400): void {
 	}
 	introProc = null;
 	introPath = null;
+	// Narration is short (~13s) and usually finished before fade fires;
+	// when the user skips with Esc/q mid-narration, just cut it abruptly —
+	// music fade-out is the audible cushion, narration cut is fine.
+	const nproc = narrationProc;
+	narrationProc = null;
+	if (nproc) {
+		try {
+			nproc.kill("SIGTERM");
+		} catch {
+			/* already gone */
+		}
+	}
 	const fadeSec = Math.max(0.5, durationMs / 1000);
 	try {
 		const fadeProc = spawn(
@@ -246,6 +308,27 @@ function playIntroSound(): void {
 	} catch {
 		// best-effort; never break the banner
 	}
+
+	// Layer in the pre-rendered narration (Jasper voice). Spawned in
+	// parallel with the music; killed together via stopIntroSound. Pure
+	// best-effort — if the narration MP3 is missing or afplay errors out,
+	// the splash still plays with music only.
+	try {
+		const narrationPath = resolveNarrationSound();
+		if (!narrationPath) return;
+		const nproc = spawn("afplay", ["-v", String(NARRATION_VOLUME), narrationPath], {
+			stdio: "ignore",
+		});
+		nproc.on("exit", () => {
+			if (narrationProc === nproc) narrationProc = null;
+		});
+		nproc.on("error", () => {
+			if (narrationProc === nproc) narrationProc = null;
+		});
+		narrationProc = nproc;
+	} catch {
+		// best-effort; narration is decorative
+	}
 }
 
 /** Exposed so app.tsx and slash commands can stop the music on demand.
@@ -275,13 +358,17 @@ const BODY = "Infinite General Intelligence. free. local. open.";
 
 // Cinematic schedule — paced to the slow-starting launch instrumental.
 // Skip entirely with 8GENT_NO_INTRO=1 or 8GENT_LITE=1.
+// Paced to the KittenTTS Jasper narration (~13.2s):
+//   ~1.0s pre-pad, title line, gap, subhead line, gap, body line.
+// Visual reveals lead the narration slightly so the user sees the text
+// just before Jasper speaks it.
 const T_WORDMARK = 0;
 const T_FLOURISH = 1500;
 const T_TITLE = 2500;
-const T_SUBHEAD = 4000;
-const T_BODY = 5800;
-const T_HOLD_END = 7500;
-const T_DONE = 8500;
+const T_SUBHEAD = 5500;
+const T_BODY = 9000;
+const T_HOLD_END = 12500;
+const T_DONE = 13500;
 
 // Typewriter speed — characters revealed per second.
 const TYPE_CPS = 24;
