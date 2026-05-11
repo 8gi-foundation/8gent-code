@@ -78,6 +78,13 @@ function NamedRow({
 type ToolState = "idle" | "running" | "ok" | "fail";
 type ProviderState = "local" | "fallback" | "offline";
 type AgentState = "idle" | "active" | "blocked";
+type BodyPartState = "disabled" | "idle" | "inFlight";
+
+interface BodyPartsRow {
+	hands: BodyPartState;
+	eyes: BodyPartState;
+	handeyes: BodyPartState;
+}
 
 interface ActiveTask {
 	id: string;
@@ -115,11 +122,15 @@ interface ActivityRailProps {
 	providers: ReadonlyArray<ProviderRow>;
 	memory: MemoryStats;
 	agents: ReadonlyArray<AgentRow>;
-	/** Live turn signals — when set, the TOOLS section reflects the active
+	/** Live turn signals - when set, the TOOLS section reflects the active
 	 *  turn (chat-truth) instead of the stale tools array. */
 	isProcessing?: boolean;
 	activeTool?: string | null;
 	toolsCompleted?: number;
+	/** Body-parts indicators: hands, eyes, handeyes. Optional - rail still
+	 *  renders without the BODY section when undefined, preserving callers
+	 *  that have not yet wired the useBodyParts hook. */
+	bodyParts?: BodyPartsRow;
 }
 
 // Friendly route label. The rail surfaces the agent's tiering, not the
@@ -173,6 +184,32 @@ const AGENT_COLOR: Record<AgentState, string> = {
 	blocked: t.orange,
 };
 
+// Body-parts taxonomy: hands (cliclick), eyes (AX bridge), handeyes
+// (engagement loop). Three observable states map to three glyphs in the
+// same visual family as the TOOLS section so a quick glance reads as a
+// uniform inspector, not a stylistic outlier.
+//
+//   disabled - outlined hollow ring, dim text
+//   idle     - filled bright ring, bright text (enabled, ready)
+//   inFlight - inverted/pulsed bullseye, teal accent (live tool call)
+const BODY_GLYPH: Record<BodyPartState, string> = {
+	disabled: "○",
+	idle:     "●",
+	inFlight: "◉",
+};
+
+const BODY_COLOR: Record<BodyPartState, string> = {
+	disabled: t.muted,
+	idle:     t.green,
+	inFlight: t.teal,
+};
+
+const BODY_PART_LABELS: ReadonlyArray<{ key: keyof BodyPartsRow; label: string }> = [
+	{ key: "hands",    label: "hands" },
+	{ key: "eyes",     label: "eyes" },
+	{ key: "handeyes", label: "handeyes" },
+];
+
 function bar(percent: number, width = 12): string {
 	const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
 	return "█".repeat(filled) + "░".repeat(width - filled);
@@ -187,6 +224,7 @@ export function ActivityRail({
 	isProcessing = false,
 	activeTool = null,
 	toolsCompleted,
+	bodyParts,
 }: ActivityRailProps) {
 	return (
 		<Box
@@ -268,6 +306,21 @@ export function ActivityRail({
 					/>
 				))}
 			</RailSection>
+
+			{bodyParts ? (
+				<RailSection title="BODY">
+					{BODY_PART_LABELS.map(({ key, label }) => {
+						const state = bodyParts[key];
+						return (
+							<NamedRow
+								key={key}
+								name={`${BODY_GLYPH[state]} ${label}`}
+								color={BODY_COLOR[state]}
+							/>
+						);
+					})}
+				</RailSection>
+			) : null}
 		</Box>
 	);
 }
@@ -281,4 +334,6 @@ export type {
 	ProviderState,
 	AgentRow,
 	AgentState,
+	BodyPartState,
+	BodyPartsRow,
 };

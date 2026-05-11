@@ -50,7 +50,10 @@ export type SlashCommand =
 	| "settings"
 	| "quiet"
 	| "term"
-	| "create-app";
+	| "create-app"
+	| "hands"
+	| "eyes"
+	| "handeyes";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -346,6 +349,24 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description:
 			"Scaffold a personal mini-app at ~/.8gent/apps/<name>/ (manifest, index.ts, SKILL.md, tests). Iteration is driven by the embedded SKILL.md.",
 		usage: "/create-app <name> [-- description text] [--caps read,write,bash]",
+	},
+	{
+		name: "hands",
+		aliases: [],
+		description: "Toggle hands indicator (cliclick-driven cursor and keyboard).",
+		usage: "/hands",
+	},
+	{
+		name: "eyes",
+		aliases: [],
+		description: "Toggle eyes indicator (AX-bridge driven screen reads).",
+		usage: "/eyes",
+	},
+	{
+		name: "handeyes",
+		aliases: [],
+		description: "Toggle handeyes indicator (engagement loop, hands driven by eyes).",
+		usage: "/handeyes",
 	},
 ];
 

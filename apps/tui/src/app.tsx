@@ -169,6 +169,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { useLilEightState } from "./hooks/useLilEightState.js";
 import { useGitSync } from "./hooks/useGitSync.js";
+import { useBodyParts } from "./hooks/useBodyParts.js";
 import {
 	deriveTools,
 	deriveProviders,
@@ -705,6 +706,16 @@ export function App({
 	const [stepCount, setStepCount] = useState(0);
 	const [toolCount, setToolCount] = useState(0);
 	const [totalTokens, setTotalTokens] = useState(0);
+	// Body-parts visual indicators (hands / eyes / handeyes). Session-scoped,
+	// in-memory only. Defaults detect cliclick + 8gent-ax-bridge on first
+	// render. Pulse driven by onToolStart / onToolEnd below. The mark*/toggle
+	// methods are referentially stable so they're safe in callback deps.
+	const bodyParts = useBodyParts();
+	const {
+		markStart: markBodyPartStart,
+		markEnd: markBodyPartEnd,
+		toggle: toggleBodyPart,
+	} = bodyParts;
 	// Smoothed output tok/s from the most recent agent step. Resets to 0
 	// when the next prompt fires, so the bottom bar always reflects the
 	// turn the user just saw stream rather than a stale figure from
@@ -1860,6 +1871,9 @@ export function App({
 					setProcessingStage("executing");
 					setStatus("executing");
 					pushActivity(event.toolName, event.toolCallId, event.args);
+					// Body-parts indicators light up on tool prefix match.
+					// Background tabs don't disturb the foreground rail.
+					markBodyPartStart(event.toolName);
 				}
 				logToolStart(tabId, tabTitle, event.toolName, event.toolCallId, event.args);
 
@@ -1897,6 +1911,8 @@ export function App({
 				const isActive = tabId === activeTabId;
 				if (isActive) {
 					setToolCount((prev) => prev + 1);
+					// Trigger the brief flash-back-to-idle on the matching part.
+					markBodyPartEnd(event.toolName);
 				}
 				completeActivity(event.toolCallId, event.success !== false, event.durationMs || 0);
 				logToolEnd(
@@ -2097,7 +2113,7 @@ export function App({
 				}
 			},
 		}),
-		[activeTabId, appendToTab, autoKanban],
+		[activeTabId, appendToTab, autoKanban, markBodyPartStart, markBodyPartEnd],
 	);
 
 	// Initialize agent for the active tab. Each chat tab owns its own Agent
@@ -3183,8 +3199,22 @@ export function App({
 				}
 
 				case "settings": {
-					// Open the settings tab (singleton — switches if it already exists).
+					// Open the settings tab (singleton - switches if it already exists).
 					workspaceTabs.addTab("settings", "Settings");
+					break;
+				}
+
+				case "hands":
+				case "eyes":
+				case "handeyes": {
+					// Visual oracle toggle. Flips the matching body-parts
+					// indicator between idle and disabled for this session.
+					// Does NOT gate the underlying tool calls in v1 - icons
+					// reflect intent, not enforcement.
+					const next = toggleBodyPart(command);
+					addSystemMessage(
+						`${command}: ${next === "idle" ? "enabled" : next === "disabled" ? "disabled" : "in flight"}`,
+					);
 					break;
 				}
 
@@ -4435,6 +4465,7 @@ export function App({
 			agent,
 			orchestration,
 			workspaceTabs,
+			toggleBodyPart,
 		],
 	);
 
@@ -5667,6 +5698,7 @@ export function App({
 								isProcessing={isProcessing}
 								activeTool={activeTool || (isProcessing ? "reasoning" : null)}
 								toolsCompleted={toolCount}
+								bodyParts={bodyParts.state}
 							/>
 						)}
 					</Box>
