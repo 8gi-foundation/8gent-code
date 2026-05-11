@@ -1,9 +1,9 @@
 {
 	"name": "@8gent/db",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"private": true,
 	"type": "module",
-	"description": "Convex database layer for 8gent Code — user accounts, session tracking, usage analytics, preference sync",
+	"description": "Convex client wrappers + workspace-local SQLite layer for 8gent Code. Convex schema and functions now live in 8gi-foundation/8gi-data (private).",
 	"main": "client.ts",
 	"types": "client.ts",
 	"exports": {
@@ -22,11 +22,10 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "bun test src/",
-		"dev": "npx convex dev",
-		"deploy": "npx convex deploy"
+		"test": "bun test src/"
 	},
 	"dependencies": {
+		"@8gi/data": "git+ssh://git@github.com:8gi-foundation/8gi-data.git#main",
 		"convex": "^1.17.0"
 	},
 	"devDependencies": {
