@@ -301,7 +301,7 @@ export const kgAdd: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 			contentHash,
 		};
 		// Build a real WorkingMemory value. Every required field is populated
-		// even if we don't surface it over the wire — the previous
+		// even if we don't surface it over the wire. The previous
 		// `as unknown as Memory` cast hid this from the type checker. `tags`
 		// is added on top via index access since extractTags reads it at
 		// runtime; WorkingMemory itself doesn't declare a tags field.

@@ -320,7 +320,7 @@ describe("kg.* scope isolation + sensitive-file gate", () => {
 
 describe("fs.exec policy", () => {
 	// The allowlist is the security boundary. We dropped the parallel hard-deny
-	// regexes because they created a false sense of completeness — these
+	// regexes because they created a false sense of completeness: these
 	// commands MUST still be rejected, but via the allowlist falling through
 	// to deny-by-default, not via a regex match.
 	test("rejects curl | sh (curl head verb not on allowlist)", () => {

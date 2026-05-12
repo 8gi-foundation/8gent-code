@@ -43,7 +43,7 @@ export interface SensitiveCheckResult {
 }
 
 /**
- * Classify a path. Forbidden trumps sensitive — if both match, callers should
+ * Classify a path. Forbidden trumps sensitive: if both match, callers should
  * see `forbidden: true` first.
  */
 export function classifySensitivePath(filePath: string): SensitiveCheckResult {

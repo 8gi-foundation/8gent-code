@@ -427,7 +427,7 @@ interface ExecPolicyResult {
  * The security boundary is `COMMAND_ALLOWLIST` plus the per-pipeline-segment
  * verb check below. The allowlist is deny-by-default: anything not on it is
  * rejected (or escalated through the NemoClaw policy engine). We do NOT keep
- * a parallel hard-deny regex list — it would only catch the most naive
+ * a parallel hard-deny regex list: it would only catch the most naive
  * obfuscations and create a false sense of completeness. Trust the
  * allowlist; do not pretend a finite regex set can enumerate "bad shell".
  */
