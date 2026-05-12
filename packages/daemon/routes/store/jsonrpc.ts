@@ -46,7 +46,7 @@ export interface JsonRpcContext {
 	initiator: string;
 }
 
-export type JsonRpcHandler = (params: any, ctx: JsonRpcContext) => unknown | Promise<unknown>;
+export type JsonRpcHandler = (params: unknown, ctx: JsonRpcContext) => unknown | Promise<unknown>;
 
 // JSON-RPC 2.0 error codes
 export const JSONRPC_PARSE_ERROR = -32700;
@@ -119,12 +119,24 @@ export async function dispatch(
 /** Parse a raw text frame; returns either the parsed request or an error response. */
 export function parseRequest(raw: string): JsonRpcRequest | JsonRpcResponse {
 	try {
-		const obj = JSON.parse(raw) as JsonRpcRequest;
-		if (obj && typeof obj === "object" && obj.jsonrpc === "2.0") {
-			return obj;
-		}
-		return makeError(null, JSONRPC_INVALID_REQUEST, "not a JSON-RPC 2.0 request");
+		const obj = JSON.parse(raw) as unknown;
+		return parseRequestFromObject(obj);
 	} catch {
 		return makeError(null, JSONRPC_PARSE_ERROR, "parse error");
 	}
+}
+
+/**
+ * Same as `parseRequest` but accepts an already-parsed object. Used by the
+ * route to avoid re-parsing the frame after the handshake check.
+ */
+export function parseRequestFromObject(obj: unknown): JsonRpcRequest | JsonRpcResponse {
+	if (
+		obj &&
+		typeof obj === "object" &&
+		(obj as { jsonrpc?: unknown }).jsonrpc === "2.0"
+	) {
+		return obj as JsonRpcRequest;
+	}
+	return makeError(null, JSONRPC_INVALID_REQUEST, "not a JSON-RPC 2.0 request");
 }

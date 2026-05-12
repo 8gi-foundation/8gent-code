@@ -24,7 +24,7 @@ import {
 	dispatch,
 	makeError,
 	makeNotification,
-	parseRequest,
+	parseRequestFromObject,
 } from "./jsonrpc";
 import { kgAdd, kgDelete, kgInspect, kgSearch, kgStatus } from "./kg";
 import {
@@ -69,6 +69,14 @@ interface StoreRouteState {
 	authenticated: boolean;
 	initiator: string;
 	socketKey: object;
+	/**
+	 * Per-socket message queue. Bun's `message()` callback can re-enter while
+	 * a prior `await` is suspended, which (without serialisation) lets a
+	 * client send `[handshake, fs.exec]` back-to-back and have `fs.exec` slip
+	 * through before `authenticated = true` is committed. We chain every
+	 * incoming message onto this promise so they execute strictly in order.
+	 */
+	queue: Promise<void>;
 }
 
 const stateBySocket = new WeakMap<StoreWS, StoreRouteState>();
@@ -105,6 +113,7 @@ export function handleStoreOpen(ws: StoreWS): void {
 		authenticated: false,
 		initiator: "anonymous",
 		socketKey,
+		queue: Promise.resolve(),
 	};
 	stateBySocket.set(ws, state);
 	console.log(`[store-route] client ${id} connected`);
@@ -142,14 +151,32 @@ function isHandshake(value: unknown): value is HandshakeMsg {
 	);
 }
 
-export async function handleStoreMessage(
+export function handleStoreMessage(
 	ws: StoreWS,
 	raw: string,
 	options: { tokenPath?: string } = {},
 ): Promise<void> {
 	const state = stateBySocket.get(ws);
-	if (!state) return;
+	if (!state) return Promise.resolve();
 
+	// Chain onto the per-socket queue so concurrent messages execute strictly
+	// in arrival order. This is what stops a client from racing handshake
+	// against an authenticated call: the second message awaits the first.
+	const next = state.queue.then(() =>
+		handleMessageInner(ws, state, raw, options).catch((err) => {
+			console.warn(`[store-route] handler error for ${state.id}:`, (err as Error).message);
+		}),
+	);
+	state.queue = next;
+	return next;
+}
+
+async function handleMessageInner(
+	ws: StoreWS,
+	state: StoreRouteState,
+	raw: string,
+	options: { tokenPath?: string },
+): Promise<void> {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
@@ -161,14 +188,14 @@ export async function handleStoreMessage(
 	// Handshake handling (out-of-band, not JSON-RPC).
 	if (isHandshake(parsed)) {
 		const expected = ensureServerToken(options.tokenPath);
-		const provided = (parsed as HandshakeMsg).token;
+		const provided = parsed.token;
 		// constant-time compare to keep timing attacks out of the hot path
 		if (
 			provided.length === expected.length &&
 			crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
 		) {
 			state.authenticated = true;
-			state.initiator = (parsed as HandshakeMsg).initiator ?? "anonymous";
+			state.initiator = parsed.initiator ?? "anonymous";
 			send(ws, { type: "handshake.ok", route: "store" });
 		} else {
 			send(ws, { type: "handshake.fail", reason: "invalid token" });
@@ -179,7 +206,8 @@ export async function handleStoreMessage(
 		return;
 	}
 
-	const reqOrErr = parseRequest(raw);
+	// Reuse the already-parsed object instead of re-parsing the raw frame.
+	const reqOrErr = parseRequestFromObject(parsed);
 	if ("error" in reqOrErr) {
 		send(ws, reqOrErr);
 		return;

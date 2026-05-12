@@ -23,9 +23,10 @@ import * as path from "node:path";
 import { scrub } from "../../../eight/secret-scanner";
 import { getEmbeddingProvider } from "../../../memory/embeddings";
 import { MemoryStore } from "../../../memory/store";
-import type { Memory, MemoryScope } from "../../../memory/types";
+import type { Memory, MemoryScope, WorkingMemory } from "../../../memory/types";
 import { logKgOp } from "./audit";
 import { JSONRPC_BLOCKED, JsonRpcError, type JsonRpcContext, type JsonRpcHandler } from "./jsonrpc";
+import { classifySensitivePath } from "./sensitive";
 
 // ── Store ─────────────────────────────────────────────────────────────
 
@@ -67,20 +68,15 @@ export function _setKgStorePath(dbPath: string | null): void {
 
 // ── Sensitive-file gates ──────────────────────────────────────────────
 
-const SENSITIVE_FILENAME_RE = [
-	/(^|[\\/])\.env(\..+)?$/i,
-	/\.pem$/i,
-	/\.key$/i,
-	/(^|[\\/])id_rsa(\.pub)?$/i,
-	/_secret\b/i,
-	/_credential\b/i,
-	/credentials?\.json$/i,
-];
-
+/**
+ * Returns a reason string if the path is sensitive (or forbidden), null
+ * otherwise. Uses the shared `classifySensitivePath` helper so the same
+ * redlines apply to fs.write and kg.add.
+ */
 function looksSensitive(filePath: string): string | null {
-	for (const re of SENSITIVE_FILENAME_RE) {
-		if (re.test(filePath)) return `filename matches sensitive pattern (${re.source})`;
-	}
+	const check = classifySensitivePath(filePath);
+	if (check.forbidden) return check.reason ?? "forbidden path";
+	if (check.sensitive) return check.reason ?? "sensitive path";
 	return null;
 }
 
@@ -210,7 +206,8 @@ function ensureScopeOk(scope: "conversation" | "global", conversationId?: string
 	return scope === "conversation" ? conversationId ?? null : null;
 }
 
-export const kgAdd: JsonRpcHandler = async (params: KgAddParams, ctx: JsonRpcContext) => {
+export const kgAdd: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
+	const params = raw as KgAddParams;
 	if (!params?.filePath) throw new Error("kg.add: missing filePath");
 	const scope = params.scope ?? "conversation";
 	const convId = ensureScopeOk(scope, params.conversationId);
@@ -303,11 +300,12 @@ export const kgAdd: JsonRpcHandler = async (params: KgAddParams, ctx: JsonRpcCon
 			conversationId: convId,
 			contentHash,
 		};
-		// WorkingMemory requires sessionId/priority/ttlMs/expiresAt; we don't
-		// expose those over the wire, but the schema needs them. We also tack
-		// on `tags` so extractTags can pick them up (the store's runtime check
-		// ignores the static type).
-		const memory = {
+		// Build a real WorkingMemory value. Every required field is populated
+		// even if we don't surface it over the wire — the previous
+		// `as unknown as Memory` cast hid this from the type checker. `tags`
+		// is added on top via index access since extractTags reads it at
+		// runtime; WorkingMemory itself doesn't declare a tags field.
+		const memory: WorkingMemory = {
 			id: "",
 			type: "working",
 			scope: memoryScope,
@@ -317,17 +315,24 @@ export const kgAdd: JsonRpcHandler = async (params: KgAddParams, ctx: JsonRpcCon
 			priority: 1,
 			ttlMs: 0,
 			expiresAt: 0,
-			tags: [`file:${path.basename(filePath)}`, "kg", scope],
 			importance: 0.5,
 			decayFactor: 1.0,
 			accessCount: 0,
-			lastAccessed: 0,
+			lastAccessed: now,
 			version: 1,
-			source: "import" as const,
+			source: "import",
 			sourceId: `file:${filePath}`,
 			createdAt: now,
 			updatedAt: now,
-		} as unknown as Memory;
+		};
+		// Attach tags out-of-band so extractTags can pick them up. The runtime
+		// code reads `memory.tags`; the static type doesn't declare it, so we
+		// stash it via a typed extension instead of `as any`.
+		(memory as WorkingMemory & { tags: string[] }).tags = [
+			`file:${path.basename(filePath)}`,
+			"kg",
+			scope,
+		];
 		const id = s.write(memory);
 		ids.push(id);
 	}
@@ -345,7 +350,8 @@ export const kgAdd: JsonRpcHandler = async (params: KgAddParams, ctx: JsonRpcCon
 	return { chunkIds: ids, chunkCount: ids.length, idempotent: false, contentHash };
 };
 
-export const kgSearch: JsonRpcHandler = async (params: KgSearchParams, _ctx) => {
+export const kgSearch: JsonRpcHandler = async (raw, _ctx) => {
+	const params = raw as KgSearchParams;
 	if (!params?.query) throw new Error("kg.search: missing query");
 	const scope = params.scope ?? "conversation";
 	const convId = ensureScopeOk(scope, params.conversationId);
@@ -374,7 +380,8 @@ export const kgSearch: JsonRpcHandler = async (params: KgSearchParams, _ctx) => 
 	};
 };
 
-export const kgInspect: JsonRpcHandler = async (params: KgInspectParams, _ctx) => {
+export const kgInspect: JsonRpcHandler = async (raw, _ctx) => {
+	const params = raw as KgInspectParams;
 	if (!params?.filePath) throw new Error("kg.inspect: missing filePath");
 	const filePath = path.resolve(params.filePath);
 	const convId = params.conversationId ?? null;
@@ -401,7 +408,8 @@ export const kgInspect: JsonRpcHandler = async (params: KgInspectParams, _ctx) =
 	};
 };
 
-export const kgDelete: JsonRpcHandler = async (params: KgDeleteParams, ctx: JsonRpcContext) => {
+export const kgDelete: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
+	const params = raw as KgDeleteParams;
 	if (!params?.filePath && !params?.chunkId) {
 		throw new Error("kg.delete: requires filePath or chunkId");
 	}
@@ -433,7 +441,8 @@ export const kgDelete: JsonRpcHandler = async (params: KgDeleteParams, ctx: Json
 	return { deleted };
 };
 
-export const kgStatus: JsonRpcHandler = async (params: KgStatusParams, _ctx) => {
+export const kgStatus: JsonRpcHandler = async (raw, _ctx) => {
+	const params = raw as KgStatusParams;
 	if (!params?.filePath) throw new Error("kg.status: missing filePath");
 	const filePath = path.resolve(params.filePath);
 	const convId = params.conversationId ?? null;

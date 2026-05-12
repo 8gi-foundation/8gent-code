@@ -56,6 +56,25 @@ export interface ExecAuditEntry {
 	bypass?: boolean;
 }
 
+/**
+ * fs.write / fs.edit / fs.delete sensitive-gate events.
+ *
+ * `op` values:
+ *   - "blocked":  the path matched a sensitive/forbidden pattern and was rejected.
+ *   - "override": the path matched a sensitive (not forbidden) pattern and the
+ *                 caller passed `confirmedSensitiveWrite: true` to proceed.
+ */
+export interface FsSensitiveAuditEntry {
+	op: "blocked" | "override";
+	verb: "write" | "edit" | "delete";
+	workspaceId: string;
+	path: string;
+	resolved?: string;
+	initiator: string;
+	reason: string;
+	forbidden?: boolean;
+}
+
 function append(filename: string, entry: Record<string, unknown>): void {
 	try {
 		const line = `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`;
@@ -72,6 +91,10 @@ export function logKgOp(entry: KgAuditEntry): void {
 
 export function logExecOp(entry: ExecAuditEntry): void {
 	append("exec-ops.jsonl", { ...entry } as Record<string, unknown>);
+}
+
+export function logFsSensitive(entry: FsSensitiveAuditEntry): void {
+	append("fs-sensitive.jsonl", { ...entry } as Record<string, unknown>);
 }
 
 /** Test hook: override the audit dir so tests don't pollute ~/.8gent. */

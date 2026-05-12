@@ -17,7 +17,16 @@ import {
 	type SessionInfo,
 	SessionManager,
 } from "../../../eight/session-manager";
-import type { JsonRpcContext, JsonRpcHandler, NotifySender } from "./jsonrpc";
+import {
+	JSONRPC_BLOCKED,
+	JsonRpcError,
+	type JsonRpcContext,
+	type JsonRpcHandler,
+	type NotifySender,
+} from "./jsonrpc";
+
+/** Max session subscriptions a single socket may hold open at once. */
+export const MAX_SESSION_SUBS_PER_SOCKET = 32;
 
 let _manager: SessionManager | null = null;
 function manager(): SessionManager {
@@ -100,7 +109,8 @@ export function tearDownSessionSubs(socketKey: object): void {
 
 // ── Handlers ──────────────────────────────────────────────────────────
 
-export const sessionList: JsonRpcHandler = (params: SessionListParams = {}, _ctx) => {
+export const sessionList: JsonRpcHandler = (raw, _ctx) => {
+	const params = (raw ?? {}) as SessionListParams;
 	const limit = Math.min(Math.max(params.limit ?? 20, 1), 200);
 	// Cursor is `id` of last item from the previous page; when present we
 	// page by lastActiveAt strictly older than that record.
@@ -120,7 +130,8 @@ export const sessionList: JsonRpcHandler = (params: SessionListParams = {}, _ctx
 	return { sessions, nextCursor };
 };
 
-export const sessionOpen: JsonRpcHandler = (params: SessionOpenParams, _ctx) => {
+export const sessionOpen: JsonRpcHandler = (raw, _ctx) => {
+	const params = raw as SessionOpenParams;
 	if (!params?.id) throw new Error("session.open: missing id");
 	const file = manager().resume(params.id);
 	if (!file) throw new Error(`session.open: not found: ${params.id}`);
@@ -141,7 +152,8 @@ export const sessionOpen: JsonRpcHandler = (params: SessionOpenParams, _ctx) => 
 	};
 };
 
-export const sessionMessages: JsonRpcHandler = (params: SessionMessagesParams, _ctx) => {
+export const sessionMessages: JsonRpcHandler = (raw, _ctx) => {
+	const params = raw as SessionMessagesParams;
 	if (!params?.id) throw new Error("session.messages: missing id");
 	const file = manager().resume(params.id);
 	if (!file) throw new Error(`session.messages: not found: ${params.id}`);
@@ -151,10 +163,8 @@ export const sessionMessages: JsonRpcHandler = (params: SessionMessagesParams, _
 	return { messages: file.messages.slice(start, before) };
 };
 
-export const sessionSubscribe: JsonRpcHandler = (
-	params: SessionSubscribeParams,
-	ctx: JsonRpcContext,
-) => {
+export const sessionSubscribe: JsonRpcHandler = (raw, ctx: JsonRpcContext) => {
+	const params = raw as SessionSubscribeParams;
 	if (!params?.id) throw new Error("session.subscribe: missing id");
 	const sessionId = params.id;
 
@@ -173,6 +183,15 @@ export const sessionSubscribe: JsonRpcHandler = (
 	if (subs.has(key)) {
 		// Already subscribed; idempotent ack.
 		return { subscribed: true, sessionId, alreadyActive: true };
+	}
+	// Cap subscriptions per socket. Without this, a misbehaving client could
+	// subscribe to thousands of session IDs and leak bus listeners.
+	if (subs.size >= MAX_SESSION_SUBS_PER_SOCKET) {
+		throw new JsonRpcError(
+			JSONRPC_BLOCKED,
+			`session.subscribe: per-socket subscription cap reached (${MAX_SESSION_SUBS_PER_SOCKET})`,
+			{ blocked: true, cap: MAX_SESSION_SUBS_PER_SOCKET },
+		);
 	}
 
 	const events: EventName[] = ["agent:stream", "agent:error", "session:end"];

@@ -9,12 +9,19 @@
  * checked with `isWithinWorkspace`. Symlinks pointing out of the workspace
  * are rejected. Path traversal (`..`) is collapsed pre-check.
  *
+ * Sensitive-file gate: write/edit/delete paths are classified by
+ * `classifySensitivePath` (see ./sensitive.ts). Sensitive paths (.env, key
+ * material, *_secret*, *_credential*) are blocked unless the caller passes
+ * `confirmedSensitiveWrite: true`; both the block and the override are
+ * audited. Forbidden paths (anything under `.git/`) are rejected with no
+ * override.
+ *
  * fs.exec routes through the existing NemoClaw policy engine
  * (`evaluatePolicy("run_command", ...)`). On top of that we apply a
- * daemon-local allowlist (`COMMAND_ALLOWLIST`) and a tighter deny-list for
- * download-pipe-execute and base64-decode-pipe-execute patterns. The
- * `EIGHT_LEGACY_BASH=1` env var bypasses both gates for one release; bypass
- * is still audited and logged with a warning.
+ * daemon-local allowlist (`COMMAND_ALLOWLIST`) which is the actual security
+ * boundary for shell exec. The `EIGHT_LEGACY_BASH=1` env var bypasses the
+ * allowlist for one release; bypass is still audited and logged with a
+ * warning.
  */
 
 import * as crypto from "node:crypto";
@@ -26,13 +33,14 @@ import {
 	resolveSafe,
 } from "../../../permissions/src/workspace-boundary";
 import { getWorkspaceDb } from "../../../db/src/workspace-db";
-import { logExecOp } from "./audit";
+import { logExecOp, logFsSensitive } from "./audit";
 import {
 	JSONRPC_BLOCKED,
 	JsonRpcError,
 	type JsonRpcContext,
 	type JsonRpcHandler,
 } from "./jsonrpc";
+import { classifySensitivePath } from "./sensitive";
 
 // ── Workspace registry ────────────────────────────────────────────────
 
@@ -134,6 +142,7 @@ interface FsWriteParams {
 	workspaceId: string;
 	path: string;
 	content: string;
+	confirmedSensitiveWrite?: boolean;
 }
 
 interface FsEditParams {
@@ -142,11 +151,72 @@ interface FsEditParams {
 	oldString: string;
 	newString: string;
 	replaceAll?: boolean;
+	confirmedSensitiveWrite?: boolean;
 }
 
 interface FsDeleteParams {
 	workspaceId: string;
 	path: string;
+	recursive?: boolean;
+	confirmedSensitiveWrite?: boolean;
+}
+
+/**
+ * Apply the sensitive-path gate before a write/edit/delete proceeds. Returns
+ * normally if the path is clear; throws JsonRpcError(BLOCKED) otherwise. Both
+ * the block and any override are written to the fs-sensitive audit log.
+ */
+function enforceSensitiveGate(
+	verb: "write" | "edit" | "delete",
+	params: { workspaceId: string; path: string; confirmedSensitiveWrite?: boolean },
+	resolved: string,
+	initiator: string,
+): void {
+	const check = classifySensitivePath(resolved);
+	if (check.forbidden) {
+		logFsSensitive({
+			op: "blocked",
+			verb,
+			workspaceId: params.workspaceId,
+			path: params.path,
+			resolved,
+			initiator,
+			reason: check.reason ?? "forbidden path",
+			forbidden: true,
+		});
+		throw new JsonRpcError(JSONRPC_BLOCKED, "blocked: forbidden path", {
+			blocked: true,
+			forbidden: true,
+			reason: check.reason,
+		});
+	}
+	if (check.sensitive) {
+		if (!params.confirmedSensitiveWrite) {
+			logFsSensitive({
+				op: "blocked",
+				verb,
+				workspaceId: params.workspaceId,
+				path: params.path,
+				resolved,
+				initiator,
+				reason: check.reason ?? "sensitive path",
+			});
+			throw new JsonRpcError(JSONRPC_BLOCKED, "blocked: sensitive path", {
+				blocked: true,
+				reason: check.reason,
+			});
+		}
+		// Override: log it so the audit trail shows the explicit confirmation.
+		logFsSensitive({
+			op: "override",
+			verb,
+			workspaceId: params.workspaceId,
+			path: params.path,
+			resolved,
+			initiator,
+			reason: check.reason ?? "sensitive path",
+		});
+	}
 }
 
 interface FsStatParams {
@@ -162,7 +232,8 @@ interface FsExecParams {
 	initiator?: string;
 }
 
-export const fsList: JsonRpcHandler = (params: FsListParams) => {
+export const fsList: JsonRpcHandler = (raw) => {
+	const params = raw as FsListParams;
 	const root = workspaceRoot(params.workspaceId);
 	const target = assertInWorkspace(root, params.path);
 	const stat = fs.statSync(target);
@@ -201,7 +272,8 @@ export const fsList: JsonRpcHandler = (params: FsListParams) => {
 	return { entries };
 };
 
-export const fsRead: JsonRpcHandler = (params: FsReadParams) => {
+export const fsRead: JsonRpcHandler = (raw) => {
+	const params = raw as FsReadParams;
 	const root = workspaceRoot(params.workspaceId);
 	const target = assertInWorkspace(root, params.path);
 	const stat = fs.statSync(target);
@@ -224,9 +296,11 @@ export const fsRead: JsonRpcHandler = (params: FsReadParams) => {
 	return { content: fs.readFileSync(target).toString("base64"), mime, encoding: "base64" };
 };
 
-export const fsWrite: JsonRpcHandler = (params: FsWriteParams) => {
+export const fsWrite: JsonRpcHandler = (raw, ctx: JsonRpcContext) => {
+	const params = raw as FsWriteParams;
 	const root = workspaceRoot(params.workspaceId);
 	const target = assertInWorkspace(root, params.path);
+	enforceSensitiveGate("write", params, target, ctx.initiator);
 	// Ensure parent dir exists.
 	const parent = path.dirname(target);
 	if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
@@ -234,9 +308,11 @@ export const fsWrite: JsonRpcHandler = (params: FsWriteParams) => {
 	return { bytesWritten: Buffer.byteLength(params.content) };
 };
 
-export const fsEdit: JsonRpcHandler = (params: FsEditParams) => {
+export const fsEdit: JsonRpcHandler = (raw, ctx: JsonRpcContext) => {
+	const params = raw as FsEditParams;
 	const root = workspaceRoot(params.workspaceId);
 	const target = assertInWorkspace(root, params.path);
+	enforceSensitiveGate("edit", params, target, ctx.initiator);
 	if (!fs.existsSync(target)) throw new Error(`fs.edit: file not found: ${params.path}`);
 	const before = fs.readFileSync(target, "utf-8");
 	if (!before.includes(params.oldString)) {
@@ -257,20 +333,39 @@ export const fsEdit: JsonRpcHandler = (params: FsEditParams) => {
 	return { ok: true };
 };
 
-export const fsDelete: JsonRpcHandler = (params: FsDeleteParams) => {
+export const fsDelete: JsonRpcHandler = (raw, ctx: JsonRpcContext) => {
+	const params = raw as FsDeleteParams;
 	const root = workspaceRoot(params.workspaceId);
 	const target = assertInWorkspace(root, params.path);
+	enforceSensitiveGate("delete", params, target, ctx.initiator);
 	if (!fs.existsSync(target)) return { ok: false };
 	const stat = fs.statSync(target);
 	if (stat.isDirectory()) {
-		fs.rmdirSync(target);
+		const recursive = params.recursive === true;
+		if (!recursive) {
+			let entries: string[] = [];
+			try {
+				entries = fs.readdirSync(target);
+			} catch {
+				entries = [];
+			}
+			if (entries.length > 0) {
+				throw new Error(
+					`fs.delete: directory not empty (${entries.length} entries); pass recursive=true to remove`,
+				);
+			}
+			fs.rmdirSync(target);
+		} else {
+			fs.rmSync(target, { recursive: true, force: true });
+		}
 	} else {
 		fs.unlinkSync(target);
 	}
 	return { ok: true };
 };
 
-export const fsStat: JsonRpcHandler = (params: FsStatParams) => {
+export const fsStat: JsonRpcHandler = (raw) => {
+	const params = raw as FsStatParams;
 	const root = workspaceRoot(params.workspaceId);
 	const target = assertInWorkspace(root, params.path);
 	const stat = fs.statSync(target);
@@ -320,25 +415,22 @@ const COMMAND_ALLOWLIST = new Set([
 /** Git subcommands that are read-only enough to allow without policy. */
 const GIT_SAFE_SUBS = new Set(["status", "diff", "log", "branch", "show", "rev-parse"]);
 
-/** Hard deny patterns. These never reach the policy engine and never run. */
-const HARD_DENY_PATTERNS: Array<{ id: string; re: RegExp }> = [
-	// download-pipe-execute: curl ... | sh, wget ... | bash, etc.
-	{ id: "pipe_to_shell", re: /\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh|fish)\b/i },
-	// base64-decode-pipe-execute
-	{ id: "b64_pipe_shell", re: /\b(base64\s+(-d|--decode)|openssl\s+base64\s+-d)\b[^|]*\|\s*(sh|bash|zsh)\b/i },
-	// IFS smuggling
-	{ id: "ifs_smuggle", re: /\bIFS\s*=\s*['"]?[^A-Za-z0-9 \t]/i },
-	// fork bombs and rm -rf at root
-	{ id: "fork_bomb", re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;/ },
-	{ id: "rm_root", re: /\brm\s+-[rRf]+\s+\/(\s|$)/ },
-];
-
 interface ExecPolicyResult {
 	allowed: boolean;
 	reason?: string;
 	bypass?: boolean;
 }
 
+/**
+ * Evaluate a shell command against the daemon's exec policy.
+ *
+ * The security boundary is `COMMAND_ALLOWLIST` plus the per-pipeline-segment
+ * verb check below. The allowlist is deny-by-default: anything not on it is
+ * rejected (or escalated through the NemoClaw policy engine). We do NOT keep
+ * a parallel hard-deny regex list — it would only catch the most naive
+ * obfuscations and create a false sense of completeness. Trust the
+ * allowlist; do not pretend a finite regex set can enumerate "bad shell".
+ */
 function evaluateExec(command: string): ExecPolicyResult {
 	if (process.env.EIGHT_LEGACY_BASH === "1") {
 		console.warn(
@@ -349,13 +441,6 @@ function evaluateExec(command: string): ExecPolicyResult {
 
 	const trimmed = command.trim();
 	if (!trimmed) return { allowed: false, reason: "empty command" };
-
-	// Hard deny patterns first.
-	for (const { id, re } of HARD_DENY_PATTERNS) {
-		if (re.test(trimmed)) {
-			return { allowed: false, reason: `hard deny: ${id}` };
-		}
-	}
 
 	// Pipelines / && / ; - split and verify every leg's head verb is allow-listed.
 	const segments = trimmed.split(/\s*(?:\|\||\||&&|;)\s*/g);
@@ -409,7 +494,8 @@ function evaluateExec(command: string): ExecPolicyResult {
 	return { allowed: true };
 }
 
-export const fsExec: JsonRpcHandler = async (params: FsExecParams, ctx: JsonRpcContext) => {
+export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
+	const params = raw as FsExecParams;
 	if (!params?.command) throw new Error("fs.exec: missing command");
 	if (!params?.conversationId) throw new Error("fs.exec: missing conversationId");
 	const initiator = params.initiator ?? ctx.initiator;
