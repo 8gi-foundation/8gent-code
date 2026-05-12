@@ -30,6 +30,13 @@ import {
 	handleDispatchMessage,
 	handleDispatchOpen,
 } from "./routes/dispatch";
+import {
+	type StoreWS,
+	ensureServerToken,
+	handleStoreClose,
+	handleStoreMessage,
+	handleStoreOpen,
+} from "./routes/store/index";
 
 export interface GatewayConfig {
 	port: number;
@@ -55,6 +62,8 @@ interface ClientState {
 	isComputerRoute?: boolean;
 	/** Marks a connection upgraded on the /dispatch route. */
 	isDispatchRoute?: boolean;
+	/** Marks a connection upgraded on the /store route. */
+	isStoreRoute?: boolean;
 }
 
 type InboundMessage =
@@ -378,6 +387,21 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				return new Response("WebSocket upgrade required", { status: 426 });
 			}
 
+			// /store route - JSON-RPC 2.0 over WS for session/kg/fs cross-host sharing.
+			if (url.pathname === "/store") {
+				// Eagerly create the token so first-time clients can pull it
+				// from `~/.8gent/server.token`.
+				ensureServerToken();
+				if (
+					(server.upgrade as (r: Request, opts?: any) => boolean)(req, {
+						data: { route: "store" },
+					})
+				) {
+					return undefined;
+				}
+				return new Response("WebSocket upgrade required", { status: 426 });
+			}
+
 			// /dispatch route - cross-surface remote dispatch.
 			if (url.pathname === "/dispatch") {
 				if (!config.dispatch) {
@@ -424,21 +448,37 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				const data = (ws as unknown as { data?: { route?: string } }).data;
 				const isComputer = data?.route === "computer";
 				const isDispatch = data?.route === "dispatch";
+				const isStore = data?.route === "store";
 				const state: ClientState = {
 					id,
-					channel: isComputer ? "computer" : isDispatch ? "dispatch" : "api",
+					channel: isComputer
+						? "computer"
+						: isDispatch
+							? "dispatch"
+							: isStore
+								? "store"
+								: "api",
 					sessionId: null,
 					authenticated: !config.authToken,
 					isComputerRoute: isComputer,
 					isDispatchRoute: isDispatch,
+					isStoreRoute: isStore,
 				};
 				clients.set(ws, state);
-				const tag = isComputer ? " (computer)" : isDispatch ? " (dispatch)" : "";
+				const tag = isComputer
+					? " (computer)"
+					: isDispatch
+						? " (dispatch)"
+						: isStore
+							? " (store)"
+							: "";
 				console.log(`[gateway] client ${id} connected${tag}`);
 				if (isComputer) {
 					handleComputerOpen(ws as unknown as ComputerWS, config.pool, state);
 				} else if (isDispatch) {
 					handleDispatchOpen(ws as unknown as DispatchWS);
+				} else if (isStore) {
+					handleStoreOpen(ws as unknown as StoreWS);
 				}
 			},
 			message(ws, raw) {
@@ -456,6 +496,12 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					);
 					return;
 				}
+				if (state?.isStoreRoute) {
+					handleStoreMessage(ws as unknown as StoreWS, text).catch((err) => {
+						console.warn("[store-route] handler error:", err);
+					});
+					return;
+				}
 				handleMessage(ws, config, text);
 			},
 			close(ws) {
@@ -469,6 +515,8 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 							pool: config.pool,
 							...config.dispatch,
 						});
+					} else if (state.isStoreRoute) {
+						handleStoreClose(ws as unknown as StoreWS);
 					} else if (state.sessionId) {
 						bus.emit("session:end", {
 							sessionId: state.sessionId,
@@ -486,5 +534,6 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 	if (config.dispatch) {
 		console.log(`[gateway] dispatch protocol: ws://${hostname}:${config.port}/dispatch`);
 	}
+	console.log(`[gateway] store route: ws://${hostname}:${config.port}/store`);
 	return server;
 }
