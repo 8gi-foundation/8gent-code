@@ -115,9 +115,9 @@ Democratize infinite general intelligence for everyone. Free, local-first, priva
 ### Content / Copy
 - No customer-facing AI/tooling language. No "Export for AI", "Send to Claude", etc.
 - No em dashes in any publication.
-- No invented biography or statistics about James.
-- No self-harm details about [REDACTED-CHILD] in any public content.
-- No formal diagnosis claims (James is self-identified AuDHD, not formally diagnosed).
+- No invented biography or statistics about the founder.
+- No personal details about the founder's family in any public content (names, ages, health, school, etc.).
+- No formal diagnosis claims about the founder.
 - aidhd.dev is stealth mode - do not mention publicly.
 
 ### Process
@@ -187,9 +187,10 @@ Async messaging across sessions and agents.
 
 ## Key Contacts
 
-- 8GI Foundation: [REDACTED-EMAIL] | Telegram: [REDACTED]
-- AI James: [REDACTED-BOT]
-- Artale (human 8SO): Discord handle Artale
+Personal contact details (email, Telegram, Discord handles) are NOT stored in this public file.
+They live in `8gi-governance/context/contacts.md` (private repo) and are loaded into agent
+context at runtime via the CI sync workflow. Do not paste personal handles, emails, or phone
+numbers into this file or any other file in a public repo.
 
 ---
 

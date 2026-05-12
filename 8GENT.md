@@ -109,6 +109,6 @@ CLI (53), Finance (54), Email (54), Design Tokens (39), CI/CD (33), Data Viz (30
 
 | Who | Role |
 |-----|------|
-| 8GI Foundation ([REDACTED]) | Creator, architect |
+| 8GI Foundation | Creator, architect |
 | AI James (Claude) | Co-creator, benchmark engineer |
 | Thomas Davis (@thomasdavis) | TUI, AI SDK, packages/eight refactor |

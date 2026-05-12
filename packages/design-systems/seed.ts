@@ -2,7 +2,7 @@
  * Seed Database with Design Systems from Portfolio
  *
  * Populates the SQLite database with design systems extracted from
- * 8GI Foundation's portfolio (personal-os).
+ * the founder's portfolio site.
  */
 
 import {

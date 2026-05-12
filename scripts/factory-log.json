@@ -1841,7 +1841,7 @@
 	{
 		"name": "percentile",
 		"status": "error",
-		"error": "fatal: Unable to create '/home/operator/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
+		"error": "fatal: Unable to create '/Users/<redacted>/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
 		"timestamp": "2026-03-26T17:04:36.603Z"
 	},
 	{
@@ -2728,7 +2728,7 @@
 	{
 		"name": "sqli-pattern-detector",
 		"status": "error",
-		"error": "fatal: Unable to create '/home/operator/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
+		"error": "fatal: Unable to create '/Users/<redacted>/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
 		"timestamp": "2026-03-26T22:17:04.725Z"
 	},
 	{
@@ -3420,7 +3420,7 @@
 	{
 		"name": "reading-time-estimator",
 		"status": "error",
-		"error": "fatal: Unable to create '/home/operator/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
+		"error": "fatal: Unable to create '/Users/<redacted>/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
 		"timestamp": "2026-03-27T04:39:31.242Z"
 	},
 	{
@@ -3652,7 +3652,7 @@
 	{
 		"name": "moment-of-inertia",
 		"status": "error",
-		"error": "fatal: Unable to create '/home/operator/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
+		"error": "fatal: Unable to create '/Users/<redacted>/8gent-code/.git/index.lock': File exists.\n\nAnother git process seems to be running in this repository, e.g.\nan editor opened by 'git commit'. Please make sure all processes\nare terminated then try again. If it still fails, a git process\nmay have crashed in this repository earlier:\nremove the file manually to continue.\n",
 		"timestamp": "2026-03-27T06:14:08.975Z"
 	},
 	{

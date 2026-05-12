@@ -16,7 +16,7 @@ import { t } from "../../theme.js";
 
 const SHORT_TARGET = "write foo.ts";
 const LONG_TARGET =
-	"write /home/operator/8gent-code/apps/tui/src/components/very/deeply/nested/path/to/file/that/will/definitely/exceed/the/visible/width/of/the/inline/approval/card.ts";
+	"write /Users/dev/8gent-code/apps/tui/src/components/very/deeply/nested/path/to/file/that/will/definitely/exceed/the/visible/width/of/the/inline/approval/card.ts";
 
 function invoke(props: InlineApprovalPromptProps): React.ReactElement {
 	// InlineApprovalPrompt is pure, so we can call it as a regular function

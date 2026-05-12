@@ -213,7 +213,7 @@ When adding features, update relevant docs:
 
 ## Questions?
 
-Open an issue or reach out on X: [[REDACTED]]([REDACTED])
+Open an issue on the [GitHub repo](https://github.com/8gi-foundation/8gent-code).
 
 ---
 

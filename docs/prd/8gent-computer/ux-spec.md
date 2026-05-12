@@ -101,9 +101,9 @@ Status colours never appear alone. Every status colour pairs with a text label a
 
 **Source-of-truth precedence:**
 
-1. `BRAND.md` at the root of this repo (`/home/operator/8gent-code/BRAND.md`). Typography (Fraunces 800 wordmark, Fraunces 700 headings, Inter 400-600 body, JetBrains Mono code). Palette (warm only, banned hues 270-350). Accent `#E8610A` light / `#F07A28` dark.
+1. `BRAND.md` at the root of this repo. Typography (Fraunces 800 wordmark, Fraunces 700 headings, Inter 400-600 body, JetBrains Mono code). Palette (warm only, banned hues 270-350). Accent `#E8610A` light / `#F07A28` dark.
 2. `8gi-foundation/8gent-OS` (the Next.js per-user OS at `{user}.8gentOS.com`). The same CSS token names used there (`--bg-0..3`, `--text-primary/secondary/tertiary`, `--border`, `--accent`, `--heartbeat-*`) are the token names used here. The Swift implementation reads the same token-name contract and maps to native colours.
-3. `[REDACTED-PATH]/` (AI James OS parent). Cross-checked so that a user moving between the native app and the parent web surfaces does not feel a brand drop.
+3. The parent personal-OS surface. Cross-checked so that a user moving between the native app and the parent web surfaces does not feel a brand drop.
 
 Component grammar (button shapes, sidebar widths 240pt, sheet widths 520pt, 8pt spacing grid, 200ms ease-out motion) tracks 8gentOS. A user moving between `{user}.8gentOS.com` in a browser tab and the native 8gent Computer window should feel continuity, not translation.
 

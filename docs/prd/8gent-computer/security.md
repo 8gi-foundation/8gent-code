@@ -339,12 +339,13 @@ start. User can add to the list in Settings. User cannot remove from
 the default list without a `--i-know-what-im-doing` toggle that logs a
 policy decision to the audit store.
 
-### 5.4 [REDACTED-CHILD] (COPPA) default
+### 5.4 Child user (COPPA) default
 
-For sessions with `user=nick`, the entire screen-capture capability is
-disabled by default (not just deny-list filtered). To enable for a
-specific creative task, James must explicitly toggle it in a per-
-session consent sheet. See section 6 row `COPPA`.
+For sessions tagged with a child-user role, the entire screen-capture
+capability is disabled by default (not just deny-list filtered). To
+enable for a specific creative task, the supervising adult must
+explicitly toggle it in a per-session consent sheet. See section 6 row
+`COPPA`.
 
 ---
 
@@ -357,10 +358,10 @@ session consent sheet. See section 6 row `COPPA`.
 | **Malicious local process** | Localhost Qdrant port, daemon Unix socket, daemon WS port 18789 | Qdrant binds 127.0.0.1 only. Daemon WS validates origin header, rejects cross-origin. Daemon socket permission 0600. Master key only leaves Keychain into signed, hardened-runtime processes. | Another process running as the same user can read Keychain after a one-time "Always Allow" if impersonating our bundle id with a matching code signature, which requires a stolen Developer ID. | Pin daemon WS to require a per-install shared secret, not just origin. Issue: `daemon: pre-shared secret for WS auth` |
 | **Prompt injection extracting cross-tier memory** | Retrieval layer | Sensitivity-tier gate at `packages/memory/recall.ts` (section 4). | Injection against same-tier data still works (not a cross-tier threat). | Document tier-scoping in agent prompt. Issue: `prompts: add tier-scoping guard` |
 | **Sensitive-app screen-capture leak** | Screen Recording permission, 8gent-hands subprocess | Bundle-id deny-list (section 5). Double-check in hands subprocess. | User can override defaults; heuristics (terminal, preview) are best-effort. | Audit log every deny-list override. Issue: `audit: log deny-list overrides` |
-| **COPPA ([REDACTED-CHILD])** | Any collection, screen capture, retention | `user=nick` sessions write to isolated collection tag `nick-*`, screen capture disabled by default, retention class `child-short` caps at 30 days with daily redaction scan for PII. No cloud sync for nick sessions ever. | Parental supervision assumed; not a technical control beyond above. | Ship the `child-short` retention class. Issue: `memory: child-short retention` |
+| **COPPA (child user)** | Any collection, screen capture, retention | Child-user sessions write to an isolated collection tag, screen capture disabled by default, retention class `child-short` caps at 30 days with daily redaction scan for PII. No cloud sync for child-user sessions ever. | Parental supervision assumed; not a technical control beyond above. | Ship the `child-short` retention class. Issue: `memory: child-short retention` |
 | **GDPR right-to-forget** | All on-disk stores | Single command `8gent memory forget --user=<id>` that deletes from SQLite, Qdrant, embeddings, and the audit log (audit-log entries get tombstoned, not deleted, with a `forgotten=true` flag and no PII). Runs within 30 days of user request. | Backups (none in v1, local only) are out of scope. | Implement `memory forget`. Issue: `memory: GDPR forget command` |
 | **Daemon process injection** | Daemon binary on disk, LaunchAgent plist | Developer ID signed, hardened runtime, notarised. LaunchAgent plist in `~/Library/LaunchAgents/` owned by user, 0644. | Attacker who already has user-level write to LaunchAgents can swap the binary. This is a broader OS compromise. | Periodic code-signature self-check on daemon start. Issue: `daemon: self-check signature on start` |
-| **Remote wipe abuse** | `eight-vessel.fly.dev` command channel | Signed commands only, Ed25519, per-install public key registered at install time on the vessel. Nonce prevents replay. | Fly.io compromise = ability to send signed-looking commands, but the vessel does not hold the Ed25519 private key (held by James offline). | Document the key-custody protocol. Issue: `vessel: remote-wipe key custody doc` |
+| **Remote wipe abuse** | `eight-vessel.fly.dev` command channel | Signed commands only, Ed25519, per-install public key registered at install time on the vessel. Nonce prevents replay. | Fly.io compromise = ability to send signed-looking commands, but the vessel does not hold the Ed25519 private key (held offline by the operator). | Document the key-custody protocol. Issue: `vessel: remote-wipe key custody doc` |
 | **Telemetry leak** | Any outbound HTTP from daemon | Local-first default, no analytics in v1. When cloud is opted in, the provider chain only contacts the provider endpoints. | User adding a provider API key means that provider sees prompt content by design. | Clear consent copy for cloud opt-in. Moira owns. |
 
 ---
