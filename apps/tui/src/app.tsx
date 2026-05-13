@@ -5632,7 +5632,7 @@ export function App({
 						<Box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
 							<MessageList
 								messages={messages}
-								maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
+								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
 								contentWidth={Math.max(
 									24,
 									viewport.width - (showContextRail ? 30 : 0) - (showActivityRail ? 36 : 0) - 8,
