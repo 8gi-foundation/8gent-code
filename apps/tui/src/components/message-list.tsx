@@ -25,8 +25,9 @@
 
 import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
+import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { t } from "../theme.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
 import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
@@ -109,43 +110,182 @@ interface MessageListProps {
 	messages: Message[];
 	animateTyping?: boolean;
 	soundEnabled?: boolean;
+	/** Legacy cap on rendered messages. Acts as a final safety lid even when
+	 *  rowBudget is also provided. Default 200 — large because rowBudget now
+	 *  does the real clipping. */
 	maxVisible?: number;
 	/** When set, row and bubble width math use this instead of stdout.columns. */
 	contentWidth?: number;
+	/** Available terminal rows for the list. Drives the slice math so the
+	 *  rendered tree never exceeds the container — which is what was causing
+	 *  the streaming overlap artifacts. */
+	rowBudget?: number;
 	/** When false, skip bubble fade-in delays (matches ^A global anim toggle). */
 	showAnimations?: boolean;
+	/** Disable mouse-wheel + keyboard scroll capture (e.g. another modal owns input). */
+	scrollEnabled?: boolean;
+}
+
+/**
+ * Estimate how many terminal rows a message renders into.
+ * Used to slice the visible window so the rendered tree's total height never
+ * exceeds the container — Ink's diff renderer leaves stale chars when content
+ * shrinks, so we MUST clip in our own code, not rely on overflow:hidden.
+ *
+ * Overhead per message: 1 header row + 1 marginBottom; assistant footer adds 1.
+ * Body: count wrapped lines for each line of content.
+ */
+function estimateMessageRows(message: Message, wrapWidth: number): number {
+	if (message.role === "tool") return 0;
+	const w = Math.max(1, wrapWidth);
+	const safe = breakLongTokens(message.content, w);
+	let rows = 0;
+	for (const line of safe.split("\n")) {
+		rows += Math.max(1, Math.ceil(line.length / w));
+	}
+	if (message.role === "system") {
+		// Multi-line system messages get top/bottom ─── separators (2 extra rows).
+		return rows + (message.content.includes("\n") ? 2 : 0) + 1;
+	}
+	// 1 header + 1 marginBottom; assistant with metadata = 1 footer too.
+	const overhead =
+		message.role === "assistant" &&
+		typeof message.latencyMs === "number" &&
+		typeof message.tokens === "number"
+			? 3
+			: 2;
+	return rows + overhead;
 }
 
 export function MessageList({
 	messages,
 	animateTyping = true,
 	soundEnabled = false,
-	maxVisible = 50,
+	maxVisible = 200,
 	contentWidth: contentWidthProp,
+	rowBudget,
 	showAnimations = true,
+	scrollEnabled = true,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
+	// Width used to estimate wrapped line count — matches MessageItem's body
+	// width math (contentWidth - 2 outer chrome, * 0.78 bubble, - 2 slack).
+	const wrapBudget = Math.max(8, Math.floor((resolvedContentWidth - 2) * 0.78) - 2);
+	// Default rowBudget: tall enough that small chats render fully, low enough
+	// that long sessions still clip on a typical terminal (80x24).
+	const resolvedRowBudget = Math.max(4, rowBudget ?? Math.max(8, (stdout?.rows ?? 24) - 10));
 
 	const prevCountRef = useRef(messages.length);
 	const [newMessageId, setNewMessageId] = useState<string | null>(null);
 
-	// Track new messages for animation
-	useEffect(() => {
-		if (messages.length > prevCountRef.current) {
-			const newMessage = messages[messages.length - 1];
-			setNewMessageId(newMessage.id);
-		}
-		prevCountRef.current = messages.length;
-	}, [messages]);
-
 	// Tool messages never render in chat — they flow to the ^B processes panel.
-	// The agent's current activity is surfaced via the status bar's plan verb.
 	const chatMessages = messages.filter((m) => m.role !== "tool");
 
-	// Only render the most recent messages to prevent scroll jumping.
-	const visibleMessages =
-		chatMessages.length > maxVisible ? chatMessages.slice(-maxVisible) : chatMessages;
+	// Per-message estimated row counts. Cheap to compute; no memo needed.
+	const rowEstimates = chatMessages.map((m) => estimateMessageRows(m, wrapBudget));
+
+	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
+	// scrollOffset = messages held back from the bottom. autoScrollRef tracks
+	// whether the user is pinned to the live edge.
+	const [scrollOffset, setScrollOffset] = useState(0);
+	const autoScrollRef = useRef(true);
+
+	const total = chatMessages.length;
+
+	// Walk back from the latest message, fitting as many as the row budget
+	// allows. This is the single source of truth for "what fits on screen".
+	// It also tells us the deepest valid scrollOffset — the offset where the
+	// oldest message becomes the bottom of the window.
+	const computeWindow = useCallback(
+		(offsetFromBottom: number) => {
+			const sliceEnd = Math.max(1, total - offsetFromBottom);
+			let acc = 0;
+			let startIdx = sliceEnd;
+			for (let i = sliceEnd - 1; i >= 0; i--) {
+				const r = rowEstimates[i] ?? 0;
+				// Always include at least one message, even if it overflows alone.
+				if (acc + r > resolvedRowBudget && startIdx < sliceEnd) break;
+				acc += r;
+				startIdx = i;
+			}
+			return { startIdx, sliceEnd };
+		},
+		[total, rowEstimates, resolvedRowBudget],
+	);
+
+	// maxScrollOffset: the deepest scroll position where message 0 is still
+	// the top of the window. Find the smallest K where rows[0..K] would
+	// overflow the budget — that K becomes the sliceEnd at max scroll, and
+	// offset = total - K. If all messages fit, no scrolling needed.
+	const maxScrollOffset = (() => {
+		if (total === 0) return 0;
+		let acc = 0;
+		for (let i = 0; i < total; i++) {
+			acc += rowEstimates[i] ?? 0;
+			if (acc > resolvedRowBudget) {
+				// msg 0 alone exceeds the budget — irreducible, no real scrolling.
+				if (i === 0) return 0;
+				// rows[0..i-1] fit; msg i would push us over. sliceEnd = i.
+				return Math.max(0, total - i);
+			}
+		}
+		return 0;
+	})();
+	const clampedOffset = Math.min(scrollOffset, maxScrollOffset);
+
+	const scrollBy = useCallback(
+		(deltaMessages: number) => {
+			setScrollOffset((prev) => {
+				const next = Math.max(0, Math.min(prev + deltaMessages, maxScrollOffset));
+				autoScrollRef.current = next === 0;
+				return next;
+			});
+		},
+		[maxScrollOffset],
+	);
+
+	// Keyboard: shift+arrows (plain arrows are owned by the input field).
+	useInput(
+		(_input, key) => {
+			if (key.shift && key.upArrow) scrollBy(+1);
+			else if (key.shift && key.downArrow) scrollBy(-1);
+			else if (key.shift && key.pageUp) scrollBy(+5);
+			else if (key.shift && key.pageDown) scrollBy(-5);
+		},
+		{ isActive: scrollEnabled },
+	);
+
+	// Mouse wheel. 2 messages per notch — fast enough to feel responsive,
+	// small enough that a long bubble doesn't fly past in one click.
+	useMouseScroll({
+		enabled: scrollEnabled,
+		step: 2,
+		onWheelUp: () => scrollBy(+1),
+		onWheelDown: () => scrollBy(-1),
+	});
+
+	// Auto-pin: new messages while pinned snap to bottom. If the user is
+	// scrolled up, we BUMP scrollOffset so their view stays locked on the same
+	// content (web behavior — adding new messages at the bottom must not shift
+	// the messages the user is currently reading).
+	useEffect(() => {
+		if (total > prevCountRef.current) {
+			const newMessage = chatMessages[chatMessages.length - 1];
+			if (newMessage) setNewMessageId(newMessage.id);
+			if (autoScrollRef.current) {
+				setScrollOffset(0);
+			} else {
+				const delta = total - prevCountRef.current;
+				setScrollOffset((prev) => Math.min(prev + delta, total - 1));
+			}
+		}
+		prevCountRef.current = total;
+	}, [total, chatMessages]);
+
+	const { startIdx: sliceStart, sliceEnd } = computeWindow(clampedOffset);
+	const visibleMessages = chatMessages.slice(sliceStart, sliceEnd);
+	const _maxVisibleCap = maxVisible; // legacy prop retained for callers; not used in slicing.
 
 	// Find the most recent assistant message — that's the only one that gets
 	// the live teal accent. Older assistant replies render in muted to keep
@@ -181,6 +321,13 @@ export function MessageList({
 					isLatestAssistant={message.id === lastAssistantId}
 				/>
 			))}
+			{clampedOffset > 0 && (
+				<Box justifyContent="center" flexShrink={0}>
+					<Text color={t.muted} dimColor>
+						{`↓ ${clampedOffset} below — shift+↓ or scroll down to follow`}
+					</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }
