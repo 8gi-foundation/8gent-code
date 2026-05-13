@@ -25,8 +25,9 @@
 
 import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
+import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { t } from "../theme.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
 import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
@@ -114,6 +115,8 @@ interface MessageListProps {
 	contentWidth?: number;
 	/** When false, skip bubble fade-in delays (matches ^A global anim toggle). */
 	showAnimations?: boolean;
+	/** Disable mouse-wheel + keyboard scroll capture (e.g. another modal owns input). */
+	scrollEnabled?: boolean;
 }
 
 export function MessageList({
@@ -123,6 +126,7 @@ export function MessageList({
 	maxVisible = 50,
 	contentWidth: contentWidthProp,
 	showAnimations = true,
+	scrollEnabled = true,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
@@ -130,22 +134,71 @@ export function MessageList({
 	const prevCountRef = useRef(messages.length);
 	const [newMessageId, setNewMessageId] = useState<string | null>(null);
 
-	// Track new messages for animation
-	useEffect(() => {
-		if (messages.length > prevCountRef.current) {
-			const newMessage = messages[messages.length - 1];
-			setNewMessageId(newMessage.id);
-		}
-		prevCountRef.current = messages.length;
-	}, [messages]);
-
 	// Tool messages never render in chat — they flow to the ^B processes panel.
 	// The agent's current activity is surfaced via the status bar's plan verb.
 	const chatMessages = messages.filter((m) => m.role !== "tool");
 
-	// Only render the most recent messages to prevent scroll jumping.
-	const visibleMessages =
-		chatMessages.length > maxVisible ? chatMessages.slice(-maxVisible) : chatMessages;
+	// --- Scroll state (web-style auto-pin contract) ---
+	// scrollOffset = how many messages back from the latest the window is anchored.
+	// autoScroll = "user is at bottom, follow new content". Mirrors OpenMono's
+	// AnsiPainter._autoScroll. Scrolling up sets it false; scrolling back to
+	// bottom sets it true. New messages while autoScroll=true snap to bottom;
+	// while false, the user holds their position and doesn't get yanked.
+	const [scrollOffset, setScrollOffset] = useState(0);
+	const autoScrollRef = useRef(true);
+
+	const total = chatMessages.length;
+	const windowSize = Math.max(1, maxVisible);
+	const maxScrollOffset = Math.max(0, total - windowSize);
+	const clampedOffset = Math.min(scrollOffset, maxScrollOffset);
+
+	const scrollBy = useCallback(
+		(delta: number) => {
+			setScrollOffset((prev) => {
+				const next = Math.max(0, Math.min(prev + delta, maxScrollOffset));
+				autoScrollRef.current = next === 0;
+				return next;
+			});
+		},
+		[maxScrollOffset],
+	);
+
+	// Keyboard scroll. Shift-modifier so we don't fight the input field's plain arrows.
+	useInput(
+		(_input, key) => {
+			if (key.shift && key.upArrow) scrollBy(+1);
+			else if (key.shift && key.downArrow) scrollBy(-1);
+			else if (key.shift && key.pageUp) scrollBy(+windowSize);
+			else if (key.shift && key.pageDown) scrollBy(-windowSize);
+		},
+		{ isActive: scrollEnabled },
+	);
+
+	// Mouse wheel scroll. SGR mode, see useMouseScroll.ts for terminal teardown.
+	useMouseScroll({
+		enabled: scrollEnabled,
+		onWheelUp: () => scrollBy(+1),
+		onWheelDown: () => scrollBy(-1),
+	});
+
+	// Auto-pin contract: when new messages arrive AND user is pinned to bottom,
+	// stay pinned. When new messages arrive but user has scrolled up, do nothing
+	// — they're reading history. (We don't bump offset to compensate; the slice
+	// below uses `total - windowSize - offset` so older content scrolls out the
+	// top, which matches every chat UI on the web.)
+	useEffect(() => {
+		if (total > prevCountRef.current) {
+			const newMessage = chatMessages[chatMessages.length - 1];
+			if (newMessage) setNewMessageId(newMessage.id);
+			if (autoScrollRef.current) setScrollOffset(0);
+		}
+		prevCountRef.current = total;
+	}, [total, chatMessages]);
+
+	// Slice the visible window (OpenMono's `lines.Count - h - _scrollOffset`).
+	const sliceEnd = total - clampedOffset;
+	const sliceStart = Math.max(0, sliceEnd - windowSize);
+	const visibleMessages = chatMessages.slice(sliceStart, sliceEnd);
 
 	// Find the most recent assistant message — that's the only one that gets
 	// the live teal accent. Older assistant replies render in muted to keep
@@ -181,6 +234,13 @@ export function MessageList({
 					isLatestAssistant={message.id === lastAssistantId}
 				/>
 			))}
+			{clampedOffset > 0 && (
+				<Box justifyContent="center" flexShrink={0}>
+					<Text color={t.muted} dimColor>
+						{`↓ ${clampedOffset} below — shift+↓ or scroll down to follow`}
+					</Text>
+				</Box>
+			)}
 		</Box>
 	);
 }
