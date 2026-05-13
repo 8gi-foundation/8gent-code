@@ -178,6 +178,10 @@ export function MessageList({
 
 	const prevCountRef = useRef(messages.length);
 	const [newMessageId, setNewMessageId] = useState<string | null>(null);
+	// Messages we've already kicked off the typing animation for. Once an ID
+	// lands here, future remounts (caused by scrolling out of the slice and
+	// back) render statically — pages stay stable like a book.
+	const animatedIdsRef = useRef<Set<string>>(new Set());
 
 	// Tool messages never render in chat — they flow to the ^B processes panel.
 	const chatMessages = messages.filter((m) => m.role !== "tool");
@@ -308,19 +312,29 @@ export function MessageList({
 					</Text>
 				</Box>
 			) : null}
-			{visibleMessages.map((message, index) => (
-				<MessageItem
-					key={message.id}
-					message={message}
-					isNew={message.id === newMessageId}
-					animate={animateTyping}
-					soundEnabled={soundEnabled}
-					index={index}
-					contentWidth={resolvedContentWidth}
-					showAnimations={showAnimations}
-					isLatestAssistant={message.id === lastAssistantId}
-				/>
-			))}
+			{visibleMessages.map((message, index) => {
+				// Animate only the first time we see this message. Once it's been
+				// rendered as "new", subsequent renders (scroll back, slice churn)
+				// treat it as static so TypingText doesn't replay.
+				const isFirstShow =
+					message.id === newMessageId && !animatedIdsRef.current.has(message.id);
+				return (
+					<MessageItem
+						key={message.id}
+						message={message}
+						isNew={isFirstShow}
+						animate={animateTyping}
+						soundEnabled={soundEnabled}
+						index={index}
+						contentWidth={resolvedContentWidth}
+						showAnimations={showAnimations}
+						isLatestAssistant={message.id === lastAssistantId}
+						onAnimationStart={(id) => {
+							animatedIdsRef.current.add(id);
+						}}
+					/>
+				);
+			})}
 			{clampedOffset > 0 && (
 				<Box justifyContent="center" flexShrink={0}>
 					<Text color={t.muted} dimColor>
@@ -341,6 +355,10 @@ interface MessageItemProps {
 	contentWidth: number;
 	showAnimations: boolean;
 	isLatestAssistant?: boolean;
+	/** Fires once on first mount when isNew=true. Parent uses it to record
+	 *  that this message has begun its typing animation, so future remounts
+	 *  (from scroll) render the message statically. */
+	onAnimationStart?: (id: string) => void;
 }
 
 function MessageItem({
@@ -352,6 +370,7 @@ function MessageItem({
 	contentWidth,
 	showAnimations,
 	isLatestAssistant = false,
+	onAnimationStart,
 }: MessageItemProps) {
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -378,10 +397,11 @@ function MessageItem({
 	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
 	useEffect(() => {
 		if (isNew) {
+			onAnimationStart?.(message.id);
 			const timeout = setTimeout(() => setShowContent(true), 50);
 			return () => clearTimeout(timeout);
 		}
-	}, [isNew]);
+	}, [isNew, message.id, onAnimationStart]);
 
 	// Tool messages never render in chat (filtered at MessageList level). Guard anyway.
 	if (message.role === "tool") return null;
