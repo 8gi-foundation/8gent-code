@@ -130,3 +130,5 @@ packages/eight-bdh/data/phase-3c-toolcalls-corpus.bin
 packages/eight-bdh/checkpoints/phase-3c-toolcalls-5m.pt
 packages/eight-bdh/checkpoints/phase-3c-toolcalls-5m-best-val.pt
 packages/eight-bdh/trainer/local/tinystories-pretrain-train-log.jsonl
+packages/eight-bdh/trainer/local/__pycache__/
+packages/eight-bdh/trainer/local/_test_tmp_gold.jsonl
