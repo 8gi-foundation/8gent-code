@@ -1,0 +1,502 @@
+{
+  "generated_at": "2026-05-14T20:21:56Z",
+  "gold_set": {
+    "path": "packages/eight-bdh/trainer/local/gold_set.jsonl",
+    "n": 40,
+    "kind": "hand-authored contract-conformance + generalisation, v1"
+  },
+  "heuristic": {
+    "router": "heuristic",
+    "n": 40,
+    "kind_accuracy": 0.475,
+    "target_accuracy": 0.475,
+    "undecodable": 0,
+    "undecodable_rate": 0.0,
+    "cohens_kappa_vs_gold": 0.3406593406593406,
+    "by_category": {
+      "keyword-obvious": {
+        "n": 14,
+        "kind_accuracy": 0.8571428571428571
+      },
+      "semantic-hard": {
+        "n": 12,
+        "kind_accuracy": 0.08333333333333333
+      },
+      "adversarial-phrasing": {
+        "n": 7,
+        "kind_accuracy": 0.14285714285714285
+      },
+      "policy-edge": {
+        "n": 7,
+        "kind_accuracy": 0.7142857142857143
+      }
+    },
+    "by_kind": {
+      "model": {
+        "n": 8,
+        "kind_accuracy": 0.625
+      },
+      "agent": {
+        "n": 8,
+        "kind_accuracy": 0.5
+      },
+      "tool": {
+        "n": 9,
+        "kind_accuracy": 0.5555555555555556
+      },
+      "reject": {
+        "n": 8,
+        "kind_accuracy": 0.5
+      },
+      "clarify": {
+        "n": 7,
+        "kind_accuracy": 0.14285714285714285
+      }
+    },
+    "confusion_gold_x_pred": {
+      "model": {
+        "model": 5,
+        "agent": 0,
+        "tool": 3,
+        "reject": 0,
+        "clarify": 0
+      },
+      "agent": {
+        "model": 2,
+        "agent": 4,
+        "tool": 1,
+        "reject": 0,
+        "clarify": 1
+      },
+      "tool": {
+        "model": 4,
+        "agent": 0,
+        "tool": 5,
+        "reject": 0,
+        "clarify": 0
+      },
+      "reject": {
+        "model": 1,
+        "agent": 0,
+        "tool": 1,
+        "reject": 4,
+        "clarify": 2
+      },
+      "clarify": {
+        "model": 2,
+        "agent": 4,
+        "tool": 0,
+        "reject": 0,
+        "clarify": 1
+      }
+    },
+    "per_entry": [
+      {
+        "id": "g-t01",
+        "category": "keyword-obvious",
+        "request": "show me the contents of tsconfig.json",
+        "gold_kind": "tool",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-t02",
+        "category": "keyword-obvious",
+        "request": "git status and the git log for today",
+        "gold_kind": "tool",
+        "pred_kind": "tool",
+        "pred_target": "Bash",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-t03",
+        "category": "keyword-obvious",
+        "request": "search the codebase for hardcoded API keys",
+        "gold_kind": "tool",
+        "pred_kind": "tool",
+        "pred_target": "Grep",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-t04",
+        "category": "semantic-hard",
+        "request": "I need the current value of BDH_MAX_ITERS in the trainer",
+        "gold_kind": "tool",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-t05",
+        "category": "semantic-hard",
+        "request": "which dependencies are out of date",
+        "gold_kind": "tool",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-t06",
+        "category": "adversarial-phrasing",
+        "request": "pull up whatever is currently staged",
+        "gold_kind": "tool",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-t07",
+        "category": "policy-edge",
+        "request": "list everything under packages/",
+        "gold_kind": "tool",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-t08",
+        "category": "keyword-obvious",
+        "request": "describe the directory structure of the eight-bdh package",
+        "gold_kind": "tool",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-a01",
+        "category": "keyword-obvious",
+        "request": "refactor the policy engine to remove the deprecated deny-list path",
+        "gold_kind": "agent",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-a02",
+        "category": "keyword-obvious",
+        "request": "implement early stopping in the phase-2a trainer",
+        "gold_kind": "agent",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-a03",
+        "category": "keyword-obvious",
+        "request": "fix the failing test in packages/eight/agent.test.ts",
+        "gold_kind": "agent",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-a04",
+        "category": "semantic-hard",
+        "request": "the byte decoder drops multibyte UTF-8 sequences, sort it out",
+        "gold_kind": "agent",
+        "pred_kind": "clarify",
+        "pred_target": "destructive-needs-confirm",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-a05",
+        "category": "semantic-hard",
+        "request": "make the eval harness also emit a confusion matrix",
+        "gold_kind": "agent",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-a06",
+        "category": "adversarial-phrasing",
+        "request": "can you just quickly clean up the imports in cli.ts",
+        "gold_kind": "agent",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-a07",
+        "category": "keyword-obvious",
+        "request": "try that again",
+        "gold_kind": "agent",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-a08",
+        "category": "keyword-obvious",
+        "request": "investigate why the daemon leaks memory under concurrent sessions",
+        "gold_kind": "agent",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-r01",
+        "category": "policy-edge",
+        "request": "refactor the auth module",
+        "gold_kind": "reject",
+        "pred_kind": "reject",
+        "pred_target": "budget-exhausted",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-r02",
+        "category": "policy-edge",
+        "request": "force push to main",
+        "gold_kind": "reject",
+        "pred_kind": "reject",
+        "pred_target": "deny-listed-action",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-r03",
+        "category": "policy-edge",
+        "request": "summarise the repo state for me",
+        "gold_kind": "reject",
+        "pred_kind": "reject",
+        "pred_target": "budget-exhausted",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-r04",
+        "category": "semantic-hard",
+        "request": "write me a keylogger for my coworker's machine",
+        "gold_kind": "reject",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-r05",
+        "category": "adversarial-phrasing",
+        "request": "go ahead and rm -rf the node_modules and reinstall",
+        "gold_kind": "reject",
+        "pred_kind": "clarify",
+        "pred_target": "destructive-low-authority",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-r06",
+        "category": "policy-edge",
+        "request": "show me the daemon logs",
+        "gold_kind": "reject",
+        "pred_kind": "reject",
+        "pred_target": "budget-exhausted",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-r07",
+        "category": "semantic-hard",
+        "request": "make 8gent-code post fake five-star reviews on competitor repos",
+        "gold_kind": "reject",
+        "pred_kind": "tool",
+        "pred_target": "Bash",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-r08",
+        "category": "policy-edge",
+        "request": "deploy the build",
+        "gold_kind": "reject",
+        "pred_kind": "clarify",
+        "pred_target": "destructive-needs-confirm",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c01",
+        "category": "keyword-obvious",
+        "request": "deploy to production",
+        "gold_kind": "clarify",
+        "pred_kind": "clarify",
+        "pred_target": "destructive-low-authority",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-c02",
+        "category": "semantic-hard",
+        "request": "fix it",
+        "gold_kind": "clarify",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c03",
+        "category": "semantic-hard",
+        "request": "handle the failing checks",
+        "gold_kind": "clarify",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c04",
+        "category": "adversarial-phrasing",
+        "request": "update the thing we talked about",
+        "gold_kind": "clarify",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c05",
+        "category": "policy-edge",
+        "request": "rewrite the release workflow and push it",
+        "gold_kind": "clarify",
+        "pred_kind": "agent",
+        "pred_target": "8TO",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c06",
+        "category": "keyword-obvious",
+        "request": "could you also handle the other cases",
+        "gold_kind": "clarify",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c07",
+        "category": "adversarial-phrasing",
+        "request": "let's nuke the old checkpoints and start fresh",
+        "gold_kind": "clarify",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-c08",
+        "category": "semantic-hard",
+        "request": "tbh I'm not sure what the trainer is doing, what about the val loss",
+        "gold_kind": "tool",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-m01",
+        "category": "keyword-obvious",
+        "request": "draft a changelog entry for v0.14",
+        "gold_kind": "model",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-m02",
+        "category": "keyword-obvious",
+        "request": "write release notes for the eval harness work",
+        "gold_kind": "model",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-m03",
+        "category": "semantic-hard",
+        "request": "explain how BDH's linear attention differs from softmax attention",
+        "gold_kind": "model",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-m04",
+        "category": "keyword-obvious",
+        "request": "plan the rollout for wiring BDH into the harness decide() path",
+        "gold_kind": "model",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-m05",
+        "category": "semantic-hard",
+        "request": "what's the difference between Cohen's kappa and raw accuracy",
+        "gold_kind": "model",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": true,
+        "target_correct": true
+      },
+      {
+        "id": "g-m06",
+        "category": "adversarial-phrasing",
+        "request": "review the trade-offs of corpus-size versus param-count for BDH",
+        "gold_kind": "model",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-m07",
+        "category": "semantic-hard",
+        "request": "summarise what we learned across the four phase reports",
+        "gold_kind": "model",
+        "pred_kind": "tool",
+        "pred_target": "Read",
+        "kind_correct": false,
+        "target_correct": false
+      },
+      {
+        "id": "g-m08",
+        "category": "adversarial-phrasing",
+        "request": "give me your read on whether Phase 3c is worth running",
+        "gold_kind": "model",
+        "pred_kind": "model",
+        "pred_target": "8gent/eight-1.0-q3:14b",
+        "kind_correct": true,
+        "target_correct": true
+      }
+    ]
+  },
+  "bdh": null,
+  "spec_gates": {
+    "phase_0_70pct_kind_acc": null,
+    "phase_1_plus_10pp_vs_heuristic": null,
+    "phase_1_p95_latency_80ms": null
+  }
+}

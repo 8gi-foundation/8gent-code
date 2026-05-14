@@ -1,0 +1,30 @@
+{
+  "gold_set": "gold_set.jsonl",
+  "labelled_by": "AI James (single author)",
+  "labelled_at": "2026-05-14",
+  "contract": "../ROUTING-CONTRACT.md",
+  "contract_version": "0.1",
+  "contract_status": "PROPOSED - boardroom-reviewed, NOT chair-ratified",
+  "ratified_as": "v1 DIAGNOSTIC instrument only",
+  "ratified_by": "8GI boardroom 2026-05-14 (8EO, 8TO, 8PO, 8DO, 8SO, 8CO, 8MO, 8GO) - unanimous RATIFY WITH CHANGES",
+  "ratification_basis": "Orchestrator spec section 0.5 (chair amendment 2026-04-28) already demoted the eval harness from a ship gate to a diagnostic instrument. A diagnostic does not require a chair-ratified contract; it requires honest provenance. This file is that provenance.",
+  "not_ratified_for": [
+    "Use as a release ship gate",
+    "Use as a training or tuning signal (see open_conditions)",
+    "Promotion of ROUTING-CONTRACT.md into the orchestrator spec - that is L5 chair-only"
+  ],
+  "boardroom_minutes": "../../../docs/boardroom-minutes/2026-05-14-bdh-gold-set-ratification.md",
+  "changes_from_boardroom": [
+    "g-c08: relabelled clarify -> tool (8PO - the user asked a concrete question, the val loss, which one read answers; contract rule 9). Recategorised keyword-obvious -> semantic-hard (the keyword router mis-routes it).",
+    "g-a07: kept agent. ROUTING-CONTRACT.md gained an explicit rule 7 (retry-after-failure -> agent) so the label is grounded in the contract rather than an unstated sub-rule (8TO).",
+    "g-c03: kept clarify, marked disputed: true inline. 8PO holds clarify, 8DO holds agent - a live officer split. Held at the current label pending a second rater to break the tie (Boardroom rule 3: document dissent, do not force consensus)."
+  ],
+  "second_rater_priority": ["g-c03", "g-a07", "g-c08"],
+  "open_conditions": [
+    "A second independent rater must relabel all 40 entries blind; report inter-rater Cohen's kappa in eval-report.json before this set is used as any training or tuning signal (8SO, 8CO).",
+    "n=40 cannot measure the spec section 9 gates at their stated sample sizes (100-example Phase 0 holdout, 5k Phase 1 set). The +10pp-vs-heuristic delta at n=40 carries an interval of roughly plus or minus 15pp - treat it as a headroom indicator, not a gate (8TO).",
+    "ROUTING-CONTRACT.md v0.1 and its authority_level < 3 clarify threshold require L5 chair ratification before promotion into the orchestrator spec (8GO, 8SO).",
+    "Grow the set toward >= 100 entries with deliberate minimal-contrast pairs (vary one of: authority_level, deny_actions, budget, history) before any default-on promotion (8TO)."
+  ],
+  "citation_rule": "Never publish the heuristic baseline number (currently 47.5 percent kind accuracy) without its difficulty-tier breakdown and the 'headroom on a hard-weighted set, not a router accuracy rate' frame. See EVAL-HARNESS.md."
+}
