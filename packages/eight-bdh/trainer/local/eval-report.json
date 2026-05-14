@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-14T16:26:48Z",
+  "generated_at": "2026-05-14T20:21:56Z",
   "gold_set": {
     "path": "packages/eight-bdh/trainer/local/gold_set.jsonl",
     "n": 40,
@@ -12,15 +12,15 @@
     "target_accuracy": 0.475,
     "undecodable": 0,
     "undecodable_rate": 0.0,
-    "cohens_kappa_vs_gold": 0.34374999999999994,
+    "cohens_kappa_vs_gold": 0.3406593406593406,
     "by_category": {
       "keyword-obvious": {
-        "n": 15,
-        "kind_accuracy": 0.8
+        "n": 14,
+        "kind_accuracy": 0.8571428571428571
       },
       "semantic-hard": {
-        "n": 11,
-        "kind_accuracy": 0.09090909090909091
+        "n": 12,
+        "kind_accuracy": 0.08333333333333333
       },
       "adversarial-phrasing": {
         "n": 7,
@@ -41,16 +41,16 @@
         "kind_accuracy": 0.5
       },
       "tool": {
-        "n": 8,
-        "kind_accuracy": 0.625
+        "n": 9,
+        "kind_accuracy": 0.5555555555555556
       },
       "reject": {
         "n": 8,
         "kind_accuracy": 0.5
       },
       "clarify": {
-        "n": 8,
-        "kind_accuracy": 0.125
+        "n": 7,
+        "kind_accuracy": 0.14285714285714285
       }
     },
     "confusion_gold_x_pred": {
@@ -69,7 +69,7 @@
         "clarify": 1
       },
       "tool": {
-        "model": 3,
+        "model": 4,
         "agent": 0,
         "tool": 5,
         "reject": 0,
@@ -83,7 +83,7 @@
         "clarify": 2
       },
       "clarify": {
-        "model": 3,
+        "model": 2,
         "agent": 4,
         "tool": 0,
         "reject": 0,
@@ -157,7 +157,7 @@
         "request": "list everything under packages/",
         "gold_kind": "tool",
         "pred_kind": "tool",
-        "pred_target": "Bash",
+        "pred_target": "Read",
         "kind_correct": true,
         "target_correct": true
       },
@@ -167,7 +167,7 @@
         "request": "describe the directory structure of the eight-bdh package",
         "gold_kind": "tool",
         "pred_kind": "tool",
-        "pred_target": "Bash",
+        "pred_target": "Read",
         "kind_correct": true,
         "target_correct": true
       },
@@ -177,7 +177,7 @@
         "request": "refactor the policy engine to remove the deprecated deny-list path",
         "gold_kind": "agent",
         "pred_kind": "tool",
-        "pred_target": "Bash",
+        "pred_target": "Read",
         "kind_correct": false,
         "target_correct": false
       },
@@ -403,9 +403,9 @@
       },
       {
         "id": "g-c08",
-        "category": "keyword-obvious",
+        "category": "semantic-hard",
         "request": "tbh I'm not sure what the trainer is doing, what about the val loss",
-        "gold_kind": "clarify",
+        "gold_kind": "tool",
         "pred_kind": "model",
         "pred_target": "8gent/eight-1.0-q3:14b",
         "kind_correct": false,

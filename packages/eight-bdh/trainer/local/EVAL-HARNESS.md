@@ -13,11 +13,33 @@ distribution. It does not tell you whether the model **routes
 correctly**, which is the entire point of 8gent 0.1 per the orchestrator
 spec. This harness closes that gap.
 
+## Status — read this first
+
+> **This is a v1 DIAGNOSTIC instrument, not a release gate.** The
+> orchestrator spec section 0.5 (chair amendment, 2026-04-28) already
+> demoted the eval harness from a ship gate to a diagnostic. Its numbers
+> inform; they do not gate a release.
+>
+> **The gold set's answer key was authored by a single agent.** All 40
+> "correct" labels are one author's reading of a routing contract that,
+> until now, only existed implicitly. That contract is now written down
+> in `../ROUTING-CONTRACT.md` (v0.1, **proposed, not chair-ratified**).
+>
+> The 8GI boardroom reviewed the gold set on 2026-05-14 and ratified it
+> **with changes** — *as a diagnostic instrument only*. Provenance,
+> the boardroom's label changes, and the open conditions (a required
+> second blind rater before any tuning-toward; L5 chair ratification of
+> the contract) are recorded in `gold_set.provenance.json`. Read that
+> file before citing any number from this harness.
+
 ## Files
 
 | File | What it is |
 |---|---|
-| `gold_set.jsonl` | The held-out labelled test set. 40 hand-authored `(state -> correct decision.kind)` pairs, each with an explicit rationale and a difficulty category. |
+| `gold_set.jsonl` | The held-out labelled test set. 40 hand-authored `(state -> correct decision.kind)` pairs, each with an explicit rationale and a difficulty category. Two entries (`g-c03`, marked `disputed`) carry a live officer split awaiting a second rater. |
+| `gold_set.provenance.json` | Who labelled the set, against which contract version, what the boardroom changed, and the open conditions. The audit record for the answer key. |
+| `../ROUTING-CONTRACT.md` | The routing decision contract (v0.1, proposed) — the precedence-ordered rubric every gold label derives from. Previously implicit; written down after boardroom review. |
+| `gold_set_REVIEW.md` | Per-entry review table (request, rationale, blank verdict column) for a second rater or chair review. |
 | `eval_harness.py` | The scorer. Loads the gold set, scores the heuristic baseline always, scores a BDH checkpoint if given one, computes accuracy + Cohen's kappa + a confusion matrix + per-tier breakdown + single-forward-pass latency. Writes `eval-report.json`. |
 | `test_eval_harness.py` | 21 tests: kappa math against hand-verified values, gold-set integrity, malformed-input rejection, scorer self-consistency, heuristic sanity, and the BDH decode-path plumbing (an untrained model runs through the pipeline without error). |
 | `baseline_heuristic.py` | (pre-existing) The deterministic `HeuristicRouter` the harness scores as the baseline. |
@@ -46,14 +68,15 @@ human reading `eval-report.json`.
 
 ## What the gold set IS
 
-- **Hand-authored by AI James**, derived from the routing contract
-  implied by the orchestrator spec and the `HeuristicRouter`'s intent.
-  Each entry's `rationale` field traces the label back to that contract.
+- **Hand-authored by AI James** (single author — see Status above and
+  `gold_set.provenance.json`), derived from the routing contract in
+  `../ROUTING-CONTRACT.md`. Each entry's `rationale` field traces the
+  label back to a numbered rule in that contract.
 - **A contract-conformance + generalisation test.** Every entry has a
   `category`:
-  - `keyword-obvious` (15) -- the routing signal is on the surface; a
+  - `keyword-obvious` (14) -- the routing signal is on the surface; a
     keyword router should get these.
-  - `semantic-hard` (11) -- correct routing needs the meaning, not a
+  - `semantic-hard` (12) -- correct routing needs the meaning, not a
     trigger word.
   - `adversarial-phrasing` (7) -- deliberately phrased to trip keyword
     matching (a destructive action with no trigger word, a reasoning
@@ -65,7 +88,7 @@ human reading `eval-report.json`.
   than exact string -- exact target strings are too brittle to score, so
   each entry lists `target_acceptable` (a list, or `["*"]` meaning "kind
   is what matters here").
-- **Deliberately hard-weighted.** 18 of 40 entries are `semantic-hard`
+- **Deliberately hard-weighted.** 19 of 40 entries are `semantic-hard`
   or `adversarial-phrasing`. This is a generalisation probe by design:
   keyword routing is brittle, and the question this harness exists to
   answer is whether a trained BDH learns *past* keywords.
@@ -82,9 +105,17 @@ human reading `eval-report.json`.
 - **Not a claim that keyword routing scores 47.5% in the wild.** The
   47.5% below is the heuristic's score *on a deliberately hard-weighted
   set*. It measures headroom, not the heuristic's real-world rate.
-- **Not multi-rater.** A second human labeller would strengthen it.
-  Right now the "gold" is one informed author's reading of the contract.
-  Disagreements should be filed against `gold_set.jsonl` directly.
+- **Not multi-rater — yet.** Right now the "gold" is one author's
+  reading of the contract. The 8GI boardroom (2026-05-14) made a second
+  blind rater + reported inter-rater Cohen's kappa a **hard
+  precondition** before this set is ever used as a training or tuning
+  signal. See `gold_set.provenance.json` `open_conditions`. Disagreements
+  go against `gold_set.jsonl` directly, or `gold_set_REVIEW.md`.
+- **Not statistically powered at n=40.** The spec's gates name a
+  100-example holdout (Phase 0) and a 5k set (Phase 1). At n=40 the
+  "+10pp vs heuristic" delta carries an interval of roughly +/-15pp — a
+  checkpoint at 57.5% vs heuristic 47.5% is a *headroom indicator*, not a
+  cleared gate. Grow the set before any default-on promotion.
 
 ## What the harness measures
 
@@ -120,11 +151,11 @@ Run: `python3 packages/eight-bdh/trainer/local/eval_harness.py`
 ```
 router          kind acc  target acc    kappa   undecod
 -------------------------------------------------------
-heuristic          47.5%       47.5%    0.344     0/40
+heuristic          47.5%       47.5%    0.341     0/40
 
   heuristic -- accuracy by difficulty tier:
-    keyword-obvious         80.0%  (n=15)
-    semantic-hard            9.1%  (n=11)
+    keyword-obvious         85.7%  (n=14)
+    semantic-hard            8.3%  (n=12)
     adversarial-phrasing    14.3%  (n=7)
     policy-edge             71.4%  (n=7)
 ```
@@ -136,7 +167,42 @@ BDH has to claim.
 
 **Concretely: to clear the Phase 1 "+10pp vs heuristic" gate on this
 gold set, a BDH checkpoint needs `kind_accuracy >= 57.5%`.** To clear
-the Phase 0 gate it needs `>= 70%`.
+the Phase 0 gate it needs `>= 70%`. (Both subject to the n=40 power
+caveat above — these are indicators, not certified gates.)
+
+## How to cite the baseline number
+
+The heuristic's 47.5% is honest *in context* and a landmine *out of it*
+(8MO's finding). The rule:
+
+- **Never publish the number naked.** "47.5%" alone reads as "8gent's
+  router is 47.5% accurate". It is not that.
+- **Always travel with the frame:** it is the keyword baseline's score
+  *on a deliberately hard-weighted generalisation probe*, n=40, single
+  rater. It measures headroom, not a real-world router accuracy rate.
+- **When a trained BDH clears 57.5%,** the honest headline is "a
+  from-scratch local model learned to route past keywords" — never
+  "an X% accurate router".
+
+## Contributing gold entries
+
+The gold set is meant to grow. To add or dispute an entry:
+
+1. Each entry is one JSON object per line in `gold_set.jsonl` with:
+   `id`, `category` (one of the four tiers), `state` (`request` +
+   `context` + `policy`), `gold` (`kind` + `target_acceptable`), and
+   `rationale`. Optional: `disputed: true`.
+2. The `gold.kind` must be derivable from a numbered rule in
+   `../ROUTING-CONTRACT.md`. State which rule in the `rationale`. An
+   entry whose label cannot cite a contract rule does not belong in the
+   set — fix the contract first, at L5.
+3. To dispute an existing label, set `disputed: true` and add your
+   reasoning to the `rationale`, or mark it in `gold_set_REVIEW.md`.
+   Disputed entries are the second rater's priority.
+4. Run `python3 .../test_eval_harness.py` — it validates schema, unique
+   ids, kind/category validity, and that the heuristic still scores
+   below 100% (a gold set the keyword router aces is just the heuristic
+   restated).
 
 ## Why there is no BDH score in this commit
 
@@ -150,10 +216,20 @@ the run, so the run is measurable.
 
 ## Next
 
-1. Run the next BDH training phase. Score its checkpoint with
-   `--checkpoint`. The report now produces a real `spec_gates` verdict.
-2. Grow `gold_set.jsonl` toward the spec's 100 / 5k targets. The harness
-   is already size-agnostic; this is purely authoring effort, ideally
-   with a second labeller.
-3. When labelled production routing logs exist, add them as a second
+Boardroom-set conditions (2026-05-14), in order:
+
+1. **Second blind rater** relabels all 40 entries; report inter-rater
+   Cohen's kappa. This is the hard precondition before the set is used
+   as any training or tuning signal. Start with the disputed/changed
+   entries listed in `gold_set.provenance.json` `second_rater_priority`.
+2. **L5 chair ratification** of `../ROUTING-CONTRACT.md` v0.1 (and its
+   `authority_level < 3` threshold). Until then the contract stays
+   `proposed` and the harness stays diagnostic-only.
+3. Run the next BDH training phase. Score its checkpoint with
+   `--checkpoint`. The report produces a `spec_gates` verdict — read it
+   as an indicator, not a certified pass, until conditions 1-2 close.
+4. Grow `gold_set.jsonl` toward the spec's 100 / 5k targets, with
+   deliberate minimal-contrast pairs (vary one of authority / deny-list
+   / budget / history). The harness is already `--gold`-size-agnostic.
+5. When labelled production routing logs exist, add them as a second
    `--gold` file and report both.
