@@ -21,6 +21,34 @@ The TUI center panel is now scrollable. Pinned to the bottom by default; scroll 
 
 Tradeoffs: drag-to-select needs Option (macOS) / Shift (Linux) while focused; tmux users need `set -g mouse on`.
 
+### Added - Daemon `/store` route (#2575)
+
+New WebSocket route at `ws://localhost:18789/store` exposing `session.*`, `kg.*`, and `fs.*` over JSON-RPC 2.0. Lets the 8gent-code TUI and 8gent-computer Electron share sessions, knowledge-graph chunks, and workspace files against one daemon. `kg.*` chunks files into `MemoryStore` behind filename + content secret gates. `fs.exec` is deny-by-default with a small allowlist plus hard-deny patterns (download-pipe-execute, base64 smuggling, root-tree destructive commands). Capability-token auth (`~/.8gent/server.token`, mode 0600, constant-time compare); audit logs to `~/.8gent/audit/`. 29 daemon tests pass.
+
+### Added - Body-parts visual indicators (#2553)
+
+New BODY section in the ActivityRail shows eyes/hands/handeyes state: `○` disabled, `●` idle, `◉` in-flight. `/eyes`, `/hands`, `/handeyes` slash commands toggle per-session enabled state. Capability detection at launch auto-enables based on `cliclick` (hands) and the bundled AX bridge (eyes); handeyes needs both. New `useBodyParts` hook, 6 new ActivityRail tests. Also corrected `bin/8gent.ts` VERSION drift (0.16.0 → 0.17.0).
+
+### Added - Intro splash narration (#2555)
+
+Pre-rendered KittenTTS (Jasper voice) narration plays over the launch music, synced to the splash typewriter cascade. Bundled as `apps/tui/sounds/splash-narration.mp3` (218KB) so the TUI startup path stays dependency-free. Splash schedule extended to 13.5s; music volume lowered so the narration reads clearly. Killed on exit / SIGINT / SIGTERM / `/quiet`.
+
+### Added - Governance tables in unified 8GI Convex (#2540)
+
+Ported 8 governance tables (submissions, agent_mail, agentTranscripts/Sessions/Context, shareLinks/Viewers/Events) and 6 function files into `packages/db/convex/` so the unified 8GI Convex serves all 8GI surfaces, not just 8gent-code telemetry. 22 new indexes, no table collisions. Phase 1 of the Convex consolidation; unblocks the dashboard fold-in (#2550).
+
+### Changed - Intro splash copy (#2554)
+
+The launch splash now leads with the IGI pitch ("Your intelligence shouldn't be a subscription." / "Take back custody of your cognition." / "Infinite General Intelligence. free. local. open.") instead of the older Infinite-Gentleman framing. Same cascade timing and typewriter speed. The Infinite Gentleman line stays a sub-brand elsewhere (decks, social bios).
+
+### Removed - `apps/dashboard` (#2550)
+
+The standalone admin dashboard was folded into 8gi-governance's `/internal/platform/*` during the 2026-05-10 Convex consolidation and ran side-by-side for a day with no regressions. Deletes the entire app and drops one transitive dependency from `bun.lock`. Two historical doc references remain (descriptive, not build deps).
+
+### Fixed - Utility tabs render in non-chat modes (#2543)
+
+Settings, Notes, Ideas, BTW, Questions, Kanban, Music, Projects, and Terminal tabs were invisible whenever the agent was in any non-chat viewMode (PLANNING, RESEARCHING, etc.). The utility-tab switch in `renderMainContent` was gated on `viewMode === "chat"`. Utility tabs are workspace-scoped, not mode-scoped; dropped the guard.
+
 ---
 
 ## [0.17.0] - 2026-05-10
