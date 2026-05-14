@@ -7,6 +7,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added - Chat scrollback (mouse wheel + keyboard)
+
+The TUI center panel is now scrollable. Pinned to the bottom by default; scroll up to read earlier turns without being yanked back when new output streams in.
+
+- **Mouse wheel / trackpad** (#2596) - new `useMouseScroll` hook enables xterm SGR mouse mode (`?1000h ?1006h`) and patches both `stdin.emit('data')` and `stdin.read()` so wheel bytes are consumed before Ink's input parser sees them (Ink reads via `'readable'` + `stdin.read()`, not `'data'`). Mouse mode is torn down on four exit paths so the terminal is never left in capture mode.
+- **Keyboard** (#2596) - `shift+↑/↓` scrolls one message, `shift+PgUp/PgDn` scrolls five. Plain arrows stay owned by the input field.
+- **Row-budget slicing** (#2596) - the visible window is now sized by estimated rendered rows, not message count. Fixes the streaming overlap artifact (rendered tree never exceeds the container) and makes scroll actually move on chats with few messages.
+- **Content-anchored offset** (#2596) - new messages arriving while the user is scrolled up no longer shift the user's view; the offset bumps to keep them on the same content.
+- **Stable pages** (#2597) - scrolling a finished assistant reply out of view and back no longer replays the typing animation. Animated message IDs are tracked so re-mounts render statically.
+
+Tradeoffs: drag-to-select needs Option (macOS) / Shift (Linux) while focused; tmux users need `set -g mouse on`.
+
+---
+
 ## [0.17.0] - 2026-05-10
 
 ### Added - Body-parts taxonomy (eyes + handeyes shipped end-to-end)
