@@ -42,9 +42,11 @@ from bdh import BDH, BDHConfig
 CHECKPOINTS = {
     0: CHECKPOINT_DIR / "phase-0-5m.pt",
     1: CHECKPOINT_DIR / "phase-1-explore-5m.pt",
+    3: CHECKPOINT_DIR / "phase-3c-toolcalls-5m-best-val.pt",
 }
 
 USEFUL_TAGS = [
+    # Phase 0 / 1 (heterogeneous corpus)
     "<<doc:packages/eight-bdh/MODEL-CARD.md>>\n",
     "<<doc:CLAUDE.md>>\n",
     "<<doc:BRAND.md>>\n",
@@ -52,6 +54,13 @@ USEFUL_TAGS = [
     '<<session:abc12345.json>>\n{"createdAt":"',
     "<<blog:content/blog/welcome-to-the-circle.mdx>>\n",
     "<<phase-0-corpus:packages/eight-bdh/data/phase-0-seed-42.jsonl>>\n",
+    # Phase 3c (tool-call corpus) — the model was trained on these tags
+    "<<toolcall:Bash>>\n",
+    '<<toolcall:Bash>>\n{"command":"',
+    '<<toolcall:Read>>\n{"file_path":"',
+    '<<toolcall:Edit>>\n{"file_path":"',
+    '<<toolcall:Grep>>\n{"pattern":"',
+    '<<toolcall:WebSearch>>\n{"query":"',
     # Try empty (default style)
     "",
     # Try unseen tag (probe)
@@ -139,7 +148,8 @@ def read_multiline_prompt() -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", type=int, default=1, choices=[0, 1])
+    parser.add_argument("--phase", type=int, default=1, choices=[0, 1, 3],
+                        help="0=Phase 0 (rule-based), 1=Phase 1 (heterogeneous), 3=Phase 3c (tool-calls, best-val)")
     parser.add_argument("--temp", type=float, default=0.8)
     parser.add_argument("--topk", type=int, default=40)
     parser.add_argument("--len", dest="max_len", type=int, default=200)
