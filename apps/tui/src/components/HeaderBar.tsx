@@ -37,6 +37,8 @@ const ui = {
 
 interface HeaderBarProps {
 	updateAvailable?: { latest: string; current: string } | null;
+	/** Current package version (e.g. "0.17.0"). Rendered in the brand pill so you always know what build you are on. */
+	version?: string;
 	workspacePath: string;
 	branch: string;
 	/** "ahead 1", "behind 2", "in sync", etc. */
@@ -50,6 +52,7 @@ interface HeaderBarProps {
 
 export function HeaderBar({
 	updateAvailable,
+	version,
 	workspacePath,
 	branch,
 	syncStatus,
@@ -61,8 +64,8 @@ export function HeaderBar({
 }: HeaderBarProps) {
 	return (
 		<Box width="100%" justifyContent="space-between" alignItems="center" flexShrink={0} overflow="hidden">
-			<Box width={38} flexShrink={0}>
-				<BrandPill updateAvailable={updateAvailable} />
+			<Box width={48} flexShrink={0}>
+				<BrandPill updateAvailable={updateAvailable} version={version} />
 			</Box>
 
 			<Box flexGrow={1} minWidth={0} paddingX={1} justifyContent="center" overflow="hidden">
@@ -96,14 +99,22 @@ export function HeaderBar({
 
 function BrandPill({
 	updateAvailable,
+	version,
 }: {
 	updateAvailable?: { latest: string; current: string } | null;
+	version?: string;
 }) {
 	return (
 		<Box borderStyle="round" borderColor={ui.pillBorder} paddingX={1} flexShrink={0}>
 			<BrandWord />
 			<Text color={ui.muted}> Code</Text>
 			<Text color={ui.orange} bold>.</Text>
+			{version ? (
+				<>
+					<Text color={ui.dim}> </Text>
+					<Text color={ui.muted}>v{version}</Text>
+				</>
+			) : null}
 			<Text color={ui.dim}> </Text>
 			<Text color={ui.dim}>│</Text>
 			<Text color={ui.muted}> The Infinite </Text>

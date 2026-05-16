@@ -1,0 +1,66 @@
+name: Version Bump on Main
+
+# Bumps the package version (patch by default) on every push to main so
+# every shipping commit gets a unique version number visible in the TUI
+# header. Skips its own commits via [skip ci] in the message.
+#
+# Manual override via the PR title or commit message:
+#   [bump:major]  → 1.2.3 → 2.0.0
+#   [bump:minor]  → 1.2.3 → 1.3.0
+#   [bump:patch]  → 1.2.3 → 1.2.4 (default)
+#   [skip bump]   → no version change
+#
+# Per James 2026-05-16: "bump it up each time we push to main, even by a
+# fraction. Every PR at least."
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[skip bump]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide bump level
+        id: level
+        run: |
+          MSG="${{ github.event.head_commit.message }}"
+          if echo "$MSG" | grep -q '\[bump:major\]'; then
+            echo "level=major" >> "$GITHUB_OUTPUT"
+          elif echo "$MSG" | grep -q '\[bump:minor\]'; then
+            echo "level=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "level=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        run: |
+          npm version "${{ steps.level.outputs.level }}" --no-git-tag-version --no-commit-hooks
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          git add package.json package-lock.json 2>/dev/null || git add package.json
+          git commit -m "chore: bump version to v${NEW_VERSION} [skip ci]"
+          git tag "v${NEW_VERSION}"
+
+      - name: Push
+        run: |
+          git push origin HEAD:main
+          git push origin --tags
