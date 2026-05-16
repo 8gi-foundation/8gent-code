@@ -167,6 +167,8 @@ import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.j
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { ContextRail } from "./components/ContextRail.js";
+import { LivePlanRail } from "./components/PlanRail.js";
+import { getTaskManager } from "../../../packages/tasks/index.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { ActivityRail } from "./components/ActivityRail.js";
@@ -661,6 +663,9 @@ export function App({
 		goalClientRef.current = new GoalClient(new InProcessGoalTransport());
 	}
 	const goalClient = goalClientRef.current;
+	// Singleton task manager handle for the living-plan rail. Lives in
+	// ~/.8gent/tasks.json and survives across sessions.
+	const taskManagerRef = useRef(getTaskManager());
 	const [messages, setMessagesRaw] = useState<Message[]>([
 		{
 			id: "welcome",
@@ -5616,12 +5621,15 @@ export function App({
 					<Box flexGrow={1} minHeight={0} gap={1}>
 						{showContextRail && (
 							<ContextRail
-								branch={currentBranch || "—"}
+								branch={currentBranch || "-"}
 								risk={infiniteModeActive ? "high" : "low"}
 								permissions={infiniteModeActive ? "infinite" : "ask"}
 								contextPct={contextPct}
 								adhdMode={adhdMode}
 							/>
+						)}
+						{showContextRail && (
+							<LivePlanRail manager={taskManagerRef.current} limit={8} />
 						)}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
@@ -5654,7 +5662,7 @@ export function App({
 								rowBudget={Math.max(6, viewport.height - (isProcessing ? 18 : 10))}
 								contentWidth={Math.max(
 									24,
-									viewport.width - (showContextRail ? 30 : 0) - (showActivityRail ? 36 : 0) - 8,
+									viewport.width - (showContextRail ? 55 : 0) - (showActivityRail ? 36 : 0) - 8,
 								)}
 							/>
 						</Box>
