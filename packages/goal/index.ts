@@ -54,3 +54,21 @@ export {
 export { buildReceipt } from "./receipt";
 
 export { GoalLoop, type GoalLoopOptions } from "./goal-loop";
+
+export {
+	GoalPersistence,
+	type AppendEventInput,
+	type CreateRunInput,
+	type PersistedGoalRun,
+} from "./persistence";
+
+export {
+	Ledger,
+	ZERO_HASH,
+	canonical,
+	type AppendInput as LedgerAppendInput,
+	type HmacPrimitive,
+	type LedgerEntry,
+	type LedgerOpenOptions,
+	type LedgerVerifyResult,
+} from "./ledger";
