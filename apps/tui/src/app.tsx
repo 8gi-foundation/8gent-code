@@ -61,6 +61,9 @@ import {
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
 import { CommandInput } from "./components/command-input.js";
+import { GoalClient } from "./lib/goal-client.js";
+import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
+import pkgInfo from "../../../package.json" with { type: "json" };
 import { CommandPalette } from "./components/CommandPalette.js";
 import { FixedFrame } from "./components/fixed-frame/FixedFrame.js";
 import { HeaderBar } from "./components/HeaderBar.js";
@@ -650,6 +653,14 @@ export function App({
 	// Core state
 	// Per-tab message storage (tab-aware logic wired after workspaceTabs hook below)
 	const tabMessagesRef = useRef<Map<string, Message[]>>(new Map());
+	// Stable goal-loop client (one per app instance). Uses the in-process
+	// transport so /goal works without a separately-running daemon. When
+	// a real WebSocket transport ships, swap the constructor here.
+	const goalClientRef = useRef<GoalClient | null>(null);
+	if (!goalClientRef.current) {
+		goalClientRef.current = new GoalClient(new InProcessGoalTransport());
+	}
+	const goalClient = goalClientRef.current;
 	const [messages, setMessagesRaw] = useState<Message[]>([
 		{
 			id: "welcome",
@@ -5575,8 +5586,9 @@ export function App({
 				<Box flexShrink={0}>
 					<HeaderBar
 						updateAvailable={updateInfo}
+						version={pkgInfo.version}
 						workspacePath={process.cwd()}
-						branch={currentBranch || "—"}
+						branch={currentBranch || "-"}
 						syncStatus={gitSync.label}
 						micOn={Boolean(micOn)}
 						approvalPending={isApprovalPending}
@@ -5689,6 +5701,8 @@ export function App({
 								injectedText={voiceTranscript}
 								transformInputValue={transformChatInput}
 								allowEmptySubmit={!!imageInput.currentImage}
+								goalClient={goalClient}
+								sessionId="tui"
 							/>
 						</Box>
 					</Box>
