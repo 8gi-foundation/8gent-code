@@ -84,6 +84,13 @@ function runtimeForProvider(provider: string): AgentConfig["runtime"] {
 		case "ollama":
 		case "8gent":
 			return "ollama";
+		case "lmstudio":
+			return "lmstudio";
+		case "openrouter":
+			return "openrouter";
+		// Hosted providers (groq, grok, openai, anthropic, mistral, together,
+		// fireworks, replicate) all reach the model via openrouter as the
+		// default proxy here — AgentConfig.runtime is the narrow set.
 		default:
 			return "openrouter";
 	}
