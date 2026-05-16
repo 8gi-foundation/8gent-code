@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.17.0";
+const VERSION = "0.17.1";
 
 // Resolve the directory of this script across runtimes. `__dirname` is
 // undefined in pure ESM and unreliable after bundling, so derive it from
