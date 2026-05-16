@@ -96,15 +96,21 @@ if (import.meta.main) {
 	if (args.length > 0 && args[0] !== "--interactive") {
 		const promptText = args.join(" ");
 		(async () => {
+			// EIGHT_MODEL env can pin a specific model; otherwise default to
+			// the local 8gent runtime model the constitution names as OOTB.
+			// (Previously read a typo'd `EIGHGENT_MODEL` and fell back to
+			// a non-existent `glm-4.7-flash:latest`.)
 			const config: AgentConfig = {
-				model: process.env.EIGHGENT_MODEL || "glm-4.7-flash:latest",
+				model: process.env.EIGHT_MODEL || "eight-1.0-q3:14b",
 				runtime: "ollama",
 				workingDirectory: process.cwd(),
 				maxTurns: hasInfiniteFlag ? 100 : 30,
 			};
 			const agent = new Agent(config);
 			if (!(await agent.isReady())) {
-				console.error("Ollama is not running");
+				console.error(
+					"Local runtime not reachable. Start ollama (`ollama serve`), or set a provider via `8gent run --provider openrouter ...`.",
+				);
 				process.exit(1);
 			}
 			if (hasInfiniteFlag) {

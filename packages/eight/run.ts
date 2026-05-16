@@ -153,8 +153,9 @@ function emit(obj: Record<string, unknown>): void {
 
 /**
  * Pick a sensible default model for the active provider when the caller did
- * not specify one. We keep this conservative: Ollama gets `qwen3:14b`,
- * everything else gets `auto:free` which the provider manager understands.
+ * not specify one. Unknown providers fall through to `auto:free` — the
+ * OpenRouter free-tier alias — instead of assuming an ollama model is
+ * installed.
  */
 function defaultModelFor(provider: string): string {
 	switch (provider) {
@@ -167,7 +168,19 @@ function defaultModelFor(provider: string): string {
 		case "openrouter":
 			return "auto:free";
 		default:
-			return "qwen3:14b";
+			return "auto:free";
+	}
+}
+
+/** Probe localhost:11434 once to see if ollama is actually running. */
+async function isOllamaUp(): Promise<boolean> {
+	try {
+		const res = await fetch("http://localhost:11434/api/tags", {
+			signal: AbortSignal.timeout(1500),
+		});
+		return res.ok;
+	} catch {
+		return false;
 	}
 }
 
@@ -219,7 +232,14 @@ export async function runRunCommand(argv: string[]): Promise<number> {
 	}
 
 	// Resolve provider + model.
-	const provider = opts.provider || "ollama";
+	// If the caller didn't pick a provider, probe ollama once and only
+	// route to it when it actually answers. Otherwise drop to the free
+	// cloud tier so the run doesn't fail with `ECONNREFUSED 127.0.0.1:11434`
+	// on a fresh Windows install that has never had ollama.
+	let provider = opts.provider;
+	if (!provider) {
+		provider = (await isOllamaUp()) ? "ollama" : "openrouter";
+	}
 	let model = opts.model;
 	if (!model) {
 		if (provider === "ollama") {

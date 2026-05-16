@@ -96,7 +96,12 @@ export function ensureKeysFile(): string {
 export function readKeysFile(path: string = KEYS_PATH): Record<string, string> {
 	if (!existsSync(path)) return {};
 	const out: Record<string, string> = {};
-	const text = readFileSync(path, "utf-8");
+	// Strip UTF-8 BOM. Notepad on Windows saves files with a BOM by default
+	// and that byte would otherwise be glued to the first key name, so
+	// `process.env["﻿OPENAI_API_KEY"]` is set instead of OPENAI_API_KEY
+	// and every downstream provider lookup misses.
+	const raw = readFileSync(path, "utf-8");
+	const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
 	for (const rawLine of text.split(/\r?\n/)) {
 		const line = rawLine.trim();
 		if (!line || line.startsWith("#")) continue;
