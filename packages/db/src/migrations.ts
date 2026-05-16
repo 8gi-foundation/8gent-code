@@ -95,6 +95,54 @@ CREATE INDEX IF NOT EXISTS idx_memory_index_topic ON memory_index(topic);
 `;
 
 /**
+ * v2 schema. Goal-loop (/go) tables.
+ *
+ * `goal_runs` is the row-per-run record. `goal_events` is the append-only
+ * event log produced by `packages/goal/`. 8GO owns ledger serialization on
+ * the file side; this SQLite mirror is for fast UI queries + recovery on
+ * daemon restart.
+ *
+ * Naming: snake_case to match v1. Timestamps: INTEGER millis.
+ * Status enum (mirrors packages/goal/types.ts RunStatus):
+ *   pending | running | judging | completed | stopped | failed
+ */
+const GOAL_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS goal_runs (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	goal_text TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	stop_reason TEXT,
+	budget_turns INTEGER NOT NULL,
+	budget_tokens INTEGER,
+	budget_wallclock_ms INTEGER,
+	budget_files_changed INTEGER,
+	budget_egress_bytes INTEGER,
+	executor_model TEXT NOT NULL,
+	judge_model TEXT NOT NULL,
+	judge_verdict TEXT,
+	receipt TEXT,
+	started_at INTEGER,
+	ended_at INTEGER,
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goal_runs_session ON goal_runs(session_id);
+CREATE INDEX IF NOT EXISTS idx_goal_runs_status ON goal_runs(status);
+CREATE INDEX IF NOT EXISTS idx_goal_runs_started ON goal_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS goal_events (
+	run_id TEXT NOT NULL,
+	seq INTEGER NOT NULL,
+	kind TEXT NOT NULL,
+	payload TEXT NOT NULL,
+	ts INTEGER NOT NULL,
+	PRIMARY KEY (run_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_goal_events_run ON goal_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_goal_events_ts ON goal_events(ts);
+`;
+
+/**
  * Append-only list. Never reorder, never edit applied entries.
  * To evolve the schema, add a new entry with a higher version number.
  */
@@ -103,6 +151,11 @@ export const MIGRATIONS: Migration[] = [
 		version: 1,
 		name: "init_core_tables",
 		up: CORE_TABLES_SQL,
+	},
+	{
+		version: 2,
+		name: "goal_runs_and_events",
+		up: GOAL_TABLES_SQL,
 	},
 ];
 
