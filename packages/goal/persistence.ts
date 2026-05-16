@@ -1,5 +1,5 @@
 /**
- * GoalPersistence - SQLite mirror of /go runs and events.
+ * GoalPersistence - SQLite mirror of /goal runs and events.
  *
  * Backs the in-memory goal loop with durable storage. The daemon constructs
  * one of these per workspace DB; the loop writes through a sink that fans

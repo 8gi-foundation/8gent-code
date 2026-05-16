@@ -16,7 +16,7 @@ import { type JudgeHandle, type JudgeVerdict, SATISFIED_CONFIDENCE_FLOOR } from 
 export class JudgeExecutorCollisionError extends Error {
 	constructor(model: string) {
 		super(
-			`judge model and executor model are both "${model}" - /go requires a different judge model (8TO mitigation: self-judging defeats the loop)`,
+			`judge model and executor model are both "${model}" - /goal requires a different judge model (8TO mitigation: self-judging defeats the loop)`,
 		);
 		this.name = "JudgeExecutorCollisionError";
 	}

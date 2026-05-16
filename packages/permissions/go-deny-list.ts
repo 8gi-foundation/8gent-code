@@ -1,7 +1,7 @@
 /**
- * 8gent Code - /go Hard Deny-List (issue #2609, epic #2605)
+ * 8gent Code - /goal Hard Deny-List (issue #2609, epic #2605)
  *
- * Hardcoded patterns that can NEVER be overridden by /go context, /subgoal
+ * Hardcoded patterns that can NEVER be overridden by /goal context, /subgoal
  * payloads, YAML policy, or runtime addPolicy calls. The deny-list is the
  * last line of defence: if a tool call matches, the run is killed.
  *
@@ -24,7 +24,7 @@ export interface DenyListResult {
 }
 
 /**
- * Treat any tool that runs shell/commands as a shell call. The /go gate
+ * Treat any tool that runs shell/commands as a shell call. The /goal gate
  * itself never inspects file content - only tool invocation metadata.
  */
 const SHELL_TOOLS = new Set<string>([
@@ -327,7 +327,7 @@ export interface ToolCallLike {
  * pattern, or { denied: false } if nothing matched.
  *
  * The deny-list is hardcoded - this function MUST NOT accept overrides,
- * extensions, or context-based skips. /go runs that need an exception must
+ * extensions, or context-based skips. /goal runs that need an exception must
  * fail loudly and route through human-in-the-loop approval, not bypass.
  */
 export function matchDenyList(toolCall: ToolCallLike): DenyListResult {

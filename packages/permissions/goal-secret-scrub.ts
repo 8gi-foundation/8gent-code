@@ -1,8 +1,8 @@
 /**
- * 8gent Code - /go Goal Text Secret Scrub (issue #2609, epic #2605)
+ * 8gent Code - /goal Goal Text Secret Scrub (issue #2609, epic #2605)
  *
- * Scans /go goal text and /subgoal payloads for credential-shaped strings
- * BEFORE the agent loop starts. If anything matches, the /go invocation is
+ * Scans /goal goal text and /subgoal payloads for credential-shaped strings
+ * BEFORE the agent loop starts. If anything matches, the /goal invocation is
  * rejected with the list of pattern ids (no values logged - the patterns
  * themselves are returned, never the matched substring).
  *

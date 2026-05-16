@@ -1,9 +1,9 @@
 /**
- * Public surface for the eight/go module.
+ * Public surface for the eight/goal module.
  *
  * Owned by 8DO. This barrel only re-exports verdict copy + lint. All
  * loop logic lives in @8gent/goal. Anything that wants to render a
- * /go user-facing string MUST go through here, not freelance.
+ * /goal user-facing string MUST go through here, not freelance.
  */
 
 export {

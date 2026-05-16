@@ -1,9 +1,9 @@
 /**
- * /go slash command tests.
+ * /goal slash command tests.
  *
  * Strategy mirrors the rest of __tests__/: the codebase has no
  * ink-testing-library installed, so we test at the unit boundary that
- * actually matters for /go: the parse + dispatch pipeline that
+ * actually matters for /goal: the parse + dispatch pipeline that
  * command-input.tsx exports as `handleGoCommand`. Component-level
  * rendering is exercised through the same trick used in
  * LiveFocalStrip.test.tsx (function-as-element) for the focal strip
@@ -12,9 +12,9 @@
  * Coverage:
  *   1. parseGoCommand recognises every subcommand + invalid input.
  *   2. handleGoCommand dispatches the right RPC envelope through the
- *      transport for each /go variant.
+ *      transport for each /goal variant.
  *   3. /subgoal forwards text or surfaces an error.
- *   4. /go ? emits all GO_HELP_LINES.
+ *   4. /goal ? emits all GO_HELP_LINES.
  *   5. LiveFocalStripWithGoal renders the verdict line and runs its
  *      copy through the banned-token lint.
  *   6. buildGoalLine produces the BRAND.md one-liner.
@@ -85,11 +85,11 @@ function mkClient(): { client: GoalClient; transport: MemoryTransport } {
 	return { client, transport };
 }
 
-describe("handleGoCommand: /go", () => {
-	test("/go <goal> sends goal.start with the right shape", () => {
+describe("handleGoCommand: /goal", () => {
+	test("/goal <goal> sends goal.start with the right shape", () => {
 		const { client, transport } = mkClient();
 		const sys: string[] = [];
-		handleGoCommand("go", ["wire", "the", "tui"], client, "sess_1", (l) =>
+		handleGoCommand("goal", ["wire", "the", "tui"], client, "sess_1", (l) =>
 			sys.push(l),
 		);
 		expect(transport.sent).toHaveLength(1);
@@ -101,10 +101,10 @@ describe("handleGoCommand: /go", () => {
 		expect(sys.join("\n")).toContain("Going.");
 	});
 
-	test("/go ? emits help with all subcommands", () => {
+	test("/goal ? emits help with all subcommands", () => {
 		const { client, transport } = mkClient();
 		const sys: string[] = [];
-		handleGoCommand("go", ["?"], client, "sess_1", (l) => sys.push(l));
+		handleGoCommand("goal", ["?"], client, "sess_1", (l) => sys.push(l));
 		expect(transport.sent).toHaveLength(0);
 		const text = sys.join("\n");
 		for (const line of GO_HELP_LINES) {
@@ -112,54 +112,54 @@ describe("handleGoCommand: /go", () => {
 		}
 	});
 
-	test("/go status sends goal.status when active", () => {
+	test("/goal status sends goal.status when active", () => {
 		const { client, transport } = mkClient();
 		client.setActiveRunId("g_abc");
 		const sys: string[] = [];
-		handleGoCommand("go", ["status"], client, "sess_1", (l) => sys.push(l));
+		handleGoCommand("goal", ["status"], client, "sess_1", (l) => sys.push(l));
 		expect(transport.sent[0]).toEqual({ type: "goal.status", runId: "g_abc" });
 	});
 
-	test("/go status with no active run surfaces the error to the system line", () => {
+	test("/goal status with no active run surfaces the error to the system line", () => {
 		const { client, transport } = mkClient();
 		const sys: string[] = [];
-		handleGoCommand("go", ["status"], client, "sess_1", (l) => sys.push(l));
+		handleGoCommand("goal", ["status"], client, "sess_1", (l) => sys.push(l));
 		expect(transport.sent).toHaveLength(0);
 		expect(sys.join("\n")).toContain("no active run");
 	});
 
-	test("/go stop sends goal.abort", () => {
+	test("/goal stop sends goal.abort", () => {
 		const { client, transport } = mkClient();
 		client.setActiveRunId("g_abc");
-		handleGoCommand("go", ["stop"], client, "sess_1");
+		handleGoCommand("goal", ["stop"], client, "sess_1");
 		expect(transport.sent[0]).toEqual({ type: "goal.abort", runId: "g_abc" });
 	});
 
-	test("/go resume sends goal.resume", () => {
+	test("/goal resume sends goal.resume", () => {
 		const { client, transport } = mkClient();
 		client.setActiveRunId("g_abc");
-		handleGoCommand("go", ["resume"], client, "sess_1");
+		handleGoCommand("goal", ["resume"], client, "sess_1");
 		expect(transport.sent[0]).toEqual({ type: "goal.resume", runId: "g_abc" });
 	});
 
-	test("/go clear aborts and drops state (idempotent on second call)", () => {
+	test("/goal clear aborts and drops state (idempotent on second call)", () => {
 		const { client, transport } = mkClient();
 		client.setActiveRunId("g_abc");
-		handleGoCommand("go", ["clear"], client, "sess_1");
+		handleGoCommand("goal", ["clear"], client, "sess_1");
 		expect(transport.sent[0]).toEqual({ type: "goal.abort", runId: "g_abc" });
 		expect(client.getActiveRunId()).toBeNull();
 
 		// Second invocation: no active run, no envelope sent, no throw.
 		const before = transport.sent.length;
-		handleGoCommand("go", ["clear"], client, "sess_1");
+		handleGoCommand("goal", ["clear"], client, "sess_1");
 		expect(transport.sent.length).toBe(before);
 		expect(client.getActiveRunId()).toBeNull();
 	});
 
-	test("/go (no args) reports the error rather than sending", () => {
+	test("/goal (no args) reports the error rather than sending", () => {
 		const { client, transport } = mkClient();
 		const sys: string[] = [];
-		handleGoCommand("go", [], client, "sess_1", (l) => sys.push(l));
+		handleGoCommand("goal", [], client, "sess_1", (l) => sys.push(l));
 		expect(transport.sent).toHaveLength(0);
 		expect(sys.join("\n")).toContain("missing goal text");
 	});

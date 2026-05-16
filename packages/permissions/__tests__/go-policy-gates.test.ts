@@ -1,5 +1,5 @@
 /**
- * Tests for /go policy gates (issue #2609, epic #2605).
+ * Tests for /goal policy gates (issue #2609, epic #2605).
  *
  * Covers:
  *   - CapabilityBudget axis exhaustion (each axis independently)
@@ -399,9 +399,9 @@ describe("scrubGoalText", () => {
 	});
 
 	test("returns empty foundSecrets on clean text", () => {
-		const r = scrubGoalText("Implement the /go capability budget for issue #2609.");
+		const r = scrubGoalText("Implement the /goal capability budget for issue #2609.");
 		expect(r.foundSecrets).toEqual([]);
-		expect(r.clean).toBe("Implement the /go capability budget for issue #2609.");
+		expect(r.clean).toBe("Implement the /goal capability budget for issue #2609.");
 	});
 
 	test("containsSecret convenience returns true on hit", () => {
