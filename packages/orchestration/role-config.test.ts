@@ -40,24 +40,28 @@ function setPlatform(platform: NodeJS.Platform, arch: string) {
 }
 
 describe("defaultRoleConfig", () => {
-	test("linux defaults to ollama qwen3:14b for all roles", () => {
+	// Non-Darwin platforms have no realistic guarantee that ollama is
+	// installed (Windows installs ship with nothing). The default
+	// drops to OpenRouter's free tier so a fresh install boots cleanly
+	// instead of failing with ECONNREFUSED 127.0.0.1:11434.
+	test("linux defaults to openrouter auto:free for all roles", () => {
 		setPlatform("linux", "x64");
 		const cfg = defaultRoleConfig();
 		expect(cfg.schemaVersion).toBe(1);
 		expect(cfg.orchestrator).toEqual({
-			provider: "ollama",
-			model: "qwen3:14b",
+			provider: "openrouter",
+			model: "auto:free",
 		});
-		expect(cfg.engineer).toEqual({ provider: "ollama", model: "qwen3:14b" });
-		expect(cfg.qa).toEqual({ provider: "ollama", model: "qwen3:14b" });
-		expect(cfg.fallback).toEqual({ provider: "ollama", model: "qwen3:14b" });
+		expect(cfg.engineer).toEqual({ provider: "openrouter", model: "auto:free" });
+		expect(cfg.qa).toEqual({ provider: "openrouter", model: "auto:free" });
+		expect(cfg.fallback).toEqual({ provider: "openrouter", model: "auto:free" });
 	});
 
-	test("darwin x64 (intel) also defaults to ollama qwen3:14b", () => {
+	test("darwin x64 (intel) also defaults to openrouter auto:free", () => {
 		setPlatform("darwin", "x64");
 		const cfg = defaultRoleConfig();
-		expect(cfg.orchestrator.provider).toBe("ollama");
-		expect(cfg.orchestrator.model).toBe("qwen3:14b");
+		expect(cfg.orchestrator.provider).toBe("openrouter");
+		expect(cfg.orchestrator.model).toBe("auto:free");
 	});
 
 	test("darwin arm64 without apple-foundation bridge defaults to 8gent eight-1.0-q3:14b", () => {
