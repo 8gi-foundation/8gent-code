@@ -729,6 +729,132 @@ export function getAgentPolicy(agentId: string): PolicyRule[] {
 	);
 }
 
+// ============================================
+// /go Capability Budget (issue #2609, epic #2605)
+// ============================================
+
+/**
+ * Per-run capability budget. Every axis is enforced; the first axis to
+ * exceed its cap kills the run with `exceeded:<axis>`.
+ *
+ * - maxWallclockMs:    cumulative elapsed ms since run start
+ * - maxToolCalls:      total tool invocations attempted
+ * - maxCloudUsd:       cumulative cloud-tier inference spend in USD
+ * - maxFilesModified:  unique file paths the run has written or deleted
+ * - maxEgressBytes:    cumulative outbound network bytes
+ */
+export interface CapabilityBudget {
+	maxWallclockMs: number;
+	maxToolCalls: number;
+	maxCloudUsd: number;
+	maxFilesModified: number;
+	maxEgressBytes: number;
+	/** Computer-use surfaces only: block financial domains, password fields, sudo. */
+	financialDomainsBlocked?: boolean;
+	passwordFieldsBlocked?: boolean;
+	sudoBlocked?: boolean;
+}
+
+/**
+ * Running counters tracked over the lifetime of a /go run. Caller is
+ * responsible for incrementing these as work happens; the evaluator only
+ * compares them against the budget.
+ */
+export interface BudgetCounters {
+	wallclockMs: number;
+	toolCalls: number;
+	cloudUsd: number;
+	filesModified: number;
+	egressBytes: number;
+	/** Whether the current judge attempt is using a cloud-tier model. */
+	currentAttemptCloudTier?: boolean;
+	/** Pattern ids from goal-secret-scrub for the active run. */
+	scrubbedSecretMarkers?: string[];
+}
+
+/**
+ * Default TUI budget. Conservative caps so a runaway loop dies before it
+ * eats the workspace.
+ *
+ *   2h wallclock, 500 tool calls, $0 cloud (local only), 50 files, 100MB egress.
+ */
+export const DEFAULT_TUI_BUDGET: CapabilityBudget = {
+	maxWallclockMs: 2 * 60 * 60 * 1000,
+	maxToolCalls: 500,
+	maxCloudUsd: 0,
+	maxFilesModified: 50,
+	maxEgressBytes: 100 * 1024 * 1024,
+};
+
+/**
+ * Default computer-use budget. Shorter wallclock, same other limits,
+ * plus three hard switches: financial domains, password fields, sudo
+ * are all blocked when computer-use is the active surface.
+ */
+export const DEFAULT_COMPUTER_USE_BUDGET: CapabilityBudget = {
+	maxWallclockMs: 1 * 60 * 60 * 1000,
+	maxToolCalls: 500,
+	maxCloudUsd: 0,
+	maxFilesModified: 50,
+	maxEgressBytes: 100 * 1024 * 1024,
+	financialDomainsBlocked: true,
+	passwordFieldsBlocked: true,
+	sudoBlocked: true,
+};
+
+export type BudgetEvalResult =
+	| { allowed: true }
+	| { allowed: false; reason: string };
+
+/**
+ * Evaluate the budget. Returns the first axis to breach (alphabetised
+ * priority, but in practice "first match wins"). The runId argument is
+ * carried for audit logging by callers; this function itself is pure.
+ *
+ * Also enforces cloud-failover-with-secrets: if the run has scrubbed
+ * secret markers AND the current judge attempt is cloud-tier, the call
+ * is blocked with `cloud-with-secrets-blocked`. No flag can override.
+ */
+export function evaluateBudget(
+	runId: string,
+	counters: BudgetCounters,
+	budget: CapabilityBudget,
+): BudgetEvalResult {
+	// Hard safety: cloud-with-secrets, evaluated FIRST so a budget axis
+	// breach doesn't mask the more severe secret-exfil risk.
+	if (
+		counters.currentAttemptCloudTier === true &&
+		Array.isArray(counters.scrubbedSecretMarkers) &&
+		counters.scrubbedSecretMarkers.length > 0
+	) {
+		return {
+			allowed: false,
+			reason: "cloud-with-secrets-blocked",
+		};
+	}
+
+	if (counters.wallclockMs > budget.maxWallclockMs) {
+		return { allowed: false, reason: "exceeded:wallclock" };
+	}
+	if (counters.toolCalls > budget.maxToolCalls) {
+		return { allowed: false, reason: "exceeded:tool-calls" };
+	}
+	if (counters.cloudUsd > budget.maxCloudUsd) {
+		return { allowed: false, reason: "exceeded:cloud-usd" };
+	}
+	if (counters.filesModified > budget.maxFilesModified) {
+		return { allowed: false, reason: "exceeded:files-modified" };
+	}
+	if (counters.egressBytes > budget.maxEgressBytes) {
+		return { allowed: false, reason: "exceeded:egress-bytes" };
+	}
+
+	// runId is carried for audit hooks; reference it so linters don't strip.
+	void runId;
+
+	return { allowed: true };
+}
+
 /**
  * Default restrictive policy rules for spawned/imported agents.
  * These block network, git push, and secret access unless explicitly overridden.
