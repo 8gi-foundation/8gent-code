@@ -38,6 +38,7 @@ import {
 } from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
+import { type GoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
 import type { DaemonChannel } from "./types";
@@ -279,7 +280,37 @@ export async function main(): Promise<void> {
 			: undefined,
 	});
 
-	// Start WebSocket gateway with agent pool + dispatch
+	// Goal-loop manager. Scaffold-stage factory rejects start requests until
+	// the executor/judge provider wiring is delivered by 8EO. The RPC surface
+	// is live so clients can probe goal.status / goal.resume without crashing
+	// the daemon, and goal.start returns a clear error rather than a 404.
+	const goalFactory: GoalExecutorFactory = {
+		async build() {
+			throw new Error(
+				"goal-loop executor factory not wired yet (issue #2606 scaffold ships RPC + types; executor binding is the follow-up issue)",
+			);
+		},
+	};
+	// Scaffold-stage event sink: log line per event so daemon operators can
+	// see goal-loop traffic. Per-surface streaming + SQLite mirror (8GO) and
+	// receipt emission to the bus (8DO) plug in via separate listeners in
+	// follow-up issues - keeping the scaffold listener trivial avoids
+	// committing to a particular bus event shape.
+	const goalManager = new GoalManager({
+		factory: goalFactory,
+		onEvent: (event) => {
+			try {
+				appendFileSync(
+					LOG_PATH,
+					`${new Date(event.ts).toISOString()} [goal:${event.kind}] runId=${event.runId} seq=${event.seq} ${JSON.stringify(event.payload)}\n`,
+				);
+			} catch {
+				// log dir may not exist yet
+			}
+		},
+	});
+
+	// Start WebSocket gateway with agent pool + dispatch + goal-loop
 	server = startGateway({
 		port: config.port,
 		authToken: config.authToken,
@@ -292,6 +323,7 @@ export async function main(): Promise<void> {
 			verifier: dispatchVerifier,
 			hub: dispatchHub,
 		},
+		goal: goalManager,
 	});
 
 	// Start heartbeat
