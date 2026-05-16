@@ -60,7 +60,7 @@ interface CommandInputProps {
 	recentCommands?: string[];
 	// Slash command handlers
 	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
-	/** Optional /go client. When present, /go and /subgoal are handled in
+	/** Optional /goal client. When present, /goal and /subgoal are handled in
 	 *  this component (daemon RPC dispatched directly) instead of bubbling
 	 *  up to onSlashCommand. Keeps the goal protocol localized to one file. */
 	goalClient?: GoalClient | null;
@@ -253,12 +253,12 @@ export function CommandInput({
 					byToken: slashByToken,
 				});
 
-				// /go and /subgoal: handled in-component when a GoalClient is
+				// /goal and /subgoal: handled in-component when a GoalClient is
 				// wired in. Falls through to onSlashCommand otherwise so the
 				// app can render a clean "goal loop not connected" message.
 				if (
 					resolved?.entry.kind === "builtin" &&
-					(resolved.entry.builtInName === "go" ||
+					(resolved.entry.builtInName === "goal" ||
 						resolved.entry.builtInName === "subgoal") &&
 					goalClient
 				) {
@@ -404,7 +404,7 @@ export function CommandInput({
 }
 
 // ============================================
-// /go + /subgoal dispatch
+// /goal + /subgoal dispatch
 // ============================================
 //
 // Lives in this file rather than app.tsx so the goal protocol stays
@@ -423,7 +423,7 @@ function emitSystem(
 }
 
 export function handleGoCommand(
-	commandName: "go" | "subgoal",
+	commandName: "goal" | "subgoal",
 	args: readonly string[],
 	client: GoalClient,
 	sessionId: string,
@@ -454,7 +454,7 @@ export function handleGoCommand(
 			return;
 		}
 		case "invalid": {
-			emitSystem(onSystemMessage, `/go: ${parsed.reason}`);
+			emitSystem(onSystemMessage, `/goal: ${parsed.reason}`);
 			return;
 		}
 		case "start": {
@@ -466,7 +466,7 @@ export function handleGoCommand(
 			} catch (err) {
 				emitSystem(
 					onSystemMessage,
-					`/go: ${err instanceof Error ? err.message : String(err)}`,
+					`/goal: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 			return;
@@ -477,7 +477,7 @@ export function handleGoCommand(
 			} catch (err) {
 				emitSystem(
 					onSystemMessage,
-					`/go status: ${err instanceof Error ? err.message : String(err)}`,
+					`/goal status: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 			return;
@@ -489,7 +489,7 @@ export function handleGoCommand(
 			} catch (err) {
 				emitSystem(
 					onSystemMessage,
-					`/go stop: ${err instanceof Error ? err.message : String(err)}`,
+					`/goal stop: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 			return;
@@ -501,7 +501,7 @@ export function handleGoCommand(
 			} catch (err) {
 				emitSystem(
 					onSystemMessage,
-					`/go resume: ${err instanceof Error ? err.message : String(err)}`,
+					`/goal resume: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 			return;

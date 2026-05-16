@@ -14,7 +14,7 @@
  *
  * Goal-loop integration (issue #2608): the pure LiveFocalStrip stays
  * untouched. A second component, LiveFocalStripWithGoal, wraps it and
- * subscribes to /go events from a GoalClient. It owns:
+ * subscribes to /goal events from a GoalClient. It owns:
  *   - the one-line default display ("Going. Sub-goal x of y...")
  *   - Ctrl+G chord to expand to the 3-line BRAND.md form
  *   - ADHD-mode override to stay on the one-liner
@@ -331,7 +331,7 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 	const goalBorderColor = goalState.terminal === "stuck" ? t.orange : t.teal;
 
 	if (!goalState.runId && !goalState.verdictLine) {
-		// No /go traffic yet. Render only the canonical strip.
+		// No /goal traffic yet. Render only the canonical strip.
 		return <LiveFocalStrip {...stripProps} />;
 	}
 
@@ -353,7 +353,7 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 							turns: {goalState.turns} · elapsed: {formatElapsed(goalState.elapsedMs)}
 						</Text>
 						<Text color={t.muted} wrap="truncate-end">
-							Ctrl+G to collapse · /go ? for help
+							Ctrl+G to collapse · /goal ? for help
 						</Text>
 					</>
 				)}

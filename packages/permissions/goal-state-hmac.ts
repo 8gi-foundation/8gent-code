@@ -1,7 +1,7 @@
 /**
- * 8gent Code - /go State HMAC (issue #2609, epic #2605)
+ * 8gent Code - /goal State HMAC (issue #2609, epic #2605)
  *
- * Signs `.go-state.json` so a resumed /go run cannot be tampered with
+ * Signs `.go-state.json` so a resumed /goal run cannot be tampered with
  * between sessions. Uses a daemon-resident HMAC key at
  * `~/.8gent/keys/state-hmac.key`. The key is generated on first use,
  * 32 bytes, chmod 0600. Verify mismatch => refuse to resume.
@@ -133,7 +133,7 @@ export function verify(signed: SignedPayload, keyOverride?: Buffer): boolean {
 
 /**
  * Verify and throw on mismatch. Use this from resume paths where the
- * intent is to abort the entire /go run on bad state.
+ * intent is to abort the entire /goal run on bad state.
  */
 export function verifyOrThrow(signed: SignedPayload, keyOverride?: Buffer): void {
 	if (!verify(signed, keyOverride)) {

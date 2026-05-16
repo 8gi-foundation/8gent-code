@@ -1,7 +1,7 @@
 /**
  * Goal-loop core types.
  *
- * The /go feature wraps an existing agent runner in an outer loop with three
+ * The /goal feature wraps an existing agent runner in an outer loop with three
  * roles, each behind a small interface:
  *
  *   - executor: takes a turn, returns work product + token usage

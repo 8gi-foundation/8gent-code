@@ -54,7 +54,7 @@ export type SlashCommand =
 	| "hands"
 	| "eyes"
 	| "handeyes"
-	| "go"
+	| "goal"
 	| "subgoal";
 
 export interface BuiltInSlashCommandDef {
@@ -371,16 +371,16 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/handeyes",
 	},
 	{
-		name: "go",
-		aliases: [],
+		name: "goal",
+		aliases: ["go"],
 		description:
 			"Run a goal to completion. Sub: status | stop | resume | clear | ?",
-		usage: "/go <goal> | /go status | /go stop | /go resume | /go clear | /go ?",
+		usage: "/goal <goal> | /goal status | /goal stop | /goal resume | /goal clear | /goal ?",
 	},
 	{
 		name: "subgoal",
 		aliases: [],
-		description: "Inject a sub-goal into the running /go loop.",
+		description: "Inject a sub-goal into the running /goal loop.",
 		usage: "/subgoal <text>",
 	},
 ];

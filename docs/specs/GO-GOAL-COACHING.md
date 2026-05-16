@@ -1,10 +1,10 @@
-# /go Goal Coaching
+# /goal Goal Coaching
 
 Status: draft v1
 Owner: 8PO (Samantha)
 Cross-reference: epic #2605, sub-issue #2607
 
-The /go loop only works if the goal has a verifiable outcome. Most users state goals vaguely on the first try. This spec defines how the agent turns a vague goal into a specific one in a single round trip, without rejecting the user.
+The /goal loop only works if the goal has a verifiable outcome. Most users state goals vaguely on the first try. This spec defines how the agent turns a vague goal into a specific one in a single round trip, without rejecting the user.
 
 This is the difference between an agent that feels like a teammate and one that feels like a form.
 
@@ -129,6 +129,6 @@ Target: <30% of runs trigger coaching round 2. If higher, the heuristic in step 
 
 ## Open questions for the boardroom
 
-1. Should coaching ever fire after a `/go resume`? (Default proposal: no, the resumed run already has a coached goal.)
+1. Should coaching ever fire after a `/goal resume`? (Default proposal: no, the resumed run already has a coached goal.)
 2. If the agent's coaching proposal contains an unsafe action (writes to /etc, deletes the homedir), does 8SO's deny-list redact the proposal or block it? (Default proposal: block the proposal, ask the user for a different scope.)
-3. Should the coached goal be saved as a "template" the user can replay later via `/go --like <run-id>`? (Default proposal: yes, it's a one-line addition and worth the muscle memory.)
+3. Should the coached goal be saved as a "template" the user can replay later via `/goal --like <run-id>`? (Default proposal: yes, it's a one-line addition and worth the muscle memory.)

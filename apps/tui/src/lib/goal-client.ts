@@ -1,5 +1,5 @@
 /**
- * TUI-side client for the /go daemon RPC.
+ * TUI-side client for the /goal daemon RPC.
  *
  * This module is the only place in the TUI that knows the shape of the
  * goal.* wire protocol. The rest of the app calls high-level methods
@@ -33,7 +33,7 @@ import type {
 import type { GoalEvent } from "../../../../packages/goal/index.js";
 
 /**
- * Parsed /go subcommand. The TUI calls parseGoCommand once per user
+ * Parsed /goal subcommand. The TUI calls parseGoCommand once per user
  * submission and switches on the result rather than re-parsing in
  * three places.
  */
@@ -47,26 +47,26 @@ export type GoSubcommand =
 	| { kind: "invalid"; reason: string };
 
 /**
- * Inline help shown by `/go ?`. One line per subcommand, no jargon. The
+ * Inline help shown by `/goal ?`. One line per subcommand, no jargon. The
  * 8DO copy bar applies here too: this is user-facing.
  */
 export const GO_HELP_LINES: readonly string[] = [
-	"/go <goal>     start a goal-loop run",
-	"/go status     show what's happening now",
-	"/go stop       abort the run",
-	"/go resume     continue a paused run",
-	"/go clear      stop and drop the run state",
-	"/go ?          show this help",
+	"/goal <goal>     start a goal-loop run",
+	"/goal status     show what's happening now",
+	"/goal stop       abort the run",
+	"/goal resume     continue a paused run",
+	"/goal clear      stop and drop the run state",
+	"/goal ?          show this help",
 ] as const;
 
 /**
- * Parse `/go ...` argv into a subcommand. The slash-registry has
- * already stripped the leading `/go` token, so `args` is what came
+ * Parse `/goal ...` argv into a subcommand. The slash-registry has
+ * already stripped the leading `/goal` token, so `args` is what came
  * after.
  */
 export function parseGoCommand(args: readonly string[]): GoSubcommand {
 	if (args.length === 0) {
-		return { kind: "invalid", reason: "missing goal text. Try /go ? for help." };
+		return { kind: "invalid", reason: "missing goal text. Try /goal ? for help." };
 	}
 	const first = (args[0] ?? "").toLowerCase();
 	switch (first) {
@@ -132,12 +132,12 @@ export class GoalClient {
 
 	constructor(private readonly transport: GoalTransport) {}
 
-	/** Most recently started runId, if any. Used by /go status / stop / etc. */
+	/** Most recently started runId, if any. Used by /goal status / stop / etc. */
 	getActiveRunId(): string | null {
 		return this.currentRunId;
 	}
 
-	/** Test seam + recovery hook for `/go resume`. */
+	/** Test seam + recovery hook for `/goal resume`. */
 	setActiveRunId(runId: string | null): void {
 		this.currentRunId = runId;
 	}
@@ -192,7 +192,7 @@ export class GoalClient {
 
 	/**
 	 * Stop the current run and drop client-side state. Per epic refinement
-	 * comment #4467176878: /go clear == abort + forget. The daemon's own
+	 * comment #4467176878: /goal clear == abort + forget. The daemon's own
 	 * ledger is untouched (8GO owns that), the TUI just stops tracking the
 	 * runId. Idempotent: safe to call with no active run.
 	 */
