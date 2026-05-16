@@ -38,7 +38,7 @@ import {
 } from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
-import { type GoalExecutorFactory, GoalManager } from "./goal-rpc";
+import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
 import type { DaemonChannel } from "./types";
@@ -280,24 +280,17 @@ export async function main(): Promise<void> {
 			: undefined,
 	});
 
-	// Goal-loop manager. Scaffold-stage factory rejects start requests until
-	// the executor/judge provider wiring is delivered by 8EO. The RPC surface
-	// is live so clients can probe goal.status / goal.resume without crashing
-	// the daemon, and goal.start returns a clear error rather than a 404.
-	const goalFactory: GoalExecutorFactory = {
-		async build() {
-			throw new Error(
-				"goal-loop executor factory not wired yet (issue #2606 scaffold ships RPC + types; executor binding is the follow-up issue)",
-			);
-		},
-	};
-	// Scaffold-stage event sink: log line per event so daemon operators can
-	// see goal-loop traffic. Per-surface streaming + SQLite mirror (8GO) and
+	// Goal-loop manager. Default factory wires the real `EightExecutor`
+	// (wraps `packages/eight/agent.ts`) and `FailoverJudge` (uses
+	// `packages/providers/failover.ts` to select a local-first judge model).
+	// Anti-collusion is enforced in the judge constructor; the judge fails
+	// open so a sick local model can never wedge the loop.
+	// Event sink: log line per event so daemon operators can see
+	// goal-loop traffic. Per-surface streaming + SQLite mirror (8GO) and
 	// receipt emission to the bus (8DO) plug in via separate listeners in
-	// follow-up issues - keeping the scaffold listener trivial avoids
-	// committing to a particular bus event shape.
+	// follow-up issues.
 	const goalManager = new GoalManager({
-		factory: goalFactory,
+		factory: new DefaultGoalExecutorFactory(),
 		onEvent: (event) => {
 			try {
 				appendFileSync(
