@@ -53,7 +53,9 @@ export type SlashCommand =
 	| "create-app"
 	| "hands"
 	| "eyes"
-	| "handeyes";
+	| "handeyes"
+	| "go"
+	| "subgoal";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -367,6 +369,19 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Toggle handeyes indicator (engagement loop, hands driven by eyes).",
 		usage: "/handeyes",
+	},
+	{
+		name: "go",
+		aliases: [],
+		description:
+			"Run a goal to completion. Sub: status | stop | resume | clear | ?",
+		usage: "/go <goal> | /go status | /go stop | /go resume | /go clear | /go ?",
+	},
+	{
+		name: "subgoal",
+		aliases: [],
+		description: "Inject a sub-goal into the running /go loop.",
+		usage: "/subgoal <text>",
 	},
 ];
 

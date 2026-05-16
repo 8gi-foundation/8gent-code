@@ -536,10 +536,125 @@ const verifier = new CompositeTokenVerifier([
 ]);
 ```
 
+## Goal-Loop Methods
+
+The `/go` feature wraps an existing agent session in an outer loop driven by a
+separate judge model. RPC methods travel on the default gateway WebSocket
+(same channel as `prompt` and `session:*`). All goal-loop messages share a
+`goal.*` type prefix. Implementation: `packages/goal/` (pure logic),
+`packages/daemon/goal-rpc.ts` (manager + handlers).
+
+### Methods
+
+#### `goal.start`
+
+```
+Client -> {
+  "type": "goal.start",
+  "sessionId": "s_xyz",
+  "goal": "make the failing auth tests pass",
+  "budget": {
+    "turns": 8,
+    "tokens": 60000,
+    "wallclockMs": 600000,
+    "maxDissentStreak": 6
+  },
+  "executorModel": "qwen3.5:14b",   // optional hint
+  "judgeModel": "deepseek-v4-flash" // optional hint; MUST differ from executor
+}
+
+Server -> { "type": "goal.started", "runId": "g_xxx_yyy" }
+```
+
+`budget` is optional; defaults are defined in `packages/goal/types.ts`
+(`DEFAULT_BUDGET`). Constructor rejects identical executor + judge models with
+`goal.error`.
+
+#### `goal.status`
+
+```
+Client -> { "type": "goal.status", "runId": "g_xxx_yyy" }
+
+Server -> {
+  "type": "goal.status",
+  "runId": "g_xxx_yyy",
+  "snapshot": {
+    "runId": "g_xxx_yyy",
+    "sessionId": "s_xyz",
+    "goal": "...",
+    "status": "running",         // pending | running | judging | completed | stopped | failed
+    "stopReason": null,           // set on terminal status
+    "lastVerdict": { ... } | null,
+    "counters": { "turns": 3, "tokens": 18204, ... },
+    "receipt": { ... } | null,    // present only on terminal status
+    "startedAt": 1731700000000,
+    "endedAt": null
+  }
+}
+```
+
+`snapshot` is `null` when the runId is unknown to the manager.
+
+#### `goal.subgoal`
+
+```
+Client -> { "type": "goal.subgoal", "runId": "g_xxx_yyy", "text": "focus on the JWT verifier" }
+Server -> { "type": "goal.subgoal:ok", "runId": "g_xxx_yyy", "accepted": true }
+```
+
+The subgoal is consumed by the next executor turn. The current in-flight turn
+completes first; subgoals never preempt.
+
+#### `goal.abort`
+
+```
+Client -> { "type": "goal.abort", "runId": "g_xxx_yyy" }
+Server -> { "type": "goal.abort:ok", "runId": "g_xxx_yyy", "accepted": true }
+```
+
+Cooperative. The executor's `abort()` is called; the run terminates with
+`stopReason: "user_abort"`.
+
+#### `goal.resume`
+
+```
+Client -> { "type": "goal.resume", "runId": "g_xxx_yyy" }
+Server -> { "type": "goal.resume:ok", "runId": "g_xxx_yyy", "known": true }
+```
+
+Scaffold version: returns whether the manager still holds the run in memory.
+Full ledger replay (post-daemon-restart recovery) is owned by 8GO and ships in
+a follow-up.
+
+#### `goal.error`
+
+Any goal RPC may return `{ "type": "goal.error", "message": "..." }` instead
+of its success envelope (bad arguments, unknown method, executor factory
+failure, etc.). Clients should treat any `goal.error` as terminal for the
+request that triggered it.
+
+### Streaming events
+
+Per-turn progress flows over the existing `event` envelope. Event `event`
+names are the `GoalEventKind` values from `packages/goal/types.ts`:
+
+| Event kind | When | Payload highlights |
+|---|---|---|
+| `goal.turn` (`turn.requested` / `turn.completed`) | Executor takes a turn | `turn`, `summary`, `tokensIn`, `tokensOut`, `subgoal` |
+| `goal.judge` (`judge.requested` / `judge.verdict`) | Judge scores a turn | `decision`, `confidence`, `summary` |
+| `goal.done` (`run.completed` / `run.stopped` / `run.failed`) | Terminal transition | `status`, `stopReason`, `finalVerdict` |
+| `subgoal.injected` | `goal.subgoal` accepted | `text` |
+| `budget.tripped` | Cap hit | `reason` (`budget_turns` / `budget_tokens` / etc.) |
+
+Each event carries `runId` + monotonic `seq` for ordering. Sinks for the
+event stream (SQLite mirror, HMAC append-only file) are owned by 8GO; the
+goal package only emits in-memory `GoalEvent` records.
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3 | 2026-05-16 | Add goal-loop methods (`goal.start` / `goal.status` / `goal.subgoal` / `goal.abort` / `goal.resume`) + streaming event taxonomy. Schema v2 (`goal_runs`, `goal_events`). (#2606) |
 | 1.2 | 2026-04-26 | Add remote dispatch protocol (`/dispatch` route). Surface registration, replay protection, rate limiting, capability scoping, fan-out to `replay_to` subscribers, `dispatch_source` in trace records. (#1896) |
 | 1.1 | 2026-04-25 | Add `computer` channel, dedicated `/computer` route, streaming event taxonomy (`token`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`), `protocol_version: 1` on every frame, `/ops/agent-pool/status` endpoint. |
 | 1.0 | 2026-03-22 | Initial protocol - sessions, prompts, events, cron, health |

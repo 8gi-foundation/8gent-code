@@ -38,6 +38,7 @@ import {
 } from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
+import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
 import type { DaemonChannel } from "./types";
@@ -279,7 +280,30 @@ export async function main(): Promise<void> {
 			: undefined,
 	});
 
-	// Start WebSocket gateway with agent pool + dispatch
+	// Goal-loop manager. Default factory wires the real `EightExecutor`
+	// (wraps `packages/eight/agent.ts`) and `FailoverJudge` (uses
+	// `packages/providers/failover.ts` to select a local-first judge model).
+	// Anti-collusion is enforced in the judge constructor; the judge fails
+	// open so a sick local model can never wedge the loop.
+	// Event sink: log line per event so daemon operators can see
+	// goal-loop traffic. Per-surface streaming + SQLite mirror (8GO) and
+	// receipt emission to the bus (8DO) plug in via separate listeners in
+	// follow-up issues.
+	const goalManager = new GoalManager({
+		factory: new DefaultGoalExecutorFactory(),
+		onEvent: (event) => {
+			try {
+				appendFileSync(
+					LOG_PATH,
+					`${new Date(event.ts).toISOString()} [goal:${event.kind}] runId=${event.runId} seq=${event.seq} ${JSON.stringify(event.payload)}\n`,
+				);
+			} catch {
+				// log dir may not exist yet
+			}
+		},
+	});
+
+	// Start WebSocket gateway with agent pool + dispatch + goal-loop
 	server = startGateway({
 		port: config.port,
 		authToken: config.authToken,
@@ -292,6 +316,7 @@ export async function main(): Promise<void> {
 			verifier: dispatchVerifier,
 			hub: dispatchHub,
 		},
+		goal: goalManager,
 	});
 
 	// Start heartbeat

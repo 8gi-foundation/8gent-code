@@ -1202,7 +1202,44 @@ export function isInfiniteMode(): boolean {
 // ============================================
 
 export { ToolG8 } from "./toolg8.js";
-export { getAgentPolicy, SPAWNED_AGENT_RESTRICTIONS } from "./policy-engine.js";
+export {
+	getAgentPolicy,
+	SPAWNED_AGENT_RESTRICTIONS,
+	evaluateBudget,
+	DEFAULT_TUI_BUDGET,
+	DEFAULT_COMPUTER_USE_BUDGET,
+} from "./policy-engine.js";
+export type {
+	CapabilityBudget,
+	BudgetCounters,
+	BudgetEvalResult,
+} from "./policy-engine.js";
+export {
+	matchDenyList,
+	GO_DENY_LIST,
+} from "./go-deny-list.js";
+export type {
+	DenyListPattern,
+	DenyListResult,
+	ToolCallLike,
+} from "./go-deny-list.js";
+export {
+	scrubGoalText,
+	containsSecret,
+	SECRET_PATTERNS,
+} from "./goal-secret-scrub.js";
+export type {
+	SecretPattern,
+	ScrubResult,
+} from "./goal-secret-scrub.js";
+export {
+	sign as signGoalState,
+	verify as verifyGoalState,
+	verifyOrThrow as verifyGoalStateOrThrow,
+	loadOrCreateKey as loadGoalStateKey,
+	getKeyPath as getGoalStateKeyPath,
+} from "./goal-state-hmac.js";
+export type { SignedPayload as SignedGoalState } from "./goal-state-hmac.js";
 export { validatePath, isWindowsDeviceName } from "./path-guard.js";
 export type { ValidatePathResult } from "./path-guard.js";
 export {
