@@ -1,8 +1,8 @@
 /**
- * 8DO-owned user-facing verdict copy for the /go loop.
+ * 8DO-owned user-facing verdict copy for the /goal loop.
  *
  * Every string a person reads about a goal run flows through this module.
- * The /go feature has six terminal or near-terminal moments, and each one
+ * The /goal feature has six terminal or near-terminal moments, and each one
  * gets exactly one canonical sentence so the experience never drifts into
  * generic LLM voice ("I've successfully...", "Great news...", "Working
  * on it..."). The agent does not narrate its own labour. It reports
@@ -81,7 +81,7 @@ export type VerdictFields =
 
 /**
  * Tokens that must never appear in any verdict the operator sees. This
- * is the brand floor for the /go feature, not a soft hint.
+ * is the brand floor for the /goal feature, not a soft hint.
  *
  * Em dash is on the list per CLAUDE.md prohibition. Inclusion of "AI"
  * and "model" is deliberate: the agent is doing work for a person, it

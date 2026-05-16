@@ -1,10 +1,10 @@
-# /go Receipt Schema
+# /goal Receipt Schema
 
 Status: draft v1
 Owner: 8PO (Samantha)
 Cross-reference: #2607 (this spec), #2608 (verdict copy + lint), epic #2605
 
-The receipt is what every surface (TUI, Electron, Telegram bridge, JSON SDK) renders when a `/go` run reaches a terminal state. Same fields on every surface. Same order. Same length budget.
+The receipt is what every surface (TUI, Electron, Telegram bridge, JSON SDK) renders when a `/goal` run reaches a terminal state. Same fields on every surface. Same order. Same length budget.
 
 This is not a log. This is the artifact the user sees when they come back from making coffee. It must answer three questions in under three seconds: did it work, where is the proof, what did it cost.
 
@@ -110,7 +110,7 @@ Speaks the verdict line. Once. Never speaks evidence or cost. Never speaks mid-r
 
 KittenTTS is the only approved voice. ElevenLabs is never used for receipt playback (cost + dependency).
 
-The voice fires once at terminal state. If the user starts another `/go` before the previous receipt is spoken, the queued speech is dropped, not delayed.
+The voice fires once at terminal state. If the user starts another `/goal` before the previous receipt is spoken, the queued speech is dropped, not delayed.
 
 ### JSON SDK
 
@@ -163,6 +163,6 @@ Cross-reference: 8DO sub-issue #2608 owns the lint rule that enforces the banned
 
 ## Open questions for the boardroom
 
-1. When a run is resumed (`/go resume <run-id>`), does the receipt show cumulative cost across resumptions or only the latest segment? (Default proposal: cumulative, with a `resumed_from` field on the JSON shape.)
+1. When a run is resumed (`/goal resume <run-id>`), does the receipt show cumulative cost across resumptions or only the latest segment? (Default proposal: cumulative, with a `resumed_from` field on the JSON shape.)
 2. When the judge disagrees with execution evidence (e.g. tests pass but judge says goal not met), which wins? (Default proposal: judge wins on goal-met, execution wins on cost/duration.)
-3. For walk-away runs (>5 min), do we ship a Telegram receipt mirror automatically or only on opt-in? (Default proposal: opt-in per-run via `/go --notify telegram`.)
+3. For walk-away runs (>5 min), do we ship a Telegram receipt mirror automatically or only on opt-in? (Default proposal: opt-in per-run via `/goal --notify telegram`.)

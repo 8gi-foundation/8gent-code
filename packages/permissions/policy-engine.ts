@@ -730,7 +730,7 @@ export function getAgentPolicy(agentId: string): PolicyRule[] {
 }
 
 // ============================================
-// /go Capability Budget (issue #2609, epic #2605)
+// /goal Capability Budget (issue #2609, epic #2605)
 // ============================================
 
 /**
@@ -756,7 +756,7 @@ export interface CapabilityBudget {
 }
 
 /**
- * Running counters tracked over the lifetime of a /go run. Caller is
+ * Running counters tracked over the lifetime of a /goal run. Caller is
  * responsible for incrementing these as work happens; the evaluator only
  * compares them against the budget.
  */

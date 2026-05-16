@@ -1,4 +1,4 @@
-# /go launch - Friday 2026-05-22 go/no-go checklist
+# /goal launch - Friday 2026-05-22 go/no-go checklist
 
 **Decision time:** 09:00 IST Fri 2026-05-22
 **Ship target:** 14:00 IST Fri 2026-05-22 (X video drop)
@@ -42,7 +42,7 @@
 | 22 | All 17 social posts drafted with copy locked | 8MO | `wc -l docs/launches/2026-05-22-go/social-sequence-72h.md` matches expected | [ ] |
 | 23 | Day 0 posts pre-approved by James (X + Threads + LinkedIn + IG + Telegram) | 8MO | approval line per post in Telegram thread | [ ] |
 | 24 | Telegram broadcast voice note generated (KittenTTS) | 8MO | file exists at `assets/launch/telegram-vo.mp3`, KittenTTS metadata confirmed | [ ] |
-| 25 | README snippet PR opened against 8gent-code main | 8MO | `gh pr list --repo 8gi-foundation/8gent-code --search "readme /go"` returns 1 open PR | [ ] |
+| 25 | README snippet PR opened against 8gent-code main | 8MO | `gh pr list --repo 8gi-foundation/8gent-code --search "readme /goal"` returns 1 open PR | [ ] |
 | 26 | README snippet merged before 14:00 IST | 8MO | `gh pr view <PR> --json mergedAt` returns timestamp before 14:00 | [ ] |
 
 ---
@@ -67,7 +67,7 @@
 |------------|--------|
 | All 33 green | SHIP per plan. 14:00 IST X drop. Full social sequence runs. |
 | Any engineering gate (1-13) red AND day-3 eval >= 70% | Hold ship. Patch. Re-evaluate at 12:00 IST. If unresolved, downgrade. |
-| Day-3 eval (gate 9) < 70% | DOWNGRADE: ship `/go --experimental` flag, reframe Day 0 posts to "early access", no AIDHD essay until eval recovers. |
+| Day-3 eval (gate 9) < 70% | DOWNGRADE: ship `/goal --experimental` flag, reframe Day 0 posts to "early access", no AIDHD essay until eval recovers. |
 | Any content gate (14-26) red | Hold the relevant post only. Other posts proceed if their dependencies are green. |
 | Any governance gate (27-33) red | Hold full launch. Governance is non-negotiable. |
 | Vendor trace found in any frame | Hold launch. Re-render. No exceptions. |
@@ -100,8 +100,8 @@ curl -sI https://8gi.org/minutes/2026-05-16-go-feature | head -1
 1. Swap Day 0 X post text:
    ```
    Early access today.
-   /go runs locally on your laptop. We're still tuning the judge.
-   /go organize my Downloads folder by file type and date, dedupe, surface anything sketchy.
+   /goal runs locally on your laptop. We're still tuning the judge.
+   /goal organize my Downloads folder by file type and date, dedupe, surface anything sketchy.
    8gent.dev
    ```
 2. Skip the airplane-mode hero stamp on the video; replace with "Early access. Local-first. Tuning in public." card.

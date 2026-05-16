@@ -1,4 +1,4 @@
-# /go Launch Video Script
+# /goal Launch Video Script
 
 **Ship date:** 2026-05-22 (Friday)
 **Owner:** 8MO (Zara)
@@ -27,7 +27,7 @@
 | 2 | 3.0 - 5.5 | Same black card. Two more lines stamp in. | "No cloud. / No keys. / No bill." | (silence) | Thump x3 |
 | 3 | 5.5 - 8.0 | Hard cut to a terminal. 8gent-code TUI open. Bottom status bar shows model picker with Apple Foundation highlighted, Ollama + LM Studio listed beside it. Menu bar shows airplane mode ON. | Lower-third: "Apple Foundation - local - apfel" | "This is 8gent Code. Running on the metal." | Typewriter tap as cursor blinks |
 | 4 | 8.0 - 11.0 | Hands type the prompt. Show every keystroke. | Lower-third stays. | "Watch." | Typewriter |
-| 5 | 11.0 - 14.0 | Prompt fully typed: `/go organize my Downloads folder by file type and date, dedupe, surface anything sketchy.` Cursor hovers over enter. | The prompt is the only thing on screen besides the model picker. | (silence) | (silence) |
+| 5 | 11.0 - 14.0 | Prompt fully typed: `/goal organize my Downloads folder by file type and date, dedupe, surface anything sketchy.` Cursor hovers over enter. | The prompt is the only thing on screen besides the model picker. | (silence) | (silence) |
 | 6 | 14.0 - 15.0 | Enter pressed. Tiny screen flash. | LiveFocalStrip lights up in accent orange across bottom. One line: "thinking - apfel". | (silence) | Soft click |
 | 7 | 15.0 - 22.0 | Speed ramp 4x. Files shuffling. Sub-agent spawn callout in corner. New folders being created: `Images/`, `PDFs/`, `Archives/`, `Code/`, `Installers/`, `Surface/`. | Counter in corner: "Files moved: 0 -> 247". Lower-third flips to "Sub-agent: dedupe". | "It plans. It runs. It checks its own work." | Quick paper-shuffle SFX, low |
 | 8 | 22.0 - 28.0 | Cut to before/after split screen. Left: chaotic Downloads. Right: tidy folder tree. Both real Finder windows. | Top stamp: "BEFORE / AFTER" | "Two hundred forty seven files. Sorted by type. Sorted by date. Forty one duplicates removed." | Single thump at "247" |
