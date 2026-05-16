@@ -167,7 +167,7 @@ import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.j
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { ContextRail } from "./components/ContextRail.js";
-import { LiveFocalStrip } from "./components/LiveFocalStrip.js";
+import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { useLilEightState } from "./hooks/useLilEightState.js";
@@ -5625,7 +5625,9 @@ export function App({
 						)}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStrip
+						<LiveFocalStripWithGoal
+							goalClient={goalClient}
+							adhdMode={adhdMode}
 							mode={
 								agentMode === "Planning"
 									? "Planning"
@@ -5638,7 +5640,7 @@ export function App({
 												: "Researching"
 							}
 							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={currentModel || "—"}
+							route={currentModel || "-"}
 							tokens={tokenStr}
 							contextPct={contextPct}
 							approvalPending={isApprovalPending}
@@ -5703,6 +5705,17 @@ export function App({
 								allowEmptySubmit={!!imageInput.currentImage}
 								goalClient={goalClient}
 								sessionId="tui"
+								onSystemMessage={(line) => {
+									setMessages((prev) => [
+										...prev,
+										{
+											id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+											role: "system",
+											content: line,
+											timestamp: new Date(),
+										},
+									]);
+								}}
 							/>
 						</Box>
 					</Box>

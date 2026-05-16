@@ -129,6 +129,22 @@ export class ModelFailover {
 					},
 				],
 			},
+			// LM Studio-loaded models. When a user has a model loaded in LM
+			// Studio the failover chain must include the lmstudio provider
+			// explicitly, otherwise resolve() falls through to openrouter
+			// and the executor fails with "model not found". Add new
+			// lmstudio-loaded model ids here as users adopt them.
+			"google/gemma-4-26b-a4b": {
+				models: [
+					{ model: "google/gemma-4-26b-a4b", provider: "lmstudio" },
+					...prefix,
+					{ model: "qwen3:14b", provider: "ollama" },
+					{
+						model: "meta-llama/llama-3-8b-instruct:free",
+						provider: "openrouter",
+					},
+				],
+			},
 		};
 	}
 
