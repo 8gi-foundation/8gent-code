@@ -285,6 +285,35 @@ describe("FailoverJudge - fail open", () => {
 		expect(v.summary).toMatch(/judge unavailable/);
 	});
 
+	it("routes lmstudio provider to lmstudio runtime (regression: previously fell through to openrouter)", async () => {
+		const client = new StubClient();
+		client.generateResponses = [
+			"crit",
+			JSON.stringify({ done: false, confidence: 0.1, reason: "still working" }),
+		];
+		const factoryCalls: Array<{ runtime: string; model: string }> = [];
+		const failover = new ModelFailover({
+			text: {
+				"lmstudio-judge": {
+					models: [{ model: "lmstudio-judge", provider: "lmstudio" }],
+				},
+			},
+			computer: {},
+		});
+		const j = new FailoverJudge({
+			executorModel: "exec",
+			judgeModel: "lmstudio-judge",
+			failover,
+			clientFactory: (cfg) => {
+				factoryCalls.push(cfg);
+				return client;
+			},
+		});
+		await j.score(makeInput());
+		expect(factoryCalls.length).toBeGreaterThan(0);
+		expect(factoryCalls[0]?.runtime).toBe("lmstudio");
+	});
+
 	it("never returns a summary with em dashes", async () => {
 		const client = new StubClient();
 		client.generateResponses = [
