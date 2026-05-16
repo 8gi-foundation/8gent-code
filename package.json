@@ -11,6 +11,7 @@
 	},
 	"files": [
 		"dist/cli.js",
+		"dist/tui.js",
 		"dist/skills",
 		"dist/sounds",
 		"bin/8gent-run.js",
@@ -34,8 +35,8 @@
 		"build:eyes-bridge": "bash packages/eyes/native/build.sh",
 		"cli": "bun run bin/8gent.ts",
 		"dev": "next dev",
-		"build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && node scripts/build-finalize.js",
-		"build:tui": "bun build apps/tui/src/index.tsx --outdir dist/tui --target node",
+		"build": "bun build bin/8gent.ts --outfile dist/cli.js --target bun && bun build apps/tui/src/index.tsx --outfile dist/tui.js --target bun --external react-devtools-core && node scripts/build-finalize.js",
+		"build:tui": "bun build apps/tui/src/index.tsx --outfile dist/tui.js --target bun --external react-devtools-core",
 		"prepublishOnly": "npm run build",
 		"postinstall": "node scripts/postinstall.js",
 		"test": "bun test packages/ apps/",

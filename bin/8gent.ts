@@ -8,8 +8,35 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const VERSION = "0.17.0";
+
+// Resolve the directory of this script across runtimes. `__dirname` is
+// undefined in pure ESM and unreliable after bundling, so derive it from
+// `import.meta.url` (works under Bun, Node ESM, and bundled output).
+const BIN_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// Walk up from BIN_DIR to find the source tree root. When installed via
+// npm we only ship `dist/cli.js` + `bin/8gent-run.js`, so packages/apps/
+// scripts don't exist alongside the bundle — `repoRoot()` returns null in
+// that case and dev-only commands print a clear error instead of trying
+// to spawn a missing file with a Windows path that has never existed.
+function repoRoot(): string | null {
+	const candidates = [
+		path.join(BIN_DIR, ".."),
+		path.join(BIN_DIR, "..", ".."),
+	];
+	for (const candidate of candidates) {
+		if (
+			fs.existsSync(path.join(candidate, "apps", "tui", "src", "index.tsx")) ||
+			fs.existsSync(path.join(candidate, "packages", "eight"))
+		) {
+			return candidate;
+		}
+	}
+	return null;
+}
 const BANNER = `
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -890,28 +917,36 @@ async function searchCommand(args: string[]) {
 }
 
 async function benchmarkCommand(args: string[]) {
-	// Run the benchmark script
-	const benchmarkPath = path.join(__dirname, "../scripts/benchmark.ts");
+	const root = repoRoot();
+	if (!root) {
+		console.error(
+			"`8gent benchmark` requires running from a source checkout. Clone https://github.com/8gi-foundation/8gent-code and run `bun run benchmark` there.",
+		);
+		process.exit(1);
+	}
+	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
 	const { spawn } = await import("node:child_process");
-
 	const proc = spawn("bun", ["run", benchmarkPath, ...args], {
 		stdio: "inherit",
-		cwd: path.join(__dirname, ".."),
+		cwd: root,
 	});
-
 	proc.on("exit", (code) => process.exit(code || 0));
 }
 
 async function demoCommand(args: string[]) {
-	// Run the demo script
-	const demoPath = path.join(__dirname, "../scripts/demo-savings.ts");
+	const root = repoRoot();
+	if (!root) {
+		console.error(
+			"`8gent demo` requires running from a source checkout. Clone https://github.com/8gi-foundation/8gent-code and run `bun run demo` there.",
+		);
+		process.exit(1);
+	}
+	const demoPath = path.join(root, "scripts", "demo-savings.ts");
 	const { spawn } = await import("node:child_process");
-
 	const proc = spawn("bun", ["run", demoPath, ...args], {
 		stdio: "inherit",
-		cwd: path.join(__dirname, ".."),
+		cwd: root,
 	});
-
 	proc.on("exit", (code) => process.exit(code || 0));
 }
 
@@ -927,8 +962,9 @@ async function spawnPet(sessionId?: string) {
 
 		// Start terminal pet in background
 		try {
-			const petPath = path.join(__dirname, "../packages/pet/terminal-pet.ts");
-			if (fs.existsSync(petPath)) {
+			const root = repoRoot();
+			const petPath = root ? path.join(root, "packages", "pet", "terminal-pet.ts") : "";
+			if (petPath && fs.existsSync(petPath)) {
 				const { TerminalPet } = await import(petPath);
 				const pet = new TerminalPet({ label: sessionId || "eight" });
 
@@ -957,8 +993,8 @@ async function spawnPet(sessionId?: string) {
 
 		// Register with mesh
 		try {
-			const home = process.env.HOME || process.env.USERPROFILE || "~";
-			const meshDir = path.join(home, ".8gent", "mesh");
+			const { homedir } = await import("node:os");
+			const meshDir = path.join(homedir(), ".8gent", "mesh");
 			fs.mkdirSync(meshDir, { recursive: true });
 			const registryPath = path.join(meshDir, "registry.json");
 			let registry: Record<string, any> = {};
@@ -986,7 +1022,8 @@ async function spawnPet(sessionId?: string) {
 	try {
 		const { generateCompanion } = await import("../packages/pet/companion.js");
 		const companion = generateCompanion(sessionId || `session-${Date.now()}`);
-		const home = process.env.HOME || "~";
+		const { homedir } = await import("node:os");
+		const home = homedir();
 		fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
 		fs.writeFileSync(
 			path.join(home, ".8gent", "active-companion.json"),
@@ -1008,7 +1045,8 @@ async function spawnPet(sessionId?: string) {
 		);
 	} catch {}
 
-	const lilEightScript = path.join(__dirname, "lil-eight.sh");
+	const root = repoRoot();
+	const lilEightScript = path.join(BIN_DIR, "lil-eight.sh");
 
 	// Kill existing pets, then spawn fresh
 	try {
@@ -1022,9 +1060,9 @@ async function spawnPet(sessionId?: string) {
 		});
 		pet.unref();
 		console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
-	} else {
+	} else if (root) {
 		// Try build first
-		const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
+		const buildScript = path.join(root, "apps", "lil-eight", "build.sh");
 		if (fs.existsSync(buildScript)) {
 			console.log("\x1b[36m[pet] Building Lil Eight...\x1b[0m");
 			try {
@@ -1043,7 +1081,8 @@ async function spawnPet(sessionId?: string) {
 
 	// Register this session with the Agent Mesh
 	try {
-		const meshDir = path.join(process.env.HOME || "~", ".8gent", "mesh");
+		const { homedir } = await import("node:os");
+		const meshDir = path.join(homedir(), ".8gent", "mesh");
 		const registryPath = path.join(meshDir, "registry.json");
 		fs.mkdirSync(meshDir, { recursive: true });
 
@@ -1100,16 +1139,38 @@ async function tuiCommand(args: string[]) {
 
 	console.log("Launching TUI...\n");
 
-	const { spawn } = await import("node:child_process");
-	const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
+	const tuiPath = resolveTuiEntry();
+	if (!tuiPath) {
+		console.error(
+			"TUI entry not found. Reinstall with `npm install -g @8gi-foundation/8gent-code` or run from a source checkout.",
+		);
+		process.exit(1);
+	}
 
-	// Pass --name and --resume flags through to TUI
+	const { spawn } = await import("node:child_process");
 	const proc = spawn("bun", ["run", tuiPath, ...filteredArgs], {
 		stdio: "inherit",
-		cwd: path.join(__dirname, ".."),
+		cwd: path.dirname(tuiPath),
 	});
 
 	proc.on("exit", (code) => process.exit(code || 0));
+}
+
+/**
+ * Find the TUI entry. Prefer a bundled `dist/tui.js` (shipped via npm),
+ * fall back to the source `apps/tui/src/index.tsx` when running from a
+ * git checkout. Returns null when neither exists so the caller can print
+ * a clear error instead of spawning bun against a phantom path.
+ */
+function resolveTuiEntry(): string | null {
+	const bundled = path.join(BIN_DIR, "tui.js");
+	if (fs.existsSync(bundled)) return bundled;
+	const root = repoRoot();
+	if (root) {
+		const src = path.join(root, "apps", "tui", "src", "index.tsx");
+		if (fs.existsSync(src)) return src;
+	}
+	return null;
 }
 
 async function airdropCommand(args: string[]) {
@@ -1190,11 +1251,18 @@ async function airdropCommand(args: string[]) {
 async function petCommand(args: string[]) {
 	const subCmd = args[0] || "start";
 	const { execSync } = await import("node:child_process");
-	const lilEightScript = path.join(__dirname, "lil-eight.sh");
+	const lilEightScript = path.join(BIN_DIR, "lil-eight.sh");
+	const root = repoRoot();
 
 	if (!fs.existsSync(lilEightScript)) {
+		if (!root) {
+			console.error(
+				"Lil Eight dock pet requires a source checkout to build. Clone https://github.com/8gi-foundation/8gent-code and run `bun run pet` there.",
+			);
+			process.exit(1);
+		}
 		console.log("Building Lil Eight first...");
-		const buildScript = path.join(__dirname, "../apps/lil-eight/build.sh");
+		const buildScript = path.join(root, "apps", "lil-eight", "build.sh");
 		execSync(`bash "${buildScript}"`, { stdio: "inherit" });
 	}
 
@@ -1219,14 +1287,21 @@ async function petCommand(args: string[]) {
 			setTimeout(() => spawnPet(), 1000);
 			break;
 		case "build":
-			execSync(`bash "${path.join(__dirname, "../apps/lil-eight/build.sh")}"`, {
+			if (!root) {
+				console.error(
+					"`8gent pet build` requires a source checkout. Clone https://github.com/8gi-foundation/8gent-code.",
+				);
+				process.exit(1);
+			}
+			execSync(`bash "${path.join(root, "apps", "lil-eight", "build.sh")}"`, {
 				stdio: "inherit",
 			});
 			break;
 		case "log":
 		case "logs": {
 			const { spawn: sp } = await import("node:child_process");
-			const logPath = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
+			const { homedir } = await import("node:os");
+			const logPath = path.join(homedir(), ".8gent", "lil-eight.log");
 			sp("tail", ["-f", logPath], { stdio: "inherit" });
 			break;
 		}
@@ -1234,7 +1309,8 @@ async function petCommand(args: string[]) {
 			try {
 				execSync("pgrep -f LilEight", { stdio: "pipe" });
 				console.log("Lil Eight is running");
-				const logP = path.join(process.env.HOME || "~", ".8gent", "lil-eight.log");
+				const { homedir } = await import("node:os");
+				const logP = path.join(homedir(), ".8gent", "lil-eight.log");
 				if (fs.existsSync(logP)) {
 					const lines = fs.readFileSync(logP, "utf-8").trim().split("\n").slice(-3);
 					lines.forEach((l) => console.log(`  ${l}`));
@@ -1809,11 +1885,17 @@ async function sessionCommand(args: string[]) {
 				process.exit(1);
 			}
 			// Resume launches TUI with session context
+			const tuiPath = resolveTuiEntry();
+			if (!tuiPath) {
+				console.error(
+					"TUI entry not found. Reinstall with `npm install -g @8gi-foundation/8gent-code` or run from a source checkout.",
+				);
+				process.exit(1);
+			}
 			const { spawn } = await import("node:child_process");
-			const tuiPath = path.join(__dirname, "../apps/tui/src/index.tsx");
 			const proc = spawn("bun", ["run", tuiPath, "--resume", nameOrId], {
 				stdio: "inherit",
-				cwd: path.join(__dirname, ".."),
+				cwd: path.dirname(tuiPath),
 			});
 			proc.on("exit", (code) => process.exit(code || 0));
 			break;

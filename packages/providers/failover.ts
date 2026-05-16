@@ -172,10 +172,15 @@ export class ModelFailover {
 	/**
 	 * Return the first healthy model in the chain for the given channel.
 	 * Defaults to the `text` channel for back-compat with existing callers.
+	 *
+	 * When no chain is registered for a model, fall back to the free cloud
+	 * tier rather than assuming ollama is installed — Windows / fresh
+	 * installs frequently lack it and "ollama is the universal fallback"
+	 * is what made the model crash on first launch.
 	 */
 	resolve(model: string, channel: FailoverChannel = "text"): FailoverEntry {
 		const chain = this.chainsByChannel[channel]?.[model];
-		if (!chain) return { model, provider: "ollama" };
+		if (!chain) return { model, provider: "openrouter" };
 
 		const head = chain.models[0];
 		for (const entry of chain.models) {
@@ -198,13 +203,13 @@ export class ModelFailover {
 		// Everything is down - return last entry as a hail mary
 		const last = chain.models[chain.models.length - 1] || {
 			model,
-			provider: "ollama",
+			provider: "openrouter",
 		};
 		this.recordEvent({
 			ts: Date.now(),
 			channel,
 			fromModel: head?.model ?? model,
-			fromProvider: head?.provider ?? "ollama",
+			fromProvider: head?.provider ?? "openrouter",
 			toModel: last.model,
 			toProvider: last.provider,
 			reason: "all-tiers-down",

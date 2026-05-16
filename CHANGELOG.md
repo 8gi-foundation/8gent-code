@@ -9,6 +9,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - Windows install blockers (5 bugs)
+
+The npm package shipped with five blocking bugs on Windows that left users stuck right after install. All five fixed.
+
+- **Hardcoded source paths in dist** - `bin/8gent.ts` referenced `__dirname/../apps/...` / `../scripts/...` / `../packages/...` for the TUI, benchmark, demo, and pet commands. None of those source paths exist in the npm tarball (only `dist/cli.js`, `bin/8gent-run.js`, and a handful of assets ship), so spawned children silently failed on a clean install. Replaced with a `BIN_DIR` derived from `import.meta.url`, added `repoRoot()` detection for dev-only commands (clean error if absent), and bundled the TUI as `dist/tui.js` shipped via the `files` whitelist. The TUI command now prefers the bundled entry and only falls back to source when running from a checkout.
+- **`keys.env` "merged 0 keys" on Windows** - `readKeysFile` did not strip the UTF-8 BOM. Notepad saves `.env` files with a BOM by default, so the first key parsed as `﻿OPENAI_API_KEY` and every downstream provider lookup missed. Strip the BOM before parsing.
+- **`config.model.includes()` crash from CLI args** - `createModel()` and `getRetryConfig()` in `packages/ai/providers.ts` called `.includes(":free")` without checking that `model` is a string. CLI flag parsing can pass `undefined` when no `--model` is given. `createModel` now throws a clear error naming the provider; `getRetryConfig` guards the membership test.
+- **Ollama forced as default provider** - `defaultRoleConfig()` hardcoded `{ provider: "ollama", model: "qwen3:14b" }` for any non-Darwin system, and `ModelFailover.resolve()` used the same as its hail-mary. Both now default to OpenRouter `auto:free` so a fresh Windows / Linux install boots into a working state instead of an `ECONNREFUSED 11434`. The TUI `loadProviderSettings` no longer pins `"ollama"` when `providers.json` is absent - it leaves the slot empty so `detectBestLocalProvider()` runs.
+- **`qwen3:14b` returned as universal fallback** - `defaultModelFor()` in `packages/eight/run.ts` returned `qwen3:14b` for any unknown provider. `runRunCommand()` now probes ollama once and only routes to it when the daemon answers; otherwise falls through to `openrouter` / `auto:free`. Also fixed `packages/eight/index.ts` env var typo (`EIGHGENT_MODEL` -> `EIGHT_MODEL`) and the bogus `glm-4.7-flash:latest` default model.
+
 ### Added - Chat scrollback (mouse wheel + keyboard)
 
 The TUI center panel is now scrollable. Pinned to the bottom by default; scroll up to read earlier turns without being yanked back when new output streams in.

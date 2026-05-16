@@ -52,7 +52,11 @@ function tmpPath(): string {
  *
  * - darwin + arm64 + apple-foundation bridge present: all roles use apple-foundation.
  * - darwin + arm64 without the bridge: all roles use the local 8gent runtime.
- * - everything else: all roles use ollama / qwen3:14b.
+ * - everything else (Linux, Windows, x86 Macs): openrouter / auto:free.
+ *   Constitution Principle 2 is "Free and local by default" — when no
+ *   local runtime is realistically available, fall through to the free
+ *   cloud tier rather than pretending ollama+qwen3:14b is installed.
+ *   Users with ollama can override via ~/.8gent/roles.json.
  */
 export function defaultRoleConfig(): RoleConfig {
 	const isDarwinArm = process.platform === "darwin" && process.arch === "arm64";
@@ -66,7 +70,7 @@ export function defaultRoleConfig(): RoleConfig {
 	} else if (isDarwinArm) {
 		assignment = { provider: "8gent", model: "eight-1.0-q3:14b" };
 	} else {
-		assignment = { provider: "ollama", model: "qwen3:14b" };
+		assignment = { provider: "openrouter", model: "auto:free" };
 	}
 
 	return {
