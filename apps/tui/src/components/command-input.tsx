@@ -26,6 +26,11 @@ import {
 	resolveSlashInput,
 	toGhostSuggestions,
 } from "../lib/slash-registry.js";
+import {
+	GO_HELP_LINES,
+	type GoalClient,
+	parseGoCommand,
+} from "../lib/goal-client.js";
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
 import { Blink } from "./fade-transition.js";
@@ -55,6 +60,14 @@ interface CommandInputProps {
 	recentCommands?: string[];
 	// Slash command handlers
 	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
+	/** Optional /go client. When present, /go and /subgoal are handled in
+	 *  this component (daemon RPC dispatched directly) instead of bubbling
+	 *  up to onSlashCommand. Keeps the goal protocol localized to one file. */
+	goalClient?: GoalClient | null;
+	/** Current session id, used for goal.start. Defaults to "tui" if absent. */
+	sessionId?: string;
+	/** Hook for surfacing system-line messages without coupling to app.tsx. */
+	onSystemMessage?: (line: string) => void;
 	/** Text injected from voice transcription — appended to current input for review */
 	injectedText?: string | null;
 	/** Whether the input is focused (false when non-chat views are active) */
@@ -98,6 +111,9 @@ export function CommandInput({
 	planNextStep = null,
 	recentCommands = EMPTY_RECENT,
 	onSlashCommand,
+	goalClient = null,
+	sessionId = "tui",
+	onSystemMessage,
 	injectedText = null,
 	focused = true,
 	transformInputValue,
@@ -236,6 +252,27 @@ export function CommandInput({
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
 				});
+
+				// /go and /subgoal: handled in-component when a GoalClient is
+				// wired in. Falls through to onSlashCommand otherwise so the
+				// app can render a clean "goal loop not connected" message.
+				if (
+					resolved?.entry.kind === "builtin" &&
+					(resolved.entry.builtInName === "go" ||
+						resolved.entry.builtInName === "subgoal") &&
+					goalClient
+				) {
+					handleGoCommand(
+						resolved.entry.builtInName,
+						resolved.args,
+						goalClient,
+						sessionId,
+						onSystemMessage,
+					);
+					setValue("");
+					return;
+				}
+
 				if (
 					resolved &&
 					resolved.entry.kind === "builtin" &&
@@ -252,7 +289,16 @@ export function CommandInput({
 			onSubmit(input);
 			setValue("");
 		},
-		[onSubmit, onSlashCommand, allowEmptySubmit, slashRegistryEntries, slashByToken],
+		[
+			onSubmit,
+			onSlashCommand,
+			allowEmptySubmit,
+			slashRegistryEntries,
+			slashByToken,
+			goalClient,
+			sessionId,
+			onSystemMessage,
+		],
 	);
 
 	// Get current step index
@@ -355,6 +401,117 @@ export function CommandInput({
 			)}
 		</Box>
 	);
+}
+
+// ============================================
+// /go + /subgoal dispatch
+// ============================================
+//
+// Lives in this file rather than app.tsx so the goal protocol stays
+// localized to one place. The component handles parsing + dispatch, the
+// daemon (via GoalClient transport) owns execution, and the surface
+// messages (verdicts, help) are 8DO-owned copy imported through the
+// goal-client barrel and the verdicts module.
+
+function emitSystem(
+	onSystemMessage: ((line: string) => void) | undefined,
+	line: string,
+): void {
+	if (onSystemMessage) {
+		onSystemMessage(line);
+	}
+}
+
+export function handleGoCommand(
+	commandName: "go" | "subgoal",
+	args: readonly string[],
+	client: GoalClient,
+	sessionId: string,
+	onSystemMessage?: (line: string) => void,
+): void {
+	if (commandName === "subgoal") {
+		const text = args.join(" ").trim();
+		if (!text) {
+			emitSystem(onSystemMessage, "/subgoal: text required. Try /subgoal <text>.");
+			return;
+		}
+		try {
+			client.subgoal(text);
+			emitSystem(onSystemMessage, "Subgoal sent.");
+		} catch (err) {
+			emitSystem(
+				onSystemMessage,
+				`/subgoal: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+		return;
+	}
+
+	const parsed = parseGoCommand(args);
+	switch (parsed.kind) {
+		case "help": {
+			emitSystem(onSystemMessage, GO_HELP_LINES.join("\n"));
+			return;
+		}
+		case "invalid": {
+			emitSystem(onSystemMessage, `/go: ${parsed.reason}`);
+			return;
+		}
+		case "start": {
+			try {
+				client.start(sessionId, parsed.goal);
+				// Acknowledgement copy is intentionally minimal. The verdict
+				// stream from LiveFocalStrip is the real surface.
+				emitSystem(onSystemMessage, `Going. ${parsed.goal}`);
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/go: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "status": {
+			try {
+				client.status();
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/go status: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "stop": {
+			try {
+				client.abort();
+				emitSystem(onSystemMessage, "Stopping.");
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/go stop: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "resume": {
+			try {
+				client.resume();
+				emitSystem(onSystemMessage, "Resuming.");
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/go resume: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "clear": {
+			client.clear();
+			emitSystem(onSystemMessage, "Cleared.");
+			return;
+		}
+	}
 }
 
 // ============================================
