@@ -18,6 +18,7 @@ import type {
 	TokenVerifier,
 } from "./dispatch";
 import { type EventName, bus } from "./events";
+import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import {
 	type ComputerWS,
 	handleComputerClose,
@@ -51,6 +52,8 @@ export interface GatewayConfig {
 		verifier: TokenVerifier;
 		hub: DispatchHub;
 	};
+	/** Optional goal-loop manager. When omitted, goal.* RPCs return an error. */
+	goal?: GoalManager;
 }
 
 interface ClientState {
@@ -145,6 +148,24 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			return;
 		}
 		send(ws, { type: "error", message: "not authenticated" });
+		return;
+	}
+
+	// goal.* RPC interception. Fire-and-forget; handler emits responses
+	// via the ws.send callback. Returns true if handled.
+	if (typeof (msg as any).type === "string" && (msg as any).type.startsWith("goal.")) {
+		if (!config.goal) {
+			send(ws, { type: "error", message: "goal-loop manager not configured" });
+			return;
+		}
+		const sendGoal = (out: GoalRpcOutbound) => {
+			try {
+				ws.send(JSON.stringify(out));
+			} catch {
+				// client disconnected
+			}
+		};
+		void handleGoalRpc(msg, { manager: config.goal, send: sendGoal });
 		return;
 	}
 
