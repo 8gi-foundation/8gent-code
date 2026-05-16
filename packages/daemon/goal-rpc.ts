@@ -17,7 +17,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { GoalLoop, type GoalEvent, type GoalEventSink } from "../goal";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+	GoalLoop,
+	GoalPersistence,
+	Ledger,
+	type GoalEvent,
+	type GoalEventSink,
+} from "../goal";
 import type {
 	Budget,
 	ExecutorHandle,
@@ -25,6 +33,7 @@ import type {
 	JudgeHandle,
 	Receipt,
 } from "../goal";
+import type { WorkspaceDb } from "../db/src/workspace-db";
 
 // ---- Manager-side state -----------------------------------------------------
 
@@ -92,12 +101,50 @@ export interface GoalManagerDeps {
 	onEvent?: GoalEventListener;
 	/** Optional override (tests). */
 	now?: () => number;
+	/**
+	 * Workspace DB handle. When provided, every run is mirrored into the
+	 * goal_runs + goal_events tables for UI queries and crash recovery.
+	 *
+	 * If omitted, runs remain in-memory only (8TO's original behaviour;
+	 * still required for the legacy tests in `goal-loop.test.ts`).
+	 */
+	workspace?: WorkspaceDb;
+	/**
+	 * HMAC key for signing ledger entries. Required when `workspace` is
+	 * provided. In production the daemon loads this from
+	 * `~/.8gent/keys/state-hmac.key` (0600). See `packages/goal/ledger.ts`
+	 * for the TODO that will swap to `@8gent/permissions` once PR #2616
+	 * lands.
+	 */
+	ledgerKey?: Buffer;
+	/**
+	 * Base directory for per-run ledger files. Defaults to
+	 * `~/.8gent/runs/`. The final path is `<baseDir>/<runId>/ledger.jsonl`.
+	 */
+	ledgerBaseDir?: string;
 }
 
 export class GoalManager {
 	private readonly runs = new Map<string, InternalRun>();
+	private readonly persistence: GoalPersistence | null;
+	private readonly ledgerBaseDir: string;
+	private readonly ledgerKey: Buffer | null;
 
-	constructor(private readonly deps: GoalManagerDeps) {}
+	constructor(private readonly deps: GoalManagerDeps) {
+		this.persistence = deps.workspace ? new GoalPersistence(deps.workspace) : null;
+		this.ledgerBaseDir =
+			deps.ledgerBaseDir ?? path.join(os.homedir(), ".8gent", "runs");
+		this.ledgerKey = deps.ledgerKey ?? null;
+		if (this.persistence && !this.ledgerKey) {
+			// Soft warning, not throw: tests may want persistence without ledger
+			// and the daemon entry point owns the real key resolution. In
+			// production the daemon must supply both.
+			// eslint-disable-next-line no-console
+			console.warn(
+				"[GoalManager] workspace provided without ledgerKey - ledger writes disabled",
+			);
+		}
+	}
 
 	listIds(): string[] {
 		return Array.from(this.runs.keys());
@@ -121,7 +168,61 @@ export class GoalManager {
 			judgeModelHint: input.judgeModelHint,
 		});
 
-		const sink = new FanoutEventSink(this.deps.onEvent ? [this.deps.onEvent] : []);
+		// Wire persistence + ledger if the daemon supplied them. Falls back
+		// to in-memory only when either is absent.
+		const listeners: GoalEventListener[] = [];
+		if (this.deps.onEvent) listeners.push(this.deps.onEvent);
+		let ledger: Ledger | null = null;
+		if (this.persistence) {
+			// Resolve budget defaults the same way the loop will (so the
+			// persisted row matches the loop's resolved budget).
+			const { resolveBudget } = await import("../goal/budget");
+			const resolved = resolveBudget(input.budget);
+			this.persistence.createRun({
+				runId,
+				sessionId: input.sessionId,
+				goalText: input.goal,
+				budget: resolved,
+				executorModel: executor.model,
+				judgeModel: judge.model,
+			});
+			const persistence = this.persistence;
+			listeners.push((event) => {
+				try {
+					persistence.appendEvent({
+						runId: event.runId,
+						kind: event.kind,
+						payload: { ...event.payload, ts: event.ts },
+					});
+					if (event.kind === "run.started") {
+						persistence.markStarted(event.runId, event.ts);
+					}
+				} catch (err) {
+					// Sink failures must not crash the loop. Audit miss is
+					// preferable to terminating an in-flight run.
+					// eslint-disable-next-line no-console
+					console.warn("[GoalManager] persistence append failed:", err);
+				}
+			});
+		}
+		if (this.persistence && this.ledgerKey) {
+			ledger = Ledger.open({
+				runId,
+				baseDir: this.ledgerBaseDir,
+				key: this.ledgerKey,
+			});
+			const led = ledger;
+			listeners.push((event) => {
+				try {
+					led.append({ kind: event.kind, payload: event.payload, now: event.ts });
+				} catch (err) {
+					// eslint-disable-next-line no-console
+					console.warn("[GoalManager] ledger append failed:", err);
+				}
+			});
+		}
+
+		const sink = new FanoutEventSink(listeners);
 		const loop = new GoalLoop({
 			runId,
 			sessionId: input.sessionId,
@@ -133,14 +234,33 @@ export class GoalManager {
 			now: this.deps.now,
 		});
 
+		const persistence = this.persistence;
+		const ledgerForRun = ledger;
 		const settled = loop
 			.run_()
 			.then((receipt) => {
 				const entry = this.runs.get(runId);
 				if (entry) entry.receipt = receipt;
+				if (persistence) {
+					try {
+						persistence.markComplete(
+							runId,
+							receipt.status,
+							receipt.stopReason,
+							receipt.endedAt,
+						);
+					} catch (err) {
+						// eslint-disable-next-line no-console
+						console.warn("[GoalManager] markComplete failed:", err);
+					}
+				}
+				if (ledgerForRun) {
+					ledgerForRun.close();
+				}
 				return receipt;
 			})
 			.catch((err) => {
+				if (ledgerForRun) ledgerForRun.close();
 				// Loop has its own defensive catch; this is belt-and-braces.
 				throw err;
 			});
@@ -182,12 +302,53 @@ export class GoalManager {
 	}
 
 	/**
-	 * Daemon-restart recovery hook. Scaffold version is a no-op: replay from
-	 * the persisted ledger is owned by 8GO in a follow-up. Returns whether
-	 * the run is currently known in memory.
+	 * Daemon-restart recovery hook.
+	 *
+	 * If the run is in memory, return true immediately.
+	 *
+	 * If the run is not in memory but is present in the persistence layer,
+	 * verify the ledger chain (8GO: every resume must re-verify audit
+	 * integrity before exposing the run to RPC callers). Returns true if
+	 * the run was hydrated and the chain is intact.
+	 *
+	 * The scaffold does NOT re-attach a live GoalLoop; the daemon factory
+	 * owns executor + judge re-creation. This hook reports readiness; the
+	 * higher-level orchestrator (`apps/tui` + `apps/dashboard`) replays
+	 * events from `goal_events` to rebuild UI state. Re-running the loop
+	 * from a checkpoint is tracked separately.
 	 */
 	resume(runId: string): boolean {
-		return this.runs.has(runId);
+		if (this.runs.has(runId)) return true;
+		if (!this.persistence) return false;
+		const row = this.persistence.getRun(runId);
+		if (!row) return false;
+		if (this.ledgerKey) {
+			let ledger: Ledger;
+			try {
+				ledger = Ledger.open({
+					runId,
+					baseDir: this.ledgerBaseDir,
+					key: this.ledgerKey,
+				});
+			} catch {
+				return false;
+			}
+			const verdict = ledger.verify();
+			ledger.close();
+			if (!verdict.ok) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					`[GoalManager] resume(${runId}): ledger verify failed at seq=${verdict.atSeq} - ${verdict.reason}`,
+				);
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Expose the persistence layer for UI replays + tests. */
+	getPersistence(): GoalPersistence | null {
+		return this.persistence;
 	}
 
 	/** Await a specific run's completion. Useful for tests and headless mode. */
