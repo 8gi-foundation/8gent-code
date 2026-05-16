@@ -18,6 +18,8 @@
 
 import { randomUUID } from "node:crypto";
 import { GoalLoop, type GoalEvent, type GoalEventSink } from "../goal";
+import { EightExecutor } from "../goal/executor-eight";
+import { FailoverJudge } from "../goal/judge-failover";
 import type {
 	Budget,
 	ExecutorHandle,
@@ -52,8 +54,9 @@ interface InternalRun {
  * executor + judge handles. The factory is the only place that knows about
  * AgentPool, ModelFailover, and provider selection.
  *
- * Scaffold contract only; concrete factory lives in a follow-up issue
- * (executor wiring is owned by 8EO).
+ * Default impl `DefaultGoalExecutorFactory` wires `EightExecutor` +
+ * `FailoverJudge` against the live agent loop and provider failover chain.
+ * Tests inject their own factory to avoid touching the agent surface.
  */
 export interface GoalExecutorFactory {
 	build(opts: {
@@ -62,6 +65,53 @@ export interface GoalExecutorFactory {
 		executorModelHint?: string;
 		judgeModelHint?: string;
 	}): Promise<{ executor: ExecutorHandle; judge: JudgeHandle }>;
+}
+
+/**
+ * Default factory: real `EightExecutor` + `FailoverJudge`.
+ *
+ * Executor model defaults to "eight-1.0-q3:14b" (the 8gent local default
+ * per repo CLAUDE.md). Judge defaults to "apple-foundationmodel" so the
+ * failover chain prefers apfel/Apple Foundation when available and falls
+ * back to ollama/openrouter otherwise. Per-call hints override both.
+ *
+ * Anti-collusion is enforced inside `FailoverJudge`'s constructor.
+ */
+export class DefaultGoalExecutorFactory implements GoalExecutorFactory {
+	constructor(
+		private readonly defaults: {
+			executorModel?: string;
+			executorRuntime?: "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek";
+			judgeModel?: string;
+		} = {},
+	) {}
+
+	async build(opts: {
+		sessionId: string;
+		goal: string;
+		executorModelHint?: string;
+		judgeModelHint?: string;
+	}): Promise<{ executor: ExecutorHandle; judge: JudgeHandle }> {
+		const executorModel =
+			opts.executorModelHint?.trim() ||
+			this.defaults.executorModel ||
+			"eight-1.0-q3:14b";
+		const executorRuntime = this.defaults.executorRuntime ?? "ollama";
+		const judgeModel =
+			opts.judgeModelHint?.trim() ||
+			this.defaults.judgeModel ||
+			"apple-foundationmodel";
+
+		const executor = new EightExecutor({
+			model: executorModel,
+			runtime: executorRuntime,
+		});
+		const judge = new FailoverJudge({
+			executorModel,
+			judgeModel,
+		});
+		return { executor, judge };
+	}
 }
 
 /**
@@ -87,7 +137,11 @@ export class FanoutEventSink implements GoalEventSink {
 // ---- Manager ---------------------------------------------------------------
 
 export interface GoalManagerDeps {
-	factory: GoalExecutorFactory;
+	/**
+	 * Optional. If omitted, `DefaultGoalExecutorFactory` is used (real
+	 * `EightExecutor` + `FailoverJudge`). Tests inject a mock factory.
+	 */
+	factory?: GoalExecutorFactory;
 	/** Called with every event for every run. Useful for daemon-wide logging. */
 	onEvent?: GoalEventListener;
 	/** Optional override (tests). */
@@ -96,8 +150,11 @@ export interface GoalManagerDeps {
 
 export class GoalManager {
 	private readonly runs = new Map<string, InternalRun>();
+	private readonly factory: GoalExecutorFactory;
 
-	constructor(private readonly deps: GoalManagerDeps) {}
+	constructor(private readonly deps: GoalManagerDeps) {
+		this.factory = deps.factory ?? new DefaultGoalExecutorFactory();
+	}
 
 	listIds(): string[] {
 		return Array.from(this.runs.keys());
@@ -114,7 +171,7 @@ export class GoalManager {
 		if (!input.goal?.trim()) throw new Error("goal required");
 
 		const runId = `g_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
-		const { executor, judge } = await this.deps.factory.build({
+		const { executor, judge } = await this.factory.build({
 			sessionId: input.sessionId,
 			goal: input.goal,
 			executorModelHint: input.executorModelHint,
