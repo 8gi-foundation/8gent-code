@@ -37,6 +37,12 @@ const DEFAULT_URLS: Record<ProviderName, string> = {
  * allow 1000 calls/day but have per-minute rate limits.
  */
 export function createModel(config: ProviderConfig): LanguageModel {
+	if (!config.model || typeof config.model !== "string") {
+		throw new Error(
+			`createModel called without a model id for provider "${config.name}". ` +
+				`Pass { name, model } — got model=${JSON.stringify(config.model)}.`,
+		);
+	}
 	const baseURL = config.baseURL || DEFAULT_URLS[config.name];
 	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
 
@@ -83,7 +89,7 @@ export function createModel(config: ProviderConfig): LanguageModel {
  * Use exponential backoff: 2s, 4s, 8s, 16s, 32s across 8 attempts.
  */
 export function getRetryConfig(config: ProviderConfig): { maxRetries: number } {
-	const isFreeModel = config.model.includes(":free");
+	const isFreeModel = typeof config.model === "string" && config.model.includes(":free");
 	return { maxRetries: isFreeModel ? 8 : 3 };
 }
 

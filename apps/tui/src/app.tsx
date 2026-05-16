@@ -278,12 +278,14 @@ function loadProviderSettings(): { provider: string; model: string } {
 		if (fs.existsSync(settingsPath)) {
 			const data = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
 			return {
-				provider: data.activeProvider || "ollama",
+				provider: data.activeProvider || "",
 				model: data.activeModel || "",
 			};
 		}
 	} catch {}
-	return { provider: "ollama", model: "" };
+	// Leave empty so `detectBestLocalProvider()` runs and picks an actually
+	// installed runtime instead of forcing ollama on machines without it.
+	return { provider: "", model: "" };
 }
 
 /**
@@ -338,7 +340,10 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 		}
 	}
 
-	return { provider: "ollama", model: "" };
+	// No local provider answered. Default to OpenRouter free tier so a fresh
+	// Windows / Linux install boots into a working state instead of pointing
+	// at an ollama that isn't there.
+	return { provider: "openrouter", model: "auto:free" };
 }
 
 loadEnvFile();
