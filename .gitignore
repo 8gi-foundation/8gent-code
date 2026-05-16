@@ -38,6 +38,7 @@ coverage/
 *.db
 *.db-journal
 *.db-wal
+*.db-shm
 
 # Research outputs (keep structure, ignore data)
 research-results.tsv
