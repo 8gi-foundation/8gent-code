@@ -1,5 +1,5 @@
 /**
- * @8gent/goal - Goal-loop orchestrator for the /go feature.
+ * @8gent/goal - Goal-loop orchestrator for the /goal feature.
  *
  * Public surface. Everything here is pure logic. I/O (provider calls,
  * SQLite, websocket fan-out) is the daemon layer's job - this package

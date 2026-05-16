@@ -1,5 +1,5 @@
 /**
- * Append-only hash-chained ledger for /go runs.
+ * Append-only hash-chained ledger for /goal runs.
  *
  * On-disk format: JSONL at `<baseDir>/<runId>/ledger.jsonl`.
  *
@@ -149,7 +149,7 @@ export class Ledger {
 
 	/**
 	 * Open (or create) a ledger for a run. Throws if the directory is not
-	 * writable - by design we refuse to start a /go run that cannot persist
+	 * writable - by design we refuse to start a /goal run that cannot persist
 	 * its audit log.
 	 */
 	static open(opts: LedgerOpenOptions): Ledger {

@@ -1,4 +1,4 @@
-# /go Downloads-folder demo - reproducible in 60 seconds
+# /goal Downloads-folder demo - reproducible in 60 seconds
 
 **Goal:** a stranger with an M-series Mac runs this in under 60 seconds and gets the same result you saw in the launch video.
 
@@ -9,7 +9,7 @@
 ## The prompt (ONE LINE, paste-ready)
 
 ```
-/go organize my Downloads folder by file type and date, dedupe, surface anything sketchy.
+/goal organize my Downloads folder by file type and date, dedupe, surface anything sketchy.
 ```
 
 That is the entire demo. One slash command, one line, no flags, no setup files.
@@ -18,7 +18,7 @@ That is the entire demo. One slash command, one line, no flags, no setup files.
 
 ## System requirements
 
-You need ONE of the following local stacks. The /go judge will pick whichever is available, in this order.
+You need ONE of the following local stacks. The /goal judge will pick whichever is available, in this order.
 
 1. **macOS 26 on Apple Silicon** (apfel auto-enabled - zero setup, fastest).
 2. **Ollama** running locally with at least one chat model and one judge model pulled:
@@ -45,7 +45,7 @@ npm i -g @8gi-foundation/8gent-code
 8gent
 
 # 0:15  paste the prompt
-/go organize my Downloads folder by file type and date, dedupe, surface anything sketchy.
+/goal organize my Downloads folder by file type and date, dedupe, surface anything sketchy.
 
 # 0:20  watch the LiveFocalStrip
 #       you should see one-line status updates:
@@ -110,10 +110,10 @@ If the local judge is unavailable mid-run, the user sees this, exactly:
 ```
 Local judge unavailable.
 This run is paused, not failed.
-Resume with cloud judge (opt-in, your keys):  /go resume --cloud-judge
-Resume when local is back:                    /go resume
-Abort and keep what changed:                  /go stop
-Abort and roll back:                          /go stop --rollback
+Resume with cloud judge (opt-in, your keys):  /goal resume --cloud-judge
+Resume when local is back:                    /goal resume
+Abort and keep what changed:                  /goal stop
+Abort and roll back:                          /goal stop --rollback
 ```
 
 What this is NOT:
@@ -162,7 +162,7 @@ If `grep` returns anything, the demo was tainted by cloud. Discard the take and 
 ## Backup demo (AIDHD essay companion)
 
 ```
-/go triage my inbox by importance and draft replies.
+/goal triage my inbox by importance and draft replies.
 ```
 
 Same shape. Different surface. Pulls from Mail.app via system Mail access (must be granted on first run via standard macOS prompt). Produces:

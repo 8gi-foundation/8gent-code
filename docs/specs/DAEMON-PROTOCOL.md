@@ -538,7 +538,7 @@ const verifier = new CompositeTokenVerifier([
 
 ## Goal-Loop Methods
 
-The `/go` feature wraps an existing agent session in an outer loop driven by a
+The `/goal` feature wraps an existing agent session in an outer loop driven by a
 separate judge model. RPC methods travel on the default gateway WebSocket
 (same channel as `prompt` and `session:*`). All goal-loop messages share a
 `goal.*` type prefix. Implementation: `packages/goal/` (pure logic),

@@ -1,10 +1,10 @@
 /**
- * End-to-end /go demo.
+ * End-to-end /goal demo.
  *
  * Wires GoalLoop + EightExecutor + FailoverJudge to real local models, sets
  * a measurable goal, runs the loop, verifies the side effect.
  *
- * Bar: `/go "create /tmp/eight-test.txt with content 'works'"` must close
+ * Bar: `/goal "create /tmp/eight-test.txt with content 'works'"` must close
  * the loop AND produce the file. Anything else is not shipped.
  */
 
@@ -100,7 +100,7 @@ async function main() {
 	console.log("PASS: file created with correct content");
 	console.log("==============================================\n");
 
-	console.log("[demo] /go end-to-end VERIFIED");
+	console.log("[demo] /goal end-to-end VERIFIED");
 	process.exit(0);
 }
 

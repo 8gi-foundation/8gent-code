@@ -1,17 +1,17 @@
-# /go Eval Set
+# /goal Eval Set
 
 Status: v1 (locked 2026-05-16)
 Owner: 8PO (Samantha)
 Source of truth: `go-task-set-v1.jsonl`
 Cross-reference: epic #2605, sub-issue #2607, boardroom minutes `2026-05-16-go-feature.md`
 
-The eval set is the only thing that decides whether `/go` shipped a working product on Friday 2026-05-22. Twenty tasks. Deterministic verification. No "looks right" judgments.
+The eval set is the only thing that decides whether `/goal` shipped a working product on Friday 2026-05-22. Twenty tasks. Deterministic verification. No "looks right" judgments.
 
 ---
 
 ## Why this exists
 
-The /go loop's success metric is local-only completion rate >= 60% on a fixed task set, measured week 1 post-ship. The kill criterion is judge-vs-human agreement >= 70% on day 3 (30 sampled trajectories from this set). Without a locked set, both metrics are meaningless.
+The /goal loop's success metric is local-only completion rate >= 60% on a fixed task set, measured week 1 post-ship. The kill criterion is judge-vs-human agreement >= 70% on day 3 (30 sampled trajectories from this set). Without a locked set, both metrics are meaningless.
 
 The set is also our defense against scope creep. If a feature proposal during week 1 doesn't move a number on this set, it doesn't ship.
 
@@ -55,7 +55,7 @@ Walk-away tasks (>5 min wall-clock): 6. These stress the loop's ability to run u
 bun run eval:go --task go-001
 ```
 
-This invokes the daemon with the task's goal, lets `/go` run to terminal state or budget exhaustion, then runs the task's `verification.check` command. Pass/fail is binary.
+This invokes the daemon with the task's goal, lets `/goal` run to terminal state or budget exhaustion, then runs the task's `verification.check` command. Pass/fail is binary.
 
 ### Full sweep
 
