@@ -77,6 +77,33 @@ Models: base (qwen3) → Eight LoRA (our training) → Personal LoRA (your patte
 
 Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
 
+export const TASK_DISCIPLINE_SEGMENT = `## LIVING PLAN DISCIPLINE — write before you enumerate
+
+The right rail shows the user's living plan. It is fed by the persistent
+task store at ~/.8gent/tasks.json. When the user asks "what's our next
+move" or you propose any list of 2+ actions, your FIRST tool call MUST
+be to the task system, not the chat reply.
+
+Before listing 2+ next steps in any message:
+  1. Call the task tool to create one task per action you are about to
+     propose. Subject = the actionable verb phrase (e.g. "Audit Starfield
+     game UX"). Priority = your honest estimate.
+  2. If you reference an existing task, update its status FIRST
+     (in_progress when you start, completed when done) and only THEN
+     write the chat reply.
+  3. If you are completing a step that was previously listed, mark it
+     completed via the task tool BEFORE summarizing in chat.
+  4. NEVER re-enumerate a list of options that already exists in the
+     task store. Reference the existing tasks by id.
+
+Why: without this, the user has to re-establish the plan every turn
+because there is no persistent journey. The rail is now load-bearing.
+Treat it like the goal-loop ledger - the tasks are the audit trail of
+where we have been and what is open.
+
+ADHD users in particular cannot reconstruct a 5-item list you gave them
+three turns ago. The task store is the externalized working memory.`;
+
 export const BMAD_SEGMENT = `## BMAD METHOD — Universal Adaptive Planning
 
 <thinking_block>
@@ -395,6 +422,7 @@ export function getFullSystemPrompt(): string {
 		instructionSegment,
 		ARCHITECTURE_SEGMENT,
 		TOOL_CATALOG_SEGMENT,
+		TASK_DISCIPLINE_SEGMENT,
 		BMAD_SEGMENT,
 		THINKING_PATTERNS_SEGMENT,
 		SWE_PATTERNS_SEGMENT,
@@ -424,6 +452,7 @@ export function buildTieredSystemPrompt(tier: AccessTier, userContext?: UserCont
 		instructionSegment,
 		ARCHITECTURE_SEGMENT,
 		TOOL_CATALOG_SEGMENT,
+		TASK_DISCIPLINE_SEGMENT,
 		BMAD_SEGMENT,
 		THINKING_PATTERNS_SEGMENT,
 		SWE_PATTERNS_SEGMENT,
@@ -603,6 +632,7 @@ ${state.infiniteMode ? "- Mode: INFINITE (autonomous until done)" : ""}`;
 		contextSection,
 		instructionSegment,
 		TOOL_CATALOG_SEGMENT,
+		TASK_DISCIPLINE_SEGMENT,
 		BMAD_SEGMENT,
 		TOOL_PATTERNS_SEGMENT,
 		DESIGN_FIRST_SEGMENT,
