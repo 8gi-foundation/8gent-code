@@ -1,11 +1,11 @@
 /**
- * @8gent/eyes — `extract_video` tool handler (VIDEO-INGESTION spec §6).
+ * @8gent/eyes - `extract_video` tool handler (VIDEO-INGESTION spec §6).
  *
  * Orchestrates the video-ingestion pipeline:
- *   1. Capability gate (off by default — spec §11).
+ *   1. Capability gate (off by default, spec §11).
  *   2. Path resolution + container sniff (spec §6 step 1-2, §13).
  *   3. Spawn / initialize the Marlin sidecar (spec §4.3).
- *   4. Chunk-and-merge `caption` per window (spec §8) — see chunk-merge.ts
+ *   4. Chunk-and-merge `caption` per window (spec §8): see chunk-merge.ts
  *      for the §8-vs-§5.5 design decision.
  *   5. `transcribe` the whole file once (spec §5.4, §8 step 6).
  *   6. Optional `find` for a natural-language query (spec §5.3).
@@ -149,7 +149,7 @@ export async function extractVideo(
 ): Promise<ExtractVideoResult> {
 	const mode: ExtractVideoMode = args.mode ?? "full";
 
-	// 1. Capability gate (spec §6 step 3, §11) — never silently no-op.
+	// 1. Capability gate (spec §6 step 3, §11): never silently no-op.
 	if (!deps.skipCapabilityCheck) {
 		const cap = checkVideoCapability();
 		if (!cap.installed) {
@@ -186,7 +186,7 @@ export async function extractVideo(
 	for (let attempt = 1; attempt <= 2; attempt++) {
 		try {
 			const extraction = await runWithSidecar(absolutePath, mode, args.query, spawnSpec, deps);
-			// 8. ingest handoff — KG write via packages/memory/video-extractor.ts (#2633).
+			// 8. ingest handoff: KG write via packages/memory/video-extractor.ts (#2633).
 			if (args.ingest) {
 				deps.onProgress?.("Ingesting video into the knowledge graph.");
 				const ingest = await runIngest(extraction, deps);
@@ -197,7 +197,7 @@ export async function extractVideo(
 			lastErr = classifyError(e);
 			// Retry only a process failure, and only once (spec §6 step 9).
 			if (lastErr.kind === "sidecar_failure" && attempt === 1) {
-				deps.onProgress?.("Marlin sidecar crashed — restarting once and retrying.");
+				deps.onProgress?.("Marlin sidecar crashed, restarting once and retrying.");
 				continue;
 			}
 			break;
@@ -219,7 +219,7 @@ async function runWithSidecar(
 ): Promise<VideoExtraction> {
 	const client = await MarlinSidecarClient.start(spawnSpec);
 	try {
-		// initialize (spec §4.3 step 3) — slow on first run.
+		// initialize (spec §4.3 step 3): slow on first run.
 		const init = await client.request<InitializeResult>("initialize");
 
 		// Probe duration via `health` (spec §5.6). The fake sidecar echoes
