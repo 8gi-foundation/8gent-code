@@ -1,18 +1,18 @@
 /**
- * Tests for video-extractor — knowledge-graph ingestion for video
+ * Tests for video-extractor - knowledge-graph ingestion for video
  * (VIDEO-INGESTION spec 9).
  *
  * What is tested (deterministic plumbing + fusion, per the honest constraints):
- *  1. intervalsOverlap — interval-intersection math.
- *  2. fuseTimeline — overlapping event+segment fuse; non-overlapping stay alone;
+ *  1. intervalsOverlap - interval-intersection math.
+ *  2. fuseTimeline - overlapping event+segment fuse; non-overlapping stay alone;
  *     every event and segment appears exactly once; modality tagging.
- *  3. extractFromVideo without stage-2 — emits the video entity, one event per
+ *  3. extractFromVideo without stage-2 - emits the video entity, one event per
  *     fused unit, occurs_in, and precedes in timeline order.
- *  4. Provenance metadata — source/videoId/start/end/modality on every
+ *  4. Provenance metadata - source/videoId/start/end/modality on every
  *     emitted node.
- *  5. Stage-2 with a MOCK LLM returning fixed triples — content entities,
+ *  5. Stage-2 with a MOCK LLM returning fixed triples - content entities,
  *     mentions edges, prompt-version stamp; a throwing mock is non-fatal.
- *  6. videoId dedup — re-ingesting the same videoId upserts the video node,
+ *  6. videoId dedup - re-ingesting the same videoId upserts the video node,
  *     does not duplicate it, and bumps mention_count.
  *
  * What is NOT tested: the extraction QUALITY of a real LLM. Stage-2 is mocked.
@@ -185,7 +185,7 @@ describe("extractFromVideo (no stage-2)", () => {
 			expect(m.videoId).toBe("sha256:abc123");
 			expect(typeof m.start).toBe("number");
 			expect(typeof m.end).toBe("number");
-			expect(["visual", "audio", "fused"]).toContain(m.modality);
+			expect(["visual", "audio", "fused"]).toContain(m.modality as string);
 		}
 	});
 

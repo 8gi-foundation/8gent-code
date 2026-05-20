@@ -334,7 +334,7 @@ export async function extractFromVideo(
 			toName: videoId,
 			toType: "video",
 			type: "occurs_in",
-			metadata: provenance(videoId, unit.start, unit.end, unit.modality),
+			metadata: { ...provenance(videoId, unit.start, unit.end, unit.modality) },
 		});
 	}
 
@@ -347,7 +347,7 @@ export async function extractFromVideo(
 			toName: eventNames[i + 1],
 			toType: "event",
 			type: "precedes",
-			metadata: provenance(videoId, cur.start, cur.end, cur.modality),
+			metadata: { ...provenance(videoId, cur.start, cur.end, cur.modality) },
 		});
 	}
 
@@ -442,7 +442,7 @@ async function runStage2(
 					toName: e.name,
 					toType: e.type,
 					type: "mentions",
-					metadata: evProv,
+					metadata: { ...evProv },
 				});
 			}
 		}
