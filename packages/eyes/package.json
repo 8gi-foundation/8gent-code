@@ -25,7 +25,8 @@
 		"test": "bun test"
 	},
 	"dependencies": {
-		"@8gent/audit": "workspace:*"
+		"@8gent/audit": "workspace:*",
+		"@8gent/memory": "workspace:*"
 	},
 	"devDependencies": {
 		"typescript": "^5.3.0"

@@ -24,7 +24,9 @@ export type EntityType =
 	| "decision"
 	| "concept"
 	| "preference"
-	| "tool";
+	| "tool"
+	| "video" // VIDEO-INGESTION spec 9.4: a source video, keyed by videoId
+	| "event"; // VIDEO-INGESTION spec 9.4: a timestamped moment within a video
 
 export type RelationshipType =
 	| "depends_on"
@@ -34,7 +36,10 @@ export type RelationshipType =
 	| "prefers"
 	| "uses"
 	| "contains"
-	| "related_to";
+	| "related_to"
+	| "occurs_in" // VIDEO-INGESTION spec 9.4: event occurs_in video
+	| "precedes" // VIDEO-INGESTION spec 9.4: event precedes event (temporal order)
+	| "mentions"; // VIDEO-INGESTION spec 9.4: event/transcript mentions concept/person
 
 export interface Entity {
 	id: string;
