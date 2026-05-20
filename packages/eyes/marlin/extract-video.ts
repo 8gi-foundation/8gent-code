@@ -139,7 +139,7 @@ export async function extractVideo(
 				error: {
 					kind: "capability_not_installed",
 					message: cap.reason ?? "Video understanding is not installed.",
-					suggestion: "8gent vision install",
+					suggestion: cap.suggestion ?? "8gent vision install",
 				},
 			};
 		}

@@ -65,6 +65,30 @@ describe("resolveVideoPath", () => {
 		if (!r.ok) expect(r.reason).toContain("escapes");
 	});
 
+	test("rejects an absolute path through an escaping symlink", () => {
+		// The model controls the `path` arg. An absolute path is NOT exempt
+		// from the symlink-escape check (spec §6): a symlink that resolves
+		// outside the directory the user named is rejected.
+		const root = mkdtempSync(join(tmpdir(), "marlin-abs-root-"));
+		const outside = mkdtempSync(join(tmpdir(), "marlin-abs-outside-"));
+		const secret = join(outside, "secret.mp4");
+		writeFileSync(secret, Buffer.from([0, 0, 0, 0x18]));
+		const link = join(root, "innocent.mp4");
+		symlinkSync(secret, link);
+		// An ABSOLUTE path through the escaping symlink is rejected.
+		const r = resolveVideoPath(link);
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.reason).toContain("escapes");
+		rmSync(root, { recursive: true, force: true });
+		rmSync(outside, { recursive: true, force: true });
+	});
+
+	test("accepts an absolute path to a real file in its own directory", () => {
+		// A genuine absolute path (no redirecting symlink) is allowed.
+		const r = resolveVideoPath(fx.sampleMp4);
+		expect(r.ok).toBe(true);
+	});
+
 	test("rejects a directory", () => {
 		const r = resolveVideoPath(fx.dir);
 		expect(r.ok).toBe(false);
