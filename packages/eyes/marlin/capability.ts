@@ -59,6 +59,8 @@ export interface CapabilityStatus {
 	venvPresent: boolean;
 	/** Human-readable reason the capability is unavailable, if any. */
 	reason?: string;
+	/** The action that resolves the unavailable state (install vs config). */
+	suggestion?: string;
 }
 
 /** Inspect the install state of the video-ingestion capability. */
@@ -69,15 +71,21 @@ export function checkVideoCapability(): CapabilityStatus {
 		return { installed: true, flagEnabled, venvPresent };
 	}
 	let reason: string;
+	let suggestion: string;
 	if (!flagEnabled && !venvPresent) {
 		reason =
 			"Video understanding is not installed. Run `8gent vision install` to provision the local Marlin sidecar, then it is enabled automatically.";
+		suggestion = "8gent vision install";
 	} else if (!venvPresent) {
 		reason =
 			"Video understanding is enabled in config but the Marlin sidecar venv is missing. Run `8gent vision install` to provision it.";
+		suggestion = "8gent vision install";
 	} else {
+		// venv present, flag off — the fix is a config edit, not a reinstall.
 		reason =
 			"The Marlin sidecar venv is provisioned but video understanding is disabled. Set `vision.videoIngestion` to true in ~/.8gent/config.json (or EIGHT_VIDEO_INGESTION=1).";
+		suggestion =
+			"Set `vision.videoIngestion` to true in ~/.8gent/config.json, or set EIGHT_VIDEO_INGESTION=1.";
 	}
-	return { installed: false, flagEnabled, venvPresent, reason };
+	return { installed: false, flagEnabled, venvPresent, reason, suggestion };
 }

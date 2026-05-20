@@ -9,7 +9,7 @@
  */
 
 import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 export type VideoPathResult = { ok: true; absolutePath: string } | { ok: false; reason: string };
 
@@ -42,22 +42,31 @@ export function resolveVideoPath(input: string, cwd: string = process.cwd()): Vi
 	} catch (e) {
 		return { ok: false, reason: `Cannot resolve path: ${(e as Error).message}` };
 	}
-	const allowedRoot = realpathSync(cwd);
-	// The real target must be inside the allowed root. An absolute path the
-	// user passes directly is allowed; a symlink that escapes the root is not.
-	const escapesRoot = !real.startsWith(`${allowedRoot}/`) && real !== allowedRoot;
+	// Symlink-escape guard (spec §6: "reject traversal and symlink escape").
+	// A relative path must resolve to a real target under `cwd`. An absolute
+	// path must resolve to a real target under its own lexical parent: a
+	// symlink — the file itself, or any chain component — that redirects the
+	// real path out of the directory the user named is an escape. Both cases
+	// are checked; an absolute input is NOT exempt. Roots are passed through
+	// `realpathSync` so platform system symlinks (macOS /tmp -> /private/tmp)
+	// do not trip a false escape.
 	const userGaveAbsolute = isAbsolute(input);
-	if (escapesRoot && !userGaveAbsolute) {
+	const rootInput = userGaveAbsolute ? dirname(joined) : cwd;
+	let allowedRoot: string;
+	try {
+		allowedRoot = realpathSync(rootInput);
+	} catch (e) {
+		return { ok: false, reason: `Cannot resolve directory: ${(e as Error).message}` };
+	}
+	const escapesRoot = !real.startsWith(`${allowedRoot}/`) && real !== allowedRoot;
+	if (escapesRoot) {
 		return {
 			ok: false,
-			reason: `Path escapes the workspace via a symlink or traversal: ${input}`,
+			reason: `Path escapes ${
+				userGaveAbsolute ? "its directory" : "the workspace"
+			} via a symlink or traversal: ${input}`,
 		};
 	}
-	// Even for a user-supplied absolute path, reject if a symlink in the chain
-	// redirects the path elsewhere (the input and its realpath disagree on a
-	// non-cosmetic level). We allow the realpath; the guard above already
-	// blocks relative-path escapes. Absolute inputs are trusted as the user's
-	// explicit choice, per spec §6 ("the user-passed location").
 	let st: ReturnType<typeof statSync>;
 	try {
 		st = statSync(real);
