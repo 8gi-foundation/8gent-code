@@ -1,0 +1,25 @@
+-- 002-kg-video-enums.sql
+-- VIDEO-INGESTION spec 9.4: EntityType / RelationshipType enum extension
+-- for the knowledge-graph video lane (8gent-code#2633).
+--
+-- New EntityType members:        "video", "event"
+-- New RelationshipType members:  "occurs_in", "precedes", "mentions"
+--
+-- DOCUMENTED NO-OP.
+--
+-- The enum extension is purely TypeScript. It requires no schema change
+-- because `knowledge_entities.type` and `knowledge_relationships.type`
+-- are declared `TEXT NOT NULL` with NO CHECK constraint (see graph.ts
+-- initSchema): the column is free-text at the SQLite level and already
+-- accepts any string. Widening a CHECK constraint is therefore not needed.
+--
+-- This file exists so the enum change is traceable in the migrations
+-- history and so a future reviewer who expects a constraint finds the
+-- rationale here rather than assuming the migration was forgotten.
+--
+-- If a CHECK constraint is ever added to the `type` columns, this
+-- migration must be revisited to widen it (SQLite has no ALTER ... DROP
+-- CONSTRAINT; widening means a table rebuild). It is not added today
+-- because the existing schema is intentionally free-text.
+
+-- Intentionally no DDL. See header.
