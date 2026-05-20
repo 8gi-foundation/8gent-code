@@ -118,6 +118,19 @@ export {
 // ── Health, Checkpointing, Contradictions ────────────────────────────
 export { memoryHealth, type MemoryHealth } from "./health.js";
 export { checkpoint, rollback, listCheckpoints } from "./checkpoint.js";
+// Knowledge-graph enums (VIDEO-INGESTION spec 9.4) and the video lane (#2633).
+export type { EntityType, RelationshipType } from "./graph.js";
+export {
+	extractFromVideo,
+	fuseTimeline,
+	intervalsOverlap,
+	ingestVideoToGraph,
+	type VideoExtractorOptions,
+	type VideoTripleExtractorFn,
+	type VideoIngestResult,
+	type VideoModality,
+	type VideoProvenance,
+} from "./video-extractor.js";
 export {
 	detectContradictions,
 	resolveContradiction,

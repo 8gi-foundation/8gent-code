@@ -1,17 +1,17 @@
 /**
- * @8gent/eyes — `extract_video` tool handler (VIDEO-INGESTION spec §6).
+ * @8gent/eyes - `extract_video` tool handler (VIDEO-INGESTION spec §6).
  *
  * Orchestrates the video-ingestion pipeline:
- *   1. Capability gate (off by default — spec §11).
+ *   1. Capability gate (off by default, spec §11).
  *   2. Path resolution + container sniff (spec §6 step 1-2, §13).
  *   3. Spawn / initialize the Marlin sidecar (spec §4.3).
- *   4. Chunk-and-merge `caption` per window (spec §8) — see chunk-merge.ts
+ *   4. Chunk-and-merge `caption` per window (spec §8): see chunk-merge.ts
  *      for the §8-vs-§5.5 design decision.
  *   5. `transcribe` the whole file once (spec §5.4, §8 step 6).
  *   6. Optional `find` for a natural-language query (spec §5.3).
  *   7. Assemble a `VideoExtraction` (spec §7).
- *   8. On `ingest: true`, hand off to video-extractor.ts — NOT built here
- *      (#2633), so a clearly-marked TODO is left.
+ *   8. On `ingest: true`, hand off to `@8gent/memory/video-extractor` (#2633)
+ *      for stage-2 triple extraction and knowledge-graph write.
  *   9. Sidecar crash → restart once, retry, then a structured error with
  *      the stderr tail (spec §6 step 9, §13).
  *
@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 
+import type { VideoExtractorOptions, VideoIngestResult } from "@8gent/memory/video-extractor";
 import type { TranscriptSegment, VideoEvent, VideoExtraction, VideoSpan } from "../types.js";
 import { checkVideoCapability, marlinVenvPython } from "./capability.js";
 import {
@@ -53,6 +54,16 @@ export interface ExtractVideoArgs {
 	ingest?: boolean;
 }
 
+/**
+ * Ingest hook for `ingest: true`. Takes a `VideoExtraction` and writes it into
+ * the knowledge graph via `packages/memory/video-extractor.ts` (#2633). It is
+ * a dependency so the tool stays testable without a memory database: a test
+ * passes a fake hook, production wires `ingestVideoToGraph`.
+ */
+export type VideoIngestHook = (
+	extraction: VideoExtraction,
+) => Promise<VideoIngestResult> | VideoIngestResult;
+
 /** Hooks for testing: lets a test inject a fake sidecar + cwd. */
 export interface ExtractVideoDeps {
 	/** How to spawn the sidecar. Default: the provisioned venv. */
@@ -63,10 +74,18 @@ export interface ExtractVideoDeps {
 	skipCapabilityCheck?: boolean;
 	/** Progress sink for per-window chunk progress (spec §8). */
 	onProgress?: (msg: string) => void;
+	/**
+	 * Knowledge-graph ingest hook for `ingest: true`. If omitted, the tool
+	 * lazily wires the default graph + `ingestVideoToGraph` from
+	 * `@8gent/memory/video-extractor`.
+	 */
+	ingestHook?: VideoIngestHook;
+	/** Stage-2 LLM extractor passed through to the default ingest hook. */
+	ingestOptions?: VideoExtractorOptions;
 }
 
 export type ExtractVideoResult =
-	| { ok: true; extraction: VideoExtraction }
+	| { ok: true; extraction: VideoExtraction; ingest?: VideoIngestResult }
 	| { ok: false; error: ExtractVideoError };
 
 export interface ExtractVideoError {
@@ -130,7 +149,7 @@ export async function extractVideo(
 ): Promise<ExtractVideoResult> {
 	const mode: ExtractVideoMode = args.mode ?? "full";
 
-	// 1. Capability gate (spec §6 step 3, §11) — never silently no-op.
+	// 1. Capability gate (spec §6 step 3, §11): never silently no-op.
 	if (!deps.skipCapabilityCheck) {
 		const cap = checkVideoCapability();
 		if (!cap.installed) {
@@ -167,22 +186,18 @@ export async function extractVideo(
 	for (let attempt = 1; attempt <= 2; attempt++) {
 		try {
 			const extraction = await runWithSidecar(absolutePath, mode, args.query, spawnSpec, deps);
-			// 8. ingest handoff — built by #2633, not here.
+			// 8. ingest handoff: KG write via packages/memory/video-extractor.ts (#2633).
 			if (args.ingest) {
-				// TODO(#2633): call into packages/memory/video-extractor.ts to run
-				// stage-2 triple extraction and write `video`/`event` nodes into the
-				// knowledge graph. The VideoExtraction below is the exact input that
-				// `video-extractor.ts` consumes; this handler does not build it.
-				deps.onProgress?.(
-					"ingest:true requested — knowledge-graph write is pending video-extractor.ts (#2633).",
-				);
+				deps.onProgress?.("Ingesting video into the knowledge graph.");
+				const ingest = await runIngest(extraction, deps);
+				return { ok: true, extraction, ingest };
 			}
 			return { ok: true, extraction };
 		} catch (e) {
 			lastErr = classifyError(e);
 			// Retry only a process failure, and only once (spec §6 step 9).
 			if (lastErr.kind === "sidecar_failure" && attempt === 1) {
-				deps.onProgress?.("Marlin sidecar crashed — restarting once and retrying.");
+				deps.onProgress?.("Marlin sidecar crashed, restarting once and retrying.");
 				continue;
 			}
 			break;
@@ -204,7 +219,7 @@ async function runWithSidecar(
 ): Promise<VideoExtraction> {
 	const client = await MarlinSidecarClient.start(spawnSpec);
 	try {
-		// initialize (spec §4.3 step 3) — slow on first run.
+		// initialize (spec §4.3 step 3): slow on first run.
 		const init = await client.request<InitializeResult>("initialize");
 
 		// Probe duration via `health` (spec §5.6). The fake sidecar echoes
@@ -275,6 +290,49 @@ async function runWithSidecar(
 		await client.stop().catch(() => {
 			/* best-effort shutdown */
 		});
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge-graph ingest (spec §6 step 8, §9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the `ingest: true` handoff. Uses the injected `ingestHook` when present
+ * (the test path). Otherwise it lazily opens the global memory database and
+ * calls `ingestVideoToGraph` from `@8gent/memory/video-extractor`. The memory
+ * package is imported dynamically so a build that never sets `ingest: true`
+ * does not eagerly load the SQLite-backed graph.
+ */
+async function runIngest(
+	extraction: VideoExtraction,
+	deps: ExtractVideoDeps,
+): Promise<VideoIngestResult> {
+	if (deps.ingestHook) {
+		return deps.ingestHook(extraction);
+	}
+
+	const { Database } = await import("bun:sqlite");
+	const os = await import("node:os");
+	const path = await import("node:path");
+	const fs = await import("node:fs");
+	const { KnowledgeGraph } = await import("@8gent/memory");
+	const { ingestVideoToGraph } = await import("@8gent/memory/video-extractor");
+
+	const dbPath = path.join(
+		process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"),
+		"memory",
+		"memory.db",
+	);
+	fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+	const db = new Database(dbPath, { create: true });
+	try {
+		db.run("PRAGMA journal_mode=WAL");
+		const graph = new KnowledgeGraph(db);
+		return await ingestVideoToGraph(graph, extraction, deps.ingestOptions ?? {});
+	} finally {
+		db.close();
 	}
 }
 
@@ -368,5 +426,12 @@ export function formatExtractVideoResult(result: ExtractVideoResult): string {
 		);
 	}
 	lines.push(`videoId: ${e.videoId}`);
+	if (result.ingest) {
+		lines.push(
+			`Ingested into the knowledge graph: ${result.ingest.entitiesCreated} entities, ` +
+				`${result.ingest.relationshipsCreated} relationships` +
+				`${result.ingest.stage2Ran ? " (with triple extraction)" : ""}.`,
+		);
+	}
 	return lines.join("\n");
 }

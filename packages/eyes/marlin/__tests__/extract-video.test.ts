@@ -207,12 +207,48 @@ describe("extractVideo — sidecar crash retry", () => {
 });
 
 describe("extractVideo — ingest handoff", () => {
-	test("ingest:true emits a pending-handoff progress note (video-extractor #2633)", async () => {
+	test("ingest:true calls the injected ingest hook and surfaces its result", async () => {
 		const progress: string[] = [];
 		const d = deps("ok");
 		d.onProgress = (m) => progress.push(m);
+		let hookSawVideoId = "";
+		d.ingestHook = (extraction) => {
+			hookSawVideoId = extraction.videoId;
+			return {
+				videoId: extraction.videoId,
+				entitiesCreated: 5,
+				relationshipsCreated: 4,
+				stage2Ran: false,
+			};
+		};
+
 		const result = await extractVideo({ path: SAMPLE_MP4, ingest: true }, d);
 		expect(result.ok).toBe(true);
-		expect(progress.some((m) => m.includes("pending"))).toBe(true);
+		if (result.ok) {
+			// The hook received the same VideoExtraction the tool assembled.
+			expect(hookSawVideoId).toBe(result.extraction.videoId);
+			expect(result.ingest).toBeDefined();
+			expect(result.ingest?.entitiesCreated).toBe(5);
+			expect(result.ingest?.relationshipsCreated).toBe(4);
+		}
+		expect(progress.some((m) => m.includes("knowledge graph"))).toBe(true);
+	});
+
+	test("ingest:false does not invoke the ingest hook", async () => {
+		const d = deps("ok");
+		let hookCalled = false;
+		d.ingestHook = (extraction) => {
+			hookCalled = true;
+			return {
+				videoId: extraction.videoId,
+				entitiesCreated: 0,
+				relationshipsCreated: 0,
+				stage2Ran: false,
+			};
+		};
+		const result = await extractVideo({ path: SAMPLE_MP4 }, d);
+		expect(result.ok).toBe(true);
+		expect(hookCalled).toBe(false);
+		if (result.ok) expect(result.ingest).toBeUndefined();
 	});
 });

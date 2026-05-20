@@ -29,6 +29,10 @@
 		"./sqlite-vec": {
 			"import": "./sqlite-vec.ts",
 			"types": "./sqlite-vec.ts"
+		},
+		"./video-extractor": {
+			"import": "./video-extractor.ts",
+			"types": "./video-extractor.ts"
 		}
 	},
 	"scripts": {
@@ -36,6 +40,7 @@
 		"bench": "bun run bench/vec-search.ts"
 	},
 	"dependencies": {
+		"@8gent/eyes": "workspace:*",
 		"sqlite-vec": "^0.1.9"
 	},
 	"devDependencies": {
