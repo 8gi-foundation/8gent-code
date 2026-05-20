@@ -1,0 +1,44 @@
+[project]
+name = "marlin-sidecar"
+version = "0.1.0"
+description = "Marlin+Whisper video understanding sidecar for 8gent-code (packages/eyes/marlin)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+
+# Spec: docs/specs/VIDEO-INGESTION.md section 11.
+# These are the inference dependencies. They are heavy (~2.5GB of wheels)
+# and are only installed when the user opts into the video capability via
+# `8gent vision install`, which provisions a uv-managed venv under
+# ~/.8gent/venvs/marlin/. A fresh npm install of 8gent-code carries no Python.
+dependencies = [
+    "transformers>=5.7.0",
+    "torch>=2.11.0",
+    "torchcodec",
+    "qwen-vl-utils>=0.0.14",
+    "av",
+    "pillow",
+    "mlx-whisper",
+]
+
+[project.optional-dependencies]
+# Test dependencies only. The unit suite runs the protocol, error codes,
+# chunk-and-merge math and lifecycle against a mock model, so it does NOT
+# require torch, transformers, or any model weights.
+test = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+marlin = "marlin_sidecar.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["marlin_sidecar"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
