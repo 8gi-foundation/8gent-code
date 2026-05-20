@@ -26,12 +26,12 @@ export interface Frame {
 	id: string;
 	path: string;
 	buffer?: Buffer;
-	width: number;          // logical (DPI-independent) pixels per §8.1
-	height: number;         // logical
+	width: number; // logical (DPI-independent) pixels per §8.1
+	height: number; // logical
 	displayId: number;
 	capturedAt: number;
-	scale: number;          // backing scale factor (e.g. 2 on retina). raw_pixels = width * scale.
-	platform: "darwin" | "win32" | "linux";  // for cross-platform locator dispatch per §8.5
+	scale: number; // backing scale factor (e.g. 2 on retina). raw_pixels = width * scale.
+	platform: "darwin" | "win32" | "linux"; // for cross-platform locator dispatch per §8.5
 }
 
 export interface AnnotatedElement {
@@ -129,4 +129,55 @@ export interface BackendOpts {
 	binaryPath?: string;
 	modelHint?: string;
 	tracePath?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Video extraction (VIDEO-INGESTION spec §7)
+//
+// These types are the frozen contract between the `extract_video` tool
+// (#2632) and `packages/memory/video-extractor.ts` (#2633). The tool owns
+// and produces a VideoExtraction; the video-extractor consumes it. All times
+// are floating-point seconds, media-relative (0.0 = first frame), never
+// wall-clock.
+// ---------------------------------------------------------------------------
+
+/** A visually observed event with a media-relative time span. */
+export interface VideoEvent {
+	start: number; // seconds, media-relative
+	end: number; // seconds, media-relative
+	description: string; // natural-language, from Marlin
+}
+
+/** A span of transcribed speech. */
+export interface TranscriptSegment {
+	start: number;
+	end: number;
+	text: string;
+	speaker?: string; // reserved; diarization is a future lane, undefined for now
+}
+
+/** A located time span (Marlin find mode). */
+export interface VideoSpan {
+	start: number;
+	end: number;
+}
+
+/** The full structured extraction of one video. */
+export interface VideoExtraction {
+	videoId: string; // content hash (sha256 of file bytes), stable id
+	path: string; // absolute path at extraction time
+	durationSec: number;
+	chunked: boolean; // true if the video exceeded one Marlin window
+	chunkCount: number;
+	scene: string; // overall scene paragraph (merged if chunked)
+	events: VideoEvent[]; // sorted by start, what was seen
+	transcript: TranscriptSegment[]; // sorted by start, what was said
+	find?: {
+		// present only if a query was passed
+		query: string;
+		span: VideoSpan | null;
+		formatOk: boolean;
+	};
+	models: { vision: string; audio: string };
+	generatedAt: number; // epoch ms
 }

@@ -23,8 +23,8 @@ import type {
 	BackendOpts,
 	CaptureOpts,
 	Description,
-	Disposable,
 	DiffOpts,
+	Disposable,
 	Frame,
 	FrameDiff,
 	Locator,
@@ -53,6 +53,10 @@ export type {
 	Point,
 	Predicate,
 	Region,
+	TranscriptSegment,
+	VideoEvent,
+	VideoExtraction,
+	VideoSpan,
 	WaitOpts,
 	WaitResult,
 } from "./types.js";
@@ -113,9 +117,7 @@ export function getEyesBackend(id: string): EyesBackend | undefined {
  * null if nothing is available; callers should surface an actionable install
  * prompt rather than throw.
  */
-export async function selectEyesBackend(
-	preferenceOrder: string[],
-): Promise<EyesBackend | null> {
+export async function selectEyesBackend(preferenceOrder: string[]): Promise<EyesBackend | null> {
 	for (const id of preferenceOrder) {
 		const b = _backends.get(id);
 		if (!b) continue;
@@ -131,10 +133,7 @@ export async function selectEyesBackend(
  *
  * Backends not yet registered are skipped silently.
  */
-export const DEFAULT_FAILOVER: readonly string[] = Object.freeze([
-	"ax-native",
-	"remote-vlm",
-]);
+export const DEFAULT_FAILOVER: readonly string[] = Object.freeze(["ax-native", "remote-vlm"]);
 
 // ---------------------------------------------------------------------------
 // First-party backends + perception-tier API. Re-exported here so consumers
