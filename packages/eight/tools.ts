@@ -92,6 +92,11 @@ import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../
 import { ArtifactStore } from "./artifact-store";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
+import {
+	type ExtractVideoMode,
+	extractVideo,
+	formatExtractVideoResult,
+} from "@8gent/eyes/marlin";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -661,6 +666,41 @@ export class ToolExecutor {
 							},
 						},
 						required: ["path", "query"],
+					},
+				},
+			},
+			// Video ingestion tool (VIDEO-INGESTION spec §6).
+			// Always advertised so the model can discover it; the capability is
+			// OFF BY DEFAULT (spec §11) and the handler returns a structured
+			// "install required" error rather than silently no-opping.
+			{
+				type: "function",
+				function: {
+					name: "extract_video",
+					description:
+						"[VIDEO] Extracts structured information from a video file: a scene summary, timestamped visual events, and a speech transcript. Use to understand screen recordings, demos, meetings, or clips, or to ingest a video into the knowledge graph. Runs fully local on-device. Requires the video-understanding capability to be installed (8gent vision install).",
+					parameters: {
+						type: "object",
+						properties: {
+							path: { type: "string", description: "Path to the video file" },
+							mode: {
+								type: "string",
+								enum: ["full", "visual", "audio"],
+								description:
+									"full = events + transcript (default); visual = events only; audio = transcript only",
+							},
+							query: {
+								type: "string",
+								description:
+									"Optional natural-language event to locate; returns the matching time span",
+							},
+							ingest: {
+								type: "boolean",
+								description:
+									"If true, write the result into the knowledge graph (default false)",
+							},
+						},
+						required: ["path"],
 					},
 				},
 			},
@@ -1246,6 +1286,15 @@ export class ToolExecutor {
 					args.path as string,
 					args.query as string,
 					args.caseSensitive as boolean | undefined,
+				);
+
+			// Video tool (VIDEO-INGESTION spec §6)
+			case "extract_video":
+				return this.handleExtractVideo(
+					args.path as string,
+					args.mode as ExtractVideoMode | undefined,
+					args.query as string | undefined,
+					args.ingest as boolean | undefined,
 				);
 
 			// Notebook tools
@@ -2030,6 +2079,32 @@ export class ToolExecutor {
 			);
 		} catch (err) {
 			return `Error searching PDF: ${err}`;
+		}
+	}
+
+	// ============================================
+	// Video Tool Handler (VIDEO-INGESTION spec §6)
+	// ============================================
+
+	/**
+	 * Run the `extract_video` tool. The capability is off by default; the
+	 * handler in @8gent/eyes/marlin returns a structured install-required
+	 * error when the Marlin sidecar is not provisioned (spec §11).
+	 */
+	private async handleExtractVideo(
+		videoPath: string,
+		mode: ExtractVideoMode | undefined,
+		query: string | undefined,
+		ingest: boolean | undefined,
+	): Promise<string> {
+		try {
+			const result = await extractVideo(
+				{ path: videoPath, mode, query, ingest },
+				{ cwd: this.workingDirectory },
+			);
+			return formatExtractVideoResult(result);
+		} catch (err) {
+			return `Error extracting video: ${err}`;
 		}
 	}
 
