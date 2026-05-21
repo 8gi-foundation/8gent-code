@@ -6,12 +6,11 @@ Subcommands:
   marlin serve   - run the JSON-RPC sidecar on stdio (same as `python -m marlin_sidecar`).
   marlin bench   - benchmark inference latency on a real video.
 
-`marlin bench` is a STUB. It needs real Marlin weights to produce a number,
-and NemoStation/Marlin-2B is a gated HuggingFace repo whose weights cannot
-be downloaded in this build environment. The subcommand wiring, argument
-parsing and report shape are real; the measured numbers are not yet
-obtainable. Per the verify-before-claiming rule, no roadmap line may claim
-"runs locally at X seconds" until this produces a real measurement.
+`marlin bench` loads the real Marlin-2B weights (downloading ~5GB on first
+run) and runs a real caption() pass, reporting cold-load time, caption
+latency, the device used, and whether MPS fell back to CPU. Per the
+verify-before-claiming rule, only a number this command actually measured
+may back a "runs locally at X seconds" roadmap line.
 """
 
 from __future__ import annotations
@@ -29,45 +28,71 @@ def _cmd_serve(_args: argparse.Namespace) -> int:
 
 
 def _cmd_bench(args: argparse.Namespace) -> int:
-    """Benchmark stub. Requires real weights to produce a latency number."""
+    """Load the real Marlin model and report real load + caption latency."""
     print("marlin bench", file=sys.stderr)
     print(f"  video:  {args.video}", file=sys.stderr)
-    print(f"  device: {args.device}", file=sys.stderr)
+    print(f"  device: {args.device} (requested)", file=sys.stderr)
     print("", file=sys.stderr)
 
-    try:
-        from .model import MarlinVideoModel
+    from .model import MarlinVideoModel
 
-        model = MarlinVideoModel()
-        t0 = time.monotonic()
-        model.load(
+    model = MarlinVideoModel()
+
+    # --- Cold load (first run downloads ~5GB of weights). ---
+    print("  loading model (first run downloads weights)...", file=sys.stderr)
+    t0 = time.monotonic()
+    try:
+        info = model.load(
             constants.DEFAULT_VISION_MODEL,
             constants.MARLIN_REVISION,
             constants.DEFAULT_AUDIO_MODEL,
             args.device,
         )
-        load_ms = int((time.monotonic() - t0) * 1000)
-
-        t0 = time.monotonic()
-        probe = model.probe(args.video)
-        model.caption(args.video, 0.0, min(probe.duration_sec, 120.0),
-                      constants.DEFAULT_FPS, constants.MAX_FRAMES,
-                      constants.DEFAULT_MAX_TOKENS)
-        caption_ms = int((time.monotonic() - t0) * 1000)
-
-        print(f"  load:    {load_ms} ms", file=sys.stderr)
-        print(f"  caption: {caption_ms} ms (first 120s window)", file=sys.stderr)
-        return 0
     except Exception as exc:
-        # Expected in any environment without gated weights / a placeholder pin.
-        print(f"  benchmark unavailable: {exc}", file=sys.stderr)
-        print(
-            "  This is a STUB. Real numbers require the gated "
-            "NemoStation/Marlin-2B weights and a non-placeholder "
-            "MARLIN_REVISION pin.",
-            file=sys.stderr,
-        )
+        print(f"  LOAD FAILED: {exc}", file=sys.stderr)
         return 1
+    load_ms = int((time.monotonic() - t0) * 1000)
+
+    print(f"  load:        {load_ms} ms ({load_ms / 1000.0:.1f} s)",
+          file=sys.stderr)
+    print(f"  device:      {info.device}", file=sys.stderr)
+    print(f"  mps_fallback:{info.mps_fallback}", file=sys.stderr)
+    for w in info.warnings:
+        print(f"  warning:     {w}", file=sys.stderr)
+
+    # --- Probe. ---
+    try:
+        probe = model.probe(args.video)
+    except Exception as exc:
+        print(f"  PROBE FAILED: {exc}", file=sys.stderr)
+        return 1
+    print(f"  duration:    {probe.duration_sec:.2f} s", file=sys.stderr)
+
+    # --- Caption the whole file (a single window when <= ~2 min). ---
+    window_end = min(probe.duration_sec, constants.DEFAULT_MAX_CHUNK_SEC)
+    print(f"  captioning 0.0-{window_end:.1f}s ...", file=sys.stderr)
+    t0 = time.monotonic()
+    try:
+        result = model.caption(
+            args.video, 0.0, window_end,
+            constants.DEFAULT_FPS, constants.MAX_FRAMES,
+            constants.DEFAULT_MAX_TOKENS,
+        )
+    except Exception as exc:
+        print(f"  CAPTION FAILED: {exc}", file=sys.stderr)
+        return 1
+    caption_ms = int((time.monotonic() - t0) * 1000)
+
+    print("", file=sys.stderr)
+    print("  === RESULT ===", file=sys.stderr)
+    print(f"  caption latency: {caption_ms} ms ({caption_ms / 1000.0:.1f} s)",
+          file=sys.stderr)
+    print(f"  events:          {len(result.events)}", file=sys.stderr)
+    print(f"  scene:           {result.scene}", file=sys.stderr)
+    for ev in result.events:
+        print(f"    [{ev['start']:.1f}-{ev['end']:.1f}s] {ev['description']}",
+              file=sys.stderr)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="run the JSON-RPC sidecar on stdio")
     serve.set_defaults(func=_cmd_serve)
 
-    bench = sub.add_parser("bench", help="benchmark inference latency (stub)")
+    bench = sub.add_parser("bench", help="benchmark real inference latency")
     bench.add_argument("video", help="path to a video file to benchmark on")
     bench.add_argument("--device", default=constants.DEFAULT_DEVICE,
                        choices=list(constants.VALID_DEVICES))
