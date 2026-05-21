@@ -16,16 +16,19 @@ DEFAULT_AUDIO_MODEL = "mlx-community/whisper-base-mlx"
 # SECURITY (spec section 10): Marlin requires trust_remote_code=True, which
 # executes modeling_marlin.py from the repo. The revision MUST be a specific
 # commit hash, never a moving branch, so an upstream change cannot reach the
-# user without a reviewed PR (8SO-labelled).
+# user without a reviewed PR (8SO-labelled). Any future bump of this hash
+# requires a fresh 8SO review of modeling_marlin.py at the new commit.
 #
-# HONEST CONSTRAINT: NemoStation/Marlin-2B is a GATED repo on HuggingFace.
-# Its weights and trust_remote_code commit hash cannot be fetched in the
-# build environment for this PR. The value below is a deliberate, clearly
-# marked PLACEHOLDER. It MUST be replaced with the real pinned commit hash
-# (after reviewing the diff of modeling_marlin.py) before the sidecar is
-# run against real weights. The model layer raises a clear error if it is
-# asked to load while this placeholder is still in place.
-MARLIN_REVISION = "PLACEHOLDER_PENDING_HF_ACCESS"
+# Pinned 2026-05-21 after an 8SO review of modeling_marlin.py at this commit.
+# Verdict SAFE-TO-PIN: no network calls, no process execution, no filesystem
+# exfiltration; config.json auto_map points only at the reviewed file.
+MARLIN_REVISION = "36bc8fbf6795be21ca2629ce72742e71ac3d9d17"
+
+# Sentinel meaning "no real revision pinned yet". The real model layer
+# refuses to load against this value, so trust_remote_code can never run
+# un-reviewed. Kept after pinning so an old config or an explicit caller
+# that still passes the sentinel fails closed with a clear error.
+PLACEHOLDER_REVISION = "PLACEHOLDER_PENDING_HF_ACCESS"
 
 # --- Device selection (spec section 4.4) ---
 
