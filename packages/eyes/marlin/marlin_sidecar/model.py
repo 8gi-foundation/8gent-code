@@ -19,10 +19,30 @@ Spec: docs/specs/VIDEO-INGESTION.md sections 4, 5.
 from __future__ import annotations
 
 import abc
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import constants, errors
+from . import clip, constants, errors
+
+
+def _apply_video_env() -> None:
+    """Set Marlin's video-preprocessing env vars before transformers loads.
+
+    ``modeling_marlin.py`` documents that ``FORCE_QWENVL_VIDEO_READER``,
+    ``VIDEO_MAX_PIXELS``, ``FPS``, ``FPS_MAX_FRAMES`` and ``FPS_MIN_FRAMES``
+    must be set before the model module is imported, and itself applies them
+    via ``os.environ.setdefault`` at import time. ``setdefault`` is
+    first-writer-wins, so the sidecar sets them here (during ``load``, before
+    any transformers import) to the spec section 12 limits. Per-window
+    ``fps`` / ``maxFrames`` overrides are applied directly to the loaded
+    video processor in ``caption`` - see ``_configure_video_processor``.
+    """
+    os.environ.setdefault("FORCE_QWENVL_VIDEO_READER", "torchcodec")
+    os.environ.setdefault("VIDEO_MAX_PIXELS", "200704")
+    os.environ.setdefault("FPS", str(constants.DEFAULT_FPS))
+    os.environ.setdefault("FPS_MAX_FRAMES", str(constants.MAX_FRAMES))
+    os.environ.setdefault("FPS_MIN_FRAMES", str(constants.MIN_FRAMES))
 
 
 # --- Result dataclasses (shapes mirror the JSON-RPC results in spec section 5) ---
@@ -300,6 +320,11 @@ class MarlinVideoModel(VideoModel):
         t0 = time.monotonic()
         warnings: list[str] = []
 
+        # Set video-preprocessing env vars before transformers (and the gated
+        # modeling_marlin.py) are imported. modeling_marlin uses setdefault,
+        # so the first writer wins - that must be us.
+        _apply_video_env()
+
         try:
             import torch  # type: ignore
         except ImportError as exc:  # pragma: no cover - depends on env
@@ -387,27 +412,148 @@ class MarlinVideoModel(VideoModel):
         finally:
             container.close()
 
+    def _configure_video_processor(self, fps: float, max_frames: int) -> None:
+        """Apply per-window fps / max_frames to the loaded video processor.
+
+        ``modeling_marlin.caption()`` builds inputs via the processor's
+        ``apply_chat_template`` with no per-call sampling args, so the only
+        reliable per-window lever is the video processor's own attributes
+        (``Qwen3VLVideoProcessor.fps`` / ``.max_frames``). transformers reads
+        these at decode time. Setting them here honours the request's
+        ``fps`` / ``maxFrames`` for this window. A no-op if the processor has
+        no ``video_processor`` (older processor layouts).
+        """
+        vproc = getattr(self._processor, "video_processor", None)
+        if vproc is None:
+            return
+        if hasattr(vproc, "fps"):
+            vproc.fps = fps
+        if hasattr(vproc, "max_frames"):
+            vproc.max_frames = int(max_frames)
+        if hasattr(vproc, "min_frames"):
+            vproc.min_frames = constants.MIN_FRAMES
+
     def caption(self, path: str, start_sec: float, end_sec: float, fps: float,
                 max_frames: int, max_tokens: int) -> CaptionResult:  # pragma: no cover
         if not self._loaded:
             raise errors.model_not_loaded()
-        # The concrete generation call depends on modeling_marlin.py, which is
-        # gated and unavailable. This is intentionally left unimplemented
-        # rather than guessed at; it must be filled in once HF access lands.
-        raise errors.internal_error(
-            "MarlinVideoModel.caption is not implemented: real Marlin weights "
-            "and modeling_marlin.py are gated and unavailable in this build. "
-            "Implement against the real model after HF access is granted."
+
+        # modeling_marlin.caption() captions the WHOLE file: it has no window
+        # parameter. For a strict sub-range we physically clip with ffmpeg,
+        # caption the clip, then rebase clip-relative times by +start_sec.
+        probe = self.probe(path)
+        whole_file = clip.is_whole_file(start_sec, end_sec, probe.duration_sec)
+
+        self._configure_video_processor(fps, max_frames)
+
+        clip_path: str | None = None
+        try:
+            caption_path = path
+            if not whole_file:
+                try:
+                    clip_path = clip.cut_window(path, start_sec, end_sec)
+                except RuntimeError as exc:
+                    raise errors.video_decode_failed(str(exc)) from exc
+                caption_path = clip_path
+
+            try:
+                result = self._vision.caption(
+                    caption_path, max_new_tokens=max_tokens,
+                )
+            except RuntimeError as exc:
+                # MPS / CUDA OOM surfaces as a RuntimeError mentioning memory.
+                msg = str(exc).lower()
+                if "out of memory" in msg or "alloc" in msg:
+                    raise errors.out_of_memory(
+                        suggested_fps=max(fps / 2.0, 0.5)
+                    ) from exc
+                raise errors.internal_error(
+                    f"Marlin caption generation failed: {exc}"
+                ) from exc
+        finally:
+            if clip_path is not None:
+                try:
+                    os.unlink(clip_path)
+                except OSError:
+                    pass
+
+        # modeling_marlin returns events as {start, end, description} dicts on
+        # the captioned file's timeline. For a clipped sub-range that timeline
+        # starts at 0, so rebase by +start_sec and clamp end to end_sec.
+        raw_events = [dict(ev) for ev in result.get("events", [])]
+        if whole_file:
+            events = [
+                {
+                    "start": round(float(ev["start"]), 3),
+                    "end": round(min(float(ev["end"]), end_sec), 3),
+                    "description": ev["description"],
+                }
+                for ev in raw_events
+            ]
+        else:
+            events = clip.rebase_to_window(raw_events, start_sec, end_sec)
+
+        return CaptionResult(
+            scene=result.get("scene", ""),
+            events=events,
+            # modeling_marlin does not expose the decoded frame count; report
+            # the window's max_frames ceiling. truncated stays False because
+            # the model never signals downsampling through its public API.
+            frame_count=int(max_frames),
+            truncated=False,
         )
 
     def find(self, path: str, event: str, start_sec: float,
              end_sec: float) -> FindResult:  # pragma: no cover
         if not self._loaded:
             raise errors.model_not_loaded()
-        raise errors.internal_error(
-            "MarlinVideoModel.find is not implemented: real Marlin weights "
-            "are gated and unavailable in this build."
-        )
+
+        probe = self.probe(path)
+        whole_file = clip.is_whole_file(start_sec, end_sec, probe.duration_sec)
+
+        clip_path: str | None = None
+        try:
+            find_path = path
+            if not whole_file:
+                try:
+                    clip_path = clip.cut_window(path, start_sec, end_sec)
+                except RuntimeError as exc:
+                    raise errors.video_decode_failed(str(exc)) from exc
+                find_path = clip_path
+
+            try:
+                result = self._vision.find(find_path, event)
+            except ValueError as exc:
+                # modeling_marlin.find raises ValueError on an empty event.
+                raise errors.invalid_params(str(exc)) from exc
+            except RuntimeError as exc:
+                msg = str(exc).lower()
+                if "out of memory" in msg or "alloc" in msg:
+                    raise errors.out_of_memory(suggested_fps=1.0) from exc
+                raise errors.internal_error(
+                    f"Marlin find generation failed: {exc}"
+                ) from exc
+        finally:
+            if clip_path is not None:
+                try:
+                    os.unlink(clip_path)
+                except OSError:
+                    pass
+
+        # find() returns span as a (start, end) tuple or None, on the
+        # searched file's timeline. Rebase a sub-range span by +start_sec.
+        model_span = result.get("span")
+        if whole_file:
+            if model_span is None:
+                span = None
+            else:
+                s = float(model_span[0])
+                e = min(float(model_span[1]), end_sec)
+                span = {"start": round(min(s, e), 3), "end": round(e, 3)}
+        else:
+            span = clip.rebase_span(model_span, start_sec, end_sec)
+
+        return FindResult(span=span, format_ok=bool(result.get("format_ok")))
 
     def transcribe(self, path: str, language: str,
                     audio_track: int) -> TranscribeResult:  # pragma: no cover
