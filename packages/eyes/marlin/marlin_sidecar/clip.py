@@ -16,6 +16,7 @@ construction, the whole-file detection and the rebasing are pure).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from typing import Any
@@ -60,10 +61,21 @@ def ffmpeg_clip_command(src: str, dst: str, start_sec: float,
     ]
 
 
+def _safe_unlink(path: str) -> None:
+    """Delete ``path`` if present, swallowing OSError."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def cut_window(src: str, start_sec: float, end_sec: float) -> str:
     """Cut [start_sec, end_sec] of ``src`` to a temp mp4 and return its path.
 
-    The caller owns the returned file and must delete it. Raises
+    On success the caller owns the returned file and must delete it. On any
+    failure - ffmpeg exiting non-zero, or ``subprocess.run`` itself raising -
+    this function deletes its own temp file before propagating, so a failed
+    clip never leaks a ``marlin-clip-*.mp4`` into the temp dir. Raises
     ``RuntimeError`` if ffmpeg exits non-zero, with the ffmpeg stderr tail in
     the message so a clip failure is diagnosable.
     """
@@ -73,8 +85,14 @@ def cut_window(src: str, start_sec: float, end_sec: float) -> str:
     handle.close()
     dst = handle.name
     cmd = ffmpeg_clip_command(src, dst, start_sec, end_sec)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except BaseException:
+        # ffmpeg missing, OS error spawning, interrupt - own the cleanup.
+        _safe_unlink(dst)
+        raise
     if proc.returncode != 0:
+        _safe_unlink(dst)
         raise RuntimeError(
             f"ffmpeg clip failed (exit {proc.returncode}): "
             f"{proc.stderr.strip()[-500:]}"
