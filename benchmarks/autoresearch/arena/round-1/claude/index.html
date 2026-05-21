@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>James Spalding - AI Engineer</title>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --ink: #f4f1ea;
+    --muted: #9aa3ad;
+    --accent: #f0a500;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #scene { position: fixed; inset: 0; z-index: 0; }
+  .hero {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 8vw;
+    pointer-events: none;
+  }
+  .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.4rem;
+  }
+  h1 {
+    font-size: clamp(2.6rem, 9vw, 6.4rem);
+    font-weight: 700;
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    margin-top: 1.2rem;
+    font-size: clamp(1rem, 2.4vw, 1.4rem);
+    color: var(--muted);
+    max-width: 34ch;
+  }
+  .cta {
+    pointer-events: auto;
+    margin-top: 2.6rem;
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.95rem 1.7rem;
+    background: var(--accent);
+    color: #0a0d12;
+    font-weight: 600;
+    font-size: 0.98rem;
+    text-decoration: none;
+    border-radius: 999px;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  .cta:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(240,165,0,0.28); }
+  .hint {
+    position: fixed;
+    bottom: 1.6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+    font-size: 0.74rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    opacity: 0.6;
+  }
+  @media (max-width: 640px) { .hero { padding: 0 7vw; } }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<main class="hero">
+  <p class="eyebrow">AI Engineering / Local-First Systems</p>
+  <h1>James Spalding</h1>
+  <p class="subtitle">Building autonomous agents that run on your hardware, learn continuously, and answer to no one but you.</p>
+  <a class="cta" href="#work">See the work &rarr;</a>
+</main>
+<p class="hint">Move your cursor</p>
+
+<script type="module">
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+const canvas = document.getElementById("scene");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0a0d12, 0.07);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
+camera.position.set(0, 0, 7);
+
+// Centerpiece: a faceted icosahedron with a wireframe shell.
+const core = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(1.7, 0),
+  new THREE.MeshStandardMaterial({ color: 0x1b2129, metalness: 0.45, roughness: 0.35, flatShading: true })
+);
+const shell = new THREE.LineSegments(
+  new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(2.05, 0)),
+  new THREE.LineBasicMaterial({ color: 0xf0a500, transparent: true, opacity: 0.55 })
+);
+const centerpiece = new THREE.Group();
+centerpiece.add(core, shell);
+scene.add(centerpiece);
+
+// Particle field for depth.
+const COUNT = 700;
+const positions = new Float32Array(COUNT * 3);
+for (let i = 0; i < COUNT * 3; i++) positions[i] = (Math.random() - 0.5) * 26;
+const stars = new THREE.Points(
+  new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(positions, 3)),
+  new THREE.PointsMaterial({ color: 0x6c7787, size: 0.04 })
+);
+scene.add(stars);
+
+// Lighting: ambient fill + warm key light.
+scene.add(new THREE.AmbientLight(0x404654, 1.1));
+const key = new THREE.DirectionalLight(0xfff0d4, 2.2);
+key.position.set(4, 5, 6);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xf0a500, 0.9);
+rim.position.set(-6, -3, -4);
+scene.add(rim);
+
+// Mouse parallax.
+const pointer = { x: 0, y: 0 };
+function onPointer(x, y) {
+  pointer.x = (x / window.innerWidth) * 2 - 1;
+  pointer.y = (y / window.innerHeight) * 2 - 1;
+}
+window.addEventListener("mousemove", (e) => onPointer(e.clientX, e.clientY));
+window.addEventListener("touchmove", (e) => {
+  if (e.touches[0]) onPointer(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: true });
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+
+let raf;
+const clock = new THREE.Clock();
+function animate() {
+  const t = clock.getElapsedTime();
+  centerpiece.rotation.y += 0.004;
+  centerpiece.rotation.x = Math.sin(t * 0.4) * 0.25;
+  centerpiece.position.y = Math.sin(t * 0.8) * 0.12;
+  stars.rotation.y = t * 0.02;
+  // Ease the camera toward the pointer for parallax.
+  camera.position.x += (pointer.x * 1.1 - camera.position.x) * 0.04;
+  camera.position.y += (-pointer.y * 0.8 - camera.position.y) * 0.04;
+  camera.lookAt(0, 0, 0);
+  renderer.render(scene, camera);
+  raf = requestAnimationFrame(animate);
+}
+animate();
+
+window.addEventListener("beforeunload", () => cancelAnimationFrame(raf));
+</script>
+</body>
+</html>
