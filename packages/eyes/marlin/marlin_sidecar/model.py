@@ -9,11 +9,9 @@ talks to, plus two implementations:
   transformers + MPS and mlx-whisper. It imports torch/transformers lazily
   so that importing this module never drags in the heavy dependencies.
 
-HONEST CONSTRAINT: ``MarlinVideoModel`` cannot be exercised in the build
-environment for this PR. NemoStation/Marlin-2B is a gated HuggingFace repo;
-its weights and the trust_remote_code commit hash are not downloadable here.
-Real inference is unverified. The real load path raises a clear error while
-``MARLIN_REVISION`` is still the placeholder.
+``MARLIN_REVISION`` is pinned to a real, 8SO-reviewed commit. The real load
+path still refuses to load against the ``PLACEHOLDER_REVISION`` sentinel, so
+trust_remote_code never runs un-reviewed if an old config supplies it.
 
 Spec: docs/specs/VIDEO-INGESTION.md sections 4, 5.
 """
@@ -288,15 +286,15 @@ class MarlinVideoModel(VideoModel):
              device: str) -> LoadInfo:
         import time
 
-        # Refuse to load against the placeholder revision. Loading Marlin
+        # Refuse to load against the placeholder sentinel. Loading Marlin
         # requires trust_remote_code=True; without a real reviewed commit
         # pin that would be arbitrary code execution from a moving target.
-        if vision_revision == constants.MARLIN_REVISION:
+        if vision_revision == constants.PLACEHOLDER_REVISION:
             raise errors.internal_error(
-                "MARLIN_REVISION is still the placeholder "
-                f"'{constants.MARLIN_REVISION}'. The real pinned commit hash "
-                "must be set (after an 8SO review of modeling_marlin.py) "
-                "before the real model can be loaded. See constants.py."
+                "vision revision is the placeholder sentinel "
+                f"'{constants.PLACEHOLDER_REVISION}'. A real commit hash must "
+                "be pinned (after an 8SO review of modeling_marlin.py) before "
+                "the real model can be loaded. See constants.py."
             )
 
         t0 = time.monotonic()
