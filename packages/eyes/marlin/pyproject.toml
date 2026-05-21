@@ -14,6 +14,7 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "transformers>=5.7.0",
     "torch>=2.11.0",
+    "torchvision",
     "torchcodec",
     "qwen-vl-utils>=0.0.14",
     "av",
