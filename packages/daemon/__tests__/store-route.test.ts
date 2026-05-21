@@ -30,6 +30,7 @@ import {
 	_evaluateExecForTest,
 	_registerWorkspace,
 } from "../routes/store/fs";
+import { _setGraphStorePath } from "../routes/store/graph";
 import { _setKgStorePath } from "../routes/store/kg";
 import {
 	_resetStoreRoute,
@@ -47,6 +48,7 @@ const WORKSPACE = path.join(TMP, "workspace");
 const AUDIT_DIR = path.join(TMP, "audit");
 const SESSIONS_DIR = path.join(TMP, "sessions");
 const KG_DB = path.join(TMP, "kg.db");
+const GRAPH_DB = path.join(TMP, "graph.db");
 const TOKEN_PATH = path.join(TMP, "server.token");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -74,6 +76,7 @@ beforeAll(() => {
 
 	_setAuditDir(AUDIT_DIR);
 	_setKgStorePath(KG_DB);
+	_setGraphStorePath(GRAPH_DB);
 	_resetStoreRoute();
 	ensureServerToken(TOKEN_PATH);
 	_registerWorkspace("test-ws", WORKSPACE);
@@ -314,6 +317,209 @@ describe("kg.* scope isolation + sensitive-file gate", () => {
 			confirmedNoSecrets: true,
 		});
 		expect(res.error).toBeUndefined();
+		handleStoreClose(ws as never);
+	});
+});
+
+describe("graph.* canonical knowledge graph", () => {
+	test("graph.upsertEntity dedupes within a project", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const a = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-1",
+			type: "concept",
+			name: "Router",
+		});
+		const b = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-1",
+			type: "concept",
+			name: "Router",
+		});
+		expect(a.error).toBeUndefined();
+		expect(b.error).toBeUndefined();
+		const ea = (a.result as { entity: { id: string } }).entity;
+		const eb = (b.result as { entity: { id: string; mentionCount: number } }).entity;
+		expect(ea.id).toBe(eb.id);
+		expect(eb.mentionCount).toBe(2);
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.upsertEntity keeps same-identity entities separate across projects", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const a = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-A",
+			type: "concept",
+			name: "Shared",
+		});
+		const b = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-B",
+			type: "concept",
+			name: "Shared",
+		});
+		const ea = (a.result as { entity: { id: string; projectId: string } }).entity;
+		const eb = (b.result as { entity: { id: string; projectId: string } }).entity;
+		expect(ea.id).not.toBe(eb.id);
+		expect(ea.projectId).toBe("proj-A");
+		expect(eb.projectId).toBe("proj-B");
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.query returns only the requested project's graph", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		// Seed proj-X with two entities + a relationship.
+		const s = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-X",
+			type: "concept",
+			name: "X-Source",
+		});
+		const t = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-X",
+			type: "concept",
+			name: "X-Target",
+		});
+		const sId = (s.result as { entity: { id: string } }).entity.id;
+		const tId = (t.result as { entity: { id: string } }).entity.id;
+		await callRpc(ws, "graph.upsertRelationship", {
+			projectId: "proj-X",
+			sourceId: sId,
+			targetId: tId,
+			type: "related_to",
+		});
+		// Seed proj-Y with an unrelated entity.
+		await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-Y",
+			type: "concept",
+			name: "Y-Only",
+		});
+
+		const x = await callRpc(ws, "graph.query", { projectId: "proj-X" });
+		expect(x.error).toBeUndefined();
+		const xr = x.result as {
+			entities: { name: string }[];
+			relationships: { type: string }[];
+		};
+		expect(xr.entities.map((e) => e.name).sort()).toEqual(["X-Source", "X-Target"]);
+		expect(xr.relationships).toHaveLength(1);
+		expect(xr.relationships[0].type).toBe("related_to");
+
+		const y = await callRpc(ws, "graph.query", { projectId: "proj-Y" });
+		const yr = y.result as { entities: { name: string }[] };
+		expect(yr.entities.map((e) => e.name)).toEqual(["Y-Only"]);
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.subgraph traverses the neighbourhood", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const center = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-sub",
+			type: "concept",
+			name: "Center",
+		});
+		const leaf = await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-sub",
+			type: "concept",
+			name: "Leaf",
+		});
+		const centerId = (center.result as { entity: { id: string } }).entity.id;
+		const leafId = (leaf.result as { entity: { id: string } }).entity.id;
+		await callRpc(ws, "graph.upsertRelationship", {
+			projectId: "proj-sub",
+			sourceId: centerId,
+			targetId: leafId,
+			type: "related_to",
+		});
+
+		const res = await callRpc(ws, "graph.subgraph", {
+			projectId: "proj-sub",
+			entityId: centerId,
+			depth: 1,
+		});
+		expect(res.error).toBeUndefined();
+		const sub = res.result as {
+			entities: { id: string }[];
+			relationships: { id: string }[];
+		};
+		const ids = sub.entities.map((e) => e.id).sort();
+		expect(ids).toEqual([centerId, leafId].sort());
+		expect(sub.relationships).toHaveLength(1);
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.stats reports per-project counts", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-stats",
+			type: "function",
+			name: "fnA",
+		});
+		await callRpc(ws, "graph.upsertEntity", {
+			projectId: "proj-stats",
+			type: "concept",
+			name: "conceptA",
+		});
+		const res = await callRpc(ws, "graph.stats", { projectId: "proj-stats" });
+		expect(res.error).toBeUndefined();
+		const stats = res.result as {
+			entityCount: number;
+			relationshipCount: number;
+			byType: Record<string, number>;
+		};
+		expect(stats.entityCount).toBe(2);
+		expect(stats.byType).toEqual({ function: 1, concept: 1 });
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.* defaults projectId to 'default' when omitted", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const res = await callRpc(ws, "graph.upsertEntity", {
+			type: "tool",
+			name: "default-scoped",
+		});
+		expect(res.error).toBeUndefined();
+		const entity = (res.result as { entity: { projectId: string } }).entity;
+		expect(entity.projectId).toBe("default");
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.upsertEntity rejects missing required fields with -32602", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const noName = await callRpc(ws, "graph.upsertEntity", { type: "concept" });
+		expect(noName.error?.code).toBe(-32602);
+		const noType = await callRpc(ws, "graph.upsertEntity", { name: "x" });
+		expect(noType.error?.code).toBe(-32602);
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.upsertRelationship rejects missing endpoints with -32602", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const res = await callRpc(ws, "graph.upsertRelationship", {
+			sourceId: "ent_x",
+			type: "related_to",
+		});
+		expect(res.error?.code).toBe(-32602);
+		handleStoreClose(ws as never);
+	});
+
+	test("graph.* rejects RPC before handshake", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		const res = await callRpc(ws, "graph.stats", {});
+		expect(res.error?.code).toBe(-32000);
 		handleStoreClose(ws as never);
 	});
 });

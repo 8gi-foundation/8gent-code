@@ -1,12 +1,12 @@
 /**
- * `/store` WebSocket route: JSON-RPC 2.0 over WS for session, kg, and fs.
+ * `/store` WebSocket route: JSON-RPC 2.0 over WS for session, kg, graph, and fs.
  *
  * Auth: capability token. The daemon reads (or generates) a 32-byte hex token
  * at `~/.8gent/server.token`. Clients send a `handshake` frame as the first
  * message containing the token plus an initiator string. Until the handshake
  * succeeds, every JSON-RPC call returns `-32000 unauthorized`.
  *
- * After handshake, callers can dispatch session.*, kg.*, and fs.* methods.
+ * After handshake, callers can dispatch session.*, kg.*, graph.*, and fs.* methods.
  * Notifications (server -> client) are sent for `session.subscribe`.
  */
 
@@ -26,6 +26,13 @@ import {
 	makeNotification,
 	parseRequestFromObject,
 } from "./jsonrpc";
+import {
+	graphQuery,
+	graphStats,
+	graphSubgraph,
+	graphUpsertEntity,
+	graphUpsertRelationship,
+} from "./graph";
 import { kgAdd, kgDelete, kgInspect, kgSearch, kgStatus } from "./kg";
 import {
 	sessionList,
@@ -94,6 +101,11 @@ const HANDLERS: Record<string, JsonRpcHandler> = {
 	"kg.inspect": kgInspect,
 	"kg.delete": kgDelete,
 	"kg.status": kgStatus,
+	"graph.upsertEntity": graphUpsertEntity,
+	"graph.upsertRelationship": graphUpsertRelationship,
+	"graph.query": graphQuery,
+	"graph.subgraph": graphSubgraph,
+	"graph.stats": graphStats,
 	"fs.list": fsList,
 	"fs.read": fsRead,
 	"fs.write": fsWrite,
