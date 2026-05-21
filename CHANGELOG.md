@@ -9,6 +9,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - Instruction loader silently shadowed AGENTS.md
+
+The instruction loader (`packages/eight/instruction-loader.ts`) searched `8GENT.md`, `AGENTS.md`, `CLAUDE.md` in that order with first-match-wins per directory. In any repo carrying both `8GENT.md` and `AGENTS.md` (including this one), `8GENT.md` shadowed `AGENTS.md`, so the vendor-neutral open-standard file was never loaded by the agent.
+
+- **AGENTS.md is now canonical** - reordered the search to `AGENTS.md > 8GENT.md > CLAUDE.md`. The vendor-neutral open standard wins; 8gent is not married to any vendor. `CLAUDE.md` stays a last-resort fallback that loads only when no vendor-neutral file is present, minimizing vendor exposure. Added `instruction-loader.test.ts` locking the priority order and nested-directory merge behavior.
+
 ### Fixed - Windows install blockers (5 bugs)
 
 The npm package shipped with five blocking bugs on Windows that left users stuck right after install. All five fixed.
