@@ -33,6 +33,7 @@ import {
 export type ProviderName =
 	| "8gent"
 	| "ollama"
+	| "lmstudio"
 	| "apple-foundation"
 	| "apfel"
 	| "deepseek"
@@ -235,6 +236,23 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		// Ollama silently strips `reasoning_effort` and has no native thinking
 		// API. Leave empty so the router never tries to forward a thinking
 		// payload that would be discarded.
+		supportedThinkingLevels: [],
+	},
+	lmstudio: {
+		name: "lmstudio",
+		displayName: "LM Studio (Local)",
+		// LM Studio serves an OpenAI-compatible API. Default port 1234.
+		baseUrl: process.env.LMSTUDIO_BASE_URL || "http://localhost:1234/v1",
+		apiKeyEnv: "", // Local, no key — parallels ollama.
+		defaultModel: "google/gemma-4-26b-a4b",
+		models: ["google/gemma-4-26b-a4b"],
+		// Local provider with no API key, enabled by default like ollama.
+		// If the LM Studio server is not running, role calls fail over per
+		// the failover chain rather than blocking startup.
+		enabled: true,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
 		supportedThinkingLevels: [],
 	},
 	"apple-foundation": {
@@ -1007,6 +1025,7 @@ export function resetProviderManager(): void {
 export const PROVIDER_NAMES: ProviderName[] = [
 	"8gent",
 	"ollama",
+	"lmstudio",
 	"openrouter",
 	"groq",
 	"grok",
