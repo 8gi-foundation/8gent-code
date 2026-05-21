@@ -116,6 +116,7 @@ export function lintMemory(db: Database, graph: KnowledgeGraph): LintReport {
 	const broken: BrokenReference[] = [];
 	const allRels = db.prepare("SELECT * FROM knowledge_relationships").all() as Array<{
 		id: string;
+		project_id: string;
 		source_id: string;
 		target_id: string;
 		type: string;
@@ -128,6 +129,7 @@ export function lintMemory(db: Database, graph: KnowledgeGraph): LintReport {
 	for (const row of allRels) {
 		const rel: Relationship = {
 			id: row.id,
+			projectId: row.project_id,
 			sourceId: row.source_id,
 			targetId: row.target_id,
 			type: row.type as any,
