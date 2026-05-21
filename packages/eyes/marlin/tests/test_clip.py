@@ -6,6 +6,12 @@ clip-relative timestamps. The whole-file detection, ffmpeg command shape and
 the rebasing arithmetic are pure and tested here without weights or a decode.
 """
 
+import glob
+import os
+import tempfile
+
+import pytest
+
 from marlin_sidecar import clip
 
 
@@ -110,3 +116,43 @@ def test_rebase_span_clamps_end_to_window_end():
     span = clip.rebase_span((2.0, 999.0), window_start=10.0, window_end=30.0)
     assert span["end"] == 30.0
     assert span["start"] <= span["end"]
+
+
+# --- cut_window cleanup ----------------------------------------------------
+
+
+def test_cut_window_cleans_temp_file_on_ffmpeg_failure(monkeypatch):
+    # An ffmpeg failure must not leak the temp file cut_window created.
+    # A model that repeatedly requests un-clippable ranges would otherwise
+    # slowly fill the temp dir.
+    pattern = os.path.join(tempfile.gettempdir(), "marlin-clip-*.mp4")
+    before = set(glob.glob(pattern))
+
+    class _FailedProc:
+        returncode = 1
+        stderr = "simulated ffmpeg failure"
+
+    monkeypatch.setattr(
+        clip.subprocess, "run", lambda *a, **k: _FailedProc(),
+    )
+    with pytest.raises(RuntimeError, match="ffmpeg clip failed"):
+        clip.cut_window("/nonexistent/src.mp4", 1.0, 5.0)
+
+    after = set(glob.glob(pattern))
+    assert after == before  # no marlin-clip-*.mp4 leaked
+
+
+def test_cut_window_cleans_temp_file_when_subprocess_raises(monkeypatch):
+    # If subprocess.run itself raises (ffmpeg missing), still no leak.
+    pattern = os.path.join(tempfile.gettempdir(), "marlin-clip-*.mp4")
+    before = set(glob.glob(pattern))
+
+    def _boom(*a, **k):
+        raise FileNotFoundError("ffmpeg not found")
+
+    monkeypatch.setattr(clip.subprocess, "run", _boom)
+    with pytest.raises(FileNotFoundError):
+        clip.cut_window("/nonexistent/src.mp4", 1.0, 5.0)
+
+    after = set(glob.glob(pattern))
+    assert after == before
