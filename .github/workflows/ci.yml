@@ -69,10 +69,13 @@ jobs:
 
       - name: Security - secrets scan
         run: |
+          # Test files legitimately contain fake fixtures; gitleaks (the
+          # Secret Detection job) scans them properly with allowlisting.
           FINDINGS=$(grep -rn --include='*.ts' --include='*.json' \
             -E '(API_KEY|SECRET|PASSWORD|PRIVATE_KEY)\s*[:=]\s*"[^"]{8,}' \
             packages/ apps/ bin/ \
-            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.8gent \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.8gent --exclude-dir=__tests__ \
+            --exclude='*.test.ts' \
             2>/dev/null | grep -v 'description\|placeholder\|example\|interface\|type ' || true)
           if [ -n "$FINDINGS" ]; then
             echo "Potential hardcoded secrets found:"
