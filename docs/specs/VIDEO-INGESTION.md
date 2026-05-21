@@ -442,8 +442,8 @@ This section must be signed off by 8SO (Karen) before the sidecar PR merges.
 
 - Marlin window: 240 frames max, 4 frames min, 2.0 fps default, 448x448 max per frame, 2048 gen tokens.
 - Memory: Marlin ~4-5GB BF16 + Whisper-base ~150MB + frame activations. Tight on a 16GB M-series Mac with the frame cap; comfortable on 32GB+.
-- Speed: not yet benchmarked. Expect tens of seconds to a couple of minutes per 2-minute window on M-series, worse where MPS fallback pushes the visual tower onto CPU. **A real benchmark on James's MacBook Pro is a prerequisite before any roadmap line claims "runs locally" - per the verify-before-claiming rule.** A `marlin bench` subcommand produces the number.
-- Cold start: first `initialize` after install pays model load (tens of seconds). Warm calls do not.
+- Speed: first real benchmark on James's MacBook Pro (Apple Silicon, MPS), `marlin bench` against a 20s 640x480 30fps `testsrc` clip: cold model load 86.4s, caption latency 29.8s for the single window (greedy, 2048-token cap, 2.0 fps sampling). The visual tower runs on MPS. This is the only number a "runs locally" roadmap line may cite; longer or denser videos chunk and scale roughly linearly per 2-minute window. A `marlin bench` subcommand reproduces the measurement.
+- Cold start: first `initialize` after install pays model load (~86s measured cold, including the offline weight read from cache). Warm calls do not.
 
 ## 13. Edge cases
 
