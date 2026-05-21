@@ -14,13 +14,13 @@ from marlin_sidecar.model import MarlinVideoModel, MockVideoModel
 
 def test_real_model_refuses_to_load_on_placeholder_revision():
     # Loading Marlin runs trust_remote_code; doing that against the
-    # placeholder pin would be unreviewed code execution. The model must
-    # refuse with a clear internal error.
+    # placeholder sentinel would be unreviewed code execution. The model
+    # must refuse with a clear internal error.
     model = MarlinVideoModel()
     with pytest.raises(RpcError) as excinfo:
         model.load(
             constants.DEFAULT_VISION_MODEL,
-            constants.MARLIN_REVISION,  # the placeholder
+            constants.PLACEHOLDER_REVISION,  # the sentinel, not a real pin
             constants.DEFAULT_AUDIO_MODEL,
             "cpu",
         )
