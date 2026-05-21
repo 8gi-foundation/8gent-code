@@ -144,6 +144,27 @@ export function recommendRoleConfig(models: DetectedModel[]): RoleConfig | null 
 	};
 }
 
+/**
+ * Unload an Ollama model from memory (keep_alive: 0). On a single machine
+ * the local models must time-share RAM rather than co-reside - a resident
+ * 27B model can starve a second large model and cause inference failures.
+ */
+export async function unloadOllamaModel(
+	model: string,
+	baseUrl = OLLAMA_URL,
+): Promise<void> {
+	try {
+		await fetch(`${baseUrl}/api/generate`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model, keep_alive: 0 }),
+			signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+		});
+	} catch {
+		// Best-effort: an unload failure is not fatal to the caller.
+	}
+}
+
 /** Convenience: detect then recommend in one call. */
 export async function recommendFromHost(): Promise<RoleConfig | null> {
 	return recommendRoleConfig(await detectLocalModels());

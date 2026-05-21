@@ -25,6 +25,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRoleConfig, type RoleModelAssignment } from "../../packages/orchestration/role-config";
+import { unloadOllamaModel } from "../../packages/orchestration/local-model-detect";
 
 const ROUND = process.env.ARENA_ROUND ?? "round-2";
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -65,7 +66,9 @@ function log(msg: string): void {
  */
 function designTokens(): { system: string; block: string } {
 	try {
-		const db = new Database(DESIGN_DB, { readonly: true });
+		// Not readonly: bun:sqlite cannot open a WAL-mode DB read-only
+		// (it needs write access to the -shm sidecar). We only read.
+		const db = new Database(DESIGN_DB);
 		// Prefer a minimal/professional system; fall back to any system.
 		const sys = db
 			.query(
@@ -232,13 +235,20 @@ async function main(): Promise<void> {
 	const design = designTokens();
 	log(`design DB: selected '${design.system}'`);
 
-	// Warm both distinct models before the timed workflow.
-	await warm(roles.orchestrator);
-	if (roles.engineer.model !== roles.orchestrator.model) await warm(roles.engineer);
+	// Memory time-sharing: on one machine the local models cannot co-reside
+	// (a resident 27B model starves the next). Free an Ollama model as soon
+	// as its step is done, and warm each model only just before it runs.
+	const freeIfOllama = async (a: RoleModelAssignment): Promise<void> => {
+		if (a.provider === "ollama" || a.provider === "8gent") {
+			log(`unloading ${a.model} to free memory`);
+			await unloadOllamaModel(a.model);
+		}
+	};
 
 	const results: RoleResult[] = [];
 
 	// 1. orchestrator plans (with design tokens in hand).
+	await warm(roles.orchestrator);
 	const plan = await step(
 		"orchestrator",
 		roles.orchestrator,
@@ -251,8 +261,10 @@ async function main(): Promise<void> {
 			),
 		results,
 	);
+	await freeIfOllama(roles.orchestrator); // release before the engineer model loads.
 
 	// 2. engineer writes the code.
+	await warm(roles.engineer);
 	const draftRaw = await step(
 		"engineer",
 		roles.engineer,
@@ -268,6 +280,7 @@ async function main(): Promise<void> {
 	const draft = extractHtml(draftRaw);
 
 	// 3. qa reviews.
+	await warm(roles.qa);
 	const review = await step(
 		"qa",
 		roles.qa,
@@ -280,10 +293,12 @@ async function main(): Promise<void> {
 			),
 		results,
 	);
+	await freeIfOllama(roles.qa); // release before the engineer model runs again.
 
 	// 4. engineer applies fixes.
 	let final = draft;
 	if (review && draft) {
+		await warm(roles.engineer); // re-warm in case the qa model load evicted it.
 		const finalRaw = await step(
 			"engineer-fix",
 			roles.engineer,
