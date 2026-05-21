@@ -16,6 +16,10 @@ dependencies = [
     "torch>=2.11.0",
     "torchvision",
     "torchcodec",
+    # accelerate is required because model.load() places the model with a
+    # `device_map`; transformers raises without it. Spec section 11's wheel
+    # list predates the device_map load path.
+    "accelerate>=1.0.0",
     "qwen-vl-utils>=0.0.14",
     "av",
     "pillow",
