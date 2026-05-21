@@ -9,6 +9,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - Unified instruction files into one source under three names
+
+`AGENTS.md`, `8GENT.md`, and `CLAUDE.md` previously held three different documents that drifted apart - different harnesses read different files and got different instructions.
+
+- **One file, three names** - all unique content (repo dev instructions, the autoresearch dev process, and 8GI ecosystem context) is consolidated into `AGENTS.md`, the vendor-neutral open standard. `8GENT.md` and `CLAUDE.md` are now symlinks to `AGENTS.md`, so any agent harness reads identical instructions regardless of which filename it looks for. Edit `AGENTS.md` only.
+- **Caveat** - the 8GI ecosystem section of `AGENTS.md` is auto-propagated from `8gi-governance`. If that sync overwrites this file, ecosystem-section edits must be made in `8gi-governance`, not here.
+
 ### Fixed - Instruction loader silently shadowed AGENTS.md
 
 The instruction loader (`packages/eight/instruction-loader.ts`) searched `8GENT.md`, `AGENTS.md`, `CLAUDE.md` in that order with first-match-wins per directory. In any repo carrying both `8GENT.md` and `AGENTS.md` (including this one), `8GENT.md` shadowed `AGENTS.md`, so the vendor-neutral open-standard file was never loaded by the agent.
