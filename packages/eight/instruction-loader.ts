@@ -1,8 +1,11 @@
 /**
- * Instruction Loader - Auto-discover and merge 8GENT.md / AGENTS.md / CLAUDE.md
+ * Instruction Loader - Auto-discover and merge AGENTS.md / 8GENT.md / CLAUDE.md
  *
- * Priority order per directory: 8GENT.md > AGENTS.md > CLAUDE.md (first found wins)
- * Merge order: global (~/.8gent/8GENT.md) < project root < cwd (later overrides earlier)
+ * Priority order per directory: AGENTS.md > 8GENT.md > CLAUDE.md (first found wins).
+ * AGENTS.md is the vendor-neutral open standard and is canonical: 8gent is not
+ * married to any vendor, so the open file wins. CLAUDE.md is a last-resort
+ * fallback only - it loads when no vendor-neutral file is present.
+ * Merge order: global (~/.8gent) < project root < cwd (later overrides earlier)
  *
  * @see https://github.com/8gi-foundation/8gent-code/issues/941
  */
@@ -12,7 +15,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /** File names to search for, in priority order (first match per directory wins) */
-const INSTRUCTION_FILES = ["8GENT.md", "AGENTS.md", "CLAUDE.md"] as const;
+const INSTRUCTION_FILES = ["AGENTS.md", "8GENT.md", "CLAUDE.md"] as const;
 
 /**
  * Find the first instruction file in a given directory.
@@ -60,7 +63,7 @@ function walkUp(startDir: string): string[] {
  * Load and merge instruction files for the given working directory.
  *
  * Merge order (later overrides earlier):
- *   1. Global: ~/.8gent/8GENT.md
+ *   1. Global: ~/.8gent/AGENTS.md (or 8GENT.md / CLAUDE.md fallback)
  *   2. Directories from project root down to cwd
  *
  * Returns concatenated content separated by horizontal rules, or empty string

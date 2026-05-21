@@ -411,7 +411,7 @@ export const RULES_SEGMENT = `## CRITICAL RULES
  */
 /** Build full system prompt lazily (reads env vars at call time, not import time) */
 export function getFullSystemPrompt(): string {
-	// Load project-level instruction files (8GENT.md / AGENTS.md / CLAUDE.md)
+	// Load project-level instruction files (AGENTS.md / 8GENT.md / CLAUDE.md)
 	const instructions = loadInstructions(process.cwd());
 	const instructionSegment = instructions ? `## PROJECT INSTRUCTIONS\n\n${instructions}` : "";
 
