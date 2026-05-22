@@ -2393,6 +2393,7 @@ export function App({
 							"  /predict (Ctrl+E) - Show predicted next steps\n" +
 							"  /avenues - Show planned avenues\n" +
 							"  /design [task] - Get design system suggestions\n" +
+							"  /build <task> - Adaptive three-model pipeline (self-correcting)\n" +
 							"  /evidence - Show full evidence breakdown\n" +
 							"  /notes - Open scratchpad notes tab\n" +
 							"  /ideas - Open idea capture tab\n" +
@@ -3762,6 +3763,45 @@ export function App({
 							);
 						}
 					});
+					break;
+				}
+
+				case "build": {
+					// Run the adaptive three-model pipeline on a build task.
+					// Fire-and-forget: progress streams in as system messages so
+					// the TUI stays responsive across the multi-minute run.
+					const buildTask = args.join(" ").trim();
+					if (!buildTask) {
+						addSystemMessage(
+							"Usage: /build <task description>\n" +
+								"Runs the adaptive pipeline: orchestrator -> context -> engineer, " +
+								"deterministically self-correcting around model constraints.",
+						);
+						break;
+					}
+					addSystemMessage(`Adaptive pipeline starting.\ntask: ${buildTask}`);
+					void (async () => {
+						try {
+							const { runAdaptivePipeline } = await import(
+								"../../../packages/orchestration/adaptive-pipeline.js"
+							);
+							const result = await runAdaptivePipeline({
+								task: buildTask,
+								onProgress: (m: string) => addSystemMessage(`  ${m}`),
+							});
+							const outDir = pathMod.join(process.cwd(), "pipeline-output");
+							fs.mkdirSync(outDir, { recursive: true });
+							const outPath = pathMod.join(outDir, "index.html");
+							fs.writeFileSync(outPath, result.artifact || "<!-- no artifact -->");
+							addSystemMessage(
+								`Pipeline ${result.ok ? "ok" : "incomplete"} - ` +
+									`${result.stages.length} stages, ${(result.totalMs / 1000).toFixed(0)}s, ` +
+									`${result.defects.length} defect(s)\nArtifact: ${outPath}`,
+							);
+						} catch (err) {
+							addSystemMessage(`Pipeline failed: ${err}`);
+						}
+					})();
 					break;
 				}
 

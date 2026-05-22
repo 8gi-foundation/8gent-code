@@ -55,7 +55,8 @@ export type SlashCommand =
 	| "eyes"
 	| "handeyes"
 	| "goal"
-	| "subgoal";
+	| "subgoal"
+	| "build";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -234,6 +235,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["d", "ui", "style"],
 		description: "Suggest design systems for current task",
 		usage: "/design [task description]",
+	},
+	{
+		name: "build",
+		aliases: ["b"],
+		description: "Run the adaptive three-model pipeline on a build task",
+		usage: "/build <task description>",
 	},
 	{
 		name: "evidence",
