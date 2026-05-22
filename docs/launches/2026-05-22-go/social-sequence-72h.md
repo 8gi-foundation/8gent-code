@@ -304,4 +304,4 @@ All drafts pre-queued in 8MO mailbox 24h ahead with KittenTTS audio summary for 
 - No purple, pink, magenta, blue-gray in any attached graphics. Accent `#F07A28`.
 - No vendor traces. Day 3 is the only post that names Hermes and Codex. Never Claude, never Anthropic, never OpenAI in any other post.
 - Never imply formal diagnosis if mentioning neurodivergence. James is self-identified AuDHD only.
-- Never reference SIB or any clinical detail about Nicholas.
+- Never reference private medical or clinical detail about family members.

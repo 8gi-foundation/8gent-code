@@ -33,7 +33,7 @@ const SKIP = new Set([
 	"template-skill",
 	"skill-index.json",
 	"no-bullshit.md",
-	"nick-speech-anatomy.md",
+	"speech-anatomy.md",
 	"phoneme-video-generator.md",
 	"suno-music-generator.md",
 	"Suno.md",
