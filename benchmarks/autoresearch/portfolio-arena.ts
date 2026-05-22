@@ -250,6 +250,29 @@ function extractHtml(text: string): string {
 	return (start >= 0 ? body.slice(start) : body).trim();
 }
 
+/**
+ * Programmatic render-readiness check. This is the functional QA gate -
+ * it catches the structural failures an LLM reviewer reads past (a
+ * truncated file, a render loop that is never started). Returns concrete
+ * defect strings that get fed straight into the engineer-fix step.
+ */
+function staticChecks(html: string): string[] {
+	const d: string[] = [];
+	if (!/<\/html>\s*$/i.test(html.trim()))
+		d.push("File is TRUNCATED - it does not end with </html>. Output the COMPLETE file.");
+	if (!/renderer\.render\s*\(/.test(html))
+		d.push("renderer.render() is never called - the 3D scene will never paint. Add it inside the animation loop.");
+	if (!/requestAnimationFrame/.test(html))
+		d.push("No requestAnimationFrame loop.");
+	if (
+		!/\b(animate|init|start|main)\s*\(\s*\)\s*;/.test(html) &&
+		!/new\s+[A-Z]\w*\s*\(/.test(html)
+	)
+		d.push("The animation loop / class is defined but never invoked at top level - nothing starts.");
+	if (!/three@0\.16/.test(html)) d.push("Three.js 0.160 CDN import is missing.");
+	return d;
+}
+
 async function step(
 	name: string,
 	a: RoleModelAssignment,
@@ -362,9 +385,9 @@ async function main(): Promise<void> {
 		() =>
 			callRole(
 				roles.engineer,
-				"You are the engineer. Write complete, correct, runnable code. Output only the file.",
+				"You are the engineer. Write complete, correct, runnable code. The file MUST end with </html>. Output only the file.",
 				`${TASK}\n\nDesign tokens to use:\n${design.block}\n\nEngineer brief:\n${engineerContext}`,
-				8000,
+				16000,
 			),
 		results,
 	);
@@ -388,9 +411,18 @@ async function main(): Promise<void> {
 		await freeIfOllama(roles.qa); // release before the engineer model runs again.
 	}
 
+	// Functional QA gate: programmatic render-readiness checks, merged with
+	// the LLM review. This is what catches the truncation / dead-render-loop
+	// failures the LLM reviewer reads straight past.
+	const draftDefects = staticChecks(draft);
+	if (draftDefects.length > 0) {
+		log(`static checks found ${draftDefects.length} defect(s) in the draft`);
+	}
+	const fullReview = [review, ...(draftDefects.length ? ["Automated render checks (MUST fix):", ...draftDefects] : [])].join("\n");
+
 	// 4. engineer applies fixes.
 	let final = draft;
-	if (review && draft) {
+	if (fullReview.trim() && draft) {
 		await warm(roles.engineer); // re-warm in case the qa model load evicted it.
 		const finalRaw = await step(
 			"engineer-fix",
@@ -398,22 +430,29 @@ async function main(): Promise<void> {
 			() =>
 				callRole(
 					roles.engineer,
-					"You are the engineer. Apply the QA fixes. Output only the complete corrected file.",
-					`${TASK}\n\nCurrent index.html:\n${draft}\n\nQA defects to fix:\n${review}`,
-					8000,
+					"You are the engineer. Apply every fix. Output the COMPLETE corrected file, ending with </html>. Output only the file.",
+					`${TASK}\n\nCurrent index.html:\n${draft}\n\nDefects to fix:\n${fullReview}`,
+					16000,
 				),
 			results,
 		);
 		const fixed = extractHtml(finalRaw);
-		// Accept the fix only if it is a complete document of comparable
-		// size. A fix 10x smaller than the draft is a truncated fragment -
-		// keep the draft (this is what broke Round 5's artifact).
-		if (fixed.length >= draft.length * 0.7 && /<\/html>/i.test(fixed)) {
+		// Pick whichever candidate passes more functional checks; on a tie,
+		// keep the draft unless the fix is a complete, comparably-sized doc.
+		const fixDefects = staticChecks(fixed);
+		const fixComplete = fixed.length >= draft.length * 0.7 && /<\/html>/i.test(fixed);
+		if (fixed.length > 400 && fixDefects.length < draftDefects.length) {
 			final = fixed;
+			log(`fix accepted (${fixDefects.length} defects vs draft ${draftDefects.length})`);
+		} else if (fixComplete && fixDefects.length <= draftDefects.length) {
+			final = fixed;
+			log("fix accepted (complete, no worse than draft)");
 		} else {
-			log(`fix rejected (${fixed.length}ch vs draft ${draft.length}ch) - keeping draft`);
+			log(`fix rejected (${fixed.length}ch, ${fixDefects.length} defects) - keeping draft`);
 		}
 	}
+	const finalDefects = staticChecks(final);
+	log(`final artifact: ${final.length}ch, ${finalDefects.length} static defect(s)`);
 
 	writeFileSync(join(OUT_DIR, "index.html"), final || "<!-- ensemble produced no artifact -->");
 	writeFileSync(
@@ -429,7 +468,9 @@ async function main(): Promise<void> {
 				review,
 				artifactChars: final.length,
 				totalMs: results.reduce((s, r) => s + r.ms, 0),
-				ensembleOk: results.every((r) => r.ok) && final.length > 400,
+				staticDefects: finalDefects,
+				ensembleOk:
+					results.every((r) => r.ok) && final.length > 400 && finalDefects.length === 0,
 			},
 			null,
 			2,
