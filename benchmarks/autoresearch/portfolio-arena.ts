@@ -226,6 +226,15 @@ async function step(
 
 async function main(): Promise<void> {
 	const roles = loadRoleConfig();
+	// Non-destructive engineer override: lets the arena route around a
+	// wedged provider (e.g. LM Studio "Compute error") without rewriting
+	// roles.json. Arena-scoped only; the real harness config is untouched.
+	if (process.env.ARENA_ENGINEER_PROVIDER && process.env.ARENA_ENGINEER_MODEL) {
+		roles.engineer = {
+			provider: process.env.ARENA_ENGINEER_PROVIDER as RoleModelAssignment["provider"],
+			model: process.env.ARENA_ENGINEER_MODEL,
+		};
+	}
 	mkdirSync(OUT_DIR, { recursive: true });
 	log(`Arena ${ROUND} - three-model ensemble`);
 	log(`  orchestrator ${roles.orchestrator.provider}/${roles.orchestrator.model}`);
@@ -261,7 +270,11 @@ async function main(): Promise<void> {
 			),
 		results,
 	);
-	await freeIfOllama(roles.orchestrator); // release before the engineer model loads.
+	// Release only when the engineer uses a different model - no point
+	// unloading then reloading the same one.
+	if (roles.orchestrator.model !== roles.engineer.model) {
+		await freeIfOllama(roles.orchestrator);
+	}
 
 	// 2. engineer writes the code.
 	await warm(roles.engineer);
@@ -293,7 +306,9 @@ async function main(): Promise<void> {
 			),
 		results,
 	);
-	await freeIfOllama(roles.qa); // release before the engineer model runs again.
+	if (roles.qa.model !== roles.engineer.model) {
+		await freeIfOllama(roles.qa); // release before the engineer model runs again.
+	}
 
 	// 4. engineer applies fixes.
 	let final = draft;
