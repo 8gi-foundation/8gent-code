@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>James Spalding | Portfolio</title>
+    <style>
+        :root {
+            /* Design Tokens - Vercel Dark Theme */
+            --accent: hsl(0 0% 5%);
+            --primary: hsl(0 0% 5%);
+            --muted_foreground: hsl(0 0% 40%);
+            --border: hsl(0 0% 90%);
+            --background: hsl(0 0% 0%);
+            --foreground: hsl(0 0% 100%);
+
+            /* Typography */
+            --font-main: "Geist", "Inter", system-ui, -apple-system, sans-serif;
+            --h1: 2.25rem;
+            --h2: 1.875rem;
+            --h3: 1.5rem;
+            --h4: 1.25rem;
+            --h5: 1.125rem;
+            --h6: 1rem;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--background);
+            color: var(--foreground);
+            font-family: var(--font-main);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .overlay {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            pointer-events: none;
+            padding: 0 20px;
+            max-width: 800px;
+        }
+
+        h1 {
+            font-size: var(--h1);
+            font-weight: 700;
+            letter-spacing: -0.05em;
+            margin-bottom: 0.5rem;
+            color: var(--foreground);
+        }
+
+        p {
+            font-size: var(--h4);
+            color: var(--muted_foreground);
+            margin-bottom: 2rem;
+            font-weight: 400;
+        }
+
+        .cta-button {
+            pointer-events: auto;
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: var(--foreground);
+            color: var(--background);
+            text-decoration: none;
+            font-size: var(--h6);
+            font-weight: 500;
+            border-radius: 6px;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+            border: 1px solid var(--foreground);
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2rem; }
+            p { font-size: 1.1rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <main class="overlay">
+        <h1>James Spalding</h1>
+        <p>Creative Developer & Engineer</p>
+        <a href="#" class="cta-button">View Projects</a>
+    </main>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+        class PortfolioScene {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.mouse = new THREE.Vector2(0, 0);
+                this.targetRotation = new THREE.Vector2(0, 0);
+                this.currentRotation = new THREE.Vector2(0, 0);
+                
+                this.initScene();
+                this.initLights();
+                this.initGeometry();
+                this.addEventListeners();
+                this.animate();
+            }
+
+            initScene() {
+                this.scene = new THREE.Scene();
+                
+                this.camera = new THREE.PerspectiveCamera(
+                    75, 
+                    window.innerWidth / window.innerHeight, 
+                    0.1, 
+                    1000
+                );
+                this.camera.position.z = 3;
+
+                this.renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    alpha: true
+                });
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.toneMapping = THREE.ReinhardToneMapping;
+                this.container.appendChild(this.renderer.domElement);
+            }
+
+            initLights() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+                this.scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+                dirLight.position.set(5, 5, 5);
+                this.scene.add(dirLight);
+
+                const pointLight = new THREE.PointLight(0xffffff, 1);
+                pointLight.position.set(-5, -5, 2);
+                this.scene.add(pointLight);
+            }
+
+            initGeometry() {
+                // Using Icosahedron for a clean, geometric aesthetic
+                const geometry = new THREE.IcosahedronGeometry(1, 0);
+                
+                // Neutral, high-quality material (Silver/Chrome look)
+                const material = new THREE.MeshStandardMaterial({
+                    color: 0xffffff,
+                    roughness: 0.1,
+                    metalness: 0.9,
+                    flatShading: true
+                });
+
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.scene.add(this.mesh);
+
+                // Add a wireframe overlay for extra detail
+                const wireframeGeom = new THREE.IcosahedronGeometry(1.02, 0);
+                const wireframeMat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.1
+                });
+                this.wireframe = new THREE.Mesh(wireframeGeom, wireframeMat);
+                this.scene.add(this.wireframe);
+            }
+
+            addEventListeners() {
+                window.addEventListener('resize', () => this.onResize());
+                window.addEventListener('mousemove', (e) => this.onMouseMove(e));
+            }
+
+            onMouseMove(event) {
+                // Normalize mouse coordinates to -1 to +1
+                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                // Set target rotation based on mouse position
+                this.targetRotation.x = this.mouse.y * 0.5;
+                this.targetRotation.y = this.mouse.x * 0.5;
+            }
+
+            onResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                // Smoothly interpolate rotation (lerp)
+                this.currentRotation.x += (this.targetRotation.x - this.currentRotation.x) * 0.05;
+                this.currentRotation.y += (this.targetRotation.y - this.currentRotation.y) * 0.05;
+
+                // Continuous slow rotation
+                const time = Date.now() * 0.0005;
+                this.mesh.rotation.x = this.currentRotation.x + time * 0.2;
+                this.mesh.rotation.y = this.rotationY || 0; // Placeholder for Y axis
+                this.mesh.rotation.z = time * 0.1;
+
+                // Apply mouse-driven rotation to the main mesh and wireframe
+                this.mesh.rotation.x += this.currentRotation.x;
+                this.mesh.rotation.y += this.currentRotation.y;
+                
+                this.wireframe
