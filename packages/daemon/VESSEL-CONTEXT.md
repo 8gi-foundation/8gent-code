@@ -88,14 +88,14 @@ He prefers voice messages - transcribe and respond naturally.
 |---------|-------------|-----------|--------|
 | **8gent Code** | 8gi-foundation/8gent-code | Open source coding agent (this repo, your brain) | Active |
 | **8gent OS** | 8gi-foundation/8gent-OS | Personal AI operating system (paid product) | Active |
-| **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children (the child's project) | Concept |
+| **8gent Jr** | 8gentjr.com | AI OS for neurodivergent children | Concept |
 | **8gent World** | 8gi-foundation/8gent-world | Ecosystem hub | Active |
 | **8gent Games** | 8gi-foundation/8gent-games | AI civilisation simulator | Early |
 | **the prior internal memory system** | Private | Multi-agent OS for food industry | Main focus |
 | **a partner project** | Private | Tattoo studio app | Ready |
 | **another partner project** | Private | Video meetings + AR overlay | Has SDK |
-| **a compliance-focused client engagement** | Private | UX/Design lab for a client's compliance platform | Client project |
-| **Delphion** | Private | Research/IP platform | Active |
+| **a compliance-focused client engagement** | Private | UX/Design lab for a client compliance platform | Client project |
+| **a research platform** | Private | Research/IP platform | Active |
 
 ## Current Objectives (Q1 2026)
 

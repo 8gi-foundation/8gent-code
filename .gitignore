@@ -122,3 +122,9 @@ bin/apple-foundation-bridge/Package.resolved
 # Eyes native AX bridge build artifacts (rebuild with: bun run build:eyes-bridge)
 packages/eyes/native/swift/.build/
 packages/eyes/native/swift/Package.resolved
+
+# adaptive-pipeline outputs - never commit generated artifacts
+pipeline-output/
+benchmarks/autoresearch/arena/round-*/
+*-portfolio/
+celtic_hero_standalone.html

@@ -257,7 +257,7 @@ mem.consolidate("daily")         // Background summarization
 const rep = await mem.getRepresentation("james")
 // -> "James is a full-stack engineer focused on building personal AI systems.
 //     He prefers dark mode, direct communication, and values local-first
-//     architecture. His top priorities are 8gent OS launch and the child's Jr app."
+//     architecture. His top priorities are 8gent OS launch and the Jr app."
 ```
 
 ## Dependencies
