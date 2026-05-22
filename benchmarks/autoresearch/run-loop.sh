@@ -2,7 +2,10 @@
 # 8gent vs Claude Code - Autoresearch Runner
 # Run this in background: nohup ./run-loop.sh &
 
-cd /home/operator/8gent-code
+# Resolve the repo root from this script's own location so the loop runs
+# on any host. The script lives at benchmarks/autoresearch/run-loop.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.." || { echo "Cannot resolve repo root" >&2; exit 1; }
 
 LOG_FILE="benchmarks/autoresearch/run.log"
 RESULTS_FILE="benchmarks/results.tsv"
