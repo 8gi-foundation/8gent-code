@@ -270,6 +270,21 @@ function staticChecks(html: string): string[] {
 	)
 		d.push("The animation loop / class is defined but never invoked at top level - nothing starts.");
 	if (!/three@0\.16/.test(html)) d.push("Three.js 0.160 CDN import is missing.");
+
+	// Real parse gate: extract every <script> body and run it through the
+	// Bun transpiler. A syntax error means the page silently does nothing -
+	// exactly the failure an LLM reviewer reads straight past.
+	const transpiler = new Bun.Transpiler({ loader: "ts" });
+	for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+		const code = m[1]?.trim();
+		if (!code) continue;
+		try {
+			transpiler.transformSync(code);
+		} catch (err) {
+			const msg = String(err).replace(/\s+/g, " ").slice(0, 160);
+			d.push(`JavaScript SYNTAX ERROR - the script will not run: ${msg}. Fix the syntax.`);
+		}
+	}
 	return d;
 }
 
@@ -407,9 +422,10 @@ async function main(): Promise<void> {
 			),
 		results,
 	);
-	if (roles.qa.model !== roles.engineer.model) {
-		await freeIfOllama(roles.qa); // release before the engineer model runs again.
-	}
+	// qwen stays resident: it also runs the fix step below. gemma's fix
+	// output was unusable three rounds running (738/4461/26 chars), so the
+	// repair is routed to the reliable model. gemma still does the primary
+	// engineering draft; qwen, already warm from qa, applies the fixes.
 
 	// Functional QA gate: programmatic render-readiness checks, merged with
 	// the LLM review. This is what catches the truncation / dead-render-loop
@@ -420,16 +436,15 @@ async function main(): Promise<void> {
 	}
 	const fullReview = [review, ...(draftDefects.length ? ["Automated render checks (MUST fix):", ...draftDefects] : [])].join("\n");
 
-	// 4. engineer applies fixes.
+	// 4. fix step - routed to qwen (reliable, already warm from qa).
 	let final = draft;
 	if (fullReview.trim() && draft) {
-		await warm(roles.engineer); // re-warm in case the qa model load evicted it.
 		const finalRaw = await step(
 			"engineer-fix",
-			roles.engineer,
+			roles.qa,
 			() =>
 				callRole(
-					roles.engineer,
+					roles.qa,
 					"You are the engineer. Apply every fix. Output the COMPLETE corrected file, ending with </html>. Output only the file.",
 					`${TASK}\n\nCurrent index.html:\n${draft}\n\nDefects to fix:\n${fullReview}`,
 					16000,
