@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/specifications",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"description": "JSON Schemas and TypeScript types for all 8gent data formats",
 	"type": "module",
 	"main": "./session/index.ts",

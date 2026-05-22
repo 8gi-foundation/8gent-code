@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/memory",
-	"version": "0.2.0",
+	"version": "0.17.3",
 	"description": "Multi-layered memory system v2 — SQLite-backed with FTS5 search, optional vector embeddings, and knowledge graph for 8gent Code",
 	"main": "index.ts",
 	"types": "index.ts",
