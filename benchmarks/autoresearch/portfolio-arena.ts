@@ -22,7 +22,9 @@
  */
 
 import { Database } from "bun:sqlite";
+import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadRoleConfig, type RoleModelAssignment } from "../../packages/orchestration/role-config";
 import { unloadOllamaModel } from "../../packages/orchestration/local-model-detect";
@@ -31,6 +33,9 @@ const ROUND = process.env.ARENA_ROUND ?? "round-2";
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 const OUT_DIR = join(import.meta.dir, "arena", ROUND, "8gent");
 const DESIGN_DB = join(REPO_ROOT, "data", "design-systems.db");
+const BRIDGE_PATH =
+	process.env.APPLE_FOUNDATION_BRIDGE ||
+	join(homedir(), ".8gent", "bin", "apple-foundation-bridge");
 const CALL_TIMEOUT_MS = 480_000; // 8 min hard ceiling per call.
 
 const TASK = `Build a single-file animated 3D portfolio hero section as index.html.
@@ -156,8 +161,59 @@ async function callLMStudio(
 		signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
 	});
 	if (!res.ok) throw new Error(`lmstudio ${res.status}: ${(await res.text()).slice(0, 200)}`);
-	const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-	return json.choices?.[0]?.message?.content ?? "";
+	const json = (await res.json()) as {
+		choices?: { message?: { content?: string; reasoning_content?: string } }[];
+	};
+	const msg = json.choices?.[0]?.message;
+	// gemma-4-26b-a4b is a reasoning model: real output lands in `content`
+	// after the trace. Fall back to reasoning_content so a run never returns
+	// empty if the model spent its budget thinking.
+	return msg?.content || msg?.reasoning_content || "";
+}
+
+/**
+ * Drive the Apple Foundation model via its bridge binary (JSON-line IPC over
+ * stdin/stdout). One request per spawn - the arena makes few, large calls.
+ */
+function callAppleFoundation(system: string, user: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const proc = spawn(BRIDGE_PATH, [], { stdio: ["pipe", "pipe", "ignore"] });
+		let buf = "";
+		const timer = setTimeout(() => {
+			proc.kill();
+			reject(new Error("apple-foundation bridge timed out"));
+		}, 120_000);
+		proc.stdout.on("data", (c) => {
+			buf += c;
+			const nl = buf.indexOf("\n");
+			if (nl === -1) return;
+			clearTimeout(timer);
+			proc.kill();
+			try {
+				const r = JSON.parse(buf.slice(0, nl)) as {
+					message?: { content?: string };
+					error?: string;
+				};
+				if (r.error) reject(new Error(`apple-foundation: ${r.error}`));
+				else resolve(r.message?.content ?? "");
+			} catch (err) {
+				reject(new Error(`apple-foundation bad JSON: ${err}`));
+			}
+		});
+		proc.on("error", (err) => {
+			clearTimeout(timer);
+			reject(err);
+		});
+		proc.stdin.write(
+			`${JSON.stringify({
+				model: "apple-foundationmodel",
+				messages: [
+					{ role: "system", content: system },
+					{ role: "user", content: user },
+				],
+			})}\n`,
+		);
+	});
 }
 
 async function callRole(
@@ -276,8 +332,28 @@ async function main(): Promise<void> {
 		await freeIfOllama(roles.orchestrator);
 	}
 
-	// 2. engineer writes the code.
+	// 1b. context manager (Apple Foundation): compress the plan + tokens
+	// into a tight engineer brief. Flow and context management is the
+	// on-device model's strength, and this puts the third local model
+	// into the workflow proper rather than leaving it as a dead fallback.
+	const appleAssignment: RoleModelAssignment = {
+		provider: "apple-foundation",
+		model: "apple-foundationmodel",
+	};
+	const brief = await step(
+		"context",
+		appleAssignment,
+		() =>
+			callAppleFoundation(
+				"You are the context manager. Compress the input into a tight, complete brief an engineer can build from. Keep every concrete requirement and design token. No preamble, no commentary.",
+				`Build plan:\n${plan}\n\nDesign tokens:\n${design.block}`,
+			),
+		results,
+	);
+
+	// 2. engineer writes the code from the compacted brief.
 	await warm(roles.engineer);
+	const engineerContext = brief || plan || "(build directly from the requirements)";
 	const draftRaw = await step(
 		"engineer",
 		roles.engineer,
@@ -285,7 +361,7 @@ async function main(): Promise<void> {
 			callRole(
 				roles.engineer,
 				"You are the engineer. Write complete, correct, runnable code. Output only the file.",
-				`${TASK}\n\nDesign tokens to use:\n${design.block}\n\nBuild plan:\n${plan || "(no plan - build directly from the requirements)"}`,
+				`${TASK}\n\nDesign tokens to use:\n${design.block}\n\nEngineer brief:\n${engineerContext}`,
 				8000,
 			),
 		results,
