@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/hands",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"private": true,
 	"description": "macOS desktop driver for the 8gent Computer agent. Real screencapture + cliclick/osascript bridge. Closes #1908.",
 	"main": "index.ts",

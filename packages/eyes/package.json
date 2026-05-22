@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/eyes",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"private": true,
 	"description": "Perception layer for the 8gent body-parts taxonomy. Backend-agnostic Eyes contract. Spec: docs/specs/EYES-SPEC.md.",
 	"main": "index.ts",

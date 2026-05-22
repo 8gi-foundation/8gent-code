@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/g8way",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"private": true,
 	"type": "module",
 	"description": "Lotus-class model proxy. OpenAI-compatible HTTP gateway with Clerk JWT auth, per-tenant rate limiting, OpenRouter routing, and structured usage logging.",

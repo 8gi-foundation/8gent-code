@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/channels",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"description": "Multi-platform messaging abstraction - unified channel layer for Telegram, Discord, Slack, WhatsApp",
 	"main": "index.ts",
 	"types": "index.ts",
