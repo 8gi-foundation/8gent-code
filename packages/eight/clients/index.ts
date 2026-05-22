@@ -51,6 +51,8 @@ function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
 			return "apfel";
 		case "deepseek":
 			return "deepseek";
+		case "lmstudio":
+			return "lmstudio";
 		case "ollama":
 		case "8gent":
 			return "ollama"; // 8gent runs on the local ollama server today

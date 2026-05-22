@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>James Spalding | Portfolio</title>
+    <style>
+        /* 
+         * Design System: Vercel-inspired Dark Theme
+         * Tokens based on provided HSL values
+         */
+        :root {
+            /* Colors */
+            --accent: hsl(0 0% 5%);       /* Deep Black */
+            --primary: hsl(0 0% 5%);      /* Deep Black */
+            --muted_foreground: hsl(0 0% 40%); /* Dark Gray */
+            --border: hsl(0 0% 90%);      /* Light Gray */
+            --foreground: hsl(0 0% 98%);  /* Near White */
+            --background: hsl(0 0% 0%);   /* Pure Black for canvas bg */
+            
+            /* Typography */
+            --font-sans: "Geist", "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            
+            /* Sizing */
+            --h1-size: 2.25rem;
+            --h2-size: 1.875rem;
+            --h3-size: 1.5rem;
+            --h4-size: 1.25rem;
+            --h5-size: 1.125rem;
+            --h6-size: 1rem;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--background);
+            color: var(--foreground);
+            font-family: var(--font-sans);
+            overflow: hidden; /* Prevent scrollbars */
+            width: 100vw;
+            height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Canvas Container */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            outline: none;
+        }
+
+        /* Overlay Content */
+        main {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 1.5rem;
+            pointer-events: none; /* Let clicks pass through to canvas where possible */
+        }
+
+        .content-wrapper {
+            pointer-events: auto; /* Re-enable clicks for buttons */
+            max-width: 600px;
+            animation: fadeIn 1s ease-out forwards;
+        }
+
+        h1 {
+            font-size: var(--h1-size);
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            margin-bottom: 0.5rem;
+            line-height: 1.1;
+            color: var(--foreground);
+        }
+
+        /* Responsive Heading */
+        @media (min-width: 768px) {
+            h1 {
+                font-size: 3.5rem; /* Larger on desktop */
+            }
+        }
+
+        .subtitle {
+            font-size: var(--h5-size);
+            color: var(--muted_foreground);
+            margin-bottom: 2rem;
+            font-weight: 400;
+            letter-spacing: 0.01em;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            font-size: var(--h6-size);
+            font-weight: 500;
+            color: var(--accent); /* Dark text */
+            background-color: var(--foreground); /* Light bg */
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            user-select: none;
+        }
+
+        .cta-button:hover {
+            background-color: var(--border);
+            border-color: var(--muted_foreground);
+            transform: translateY(-1px);
+        }
+
+        .cta-button:active {
+            transform: translateY(0);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <main>
+        <div class="content-wrapper">
+            <h1>James Spalding</h1>
+            <p class="subtitle">Creative Developer & 3D Designer</p>
+            <a href="#" class="cta-button">View Projects</a>
+        </div>
+    </main>
+
+    <!-- Import Three.js as an ES Module -->
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+        // --- Configuration ---
+        const config = {
+            colors: {
+                background: 0x050505, // Very dark, matching --accent
+                ambient: 0xffffff,
+                directional: 0xffffff,
+                geometry: 0x1a1a1a,   // Dark gray for the object
+                geometryHighlight: 0x333333
+            },
+            rotationSpeed: 0.005,
+            mouseSensitivity: 0.5
+        };
+
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(config.colors.background);
+        // Add subtle fog for depth
+        scene.fog = new THREE.FogExp2(config.colors.background, 0.03);
+
+        // Camera
+        const camera = new THREE.PerspectiveCamera(
+            75, 
+            window.innerWidth / window.innerHeight, 
+            0.1, 
+            1000
+        );
+        camera.position.z = 5;
+
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            alpha: false 
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Optimize for high DPI
+        container.appendChild(renderer.domElement);
+
+        // --- Lighting (Tasteful, Neutral) ---
+        const ambientLight = new THREE.AmbientLight(config.colors.ambient, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(config.colors.directional, 1.5);
+        dirLight.position.set(5, 5, 5);
+        scene.add(dirLight);
+
+        // Add a subtle rim light from the opposite side
+        const rimLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        rimLight.position.set(-5, -5, -5);
+        scene.add(rimLight);
+
+        // --- Geometry (The Centerpiece) ---
+        // Using TorusKnot for a complex, organic shape
+        const geometry = new THREE.TorusKnotGeometry(1.2, 0.4, 128, 32);
+        
+        // Material: Standard material reacts well to light
+        const material = new THREE.MeshStandardMaterial({
+            color: config.colors.geometry,
+            roughness: 0.3,
+            metalness: 0.8,
+            flatShading: false
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+
+        // --- Interaction State ---
+        const mouse = {
+            x: 0,
+            y: 0,
+            targetX: 0,
+            targetY: 0
+        };
+
+        // --- Event Listeners ---
+        
+        // Mouse Movement
+        document.addEventListener('mousemove', (event) => {
+            // Normalize mouse position from -1 to 1
+            mouse.targetX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.targetY = -(event.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // Touch Support (Mobile)
+        document.addEventListener('touchmove', (event) => {
+            if (event.touches.length > 0) {
+                mouse.targetX = (event.touches[0].clientX / window.innerWidth) * 2 - 1;
+                mouse.targetY = -(event.touches[0].clientY / window.innerHeight) * 2 + 1;
+            }
+        }, { passive: true });
+
+        // Resize Handling
+        window.addEventListener('resize', onWindowResize, false);
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            // 1. Continuous Rotation
+            mesh.rotation.x += config.rotationSpeed;
+            mesh.rotation.y += config.rotationSpeed * 1.5;
+
+            // 2. Mouse Interaction (Smooth Lerp)
+            // We add the mouse influence to the base rotation
+            mouse.x += (mouse.targetX - mouse.x) * 0.05;
+            mouse.y += (mouse.targetY - mouse.y) * 0.05;
+
+            // Apply mouse offset to rotation
+            mesh.rotation.x += mouse.y * config.mouseSensitivity * delta;
+            mesh.rotation.y += mouse.x * config.mouseSensitivity * delta;
+
+            // 3. Subtle "Breathing" Scale Effect
+            const scale = 1 + Math.sin(time * 0.5) * 0.02;
+            mesh.scale.set(scale, scale, scale);
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Cleanup ---
+        // Although not strictly necessary for a single-page app that doesn't unload,
+        // it's good practice to define disposal logic if the component were to be destroyed.
+        window.addEventListener('beforeunload', () => {
+            geometry.dispose();
+            material.dispose();
+            renderer.dispose();
+        });
+
+        // Start
+        animate();
+
+    </script>
+</body>
+</html>
