@@ -345,8 +345,10 @@ async function main(): Promise<void> {
 		appleAssignment,
 		() =>
 			callAppleFoundation(
-				"You are the context manager. Compress the input into a tight, complete brief an engineer can build from. Keep every concrete requirement and design token. No preamble, no commentary.",
-				`Build plan:\n${plan}\n\nDesign tokens:\n${design.block}`,
+				"Compress this into a tight engineer brief. Keep every requirement and token. No preamble.",
+				// Apple Foundation has a 4096-token window (input + output).
+				// Hard-cap the input so the compaction step never overflows.
+				`Build plan:\n${plan.slice(0, 1200)}\n\nDesign tokens:\n${design.block.slice(0, 500)}`,
 			),
 		results,
 	);
@@ -403,7 +405,14 @@ async function main(): Promise<void> {
 			results,
 		);
 		const fixed = extractHtml(finalRaw);
-		if (fixed.length > 400) final = fixed;
+		// Accept the fix only if it is a complete document of comparable
+		// size. A fix 10x smaller than the draft is a truncated fragment -
+		// keep the draft (this is what broke Round 5's artifact).
+		if (fixed.length >= draft.length * 0.7 && /<\/html>/i.test(fixed)) {
+			final = fixed;
+		} else {
+			log(`fix rejected (${fixed.length}ch vs draft ${draft.length}ch) - keeping draft`);
+		}
 	}
 
 	writeFileSync(join(OUT_DIR, "index.html"), final || "<!-- ensemble produced no artifact -->");
