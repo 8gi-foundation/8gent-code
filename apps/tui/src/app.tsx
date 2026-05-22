@@ -133,6 +133,7 @@ import {
 	logToolStart,
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
+import { detectBuildIntent } from "./lib/build-intent.js";
 import {
 	BUILT_IN_SLASH_COMMANDS,
 	type SlashCommand,
@@ -4787,6 +4788,28 @@ export function App({
 				addSystemMessage("I didn't quite catch that. Please try again.");
 			}
 			return;
+		}
+
+		// Build-intent auto-route: an imperative "build / create / scaffold ..."
+		// message runs the adaptive pipeline without the user typing /build.
+		// Detection is conservative (see build-intent.ts) - informational
+		// questions and terse remarks fall through to the normal agent.
+		if (input && !attached) {
+			const buildTask = detectBuildIntent(input);
+			if (buildTask) {
+				appendToTab(tabId, {
+					id: `user-${Date.now()}`,
+					role: "user" as const,
+					content: bubbleContent,
+					timestamp: new Date(),
+				});
+				addSystemMessage(
+					"Detected a build task - routing to the adaptive pipeline. " +
+						"Phrase it as a question to just chat instead.",
+				);
+				void handleSlashCommand("build", buildTask.split(/\s+/));
+				return;
+			}
 		}
 
 		// Track command history
