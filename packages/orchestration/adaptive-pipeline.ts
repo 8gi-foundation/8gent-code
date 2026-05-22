@@ -511,24 +511,31 @@ export class AdaptivePipeline {
 			this.log(`repair pass ${pass}: ${defects.length} defect(s)`);
 			let review = "";
 			try {
+				this.log(`repair pass ${pass}: ${qa.key} reviewing ...`);
 				review = await qa.call(
 					"You are QA. List concrete defects and missing requirements only. Be specific.",
 					`${ctx.task}\n\nSubmitted file:\n${ctx.artifact}`,
 					1500,
 				);
+				this.log(`repair pass ${pass}: review done (${review.length} chars)`);
 			} catch (err) {
 				this.log(`repair pass ${pass}: qa failed (${err}) - using static defects only`);
 			}
 			const brief = [review, "Automated render checks (MUST fix):", ...defects].join("\n");
 			let fixed = "";
 			try {
+				// 8000 is ample for a full single-file artifact (~2.5k tokens)
+				// plus margin. 16000 made a local 27B model grind for 10+
+				// minutes and risk the call timeout - see issue #2652.
+				this.log(`repair pass ${pass}: ${fixer.key} rewriting ...`);
 				fixed = extractHtml(
 					await fixer.call(
 						"You are the engineer. Apply every fix. Output the COMPLETE corrected file, ending with </html>. Output only the file.",
 						`${ctx.task}\n\nCurrent file:\n${ctx.artifact}\n\nDefects to fix:\n${brief}`,
-						16000,
+						8000,
 					),
 				);
+				this.log(`repair pass ${pass}: rewrite done (${fixed.length} chars)`);
 			} catch (err) {
 				this.log(`repair pass ${pass}: fixer failed (${err})`);
 				break;
