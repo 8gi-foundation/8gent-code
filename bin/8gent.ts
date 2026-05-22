@@ -86,6 +86,7 @@ COMMANDS:
   search <query>              Search for symbols across files
   benchmark                   Run efficiency benchmarks
   infinite <task>             Run task in autonomous infinite mode
+  pipeline <task>             Adaptive three-model build pipeline (local models)
   export <session-id|--last>    Export a session as self-contained HTML
   review                      Review current git diff for bugs/security/style
   review --pr <number>        Review a specific PR diff
@@ -358,6 +359,15 @@ async function main() {
 		case "run": {
 			const { runRunCommand } = await import("../packages/eight/run.ts");
 			const code = await runRunCommand(restArgs);
+			process.exit(code);
+			break;
+		}
+
+		case "pipeline": {
+			const { runPipelineCommand } = await import(
+				"../packages/orchestration/pipeline-cli.ts"
+			);
+			const code = await runPipelineCommand(restArgs);
 			process.exit(code);
 			break;
 		}
