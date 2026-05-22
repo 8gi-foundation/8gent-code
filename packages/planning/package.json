@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/planning",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"description": "Proactive planning engine and avenue tracking for 8gent Code",
 	"main": "index.ts",
 	"types": "index.ts",

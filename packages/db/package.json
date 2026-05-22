@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/db",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"private": true,
 	"type": "module",
 	"description": "Convex database layer for 8gent Code — user accounts, session tracking, usage analytics, preference sync",

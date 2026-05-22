@@ -37,7 +37,7 @@ const ui = {
 
 interface HeaderBarProps {
 	updateAvailable?: { latest: string; current: string } | null;
-	/** Current package version (e.g. "0.17.0"). Rendered in the brand pill so you always know what build you are on. */
+	/** Current package version (e.g. "0.17.3"). Rendered in the brand pill so you always know what build you are on. */
 	version?: string;
 	workspacePath: string;
 	branch: string;

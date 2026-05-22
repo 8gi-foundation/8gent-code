@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/reporting",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"description": "Completion report generation and history for 8gent Code",
 	"type": "module",
 	"main": "./index.ts",
