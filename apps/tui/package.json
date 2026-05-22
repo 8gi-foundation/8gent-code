@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/tui",
-	"version": "0.0.1",
+	"version": "0.17.3",
 	"private": true,
 	"type": "module",
 	"main": "src/index.tsx",

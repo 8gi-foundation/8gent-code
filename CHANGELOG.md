@@ -9,6 +9,40 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-05-22
+
+### Added - Adaptive three-model orchestration pipeline (#2648)
+
+Planner, engineer, and judge roles are each assigned to a distinct local model, matched to that model's strength. Dynamic local-model detection probes what is actually installed on the host and assigns roles accordingly, so the pipeline adapts to the machine instead of assuming a fixed model set.
+
+### Added - `/build` slash command (#2655)
+
+Runs the adaptive three-model pipeline end-to-end from the TUI.
+
+### Added - Video ingestion via Marlin + Whisper (#2636, #2638, #2641)
+
+The `eyes` package gains a Marlin caption + Whisper transcript sidecar. A new `extract_video` tool chunks long videos and merges the results; the knowledge-graph video-extractor folds them into the graph with extended `EntityType` / `RelationshipType` coverage.
+
+### Added - KnowledgeGraph over `graph.*` RPC (#2642)
+
+The daemon `/store` route now exposes the project-scoped KnowledgeGraph over `graph.*` JSON-RPC, alongside the existing `session.*` / `kg.*` / `fs.*` surfaces.
+
+### Added - MaxVoiceMode skill (#2649)
+
+New skill that narrates work aloud via local TTS at each milestone.
+
+### Added - Living plan rail + task discipline
+
+The TUI gains a living plan rail, and the system prompt enforces task discipline so multi-step work tracks against an explicit plan.
+
+### Fixed - `/goal` command was silently inert
+
+`GoalClient` was never wired into `CommandInput`, so `/goal` did nothing. Wired it through, added a version header to the TUI, restored the missing `lmstudio` case in `runtimeForProvider`, and fixed the `LiveFocalStrip` vs `LiveFocalStripWithGoal` swap that suppressed goal output.
+
+### Fixed - Loop observability + fixer budget (#2653)
+
+Repaired loop observability in the orchestration package and set a saner fixer-iteration budget.
+
 ### Changed - Unified instruction files into one source under three names
 
 `AGENTS.md`, `8GENT.md`, and `CLAUDE.md` previously held three different documents that drifted apart - different harnesses read different files and got different instructions.

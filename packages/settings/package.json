@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/settings",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"description": "Typed settings store for 8gent Code — schema, defaults, and ~/.8gent/settings.json persistence",
 	"private": true,
 	"main": "index.ts",

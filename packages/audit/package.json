@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/audit",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"description": "Append-only access audit log for child records (DPIA G7). Tracks who read which record, when, and why.",
 	"main": "index.ts",
 	"types": "index.ts",

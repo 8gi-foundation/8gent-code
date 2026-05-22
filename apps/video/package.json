@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/video",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"private": true,
 	"description": "Remotion compositions for 8gent. Cinematic travel maps for LetsFG and other geo videos.",
 	"scripts": {

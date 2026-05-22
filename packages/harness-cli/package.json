@@ -1,6 +1,6 @@
 {
 	"name": "@8gent/harness-cli",
-	"version": "0.1.0",
+	"version": "0.17.3",
 	"type": "module",
 	"description": "Headless CLI for running, inspecting, and testing 8gent sessions",
 	"bin": {

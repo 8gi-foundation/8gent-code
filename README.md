@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.17.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.17.0 Body Parts" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.17.3-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.17.3 Body Parts" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -558,12 +558,13 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 <tr>
 <td valign="top" width="33%">
 
-### Just shipped (v0.17.0)
+### Just shipped (v0.17.3)
 
-**Body-parts taxonomy** - the agent now sees and selectively coordinates eyes+hands when stuck.
+**Adaptive three-model orchestration** - planner, engineer, and judge roles are matched to distinct local models, with dynamic detection of what is installed on the host. New `/build` slash command runs the pipeline end-to-end.
 
-- Eyes: spec + bundled native AX bridge + perceptual diff + vision-router + agent tools + CLI
-- Handeyes: third body-part (#2526), 5 compound tools, 3 of 4 triggers live
+- Body-parts taxonomy: eyes + hands + handeyes, selectively coordinated when the agent is stuck
+- Video ingestion: Marlin caption + Whisper transcript sidecar, `extract_video` tool, knowledge-graph folding
+- KnowledgeGraph over `graph.*` RPC; living plan rail + task discipline in the TUI
 - DoomLoopDetector EventEmitter (#2527, RFC Option A)
 
 **v0.14 hardened kernel** (folded into this release):

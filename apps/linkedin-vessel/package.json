@@ -1,6 +1,6 @@
 {
 	"name": "@8gi/linkedin-vessel",
-	"version": "1.0.0",
+	"version": "0.17.3",
 	"private": true,
 	"description": "LinkedIn outreach vessel with HyperAgent self-improvement",
 	"scripts": {
