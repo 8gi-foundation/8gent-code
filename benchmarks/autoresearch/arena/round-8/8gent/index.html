@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>James Spalding | Portfolio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* Design Tokens */
+        :root {
+            --background: hsl(0 0% 5%);
+            --foreground: hsl(0 0% 95%);
+            --muted_foreground: hsl(0 0% 60%);
+            --border: hsl(0 0% 20%);
+            
+            /* Typography */
+            --font-main: "Inter", system-ui, -apple-system, sans-serif;
+            --h1: 3.5rem;
+            --h4: 1.25rem;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--background);
+            color: var(--foreground);
+            font-family: var(--font-main);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            outline: none;
+        }
+
+        #ui-overlay {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            padding: 2rem;
+            max-width: 800px;
+            pointer-events: none; /* Let clicks pass through empty areas */
+            user-select: none;
+        }
+
+        /* Re-enable pointer events for interactive elements */
+        #ui-overlay * {
+            pointer-events: auto;
+        }
+
+        h1 {
+            font-size: var(--h1);
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            margin-bottom: 0.75rem;
+            color: var(--foreground);
+            line-height: 1.1;
+        }
+
+        p {
+            font-size: var(--h4);
+            color: var(--muted_foreground);
+            margin-bottom: 2.5rem;
+            font-weight: 400;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 0.875rem 2rem;
+            background-color: var(--foreground);
+            color: var(--background);
+            text-decoration: none;
+            font-weight: 600;
+            border-radius: 4px;
+            transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s;
+            border: 1px solid var(--foreground);
+            cursor: pointer;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+
+        .cta-button:active {
+            transform: translateY(0);
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2.5rem; }
+            p { font-size: 1.125rem; }
+            .cta-button { padding: 0.75rem 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container" role="img" aria-label="Animated 3D geometric background"></div>
+
+    <main id="ui-overlay">
+        <h1>James Spalding</h1>
+        <p>Creative Developer & 3D Engineer</p>
+        <a href="#" class="cta-button">View Projects</a>
+    </main>
+
+    <!-- Three.js Implementation -->
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+        class PortfolioScene {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                
+                this.mouse = new THREE.Vector2();
+                this.targetRotation = new THREE.Vector2();
+                this.currentRotation = new THREE.Vector2();
+                
+                this.animationId = null;
+                this.mesh = null;
+
+                this.init();
+            }
+
+            init() {
+                // Renderer Setup
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.container.appendChild(this.renderer.domElement);
+
+                // Camera Position
+                this.camera.position.z = 4;
+
+                // Geometry: Icosahedron for a clean, geometric look
+                const geometry = new THREE.IcosahedronGeometry(1.2, 0); 
+                const material = new THREE.MeshStandardMaterial({
+                    color: 0x888888, // Neutral grey
+                    metalness: 0.8,
+                    roughness: 0.2,
+                    flatShading: true
+                });
+
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.scene.add(this.mesh);
+
+                // Add Wireframe overlay for extra detail
+                const wireframeGeom = new THREE.IcosahedronGeometry(1.25, 0);
+                const wireframeMat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.15
+                });
+                const wireframe = new THREE.Mesh(wireframeGeom, wireframeMat);
+                this.mesh.add(wireframe);
+
+                // Lighting - Strictly Neutral (No Purple/Pink)
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+                dirLight.position.set(5, 5, 5);
+                this.scene.add(dirLight);
+
+                const pointLight = new THREE.PointLight(0xffffff, 1);
+                pointLight.position.set(-5, -5, 2);
+                this.scene.add(pointLight);
+
+                // Event Listeners
+                window.addEventListener('resize', () => this.onResize());
+                window.addEventListener('mousemove', (e) => this.onMouseMove(e));
+                window.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: true });
+
+                // Start Loop
+                this.animate();
+            }
+
+            onMouseMove(event) {
+                // Normalize mouse coordinates to -1 to +1
+                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                // Set target rotation based on mouse position
+                this.targetRotation.x = this.mouse.y * 0.5;
+                this.targetRotation.y = this.mouse.x * 0.5;
+            }
+
+            onTouchMove(event) {
+                if (event.touches.length > 0) {
+                    const touch = event.touches[0];
+                    this.mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+                    this.mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+
+                    this.targetRotation.x = this.mouse.y * 0.5;
+                    this.targetRotation.y = this.mouse.x * 0.5;
+                }
+            }
+
+            onResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            animate() {
+                this.animationId = requestAnimationFrame(() => this.animate());
+
+                // Continuous Rotation
+                if (this.mesh) {
+                    this.mesh.rotation.x += 0.002;
+                    this.mesh.rotation.y += 0.005;
+                }
+
+                // Mouse Interaction (Lerp for smoothness)
+                this.currentRotation.x += (this.targetRotation.x - this.currentRotation.x) * 0.05;
+                this.currentRotation.y += (this.targetRotation.y - this.currentRotation.y) * 0.05;
+
+                if (this.mesh) {
+                    this.mesh.rotation.x += this.currentRotation.x;
+                    this.mesh.rotation.y += this.currentRotation.y;
+                }
+
+                // Render Scene
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            dispose() {
+                // Cleanup
+                if (this.animationId) {
+                    cancelAnimationFrame(this.animationId);
+                }
+                
+                window.removeEventListener('resize', this.onResize);
+                window.removeEventListener('mousemove', this.onMouseMove);
+                window.removeEventListener('touchmove', this.onTouchMove);
+
+                if (this.mesh) {
+                    this.mesh.geometry.dispose();
+                    this.mesh.material.dispose();
+                    // Dispose children (wireframe)
+                    this.mesh.children.forEach(child => {
+                        child.geometry.dispose();
+                        child.material.dispose();
+                    });
+                }
+                
+                this.renderer.dispose();
+                if (this.container && this.renderer.domElement) {
+                    this.container.removeChild(this.renderer.domElement);
+                }
+            }
+        }
+
+        // Initialize
+        const scene = new PortfolioScene();
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            scene.dispose();
+        });
+    </script>
+</body>
+</html>
