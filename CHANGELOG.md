@@ -9,6 +9,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - `fs.register` JSON-RPC method on the daemon `/store` route (#2662)
+
+Out-of-process clients (8gent-computer, future TUI vessels) build their own workspaceIds and call `fs.list / fs.read / fs.write`. The daemon previously rejected unknown ids with `fs: unknown workspaceId` and had **no wire method to register one** - `_registerWorkspace` was in-process only. New `fs.register({ workspaceId, root })` lets clients register a workspace before file ops:
+
+- Validates `workspaceId` against `/^[A-Za-z0-9_.-]{1,128}$/` (KV-key injection safe).
+- Rejects the reserved id `default` (which still resolves via `EIGHT_WORKSPACE_ROOT` / `process.cwd()`).
+- Requires `root` to exist and be a directory; refuses the filesystem root.
+- Idempotent on the same id; updates the mapping otherwise.
+
+Paired with 8gent-computer's `ensureWorkspace` calling this method on first sight of each workspaceId, this clears the "unknown workspaceId" failure that blocked every file op in fresh chats.
+
 ## [0.17.3] - 2026-05-22
 
 ### Added - Adaptive three-model orchestration pipeline (#2648)

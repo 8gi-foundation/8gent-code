@@ -14,7 +14,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as crypto from "node:crypto";
 import * as path from "node:path";
 import { getDataDir } from "../../data-dir";
-import { fsDelete, fsEdit, fsExec, fsList, fsRead, fsStat, fsWrite } from "./fs";
+import {
+	fsDelete,
+	fsEdit,
+	fsExec,
+	fsList,
+	fsRead,
+	fsRegister,
+	fsStat,
+	fsWrite,
+} from "./fs";
 import {
 	JSONRPC_PARSE_ERROR,
 	JSONRPC_UNAUTHORIZED,
@@ -106,6 +115,7 @@ const HANDLERS: Record<string, JsonRpcHandler> = {
 	"graph.query": graphQuery,
 	"graph.subgraph": graphSubgraph,
 	"graph.stats": graphStats,
+	"fs.register": fsRegister,
 	"fs.list": fsList,
 	"fs.read": fsRead,
 	"fs.write": fsWrite,

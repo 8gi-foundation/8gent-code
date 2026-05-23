@@ -624,6 +624,67 @@ describe("fs.* via RPC", () => {
 	});
 });
 
+describe("fs.register via RPC", () => {
+	test("registers a fresh workspaceId and unlocks fs ops on it", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+
+		// Fresh id - unregistered ids reject with 'unknown workspaceId'.
+		const fresh = "fresh-" + Date.now();
+		const beforeList = await callRpc(ws, "fs.list", { workspaceId: fresh, path: "." });
+		expect(beforeList.error).toBeDefined();
+		expect(String(beforeList.error?.message)).toContain("unknown workspaceId");
+
+		// Register it, then fs.list works.
+		const reg = await callRpc(ws, "fs.register", { workspaceId: fresh, root: WORKSPACE });
+		expect(reg.error).toBeUndefined();
+		expect((reg.result as { ok: boolean }).ok).toBe(true);
+
+		const afterList = await callRpc(ws, "fs.list", { workspaceId: fresh, path: "." });
+		expect(afterList.error).toBeUndefined();
+		const entries = (afterList.result as { entries: { name: string }[] }).entries;
+		expect(entries.find((e) => e.name === "hello.md")).toBeDefined();
+		handleStoreClose(ws as never);
+	});
+
+	test("rejects the reserved 'default' id", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const res = await callRpc(ws, "fs.register", { workspaceId: "default", root: WORKSPACE });
+		expect(res.error).toBeDefined();
+		expect(String(res.error?.message)).toContain("reserved");
+		handleStoreClose(ws as never);
+	});
+
+	test("rejects malformed workspaceIds", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const res = await callRpc(ws, "fs.register", {
+			workspaceId: "bad/with/slashes",
+			root: WORKSPACE,
+		});
+		expect(res.error).toBeDefined();
+		expect(String(res.error?.message)).toContain("invalid workspaceId");
+		handleStoreClose(ws as never);
+	});
+
+	test("rejects nonexistent root", async () => {
+		const ws = makeWS();
+		handleStoreOpen(ws as never);
+		await handshake(ws, ensureServerToken(TOKEN_PATH));
+		const res = await callRpc(ws, "fs.register", {
+			workspaceId: "wont-exist-" + Date.now(),
+			root: path.join(TMP, "does-not-exist"),
+		});
+		expect(res.error).toBeDefined();
+		expect(String(res.error?.message)).toContain("does not exist");
+		handleStoreClose(ws as never);
+	});
+});
+
 // ── Handshake race / message ordering ─────────────────────────────────
 
 describe("/store handshake race", () => {

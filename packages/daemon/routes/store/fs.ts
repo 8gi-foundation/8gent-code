@@ -72,6 +72,50 @@ export function _registerWorkspace(workspaceId: string, root: string): void {
 	db.kvSet(WORKSPACE_KV_PREFIX + workspaceId, fs.realpathSync(root));
 }
 
+/** Permissive but bounded workspaceId charset. Prevents KV-key injection
+ *  and keeps ids file-system friendly. */
+const WORKSPACE_ID_RE = /^[a-zA-Z0-9_.-]{1,128}$/;
+
+/**
+ * fs.register - tell the daemon that `workspaceId` maps to the directory
+ * at `root`. Required before any fs.list / fs.read / fs.write call on that
+ * id; without it, every op rejects with "unknown workspaceId". Idempotent:
+ * re-registering an id with the same (or a different) root just updates
+ * the mapping. The reserved id "default" cannot be registered through this
+ * RPC - it always resolves via EIGHT_WORKSPACE_ROOT / process.cwd().
+ */
+export const fsRegister: JsonRpcHandler = (raw) => {
+	const params = raw as { workspaceId?: string; root?: string } | undefined;
+	if (!params?.workspaceId) {
+		throw new Error("fs.register: missing workspaceId");
+	}
+	if (!params?.root) {
+		throw new Error("fs.register: missing root");
+	}
+	const { workspaceId, root } = params;
+	if (workspaceId === "default") {
+		throw new Error("fs.register: 'default' is reserved");
+	}
+	if (!WORKSPACE_ID_RE.test(workspaceId)) {
+		throw new Error(
+			"fs.register: invalid workspaceId (allowed: [A-Za-z0-9_.-], max 128 chars)",
+		);
+	}
+	if (!fs.existsSync(root)) {
+		throw new Error(`fs.register: root does not exist: ${root}`);
+	}
+	const realRoot = fs.realpathSync(root);
+	const stat = fs.statSync(realRoot);
+	if (!stat.isDirectory()) {
+		throw new Error(`fs.register: root is not a directory: ${realRoot}`);
+	}
+	if (realRoot === path.parse(realRoot).root) {
+		throw new Error("fs.register: refusing to register filesystem root");
+	}
+	_registerWorkspace(workspaceId, realRoot);
+	return { ok: true, workspaceId, root: realRoot };
+};
+
 function assertInWorkspace(root: string, target: string): string {
 	const resolved = resolveSafe(target, root);
 	if (!isWithinWorkspace(resolved, root)) {
