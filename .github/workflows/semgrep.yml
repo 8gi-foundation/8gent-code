@@ -1,13 +1,17 @@
 name: Semgrep Static Analysis
 
+# Container pull + full scan is expensive. Run on PRs (catches issues before
+# merge) and weekly (catches drift). Push-to-main was redundant with PR.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   schedule:
     - cron: '0 8 * * 1'  # Monday 8am UTC
   workflow_dispatch:
+
+concurrency:
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   semgrep:
