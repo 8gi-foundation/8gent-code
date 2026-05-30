@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed - GitHub Actions usage reduction
+
+Org-level Actions quota was hit (3,000 min/month). Workflow changes to bring usage well under cap:
+
+- `swift` job moved out of `ci.yml` into new `swift-nightly.yml` (nightly cron + manual dispatch + PRs that touch `apps/8gent-computer/**`). macOS runners bill at 10x; running it on every PR was the dominant cost.
+- `lint.yml` deleted - `bun run lint` is already part of `ci.yml`.
+- `semgrep.yml` and `gitleaks.yml` no longer trigger on push to main (PR + weekly cron + manual is sufficient).
+- `concurrency: cancel-in-progress` added to `ci.yml`, `semgrep.yml`, `gitleaks.yml`, and `8gent-review.yml` so superseded runs no longer complete needlessly.
+
 ### Added - `fs.register` JSON-RPC method on the daemon `/store` route (#2662)
 
 Out-of-process clients (8gent-computer, future TUI vessels) build their own workspaceIds and call `fs.list / fs.read / fs.write`. The daemon previously rejected unknown ids with `fs: unknown workspaceId` and had **no wire method to register one** - `_registerWorkspace` was in-process only. New `fs.register({ workspaceId, root })` lets clients register a workspace before file ops:

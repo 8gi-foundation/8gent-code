@@ -1,11 +1,15 @@
 name: Gitleaks Secret Scan
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * 1'  # Monday 9am UTC
+
+concurrency:
+  group: gitleaks-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gitleaks:
