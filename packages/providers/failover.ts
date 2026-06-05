@@ -97,6 +97,21 @@ export class ModelFailover {
 		const prefix: FailoverEntry[] = preferAppleFoundation ? [APPLE_FOUNDATION_ENTRY] : [];
 
 		return {
+			// When openrouter/auto times out (usually because it routed to a
+			// thinking model with long TTFT), fall back to a fast reliable model.
+			"openrouter/auto": {
+				models: [
+					{ model: "openrouter/auto", provider: "openrouter" },
+					{
+						model: "meta-llama/llama-3.3-70b-instruct",
+						provider: "openrouter",
+					},
+					{
+						model: "meta-llama/llama-3-8b-instruct:free",
+						provider: "openrouter",
+					},
+				],
+			},
 			"eight:latest": {
 				models: [
 					...prefix,
