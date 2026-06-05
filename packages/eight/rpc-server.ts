@@ -31,9 +31,23 @@ type Handler = (id: number | string, params: Record<string, unknown>) => Promise
 
 const methods: Record<string, Handler> = {
 	"session.create": async (id, params) => {
-		const model = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
+		const rawModel = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
 		const cwd = (params.cwd as string) || process.cwd();
 		const sessionId = `rpc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+		// Auto-detect runtime from model prefix (e.g. "openrouter:auto" → runtime=openrouter, model=auto)
+		// Accept explicit runtime override via params.runtime
+		let runtime = (params.runtime as string) || "ollama";
+		let model = rawModel;
+		const KNOWN_RUNTIMES = ["openrouter","ollama","lmstudio","anthropic","openai","groq","grok","mistral","8gent","together","fireworks","replicate"];
+		const colonIdx = rawModel.indexOf(":");
+		if (colonIdx > 0) {
+			const prefix = rawModel.slice(0, colonIdx);
+			if (KNOWN_RUNTIMES.includes(prefix)) {
+				runtime = prefix;
+				model = rawModel.slice(colonIdx + 1);
+			}
+		}
 
 		const events: AgentEventCallbacks = {
 			onToolStart: (e) =>
@@ -55,7 +69,7 @@ const methods: Record<string, Handler> = {
 
 		const agent = new Agent({
 			model,
-			runtime: "ollama",
+			runtime,
 			workingDirectory: cwd,
 			maxTurns: 30,
 			events,
