@@ -74,6 +74,7 @@ const methods: Record<string, Handler> = {
 			maxTurns: 30,
 			allTools: true,
 			events,
+			...(params.systemPrompt ? { systemPrompt: params.systemPrompt as string } : {}),
 		});
 
 		sessions.set(sessionId, { agent, id: sessionId });
