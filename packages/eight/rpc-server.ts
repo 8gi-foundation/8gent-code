@@ -72,6 +72,7 @@ const methods: Record<string, Handler> = {
 			runtime,
 			workingDirectory: cwd,
 			maxTurns: 30,
+			allTools: true,
 			events,
 		});
 
