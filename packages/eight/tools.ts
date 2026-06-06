@@ -3081,6 +3081,14 @@ export class ToolExecutor {
 			const { executeHandsTool } = await import("../daemon/tools/hands");
 
 			const visionCfg = loadVisionConfig();
+			const { resolveComputerUseModel } = await import("./vision-router");
+			const { model: pinnedModel, autoSelected } = await resolveComputerUseModel(
+				visionCfg.computerUseModel,
+				{ openRouterApiKey: process.env.OPENROUTER_API_KEY },
+			);
+			if (autoSelected) {
+				console.log(`[cua] auto-selected vision model: ${pinnedModel} (${visionCfg.computerUseModel} is not vision-capable)`);
+			}
 			const failover = new ModelFailover();
 
 			// Skip providers that lack credentials or aren't installed.
@@ -3117,7 +3125,7 @@ export class ToolExecutor {
 				goal: goal.trim(),
 				maxSteps: steps,
 				sessionId: `tools-cua-${Date.now()}`,
-				pinnedModel: visionCfg.computerUseModel,
+				pinnedModel,
 				failover,
 				handsAdapter,
 				approve: agentApprove,

@@ -461,6 +461,44 @@ export async function hasVisionSupport(options?: {
 }
 
 /**
+ * Heuristic check: does this model id/name appear to be vision-capable?
+ * Used to decide whether auto-discovery is needed before starting a CUA loop.
+ * Errs on the side of false (triggers discovery) rather than trusting a
+ * text-only model with screenshot payloads.
+ */
+export function isKnownVisionModel(modelId: string): boolean {
+	const lower = modelId.toLowerCase();
+	// Local vision families
+	for (const marker of [...OLLAMA_VISION_MODELS, ...OLLAMA_OCR_MODELS]) {
+		if (lower.includes(marker.toLowerCase())) return true;
+	}
+	// Cloud vision families
+	const cloudMarkers = ["claude", "gpt-4o", "gpt-4.1", "gpt-5", "gemini", "pixtral", "llava", "vision"];
+	return cloudMarkers.some((m) => lower.includes(m));
+}
+
+/**
+ * Auto-select the best available vision model, logging the choice.
+ * Returns the configured computerUseModel if it's already vision-capable.
+ * Falls back to findVisionModel() discovery, then a hardcoded OpenRouter model.
+ */
+export async function resolveComputerUseModel(
+	configured: string,
+	options?: { ollamaUrl?: string; openRouterApiKey?: string },
+): Promise<{ model: string; autoSelected: boolean }> {
+	if (isKnownVisionModel(configured)) {
+		return { model: configured, autoSelected: false };
+	}
+	const result = await findVisionModel(options);
+	if (result.found && result.model) {
+		const prefix = result.model.provider === "openrouter" ? "openrouter:" : "ollama:";
+		return { model: `${prefix}${result.model.model}`, autoSelected: true };
+	}
+	// Last-resort cloud fallback — works with or without a key via :free
+	return { model: "openrouter:meta-llama/llama-3.2-11b-vision-instruct:free", autoSelected: true };
+}
+
+/**
  * List all recommended OCR models for `ollama pull` suggestions.
  */
 export function getRecommendedOCRModels(): Array<{

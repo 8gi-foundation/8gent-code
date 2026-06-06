@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { runComputerUseLoop, type CuaLoopConfig, type HandsAdapter } from "../loops/computer-use";
 import { ModelFailover } from "../../providers/failover";
+import { loadVisionConfig, resolveComputerUseModel } from "../vision-router";
 
 const MARKER_PATH = join(homedir(), ".8gent", "cua-configured");
 const DEFAULT_MAX_STEPS = 20;
@@ -137,10 +138,19 @@ async function main(): Promise<void> {
 		failover.markDown("apple-foundationmodel", "apfel");
 	}
 
+	const visionCfg = loadVisionConfig();
+	const { model: pinnedModel, autoSelected } = await resolveComputerUseModel(
+		visionCfg.computerUseModel,
+		{ openRouterApiKey: process.env.OPENROUTER_API_KEY },
+	);
+	const modelLabel = autoSelected
+		? `${pinnedModel} (auto-selected)`
+		: pinnedModel;
+
 	console.log("");
 	console.log("  ┌─────────────────────────────────────────────────────┐");
 	console.log(`  │  Goal: ${goal.slice(0, 47).padEnd(47)} │`);
-	console.log(`  │  Model: qwen3.6:27b (vision tier)                   │`);
+	console.log(`  │  Model: ${modelLabel.slice(0, 45).padEnd(45)} │`);
 	console.log(`  │  Max steps: ${String(maxSteps).padEnd(41)} │`);
 	console.log("  └─────────────────────────────────────────────────────┘");
 	console.log("");
@@ -175,7 +185,7 @@ async function main(): Promise<void> {
 		sessionId,
 		approve: approveInteractive,
 		hostInfo: `macOS, Apple Silicon, Ghostty terminal`,
-		pinnedModel: "qwen3.6:27b",
+		pinnedModel,
 		failover,
 		handsAdapter,
 	};
