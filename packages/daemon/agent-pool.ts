@@ -176,6 +176,11 @@ export class AgentPool {
 			apiKey: this.config.apiKey,
 			maxTurns,
 			events,
+			// Delegation is the personal-OS channel (phone/glasses relay). It needs
+			// the full toolset upfront: with deferred loading, models skip the
+			// discover_tools hop and silently drop memory writes ("I'll remember
+			// that" with no remember call). Capability beats token thrift here.
+			allTools: channel === "delegation",
 		};
 
 		const agent = new Agent(agentConfig);

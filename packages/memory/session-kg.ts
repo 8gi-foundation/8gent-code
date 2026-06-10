@@ -142,7 +142,10 @@ export async function writeSessionToKG(input: SessionKGInput): Promise<void> {
  * Injects top global memories (personal facts) into the system prompt.
  * Reads synchronously so it can be called during agent construction.
  */
-export function recallGlobalMemoriesSync(limit = 10): string {
+// Default 30, not 10: a seeded owner profile alone is ~12 high-importance
+// facts, which would crowd newly learned (default-importance) memories out of
+// the boot prompt forever. ~6k chars worst case — cheap next to the toolset.
+export function recallGlobalMemoriesSync(limit = 30): string {
 	try {
 		const { existsSync } = require("node:fs") as typeof import("node:fs");
 		if (!existsSync(GLOBAL_DB_PATH)) return "";
