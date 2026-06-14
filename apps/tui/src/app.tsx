@@ -1721,6 +1721,16 @@ export function App({
 			setExpandedView((prev) => !prev);
 		}
 
+		// Ctrl+M: open model picker overlay
+		if (key.ctrl && input === "m" && !key.shift) {
+			setViewMode("model-select");
+		}
+
+		// Ctrl+Shift+M: open provider picker overlay
+		if (key.ctrl && input === "M" && key.shift) {
+			setViewMode("provider-select");
+		}
+
 		// Toggle process panel
 		if (key.ctrl && input === "b") {
 			processPanel.toggleSidebar();
@@ -2430,7 +2440,9 @@ export function App({
 							"  Ctrl+A - Toggle animations\n" +
 							"  Ctrl+S - Toggle sound\n" +
 							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
-							"  Ctrl+H - Toggle fancy header",
+							"  Ctrl+H - Toggle fancy header\n" +
+							"  Ctrl+M - Model picker\n" +
+							"  Ctrl+Shift+M - Provider picker",
 					);
 					break;
 

@@ -8,6 +8,7 @@
  * through this module so guard rails can never be skipped.
  */
 
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getDriver } from "../hands";
@@ -125,7 +126,25 @@ export function click(opts: ClickOptions): CommandResult {
 	}
 
 	const r = getDriver().click(opts.point, opts.button ?? "left", count);
+	if (r.ok) emitOverlay({ kind: "click", x: opts.point.x, y: opts.point.y });
 	return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+// Best-effort: write where the agent is acting so the EightBody screen overlay
+// can draw a marker (red laser ring on click, glow rect on focus). Cosmetic and
+// never on the critical path; opt out with EIGHT_OVERLAY=0.
+function emitOverlay(ev: { kind: "click" | "focus"; x: number; y: number; w?: number; h?: number }): void {
+	if (process.env.EIGHT_OVERLAY === "0") return;
+	try {
+		const dir = path.join(os.homedir(), ".8gent");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(
+			path.join(dir, "overlay.json"),
+			JSON.stringify({ kind: ev.kind, x: ev.x, y: ev.y, w: ev.w ?? 0, h: ev.h ?? 0, ts: Date.now() / 1000 }),
+		);
+	} catch {
+		/* overlay is cosmetic — never let it break an action */
+	}
 }
 
 /**
