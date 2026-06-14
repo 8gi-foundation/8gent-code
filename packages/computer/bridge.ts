@@ -155,7 +155,15 @@ export function press(opts: PressOptions): CommandResult {
 		return { ok: false, error: "Keys cannot be empty" };
 	}
 
-	const isDangerous = DANGEROUS_KEYS.has(normalized);
+	// Hard-block dangerous combos (quit / close / logout / force-interrupt)
+	// BEFORE executing anything. These can close apps or end the session, so an
+	// autonomous or auto-approved caller must never be able to fire them. This
+	// is the shared chokepoint for every caller (daemon, CLI, TUI). Previously
+	// the combo was EXECUTED and merely warned about afterwards — the keys
+	// actually fired. Now it is refused without touching the driver.
+	if (DANGEROUS_KEYS.has(normalized)) {
+		return { ok: false, error: `Blocked dangerous key combo "${normalized}"` };
+	}
 
 	const count = opts.count ?? 1;
 	if (count < 1 || count > MAX_CLICK_COUNT) {
@@ -174,9 +182,6 @@ export function press(opts: PressOptions): CommandResult {
 		}
 	}
 
-	if (isDangerous) {
-		return { ok: true, error: `Warning: executed dangerous key combo "${normalized}"` };
-	}
 	return { ok: true };
 }
 
