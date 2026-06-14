@@ -212,6 +212,23 @@ export async function main(): Promise<void> {
 	// Setup log file writer
 	setupLogging();
 
+	// EIGHT_AUTO_APPROVE=1 puts the daemon's NemoClaw PermissionManager into
+	// auto-approve mode for the life of the process — require_approval actions
+	// (desktop click/type, file writes, git, most bash) execute without a
+	// prompt. This is what lets the always-on voice/glasses surface ACT
+	// hands-free. Block-tier rules are unaffected: catastrophic bash (rm -rf /,
+	// etc.) and dangerous keys (cmd+q, logout) stay hard-denied. Opt-in only;
+	// unset the env to return to gated prompts. Mirrors `run.ts --yes`.
+	if (process.env.EIGHT_AUTO_APPROVE === "1") {
+		try {
+			const perms = await import("../permissions");
+			perms.getPermissionManager().setAutoApprove(true);
+			console.log("[daemon] auto-approve ON (EIGHT_AUTO_APPROVE=1) — dangerous bash/keys still blocked");
+		} catch (err) {
+			console.error(`[daemon] warn: could not enable auto-approve: ${String(err)}`);
+		}
+	}
+
 	// Create the agent pool - manages Agent instances per session
 	pool = new AgentPool(poolConfig);
 
