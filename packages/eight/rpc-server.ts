@@ -69,7 +69,7 @@ const methods: Record<string, Handler> = {
 
 		const agent = new Agent({
 			model,
-			runtime,
+			runtime: runtime as "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek",
 			workingDirectory: cwd,
 			maxTurns: 30,
 			allTools: true,
