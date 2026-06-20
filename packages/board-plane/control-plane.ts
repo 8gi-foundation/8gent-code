@@ -150,6 +150,13 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
 						break;
 					}
 					case "task:complete": {
+						// Resolve channel immediately so typing indicator fires
+						// before the potentially slow policy gate and post
+						const completed = taskQueue.getRecentTasks("", 1).find((t) => t.id === msg.taskId);
+						if (completed) {
+							rest.setTyping(conn.memberCode, completed.channelId);
+						}
+
 						// Content policy gate - validate before posting
 						const policy = validateResponse(msg.response, conn.memberCode);
 						if (!policy.pass) {
@@ -163,7 +170,6 @@ export async function startControlPlane(config: ControlPlaneConfig): Promise<voi
 						} else {
 							const safeResponse = sanitizeResponse(msg.response);
 							taskQueue.completeTask(msg.taskId, safeResponse);
-							const completed = taskQueue.getRecentTasks("", 1).find((t) => t.id === msg.taskId);
 							if (completed) {
 								rest.postMessage(conn.memberCode, completed.channelId, safeResponse);
 								memory.storeResponse(completed.channelId, conn.memberCode, safeResponse);
