@@ -7,6 +7,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { DEFAULT_HEDGE_CONFIG, HedgeExecutor, type HedgeConfig } from "./hedge-executor";
 import type { ScoreRecord } from "./judge";
 import { type LoopStatus, type ProductionConfig, ProductionLoop } from "./loop";
 import { type CollectorStats, PersonalCollector, type TrainingPair } from "./personal-collector";
@@ -26,6 +27,13 @@ export interface KernelConfig {
 	personalLoraPath: string;
 	/** Override production config */
 	production: Partial<ProductionConfig>;
+	/**
+	 * Hedge executor config. Default OFF. The hedge executor is independent of
+	 * the training pipeline `enabled` flag - it can accumulate dormant preference
+	 * data with training fully off - but it is OFF by default and only fires K
+	 * candidates when `hedge.enabled` is true.
+	 */
+	hedge: Partial<HedgeConfig>;
 }
 
 const DEFAULT_KERNEL_CONFIG: KernelConfig = {
@@ -33,6 +41,7 @@ const DEFAULT_KERNEL_CONFIG: KernelConfig = {
 	configPath: "config/training-proxy.yaml",
 	personalLoraPath: "~/.8gent/personal-lora/",
 	production: {},
+	hedge: { enabled: false },
 };
 
 export class KernelManager {
@@ -40,10 +49,12 @@ export class KernelManager {
 	private loop: ProductionLoop | null = null;
 	private userId: string | null = null;
 	private collector: PersonalCollector;
+	private hedgeExecutor: HedgeExecutor;
 
 	constructor(config: Partial<KernelConfig> = {}) {
 		this.config = { ...DEFAULT_KERNEL_CONFIG, ...config };
 		this.collector = new PersonalCollector();
+		this.hedgeExecutor = new HedgeExecutor({ ...DEFAULT_HEDGE_CONFIG, ...this.config.hedge });
 	}
 
 	/**
@@ -65,6 +76,8 @@ export class KernelManager {
 					proxy: { port: 30000, ollamaUrl: "http://localhost:11434" },
 					training: { baseModel: mc.baseModel ?? "qwen3:14b" },
 				},
+				// Hedge stays OFF unless training_proxy.hedge.enabled is explicitly true.
+				hedge: { enabled: mc.hedge?.enabled === true, ...(mc.hedge ?? {}) },
 			});
 		} catch {
 			return new KernelManager();
@@ -214,5 +227,22 @@ export class KernelManager {
 	 */
 	get isEnabled(): boolean {
 		return this.config.enabled;
+	}
+
+	/**
+	 * The hedge executor. Default OFF: when its flag is off, `run()` fires exactly
+	 * one candidate and is byte-identical to a single generate call. The agent
+	 * loop wraps its single `agent.generate` call with this so that, when hedging
+	 * is enabled, winner-vs-loser preference data accumulates dormantly on disk.
+	 */
+	get hedge(): HedgeExecutor {
+		return this.hedgeExecutor;
+	}
+
+	/**
+	 * Whether the hedge executor is enabled. Default false.
+	 */
+	get isHedgeEnabled(): boolean {
+		return this.hedgeExecutor.enabled;
 	}
 }

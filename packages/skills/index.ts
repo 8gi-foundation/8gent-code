@@ -285,9 +285,21 @@ export class SkillManager {
 			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), false);
 		}
 
-		const claudeSkillsRoot = path.join(process.cwd(), ".claude", "skills");
-		for (const filePath of collectNestedSkillMdPaths(claudeSkillsRoot)) {
-			this.tryIngestSkillFile(filePath, true);
+		// Discover .claude/skills from BOTH the project (repo-local override) and the
+		// user's GLOBAL ~/.claude/skills. The global root was missing, so the daemon
+		// brain could not see James's local Claude skills - only repo-bundled ones.
+		// De-duped so a project that equals home is not ingested twice.
+		const claudeSkillsRoots = [
+			path.join(process.cwd(), ".claude", "skills"),
+			path.join(os.homedir(), ".claude", "skills"),
+		];
+		const seenSkillPaths = new Set<string>();
+		for (const root of claudeSkillsRoots) {
+			for (const filePath of collectNestedSkillMdPaths(root)) {
+				if (seenSkillPaths.has(filePath)) continue;
+				seenSkillPaths.add(filePath);
+				this.tryIngestSkillFile(filePath, true);
+			}
 		}
 
 		for (const filePath of discoverBundledSkillMdFiles()) {

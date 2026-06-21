@@ -22,3 +22,52 @@ export {
 	checkTrainerDeps,
 	type LocalTrainerConfig,
 } from "./local-trainer";
+export {
+	HedgeExecutor,
+	DEFAULT_HEDGE_CONFIG,
+	selectCandidates,
+	type HedgeConfig,
+	type HedgeCandidate,
+	type HedgeGenerator,
+	type HedgeRunOptions,
+	type HedgeRunResult,
+	type HedgeSignalRow,
+	type GenerateResult,
+} from "./hedge-executor";
+export {
+	ResourceGovernor,
+	decide as decideResourceVerdict,
+	turnCostUsd,
+	DEFAULT_BUDGET_POLICY,
+	type GovernorVerdict,
+	type ResourceSnapshot,
+	type BudgetPolicy,
+	type Vitals,
+	type ThermalState,
+} from "./resource-governor";
+export {
+	evaluatePromotion,
+	holdOutBeats,
+	loadPromotionPolicy,
+	writeRollbackManifest,
+	readRollbackManifest,
+	DEFAULT_PROMOTION_POLICY,
+	PROMOTION_POLICY_PATH,
+	type PromotionPolicy,
+	type PromotionRequest,
+	type PromotionDecision,
+	type PromotionAutonomy,
+	type HoldOut,
+	type HoldOutResult,
+	type CanarySignal,
+	type HumanConfirm,
+	type RollbackManifest,
+	type BumpClass,
+} from "./promotion-gate";
+export {
+	exportDailyCorpus,
+	DEFAULT_BDH_CORPUS_DIR,
+	type BdhExportOptions,
+	type BdhExportResult,
+	type BdhCorpusRow,
+} from "./bdh-export";

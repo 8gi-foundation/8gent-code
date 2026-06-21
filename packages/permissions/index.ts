@@ -1205,24 +1205,54 @@ export { ToolG8 } from "./toolg8.js";
 export {
 	getAgentPolicy,
 	SPAWNED_AGENT_RESTRICTIONS,
+	SHADOW_AGENT_RESTRICTIONS,
+	SHADOW_AGENT_SCOPE,
 	evaluateBudget,
+	evaluateBudgetPolicy,
+	reconcileBudgetPolicy,
 	DEFAULT_TUI_BUDGET,
 	DEFAULT_COMPUTER_USE_BUDGET,
+	DEFAULT_BUDGET_POLICY,
 } from "./policy-engine.js";
 export type {
 	CapabilityBudget,
 	BudgetCounters,
 	BudgetEvalResult,
+	BudgetPolicy,
+	BudgetAtCapAction,
+	RollingBudgetCounters,
+	BudgetPolicyResult,
 } from "./policy-engine.js";
 export {
 	matchDenyList,
+	matchNeverAuto,
 	GO_DENY_LIST,
+	NEVER_AUTO_CLASSES,
 } from "./go-deny-list.js";
 export type {
 	DenyListPattern,
 	DenyListResult,
 	ToolCallLike,
+	NeverAutoContext,
+	NeverAutoResult,
 } from "./go-deny-list.js";
+export {
+	Rung,
+	DEFAULT_RUNG,
+	evaluateRung,
+	checkerPassed,
+	appendRungAudit,
+	signApprovalGrant,
+	getAuditLogPath as getRungAuditLogPath,
+} from "./autonomy-ladder.js";
+export type {
+	AutonomyDomain,
+	RungDecision,
+	RungEvalInput,
+	MakerCheckerContext,
+	RungAuditRecord,
+	ApprovalGrantPayload,
+} from "./autonomy-ladder.js";
 export {
 	scrubGoalText,
 	containsSecret,

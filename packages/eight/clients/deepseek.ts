@@ -11,6 +11,8 @@
  */
 
 import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
+import { deanonymize } from "../../permissions/pii-anonymizer";
+import { anonymizeOutbound, deanonymizeResponse, resolveLocalFallback } from "./pii-gate";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 
@@ -59,6 +61,28 @@ export class DeepSeekClient implements LLMClient {
 	}
 
 	async chat(messages: Message[], tools?: object[]): Promise<LLMResponse> {
+		// ── PII gate (cloud-egress boundary) ────────────────────────────────
+		// HARD RULE: no PII may reach DeepSeek. Anonymize + verify before send;
+		// de-anonymize the reply. Fail closed to a local model on any failure.
+		const gate = anonymizeOutbound(messages);
+		if (!gate.clean) {
+			const local = resolveLocalFallback();
+			if (!local) {
+				throw new Error(
+					"PII gate fail-closed (DeepSeek): could not produce a verified-clean " +
+						"payload and no local provider is available. Refusing to send to cloud.",
+				);
+			}
+			// Local path: the ORIGINAL (un-anonymized) messages stay on-device.
+			return local.chat(messages, tools);
+		}
+
+		const response = await this.chatRaw(gate.messages, tools);
+		return deanonymizeResponse(response, gate.map);
+	}
+
+	/** Raw cloud dispatch. Callers must pass already-gated (pseudonymized) messages. */
+	private async chatRaw(messages: Message[], tools?: object[]): Promise<LLMResponse> {
 		const body: Record<string, unknown> = {
 			model: this.model,
 			messages: messages.map((m) => ({
@@ -110,9 +134,19 @@ export class DeepSeekClient implements LLMClient {
 	}
 
 	async *stream(messages: Message[]): AsyncGenerator<string> {
+		// PII gate: never stream raw PII to the cloud. Anonymize + verify before
+		// send; fail closed (refuse) if the payload cannot be proven clean. Each
+		// yielded delta is de-anonymized so the caller sees real values back.
+		const gate = anonymizeOutbound(messages);
+		if (!gate.clean) {
+			throw new Error(
+				"PII gate fail-closed (DeepSeek stream): could not produce a verified-clean " +
+					"payload. Refusing to stream to cloud.",
+			);
+		}
 		const body = {
 			model: this.model,
-			messages: messages.map((m) => ({
+			messages: gate.messages.map((m) => ({
 				role: m.role,
 				content: flattenContent(m.content),
 			})),
@@ -145,7 +179,7 @@ export class DeepSeekClient implements LLMClient {
 					try {
 						const parsed = JSON.parse(payload);
 						const delta = parsed.choices?.[0]?.delta?.content;
-						if (delta) yield delta as string;
+						if (delta) yield deanonymize(delta as string, gate.map);
 					} catch {
 						// Skip non-JSON SSE keepalives.
 					}

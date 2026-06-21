@@ -223,9 +223,19 @@ export async function evaluateAndBump(
 	newScore: number,
 	newDetails: Record<string, number>,
 	openrouterApiKey: string,
+	/**
+	 * P0-2 gate: a version bump that OVERWRITES the baseline and makes the
+	 * candidate the active version is a promotion. It must NOT happen on a single
+	 * cloud-judge verdict. The caller must pass `gateApproved: true` (obtained
+	 * from the promotion gate: frozen hold-out + canary + human confirm) for the
+	 * baseline to be overwritten. Default FALSE: the judge verdict is recorded in
+	 * history, but the baseline/active version is left untouched.
+	 */
+	options: { gateApproved?: boolean } = {},
 ): Promise<{ bumped: boolean; newVersion: string; verdict: string }> {
 	const current = getCurrentVersion();
 	const baseline = getBaseline();
+	const gateApproved = options.gateApproved === true;
 
 	const { verdict, reasoning } = await judgeImprovement(
 		baseline.score,
@@ -240,6 +250,27 @@ export async function evaluateAndBump(
 			bumped: false,
 			newVersion: getVersionString(current),
 			verdict: reasoning,
+		};
+	}
+
+	// P0-2: without an approved promotion gate, record the candidate in history
+	// as NOT promoted and do NOT overwrite the baseline or active version. The
+	// judge scores quality; it does not certify a promotion.
+	if (!gateApproved) {
+		current.history.push({
+			version: getVersionString(current),
+			date: new Date().toISOString(),
+			benchmarkScore: newScore,
+			improvement: newScore - baseline.score,
+			promoted: false,
+			judgeVerdict: `[candidate, not promoted - gate not approved] ${reasoning}`,
+		});
+		if (current.history.length > 20) current.history = current.history.slice(-20);
+		saveVersion(current);
+		return {
+			bumped: false,
+			newVersion: getVersionString(current),
+			verdict: `Candidate recorded; promotion withheld pending gate. ${reasoning}`,
 		};
 	}
 

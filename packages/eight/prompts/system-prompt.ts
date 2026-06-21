@@ -7,6 +7,9 @@
  * Identity and access control are composed via soul-layers.ts.
  */
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
@@ -23,6 +26,59 @@ export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
  * Kept for backward compatibility with any direct imports.
  */
 export const IDENTITY_SEGMENT = composeSoulPrompt("owner");
+
+// ============================================
+// Board Context (universal standing briefing)
+// ============================================
+
+/**
+ * Path to the standing board briefing. This single file is the one place the
+ * whole 8GI board's shared context lives (roadmap + phase gates + officer roster
+ * + "how to query the live sources"). It is regenerated/kept fresh out-of-band
+ * by the relay (mac/relay/board_context.py on the heartbeat cadence) so this
+ * read is pure and never needs the network.
+ */
+export const BOARD_CONTEXT_PATH = join(homedir(), ".8gent", "board-context.md");
+
+/**
+ * Cap the injected briefing so a long file never bloats every agent's prompt.
+ * Mirrors the relay-side cap in harness.py (_BOARD_CONTEXT_CAP) so the same
+ * file produces a bounded block on every surface.
+ */
+export const BOARD_CONTEXT_CAP = 4500;
+
+/**
+ * Build the `## BOARD CONTEXT` segment from the standing briefing on disk.
+ *
+ * This is the UNIVERSAL injection: it is appended inside USER_CONTEXT_SEGMENT
+ * (which agent.ts assembles into every agent's system prompt) and into the
+ * composed prompts below, so the daemon doer, the boardroom officers, and any
+ * forked child agent (all of which instantiate `new Agent(...)`) inherit the
+ * same roadmap + the "you are tool-capable, QUERY the live sources, do not
+ * guess" instruction.
+ *
+ * Pure read (no network). Absent/empty file => "" (omitted cleanly). The file
+ * is PII-free by contract (project/roadmap/state only); nothing here adds PII.
+ */
+export function buildBoardContextSegment(path: string = BOARD_CONTEXT_PATH): string {
+	let text: string;
+	try {
+		text = readFileSync(path, "utf-8").trim();
+	} catch {
+		return ""; // absent file => omit cleanly
+	}
+	if (!text) return ""; // empty file => omit cleanly
+	if (text.length > BOARD_CONTEXT_CAP) {
+		text = `${text.slice(0, BOARD_CONTEXT_CAP).replace(/\n[^\n]*$/, "")}\n... (truncated; read the full file for more)`;
+	}
+	return [
+		"## BOARD CONTEXT",
+		"Standing briefing for the whole 8GI board. Read it and answer from it.",
+		"You are tool-capable: QUERY the live sources it cites (read the files, hit the relay/Convex endpoints) rather than guessing. Always prefer real data over a guess.",
+		"",
+		text,
+	].join("\n");
+}
 
 /**
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
@@ -58,7 +114,11 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 		parts.push(`Respond in: ${userData.language}`);
 	}
 
-	return parts.length > 1 ? parts.join("\n") : "";
+	// Append the universal board briefing so every agent that gets a user-context
+	// block also gets the shared roadmap + "query the live sources" instruction.
+	const board = buildBoardContextSegment();
+	const userPart = parts.length > 1 ? parts.join("\n") : "";
+	return [userPart, board].filter(Boolean).join("\n\n");
 };
 
 export const ARCHITECTURE_SEGMENT = `## SELF-KNOWLEDGE
@@ -419,6 +479,8 @@ export function getFullSystemPrompt(): string {
 		composeSoulPrompt("owner"),
 		// Inject vessel context if running as a deployed instance
 		process.env.EIGHT_VESSEL_CONTEXT || "",
+		// Universal standing board briefing (roadmap + how-to-query). Omitted if absent.
+		buildBoardContextSegment(),
 		instructionSegment,
 		ARCHITECTURE_SEGMENT,
 		TOOL_CATALOG_SEGMENT,
@@ -449,6 +511,8 @@ export function buildTieredSystemPrompt(tier: AccessTier, userContext?: UserCont
 
 	return [
 		composeSoulPrompt(tier, userContext),
+		// Universal standing board briefing (roadmap + how-to-query). Omitted if absent.
+		buildBoardContextSegment(),
 		instructionSegment,
 		ARCHITECTURE_SEGMENT,
 		TOOL_CATALOG_SEGMENT,
@@ -629,6 +693,8 @@ ${state.infiniteMode ? "- Mode: INFINITE (autonomous until done)" : ""}`;
 
 	return [
 		composeSoulPrompt(tier, userContext),
+		// Universal standing board briefing (roadmap + how-to-query). Omitted if absent.
+		buildBoardContextSegment(),
 		contextSection,
 		instructionSegment,
 		TOOL_CATALOG_SEGMENT,

@@ -16,6 +16,7 @@ import { indexFolder as astIndexFolder } from "../ast-index";
 import { getExtensionManager } from "../extensions";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
+import type { HedgeCandidate } from "../kernel/hedge-executor";
 import { KernelManager } from "../kernel/manager";
 import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
@@ -370,6 +371,23 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		if (!LITE) {
 			this.kernel.start().catch(() => {});
 		}
+		// Connector 1 (ISI wiring): the personal collector early-returns false
+		// forever unless a userId is set. Wire it ONCE here, but ONLY when the
+		// kernel is enabled via training_proxy.enabled (default false). When the
+		// flag is off this is a no-op, so collection stays dormant. The id is a
+		// stable, local-only hash of host+home - never a network identity.
+		if (!LITE && this.kernel.isEnabled) {
+			try {
+				const localUserId = crypto
+					.createHash("sha256")
+					.update(`${os.hostname()}::${os.homedir()}`)
+					.digest("hex")
+					.slice(0, 16);
+				this.kernel.setUserId(localUserId);
+			} catch {
+				// If we cannot derive a stable id, leave collection dormant.
+			}
+		}
 
 		// Initialize orchestrator bus for multi-agent coordination.
 		// (Singleton getter — cheap, no background loops kicked off here.)
@@ -651,7 +669,23 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			this.toolRegistry.loadCategory("computer");
 		}
 		const allTools = this.toolRegistry.getTools();
-		const localCoreTools = cuaConfigured ? [...CORE_TOOLS, "run_computer_task"] : CORE_TOOLS;
+		// When CUA is configured, give a LOCAL provider both the autonomous loop
+		// AND the granular desktop_* tools, so it can act directly (screenshot ->
+		// click -> type) with the local vision model instead of being stuck behind
+		// the cloud-dependent run_computer_task loop. Everything here runs on-device.
+		const DESKTOP_TOOLS = [
+			"run_computer_task",
+			"desktop_screenshot",
+			"desktop_click",
+			"desktop_type",
+			"desktop_press",
+			"desktop_scroll",
+			"desktop_drag",
+			"desktop_hover",
+			"desktop_windows",
+			"desktop_clipboard",
+		];
+		const localCoreTools = cuaConfigured ? [...CORE_TOOLS, ...DESKTOP_TOOLS] : CORE_TOOLS;
 		const effectiveTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
 			: allTools;
@@ -1151,13 +1185,70 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 				for (let attempt = 1; attempt <= RATE_LIMIT_ATTEMPTS; attempt++) {
 					try {
-						result = await agent.generate({
-							messages,
-							abortSignal: this.abortController?.signal,
-						});
+						// ── Hedge wrap (ISI keystone). When the hedge flag is OFF (default),
+						// this fires exactly ONE candidate (the current chain entry) and is
+						// byte-identical to a single `agent.generate(...)`. When ON, it fires
+						// K free/local-preferred candidates, returns the fastest winner, and
+						// writes a dormant winner-vs-loser preference signal to disk. The
+						// executor only ever returns ONE result here; tool calls below run for
+						// that single result exactly as before, so no loser candidate can ever
+						// reach the tool executor.
+						const hedge = this.kernel.hedge;
+						const candidates: HedgeCandidate[] = [
+							{ provider: currentEntry.provider, model: currentEntry.model, local: isLocalProvider },
+						];
+						if (hedge.enabled) {
+							// Add sibling free/local entries from the failover chain as extra
+							// candidates. Non-fatal if the chain has no siblings.
+							const sibling = failover.resolve(currentEntry.model, channel);
+							if (
+								sibling.model !== currentEntry.model ||
+								sibling.provider !== currentEntry.provider
+							) {
+								candidates.push({
+									provider: sibling.provider,
+									model: sibling.model,
+									local: false,
+								});
+							}
+						}
+						const hedgeOut = await hedge.run(
+							candidates,
+							async (cand, signal) => {
+								const candAgent =
+									cand.provider === currentEntry.provider && cand.model === currentEntry.model
+										? agent
+										: createEightAgent({
+												...agentConfig,
+												provider: { name: cand.provider as any, model: cand.model },
+											});
+								// The agent's GenerateTextResult is structurally a superset of the
+								// hedge GenerateResult (it has text + steps); widen for the executor.
+								return candAgent.generate({ messages, abortSignal: signal }) as unknown as Promise<
+									import("../kernel/hedge-executor").GenerateResult
+								>;
+							},
+							{
+								sessionId: this.sessionId,
+								turnIndex: this.messageHistory.filter((m) => m.role === "assistant").length,
+								prompt: textForAgent,
+								abortSignal: this.abortController?.signal,
+							},
+						);
+						result = hedgeOut.result;
 						resolved = true;
 						// Update agentConfig so any downstream logic sees the provider that actually succeeded
-						agentConfig = stepConfig;
+						agentConfig =
+							hedgeOut.winner.provider === currentEntry.provider &&
+							hedgeOut.winner.model === currentEntry.model
+								? stepConfig
+								: {
+										...agentConfig,
+										provider: {
+											name: hedgeOut.winner.provider as any,
+											model: hedgeOut.winner.model,
+										},
+									};
 						break outer;
 					} catch (err: any) {
 						if (err?.name === "AbortError") throw err; // User pressed ESC
@@ -1251,19 +1342,53 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 			this.messageHistory.push({ role: "assistant", content: flavoredContent });
 
-			// Feed successful turn to kernel for personal LoRA training (fire-and-forget)
+			// Feed successful turn to kernel for personal LoRA training (fire-and-forget).
+			// Connector 2 (ISI wiring): score the turn with the PRM judge instead of a
+			// hardcoded 0.8. processTurn runs the judge (which redacts + hard-skips on
+			// secrets before any cloud call) and returns the real overall score. It
+			// returns null when the kernel loop is inactive (flag off / not started),
+			// in which case we fall back to the prior neutral 0.8 default so behaviour
+			// is unchanged when the flag is OFF. Kept fully off the hot path.
 			if (this.kernel.isActive || this.kernel.isEnabled) {
-				this.kernel.collectSessionTrace(
-					this.sessionId,
-					textForAgent,
-					flavoredContent,
-					0.8, // Default score — PRM judge would score this properly if kernel is active
-					{
-						model: this.config.model,
-						toolCallsSucceeded: this.sessionEvidence.filter((e) => !e.verified).length === 0,
-						userCorrected: false, // Will be updated on next user message if it's a correction
-					},
-				);
+				const toolCallsSucceeded =
+					this.sessionEvidence.filter((e) => !e.verified).length === 0;
+				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
+				const promptForKernel = textForAgent;
+				const responseForKernel = flavoredContent;
+				const modelForKernel = this.config.model;
+				// Fire-and-forget: judge scores async, never blocks the turn.
+				void this.kernel
+					.processTurn(
+						this.sessionId,
+						turnIndex,
+						modelForKernel,
+						promptForKernel,
+						responseForKernel,
+					)
+					.then((record) => {
+						const score = record?.scores.overall ?? 0.8;
+						this.kernel.collectSessionTrace(
+							this.sessionId,
+							promptForKernel,
+							responseForKernel,
+							score,
+							{
+								model: modelForKernel,
+								toolCallsSucceeded,
+								userCorrected: false,
+							},
+						);
+					})
+					.catch(() => {
+						// Judge unavailable: fall back to the neutral default, never block.
+						this.kernel.collectSessionTrace(
+							this.sessionId,
+							promptForKernel,
+							responseForKernel,
+							0.8,
+							{ model: modelForKernel, toolCallsSucceeded, userCorrected: false },
+						);
+					});
 			}
 
 			// Save checkpoint every 5 messages
