@@ -13,10 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validatePath } from "./path-guard.js";
-import {
-	checkCommandBoundary,
-	checkFilePathBoundary,
-} from "./src/workspace-boundary.js";
+import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
 	PolicyActionType,
 	PolicyContext,
@@ -537,10 +534,7 @@ function resolveAllowedPrefixes(context: PolicyContext): string[] {
  * Skipped when no workspace root is set (CLI startup, daemons that opt out)
  * so existing tooling keeps working until a root is wired in.
  */
-function workspaceBoundaryGate(
-	action: string,
-	context: PolicyContext,
-): PolicyDecision | null {
+function workspaceBoundaryGate(action: string, context: PolicyContext): PolicyDecision | null {
 	const workspaceRoot = resolveWorkspaceRoot(context);
 	if (!workspaceRoot) return null;
 
@@ -576,6 +570,61 @@ function workspaceBoundaryGate(
 }
 
 // ============================================
+// Shadow-candidate hard-deny (issue #2699, 8SO P0-3)
+// ============================================
+
+/**
+ * The agent scope a hedge/shadow LOSER candidate runs under. Shadow
+ * candidates may READ and COMPUTE only - they can NEVER reach a
+ * side-effecting tool. Exactly one winner is chosen, then the winner
+ * (NOT the shadow) re-executes side effects under the normal policy path.
+ *
+ * This mirrors `SPAWNED_AGENT_RESTRICTIONS` but is enforced as a hard
+ * PRE-GATE (not a YAML rule), so no `addPolicy`/YAML allow can ever lift it.
+ */
+export const SHADOW_AGENT_SCOPE = "__shadow__";
+
+/**
+ * Every side-effecting action class. A `__shadow__`-scoped agent attempting
+ * any of these is hard-denied before YAML rule eval. Read/compute-shaped
+ * actions (read_file, glob, list_files) are deliberately absent - shadows
+ * may observe and compute, they just cannot change the world.
+ */
+const SHADOW_DENIED_ACTIONS = new Set<string>([
+	"write_file",
+	"delete_file",
+	"edit_file",
+	"apply_patch",
+	"run_command",
+	"git_push",
+	"git_commit",
+	"network_request",
+	"secret_write",
+	"env_access",
+	"email_send",
+	"email_receive",
+	"issue_email_address",
+	"agent_mail_send",
+	"peers_send",
+	"computer_use",
+]);
+
+/**
+ * Shadow hard-deny gate. If the context agent is the shadow scope and the
+ * action is side-effecting, deny unconditionally. Read/compute actions fall
+ * through to the normal gates (which still apply path-guard etc).
+ */
+function shadowGate(action: string, context: PolicyContext): PolicyDecision | null {
+	const agentId = typeof context.agentId === "string" ? context.agentId : "";
+	if (agentId !== SHADOW_AGENT_SCOPE) return null;
+	if (!SHADOW_DENIED_ACTIONS.has(action)) return null;
+	return {
+		allowed: false,
+		reason: `[shadow-deny] shadow/hedge candidate (scope __shadow__) attempted side-effecting action "${action}". Shadow candidates run text/plan-only; only the chosen winner re-executes side effects under the normal policy path.`,
+	};
+}
+
+// ============================================
 // Core Evaluator
 // ============================================
 
@@ -586,6 +635,7 @@ function workspaceBoundaryGate(
  *   0a. Path guard - credential / UNC / device deny-list (issue #2465, not YAML-overridable)
  *   0b. COPPA hard-deny - email/address-issuance for child accounts (not YAML-overridable)
  *   0c. Workspace boundary - realpath-anchored confinement (issue #2083, not YAML-overridable)
+ *   0d. Shadow-candidate hard-deny - __shadow__ scope cannot side-effect (issue #2699, not YAML-overridable)
  *   1. Disabled rules skipped
  *   2. "block" rules checked first - if matched, hard deny (no override possible)
  *   3. "require_approval" rules checked - if matched, soft deny
@@ -604,6 +654,12 @@ export function evaluatePolicy(
 
 	const boundary = workspaceBoundaryGate(action, context);
 	if (boundary) return boundary;
+
+	// 0d. Shadow-candidate hard-deny (issue #2699, 8SO P0-3) - a __shadow__
+	//     scoped agent may never reach a side-effecting tool. Pre-gate so no
+	//     YAML/addPolicy allow can lift it.
+	const shadow = shadowGate(action, context);
+	if (shadow) return shadow;
 
 	if (!_loaded) loadPolicies();
 
@@ -699,10 +755,7 @@ export interface BashCapabilityLike {
 	path?: string;
 }
 
-export function evaluateCapabilities(
-	caps: BashCapabilityLike[],
-	agentId?: string,
-): PolicyDecision {
+export function evaluateCapabilities(caps: BashCapabilityLike[], agentId?: string): PolicyDecision {
 	for (const cap of caps) {
 		const ctx: PolicyContext = { agentId };
 		if (cap.command !== undefined) ctx.command = cap.command;
@@ -802,9 +855,7 @@ export const DEFAULT_COMPUTER_USE_BUDGET: CapabilityBudget = {
 	sudoBlocked: true,
 };
 
-export type BudgetEvalResult =
-	| { allowed: true }
-	| { allowed: false; reason: string };
+export type BudgetEvalResult = { allowed: true } | { allowed: false; reason: string };
 
 /**
  * Evaluate the budget. Returns the first axis to breach (alphabetised
@@ -855,6 +906,163 @@ export function evaluateBudget(
 	return { allowed: true };
 }
 
+// ============================================
+// Budget POLICY (issue #2699, 8GO section 3)
+// ============================================
+
+/**
+ * The at-cap behaviour Agent A's ResourceGovernor reads. Policy fixes the
+ * meaning per axis; the engine (Agent A) wires the counters.
+ *
+ * ADOPTED DEFAULTS (8GO):
+ *   thermal ceiling   = HARD-HALT      (safety over completion, always)
+ *   spend ceiling     = halt-and-ask   (never spend past the ceiling to finish)
+ *   token/day ceiling = degrade-to-local (drop to a cheaper local model)
+ *
+ * A halt always leaves a signed, resumable state (the caller writes the
+ * checkpoint; this enum tells it which response to take).
+ */
+export type BudgetAtCapAction = "degrade" | "ask" | "halt";
+
+/**
+ * Rolling ceilings layered on top of the per-run `CapabilityBudget`. These
+ * track across runs (per-day token + spend) and against the host (thermal).
+ * Agent A's ResourceGovernor owns the counters; policy owns the thresholds
+ * and the at-cap action.
+ */
+export interface BudgetPolicy {
+	/** Per-day token cap. Breach => degrade-to-local. */
+	maxTokensPerDay: number;
+	/** Per-day cloud spend ceiling in USD. Breach => halt-and-ask. */
+	maxSpendPerDayUsd: number;
+	/** Thermal / sustained-compute ceiling (0-100). Breach => hard-halt. */
+	maxThermalPct: number;
+	/** The at-cap action per axis. Fixed by policy; not caller-overridable up. */
+	atCap: {
+		token: BudgetAtCapAction;
+		spend: BudgetAtCapAction;
+		thermal: BudgetAtCapAction;
+	};
+}
+
+/**
+ * The adopted default budget policy. local-first => $0 default cloud spend.
+ * The system may TIGHTEN these (more conservative) but never WIDEN them.
+ */
+export const DEFAULT_BUDGET_POLICY: BudgetPolicy = {
+	maxTokensPerDay: 2_000_000,
+	maxSpendPerDayUsd: 0,
+	maxThermalPct: 85,
+	atCap: {
+		token: "degrade",
+		spend: "ask",
+		thermal: "halt",
+	},
+};
+
+export interface RollingBudgetCounters {
+	tokensToday: number;
+	spendTodayUsd: number;
+	/** Current thermal / sustained-compute load, 0-100. */
+	thermalPct: number;
+}
+
+export type BudgetPolicyResult =
+	| { withinBudget: true }
+	| {
+			withinBudget: false;
+			axis: "token" | "spend" | "thermal";
+			action: BudgetAtCapAction;
+			reason: string;
+	  };
+
+/**
+ * Evaluate the rolling budget POLICY and return the at-cap action for the
+ * first breached axis. Thermal is checked FIRST (a runaway / overheat is the
+ * most severe), then spend (money), then tokens (cheapest to recover from).
+ *
+ * Pure function: it reads counters + policy and returns a verdict. Every
+ * deny/degrade/halt MUST be audit-logged by the caller
+ * (`{ts, op:"budget", runId, axis, action, counters}`); no budget event is
+ * silent. `runId` is carried for that hook.
+ */
+export function evaluateBudgetPolicy(
+	runId: string,
+	counters: RollingBudgetCounters,
+	policy: BudgetPolicy = DEFAULT_BUDGET_POLICY,
+): BudgetPolicyResult {
+	void runId; // carried for the caller's audit hook
+
+	if (counters.thermalPct > policy.maxThermalPct) {
+		return {
+			withinBudget: false,
+			axis: "thermal",
+			action: policy.atCap.thermal,
+			reason: `exceeded:thermal (${counters.thermalPct}% > ${policy.maxThermalPct}%) -> ${policy.atCap.thermal}`,
+		};
+	}
+	if (counters.spendTodayUsd > policy.maxSpendPerDayUsd) {
+		return {
+			withinBudget: false,
+			axis: "spend",
+			action: policy.atCap.spend,
+			reason: `exceeded:spend-per-day ($${counters.spendTodayUsd} > $${policy.maxSpendPerDayUsd}) -> ${policy.atCap.spend}`,
+		};
+	}
+	if (counters.tokensToday > policy.maxTokensPerDay) {
+		return {
+			withinBudget: false,
+			axis: "token",
+			action: policy.atCap.token,
+			reason: `exceeded:tokens-per-day (${counters.tokensToday} > ${policy.maxTokensPerDay}) -> ${policy.atCap.token}`,
+		};
+	}
+	return { withinBudget: true };
+}
+
+/**
+ * Reconcile a PROPOSED budget policy against the current one. The system may
+ * TIGHTEN its own budget (every axis <= current) but may NEVER WIDEN it - a
+ * wider envelope is a James decision (a rung-3 approval), not something the
+ * flywheel grants itself. Returns the safe-merged policy: any axis the
+ * proposal tried to widen is clamped back to the current (tighter) value.
+ *
+ * `widened` lists the axes that were clamped, so the caller can surface a
+ * rung-3 card ("the system wanted more headroom - approve?").
+ */
+export function reconcileBudgetPolicy(
+	current: BudgetPolicy,
+	proposed: Partial<BudgetPolicy>,
+): { policy: BudgetPolicy; widened: string[] } {
+	const widened: string[] = [];
+	const clampDown = (axis: keyof BudgetPolicy, cur: number, next: number | undefined): number => {
+		if (typeof next !== "number") return cur;
+		if (next > cur) {
+			widened.push(String(axis));
+			return cur; // refuse to widen - keep the tighter current value
+		}
+		return next; // tightening is always allowed
+	};
+	return {
+		policy: {
+			maxTokensPerDay: clampDown(
+				"maxTokensPerDay",
+				current.maxTokensPerDay,
+				proposed.maxTokensPerDay,
+			),
+			maxSpendPerDayUsd: clampDown(
+				"maxSpendPerDayUsd",
+				current.maxSpendPerDayUsd,
+				proposed.maxSpendPerDayUsd,
+			),
+			maxThermalPct: clampDown("maxThermalPct", current.maxThermalPct, proposed.maxThermalPct),
+			// at-cap actions are policy-fixed; a proposal cannot soften them.
+			atCap: current.atCap,
+		},
+		widened,
+	};
+}
+
 /**
  * Default restrictive policy rules for spawned/imported agents.
  * These block network, git push, and secret access unless explicitly overridden.
@@ -891,5 +1099,56 @@ export const SPAWNED_AGENT_RESTRICTIONS: PolicyRule[] = [
 		decision: "block",
 		message: "Spawned agents cannot access env vars by default.",
 		agentScope: "__spawned__",
+	},
+];
+
+/**
+ * Shadow-candidate restriction rules (issue #2699). These mirror the
+ * SPAWNED set for the `__shadow__` scope. The hard `shadowGate` pre-gate is
+ * the primary enforcement; these YAML-shaped rules are belt-and-suspenders
+ * for callers that load them via `addPolicy`. A shadow candidate may read
+ * and compute, but never write, push, send, or exec.
+ */
+export const SHADOW_AGENT_RESTRICTIONS: PolicyRule[] = [
+	{
+		name: "shadow-no-write",
+		action: "write_file",
+		condition: "path contains ",
+		decision: "block",
+		message:
+			"Shadow/hedge candidates cannot write files. Only the chosen winner re-executes side effects.",
+		agentScope: SHADOW_AGENT_SCOPE,
+	},
+	{
+		name: "shadow-no-command",
+		action: "run_command",
+		condition: "command contains ",
+		decision: "block",
+		message: "Shadow/hedge candidates cannot run commands.",
+		agentScope: SHADOW_AGENT_SCOPE,
+	},
+	{
+		name: "shadow-no-network",
+		action: "network_request",
+		condition: "url contains .",
+		decision: "block",
+		message: "Shadow/hedge candidates cannot make network requests.",
+		agentScope: SHADOW_AGENT_SCOPE,
+	},
+	{
+		name: "shadow-no-git-push",
+		action: "git_push",
+		condition: "branch contains ",
+		decision: "block",
+		message: "Shadow/hedge candidates cannot push to git.",
+		agentScope: SHADOW_AGENT_SCOPE,
+	},
+	{
+		name: "shadow-no-send",
+		action: "email_send",
+		condition: "to contains ",
+		decision: "block",
+		message: "Shadow/hedge candidates cannot send mail.",
+		agentScope: SHADOW_AGENT_SCOPE,
 	},
 ];

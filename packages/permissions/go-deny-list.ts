@@ -27,13 +27,7 @@ export interface DenyListResult {
  * Treat any tool that runs shell/commands as a shell call. The /goal gate
  * itself never inspects file content - only tool invocation metadata.
  */
-const SHELL_TOOLS = new Set<string>([
-	"bash",
-	"shell",
-	"run_command",
-	"exec",
-	"system",
-]);
+const SHELL_TOOLS = new Set<string>(["bash", "shell", "run_command", "exec", "system"]);
 
 const isShell = (tool: string): boolean => SHELL_TOOLS.has(tool.toLowerCase());
 
@@ -121,7 +115,8 @@ const DNS_MUTATION_PATTERNS: RegExp[] = [
  */
 function matchRmRfOutsideTmp(args: string): boolean {
 	// Look for rm with recursive + force flags
-	const rmRecursive = /\brm\s+(?:-[A-Za-z]*[rR][A-Za-z]*[fF][A-Za-z]*|-[A-Za-z]*[fF][A-Za-z]*[rR][A-Za-z]*|-rf|-fr|-Rf|-fR|--recursive\s+--force|--force\s+--recursive)\b/;
+	const rmRecursive =
+		/\brm\s+(?:-[A-Za-z]*[rR][A-Za-z]*[fF][A-Za-z]*|-[A-Za-z]*[fF][A-Za-z]*[rR][A-Za-z]*|-rf|-fr|-Rf|-fR|--recursive\s+--force|--force\s+--recursive)\b/;
 	if (!rmRecursive.test(args)) return false;
 
 	// Extract the path tokens after the flags. Anything that looks like a
@@ -293,6 +288,63 @@ export const GO_DENY_LIST: DenyListPattern[] = [
 		match: (tool, args) => isShell(tool) && matchFlyDeployProd(args),
 	},
 ];
+
+// ============================================
+// Never-auto set (issue #2699, 8GO rule 2 / 8SO maker-checker)
+// ============================================
+
+/**
+ * The set of action classes that may NEVER auto-fire (cap at rung 3, always
+ * a human second signature) regardless of the configured autonomy rung. This
+ * is the decision-level analogue of GO_DENY_LIST: GO_DENY_LIST blocks tool
+ * calls outright; NEVER_AUTO_CLASSES caps the autonomy of otherwise-permitted
+ * actions. The autonomy ladder's irreversible/under-James's-name capping
+ * enforces this; this list is the named, auditable source of truth.
+ */
+export const NEVER_AUTO_CLASSES: { id: string; label: string }[] = [
+	{
+		id: "irreversible",
+		label: "irreversible action (delete, force-push, history rewrite, prod deploy, DB drop)",
+	},
+	{ id: "under-james-name", label: "outbound under James's name (original opinion / public post)" },
+	{ id: "non-retractable-send", label: "non-retractable external send" },
+	{ id: "spend-over-envelope", label: "spend above the budget envelope" },
+	{ id: "model-promotion-minor-plus", label: "model promotion of minor or major version" },
+	{ id: "maker-equals-checker", label: "maker is its own checker (no independent verdict)" },
+];
+
+export interface NeverAutoContext {
+	/** Whether the action is reversible (Undo / revert / retract / checkpoint). */
+	reversible?: boolean;
+	/** Whether the action speaks to the world under James's name. */
+	underJamesName?: boolean;
+	/** Maker identity. */
+	maker?: string;
+	/** Checker identity. MUST differ from maker for an action to auto. */
+	checker?: string;
+}
+
+export interface NeverAutoResult {
+	neverAuto: boolean;
+	/** Matched class ids (may be more than one). */
+	classes: string[];
+}
+
+/**
+ * Decide whether an action may NEVER auto-fire. Returns the matched class
+ * ids. An action with ANY match caps at rung 3 (human second signature) and
+ * is never eligible for rung 4 auto, regardless of dial setting.
+ */
+export function matchNeverAuto(ctx: NeverAutoContext): NeverAutoResult {
+	const classes: string[] = [];
+	if (ctx.reversible === false) classes.push("irreversible");
+	if (ctx.underJamesName === true) classes.push("under-james-name");
+	// maker == checker (or a missing checker) means no independent verdict.
+	if (!ctx.maker || !ctx.checker || ctx.maker === ctx.checker) {
+		classes.push("maker-equals-checker");
+	}
+	return { neverAuto: classes.length > 0, classes };
+}
 
 /**
  * Serialise tool args to a single string for substring/regex matching.

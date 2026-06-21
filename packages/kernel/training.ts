@@ -12,6 +12,16 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { spawn } from "bun";
 import type { ScoreRecord } from "./judge";
+import {
+	DEFAULT_PROMOTION_POLICY,
+	type HoldOut,
+	type HoldOutResult,
+	holdOutBeats,
+	loadPromotionPolicy,
+	type PromotionPolicy,
+	readRollbackManifest,
+	writeRollbackManifest,
+} from "./promotion-gate";
 
 export interface TrainingConfig {
 	/** Base model being fine-tuned */
@@ -32,6 +42,14 @@ export interface TrainingConfig {
 	promotionThreshold: number;
 	/** Training proxy config path */
 	trainingProxyConfigPath: string;
+	/**
+	 * Frozen hold-out validation command. Runs the candidate against a SEALED
+	 * eval set that training never saw (distinct from `validateCommand`, which
+	 * runs the training/benchmark family). A checkpoint NEVER reaches "promoted"
+	 * status from training alone; the promotion gate (hold-out + canary + human
+	 * confirm) decides that. This command just measures per-task hold-out scores.
+	 */
+	holdOutValidateCommand: string;
 }
 
 export interface CheckpointInfo {
@@ -44,6 +62,8 @@ export interface CheckpointInfo {
 	status: "training" | "validating" | "promoted" | "rolled_back" | "pending";
 	createdAt: string;
 	promotedAt: string | null;
+	/** Per-task scores on the FROZEN hold-out (sealed eval set training never saw). */
+	holdOutScores?: Record<string, number>;
 }
 
 interface TrainingBatch {
@@ -80,6 +100,7 @@ const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
 	validateCommand: "bun run benchmarks/autoresearch/validate-checkpoint.ts",
 	promotionThreshold: 80,
 	trainingProxyConfigPath: "config/training-proxy.yaml",
+	holdOutValidateCommand: "bun run benchmarks/autoresearch/validate-holdout.ts",
 };
 
 export class TrainingOrchestrator {
@@ -178,14 +199,20 @@ export class TrainingOrchestrator {
 			checkpoint.status = "validating";
 			this.saveState();
 
-			// Validate the checkpoint
+			// Validate the checkpoint against the (training-family) benchmark. This
+			// is a NECESSARY-not-SUFFICIENT screen: a checkpoint that fails the
+			// benchmark threshold is rolled back immediately; one that passes is
+			// marked PENDING, not promoted. Promotion is owned by the promotion
+			// gate (frozen hold-out + canary + human confirm), never by training.
 			const benchScore = await this.validateCheckpoint(checkpointId);
 			checkpoint.benchmarkScore = benchScore;
 
 			if (benchScore >= this.config.promotionThreshold) {
-				checkpoint.status = "promoted";
-				checkpoint.promotedAt = new Date().toISOString();
-				this.state.activeCheckpointId = checkpointId;
+				// Passed the screen. Hold at PENDING; do NOT swap the active model.
+				// The frozen hold-out is measured here so the gate can certify
+				// no-regression, but the gate (and human, at autonomy 0) decides.
+				checkpoint.status = "pending";
+				checkpoint.holdOutScores = await this.validateHoldOut(checkpointId);
 			} else {
 				checkpoint.status = "rolled_back";
 				await this.rollback(checkpointId);
@@ -199,6 +226,62 @@ export class TrainingOrchestrator {
 		}
 
 		return checkpoint;
+	}
+
+	/**
+	 * Promote a PENDING checkpoint through the promotion gate. Returns true only
+	 * when the gate's hold-out check passes AND the policy allows the swap. This
+	 * is the ONLY path that sets a checkpoint to "promoted" and moves the active
+	 * pointer, and it writes a rollback manifest BEFORE the swap.
+	 *
+	 * NOTE: canary + human-confirm are enforced by the caller (ProductionLoop /
+	 * version-manager) via `evaluatePromotion`; this method enforces the
+	 * hold-out + rollback-manifest invariants at the training layer so a
+	 * checkpoint cannot be promoted from here without a sealed hold-out beat.
+	 */
+	promoteCheckpoint(
+		checkpointId: string,
+		opts: {
+			holdOut: HoldOut;
+			gateApproved: boolean;
+			activeVersion?: string;
+			candidateVersion?: string;
+			weightsPath?: string;
+		},
+	): { promoted: boolean; reason: string } {
+		const checkpoint = this.state.checkpoints.find((c) => c.id === checkpointId);
+		if (!checkpoint) return { promoted: false, reason: "checkpoint not found" };
+		if (checkpoint.status !== "pending") {
+			return { promoted: false, reason: `checkpoint not pending (status=${checkpoint.status})` };
+		}
+
+		// Hold-out invariant at the training layer: candidate must beat-or-tie the
+		// sealed hold-out. This cannot be bypassed even if the caller's gate said yes.
+		const result: HoldOutResult = { tasks: checkpoint.holdOutScores ?? {} };
+		const ho = holdOutBeats(opts.holdOut, result);
+		if (!ho.ok) {
+			return { promoted: false, reason: `hold-out: ${ho.reason}` };
+		}
+
+		if (!opts.gateApproved) {
+			return { promoted: false, reason: "promotion gate did not approve (canary/human-confirm)" };
+		}
+
+		// Write the rollback manifest BEFORE the swap so rollback restores from
+		// disk truth, not a best-effort shell call.
+		const previous = this.getActiveCheckpoint();
+		writeRollbackManifest({
+			activeVersion: opts.activeVersion ?? previous?.id ?? "none",
+			previousVersion: opts.candidateVersion ?? checkpointId,
+			weightsPath: opts.weightsPath ?? join(this.config.dataDir, "checkpoints", checkpointId),
+			baselineSnapshot: this.state.baselineScores,
+		});
+
+		checkpoint.status = "promoted";
+		checkpoint.promotedAt = new Date().toISOString();
+		this.state.activeCheckpointId = checkpointId;
+		this.saveState();
+		return { promoted: true, reason: ho.reason };
 	}
 
 	/**
@@ -303,17 +386,56 @@ export class TrainingOrchestrator {
 		return scoreMatch ? Number.parseFloat(scoreMatch[1]) : 0;
 	}
 
-	private async rollback(_checkpointId: string): Promise<void> {
-		// Tell the training proxy to revert to previous weights
+	/**
+	 * Run the FROZEN hold-out validation: a sealed eval set training never saw.
+	 * Returns per-task scores. Used by the promotion gate to certify the
+	 * candidate does not regress on held-out tasks (stops train-on-test). Best
+	 * effort: an unavailable command yields an empty map, which the gate treats
+	 * as "cannot certify" and therefore REJECTS the promotion (fail closed).
+	 */
+	private async validateHoldOut(_checkpointId: string): Promise<Record<string, number>> {
 		try {
 			const proc = spawn({
-				cmd: ["metaclaw", "rollback"],
+				cmd: this.config.holdOutValidateCommand.split(" "),
 				stdout: "pipe",
 				stderr: "pipe",
+				env: { ...process.env, TRAINING_PROXY_URL: "http://localhost:30000" },
 			});
 			await proc.exited;
+			const resultsPath = join(
+				dirname(this.config.holdOutValidateCommand.split(" ").pop()!),
+				"holdout-results.json",
+			);
+			if (existsSync(resultsPath)) {
+				const results = JSON.parse(readFileSync(resultsPath, "utf-8"));
+				return (results.perTask as Record<string, number>) ?? {};
+			}
 		} catch {
-			// Best effort — the training proxy may handle rollback internally
+			// Fail closed: no hold-out scores -> gate rejects.
+		}
+		return {};
+	}
+
+	/**
+	 * Roll back using the rollback MANIFEST written before a swap, not a shell
+	 * call that may no-op. Restores the active checkpoint pointer from the
+	 * manifest. Still asks the proxy to revert weights as a best-effort second
+	 * step, but the source of truth is the on-disk manifest.
+	 */
+	private async rollback(_checkpointId: string): Promise<void> {
+		const manifest = readRollbackManifest();
+		if (manifest) {
+			// Restore the active pointer to the previously-active checkpoint.
+			this.state.activeCheckpointId =
+				manifest.activeVersion === "none" ? null : manifest.activeVersion;
+			this.saveState();
+		}
+		// Best-effort weight revert via the proxy (manifest is the real record).
+		try {
+			const proc = spawn({ cmd: ["metaclaw", "rollback"], stdout: "pipe", stderr: "pipe" });
+			await proc.exited;
+		} catch {
+			// Best effort — the manifest above already restored the pointer.
 		}
 	}
 

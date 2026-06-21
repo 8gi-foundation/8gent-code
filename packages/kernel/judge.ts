@@ -8,6 +8,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { redact } from "../memory/redact";
+import { anonymize, containsPii } from "../permissions/pii-anonymizer";
+import { containsSecret } from "../permissions/goal-secret-scrub";
 
 export interface JudgeConfig {
 	/** Judge model endpoint (default: OpenRouter) */
@@ -103,7 +106,43 @@ export class JudgeScorer {
 		prompt: string,
 		response: string,
 	): Promise<ScoreRecord> {
-		const judgePrompt = `## User Prompt\n${prompt.slice(0, 2000)}\n\n## Agent Response\n${response.slice(0, 4000)}\n\nScore this response:`;
+		// Privacy gate: the judge runs in the cloud (OpenRouter), so nothing raw
+		// from the user's work may leave the device. Two layers, in order:
+		//   1. Redact known secret patterns (keys/tokens/credentials).
+		//   2. Anonymize PII (emails, phones, names, addresses, card/IBAN/SSN).
+		// If anything secret-shaped OR PII-shaped still survives after both
+		// passes, skip cloud scoring entirely and record a neutral, scrubbed
+		// row rather than leak.
+		const redactedPrompt = redact(prompt);
+		const redactedResponse = redact(response);
+		const safePrompt = anonymize(redactedPrompt).text;
+		const safeResponse = anonymize(redactedResponse).text;
+		if (
+			containsSecret(safePrompt) ||
+			containsSecret(safeResponse) ||
+			containsPii(safePrompt) ||
+			containsPii(safeResponse)
+		) {
+			const skipped: ScoreRecord = {
+				sessionId,
+				turnIndex,
+				model,
+				prompt: "[redacted: secret or PII detected, not scored]",
+				response: "[redacted: secret or PII detected, not scored]",
+				scores: {
+					executionSuccess: 0,
+					codeQuality: 0,
+					toolEfficiency: 0,
+					directness: 0,
+					overall: 0,
+				},
+				timestamp: new Date().toISOString(),
+			};
+			this.appendRecord(skipped);
+			return skipped;
+		}
+
+		const judgePrompt = `## User Prompt\n${safePrompt.slice(0, 2000)}\n\n## Agent Response\n${safeResponse.slice(0, 4000)}\n\nScore this response:`;
 
 		const scores = await this.callJudge(judgePrompt);
 		const weights = this.config.criteria;
@@ -117,8 +156,8 @@ export class JudgeScorer {
 			sessionId,
 			turnIndex,
 			model,
-			prompt: prompt.slice(0, 500),
-			response: response.slice(0, 500),
+			prompt: safePrompt.slice(0, 500),
+			response: safeResponse.slice(0, 500),
 			scores: { ...scores, overall: Math.round(overall * 100) / 100 },
 			timestamp: new Date().toISOString(),
 		};

@@ -9,12 +9,22 @@
  * - Graceful degradation when components are unavailable
  */
 
+import { join } from "node:path";
 import {
 	getExperienceSummary,
 	getModelOrder,
 	recordResult,
 } from "../../benchmarks/autoresearch/model-router";
 import { type JudgeConfig, JudgeScorer, type ScoreRecord } from "./judge";
+import { adaptPairsFile } from "./pair-adapter";
+import {
+	type BumpClass,
+	type CanarySignal,
+	evaluatePromotion,
+	type HoldOut,
+	type HumanConfirm,
+	loadPromotionPolicy,
+} from "./promotion-gate";
 import { type ProxyConfig, type ProxyStatus, TrainingProxy } from "./proxy";
 import { type CheckpointInfo, type TrainingConfig, TrainingOrchestrator } from "./training";
 
@@ -30,8 +40,19 @@ export interface ProductionConfig {
 	sleepEnd: number;
 	/** Idle threshold in minutes before allowing training (default: 30) */
 	idleThresholdMinutes: number;
-	/** Auto-promote improved checkpoints to model-router (default: true) */
+	/**
+	 * Auto-promote improved checkpoints to model-router. DEFAULT FALSE (P0-2).
+	 * Historically this defaulted true and swapped the active model on a single
+	 * cloud-judge verdict with no frozen hold-out, no canary, and a no-op
+	 * rollback. It now defaults FALSE: a checkpoint is held PENDING and is only
+	 * promoted through the promotion gate (frozen hold-out beat + canary + human
+	 * confirm). Autonomy is Level 0 - human confirm on every promotion.
+	 */
 	autoPromote: boolean;
+	/** Optional thermal gate: training only proceeds when this returns true.
+	 * MadMax sleep/idle is ANDed with thermal nominal so the overnight run never
+	 * cooks the laptop. Defaults to always-nominal when not provided. */
+	thermalNominal?: () => boolean;
 	/** Score trend alert: warn if avg drops below this (default: 0.5) */
 	scoreTrendAlertThreshold: number;
 	/** Model tag for the fine-tuned variant (default: "{base}-ft") */
@@ -68,7 +89,9 @@ const DEFAULT_PRODUCTION_CONFIG: ProductionConfig = {
 	sleepStart: 23,
 	sleepEnd: 7,
 	idleThresholdMinutes: 30,
-	autoPromote: true,
+	// P0-2: default FALSE. Promotion now requires the promotion gate
+	// (frozen hold-out + canary + human confirm), never a single judge verdict.
+	autoPromote: false,
 	scoreTrendAlertThreshold: 0.5,
 	fineTunedModelTag: "",
 };
@@ -251,11 +274,10 @@ export class ProductionLoop {
 	 */
 	async forceTraining(): Promise<CheckpointInfo> {
 		const checkpoint = await this.trainer.train();
-
-		if (checkpoint.status === "promoted" && this.config.autoPromote) {
-			this.promoteToRouter(checkpoint);
-		}
-
+		// A trained checkpoint is PENDING, never auto-promoted. Promotion is a
+		// separate, gated action (frozen hold-out + canary + human confirm). When
+		// autoPromote is false (default) we never touch the router here.
+		this.maybePromote(checkpoint);
 		return checkpoint;
 	}
 
@@ -273,15 +295,52 @@ export class ProductionLoop {
 		if (state.bufferSize < state.batchSize) return;
 		if (state.isTraining) return;
 
+		// Connector 3 (ISI wiring): collect -> adapt -> train. Before training,
+		// convert the collected single-response pairs (plus any hedge-derived
+		// multi-candidate contrast) into the GRPO chosen/rejected file the LoRA
+		// trainer reads. This is the step that was missing - the loop previously
+		// trained from the buffer directly and never routed through the adapter.
+		// adaptPairsFile is a pure file transform; with no multi-candidate data it
+		// simply writes zero pairs (no fabricated preference), so it is safe to run
+		// unconditionally on every training tick.
+		try {
+			const trainingDir = ".8gent/kernel/training";
+			adaptPairsFile(join(trainingDir, "pairs.jsonl"), join(trainingDir, "grpo.jsonl"), {
+				hedgeSignalPath: join(trainingDir, "hedge-signal.jsonl"),
+			});
+		} catch (err) {
+			console.error(`[kernel] Pair adaptation failed (continuing): ${err}`);
+		}
+
 		// All conditions met — trigger training
 		try {
 			const checkpoint = await this.trainer.train();
-
-			if (checkpoint.status === "promoted" && this.config.autoPromote) {
-				this.promoteToRouter(checkpoint);
-			}
+			this.maybePromote(checkpoint);
 		} catch (err) {
 			console.error(`[kernel] Training tick failed: ${err}`);
+		}
+	}
+
+	/**
+	 * Promotion is GATED. A freshly trained checkpoint is PENDING; it is only
+	 * promoted when autoPromote is explicitly enabled AND the promotion gate
+	 * passes (frozen hold-out + canary + human confirm). With autoPromote false
+	 * (the default), this is a no-op: the candidate is held, never swapped.
+	 *
+	 * The full gate (canary signal + human-confirm token) is supplied by the
+	 * surface that owns those signals (TUI/daemon). This loop deliberately does
+	 * NOT fabricate a human confirm or a canary, so it can never self-promote.
+	 */
+	private maybePromote(checkpoint: CheckpointInfo): void {
+		if (!this.config.autoPromote) return; // default path: nothing promotes
+		// Even when autoPromote is on, this loop has no human-confirm token and no
+		// canary signal of its own, so it does not call promoteCheckpoint here.
+		// Promotion is driven explicitly by the gated surface. We only surface the
+		// pending candidate; we never swap the router autonomously.
+		if (checkpoint.status === "pending") {
+			console.log(
+				`[kernel] Checkpoint ${checkpoint.id} is PENDING promotion (awaiting hold-out + canary + human confirm).`,
+			);
 		}
 	}
 
@@ -302,7 +361,11 @@ export class ProductionLoop {
 
 		// MadMax: train only during sleep or idle
 		// Non-MadMax: train anytime batch is ready
-		const trainingAllowed = this.config.madmaxEnabled ? inSleepWindow || isIdle : true;
+		// In BOTH cases, the overnight LoRA run is additionally gated on thermal
+		// nominal so it never cooks the laptop (ResourceGovernor seam).
+		const thermalOk = this.config.thermalNominal ? this.config.thermalNominal() : true;
+		const scheduleAllowed = this.config.madmaxEnabled ? inSleepWindow || isIdle : true;
+		const trainingAllowed = scheduleAllowed && thermalOk;
 
 		return {
 			inSleepWindow,
@@ -318,6 +381,60 @@ export class ProductionLoop {
 		if (state.isTraining) return "training";
 		if (state.bufferSize > 0) return "collecting";
 		return "idle";
+	}
+
+	/**
+	 * Promote a PENDING checkpoint through the full promotion gate. This is the
+	 * ONLY path that can swap the active model into the router. It is called by
+	 * the gated surface (TUI/daemon) that owns the canary signal and the human
+	 * confirm token - never by the autonomous training tick.
+	 *
+	 * All of the following must hold or the swap is refused:
+	 *   - autoPromote enabled in policy
+	 *   - candidate beat-or-tied the FROZEN hold-out
+	 *   - canary healthy
+	 *   - human confirm present for minor+ (and patch at autonomy 0)
+	 *
+	 * On success, the trainer writes a rollback manifest before the swap and the
+	 * router experience DB is updated.
+	 */
+	promoteThroughGate(
+		checkpointId: string,
+		args: {
+			bump: BumpClass;
+			holdOut: HoldOut;
+			canary: CanarySignal;
+			humanConfirm?: HumanConfirm;
+		},
+	): { promoted: boolean; reason: string } {
+		const policy = loadPromotionPolicy();
+		const checkpoint = this.trainer.getCheckpoints().find((c) => c.id === checkpointId);
+		if (!checkpoint) return { promoted: false, reason: "checkpoint not found" };
+
+		const decision = evaluatePromotion(
+			{
+				candidateId: checkpointId,
+				bump: args.bump,
+				holdOut: args.holdOut,
+				holdOutResult: { tasks: checkpoint.holdOutScores ?? {} },
+				canary: args.canary,
+				humanConfirm: args.humanConfirm,
+			},
+			policy,
+		);
+		if (!decision.promote) return { promoted: false, reason: decision.reason };
+
+		const swap = this.trainer.promoteCheckpoint(checkpointId, {
+			holdOut: args.holdOut,
+			gateApproved: true,
+			candidateVersion: checkpointId,
+		});
+		if (!swap.promoted) return swap;
+
+		// Router experience DB update is the final, gated step.
+		const promoted = this.trainer.getActiveCheckpoint();
+		if (promoted) this.promoteToRouter(promoted);
+		return { promoted: true, reason: decision.reason };
 	}
 
 	/**

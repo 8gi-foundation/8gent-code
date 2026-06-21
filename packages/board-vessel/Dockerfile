@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 # Copy vessel and its dependency on board-plane types
 COPY packages/board-plane/types.ts packages/board-plane/types.ts
 COPY packages/board-vessel/ packages/board-vessel/
+# PII gate: inference.ts imports the local, dependency-free anonymizer so no
+# officer-chat payload reaches the cloud model proxy with real identity in it.
+COPY packages/permissions/pii-anonymizer.ts packages/permissions/pii-anonymizer.ts
 
 # Create non-root user
 RUN addgroup --system --gid 1001 vessel && \

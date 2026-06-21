@@ -18,6 +18,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "../types/index.js";
+import {
+	anonymizeMessages,
+	deanonymize,
+	verifyClean,
+} from "../permissions/pii-anonymizer";
 import { AuthRotator } from "./auth-rotation";
 import { ModelFailover } from "./failover";
 import {
@@ -627,30 +632,112 @@ export class ProviderManager {
 		const thinkingResolution = request.thinking
 			? resolveThinkingForRouting(request.thinking, provider.supportedThinkingLevels)
 			: undefined;
-		const resolvedRequest: ChatRequest = thinkingResolution
+		let resolvedRequest: ChatRequest = thinkingResolution
 			? {
 					...request,
 					thinking: thinkingResolution.level ?? undefined,
 				}
 			: request;
 
+		// ── PII anonymization gate (cloud-egress boundary) ──────────────────
+		// HARD RULE: no PII may reach a cloud provider. If this provider sends
+		// data off-machine, anonymize the outbound messages here; restore real
+		// values on the way back. Local providers bypass entirely - their data
+		// never leaves the device. If anonymization cannot be verified clean,
+		// we FAIL CLOSED (route to a local provider, or refuse).
+		let piiMap: Map<string, string> | null = null;
+		let dispatchProvider = provider;
+		let dispatchModel = model;
+
+		if (isCloudProvider(provider)) {
+			// Run anonymization + verification under a guard. ANY failure here
+			// (the anonymizer throwing, or PII still present in the verified
+			// output) means we must NOT send raw to the cloud: fail closed by
+			// routing to a local provider, or refuse if none exists.
+			let failClosed = false;
+			try {
+				const gated = anonymizeMessages(resolvedRequest.messages);
+				if (verifyClean(gated.messages.map((m) => m.content).join("\n"))) {
+					piiMap = gated.map;
+					resolvedRequest = { ...resolvedRequest, messages: gated.messages };
+				} else {
+					failClosed = true;
+				}
+			} catch {
+				// Anonymizer unavailable / errored - cannot prove the payload is
+				// clean, so treat as if PII survived.
+				failClosed = true;
+			}
+
+			if (failClosed) {
+				const local = this.resolveLocalFallback();
+				if (!local) {
+					throw new Error(
+						"PII gate fail-closed: could not produce a verified-clean payload and " +
+							"no local provider is available. Refusing to send to cloud.",
+					);
+				}
+				dispatchProvider = local.provider;
+				dispatchModel = local.model;
+				// Local path: send the ORIGINAL (un-anonymized) messages - data
+				// stays on-device, so the model should see real values.
+				resolvedRequest = { ...resolvedRequest };
+			}
+		}
+
 		let response: ChatResponse;
-		switch (provider.name) {
+		switch (dispatchProvider.name) {
 			case "ollama":
-				response = await this.chatOllama(resolvedRequest, model);
+				response = await this.chatOllama(resolvedRequest, dispatchModel);
 				break;
 			case "anthropic":
-				response = await this.chatAnthropic(resolvedRequest, model);
+				response = await this.chatAnthropic(resolvedRequest, dispatchModel);
 				break;
 			default:
 				// OpenAI-compatible providers
-				response = await this.chatOpenAICompatible(provider, resolvedRequest, model);
+				response = await this.chatOpenAICompatible(dispatchProvider, resolvedRequest, dispatchModel);
+		}
+
+		// De-anonymize the cloud response so the caller (officer/user) sees real
+		// values; the cloud only ever saw pseudonyms.
+		if (piiMap && piiMap.size > 0) {
+			response.content = deanonymize(response.content, piiMap);
+			if (response.toolCalls) {
+				response.toolCalls = response.toolCalls.map((tc) => ({
+					...tc,
+					arguments: deanonymizeArgs(tc.arguments, piiMap as Map<string, string>),
+				}));
+			}
 		}
 
 		if (thinkingResolution) {
 			response.thinking = thinkingResolution;
 		}
 		return response;
+	}
+
+	/**
+	 * Resolve a local provider to fall back to when the PII gate refuses a
+	 * cloud send. Prefers an enabled local provider (8gent, ollama, lmstudio,
+	 * apfel) that is reachable by configuration. Returns null when none exist.
+	 */
+	private resolveLocalFallback(): { provider: ProviderConfig; model: string } | null {
+		for (const name of LOCAL_FALLBACK_ORDER) {
+			const p = this.getProvider(name);
+			if (!p) continue;
+			if (p.enabled || this.getApiKey(name)) {
+				return { provider: p, model: p.defaultModel };
+			}
+		}
+		// 8gent / ollama share localhost:11434 and are on by default even if a
+		// settings file disabled the flag. Prefer ollama as the always-available
+		// local of last resort: it needs no API key and has a dedicated dispatch
+		// path, so the fail-closed reroute cannot itself error on a missing key.
+		const ollama = this.getProvider("ollama");
+		if (ollama) return { provider: ollama, model: ollama.defaultModel };
+		const eight = this.getProvider("8gent");
+		if (eight) return { provider: eight, model: eight.defaultModel };
+		return null;
 	}
 
 	/**
@@ -904,6 +991,71 @@ export class ProviderManager {
 				: undefined,
 		};
 	}
+}
+
+// ============================================
+// PII Egress Gate Helpers
+// ============================================
+
+/**
+ * Providers tried, in order, when the PII gate must fail closed off a cloud
+ * provider. All are on-device.
+ */
+const LOCAL_FALLBACK_ORDER: ProviderName[] = ["ollama", "8gent", "lmstudio", "apfel"];
+
+/**
+ * Hostnames considered on-device. A request to any of these never leaves the
+ * machine, so the PII gate bypasses it.
+ */
+const LOCAL_HOST_RE = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$/i;
+
+/**
+ * Decide whether a provider sends data off the local machine. Cloud = it has a
+ * public base URL whose host is not localhost. Providers with no base URL
+ * (IPC / subprocess: apple-foundation, host-cli-*) keep data local.
+ *
+ * NOTE: this is deliberately strict and base-URL driven rather than an
+ * allow-list of names - a new cloud provider added later is treated as cloud
+ * by default (fail-safe), and a provider repointed at localhost is treated as
+ * local.
+ */
+export function isCloudProvider(provider: Pick<ProviderConfig, "baseUrl">): boolean {
+	const url = (provider.baseUrl || "").trim();
+	if (!url) return false; // IPC / subprocess - on device
+	let host: string;
+	try {
+		host = new URL(url).hostname;
+	} catch {
+		// Unparseable base URL: treat as cloud (fail-safe - we cannot prove it
+		// is local, so we must anonymize).
+		return true;
+	}
+	if (LOCAL_HOST_RE.test(host)) return false;
+	// *.internal (Fly private network) is NOT proven local - the proxy behind it
+	// may forward to a public cloud provider. Treat as cloud (fail-safe).
+	return true;
+}
+
+/**
+ * De-anonymize string values inside tool-call arguments (the cloud model may
+ * echo a pseudonym back into a tool argument). Recurses through nested
+ * objects/arrays; leaves non-strings untouched.
+ */
+function deanonymizeArgs(
+	args: Record<string, unknown>,
+	map: Map<string, string>,
+): Record<string, unknown> {
+	const walk = (v: unknown): unknown => {
+		if (typeof v === "string") return deanonymize(v, map);
+		if (Array.isArray(v)) return v.map(walk);
+		if (v && typeof v === "object") {
+			const out: Record<string, unknown> = {};
+			for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = walk(val);
+			return out;
+		}
+		return v;
+	};
+	return walk(args) as Record<string, unknown>;
 }
 
 // ============================================

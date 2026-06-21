@@ -1,2 +1,5 @@
 *.pyc
 harbor-results/
+# Runtime artifacts written by the validators (NOT the frozen fixture in holdout/).
+autoresearch/holdout-results.json
+autoresearch/checkpoint-results.json
