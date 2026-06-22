@@ -1,0 +1,182 @@
+[
+  {
+    "name": "slugify",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "camel-case",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 4,
+    "testsPassed": 0,
+    "testsFailed": 4,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "pluralize",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "template-engine",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "lru-cache",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "priority-queue",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "ring-buffer",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "trie-search",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "bloom-filter",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "debounce",
+    "status": "implemented",
+    "implemented": true,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 0,
+    "reason": "Implementation exists. Tests generated."
+  },
+  {
+    "name": "async-pool",
+    "status": "implemented",
+    "implemented": true,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 0,
+    "reason": "Implementation exists. Tests generated."
+  },
+  {
+    "name": "retry",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "timeout-wrap",
+    "status": "implemented",
+    "implemented": true,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 0,
+    "reason": "Implementation exists. Tests generated."
+  },
+  {
+    "name": "glob-matcher",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "temp-dir",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "url-parser",
+    "status": "implemented",
+    "implemented": true,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 0,
+    "reason": "Implementation exists. Tests generated."
+  },
+  {
+    "name": "hmac-sha256",
+    "status": "implemented",
+    "implemented": true,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 0,
+    "reason": "Implementation exists. Tests generated."
+  },
+  {
+    "name": "uuid-v4",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "base32",
+    "status": "not_implemented",
+    "implemented": false,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 5,
+    "reason": "Not implemented. Test stubs generated."
+  },
+  {
+    "name": "hex-codec",
+    "status": "implemented",
+    "implemented": true,
+    "testsRun": 5,
+    "testsPassed": 0,
+    "testsFailed": 0,
+    "reason": "Implementation exists. Tests generated."
+  }
+]
