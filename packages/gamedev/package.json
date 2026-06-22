@@ -1,0 +1,29 @@
+{
+  "name": "@8gi-foundation/8gent-gamedev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first 2D game dev pipeline: AI sprite prompts, sprite slicer, animation generator, game scaffolding",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "dev": "bun run src/cli.ts"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "sharp": "^0.34.5"
+  }
+}
