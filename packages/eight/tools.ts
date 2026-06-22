@@ -1380,12 +1380,12 @@ export class ToolExecutor {
 
 			// Memory tools
 			case "remember":
-				return this.handleRemember(
+				return await this.handleRemember(
 					args.fact as string,
 					args.layer as "session" | "project" | "global",
 				);
 			case "recall":
-				return this.handleRecall(args.query as string, args.limit as number | undefined);
+				return await this.handleRecall(args.query as string, args.limit as number | undefined);
 
 			// Desktop Computer Use tools (Power #10)
 			case "desktop_screenshot":
@@ -2761,7 +2761,7 @@ export class ToolExecutor {
 	): Promise<string> {
 		try {
 			const memory = getMemoryManager(this.workingDirectory);
-			const id = memory.remember(fact, layer, { source: "user:remember" });
+			const id = await memory.remember(fact, layer, { source: "user:remember" });
 			const stats = await memory.getStats();
 			return `Remembered (${layer}): "${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}"\nID: ${id}\nMemory stats — session: ${stats.session}, project: ${stats.project}, global: ${stats.global}`;
 		} catch (err) {
