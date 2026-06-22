@@ -151,3 +151,45 @@ All three support true local-first operation with Ollama or compatible runtimes.
 ---
 
 *Sources: GitHub stars and activity as of June 2026, verified via github.com, aimagicx.com, firecrawl.dev, fast.io*
+
+---
+
+## Appendix: Stable Diffusion (Image Generation - Not an Agent Framework)
+
+**Note:** Stable Diffusion is a diffusion model for image generation, not an AI agent framework. Included here as a key local-first AI tool for completeness.
+
+### What it is
+Open-source image generation model. Runs locally with no API costs per image. Supports text-to-image, image-to-image, inpainting, ControlNet, and LoRA fine-tunes.
+
+### Key Facts
+- Base model: SD 1.5, SD 2.1, SDXL, SD 3
+- License: CreativeML Open Rail (non-commercial), SDXL community license (commercial use allowed)
+- Top UIs: ComfyUI (node-based), Automatic1111 (web UI), Fooocus (simplified)
+
+### Local LLM Support
+N/A - image model, not LLM. Local inference via CUDA (NVIDIA), ROCm (AMD), Core ML (Apple Silicon), or CPU (slow).
+
+### Strengths
+- No per-image API costs
+- Full control over prompts, LoRAs, ControlNet, sampling methods
+- Extensive plugin ecosystem
+- Can run on consumer hardware (4GB VRAM for SD 1.5)
+
+### Weaknesses
+- Not an agent framework (no autonomous decision-making, tool use, or state management)
+- Image generation only, no text/LLM capabilities
+
+### When to include it
+You are building a local AI toolkit and want image generation alongside agentic tools. Pair with Ollama for text and Stable Diffusion for images.
+
+### Key Tools
+| Tool | Best For |
+|------|----------|
+| **ComfyUI** | Power users, workflow automation, node-based pipelines |
+| **Automatic1111** | Most popular, extensive community, lots of extensions |
+| **Fooocus** | Beginners, minimal config, one-click setup |
+| **Forge WebUI** | Faster than A1111, optimized for low VRAM |
+
+---
+
+*Stable Diffusion research: stability.ai, localai.computer, aitooldiscovery.com (June 2026)*
