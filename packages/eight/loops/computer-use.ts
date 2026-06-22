@@ -37,6 +37,10 @@ import { buildComputerUseSystemPrompt } from "../prompts/computer-use-system";
 import { buildVisionPrompt } from "../prompts/computer-use-vision";
 import type { Message } from "../types";
 import type { LLMClient } from "../types";
+import {
+	DoomLoopDetector,
+	type DoomToolCall,
+} from "../tool-loop-detector";
 
 /**
  * Optional adapter for headless environments (CI, smoke suite) that lets
@@ -73,7 +77,8 @@ export type CuaTerminationReason =
 	| "goal_complete"
 	| "goal_failed"
 	| "max_steps"
-	| "internal_error";
+	| "internal_error"
+	| "doom_loop";
 
 export interface CuaStepRecord {
 	step: number;
@@ -269,6 +274,11 @@ export async function runComputerUseLoop(
 	let consecutiveModelErrors = 0;
 	const MAX_CONSECUTIVE_ERRORS = 4;
 
+	// DoomLoopDetector: period-1 to period-4 cycle detection on a 12-call sliding
+	// window. Halts the loop when a repeating cycle is detected so the agent
+	// does not burn steps on a stuck pattern.
+	const doomDetector = new DoomLoopDetector();
+
 	for (let step = 1; step <= maxSteps; step += 1) {
 		const t0 = Date.now();
 		const method = nextPerceptionMethod(history);
@@ -437,6 +447,37 @@ export async function runComputerUseLoop(
 			? previewResult(exec.result)
 			: `[denied] ${exec.reason}`;
 		lastActionResult = preview;
+
+		// Record this tool call in the DoomLoopDetector and check for cycles.
+		// DoomLoopDetector uses a 12-call sliding window and scans periods 1-4.
+		// Period-1 with 3+ identical calls triggers the stuck event.
+		if (!TERMINAL_TOOLS.has(toolName)) {
+			doomDetector.record({ toolName, args: toolArgs });
+			const doomEvent = doomDetector.check();
+			if (doomEvent) {
+				// Emit the stuck event so handeyes and other consumers can react.
+				doomDetector.emit("stuck", doomEvent);
+				history.push({
+					step,
+					perception,
+					perceptionMethod: method,
+					cost: perception.cost,
+					toolName,
+					toolArgs,
+					resultPreview: preview,
+					approved,
+					durationMs: Date.now() - t0,
+				});
+				return {
+					ok: false,
+					reason: "doom_loop",
+					steps: history,
+					finalMessage: doomEvent.message,
+					totalCost,
+				};
+			}
+		}
+
 		history.push({
 			step,
 			perception,
