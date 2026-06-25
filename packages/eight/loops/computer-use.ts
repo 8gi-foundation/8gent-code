@@ -276,8 +276,10 @@ export async function runComputerUseLoop(
 
 	// DoomLoopDetector: period-1 to period-4 cycle detection on a 12-call sliding
 	// window. Halts the loop when a repeating cycle is detected so the agent
-	// does not burn steps on a stuck pattern.
+	// does not burn steps on a stuck pattern. We accumulate calls locally and
+	// pass them in batch to doomDetector.check() each step.
 	const doomDetector = new DoomLoopDetector();
+	const doomHistory: DoomToolCall[] = [];
 
 	for (let step = 1; step <= maxSteps; step += 1) {
 		const t0 = Date.now();
@@ -448,34 +450,22 @@ export async function runComputerUseLoop(
 			: `[denied] ${exec.reason}`;
 		lastActionResult = preview;
 
-		// Record this tool call in the DoomLoopDetector and check for cycles.
-		// DoomLoopDetector uses a 12-call sliding window and scans periods 1-4.
-		// Period-1 with 3+ identical calls triggers the stuck event.
-		if (!TERMINAL_TOOLS.has(toolName)) {
-			doomDetector.record({ toolName, args: toolArgs });
-			const doomEvent = doomDetector.check();
-			if (doomEvent) {
-				// Emit the stuck event so handeyes and other consumers can react.
-				doomDetector.emit("stuck", doomEvent);
-				history.push({
-					step,
-					perception,
-					perceptionMethod: method,
-					cost: perception.cost,
-					toolName,
-					toolArgs,
-					resultPreview: preview,
-					approved,
-					durationMs: Date.now() - t0,
-				});
-				return {
-					ok: false,
-					reason: "doom_loop",
-					steps: history,
-					finalMessage: doomEvent.message,
-					totalCost,
-				};
-			}
+		// DoomLoopDetector: period-1 to period-4 cycle detection on a 12-call
+		// sliding window. Check BEFORE recording the step to history so the
+		// loop halts on the offending call rather than after it.
+		// (TERMINAL_TOOLS check above guarantees toolName is non-terminal here.)
+		doomHistory.push({ toolName, args: toolArgs });
+		const isDoom = doomDetector.check(doomHistory);
+		if (isDoom) {
+			const stuckPayload = { toolName, args: toolArgs, step, history: doomHistory };
+			doomDetector.emit("stuck", stuckPayload);
+			return {
+				ok: false,
+				reason: "doom_loop",
+				steps: history,
+				finalMessage: "Doom loop detected: repeating tool call pattern halted.",
+				totalCost,
+			};
 		}
 
 		history.push({

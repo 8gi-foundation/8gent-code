@@ -32,10 +32,30 @@ const SENSITIVE_PATTERNS: RegExp[] = [
 ];
 
 /** Cloud providers that send data off-machine */
-const CLOUD_PROVIDERS = new Set(["openrouter"]);
+const CLOUD_PROVIDERS = new Set([
+	"openrouter",
+	"groq",
+	"grok",
+	"openai",
+	"anthropic",
+	"mistral",
+	"together",
+	"fireworks",
+	"replicate",
+]);
 
-/** Local providers that keep data on-device */
-const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio"]);
+/** Local providers that keep data on-device (or on-host via CLI bridge).
+ * 8gent relays stay on the local network. Host-CLI delegates shell to
+ * user-authenticated binaries already on the machine. */
+const LOCAL_PROVIDERS = new Set([
+	"ollama",
+	"lmstudio",
+	"apple-foundation", // Mac-native via ~/.8gent/bin/apple-foundation-bridge
+	"8gent", // 8gent relay / local mesh (never routes to cloud without explicit opt-in)
+	"host-cli-primary", // CLI on host, opt-in only
+	"host-cli-secondary", // CLI on host, opt-in only
+	"apfel", // Apple's on-device models
+]);
 
 const DEFAULT_LOCAL_MODEL = "qwen3.5:latest";
 

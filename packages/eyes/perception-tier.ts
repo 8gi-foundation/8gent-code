@@ -47,7 +47,7 @@ export const LOCAL_PROVIDERS: ReadonlySet<string> = new Set([
 	"ollama",
 	"apfel",
 	"apple-foundation",
-	"lm-studio",
+	"lmstudio",
 ]);
 
 export function isRemoteProvider(provider: string): boolean {

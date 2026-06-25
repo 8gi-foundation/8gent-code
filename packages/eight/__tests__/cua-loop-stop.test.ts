@@ -134,9 +134,10 @@ function makeMockClientFactory(clients: MockClient[]) {
 
 describe("E4: Max steps reached", () => {
   test("returns reason=max_steps when step limit is reached without goal_complete", async () => {
-    const responses = Array(DEFAULT_MAX_STEPS).fill(null).map(() => ({
+    // Use varied args so DoomLoopDetector does not fire before max_steps is hit.
+    const responses = Array(DEFAULT_MAX_STEPS).fill(null).map((_, i) => ({
       tool: "desktop_click",
-      args: { x: 100, y: 200 },
+      args: { x: 100 + i, y: 200 + i },
     }));
 
     const client = makeMockClient(responses);
@@ -156,9 +157,9 @@ describe("E4: Max steps reached", () => {
 
   test("stops early if maxSteps is set lower than default", async () => {
     const maxSteps = 5;
-    const responses = Array(maxSteps).fill(null).map(() => ({
+    const responses = Array(maxSteps).fill(null).map((_, i) => ({
       tool: "desktop_click",
-      args: { x: 100, y: 200 },
+      args: { x: 100 + i, y: 200 + i },
     }));
 
     const client = makeMockClient(responses);
@@ -258,8 +259,9 @@ describe("E5: All model providers exhausted", () => {
     sequence.push({ throw: new Error("network error") });
 
     // Three successful rounds (resets counter each time)
+    // Use varied args to avoid DoomLoopDetector firing before the error cascade.
     for (let i = 0; i < 3; i++) {
-      sequence.push({ tool: "desktop_click", args: { x: 100, y: 200 } });
+      sequence.push({ tool: "desktop_click", args: { x: 100 + i, y: 200 + i } });
     }
 
     // Four consecutive errors (hits the limit)
@@ -407,31 +409,28 @@ describe("E16: No-tool loop (free-text responses)", () => {
 
 describe("DoomLoopDetector integration gap", () => {
   test("GAP: runComputerUseLoop does not use DoomLoopDetector", () => {
-    // Evidence: grep for "DoomLoopDetector" in the source returns nothing
-    // The loop relies only on step counting and error counting
-    // It has no tool call repetition detection
-
-    // This is a static analysis test - we verify the gap by checking
-    // that the loop does NOT contain doom-related logic
-    const loopUsesDoomDetector = false; // Static analysis shows: no
+    // Evidence: doomDetector.check() is called in runComputerUseLoop after each
+    // non-terminal tool call; doom_history is accumulated and checked before
+    // the step is recorded to history.
+    const loopUsesDoomDetector = true; // Now integrated
     const loopHasStepCounter = true; // Yes, used
     const loopHasErrorCounter = true; // Yes, used
 
-    expect(loopUsesDoomDetector).toBe(false); // Gap
+    expect(loopUsesDoomDetector).toBe(true); // Integrated
     expect(loopHasStepCounter).toBe(true); // Implemented
     expect(loopHasErrorCounter).toBe(true); // Implemented
   });
 
-  test("GAP: tool call repetition is NOT detected in CUA loop", async () => {
-    // Scenario: model repeatedly calls the same tool with same args
-    // Current: loop continues until max_steps
-    // Desired: DoomLoopDetector detects repetition after 3 cycles and halts
+  test("DoomLoopDetector halts on tool call repetition (AAA pattern)", async () => {
+    // Scenario: model repeatedly calls the same tool with same args.
+    // DoomLoopDetector: period-1 with 3 identical calls in a row fires doom_loop.
+    // The loop halts after exactly 3 desktop_click calls, never reaching step 4.
 
     const responses = [
       { tool: "desktop_click", args: { x: 100, y: 200 } }, // step 1
       { tool: "desktop_click", args: { x: 100, y: 200 } }, // step 2 - repeat
-      { tool: "desktop_click", args: { x: 100, y: 200 } }, // step 3 - repeat
-      { tool: "desktop_click", args: { x: 100, y: 200 } }, // step 4 - repeat (DoomLoopDetector would fire here)
+      { tool: "desktop_click", args: { x: 100, y: 200 } }, // step 3 - doom_loop fires here (AAA)
+      { tool: "desktop_click", args: { x: 100, y: 200 } }, // never reached
       { tool: "goal_complete", args: { summary: "done" } }, // never reached
     ];
 
@@ -452,10 +451,11 @@ describe("DoomLoopDetector integration gap", () => {
       maxSteps: 20,
     });
 
-    // Current behavior: 4 desktop_click calls, then goal_complete
-    // Gap: DoomLoopDetector would have halted after step 3 (AAA pattern)
-    expect(result.steps.filter((s) => s.toolName === "desktop_click").length).toBe(4);
-    expect(result.ok).toBe(true); // completed because steps < max_steps
+    // DoomLoopDetector halts BEFORE recording the 3rd step to history
+    // (doom fires immediately on the repeat, step not added to steps[]).
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("doom_loop");
+    expect(result.steps.filter((s) => s.toolName === "desktop_click").length).toBe(2);
   });
 });
 

@@ -526,7 +526,7 @@ export class TelegramAgentMode {
 				unlinkSync(RUN_PID_FILE);
 			} catch {}
 
-			const startedAt = this.memory.recall("competition_started_at");
+			const startedAt = await this.memory.recall("competition_started_at");
 			let duration = "";
 			if (startedAt) {
 				const elapsed = Date.now() - new Date(startedAt).getTime();

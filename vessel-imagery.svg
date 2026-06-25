@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="8gent vessel imagery">
+  <title>The Vessel</title>
+  <desc>Imagery of the 8gent personal AI orchestrator vessel with officers orbiting the core</desc>
+
+  <!-- Deep space background -->
+  <rect width="800" height="500" fill="#0a0e14"/>
+
+  <!-- Subtle grid for depth -->
+  <g stroke="#1a2535" stroke-width="0.5" opacity="0.4">
+    <line x1="0" y1="100" x2="800" y2="100"/>
+    <line x1="0" y1="200" x2="800" y2="200"/>
+    <line x1="0" y1="300" x2="800" y2="300"/>
+    <line x1="0" y1="400" x2="800" y2="400"/>
+    <line x1="100" y1="0" x2="100" y2="500"/>
+    <line x1="200" y1="0" x2="200" y2="500"/>
+    <line x1="300" y1="0" x2="300" y2="500"/>
+    <line x1="400" y1="0" x2="400" y2="500"/>
+    <line x1="500" y1="0" x2="500" y2="500"/>
+    <line x1="600" y1="0" x2="600" y2="500"/>
+    <line x1="700" y1="0" x2="700" y2="500"/>
+  </g>
+
+  <!-- Outer orbit rings -->
+  <ellipse cx="400" cy="250" rx="220" ry="100" fill="none" stroke="#00c896" stroke-width="1" opacity="0.15" stroke-dasharray="4 6"/>
+  <ellipse cx="400" cy="250" rx="280" ry="130" fill="none" stroke="#00c896" stroke-width="0.5" opacity="0.1" stroke-dasharray="2 8"/>
+
+  <!-- Flow particles - outer ring -->
+  <circle cx="400" cy="150" r="3" fill="#00c896" opacity="0.7">
+    <animateMotion dur="8s" repeatCount="indefinite" path="M400,150 A220,100 0 1,1 399.9,150"/>
+  </circle>
+  <circle cx="620" cy="250" r="2" fill="#00c896" opacity="0.5">
+    <animateMotion dur="12s" repeatCount="indefinite" path="M620,250 A220,100 0 1,1 619.9,250"/>
+  </circle>
+
+  <!-- Officer nodes on orbit -->
+  <!-- Rishi - Technical -->
+  <circle cx="620" cy="250" r="24" fill="#0a0e14" stroke="#00c896" stroke-width="2"/>
+  <text x="620" y="247" font-family="monospace" font-size="9" fill="#00c896" text-anchor="middle">Rishi</text>
+  <text x="620" y="260" font-family="monospace" font-size="7" fill="#4a6070" text-anchor="middle">Technical</text>
+
+  <!-- Samantha - Product -->
+  <circle cx="400" cy="130" r="24" fill="#0a0e14" stroke="#00c896" stroke-width="2"/>
+  <text x="400" y="127" font-family="monospace" font-size="9" fill="#00c896" text-anchor="middle">Sam</text>
+  <text x="400" y="140" font-family="monospace" font-size="7" fill="#4a6070" text-anchor="middle">Product</text>
+
+  <!-- James - 8EO -->
+  <circle cx="180" cy="250" r="24" fill="#0a0e14" stroke="#00c896" stroke-width="2"/>
+  <text x="180" y="247" font-family="monospace" font-size="9" fill="#00c896" text-anchor="middle">James</text>
+  <text x="180" y="260" font-family="monospace" font-size="7" fill="#4a6070" text-anchor="middle">8EO</text>
+
+  <!-- Connection lines from officers to core -->
+  <line x1="596" y1="250" x2="470" y2="250" stroke="#00c896" stroke-width="1" opacity="0.3"/>
+  <line x1="400" y1="154" x2="400" y2="230" stroke="#00c896" stroke-width="1" opacity="0.3"/>
+  <line x1="204" y1="250" x2="330" y2="250" stroke="#00c896" stroke-width="1" opacity="0.3"/>
+
+  <!-- The vessel core - multiple layered rings -->
+  <circle cx="400" cy="250" r="100" fill="none" stroke="#00c896" stroke-width="1.5" opacity="0.1"/>
+  <circle cx="400" cy="250" r="85" fill="none" stroke="#00c896" stroke-width="1" opacity="0.2"/>
+  <circle cx="400" cy="250" r="70" fill="none" stroke="#00c896" stroke-width="1.5" opacity="0.3"/>
+
+  <!-- Core glow -->
+  <circle cx="400" cy="250" r="60" fill="#00c896" opacity="0.05"/>
+  <circle cx="400" cy="250" r="50" fill="#00c896" opacity="0.08"/>
+  <circle cx="400" cy="250" r="40" fill="#00c896" opacity="0.12"/>
+
+  <!-- The 8 symbol in the core -->
+  <g transform="translate(400,250)">
+    <!-- Top loop -->
+    <ellipse cx="0" cy="-18" rx="16" ry="18" fill="none" stroke="#00c896" stroke-width="3" opacity="0.9"/>
+    <!-- Bottom loop -->
+    <ellipse cx="0" cy="18" rx="16" ry="18" fill="none" stroke="#00c896" stroke-width="3" opacity="0.9"/>
+    <!-- Middle join -->
+    <line x1="-16" y1="0" x2="16" y2="0" stroke="#00c896" stroke-width="3" opacity="0.9"/>
+  </g>
+
+  <!-- Pulsing ring around 8 -->
+  <circle cx="400" cy="250" r="55" fill="none" stroke="#00c896" stroke-width="1" opacity="0.4">
+    <animate attributeName="r" values="55;70;55" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.4;0.1;0.4" dur="3s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Memory/data streams - small particles flowing into core -->
+  <circle cx="470" cy="215" r="2" fill="#00c896" opacity="0.6">
+    <animate attributeName="cx" values="470;430" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="215;240" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="330" cy="285" r="2" fill="#00c896" opacity="0.6">
+    <animate attributeName="cx" values="330;370" dur="2.5s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="285;260" dur="2.5s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0" dur="2.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="400" cy="310" r="2" fill="#00c896" opacity="0.5">
+    <animate attributeName="cy" values="310;270" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.5;0" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Top label -->
+  <text x="400" y="30" font-family="monospace" font-size="11" fill="#00c896" text-anchor="middle" letter-spacing="4" opacity="0.8">8GENT VESSEL</text>
+  <line x1="200" y1="40" x2="600" y2="40" stroke="#00c896" stroke-width="0.5" opacity="0.3"/>
+
+  <!-- Bottom caption -->
+  <text x="400" y="470" font-family="monospace" font-size="9" fill="#4a6070" text-anchor="middle" letter-spacing="2">LOCAL // ORCHESTRATOR // INFINITE GENTLEMAN</text>
+
+  <!-- Corner marks -->
+  <text x="20" y="20" font-family="monospace" font-size="8" fill="#1a2535">8GI/8EO</text>
+  <text x="780" y="20" font-family="monospace" font-size="8" fill="#1a2535" text-anchor="end">v1.0</text>
+
+  <!-- Version indicator at bottom left -->
+  <text x="20" y="485" font-family="monospace" font-size="8" fill="#1a2535">PodJamz // personal vessel</text>
+</svg>

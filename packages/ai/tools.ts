@@ -573,6 +573,53 @@ const describeImage = tool({
 });
 
 // ============================================
+// Creative Tools — local-first sprite/animation generation
+// ============================================
+
+const generateSpriteTool = tool({
+	description:
+		"Generate a sprite sheet or animation from a natural language prompt. Local-first: uses sharp for slicing and ffmpeg for animation when available. Falls back to OpenAI DALL-E for cloud generation. Assets are saved to ~/.8gent/assets/media/. Example: 'animate a walking robot character', '16-frame idle loop for a knight sprite'.",
+	inputSchema: z.object({
+		prompt: z.string().describe("Natural language description of the sprite or animation to generate"),
+		frameCount: z.number().optional().default(8).describe("Number of frames in the animation (default: 8)"),
+		loop: z.boolean().optional().default(true).describe("Whether the animation loops (default: true)"),
+		direction: z.enum(["forward", "reverse", "pingpong"]).optional().default("forward").describe("Animation direction"),
+		style: z.enum(["pixel-art", "hand-drawn", "3d-render", "anime", "painterly"]).optional().default("pixel-art").describe("Art style"),
+		format: z.enum(["gif", "webp", "png"]).optional().default("gif").describe("Output animation format"),
+		forceCloud: z.boolean().optional().default(false).describe("Force cloud generation even if local tools are available"),
+	}),
+	execute: async ({ prompt, frameCount, loop, direction, style, format, forceCloud }) => {
+		const { generate } = await import("../gamedev/harness");
+		const result = await generate({ prompt, frameCount, loop, direction, style, format, forceCloud });
+		if (result.success) {
+			return JSON.stringify(
+				{
+					success: true,
+					sheetPath: result.sheetPath,
+					animatedPath: result.animatedPath,
+					manifest: result.manifest,
+					path: result.path,
+					assetId: result.manifest ? `See ~/.8gent/assets/media/index.json` : undefined,
+				},
+				null,
+				2,
+			);
+		} else {
+			return JSON.stringify(
+				{
+					success: false,
+					reason: result.reason,
+					path: result.path,
+					hint: "Try forceCloud=true if local tools are unavailable, or simplify the prompt.",
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
+// ============================================
 // PDF Tools
 // ============================================
 
@@ -2873,6 +2920,9 @@ export const agentTools = {
 
 	// Self-evolution
 	propose_skill_creation: proposeSkillCreation,
+
+	// Creative — local-first media generation (spritesheet, animation)
+	generate_sprite: generateSpriteTool,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;

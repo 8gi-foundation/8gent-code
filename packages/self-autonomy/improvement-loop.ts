@@ -247,3 +247,151 @@ export function getSkillsForNextIteration(taskHint: string, limit = 3): string {
 	if (skills.length === 0) return "";
 	return skills.map((s) => `- ${s.action} [${(s.confidence * 100).toFixed(0)}%]`).join("\n");
 }
+
+// ============================================
+// Step 4 - Loop Stop Conditions  (addresses issue #2700)
+// ============================================
+
+export interface LoopStopCondition {
+	maxTurns?: number;
+	maxTokens?: number;
+	maxTimeMs?: number;
+	goalText?: string;
+	goalScoreThreshold?: number;
+	maxStallCount?: number;
+}
+
+export type StopReason =
+	| { type: "max_turns"; turns: number }
+	| { type: "max_tokens"; tokens: number; limit: number }
+	| { type: "max_time"; elapsedMs: number; limit: number }
+	| { type: "goal_met"; score: number; goalText?: string }
+	| { type: "goal_score_threshold"; score: number; threshold: number }
+	| { type: "stalled"; stallCount: number; limit: number }
+	| { type: "manual" };
+
+export interface LoopState {
+	turns: number;
+	totalTokens: number;
+	startTimeMs: number;
+	stallCount: number;
+	prevAvgScore: number | null;
+}
+
+export function initLoopState(): LoopState {
+	return { turns: 0, totalTokens: 0, startTimeMs: Date.now(), stallCount: 0, prevAvgScore: null };
+}
+
+export function shouldStop(
+	state: LoopState,
+	condition: LoopStopCondition,
+	currentAvgScore: number,
+	tokenBudgetThisTurn?: number,
+): { stop: boolean; reason?: StopReason } {
+	const limits = {
+		maxTurns: condition.maxTurns ?? 20,
+		maxTokens: condition.maxTokens ?? Infinity,
+		maxTimeMs: condition.maxTimeMs ?? Infinity,
+		maxStallCount: condition.maxStallCount ?? 3,
+	};
+	const elapsedMs = Date.now() - state.startTimeMs;
+	const tokensUsed = tokenBudgetThisTurn != null ? state.totalTokens + tokenBudgetThisTurn : state.totalTokens;
+
+	if (condition.goalScoreThreshold != null && currentAvgScore >= condition.goalScoreThreshold) {
+		return { stop: true, reason: { type: "goal_score_threshold", score: currentAvgScore, threshold: condition.goalScoreThreshold } };
+	}
+	if (tokensUsed > limits.maxTokens) {
+		return { stop: true, reason: { type: "max_tokens", tokens: tokensUsed, limit: limits.maxTokens } };
+	}
+	if (elapsedMs > limits.maxTimeMs) {
+		return { stop: true, reason: { type: "max_time", elapsedMs, limit: limits.maxTimeMs } };
+	}
+	if (state.stallCount >= limits.maxStallCount) {
+		return { stop: true, reason: { type: "stalled", stallCount: state.stallCount, limit: limits.maxStallCount } };
+	}
+	if (state.turns >= limits.maxTurns) {
+		return { stop: true, reason: { type: "max_turns", turns: state.turns } };
+	}
+	return { stop: false };
+}
+
+export interface GoalEvaluator {
+	evaluate(goalText: string, evidence: string[], sessionId: string): Promise<boolean>;
+}
+
+export class RegexGoalEvaluator implements GoalEvaluator {
+	async evaluate(goalText: string, evidence: string[], _sessionId: string): Promise<boolean> {
+		const tokens = goalText.toLowerCase().split(/\s+/);
+		if (tokens.includes("pass") && tokens.includes("test")) {
+			const indicators = ["0 failed", "0 failures", "all passed", "✓", "pass:"];
+			return evidence.some((e) => indicators.some((ind) => e.includes(ind)));
+		}
+		if (tokens.includes("lint") && tokens.includes("clean")) {
+			return evidence.some((e) => e.includes("0 errors") || e.includes("no issues"));
+		}
+		return evidence.some((e) => e.toLowerCase().includes(goalText.toLowerCase()));
+	}
+}
+
+export class LoopController {
+	private state: LoopState;
+	private condition: LoopStopCondition;
+	private iterations: Array<{ result: IterationResultLike; tokensUsed?: number }> = [];
+	private _stopped = false;
+	private _stopReason?: StopReason;
+
+	constructor(condition: LoopStopCondition = {}) {
+		this.state = initLoopState();
+		this.condition = condition;
+	}
+
+	currentContext(): { turn: number; history: IterationResultLike[] } {
+		return { turn: this.state.turns, history: this.iterations.map((i) => i.result) };
+	}
+
+	advance(result: IterationResultLike, tokensUsed?: number): void {
+		if (this._stopped) return;
+		const prevAvg = this.state.prevAvgScore;
+		this.state.turns++;
+		if (tokensUsed != null) this.state.totalTokens += tokensUsed;
+		if (prevAvg !== null && result.avgScore <= prevAvg) {
+			this.state.stallCount++;
+		} else {
+			this.state.stallCount = 0;
+		}
+		this.state.prevAvgScore = result.avgScore;
+		this.iterations.push({ result, tokensUsed });
+		const check = shouldStop(this.state, this.condition, result.avgScore, tokensUsed);
+		if (check.stop) { this._stopped = true; this._stopReason = check.reason; }
+	}
+
+	get stopped(): boolean { return this._stopped; }
+	get stopReason(): StopReason | undefined { return this._stopReason; }
+	get currentState(): LoopState { return { ...this.state }; }
+
+	summary(): {
+		stopped: boolean; reason?: StopReason; state: LoopState;
+		iterations: number; finalScore: number | null; skillsLearned: number;
+	} {
+		return {
+			stopped: this._stopped, reason: this._stopReason, state: this.currentState,
+			iterations: this.state.turns, finalScore: this.state.prevAvgScore,
+			skillsLearned: this.iterations.reduce((sum, i) => sum + (i.result.mutationsAdded.length > 0 ? 1 : 0), 0),
+		};
+	}
+}
+
+export async function runBoundedLoop(
+	condition: LoopStopCondition,
+	runIteration: (ctx: { turn: number; history: IterationResultLike[] }) => Promise<{
+		result: IterationResultLike; tokensUsed?: number;
+	}>,
+): Promise<ReturnType<LoopController["summary"]>> {
+	const ctrl = new LoopController(condition);
+	while (!ctrl.stopped) {
+		const ctx = ctrl.currentContext();
+		const { result, tokensUsed } = await runIteration(ctx);
+		ctrl.advance(result, tokensUsed);
+	}
+	return ctrl.summary();
+}

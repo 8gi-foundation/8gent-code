@@ -37,3 +37,13 @@ export {
 } from "./prompts";
 
 export { scaffoldGame, type GameConfig } from "./scaffold";
+
+export {
+	generate,
+	detectTools,
+	listAssets,
+	type GenerateOptions,
+	type GenerateResult,
+	type MediaAsset,
+	type MediaAssetManifest,
+} from "./harness";

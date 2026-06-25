@@ -13,11 +13,27 @@ final class PanelState: ObservableObject {
     /// Approval prompt active. Backed by `pendingApproval` below.
     @Published var pendingApproval: PendingApproval?
 
+    /// Live tool steps - populated as the doer calls tools.
+    @Published var toolSteps: [ToolStep] = []
+
     struct PendingApproval: Identifiable {
         let id = UUID()
         let tool: String
         let requestId: String
         let reason: String?
+    }
+
+    struct ToolStep: Identifiable {
+        let id: String
+        let tool: String
+        var status: StepStatus
+        var durationMs: Int?
+
+        enum StepStatus: String {
+            case running = "running"
+            case done = "done"
+            case error = "error"
+        }
     }
 }
 
@@ -27,7 +43,7 @@ final class MainPanel {
     private let panel: NSPanel
     private var clickOutsideMonitor: Any?
     private var keyDownMonitor: Any?
-    private let panelSize = NSSize(width: 560, height: 96)
+    private let panelSize = NSSize(width: 560, height: 120)
     private let bottomInset: CGFloat = 80
 
     private let state = PanelState()
@@ -138,6 +154,7 @@ final class MainPanel {
             self.state.caption = text
             self.capture.stop()
             self.tokenTail = ""
+            self.state.toolSteps = []
             self.client.sendIntent(text)
             self.state.status = "Thinking..."
         }
@@ -168,17 +185,32 @@ final class MainPanel {
                 if final {
                     self.state.status = "Done."
                 }
-            case .toolCall:
-                self.state.status = "(acting)"
-            case .toolResult:
-                self.state.status = "(thinking)"
+            case let .toolCall(_, tool, callId, _):
+                // Truncate long tool names for display
+                let displayName = tool.count > 30 ? String(tool.prefix(30)) + "..." : tool
+                self.state.status = displayName
+                self.state.toolSteps.append(.init(id: callId, tool: displayName, status: .running))
+            case let .toolResult(_, tool, callId, _, durationMs):
+                let displayName = tool.count > 30 ? String(tool.prefix(30)) + "..." : tool
+                self.state.status = "\(displayName) done"
+                if let idx = self.state.toolSteps.firstIndex(where: { $0.id == callId }) {
+                    self.state.toolSteps[idx].status = .done
+                    self.state.toolSteps[idx].durationMs = durationMs
+                }
             case let .approvalRequired(_, tool, requestId, reason):
                 self.state.pendingApproval = .init(tool: tool, requestId: requestId, reason: reason)
             case let .error(_, error, _):
                 self.state.status = "Error: \(error)"
+                // Mark any running steps as errored
+                for i in 0..<self.state.toolSteps.count {
+                    if self.state.toolSteps[i].status == .running {
+                        self.state.toolSteps[i].status = .error
+                    }
+                }
             case .done:
                 self.reply.flush()
                 self.state.status = "Press Cmd+Opt+Space to dismiss."
+                self.state.toolSteps = []
             }
         }
     }
@@ -237,6 +269,17 @@ private struct PanelContent: View {
                             .font(.system(.callout, design: .default))
                             .foregroundStyle(.secondary.opacity(0.85))
                     }
+
+                    // Live tool steps - compact pill badges
+                    if !state.toolSteps.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(state.toolSteps) { step in
+                                    ToolStepBadge(step: step)
+                                }
+                            }
+                        }
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -252,6 +295,53 @@ private struct PanelContent: View {
                 )
                 .transition(.opacity)
             }
+        }
+    }
+}
+
+private struct ToolStepBadge: View {
+    let step: PanelState.ToolStep
+
+    var body: some View {
+        HStack(spacing: 4) {
+            statusIcon
+            Text(step.tool)
+                .font(.system(.caption2, design: .default).monospaced())
+                .lineLimit(1)
+            if let ms = step.durationMs {
+                Text("\(ms)ms")
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(badgeColor.opacity(0.2))
+        .foregroundStyle(badgeColor)
+        .cornerRadius(10)
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch step.status {
+        case .running:
+            ProgressView()
+                .scaleEffect(0.5)
+                .frame(width: 10, height: 10)
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 10))
+        case .error:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 10))
+        }
+    }
+
+    private var badgeColor: Color {
+        switch step.status {
+        case .running: return .blue
+        case .done: return .green
+        case .error: return .red
         }
     }
 }
