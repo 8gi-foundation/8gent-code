@@ -64,6 +64,7 @@ import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
 import { ToolLoopDetector } from "./tool-loop-detector";
 import { TurnJournal } from "./turn-journal";
+import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import {
@@ -1170,6 +1171,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			let resolved = false;
 			const MAX_PROVIDERS = 6; // hard cap so a misconfigured chain can't loop forever
 			const RATE_LIMIT_ATTEMPTS = 4;
+			// Per-attempt wall-clock bound. Guarantees a single provider.generate()
+			// call terminates even when the provider socket stalls (unreachable
+			// apple-foundation bridge, an endpoint that accepts but never streams,
+			// an invalid model id whose client hangs). On timeout we abort the
+			// shared signal and reject; the catch below treats it like any other
+			// provider error and advances the bounded failover chain. Once the
+			// chain is exhausted the turn throws "All providers exhausted" instead
+			// of hanging for the full 30-min session watchdog. Override with
+			// EIGHT_TURN_TIMEOUT_MS.
+			const attemptTimeoutMs = resolveTurnTimeoutMs();
 
 			outer: for (let chainStep = 0; chainStep < MAX_PROVIDERS; chainStep++) {
 				const key = `${currentEntry.provider}::${currentEntry.model}`;
@@ -1184,6 +1195,12 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				const agent = createEightAgent(stepConfig);
 
 				for (let attempt = 1; attempt <= RATE_LIMIT_ATTEMPTS; attempt++) {
+					// Tracks whether THIS attempt's per-attempt timeout fired. When it
+					// does we abort the shared signal, so the in-flight generate() may
+					// reject with an AbortError that wins the race ahead of our
+					// TurnTimeoutError. Without this flag the catch below would treat
+					// that AbortError as a user ESC and kill the whole turn.
+					let attemptTimedOut = false;
 					try {
 						// ── Hedge wrap (ISI keystone). When the hedge flag is OFF (default),
 						// this fires exactly ONE candidate (the current chain entry) and is
@@ -1212,28 +1229,43 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 								});
 							}
 						}
-						const hedgeOut = await hedge.run(
-							candidates,
-							async (cand, signal) => {
-								const candAgent =
-									cand.provider === currentEntry.provider && cand.model === currentEntry.model
-										? agent
-										: createEightAgent({
-												...agentConfig,
-												provider: { name: cand.provider as any, model: cand.model },
-											});
-								// The agent's GenerateTextResult is structurally a superset of the
-								// hedge GenerateResult (it has text + steps); widen for the executor.
-								return candAgent.generate({ messages, abortSignal: signal }) as unknown as Promise<
-									import("../kernel/hedge-executor").GenerateResult
-								>;
+						const hedgeOut = await withTurnTimeout(
+							() =>
+								hedge.run(
+									candidates,
+									async (cand, signal) => {
+										const candAgent =
+											cand.provider === currentEntry.provider &&
+											cand.model === currentEntry.model
+												? agent
+												: createEightAgent({
+														...agentConfig,
+														provider: { name: cand.provider as any, model: cand.model },
+													});
+										// The agent's GenerateTextResult is structurally a superset of the
+										// hedge GenerateResult (it has text + steps); widen for the executor.
+										return candAgent.generate({
+											messages,
+											abortSignal: signal,
+										}) as unknown as Promise<
+											import("../kernel/hedge-executor").GenerateResult
+										>;
+									},
+									{
+										sessionId: this.sessionId,
+										turnIndex: this.messageHistory.filter((m) => m.role === "assistant")
+											.length,
+										prompt: textForAgent,
+										abortSignal: this.abortController?.signal,
+									},
+								),
+							attemptTimeoutMs,
+							// Abort the shared signal so the stalled request tears down.
+							() => {
+								attemptTimedOut = true;
+								this.abortController?.abort();
 							},
-							{
-								sessionId: this.sessionId,
-								turnIndex: this.messageHistory.filter((m) => m.role === "assistant").length,
-								prompt: textForAgent,
-								abortSignal: this.abortController?.signal,
-							},
+							`${currentEntry.provider}/${currentEntry.model}`,
 						);
 						result = hedgeOut.result;
 						resolved = true;
@@ -1251,7 +1283,19 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 									};
 						break outer;
 					} catch (err: any) {
-						if (err?.name === "AbortError") throw err; // User pressed ESC
+						// A genuine user ESC aborts the controller WITHOUT a per-attempt
+						// timeout - re-throw so the turn unwinds. But when OUR timeout
+						// fired, the in-flight request may surface as an AbortError that
+						// wins the race ahead of the TurnTimeoutError; that is a stalled
+						// provider, not a user cancel, so fall through to failover.
+						if (err?.name === "AbortError" && !attemptTimedOut) throw err;
+
+						// The shared controller is now aborted (timeout tore it down).
+						// Refresh it so the next chain attempt gets a live signal instead
+						// of an already-aborted one that would fail instantly.
+						if (attemptTimedOut) {
+							this.abortController = new AbortController();
+						}
 
 						const msg = String(err?.message ?? err);
 						const isRateLimit =
@@ -1321,13 +1365,25 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 							role: m.role as "user" | "assistant",
 							content: m.content,
 						}));
+					let retryTimedOut = false;
 					try {
-						result = await retryAgent.generate({
-							messages: messages2,
-							abortSignal: this.abortController?.signal,
-						});
+						result = await withTurnTimeout(
+							() =>
+								retryAgent.generate({
+									messages: messages2,
+									abortSignal: this.abortController?.signal,
+								}),
+							attemptTimeoutMs,
+							() => {
+								retryTimedOut = true;
+								this.abortController?.abort();
+							},
+							"retry/maxOutputTokens",
+						);
 					} catch (retryErr: any) {
-						if (retryErr?.name === "AbortError") throw retryErr;
+						// Only a genuine user ESC (no timeout) re-throws. A timeout-driven
+						// abort or any other failure keeps the prior successful result.
+						if (retryErr?.name === "AbortError" && !retryTimedOut) throw retryErr;
 						console.log(`[agent] Retry with larger maxOutputTokens failed: ${retryErr?.message}`);
 					}
 					this.abortController = null;
