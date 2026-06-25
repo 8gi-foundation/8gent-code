@@ -44,6 +44,10 @@ export interface TextToolTurnOptions {
  * - Otherwise: insert a new leading system message holding the instructions.
  * - When `tools` is empty: pass the messages through as a shallow copy with no
  *   added system content.
+ *
+ * Only the FIRST message is inspected, so a later system message is passed
+ * through as-is (never merged). An empty messages array with tools present
+ * yields a single synthesized leading system message holding the instructions.
  */
 function withToolInstructions(
 	messages: TextToolMessage[],
@@ -70,7 +74,7 @@ function withToolInstructions(
 		role: "system",
 		content: instructions,
 	};
-	return [systemMessage, ...messages.slice()];
+	return [systemMessage, ...messages];
 }
 
 /**

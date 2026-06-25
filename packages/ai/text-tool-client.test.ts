@@ -177,6 +177,51 @@ describe("runTextToolTurn", () => {
 		expect(input[0].content).toBe("sys");
 	});
 
+	it("merges only the first system message, passing later system messages through", async () => {
+		let received: TextToolMessage[] | null = null;
+		const firstSystem = "You are the first system prompt.";
+		const secondSystem: TextToolMessage = {
+			role: "system",
+			content: "A second system message that must stay untouched.",
+		};
+
+		await runTextToolTurn({
+			messages: [
+				{ role: "system", content: firstSystem },
+				secondSystem,
+				{ role: "user", content: "go" },
+			],
+			tools: TOOLS,
+			call: async (messages) => {
+				received = messages;
+				return "ok";
+			},
+		});
+
+		expect(received![0].role).toBe("system");
+		expect(received![0].content).toContain(firstSystem);
+		expect(received![0].content).toContain("tool_call");
+		// The second system message passes through unchanged.
+		expect(received![1]).toEqual(secondSystem);
+	});
+
+	it("synthesizes a single leading system message for empty messages with tools", async () => {
+		let received: TextToolMessage[] | null = null;
+
+		await runTextToolTurn({
+			messages: [],
+			tools: TOOLS,
+			call: async (messages) => {
+				received = messages;
+				return "ok";
+			},
+		});
+
+		expect(received!.length).toBe(1);
+		expect(received![0].role).toBe("system");
+		expect(received![0].content).toContain("tool_call");
+	});
+
 	it("propagates a rejection from call", async () => {
 		const boom = new Error("model offline");
 		await expect(
