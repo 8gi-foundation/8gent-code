@@ -1601,14 +1601,11 @@ async function cronCommand(args: string[]) {
 // Drives a tool-incapable local model agentically via the harness-side text
 // tool-call protocol. Builds a direct `call` against the provider's
 // OpenAI-compatible chat completions endpoint (no native `tools` payload), then
-// runs the read-only demo tools through runTextToolAgent.
+// runs the read-only demo tools through runTextToolAgent. Named *Demo* to
+// distinguish it from Agent.runTextToolChat (packages/eight/agent.ts), which
+// drives the REAL executor tools and is the path the TUI + Pill use.
 
-const TEXT_TOOL_ENDPOINTS: Record<string, string> = {
-	lmstudio: "http://localhost:1234/v1/chat/completions",
-	ollama: "http://localhost:11434/v1/chat/completions",
-};
-
-async function runTextToolChat(opts: {
+async function runDemoTextToolChat(opts: {
 	message: string;
 	provider: string;
 	model: string;
@@ -1618,33 +1615,10 @@ async function runTextToolChat(opts: {
 	toolLog: Array<{ name: string; args: Record<string, unknown>; result: string }>;
 }> {
 	const { runTextToolAgent } = await import("../packages/ai/text-tool-loop");
+	const { buildTextToolCall } = await import("../packages/ai/text-tool-endpoint");
 	const { getDemoTools } = await import("../packages/ai/text-tool-demo-tools");
-	type Msg = { role: "system" | "user" | "assistant" | "tool"; content: string };
 
-	const endpoint =
-		TEXT_TOOL_ENDPOINTS[opts.provider] || TEXT_TOOL_ENDPOINTS.lmstudio;
-
-	const call = async (messages: Msg[]): Promise<string> => {
-		const res = await fetch(endpoint, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				model: opts.model,
-				messages,
-				temperature: 0.2,
-				stream: false,
-			}),
-		});
-		if (!res.ok) {
-			const body = await res.text().catch(() => "");
-			throw new Error(
-				`${opts.provider} chat completions ${res.status}: ${body.slice(0, 300)}`,
-			);
-		}
-		const data = (await res.json()) as any;
-		const content = data?.choices?.[0]?.message?.content;
-		return typeof content === "string" ? content : "";
-	};
+	const call = buildTextToolCall({ provider: opts.provider, model: opts.model });
 
 	const result = await runTextToolAgent({
 		messages: [{ role: "user", content: opts.message }],
@@ -1722,7 +1696,7 @@ async function chatCommand(args: string[]) {
 
 	if (useTextTools) {
 		try {
-			const out = await runTextToolChat({
+			const out = await runDemoTextToolChat({
 				message,
 				provider: resolvedProvider,
 				model: resolvedModel,

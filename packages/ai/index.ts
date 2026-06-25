@@ -56,6 +56,26 @@ export type {
 // Toolshed bridge
 export { registerToolsInToolshed } from "./toolshed-bridge";
 
+// Text-tool calling - drive tool-incapable local models agentically.
+export {
+	needsTextTools,
+	type ToolSpec,
+} from "./text-tools";
+export {
+	runTextToolAgent,
+	type TextTool,
+	type TextToolLogEntry,
+	type TextToolAgentResult,
+} from "./text-tool-loop";
+export {
+	TEXT_TOOL_ENDPOINTS,
+	resolveTextToolEndpoint,
+	buildTextToolCall,
+	toolDefToSpec,
+	toolDefsToSpecs,
+	toolDefsToTextTools,
+} from "./text-tool-endpoint";
+
 // Edge Inference - local embedding + classification, no API key required
 export {
 	embed,

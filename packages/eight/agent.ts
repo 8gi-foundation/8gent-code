@@ -120,6 +120,31 @@ import {
 	setRuntimeParams,
 	setToolContext,
 } from "../ai";
+import {
+	buildTextToolCall,
+	needsTextTools,
+	resolveTextToolEndpoint,
+	runTextToolAgent,
+	type TextTool,
+	toolDefsToSpecs,
+} from "../ai";
+
+/**
+ * Decide whether Agent.chat() should drive tools through the harness-side text
+ * protocol instead of the AI SDK native tool loop. Mirrors bin/8gent.ts
+ * chatCommand: lmstudio/ollama are the tool-incapable local providers whose
+ * served chat templates 400 on a native `tools` payload. EIGHT_TEXT_TOOLS is an
+ * explicit override: "1"/"true" forces text tools on for any provider, "0"/
+ * "false" forces it off. Built on the pure needsTextTools gate so the single
+ * source of truth for the native-vs-text decision stays in packages/ai.
+ */
+function shouldUseTextTools(providerName: string): boolean {
+	const override = (process.env.EIGHT_TEXT_TOOLS || "").trim().toLowerCase();
+	if (override === "1" || override === "true") return true;
+	if (override === "0" || override === "false") return false;
+	const supportsNativeTools = providerName !== "lmstudio" && providerName !== "ollama";
+	return needsTextTools({ supportsNativeTools });
+}
 
 export class Agent {
 	private executor: ToolExecutor;
@@ -482,6 +507,278 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			});
 	}
 
+	/**
+	 * Text-tool agentic turn for tool-incapable local providers.
+	 *
+	 * Runs the harness-side `tool_call` protocol instead of the AI SDK native
+	 * tool loop. Builds {spec, run} tools from the REAL ToolExecutor (so writes,
+	 * edits, and run_command actually execute, honouring the working directory),
+	 * drives the local model through buildTextToolCall (no native `tools`
+	 * payload), and emits the same onToolStart/onToolEnd events the native path
+	 * emits so the TUI step rail and the Pill work-surface render the calls live.
+	 * Returns the final assistant text in the exact shape Agent.chat() normally
+	 * returns (flavored prose), so app.tsx and agent-pool.ts render it unchanged.
+	 */
+	private async runTextToolChat(opts: {
+		providerName: string;
+		providerModel: string;
+		instructions: string;
+		localCoreTools: string[];
+		chatStartTime: number;
+		textForAgent: string;
+	}): Promise<string> {
+		const {
+			providerName,
+			providerModel,
+			instructions,
+			localCoreTools,
+			chatStartTime,
+			textForAgent,
+		} = opts;
+
+		// Live abort controller for THIS text-tool turn. The text-tool branch
+		// returns before the native path creates its controller, so without this
+		// `this.abortController` is null and this.abort() - fired by the circuit
+		// breaker below, the session watchdog, and user ESC - would be a no-op.
+		// Assigning it here makes all three actually stop the turn.
+		this.abortController = new AbortController();
+		const signal = this.abortController.signal;
+
+		// Build the real tool set: intersect the executor's own tool definitions
+		// (everything it can actually run) with the local CORE_TOOLS subset via a
+		// spec-only conversion, then wire each spec's run() to the REAL executor
+		// here so we can fire the tool lifecycle events both surfaces consume,
+		// plus minimal session + loop-detector bookkeeping, around each call.
+		const allow = new Set(localCoreTools);
+		const specs = toolDefsToSpecs(
+			this.executor.getToolDefinitions() as Array<{
+				type?: string;
+				function?: { name?: unknown; description?: unknown; parameters?: unknown };
+			}>,
+			allow,
+		);
+
+		let stepNumber = 0;
+		const tools: TextTool[] = specs.map((spec) => ({
+			spec,
+			run: async (args: Record<string, unknown>) => {
+				const toolName = spec.name;
+				const toolCallId = `tt-${Date.now()}-${stepNumber}`;
+				const step = stepNumber++;
+				const startedAt = Date.now();
+
+				// Track file paths for the privacy gate, matching the native path.
+				const toolPath = (args as { path?: unknown }).path;
+				if (
+					typeof toolPath === "string" &&
+					["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
+				) {
+					this.recentFilePaths.push(toolPath);
+					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+				}
+
+				console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
+				this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
+				this.sessionWriter.writeToolCall(
+					{
+						toolCallId,
+						name: toolName,
+						arguments: args,
+						success: true,
+						durationMs: 0,
+						startedAt: new Date(startedAt).toISOString(),
+					},
+					undefined,
+					step,
+				);
+
+				let result = "";
+				let success = true;
+				try {
+					result = await this.executor.execute(toolName, args);
+					// The executor returns an error STRING rather than throwing for most
+					// failure modes; treat a leading error marker as an unsuccessful call
+					// for event + session bookkeeping.
+					success = !/^(\[[A-Z_ ]*(BLOCKED|DENIED|ERROR)\]|Error:|Unknown tool:)/.test(
+						result.trimStart(),
+					);
+				} catch (err) {
+					success = false;
+					result = `Error running tool "${toolName}": ${err instanceof Error ? err.message : String(err)}`;
+				}
+
+				const durationMs = Date.now() - startedAt;
+
+				// Circuit breaker / loop detection, mirroring the native finish handler.
+				this.loopDetector.record(toolName, args);
+				const loopResult = this.loopDetector.check();
+				if (loopResult) {
+					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
+					this.abort();
+				}
+
+				if (success) {
+					this.sessionWriter.writeToolResult(
+						toolCallId,
+						true,
+						result.slice(0, 2000),
+						durationMs,
+						toolName,
+						step,
+					);
+					if (toolName === "write_file" && typeof toolPath === "string") {
+						this.sessionWriter.trackFileCreated(toolPath);
+					} else if (toolName === "edit_file" && typeof toolPath === "string") {
+						this.sessionWriter.trackFileModified(toolPath);
+					}
+					if (toolName === "git_commit" && result.includes("[")) {
+						const commitHash = extractCommitHash(result);
+						if (commitHash) this.sessionWriter.trackGitCommit(commitHash);
+					}
+				} else {
+					this.sessionWriter.writeToolError(toolCallId, toolName, result, step);
+				}
+
+				this.events.onToolEnd?.({
+					toolName,
+					toolCallId,
+					args,
+					success,
+					durationMs,
+					stepNumber: step,
+					resultPreview: result.slice(0, 200),
+				});
+
+				return result;
+			},
+		}));
+
+		// Conversation: the in-place system instructions plus the non-system
+		// history (runTextToolAgent injects the tool protocol into the system
+		// message itself). Matches the native path's message assembly.
+		const history = this.messageHistory
+			.filter((m) => m.role !== "system")
+			.map((m) => ({
+				role: m.role as "user" | "assistant",
+				content: m.content,
+			}));
+		const messages: Array<{
+			role: "system" | "user" | "assistant" | "tool";
+			content: string;
+		}> = instructions
+			? [{ role: "system", content: instructions }, ...history]
+			: [...history];
+
+		// The raw call hits the local endpoint with the turn's abort signal wired
+		// into fetch, so an abort (timeout / circuit breaker / ESC) tears the
+		// request down. We wrap each round in withTurnTimeout: a single stalled
+		// round (socket accepted, no body - maxRounds bounds round COUNT, not a
+		// stuck round) aborts the shared signal and rejects, ending the turn in
+		// bounded time instead of hanging for the full session watchdog.
+		const rawCall = buildTextToolCall({
+			provider: providerName,
+			model: providerModel,
+			temperature: getRuntimeParams().temperature ?? 0.2,
+			signal,
+		});
+		const attemptTimeoutMs = resolveTurnTimeoutMs();
+		const endpoint = resolveTextToolEndpoint(providerName);
+		const call = (msgs: Parameters<typeof rawCall>[0]) =>
+			withTurnTimeout(
+				() => rawCall(msgs),
+				attemptTimeoutMs,
+				() => this.abortController?.abort(),
+				`${providerName}/${providerModel} (text-tools)`,
+			);
+
+		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
+		try {
+			agentResult = await runTextToolAgent({
+				messages,
+				tools,
+				call,
+				maxRounds: this.config.maxTurns ?? 6,
+				signal,
+			});
+		} catch (err) {
+			// Provider down (ECONNREFUSED -> raw "fetch failed"), a stalled-round
+			// timeout, or an abort. Return a friendly turn in the normal chat()
+			// shape so the TUI/Pill render it cleanly instead of throwing a raw
+			// fetch error up through the surface.
+			this.abortController = null;
+			const raw = err instanceof Error ? err.message : String(err);
+			const isReachability =
+				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
+					raw,
+				);
+			const friendly = isReachability
+				? `The local model endpoint (${endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`
+				: `The local model turn could not complete: ${raw}`;
+			this.messageHistory.push({ role: "assistant", content: friendly });
+			return friendly;
+		}
+		this.abortController = null;
+
+		// Map into the exact shape chat() normally returns: flavored prose, pushed
+		// onto the assistant history, with the post-turn bookkeeping the native
+		// path performs (session evidence summary, run log, journal).
+		const content = agentResult.content;
+		const flavor = personalityVoice.getFlavor("complete");
+		const flavoredContent = flavorResponse(content, flavor);
+		this.messageHistory.push({ role: "assistant", content: flavoredContent });
+		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
+
+		const durationSec = Math.round((Date.now() - chatStartTime) / 1000);
+		if (this.enableReporting) {
+			appendRun({
+				ts: new Date().toISOString(),
+				status: "ok",
+				model: this.config.model,
+				dur: durationSec,
+				tokens: 0,
+				cost: this.totalCost,
+				tools: agentResult.toolLog.length,
+				created: Array.from(this.sessionWriter.getFilesCreated()),
+				modified: Array.from(this.sessionWriter.getFilesModified()),
+				session: this.sessionId,
+				cwd: this.config.workingDirectory || process.cwd(),
+				prompt: textForAgent.slice(0, 120),
+			});
+		}
+
+		try {
+			const _idx = this.turnIndex++;
+			await this.turnJournal.write({
+				sessionId: this.sessionId,
+				turnIndex: _idx,
+				startedAt: new Date(chatStartTime).toISOString(),
+				finishedAt: new Date().toISOString(),
+				input: { role: "user", content: textForAgent },
+				systemPromptHash: this.systemPromptHashFull,
+				systemPromptLength: this.systemPromptLengthFull,
+				toolCalls: agentResult.toolLog.map((e, i) => ({
+					id: `tt-${i}`,
+					name: e.name,
+					args: e.args,
+					resultPreview: e.result.slice(0, 200),
+					durationMs: 0,
+					cached: false,
+					redacted: false,
+				})),
+				modelOutput: {
+					content: flavoredContent,
+					tokens: { in: 0, out: 0, total: 0 },
+				},
+				latencyMs: Date.now() - chatStartTime,
+				status: "ok",
+			});
+		} catch {
+			/* journal is best-effort; never break the turn */
+		}
+
+		return flavoredContent;
+	}
+
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
 		// Reset circuit breaker and privacy tracker for each new turn
 		this.loopDetector.reset();
@@ -722,6 +1019,37 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
 ## Voice Chat Mode (active)
 You are in a real-time voice conversation. The user is speaking to you; their words arrive as transcribed text (STT). Your written replies are spoken back to them via text-to-speech (TTS). You are NOT a text-only interface — you can hear them and they can hear you. Speak conversationally as if on a phone call. Do not apologise for being text-only or claim you cannot hear them — you can. Keep replies concise and natural since they will be spoken aloud. Avoid heavy markdown, code blocks, or long URLs — they don't read well in TTS.`;
+		}
+
+		// ── Text-Tool Routing (local-model agentic tool calling) ──────────
+		// A tool-incapable local model (whose served chat template 400s on a
+		// native `tools` payload, e.g. some LM Studio GGUF templates) cannot use
+		// the AI SDK ToolLoopAgent path below. For those providers we keep tool
+		// orchestration in the harness: omit native tools, inject the tool
+		// instructions into the system prompt, and parse fenced `tool_call` blocks
+		// from the model's plain-text reply. Routing it HERE (the shared chat()
+		// method) means the TUI and the Pill/daemon get it automatically, not just
+		// the CLI. The native path below is left 100% unchanged for capable
+		// providers - this branch only fires behind the needsTextTools gate.
+		//
+		// The gate mirrors bin/8gent.ts chatCommand: lmstudio/ollama are the
+		// tool-incapable local providers (the provider registry's coarse
+		// supportsTools flag is true for them, but their GGUF templates reject a
+		// tools payload), overridable via EIGHT_TEXT_TOOLS=1|0.
+		if (shouldUseTextTools(providerName)) {
+			const textResult = await this.runTextToolChat({
+				providerName,
+				providerModel: providerConfig.model,
+				instructions: effectiveInstructions,
+				localCoreTools,
+				chatStartTime,
+				textForAgent,
+			});
+			if (sessionWatchdog) {
+				clearTimeout(sessionWatchdog);
+				sessionWatchdog = null;
+			}
+			return textResult;
 		}
 
 		let agentConfig: EightAgentConfig = {

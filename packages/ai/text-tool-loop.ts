@@ -32,6 +32,13 @@ export interface TextToolAgentOptions {
 	tools: TextTool[];
 	call: (messages: TextToolMessage[]) => Promise<string>;
 	maxRounds?: number;
+	/**
+	 * Optional abort signal. Checked at the top of every round; once aborted the
+	 * loop stops and returns the last round's prose. The caller is responsible
+	 * for wiring this signal into `call` (so an in-flight model request is torn
+	 * down) - this only stops the loop from STARTING another round.
+	 */
+	signal?: AbortSignal;
 }
 
 export interface TextToolAgentResult {
@@ -86,6 +93,11 @@ export async function runTextToolAgent(
 	let lastContent = "";
 
 	for (let round = 1; round <= maxRounds; round++) {
+		// Stop before starting another round if the caller aborted (turn timeout,
+		// circuit breaker, user ESC). Return whatever prose the last round yielded.
+		if (opts.signal?.aborted) {
+			return { content: lastContent, rounds: round - 1, toolLog };
+		}
 		const turn = await runTextToolTurn({
 			messages,
 			tools: specs,
