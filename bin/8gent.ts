@@ -138,6 +138,8 @@ OPTIONS:
   --output-format <fmt>  run-only: 'stream-json' emits one NDJSON event per line.
   --model=<m>    Override model (e.g., --model=qwen3:14b)
   --provider=<p> Override provider (e.g., --provider=ollama)
+  --text-tools   chat: drive a tool-incapable local model agentically via the
+                 harness-side text tool-call protocol (auto-on for lmstudio/ollama)
   --cwd=<dir>    Override working directory
   --fast         Start in fast mode (use fastest available model)
   --resume       Resume last session (or --resume=<name> for specific)
@@ -1594,6 +1596,70 @@ async function cronCommand(args: string[]) {
 
 // ── Chat Command (non-interactive, pipe-friendly) ─────────────────
 
+// ── Text-Tool Chat (local-model agentic loop) ─────────────────────
+//
+// Drives a tool-incapable local model agentically via the harness-side text
+// tool-call protocol. Builds a direct `call` against the provider's
+// OpenAI-compatible chat completions endpoint (no native `tools` payload), then
+// runs the read-only demo tools through runTextToolAgent.
+
+const TEXT_TOOL_ENDPOINTS: Record<string, string> = {
+	lmstudio: "http://localhost:1234/v1/chat/completions",
+	ollama: "http://localhost:11434/v1/chat/completions",
+};
+
+async function runTextToolChat(opts: {
+	message: string;
+	provider: string;
+	model: string;
+}): Promise<{
+	content: string;
+	rounds: number;
+	toolLog: Array<{ name: string; args: Record<string, unknown>; result: string }>;
+}> {
+	const { runTextToolAgent } = await import("../packages/ai/text-tool-loop");
+	const { getDemoTools } = await import("../packages/ai/text-tool-demo-tools");
+	type Msg = { role: "system" | "user" | "assistant" | "tool"; content: string };
+
+	const endpoint =
+		TEXT_TOOL_ENDPOINTS[opts.provider] || TEXT_TOOL_ENDPOINTS.lmstudio;
+
+	const call = async (messages: Msg[]): Promise<string> => {
+		const res = await fetch(endpoint, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				model: opts.model,
+				messages,
+				temperature: 0.2,
+				stream: false,
+			}),
+		});
+		if (!res.ok) {
+			const body = await res.text().catch(() => "");
+			throw new Error(
+				`${opts.provider} chat completions ${res.status}: ${body.slice(0, 300)}`,
+			);
+		}
+		const data = (await res.json()) as any;
+		const content = data?.choices?.[0]?.message?.content;
+		return typeof content === "string" ? content : "";
+	};
+
+	const result = await runTextToolAgent({
+		messages: [{ role: "user", content: opts.message }],
+		tools: getDemoTools(),
+		call,
+		maxRounds: 6,
+	});
+
+	return {
+		content: result.content,
+		rounds: result.rounds,
+		toolLog: result.toolLog,
+	};
+}
+
 async function chatCommand(args: string[]) {
 	const { flags, rest } = parseFlags(args);
 	const isJson = !!flags.json;
@@ -1638,6 +1704,49 @@ async function chatCommand(args: string[]) {
 				jsonOut({ success: false, error: errMsg });
 			} else {
 				console.error(errMsg);
+			}
+			process.exit(1);
+		}
+	}
+
+	// Text-tool path: local models whose chat template 400s on a native `tools`
+	// payload cannot do native tool calling. For those we keep tool orchestration
+	// in the harness, driving the model agentically through fenced `tool_call`
+	// blocks. Forced with --text-tools, auto-detected for lmstudio/ollama.
+	const resolvedProvider = provider || "ollama";
+	const forceTextTools = !!flags["text-tools"];
+	const useTextTools =
+		forceTextTools ||
+		resolvedProvider === "lmstudio" ||
+		resolvedProvider === "ollama";
+
+	if (useTextTools) {
+		try {
+			const out = await runTextToolChat({
+				message,
+				provider: resolvedProvider,
+				model: resolvedModel,
+			});
+			if (isJson) {
+				jsonOut({
+					success: true,
+					message,
+					response: out.content,
+					model: resolvedModel,
+					provider: resolvedProvider,
+					rounds: out.rounds,
+					toolLog: out.toolLog,
+				});
+			} else {
+				console.log(out.content);
+			}
+			return;
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			if (isJson) {
+				jsonOut({ success: false, error: errMsg });
+			} else {
+				console.error(`Error: ${errMsg}`);
 			}
 			process.exit(1);
 		}
