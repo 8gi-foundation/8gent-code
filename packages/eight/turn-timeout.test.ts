@@ -16,6 +16,13 @@ import {
 } from "./turn-timeout";
 
 describe("resolveTurnTimeoutMs", () => {
+	it("pins the default at 5 min (local-first headroom)", () => {
+		// Pin the literal so an accidental change to the constant trips a test.
+		// 5 min gives slow-but-alive local models room while still defeating the
+		// 30-min session-watchdog hang.
+		expect(DEFAULT_TURN_TIMEOUT_MS).toBe(300_000);
+	});
+
 	it("defaults when env is unset", () => {
 		expect(resolveTurnTimeoutMs({})).toBe(DEFAULT_TURN_TIMEOUT_MS);
 	});

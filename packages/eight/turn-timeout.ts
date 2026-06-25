@@ -15,10 +15,20 @@
  * the chain, and - once the bounded chain is exhausted - throw a clean
  * "All providers exhausted" error that unblocks the caller.
  *
- * Default: 120s per attempt. Override with EIGHT_TURN_TIMEOUT_MS.
+ * Default: 300s (5 min) per attempt. Override with EIGHT_TURN_TIMEOUT_MS.
+ *
+ * Why 5 min and not something tighter: this is a LOCAL-FIRST daemon. A cold
+ * local model (eight-1.0-q3:14b / qwen3:14b) on a busy machine can legitimately
+ * take a long time for ONE attempt - first token after loading weights from
+ * disk, a large context, a CPU-only fallback, or a long reasoning turn. A 5 min
+ * bound gives a slow-but-alive local generation real headroom while still
+ * defeating the 30-min session-watchdog hang with margin: even the worst case
+ * (all 6 providers in the chain stall) caps the turn near the watchdog, and the
+ * realistic case (one or two unreachable providers) fails over in minutes. Fast
+ * cloud-only setups can lower this via EIGHT_TURN_TIMEOUT_MS.
  */
 
-export const DEFAULT_TURN_TIMEOUT_MS = 120_000;
+export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 
 /** Floor so a misconfigured env can never make attempts effectively instant. */
 const MIN_TURN_TIMEOUT_MS = 1_000;

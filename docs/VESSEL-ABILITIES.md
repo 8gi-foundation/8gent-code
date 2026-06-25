@@ -2,11 +2,13 @@
 
 The first four abilities that run on the Eight vessel without a sandbox.
 
-## Environment Variable
+## Environment Variables
 
 All persistent paths respect `EIGHT_DATA_DIR`. When unset, defaults to `~/.8gent/`.
 
 On Fly.io the volume is mounted at `/root/.8gent/` and `HOME=/root`, so the default works. Setting `EIGHT_DATA_DIR=/data` would redirect all storage to a different mount point.
+
+`EIGHT_TURN_TIMEOUT_MS` bounds a single provider generate() attempt inside the agent's failover loop. When unset, defaults to `300000` (5 minutes). On timeout the attempt is aborted and treated as a provider failure, so the chain fails over and an exhausted chain returns a clean error instead of hanging the turn (and any WebSocket caller) until the 30-minute session watchdog. Lower it for fast cloud-only setups that want quicker failover; raise it for slow local models (a cold `eight-1.0-q3:14b` / `qwen3:14b` on a busy or CPU-only box can legitimately need more time for one attempt). Values of `0`, negative, or non-numeric fall back to the default; a 1000 ms floor is enforced so an attempt is never effectively instant.
 
 ---
 

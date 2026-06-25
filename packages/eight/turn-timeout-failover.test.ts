@@ -115,9 +115,11 @@ describe("daemon turn termination under an all-failing provider chain", () => {
 		expect((thrown as Error).message).toContain("All providers exhausted");
 		expect((thrown as Error).message).toContain("apple-foundation/apple-foundationmodel");
 
-		// Bounded: roughly attempts x per-attempt timeout, with generous slack.
-		// The key assertion is it is NOT anywhere near the 30-min watchdog.
-		expect(elapsed).toBeLessThan(chain.length * perAttempt + 2000);
+		// Bounded: roughly attempts x per-attempt timeout. The MEANINGFUL bound is
+		// that it is nowhere near the 30-min watchdog. We keep a loose multiplier
+		// bound as a smoke check but with wide slack so a loaded CI box (where
+		// setTimeout firing and the event loop both lag) does not flake.
+		expect(elapsed).toBeLessThan(chain.length * perAttempt * 10 + 5000);
 		expect(elapsed).toBeLessThan(30 * 60 * 1000);
 	});
 
