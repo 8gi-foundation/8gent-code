@@ -1,0 +1,97 @@
+/**
+ * 8gent AI - One-Round Text-Tool Adapter
+ *
+ * Wires the pure text tool-call protocol (see ./text-tools) to an injected
+ * model call. Given a conversation and a tool set, it injects the tool
+ * instructions into the system prompt, runs ONE model turn through the caller's
+ * `call` function, then parses the reply into prose plus any tool calls.
+ *
+ * This module performs no network or I/O of its own: the actual model
+ * invocation is supplied by the caller via `opts.call`. It never mutates the
+ * caller's messages array or message objects.
+ */
+
+import {
+	buildToolSystemPrompt,
+	parseToolCalls,
+	stripToolCalls,
+	type ParsedToolCall,
+	type ToolSpec,
+} from "./text-tools";
+
+export type TextToolMessage = {
+	role: "system" | "user" | "assistant" | "tool";
+	content: string;
+};
+
+export type TextToolTurn = {
+	content: string;
+	toolCalls: ParsedToolCall[];
+};
+
+export interface TextToolTurnOptions {
+	messages: TextToolMessage[];
+	tools: ToolSpec[];
+	call: (messages: TextToolMessage[]) => Promise<string>;
+}
+
+/**
+ * Build a new messages array with the tool instructions injected into the
+ * system prompt. Never mutates the input array or its message objects.
+ *
+ * - First message is "system": prepend instructions, a blank line, then the
+ *   existing system content (as a fresh object).
+ * - Otherwise: insert a new leading system message holding the instructions.
+ * - When `tools` is empty: pass the messages through as a shallow copy with no
+ *   added system content.
+ *
+ * Only the FIRST message is inspected, so a later system message is passed
+ * through as-is (never merged). An empty messages array with tools present
+ * yields a single synthesized leading system message holding the instructions.
+ */
+function withToolInstructions(
+	messages: TextToolMessage[],
+	tools: ToolSpec[],
+): TextToolMessage[] {
+	if (tools.length === 0) {
+		// No instructions to add. Return a shallow copy so we never hand back the
+		// caller's own array, while leaving every message object untouched.
+		return messages.slice();
+	}
+
+	const instructions = buildToolSystemPrompt(tools);
+	const first = messages[0];
+
+	if (first && first.role === "system") {
+		const merged: TextToolMessage = {
+			role: "system",
+			content: `${instructions}\n\n${first.content}`,
+		};
+		return [merged, ...messages.slice(1)];
+	}
+
+	const systemMessage: TextToolMessage = {
+		role: "system",
+		content: instructions,
+	};
+	return [systemMessage, ...messages];
+}
+
+/**
+ * Run one text-tool model turn.
+ *
+ * Injects the tool instructions into the system prompt, calls the injected
+ * model `call` once, then returns the stripped prose and any parsed tool calls.
+ * Never throws for normal model output. If `call` itself rejects, the rejection
+ * propagates unchanged.
+ */
+export async function runTextToolTurn(
+	opts: TextToolTurnOptions,
+): Promise<TextToolTurn> {
+	const messages = withToolInstructions(opts.messages, opts.tools);
+	const raw = await opts.call(messages);
+	return {
+		content: stripToolCalls(raw),
+		toolCalls: parseToolCalls(raw),
+	};
+}
