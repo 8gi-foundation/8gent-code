@@ -282,9 +282,11 @@ describe("E5: All model providers exhausted", () => {
       maxSteps: 20,
     });
 
-    // Should fail after the final 4 consecutive errors
+    // Should fail after the final 4 consecutive errors: four in a row exhausts
+    // the consecutive-error budget (the same rule the sibling test pins), so the
+    // loop stops with goal_failed, not max_steps.
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe("max_steps");
+    expect(result.reason).toBe("goal_failed");
   });
 
   test("client init error also counts toward consecutive error limit", async () => {
@@ -490,7 +492,7 @@ describe("Cost tracking", () => {
 
     // Verify cost is tracked on each step
     const costs = result.steps.map((s) => s.cost.tokens);
-    expect(costs.length).toBe(4); // 2 clicks + 1 goal_complete + 1 initial
+    expect(costs.length).toBe(3); // 2 clicks + 1 goal_complete (no separate initial step)
     expect(costs.every((c) => c > 0)).toBe(true);
   });
 

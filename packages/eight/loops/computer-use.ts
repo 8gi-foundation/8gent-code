@@ -219,7 +219,17 @@ function resolveClient(
 	factory?: (entry: FailoverEntry) => LLMClient,
 ): { client: LLMClient; entry: FailoverEntry } {
 	const entry = failover.resolve(pinnedModel, "computer");
-	if (factory) return { client: factory(entry), entry };
+	if (factory) {
+		const produced = factory(entry) as
+			| LLMClient
+			| { client: LLMClient; entry?: FailoverEntry };
+		// The factory may return a bare client or a { client, entry } wrapper.
+		if (produced && typeof (produced as LLMClient).chat !== "function") {
+			const wrapped = produced as { client: LLMClient; entry?: FailoverEntry };
+			return { client: wrapped.client, entry: wrapped.entry ?? entry };
+		}
+		return { client: produced as LLMClient, entry };
+	}
 	const runtime:
 		| "ollama"
 		| "deepseek"
@@ -276,10 +286,9 @@ export async function runComputerUseLoop(
 
 	// DoomLoopDetector: period-1 to period-4 cycle detection on a 12-call sliding
 	// window. Halts the loop when a repeating cycle is detected so the agent
-	// does not burn steps on a stuck pattern. We accumulate calls locally and
-	// pass them in batch to doomDetector.check() each step.
+	// does not burn steps on a stuck pattern. The detector owns its own window;
+	// we feed it one call per step.
 	const doomDetector = new DoomLoopDetector();
-	const doomHistory: DoomToolCall[] = [];
 
 	for (let step = 1; step <= maxSteps; step += 1) {
 		const t0 = Date.now();
@@ -387,6 +396,37 @@ export async function runComputerUseLoop(
 			}
 			continue;
 		}
+
+		// A malformed / empty response (e.g. an exhausted mock or a provider that
+		// returned no body) has no message. Treat it like a model error so the
+		// loop never dereferences undefined and the failover chain can advance.
+		if (!llmResp || !llmResp.message) {
+			failover.markDown(entry.model, entry.provider);
+			lastActionResult = `empty model response on ${entry.provider}/${entry.model}`;
+			consecutiveModelErrors += 1;
+			history.push({
+				step,
+				perception,
+				perceptionMethod: method,
+				cost: perception.cost,
+				toolName: "_model_error",
+				toolArgs: {},
+				resultPreview: lastActionResult,
+				approved: false,
+				durationMs: Date.now() - t0,
+			});
+			if (consecutiveModelErrors >= MAX_CONSECUTIVE_ERRORS) {
+				return {
+					ok: false,
+					reason: "goal_failed",
+					steps: history,
+					finalMessage: `All model providers exhausted after ${consecutiveModelErrors} consecutive errors. Last: ${lastActionResult}`,
+					totalCost,
+				};
+			}
+			continue;
+		}
+
 		consecutiveModelErrors = 0; // reset on any successful model response
 
 		const toolCall = llmResp.message.tool_calls?.[0];
@@ -454,11 +494,12 @@ export async function runComputerUseLoop(
 		// sliding window. Check BEFORE recording the step to history so the
 		// loop halts on the offending call rather than after it.
 		// (TERMINAL_TOOLS check above guarantees toolName is non-terminal here.)
-		doomHistory.push({ toolName, args: toolArgs });
-		const isDoom = doomDetector.check(doomHistory);
+		// Pass ONLY the latest call; the detector appends to its own internal
+		// window. Feeding the whole accumulator would double-count and fire a
+		// step early. The detector emits "stuck" itself on detection.
+		const latestCall: DoomToolCall = { toolName, args: toolArgs };
+		const isDoom = doomDetector.check([latestCall]);
 		if (isDoom) {
-			const stuckPayload = { toolName, args: toolArgs, step, history: doomHistory };
-			doomDetector.emit("stuck", stuckPayload);
 			return {
 				ok: false,
 				reason: "doom_loop",

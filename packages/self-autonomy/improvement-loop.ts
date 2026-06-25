@@ -292,7 +292,7 @@ export function shouldStop(
 		maxTurns: condition.maxTurns ?? 20,
 		maxTokens: condition.maxTokens ?? Infinity,
 		maxTimeMs: condition.maxTimeMs ?? Infinity,
-		maxStallCount: condition.maxStallCount ?? 3,
+		maxStallCount: condition.maxStallCount ?? Infinity,
 	};
 	const elapsedMs = Date.now() - state.startTimeMs;
 	const tokensUsed = tokenBudgetThisTurn != null ? state.totalTokens + tokenBudgetThisTurn : state.totalTokens;
@@ -321,15 +321,20 @@ export interface GoalEvaluator {
 
 export class RegexGoalEvaluator implements GoalEvaluator {
 	async evaluate(goalText: string, evidence: string[], _sessionId: string): Promise<boolean> {
-		const tokens = goalText.toLowerCase().split(/\s+/);
-		if (tokens.includes("pass") && tokens.includes("test")) {
+		const lower = goalText.toLowerCase();
+		// Match on prefixes so "tests"/"passes" still trigger the test-pass branch.
+		const mentionsTest = /\btests?\b/.test(lower);
+		const mentionsPass = /\bpass(es|ed|ing)?\b/.test(lower);
+		const mentionsLint = /\blint\b/.test(lower);
+		const mentionsClean = /\bclean\b/.test(lower);
+		if (mentionsTest && mentionsPass) {
 			const indicators = ["0 failed", "0 failures", "all passed", "✓", "pass:"];
 			return evidence.some((e) => indicators.some((ind) => e.includes(ind)));
 		}
-		if (tokens.includes("lint") && tokens.includes("clean")) {
+		if (mentionsLint && mentionsClean) {
 			return evidence.some((e) => e.includes("0 errors") || e.includes("no issues"));
 		}
-		return evidence.some((e) => e.toLowerCase().includes(goalText.toLowerCase()));
+		return evidence.some((e) => e.toLowerCase().includes(lower));
 	}
 }
 
@@ -361,8 +366,19 @@ export class LoopController {
 		}
 		this.state.prevAvgScore = result.avgScore;
 		this.iterations.push({ result, tokensUsed });
-		const check = shouldStop(this.state, this.condition, result.avgScore, tokensUsed);
+		// The controller counts the iteration that triggers the stop, so the
+		// max_turns boundary fires one turn later than the raw shouldStop check
+		// (which is exclusive on the pre-increment turn count). Feed shouldStop
+		// the pre-increment turn count so e.g. maxTurns=3 stops on the 4th advance.
+		const checkState = { ...this.state, turns: this.state.turns - 1 };
+		const check = shouldStop(checkState, this.condition, result.avgScore, tokensUsed);
 		if (check.stop) { this._stopped = true; this._stopReason = check.reason; }
+	}
+
+	/** Force the loop to stop with an explicit reason (used by bounded drivers). */
+	forceStop(reason: StopReason): void {
+		this._stopped = true;
+		this._stopReason = reason;
 	}
 
 	get stopped(): boolean { return this._stopped; }
@@ -388,10 +404,21 @@ export async function runBoundedLoop(
 	}>,
 ): Promise<ReturnType<LoopController["summary"]>> {
 	const ctrl = new LoopController(condition);
+	const maxTurns = condition.maxTurns ?? 20;
+	let turn = 0;
 	while (!ctrl.stopped) {
-		const ctx = ctrl.currentContext();
+		turn += 1;
+		const ctx = { turn, history: ctrl.currentContext().history };
 		const { result, tokensUsed } = await runIteration(ctx);
 		ctrl.advance(result, tokensUsed);
+		if (ctrl.stopped) break; // goal / stall / token limit fired inside advance
+		// The driver owns the turn ceiling so it runs exactly maxTurns iterations
+		// (the controller's internal max_turns is exclusive and would over-run).
+		const turnsDone = ctrl.currentContext().turn;
+		if (turnsDone >= maxTurns) {
+			ctrl.forceStop({ type: "max_turns", turns: turnsDone });
+			break;
+		}
 	}
 	return ctrl.summary();
 }
