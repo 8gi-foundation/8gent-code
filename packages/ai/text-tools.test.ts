@@ -8,6 +8,7 @@
 import { test, expect, describe } from "bun:test";
 import {
 	buildToolSystemPrompt,
+	needsTextTools,
 	parseToolCalls,
 	stripToolCalls,
 	type ToolSpec,
@@ -234,6 +235,16 @@ describe("parseToolCalls", () => {
 		const calls = parseToolCalls(text);
 		expect(calls).toHaveLength(1);
 		expect(calls[0].name).toBe("list_dir");
+	});
+});
+
+describe("needsTextTools", () => {
+	test("returns true when the provider lacks native tool support", () => {
+		expect(needsTextTools({ supportsNativeTools: false })).toBe(true);
+	});
+
+	test("returns false when the provider supports native tools", () => {
+		expect(needsTextTools({ supportsNativeTools: true })).toBe(false);
 	});
 });
 

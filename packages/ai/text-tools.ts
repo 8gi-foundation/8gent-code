@@ -225,6 +225,24 @@ export function parseToolCalls(text: string): ParsedToolCall[] {
 }
 
 /**
+ * Decide whether the harness should drive tools through the text protocol
+ * (buildToolSystemPrompt + runTextToolTurn) instead of native OpenAI-style
+ * tool calling.
+ *
+ * A provider/model whose served chat template rejects a `tools` payload (some
+ * local LM Studio GGUF templates 400 on it) cannot use native tool calling. For
+ * those, the harness keeps tool orchestration in itself: it omits the native
+ * `tools` field, injects the tool instructions into the system prompt, and
+ * parses the model's plain-text reply for `tool_call` blocks. This gate is the
+ * single decision point for that switch.
+ *
+ * Pure: returns the negation of native-tool support.
+ */
+export function needsTextTools(opts: { supportsNativeTools: boolean }): boolean {
+	return !opts.supportsNativeTools;
+}
+
+/**
  * Remove every `tool_call` block (opening fence through the JSON object and an
  * optional trailing fence) and return the remaining natural-language portion,
  * trimmed. Blocks are removed even when their JSON did not parse, so no JSON
