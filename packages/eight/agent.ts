@@ -936,7 +936,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 						if (autoFacts.length > 0) {
 							const memory = getMemoryManager(this.config.workingDirectory || process.cwd());
 							for (const { fact, layer } of autoFacts) {
-								memory.remember(fact, layer, {
+								await memory.remember(fact, layer, {
 									source: `auto:${event.toolName}`,
 								});
 							}

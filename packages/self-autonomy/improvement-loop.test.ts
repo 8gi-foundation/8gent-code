@@ -236,3 +236,217 @@ describe("runImprovementCycle (full E2E)", () => {
 		expect(summary.improvedSkills + summary.degradedSkills).toBeGreaterThan(0);
 	});
 });
+
+// ============================================================
+// Tests for Step 4 — Loop Stop Conditions  (issue #2700)
+// ============================================================
+
+import {
+	type LoopStopCondition,
+	initLoopState,
+	shouldStop,
+	RegexGoalEvaluator,
+	LoopController,
+	runBoundedLoop,
+} from "./improvement-loop";
+
+function makeIter(avgScore: number, mutations: string[] = []): import("./improvement-loop").IterationResultLike {
+	return {
+		iteration: 0,
+		avgScore,
+		passing: avgScore >= 80 ? 1 : 0,
+		total: 1,
+		scores: { FOO: avgScore },
+		mutationsAdded: mutations,
+		timestamp: new Date().toISOString(),
+	};
+}
+
+describe("shouldStop", () => {
+	it("returns stop=false on fresh state with no limits", () => {
+		const state = initLoopState();
+		const result = shouldStop(state, {}, 0);
+		expect(result.stop).toBe(false);
+	});
+
+	it("stops on max_turns", () => {
+		const state = { ...initLoopState(), turns: 10 };
+		const result = shouldStop(state, { maxTurns: 10 }, 0);
+		expect(result.stop).toBe(true);
+		expect(result.reason?.type).toBe("max_turns");
+	});
+
+	it("stops on goal_score_threshold", () => {
+		const state = initLoopState();
+		const result = shouldStop(state, { goalScoreThreshold: 95 }, 96);
+		expect(result.stop).toBe(true);
+		expect(result.reason?.type).toBe("goal_score_threshold");
+	});
+
+	it("does NOT stop when score is below threshold", () => {
+		const state = initLoopState();
+		const result = shouldStop(state, { goalScoreThreshold: 95 }, 80);
+		expect(result.stop).toBe(false);
+	});
+
+	it("stops on max_tokens", () => {
+		const state = { ...initLoopState(), totalTokens: 90_000 };
+		const result = shouldStop(state, { maxTokens: 100_000 }, 50, 15_000);
+		expect(result.stop).toBe(true);
+		expect(result.reason?.type).toBe("max_tokens");
+	});
+
+	it("stops on stall", () => {
+		const state = { ...initLoopState(), stallCount: 3 };
+		const result = shouldStop(state, { maxStallCount: 3 }, 50);
+		expect(result.stop).toBe(true);
+		expect(result.reason?.type).toBe("stalled");
+	});
+
+	it("stall check is exclusive: stallCount == limit - 1 means keep going", () => {
+		const state = { ...initLoopState(), stallCount: 2 };
+		const result = shouldStop(state, { maxStallCount: 3 }, 50);
+		expect(result.stop).toBe(false);
+	});
+
+	it("goal_score_threshold takes priority over max_turns", () => {
+		// Both are true but goal_met should win
+		const state = { ...initLoopState(), turns: 10 };
+		const result = shouldStop(state, { maxTurns: 10, goalScoreThreshold: 95 }, 98);
+		expect(result.stop).toBe(true);
+		expect(result.reason?.type).toBe("goal_score_threshold");
+	});
+});
+
+describe("RegexGoalEvaluator", () => {
+	it("returns true when evidence contains '0 failed'", async () => {
+		const ev = new RegexGoalEvaluator();
+		const result = await ev.evaluate("all tests pass", ["Running tests...", "0 failed", "Done"], "s1");
+		expect(result).toBe(true);
+	});
+
+	it("returns false when no pass indicators present", async () => {
+		const ev = new RegexGoalEvaluator();
+		const result = await ev.evaluate("all tests pass", ["Running tests...", "3 failed"], "s1");
+		expect(result).toBe(false);
+	});
+
+	it("handles lint clean goal", async () => {
+		const ev = new RegexGoalEvaluator();
+		const result = await ev.evaluate("lint is clean", ["ESLint: 0 errors"], "s1");
+		expect(result).toBe(true);
+	});
+
+	it("fallback: goal text as search term", async () => {
+		const ev = new RegexGoalEvaluator();
+		const result = await ev.evaluate("deploy-ready", ["Status: deploy-ready"], "s1");
+		expect(result).toBe(true);
+	});
+});
+
+describe("LoopController", () => {
+	it("starts with stopped=false", () => {
+		const ctrl = new LoopController();
+		expect(ctrl.stopped).toBe(false);
+		expect(ctrl.stopReason).toBeUndefined();
+	});
+
+	it("stops after maxTurns iterations", () => {
+		const ctrl = new LoopController({ maxTurns: 3 });
+		for (let i = 0; i < 3; i++) {
+			ctrl.advance(makeIter(50));
+			expect(ctrl.stopped).toBe(false); // stops AFTER the 3rd advance
+		}
+		ctrl.advance(makeIter(50));
+		expect(ctrl.stopped).toBe(true);
+		expect(ctrl.stopReason?.type).toBe("max_turns");
+	});
+
+	it("stops early when goal_score_threshold is met", () => {
+		const ctrl = new LoopController({ goalScoreThreshold: 95 });
+		ctrl.advance(makeIter(40));
+		expect(ctrl.stopped).toBe(false);
+		ctrl.advance(makeIter(98));
+		expect(ctrl.stopped).toBe(true);
+		expect(ctrl.stopReason?.type).toBe("goal_score_threshold");
+	});
+
+	it("increments stall count when score does not improve", () => {
+		const ctrl = new LoopController({ maxStallCount: 2 });
+		ctrl.advance(makeIter(40)); // 0 stalls (prevAvg = null)
+		expect(ctrl.currentState.stallCount).toBe(0);
+		ctrl.advance(makeIter(40)); // score same → stall
+		expect(ctrl.currentState.stallCount).toBe(1);
+		ctrl.advance(makeIter(40)); // stall again → stop
+		expect(ctrl.stopped).toBe(true);
+		expect(ctrl.stopReason?.type).toBe("stalled");
+	});
+
+	it("resets stall count when score improves", () => {
+		const ctrl = new LoopController({ maxStallCount: 2 });
+		ctrl.advance(makeIter(40));
+		ctrl.advance(makeIter(40)); // stall = 1
+		expect(ctrl.currentState.stallCount).toBe(1);
+		ctrl.advance(makeIter(45)); // improved → stall reset
+		expect(ctrl.currentState.stallCount).toBe(0);
+		ctrl.advance(makeIter(40)); // stall = 1 again
+		expect(ctrl.currentState.stallCount).toBe(1);
+	});
+
+	it("tracks totalTokens when tokensUsed is provided", () => {
+		const ctrl = new LoopController({ maxTokens: 50_000 });
+		ctrl.advance(makeIter(50), 30_000);
+		expect(ctrl.currentState.totalTokens).toBe(30_000);
+		ctrl.advance(makeIter(50), 30_000); // should trigger max_tokens
+		expect(ctrl.stopped).toBe(true);
+		expect(ctrl.stopReason?.type).toBe("max_tokens");
+	});
+
+	it("summary() returns correct shape", () => {
+		const ctrl = new LoopController({ maxTurns: 1 });
+		ctrl.advance(makeIter(85, ["[FOO] fix"]));
+		ctrl.advance(makeIter(85, ["[FOO] fix"])); // triggers stop
+		const s = ctrl.summary();
+		expect(s.stopped).toBe(true);
+		expect(s.reason?.type).toBe("max_turns");
+		expect(s.iterations).toBe(2);
+		expect(s.finalScore).toBe(85);
+		expect(s.skillsLearned).toBe(2);
+	});
+
+	it("currentContext() returns turn + history", () => {
+		const ctrl = new LoopController();
+		ctrl.advance(makeIter(50));
+		ctrl.advance(makeIter(60));
+		const ctx = ctrl.currentContext();
+		expect(ctx.turn).toBe(2);
+		expect(ctx.history.length).toBe(2);
+		expect(ctx.history[0].avgScore).toBe(50);
+		expect(ctx.history[1].avgScore).toBe(60);
+	});
+});
+
+describe("runBoundedLoop (async shortcut)", () => {
+	it("runs exactly maxTurns iterations then returns summary", async () => {
+		let callCount = 0;
+		const summary = await runBoundedLoop({ maxTurns: 4 }, async ({ turn }) => {
+			callCount++;
+			return { result: makeIter(50 + turn) };
+		});
+		expect(callCount).toBe(4);
+		expect(summary.stopped).toBe(true);
+		expect(summary.reason?.type).toBe("max_turns");
+		expect(summary.iterations).toBe(4);
+	});
+
+	it("exits early when goal_score_threshold is met", async () => {
+		let callCount = 0;
+		const summary = await runBoundedLoop({ maxTurns: 20, goalScoreThreshold: 90 }, async ({ turn }) => {
+			callCount++;
+			return { result: makeIter(turn > 2 ? 95 : 50) };
+		});
+		expect(callCount).toBe(3); // turn 0 (50), turn 1 (50), turn 2 (95 → stop)
+		expect(summary.reason?.type).toBe("goal_score_threshold");
+		expect(summary.finalScore).toBe(95);
+	});
+});
