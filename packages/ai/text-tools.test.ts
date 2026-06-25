@@ -177,6 +177,64 @@ describe("parseToolCalls", () => {
 	test("returns [] for empty string", () => {
 		expect(parseToolCalls("")).toEqual([]);
 	});
+
+	test("parses a call whose arguments.content contains a fenced code block", () => {
+		const content = "# Title\n```bash\nnpm i\n```\ndone";
+		const text = [
+			"I will write the readme.",
+			"```tool_call",
+			JSON.stringify({
+				name: "write_file",
+				arguments: { path: "README.md", content },
+			}),
+			"```",
+			"Done.",
+		].join("\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].name).toBe("write_file");
+		expect(calls[0].arguments).toEqual({ path: "README.md", content });
+	});
+
+	test("parses correctly with CRLF line endings", () => {
+		const text = [
+			"prose before",
+			"```tool_call",
+			'{"name": "read_file", "arguments": {"path": "a.txt"}}',
+			"```",
+			"prose after",
+		].join("\r\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toEqual({
+			name: "read_file",
+			arguments: { path: "a.txt" },
+		});
+	});
+
+	test("handles a JSON string value containing a literal brace and an escaped quote", () => {
+		// content has a `}` (which must not end the object early) and a `\"`
+		// escape (the scanner must not treat the escaped quote as a delimiter).
+		const content = 'function f() { return "a \\" b"; }';
+		const text = [
+			"```tool_call",
+			JSON.stringify({ name: "write_file", arguments: { content } }),
+			"```",
+		].join("\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].arguments).toEqual({ content });
+	});
+
+	test("parses a call when the trailing fence is absent", () => {
+		const text = [
+			"```tool_call",
+			'{"name": "list_dir", "arguments": {"path": "."}}',
+		].join("\n");
+		const calls = parseToolCalls(text);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].name).toBe("list_dir");
+	});
 });
 
 describe("stripToolCalls", () => {
@@ -204,5 +262,28 @@ describe("stripToolCalls", () => {
 	test("returns empty string when the text is only a block", () => {
 		const text = ["```tool_call", '{"name": "list_dir"}', "```"].join("\n");
 		expect(stripToolCalls(text)).toBe("");
+	});
+
+	test("leaves clean prose when a block's args contain a fenced code block", () => {
+		const content = "# Title\n```bash\nnpm i\n```\ndone";
+		const text = [
+			"I will write the readme.",
+			"```tool_call",
+			JSON.stringify({
+				name: "write_file",
+				arguments: { path: "README.md", content },
+			}),
+			"```",
+			"Done.",
+		].join("\n");
+		const stripped = stripToolCalls(text);
+		expect(stripped).toContain("I will write the readme.");
+		expect(stripped).toContain("Done.");
+		// No JSON shrapnel from the call survives.
+		expect(stripped).not.toContain("write_file");
+		expect(stripped).not.toContain("README.md");
+		expect(stripped).not.toContain("npm i");
+		expect(stripped).not.toContain("tool_call");
+		expect(stripped).toBe(stripped.trim());
 	});
 });
