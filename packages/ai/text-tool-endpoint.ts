@@ -43,12 +43,18 @@ type ChatMessage = {
  * GGUF chat template that rejects native tool calling never 400s. Returns the
  * assistant message text (empty string when the provider returns no content).
  * Rejects (so the loop's caller can fall back) when the endpoint errors.
+ *
+ * Pass `signal` to make the underlying fetch abortable: a stalled local model
+ * (socket accepted, no body) is then torn down when the caller aborts (turn
+ * timeout, circuit breaker, user ESC) instead of leaving the request - and the
+ * turn - hung forever.
  */
 export function buildTextToolCall(opts: {
 	provider: string;
 	model: string;
 	endpoint?: string;
 	temperature?: number;
+	signal?: AbortSignal;
 }): (messages: ChatMessage[]) => Promise<string> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider);
 	const temperature = opts.temperature ?? 0.2;
@@ -63,6 +69,7 @@ export function buildTextToolCall(opts: {
 				temperature,
 				stream: false,
 			}),
+			signal: opts.signal,
 		});
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
@@ -108,6 +115,27 @@ export function toolDefToSpec(def: OpenAiToolDef): ToolSpec | null {
 }
 
 /**
+ * Convert OpenAI-style tool definitions into ToolSpecs, filtered to `allow`
+ * (when given). Definitions without a usable name are skipped. Use this when
+ * the caller wires its own `run` per spec (the agent path does, so it can emit
+ * lifecycle events around each call); use toolDefsToTextTools when a single
+ * shared `execute` is enough.
+ */
+export function toolDefsToSpecs(
+	defs: OpenAiToolDef[],
+	allow?: Set<string>,
+): ToolSpec[] {
+	const specs: ToolSpec[] = [];
+	for (const def of defs) {
+		const spec = toolDefToSpec(def);
+		if (!spec) continue;
+		if (allow && !allow.has(spec.name)) continue;
+		specs.push(spec);
+	}
+	return specs;
+}
+
+/**
  * Convert OpenAI-style tool definitions into runTextToolAgent {spec, run}
  * tools. Only definitions whose name is in `allow` are kept (when `allow` is
  * given), and `run(args)` is wired to the injected `execute`, which must be the
@@ -120,15 +148,8 @@ export function toolDefsToTextTools(
 	execute: (name: string, args: Record<string, unknown>) => Promise<string>,
 	allow?: Set<string>,
 ): TextTool[] {
-	const tools: TextTool[] = [];
-	for (const def of defs) {
-		const spec = toolDefToSpec(def);
-		if (!spec) continue;
-		if (allow && !allow.has(spec.name)) continue;
-		tools.push({
-			spec,
-			run: (args: Record<string, unknown>) => execute(spec.name, args),
-		});
-	}
-	return tools;
+	return toolDefsToSpecs(defs, allow).map((spec) => ({
+		spec,
+		run: (args: Record<string, unknown>) => execute(spec.name, args),
+	}));
 }

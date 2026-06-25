@@ -72,6 +72,7 @@ export {
 	resolveTextToolEndpoint,
 	buildTextToolCall,
 	toolDefToSpec,
+	toolDefsToSpecs,
 	toolDefsToTextTools,
 } from "./text-tool-endpoint";
 

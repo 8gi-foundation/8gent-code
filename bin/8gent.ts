@@ -1601,9 +1601,11 @@ async function cronCommand(args: string[]) {
 // Drives a tool-incapable local model agentically via the harness-side text
 // tool-call protocol. Builds a direct `call` against the provider's
 // OpenAI-compatible chat completions endpoint (no native `tools` payload), then
-// runs the read-only demo tools through runTextToolAgent.
+// runs the read-only demo tools through runTextToolAgent. Named *Demo* to
+// distinguish it from Agent.runTextToolChat (packages/eight/agent.ts), which
+// drives the REAL executor tools and is the path the TUI + Pill use.
 
-async function runTextToolChat(opts: {
+async function runDemoTextToolChat(opts: {
 	message: string;
 	provider: string;
 	model: string;
@@ -1694,7 +1696,7 @@ async function chatCommand(args: string[]) {
 
 	if (useTextTools) {
 		try {
-			const out = await runTextToolChat({
+			const out = await runDemoTextToolChat({
 				message,
 				provider: resolvedProvider,
 				model: resolvedModel,

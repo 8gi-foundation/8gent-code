@@ -123,9 +123,10 @@ import {
 import {
 	buildTextToolCall,
 	needsTextTools,
+	resolveTextToolEndpoint,
 	runTextToolAgent,
 	type TextTool,
-	toolDefsToTextTools,
+	toolDefsToSpecs,
 } from "../ai";
 
 /**
@@ -535,27 +536,33 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			textForAgent,
 		} = opts;
 
+		// Live abort controller for THIS text-tool turn. The text-tool branch
+		// returns before the native path creates its controller, so without this
+		// `this.abortController` is null and this.abort() - fired by the circuit
+		// breaker below, the session watchdog, and user ESC - would be a no-op.
+		// Assigning it here makes all three actually stop the turn.
+		this.abortController = new AbortController();
+		const signal = this.abortController.signal;
+
 		// Build the real tool set: intersect the executor's own tool definitions
-		// (everything it can actually run) with the local CORE_TOOLS subset. Every
-		// exposed tool therefore has a working executor; run() invokes the real
-		// file/command/git tool, not a read-only demo. Each run is wrapped to fire
-		// the tool lifecycle events both surfaces consume, plus minimal session +
-		// loop-detector bookkeeping so the audit trail mirrors the native path.
+		// (everything it can actually run) with the local CORE_TOOLS subset via a
+		// spec-only conversion, then wire each spec's run() to the REAL executor
+		// here so we can fire the tool lifecycle events both surfaces consume,
+		// plus minimal session + loop-detector bookkeeping, around each call.
 		const allow = new Set(localCoreTools);
-		const baseTools = toolDefsToTextTools(
+		const specs = toolDefsToSpecs(
 			this.executor.getToolDefinitions() as Array<{
 				type?: string;
 				function?: { name?: unknown; description?: unknown; parameters?: unknown };
 			}>,
-			(name, args) => this.executor.execute(name, args),
 			allow,
 		);
 
 		let stepNumber = 0;
-		const tools: TextTool[] = baseTools.map((t) => ({
-			spec: t.spec,
+		const tools: TextTool[] = specs.map((spec) => ({
+			spec,
 			run: async (args: Record<string, unknown>) => {
-				const toolName = t.spec.name;
+				const toolName = spec.name;
 				const toolCallId = `tt-${Date.now()}-${stepNumber}`;
 				const step = stepNumber++;
 				const startedAt = Date.now();
@@ -662,18 +669,55 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			? [{ role: "system", content: instructions }, ...history]
 			: [...history];
 
-		const call = buildTextToolCall({
+		// The raw call hits the local endpoint with the turn's abort signal wired
+		// into fetch, so an abort (timeout / circuit breaker / ESC) tears the
+		// request down. We wrap each round in withTurnTimeout: a single stalled
+		// round (socket accepted, no body - maxRounds bounds round COUNT, not a
+		// stuck round) aborts the shared signal and rejects, ending the turn in
+		// bounded time instead of hanging for the full session watchdog.
+		const rawCall = buildTextToolCall({
 			provider: providerName,
 			model: providerModel,
 			temperature: getRuntimeParams().temperature ?? 0.2,
+			signal,
 		});
+		const attemptTimeoutMs = resolveTurnTimeoutMs();
+		const endpoint = resolveTextToolEndpoint(providerName);
+		const call = (msgs: Parameters<typeof rawCall>[0]) =>
+			withTurnTimeout(
+				() => rawCall(msgs),
+				attemptTimeoutMs,
+				() => this.abortController?.abort(),
+				`${providerName}/${providerModel} (text-tools)`,
+			);
 
-		const agentResult = await runTextToolAgent({
-			messages,
-			tools,
-			call,
-			maxRounds: this.config.maxTurns ?? 6,
-		});
+		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
+		try {
+			agentResult = await runTextToolAgent({
+				messages,
+				tools,
+				call,
+				maxRounds: this.config.maxTurns ?? 6,
+				signal,
+			});
+		} catch (err) {
+			// Provider down (ECONNREFUSED -> raw "fetch failed"), a stalled-round
+			// timeout, or an abort. Return a friendly turn in the normal chat()
+			// shape so the TUI/Pill render it cleanly instead of throwing a raw
+			// fetch error up through the surface.
+			this.abortController = null;
+			const raw = err instanceof Error ? err.message : String(err);
+			const isReachability =
+				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
+					raw,
+				);
+			const friendly = isReachability
+				? `The local model endpoint (${endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`
+				: `The local model turn could not complete: ${raw}`;
+			this.messageHistory.push({ role: "assistant", content: friendly });
+			return friendly;
+		}
+		this.abortController = null;
 
 		// Map into the exact shape chat() normally returns: flavored prose, pushed
 		// onto the assistant history, with the post-turn bookkeeping the native
@@ -986,7 +1030,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 		// from the model's plain-text reply. Routing it HERE (the shared chat()
 		// method) means the TUI and the Pill/daemon get it automatically, not just
 		// the CLI. The native path below is left 100% unchanged for capable
-		// providers — this branch only fires behind the needsTextTools gate.
+		// providers - this branch only fires behind the needsTextTools gate.
 		//
 		// The gate mirrors bin/8gent.ts chatCommand: lmstudio/ollama are the
 		// tool-incapable local providers (the provider registry's coarse
