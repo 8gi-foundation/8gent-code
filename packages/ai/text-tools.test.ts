@@ -48,11 +48,58 @@ describe("buildToolSystemPrompt", () => {
 		expect(prompt).toContain("List the entries in a directory.");
 	});
 
-	test("renders the parameter schema for each tool", () => {
+	test("renders each tool's parameters compactly with name and type", () => {
 		const prompt = buildToolSystemPrompt(TOOLS);
-		// The schema JSON for read_file's "required" array should appear.
-		expect(prompt).toContain('"required"');
-		expect(prompt).toContain('"properties"');
+		// Compact signature form: name(param: type, ...). read_file takes a
+		// required string `path`; the param name and its type must both appear,
+		// without the pretty-printed JSON-schema noise.
+		expect(prompt).toContain("read_file(");
+		expect(prompt).toContain("path: string");
+		// The verbose JSON-schema scaffolding is gone now that rendering is lean.
+		expect(prompt).not.toContain('"properties"');
+		expect(prompt).not.toContain("(JSON schema)");
+	});
+
+	test("marks optional parameters with a trailing ? and required ones plainly", () => {
+		const prompt = buildToolSystemPrompt(TOOLS);
+		// read_file.path is required -> `path: string` (no ?).
+		expect(prompt).toContain("read_file(path: string)");
+		// list_dir.path is not in `required` -> `path?: string`.
+		expect(prompt).toContain("list_dir(path?: string)");
+	});
+
+	test("steers writes toward write_file and forbids fabricated success", () => {
+		const prompt = buildToolSystemPrompt(TOOLS);
+		// Bug B steering: file writes must go through write_file, never shell.
+		expect(prompt).toContain("write_file");
+		// Steering forbids using run_command to write files (text may wrap, so
+		// normalize whitespace before matching).
+		const flat = prompt.toLowerCase().replace(/\s+/g, " ");
+		expect(flat).toContain("you must use the write_file tool");
+		expect(flat).toContain("do not use run_command");
+		// Never claim an action without the matching tool_call + result.
+		expect(flat).toContain("never claim");
+	});
+
+	test("renders a realistic toolset well under a sane char budget", () => {
+		// A ~10-tool set must stay lean enough to fit an 8k local window with
+		// room for the conversation and tool results. The old pretty-printed
+		// full-JSON-schema rendering blew well past this.
+		const many: ToolSpec[] = Array.from({ length: 10 }, (_, i) => ({
+			name: `tool_${i}`,
+			description: `Performs operation number ${i} on the workspace and returns a result.`,
+			parameters: {
+				type: "object",
+				properties: {
+					path: { type: "string" },
+					content: { type: "string" },
+					recursive: { type: "boolean" },
+				},
+				required: ["path"],
+			},
+		}));
+		const prompt = buildToolSystemPrompt(many);
+		expect(prompt.length).toBeLessThan(6000);
 	});
 
 	test("handles an empty tool list without throwing", () => {

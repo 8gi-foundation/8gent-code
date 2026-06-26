@@ -48,6 +48,40 @@ export interface TextToolAgentResult {
 }
 
 /**
+ * Detect a run_command call that is trying to write file CONTENTS through the
+ * shell (a redirect to a file, `tee`, or a here-doc), which the model should do
+ * with write_file instead. Deterministic string inspection of the actual
+ * command - NOT an NLP guess on prose. Used to feed a short corrective note back
+ * to the model so it stops substituting shell writes for write_file (Bug B).
+ *
+ * Plain `mkdir -p some/dir` is intentionally NOT flagged: creating a directory
+ * is a legitimate shell action and does not write file contents.
+ */
+export function isShellFileWrite(command: unknown): boolean {
+	if (typeof command !== "string") return false;
+	const c = command.trim();
+	if (!c) return false;
+	// Redirect to a file: `> path` or `>> path` (not `2>&1` style fd dup).
+	if (/(^|\s)\d*>>?\s*[^&\s]/.test(c) && !/>>?\s*&/.test(c)) {
+		// echo/printf/cat into a redirect is the classic shell-write antipattern.
+		if (/\b(echo|printf|cat|tee)\b/.test(c) || />>?\s*['"]?\/?[\w.\-/]+/.test(c)) {
+			return true;
+		}
+	}
+	// `... | tee file` writes file contents too.
+	if (/\|\s*tee\b/.test(c)) return true;
+	// Here-doc redirected into a file: `cat <<EOF > file`.
+	if (/<<-?\s*['"]?\w+/.test(c) && />>?\s*[^&\s]/.test(c)) return true;
+	return false;
+}
+
+const SHELL_WRITE_NOTE =
+	"\n\nNote: it looks like you used run_command to write file contents via the " +
+	"shell. That is not the correct tool. To create or change a file, call " +
+	"write_file (or edit_file) with the path and content. Do not claim the file " +
+	"was written unless you call write_file and see its success result.";
+
+/**
  * Run a tool-call against the matching tool, never throwing. A missing tool or a
  * throwing `run` is captured as a short error string so the loop can feed it
  * back to the model instead of aborting.
@@ -115,7 +149,14 @@ export async function runTextToolAgent(
 		for (const tc of turn.toolCalls) {
 			const result = await executeTool(opts.tools, tc.name, tc.arguments);
 			toolLog.push({ name: tc.name, args: tc.arguments, result });
-			resultParts.push(`Tool ${tc.name} returned:\n${result}`);
+			// Deterministic guard (Bug B): if the model wrote file contents through
+			// the shell instead of write_file, append a short corrective note to
+			// this result so the next round is steered back to the right tool.
+			const note =
+				tc.name === "run_command" && isShellFileWrite(tc.arguments?.command)
+					? SHELL_WRITE_NOTE
+					: "";
+			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
 
 		// Record the model's raw round output, then the tool results as the next
