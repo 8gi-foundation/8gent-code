@@ -9,6 +9,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - 8gent-flow Mac vision relay (#2718)
+
+Introduced `@8gi-foundation/8gent-flow`, a Mac-first relay that reuses
+`@8gent/eyes` for local screen capture and exposes token-gated WebSocket frames
+for iOS or browser clients on the same network.
+
+- Defaults to loopback with a generated pair token.
+- Supports LAN binding with `--host 0.0.0.0` for iOS pairing.
+- Sends JPEG or PNG frame payloads, with metadata-only and max-frame-size modes.
+- Reports missing macOS Screen Recording and Accessibility grants explicitly.
+
 ### Changed - GitHub Actions usage reduction
 
 Org-level Actions quota was hit (3,000 min/month). Workflow changes to bring usage well under cap:
