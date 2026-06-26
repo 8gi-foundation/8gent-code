@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runTextToolAgent, type TextTool } from "./text-tool-loop";
+import { isShellFileWrite, runTextToolAgent, type TextTool } from "./text-tool-loop";
 import type { TextToolMessage } from "./text-tool-client";
 
 const READ_FILE_TOOL: TextTool = {
@@ -98,5 +98,31 @@ describe("runTextToolAgent", () => {
 		expect(result.content).toBe("Handled the error gracefully.");
 		expect(result.toolLog).toHaveLength(1);
 		expect(result.toolLog[0].result).toContain("kaboom");
+	});
+});
+
+describe("isShellFileWrite", () => {
+	test("flags echo/printf/cat into a redirect", () => {
+		expect(isShellFileWrite("echo 'hi' > /tmp/out.txt")).toBe(true);
+		expect(isShellFileWrite("printf 'hi' >> log.txt")).toBe(true);
+		expect(isShellFileWrite("cat foo > bar.txt")).toBe(true);
+	});
+
+	test("flags a pipe into tee and a here-doc redirect", () => {
+		expect(isShellFileWrite("echo hi | tee out.txt")).toBe(true);
+		expect(isShellFileWrite("cat <<EOF > out.txt\nhi\nEOF")).toBe(true);
+	});
+
+	test("does NOT flag plain mkdir, ls, or fd redirection", () => {
+		expect(isShellFileWrite("mkdir -p /tmp/dogfood")).toBe(false);
+		expect(isShellFileWrite("ls -la /tmp")).toBe(false);
+		expect(isShellFileWrite("some-cmd 2>&1")).toBe(false);
+		expect(isShellFileWrite("grep foo bar.txt")).toBe(false);
+	});
+
+	test("ignores non-string commands", () => {
+		expect(isShellFileWrite(undefined)).toBe(false);
+		expect(isShellFileWrite(42)).toBe(false);
+		expect(isShellFileWrite("")).toBe(false);
 	});
 });
