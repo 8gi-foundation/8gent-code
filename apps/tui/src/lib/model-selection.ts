@@ -73,6 +73,32 @@ export function pickBestChatModel(modelIds: string[], opts?: { preference?: stri
 	return scored[0]?.id || pool[0] || "";
 }
 
+/** Runtime literal understood by the Agent's AgentConfig. */
+export type AgentRuntime = "ollama" | "lmstudio" | "openrouter";
+
+/**
+ * Map a TUI provider id to the runtime literal the Agent understands.
+ *
+ * This is the single authority for provider -> runtime resolution. Every site
+ * that builds a turn-serving Agent must route through it so the mappings cannot
+ * drift (a stale ad-hoc `let runtime = "ollama"` block was the source of a
+ * provider-routing bug where `--provider=lmstudio` ran against Ollama).
+ *
+ * - lmstudio                         -> lmstudio
+ * - openrouter / openrouter-free     -> openrouter
+ * - apfel (apple-foundation), ollama -> ollama (apfel rides the ollama adapter
+ *   chain, matching prior behaviour)
+ * - undefined / unknown              -> ollama (safe local default)
+ */
+export function providerToRuntime(provider?: string): AgentRuntime {
+	if (provider === "lmstudio") return "lmstudio";
+	if (provider === "openrouter" || provider === "openrouter-free") return "openrouter";
+	// apfel / apple-foundation, ollama, undefined, and any unknown provider fall
+	// through to the ollama runtime (apfel is OpenAI-compatible and handled by the
+	// Agent's own adapter chain).
+	return "ollama";
+}
+
 /** Map CLI / saved provider strings to internal provider ids. */
 export function normalizeProviderId(raw?: string): string | undefined {
 	if (!raw?.trim()) return undefined;

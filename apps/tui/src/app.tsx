@@ -240,6 +240,7 @@ import {
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	pickBestChatModel,
+	providerToRuntime,
 } from "./lib/model-selection.js";
 
 function loadEnvFile() {
@@ -1051,6 +1052,24 @@ export function App({
 		if (!tab || tab.type !== "chat") return;
 		const role = (tab.data as { role?: string } | undefined)?.role;
 		if (!role) return;
+		// CLI override guard: a --provider/--model passed on launch is authoritative
+		// for the tab that was active at launch. Without this guard the role-registry
+		// default below (e.g. orchestrator -> ollama) overwrites currentProvider,
+		// so the turn-serving agent is built with runtime=ollama even though the
+		// user asked for lmstudio. Pin once, then let role defaults take over for
+		// subsequent tab switches.
+		if (cliProviderRequestedRef.current || cliModelRequestedRef.current) {
+			if (cliPinnedTabIdRef.current === null) {
+				// First run after launch: remember the pinned tab and keep the CLI
+				// override intact (do not apply role defaults to it).
+				cliPinnedTabIdRef.current = tab.id;
+				return;
+			}
+			if (cliPinnedTabIdRef.current === tab.id) {
+				// Re-entering the pinned tab: still honour the CLI override.
+				return;
+			}
+		}
 		const cfg = ROLE_REGISTRY[role];
 		// Persisted settings override role-registry defaults for orchestrator/engineer/qa tabs.
 		try {
@@ -1111,6 +1130,15 @@ export function App({
 
 	// Model/Provider state (must be before agent init)
 	const cliModelRequestedRef = useRef((cliModel ?? "").trim());
+	// A normalized CLI --provider, if one was passed. When set, it is authoritative
+	// for the initial active tab and must not be clobbered by the role-registry
+	// default effect (which would otherwise reset an explicit --provider=lmstudio
+	// back to the orchestrator's ollama default, routing the turn to the wrong
+	// engine). Cleared once the user explicitly switches provider/tab.
+	const cliProviderRequestedRef = useRef(normalizeProviderId(cliProvider));
+	// The tab that is active at launch. A CLI --provider/--model override pins
+	// THIS tab only; switching to or opening other tabs uses their role defaults.
+	const cliPinnedTabIdRef = useRef<string | null>(null);
 	const [currentProvider, setCurrentProvider] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).provider,
 	);
@@ -2175,12 +2203,18 @@ export function App({
 				const _initTabId = _activeTab?.id || "default";
 				const _initTabTitle = _activeTab?.title || "Chat";
 
-				// Reuse existing per-tab agent if its underlying model still matches.
-				// Otherwise abort + drop and rebuild with the new spec.
+				// Reuse existing per-tab agent only if BOTH its model and its runtime
+				// still match. Checking the model alone let an agent built with a
+				// stale runtime (e.g. ollama) survive a provider switch to lmstudio,
+				// so the turn ran against the wrong engine. Otherwise abort + drop
+				// and rebuild with the current spec.
+				const _wantRuntime = providerToRuntime(currentProvider);
 				const _existing = perTabAgents.getAgent(_initTabId);
 				if (_existing) {
-					const _cfg = (_existing as unknown as { config?: { model?: string } }).config;
-					if (_cfg?.model === currentModel) {
+					const _cfg = (_existing as unknown as {
+						config?: { model?: string; runtime?: string };
+					}).config;
+					if (_cfg?.model === currentModel && _cfg?.runtime === _wantRuntime) {
 						setAgent(_existing);
 						setAgentReady(true);
 						return;
@@ -2188,13 +2222,10 @@ export function App({
 					perTabAgents.removeTabAgent(_initTabId);
 				}
 
-				// Map provider to runtime
-				let runtime: "ollama" | "lmstudio" | "openrouter" = "ollama";
-				if (currentProvider === "lmstudio") {
-					runtime = "lmstudio";
-				} else if (currentProvider === "openrouter" || currentProvider === "openrouter-free") {
-					runtime = "openrouter";
-				}
+				// Build with the runtime resolved above via the single shared
+				// authority so the turn-serving agent always honours the active
+				// (CLI / settings) provider instead of silently defaulting to ollama.
+				const runtime = _wantRuntime;
 
 				const newAgent = new Agent({
 					model: currentModel,

@@ -34,6 +34,7 @@ import { Agent } from "../../../../packages/eight/index.js";
 import type { AgentEventCallbacks } from "../../../../packages/eight/index.js";
 import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.js";
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
+import { providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
 // Types
@@ -65,15 +66,13 @@ export interface CreateAgentOptions extends TabAgentSpec {
 // Helpers
 // ============================================
 
-/** Map a TUI provider id to the runtime literal that AgentConfig understands. */
+/**
+ * Map a TUI provider id to the runtime literal that AgentConfig understands.
+ * Delegates to the single shared authority so per-tab agents resolve runtime
+ * identically to the foreground agent (no drift between sites).
+ */
 function toAgentRuntime(provider: string): TabAgentRuntime {
-	if (provider === "lmstudio") return "lmstudio";
-	if (provider === "openrouter" || provider === "openrouter-free") return "openrouter";
-	// apfel, ollama, and any unknown provider fall through to ollama runtime;
-	// apfel is OpenAI-compatible and the existing Agent treats it via its own
-	// adapter chain - matching what app.tsx did before this hook landed.
-	if (provider === "apfel") return "ollama";
-	return "ollama";
+	return providerToRuntime(provider);
 }
 
 /** Resolve provider/model for a chat tab: per-tab settings override -> ROLE_REGISTRY default. */
