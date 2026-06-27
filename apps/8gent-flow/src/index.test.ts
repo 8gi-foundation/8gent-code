@@ -42,6 +42,7 @@ describe("parseFlowConfig", () => {
 		expect(parsed.config.fps).toBe(1);
 		expect(parsed.config.token).toBeTruthy();
 		expect(parsed.config.includeImage).toBe(true);
+		expect(parsed.config.allowControl).toBe(true);
 	});
 
 	it("supports LAN, on-demand, metadata-only iOS relay settings", () => {
@@ -68,6 +69,17 @@ describe("parseFlowConfig", () => {
 		expect(parsed.config.path).toBe("/ios-flow");
 		expect(parsed.config.format).toBe("png");
 		expect(parsed.config.includeImage).toBe(false);
+		expect(parsed.config.allowControl).toBe(true);
+	});
+
+	it("keeps control disabled on no-token relays unless explicitly allowed", () => {
+		const noToken = parseFlowConfig(["serve", "--no-token"]);
+		expect(noToken.config.token).toBeNull();
+		expect(noToken.config.allowControl).toBe(false);
+
+		const explicit = parseFlowConfig(["serve", "--no-token", "--allow-unauthenticated-control"]);
+		expect(explicit.config.token).toBeNull();
+		expect(explicit.config.allowControl).toBe(true);
 	});
 });
 
@@ -127,6 +139,7 @@ describe("serveFlow", () => {
 				format: "jpeg",
 				includeImage: true,
 				maxFrameBytes: 100,
+				allowControl: true,
 			},
 			{
 				eyes: {
@@ -153,6 +166,79 @@ describe("serveFlow", () => {
 			expect((frame as { image?: { data?: string } }).image?.data).toBe(
 				Buffer.from([8, 6, 1, 0]).toString("base64"),
 			);
+			ws.close();
+		} finally {
+			relay.stop();
+		}
+	});
+
+	it("dispatches authenticated control messages and refreshes the frame", async () => {
+		const dir = join(tmpdir(), `8gent-flow-test-${Date.now()}`);
+		await mkdir(dir, { recursive: true });
+		const path = join(dir, "frame.jpg");
+		await writeFile(path, Buffer.from([1, 3, 3, 7]));
+		const clicks: Array<{ x: number; y: number; count?: number }> = [];
+
+		const relay = await serveFlow(
+			{
+				host: "127.0.0.1",
+				port: 0,
+				path: "/flow",
+				fps: 0,
+				token: "pair-token",
+				displayId: "primary",
+				format: "jpeg",
+				includeImage: true,
+				maxFrameBytes: 100,
+				allowControl: true,
+			},
+			{
+				eyes: {
+					async capture() {
+						return fixtureFrame(path);
+					},
+				},
+				control: {
+					click(input) {
+						clicks.push(input);
+						return { ok: true };
+					},
+					hover() {
+						return { ok: true };
+					},
+					scroll() {
+						return { ok: true };
+					},
+					typeText() {
+						return { ok: true };
+					},
+					press() {
+						return { ok: true };
+					},
+				},
+				now: () => 456,
+			},
+		);
+
+		try {
+			const ws = new WebSocket(`ws://127.0.0.1:${relay.port}/flow`);
+			await nextMessage(ws);
+			ws.send(JSON.stringify({ type: "hello", token: "pair-token" }));
+			await nextMessage(ws);
+
+			ws.send(JSON.stringify({ type: "control.click", id: "tap-1", x: 42, y: 99, count: 1 }));
+			const result = await nextMessage(ws);
+			expect(result).toEqual({
+				type: "control.result",
+				protocol: "8gent-flow.v1",
+				id: "tap-1",
+				action: "control.click",
+				ok: true,
+			});
+			expect(clicks).toEqual([{ x: 42, y: 99, count: 1 }]);
+
+			const frame = await nextMessage(ws);
+			expect((frame as { type?: string }).type).toBe("flow.frame");
 			ws.close();
 		} finally {
 			relay.stop();
