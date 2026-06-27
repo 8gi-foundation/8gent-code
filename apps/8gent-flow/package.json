@@ -1,0 +1,20 @@
+{
+	"name": "@8gi-foundation/8gent-flow",
+	"version": "0.17.3",
+	"description": "Mac vision relay for 8gent-flow clients.",
+	"type": "module",
+	"bin": {
+		"8gent-flow": "src/index.ts"
+	},
+	"scripts": {
+		"start": "bun run src/index.ts serve",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@8gent/eyes": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^5.3.0"
+	}
+}
