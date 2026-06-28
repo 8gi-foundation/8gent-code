@@ -22,6 +22,18 @@ import {
 	probeAxNativePermissions,
 	selectEyesBackend,
 } from "@8gent/eyes";
+import {
+	click as desktopClick,
+	hover as desktopHover,
+	press as desktopPress,
+	scroll as desktopScroll,
+	typeText as desktopType,
+} from "../../../packages/computer/index.js";
+import type {
+	CommandResult,
+	MouseButton,
+	ScrollDirection,
+} from "../../../packages/computer/types.js";
 
 const PROTOCOL_VERSION = "8gent-flow.v1";
 const DEFAULT_HOST = "127.0.0.1";
@@ -44,6 +56,7 @@ export interface FlowConfig {
 	format: "jpeg" | "png";
 	includeImage: boolean;
 	maxFrameBytes: number;
+	allowControl: boolean;
 }
 
 interface Argv {
@@ -59,6 +72,7 @@ interface FlowSocketData {
 
 interface ServeDeps {
 	eyes?: Pick<Eyes, "capture">;
+	control?: FlowControlDriver;
 	now?: () => number;
 }
 
@@ -94,6 +108,28 @@ export interface FlowFramePayload {
 		bytes?: number;
 	};
 }
+
+export interface FlowControlDriver {
+	click(input: { x: number; y: number; button?: MouseButton; count?: number }):
+		| CommandResult
+		| Promise<CommandResult>;
+	hover(input: { x: number; y: number }): CommandResult | Promise<CommandResult>;
+	scroll(input: {
+		direction: ScrollDirection;
+		amount?: number;
+		x?: number;
+		y?: number;
+	}): CommandResult | Promise<CommandResult>;
+	typeText(input: { text: string; delay?: number }): CommandResult | Promise<CommandResult>;
+	press(input: { keys: string; count?: number; delay?: number }):
+		| CommandResult
+		| Promise<CommandResult>;
+}
+
+type ControlMessage = Record<string, unknown> & {
+	type?: string;
+	id?: string;
+};
 
 function out(payload: unknown): void {
 	process.stdout.write(`${JSON.stringify(payload)}\n`);
@@ -183,6 +219,7 @@ export function parseFlowConfig(raw: string[]): { subcommand: string | null; con
 	const explicitToken = flagStr(argv, "token");
 	const noToken = flagBool(argv, "no-token");
 	if (explicitToken && noToken) fail(EXIT_USAGE, "use --token or --no-token, not both");
+	const allowUnauthenticatedControl = flagBool(argv, "allow-unauthenticated-control");
 
 	const format = flagStr(argv, "format") === "png" ? "png" : "jpeg";
 	const config: FlowConfig = {
@@ -198,6 +235,7 @@ export function parseFlowConfig(raw: string[]): { subcommand: string | null; con
 			min: 1,
 			max: 50 * 1024 * 1024,
 		}),
+		allowControl: !flagBool(argv, "no-control") && (!noToken || allowUnauthenticatedControl),
 	};
 
 	return { subcommand: argv.subcommand, config };
@@ -246,6 +284,128 @@ export async function frameToPayload(
 	return payload;
 }
 
+function createDesktopControlDriver(): FlowControlDriver {
+	return {
+		click(input) {
+			return desktopClick({
+				point: { x: input.x, y: input.y },
+				button: input.button,
+				count: input.count,
+			});
+		},
+		hover(input) {
+			return desktopHover({ x: input.x, y: input.y });
+		},
+		scroll(input) {
+			return desktopScroll({
+				direction: input.direction,
+				amount: input.amount,
+				point:
+					input.x !== undefined && input.y !== undefined ? { x: input.x, y: input.y } : undefined,
+			});
+		},
+		typeText(input) {
+			return desktopType({ text: input.text, delay: input.delay });
+		},
+		press(input) {
+			return desktopPress({ keys: input.keys, count: input.count, delay: input.delay });
+		},
+	};
+}
+
+function controlResultMessage(msg: ControlMessage, action: string, result: CommandResult): string {
+	return JSON.stringify({
+		type: "control.result",
+		protocol: PROTOCOL_VERSION,
+		id: msg.id,
+		action,
+		ok: result.ok,
+		error: result.ok ? undefined : result.error,
+	});
+}
+
+function controlErrorMessage(msg: ControlMessage, action: string, reason: string): string {
+	return controlResultMessage(msg, action, { ok: false, error: reason });
+}
+
+function numberValue(msg: ControlMessage, key: string): number {
+	const value = msg[key];
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(`${key} must be a finite number`);
+	}
+	return value;
+}
+
+function optionalNumberValue(msg: ControlMessage, key: string): number | undefined {
+	const value = msg[key];
+	if (value === undefined) return undefined;
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(`${key} must be a finite number`);
+	}
+	return value;
+}
+
+function stringValue(msg: ControlMessage, key: string): string {
+	const value = msg[key];
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new Error(`${key} must be a non-empty string`);
+	}
+	return value;
+}
+
+function optionalMouseButton(msg: ControlMessage): MouseButton | undefined {
+	const value = msg.button;
+	if (value === undefined) return undefined;
+	if (value === "left" || value === "right" || value === "middle") return value;
+	throw new Error("button must be left, right, or middle");
+}
+
+function scrollDirection(msg: ControlMessage): ScrollDirection {
+	const value = msg.direction;
+	if (value === "up" || value === "down" || value === "left" || value === "right") return value;
+	throw new Error("direction must be up, down, left, or right");
+}
+
+export async function executeControlMessage(
+	msg: ControlMessage,
+	control: FlowControlDriver,
+): Promise<CommandResult> {
+	switch (msg.type) {
+		case "control.click":
+			return control.click({
+				x: numberValue(msg, "x"),
+				y: numberValue(msg, "y"),
+				button: optionalMouseButton(msg),
+				count: optionalNumberValue(msg, "count"),
+			});
+		case "control.hover":
+			return control.hover({
+				x: numberValue(msg, "x"),
+				y: numberValue(msg, "y"),
+			});
+		case "control.scroll":
+			return control.scroll({
+				direction: scrollDirection(msg),
+				amount: optionalNumberValue(msg, "amount"),
+				x: optionalNumberValue(msg, "x"),
+				y: optionalNumberValue(msg, "y"),
+			});
+		case "control.type":
+			return control.typeText({
+				text: stringValue(msg, "text"),
+				delay: optionalNumberValue(msg, "delay"),
+			});
+		case "control.press":
+			return control.press({
+				keys: stringValue(msg, "keys"),
+				count: optionalNumberValue(msg, "count"),
+				delay: optionalNumberValue(msg, "delay"),
+			});
+		default:
+			return { ok: false, error: `unsupported control action: ${msg.type ?? "(missing)"}` };
+	}
+}
+
 function localUrls(host: string, port: number, path: string): string[] {
 	if (host !== "0.0.0.0" && host !== "::") return [`ws://${host}:${port}${path}`];
 
@@ -287,6 +447,12 @@ function readyMessage(config: FlowConfig, relay: Pick<FlowRelay, "url" | "localU
 		localUrls: relay.localUrls,
 		fps: config.fps,
 		tokenRequired: config.token !== null,
+		control: {
+			enabled: config.allowControl,
+			actions: config.allowControl
+				? ["control.click", "control.hover", "control.scroll", "control.type", "control.press"]
+				: [],
+		},
 	});
 }
 
@@ -296,6 +462,7 @@ function errorMessage(reason: string): string {
 
 export async function serveFlow(config: FlowConfig, deps: ServeDeps = {}): Promise<FlowRelay> {
 	const eyes = deps.eyes ?? (await createEyes());
+	const control = config.allowControl ? (deps.control ?? createDesktopControlDriver()) : null;
 	const now = deps.now ?? Date.now;
 	const clients = new Set<Bun.ServerWebSocket<FlowSocketData>>();
 	let captureInFlight = false;
@@ -312,6 +479,7 @@ export async function serveFlow(config: FlowConfig, deps: ServeDeps = {}): Promi
 					path: config.path,
 					fps: config.fps,
 					tokenRequired: config.token !== null,
+					controlEnabled: config.allowControl,
 				});
 			}
 			if (url.pathname !== config.path) {
@@ -349,7 +517,7 @@ export async function serveFlow(config: FlowConfig, deps: ServeDeps = {}): Promi
 					return;
 				}
 
-				const msg = parsed as { type?: string; token?: string };
+				const msg = parsed as ControlMessage & { token?: string };
 				if (msg.type === "hello") {
 					if (config.token !== null && msg.token !== config.token) {
 						ws.close(1008, "bad token");
@@ -369,6 +537,10 @@ export async function serveFlow(config: FlowConfig, deps: ServeDeps = {}): Promi
 				}
 				if (msg.type === "request_frame") {
 					void captureAndSend(ws);
+					return;
+				}
+				if (typeof msg.type === "string" && msg.type.startsWith("control.")) {
+					void controlAndRefresh(ws, msg);
 					return;
 				}
 				ws.send(errorMessage(`unknown message type: ${msg.type ?? "(missing)"}`));
@@ -410,6 +582,31 @@ export async function serveFlow(config: FlowConfig, deps: ServeDeps = {}): Promi
 			ws.send(JSON.stringify(await capturePayload()));
 		} catch (err) {
 			ws.send(errorMessage(err instanceof Error ? err.message : String(err)));
+		}
+	}
+
+	async function controlAndRefresh(
+		ws: Bun.ServerWebSocket<FlowSocketData>,
+		msg: ControlMessage,
+	): Promise<void> {
+		if (!control) {
+			ws.send(
+				controlErrorMessage(msg, msg.type ?? "control", "control is disabled for this relay"),
+			);
+			return;
+		}
+		try {
+			const result = await executeControlMessage(msg, control);
+			ws.send(controlResultMessage(msg, msg.type ?? "control", result));
+			if (result.ok) void captureAndSend(ws);
+		} catch (err) {
+			ws.send(
+				controlErrorMessage(
+					msg,
+					msg.type ?? "control",
+					err instanceof Error ? err.message : String(err),
+				),
+			);
 		}
 	}
 
@@ -458,7 +655,7 @@ function printHelp(): void {
 	out({
 		ok: true,
 		usage:
-			"8gent-flow serve [--host 0.0.0.0] [--port 8788] [--fps 1] [--display primary] [--token TOKEN]",
+			"8gent-flow serve [--host 0.0.0.0] [--port 8788] [--fps 1] [--display primary] [--token TOKEN] [--no-control]",
 		subcommands: ["serve", "once"],
 		defaults: {
 			host: DEFAULT_HOST,
@@ -466,8 +663,9 @@ function printHelp(): void {
 			path: DEFAULT_PATH,
 			fps: DEFAULT_FPS,
 			format: "jpeg",
+			control: "enabled when a pair token is required",
 		},
-		ios: "Use --host 0.0.0.0 for LAN clients. The pair token is printed only on the Mac.",
+		ios: "Use --host 0.0.0.0 for LAN/Tailscale clients. iOS sends hello with the pair token, then request_frame/control.* messages.",
 	});
 }
 
