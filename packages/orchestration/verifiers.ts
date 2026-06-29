@@ -75,6 +75,23 @@ export const fileExistsVerifier: Verifier = {
 export const tscVerifier: Verifier = {
 	name: "tsc-noemit",
 	async verify(input: VerifyInput): Promise<VerifierFinding> {
+		// A project with no tsconfig.json is not a TypeScript project: running tsc
+		// there reports "no inputs were found", which must NOT be read as a compile
+		// error (e.g. a static HTML/CSS site). Skip cleanly before spawning tsc.
+		let hasTsconfig = false;
+		try {
+			hasTsconfig = statSync(join(input.workingDirectory, "tsconfig.json")).isFile();
+		} catch {
+			hasTsconfig = false;
+		}
+		if (!hasTsconfig) {
+			return {
+				ok: true,
+				severity: "trivial",
+				type: "no-typescript",
+				detail: "no tsconfig.json - not a TypeScript project",
+			};
+		}
 		const TIMEOUT_MS = 60_000;
 		return await new Promise<VerifierFinding>((resolve) => {
 			let stdout = "";

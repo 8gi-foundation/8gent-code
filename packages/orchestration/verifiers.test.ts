@@ -15,6 +15,7 @@ import {
 	fileExistsVerifier,
 	httpVerifier,
 	makeFilesWrittenVerifier,
+	tscVerifier,
 	verifierFindingToObstacle,
 } from "./verifiers.js";
 
@@ -101,6 +102,23 @@ describe("httpVerifier", () => {
 			expect(f.type).toBe("http-error");
 		} finally {
 			global.fetch = original;
+		}
+	});
+});
+
+describe("tscVerifier", () => {
+	test("skips cleanly (no-typescript) when there is no tsconfig.json", async () => {
+		// Found live: a static HTML/CSS site has no tsconfig; tsc must not be run
+		// and its "no inputs were found" must not surface as a compile error.
+		const dir = mkdtempSync(join(tmpdir(), "verif-tsc-"));
+		try {
+			writeFileSync(join(dir, "index.html"), "<!doctype html><h1>hi</h1>");
+			const finding = await tscVerifier.verify({ workingDirectory: dir });
+			expect(finding.ok).toBe(true);
+			expect(finding.type).toBe("no-typescript");
+			expect(finding.severity).toBe("trivial");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });
