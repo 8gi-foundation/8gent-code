@@ -123,27 +123,39 @@ import {
 } from "../ai";
 import {
 	buildTextToolCall,
+	buildWriteHonestyNote,
+	modelSupportsNativeTools,
 	needsTextTools,
 	resolveTextToolEndpoint,
 	runTextToolAgent,
 	type TextTool,
 	toolDefsToSpecs,
+	type WriteOutcome,
 } from "../ai";
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
- * protocol instead of the AI SDK native tool loop. Mirrors bin/8gent.ts
- * chatCommand: lmstudio/ollama are the tool-incapable local providers whose
- * served chat templates 400 on a native `tools` payload. EIGHT_TEXT_TOOLS is an
+ * protocol instead of the AI SDK native tool loop. The decision is PER-MODEL,
+ * not per-provider: lmstudio/ollama serve a mix of templates - some (gemma) 400
+ * on a native `tools` payload, others (ornith-1.0-9b) accept it and return clean
+ * tool calls. We probe the actual served model once (cached) and only fall back
+ * to text-tools when it cannot do native tool calls. EIGHT_TEXT_TOOLS is an
  * explicit override: "1"/"true" forces text tools on for any provider, "0"/
  * "false" forces it off. Built on the pure needsTextTools gate so the single
  * source of truth for the native-vs-text decision stays in packages/ai.
  */
-function shouldUseTextTools(providerName: string): boolean {
+async function shouldUseTextTools(provider: { name: string; model: string }): Promise<boolean> {
 	const override = (process.env.EIGHT_TEXT_TOOLS || "").trim().toLowerCase();
 	if (override === "1" || override === "true") return true;
 	if (override === "0" || override === "false") return false;
-	const supportsNativeTools = providerName !== "lmstudio" && providerName !== "ollama";
+	// Only the local GGUF providers serve templates that may reject tools; every
+	// other provider is natively tool-capable and skips the probe entirely.
+	const isLocalGguf = provider.name === "lmstudio" || provider.name === "ollama";
+	if (!isLocalGguf) return needsTextTools({ supportsNativeTools: true });
+	const supportsNativeTools = await modelSupportsNativeTools({
+		provider: provider.name,
+		model: provider.model,
+	});
 	return needsTextTools({ supportsNativeTools });
 }
 
@@ -562,6 +574,11 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		);
 
 		let stepNumber = 0;
+		// Ground truth for the post-turn honesty guard: every write_file/edit_file
+		// the model ran this turn, and whether it actually succeeded. Local models
+		// routinely claim a save the tool never landed - this lets us correct the
+		// prose against disk reality before returning it.
+		const writeOutcomes: WriteOutcome[] = [];
 		const tools: TextTool[] = specs.map((spec) => ({
 			spec,
 			run: async (args: Record<string, unknown>) => {
@@ -611,6 +628,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				}
 
 				const durationMs = Date.now() - startedAt;
+
+				// Record write outcomes for the post-turn honesty guard.
+				if (
+					(toolName === "write_file" || toolName === "edit_file") &&
+					typeof toolPath === "string"
+				) {
+					writeOutcomes.push({
+						path: toolPath,
+						ok: success,
+						reason: success ? undefined : result.split("\n")[0]?.slice(0, 120),
+					});
+				}
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				this.loopDetector.record(toolName, args);
@@ -756,7 +785,11 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// path performs (session evidence summary, run log, journal).
 		const content = agentResult.content;
 		const flavor = personalityVoice.getFlavor("complete");
-		const flavoredContent = flavorResponse(content, flavor);
+		// Honesty guard: if the model claims a save that did not land (failed write
+		// tool, or a claimed write with no successful write this turn), append the
+		// ground truth so the reply cannot report a phantom file as written.
+		const honestyNote = buildWriteHonestyNote(content, writeOutcomes);
+		const flavoredContent = flavorResponse(content, flavor) + honestyNote;
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
 		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
 
@@ -1064,11 +1097,12 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 		// the CLI. The native path below is left 100% unchanged for capable
 		// providers - this branch only fires behind the needsTextTools gate.
 		//
-		// The gate mirrors bin/8gent.ts chatCommand: lmstudio/ollama are the
-		// tool-incapable local providers (the provider registry's coarse
-		// supportsTools flag is true for them, but their GGUF templates reject a
-		// tools payload), overridable via EIGHT_TEXT_TOOLS=1|0.
-		if (shouldUseTextTools(providerName)) {
+		// The gate is per-model: lmstudio/ollama serve both tool-incapable
+		// templates (gemma 400s on a tools payload) and tool-capable ones
+		// (ornith returns clean tool_calls). shouldUseTextTools probes the served
+		// model once (cached) so capable models use the native loop below.
+		// Overridable via EIGHT_TEXT_TOOLS=1|0.
+		if (await shouldUseTextTools({ name: providerName, model: providerConfig.model })) {
 			const textResult = await this.runTextToolChat({
 				providerName,
 				providerModel: providerConfig.model,

@@ -75,6 +75,13 @@ export {
 	toolDefsToSpecs,
 	toolDefsToTextTools,
 } from "./text-tool-endpoint";
+export {
+	modelSupportsNativeTools,
+	buildWriteHonestyNote,
+	__resetNativeToolCache,
+	type NativeToolProbeOpts,
+	type WriteOutcome,
+} from "./local-tool-routing";
 
 // Edge Inference - local embedding + classification, no API key required
 export {
