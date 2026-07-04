@@ -56,7 +56,7 @@ Client -> { "type": "session:create", "channel": "os" }
 Server -> { "type": "session:created", "sessionId": "s_abc123_xyz" }
 ```
 
-**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`
+**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`
 
 The channel tag is metadata for routing, concurrency caps, and analytics.
 
@@ -414,6 +414,7 @@ The token's claims fully determine the surface's `(user_id, channel, capabilitie
 | `app` | `read`, `write_basic`, `write_full` |
 | `telegram` | `read`, `write_basic` (write_full requires second-factor on the originator) |
 | `discord` | `read`, `write_basic` (write_full requires second-factor on the originator) |
+| `browser` (8gent-browser desktop app) | `read`, `write_basic` (write_full requires second-factor on the originator) |
 | `delegation` | `read`, `write_basic`, `write_full` |
 | `api` | scope per token grant (caller controls) |
 
