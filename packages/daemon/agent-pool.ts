@@ -181,6 +181,11 @@ export class AgentPool {
 			// discover_tools hop and silently drop memory writes ("I'll remember
 			// that" with no remember call). Capability beats token thrift here.
 			allTools: channel === "delegation",
+			// Delegation runs UNATTENDED (the relay autonomy engine / missions
+			// dispatch through it with no human approving each tool). Mark it so the
+			// maker-checker gate enforces at the executor: branch pushes auto-approve
+			// (audited), but rm / push-to-main / credentials / deploy hard-block.
+			unattended: channel === "delegation",
 		};
 
 		const agent = new Agent(agentConfig);
