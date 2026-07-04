@@ -16,7 +16,8 @@ export type DaemonChannel =
 	| "discord"
 	| "api"
 	| "delegation"
-	| "computer";
+	| "computer"
+	| "browser";
 
 /** Streaming event taxonomy - what flows from daemon to client during a turn. */
 export type StreamEvent =

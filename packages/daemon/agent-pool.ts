@@ -50,6 +50,7 @@ export const KNOWN_CHANNELS = [
 	"api",
 	"delegation",
 	"computer",
+	"browser",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 
