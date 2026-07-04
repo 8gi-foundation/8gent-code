@@ -195,7 +195,9 @@ export class Agent {
 	constructor(config: AgentConfig) {
 		this.config = config;
 		this.events = config.events || {};
-		this.executor = new ToolExecutor(config.workingDirectory || process.cwd());
+		this.executor = new ToolExecutor(config.workingDirectory || process.cwd(), "primary", undefined, {
+			unattended: config.unattended ?? false,
+		});
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();

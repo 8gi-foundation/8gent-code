@@ -110,6 +110,13 @@ export interface AgentConfig {
 	events?: AgentEventCallbacks;
 	/** Load all tools upfront instead of deferred loading (default: false) */
 	allTools?: boolean;
+	/**
+	 * Whether this agent runs unattended (autonomous engine, infinite mode,
+	 * heartbeat/improvement loops). When true, destructive tools are gated by the
+	 * maker-checker at the tool-execution chokepoint and require an approved
+	 * CheckerDecision. Interactive surfaces leave this false. Default: false.
+	 */
+	unattended?: boolean;
 }
 
 export interface LLMResponse {
