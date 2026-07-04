@@ -339,8 +339,13 @@ export class MakerCheckerStore {
 	}
 
 	private riskMeetsThreshold(actionRisk: ActionRisk, minRisk: ActionRisk): boolean {
-		const riskOrder: ActionRisk[] = ["SAFE", "BOUNDED", "RISKY", "DESTRUCTIVE"];
-		return riskOrder.indexOf(actionRisk) >= riskOrder.indexOf(minRisk);
+		// Case-insensitive: DEFAULT_RULES historically use uppercase risk literals
+		// ("RISKY"), while the ActionRisk enum in autonomy.ts is lowercase
+		// ("risky"). Normalize both sides so callers can pass either form (e.g.
+		// ACTION_RISK.RISKY from the maker-checker enforcer) and still match.
+		const riskOrder = ["SAFE", "BOUNDED", "RISKY", "DESTRUCTIVE"];
+		const norm = (r: ActionRisk) => String(r).toUpperCase();
+		return riskOrder.indexOf(norm(actionRisk)) >= riskOrder.indexOf(norm(minRisk));
 	}
 }
 
