@@ -107,9 +107,17 @@ describe("assertMakerCheckerApproved (enforcement logic)", () => {
 		).not.toThrow();
 	});
 
-	test("git_push unattended is blocked", () => {
+	test("git_push to a FEATURE branch is auto-approved unattended (automatic rule) — autonomy opens PRs by design", () => {
+		// Auto-approved, not blocked: the autonomous engine must be able to push a
+		// feature branch to open a PR. It is still gated for the audit trail.
 		expect(() =>
 			assertMakerCheckerApproved("git_push", { branch: "feat/x" }, { unattended: true }),
+		).not.toThrow();
+	});
+
+	test("git_push to MAIN is hard-blocked unattended (human rule)", () => {
+		expect(() =>
+			assertMakerCheckerApproved("git_push", { branch: "main" }, { unattended: true }),
 		).toThrow(MakerCheckerBlockedError);
 	});
 

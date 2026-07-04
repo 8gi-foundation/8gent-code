@@ -202,12 +202,13 @@ export function assertMakerCheckerApproved(
 	if (!classified) return;
 
 	const store = getMakerCheckerStore();
-	if (!store.requiresChecker(classified.action, classified.risk)) return;
+	const rule = store.getRule(classified.action, classified.risk);
+	if (!rule) return; // not gated by any rule
 
 	// Already approved (and not yet consumed)? Let it through.
 	if (findAndConsumeApproval(classified.action)) return;
 
-	// No approval — record the pending request and BLOCK.
+	// Record the request so there is ALWAYS an audit row for a gated action.
 	const { actionId } = store.submitAction(
 		opts.makerId ?? "autonomous",
 		classified.action,
@@ -218,12 +219,33 @@ export function assertMakerCheckerApproved(
 	);
 	if (actionId) actionIndex.set(actionId, classified.action);
 
+	// AUTOMATIC-mode, NON-destructive rules (e.g. git push to a FEATURE branch) are
+	// auto-approved: the autonomous engine opens PRs by design, so we gate them for
+	// the AUDIT TRAIL without blocking the workflow. A DESTRUCTIVE risk ALWAYS blocks
+	// even under an automatic rule (a dangerous shell command matches the automatic
+	// `shell:*` rule but escalates to DESTRUCTIVE and must not slip through).
+	// HUMAN-mode rules (rm / git push main / credentials / deploy / infinite) block.
+	if (
+		rule.checkerMode === "automatic" &&
+		classified.risk !== ACTION_RISK.DESTRUCTIVE &&
+		actionId
+	) {
+		store.approve(
+			actionId,
+			"auto-checker",
+			"automatic",
+			`auto-approved (${classified.risk}, reversible / branch-scoped)`,
+		);
+		consumed.add(actionId);
+		return;
+	}
+
 	throw new MakerCheckerBlockedError(
 		toolName,
 		classified.action,
 		classified.risk,
 		actionId ?? "",
 		`Destructive tool "${toolName}" (${classified.risk}) blocked in unattended context. ` +
-			`No approved CheckerDecision. Pending approval actionId=${actionId}.`,
+			`No approved CheckerDecision (checker mode: ${rule.checkerMode}). Pending approval actionId=${actionId}.`,
 	);
 }
