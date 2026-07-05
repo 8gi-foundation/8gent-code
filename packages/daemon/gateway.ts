@@ -5,6 +5,9 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
+import { hostname } from "node:os";
+import { detectLocalModels } from "../orchestration/local-model-detect";
+import { getProviderManager } from "../providers/index";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
 import type { AgentPool } from "./agent-pool";
@@ -82,7 +85,17 @@ type InboundMessage =
 	| { type: "cron:remove"; jobId: string }
 	| { type: "health" }
 	| { type: "approval:response"; requestId: string; approved: boolean }
+	| { type: "models:list" }
 	| { type: "ping" };
+
+/** A model available on this node, as reported by `models:list`. */
+interface NodeModel {
+	provider: string;
+	model: string;
+	location: "local";
+	/** Heuristic capability score; null when unknown. */
+	score: number | null;
+}
 
 type OutboundMessage =
 	| { type: "auth:ok" }
@@ -94,6 +107,7 @@ type OutboundMessage =
 	| { type: "cron:added"; jobId: string }
 	| { type: "cron:removed"; jobId: string }
 	| { type: "health"; data: unknown }
+	| { type: "models"; nodeId: string; models: NodeModel[] }
 	| { type: "event"; event: EventName; payload: unknown }
 	| { type: "error"; message: string }
 	| { type: "pong" };
@@ -306,6 +320,47 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					cronJobs: getJobs().length,
 				},
 			});
+			break;
+		}
+
+		case "models:list": {
+			// Enumerate the models this node can serve so any surface can drive
+			// mesh-wide model selection over the bus. Fully defensive: detection
+			// or provider-lookup failure yields an empty list, never a throw.
+			void (async () => {
+				const nodeId = hostname();
+				let models: NodeModel[] = [];
+				try {
+					const detected = await detectLocalModels();
+					// Tag by which providers are actually enabled on this node.
+					// If the provider manager is unavailable, skip filtering
+					// rather than dropping every model.
+					let enabled: Set<string> | null = null;
+					try {
+						enabled = new Set(
+							getProviderManager()
+								.listEnabledProviders()
+								.map((p) => p.name),
+						);
+					} catch {
+						enabled = null;
+					}
+					models = detected
+						.filter((m) => enabled === null || enabled.has(m.provider))
+						.map((m) => ({
+							provider: m.provider,
+							model: m.model,
+							location: "local" as const,
+							score:
+								typeof m.score === "number" && Number.isFinite(m.score)
+									? m.score
+									: null,
+						}));
+				} catch {
+					models = [];
+				}
+				send(ws, { type: "models", nodeId, models });
+			})();
 			break;
 		}
 

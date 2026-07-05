@@ -212,6 +212,30 @@ GET http://localhost:18789/health
 -> { "status": "ok", "sessions": 2, "uptime": 3600.5 }
 ```
 
+## Model Enumeration
+
+Enumerate the models a node can serve, so any surface can drive mesh-wide
+model selection over the bus. The daemon probes its local hosts (Ollama,
+LM Studio, Apple Foundation) and reports the models whose provider is enabled
+on this node. Fully defensive: detection failure yields an empty `models`
+array, never an error.
+
+```
+Client -> { "type": "models:list" }
+Server -> {
+  "type": "models",
+  "nodeId": "my-host.local",
+  "models": [
+    { "provider": "ollama", "model": "qwen3:14b", "location": "local", "score": 14 }
+  ]
+}
+```
+
+- `nodeId` is the node's `os.hostname()`.
+- `location` is currently always `"local"` (local-host discovery).
+- `score` is a heuristic capability score (higher = stronger), or `null` when
+  unknown.
+
 ## Keep-Alive
 
 ```
@@ -655,6 +679,7 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.4 | 2026-07-05 | Add `models:list` -> `models` control message. Enumerates a node's available models (provider, model, location, score) plus `nodeId`, for mesh-wide model selection. |
 | 1.3 | 2026-05-16 | Add goal-loop methods (`goal.start` / `goal.status` / `goal.subgoal` / `goal.abort` / `goal.resume`) + streaming event taxonomy. Schema v2 (`goal_runs`, `goal_events`). (#2606) |
 | 1.2 | 2026-04-26 | Add remote dispatch protocol (`/dispatch` route). Surface registration, replay protection, rate limiting, capability scoping, fan-out to `replay_to` subscribers, `dispatch_source` in trace records. (#1896) |
 | 1.1 | 2026-04-25 | Add `computer` channel, dedicated `/computer` route, streaming event taxonomy (`token`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`), `protocol_version: 1` on every frame, `/ops/agent-pool/status` endpoint. |
