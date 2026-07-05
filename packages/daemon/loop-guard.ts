@@ -109,7 +109,7 @@ export class LoopGuard {
 	}
 
 	/** Record an iteration */
-	recordIteration(progress: number = 0): void {
+	recordIteration(progress = 0): void {
 		this.state.iterationCount++;
 		this.state.lastActivityTime = Date.now();
 		this.progressHistory.push(progress);

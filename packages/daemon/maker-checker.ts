@@ -204,7 +204,7 @@ export class MakerCheckerStore {
 		actionId: string,
 		checkerId: string,
 		mode: CheckerMode,
-		reason: string = "Approved",
+		reason = "Approved",
 	): boolean {
 		const action = this.pendingActions.get(actionId);
 		if (!action) return false;

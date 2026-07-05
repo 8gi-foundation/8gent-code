@@ -65,8 +65,8 @@ function loadFrames(input: string | string[], maxFrames?: number): string[] {
 			.filter((f) => /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(f))
 			.sort((a, b) => {
 				// Natural sort: frame-1.png, frame-2.png ... frame-10.png
-				const numA = parseInt(a.match(/\d+/)?.[0] ?? "0");
-				const numB = parseInt(b.match(/\d+/)?.[0] ?? "0");
+				const numA = Number.parseInt(a.match(/\d+/)?.[0] ?? "0");
+				const numB = Number.parseInt(b.match(/\d+/)?.[0] ?? "0");
 				return numA - numB;
 			})
 			.map((f) => path.join(dir, f));
@@ -119,7 +119,7 @@ export async function animate(options: AnimateOptions): Promise<AnimateResult> {
 	} = options;
 
 	// Load frames
-	let framePaths = loadFrames(frameInput, maxFrames);
+	const framePaths = loadFrames(frameInput, maxFrames);
 
 	// Build frame sequence
 	let sequence = [...framePaths];
@@ -274,9 +274,9 @@ export async function packSpriteSheet(options: PackOptions): Promise<PackResult>
 	const actualFrames = framePaths.slice(0, cols * rows);
 
 	// Load first frame to get dimensions
-	let firstMeta = await sharp(actualFrames[0]).metadata();
-	let frameWidth = Math.round((firstMeta.width ?? 64) * scale);
-	let frameHeight = Math.round((firstMeta.height ?? 64) * scale);
+	const firstMeta = await sharp(actualFrames[0]).metadata();
+	const frameWidth = Math.round((firstMeta.width ?? 64) * scale);
+	const frameHeight = Math.round((firstMeta.height ?? 64) * scale);
 
 	const sheetWidth = actualFrames.length === 0 ? frameWidth : frameWidth * cols + padding * (cols - 1);
 	const sheetHeight = rows * frameHeight + padding * (rows - 1);
