@@ -63,7 +63,7 @@ function renderMarkdown(canvas: Canvas): string {
   return Object.entries(canvas)
     .map(([block, items]) => {
       const header = `## ${block}`;
-      const list = items.length ? items.map(i => `- ${i}`).join('\n') : 'None';
+      const list = items.length ? items.map((i: string) => `- ${i}`).join('\n') : 'None';
       return [header, list].join('\n');
     })
     .join('\n\n');
@@ -94,4 +94,5 @@ interface Canvas {
   [Block.RevenueStreams]: string[];
 }
 
-export { Block, createCanvas, setBlock, validate, renderMarkdown, scoreCompleteness, Canvas };
+export { Block, createCanvas, setBlock, validate, renderMarkdown, scoreCompleteness };
+export type { Canvas };

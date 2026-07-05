@@ -154,7 +154,10 @@ describe("runTextToolTurn", () => {
 			},
 		});
 
-		expect(received).toEqual(snapshot);
+		// `received` is only assigned inside the async callback above, so the
+		// compiler's flow analysis still types it as `null` here. Pin the
+		// matcher generic to the declared union so the assertion type-checks.
+		expect<TextToolMessage[] | null>(received).toEqual(snapshot);
 		// Input array and objects are not mutated.
 		expect(input).toEqual(snapshot);
 	});

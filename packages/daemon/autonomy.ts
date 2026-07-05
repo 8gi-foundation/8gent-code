@@ -12,7 +12,18 @@
  * Rung 4: AUTONOMOUS - full trust, all capabilities
  */
 
-import type { DispatchCapability } from "./types.ts";
+/**
+ * Autonomy-ladder capabilities. This is the ladder's own escalating capability
+ * vocabulary and is distinct from the dispatch-protocol `DispatchCapability`
+ * set (read/write_basic/write_full/admin) in ./types.ts.
+ */
+export type RungCapability =
+	| "read"
+	| "suggest"
+	| "write"
+	| "dispatch"
+	| "execute"
+	| "escalate";
 
 /** Autonomy rung levels, higher = more trust */
 export const AUTONOMY_RUNG = {
@@ -35,7 +46,7 @@ export const AUTONOMY_RUNG_LABEL: Record<AutonomyRung, string> = {
 };
 
 /** Capabilities required for each rung */
-export const RUNG_REQUIREMENTS: Record<AutonomyRung, DispatchCapability[]> = {
+export const RUNG_REQUIREMENTS: Record<AutonomyRung, RungCapability[]> = {
 	[AUTONOMY_RUNG.OBSERVE]: ["read"],
 	[AUTONOMY_RUNG.SUGGEST]: ["read", "suggest"],
 	[AUTONOMY_RUNG.ASSIST]: ["read", "write", "dispatch"],
@@ -78,15 +89,15 @@ export const RUNG_RISK_THRESHOLDS: Record<AutonomyRung, ActionRisk> = {
 
 /** Check if a capability set meets rung requirements */
 export function meetsRungRequirements(
-	capabilities: DispatchCapability[],
-	requirements: DispatchCapability[],
+	capabilities: RungCapability[],
+	requirements: RungCapability[],
 ): boolean {
 	return requirements.every((req) => capabilities.includes(req));
 }
 
 /** Get the minimum rung for a capability set */
 export function rungForCapabilities(
-	capabilities: DispatchCapability[],
+	capabilities: RungCapability[],
 ): AutonomyRung {
 	// Check from highest to lowest
 	for (let rung = AUTONOMY_RUNG.AUTONOMOUS; rung >= 0; rung--) {

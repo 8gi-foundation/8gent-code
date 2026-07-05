@@ -65,8 +65,13 @@ export interface CuaLoopConfig {
 	hostInfo?: string;
 	/** Pinned model. Defaults to the channel resolver's choice. */
 	pinnedModel?: string;
-	/** Inject a fake LLM client (used by the smoke suite). */
-	clientFactory?: (entry: FailoverEntry) => LLMClient;
+	/**
+	 * Inject a fake LLM client (used by the smoke suite). May return a bare
+	 * client or a `{ client, entry }` wrapper; `resolveClient` handles both.
+	 */
+	clientFactory?: (
+		entry: FailoverEntry,
+	) => LLMClient | { client: LLMClient; entry?: FailoverEntry };
 	/** Inject a fake failover (used by the smoke suite). */
 	failover?: ModelFailover;
 	/** Replace the daemon hands executor (CI/smoke only). */
@@ -216,13 +221,13 @@ function summarizePerception(p: TreePerception | ScreenshotPerception): string {
 function resolveClient(
 	failover: ModelFailover,
 	pinnedModel: string,
-	factory?: (entry: FailoverEntry) => LLMClient,
+	factory?: (
+		entry: FailoverEntry,
+	) => LLMClient | { client: LLMClient; entry?: FailoverEntry },
 ): { client: LLMClient; entry: FailoverEntry } {
 	const entry = failover.resolve(pinnedModel, "computer");
 	if (factory) {
-		const produced = factory(entry) as
-			| LLMClient
-			| { client: LLMClient; entry?: FailoverEntry };
+		const produced = factory(entry);
 		// The factory may return a bare client or a { client, entry } wrapper.
 		if (produced && typeof (produced as LLMClient).chat !== "function") {
 			const wrapped = produced as { client: LLMClient; entry?: FailoverEntry };

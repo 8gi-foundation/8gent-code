@@ -14,8 +14,8 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, join } from "node:os";
-import { basename, dirname, extname } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, extname, join } from "node:path";
 import { animate, packSpriteSheet } from "./animation-generator.js";
 import { sliceSpriteSheet } from "./sprite-slicer.js";
 import { buildSpritePrompt, type SpritePromptConfig } from "./prompts.js";
@@ -192,23 +192,21 @@ async function generateLocalFromImage(
 
 		const animResult = await animate({
 			frames: framePaths,
-			outputPath: join(ASSET_DIR, id, `animation.${format}`),
+			// Output extension determines the format (gif/webp/png).
+			output: join(ASSET_DIR, id, `animation.${format}`),
 			fps: 8,
-			loop: options.loop !== false,
+			// AnimateOptions.loop is a count: 0 = infinite, 1 = play once.
+			loop: options.loop === false ? 1 : 0,
 			reverse: direction === "reverse",
 			pingpong: direction === "pingpong",
-			format: format as "gif" | "webp" | "png",
 		});
 
 		// Step 3: Pack sprite sheet
 		const sheetPath = join(ASSET_DIR, id, `sheet.png`);
 		const packResult = await packSpriteSheet({
-			framePaths,
-			outputPath: sheetPath,
+			frames: framePaths,
+			output: sheetPath,
 			cols: sliceResult.frames.length,
-			rows: 1,
-			frameWidth: sliceResult.frames[0]?.width || 64,
-			frameHeight: sliceResult.frames[0]?.height || 64,
 		});
 
 		const manifest: MediaAssetManifest = {
