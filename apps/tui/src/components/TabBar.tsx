@@ -111,7 +111,7 @@ export function TabBar({
 			<Box>
 				<Text color={t.teal}>{topRow}</Text>
 				<Box flexGrow={1} />
-				{grabHint && <Text color={t.yellow}>{grabHint}</Text>}
+				{grabHint && <Text color={t.orangeAlt}>{grabHint}</Text>}
 			</Box>
 			<Box>
 				<Text color={t.teal}>

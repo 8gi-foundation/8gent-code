@@ -40,7 +40,7 @@ function scoreRecord(overrides: Partial<ScoreRecord> = {}): ScoreRecord {
 		prompt: "What is 2+2?",
 		response: "4",
 		timestamp: new Date().toISOString(),
-		scores: { overall: 0.7, reasoning: 0.7, factual: 0.7 },
+		scores: { executionSuccess: 0.7, codeQuality: 0.7, toolEfficiency: 0.7, directness: 0.7, overall: 0.7 },
 		...overrides,
 	};
 }
@@ -63,7 +63,7 @@ describe("training orchestrator — addSample filtering", () => {
 
 	test("mid-range score (0.3–0.95) is buffered", async () => {
 		const added = await orch.addSample(
-			scoreRecord({ scores: { overall: 0.5, reasoning: 0.5, factual: 0.5 } }),
+			scoreRecord({ scores: { executionSuccess: 0.5, codeQuality: 0.5, toolEfficiency: 0.5, directness: 0.5, overall: 0.5 } }),
 		);
 		expect(added).toBe(false); // batch not full yet
 		expect(orch.getState().bufferSize).toBe(1);
@@ -71,7 +71,7 @@ describe("training orchestrator — addSample filtering", () => {
 
 	test("score BELOW minScoreThreshold is rejected and not buffered", async () => {
 		const added = await orch.addSample(
-			scoreRecord({ scores: { overall: 0.1, reasoning: 0.1, factual: 0.1 } }),
+			scoreRecord({ scores: { executionSuccess: 0.1, codeQuality: 0.1, toolEfficiency: 0.1, directness: 0.1, overall: 0.1 } }),
 		);
 		expect(added).toBe(false);
 		expect(orch.getState().bufferSize).toBe(0);
@@ -79,7 +79,7 @@ describe("training orchestrator — addSample filtering", () => {
 
 	test("score ABOVE maxScoreThreshold is rejected (trivial/easy examples)", async () => {
 		const added = await orch.addSample(
-			scoreRecord({ scores: { overall: 0.99, reasoning: 0.99, factual: 0.99 } }),
+			scoreRecord({ scores: { executionSuccess: 0.99, codeQuality: 0.99, toolEfficiency: 0.99, directness: 0.99, overall: 0.99 } }),
 		);
 		expect(added).toBe(false);
 		expect(orch.getState().bufferSize).toBe(0);
@@ -87,7 +87,7 @@ describe("training orchestrator — addSample filtering", () => {
 
 	test("score exactly at minScoreThreshold is buffered (boundary: 0.3 included)", async () => {
 		await orch.addSample(
-			scoreRecord({ scores: { overall: 0.3, reasoning: 0.3, factual: 0.3 } }),
+			scoreRecord({ scores: { executionSuccess: 0.3, codeQuality: 0.3, toolEfficiency: 0.3, directness: 0.3, overall: 0.3 } }),
 		);
 		expect(orch.getState().bufferSize).toBe(1);
 	});
@@ -96,7 +96,7 @@ describe("training orchestrator — addSample filtering", () => {
 	// so 0.95 IS buffered (0.95 is NOT > 0.95).
 	test("score exactly at maxScoreThreshold (0.95) IS buffered (strict > boundary)", async () => {
 		await orch.addSample(
-			scoreRecord({ scores: { overall: 0.95, reasoning: 0.95, factual: 0.95 } }),
+			scoreRecord({ scores: { executionSuccess: 0.95, codeQuality: 0.95, toolEfficiency: 0.95, directness: 0.95, overall: 0.95 } }),
 		);
 		expect(orch.getState().bufferSize).toBe(1);
 	});
@@ -111,7 +111,7 @@ describe("training orchestrator — addSample filtering", () => {
 			maxScoreThreshold: 0.95,
 		});
 		const added = await orch2.addSample(
-			scoreRecord({ scores: { overall: 0.7, reasoning: 0.7, factual: 0.7 } }),
+			scoreRecord({ scores: { executionSuccess: 0.7, codeQuality: 0.7, toolEfficiency: 0.7, directness: 0.7, overall: 0.7 } }),
 		);
 		expect(added).toBe(false);
 		expect(orch2.getState().bufferSize).toBe(1);
@@ -119,10 +119,10 @@ describe("training orchestrator — addSample filtering", () => {
 
 	test("getState returns correct counts after two samples are added", async () => {
 		await orch.addSample(
-			scoreRecord({ scores: { overall: 0.5, reasoning: 0.5, factual: 0.5 } }),
+			scoreRecord({ scores: { executionSuccess: 0.5, codeQuality: 0.5, toolEfficiency: 0.5, directness: 0.5, overall: 0.5 } }),
 		);
 		await orch.addSample(
-			scoreRecord({ scores: { overall: 0.6, reasoning: 0.6, factual: 0.6 } }),
+			scoreRecord({ scores: { executionSuccess: 0.6, codeQuality: 0.6, toolEfficiency: 0.6, directness: 0.6, overall: 0.6 } }),
 		);
 		const s = orch.getState();
 		expect(s.bufferSize).toBe(2);
@@ -337,10 +337,10 @@ describe("training orchestrator — state round-trip", () => {
 			maxScoreThreshold: 0.95,
 		});
 		await orch1.addSample(
-			scoreRecord({ scores: { overall: 0.5, reasoning: 0.5, factual: 0.5 } }),
+			scoreRecord({ scores: { executionSuccess: 0.5, codeQuality: 0.5, toolEfficiency: 0.5, directness: 0.5, overall: 0.5 } }),
 		);
 		await orch1.addSample(
-			scoreRecord({ scores: { overall: 0.6, reasoning: 0.6, factual: 0.6 } }),
+			scoreRecord({ scores: { executionSuccess: 0.6, codeQuality: 0.6, toolEfficiency: 0.6, directness: 0.6, overall: 0.6 } }),
 		);
 
 		// New instance loads the persisted state from disk

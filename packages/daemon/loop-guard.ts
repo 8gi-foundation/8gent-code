@@ -60,7 +60,7 @@ export const DEFAULT_LOOP_GUARD_CONFIG: LoopGuardConfig = {
 	maxErrors: 3,
 	maxIdleMs: 5 * 60 * 1000, // 5 minutes
 	escalationRung: AUTONOMY_RUNG.DELEGATE,
-	escalationRisk: "RISKY",
+	escalationRisk: "risky",
 };
 
 // ============================================
@@ -256,7 +256,7 @@ export class LoopGuard {
 
 	/** Check if action risk requires escalation */
 	requiresEscalation(risk: ActionRisk): boolean {
-		const riskOrder: ActionRisk[] = ["SAFE", "BOUNDED", "RISKY", "DESTRUCTIVE"];
+		const riskOrder: ActionRisk[] = ["safe", "bounded", "risky", "destructive"];
 		const actionRiskIndex = riskOrder.indexOf(risk);
 		const thresholdRiskIndex = riskOrder.indexOf(this.config.escalationRisk);
 		return actionRiskIndex >= thresholdRiskIndex;

@@ -24,28 +24,28 @@ describe("MakerCheckerStore", () => {
 
 	describe("Rule Matching", () => {
 		it("matches glob patterns", () => {
-			const result = store.getRule("git:push:main", "DESTRUCTIVE");
+			const result = store.getRule("git:push:main", "destructive");
 			expect(result).not.toBeNull();
 			expect(result?.actionPattern).toBe("git:push:main");
 		});
 
 		it("matches wildcard patterns", () => {
-			const result = store.getRule("git:push:feature-branch", "RISKY");
+			const result = store.getRule("git:push:feature-branch", "risky");
 			expect(result).not.toBeNull();
 			expect(result?.actionPattern).toBe("git:push:*");
 		});
 
 		it("returns null for unmatched actions", () => {
-			const result = store.getRule("read:file:test.txt", "SAFE");
+			const result = store.getRule("read:file:test.txt", "safe");
 			expect(result).toBeNull();
 		});
 
 		it("respects risk thresholds", () => {
 			// shell:* rule requires BOUNDED minimum
-			const boundedResult = store.getRule("shell:run:npm", "BOUNDED");
+			const boundedResult = store.getRule("shell:run:npm", "bounded");
 			expect(boundedResult).not.toBeNull();
 
-			const safeResult = store.getRule("shell:run:npm", "SAFE");
+			const safeResult = store.getRule("shell:run:npm", "safe");
 			expect(safeResult).toBeNull();
 		});
 	});
@@ -57,7 +57,7 @@ describe("MakerCheckerStore", () => {
 				"read:file:test.txt",
 				"test.txt",
 				{},
-				"SAFE",
+				"safe",
 				2,
 			);
 
@@ -71,7 +71,7 @@ describe("MakerCheckerStore", () => {
 				"git:push:feature",
 				"origin/feature",
 				{},
-				"RISKY",
+				"risky",
 				2,
 			);
 
@@ -86,7 +86,7 @@ describe("MakerCheckerStore", () => {
 				"git:push:main",
 				"origin/main",
 				{},
-				"DESTRUCTIVE",
+				"destructive",
 				4,
 			);
 
@@ -102,7 +102,7 @@ describe("MakerCheckerStore", () => {
 				"shell:run:npm",
 				"npm install",
 				{},
-				"BOUNDED",
+				"bounded",
 				2,
 			);
 
@@ -126,7 +126,7 @@ describe("MakerCheckerStore", () => {
 				"git:push:feature",
 				"origin/feature",
 				{},
-				"RISKY",
+				"risky",
 				3,
 			);
 
@@ -150,7 +150,7 @@ describe("MakerCheckerStore", () => {
 				"shell:run:npm",
 				"npm install",
 				{},
-				"BOUNDED",
+				"bounded",
 				2,
 			);
 
@@ -160,9 +160,9 @@ describe("MakerCheckerStore", () => {
 		});
 
 		it("lists pending actions for maker", () => {
-			store.submitAction("maker_1", "shell:run:npm", "npm install", {}, "BOUNDED", 2);
-			store.submitAction("maker_1", "shell:run:test", "npm test", {}, "BOUNDED", 2);
-			store.submitAction("maker_2", "shell:run:build", "npm build", {}, "BOUNDED", 2);
+			store.submitAction("maker_1", "shell:run:npm", "npm install", {}, "bounded", 2);
+			store.submitAction("maker_1", "shell:run:test", "npm test", {}, "bounded", 2);
+			store.submitAction("maker_2", "shell:run:build", "npm build", {}, "bounded", 2);
 
 			const maker1Pending = store.pendingForMaker("maker_1");
 			expect(maker1Pending).toHaveLength(2);
@@ -176,7 +176,7 @@ describe("MakerCheckerStore", () => {
 				"shell:run:npm",
 				"npm install",
 				{},
-				"BOUNDED",
+				"bounded",
 				2,
 			);
 
@@ -207,7 +207,7 @@ describe("MakerCheckerStore", () => {
 				"shell:run:npm",
 				"npm install",
 				{},
-				"BOUNDED",
+				"bounded",
 				2,
 			);
 
@@ -225,41 +225,41 @@ describe("MakerCheckerStore", () => {
 		it("adds custom rule", () => {
 			store.addRule({
 				actionPattern: "deploy:*",
-				minRisk: "RISKY",
+				minRisk: "risky",
 				checkerMode: CHECKER_MODE.HUMAN,
 				requiredRung: 3,
 				timeoutMs: 300000,
 				notifyOwner: true,
 			});
 
-			const result = store.getRule("deploy:production", "RISKY");
+			const result = store.getRule("deploy:production", "risky");
 			expect(result).not.toBeNull();
 			expect(result?.actionPattern).toBe("deploy:*");
 		});
 
 		it("removes rule", () => {
 			store.removeRule("git:push:*");
-			const result = store.getRule("git:push:feature", "RISKY");
+			const result = store.getRule("git:push:feature", "risky");
 			expect(result).toBeNull();
 		});
 	});
 
 	describe("Default Rules Coverage", () => {
 		it("covers git push to main (highest risk)", () => {
-			const result = store.getRule("git:push:main", "DESTRUCTIVE");
+			const result = store.getRule("git:push:main", "destructive");
 			expect(result).not.toBeNull();
 			expect(result?.checkerMode).toBe(CHECKER_MODE.HUMAN);
 			expect(result?.notifyOwner).toBe(true);
 		});
 
 		it("covers credential access", () => {
-			const result = store.getRule("credential:get", "DESTRUCTIVE");
+			const result = store.getRule("credential:get", "destructive");
 			expect(result).not.toBeNull();
 			expect(result?.checkerMode).toBe(CHECKER_MODE.HUMAN);
 		});
 
 		it("covers file deletion", () => {
-			const result = store.getRule("file:delete:temp.txt", "RISKY");
+			const result = store.getRule("file:delete:temp.txt", "risky");
 			expect(result).not.toBeNull();
 			expect(result?.checkerMode).toBe(CHECKER_MODE.HUMAN);
 		});
@@ -286,7 +286,7 @@ describe("AutomaticChecker", () => {
 			action: "read:file",
 			target: "test.txt",
 			parameters: {},
-			risk: "SAFE",
+			risk: "safe",
 			rung: 2,
 			timestamp: Date.now(),
 			expiresAt: Date.now() + 60000,
@@ -302,7 +302,7 @@ describe("AutomaticChecker", () => {
 			action: "credential:delete",
 			target: "api_key",
 			parameters: {},
-			risk: "DESTRUCTIVE",
+			risk: "destructive",
 			rung: 4,
 			timestamp: Date.now(),
 			expiresAt: Date.now() + 60000,
@@ -318,7 +318,7 @@ describe("AutomaticChecker", () => {
 			action: "shell:run",
 			target: "npm install",
 			parameters: {},
-			risk: "BOUNDED",
+			risk: "bounded",
 			rung: 2,
 			timestamp: Date.now(),
 			expiresAt: Date.now() + 60000,
@@ -334,7 +334,7 @@ describe("AutomaticChecker", () => {
 			action: "git:push",
 			target: "origin",
 			parameters: {},
-			risk: "RISKY",
+			risk: "risky",
 			rung: 3,
 			timestamp: Date.now(),
 			expiresAt: Date.now() + 60000,
@@ -355,7 +355,7 @@ describe("Integration", () => {
 			"shell:run:npm",
 			"npm test",
 			{ flags: ["--coverage"] },
-			"BOUNDED",
+			"bounded",
 			4,
 		);
 
