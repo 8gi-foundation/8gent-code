@@ -1198,6 +1198,15 @@ export {
 	type FailoverEntry,
 } from "./failover";
 export {
+	callLocalModelWithReroute,
+	chooseRerouteModel,
+	isModelNotFoundError,
+	hasCloudModelKey,
+	noModelAvailableMessage,
+	type InstalledModel,
+	type LocalRerouteOutcome,
+} from "./model-reroute";
+export {
 	resolveThinkingLevel,
 	resolveThinkingForRouting,
 	thinkingTokenMultiplier,
