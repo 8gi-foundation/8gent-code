@@ -79,6 +79,8 @@ const DEFAULT_MAX_STEPS = 25;
 
 type MockClient = {
   chat: ReturnType<typeof vi.fn>;
+  generate: ReturnType<typeof vi.fn>;
+  isAvailable: ReturnType<typeof vi.fn>;
   model: string;
   provider: string;
 };
@@ -104,7 +106,13 @@ function makeMockClient(responses: Array<{
       });
     }
   }
-  return { chat: mock, model: "test/model", provider: "test" } as unknown as MockClient;
+  return {
+    chat: mock,
+    generate: vi.fn().mockResolvedValue(""),
+    isAvailable: vi.fn().mockResolvedValue(true),
+    model: "test/model",
+    provider: "test",
+  } as unknown as MockClient;
 }
 
 function makeMockHands(responses: Array<{ ok: boolean; result?: unknown; reason?: string }>) {
@@ -145,6 +153,7 @@ describe("E4: Max steps reached", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => client,
       maxSteps: DEFAULT_MAX_STEPS,
@@ -167,6 +176,7 @@ describe("E4: Max steps reached", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => client,
       maxSteps,
@@ -185,6 +195,7 @@ describe("E4: Max steps reached", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => client,
       maxSteps: 20,
@@ -202,6 +213,7 @@ describe("E4: Max steps reached", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => client,
       maxSteps: 20,
@@ -233,6 +245,7 @@ describe("E5: All model providers exhausted", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: makeMockClientFactory(clients as unknown as MockClient[]),
       maxSteps: 20,
@@ -277,6 +290,7 @@ describe("E5: All model providers exhausted", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => client,
       maxSteps: 20,
@@ -305,6 +319,7 @@ describe("E5: All model providers exhausted", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: vi.fn().mockResolvedValue({ ok: true, result: null }),
       clientFactory: makeMockClientFactory(clients as unknown as MockClient[]),
       maxSteps: 20,
@@ -333,6 +348,7 @@ describe("E16: No-tool loop (free-text responses)", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => ({
         client,
@@ -358,6 +374,7 @@ describe("E16: No-tool loop (free-text responses)", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => ({
         client,
@@ -390,6 +407,7 @@ describe("E16: No-tool loop (free-text responses)", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => ({
         client,
@@ -445,6 +463,7 @@ describe("DoomLoopDetector integration gap", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => ({
         client,
@@ -478,6 +497,7 @@ describe("Cost tracking", () => {
 
     const result = await runComputerUseLoop({
       goal: "test",
+      sessionId: "test-session",
       handsAdapter: hands,
       clientFactory: () => ({
         client,
