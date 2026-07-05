@@ -8,6 +8,8 @@ final class PanelState: ObservableObject {
     @Published var caption: String = "Listening..."
     /// Subtle status line under the caption.
     @Published var status: String = "Press Cmd+Opt+Space to dismiss."
+    /// User-controlled voice input gate. False means the mic stays off across panel opens.
+    @Published var voiceInputEnabled: Bool = true
     /// Connection indicator. True when the daemon socket is up.
     @Published var connected: Bool = false
     /// Approval prompt active. Backed by `pendingApproval` below.
@@ -34,6 +36,66 @@ final class PanelState: ObservableObject {
             case done = "done"
             case error = "error"
         }
+    }
+
+    func pauseVoice() {
+        voiceInputEnabled = false
+        caption = "Voice paused"
+        status = "Press the mic to resume listening."
+    }
+
+    func resumeVoice() {
+        voiceInputEnabled = true
+        caption = "Listening..."
+        status = "Listening..."
+    }
+
+    func notePanelShown() {
+        if voiceInputEnabled {
+            caption = "Listening..."
+        } else {
+            pauseVoice()
+        }
+    }
+
+    func noteIntentSubmitted(_ text: String) {
+        caption = text
+        status = "Thinking..."
+        toolSteps = []
+    }
+
+    func noteToolCall(tool: String, callId: String) {
+        let displayName = displayToolName(tool)
+        status = "Working: \(displayName)"
+        toolSteps.append(.init(id: callId, tool: displayName, status: .running))
+    }
+
+    func noteToolResult(tool: String, callId: String, durationMs: Int) {
+        let displayName = displayToolName(tool)
+        status = "\(displayName) done"
+        if let idx = toolSteps.firstIndex(where: { $0.id == callId }) {
+            toolSteps[idx].status = .done
+            toolSteps[idx].durationMs = durationMs
+        } else {
+            toolSteps.append(.init(id: callId, tool: displayName, status: .done, durationMs: durationMs))
+        }
+    }
+
+    func noteDone() {
+        status = toolSteps.isEmpty ? "Done. No tool proof received." : "Done. Proof remains visible."
+    }
+
+    func noteError(_ error: String) {
+        status = "Error: \(error)"
+        for i in 0..<toolSteps.count {
+            if toolSteps[i].status == .running {
+                toolSteps[i].status = .error
+            }
+        }
+    }
+
+    private func displayToolName(_ tool: String) -> String {
+        tool.count > 30 ? String(tool.prefix(30)) + "..." : tool
     }
 }
 
@@ -73,7 +135,7 @@ final class MainPanel {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
 
-        let host = NSHostingView(rootView: PanelContent(state: state, onApprove: { _, _ in }))
+        let host = NSHostingView(rootView: PanelContent(state: state, onToggleVoice: {}, onApprove: { _, _ in }))
         host.frame = NSRect(origin: .zero, size: panelSize)
         host.autoresizingMask = [.width, .height]
 
@@ -93,10 +155,14 @@ final class MainPanel {
         wireClient()
         wireCapture()
 
-        host.rootView = PanelContent(state: state, onApprove: { [weak self] reqId, ok in
-            self?.client.sendApproval(requestId: reqId, approved: ok)
-            self?.state.pendingApproval = nil
-        })
+        host.rootView = PanelContent(
+            state: state,
+            onToggleVoice: { [weak self] in self?.toggleVoiceInput() },
+            onApprove: { [weak self] reqId, ok in
+                self?.client.sendApproval(requestId: reqId, approved: ok)
+                self?.state.pendingApproval = nil
+            }
+        )
 
         client.connect()
     }
@@ -117,7 +183,11 @@ final class MainPanel {
         positionAtBottomCentre()
         panel.orderFrontRegardless()
         installDismissMonitors()
-        startListening()
+        if state.voiceInputEnabled {
+            startListening()
+        } else {
+            state.notePanelShown()
+        }
     }
 
     func hide() {
@@ -126,14 +196,34 @@ final class MainPanel {
         panel.orderOut(nil)
     }
 
+    private func toggleVoiceInput() {
+        if state.voiceInputEnabled {
+            capture.stop()
+            reply.stop()
+            state.pauseVoice()
+            return
+        }
+
+        state.resumeVoice()
+        startListening()
+    }
+
     private func startListening() {
+        guard state.voiceInputEnabled else {
+            capture.stop()
+            state.notePanelShown()
+            return
+        }
+
         if !hasRequestedAuth {
             hasRequestedAuth = true
             capture.requestAuthorization { [weak self] status in
                 guard let self = self else { return }
-                if status == .granted {
+                if status == .granted && self.state.voiceInputEnabled {
                     self.state.caption = "Listening..."
                     self.capture.start()
+                } else if status == .granted {
+                    self.state.pauseVoice()
                 } else {
                     self.state.caption = "Microphone access is required."
                     self.state.status = "Open System Settings, Privacy, and grant access to 8gent Computer."
@@ -147,16 +237,17 @@ final class MainPanel {
 
     private func wireCapture() {
         capture.onPartial = { [weak self] text in
+            guard self?.state.voiceInputEnabled == true else { return }
             self?.state.caption = text
         }
         capture.onFinal = { [weak self] text in
             guard let self = self else { return }
-            self.state.caption = text
+            guard self.state.voiceInputEnabled else { return }
             self.capture.stop()
             self.tokenTail = ""
-            self.state.toolSteps = []
+            self.state.noteIntentSubmitted(text)
             self.client.sendIntent(text)
-            self.state.status = "Thinking..."
+            self.revealForAgentActivity()
         }
         capture.onError = { [weak self] err in
             self?.state.status = "Capture error: \(err)"
@@ -186,33 +277,29 @@ final class MainPanel {
                     self.state.status = "Done."
                 }
             case let .toolCall(_, tool, callId, _):
-                // Truncate long tool names for display
-                let displayName = tool.count > 30 ? String(tool.prefix(30)) + "..." : tool
-                self.state.status = displayName
-                self.state.toolSteps.append(.init(id: callId, tool: displayName, status: .running))
+                self.state.noteToolCall(tool: tool, callId: callId)
+                self.revealForAgentActivity()
             case let .toolResult(_, tool, callId, _, durationMs):
-                let displayName = tool.count > 30 ? String(tool.prefix(30)) + "..." : tool
-                self.state.status = "\(displayName) done"
-                if let idx = self.state.toolSteps.firstIndex(where: { $0.id == callId }) {
-                    self.state.toolSteps[idx].status = .done
-                    self.state.toolSteps[idx].durationMs = durationMs
-                }
+                self.state.noteToolResult(tool: tool, callId: callId, durationMs: durationMs)
+                self.revealForAgentActivity()
             case let .approvalRequired(_, tool, requestId, reason):
                 self.state.pendingApproval = .init(tool: tool, requestId: requestId, reason: reason)
+                self.revealForAgentActivity()
             case let .error(_, error, _):
-                self.state.status = "Error: \(error)"
-                // Mark any running steps as errored
-                for i in 0..<self.state.toolSteps.count {
-                    if self.state.toolSteps[i].status == .running {
-                        self.state.toolSteps[i].status = .error
-                    }
-                }
+                self.state.noteError(error)
+                self.revealForAgentActivity()
             case .done:
                 self.reply.flush()
-                self.state.status = "Press Cmd+Opt+Space to dismiss."
-                self.state.toolSteps = []
+                self.state.noteDone()
+                self.revealForAgentActivity()
             }
         }
+    }
+
+    private func revealForAgentActivity() {
+        positionAtBottomCentre()
+        panel.orderFrontRegardless()
+        installDismissMonitors()
     }
 
     private func positionAtBottomCentre() {
@@ -224,6 +311,8 @@ final class MainPanel {
     }
 
     private func installDismissMonitors() {
+        removeDismissMonitors()
+
         keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             // keyCode 53 = Escape
             if event.keyCode == 53 {
@@ -248,13 +337,27 @@ final class MainPanel {
 
 private struct PanelContent: View {
     @ObservedObject var state: PanelState
+    let onToggleVoice: () -> Void
     let onApprove: (String, Bool) -> Void
 
     var body: some View {
         ZStack(alignment: .top) {
             HStack(spacing: 16) {
+                Button(action: onToggleVoice) {
+                    Image(systemName: state.voiceInputEnabled ? "mic.fill" : "mic.slash.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .background(buttonFill)
+                        .foregroundStyle(.primary.opacity(0.9))
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(state.voiceInputEnabled ? "Pause voice input" : "Resume voice input")
+
                 AudioWaveView()
                     .frame(width: 96, height: 48)
+                    .opacity(state.voiceInputEnabled ? 1.0 : 0.32)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(state.caption)
@@ -296,6 +399,10 @@ private struct PanelContent: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    private var buttonFill: Color {
+        state.voiceInputEnabled ? Color.white.opacity(0.18) : Color.orange.opacity(0.22)
     }
 }
 

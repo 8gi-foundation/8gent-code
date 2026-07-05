@@ -9,6 +9,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed - 8gent Computer voice loop and proof rail (#2722)
+
+- Added an in-panel mic toggle that stops voice capture and keeps it off across panel opens until the user explicitly resumes it.
+- Kept completed tool-step proof visible after `done`, and brings the panel forward for live tool activity, approval prompts, errors, and completion.
 ### Added - 8gent-flow Mac vision and control relay (#2718, #2720)
 
 Introduced `@8gi-foundation/8gent-flow`, a Mac-first relay that reuses
