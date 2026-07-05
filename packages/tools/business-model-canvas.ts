@@ -94,4 +94,4 @@ interface Canvas {
   [Block.RevenueStreams]: string[];
 }
 
-export { Block, createCanvas, setBlock, validate, renderMarkdown, scoreCompleteness, Canvas };
+export { Block, createCanvas, setBlock, validate, renderMarkdown, scoreCompleteness, type Canvas };

@@ -604,18 +604,17 @@ const generateSpriteTool = tool({
 				null,
 				2,
 			);
-		} else {
-			return JSON.stringify(
-				{
-					success: false,
-					reason: result.reason,
-					path: result.path,
-					hint: "Try forceCloud=true if local tools are unavailable, or simplify the prompt.",
-				},
-				null,
-				2,
-			);
 		}
+		return JSON.stringify(
+			{
+				success: false,
+				reason: result.reason,
+				path: result.path,
+				hint: "Try forceCloud=true if local tools are unavailable, or simplify the prompt.",
+			},
+			null,
+			2,
+		);
 	},
 });
 
