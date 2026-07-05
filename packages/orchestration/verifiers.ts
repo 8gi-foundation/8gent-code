@@ -97,6 +97,7 @@ export const tscVerifier: Verifier = {
 			let stdout = "";
 			let stderr = "";
 			let settled = false;
+			// biome-ignore lint/style/useConst: forward-declared - finish() in the spawn catch may read `timer` before it is assigned at setTimeout below.
 			let timer: ReturnType<typeof setTimeout> | undefined;
 
 			const finish = (finding: VerifierFinding): void => {

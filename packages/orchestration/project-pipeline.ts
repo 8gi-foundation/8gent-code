@@ -23,7 +23,7 @@ import * as path from "node:path";
 import { DecisionPalette, Model, ModelRoster, Obstacle, ObstacleType, Severity } from "./adaptive-pipeline.js";
 import { createAgentNode } from "./agent-node.js";
 import { decompose, type ThinkerCall } from "./decompose.js";
-import type { BuildUnit, ExecutorNode, VerifierFinding } from "./pipeline-contracts.js";
+import type { BuildUnit, ExecResult, ExecutorNode, VerifierFinding } from "./pipeline-contracts.js";
 import { PipelineEventBus } from "./pipeline-events.js";
 import { getScaffold } from "./scaffold.js";
 import { fileExistsVerifier, tscVerifier } from "./verifiers.js";
@@ -193,7 +193,7 @@ export class ProjectPipeline {
 			const node = this.executors[Math.min(execIdx, this.executors.length - 1)];
 			this.bus.emit({ kind: "unit", unitId: unit.id, path: unit.path, status: "start", model: node.key });
 
-			let res = { ok: false, filesWritten: [] as string[], transcript: "", error: undefined as string | undefined };
+			let res: ExecResult = { ok: false, filesWritten: [], transcript: "" };
 			try {
 				res = await node.run({ goal, workingDirectory: this.workdir, budgetTokens: budget, context });
 			} catch (err) {

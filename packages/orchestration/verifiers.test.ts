@@ -91,7 +91,7 @@ describe("httpVerifier", () => {
 
 	test("stubbed 500 response -> ok:false severe http-error", async () => {
 		const original = global.fetch;
-		global.fetch = (async () => new Response("boom", { status: 500 })) as typeof fetch;
+		global.fetch = (async () => new Response("boom", { status: 500 })) as unknown as typeof fetch;
 		try {
 			const f = await httpVerifier.verify({
 				workingDirectory: "/tmp",

@@ -14,6 +14,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { AgentConfig } from "../eight/types.js";
 import type { ExecRequest, ExecResult, ExecutorNode } from "./pipeline-contracts.js";
 
 /**
@@ -47,7 +48,15 @@ const defaultRunAgent: RunAgentFn = async ({
 	message,
 }) => {
 	const { Agent } = await import("../eight/agent.js");
-	const agent = new Agent({ model, runtime, workingDirectory, maxTurns });
+	// `runtime` is a provider string chosen upstream by the pipeline/CLI; Agent's
+	// config narrows it to the known provider union. The value is validated before
+	// it reaches here, so we assert the narrower type at the construction seam.
+	const agent = new Agent({
+		model,
+		runtime: runtime as AgentConfig["runtime"],
+		workingDirectory,
+		maxTurns,
+	});
 	try {
 		const text = await agent.chat(message);
 		return text ?? "";

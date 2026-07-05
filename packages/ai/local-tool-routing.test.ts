@@ -25,7 +25,7 @@ function stubFetch(impl: () => Promise<Response> | Response): { calls: number } 
 	globalThis.fetch = (async () => {
 		state.calls++;
 		return impl();
-	}) as typeof fetch;
+	}) as unknown as typeof fetch;
 	return state;
 }
 

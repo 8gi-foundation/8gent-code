@@ -59,7 +59,7 @@ describe("PipelineEventBus", () => {
 		globalThis.fetch = (async (url: string, init?: RequestInit) => {
 			calls.push({ url, body: JSON.parse(String(init?.body)) });
 			return new Response(null, { status: 200 });
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 
 		const bus = new PipelineEventBus({ httpSink: "http://localhost:7890/pipeline-events" });
 		bus.emit({ kind: "obstacle", stage: "engineer", obstacle: "compile-error", severity: "severe" });
@@ -75,7 +75,7 @@ describe("PipelineEventBus", () => {
 	test("httpSink swallows fetch errors and never throws", async () => {
 		globalThis.fetch = (async () => {
 			throw new Error("network down");
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 
 		const bus = new PipelineEventBus({ httpSink: "http://localhost:7890/pipeline-events" });
 		expect(() => bus.emit({ kind: "done", ok: true })).not.toThrow();
