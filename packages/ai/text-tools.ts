@@ -75,27 +75,91 @@ function scanBalancedObject(
 	return null;
 }
 
+// Map a single JSON-schema property node to a short type word for the compact
+// signature. Falls back to "any" for anything we cannot name cheaply. Arrays
+// render as "type[]" when their item type is known, else "array".
+function shortType(node: unknown): string {
+	if (typeof node !== "object" || node === null) return "any";
+	const n = node as Record<string, unknown>;
+	const t = n.type;
+	if (t === "array") {
+		const items = n.items;
+		const inner = items ? shortType(items) : "any";
+		return inner === "any" ? "array" : `${inner}[]`;
+	}
+	if (typeof t === "string") return t;
+	if (Array.isArray(t) && t.every((x) => typeof x === "string")) {
+		return (t as string[]).join("|");
+	}
+	return "any";
+}
+
+// Collapse a tool description to a single short clause for the lean signature
+// line. Whitespace is flattened, then we keep up to the first sentence and cap
+// the length so a verbose multi-paragraph executor description cannot bloat the
+// system prompt past a local model's context window (Bug A).
+const DESC_CAP = 140;
+function compactDescription(raw: string): string {
+	const flat = raw.replace(/\s+/g, " ").trim();
+	// First sentence (up to the first ". " boundary), if that already fits.
+	const firstSentence = flat.split(/(?<=\.)\s/)[0] ?? flat;
+	const base = firstSentence.length <= DESC_CAP ? firstSentence : flat;
+	if (base.length <= DESC_CAP) return base;
+	return `${base.slice(0, DESC_CAP - 1).trimEnd()}…`;
+}
+
+/**
+ * Render one tool as a single lean line:
+ *
+ *   name(param1: type, param2?: type) - one-line description
+ *
+ * Required params render as `param: type`; optional ones get a trailing `?`.
+ * An enum on a param is appended as a short `[one of: a, b]` note after the
+ * signature only when present. Pretty-printed full JSON schema is intentionally
+ * NOT emitted - that is the context-overflow the compact form fixes (Bug A).
+ */
+function renderToolLine(t: ToolSpec): string {
+	const params = t.parameters as
+		| { properties?: Record<string, unknown>; required?: unknown }
+		| undefined;
+	const props = params?.properties;
+	const required = new Set(
+		Array.isArray(params?.required)
+			? (params!.required as unknown[]).filter((x): x is string => typeof x === "string")
+			: [],
+	);
+
+	const enumNotes: string[] = [];
+	const sigParts: string[] = [];
+	if (props && typeof props === "object") {
+		for (const [name, node] of Object.entries(props)) {
+			const optional = required.has(name) ? "" : "?";
+			sigParts.push(`${name}${optional}: ${shortType(node)}`);
+			const enumVals =
+				node && typeof node === "object"
+					? (node as Record<string, unknown>).enum
+					: undefined;
+			if (Array.isArray(enumVals) && enumVals.length > 0) {
+				enumNotes.push(`${name} is one of: ${enumVals.join(", ")}`);
+			}
+		}
+	}
+
+	const desc = t.description ? ` - ${compactDescription(t.description)}` : "";
+	const signature = `${t.name}(${sigParts.join(", ")})${desc}`;
+	if (enumNotes.length === 0) return signature;
+	return `${signature}\n  (${enumNotes.join("; ")})`;
+}
+
 /**
  * Render the instruction block that teaches a model the text tool-call
- * protocol. The returned string lists every tool (name, description, parameter
- * schema) and defines the fenced-block call syntax. It always contains the
- * literal token `tool_call` and each tool name verbatim.
+ * protocol. Each tool is rendered as ONE lean signature line (name, typed
+ * params, one-line description) rather than a pretty-printed full JSON schema,
+ * so the whole block stays small enough to fit an 8k local context window. It
+ * always contains the literal token `tool_call` and each tool name verbatim.
  */
 export function buildToolSystemPrompt(tools: ToolSpec[]): string {
-	const toolBlocks = tools
-		.map((t) => {
-			const schema = JSON.stringify(t.parameters, null, 2);
-			return [
-				`### ${t.name}`,
-				t.description,
-				"",
-				"Parameters (JSON schema):",
-				"```json",
-				schema,
-				"```",
-			].join("\n");
-		})
-		.join("\n\n");
+	const toolBlocks = tools.map(renderToolLine).join("\n");
 
 	const toolsSection =
 		tools.length > 0 ? toolBlocks : "(No tools are available right now.)";
@@ -146,8 +210,14 @@ export function buildToolSystemPrompt(tools: ToolSpec[]): string {
 		"  directory), handle them one at a time: call the tool for the first part,",
 		"  wait for its result, then call the tool for the next part. Only give your",
 		"  final prose answer once every part is backed by a real tool result.",
+		"- To create or write a file, you MUST use the write_file tool. Do NOT use",
+		"  run_command (echo, cat, printf, mkdir, tee) to write file contents.",
+		"  write_file is the only correct way to put content on disk.",
+		"- Never claim you performed an action (wrote a file, ran a command, made a",
+		"  change) unless you actually emitted the matching tool_call in THIS",
+		"  conversation and saw its result. Do not fabricate success.",
 		"",
-		"Available tools:",
+		"Available tools (signature - description):",
 		"",
 		toolsSection,
 	].join("\n");

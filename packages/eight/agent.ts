@@ -30,6 +30,7 @@ import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orche
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
+import { callLocalModelWithReroute } from "../providers/model-reroute";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -195,7 +196,9 @@ export class Agent {
 	constructor(config: AgentConfig) {
 		this.config = config;
 		this.events = config.events || {};
-		this.executor = new ToolExecutor(config.workingDirectory || process.cwd());
+		this.executor = new ToolExecutor(config.workingDirectory || process.cwd(), "primary", undefined, {
+			unattended: config.unattended ?? false,
+		});
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
@@ -669,37 +672,65 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			? [{ role: "system", content: instructions }, ...history]
 			: [...history];
 
-		// The raw call hits the local endpoint with the turn's abort signal wired
-		// into fetch, so an abort (timeout / circuit breaker / ESC) tears the
-		// request down. We wrap each round in withTurnTimeout: a single stalled
-		// round (socket accepted, no body - maxRounds bounds round COUNT, not a
-		// stuck round) aborts the shared signal and rejects, ending the turn in
-		// bounded time instead of hanging for the full session watchdog.
-		const rawCall = buildTextToolCall({
-			provider: providerName,
-			model: providerModel,
-			temperature: getRuntimeParams().temperature ?? 0.2,
-			signal,
-		});
+		// One agentic turn against a given local provider/model. The raw call hits
+		// the local endpoint with the turn's abort signal wired into fetch, so an
+		// abort (timeout / circuit breaker / ESC) tears the request down. Each
+		// round is wrapped in withTurnTimeout: a single stalled round (socket
+		// accepted, no body - maxRounds bounds round COUNT, not a stuck round)
+		// aborts the shared signal and rejects, ending the turn in bounded time
+		// instead of hanging for the full session watchdog.
 		const attemptTimeoutMs = resolveTurnTimeoutMs();
-		const endpoint = resolveTextToolEndpoint(providerName);
-		const call = (msgs: Parameters<typeof rawCall>[0]) =>
-			withTurnTimeout(
-				() => rawCall(msgs),
-				attemptTimeoutMs,
-				() => this.abortController?.abort(),
-				`${providerName}/${providerModel} (text-tools)`,
-			);
-
-		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
-		try {
-			agentResult = await runTextToolAgent({
+		const runTurn = (provider: string, model: string) => {
+			const rawCall = buildTextToolCall({
+				provider,
+				model,
+				temperature: getRuntimeParams().temperature ?? 0.2,
+				signal,
+			});
+			const call = (msgs: Parameters<typeof rawCall>[0]) =>
+				withTurnTimeout(
+					() => rawCall(msgs),
+					attemptTimeoutMs,
+					() => this.abortController?.abort(),
+					`${provider}/${model} (text-tools)`,
+				);
+			return runTextToolAgent({
 				messages,
 				tools,
 				call,
 				maxRounds: this.config.maxTurns ?? 6,
 				signal,
 			});
+		};
+
+		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
+		try {
+			// A missing/unavailable local model must never surface a raw provider
+			// 404 (e.g. `ollama chat completions 404: model 'qwen3.6:27b' not
+			// found`). callLocalModelWithReroute probes what is actually installed
+			// and retries the turn on a real model; only a genuine no-model-anywhere
+			// case returns a clean human message.
+			const outcome = await callLocalModelWithReroute({
+				provider: providerName,
+				model: providerModel,
+				run: runTurn,
+				onReroute: (missing, chosen) => {
+					console.log(
+						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
+					);
+				},
+			});
+			if (!outcome.ok) {
+				this.abortController = null;
+				this.messageHistory.push({ role: "assistant", content: outcome.message });
+				return outcome.message;
+			}
+			if (outcome.rerouted) {
+				// Self-correct the session so subsequent turns skip the dead model
+				// instead of paying the failed-request-then-reroute cost every turn.
+				this.config.model = outcome.usedModel;
+			}
+			agentResult = outcome.value;
 		} catch (err) {
 			// Provider down (ECONNREFUSED -> raw "fetch failed"), a stalled-round
 			// timeout, or an abort. Return a friendly turn in the normal chat()
@@ -707,6 +738,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			// fetch error up through the surface.
 			this.abortController = null;
 			const raw = err instanceof Error ? err.message : String(err);
+			const endpoint = resolveTextToolEndpoint(providerName);
 			const isReachability =
 				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
 					raw,

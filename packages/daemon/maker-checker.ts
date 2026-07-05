@@ -79,7 +79,7 @@ export interface MakerCheckerRule {
 export const DEFAULT_RULES: MakerCheckerRule[] = [
 	{
 		actionPattern: "git:push:*",
-		minRisk: "RISKY",
+		minRisk: "risky",
 		checkerMode: "automatic",
 		requiredRung: AUTONOMY_RUNG.AUTONOMOUS,
 		timeoutMs: 5 * 60 * 1000,
@@ -87,7 +87,7 @@ export const DEFAULT_RULES: MakerCheckerRule[] = [
 	},
 	{
 		actionPattern: "file:delete:*",
-		minRisk: "RISKY",
+		minRisk: "risky",
 		checkerMode: "human",
 		requiredRung: AUTONOMY_RUNG.DELEGATE,
 		timeoutMs: 10 * 60 * 1000,
@@ -95,7 +95,7 @@ export const DEFAULT_RULES: MakerCheckerRule[] = [
 	},
 	{
 		actionPattern: "shell:*",
-		minRisk: "BOUNDED",
+		minRisk: "bounded",
 		checkerMode: "automatic",
 		requiredRung: AUTONOMY_RUNG.ASSIST,
 		timeoutMs: 2 * 60 * 1000,
@@ -103,7 +103,7 @@ export const DEFAULT_RULES: MakerCheckerRule[] = [
 	},
 	{
 		actionPattern: "git:push:main",
-		minRisk: "DESTRUCTIVE",
+		minRisk: "destructive",
 		checkerMode: "human",
 		requiredRung: AUTONOMY_RUNG.AUTONOMOUS,
 		timeoutMs: 30 * 60 * 1000,
@@ -111,7 +111,7 @@ export const DEFAULT_RULES: MakerCheckerRule[] = [
 	},
 	{
 		actionPattern: "credential:*",
-		minRisk: "DESTRUCTIVE",
+		minRisk: "destructive",
 		checkerMode: "human",
 		requiredRung: AUTONOMY_RUNG.AUTONOMOUS,
 		timeoutMs: 60 * 60 * 1000,
@@ -204,7 +204,7 @@ export class MakerCheckerStore {
 		actionId: string,
 		checkerId: string,
 		mode: CheckerMode,
-		reason: string = "Approved",
+		reason = "Approved",
 	): boolean {
 		const action = this.pendingActions.get(actionId);
 		if (!action) return false;
@@ -339,8 +339,12 @@ export class MakerCheckerStore {
 	}
 
 	private riskMeetsThreshold(actionRisk: ActionRisk, minRisk: ActionRisk): boolean {
-		const riskOrder: ActionRisk[] = ["SAFE", "BOUNDED", "RISKY", "DESTRUCTIVE"];
-		return riskOrder.indexOf(actionRisk) >= riskOrder.indexOf(minRisk);
+		// Case-insensitive: normalize both sides to the canonical lowercase
+		// ActionRisk form (autonomy.ts) so a caller passing either "risky" or a
+		// legacy "RISKY" (e.g. ACTION_RISK.RISKY) still matches the order table.
+		const riskOrder = ["safe", "bounded", "risky", "destructive"];
+		const norm = (r: ActionRisk) => String(r).toLowerCase();
+		return riskOrder.indexOf(norm(actionRisk)) >= riskOrder.indexOf(norm(minRisk));
 	}
 }
 
@@ -359,8 +363,8 @@ export interface AutomaticCheckerConfig {
 
 export const DEFAULT_CHECKER_CONFIG: AutomaticCheckerConfig = {
 	minRung: AUTONOMY_RUNG.DELEGATE,
-	autoApproveRisks: ["SAFE", "BOUNDED"],
-	autoRejectRisks: ["DESTRUCTIVE"],
+	autoApproveRisks: ["safe", "bounded"],
+	autoRejectRisks: ["destructive"],
 };
 
 export class AutomaticChecker {

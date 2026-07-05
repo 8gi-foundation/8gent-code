@@ -163,6 +163,10 @@ export class InfiniteRunner extends EventEmitter {
 				runtime: "ollama",
 				workingDirectory: this.config.workingDirectory,
 				maxTurns: 50, // Higher for infinite mode
+				// Infinite mode runs unattended and bypasses ToolG8 permission
+				// checks — the maker-checker gate is what keeps destructive tools
+				// from executing without an approved CheckerDecision.
+				unattended: true,
 			});
 
 			// Check Ollama availability

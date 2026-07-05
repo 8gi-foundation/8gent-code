@@ -72,6 +72,10 @@ import { getMemoryManager } from "../memory";
 import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
 import { validatePath as guardPath } from "../permissions/path-guard.js";
 import { ToolG8 } from "../permissions/toolg8.js";
+import {
+	MakerCheckerBlockedError,
+	assertMakerCheckerApproved,
+} from "../permissions/maker-checker-enforcer";
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
@@ -245,10 +249,23 @@ export class ToolExecutor {
 	private astRepoId: string | null = null;
 	private astIndexPromise: Promise<RepoIndex> | null = null;
 	private artifactStore: ArtifactStore;
+	/**
+	 * Whether this executor runs unattended (autonomous engine / infinite mode /
+	 * heartbeat). When true, destructive tools are gated by the maker-checker at
+	 * executeRaw. Interactive executors leave this false so human-approved flows
+	 * are never blocked. See packages/permissions/maker-checker-enforcer.ts.
+	 */
+	private unattended: boolean;
 
-	constructor(workingDirectory: string = process.cwd(), agentId = "primary", sessionId?: string) {
+	constructor(
+		workingDirectory: string = process.cwd(),
+		agentId = "primary",
+		sessionId?: string,
+		options: { unattended?: boolean } = {},
+	) {
 		this.workingDirectory = workingDirectory;
 		this.agentId = agentId;
+		this.unattended = options.unattended ?? false;
 		this.toolG8 = ToolG8.instance();
 		this.permissionManager = getPermissionManager();
 		this.hookManager = getHookManager();
@@ -1113,6 +1130,27 @@ export class ToolExecutor {
 	}
 
 	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// Maker-checker gate (safety-critical). This is the single chokepoint every
+		// tool call passes through, so it runs BEFORE the term-tool early return,
+		// the ToolG8 gate, and the switch. In an unattended/autonomous context a
+		// destructive tool (rm, git_push, vercel_deploy, vercel_set_env,
+		// enable_infinite_mode) cannot run without an approved CheckerDecision.
+		// Note: this deliberately sits outside the infinite-mode permission bypass.
+		try {
+			assertMakerCheckerApproved(toolName, args, {
+				unattended: this.unattended,
+				makerId: this.agentId,
+			});
+		} catch (err) {
+			if (err instanceof MakerCheckerBlockedError) {
+				// Return a blocked marker string (matches the [..BLOCKED] contract in
+				// agent.ts) so the autonomous loop records a failed tool call and
+				// continues gracefully rather than crashing.
+				return `[MAKER-CHECKER BLOCKED] ${err.message}`;
+			}
+			throw err;
+		}
+
 		// Rate limit check - prevents LLM loops from exhausting resources
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;

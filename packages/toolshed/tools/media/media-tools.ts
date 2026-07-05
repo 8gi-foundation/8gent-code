@@ -111,14 +111,13 @@ export async function generateSpriteTool(input: Record<string, unknown>): Promis
 			animated: result.animatedPath,
 			manifest: result.manifest,
 		}, null, 2);
-	} else {
-		return JSON.stringify({
-			ok: false,
-			reason: result.reason,
-			path: result.path,
-			hint: "Install sharp (bun add sharp) for local generation, or set OPENAI_API_KEY for cloud fallback.",
-		}, null, 2);
 	}
+	return JSON.stringify({
+		ok: false,
+		reason: result.reason,
+		path: result.path,
+		hint: "Install sharp (bun add sharp) for local generation, or set OPENAI_API_KEY for cloud fallback.",
+	}, null, 2);
 }
 
 export async function listSpritesTool(input: Record<string, unknown>): Promise<string> {

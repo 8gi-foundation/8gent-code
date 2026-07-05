@@ -100,8 +100,8 @@ describe("LoopGuard", () => {
 	});
 
 	it("requires escalation for risky actions", () => {
-		expect(guard.requiresEscalation("RISKY")).toBe(true);
-		expect(guard.requiresEscalation("SAFE")).toBe(false);
+		expect(guard.requiresEscalation("risky")).toBe(true);
+		expect(guard.requiresEscalation("safe")).toBe(false);
 	});
 });
 

@@ -35,6 +35,7 @@ export const CHANNEL_DEFAULT_CAPS: Record<DaemonChannel, DispatchCapability[]> =
 	api: [], // Empty = caller controls scope per minted token.
 	telegram: ["read", "write_basic"],
 	discord: ["read", "write_basic"],
+	browser: ["read", "write_basic"],
 	delegation: ["read", "write_basic", "write_full"],
 };
 
@@ -46,7 +47,7 @@ const SECOND_FACTOR_CAPS: ReadonlySet<DispatchCapability> = new Set(["write_full
  * dispatches without a separate approval prompt on the originator. The
  * issue spec calls this out for telegram/discord/mobile.
  */
-const LITE_CHANNELS: ReadonlySet<DaemonChannel> = new Set(["telegram", "discord"]);
+const LITE_CHANNELS: ReadonlySet<DaemonChannel> = new Set(["telegram", "discord", "browser"]);
 
 export interface DispatchPolicyInput {
 	fromChannel: DaemonChannel;
