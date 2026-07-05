@@ -16,6 +16,17 @@ final class DaemonClient: NSObject {
     /// Default loopback endpoint for the computer channel.
     static let defaultURL = URL(string: "ws://127.0.0.1:18789/computer")!
 
+    static func configuredURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        guard let raw = environment["EIGHT_DAEMON_URL"],
+              let url = URL(string: raw),
+              url.scheme == "ws" || url.scheme == "wss",
+              url.host?.isEmpty == false else {
+            return defaultURL
+        }
+
+        return url
+    }
+
     private let url: URL
     private let session: URLSession
     private let callbackQueue: DispatchQueue
@@ -46,7 +57,7 @@ final class DaemonClient: NSObject {
     ///   - callbackQueue: Queue on which `onEvent` / `onState` / `onProtocolError`
     ///     are delivered. Defaults to `.main` (UI-friendly). Pass a custom
     ///     queue when running headless without a main runloop.
-    init(url: URL = DaemonClient.defaultURL,
+    init(url: URL = DaemonClient.configuredURL(),
          session: URLSession = .shared,
          callbackQueue: DispatchQueue = .main) {
         self.url = url

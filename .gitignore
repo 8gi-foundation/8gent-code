@@ -123,6 +123,9 @@ bin/apple-foundation-bridge/Package.resolved
 packages/eyes/native/swift/.build/
 packages/eyes/native/swift/Package.resolved
 
+# dogfood/QA session artifacts - screenshots and reports, never commit
+dogfood-output/
+
 # adaptive-pipeline outputs - never commit generated artifacts
 pipeline-output/
 benchmarks/autoresearch/arena/round-*/

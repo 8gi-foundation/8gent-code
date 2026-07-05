@@ -24,6 +24,10 @@ let package = Package(
         .executableTarget(
             name: "AccessibilityTreeCLI",
             path: "Sources/AccessibilityTreeCLI"
+        ),
+        .testTarget(
+            name: "EightGentComputerAppTests",
+            dependencies: ["EightGentComputerApp"]
         )
     ]
 )
