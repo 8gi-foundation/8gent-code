@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("retry", () => {
 
-  test("REQUIRES: retry_fn__options__where_options_has_max", () => {
-    // Requirement: retry(fn, options) where options has maxAttempts, delay, backoff ('fixed'|'exponential'|'linear')
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/retry.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: retry(fn, options) where options has maxAttempts, delay, backoff ('fixed'|'exponential'|'linear')
+  // NOT IMPLEMENTED - to implement: create packages/tools/retry.ts
+  test.todo("REQUIRES: retry_fn__options__where_options_has_max", () => {});
 
-  test("REQUIRES: onRetry_attempt__error__callback", () => {
-    // Requirement: onRetry(attempt, error) callback
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/retry.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: onRetry(attempt, error) callback
+  // NOT IMPLEMENTED - to implement: create packages/tools/retry.ts
+  test.todo("REQUIRES: onRetry_attempt__error__callback", () => {});
 
-  test("REQUIRES: retryIf_error__predicate_to_skip_retryin", () => {
-    // Requirement: retryIf(error) predicate to skip retrying on certain errors
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/retry.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: retryIf(error) predicate to skip retrying on certain errors
+  // NOT IMPLEMENTED - to implement: create packages/tools/retry.ts
+  test.todo("REQUIRES: retryIf_error__predicate_to_skip_retryin", () => {});
 
-  test("REQUIRES: Returns_the_successful_result_or_throws_", () => {
-    // Requirement: Returns the successful result or throws the last error
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/retry.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Returns the successful result or throws the last error
+  // NOT IMPLEMENTED - to implement: create packages/tools/retry.ts
+  test.todo("REQUIRES: Returns_the_successful_result_or_throws_", () => {});
 
-  test("REQUIRES: jitter_option_adds_randomness_to_delay", () => {
-    // Requirement: jitter option adds randomness to delay
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/retry.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: jitter option adds randomness to delay
+  // NOT IMPLEMENTED - to implement: create packages/tools/retry.ts
+  test.todo("REQUIRES: jitter_option_adds_randomness_to_delay", () => {});
 });

@@ -46,11 +46,15 @@ function deps(mode: string, extraEnv: Record<string, string> = {}): ExtractVideo
 
 describe("extractVideo — capability gate", () => {
 	test("returns a structured install-required error when not installed", async () => {
-		// No skipCapabilityCheck and no env override => the gate fires.
+		// No skipCapabilityCheck and no env override => the gate fires. `home`
+		// points at empty state so the not-installed path is exercised even on a
+		// machine that actually has Marlin provisioned.
+		const emptyHome = mkdtempSync(join(tmpdir(), "marlin-gate-"));
 		const result = await extractVideo(
 			{ path: SAMPLE_MP4 },
-			{ spawnSpec: { command: "bun", args: ["run", FAKE], env: { FAKE_MODE: "ok" } } },
+			{ spawnSpec: { command: "bun", args: ["run", FAKE], env: { FAKE_MODE: "ok" } }, home: emptyHome },
 		);
+		rmSync(emptyHome, { recursive: true, force: true });
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.error.kind).toBe("capability_not_installed");

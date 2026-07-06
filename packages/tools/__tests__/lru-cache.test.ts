@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("lru-cache", () => {
 
-  test("REQUIRES: set_key__value__ttlMs___and_get_key__ret", () => {
-    // Requirement: set(key, value, ttlMs?) and get(key) returning T | undefined
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/lru-cache.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: set(key, value, ttlMs?) and get(key) returning T | undefined
+  // NOT IMPLEMENTED - to implement: create packages/tools/lru-cache.ts
+  test.todo("REQUIRES: set_key__value__ttlMs___and_get_key__ret", () => {});
 
-  test("REQUIRES: delete_key__and_clear__", () => {
-    // Requirement: delete(key) and clear()
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/lru-cache.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: delete(key) and clear()
+  // NOT IMPLEMENTED - to implement: create packages/tools/lru-cache.ts
+  test.todo("REQUIRES: delete_key__and_clear__", () => {});
 
-  test("REQUIRES: Evict_least_recently_used_when_capacity_", () => {
-    // Requirement: Evict least-recently-used when capacity exceeded
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/lru-cache.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Evict least-recently-used when capacity exceeded
+  // NOT IMPLEMENTED - to implement: create packages/tools/lru-cache.ts
+  test.todo("REQUIRES: Evict_least_recently_used_when_capacity_", () => {});
 
-  test("REQUIRES: TTL_expiry_on_get__lazy_eviction_", () => {
-    // Requirement: TTL expiry on get (lazy eviction)
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/lru-cache.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: TTL expiry on get (lazy eviction)
+  // NOT IMPLEMENTED - to implement: create packages/tools/lru-cache.ts
+  test.todo("REQUIRES: TTL_expiry_on_get__lazy_eviction_", () => {});
 
-  test("REQUIRES: size_property_and_has_key_", () => {
-    // Requirement: size property and has(key)
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/lru-cache.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: size property and has(key)
+  // NOT IMPLEMENTED - to implement: create packages/tools/lru-cache.ts
+  test.todo("REQUIRES: size_property_and_has_key_", () => {});
 });

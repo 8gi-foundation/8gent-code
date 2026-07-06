@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("base32", () => {
 
-  test("REQUIRES: encode_input__Uint8Array___string_____st", () => {
-    // Requirement: encode(input: Uint8Array | string) -> string
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/base32.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: encode(input: Uint8Array | string) -> string
+  // NOT IMPLEMENTED - to implement: create packages/tools/base32.ts
+  test.todo("REQUIRES: encode_input__Uint8Array___string_____st", () => {});
 
-  test("REQUIRES: decode_input__string_____Uint8Array", () => {
-    // Requirement: decode(input: string) -> Uint8Array
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/base32.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: decode(input: string) -> Uint8Array
+  // NOT IMPLEMENTED - to implement: create packages/tools/base32.ts
+  test.todo("REQUIRES: decode_input__string_____Uint8Array", () => {});
 
-  test("REQUIRES: Support_standard_alphabet__A_Z_2_7__and_", () => {
-    // Requirement: Support standard alphabet (A-Z 2-7) and hex alphabet
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/base32.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Support standard alphabet (A-Z 2-7) and hex alphabet
+  // NOT IMPLEMENTED - to implement: create packages/tools/base32.ts
+  test.todo("REQUIRES: Support_standard_alphabet__A_Z_2_7__and_", () => {});
 
-  test("REQUIRES: Proper_padding_with____", () => {
-    // Requirement: Proper padding with '='
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/base32.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Proper padding with '='
+  // NOT IMPLEMENTED - to implement: create packages/tools/base32.ts
+  test.todo("REQUIRES: Proper_padding_with____", () => {});
 
-  test("REQUIRES: Throw_on_invalid_input_characters", () => {
-    // Requirement: Throw on invalid input characters
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/base32.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Throw on invalid input characters
+  // NOT IMPLEMENTED - to implement: create packages/tools/base32.ts
+  test.todo("REQUIRES: Throw_on_invalid_input_characters", () => {});
 });
