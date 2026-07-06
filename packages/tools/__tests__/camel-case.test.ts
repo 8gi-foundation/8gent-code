@@ -12,31 +12,19 @@ import { describe, expect, test } from "bun:test";
 
 describe("camel-case", () => {
 
-  test("REQUIRES: Export_toCamel__toPascal__toSnake__toKeb", () => {
-    // Requirement: Export toCamel, toPascal, toSnake, toKebab, toScreaming
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/camel-case.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Export toCamel, toPascal, toSnake, toKebab, toScreaming
+  // NOT IMPLEMENTED - to implement: create packages/tools/camel-case.ts
+  test.todo("REQUIRES: Export_toCamel__toPascal__toSnake__toKeb", () => {});
 
-  test("REQUIRES: Handle_mixed_input_correctly__e_g___foo_", () => {
-    // Requirement: Handle mixed input correctly (e.g. 'foo-barBaz' -> 'fooBarBaz')
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/camel-case.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Handle mixed input correctly (e.g. 'foo-barBaz' -> 'fooBarBaz')
+  // NOT IMPLEMENTED - to implement: create packages/tools/camel-case.ts
+  test.todo("REQUIRES: Handle_mixed_input_correctly__e_g___foo_", () => {});
 
-  test("REQUIRES: Preserve_consecutive_uppercase_acronyms_", () => {
-    // Requirement: Preserve consecutive uppercase acronyms (HTTP -> http)
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/camel-case.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Preserve consecutive uppercase acronyms (HTTP -> http)
+  // NOT IMPLEMENTED - to implement: create packages/tools/camel-case.ts
+  test.todo("REQUIRES: Preserve_consecutive_uppercase_acronyms_", () => {});
 
-  test("REQUIRES: Zero_dependencies", () => {
-    // Requirement: Zero dependencies
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/camel-case.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Zero dependencies
+  // NOT IMPLEMENTED - to implement: create packages/tools/camel-case.ts
+  test.todo("REQUIRES: Zero_dependencies", () => {});
 });

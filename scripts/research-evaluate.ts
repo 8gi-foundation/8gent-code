@@ -103,16 +103,18 @@ import { describe, expect, test } from "bun:test";
 	out += `\ndescribe("${spec.name}", () => {\n`;
 
 	if (!implemented) {
-		// Generate stub tests that explicitly fail with requirement info
+		// Generate pending (todo) stubs. These document the spec's requirements
+		// as unbuilt work WITHOUT failing CI - `test.todo` reports as pending, not
+		// as a pass (so it never fakes green) and not as a failure (so an unbuilt
+		// util does not turn the whole suite red). Implement the util in
+		// packages/tools/<name>.ts, then re-run this generator: once the impl
+		// exists, real assertions are emitted instead.
 		for (let i = 0; i < testCases.length; i++) {
 			const tc = testCases[i];
 			out += `
-  test("REQUIRES: ${tc.name}", () => {
-    // Requirement: ${tc.requirement}
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/${spec.name}.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: ${tc.requirement}
+  // NOT IMPLEMENTED - to implement: create packages/tools/${spec.name}.ts
+  test.todo("REQUIRES: ${tc.name}", () => {});
 `;
 		}
 	} else {

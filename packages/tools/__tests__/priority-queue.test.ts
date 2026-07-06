@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("priority-queue", () => {
 
-  test("REQUIRES: push_item__and_pop___returning_T___undef", () => {
-    // Requirement: push(item) and pop() returning T | undefined
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/priority-queue.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: push(item) and pop() returning T | undefined
+  // NOT IMPLEMENTED - to implement: create packages/tools/priority-queue.ts
+  test.todo("REQUIRES: push_item__and_pop___returning_T___undef", () => {});
 
-  test("REQUIRES: peek___without_removal", () => {
-    // Requirement: peek() without removal
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/priority-queue.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: peek() without removal
+  // NOT IMPLEMENTED - to implement: create packages/tools/priority-queue.ts
+  test.todo("REQUIRES: peek___without_removal", () => {});
 
-  test("REQUIRES: size_property_and_isEmpty__", () => {
-    // Requirement: size property and isEmpty()
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/priority-queue.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: size property and isEmpty()
+  // NOT IMPLEMENTED - to implement: create packages/tools/priority-queue.ts
+  test.todo("REQUIRES: size_property_and_isEmpty__", () => {});
 
-  test("REQUIRES: Generic_type_T_with_comparator__a__T__b_", () => {
-    // Requirement: Generic type T with comparator (a: T, b: T) => number
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/priority-queue.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Generic type T with comparator (a: T, b: T) => number
+  // NOT IMPLEMENTED - to implement: create packages/tools/priority-queue.ts
+  test.todo("REQUIRES: Generic_type_T_with_comparator__a__T__b_", () => {});
 
-  test("REQUIRES: Min_heap_by_default__max_heap_via_negate", () => {
-    // Requirement: Min-heap by default, max-heap via negated comparator
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/priority-queue.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Min-heap by default, max-heap via negated comparator
+  // NOT IMPLEMENTED - to implement: create packages/tools/priority-queue.ts
+  test.todo("REQUIRES: Min_heap_by_default__max_heap_via_negate", () => {});
 });

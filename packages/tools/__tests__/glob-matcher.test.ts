@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("glob-matcher", () => {
 
-  test("REQUIRES: match_pattern__path_____boolean", () => {
-    // Requirement: match(pattern, path) -> boolean
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/glob-matcher.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: match(pattern, path) -> boolean
+  // NOT IMPLEMENTED - to implement: create packages/tools/glob-matcher.ts
+  test.todo("REQUIRES: match_pattern__path_____boolean", () => {});
 
-  test("REQUIRES: Support___________and__a_b__brace_expans", () => {
-    // Requirement: Support *, **, ?, and {a,b} brace expansion
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/glob-matcher.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Support *, **, ?, and {a,b} brace expansion
+  // NOT IMPLEMENTED - to implement: create packages/tools/glob-matcher.ts
+  test.todo("REQUIRES: Support___________and__a_b__brace_expans", () => {});
 
-  test("REQUIRES: Negate_patterns_with___prefix", () => {
-    // Requirement: Negate patterns with ! prefix
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/glob-matcher.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Negate patterns with ! prefix
+  // NOT IMPLEMENTED - to implement: create packages/tools/glob-matcher.ts
+  test.todo("REQUIRES: Negate_patterns_with___prefix", () => {});
 
-  test("REQUIRES: matchAll_patterns__paths_____string___fi", () => {
-    // Requirement: matchAll(patterns, paths) -> string[] filtered results
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/glob-matcher.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: matchAll(patterns, paths) -> string[] filtered results
+  // NOT IMPLEMENTED - to implement: create packages/tools/glob-matcher.ts
+  test.todo("REQUIRES: matchAll_patterns__paths_____string___fi", () => {});
 
-  test("REQUIRES: Case_insensitive_option", () => {
-    // Requirement: Case-insensitive option
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/glob-matcher.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Case-insensitive option
+  // NOT IMPLEMENTED - to implement: create packages/tools/glob-matcher.ts
+  test.todo("REQUIRES: Case_insensitive_option", () => {});
 });

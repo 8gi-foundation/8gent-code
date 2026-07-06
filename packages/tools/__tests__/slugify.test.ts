@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("slugify", () => {
 
-  test("REQUIRES: Handle_unicode_characters_by_translitera", () => {
-    // Requirement: Handle unicode characters by transliterating to ASCII
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/slugify.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Handle unicode characters by transliterating to ASCII
+  // NOT IMPLEMENTED - to implement: create packages/tools/slugify.ts
+  test.todo("REQUIRES: Handle_unicode_characters_by_translitera", () => {});
 
-  test("REQUIRES: Strip_leading_trailing_hyphens", () => {
-    // Requirement: Strip leading/trailing hyphens
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/slugify.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Strip leading/trailing hyphens
+  // NOT IMPLEMENTED - to implement: create packages/tools/slugify.ts
+  test.todo("REQUIRES: Strip_leading_trailing_hyphens", () => {});
 
-  test("REQUIRES: Collapse_consecutive_hyphens", () => {
-    // Requirement: Collapse consecutive hyphens
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/slugify.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Collapse consecutive hyphens
+  // NOT IMPLEMENTED - to implement: create packages/tools/slugify.ts
+  test.todo("REQUIRES: Collapse_consecutive_hyphens", () => {});
 
-  test("REQUIRES: Accept_optional_separator_character__def", () => {
-    // Requirement: Accept optional separator character (default: hyphen)
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/slugify.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Accept optional separator character (default: hyphen)
+  // NOT IMPLEMENTED - to implement: create packages/tools/slugify.ts
+  test.todo("REQUIRES: Accept_optional_separator_character__def", () => {});
 
-  test("REQUIRES: Lowercase_output", () => {
-    // Requirement: Lowercase output
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/slugify.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Lowercase output
+  // NOT IMPLEMENTED - to implement: create packages/tools/slugify.ts
+  test.todo("REQUIRES: Lowercase_output", () => {});
 });

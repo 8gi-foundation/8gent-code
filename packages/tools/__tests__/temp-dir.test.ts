@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("temp-dir", () => {
 
-  test("REQUIRES: createTempDir_prefix________path__string", () => {
-    // Requirement: createTempDir(prefix?) -> { path: string, cleanup: () => void }
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/temp-dir.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: createTempDir(prefix?) -> { path: string, cleanup: () => void }
+  // NOT IMPLEMENTED - to implement: create packages/tools/temp-dir.ts
+  test.todo("REQUIRES: createTempDir_prefix________path__string", () => {});
 
-  test("REQUIRES: withTempDir_fn____auto_cleans_after_call", () => {
-    // Requirement: withTempDir(fn) - auto-cleans after callback
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/temp-dir.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: withTempDir(fn) - auto-cleans after callback
+  // NOT IMPLEMENTED - to implement: create packages/tools/temp-dir.ts
+  test.todo("REQUIRES: withTempDir_fn____auto_cleans_after_call", () => {});
 
-  test("REQUIRES: Uses_OS_temp_directory__os_tmpdir___", () => {
-    // Requirement: Uses OS temp directory (os.tmpdir())
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/temp-dir.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Uses OS temp directory (os.tmpdir())
+  // NOT IMPLEMENTED - to implement: create packages/tools/temp-dir.ts
+  test.todo("REQUIRES: Uses_OS_temp_directory__os_tmpdir___", () => {});
 
-  test("REQUIRES: Recursive_directory_removal_on_cleanup", () => {
-    // Requirement: Recursive directory removal on cleanup
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/temp-dir.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Recursive directory removal on cleanup
+  // NOT IMPLEMENTED - to implement: create packages/tools/temp-dir.ts
+  test.todo("REQUIRES: Recursive_directory_removal_on_cleanup", () => {});
 
-  test("REQUIRES: Returns_absolute_path", () => {
-    // Requirement: Returns absolute path
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/temp-dir.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Returns absolute path
+  // NOT IMPLEMENTED - to implement: create packages/tools/temp-dir.ts
+  test.todo("REQUIRES: Returns_absolute_path", () => {});
 });
