@@ -10,13 +10,14 @@
  * designSystemId metadata, fail-closed on an empty DB.
  */
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import { generateCssVariables } from "../query";
 import {
+	__resetDesignContextCache,
 	DesignContextUnavailable,
 	designPromptBlock,
 	resolveDesignContext,
@@ -36,6 +37,10 @@ beforeAll(() => {
 	seededDbPath = path.join(root, "seeded.db");
 	seedDatabase(seededDbPath);
 });
+
+// Reset the module DB cache before each test so the per-test EIGHT_DESIGN_DB
+// takes effect regardless of file/test ordering.
+beforeEach(() => __resetDesignContextCache());
 
 describe("resolveDesignContext", () => {
 	test("fail-closed: throws DesignContextUnavailable on an empty DB", () => {

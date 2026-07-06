@@ -65,6 +65,12 @@ export interface DesignHint {
 
 let dbReady = false;
 
+/** Test-only: clear the DB cache so a newly-set EIGHT_DESIGN_DB takes effect on
+ * the next resolve. Not part of the public generation contract. */
+export function __resetDesignContextCache(): void {
+	dbReady = false;
+}
+
 /** Locate + initialize the design DB, mirroring the pipeline's candidate order.
  * Throws DesignContextUnavailable if missing or empty (fail-closed). */
 function ensureDb(): void {
