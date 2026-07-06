@@ -618,6 +618,38 @@ const generateSpriteTool = tool({
 	},
 });
 
+const makePdfTool = tool({
+	description:
+		"Produce a PDF document from Markdown or HTML, the way a human would via bash. Shells out to the canonical fleet-wide renderer (~/.8gent/bin/make-pdf; HTML/Markdown -> PDF via weasyprint or chrome-headless). The PDF is written into ~/.8gent/creative/ so it shows up on the Create surface. Non-destructive, deterministic, no network. Provide exactly ONE source. Example: make_pdf({ markdown: '# Report\\n\\nBody...', title: 'Weekly Report' }).",
+	inputSchema: z.object({
+		markdown: z.string().optional().describe("Inline Markdown source for the document"),
+		html: z.string().optional().describe("Inline HTML source for the document"),
+		htmlPath: z.string().optional().describe("Path to an existing HTML file to render"),
+		mdPath: z.string().optional().describe("Path to an existing Markdown file to render"),
+		title: z.string().optional().describe("Document title (used for Markdown inputs and auto-naming)"),
+		outName: z
+			.string()
+			.optional()
+			.describe("Optional output filename; resolved inside ~/.8gent/creative/ (a .pdf extension is added if missing)"),
+	}),
+	execute: async ({ markdown, html, htmlPath, mdPath, title, outName }) => {
+		const { makePdf } = await import("../tools/make-pdf");
+		try {
+			const result = await makePdf({ markdown, html, htmlPath, mdPath, title, outName });
+			return JSON.stringify(result, null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{
+					error: `make_pdf failed: ${err instanceof Error ? err.message : String(err)}`,
+					hint: "Provide exactly one of markdown/html/htmlPath/mdPath. Ensure ~/.8gent/bin/make-pdf is installed.",
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
 // ============================================
 // PDF Tools
 // ============================================
@@ -2922,6 +2954,9 @@ export const agentTools = {
 
 	// Creative — local-first media generation (spritesheet, animation)
 	generate_sprite: generateSpriteTool,
+
+	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
+	make_pdf: makePdfTool,
 } satisfies ToolSet;
 
 export type AgentTools = typeof agentTools;
