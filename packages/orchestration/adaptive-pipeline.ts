@@ -18,9 +18,8 @@
  * Proven across 8 AutoResearch rounds (benchmarks/autoresearch).
  */
 
-import { Database } from "bun:sqlite";
+import { DesignContextUnavailable, resolveDesignContext } from "../design-systems/index";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { detectLocalModels } from "./local-model-detect.js";
@@ -709,38 +708,17 @@ export function staticChecks(html: string): string[] {
 	return d;
 }
 
-function designTokens(): string {
-	const candidates = [
-		join(process.cwd(), "data", "design-systems.db"),
-		join(homedir(), ".8gent", "design-systems.db"),
-	];
-	const dbPath = candidates.find((p) => existsSync(p));
-	if (!dbPath) return "(no design-system DB found - choose tasteful defaults)";
+// De-duplicated: the single DB read now lives in the design-systems resolver
+// (packages/design-systems/context.ts). This build path keeps its non-crashing
+// contract - a missing DB degrades to a tasteful-defaults note rather than
+// aborting the build. `hint` lets a caller steer the system by project type.
+function designTokens(hint: { projectType?: string; systemId?: string } = {}): string {
 	try {
-		const db = new Database(dbPath);
-		const sys = db
-			.query(
-				"SELECT id, name FROM design_systems WHERE style IN ('minimal','elegant','tech') LIMIT 1",
-			)
-			.get() as { id: string; name: string } | null;
-		if (!sys) {
-			db.close();
-			return "(design DB empty)";
-		}
-		const pal = db
-			.query("SELECT * FROM color_palettes WHERE system_id = ?")
-			.get(sys.id) as Record<string, string> | null;
-		const typo = db
-			.query("SELECT * FROM typography WHERE system_id = ?")
-			.get(sys.id) as Record<string, string> | null;
-		db.close();
-		const lines = [`Design system: ${sys.name} (inbuilt design DB)`];
-		if (pal)
-			for (const k of ["accent_hsl", "primary_hsl", "muted_foreground_hsl", "border_hsl"])
-				if (pal[k]) lines.push(`  --${k.replace("_hsl", "")}: hsl(${pal[k]})`);
-		if (typo) lines.push(`Typography: ${typo.font_family}`);
-		return lines.join("\n");
+		return resolveDesignContext(hint).promptBlock;
 	} catch (err) {
+		if (err instanceof DesignContextUnavailable) {
+			return "(no design-system DB found - choose tasteful defaults)";
+		}
 		return `(design DB unavailable: ${err})`;
 	}
 }
