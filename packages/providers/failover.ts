@@ -133,6 +133,15 @@ export class ModelFailover {
 					},
 				],
 			},
+			// MiniCPM5-1B gatekeeper judge/classifier (#2742). Local-first, NO
+			// cloud tail — the whole point of this seat is to remove an egress
+			// path. Apple Foundation is a local fallback so hosts without
+			// MiniCPM pulled still judge on-device (Seat 2b). Without this entry
+			// resolve() would silently reroute the unknown model id to
+			// openrouter (see resolve() below).
+			"openbmb/minicpm5:latest": {
+				models: [{ model: "openbmb/minicpm5:latest", provider: "ollama" }, APPLE_FOUNDATION_ENTRY],
+			},
 			"apple-foundationmodel": {
 				models: [
 					APPLE_FOUNDATION_ENTRY,

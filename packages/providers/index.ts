@@ -233,7 +233,7 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 		baseUrl: "http://localhost:11434",
 		apiKeyEnv: "", // No API key needed
 		defaultModel: "qwen3.5:latest",
-		models: ["qwen3.6:27b", "qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1"],
+		models: ["qwen3.6:27b", "qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1", "openbmb/minicpm5:latest"],
 		enabled: true,
 		supportsTools: true,
 		supportsStreaming: true,

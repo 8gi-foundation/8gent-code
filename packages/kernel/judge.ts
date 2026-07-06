@@ -12,6 +12,28 @@ import { redact } from "../memory/redact";
 import { anonymize, containsPii } from "../permissions/pii-anonymizer";
 import { containsSecret } from "../permissions/goal-secret-scrub";
 
+// ── MiniCPM5-1B local judge (#2742) ──────────────────────────────────────────
+/** Ollama tag for the MiniCPM5-1B judge model. */
+export const MINICPM_MODEL = "openbmb/minicpm5:latest";
+/** Ollama's OpenAI-compatible endpoint — keeps the judge fully on-device. */
+export const OLLAMA_OPENAI_URL = "http://localhost:11434/v1";
+
+/** True when the kernel judge should score locally with MiniCPM5-1B. */
+export function judgeMiniCpmEnabled(): boolean {
+	return Boolean(process.env.EIGHT_JUDGE_MINICPM);
+}
+
+/**
+ * MiniCPM5-1B prepends a `<think>...</think>` reasoning block. Strip it before
+ * JSON extraction so the score parse doesn't choke. No-op for other models.
+ */
+export function stripThink(text: string): string {
+	let out = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+	out = out.replace(/<think>[\s\S]*$/i, "");
+	out = out.replace(/^[\s\S]*?<\/think>/i, "");
+	return out.trim();
+}
+
 export interface JudgeConfig {
 	/** Judge model endpoint (default: OpenRouter) */
 	prmUrl: string;
@@ -91,8 +113,16 @@ export class JudgeScorer {
 
 	constructor(config: Partial<JudgeConfig> = {}) {
 		this.config = { ...DEFAULT_JUDGE_CONFIG, ...config };
+		// Flag override (#2742): route the PRM scorer to the local MiniCPM5-1B
+		// via Ollama's OpenAI-compatible endpoint. This removes the OpenRouter
+		// egress entirely. Explicit caller overrides still win.
+		if (judgeMiniCpmEnabled()) {
+			if (config.prmModel === undefined) this.config.prmModel = MINICPM_MODEL;
+			if (config.prmUrl === undefined) this.config.prmUrl = OLLAMA_OPENAI_URL;
+		}
 		if (!this.config.prmApiKey) {
-			this.config.prmApiKey = process.env.OPENROUTER_API_KEY ?? "";
+			// Ollama ignores the key; a placeholder avoids an empty Bearer header.
+			this.config.prmApiKey = this.config.prmModel === MINICPM_MODEL ? "ollama" : (process.env.OPENROUTER_API_KEY ?? "");
 		}
 	}
 
@@ -274,7 +304,9 @@ export class JudgeScorer {
 		}
 
 		const data = await response.json();
-		const content = data.choices?.[0]?.message?.content ?? "{}";
+		const rawContent = data.choices?.[0]?.message?.content ?? "{}";
+		// MiniCPM5-1B prefixes a <think> block; strip it before JSON extraction.
+		const content = stripThink(rawContent);
 
 		// Extract JSON from response (may be wrapped in markdown fences)
 		const jsonMatch = content.match(/\{[\s\S]*\}/);

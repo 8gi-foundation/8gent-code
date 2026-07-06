@@ -47,7 +47,19 @@ export interface FailoverJudgeOptions {
 	timeoutMs?: number;
 }
 
-const DEFAULT_LOCAL_JUDGE = "apple-foundationmodel";
+/** Ollama tag for the MiniCPM5-1B local judge (#2742). */
+export const MINICPM_MODEL = "openbmb/minicpm5:latest";
+
+/**
+ * Default local judge model. When `EIGHT_JUDGE_MINICPM` is set, MiniCPM5-1B
+ * becomes the default; Apple Foundation stays as the local fallback tier in the
+ * failover chain (see providers/failover.ts) so hosts without MiniCPM pulled
+ * still judge on-device. Off by default — main behavior unchanged. Read at
+ * construction time (not module load) so tests/benches can toggle the flag.
+ */
+export function defaultLocalJudge(): string {
+	return process.env.EIGHT_JUDGE_MINICPM ? MINICPM_MODEL : "apple-foundationmodel";
+}
 
 const JUDGE_PROMPT_TEMPLATE = (args: {
 	goalText: string;
@@ -131,8 +143,14 @@ export function parseJudgeJson(raw: string): {
 	if (typeof raw !== "string" || !raw.trim()) {
 		throw new Error("judge returned empty response");
 	}
+	// MiniCPM5-1B (#2742) prepends a <think>...</think> reasoning block that can
+	// itself contain braces; strip it before locating the JSON object.
+	const dethought = raw
+		.replace(/<think>[\s\S]*?<\/think>/gi, "")
+		.replace(/<think>[\s\S]*$/i, "")
+		.replace(/^[\s\S]*?<\/think>/i, "");
 	// Strip fenced blocks if present.
-	const stripped = raw
+	const stripped = dethought
 		.replace(/^```(?:json)?\s*/im, "")
 		.replace(/```\s*$/m, "")
 		.trim();
@@ -172,7 +190,7 @@ export class FailoverJudge implements JudgeHandle {
 	private readonly goalCriteria = new Map<string, string>();
 
 	constructor(opts: FailoverJudgeOptions) {
-		const requestedJudge = (opts.judgeModel ?? DEFAULT_LOCAL_JUDGE).trim();
+		const requestedJudge = (opts.judgeModel ?? defaultLocalJudge()).trim();
 		// Anti-collusion: judge MUST differ from executor. Reuses the same
 		// equality check used in GoalLoop construction for consistency.
 		assertDistinctJudge(opts.executorModel, requestedJudge);

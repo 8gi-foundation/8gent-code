@@ -17,9 +17,42 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import { type ProviderConfig, type ProviderName, createModel } from "./providers";
+
+// ============================================
+// MiniCPM5-1B gatekeeper (#2742)
+// ============================================
+
+/** Ollama tag for the MiniCPM5-1B classifier/judge model. */
+export const MINICPM_MODEL = "openbmb/minicpm5:latest";
+
+/** True when the router should classify with MiniCPM5-1B instead of qwen3.5. */
+export function routerMiniCpmEnabled(): boolean {
+	return Boolean(process.env.EIGHT_ROUTER_MINICPM);
+}
+
+/**
+ * MiniCPM5-1B emits a `<think>...</think>` reasoning block before its answer.
+ * Strip a leading think block (and any stray closing tag) so the payload after
+ * it can be parsed as JSON / a category. Safe no-op for models that don't think.
+ */
+export function stripThink(text: string): string {
+	let out = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+	// Unbalanced: opening tag but the close got truncated, or a lone close tag.
+	out = out.replace(/<think>[\s\S]*$/i, "");
+	out = out.replace(/^[\s\S]*?<\/think>/i, "");
+	return out.trim();
+}
+
+/** Pull the first balanced `{...}` JSON object out of a noisy model reply. */
+export function extractJsonObject(text: string): string {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start !== -1 && end > start) return text.slice(start, end + 1);
+	return text.trim();
+}
 
 // ============================================
 // Types
@@ -82,10 +115,11 @@ const DEFAULT_CONFIG: RouterConfig = {
 // ============================================
 
 export function loadRouterConfig(): RouterConfig {
+	let config: RouterConfig = { ...DEFAULT_CONFIG };
 	try {
 		if (existsSync(ROUTER_CONFIG_PATH)) {
 			const raw = JSON.parse(readFileSync(ROUTER_CONFIG_PATH, "utf-8"));
-			return {
+			config = {
 				...DEFAULT_CONFIG,
 				...raw,
 				slots: { ...DEFAULT_CONFIG.slots, ...raw.slots },
@@ -94,7 +128,14 @@ export function loadRouterConfig(): RouterConfig {
 	} catch {
 		/* defaults */
 	}
-	return { ...DEFAULT_CONFIG };
+	// Flag override (#2742): MiniCPM5-1B classifier. Applied after the persisted
+	// merge so the flag wins over both defaults and a stale router.json. Only
+	// the classifier seat moves — executor slots are untouched.
+	if (routerMiniCpmEnabled()) {
+		config.classifierModel = MINICPM_MODEL;
+		config.classifierProvider = "ollama";
+	}
+	return config;
 }
 
 export function saveRouterConfig(config: RouterConfig): void {
@@ -192,11 +233,31 @@ export class TaskRouter {
 		};
 
 		const model = createModel(classifierConfig);
+		const instruction = `Classify this user task into exactly one category.\n\nTask: ${prompt.slice(0, 500)}`;
+
+		// MiniCPM5-1B (#2742) emits a <think>...</think> block that breaks the
+		// structured-output parser, so read raw text, strip the think block,
+		// then parse the JSON category ourselves.
+		if (this.config.classifierModel === MINICPM_MODEL) {
+			const { text } = await generateText({
+				model,
+				prompt:
+					`${instruction}\n\nRespond with ONLY a JSON object: ` +
+					`{"category": "code|reasoning|simple|creative", "confidence": 0..1, "reasoning": "one sentence"}`,
+				maxOutputTokens: 300,
+			});
+			const parsed = ClassificationSchema.parse(JSON.parse(extractJsonObject(stripThink(text))));
+			return {
+				category: parsed.category,
+				confidence: parsed.confidence,
+				reasoning: parsed.reasoning,
+			};
+		}
 
 		const { object } = await generateObject({
 			model,
 			schema: ClassificationSchema,
-			prompt: `Classify this user task into exactly one category.\n\nTask: ${prompt.slice(0, 500)}`,
+			prompt: instruction,
 			maxOutputTokens: 100,
 		});
 
