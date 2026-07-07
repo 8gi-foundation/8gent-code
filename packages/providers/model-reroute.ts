@@ -76,6 +76,35 @@ export function isModelNotFoundError(err: unknown): boolean {
 }
 
 /**
+ * Detect whether an error means the local provider itself is UNHEALTHY - the
+ * model is nominally "there" but the backend can't answer - so the turn should
+ * reroute to the best OTHER installed model rather than surface a dead brain.
+ *
+ * The load-bearing case: Apple Foundation is auto-selected on this host (the
+ * bridge binary is installed), but Apple Intelligence is toggled OFF in System
+ * Settings, so every call returns `"Apple Intelligence is not enabled"` (an
+ * error body, not a 404). That is not "model not found", so without this the
+ * agent kept the dead provider and stalled. We keep Apple Foundation ON (it is
+ * the best pick where Apple Intelligence IS enabled); we just fail OFF it here.
+ *
+ * Reachability failures (ECONNREFUSED, timeouts) stay the caller's to handle -
+ * those are "is the server up?", not "this provider can't answer right now".
+ */
+export function isProviderUnhealthyError(err: unknown): boolean {
+	const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+	if (!msg) return false;
+	if (/econnrefused|enotfound|eai_again|fetch failed|connection refused/.test(msg)) {
+		return false;
+	}
+	return (
+		/apple intelligence is not enabled/.test(msg) ||
+		/apple intelligence.*(disabled|unavailable|not available)/.test(msg) ||
+		/foundation model.*(unavailable|not available|disabled)/.test(msg) ||
+		/model is not ready|assets? (are )?not (yet )?(available|downloaded)/.test(msg)
+	);
+}
+
+/**
  * Probe the locally-installed models across every local host (Ollama + LM
  * Studio + Apple Foundation). Loaded lazily so `packages/providers` never takes
  * a static dependency on `packages/orchestration` (which imports providers).
@@ -164,9 +193,13 @@ export async function callLocalModelWithReroute<T>(opts: {
 			const value = await opts.run(provider, model);
 			return { ok: true, value, usedProvider: provider, usedModel: model, rerouted };
 		} catch (err) {
-			// Only a not-found error triggers a reroute, and only once. Everything
-			// else (server down, timeout, abort) is the caller's to handle.
-			if (rerouted || !isModelNotFoundError(err)) throw err;
+			// A not-found error OR an unhealthy local provider (e.g. Apple
+			// Foundation when Apple Intelligence is off) triggers ONE reroute to
+			// the best other installed model. Reachability failures, timeouts and
+			// aborts stay the caller's to handle.
+			if (rerouted || !(isModelNotFoundError(err) || isProviderUnhealthyError(err))) {
+				throw err;
+			}
 
 			const installed = await detect().catch(() => [] as InstalledModel[]);
 			const chosen = chooseRerouteModel(installed, model, opts.prefer);
