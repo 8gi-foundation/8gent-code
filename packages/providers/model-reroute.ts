@@ -100,7 +100,11 @@ export function isProviderUnhealthyError(err: unknown): boolean {
 		/apple intelligence is not enabled/.test(msg) ||
 		/apple intelligence.*(disabled|unavailable|not available)/.test(msg) ||
 		/foundation model.*(unavailable|not available|disabled)/.test(msg) ||
-		/model is not ready|assets? (are )?not (yet )?(available|downloaded)/.test(msg)
+		/model is not ready|assets? (are )?not (yet )?(available|downloaded)/.test(msg) ||
+		// Apple Intelligence just enabled but the model is still downloading/warming:
+		// the bridge returns "The model is not available. Try again later." Treat it
+		// as a health failure so we fail over while it finishes, then use it once ready.
+		/model (is )?not available|model unavailable|try again later/.test(msg)
 	);
 }
 
