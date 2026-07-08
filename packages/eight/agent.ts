@@ -30,7 +30,7 @@ import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orche
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
-import { callLocalModelWithReroute } from "../providers/model-reroute";
+import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -53,26 +53,23 @@ import {
 	ProactiveCompression,
 	type ProactiveResult,
 } from "./compaction";
-import {
-	type AgentState as TwoStageAgentState,
-	type CheckpointEntry,
-	type Summarizer,
-	TwoStageCompactor,
-} from "./two-stage-compactor";
+import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
 import { ToolLoopDetector } from "./tool-loop-detector";
-import { TurnJournal } from "./turn-journal";
-import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
+import { TurnJournal } from "./turn-journal";
+import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import {
-	PreToolRouter,
-	formatPreFetchedContext,
-	type RouterDecision,
-} from "./pre-tool-router";
+	type CheckpointEntry,
+	type Summarizer,
+	type AgentState as TwoStageAgentState,
+	TwoStageCompactor,
+} from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter } from "./vision-interpreter";
 
@@ -122,11 +119,11 @@ import {
 	setToolContext,
 } from "../ai";
 import {
+	type TextTool,
 	buildTextToolCall,
 	needsTextTools,
 	resolveTextToolEndpoint,
 	runTextToolAgent,
-	type TextTool,
 	toolDefsToSpecs,
 } from "../ai";
 
@@ -145,6 +142,21 @@ function shouldUseTextTools(providerName: string): boolean {
 	if (override === "0" || override === "false") return false;
 	const supportsNativeTools = providerName !== "lmstudio" && providerName !== "ollama";
 	return needsTextTools({ supportsNativeTools });
+}
+
+/**
+ * The operator's pinned model (`~/.8gent/providers.json` activeModel), used as
+ * the first preference when an agentic turn must be routed off a model that
+ * cannot accept tools (Law 2, issue #2747).
+ */
+function readPinnedActiveModel(): string[] {
+	try {
+		const raw = fs.readFileSync(path.join(os.homedir(), ".8gent", "providers.json"), "utf-8");
+		const parsed = JSON.parse(raw) as { activeModel?: string };
+		return typeof parsed.activeModel === "string" && parsed.activeModel ? [parsed.activeModel] : [];
+	} catch {
+		return [];
+	}
 }
 
 export class Agent {
@@ -183,6 +195,10 @@ export class Agent {
 	private twoStageCompactor: TwoStageCompactor | null = null;
 	private twoStageCheckpoints: CheckpointEntry[] = [];
 	private recentFilePaths: string[] = [];
+	// Per-turn tool ledger: every tool call this turn with its real success
+	// state. The agentic-honesty gate (issue #2747) checks the final reply
+	// against this so the agent can never claim completion it did not earn.
+	private turnToolLedger: ToolLedgerEntry[] = [];
 	// TurnJournal (#2470): per-turn replayable record for debug + audit.
 	private turnJournal: TurnJournal;
 	private turnIndex = 0;
@@ -196,9 +212,14 @@ export class Agent {
 	constructor(config: AgentConfig) {
 		this.config = config;
 		this.events = config.events || {};
-		this.executor = new ToolExecutor(config.workingDirectory || process.cwd(), "primary", undefined, {
-			unattended: config.unattended ?? false,
-		});
+		this.executor = new ToolExecutor(
+			config.workingDirectory || process.cwd(),
+			"primary",
+			undefined,
+			{
+				unattended: config.unattended ?? false,
+			},
+		);
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
@@ -602,15 +623,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					// The executor returns an error STRING rather than throwing for most
 					// failure modes; treat a leading error marker as an unsuccessful call
 					// for event + session bookkeeping.
-					success = !/^(\[[A-Z_ ]*(BLOCKED|DENIED|ERROR)\]|Error:|Unknown tool:)/.test(
-						result.trimStart(),
-					);
+					success = !isErrorToolResult(result);
 				} catch (err) {
 					success = false;
 					result = `Error running tool "${toolName}": ${err instanceof Error ? err.message : String(err)}`;
 				}
 
 				const durationMs = Date.now() - startedAt;
+
+				// Honesty ledger (issue #2747): record the REAL outcome so the final
+				// reply can be gated against what actually happened.
+				this.turnToolLedger.push({ name: toolName, args, success, result: result.slice(0, 500) });
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				this.loopDetector.record(toolName, args);
@@ -668,9 +691,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		const messages: Array<{
 			role: "system" | "user" | "assistant" | "tool";
 			content: string;
-		}> = instructions
-			? [{ role: "system", content: instructions }, ...history]
-			: [...history];
+		}> = instructions ? [{ role: "system", content: instructions }, ...history] : [...history];
 
 		// One agentic turn against a given local provider/model. The raw call hits
 		// the local endpoint with the turn's abort signal wired into fetch, so an
@@ -703,6 +724,32 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			});
 		};
 
+		// ── Law 2 (issue #2747): only tool-capable models do tool-work ──────
+		// This turn has tools in play. Verify (once, cached) that the pinned
+		// local model actually accepts a `tools` payload; a model that 400s the
+		// probe (broken jinja chat template, e.g. gemma missing
+		// format_type_argument) fabricates instead of executing, so the agentic
+		// turn is routed to a model that can act - preferring the operator's
+		// ~/.8gent/providers.json pin (ornith).
+		let effectiveProvider = providerName;
+		let effectiveModel = providerModel;
+		try {
+			const resolution = await resolveToolCapableModel({
+				provider: providerName,
+				model: providerModel,
+				prefer: readPinnedActiveModel(),
+			});
+			if (resolution.switched) {
+				console.log(`[honesty] ${resolution.reason}`);
+				effectiveProvider = resolution.provider;
+				effectiveModel = resolution.model;
+				// Session self-correction: subsequent turns start on the capable model.
+				this.config.model = resolution.model;
+			}
+		} catch {
+			// The capability gate is best-effort - it must never block a turn.
+		}
+
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
 		try {
 			// A missing/unavailable local model must never surface a raw provider
@@ -711,8 +758,8 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			// and retries the turn on a real model; only a genuine no-model-anywhere
 			// case returns a clean human message.
 			const outcome = await callLocalModelWithReroute({
-				provider: providerName,
-				model: providerModel,
+				provider: effectiveProvider,
+				model: effectiveModel,
 				run: runTurn,
 				onReroute: (missing, chosen) => {
 					console.log(
@@ -751,12 +798,27 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		}
 		this.abortController = null;
 
+		// ── Law 1 (issue #2747): no fabricated completion ────────────────────
+		// The final reply is gated on the turn's tool ledger. A completion claim
+		// with no successful action-tool call behind it is replaced with an
+		// honest report of what actually happened (the real tool error, or the
+		// fact that nothing ran at all).
+		const gated = enforceAgenticHonesty({
+			content: agentResult.content,
+			ledger: this.turnToolLedger,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		if (gated.violated) {
+			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
+		}
+
 		// Map into the exact shape chat() normally returns: flavored prose, pushed
 		// onto the assistant history, with the post-turn bookkeeping the native
-		// path performs (session evidence summary, run log, journal).
-		const content = agentResult.content;
+		// path performs (session evidence summary, run log, journal). A reply the
+		// honesty gate rewrote is NOT flavored - no celebration on a failure.
+		const content = gated.content;
 		const flavor = personalityVoice.getFlavor("complete");
-		const flavoredContent = flavorResponse(content, flavor);
+		const flavoredContent = gated.violated ? content : flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
 		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
 
@@ -812,9 +874,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 	}
 
 	async chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
-		// Reset circuit breaker and privacy tracker for each new turn
+		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
+		this.turnToolLedger = [];
 
 		const textForAgent =
 			userMessage.trim() ||
@@ -1167,6 +1230,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			onToolCallFinish: async (event) => {
 				const resultStr =
 					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+
+				// Honesty ledger (issue #2747): record the REAL outcome. The executor
+				// returns error STRINGS for most failures, so a "successful" event
+				// whose result is an error marker still counts as a failure.
+				this.turnToolLedger.push({
+					name: event.toolName,
+					args: event.args as Record<string, unknown>,
+					success: event.success && !isErrorToolResult(resultStr),
+					result: resultStr.slice(0, 500),
+				});
 
 				// Loop detection: track repeated tool calls with similar args
 				const fingerprint = `${event.toolName}:${JSON.stringify(event.args).slice(0, 200)}`;
@@ -1572,7 +1645,11 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 						// reach the tool executor.
 						const hedge = this.kernel.hedge;
 						const candidates: HedgeCandidate[] = [
-							{ provider: currentEntry.provider, model: currentEntry.model, local: isLocalProvider },
+							{
+								provider: currentEntry.provider,
+								model: currentEntry.model,
+								local: isLocalProvider,
+							},
 						];
 						if (hedge.enabled) {
 							// Add sibling free/local entries from the failover chain as extra
@@ -1595,8 +1672,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 									candidates,
 									async (cand, signal) => {
 										const candAgent =
-											cand.provider === currentEntry.provider &&
-											cand.model === currentEntry.model
+											cand.provider === currentEntry.provider && cand.model === currentEntry.model
 												? agent
 												: createEightAgent({
 														...agentConfig,
@@ -1607,14 +1683,11 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 										return candAgent.generate({
 											messages,
 											abortSignal: signal,
-										}) as unknown as Promise<
-											import("../kernel/hedge-executor").GenerateResult
-										>;
+										}) as unknown as Promise<import("../kernel/hedge-executor").GenerateResult>;
 									},
 									{
 										sessionId: this.sessionId,
-										turnIndex: this.messageHistory.filter((m) => m.role === "assistant")
-											.length,
+										turnIndex: this.messageHistory.filter((m) => m.role === "assistant").length,
 										prompt: textForAgent,
 										abortSignal: this.abortController?.signal,
 									},
@@ -1750,11 +1823,22 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				}
 			}
 
-			const content = result.text;
+			// ── Law 1 (issue #2747): no fabricated completion ────────────────
+			// Gate the final reply on the turn's tool ledger before flavoring.
+			const gatedNative = enforceAgenticHonesty({
+				content: result.text,
+				ledger: this.turnToolLedger,
+				workingDirectory: this.config.workingDirectory || process.cwd(),
+			});
+			if (gatedNative.violated) {
+				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
+			}
+			const content = gatedNative.content;
 
-			// Apply personality voice flavoring to the response
+			// Apply personality voice flavoring to the response (never on a reply
+			// the honesty gate rewrote - no celebration on a failure).
 			const flavor = personalityVoice.getFlavor("complete");
-			const flavoredContent = flavorResponse(content, flavor);
+			const flavoredContent = gatedNative.violated ? content : flavorResponse(content, flavor);
 
 			this.messageHistory.push({ role: "assistant", content: flavoredContent });
 
@@ -1766,8 +1850,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			// in which case we fall back to the prior neutral 0.8 default so behaviour
 			// is unchanged when the flag is OFF. Kept fully off the hot path.
 			if (this.kernel.isActive || this.kernel.isEnabled) {
-				const toolCallsSucceeded =
-					this.sessionEvidence.filter((e) => !e.verified).length === 0;
+				const toolCallsSucceeded = this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
 				const promptForKernel = textForAgent;
 				const responseForKernel = flavoredContent;
