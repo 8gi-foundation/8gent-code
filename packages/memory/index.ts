@@ -134,6 +134,17 @@ export {
 	type BrainEdgePayload,
 	type BrainSyncBundle,
 } from "./flow-sync.js";
+// Flow brain sync client (#2754 step 3, wave 2): the network loop that walks a
+// project subgraph and POSTs it to the relay's /brain API. Local-first, fail-closed.
+export {
+	FlowBrainSyncClient,
+	isLoopbackUrl,
+	type FetchLike,
+	type FlowSyncClientOptions,
+	type SyncReport,
+	type SyncFailure,
+	type SyncFailureKind,
+} from "./flow-sync-client.js";
 export {
 	extractFromVideo,
 	fuseTimeline,
