@@ -1,6 +1,6 @@
 # Skill Manifest (SPEC)
 
-Status: Step 1 of the third-party skill ecosystem (issue #2760). Shipped.
+Status: Steps 1-2 of the third-party skill ecosystem (issue #2760). Shipped.
 
 ## Why
 
@@ -90,10 +90,54 @@ and the skill is never installed - no capability is widened, so a malformed
 third-party skill cannot smuggle in a grant. A clean manifest proceeds to the
 existing capability check (issue #2091) unchanged.
 
+## Capability scoping: a skill gets what it declares (Step 2)
+
+Step 1 made the declaration exist and be well-formed. Step 2 makes it load-bearing
+at runtime: a skill can only reach the capabilities it declared, nothing more.
+`packages/skills/capability-scope.ts` is the bridge between the abstract manifest
+capability tokens (`network`, `filesystem-write`) and the policy engine's per-tool
+capability manifests (NemoClaw v2, `packages/permissions/capability-manifest.ts`),
+which check concrete requests (a read of a path, a fetch of a host, an exec of a
+command).
+
+Enforcement is a two-gate AND, both must allow:
+
+1. **Skill envelope gate** (`enforceSkillScope`): the request's capability must be one
+   the skill declared. The request kind maps to a manifest token:
+
+   | Request kind | Skill capability |
+   | --- | --- |
+   | `fs_read` | `filesystem-read` |
+   | `fs_write` | `filesystem-write` |
+   | `network` | `network` |
+   | `exec` | `shell` |
+
+   The envelope is the union of `requiredCapabilities` and `grantedCapabilities`. A
+   skill that never declared `network` is denied a network request here, before the
+   tool manifest is even consulted - so even a tool whose own manifest allows any host
+   cannot be used by that skill to reach the network.
+
+2. **Tool manifest gate** (`enforceCapability`): the concrete path/host/command must be
+   inside the tool's declared least-capability scopes. Deny by default for unmanifested
+   tools.
+
+`SkillManager.enforceSkillCapability(skillName, toolName, request, opts)` resolves the
+skill and applies both gates; an unknown skill is denied outright.
+
+### Backward compatibility
+
+Scoping is opt-in by declaration. A skill that declares no capabilities (every bundled
+skill today) has an empty envelope and is treated as unscoped/legacy - the envelope gate
+is skipped and only the tool manifest bounds it, so existing behavior is unchanged. A
+skill that declares at least one capability opts into strict scoping. The registry
+(Step 3) and quarantine lane (Step 4) build on this by requiring third-party skills to
+declare, so an installed stranger's skill is always scoped.
+
 ## Not in this slice
 
 - Registry index + `8gent skill install <name>` and signed releases (Step 3).
 - Quarantine read-only lane and promotion (Step 4).
 - Ten published seed skills as the reference bar (Step 5).
 
-Each of those consumes `validateManifest` as its admission gate.
+Each of those consumes `validateManifest` as its admission gate and `enforceSkillScope`
+as its runtime capability boundary.

@@ -25,11 +25,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-	ActorKind,
-	CapabilityAuditStore,
-	LogCapabilityInput,
-} from "../audit/index.js";
+import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
+import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
+import type { PolicyDecision } from "../permissions/types.js";
+import { enforceSkillScope } from "./capability-scope.js";
 import { validateSkillManifest } from "./manifest.js";
 
 // Skill compounding: learned-skills directory
@@ -715,6 +714,29 @@ examples:
 	}
 
 	/**
+	 * Enforce a skill's declared capability envelope over a tool call, then defer
+	 * to the policy engine's tool-manifest gate (issue #2760, Step 2). A skill
+	 * gets what it declares, nothing more. An unknown skill is denied outright; an
+	 * unscoped skill (no declarations) passes the envelope gate and is bounded only
+	 * by the tool manifest, preserving backward compatibility.
+	 */
+	enforceSkillCapability(
+		skillName: string,
+		toolName: string,
+		request: CapabilityRequest,
+		opts: EnforceOptions = {},
+	): PolicyDecision {
+		const skill = this.getSkill(skillName);
+		if (!skill) {
+			return {
+				allowed: false,
+				reason: `[skill-scope] unknown skill "${skillName}"; ${request.kind} denied by default`,
+			};
+		}
+		return enforceSkillScope(skill, toolName, request, opts);
+	}
+
+	/**
 	 * Save a skill to disk
 	 */
 	saveSkill(skill: Skill): void {
@@ -797,6 +819,12 @@ export {
 	KNOWN_CAPABILITIES,
 } from "./manifest.js";
 export type { SkillManifest, ManifestValidationResult } from "./manifest.js";
+export {
+	enforceSkillScope,
+	skillEnvelope,
+	isSkillScoped,
+	capabilityForRequest,
+} from "./capability-scope.js";
 export {
 	runExperiment,
 	experimentsEnabled,
