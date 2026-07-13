@@ -183,6 +183,13 @@ touches `packages/eight`, `packages/providers`, or `packages/tools` - no
 regression ships, and the numbers it compares against are in the diff, not
 a dashboard only maintainers can see. See `../scores/README.md`.
 
+The report also breaks scores down per model (e.g. `eight-1.0-q3:14b` vs a
+fallback like `gemma-3:12b`), read straight from the `model` column
+`harness-v2.ts` already writes into `results-v2.tsv`. That breakdown is
+tracked in `../scores/ledger.json` under `models` and is informational
+only - a single model's regression never fails the gate, only a category's
+blended average does. Pass `--no-by-model` to hide the table.
+
 ### Autoresearch Loop (iterative improvement)
 
 ```bash
