@@ -1243,6 +1243,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				// Record tool call for Convex session sync
 				this.sessionSync.recordToolCall();
 
+				// Kernel trace capture (#2752 step 1): buffer this tool step for the
+				// current turn's trajectory. No-op unless training_proxy.traceCapture
+				// is opted in; scrubbing happens at finalize, before anything is written.
+				this.kernel.recordToolStep({
+					tool: event.toolName,
+					argsSummary: JSON.stringify(event.args ?? {}).slice(0, 300),
+					ok: event.success,
+					durationMs: event.durationMs,
+				});
+
 				// Track file operations
 				if (event.success) {
 					if (event.toolName === "write_file" && event.args.path) {
@@ -1774,7 +1784,10 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			// returns null when the kernel loop is inactive (flag off / not started),
 			// in which case we fall back to the prior neutral 0.8 default so behaviour
 			// is unchanged when the flag is OFF. Kept fully off the hot path.
-			if (this.kernel.isActive || this.kernel.isEnabled) {
+			// Trace capture (#2752 step 1) also routes through here: when only
+			// traceCapture is opted in, processTurn still returns null (loop off)
+			// and collectSessionTrace persists the scrubbed trajectory locally.
+			if (this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled) {
 				const toolCallsSucceeded =
 					this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
@@ -1801,6 +1814,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 								model: modelForKernel,
 								toolCallsSucceeded,
 								userCorrected: false,
+								turnIndex,
 							},
 						);
 					})
@@ -1811,7 +1825,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 							promptForKernel,
 							responseForKernel,
 							0.8,
-							{ model: modelForKernel, toolCallsSucceeded, userCorrected: false },
+							{ model: modelForKernel, toolCallsSucceeded, userCorrected: false, turnIndex },
 						);
 					});
 			}

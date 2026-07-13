@@ -71,3 +71,9 @@ export {
 	type BdhExportResult,
 	type BdhCorpusRow,
 } from "./bdh-export";
+export {
+	TraceCapture,
+	type ToolStep,
+	type Trajectory,
+	type FinalizeTurnInput,
+} from "./trace-capture";
