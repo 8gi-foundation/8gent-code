@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	type CandidateScore,
 	SeleneJudge,
+	SkyworkScorer,
 	buildJudgePrompt,
 	parseScore,
 	parseVerdict,
@@ -132,5 +133,28 @@ describe("SeleneJudge fail-closed transport", () => {
 	it("reports unavailable when the Ollama server cannot be reached", async () => {
 		const judge = new SeleneJudge({ baseUrl: "http://127.0.0.1:1", timeoutMs: 500 });
 		expect(await judge.isAvailable()).toBe(false);
+	});
+});
+
+describe("SkyworkScorer fail-closed transport", () => {
+	it("scores an unreachable candidate as null (no network egress)", async () => {
+		const scorer = new SkyworkScorer({ baseUrl: "http://127.0.0.1:1", timeoutMs: 500 });
+		expect(await scorer.scoreOne("candidate text")).toBeNull();
+	});
+
+	it("ranks all candidates null and last-by-id when the endpoint is down", async () => {
+		const scorer = new SkyworkScorer({ baseUrl: "http://127.0.0.1:1", timeoutMs: 500 });
+		const ranked = await scorer.score([
+			{ id: "z", output: "one" },
+			{ id: "a", output: "two" },
+		]);
+		// Every score is null (endpoint down), so ties break deterministically by id.
+		expect(ranked.every((c) => c.score === null)).toBe(true);
+		expect(ranked.map((c) => c.id)).toEqual(["a", "z"]);
+	});
+
+	it("reports unavailable when the reward endpoint cannot be reached", async () => {
+		const scorer = new SkyworkScorer({ baseUrl: "http://127.0.0.1:1", timeoutMs: 500 });
+		expect(await scorer.isAvailable()).toBe(false);
 	});
 });
