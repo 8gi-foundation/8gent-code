@@ -63,6 +63,7 @@ import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
+import { TimeTravelStore, checkpointEveryFromEnv } from "./timetravel/checkpoint-store";
 import { ToolLoopDetector } from "./tool-loop-detector";
 import { TurnJournal } from "./turn-journal";
 import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
@@ -182,6 +183,11 @@ export class Agent {
 	private compaction: ProactiveCompression;
 	private twoStageCompactor: TwoStageCompactor | null = null;
 	private twoStageCheckpoints: CheckpointEntry[] = [];
+	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
+	// Lazily constructed so sessions that never call a tool pay nothing.
+	private timeTravelStore: TimeTravelStore | null = null;
+	private timeTravelToolCallsSinceCheckpoint = 0;
+	private timeTravelTotalToolCalls = 0;
 	private recentFilePaths: string[] = [];
 	// TurnJournal (#2470): per-turn replayable record for debug + audit.
 	private turnJournal: TurnJournal;
@@ -1435,6 +1441,9 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 				if (hasToolCalls) {
 					console.log(`\n[Step ${event.stepNumber}: executed ${event.toolCalls.length} tool(s)]`);
+					// Time-travel (#2757): checkpoint every N tool calls so
+					// "go back to before it broke things" always has a target.
+					this.recordToolCallsForTimeTravel(event.toolCalls.length);
 				}
 
 				// v2: Write step_end with full AI SDK data
@@ -2214,6 +2223,40 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 		} catch {
 			return false; // No config = no sync
 		}
+	}
+
+	/**
+	 * Time-travel interval policy (#2757): count executed tool calls and cut
+	 * a content-addressed checkpoint every EIGHT_CHECKPOINT_EVERY calls
+	 * (default 8, 0 disables). Deduped blobs make repeat saves near-free.
+	 * Never throws into the agent loop: a failed checkpoint is logged and
+	 * the turn continues.
+	 */
+	private recordToolCallsForTimeTravel(count: number): void {
+		const every = checkpointEveryFromEnv();
+		if (every === 0) return;
+		this.timeTravelToolCallsSinceCheckpoint += count;
+		this.timeTravelTotalToolCalls += count;
+		if (this.timeTravelToolCallsSinceCheckpoint < every) return;
+		this.timeTravelToolCallsSinceCheckpoint = 0;
+		try {
+			if (!this.timeTravelStore) this.timeTravelStore = new TimeTravelStore();
+			const meta = this.timeTravelStore.save(this.sessionId, this.getMessageHistory(), {
+				reason: "interval",
+				toolCallCount: this.timeTravelTotalToolCalls,
+			});
+			console.log(
+				`  [TIME_TRAVEL] checkpoint ${meta.id} at ${meta.toolCallCount} tool calls (${meta.newBlobs} new blobs)`,
+			);
+		} catch (err) {
+			console.error("  [TIME_TRAVEL] checkpoint failed:", (err as Error).message);
+		}
+	}
+
+	/** Time-travel store for this session (rewind/fork verbs build on this). */
+	getTimeTravelStore(): TimeTravelStore {
+		if (!this.timeTravelStore) this.timeTravelStore = new TimeTravelStore();
+		return this.timeTravelStore;
 	}
 
 	/**
