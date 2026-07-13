@@ -9,6 +9,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - Continuous public benchmark gate, step 1 (#2758)
+
+- `benchmarks/gate.ts`: compares fresh `benchmark:v2` category averages
+  against the checked-in `scores/ledger.json` baseline and hard-fails on
+  any regression beyond a configurable noise band (default 3 points). New
+  categories bootstrap instead of failing; `--update` seeds the ledger from
+  a trusted run.
+- `scores/ledger.json`: the public score ledger, starts empty - it is only
+  ever written by real `benchmark:v2` runs, never hand-typed.
+- `.github/workflows/benchmark-gate.yml`: runs the gate on every PR
+  touching `packages/eight`, `packages/providers`, or `packages/tools`.
+  Skips grading (never fabricates a result) when `OPENROUTER_API_KEY` isn't
+  configured on the repo.
+- Added the `benchmark:v2` script alias (`benchmarks/autoresearch/harness-v2.ts`)
+  that README.md and AGENTS.md already documented but `package.json` was
+  missing, plus `benchmark:gate` / `benchmark:gate:update`.
+
 ### Fixed - 8gent Computer voice loop and proof rail (#2722)
 
 - Added an in-panel mic toggle that stops voice capture and keeps it off across panel opens until the user explicitly resumes it.
