@@ -1,0 +1,49 @@
+name: Benchmark Gate
+
+# Frontier issue #2758, step 1: no regression ships. Every PR touching the
+# core kernel surfaces (packages/eight, packages/providers, packages/tools)
+# runs benchmark:v2 and compares category scores to the committed
+# scores/ledger.json baseline. A drop beyond the noise band hard-fails.
+#
+# If OPENROUTER_API_KEY isn't configured on this repo, the grading step is
+# skipped and the gate step reports "nothing to grade" - it never fabricates
+# a pass or a fail from data that doesn't exist.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/eight/**"
+      - "packages/providers/**"
+      - "packages/tools/**"
+      - "benchmarks/**"
+      - "scores/ledger.json"
+
+concurrency:
+  group: benchmark-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Benchmark v2 Gate
+    runs-on: ubuntu-latest
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Run benchmark:v2
+        if: ${{ env.OPENROUTER_API_KEY != '' }}
+        run: bun run benchmark:v2
+
+      - name: Gate against scores/ledger.json
+        run: bun run benchmark:gate
+
+      - name: Unit tests for the gate logic
+        run: bun test benchmarks/gate.test.ts
