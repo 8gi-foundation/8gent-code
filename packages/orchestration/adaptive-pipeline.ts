@@ -24,7 +24,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { detectLocalModels } from "./local-model-detect.js";
-import { loadRoleConfig, type RoleModelAssignment } from "./role-config.js";
+import { loadRoleConfig, type RoleModelAssignment, type RoleName } from "./role-config.js";
 
 const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const LMSTUDIO_URL = process.env.LMSTUDIO_BASE_URL || "http://localhost:1234/v1";
@@ -284,10 +284,21 @@ export interface PipelineResult {
 	totalMs: number;
 }
 
+/**
+ * Learned model chooser. Given a role and the live candidate roster, returns
+ * the model to run that role's stage, or `undefined` to defer to the configured
+ * default. This is the seam the daemon's MoA router plugs a per-task-class
+ * bandit into; when absent the pipeline uses `roles.json` exactly as before, so
+ * the choice is never silently hardcoded but also never mandatory.
+ */
+export type ModelSelector = (role: RoleName, candidates: Model[]) => Model | undefined;
+
 export interface PipelineOptions {
 	task: string;
 	maxAttempts?: number;
 	onProgress?: (msg: string) => void;
+	/** Optional learned selector; falls back to `roles.json` when it defers. */
+	selectModel?: ModelSelector;
 }
 
 /**
@@ -299,13 +310,15 @@ export class AdaptivePipeline {
 	private readonly log: (m: string) => void;
 	private readonly classifier = new ObstacleClassifier();
 	private readonly palette: DecisionPalette;
+	private readonly selectModel?: ModelSelector;
 
 	constructor(
 		private readonly roster: ModelRoster,
-		opts: { maxAttempts?: number; onProgress?: (m: string) => void } = {},
+		opts: { maxAttempts?: number; onProgress?: (m: string) => void; selectModel?: ModelSelector } = {},
 	) {
 		this.log = opts.onProgress ?? (() => {});
 		this.palette = new DecisionPalette(opts.maxAttempts ?? 3);
+		this.selectModel = opts.selectModel;
 	}
 
 	/** Build a pipeline with a freshly detected roster. */
@@ -315,10 +328,20 @@ export class AdaptivePipeline {
 	}
 
 	/**
-	 * Resolve a configured role to a healthy Model, falling back to the
-	 * strongest detected model when the configured provider is down.
+	 * Resolve a configured role to a healthy Model. A learned selector, when
+	 * present, gets first refusal among the live roster - that is the
+	 * per-task-class routing seam. It may defer (return undefined), in which
+	 * case we fall back to the configured role, and to the strongest detected
+	 * model if that provider is down.
 	 */
-	private resolve(role: string, a: RoleModelAssignment): Model {
+	private resolve(role: RoleName, a: RoleModelAssignment): Model {
+		if (this.selectModel && this.roster.models.length > 0) {
+			const chosen = this.selectModel(role, this.roster.models);
+			if (chosen) {
+				this.log(`${role}: routed to ${chosen.key} (learned)`);
+				return chosen;
+			}
+		}
 		if (this.roster.isHealthy(a.provider, a.model)) {
 			return (
 				this.roster.find(a.provider, a.model) ??

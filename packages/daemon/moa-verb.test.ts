@@ -6,6 +6,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { PipelineOptions, PipelineResult } from "../orchestration/adaptive-pipeline";
+import { RouterBandit, seededRng } from "../providers/router-bandit";
+import { MoaRouter } from "./moa-router";
 import { type MoaVerbEvent, StageStreamParser, runMoaVerb, toDispatchEvent } from "./moa-verb";
 
 describe("StageStreamParser", () => {
@@ -160,6 +162,50 @@ describe("runMoaVerb", () => {
 			"orchestrator",
 			"engineer",
 		]);
+	});
+
+	test("feeds the run's per-stage ledger back into a wired router", async () => {
+		// An in-memory router (seeded RNG, no disk). After the verb runs, each
+		// StageRecord in RESULT should be recorded against its capability class.
+		const bandit = new RouterBandit({ rng: seededRng(5) });
+		const router = new MoaRouter({ bandit });
+		await runMoaVerb({
+			turnId: "t-router",
+			task: "Build a landing page",
+			emit: () => {},
+			router,
+			runPipeline: fakePipeline(RESULT),
+		});
+		// orchestrator (writing) and engineer (code), both clean passes.
+		expect(router.winRates("writing").find((r) => r.model === "qwen")?.meanQuality).toBe(1.0);
+		expect(router.winRates("code").find((r) => r.model === "gemma")?.meanQuality).toBe(1.0);
+	});
+
+	test("passes the router's selector into the pipeline when wired", async () => {
+		const router = new MoaRouter({ rng: seededRng(6) });
+		let sawSelector = false;
+		const spyPipeline = async (opts: PipelineOptions): Promise<PipelineResult> => {
+			sawSelector = typeof opts.selectModel === "function";
+			return RESULT;
+		};
+		await runMoaVerb({
+			turnId: "t-sel",
+			task: "x",
+			emit: () => {},
+			router,
+			runPipeline: spyPipeline,
+		});
+		expect(sawSelector).toBe(true);
+	});
+
+	test("leaves selectModel undefined when no router is wired", async () => {
+		let selectorType = "unset";
+		const spyPipeline = async (opts: PipelineOptions): Promise<PipelineResult> => {
+			selectorType = typeof opts.selectModel;
+			return RESULT;
+		};
+		await runMoaVerb({ turnId: "t-none", task: "x", emit: () => {}, runPipeline: spyPipeline });
+		expect(selectorType).toBe("undefined");
 	});
 
 	test("emits error and rethrows when the pipeline throws", async () => {
