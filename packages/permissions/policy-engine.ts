@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { validatePath } from "./path-guard.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
@@ -769,6 +770,42 @@ export function evaluateCapabilities(caps: BashCapabilityLike[], agentId?: strin
 /** Quick check: is pushing to this branch allowed? */
 export function checkGitPush(branch: string): PolicyDecision {
 	return evaluatePolicy("git_push", { branch });
+}
+
+/**
+ * Capability-manifest-gated tool call evaluation (issue #2756 step 1).
+ *
+ * Order:
+ *   1. The tool's capability manifest - a tool may only use capabilities it
+ *      declared (fs scopes, network hosts, exec commands). No manifest or an
+ *      undeclared capability is a structural deny, before any rule runs.
+ *   2. The existing rule pipeline (path-guard, COPPA, workspace boundary,
+ *      shadow gate, YAML policies) via evaluatePolicy.
+ *
+ * This is the entry point tool call sites migrate to so least-capability is
+ * enforced by the engine, not by convention.
+ */
+export function evaluateToolCall(
+	toolName: string,
+	request: CapabilityRequest,
+	context: PolicyContext = {},
+): PolicyDecision {
+	const workingDirectory =
+		typeof context.workingDirectory === "string" ? context.workingDirectory : undefined;
+
+	const capability = enforceCapability(toolName, request, { workingDirectory });
+	if (!capability.allowed) return capability;
+
+	switch (request.kind) {
+		case "fs_read":
+			return evaluatePolicy("read_file", { ...context, path: request.path });
+		case "fs_write":
+			return evaluatePolicy("write_file", { ...context, path: request.path });
+		case "network":
+			return evaluatePolicy("network_request", { ...context, url: request.url });
+		case "exec":
+			return evaluatePolicy("run_command", { ...context, command: request.command });
+	}
 }
 
 /**
