@@ -1,5 +1,5 @@
 /**
- * Tests for the continuous public benchmark gate (frontier issue #2758, step 1).
+ * Tests for the continuous public benchmark gate (frontier issue #2758, steps 1 + 4).
  *
  * Covers the invariants the CI gate depends on:
  *   1. TSV parsing matches the exact columns harness-v2.ts writes.
@@ -8,6 +8,8 @@
  *   4. A drop beyond the noise band fails; inside the band stays stable.
  *   5. --update semantics: only categories present in the fresh run change.
  *   6. The CLI never hard-fails when there is nothing to grade (no results file).
+ *   7. Per-model attribution (step 4): scores aggregate per (model, category),
+ *      track separately in the ledger, and never affect the gate's pass/fail verdict.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -18,9 +20,13 @@ import { join } from "node:path";
 import {
 	type CategoryAverage,
 	type Ledger,
+	type ModelCategoryAverage,
+	compareModelsToLedger,
 	compareToLedger,
 	computeCategoryAverages,
+	computeModelCategoryAverages,
 	emptyLedger,
+	formatReport,
 	loadLedger,
 	parseResultsTsv,
 	saveLedger,
@@ -52,7 +58,9 @@ const HEADER = [
 	"timestamp",
 ];
 
-function fakeResultsTsv(rows: { id: string; category: string; score: number }[]): string {
+function fakeResultsTsv(
+	rows: { id: string; category: string; score: number; model?: string }[],
+): string {
 	const lines = [tsvRow(HEADER)];
 	for (const r of rows) {
 		lines.push(
@@ -61,7 +69,7 @@ function fakeResultsTsv(rows: { id: string; category: string; score: number }[])
 				r.category,
 				`title-${r.id}`,
 				"medium",
-				"fake/model:free",
+				r.model ?? "fake/model:free",
 				0.3,
 				r.score,
 				r.score,
@@ -82,15 +90,24 @@ function fakeResultsTsv(rows: { id: string; category: string; score: number }[])
 }
 
 describe("parseResultsTsv", () => {
-	test("parses rows matching harness-v2.ts's header", () => {
+	test("parses rows matching harness-v2.ts's header, including model", () => {
 		const tsv = fakeResultsTsv([
-			{ id: "BF001", category: "bug-fixing", score: 90 },
-			{ id: "FS001", category: "fullstack", score: 70 },
+			{ id: "BF001", category: "bug-fixing", score: 90, model: "eight-1.0-q3:14b" },
+			{ id: "FS001", category: "fullstack", score: 70, model: "eight-1.0-q3:14b" },
 		]);
 		const rows = parseResultsTsv(tsv);
 		expect(rows).toEqual([
-			{ benchmarkId: "BF001", category: "bug-fixing", score: 90 },
-			{ benchmarkId: "FS001", category: "fullstack", score: 70 },
+			{ benchmarkId: "BF001", category: "bug-fixing", model: "eight-1.0-q3:14b", score: 90 },
+			{ benchmarkId: "FS001", category: "fullstack", model: "eight-1.0-q3:14b", score: 70 },
+		]);
+	});
+
+	test("defaults model to 'unknown' when the TSV has no model column", () => {
+		const legacyHeader = HEADER.filter((h) => h !== "model");
+		const tsv = `${tsvRow(legacyHeader)}\n${tsvRow(["BF001", "bug-fixing", "t", "medium", 0.3, 90, 90, 90, "execution+keyword", 1, 1, 100, 200, 10, 20, 30, new Date(0).toISOString()])}`;
+		const rows = parseResultsTsv(tsv);
+		expect(rows).toEqual([
+			{ benchmarkId: "BF001", category: "bug-fixing", model: "unknown", score: 90 },
 		]);
 	});
 
@@ -130,6 +147,32 @@ describe("computeCategoryAverages", () => {
 	});
 });
 
+describe("computeModelCategoryAverages", () => {
+	test("averages scores per (model, category) pair independently of the overall category average", () => {
+		const rows = parseResultsTsv(
+			fakeResultsTsv([
+				{ id: "A1", category: "agentic", score: 90, model: "eight-1.0-q3:14b" },
+				{ id: "A2", category: "agentic", score: 70, model: "gemma-3:12b" },
+				{ id: "B1", category: "bug-fixing", score: 100, model: "eight-1.0-q3:14b" },
+			]),
+		);
+		const avgs = computeModelCategoryAverages(rows);
+		expect(avgs).toEqual([
+			{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 90, benchmarkCount: 1 },
+			{ model: "eight-1.0-q3:14b", category: "bug-fixing", avgScore: 100, benchmarkCount: 1 },
+			{ model: "gemma-3:12b", category: "agentic", avgScore: 70, benchmarkCount: 1 },
+		]);
+
+		// The blended per-category average stays a straight mean across both models.
+		const blended = computeCategoryAverages(rows);
+		expect(blended.find((c) => c.category === "agentic")?.avgScore).toBe(80);
+	});
+
+	test("empty input yields empty output", () => {
+		expect(computeModelCategoryAverages([])).toEqual([]);
+	});
+});
+
 describe("compareToLedger", () => {
 	const current: CategoryAverage[] = [
 		{ category: "agentic", avgScore: 80, benchmarkCount: 7 },
@@ -143,6 +186,7 @@ describe("compareToLedger", () => {
 			agentic: { avgScore: 79, benchmarkCount: 7 },
 			fullstack: { avgScore: 70, benchmarkCount: 3 },
 		},
+		models: {},
 	};
 
 	test("stays stable inside the noise band", () => {
@@ -203,10 +247,158 @@ describe("updateLedger", () => {
 		const base: Ledger = {
 			updatedAt: "2026-01-01T00:00:00.000Z",
 			categories: { "bug-fixing": { avgScore: 100, benchmarkCount: 3 } },
+			models: {},
 		};
 		const next = updateLedger(base, [{ category: "agentic", avgScore: 80, benchmarkCount: 7 }]);
 		expect(next.categories["bug-fixing"]).toEqual({ avgScore: 100, benchmarkCount: 3 });
 		expect(next.categories.agentic).toEqual({ avgScore: 80, benchmarkCount: 7 });
+	});
+
+	test("merges the per-model breakdown alongside the blended category average", () => {
+		const base = emptyLedger();
+		const modelCurrent: ModelCategoryAverage[] = [
+			{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 90, benchmarkCount: 1 },
+			{ model: "gemma-3:12b", category: "agentic", avgScore: 70, benchmarkCount: 1 },
+		];
+		const next = updateLedger(
+			base,
+			[{ category: "agentic", avgScore: 80, benchmarkCount: 2 }],
+			modelCurrent,
+		);
+		expect(next.models["eight-1.0-q3:14b"].agentic).toEqual({ avgScore: 90, benchmarkCount: 1 });
+		expect(next.models["gemma-3:12b"].agentic).toEqual({ avgScore: 70, benchmarkCount: 1 });
+	});
+
+	test("leaves a model's other categories untouched when only one category is refreshed", () => {
+		const base: Ledger = {
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			categories: {},
+			models: {
+				"eight-1.0-q3:14b": {
+					"bug-fixing": { avgScore: 100, benchmarkCount: 3 },
+				},
+			},
+		};
+		const next = updateLedger(
+			base,
+			[{ category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+			[{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+		);
+		expect(next.models["eight-1.0-q3:14b"]["bug-fixing"]).toEqual({
+			avgScore: 100,
+			benchmarkCount: 3,
+		});
+		expect(next.models["eight-1.0-q3:14b"].agentic).toEqual({ avgScore: 90, benchmarkCount: 1 });
+	});
+
+	test("omitting modelCurrent leaves the ledger's existing models breakdown untouched", () => {
+		const base: Ledger = {
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			categories: {},
+			models: {
+				"eight-1.0-q3:14b": { agentic: { avgScore: 90, benchmarkCount: 1 } },
+			},
+		};
+		const next = updateLedger(base, [{ category: "agentic", avgScore: 90, benchmarkCount: 1 }]);
+		expect(next.models).toEqual(base.models);
+	});
+});
+
+describe("compareModelsToLedger", () => {
+	const ledger: Ledger = {
+		updatedAt: "2026-06-01T00:00:00.000Z",
+		categories: {},
+		models: {
+			"eight-1.0-q3:14b": { agentic: { avgScore: 79, benchmarkCount: 7 } },
+		},
+	};
+
+	test("bootstraps a (model, category) pair with no prior baseline", () => {
+		const current: ModelCategoryAverage[] = [
+			{ model: "gemma-3:12b", category: "agentic", avgScore: 70, benchmarkCount: 1 },
+		];
+		const comparisons = compareModelsToLedger(current, ledger, 3);
+		expect(comparisons[0]).toMatchObject({ status: "bootstrap", baseline: null });
+	});
+
+	test("flags a model-level regression without needing the overall category to regress", () => {
+		const current: ModelCategoryAverage[] = [
+			{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 50, benchmarkCount: 1 },
+		];
+		const comparisons = compareModelsToLedger(current, ledger, 3);
+		expect(comparisons[0]).toMatchObject({
+			status: "regression",
+			baseline: 79,
+			current: 50,
+			delta: -29,
+		});
+	});
+
+	test("a model regression never appears in GateReport.regressions (informational only)", () => {
+		const current: CategoryAverage[] = [{ category: "agentic", avgScore: 80, benchmarkCount: 2 }];
+		const report = compareToLedger(
+			current,
+			{ ...ledger, categories: { agentic: { avgScore: 79, benchmarkCount: 7 } } },
+			3,
+		);
+		report.modelComparisons = compareModelsToLedger(
+			[{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 50, benchmarkCount: 1 }],
+			ledger,
+			3,
+		);
+		expect(report.passed).toBe(true);
+		expect(report.regressions).toEqual([]);
+	});
+
+	test("empty ledger models section bootstraps every pair", () => {
+		const current: ModelCategoryAverage[] = [
+			{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 80, benchmarkCount: 1 },
+		];
+		const comparisons = compareModelsToLedger(current, emptyLedger(), 3);
+		expect(comparisons[0].status).toBe("bootstrap");
+	});
+});
+
+describe("formatReport", () => {
+	test("omits the per-model section when there are no model comparisons", () => {
+		const report = compareToLedger(
+			[{ category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+			emptyLedger(),
+			3,
+		);
+		const text = formatReport(report);
+		expect(text).not.toContain("Per-model attribution");
+	});
+
+	test("includes a per-model breakdown line per (model, category) pair by default", () => {
+		const report = compareToLedger(
+			[{ category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+			emptyLedger(),
+			3,
+		);
+		report.modelComparisons = compareModelsToLedger(
+			[{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+			emptyLedger(),
+			3,
+		);
+		const text = formatReport(report);
+		expect(text).toContain("Per-model attribution");
+		expect(text).toContain("eight-1.0-q3:14b");
+	});
+
+	test("suppresses the per-model section when byModel: false", () => {
+		const report = compareToLedger(
+			[{ category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+			emptyLedger(),
+			3,
+		);
+		report.modelComparisons = compareModelsToLedger(
+			[{ model: "eight-1.0-q3:14b", category: "agentic", avgScore: 90, benchmarkCount: 1 }],
+			emptyLedger(),
+			3,
+		);
+		const text = formatReport(report, { byModel: false });
+		expect(text).not.toContain("Per-model attribution");
 	});
 });
 
@@ -240,5 +432,17 @@ describe("ledger file I/O", () => {
 		const path = join(import.meta.dir, "..", "scores", "ledger.json");
 		const ledger = loadLedger(path);
 		expect(ledger.categories).toEqual({});
+		expect(ledger.models).toEqual({});
+	});
+
+	test("loadLedger defaults models to {} for a pre-step-4 ledger file missing that key", () => {
+		const dir = mkdtempSync(join(tmpdir(), "gate-ledger-"));
+		const path = join(dir, "legacy-ledger.json");
+		try {
+			writeFileSync(path, JSON.stringify({ updatedAt: null, categories: {} }));
+			expect(loadLedger(path)).toEqual(emptyLedger());
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

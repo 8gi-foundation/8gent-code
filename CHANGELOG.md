@@ -9,6 +9,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - Per-model benchmark attribution, step 4 (#2758)
+
+- `benchmarks/gate.ts`: the results TSV's `model` column now feeds a second
+  aggregate, `computeModelCategoryAverages`, tracked in `scores/ledger.json`
+  under a new `models` field (`model -> category -> {avgScore, benchmarkCount}`).
+  A router change or an `eight-1.0` checkpoint bump is now attributable to
+  the model that produced it, separate from the blended category number.
+  `--update` writes both breakdowns; `bun run benchmark:gate` prints a
+  per-model attribution table by default (`--no-by-model` to hide it).
+  Purely informational — a single model regressing never fails the gate,
+  only a category's blended average does, unchanged from step 1.
+- `scores/ledger.json`, `scores/README.md`, `benchmarks/README.md` updated
+  for the new schema field and CLI flag.
+- 13 new tests in `benchmarks/gate.test.ts` covering per-model averaging,
+  ledger merge/round-trip, comparison, and report formatting.
+
 ### Added - Continuous public benchmark gate, step 1 (#2758)
 
 - `benchmarks/gate.ts`: compares fresh `benchmark:v2` category averages
