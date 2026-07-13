@@ -1203,6 +1203,21 @@ export function isInfiniteMode(): boolean {
 
 export { ToolG8 } from "./toolg8.js";
 export {
+	enforceCapability,
+	getToolManifest,
+	registerToolManifest,
+	resetToolManifests,
+	DEFAULT_TOOL_MANIFESTS,
+} from "./capability-manifest.js";
+export type {
+	CapabilityRequest,
+	ExecCapability,
+	FsCapability,
+	NetworkCapability,
+	ToolCapabilityManifest,
+} from "./capability-manifest.js";
+export {
+	evaluateToolCall,
 	getAgentPolicy,
 	SPAWNED_AGENT_RESTRICTIONS,
 	SHADOW_AGENT_RESTRICTIONS,
