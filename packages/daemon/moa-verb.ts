@@ -23,6 +23,7 @@ import {
 	type PipelineResult,
 	runAdaptivePipeline,
 } from "../orchestration/adaptive-pipeline";
+import type { MoaRouter } from "./moa-router";
 
 /**
  * Turn-scoped streaming event emitted while the MoA verb runs. Every event
@@ -126,6 +127,13 @@ export interface MoaVerbOptions {
 	/** Where typed events are streamed. */
 	emit: MoaEventSink;
 	/**
+	 * Learned per-task-class model router. When present it (a) chooses each
+	 * stage's model via its bandit instead of the static `roles.json`, and
+	 * (b) absorbs the run's per-stage outcomes as reward, then persists. When
+	 * absent the pipeline routes from config exactly as before.
+	 */
+	router?: MoaRouter;
+	/**
 	 * Pipeline runner. Defaults to the real adaptive pipeline; tests inject a
 	 * fake so the verb's streaming contract is exercised without any model
 	 * call. Kept as a narrow seam, matching the DispatchExecutor pattern.
@@ -141,7 +149,7 @@ export interface MoaVerbOptions {
  * can surface it. Returns the underlying `PipelineResult`.
  */
 export async function runMoaVerb(opts: MoaVerbOptions): Promise<PipelineResult> {
-	const { turnId, task, maxAttempts, emit } = opts;
+	const { turnId, task, maxAttempts, emit, router } = opts;
 	const run = opts.runPipeline ?? runAdaptivePipeline;
 	const parser = new StageStreamParser(turnId, emit);
 
@@ -153,10 +161,24 @@ export async function runMoaVerb(opts: MoaVerbOptions): Promise<PipelineResult> 
 			task,
 			maxAttempts,
 			onProgress: (m: string) => parser.feed(m),
+			// Learned per-task-class selection when a router is wired in.
+			selectModel: router?.chooseModel,
 		});
 	} catch (err) {
 		emit({ kind: "error", turn_id: turnId, error: String(err) });
 		throw err;
+	}
+
+	// Fold this run's per-stage ledger back into the router so the next build
+	// routes on real evidence, then persist. Best-effort: a stats write must
+	// never fail an otherwise-successful build.
+	if (router) {
+		try {
+			router.recordStages(result.stages);
+			router.save();
+		} catch {
+			/* stats are advisory - a bad write just means we relearn */
+		}
 	}
 
 	// Authoritative structured ledger: one stage_done per recorded stage.
