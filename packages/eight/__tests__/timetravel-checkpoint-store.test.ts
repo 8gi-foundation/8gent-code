@@ -202,3 +202,22 @@ describe("checkpointEveryFromEnv", () => {
 		expect(checkpointEveryFromEnv({ EIGHT_CHECKPOINT_EVERY: "0" })).toBe(0);
 	});
 });
+
+describe("EIGHT_TIMETRAVEL_DIR override", () => {
+	it("relocates a default-constructed store to the override dir", () => {
+		const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), "timetravel-override-"));
+		const prev = process.env.EIGHT_TIMETRAVEL_DIR;
+		process.env.EIGHT_TIMETRAVEL_DIR = overrideDir;
+		try {
+			const overrideStore = new TimeTravelStore();
+			overrideStore.save("session_env", [msg("user", "hello")], { reason: "manual" });
+			expect(
+				fs.existsSync(path.join(overrideDir, "sessions", "session_env", "checkpoints.jsonl")),
+			).toBe(true);
+		} finally {
+			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_TIMETRAVEL_DIR");
+			else process.env.EIGHT_TIMETRAVEL_DIR = prev;
+			fs.rmSync(overrideDir, { recursive: true, force: true });
+		}
+	});
+});

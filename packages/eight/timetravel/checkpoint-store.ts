@@ -69,6 +69,9 @@ export interface RestoredCheckpoint {
 // ---- Helpers -------------------------------------------------------------
 
 function defaultDataDir(): string {
+	// EIGHT_TIMETRAVEL_DIR relocates the store (tests, ops, shared volumes).
+	const override = process.env.EIGHT_TIMETRAVEL_DIR;
+	if (override && override.trim() !== "") return override;
 	return path.join(os.homedir(), ".8gent", "timetravel");
 }
 

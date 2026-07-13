@@ -298,6 +298,11 @@ export class AgentPool {
 		return this.sessions.has(sessionId);
 	}
 
+	/** Get the Agent instance for a session (time-travel verbs restore into it). */
+	getAgent(sessionId: string): Agent | null {
+		return this.sessions.get(sessionId)?.agent ?? null;
+	}
+
 	/** Get session info */
 	getSessionInfo(
 		sessionId: string,

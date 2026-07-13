@@ -63,7 +63,12 @@ import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
-import { TimeTravelStore, checkpointEveryFromEnv } from "./timetravel/checkpoint-store";
+import {
+	type CheckpointMeta,
+	type RestoredCheckpoint,
+	TimeTravelStore,
+	checkpointEveryFromEnv,
+} from "./timetravel/checkpoint-store";
 import { ToolLoopDetector } from "./tool-loop-detector";
 import { TurnJournal } from "./turn-journal";
 import { resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
@@ -2271,6 +2276,49 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 	getTimeTravelStore(): TimeTravelStore {
 		if (!this.timeTravelStore) this.timeTravelStore = new TimeTravelStore();
 		return this.timeTravelStore;
+	}
+
+	/** The session id this agent's time-travel checkpoints are stored under. */
+	getTimeTravelSessionId(): string {
+		return this.sessionId;
+	}
+
+	/** All time-travel checkpoints for this agent's session, oldest first. */
+	listTimeTravelCheckpoints(): CheckpointMeta[] {
+		return this.getTimeTravelStore().list(this.sessionId);
+	}
+
+	/**
+	 * Time-travel rewind verb (#2757, step 2). Goes back `steps` checkpoints
+	 * from the latest (steps=0 restores the latest checkpoint itself) and
+	 * replaces the live message history with that state. Returns the restored
+	 * checkpoint, or null when the session has no checkpoint that far back.
+	 */
+	rewindTimeTravel(steps = 1): RestoredCheckpoint | null {
+		const restored = this.getTimeTravelStore().rewind(this.sessionId, steps);
+		if (!restored) return null;
+		this.restoreFromCheckpoint(restored.messages);
+		console.log(
+			`  [TIME_TRAVEL] rewound ${steps} step(s) to checkpoint ${restored.meta.id} (${restored.meta.messageCount} messages)`,
+		);
+		return restored;
+	}
+
+	/**
+	 * Time-travel fork verb (#2757, step 2). Starts this agent's lineage from
+	 * a checkpoint of another session (zero blobs copied - content-addressed)
+	 * and restores that state into the live message history. The two sessions
+	 * then diverge independently: explore two fixes from the same state.
+	 */
+	adoptTimeTravelFork(sourceSessionId: string, checkpointId: string): RestoredCheckpoint {
+		const store = this.getTimeTravelStore();
+		const meta = store.fork(sourceSessionId, checkpointId, this.sessionId);
+		const { messages } = store.load(this.sessionId, meta.id);
+		this.restoreFromCheckpoint(messages);
+		console.log(
+			`  [TIME_TRAVEL] forked from ${sourceSessionId}/${checkpointId} into ${this.sessionId} (${messages.length} messages)`,
+		);
+		return { meta, messages };
 	}
 
 	/**
