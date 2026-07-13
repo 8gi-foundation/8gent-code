@@ -2455,6 +2455,7 @@ export function App({
 							"  /plan - Show current plan status\n" +
 							"  /session [name|list|resume] - Named session management\n" +
 							"  /fork [label] - Fork conversation at current message\n" +
+							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
 							"  /branch [list|switch <id>] - List or switch branches\n" +
 							"  /status - Show session status\n" +
 							"  /export - Export session as HTML\n" +
@@ -2648,6 +2649,65 @@ export function App({
 					addSystemMessage(
 						`Forked at current message. New branch: ${branchId} (${label || branchId})\nUse /branch list to see all branches.`,
 					);
+					break;
+				}
+
+				case "rewind": {
+					// Session time-travel (#2757 step 2): restore the agent's message
+					// history from a checkpoint cut by the interval policy.
+					if (!agent) {
+						addSystemMessage("No active agent to rewind.");
+						break;
+					}
+					if (args[0] === "list") {
+						const cps = agent.listTimeTravelCheckpoints();
+						if (cps.length === 0) {
+							addSystemMessage(
+								"No time-travel checkpoints yet. They are cut automatically every few tool calls (EIGHT_CHECKPOINT_EVERY).",
+							);
+							break;
+						}
+						const lines = cps.map((c, i) => {
+							const back = cps.length - 1 - i;
+							const when = new Date(c.createdAt).toLocaleTimeString();
+							const tail = back === 0 ? " (latest)" : ` (/rewind ${back})`;
+							return `  ${c.id} - ${c.messageCount} msgs, ${c.toolCallCount} tool calls, ${c.reason} @ ${when}${tail}`;
+						});
+						addSystemMessage(`Time-travel checkpoints (oldest first):\n${lines.join("\n")}`);
+						break;
+					}
+					const steps = args[0] ? Number.parseInt(args[0], 10) : 1;
+					if (!Number.isInteger(steps) || steps < 0) {
+						addSystemMessage("Usage: /rewind [n|list] - go back n checkpoints (default 1).");
+						break;
+					}
+					try {
+						const restored = agent.rewindTimeTravel(steps);
+						if (!restored) {
+							addSystemMessage(
+								`No checkpoint ${steps} step(s) back. /rewind list shows what exists.`,
+							);
+							break;
+						}
+						const restoredMessages = restored.messages
+							.filter((m) => m.role !== "system")
+							.map((m, i) => ({
+								id: `tt-${restored.meta.id}-${i}`,
+								role: (m.role === "user" || m.role === "assistant" || m.role === "tool"
+									? m.role
+									: "system") as Message["role"],
+								content: m.content,
+								timestamp: new Date(restored.meta.createdAt),
+							}));
+						setMessages(restoredMessages);
+						addSystemMessage(
+							`Rewound ${steps} step(s) to checkpoint ${restored.meta.id} ` +
+								`(${restored.meta.messageCount} messages, ${restored.meta.toolCallCount} tool calls). ` +
+								"The next prompt continues from that state.",
+						);
+					} catch (e: any) {
+						addSystemMessage(`Rewind error: ${e.message}`);
+					}
 					break;
 				}
 

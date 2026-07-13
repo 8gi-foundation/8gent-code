@@ -103,6 +103,81 @@ Server -> {
 }
 ```
 
+## Session Time-Travel
+
+Rewind and fork verbs over the content-addressed checkpoint store
+(`packages/eight/timetravel/checkpoint-store.ts`). The agent cuts a checkpoint
+every `EIGHT_CHECKPOINT_EVERY` executed tool calls (default 8, `0` disables),
+so any session can be rewound to an earlier state or forked to explore two
+fixes from the same state. Everything stays local under `~/.8gent/timetravel`
+(relocatable via `EIGHT_TIMETRAVEL_DIR`).
+
+All three verbs default to the connection's bound session when `sessionId`
+is omitted. Failures come back as a standard `{ "type": "error" }` frame.
+
+### List Checkpoints
+
+```
+Client -> { "type": "timetravel:list", "sessionId": "s_abc123_xyz" }
+Server -> {
+  "type": "timetravel:list",
+  "sessionId": "s_abc123_xyz",
+  "checkpoints": [
+    {
+      "id": "cp_mc0abc_0_k2f9",
+      "parentId": null,
+      "forkedFrom": null,
+      "reason": "interval",        // "interval" | "phase" | "manual" | "fork"
+      "toolCallCount": 8,
+      "messageCount": 12,
+      "createdAt": 1789300000000
+    }
+  ]
+}
+```
+
+Checkpoints are ordered oldest first. Content hashes are not exposed on the
+wire; frames stay small regardless of history size.
+
+### Rewind
+
+```
+Client -> { "type": "timetravel:rewind", "sessionId": "s_abc123_xyz", "steps": 1 }
+Server -> {
+  "type": "timetravel:rewound",
+  "sessionId": "s_abc123_xyz",
+  "steps": 1,
+  "checkpoint": { ... },           // summary of the restored checkpoint
+  "messageCount": 12
+}
+```
+
+`steps` defaults to `1` (one checkpoint back). `steps: 0` restores the latest
+checkpoint. The live agent's message history is replaced in place; the next
+`prompt` continues from the restored state. Rewinding past the oldest
+checkpoint returns an error and leaves the agent untouched.
+
+### Fork
+
+```
+Client -> { "type": "timetravel:fork", "sessionId": "s_abc123_xyz", "checkpointId": "cp_mc0abc_0_k2f9" }
+Server -> {
+  "type": "timetravel:forked",
+  "sessionId": "s_new456_abc",     // the fork's session id
+  "sourceSessionId": "s_abc123_xyz",
+  "forkedFrom": "cp_mc0abc_0_k2f9",
+  "checkpoint": { ... },
+  "messageCount": 12
+}
+```
+
+`checkpointId` defaults to the source session's latest checkpoint. `channel`
+is optional and defaults to the connection's channel. The daemon creates a new
+pool session seeded from the checkpoint (zero blobs copied - the store is
+content-addressed) and rebinds the client connection to the fork, so the next
+`prompt` runs on the forked lineage. The source session keeps running
+independently: explore two fixes from the same state.
+
 ## Sending Prompts
 
 ### Request

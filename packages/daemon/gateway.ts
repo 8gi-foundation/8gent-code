@@ -38,6 +38,11 @@ import {
 	handleStoreMessage,
 	handleStoreOpen,
 } from "./routes/store/index";
+import {
+	type TimeTravelInbound,
+	type TimeTravelOutbound,
+	handleTimeTravel,
+} from "./timetravel-verbs";
 
 export interface GatewayConfig {
 	port: number;
@@ -82,7 +87,8 @@ type InboundMessage =
 	| { type: "cron:remove"; jobId: string }
 	| { type: "health" }
 	| { type: "approval:response"; requestId: string; approved: boolean }
-	| { type: "ping" };
+	| { type: "ping" }
+	| TimeTravelInbound;
 
 type OutboundMessage =
 	| { type: "auth:ok" }
@@ -96,7 +102,8 @@ type OutboundMessage =
 	| { type: "health"; data: unknown }
 	| { type: "event"; event: EventName; payload: unknown }
 	| { type: "error"; message: string }
-	| { type: "pong" };
+	| { type: "pong" }
+	| TimeTravelOutbound;
 
 const clients = new Map<any, ClientState>();
 let nextClientId = 0;
@@ -282,6 +289,28 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			} else {
 				send(ws, { type: "error", message: `cron job ${msg.jobId} not found` });
 			}
+			break;
+		}
+
+		case "timetravel:list":
+		case "timetravel:rewind":
+		case "timetravel:fork": {
+			// Session time-travel verbs (#2757 step 2): list checkpoints,
+			// rewind the live agent, or fork a new session from a checkpoint.
+			const out = handleTimeTravel(msg, {
+				pool,
+				activeSessionId: state.sessionId,
+				channel: state.channel,
+			});
+			if (out.type === "timetravel:forked") {
+				// Bind this client to the fork so its next prompt continues there.
+				state.sessionId = out.sessionId;
+				bus.emit("session:start", {
+					sessionId: out.sessionId,
+					channel: state.channel,
+				});
+			}
+			send(ws, out);
 			break;
 		}
 
