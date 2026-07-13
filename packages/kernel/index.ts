@@ -77,3 +77,16 @@ export {
 	type Trajectory,
 	type FinalizeTurnInput,
 } from "./trace-capture";
+export {
+	LessonCollector,
+	parseLiveDemoLedger,
+	parseSelfHealReport,
+	liveDemoToLessons,
+	selfHealToLessons,
+	lessonsToGrpoPairs,
+	type LiveDemoEntry,
+	type SelfHealFinding,
+	type LessonExample,
+	type LessonSources,
+	type CollectResult,
+} from "./lesson-collector";

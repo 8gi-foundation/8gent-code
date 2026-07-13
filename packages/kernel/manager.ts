@@ -9,6 +9,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { DEFAULT_HEDGE_CONFIG, type HedgeConfig, HedgeExecutor } from "./hedge-executor";
 import type { ScoreRecord } from "./judge";
+import {
+	type CollectResult,
+	LessonCollector,
+	type LessonExample,
+	type LessonSources,
+} from "./lesson-collector";
 import { type LoopStatus, type ProductionConfig, ProductionLoop } from "./loop";
 import { type CollectorStats, PersonalCollector, type TrainingPair } from "./personal-collector";
 import { type ToolStep, TraceCapture, type Trajectory } from "./trace-capture";
@@ -42,6 +48,15 @@ export interface KernelConfig {
 	 * trajectories can accumulate locally with training fully off.
 	 */
 	traceCapture: boolean;
+	/**
+	 * Feed the LiveDemo ledger + selfheal report findings into the kernel as
+	 * labeled negative/positive examples (#2752 step 2). Opt-in, default OFF,
+	 * local-only, PII-scrubbed at collection. Like hedge and traceCapture, it
+	 * is independent of the training `enabled` flag.
+	 */
+	lessonFeeds: boolean;
+	/** Override lesson source paths (tests; defaults live under ~/.8gent) */
+	lessonSources: LessonSources;
 	/** Project root for local kernel storage (default: process.cwd()) */
 	projectRoot: string;
 }
@@ -53,6 +68,8 @@ const DEFAULT_KERNEL_CONFIG: KernelConfig = {
 	production: {},
 	hedge: { enabled: false },
 	traceCapture: false,
+	lessonFeeds: false,
+	lessonSources: {},
 	projectRoot: process.cwd(),
 };
 
@@ -63,12 +80,18 @@ export class KernelManager {
 	private collector: PersonalCollector;
 	private hedgeExecutor: HedgeExecutor;
 	private tracer: TraceCapture;
+	private lessonCollector: LessonCollector;
 
 	constructor(config: Partial<KernelConfig> = {}) {
 		this.config = { ...DEFAULT_KERNEL_CONFIG, ...config };
 		this.collector = new PersonalCollector();
 		this.hedgeExecutor = new HedgeExecutor({ ...DEFAULT_HEDGE_CONFIG, ...this.config.hedge });
 		this.tracer = new TraceCapture(this.config.projectRoot, this.config.traceCapture);
+		this.lessonCollector = new LessonCollector(
+			this.config.projectRoot,
+			this.config.lessonFeeds,
+			this.config.lessonSources,
+		);
 	}
 
 	/**
@@ -94,6 +117,8 @@ export class KernelManager {
 				hedge: { enabled: mc.hedge?.enabled === true, ...(mc.hedge ?? {}) },
 				// Trace capture stays OFF unless explicitly opted in.
 				traceCapture: mc.traceCapture === true,
+				// Lesson feeds stay OFF unless explicitly opted in.
+				lessonFeeds: mc.lessonFeeds === true,
 				projectRoot,
 			});
 		} catch {
@@ -256,6 +281,22 @@ export class KernelManager {
 	}
 
 	/**
+	 * Feed the LiveDemo ledger + selfheal reports into local training storage
+	 * as labeled negative/positive examples (#2752 step 2). No-op (all zeros)
+	 * unless lesson feeds are opted in.
+	 */
+	collectLessons(): CollectResult {
+		return this.lessonCollector.collect();
+	}
+
+	/**
+	 * Read collected lesson examples from local storage.
+	 */
+	getLessons(): LessonExample[] {
+		return this.lessonCollector.readLessons();
+	}
+
+	/**
 	 * Get training collection stats.
 	 */
 	getCollectorStats(): CollectorStats {
@@ -305,5 +346,13 @@ export class KernelManager {
 	 */
 	get isTraceCaptureEnabled(): boolean {
 		return this.tracer.enabled;
+	}
+
+	/**
+	 * Whether lesson feeds (LiveDemo ledger + selfheal reports) are opted in.
+	 * Default false.
+	 */
+	get isLessonFeedsEnabled(): boolean {
+		return this.lessonCollector.enabled;
 	}
 }

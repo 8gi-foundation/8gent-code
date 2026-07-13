@@ -51,7 +51,7 @@ function makeRel(overrides: Partial<Relationship> = {}): Relationship {
 		projectId: "8gent-code",
 		sourceId: "ent_a",
 		targetId: "ent_b",
-		type: "relates_to",
+		type: "related_to",
 		strength: 1,
 		createdAt: now,
 		updatedAt: now,
@@ -133,7 +133,7 @@ describe("syncBundle", () => {
 		// edge references the deterministic ids of the two entities, not kernel ids
 		const aId = toBrainEntity(subgraph.entities[0]).id;
 		const bId = toBrainEntity(subgraph.entities[1]).id;
-		expect(calls[2].body).toEqual({ src: aId, dst: bId, type: "relates_to" });
+		expect(calls[2].body).toEqual({ src: aId, dst: bId, type: "related_to" });
 	});
 
 	// ── 4. knownHashes cache ──────────────────────────────────────────
