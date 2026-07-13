@@ -78,6 +78,17 @@ export {
 	stripWakeWord,
 	VOICE_COMMAND_HELP,
 } from "./voice-grammar.js";
+export {
+	type LifecyclePhase,
+	type LifecycleEffect,
+	type LifecycleSignal,
+	type LifecycleState,
+	type LifecycleTransition,
+	initialLifecycleState,
+	reduceVoiceCommand,
+	reduceLifecycleSignal,
+	VoiceLifecycle,
+} from "./voice-lifecycle.js";
 
 /**
  * Main Voice Engine — orchestrates recording, transcription, and events.
