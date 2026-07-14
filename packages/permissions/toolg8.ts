@@ -10,6 +10,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type BashGateResult, gateBashCommand } from "../tools/bash-tool.js";
 import { evaluatePolicy } from "./policy-engine.js";
 import type { PolicyActionType, PolicyContext, PolicyDecision } from "./types.js";
 
@@ -23,6 +24,30 @@ export interface GateResult {
 	alternative?: string;
 }
 
+/**
+ * Per-segment bash gate trace attached to the audit entry for run_command.
+ * `denied` reflects the SEGMENT check only; the final gate decision is the
+ * AND of the whole-string check and this one (belt-and-braces).
+ */
+export interface BashGateAudit {
+	denied: boolean;
+	reason?: string;
+	capabilityCount: number;
+	capabilities: Array<{
+		kind: string;
+		command?: string;
+		path?: string;
+		source: string;
+	}>;
+	/** Set when the bash parser threw; the gate fell back to whole-string evaluation. */
+	parserError?: string;
+}
+
+type BashGateFn = (command: string, agentId?: string) => BashGateResult;
+
+/** Cap the number of capabilities written per audit entry to keep JSONL lean. */
+const AUDIT_MAX_CAPABILITIES = 50;
+
 interface AuditEntry {
 	timestamp: string;
 	agentId: string;
@@ -30,6 +55,8 @@ interface AuditEntry {
 	context: Record<string, unknown>;
 	allowed: boolean;
 	reason?: string;
+	/** Present for run_command gates: per-segment bash evaluation trace. */
+	bash?: BashGateAudit;
 }
 
 // ============================================
@@ -41,6 +68,15 @@ const AUDIT_DIR = path.join(
 	"audit",
 );
 const AUDIT_PATH = path.join(AUDIT_DIR, "toolg8.jsonl");
+
+/**
+ * Absolute path of the gate audit JSONL, resolved once at module load.
+ * Exposed so tests and ops tooling read the SAME file the gate writes,
+ * regardless of later EIGHT_DATA_DIR mutations.
+ */
+export function getAuditPath(): string {
+	return AUDIT_PATH;
+}
 
 // ============================================
 // ToolG8 Class
@@ -70,19 +106,85 @@ export class ToolG8 {
 
 		const decision: PolicyDecision = evaluatePolicy(action, fullContext);
 
-		const result: GateResult = {
-			allowed: decision.allowed,
-		};
+		// Belt-and-braces bash segment gate (issue #2782, wiring for #2466).
+		// The whole-string check above cannot see through compound commands
+		// ("echo hi && DENIED"), subshells ("echo $(DENIED)"), or redirection
+		// write targets ("ls > /etc/passwd" is a write_file, not a run_command).
+		// gateBashCommand parses the command and evaluates every segment,
+		// subshell (recursive), and redirection target against the policy
+		// engine. Deny if EITHER check denies - the segment gate can only
+		// tighten, never loosen, the whole-string decision.
+		let bash: BashGateAudit | undefined;
+		if (
+			action === "run_command" &&
+			typeof context.command === "string" &&
+			context.command.trim().length > 0
+		) {
+			bash = this.gateBashSegments(context.command, agentId);
+		}
 
-		if (!decision.allowed && "reason" in decision) {
-			result.reason = decision.reason;
+		const allowed = decision.allowed && !bash?.denied;
+
+		const result: GateResult = { allowed };
+
+		if (!allowed) {
+			if (!decision.allowed && "reason" in decision) {
+				result.reason = decision.reason;
+			} else if (bash?.denied) {
+				result.reason = `[bash-segment] ${bash.reason ?? "denied by per-segment policy"}`;
+			}
 			result.alternative = this.suggestAlternative(action);
 		}
 
 		// Audit log (fire-and-forget, never blocks)
-		this.audit(agentId, action, context, result);
+		this.audit(agentId, action, context, result, bash);
 
 		return result;
+	}
+
+	/**
+	 * Run the per-segment bash gate and shape the result for audit.
+	 *
+	 * FAIL-SAFE, NOT FAIL-OPEN: if the parser throws, this returns
+	 * `denied: false` with `parserError` set - the whole-string evaluation in
+	 * gate() has already run and remains authoritative, so a parser fault can
+	 * never grant MORE access than the legacy check, and it is never silent
+	 * (the parserError lands in the audit JSONL).
+	 */
+	private gateBashSegments(command: string, agentId: string): BashGateAudit {
+		try {
+			const { decision, capabilities } = this.bashGateFn(command, agentId);
+			return {
+				denied: !decision.allowed,
+				reason: !decision.allowed && "reason" in decision ? decision.reason : undefined,
+				capabilityCount: capabilities.length,
+				capabilities: capabilities.slice(0, AUDIT_MAX_CAPABILITIES).map((c) => ({
+					kind: c.kind,
+					command: truncateForAudit(c.command),
+					path: truncateForAudit(c.path),
+					source: c.source,
+				})),
+			};
+		} catch (err) {
+			return {
+				denied: false,
+				capabilityCount: 0,
+				capabilities: [],
+				parserError: err instanceof Error ? err.message : String(err),
+			};
+		}
+	}
+
+	/** The segment gate implementation. Swappable ONLY for tests (parser-fault path). */
+	private bashGateFn: BashGateFn = gateBashCommand;
+
+	/**
+	 * TEST ONLY - simulate a bash parser fault to prove the fail-safe fallback.
+	 * Passing null restores the real gateBashCommand. Never call in production
+	 * code paths; the segment gate must stay live.
+	 */
+	_setBashGateForTest(fn: BashGateFn | null): void {
+		this.bashGateFn = fn ?? gateBashCommand;
 	}
 
 	/**
@@ -116,6 +218,7 @@ export class ToolG8 {
 		action: PolicyActionType,
 		context: PolicyContext,
 		result: GateResult,
+		bash?: BashGateAudit,
 	): void {
 		try {
 			if (!fs.existsSync(AUDIT_DIR)) {
@@ -137,10 +240,19 @@ export class ToolG8 {
 				allowed: result.allowed,
 				reason: result.reason,
 			};
+			if (bash) {
+				entry.bash = bash;
+			}
 
 			fs.appendFileSync(AUDIT_PATH, `${JSON.stringify(entry)}\n`);
 		} catch {
 			// Silent - audit failure must never block execution
 		}
 	}
+}
+
+/** Truncate a capability string for the audit JSONL (same 200-char cap as context). */
+function truncateForAudit(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	return value.length > 200 ? `${value.slice(0, 200)}...` : value;
 }
