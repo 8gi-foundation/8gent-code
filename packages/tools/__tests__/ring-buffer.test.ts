@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("ring-buffer", () => {
 
-  test("REQUIRES: push_item__overwrites_oldest_when_full", () => {
-    // Requirement: push(item) overwrites oldest when full
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/ring-buffer.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: push(item) overwrites oldest when full
+  // NOT IMPLEMENTED - to implement: create packages/tools/ring-buffer.ts
+  test.todo("REQUIRES: push_item__overwrites_oldest_when_full", () => {});
 
-  test("REQUIRES: pop___removes_from_front", () => {
-    // Requirement: pop() removes from front
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/ring-buffer.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: pop() removes from front
+  // NOT IMPLEMENTED - to implement: create packages/tools/ring-buffer.ts
+  test.todo("REQUIRES: pop___removes_from_front", () => {});
 
-  test("REQUIRES: toArray___returns_items_in_insertion_ord", () => {
-    // Requirement: toArray() returns items in insertion order
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/ring-buffer.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: toArray() returns items in insertion order
+  // NOT IMPLEMENTED - to implement: create packages/tools/ring-buffer.ts
+  test.todo("REQUIRES: toArray___returns_items_in_insertion_ord", () => {});
 
-  test("REQUIRES: size__capacity__isFull__isEmpty_properti", () => {
-    // Requirement: size, capacity, isFull, isEmpty properties
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/ring-buffer.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: size, capacity, isFull, isEmpty properties
+  // NOT IMPLEMENTED - to implement: create packages/tools/ring-buffer.ts
+  test.todo("REQUIRES: size__capacity__isFull__isEmpty_properti", () => {});
 
-  test("REQUIRES: Generic_type_parameter", () => {
-    // Requirement: Generic type parameter
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/ring-buffer.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Generic type parameter
+  // NOT IMPLEMENTED - to implement: create packages/tools/ring-buffer.ts
+  test.todo("REQUIRES: Generic_type_parameter", () => {});
 });

@@ -30,15 +30,10 @@ export function marlinVenvPython(): string {
 	return join(marlinVenvDir(), "bin", "python");
 }
 
-/** Path to the user's 8gent config. */
-function configPath(): string {
-	return join(homedir(), ".8gent", "config.json");
-}
-
 /** Whether the `vision.videoIngestion` flag is enabled in config or env. */
-function isFlagEnabled(): boolean {
+function isFlagEnabled(home: string = homedir()): boolean {
 	if (process.env.EIGHT_VIDEO_INGESTION === "1") return true;
-	const cfg = configPath();
+	const cfg = join(home, ".8gent", "config.json");
 	if (!existsSync(cfg)) return false;
 	try {
 		const parsed = JSON.parse(readFileSync(cfg, "utf-8")) as {
@@ -63,10 +58,16 @@ export interface CapabilityStatus {
 	suggestion?: string;
 }
 
-/** Inspect the install state of the video-ingestion capability. */
-export function checkVideoCapability(): CapabilityStatus {
-	const flagEnabled = isFlagEnabled();
-	const venvPresent = existsSync(marlinVenvPython());
+/**
+ * Inspect the install state of the video-ingestion capability.
+ *
+ * `home` overrides the base directory used to locate the venv and config; it
+ * exists so tests can point at empty state and exercise the not-installed path
+ * on a machine that actually has Marlin provisioned. Production callers omit it.
+ */
+export function checkVideoCapability(home: string = homedir()): CapabilityStatus {
+	const flagEnabled = isFlagEnabled(home);
+	const venvPresent = existsSync(join(home, ".8gent", "venvs", "marlin", "bin", "python"));
 	if (flagEnabled && venvPresent) {
 		return { installed: true, flagEnabled, venvPresent };
 	}

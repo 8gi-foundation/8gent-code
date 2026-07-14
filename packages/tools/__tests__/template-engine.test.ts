@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("template-engine", () => {
 
-  test("REQUIRES: ___variable____interpolation_with_dot_pa", () => {
-    // Requirement: {{ variable }} interpolation with dot-path support
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/template-engine.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: {{ variable }} interpolation with dot-path support
+  // NOT IMPLEMENTED - to implement: create packages/tools/template-engine.ts
+  test.todo("REQUIRES: ___variable____interpolation_with_dot_pa", () => {});
 
-  test("REQUIRES: ___if_condition__________if___blocks", () => {
-    // Requirement: {{#if condition}} ... {{/if}} blocks
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/template-engine.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: {{#if condition}} ... {{/if}} blocks
+  // NOT IMPLEMENTED - to implement: create packages/tools/template-engine.ts
+  test.todo("REQUIRES: ___if_condition__________if___blocks", () => {});
 
-  test("REQUIRES: ___each_array__________each___loops_with", () => {
-    // Requirement: {{#each array}} ... {{/each}} loops with {{this}} and {{@index}}
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/template-engine.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: {{#each array}} ... {{/each}} loops with {{this}} and {{@index}}
+  // NOT IMPLEMENTED - to implement: create packages/tools/template-engine.ts
+  test.todo("REQUIRES: ___each_array__________each___loops_with", () => {});
 
-  test("REQUIRES: HTML_escape_by_default______raw_____for_", () => {
-    // Requirement: HTML-escape by default, {{{ raw }}} for unescaped output
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/template-engine.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: HTML-escape by default, {{{ raw }}} for unescaped output
+  // NOT IMPLEMENTED - to implement: create packages/tools/template-engine.ts
+  test.todo("REQUIRES: HTML_escape_by_default______raw_____for_", () => {});
 
-  test("REQUIRES: Under_150_lines", () => {
-    // Requirement: Under 150 lines
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/template-engine.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Under 150 lines
+  // NOT IMPLEMENTED - to implement: create packages/tools/template-engine.ts
+  test.todo("REQUIRES: Under_150_lines", () => {});
 });

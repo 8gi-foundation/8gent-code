@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("pluralize", () => {
 
-  test("REQUIRES: pluralize_word__count___returns_plural_o", () => {
-    // Requirement: pluralize(word, count?) returns plural or singular based on count
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/pluralize.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: pluralize(word, count?) returns plural or singular based on count
+  // NOT IMPLEMENTED - to implement: create packages/tools/pluralize.ts
+  test.todo("REQUIRES: pluralize_word__count___returns_plural_o", () => {});
 
-  test("REQUIRES: singularize_word__returns_singular_form", () => {
-    // Requirement: singularize(word) returns singular form
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/pluralize.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: singularize(word) returns singular form
+  // NOT IMPLEMENTED - to implement: create packages/tools/pluralize.ts
+  test.todo("REQUIRES: singularize_word__returns_singular_form", () => {});
 
-  test("REQUIRES: Built_in_irregulars__person_people__chil", () => {
-    // Requirement: Built-in irregulars: person/people, child/children, etc.
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/pluralize.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Built-in irregulars: person/people, child/children, etc.
+  // NOT IMPLEMENTED - to implement: create packages/tools/pluralize.ts
+  test.todo("REQUIRES: Built_in_irregulars__person_people__chil", () => {});
 
-  test("REQUIRES: Built_in_uncountables__information__seri", () => {
-    // Requirement: Built-in uncountables: information, series, etc.
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/pluralize.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Built-in uncountables: information, series, etc.
+  // NOT IMPLEMENTED - to implement: create packages/tools/pluralize.ts
+  test.todo("REQUIRES: Built_in_uncountables__information__seri", () => {});
 
-  test("REQUIRES: addIrregular_singular__plural__for_custo", () => {
-    // Requirement: addIrregular(singular, plural) for custom words
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/pluralize.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: addIrregular(singular, plural) for custom words
+  // NOT IMPLEMENTED - to implement: create packages/tools/pluralize.ts
+  test.todo("REQUIRES: addIrregular_singular__plural__for_custo", () => {});
 });

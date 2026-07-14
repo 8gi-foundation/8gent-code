@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("trie-search", () => {
 
-  test("REQUIRES: insert_word__and_search_word__for_exact_", () => {
-    // Requirement: insert(word) and search(word) for exact match
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/trie-search.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: insert(word) and search(word) for exact match
+  // NOT IMPLEMENTED - to implement: create packages/tools/trie-search.ts
+  test.todo("REQUIRES: insert_word__and_search_word__for_exact_", () => {});
 
-  test("REQUIRES: startsWith_prefix__returns_boolean", () => {
-    // Requirement: startsWith(prefix) returns boolean
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/trie-search.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: startsWith(prefix) returns boolean
+  // NOT IMPLEMENTED - to implement: create packages/tools/trie-search.ts
+  test.todo("REQUIRES: startsWith_prefix__returns_boolean", () => {});
 
-  test("REQUIRES: autocomplete_prefix__limit___returns_mat", () => {
-    // Requirement: autocomplete(prefix, limit?) returns matching words
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/trie-search.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: autocomplete(prefix, limit?) returns matching words
+  // NOT IMPLEMENTED - to implement: create packages/tools/trie-search.ts
+  test.todo("REQUIRES: autocomplete_prefix__limit___returns_mat", () => {});
 
-  test("REQUIRES: delete_word_", () => {
-    // Requirement: delete(word)
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/trie-search.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: delete(word)
+  // NOT IMPLEMENTED - to implement: create packages/tools/trie-search.ts
+  test.todo("REQUIRES: delete_word_", () => {});
 
-  test("REQUIRES: count_property_for_total_words", () => {
-    // Requirement: count property for total words
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/trie-search.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: count property for total words
+  // NOT IMPLEMENTED - to implement: create packages/tools/trie-search.ts
+  test.todo("REQUIRES: count_property_for_total_words", () => {});
 });

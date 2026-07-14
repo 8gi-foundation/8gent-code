@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("bloom-filter", () => {
 
-  test("REQUIRES: add_item__string__and_has_item__string__", () => {
-    // Requirement: add(item: string) and has(item: string) -> boolean
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/bloom-filter.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: add(item: string) and has(item: string) -> boolean
+  // NOT IMPLEMENTED - to implement: create packages/tools/bloom-filter.ts
+  test.todo("REQUIRES: add_item__string__and_has_item__string__", () => {});
 
-  test("REQUIRES: Constructor_accepts_capacity_and_falsePo", () => {
-    // Requirement: Constructor accepts capacity and falsePositiveRate
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/bloom-filter.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Constructor accepts capacity and falsePositiveRate
+  // NOT IMPLEMENTED - to implement: create packages/tools/bloom-filter.ts
+  test.todo("REQUIRES: Constructor_accepts_capacity_and_falsePo", () => {});
 
-  test("REQUIRES: Uses_multiple_FNV_hash_functions_interna", () => {
-    // Requirement: Uses multiple FNV hash functions internally
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/bloom-filter.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Uses multiple FNV hash functions internally
+  // NOT IMPLEMENTED - to implement: create packages/tools/bloom-filter.ts
+  test.todo("REQUIRES: Uses_multiple_FNV_hash_functions_interna", () => {});
 
-  test("REQUIRES: estimatedFalsePositiveRate___based_on_cu", () => {
-    // Requirement: estimatedFalsePositiveRate() based on current fill
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/bloom-filter.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: estimatedFalsePositiveRate() based on current fill
+  // NOT IMPLEMENTED - to implement: create packages/tools/bloom-filter.ts
+  test.todo("REQUIRES: estimatedFalsePositiveRate___based_on_cu", () => {});
 
-  test("REQUIRES: Zero_external_dependencies", () => {
-    // Requirement: Zero external dependencies
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/bloom-filter.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Zero external dependencies
+  // NOT IMPLEMENTED - to implement: create packages/tools/bloom-filter.ts
+  test.todo("REQUIRES: Zero_external_dependencies", () => {});
 });

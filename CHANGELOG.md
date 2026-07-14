@@ -42,6 +42,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that README.md and AGENTS.md already documented but `package.json` was
   missing, plus `benchmark:gate` / `benchmark:gate:update`.
 
+### Fixed - Full local test suite green (#2781)
+
+- `pty-bridge.cjs` now restores the execute bit on node-pty's prebuilt
+  `spawn-helper` before the first spawn. `bun install` skips the package's
+  lifecycle scripts, so the helper landed non-executable and every
+  `pty.spawn` on macOS failed with "posix_spawnp failed." - the 5
+  PtySession test failures on any bun-installed tree.
+
+### Fixed - CI Test step green again, unblocking merges (#2741)
+
+- The research-evaluate generator emitted unbuilt-utility specs as guaranteed-fail assertions (~68 across 14 modules), turning the whole suite red. They now generate as `test.todo` - pending work, never a fake pass and never a failure.
+- `isRemoteProvider` no longer treats the hyphenated `lm-studio` as a remote provider.
+- The Marlin capability tests take an injectable home directory, so the not-installed path is exercised against empty state instead of a developer's real `~/.8gent` venv.
+
 ### Fixed - 8gent Computer voice loop and proof rail (#2722)
 
 - Added an in-panel mic toggle that stops voice capture and keeps it off across panel opens until the user explicitly resumes it.
