@@ -216,6 +216,28 @@ function fsAllowed(scopes: string[] | undefined, rawPath: string, cwd: string): 
 	return false;
 }
 
+/**
+ * Resolve a tool's declared fs scopes to canonical absolute roots, for
+ * consumers that enforce them outside this module (the seatbelt sandbox
+ * builds its OS profile from these). Returns undefined when the tool has
+ * no manifest - deny by default, same as enforceCapability. A "*" scope
+ * resolves to the filesystem root.
+ */
+export function resolveManifestFsScopes(
+	tool: string,
+	workingDirectory?: string,
+): { read: string[]; write: string[] } | undefined {
+	const manifest = _registry.get(tool);
+	if (!manifest) return undefined;
+	const cwd = workingDirectory ?? process.cwd();
+	const resolve = (scopes: string[] | undefined): string[] =>
+		(scopes ?? []).map((scope) => (scope === "*" ? path.sep : resolveScope(scope, cwd)));
+	return {
+		read: resolve(manifest.fs?.read),
+		write: resolve(manifest.fs?.write),
+	};
+}
+
 // ============================================
 // Network + exec matching
 // ============================================

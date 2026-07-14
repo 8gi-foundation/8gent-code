@@ -7,7 +7,7 @@
  */
 
 /** Isolation level, ordered from weakest to strongest */
-export type IsolationLevel = "process" | "tempdir" | "docker" | "microvm";
+export type IsolationLevel = "process" | "tempdir" | "seatbelt" | "docker" | "microvm";
 
 /** Options for a sandboxed execution */
 export interface SandboxOptions {
@@ -21,6 +21,16 @@ export interface SandboxOptions {
 	workDir?: string;
 	/** Extra environment variables to inject. All others are stripped. */
 	env?: Record<string, string>;
+	/**
+	 * Session id. When set and workDir is not, the run uses the session's
+	 * persistent scratch dir (shared across calls, destroyed with the
+	 * session) instead of a throwaway per-run temp dir.
+	 */
+	sessionId?: string;
+	/** Extra read-only paths (seatbelt layer; manifest read scopes). */
+	readPaths?: string[];
+	/** Extra read/write paths (seatbelt layer; manifest write scopes). */
+	writePaths?: string[];
 }
 
 /** Result from a sandboxed execution */
