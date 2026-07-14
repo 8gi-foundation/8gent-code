@@ -25,6 +25,7 @@ export {
 	runWorkflow,
 	PROACTIVE_SYSTEM_ADDITION,
 	INFINITE_OFFER_PROMPT,
+	renderInfiniteOffer,
 	type WorkflowPhase,
 	type WorkflowState,
 	type WorkflowConfig,

@@ -14,6 +14,7 @@
 
 import { EventEmitter } from "node:events";
 import { disableInfiniteMode, enableInfiniteMode } from "../permissions";
+import { lint, render, validate } from "../tools/prompt-template";
 
 // ============================================
 // Types
@@ -88,7 +89,7 @@ export type InfiniteEvent =
 // Default Success Criteria
 // ============================================
 
-const DEFAULT_SUCCESS_PROMPT = `You are validating whether a task was completed successfully.
+export const DEFAULT_SUCCESS_PROMPT = `You are validating whether a task was completed successfully.
 
 Original task: {{TASK}}
 
@@ -105,6 +106,18 @@ Based on this information, answer ONLY with:
 - "FAILED: <reason>" if the task cannot be completed
 
 Your response:`;
+
+/** Variables available to a success-validation prompt (default or custom). */
+export function successPromptVars(state: InfiniteState): Record<string, string> {
+	return {
+		TASK: state.task,
+		ITERATIONS: state.iteration.toString(),
+		FILES: state.filesChanged.join(", ") || "none",
+		COMMANDS: state.commandsExecuted.slice(-10).join(", ") || "none",
+		LAST_RESPONSE: state.lastResponse?.slice(0, 500) || "none",
+		ERRORS: state.recoveredErrors.length.toString(),
+	};
+}
 
 // ============================================
 // Infinite Loop Runner
@@ -130,6 +143,28 @@ export class InfiniteRunner extends EventEmitter {
 			model: config.model ?? "glm-4.7-flash:latest",
 			workingDirectory: config.workingDirectory ?? process.cwd(),
 		};
+
+		// Fail fast on a typo'd custom success prompt. A render error inside
+		// defaultSuccessCriteria would be swallowed by its catch and the loop
+		// would never validate success; here it surfaces immediately.
+		const structuralIssues = lint(this.config.successPrompt);
+		if (structuralIssues.length > 0) {
+			throw new Error(`InfiniteRunner: invalid successPrompt: ${structuralIssues.join("; ")}`);
+		}
+		const promptIssues = validate(this.config.successPrompt, {
+			TASK: "",
+			ITERATIONS: "",
+			FILES: "",
+			COMMANDS: "",
+			LAST_RESPONSE: "",
+			ERRORS: "",
+		});
+		if (promptIssues.length > 0) {
+			throw new Error(
+				`InfiniteRunner: successPrompt references unknown variable(s): ${promptIssues.join(", ")}. ` +
+					`Available: TASK, ITERATIONS, FILES, COMMANDS, LAST_RESPONSE, ERRORS`,
+			);
+		}
 
 		this.state = {
 			iteration: 0,
@@ -351,13 +386,9 @@ What alternative approach will you try now?`;
 		if (!this.agent) return false;
 
 		try {
-			const prompt = this.config.successPrompt
-				.replace("{{TASK}}", state.task)
-				.replace("{{ITERATIONS}}", state.iteration.toString())
-				.replace("{{FILES}}", state.filesChanged.join(", ") || "none")
-				.replace("{{COMMANDS}}", state.commandsExecuted.slice(-10).join(", ") || "none")
-				.replace("{{LAST_RESPONSE}}", state.lastResponse?.slice(0, 500) || "none")
-				.replace("{{ERRORS}}", state.recoveredErrors.length.toString());
+			const prompt = render(this.config.successPrompt, successPromptVars(state), {
+				onMissing: "throw",
+			});
 
 			const response = await this.agent.chat(prompt);
 

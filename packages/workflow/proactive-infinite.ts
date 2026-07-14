@@ -26,6 +26,7 @@ import {
 	createGatherer,
 	formatQuestion,
 } from "../proactive";
+import { render } from "../tools/prompt-template";
 
 // ============================================
 // Types
@@ -417,6 +418,19 @@ Would you like me to enable **INFINITE MODE**?
 Type "yes" or "/infinite" to proceed, or provide more details if needed.
 `;
 
+/**
+ * Render INFINITE_OFFER_PROMPT with real values. Use this instead of
+ * substituting into the raw template by hand: it fills EVERY occurrence and
+ * throws if the template and variables ever drift apart.
+ */
+export function renderInfiniteOffer(refinedTask: string, confidence: number): string {
+	return render(
+		INFINITE_OFFER_PROMPT,
+		{ REFINED_TASK: refinedTask, CONFIDENCE: confidence },
+		{ onMissing: "throw" },
+	);
+}
+
 // ============================================
 // Exports
 // ============================================
@@ -427,4 +441,5 @@ export default {
 	runWorkflow,
 	PROACTIVE_SYSTEM_ADDITION,
 	INFINITE_OFFER_PROMPT,
+	renderInfiniteOffer,
 };
