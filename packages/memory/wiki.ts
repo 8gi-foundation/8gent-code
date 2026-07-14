@@ -10,7 +10,13 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { slugify } from "../tools/slugify.js";
 import type { Entity, EntityType, KnowledgeGraph, Relationship } from "./graph.js";
+
+// Re-exported to keep the wiki public API stable. Output is byte-identical
+// to the previous local implementation for ASCII names (see the parity
+// suite in packages/tools/__tests__/slugify.test.ts).
+export { slugify };
 
 // ── Public Types ─────────────────────────────────────────────────────
 
@@ -34,15 +40,6 @@ export interface WikiLog {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-/** Lowercase, replace non-alphanumeric with hyphens, collapse multiples. */
-export function slugify(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.replace(/-{2,}/g, "-");
-}
 
 function isoFromUnix(ms: number): string {
 	return new Date(ms).toISOString();

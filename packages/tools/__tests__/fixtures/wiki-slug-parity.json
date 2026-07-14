@@ -1,0 +1,1402 @@
+[
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "a",
+		"expected": "a"
+	},
+	{
+		"input": "A",
+		"expected": "a"
+	},
+	{
+		"input": "Hello World",
+		"expected": "hello-world"
+	},
+	{
+		"input": "hello world",
+		"expected": "hello-world"
+	},
+	{
+		"input": "C++",
+		"expected": "c"
+	},
+	{
+		"input": "node.js",
+		"expected": "node-js"
+	},
+	{
+		"input": "Node.JS",
+		"expected": "node-js"
+	},
+	{
+		"input": "  Leading/Trailing  ",
+		"expected": "leading-trailing"
+	},
+	{
+		"input": "multiple---hyphens",
+		"expected": "multiple-hyphens"
+	},
+	{
+		"input": "UPPER_CASE_NAME",
+		"expected": "upper-case-name"
+	},
+	{
+		"input": "foo@bar#baz",
+		"expected": "foo-bar-baz"
+	},
+	{
+		"input": "James Spalding",
+		"expected": "james-spalding"
+	},
+	{
+		"input": "8gent Code",
+		"expected": "8gent-code"
+	},
+	{
+		"input": "8gent-code",
+		"expected": "8gent-code"
+	},
+	{
+		"input": "GPT-4o",
+		"expected": "gpt-4o"
+	},
+	{
+		"input": "async/await",
+		"expected": "async-await"
+	},
+	{
+		"input": "a.b.c",
+		"expected": "a-b-c"
+	},
+	{
+		"input": "user's guide",
+		"expected": "user-s-guide"
+	},
+	{
+		"input": "100% coverage",
+		"expected": "100-coverage"
+	},
+	{
+		"input": "foo_bar",
+		"expected": "foo-bar"
+	},
+	{
+		"input": "--flags--",
+		"expected": "flags"
+	},
+	{
+		"input": "trailing space ",
+		"expected": "trailing-space"
+	},
+	{
+		"input": " x ",
+		"expected": "x"
+	},
+	{
+		"input": "!!!",
+		"expected": ""
+	},
+	{
+		"input": "---",
+		"expected": ""
+	},
+	{
+		"input": "   ",
+		"expected": ""
+	},
+	{
+		"input": "A B  C",
+		"expected": "a-b-c"
+	},
+	{
+		"input": "v1.2.3-beta.1",
+		"expected": "v1-2-3-beta-1"
+	},
+	{
+		"input": "Memory v2 (SQLite)",
+		"expected": "memory-v2-sqlite"
+	},
+	{
+		"input": "50/50",
+		"expected": "50-50"
+	},
+	{
+		"input": "AT&T",
+		"expected": "at-t"
+	},
+	{
+		"input": "e=mc^2",
+		"expected": "e-mc-2"
+	},
+	{
+		"input": "tabs\tand\nnewlines",
+		"expected": "tabs-and-newlines"
+	},
+	{
+		"input": "snake_case_and-kebab-case",
+		"expected": "snake-case-and-kebab-case"
+	},
+	{
+		"input": "CamelCaseName",
+		"expected": "camelcasename"
+	},
+	{
+		"input": "already-a-slug",
+		"expected": "already-a-slug"
+	},
+	{
+		"input": "ALL CAPS SENTENCE",
+		"expected": "all-caps-sentence"
+	},
+	{
+		"input": "trailing.dot.",
+		"expected": "trailing-dot"
+	},
+	{
+		"input": ".leading.dot",
+		"expected": "leading-dot"
+	},
+	{
+		"input": "quo\"tes 'single'",
+		"expected": "quo-tes-single"
+	},
+	{
+		"input": "back\\slash/forward",
+		"expected": "back-slash-forward"
+	},
+	{
+		"input": "[brackets] {braces} (parens)",
+		"expected": "brackets-braces-parens"
+	},
+	{
+		"input": "semi;colon:colon,comma",
+		"expected": "semi-colon-colon-comma"
+	},
+	{
+		"input": "star*plus+question?",
+		"expected": "star-plus-question"
+	},
+	{
+		"input": "pipe|tilde~caret^",
+		"expected": "pipe-tilde-caret"
+	},
+	{
+		"input": "one2three4five",
+		"expected": "one2three4five"
+	},
+	{
+		"input": "0",
+		"expected": "0"
+	},
+	{
+		"input": "007",
+		"expected": "007"
+	},
+	{
+		"input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	},
+	{
+		"input": "aONz2`X^:dkcM",
+		"expected": "aonz2-x-dkcm"
+	},
+	{
+		"input": "U!_7H:i|N>c{9$x'%|mkv{ik9X",
+		"expected": "u-7h-i-n-c-9-x-mkv-ik9x"
+	},
+	{
+		"input": "aM&",
+		"expected": "am"
+	},
+	{
+		"input": "o'WGpesXiBm$ufl %zK@d7m3Ayek~nob+",
+		"expected": "o-wgpesxibm-ufl-zk-d7m3ayek-nob"
+	},
+	{
+		"input": "3",
+		"expected": "3"
+	},
+	{
+		"input": "==)-w5'm.%G=^B$81",
+		"expected": "w5-m-g-b-81"
+	},
+	{
+		"input": "L9\\!5]:mk5tf",
+		"expected": "l9-5-mk5tf"
+	},
+	{
+		"input": ";Pfa-y]oleh.F1kEmc?2yD",
+		"expected": "pfa-y-oleh-f1kemc-2yd"
+	},
+	{
+		"input": "Qf*&W{TH?F-O1AE7?XPiF|m~aG54/)dOX<",
+		"expected": "qf-w-th-f-o1ae7-xpif-m-ag54-dox"
+	},
+	{
+		"input": "NHcRnK5&)",
+		"expected": "nhcrnk5"
+	},
+	{
+		"input": "T1$O^FDBub`3[`-X}U|s",
+		"expected": "t1-o-fdbub-3-x-u-s"
+	},
+	{
+		"input": "gLP[f*T\"J[K};S_\"{@:oz\"mkrV6!",
+		"expected": "glp-f-t-j-k-s-oz-mkrv6"
+	},
+	{
+		"input": "1",
+		"expected": "1"
+	},
+	{
+		"input": "R]1K-@}SL5JVmv'o: 6<HR*6TL0@?Zk;}gQx",
+		"expected": "r-1k-sl5jvmv-o-6-hr-6tl0-zk-gqx"
+	},
+	{
+		"input": "a)ehHeX$u])S\"CZ(|q1]E34$zX#Z=ox?",
+		"expected": "a-ehhex-u-s-cz-q1-e34-zx-z-ox"
+	},
+	{
+		"input": "!G%NBT%OCiLV:Lv,6 >.",
+		"expected": "g-nbt-ocilv-lv-6"
+	},
+	{
+		"input": "P I_u",
+		"expected": "p-i-u"
+	},
+	{
+		"input": "'&>q(QKC?Q&.rY5DXBVegu(^uVsa~:G>1L6<_",
+		"expected": "q-qkc-q-ry5dxbvegu-uvsa-g-1l6"
+	},
+	{
+		"input": "w7",
+		"expected": "w7"
+	},
+	{
+		"input": "t|n<Hlhs)\\_SGu",
+		"expected": "t-n-hlhs-sgu"
+	},
+	{
+		"input": ":&gRa",
+		"expected": "gra"
+	},
+	{
+		"input": "Cg@`oUH==Ua ",
+		"expected": "cg-ouh-ua"
+	},
+	{
+		"input": "\"d{czY4o`?#$m=uv}D5LhpXNkp}qn",
+		"expected": "d-czy4o-m-uv-d5lhpxnkp-qn"
+	},
+	{
+		"input": "0,%miY)}TY,ca7i1h^&%='[b~{]As,'pk",
+		"expected": "0-miy-ty-ca7i1h-b-as-pk"
+	},
+	{
+		"input": "88^JjV+T=",
+		"expected": "88-jjv-t"
+	},
+	{
+		"input": "TF+;WA~wCW_5nj{\"'iyV:hV>tNh{",
+		"expected": "tf-wa-wcw-5nj-iyv-hv-tnh"
+	},
+	{
+		"input": "ya11nhcUS!1$rb^i",
+		"expected": "ya11nhcus-1-rb-i"
+	},
+	{
+		"input": "N85Nc]).c7+Lhw",
+		"expected": "n85nc-c7-lhw"
+	},
+	{
+		"input": "$s",
+		"expected": "s"
+	},
+	{
+		"input": "X1Z7fsKS^s\\--,'",
+		"expected": "x1z7fsks-s"
+	},
+	{
+		"input": "!=QxEc\"(}'ix8{-R\"y0`d",
+		"expected": "qxec-ix8-r-y0-d"
+	},
+	{
+		"input": "ANsw-YUY )Q`O&z+^nvF",
+		"expected": "answ-yuy-q-o-z-nvf"
+	},
+	{
+		"input": "%4B<v$[5(=",
+		"expected": "4b-v-5"
+	},
+	{
+		"input": "H3^RfY1!1=*PHVyF@?k?w$q}V&KT2",
+		"expected": "h3-rfy1-1-phvyf-k-w-q-v-kt2"
+	},
+	{
+		"input": "P{-mRu:D+I01KTv|`UX[\"Y06ttI",
+		"expected": "p-mru-d-i01ktv-ux-y06tti"
+	},
+	{
+		"input": "Y-n+<",
+		"expected": "y-n"
+	},
+	{
+		"input": "XbyNfE=)>x?,7Q%7",
+		"expected": "xbynfe-x-7q-7"
+	},
+	{
+		"input": "&",
+		"expected": ""
+	},
+	{
+		"input": "?K'CNL",
+		"expected": "k-cnl"
+	},
+	{
+		"input": "i&md2`$[y*^249]H~Nb>6[[U0D",
+		"expected": "i-md2-y-249-h-nb-6-u0d"
+	},
+	{
+		"input": "]>'@7H)3i@x@uL",
+		"expected": "7h-3i-x-ul"
+	},
+	{
+		"input": "z%IG6H7 Yu8E}h]K|kV6",
+		"expected": "z-ig6h7-yu8e-h-k-kv6"
+	},
+	{
+		"input": "049C?c7",
+		"expected": "049c-c7"
+	},
+	{
+		"input": "Z'7?z=",
+		"expected": "z-7-z"
+	},
+	{
+		"input": "t=H:pGZEl#YvV",
+		"expected": "t-h-pgzel-yvv"
+	},
+	{
+		"input": ") E\\%CXLM-LzQeL?`sW-S:2",
+		"expected": "e-cxlm-lzqel-sw-s-2"
+	},
+	{
+		"input": "|Rw!(E'18",
+		"expected": "rw-e-18"
+	},
+	{
+		"input": "-",
+		"expected": ""
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "G%% +gF{r$96f8'IWweL",
+		"expected": "g-gf-r-96f8-iwwel"
+	},
+	{
+		"input": "L/3\\s b>",
+		"expected": "l-3-s-b"
+	},
+	{
+		"input": "\"[.a*O;p0M+Oqs",
+		"expected": "a-o-p0m-oqs"
+	},
+	{
+		"input": "on-?n**,X`!l@Erc$Nv0Er4Ed ",
+		"expected": "on-n-x-l-erc-nv0er4ed"
+	},
+	{
+		"input": "_H`2CK{8Ny%-f~k-dkG$ M\\hn\\dQHTBw82",
+		"expected": "h-2ck-8ny-f-k-dkg-m-hn-dqhtbw82"
+	},
+	{
+		"input": "zo$(S![",
+		"expected": "zo-s"
+	},
+	{
+		"input": "|],#4K*5w4Ve?jN`3DZr!r$",
+		"expected": "4k-5w4ve-jn-3dzr-r"
+	},
+	{
+		"input": "Kl`=@F0_Xc",
+		"expected": "kl-f0-xc"
+	},
+	{
+		"input": "`-X",
+		"expected": "x"
+	},
+	{
+		"input": "If{Gt-<]1J0TtXCizv ~?R\"H~Nh3Uw`9w|qu>#~B",
+		"expected": "if-gt-1j0ttxcizv-r-h-nh3uw-9w-qu-b"
+	},
+	{
+		"input": "0xwiSs<cO62>c Thn?zf9&V\\s:|vbqb:DNK}IT",
+		"expected": "0xwiss-co62-c-thn-zf9-v-s-vbqb-dnk-it"
+	},
+	{
+		"input": "2+B\"'",
+		"expected": "2-b"
+	},
+	{
+		"input": ")nE`",
+		"expected": "ne"
+	},
+	{
+		"input": "@I\\cG\"U_XY/Vfta'lnpD1,7~'Qo~V",
+		"expected": "i-cg-u-xy-vfta-lnpd1-7-qo-v"
+	},
+	{
+		"input": "wI.RB/E4!ysF.B{aJNl~il.$ qj/TMSYtq",
+		"expected": "wi-rb-e4-ysf-b-ajnl-il-qj-tmsytq"
+	},
+	{
+		"input": "oWcp",
+		"expected": "owcp"
+	},
+	{
+		"input": "-<YZmT`_$5]4}x=5-=^eO=}iz",
+		"expected": "yzmt-5-4-x-5-eo-iz"
+	},
+	{
+		"input": "'l;wH\\,qqvpQ4",
+		"expected": "l-wh-qqvpq4"
+	},
+	{
+		"input": "%Cy-PNJul~j",
+		"expected": "cy-pnjul-j"
+	},
+	{
+		"input": "90Mw(",
+		"expected": "90mw"
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "U;N2>N94H~9]*aV6eJl\\hi)lP-m[;Kf]QfL?yTg",
+		"expected": "u-n2-n94h-9-av6ejl-hi-lp-m-kf-qfl-ytg"
+	},
+	{
+		"input": "kqU=5qJVt)^44Gb 3i8\\ARKdtL]<z{i;H",
+		"expected": "kqu-5qjvt-44gb-3i8-arkdtl-z-i-h"
+	},
+	{
+		"input": "l|T/|PSX:}va(VNv$|!@k-",
+		"expected": "l-t-psx-va-vnv-k"
+	},
+	{
+		"input": "T9(:\"6ey*<^hp1^&_PgJ",
+		"expected": "t9-6ey-hp1-pgj"
+	},
+	{
+		"input": "7-~76>N))!{[^L\"#bE^iLCbi\\|FUp`@; Q]Y'U^",
+		"expected": "7-76-n-l-be-ilcbi-fup-q-y-u"
+	},
+	{
+		"input": "WU+juICl:W/0^T~",
+		"expected": "wu-juicl-w-0-t"
+	},
+	{
+		"input": "YIk;J@/ ",
+		"expected": "yik-j"
+	},
+	{
+		"input": "QHp",
+		"expected": "qhp"
+	},
+	{
+		"input": "F-$YiA|F",
+		"expected": "f-yia-f"
+	},
+	{
+		"input": "$F(t2-I*S^ nq7!GkC>nE|4xa,YTEig`/@z",
+		"expected": "f-t2-i-s-nq7-gkc-ne-4xa-yteig-z"
+	},
+	{
+		"input": "Etq,FZH/.efgHX_ |!Q82!C",
+		"expected": "etq-fzh-efghx-q82-c"
+	},
+	{
+		"input": "0<F<e?}kS|fwWK<n2os><=]21_k#jY\\ZfEo%",
+		"expected": "0-f-e-ks-fwwk-n2os-21-k-jy-zfeo"
+	},
+	{
+		"input": "G_#q8|hh`G2",
+		"expected": "g-q8-hh-g2"
+	},
+	{
+		"input": "#l/6p-%Gj4:::?.z",
+		"expected": "l-6p-gj4-z"
+	},
+	{
+		"input": "=\"Ofl4h]^+94_Al$KssW#<dh![>vM}F_KvYd",
+		"expected": "ofl4h-94-al-kssw-dh-vm-f-kvyd"
+	},
+	{
+		"input": "> K`un=jZ8xI#]y6{T ",
+		"expected": "k-un-jz8xi-y6-t"
+	},
+	{
+		"input": "Z(RY1NG(_yE\\%y\\'$5er}eBG0!DC\"o",
+		"expected": "z-ry1ng-ye-y-5er-ebg0-dc-o"
+	},
+	{
+		"input": "5-HQ[Wn|[B~P",
+		"expected": "5-hq-wn-b-p"
+	},
+	{
+		"input": "`26eY9AkWQ80t#E8",
+		"expected": "26ey9akwq80t-e8"
+	},
+	{
+		"input": "wHnt[B;w x$vP33(py8K/&*",
+		"expected": "whnt-b-w-x-vp33-py8k"
+	},
+	{
+		"input": "o<&>]PA`53jng)@ E^KE BoDcXaLuPi%jwC%B[@",
+		"expected": "o-pa-53jng-e-ke-bodcxalupi-jwc-b"
+	},
+	{
+		"input": "[oh*nsj8d/d6}FeS^SmZN,0*'nW;?d{bL\\C.5?a'",
+		"expected": "oh-nsj8d-d6-fes-smzn-0-nw-d-bl-c-5-a"
+	},
+	{
+		"input": "#H @8P^",
+		"expected": "h-8p"
+	},
+	{
+		"input": "d+S+V/\\#bNjK:Ar?S^>q#/'",
+		"expected": "d-s-v-bnjk-ar-s-q"
+	},
+	{
+		"input": "[1Wb=o!*hao@?Up?()PJ'`0]aW-st\"",
+		"expected": "1wb-o-hao-up-pj-0-aw-st"
+	},
+	{
+		"input": ")jP6(XBUhxgV=4Ba:Cg8z*4%k!7;",
+		"expected": "jp6-xbuhxgv-4ba-cg8z-4-k-7"
+	},
+	{
+		"input": "  T{YI)KaZWW<FI",
+		"expected": "t-yi-kazww-fi"
+	},
+	{
+		"input": "d<-3Qz!8D>",
+		"expected": "d-3qz-8d"
+	},
+	{
+		"input": "m[nH+_J@S /l60=uxs<f8\"A.E*m&;z~",
+		"expected": "m-nh-j-s-l60-uxs-f8-a-e-m-z"
+	},
+	{
+		"input": "V2@=,twE-vRz01m/=no\\K${RcHQ #uXx9TkH?tK",
+		"expected": "v2-twe-vrz01m-no-k-rchq-uxx9tkh-tk"
+	},
+	{
+		"input": "v#\" 'l0Yq+jQSI0Lfr?'x]#",
+		"expected": "v-l0yq-jqsi0lfr-x"
+	},
+	{
+		"input": "wPkZn5??5JH#Z",
+		"expected": "wpkzn5-5jh-z"
+	},
+	{
+		"input": "IDWhP+",
+		"expected": "idwhp"
+	},
+	{
+		"input": "q|\\*GCtGoUH3Z!DF/Dg$h9\\\"J'j#",
+		"expected": "q-gctgouh3z-df-dg-h9-j-j"
+	},
+	{
+		"input": "&G;jDh@bOLQ>e1~yy.n4sAu{antb027KU{",
+		"expected": "g-jdh-bolq-e1-yy-n4sau-antb027ku"
+	},
+	{
+		"input": ":MS02@lDk2Z+*amVrM#PD@nS6q%K",
+		"expected": "ms02-ldk2z-amvrm-pd-ns6q-k"
+	},
+	{
+		"input": "fwUonc",
+		"expected": "fwuonc"
+	},
+	{
+		"input": "%WIV57=Y0.G",
+		"expected": "wiv57-y0-g"
+	},
+	{
+		"input": "?SP1K%|::LJCi#Z>ra,G^J(9?}eLh9$DZ>W)ju^$",
+		"expected": "sp1k-ljci-z-ra-g-j-9-elh9-dz-w-ju"
+	},
+	{
+		"input": ";?g^U/5T(LfzgEM'i-NxA'qAL(m_",
+		"expected": "g-u-5t-lfzgem-i-nxa-qal-m"
+	},
+	{
+		"input": ",.-6kD`=R\\c5.%01:_' b\"mAJk<ebV7vpF/",
+		"expected": "6kd-r-c5-01-b-majk-ebv7vpf"
+	},
+	{
+		"input": "(Ywd{:?;^eZBa4W_Qr%Esy",
+		"expected": "ywd-ezba4w-qr-esy"
+	},
+	{
+		"input": "@YfM!b9b3A$(9f@kCq`|}IFab26&5<l_",
+		"expected": "yfm-b9b3a-9f-kcq-ifab26-5-l"
+	},
+	{
+		"input": "!",
+		"expected": ""
+	},
+	{
+		"input": "_TY^O8b4hC",
+		"expected": "ty-o8b4hc"
+	},
+	{
+		"input": "7BX^v(4FD[EGO',c",
+		"expected": "7bx-v-4fd-ego-c"
+	},
+	{
+		"input": "#Nvb>`a$2M",
+		"expected": "nvb-a-2m"
+	},
+	{
+		"input": "5*4O0'}NlsMr/D}H",
+		"expected": "5-4o0-nlsmr-d-h"
+	},
+	{
+		"input": "WD'ys Q3]|zJlJDLbnV11:0{C0/&",
+		"expected": "wd-ys-q3-zjljdlbnv11-0-c0"
+	},
+	{
+		"input": "@jM__Z}05%2\"oMcGermH#;+Lj)AZY9`6e /Rs",
+		"expected": "jm-z-05-2-omcgermh-lj-azy9-6e-rs"
+	},
+	{
+		"input": "`P:+",
+		"expected": "p"
+	},
+	{
+		"input": "678)g3HE",
+		"expected": "678-g3he"
+	},
+	{
+		"input": "l/R%dp!/1i]fkQC",
+		"expected": "l-r-dp-1i-fkqc"
+	},
+	{
+		"input": "kj",
+		"expected": "kj"
+	},
+	{
+		"input": "_GD%)$h",
+		"expected": "gd-h"
+	},
+	{
+		"input": "h3ERU5}APkN4bEG>sH:lS%C",
+		"expected": "h3eru5-apkn4beg-sh-ls-c"
+	},
+	{
+		"input": "|fOaP/*",
+		"expected": "foap"
+	},
+	{
+		"input": "v",
+		"expected": "v"
+	},
+	{
+		"input": "={?!S||`9Z0i%PXJ",
+		"expected": "s-9z0i-pxj"
+	},
+	{
+		"input": ")j3&'$ZE/zFTN9X-Yqn#8{u",
+		"expected": "j3-ze-zftn9x-yqn-8-u"
+	},
+	{
+		"input": "9U4",
+		"expected": "9u4"
+	},
+	{
+		"input": "2uhm,Bu[o#-N]M&[",
+		"expected": "2uhm-bu-o-n-m"
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "#",
+		"expected": ""
+	},
+	{
+		"input": ";Zds\"G5~[",
+		"expected": "zds-g5"
+	},
+	{
+		"input": "#gBb",
+		"expected": "gbb"
+	},
+	{
+		"input": "&:Pl)P288",
+		"expected": "pl-p288"
+	},
+	{
+		"input": "[ilm5;;9td)'$f+F5GV",
+		"expected": "ilm5-9td-f-f5gv"
+	},
+	{
+		"input": "64FF5|)u-} !]mi+= XIAVb})`cyR$T\\H",
+		"expected": "64ff5-u-mi-xiavb-cyr-t-h"
+	},
+	{
+		"input": "6|w9LcwtnF6x=qtfhkh{",
+		"expected": "6-w9lcwtnf6x-qtfhkh"
+	},
+	{
+		"input": "-#xi*}gQC\">!Nb$W",
+		"expected": "xi-gqc-nb-w"
+	},
+	{
+		"input": "Te\\fuA$\"p,H:?b_=1VqerrbC^VJH->j'\\O~&]x",
+		"expected": "te-fua-p-h-b-1vqerrbc-vjh-j-o-x"
+	},
+	{
+		"input": "X> e%5wj(HE3E[iX?h3jUOJn)&Rl[gKS^@",
+		"expected": "x-e-5wj-he3e-ix-h3juojn-rl-gks"
+	},
+	{
+		"input": "l%dF'*whd/{dm_6Vfk)D&59bg.{lZ/k}+Vli",
+		"expected": "l-df-whd-dm-6vfk-d-59bg-lz-k-vli"
+	},
+	{
+		"input": "!k7:CAPWL[G%2=Q[E",
+		"expected": "k7-capwl-g-2-q-e"
+	},
+	{
+		"input": "RT;;t*t6Sl\"Qhr2b>Wn",
+		"expected": "rt-t-t6sl-qhr2b-wn"
+	},
+	{
+		"input": "sL$/N4Ck\"PDH",
+		"expected": "sl-n4ck-pdh"
+	},
+	{
+		"input": "eO-nU3v1p=KD;ZAVK4qd9BZ|P.4tB4",
+		"expected": "eo-nu3v1p-kd-zavk4qd9bz-p-4tb4"
+	},
+	{
+		"input": ")0YU\\ssok}",
+		"expected": "0yu-ssok"
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "Wu5cO`8ss+H8)P YOKr+!Xc@,D)td@9xSt,a",
+		"expected": "wu5co-8ss-h8-p-yokr-xc-d-td-9xst-a"
+	},
+	{
+		"input": "E>N^2rl:u5Guo \"f5AS8&(Kh[=i/U-CQ{JPRA",
+		"expected": "e-n-2rl-u5guo-f5as8-kh-i-u-cq-jpra"
+	},
+	{
+		"input": "Q $",
+		"expected": "q"
+	},
+	{
+		"input": "n3Z?a)Djw$H>M);Y[n$!H-1@0I\\e9lSts",
+		"expected": "n3z-a-djw-h-m-y-n-h-1-0i-e9lsts"
+	},
+	{
+		"input": "QW0f%d\"l#'W$^",
+		"expected": "qw0f-d-l-w"
+	},
+	{
+		"input": ")B<=Ol#5hKxm+WtY!2.5[K/",
+		"expected": "b-ol-5hkxm-wty-2-5-k"
+	},
+	{
+		"input": "<Z.4o2Vr@bFh?VcHe:MDziIy#+!RRXz",
+		"expected": "z-4o2vr-bfh-vche-mdziiy-rrxz"
+	},
+	{
+		"input": "9>29EcsSo}vi%Pr2POUH/UIp\\ugpZRI%{,",
+		"expected": "9-29ecsso-vi-pr2pouh-uip-ugpzri"
+	},
+	{
+		"input": "&9iQS<kz4mdk;SB_ 4pi08-v<,OdoQq",
+		"expected": "9iqs-kz4mdk-sb-4pi08-v-odoqq"
+	},
+	{
+		"input": "%W/L'Qg?qe6@SRB#r@({g1&",
+		"expected": "w-l-qg-qe6-srb-r-g1"
+	},
+	{
+		"input": "Rjue=k%_udN9\"a.q",
+		"expected": "rjue-k-udn9-a-q"
+	},
+	{
+		"input": "2.z}}ase@ke^K4",
+		"expected": "2-z-ase-ke-k4"
+	},
+	{
+		"input": "AFx;mymvx!bVQF(x#H-&Ox.-cX8P7:%",
+		"expected": "afx-mymvx-bvqf-x-h-ox-cx8p7"
+	},
+	{
+		"input": "0H}gnZ'zFOqG",
+		"expected": "0h-gnz-zfoqg"
+	},
+	{
+		"input": "Bm\"F|xj6G'V*`+y#jZ`",
+		"expected": "bm-f-xj6g-v-y-jz"
+	},
+	{
+		"input": "$2vLmT%0~p~$\\KiI'^ns",
+		"expected": "2vlmt-0-p-kii-ns"
+	},
+	{
+		"input": ".Ec~zW'OWR[A6;v8!",
+		"expected": "ec-zw-owr-a6-v8"
+	},
+	{
+		"input": "<3'9w^U",
+		"expected": "3-9w-u"
+	},
+	{
+		"input": "ZvmF.c8;hL f($0nyU\"$+T^]5NgSOi?G)p,",
+		"expected": "zvmf-c8-hl-f-0nyu-t-5ngsoi-g-p"
+	},
+	{
+		"input": "l@.&>hr=\\/j4:pvr=d}sOUO8E}x/PJUB\\j<",
+		"expected": "l-hr-j4-pvr-d-souo8e-x-pjub-j"
+	},
+	{
+		"input": "AS{/!lPR;RF*ZVQ:5s* \\9",
+		"expected": "as-lpr-rf-zvq-5s-9"
+	},
+	{
+		"input": "0dh;{uum@sO'mejpFGrh",
+		"expected": "0dh-uum-so-mejpfgrh"
+	},
+	{
+		"input": "N$N]C#aGad\"1(N'Ll\\&",
+		"expected": "n-n-c-agad-1-n-ll"
+	},
+	{
+		"input": "X\\ZX,ay;b({fkHxw |J]g$x5]SqHO%c6g89",
+		"expected": "x-zx-ay-b-fkhxw-j-g-x5-sqho-c6g89"
+	},
+	{
+		"input": "*TtT_=?+J-NVTUwCmjTN{l#Yg0'9d>8o\"4wHu@",
+		"expected": "ttt-j-nvtuwcmjtn-l-yg0-9d-8o-4whu"
+	},
+	{
+		"input": "&Xh$z/hcy",
+		"expected": "xh-z-hcy"
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "y:Q%",
+		"expected": "y-q"
+	},
+	{
+		"input": "4S|YI;^ke'\"]JC.DCA",
+		"expected": "4s-yi-ke-jc-dca"
+	},
+	{
+		"input": "qJD;.1'3E",
+		"expected": "qjd-1-3e"
+	},
+	{
+		"input": "wC\"}ZApgVk\"|w5",
+		"expected": "wc-zapgvk-w5"
+	},
+	{
+		"input": "'#Mu0NCP_ff%:j%",
+		"expected": "mu0ncp-ff-j"
+	},
+	{
+		"input": "MF]8*+Ait%rzg,",
+		"expected": "mf-8-ait-rzg"
+	},
+	{
+		"input": "\"mruE,(",
+		"expected": "mrue"
+	},
+	{
+		"input": "*C!b;VZ6;s}q!_%$H(JzMr`2[<[t:%lgBn",
+		"expected": "c-b-vz6-s-q-h-jzmr-2-t-lgbn"
+	},
+	{
+		"input": "QHW1DZu]K/\\Ly(zJ9Z/t1G^M%7I@ZI+",
+		"expected": "qhw1dzu-k-ly-zj9z-t1g-m-7i-zi"
+	},
+	{
+		"input": "K,ZrmS{;iJMr^B~",
+		"expected": "k-zrms-ijmr-b"
+	},
+	{
+		"input": "khs%T45!)~bRX I-um|2lt'",
+		"expected": "khs-t45-brx-i-um-2lt"
+	},
+	{
+		"input": "EO<+",
+		"expected": "eo"
+	},
+	{
+		"input": "U5% Fc~ME4[UVYW#m\\L\\k69Z\\&y?lX{#\"O@\"/d",
+		"expected": "u5-fc-me4-uvyw-m-l-k69z-y-lx-o-d"
+	},
+	{
+		"input": "~ sH|$ZL.kX%nW#S&^G.OOs",
+		"expected": "sh-zl-kx-nw-s-g-oos"
+	},
+	{
+		"input": "w_\"p:+~k&tfx\\We1utES'bqBR?~u",
+		"expected": "w-p-k-tfx-we1utes-bqbr-u"
+	},
+	{
+		"input": "['_H5P@9.r{nZJg!nK,_o6mLO$(g",
+		"expected": "h5p-9-r-nzjg-nk-o6mlo-g"
+	},
+	{
+		"input": "3X_{UQN9[)GpfGem9;lIRCd[C@",
+		"expected": "3x-uqn9-gpfgem9-lircd-c"
+	},
+	{
+		"input": "}wB",
+		"expected": "wb"
+	},
+	{
+		"input": "[9X&pi;Bd,^t;gx,Lfe/K_Q_:;\"{_bU]b[-",
+		"expected": "9x-pi-bd-t-gx-lfe-k-q-bu-b"
+	},
+	{
+		"input": "Y{c b",
+		"expected": "y-c-b"
+	},
+	{
+		"input": "7kw{:7-l;Ys6lIR9oG!E-5}?>=88Mw#VSi)",
+		"expected": "7kw-7-l-ys6lir9og-e-5-88mw-vsi"
+	},
+	{
+		"input": "Tb[oA,^x'j1rm[>1`]^*kOQ@oT",
+		"expected": "tb-oa-x-j1rm-1-koq-ot"
+	},
+	{
+		"input": "SCuAtXcS4HUR,%Hyv;RT?;/k[F",
+		"expected": "scuatxcs4hur-hyv-rt-k-f"
+	},
+	{
+		"input": "tNsJETjg-9I0R3\"B4CR-P",
+		"expected": "tnsjetjg-9i0r3-b4cr-p"
+	},
+	{
+		"input": "@SX@kC57",
+		"expected": "sx-kc57"
+	},
+	{
+		"input": "Q-P`off$w(P8tmr!i",
+		"expected": "q-p-off-w-p8tmr-i"
+	},
+	{
+		"input": "EH('k?mK`{0|X[Oiz:#Q@*](9",
+		"expected": "eh-k-mk-0-x-oiz-q-9"
+	},
+	{
+		"input": "O",
+		"expected": "o"
+	},
+	{
+		"input": "N4A.*dS}%Gb_1eS@OD",
+		"expected": "n4a-ds-gb-1es-od"
+	},
+	{
+		"input": "Y teaK",
+		"expected": "y-teak"
+	},
+	{
+		"input": "kEej#lh8`!9y>k&~#;.7?t,}b8e2^*G5;D0<",
+		"expected": "keej-lh8-9y-k-7-t-b8e2-g5-d0"
+	},
+	{
+		"input": "Az'*8wk(J&]kS&o-2X26<O /|I",
+		"expected": "az-8wk-j-ks-o-2x26-o-i"
+	},
+	{
+		"input": "fF%:5AcE~`]uot@",
+		"expected": "ff-5ace-uot"
+	},
+	{
+		"input": "mM$'s4)Ef$OpdE%$\"'D_.RhK#r",
+		"expected": "mm-s4-ef-opde-d-rhk-r"
+	},
+	{
+		"input": "?npy]j#6$+4HtS#[I).^60}O<rAYv=$%;",
+		"expected": "npy-j-6-4hts-i-60-o-rayv"
+	},
+	{
+		"input": "*x?LC>7!QRGm /wA?}1c  B\"",
+		"expected": "x-lc-7-qrgm-wa-1c-b"
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "qA@a+<p9P8@C!9<Or}9",
+		"expected": "qa-a-p9p8-c-9-or-9"
+	},
+	{
+		"input": "Z955fiH{QcBkm#3J|c&7zuJ",
+		"expected": "z955fih-qcbkm-3j-c-7zuj"
+	},
+	{
+		"input": "CjA#iH",
+		"expected": "cja-ih"
+	},
+	{
+		"input": "G%xN7]#(k#H=w]ulQ]Gl;xz' o+_5-A=a",
+		"expected": "g-xn7-k-h-w-ulq-gl-xz-o-5-a-a"
+	},
+	{
+		"input": "57>-qMK_iD&ug75t/Ie%zQ)HAgOIH%h+Zrd(?",
+		"expected": "57-qmk-id-ug75t-ie-zq-hagoih-h-zrd"
+	},
+	{
+		"input": "-PI",
+		"expected": "pi"
+	},
+	{
+		"input": "25xFEJmld/",
+		"expected": "25xfejmld"
+	},
+	{
+		"input": "U7U|RF{/u}?>=@mesPW",
+		"expected": "u7u-rf-u-mespw"
+	},
+	{
+		"input": "axN3x",
+		"expected": "axn3x"
+	},
+	{
+		"input": "i`R[bh-i=\"+co3W\\h+iF.'*/GR{",
+		"expected": "i-r-bh-i-co3w-h-if-gr"
+	},
+	{
+		"input": "7URwl|^eGwUY-O+25iU}-k6`*ED,o\"W+u..6",
+		"expected": "7urwl-egwuy-o-25iu-k6-ed-o-w-u-6"
+	},
+	{
+		"input": "RESA) .\"bor&eo,,@.^qdqx]t-G2t,=G4k",
+		"expected": "resa-bor-eo-qdqx-t-g2t-g4k"
+	},
+	{
+		"input": ".y+=",
+		"expected": "y"
+	},
+	{
+		"input": "}O0wrT(-U,v(s5V`^D=B9P$l6p>%A7.U*",
+		"expected": "o0wrt-u-v-s5v-d-b9p-l6p-a7-u"
+	},
+	{
+		"input": "ph6<`",
+		"expected": "ph6"
+	},
+	{
+		"input": "Zn-XXj5Q#b&E h6}a0tir4`;(Id}EJi#",
+		"expected": "zn-xxj5q-b-e-h6-a0tir4-id-eji"
+	},
+	{
+		"input": "jz2xI^h^LR;B<&%og/a\\(Y,GBO",
+		"expected": "jz2xi-h-lr-b-og-a-y-gbo"
+	},
+	{
+		"input": "3&C/Ml,f/3OfTX,yPMJ5rh\"ja[=ep>k-",
+		"expected": "3-c-ml-f-3oftx-ypmj5rh-ja-ep-k"
+	},
+	{
+		"input": "N.;84|;%!2B#0{j#<8#345(S/~Q1-vctr[7w`B",
+		"expected": "n-84-2b-0-j-8-345-s-q1-vctr-7w-b"
+	},
+	{
+		"input": "M0<_6e~Rq;?\"H2.Y-m1Z}\\Jia=kVPI*_+jt[J",
+		"expected": "m0-6e-rq-h2-y-m1z-jia-kvpi-jt-j"
+	},
+	{
+		"input": "5JP3EvEs5N(VolSA;}104R",
+		"expected": "5jp3eves5n-volsa-104r"
+	},
+	{
+		"input": "JHaG+1LOdTcb:",
+		"expected": "jhag-1lodtcb"
+	},
+	{
+		"input": "W/LB{S'*_Ng}(",
+		"expected": "w-lb-s-ng"
+	},
+	{
+		"input": "hW_yJ*ufT!x 1s;DpIZC*Jm]EBFe#?jtu<zS",
+		"expected": "hw-yj-uft-x-1s-dpizc-jm-ebfe-jtu-zs"
+	},
+	{
+		"input": "}i5$@4of8xb",
+		"expected": "i5-4of8xb"
+	},
+	{
+		"input": "5<!hm,-~pG)//]i>uB:rqm7ilw \"uUS&@`N,$n~6",
+		"expected": "5-hm-pg-i-ub-rqm7ilw-uus-n-n-6"
+	},
+	{
+		"input": "x{f6",
+		"expected": "x-f6"
+	},
+	{
+		"input": "E<[ggx^Tn] j4_b#P6i#9$T",
+		"expected": "e-ggx-tn-j4-b-p6i-9-t"
+	},
+	{
+		"input": "=4AQh!H#<Ua@vwdHl]Y",
+		"expected": "4aqh-h-ua-vwdhl-y"
+	},
+	{
+		"input": "6IetMd'J>xI2}*#tW/\\'jTxhjwzs @#",
+		"expected": "6ietmd-j-xi2-tw-jtxhjwzs"
+	},
+	{
+		"input": "B@ OBaM%JL Q?hPTDu)S0>si9",
+		"expected": "b-obam-jl-q-hptdu-s0-si9"
+	},
+	{
+		"input": "&CWLKrE2%",
+		"expected": "cwlkre2"
+	},
+	{
+		"input": "JVP%RTsw>k14G#[jlCiwO:Z<\"%7,,80mM]dR}&!{",
+		"expected": "jvp-rtsw-k14g-jlciwo-z-7-80mm-dr"
+	},
+	{
+		"input": "P~EH;It{IHn'^hG",
+		"expected": "p-eh-it-ihn-hg"
+	},
+	{
+		"input": "K':=W$P_n3eJ5Z9anhyQvCB<`UG[xv><Z",
+		"expected": "k-w-p-n3ej5z9anhyqvcb-ug-xv-z"
+	},
+	{
+		"input": "~(/qcew}%Hz<W`[|CHZjCUD0x!/",
+		"expected": "qcew-hz-w-chzjcud0x"
+	},
+	{
+		"input": "\\1L55YNvzNkj|rj42|/~:UDaANj_}u",
+		"expected": "1l55ynvznkj-rj42-udaanj-u"
+	},
+	{
+		"input": "qR214*JRD^!{NK0[5)M]G-'PJuOm5Rfo+T",
+		"expected": "qr214-jrd-nk0-5-m-g-pjuom5rfo-t"
+	},
+	{
+		"input": "F+@%U>@3)a%eTQ.IN4@9_AY^0$jD>0&L?;Fj>L!",
+		"expected": "f-u-3-a-etq-in4-9-ay-0-jd-0-l-fj-l"
+	},
+	{
+		"input": "Driglju]8Msl\"(BSlhZE7OXuNpb",
+		"expected": "driglju-8msl-bslhze7oxunpb"
+	},
+	{
+		"input": "16F?>p{DjV|Glg<}!OZ?{Da2(",
+		"expected": "16f-p-djv-glg-oz-da2"
+	},
+	{
+		"input": "d$}%@daLRNimhPOrBrzg\\yi_fN4 A!`^",
+		"expected": "d-dalrnimhporbrzg-yi-fn4-a"
+	},
+	{
+		"input": "e,Ji)uf*Uf{_p9A>q/`aaum-2",
+		"expected": "e-ji-uf-uf-p9a-q-aaum-2"
+	},
+	{
+		"input": "i0qe L3b$aDdjYFSs?<9./+mKY\"",
+		"expected": "i0qe-l3b-addjyfss-9-mky"
+	},
+	{
+		"input": "",
+		"expected": ""
+	},
+	{
+		"input": "<K)'{24-0s0Z.py/WKN_O",
+		"expected": "k-24-0s0z-py-wkn-o"
+	},
+	{
+		"input": "k4fZ@1 h!)u43(NOEI?T^E8.'+vRYn(JSm",
+		"expected": "k4fz-1-h-u43-noei-t-e8-vryn-jsm"
+	},
+	{
+		"input": "z{/Pc<sPf;U<@Ve6v&TxM_:m]arXnq",
+		"expected": "z-pc-spf-u-ve6v-txm-m-arxnq"
+	},
+	{
+		"input": "9mHnf$SQ)KEud",
+		"expected": "9mhnf-sq-keud"
+	},
+	{
+		"input": "s8/?%|Qj+V1GNc]A",
+		"expected": "s8-qj-v1gnc-a"
+	},
+	{
+		"input": "x6^lzwz",
+		"expected": "x6-lzwz"
+	},
+	{
+		"input": "J6-#:h<f*-3Yw_\"mZt`JfxF>|UZsfE]kg8Dx",
+		"expected": "j6-h-f-3yw-mzt-jfxf-uzsfe-kg8dx"
+	},
+	{
+		"input": "}a=?8}D0_$Y<GQdG:4\\_<zt8Jo)",
+		"expected": "a-8-d0-y-gqdg-4-zt8jo"
+	},
+	{
+		"input": "n-{)vBNpqNP3ohV\"6/B(t5wekYg,Zwv]/",
+		"expected": "n-vbnpqnp3ohv-6-b-t5wekyg-zwv"
+	},
+	{
+		"input": "!K#$z<rG}*69iuGS*t\\RRP~i?:u",
+		"expected": "k-z-rg-69iugs-t-rrp-i-u"
+	},
+	{
+		"input": ";qQ_P*4j#EH31A|y?",
+		"expected": "qq-p-4j-eh31a-y"
+	},
+	{
+		"input": "%Z^oEErc1y6Gp4g%{RPXAX",
+		"expected": "z-oeerc1y6gp4g-rpxax"
+	},
+	{
+		"input": "R9qMW'z(f4k'lC+-D,Q\"S@j^s5 ~JZx_Q0_Ut",
+		"expected": "r9qmw-z-f4k-lc-d-q-s-j-s5-jzx-q0-ut"
+	},
+	{
+		"input": "Li/lJ2&X^|=.j$5F)B'%L",
+		"expected": "li-lj2-x-j-5f-b-l"
+	},
+	{
+		"input": " ^SNY5,wz4so|i;6 \\t8pp>iHX.SzI5v{Z\"=S\\D",
+		"expected": "sny5-wz4so-i-6-t8pp-ihx-szi5v-z-s-d"
+	},
+	{
+		"input": "66FX]-HF#rrj_lKKbJ>>%juU&eYdQ}",
+		"expected": "66fx-hf-rrj-lkkbj-juu-eydq"
+	},
+	{
+		"input": "^TC5>H*\"0x{yUDOf~X h--4uML/F13N--ZJSN.k",
+		"expected": "tc5-h-0x-yudof-x-h-4uml-f13n-zjsn-k"
+	},
+	{
+		"input": "f?I\\R}<aQP{%SlzcX*lhZq?+|0",
+		"expected": "f-i-r-aqp-slzcx-lhzq-0"
+	},
+	{
+		"input": "]5PtzX 5H~}cg`JI",
+		"expected": "5ptzx-5h-cg-ji"
+	},
+	{
+		"input": "I$i1|lZbk:}w2NA(rnVUhqGdJ*?/F\"TS,n",
+		"expected": "i-i1-lzbk-w2na-rnvuhqgdj-f-ts-n"
+	},
+	{
+		"input": "Acli(I8La0l Y~XS",
+		"expected": "acli-i8la0l-y-xs"
+	},
+	{
+		"input": "6`%lK(SQ5~fc9'o9k\"l2h_\\",
+		"expected": "6-lk-sq5-fc9-o9k-l2h"
+	},
+	{
+		"input": "n,N&oQYGs>",
+		"expected": "n-n-oqygs"
+	},
+	{
+		"input": "H],64Dgh,}[?_m_!bz:Q@C6R#d<veW",
+		"expected": "h-64dgh-m-bz-q-c6r-d-vew"
+	},
+	{
+		"input": "+.>q<8>&\\4{`61YTvh\"7u[%_!;y",
+		"expected": "q-8-4-61ytvh-7u-y"
+	},
+	{
+		"input": "V^D9n^,nC9Ko",
+		"expected": "v-d9n-nc9ko"
+	},
+	{
+		"input": "#Rg~9k}{;poE|9\\29{Rie^",
+		"expected": "rg-9k-poe-9-29-rie"
+	},
+	{
+		"input": "*(=iqz/LFV)PXJ__F",
+		"expected": "iqz-lfv-pxj-f"
+	},
+	{
+		"input": "F4+Q?`yE,NVWLKSJINCp",
+		"expected": "f4-q-ye-nvwlksjincp"
+	},
+	{
+		"input": "Owt2O};)gE",
+		"expected": "owt2o-ge"
+	},
+	{
+		"input": "3W5CR51%OG@Ck!`KoXnfF[Ul)2W\"xB`U,L",
+		"expected": "3w5cr51-og-ck-koxnff-ul-2w-xb-u-l"
+	},
+	{
+		"input": "&XPAIV~IiMn?q-~_`K)*PI1Bh{j@",
+		"expected": "xpaiv-iimn-q-k-pi1bh-j"
+	},
+	{
+		"input": "6sm hUp,B[Ya\\@42+fZNSmf}\"p0qhXdohWD",
+		"expected": "6sm-hup-b-ya-42-fznsmf-p0qhxdohwd"
+	},
+	{
+		"input": "DkOD5:*vf*oG9wVA",
+		"expected": "dkod5-vf-og9wva"
+	},
+	{
+		"input": "KA97F}_96>'uv()8I~)FB}G:C",
+		"expected": "ka97f-96-uv-8i-fb-g-c"
+	},
+	{
+		"input": "OG},GA-",
+		"expected": "og-ga"
+	},
+	{
+		"input": "-7Lj?oef4@t^rZ1L`(k#X%3Yrt8X&V1%v\"{H&S;",
+		"expected": "7lj-oef4-t-rz1l-k-x-3yrt8x-v1-v-h-s"
+	},
+	{
+		"input": "P3_3$%6XjVRG<g8|TlzHSnQr2|\\0;M",
+		"expected": "p3-3-6xjvrg-g8-tlzhsnqr2-0-m"
+	},
+	{
+		"input": "MXy0*qiyA$pk0@s",
+		"expected": "mxy0-qiya-pk0-s"
+	},
+	{
+		"input": "~jrZu1<4dL>Jx)~YFQ%Z\"juz\\](&5f1M",
+		"expected": "jrzu1-4dl-jx-yfq-z-juz-5f1m"
+	},
+	{
+		"input": ".M4bkQ_$/;\\Sf2",
+		"expected": "m4bkq-sf2"
+	}
+]
