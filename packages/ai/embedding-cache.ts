@@ -10,36 +10,28 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { LruCache } from "../tools/lru-cache";
 
 const CACHE_DIR = join(process.env.HOME || "~", ".8gent");
 const CACHE_PATH = join(CACHE_DIR, "embedding-cache.json");
 const MAX_ENTRIES = 1000;
 
 export class EmbeddingCache {
-	private map: Map<string, number[]>;
+	private cache: LruCache<string, number[]>;
 
 	constructor() {
-		this.map = new Map();
+		this.cache = new LruCache({ maxEntries: MAX_ENTRIES });
 		this._load();
 	}
 
 	get(text: string): number[] | null {
-		const v = this.map.get(text);
-		if (!v) return null;
-		// LRU: re-insert to move to end
-		this.map.delete(text);
-		this.map.set(text, v);
-		return v;
+		// LruCache.get promotes on hit (re-insert to move to end)
+		return this.cache.get(text) ?? null;
 	}
 
 	set(text: string, embedding: number[]): void {
-		if (this.map.has(text)) this.map.delete(text);
-		else if (this.map.size >= MAX_ENTRIES) {
-			// evict oldest (first key in insertion order)
-			const oldest = this.map.keys().next().value;
-			if (oldest !== undefined) this.map.delete(oldest);
-		}
-		this.map.set(text, embedding);
+		// LruCache evicts the oldest entry when capacity is exceeded
+		this.cache.set(text, embedding);
 	}
 
 	/** Returns cosine similarity if both texts are cached, otherwise null */
@@ -52,20 +44,20 @@ export class EmbeddingCache {
 
 	/** Size of cache */
 	get size(): number {
-		return this.map.size;
+		return this.cache.size;
 	}
 
 	/** Flush cache to disk */
 	flush(): void {
 		if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
 		const obj: Record<string, number[]> = {};
-		for (const [k, v] of this.map) obj[k] = v;
+		for (const [k, v] of this.cache.entries()) obj[k] = v;
 		writeFileSync(CACHE_PATH, JSON.stringify(obj));
 	}
 
 	/** Clear all cached entries */
 	clear(): void {
-		this.map.clear();
+		this.cache.clear();
 	}
 
 	private _load(): void {
@@ -73,7 +65,8 @@ export class EmbeddingCache {
 			if (existsSync(CACHE_PATH)) {
 				const raw = JSON.parse(readFileSync(CACHE_PATH, "utf-8")) as Record<string, number[]>;
 				for (const [k, v] of Object.entries(raw)) {
-					if (this.map.size < MAX_ENTRIES) this.map.set(k, v);
+					// keep the first MAX_ENTRIES from disk, matching the original loader
+					if (this.cache.size < MAX_ENTRIES) this.cache.set(k, v);
 				}
 			}
 		} catch {
