@@ -1,16 +1,29 @@
 /**
- * Phase 2: Judge Scoring Integration
+ * Phase 2: Judge Scoring Integration (LEGACY CLOUD PATH)
  *
  * Wires a PRM (Process Reward Model) to score agent responses.
  * Uses Gemini Flash via OpenRouter as the judge — free and fast enough
  * for async scoring. Tracks score distributions over time.
+ *
+ * Issue #2750: this cloud verdict path is being retired behind the local
+ * judge layer (`local-scorer.ts` over `packages/eight/verdict.ts`). The
+ * production loop now scores local-first and only falls back here; Step 5
+ * removes this module once the local judges win the gauntlet.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { redact } from "../memory/redact";
-import { anonymize, containsPii } from "../permissions/pii-anonymizer";
 import { containsSecret } from "../permissions/goal-secret-scrub";
+import { anonymize, containsPii } from "../permissions/pii-anonymizer";
+import {
+	DEFAULT_HISTORY_PATH,
+	type ScoreHistory,
+	type ScoreRecord,
+	appendScoreRecord,
+	loadScoreHistory,
+	scoreTrend,
+} from "./score-history";
+
+export type { ScoreRecord } from "./score-history";
 
 export interface JudgeConfig {
 	/** Judge model endpoint (default: OpenRouter) */
@@ -25,7 +38,7 @@ export interface JudgeConfig {
 	criteria: ScoringCriteria;
 }
 
-interface ScoringCriteria {
+export interface ScoringCriteria {
 	/** Did the code execute correctly? (0-1) */
 	executionSuccess: number;
 	/** Is the code clean and idiomatic? (0-1) */
@@ -36,43 +49,20 @@ interface ScoringCriteria {
 	directness: number;
 }
 
-export interface ScoreRecord {
-	sessionId: string;
-	turnIndex: number;
-	model: string;
-	prompt: string;
-	response: string;
-	scores: {
-		executionSuccess: number;
-		codeQuality: number;
-		toolEfficiency: number;
-		directness: number;
-		overall: number;
-	};
-	timestamp: string;
-}
-
-interface ScoreHistory {
-	records: ScoreRecord[];
-	stats: {
-		totalScored: number;
-		avgOverall: number;
-		scoresByModel: Record<string, { avg: number; count: number }>;
-	};
-	updatedAt: string;
-}
+/** Default criteria weights, shared with the local scorer. */
+export const DEFAULT_CRITERIA_WEIGHTS: ScoringCriteria = {
+	executionSuccess: 0.4,
+	codeQuality: 0.2,
+	toolEfficiency: 0.2,
+	directness: 0.2,
+};
 
 const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
 	prmUrl: "https://openrouter.ai/api/v1",
 	prmModel: "google/gemini-2.5-flash:free",
 	prmApiKey: "",
-	historyPath: ".8gent/kernel/score-history.json",
-	criteria: {
-		executionSuccess: 0.4,
-		codeQuality: 0.2,
-		toolEfficiency: 0.2,
-		directness: 0.2,
-	},
+	historyPath: DEFAULT_HISTORY_PATH,
+	criteria: DEFAULT_CRITERIA_WEIGHTS,
 };
 
 const JUDGE_SYSTEM_PROMPT = `You are a code quality judge for an autonomous coding agent. Score the agent's response on these criteria. Return ONLY a JSON object with numeric scores (0.0 to 1.0):
@@ -137,8 +127,9 @@ export class JudgeScorer {
 					overall: 0,
 				},
 				timestamp: new Date().toISOString(),
+				judgeSource: "cloud",
 			};
-			this.appendRecord(skipped);
+			appendScoreRecord(this.config.historyPath, skipped);
 			return skipped;
 		}
 
@@ -160,9 +151,10 @@ export class JudgeScorer {
 			response: safeResponse.slice(0, 500),
 			scores: { ...scores, overall: Math.round(overall * 100) / 100 },
 			timestamp: new Date().toISOString(),
+			judgeSource: "cloud",
 		};
 
-		this.appendRecord(record);
+		appendScoreRecord(this.config.historyPath, record);
 		return record;
 	}
 
@@ -192,15 +184,14 @@ export class JudgeScorer {
 	 * Get score distribution statistics.
 	 */
 	getDistribution(): ScoreHistory["stats"] {
-		const history = this.loadHistory();
-		return history.stats;
+		return loadScoreHistory(this.config.historyPath).stats;
 	}
 
 	/**
 	 * Get recent scores for a specific model.
 	 */
 	getModelScores(model: string, limit = 20): ScoreRecord[] {
-		const history = this.loadHistory();
+		const history = loadScoreHistory(this.config.historyPath);
 		return history.records.filter((r) => r.model === model).slice(-limit);
 	}
 
@@ -208,23 +199,7 @@ export class JudgeScorer {
 	 * Get the average score trend (last N records, grouped by day).
 	 */
 	getScoreTrend(days = 7): Array<{ date: string; avg: number; count: number }> {
-		const history = this.loadHistory();
-		const grouped: Record<string, { total: number; count: number }> = {};
-
-		for (const record of history.records) {
-			const date = record.timestamp.split("T")[0];
-			if (!grouped[date]) grouped[date] = { total: 0, count: 0 };
-			grouped[date].total += record.scores.overall;
-			grouped[date].count += 1;
-		}
-
-		return Object.entries(grouped)
-			.map(([date, { total, count }]) => ({
-				date,
-				avg: Math.round((total / count) * 100) / 100,
-				count,
-			}))
-			.slice(-days);
+		return scoreTrend(this.config.historyPath, days);
 	}
 
 	/**
@@ -289,55 +264,6 @@ export class JudgeScorer {
 			toolEfficiency: clamp(parsed.toolEfficiency ?? 0.5),
 			directness: clamp(parsed.directness ?? 0.5),
 		};
-	}
-
-	private loadHistory(): ScoreHistory {
-		try {
-			if (existsSync(this.config.historyPath)) {
-				return JSON.parse(readFileSync(this.config.historyPath, "utf-8"));
-			}
-		} catch {}
-		return {
-			records: [],
-			stats: { totalScored: 0, avgOverall: 0, scoresByModel: {} },
-			updatedAt: "",
-		};
-	}
-
-	private appendRecord(record: ScoreRecord): void {
-		const history = this.loadHistory();
-		history.records.push(record);
-
-		// Keep last 500 records
-		if (history.records.length > 500) {
-			history.records = history.records.slice(-500);
-		}
-
-		// Update stats
-		history.stats.totalScored += 1;
-		const allOverall = history.records.map((r) => r.scores.overall);
-		history.stats.avgOverall =
-			Math.round((allOverall.reduce((a, b) => a + b, 0) / allOverall.length) * 100) / 100;
-
-		// Per-model stats
-		const byModel: Record<string, number[]> = {};
-		for (const r of history.records) {
-			if (!byModel[r.model]) byModel[r.model] = [];
-			byModel[r.model].push(r.scores.overall);
-		}
-		history.stats.scoresByModel = {};
-		for (const [model, scores] of Object.entries(byModel)) {
-			history.stats.scoresByModel[model] = {
-				avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 100) / 100,
-				count: scores.length,
-			};
-		}
-
-		history.updatedAt = new Date().toISOString();
-
-		const dir = dirname(this.config.historyPath);
-		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-		writeFileSync(this.config.historyPath, JSON.stringify(history, null, 2));
 	}
 }
 
