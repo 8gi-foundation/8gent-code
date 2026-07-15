@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CapabilityAuditStore } from "./capability-store.js";
+import { DecisionAuditStore, GENESIS_HASH } from "./decision-store.js";
 import { AccessAuditStore } from "./store.js";
 import type {
 	AccessEvent,
@@ -20,23 +21,37 @@ import type {
 	ActorKind,
 	CapabilityEvent,
 	CapabilityOperation,
+	ChainVerification,
+	DecisionEvent,
+	DecisionGate,
+	DecisionOutcome,
+	DecisionRequestKind,
 	LogAccessInput,
 	LogCapabilityInput,
+	LogDecisionInput,
 	QueryAccessOptions,
 	QueryCapabilityOptions,
+	QueryDecisionOptions,
 } from "./types.js";
 
-export { AccessAuditStore, CapabilityAuditStore };
+export { AccessAuditStore, CapabilityAuditStore, DecisionAuditStore, GENESIS_HASH };
 export type {
 	AccessEvent,
 	AccessOperation,
 	ActorKind,
 	CapabilityEvent,
 	CapabilityOperation,
+	ChainVerification,
+	DecisionEvent,
+	DecisionGate,
+	DecisionOutcome,
+	DecisionRequestKind,
 	LogAccessInput,
 	LogCapabilityInput,
+	LogDecisionInput,
 	QueryAccessOptions,
 	QueryCapabilityOptions,
+	QueryDecisionOptions,
 };
 
 let _shared: AccessAuditStore | null = null;
@@ -57,6 +72,10 @@ function resolveDefaultPath(): string {
 
 function resolveDefaultCapabilityPath(): string {
 	return path.join(resolveAuditDir(), "capability.db");
+}
+
+function resolveDefaultDecisionPath(): string {
+	return path.join(resolveAuditDir(), "decisions.db");
 }
 
 /** Get the shared audit store. Opens it on first call. */
@@ -111,4 +130,46 @@ export function logCapability(input: LogCapabilityInput): string {
 /** Query the shared capability log. Read-only. */
 export function queryCapability(options: QueryCapabilityOptions = {}): CapabilityEvent[] {
 	return getCapabilityAuditStore().queryCapability(options);
+}
+
+// ============================================
+// Tool-call decision chain (issue #2756 step 3)
+// ============================================
+
+let _sharedDec: DecisionAuditStore | null = null;
+let _sharedDecPath: string | null = null;
+
+/** Get the shared tamper-evident decision store. Opens it on first call. */
+export function getDecisionAuditStore(dbPath?: string): DecisionAuditStore {
+	const target = dbPath ?? _sharedDecPath ?? resolveDefaultDecisionPath();
+	if (_sharedDec && _sharedDecPath === target) return _sharedDec;
+	if (_sharedDec) _sharedDec.close();
+	_sharedDec = new DecisionAuditStore(target);
+	_sharedDecPath = target;
+	return _sharedDec;
+}
+
+/** Reset the shared decision store. Primarily for tests. */
+export function resetDecisionAuditStore(): void {
+	if (_sharedDec) _sharedDec.close();
+	_sharedDec = null;
+	_sharedDecPath = null;
+}
+
+/**
+ * Append one tool-call decision to the shared hash chain.
+ * Caller MUST scrub secrets out of requestDetail first.
+ */
+export function logToolDecision(input: LogDecisionInput): DecisionEvent {
+	return getDecisionAuditStore().logDecision(input);
+}
+
+/** Query the shared decision chain. Read-only. Newest first. */
+export function queryToolDecisions(options: QueryDecisionOptions = {}): DecisionEvent[] {
+	return getDecisionAuditStore().queryDecisions(options);
+}
+
+/** Recompute every hash in the shared chain and report the first broken link. */
+export function verifyDecisionChain(): ChainVerification {
+	return getDecisionAuditStore().verifyChain();
 }
