@@ -9,6 +9,7 @@ import {
 } from "../../orchestration/role-config";
 import { type ProviderName, getProviderManager } from "../../providers";
 import type { AgentConfig, LLMClient } from "../types";
+import { AnthropicClient } from "./anthropic";
 import { ApfelClient } from "./apfel";
 import { AppleFoundationClient } from "./apple-foundation";
 import { DeepSeekClient } from "./deepseek";
@@ -19,6 +20,7 @@ import { OpenRouterClient } from "./openrouter";
 export { OllamaClient } from "./ollama";
 export { LMStudioClient } from "./lmstudio";
 export { OpenRouterClient } from "./openrouter";
+export { AnthropicClient } from "./anthropic";
 export { AppleFoundationClient } from "./apple-foundation";
 export { ApfelClient } from "./apfel";
 export { DeepSeekClient } from "./deepseek";
@@ -43,7 +45,7 @@ export class RoleProviderUnavailableError extends Error {
  * `createClient()`. Providers that don't map to a runtime fall through to
  * the OpenRouter path since those are all OpenAI-compatible HTTP APIs.
  */
-function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
+export function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
 	switch (provider) {
 		case "apple-foundation":
 			return "apple-foundation";
@@ -56,11 +58,16 @@ function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
 		case "ollama":
 		case "8gent":
 			return "ollama"; // 8gent runs on the local ollama server today
+		// SPEC-05 #108 dispatcher parity: Anthropic speaks the native Messages API,
+		// not the OpenAI Chat-Completions shape, so it must NOT fold onto the
+		// OpenRouter runtime. Route it to its own client (parallels the correct
+		// Anthropic branch in `ProviderManager.chat`).
+		case "anthropic":
+			return "anthropic";
 		case "openrouter":
 		case "groq":
 		case "grok":
 		case "openai":
-		case "anthropic":
 		case "mistral":
 		case "together":
 		case "fireworks":
@@ -78,6 +85,10 @@ export function createClient(config: AgentConfig): LLMClient {
 	if (config.runtime === "openrouter") {
 		const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
 		return new OpenRouterClient(config.model, apiKey);
+	}
+	if (config.runtime === "anthropic") {
+		const apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || "";
+		return new AnthropicClient(config.model, apiKey);
 	}
 	if (config.runtime === "lmstudio") {
 		return new LMStudioClient(config.model);

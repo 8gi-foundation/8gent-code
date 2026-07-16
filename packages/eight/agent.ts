@@ -31,6 +31,8 @@ import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { callLocalModelWithReroute } from "../providers/model-reroute";
+import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
+import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -242,7 +244,14 @@ export class Agent {
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
-		this.compaction = new ProactiveCompression();
+		// SPEC-05 #108: feed the ACTIVE provider's detected context window into
+		// compaction instead of the hardcoded 32k. A large-context cloud model
+		// (e.g. anthropic 200k) compacts far later; a small local model compacts
+		// sooner. Falls back to the conservative floor for unknown providers.
+		const compactionContextWindow = knownContextWindow(
+			getProviderManager().getProvider(config.runtime as ProviderRegistryName),
+		);
+		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
 
 		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
 		// rather than replacing it: the legacy single-threshold engine still
@@ -341,9 +350,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
 		// no tools / no internet when it actually does. Closes #1082.
+		// Capability gate (SPEC-05 #108): the compact local prompt is for providers
+		// whose tool pathway is text-protocol or none, not a hardcoded name list.
+		// A capable cloud provider gets the full prompt; Ollama-served 8gent GGUFs
+		// stay on the compact path via their text-tool capability.
 		const runtimeName = this.config.runtime as string;
-		const isLocalRuntime =
-			runtimeName === "lmstudio" || runtimeName === "ollama" || runtimeName === "8gent";
+		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
+		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
 		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true })}`;
 
 		this.messageHistory.push({
@@ -988,9 +1001,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"remember",
 			"recall",
 		];
+		// Capability gate (SPEC-05 #108): a provider takes the restricted local-tool
+		// path when its tool-calling pathway is the text-tool protocol (or none),
+		// resolved from provider capability flags + the EIGHT_TEXT_TOOLS override -
+		// never a hardcoded provider-name list. Native tool-callers get all tools.
 		const providerName = providerConfig.name as string;
-		const isLocalProvider =
-			providerName === "lmstudio" || providerName === "ollama" || providerName === "8gent";
+		const providerCaps = getProviderManager().getProvider(providerName as ProviderRegistryName);
+		const isLocalProvider = capabilityToolMode(providerCaps) !== "native";
 		// Deferred registry only loads `core` upfront — make sure local providers
 		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
 		// web_search won't exist to pass through.
