@@ -35,6 +35,11 @@ export class HarnessRunner {
 	 * before anything runs), then drains the run in the background.
 	 */
 	start(input: RunInput): string {
+		// #2803: refuse to dispatch an empty/whitespace prompt at the runner seam
+		// too (the HTTP layer 400s, but any direct caller must be equally safe).
+		if (!input.prompt || !input.prompt.trim()) {
+			throw new Error("prompt is required: refusing to dispatch an empty prompt (#2803)");
+		}
 		const harness = this.registry.get(input.harness);
 		const taskId = `hx_${Date.now().toString(36)}_${(this.counter++).toString(36)}`;
 		this.tasks.set(taskId, []);
