@@ -162,6 +162,60 @@ Returns `null` for non-harness paths so the gateway falls through.
 
 Local-first: omitting `harness` runs `8gent-local`.
 
+## CLI adapter (packages/harness/adapters/cli.ts) - second slice
+
+The first external-harness seam: a GENERIC adapter that plugs any external
+coding-agent CLI into the registry by spawning it as a scoped subprocess and
+mapping its stdout/exit status to StatusEvents. Local-first stands:
+`createDefaultRegistry()` still registers ONLY `8gent-local`; CLI harnesses
+are strictly opt-in via the `EIGHGENT_CLI_HARNESSES` env var, read once when
+the daemon's lazy runner singleton is created (`getHarnessRunner()`).
+
+```ts
+const CLI_HARNESS_ENV = "EIGHGENT_CLI_HARNESSES"; // JSON array of configs
+
+interface CliHarnessConfig {
+	name: string;              // registry name, e.g. "codex-cli"
+	command: string;           // executable (PATH or absolute)
+	args?: string[];           // fixed argv; "{prompt}" element = prompt slot
+	promptVia?: "arg" | "stdin"; // default "arg" (placeholder or appended)
+	needsInputPattern?: RegExp; // output line that means "waiting on a human"
+	timeoutMs?: number;        // kill + error after this long (default 10 min)
+	env?: Record<string, string>;
+}
+
+class CliHarness implements Harness { constructor(config: CliHarnessConfig) }
+function parseCliHarnessConfigs(raw: string | undefined): CliHarnessConfig[];
+function registerCliHarnessesFromEnv(registry, env = process.env): string[];
+```
+
+Example opt-in:
+
+```bash
+EIGHGENT_CLI_HARNESSES='[{"name":"codex-cli","command":"codex","args":["exec","{prompt}"]}]'
+```
+
+Mapping heuristics (an external CLI has no structured event stream; states
+are inferred honestly from what the process really does):
+
+| Process signal | StatusEvent |
+| --- | --- |
+| run accepted | `queued` |
+| process spawned | `working` (elapsedMs) |
+| stdout/stderr output line | `working` (elapsedMs) |
+| line matching needsInputPattern | `needs_input` |
+| exit code 0 | `done` + output = captured stdout |
+| non-zero exit | `error` + output = stderr / exit message |
+| spawn failure / timeout | `error` |
+
+Honesty: `tokens` and `tool` are NEVER set - an external CLI reports neither
+real token usage nor structured tool calls, and the adapter does not
+estimate. Security: argv-array spawn (no shell, prompt is one inert argv
+element), spawn/config failures terminate the stream with a single error
+event instead of throwing, every run is timeout-bounded and abandoned
+streams kill the child, captured output is tail-capped, malformed env
+config is skipped fail-safe rather than crashing daemon boot.
+
 ## Checkpoint (fill at PR close)
 
 - [x] `bun test packages/harness/` green (28 pass, 0 fail)

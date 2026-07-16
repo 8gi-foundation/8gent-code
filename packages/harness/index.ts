@@ -95,3 +95,10 @@ export function createDefaultRegistry(): HarnessRegistry {
 
 export { LocalHarness } from "./local";
 export { HarnessRunner } from "./runner";
+export {
+	CLI_HARNESS_ENV,
+	CliHarness,
+	type CliHarnessConfig,
+	parseCliHarnessConfigs,
+	registerCliHarnessesFromEnv,
+} from "./adapters/cli";

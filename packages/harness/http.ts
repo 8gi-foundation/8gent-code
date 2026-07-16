@@ -10,6 +10,7 @@
  * existing routes untouched.
  */
 
+import { registerCliHarnessesFromEnv } from "./adapters/cli";
 import { DEFAULT_HARNESS } from "./index";
 import { HarnessRunner } from "./runner";
 
@@ -17,7 +18,12 @@ let singleton: HarnessRunner | null = null;
 
 /** Daemon-wide runner. Lazily created so importing this module is free. */
 export function getHarnessRunner(): HarnessRunner {
-	if (!singleton) singleton = new HarnessRunner();
+	if (!singleton) {
+		singleton = new HarnessRunner();
+		// Opt-in external CLI harnesses (EIGHGENT_CLI_HARNESSES). Unset env
+		// var = no-op: the registry stays local-first with 8gent-local only.
+		registerCliHarnessesFromEnv(singleton.registry);
+	}
 	return singleton;
 }
 
