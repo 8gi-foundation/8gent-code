@@ -1,0 +1,190 @@
+# Release pipeline for the 8gent Model Proxy (apps/proxy).
+#
+# ============================================================================
+# GATED ON BILLING. This workflow is committed correct and complete, but the
+# 8GI org's GitHub Actions billing is currently disabled, so it will not run
+# until billing is restored (or a maintainer runs the equivalent steps locally
+# per-OS; see apps/proxy/README.md and apps/proxy/scripts/compile.sh). Nothing
+# here is aspirational - each step is the real command - it simply cannot be
+# billed to execute yet.
+# ============================================================================
+#
+# Signing is OPT-IN via repository secrets. Every signing/notarizing step is
+# guarded so the build still produces UNSIGNED artifacts when the secrets are
+# absent. No certificate is ever fabricated. See apps/proxy/SIGNING.md for the
+# exact accounts/certs a maintainer must procure to flip signing on.
+
+name: release-proxy
+
+on:
+  push:
+    tags:
+      - "proxy-v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build"
+        required: false
+        default: ""
+
+defaults:
+  run:
+    working-directory: apps/proxy
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # macOS: darwin arm64 + x64 binaries, Developer ID sign + notarize (opt-in).
+  # ---------------------------------------------------------------------------
+  macos:
+    runs-on: macos-14
+    env:
+      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12_BASE64 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_KEYCHAIN_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install workspace deps
+        working-directory: .
+        run: bun install --frozen-lockfile
+      - name: Compile darwin binaries
+        run: |
+          bash scripts/compile.sh darwin-arm64
+          bash scripts/compile.sh darwin-x64
+      - name: Codesign + notarize (opt-in)
+        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
+        run: |
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          for bin in dist/8gent-proxy-darwin-arm64 dist/8gent-proxy-darwin-x64; do
+            codesign --force --options runtime --timestamp \
+              --sign "Developer ID Application: ${APPLE_TEAM_ID}" "$bin"
+            ditto -c -k --keepParent "$bin" "$bin.zip"
+            xcrun notarytool submit "$bin.zip" --keychain-profile "$APPLE_NOTARY_PROFILE" --wait
+          done
+      - name: Note when signing was skipped
+        if: ${{ env.APPLE_CERT_P12_BASE64 == '' }}
+        run: echo "::warning::Apple signing secrets absent - shipping UNSIGNED darwin binaries. See apps/proxy/SIGNING.md."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proxy-darwin
+          path: apps/proxy/dist/8gent-proxy-darwin-*
+
+  # ---------------------------------------------------------------------------
+  # Linux: x64 + arm64 binaries, then .deb / .rpm via nfpm. Packages are not
+  # code-signed; repo/GPG signing is a distribution concern handled downstream.
+  # ---------------------------------------------------------------------------
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install workspace deps
+        working-directory: .
+        run: bun install --frozen-lockfile
+      - name: Compile linux binaries
+        run: |
+          bash scripts/compile.sh linux-x64
+          bash scripts/compile.sh linux-arm64
+      - name: Install nfpm
+        run: |
+          curl -sSL -o /tmp/nfpm.deb https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_amd64.deb
+          sudo dpkg -i /tmp/nfpm.deb
+      - name: Build deb + rpm (both arches)
+        working-directory: apps/proxy/packaging/linux
+        run: |
+          for spec in "amd64:../../dist/8gent-proxy-linux-x64" "arm64:../../dist/8gent-proxy-linux-arm64"; do
+            export ARCH="${spec%%:*}"
+            export BIN="${spec##*:}"
+            nfpm package -f nfpm.yaml -p deb -t "../../dist/8gent-proxy_${ARCH}.deb"
+            nfpm package -f nfpm.yaml -p rpm -t "../../dist/8gent-proxy_${ARCH}.rpm"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proxy-linux
+          path: |
+            apps/proxy/dist/8gent-proxy-linux-*
+            apps/proxy/dist/*.deb
+            apps/proxy/dist/*.rpm
+
+  # ---------------------------------------------------------------------------
+  # Windows: x64 binary, NSIS installer, Authenticode sign (opt-in).
+  # ---------------------------------------------------------------------------
+  windows:
+    runs-on: windows-2022
+    env:
+      WIN_CERT_PFX_BASE64: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_BASE64 }}
+      WIN_CERT_PASSWORD: ${{ secrets.WINDOWS_AUTHENTICODE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install workspace deps
+        working-directory: .
+        run: bun install --frozen-lockfile
+      - name: Compile windows binary
+        run: bash scripts/compile.sh win-x64
+      - name: Fetch WinSW for the background service
+        shell: bash
+        run: |
+          curl -sSL -o packaging/windows/8gent-proxy-service.exe \
+            https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
+      - name: Sign the proxy binary (opt-in)
+        if: ${{ env.WIN_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:TEMP\cert.pfx", [Convert]::FromBase64String($env:WIN_CERT_PFX_BASE64))
+          & "${env:ProgramFiles(x86)}\Windows Kits\10\bin\x64\signtool.exe" sign `
+            /f "$env:TEMP\cert.pfx" /p "$env:WIN_CERT_PASSWORD" /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+            dist\8gent-proxy-win-x64.exe
+      - name: Build NSIS installer
+        shell: bash
+        run: |
+          choco install nsis -y
+          "/c/Program Files (x86)/NSIS/makensis.exe" \
+            -DPROXY_BIN=../../dist/8gent-proxy-win-x64.exe \
+            packaging/windows/8gent-proxy.nsi
+      - name: Sign the installer (opt-in)
+        if: ${{ env.WIN_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Windows Kits\10\bin\x64\signtool.exe" sign `
+            /f "$env:TEMP\cert.pfx" /p "$env:WIN_CERT_PASSWORD" /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+            packaging\windows\8gent-proxy-setup.exe
+      - name: Note when signing was skipped
+        if: ${{ env.WIN_CERT_PFX_BASE64 == '' }}
+        shell: bash
+        run: echo "::warning::Windows Authenticode secrets absent - shipping UNSIGNED exe + installer. See apps/proxy/SIGNING.md."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proxy-windows
+          path: |
+            apps/proxy/dist/8gent-proxy-win-x64.exe
+            apps/proxy/packaging/windows/8gent-proxy-setup.exe
+
+  # ---------------------------------------------------------------------------
+  # Collect every OS artifact into one GitHub Release (tag builds only).
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/proxy-v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          fail_on_unmatched_files: false

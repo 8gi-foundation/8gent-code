@@ -1,0 +1,35 @@
+# nfpm config for the 8gent Model Proxy .deb / .rpm packages.
+# https://nfpm.goreleaser.com
+#
+# Build (per arch, after compiling the matching binary into dist/):
+#   ARCH=amd64 BIN=dist/8gent-proxy-linux-x64   nfpm package -f nfpm.yaml -p deb
+#   ARCH=amd64 BIN=dist/8gent-proxy-linux-x64   nfpm package -f nfpm.yaml -p rpm
+#   ARCH=arm64 BIN=dist/8gent-proxy-linux-arm64 nfpm package -f nfpm.yaml -p deb
+#
+# ARCH and BIN are read from the environment so one config covers both arches.
+name: "8gent-proxy"
+arch: "${ARCH}"
+platform: "linux"
+version: "v0.1.0"
+section: "utils"
+priority: "optional"
+maintainer: "8GI Foundation <hello@8gent.dev>"
+description: |
+  OpenAI-compatible localhost gateway over the 8gent adaptive router.
+  Point any OpenAI-compatible client at http://127.0.0.1:8787/v1 for
+  local-first routing across local and cloud model providers.
+vendor: "8GI Foundation"
+homepage: "https://8gent.dev"
+license: "Apache-2.0"
+
+contents:
+  # The compiled single binary. BIN points at the arch-matched output.
+  - src: "${BIN}"
+    dst: "/usr/bin/8gent-proxy"
+    file_info:
+      mode: 0755
+  # Ship the systemd USER unit as an example. Installing to the user manager is
+  # left to the user (see README) so the proxy never runs as root by default.
+  - src: "./8gent-proxy.service"
+    dst: "/usr/lib/systemd/user/8gent-proxy.service"
+    type: config
