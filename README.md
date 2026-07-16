@@ -152,6 +152,56 @@ npm install -g @8gi-foundation/8gent-code
 
 That's it. 8gent uses an adaptive 11-provider router. Default active provider is `8gent` local (model `eight-1.0-q3:14b`) with `ollama` also enabled by default. Cloud providers (OpenRouter, Groq, OpenAI, Anthropic, Mistral, Together, Fireworks, Replicate, Grok) are opt-in via API key. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
+## Install
+
+Two ways to install. The **npm** path is smallest but needs [Bun](https://bun.sh) on your machine. The **standalone binary** embeds the Bun runtime, so it needs nothing else.
+
+### npm (all platforms, needs Bun)
+
+```bash
+npm install -g @8gi-foundation/8gent-code
+8gent
+```
+
+### Standalone binary (no runtime required)
+
+Self-contained single-file binaries are attached to each [GitHub Release](https://github.com/8gi-foundation/8gent-code/releases). They embed the Bun runtime - no `npm`, no Bun, no Node needed.
+
+**macOS**
+
+```bash
+# Apple Silicon: 8gent-darwin-arm64   Intel: 8gent-darwin-x64
+curl -fsSL -o 8gent https://github.com/8gi-foundation/8gent-code/releases/latest/download/8gent-darwin-arm64
+chmod +x 8gent && sudo mv 8gent /usr/local/bin/8gent
+8gent
+```
+
+**Linux** - install the `.deb`, `.rpm`, or extract the `.tar.gz` (all land `8gent` on your PATH):
+
+```bash
+# Debian / Ubuntu
+sudo dpkg -i 8gent_<version>_amd64.deb
+# Fedora / RHEL
+sudo rpm -i 8gent-<version>-1.x86_64.rpm
+# Or portable tarball
+tar xzf 8gent-<version>-linux-amd64.tar.gz && sudo mv 8gent-*/bin/8gent /usr/local/bin/
+8gent
+```
+
+**Windows** - run the installer (`8gent-setup-<version>-x64.exe`). It installs to `%LOCALAPPDATA%\Programs\8gent`, adds itself to your PATH, and registers an uninstaller. A [winget](https://learn.microsoft.com/windows/package-manager/) manifest ships under `packaging/winget/` for `winget install 8GIFoundation.8gentCode` once published.
+
+> Binaries are code-signed only on releases where the maintainer's certificates are configured (see [SIGNING.md](SIGNING.md)). Unsigned downloads run fine but may prompt Gatekeeper (macOS) or SmartScreen (Windows) - allow them through, or build your own with `bun run build:binaries`.
+
+### Build binaries from source
+
+```bash
+bun install
+bun run build:binaries          # all six targets -> dist/bin/
+bun run build:binaries:host     # just your current OS/arch
+bun run package:linux           # dist/installers: .deb + .rpm + .tar.gz (needs nfpm)
+pwsh scripts/package-windows.ps1 # dist/installers: NSIS installer (needs NSIS, on Windows)
+```
+
 ## Quick Start (from source)
 
 ```bash
