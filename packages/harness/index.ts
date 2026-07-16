@@ -52,6 +52,13 @@ export interface HarnessTask {
 export interface Harness {
 	name: string;
 	run(task: HarnessTask): AsyncIterable<StatusEvent>;
+	/**
+	 * Optional: deliver a follow-up input line to an in-flight task that
+	 * reported needs_input (#2809). Returns true only when the input really
+	 * reached the task (still running, input channel open). Harnesses with
+	 * no input channel simply omit this.
+	 */
+	respond?(taskId: string, input: string): boolean;
 }
 
 /** The local-first default backend. */
@@ -95,3 +102,10 @@ export function createDefaultRegistry(): HarnessRegistry {
 
 export { LocalHarness } from "./local";
 export { HarnessRunner } from "./runner";
+export {
+	CLI_HARNESS_ENV,
+	CliHarness,
+	type CliHarnessConfig,
+	parseCliHarnessConfigs,
+	registerCliHarnessesFromEnv,
+} from "./adapters/cli";

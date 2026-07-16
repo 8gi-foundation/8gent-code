@@ -2,14 +2,17 @@
  * Harness HTTP surface (part of #2797). Mounted by the daemon gateway.
  *
  * Routes:
- *   GET  /harnesses      -> { harnesses: string[], default: "8gent-local" }
- *   POST /harness/run    -> { prompt, harness?, cwd? } => 202 { taskId, harness }
- *   GET  /harness/tasks  -> SSE stream of StatusEvents (replay + live)
+ *   GET  /harnesses        -> { harnesses: string[], default: "8gent-local" }
+ *   POST /harness/run      -> { prompt, harness?, cwd? } => 202 { taskId, harness }
+ *   GET  /harness/tasks    -> SSE stream of StatusEvents (replay + live)
+ *   POST /harness/respond  -> { taskId, input } => 200 { ok: true } | 409
+ *                             (answer a needs_input task, #2809)
  *
  * Returns null for non-harness paths so the gateway falls through to its
  * existing routes untouched.
  */
 
+import { registerCliHarnessesFromEnv } from "./adapters/cli";
 import { DEFAULT_HARNESS } from "./index";
 import { HarnessRunner } from "./runner";
 
@@ -17,7 +20,12 @@ let singleton: HarnessRunner | null = null;
 
 /** Daemon-wide runner. Lazily created so importing this module is free. */
 export function getHarnessRunner(): HarnessRunner {
-	if (!singleton) singleton = new HarnessRunner();
+	if (!singleton) {
+		singleton = new HarnessRunner();
+		// Opt-in external CLI harnesses (EIGHGENT_CLI_HARNESSES). Unset env
+		// var = no-op: the registry stays local-first with 8gent-local only.
+		registerCliHarnessesFromEnv(singleton.registry);
+	}
 	return singleton;
 }
 
@@ -41,7 +49,39 @@ export function handleHarnessRoute(
 		return handleTaskStream(runner);
 	}
 
+	if (url.pathname === "/harness/respond" && req.method === "POST") {
+		return handleRespond(req, runner);
+	}
+
 	return null;
+}
+
+/** Answer a needs_input task (#2809): write a follow-up line to its stdin. */
+async function handleRespond(req: Request, runner: HarnessRunner): Promise<Response> {
+	let body: { taskId?: unknown; input?: unknown };
+	try {
+		body = (await req.json()) as typeof body;
+	} catch {
+		return Response.json({ error: "invalid JSON body" }, { status: 400 });
+	}
+
+	const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
+	if (!taskId || typeof body.input !== "string" || body.input.length === 0) {
+		return Response.json({ error: "taskId and a non-empty input string are required" }, { status: 400 });
+	}
+	// An interactive answer is a short line ("y", a path, a token) - cap it so
+	// nobody can pump megabytes into a child's stdin through this route.
+	if (body.input.length > 64 * 1024) {
+		return Response.json({ error: "input exceeds the 64KB limit" }, { status: 400 });
+	}
+
+	if (!runner.respond(taskId, body.input)) {
+		return Response.json(
+			{ error: "task is not accepting input (unknown, finished, or not interactive)" },
+			{ status: 409 },
+		);
+	}
+	return Response.json({ ok: true });
 }
 
 async function handleRun(req: Request, runner: HarnessRunner): Promise<Response> {

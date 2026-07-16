@@ -9,7 +9,7 @@
  * persistence across daemon restarts is out of scope (see SPEC.md).
  */
 
-import { type HarnessRegistry, type StatusEvent, createDefaultRegistry } from "./index";
+import { type Harness, type HarnessRegistry, type StatusEvent, createDefaultRegistry } from "./index";
 
 export interface RunInput {
 	prompt: string;
@@ -20,9 +20,18 @@ export interface RunInput {
 /** Cap on retained tasks so a long-lived daemon does not grow unbounded. */
 const MAX_RETAINED_TASKS = 200;
 
+/**
+ * Cap on retained events per task (#2810): a verbose external CLI must not
+ * grow one task's buffered event array without bound. The first event
+ * (queued) is preserved; the oldest progress events are dropped first, so
+ * the terminal done/error event is always retained.
+ */
+const MAX_EVENTS_PER_TASK = 500;
+
 export class HarnessRunner {
 	readonly registry: HarnessRegistry;
 	private tasks = new Map<string, StatusEvent[]>();
+	private harnessByTask = new Map<string, Harness>();
 	private listeners = new Set<(e: StatusEvent) => void>();
 	private counter = 0;
 
@@ -43,6 +52,7 @@ export class HarnessRunner {
 		const harness = this.registry.get(input.harness);
 		const taskId = `hx_${Date.now().toString(36)}_${(this.counter++).toString(36)}`;
 		this.tasks.set(taskId, []);
+		this.harnessByTask.set(taskId, harness);
 		this.evictOldTasks();
 
 		void (async () => {
@@ -74,6 +84,17 @@ export class HarnessRunner {
 		return this.tasks.get(taskId) ?? [];
 	}
 
+	/**
+	 * Deliver a follow-up input line to a task that reported needs_input
+	 * (#2809). Routed to the owning harness's respond() when it has one.
+	 * Returns true only when the input really reached the running task.
+	 */
+	respond(taskId: string, input: string): boolean {
+		const harness = this.harnessByTask.get(taskId);
+		if (!harness?.respond) return false;
+		return harness.respond(taskId, input);
+	}
+
 	/** Live event feed across all tasks. Returns an unsubscribe function. */
 	subscribe(listener: (e: StatusEvent) => void): () => void {
 		this.listeners.add(listener);
@@ -90,7 +111,13 @@ export class HarnessRunner {
 	}
 
 	private record(event: StatusEvent): void {
-		this.tasks.get(event.agentId)?.push(event);
+		const events = this.tasks.get(event.agentId);
+		if (events) {
+			// #2810: bound per-task retention. Keep the first event (queued),
+			// drop the oldest progress event; the newest event always lands.
+			if (events.length >= MAX_EVENTS_PER_TASK) events.splice(1, 1);
+			events.push(event);
+		}
 		for (const listener of this.listeners) {
 			try {
 				listener(event);
@@ -105,6 +132,7 @@ export class HarnessRunner {
 			const oldest = this.tasks.keys().next().value;
 			if (oldest === undefined) break;
 			this.tasks.delete(oldest);
+			this.harnessByTask.delete(oldest);
 		}
 	}
 }
