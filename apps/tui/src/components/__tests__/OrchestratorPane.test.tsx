@@ -176,6 +176,75 @@ describe("OrchestratorPane", () => {
 		unmount();
 	});
 
+	// #2802: no row cap meant a 40-agent run rendered a 44-line pane that
+	// pushed every sibling pane off-screen.
+	test("caps rendered rows and shows an honest +N more line", () => {
+		const rows: OrchestratorRow[] = Array.from({ length: 40 }, (_, i) =>
+			row({ id: `hx_${String(i).padStart(2, "0")}`, state: "working" }),
+		);
+		const { stdout, unmount } = renderHeadless(<OrchestratorPane rows={rows} />);
+		const frame = plain(stdout.lastFrame());
+		const lines = frame.split("\n");
+		// title + header + 10 rows + overflow line + 2 border lines
+		expect(lines.length).toBeLessThanOrEqual(16);
+		expect(frame).toContain("+30 more");
+		expect(frame).toContain("40 active");
+		unmount();
+	});
+
+	test("maxRows prop overrides the default cap", () => {
+		const rows: OrchestratorRow[] = Array.from({ length: 8 }, (_, i) =>
+			row({ id: `hx_${i}`, state: "working" }),
+		);
+		const { stdout, unmount } = renderHeadless(<OrchestratorPane rows={rows} maxRows={3} />);
+		const frame = plain(stdout.lastFrame());
+		expect(frame).toContain("+5 more");
+		expect(frame.split("\n").length).toBeLessThanOrEqual(9);
+		unmount();
+	});
+
+	// #2802: fixed 66-char column budget collided into an unreadable wall on
+	// narrow terminals. Columns must drop responsively instead.
+	test("narrow pane (40 cols) drops columns instead of colliding", () => {
+		const rows: OrchestratorRow[] = [
+			row({ id: "hx_work01", state: "working", tool: "read_file", tokens: 4500, elapsedMs: 3200 }),
+			row({ id: "hx_queue1", state: "queued" }),
+		];
+		const { stdout, unmount } = renderHeadless(<OrchestratorPane rows={rows} width={40} />);
+		const frame = plain(stdout.lastFrame());
+		for (const line of frame.split("\n")) {
+			expect(line.length).toBeLessThanOrEqual(40);
+		}
+		// Dropped columns are gone, not mashed together.
+		expect(frame).not.toContain("TOKENS");
+		expect(frame).not.toContain("TOOLTOKENSELAPSED");
+		expect(frame).toContain("AGENT");
+		expect(frame).toContain("STATE");
+		expect(frame).toContain("ELAPSED");
+		expect(frame).toContain("3.2s");
+		unmount();
+	});
+
+	test("very narrow pane (24 cols) keeps AGENT + STATE inside the border", () => {
+		const rows: OrchestratorRow[] = [
+			row({ id: "hx_work01", state: "working", tool: "read_file", tokens: 4500 }),
+			row({ id: "hx_queue1", state: "queued" }),
+		];
+		const { stdout, unmount } = renderHeadless(<OrchestratorPane rows={rows} width={24} />);
+		const frame = plain(stdout.lastFrame());
+		for (const line of frame.split("\n")) {
+			expect(line.length).toBeLessThanOrEqual(24);
+		}
+		expect(frame).toContain("AGENT");
+		expect(frame).toContain("STATE");
+		expect(frame).toContain("working");
+		expect(frame).toContain("queued");
+		// The active count is dropped rather than mashed into the title
+		// ("ORCHESTRATOR2 active") when the title row has no slack.
+		expect(frame).not.toContain("ORCHESTRATOR2");
+		unmount();
+	});
+
 	test("stable frame snapshot", () => {
 		const rows: OrchestratorRow[] = [
 			row({ id: "hx_a1", state: "working", tool: "bash", tokens: 900, elapsedMs: 950 }),

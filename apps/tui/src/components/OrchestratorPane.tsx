@@ -17,14 +17,26 @@
  * agent loop never reported renders as "-", never a made-up number. Empty
  * grid says "no agents running" - no placeholder rows.
  *
+ * Space behavior (#2802): the grid caps at maxRows visible rows (active
+ * tasks kept first) with an honest "+N more" line, and columns drop
+ * responsively via layoutColumns() when the pane is narrower than the full
+ * six-column budget - AGENT and STATE always survive.
+ *
  * Theme tokens only (t.*). State colors stay inside the brand palette; the
  * banned purple/pink/violet band is asserted in the test suite.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import { type StatusEventSource, useHarnessTasks } from "../hooks/useHarnessTasks.js";
-import { type OrchestratorRow, formatElapsed, formatTokens } from "../lib/orchestrator-model.js";
+import {
+	type ColumnSpec,
+	type OrchestratorRow,
+	formatElapsed,
+	formatTokens,
+	layoutColumns,
+	selectVisibleRows,
+} from "../lib/orchestrator-model.js";
 import { t } from "../theme.js";
 
 /** Pill color per harness state. Brand palette only - no purple band. */
@@ -37,9 +49,11 @@ export const STATE_COLORS = {
 	error: t.red,
 } as const;
 
-// Column widths. STATE fits " needs_input " (13); the rest favor the id and
-// harness name, with truncate-end so narrow terminals degrade readably.
-const COL = { id: 12, state: 13, harness: 13, tool: 13, tokens: 7, elapsed: 8 } as const;
+/** Default visible-row cap; override per embed via the maxRows prop. */
+export const DEFAULT_MAX_ROWS = 10;
+
+/** Fallback pane width when neither a width prop nor stdout.columns exists. */
+const FALLBACK_WIDTH = 80;
 
 function Cell({
 	width,
@@ -63,70 +77,87 @@ function StatePill({ state }: { state: OrchestratorRow["state"] }) {
 	);
 }
 
-function HeaderRow() {
-	const cols: Array<[string, number]> = [
-		["AGENT", COL.id],
-		["STATE", COL.state],
-		["HARNESS", COL.harness],
-		["TOOL", COL.tool],
-		["TOKENS", COL.tokens],
-		["ELAPSED", COL.elapsed],
-	];
+function HeaderRow({ columns }: { columns: ColumnSpec[] }) {
 	return (
 		<Box width="100%">
-			{cols.map(([label, width]) => (
-				<Cell key={label} width={width}>
-					<Text color={t.dim}>{label}</Text>
+			{columns.map((col) => (
+				<Cell key={col.key} width={col.width}>
+					<Text color={t.dim}>{col.label}</Text>
 				</Cell>
 			))}
 		</Box>
 	);
 }
 
-function TaskRow({ row }: { row: OrchestratorRow }) {
-	return (
-		<Box width="100%">
-			<Cell width={COL.id}>
+function cellContent(row: OrchestratorRow, key: ColumnSpec["key"]): React.ReactNode {
+	switch (key) {
+		case "id":
+			return (
 				<Text color={t.textPrimary} wrap="truncate-end">
 					{row.id}
 				</Text>
-			</Cell>
-			<Cell width={COL.state}>
-				<StatePill state={row.state} />
-			</Cell>
-			<Cell width={COL.harness}>
+			);
+		case "state":
+			return <StatePill state={row.state} />;
+		case "harness":
+			return (
 				<Text color={t.textSecondary} wrap="truncate-end">
 					{row.harness}
 				</Text>
-			</Cell>
-			<Cell width={COL.tool}>
+			);
+		case "tool":
+			return (
 				<Text color={row.tool ? t.teal : t.dim} wrap="truncate-end">
 					{row.tool ?? "-"}
 				</Text>
-			</Cell>
-			<Cell width={COL.tokens}>
+			);
+		case "tokens":
+			return (
 				<Text color={row.tokens !== undefined ? t.textSecondary : t.dim}>
 					{formatTokens(row.tokens)}
 				</Text>
-			</Cell>
-			<Cell width={COL.elapsed}>
+			);
+		case "elapsed":
+			return (
 				<Text color={row.elapsedMs !== undefined ? t.textSecondary : t.dim}>
 					{formatElapsed(row.elapsedMs)}
 				</Text>
-			</Cell>
+			);
+	}
+}
+
+function TaskRow({ row, columns }: { row: OrchestratorRow; columns: ColumnSpec[] }) {
+	return (
+		<Box width="100%">
+			{columns.map((col) => (
+				<Cell key={col.key} width={col.width}>
+					{cellContent(row, col.key)}
+				</Cell>
+			))}
 		</Box>
 	);
 }
 
 export interface OrchestratorPaneProps {
 	rows: OrchestratorRow[];
-	/** Optional fixed width; defaults to filling the parent. */
+	/** Optional fixed width; defaults to the terminal width (stdout.columns). */
 	width?: number;
+	/** Visible-row cap before the "+N more" line. Default DEFAULT_MAX_ROWS. */
+	maxRows?: number;
 }
 
 /** Pure orchestrator grid. Caller owns the rows; no internal state. */
-export function OrchestratorPane({ rows, width }: OrchestratorPaneProps) {
+export function OrchestratorPane({ rows, width, maxRows }: OrchestratorPaneProps) {
+	const { stdout } = useStdout();
+	const paneWidth = width ?? stdout?.columns ?? FALLBACK_WIDTH;
+	const columns = layoutColumns(paneWidth);
+	const { visible, hidden } = selectVisibleRows(rows, maxRows ?? DEFAULT_MAX_ROWS);
 	const active = rows.filter((r) => r.state !== "done" && r.state !== "error").length;
+	const activeLabel = `${active} active`;
+	// Drop the count rather than mash it into the title on tiny panes
+	// (paneWidth - border/padding must fit title + one space + count).
+	const showActive =
+		rows.length > 0 && paneWidth - 4 >= "ORCHESTRATOR".length + 1 + activeLabel.length;
 	return (
 		<Box
 			flexDirection="column"
@@ -139,16 +170,17 @@ export function OrchestratorPane({ rows, width }: OrchestratorPaneProps) {
 				<Text color={t.orange} bold>
 					ORCHESTRATOR
 				</Text>
-				{rows.length > 0 ? <Text color={t.dim}>{`${active} active`}</Text> : null}
+				{showActive ? <Text color={t.dim}>{activeLabel}</Text> : null}
 			</Box>
 			{rows.length === 0 ? (
 				<Text color={t.dim}>no agents running</Text>
 			) : (
 				<Box flexDirection="column" width="100%">
-					<HeaderRow />
-					{rows.map((row) => (
-						<TaskRow key={row.id} row={row} />
+					<HeaderRow columns={columns} />
+					{visible.map((row) => (
+						<TaskRow key={row.id} row={row} columns={columns} />
 					))}
+					{hidden > 0 ? <Text color={t.dim}>{`+${hidden} more`}</Text> : null}
 				</Box>
 			)}
 		</Box>
@@ -159,10 +191,17 @@ export interface OrchestratorPaneLiveProps {
 	/** In-process HarnessRunner (or any allEvents+subscribe source). */
 	source?: StatusEventSource | null;
 	width?: number;
+	maxRows?: number;
 }
 
 /** Live orchestrator pane: folds the StatusEvent stream into the grid. */
-export function OrchestratorPaneLive({ source, width }: OrchestratorPaneLiveProps) {
+export function OrchestratorPaneLive({ source, width, maxRows }: OrchestratorPaneLiveProps) {
 	const rows = useHarnessTasks(source);
-	return <OrchestratorPane rows={rows} {...(width !== undefined ? { width } : {})} />;
+	return (
+		<OrchestratorPane
+			rows={rows}
+			{...(width !== undefined ? { width } : {})}
+			{...(maxRows !== undefined ? { maxRows } : {})}
+		/>
+	);
 }
