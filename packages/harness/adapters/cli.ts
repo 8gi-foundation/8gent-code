@@ -14,7 +14,7 @@
  *   | --------------------------------- | ---------------------------------- |
  *   | run accepted                      | queued                             |
  *   | process spawned                   | working (elapsedMs)                |
- *   | stdout/stderr output line         | working (elapsedMs)                |
+ *   | stdout/stderr output line         | working (throttled, elapsedMs)     |
  *   | line matching needsInputPattern   | needs_input                        |
  *   | exit code 0                       | done + output = captured stdout    |
  *   | non-zero exit                     | error + output = stderr / exit msg |
@@ -25,19 +25,44 @@
  * not estimate. `elapsedMs` is real wall clock.
  *
  * Security posture (fail safe, no shell, scoped spawn):
- *   - Bun.spawn with an argv ARRAY, never a shell string: the prompt and all
+ *   - spawn with an argv ARRAY, never a shell string: the prompt and all
  *     args travel as single argv elements, shell metacharacters are inert.
  *   - Spawn/config failures never throw out of the stream; they terminate it
  *     with a single error event.
- *   - Every run is bounded by timeoutMs (default 10 minutes); runaway
- *     processes are killed. Abandoned streams kill the child in finally.
- *   - Captured output is tail-capped so a chatty CLI cannot grow memory
- *     without bound.
+ *   - The child runs in its OWN process group (detached). Every kill targets
+ *     the whole group, so wrapper scripts cannot leave grandchildren behind
+ *     (#2806). Timeout kills escalate SIGTERM -> SIGKILL, so a child that
+ *     traps SIGTERM still dies (#2806).
+ *   - run() always terminates within a bounded window: after the child
+ *     exits, output flushing is given a bounded grace period, then any
+ *     descendant still holding the stdout/stderr pipes open is group-killed
+ *     and the pipes are severed - an orphaned grandchild can never deadlock
+ *     the generator (#2806).
+ *   - From the moment the process is spawned, ONE try/finally guards every
+ *     yield point: abandoning the stream anywhere kills the process group
+ *     (#2807).
+ *   - needsInputPattern is a TRUST BOUNDARY: the pattern comes from operator
+ *     config but is tested against untrusted CLI output. The probe is
+ *     length-capped and time-budgeted; a pattern that blows the budget
+ *     (catastrophic backtracking) disables itself for the rest of the run
+ *     instead of stalling the daemon's event loop (#2808).
+ *   - Per-line "working" events are throttled so a chatty CLI cannot flood
+ *     task buffers or SSE subscribers (#2810). Captured output is
+ *     tail-capped so it cannot grow memory without bound.
+ *
+ * needs_input delivery (#2809): when needsInputPattern is configured the
+ * child's stdin is kept OPEN for the whole run, and respond(taskId, input)
+ * writes a follow-up line to it - surfaced upstream as
+ * HarnessRunner.respond() and POST /harness/respond. Without a
+ * needsInputPattern the old contract is unchanged (stdin is closed after the
+ * initial prompt, or ignored entirely for promptVia "arg").
  *
  * Clean-room: the concept (external agent CLIs as pluggable harnesses) is
  * re-derived from scratch; zero external code copied.
  */
 
+import { type ChildProcess, spawn } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import type { Harness, HarnessTask, StatusEvent } from "../index";
 
 /** Env var holding the opt-in JSON array of CLI harness configs. */
@@ -52,6 +77,27 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 /** Keep at most this many characters of captured stdout/stderr (tail). */
 const MAX_CAPTURE_CHARS = 256 * 1024;
 
+/** Grace between SIGTERM and the SIGKILL escalation on timeout (#2806). */
+const KILL_GRACE_MS = 750;
+
+/**
+ * After the child exits, how long output flushing may take before any
+ * pipe-holding descendants are group-killed and the pipes severed (#2806).
+ */
+const FLUSH_GRACE_MS = 1_000;
+
+/**
+ * needsInputPattern probe guards (#2808). The pattern exists to match short
+ * interactive markers like "[y/N]", so only a bounded prefix of each line is
+ * tested, and a probe that blows the time budget (catastrophic backtracking)
+ * disables the pattern for the rest of the run - fail safe, never stall.
+ */
+const NEEDS_INPUT_SCAN_WINDOW = 256;
+const NEEDS_INPUT_BUDGET_MS = 25;
+
+/** Emit at most one per-line "working" event per this window (#2810). */
+const WORKING_EVENT_MIN_INTERVAL_MS = 50;
+
 export interface CliHarnessConfig {
 	/** Registry name for this harness, e.g. "codex-cli". */
 	name: string;
@@ -62,10 +108,17 @@ export interface CliHarnessConfig {
 	/**
 	 * How the prompt reaches the CLI. "arg" (default): substituted for a
 	 * "{prompt}" placeholder or appended as the final argv element.
-	 * "stdin": written to the child's stdin, which is then closed.
+	 * "stdin": written to the child's stdin, which is then closed (unless a
+	 * needsInputPattern keeps the stdin channel open, see below).
 	 */
 	promptVia?: "arg" | "stdin";
-	/** Output line pattern that means the CLI is waiting on a human. */
+	/**
+	 * Output line pattern that means the CLI is waiting on a human.
+	 * TRUST BOUNDARY: tested against untrusted CLI output - probes are
+	 * length-capped and time-budgeted (#2808). Configuring a pattern also
+	 * keeps the child's stdin open so respond() can deliver an answer
+	 * (#2809).
+	 */
 	needsInputPattern?: RegExp;
 	/** Kill the process and error the stream after this long. Default 10 min. */
 	timeoutMs?: number;
@@ -80,12 +133,35 @@ export interface CliHarnessConfig {
 export class CliHarness implements Harness {
 	readonly name: string;
 	private readonly config: CliHarnessConfig;
+	private readonly pattern?: RegExp;
+	/** Open stdin channels of in-flight interactive runs, by task id. */
+	private readonly stdinByTask = new Map<string, Writable>();
 
 	constructor(config: CliHarnessConfig) {
 		if (!config.name?.trim()) throw new Error("CliHarness requires a name");
 		if (!config.command?.trim()) throw new Error(`CliHarness ${config.name} requires a command`);
 		this.name = config.name;
 		this.config = config;
+		// Strip stateful flags (g/y make .test() carry lastIndex between lines).
+		this.pattern = config.needsInputPattern
+			? new RegExp(config.needsInputPattern.source, config.needsInputPattern.flags.replace(/[gy]/g, ""))
+			: undefined;
+	}
+
+	/**
+	 * Deliver a follow-up input line to a running task's stdin (#2809). Only
+	 * possible while the task is in flight AND a needsInputPattern was
+	 * configured (which keeps stdin open). Returns false when undeliverable.
+	 */
+	respond(taskId: string, input: string): boolean {
+		const stdin = this.stdinByTask.get(taskId);
+		if (!stdin || stdin.destroyed || !stdin.writable) return false;
+		try {
+			stdin.write(input.endsWith("\n") ? input : `${input}\n`);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	async *run(task: HarnessTask): AsyncIterable<StatusEvent> {
@@ -100,17 +176,17 @@ export class CliHarness implements Harness {
 		yield { ...base(), state: "queued" };
 
 		const promptVia = this.config.promptVia ?? "arg";
+		const interactive = Boolean(this.pattern);
 		const argv = buildArgv(this.config, task.prompt);
 
-		let proc: ReturnType<typeof Bun.spawn>;
+		let child: ChildProcess;
 		try {
-			proc = Bun.spawn({
-				cmd: argv,
+			child = spawn(argv[0] as string, argv.slice(1), {
 				cwd: task.cwd || process.cwd(),
-				stdin: promptVia === "stdin" ? "pipe" : "ignore",
-				stdout: "pipe",
-				stderr: "pipe",
 				env: { ...process.env, ...this.config.env },
+				// Own process group so kills reach the WHOLE tree (#2806).
+				detached: process.platform !== "win32",
+				stdio: [interactive || promptVia === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
 			});
 		} catch (err) {
 			yield {
@@ -122,82 +198,177 @@ export class CliHarness implements Harness {
 			return;
 		}
 
-		yield { ...base(), state: "working", elapsedMs: elapsed() };
-
-		// Bridge push-style stream pumps into this pull-style generator.
-		const pending: StatusEvent[] = [];
-		let wake: (() => void) | null = null;
-		const wakeUp = () => {
-			const w = wake;
-			wake = null;
-			w?.();
-		};
-		const push = (e: StatusEvent) => {
-			pending.push(e);
-			wakeUp();
-		};
-
-		if (promptVia === "stdin" && proc.stdin && typeof proc.stdin !== "number") {
-			const writer = proc.stdin;
-			writer.write(task.prompt);
-			writer.end();
-		}
-
-		let stdoutText = "";
-		let stderrText = "";
-		const pattern = this.config.needsInputPattern;
-
-		const pump = async (
-			stream: ReadableStream<Uint8Array> | null | undefined,
-			onText: (text: string) => void,
-		) => {
-			if (!stream) return;
-			const decoder = new TextDecoder();
-			const reader = stream.getReader();
-			let lineBuffer = "";
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				const text = decoder.decode(value, { stream: true });
-				onText(text);
-				lineBuffer = scanLines(lineBuffer + text, (line) => {
-					if (pattern?.test(line)) {
-						push({ ...base(), state: "needs_input", elapsedMs: elapsed() });
-					} else if (line.trim().length > 0) {
-						push({ ...base(), state: "working", elapsedMs: elapsed() });
-					}
-				});
-			}
-		};
-
-		const pumps = Promise.allSettled([
-			pump(proc.stdout as ReadableStream<Uint8Array>, (t) => {
-				stdoutText = capTail(stdoutText + t);
-			}),
-			pump(proc.stderr as ReadableStream<Uint8Array>, (t) => {
-				stderrText = capTail(stderrText + t);
-			}),
-		]);
-
-		const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-		let timedOut = false;
+		// From here on the process may be running: ONE try/finally guards every
+		// yield point so an abandoned stream always kills the group (#2807).
 		let settled = false;
-		const timer = setTimeout(() => {
-			timedOut = true;
+		const timers: ReturnType<typeof setTimeout>[] = [];
+		const killTree = (signal: NodeJS.Signals) => {
+			const pid = child.pid;
 			try {
-				proc.kill();
+				if (pid && pid > 0 && process.platform !== "win32") {
+					process.kill(-pid, signal); // whole process group
+					return;
+				}
+			} catch {
+				// Group already gone or not a group leader - fall through.
+			}
+			try {
+				child.kill(signal);
 			} catch {
 				// Already gone - nothing to kill.
 			}
-		}, timeoutMs);
+		};
+		const severPipes = () => {
+			try {
+				child.stdout?.destroy();
+			} catch {}
+			try {
+				child.stderr?.destroy();
+			} catch {}
+		};
 
 		try {
+			// node:child_process reports missing executables asynchronously.
+			const spawnError = await new Promise<Error | null>((resolve) => {
+				child.once("spawn", () => resolve(null));
+				child.once("error", (err) => resolve(err));
+			});
+			if (spawnError) {
+				yield {
+					...base(),
+					state: "error",
+					output: `failed to spawn ${this.config.command}: ${spawnError.message}`,
+					elapsedMs: elapsed(),
+				};
+				settled = true;
+				return;
+			}
+			// Late errors (e.g. EPIPE on kill) must never crash the daemon.
+			child.on("error", () => {});
+
+			const exited = new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			yield { ...base(), state: "working", elapsedMs: elapsed() };
+
+			// Bridge push-style stream pumps into this pull-style generator.
+			const pending: StatusEvent[] = [];
+			let wake: (() => void) | null = null;
+			const wakeUp = () => {
+				const w = wake;
+				wake = null;
+				w?.();
+			};
+			const push = (e: StatusEvent) => {
+				pending.push(e);
+				wakeUp();
+			};
+
+			if (child.stdin) {
+				if (interactive) this.stdinByTask.set(task.id, child.stdin);
+				if (promptVia === "stdin") {
+					child.stdin.write(task.prompt);
+					// Keep stdin open for respond() when a pattern is configured.
+					if (!interactive) child.stdin.end();
+				}
+			}
+
+			let stdoutText = "";
+			let stderrText = "";
+
+			// #2808: bounded, self-disabling needs_input probe.
+			let patternDisabled = false;
+			const matchesNeedsInput = (line: string): boolean => {
+				if (!this.pattern || patternDisabled) return false;
+				const candidate =
+					line.length > NEEDS_INPUT_SCAN_WINDOW ? line.slice(0, NEEDS_INPUT_SCAN_WINDOW) : line;
+				const probeStart = performance.now();
+				let matched = false;
+				try {
+					matched = this.pattern.test(candidate);
+				} catch {
+					patternDisabled = true;
+					return false;
+				}
+				if (performance.now() - probeStart > NEEDS_INPUT_BUDGET_MS) {
+					// Catastrophic backtracking: never probe again this run.
+					patternDisabled = true;
+				}
+				return matched;
+			};
+
+			// #2810: throttle per-line working events at the source.
+			let lastWorkingPushAt = 0;
+			const handleLine = (line: string) => {
+				if (matchesNeedsInput(line)) {
+					push({ ...base(), state: "needs_input", elapsedMs: elapsed() });
+				} else if (line.trim().length > 0) {
+					const now = Date.now();
+					if (now - lastWorkingPushAt >= WORKING_EVENT_MIN_INTERVAL_MS) {
+						lastWorkingPushAt = now;
+						push({ ...base(), state: "working", elapsedMs: elapsed() });
+					}
+				}
+			};
+
+			const pump = async (stream: Readable | null, onText: (text: string) => void) => {
+				if (!stream) return;
+				stream.setEncoding("utf8");
+				let lineBuffer = "";
+				try {
+					for await (const chunk of stream as AsyncIterable<string>) {
+						const text = String(chunk);
+						onText(text);
+						lineBuffer = scanLines(lineBuffer + text, handleLine);
+					}
+				} catch {
+					// Pipe severed during teardown - treated as EOF.
+				}
+			};
+
+			const pumps = Promise.allSettled([
+				pump(child.stdout, (t) => {
+					stdoutText = capTail(stdoutText + t);
+				}),
+				pump(child.stderr, (t) => {
+					stderrText = capTail(stderrText + t);
+				}),
+			]);
+
+			const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+			let timedOut = false;
+			timers.push(
+				setTimeout(() => {
+					timedOut = true;
+					killTree("SIGTERM");
+					// #2806: escalate - a child trapping SIGTERM still dies.
+					timers.push(
+						setTimeout(() => {
+							killTree("SIGKILL");
+						}, KILL_GRACE_MS),
+					);
+				}, timeoutMs),
+			);
+
 			// Signal used to break the drain loop once the process fully ends.
 			let exitCode: number | null = null;
 			let finished = false;
 			void (async () => {
-				exitCode = await proc.exited;
-				await pumps; // Flush remaining output before terminal event.
+				exitCode = await exited;
+				// #2806: bound the flush. A grandchild that inherited the pipes
+				// would otherwise hold them open forever and deadlock run().
+				const flushed = await Promise.race([
+					pumps.then(() => true),
+					new Promise<boolean>((resolve) => {
+						timers.push(setTimeout(() => resolve(false), FLUSH_GRACE_MS));
+					}),
+				]);
+				if (!flushed) {
+					killTree("SIGKILL"); // descendants still holding the pipes
+					severPipes();
+					await pumps;
+				}
 				finished = true;
 				wakeUp();
 			})();
@@ -229,25 +400,35 @@ export class CliHarness implements Harness {
 				yield { ...base(), state: "done", output: stdoutText.trim(), elapsedMs };
 			} else {
 				const detail = stderrText.trim() || stdoutText.trim();
+				const exitLabel =
+					exitCode === null
+						? `${this.config.command} was terminated by a signal`
+						: `${this.config.command} exited with code ${exitCode}`;
 				yield {
 					...base(),
 					state: "error",
-					output: detail
-						? `${this.config.command} exited with code ${exitCode}: ${detail}`
-						: `${this.config.command} exited with code ${exitCode}`,
+					output: detail ? `${exitLabel}: ${detail}` : exitLabel,
 					elapsedMs,
 				};
 			}
 			settled = true;
 		} finally {
-			clearTimeout(timer);
+			for (const timer of timers) clearTimeout(timer);
+			this.stdinByTask.delete(task.id);
+			// Release the stdin fd whether or not it was ever written to
+			// (no-op when already ended/ignored).
+			try {
+				child.stdin?.end();
+			} catch {}
 			if (!settled) {
-				// Consumer abandoned the stream: do not leave the child running.
+				// Consumer abandoned the stream (at ANY yield point after spawn):
+				// do not leave the process group running (#2807).
+				killTree("SIGTERM");
+				killTree("SIGKILL");
+				severPipes();
 				try {
-					proc.kill();
-				} catch {
-					// Already gone.
-				}
+					child.stdin?.destroy();
+				} catch {}
 			}
 		}
 	}

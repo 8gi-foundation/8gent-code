@@ -173,9 +173,20 @@ class HarnessRunner {
 	readonly registry: HarnessRegistry;
 	start(input: { prompt: string; harness?: string; cwd?: string }): string; // -> taskId, run detached
 	getEvents(taskId: string): StatusEvent[];  // buffered history, [] if unknown
+	respond(taskId: string, input: string): boolean; // answer a needs_input task (#2809)
 	subscribe(listener: (e: StatusEvent) => void): () => void; // live feed, returns unsubscribe
 }
 ```
+
+Bounded retention (#2810): besides the task-count cap, each task's buffered
+event array is capped (`MAX_EVENTS_PER_TASK = 500`). The first event (queued)
+is preserved and the oldest progress events are dropped first, so the
+terminal `done`/`error` event is always retained - one verbose task can never
+grow the daemon's memory without bound.
+
+`Harness.respond` is optional on the interface: harnesses with a live input
+channel (the CLI adapter) implement it; `respond()` returns true only when
+the input really reached the running task (#2809).
 
 ### HTTP surface (packages/harness/http.ts, wired in packages/daemon/gateway.ts)
 
@@ -191,6 +202,7 @@ Returns `null` for non-harness paths so the gateway falls through.
 | `GET /harnesses` | `{ harnesses: string[], default: "8gent-local" }` |
 | `POST /harness/run` | body `{ prompt, harness?, cwd? }` -> `202 { taskId, harness }`. 400 on missing/empty prompt or unknown harness. |
 | `GET /harness/tasks` | SSE (`text/event-stream`). Replays buffered StatusEvents, then streams live ones. Each frame: `data: <StatusEvent JSON>\n\n`. |
+| `POST /harness/respond` | body `{ taskId, input }` -> `200 { ok: true }` when the input reached the running task's stdin; `409` when undeliverable (unknown, finished, or not interactive); `400` on a malformed body (#2809). |
 
 Local-first: omitting `harness` runs `8gent-local`.
 
@@ -234,7 +246,7 @@ are inferred honestly from what the process really does):
 | --- | --- |
 | run accepted | `queued` |
 | process spawned | `working` (elapsedMs) |
-| stdout/stderr output line | `working` (elapsedMs) |
+| stdout/stderr output line | `working` (throttled, elapsedMs) |
 | line matching needsInputPattern | `needs_input` |
 | exit code 0 | `done` + output = captured stdout |
 | non-zero exit | `error` + output = stderr / exit message |
@@ -247,6 +259,36 @@ element), spawn/config failures terminate the stream with a single error
 event instead of throwing, every run is timeout-bounded and abandoned
 streams kill the child, captured output is tail-capped, malformed env
 config is skipped fail-safe rather than crashing daemon boot.
+
+Process-tree termination (#2806, #2807): the child is spawned `detached`
+into its OWN process group and every kill targets the whole group, so
+wrapper scripts cannot leave grandchildren running. Timeout kills escalate
+SIGTERM -> SIGKILL after a short grace, so a child that traps SIGTERM still
+dies. After the child exits, output flushing gets a bounded grace window;
+if a reparented descendant still holds the stdout/stderr pipes open, it is
+group-killed and the pipes are severed - `run()` always yields its terminal
+event within a bounded window, whatever the process tree looks like. One
+try/finally guards every yield point from the moment of spawn: abandoning
+the stream anywhere kills the process group.
+
+needsInputPattern trust boundary (#2808): the pattern is operator config,
+but it is evaluated against UNTRUSTED CLI output (which the task prompt can
+influence). Each probe tests only a bounded line prefix (256 chars) under a
+time budget (25ms); a probe that blows the budget - catastrophic
+backtracking - disables the pattern for the rest of the run instead of
+stalling the daemon's event loop. Stateful regex flags (g/y) are stripped.
+
+needs_input delivery (#2809): configuring a `needsInputPattern` keeps the
+child's stdin OPEN for the whole run. `CliHarness.respond(taskId, input)`
+writes a newline-terminated follow-up to the running task's stdin, surfaced
+as `HarnessRunner.respond()` and `POST /harness/respond`. Without a pattern
+the previous contract is unchanged: `promptVia "arg"` ignores stdin
+entirely, `promptVia "stdin"` writes the prompt then closes it.
+
+Event flood control (#2810): per-line `working` events are throttled at the
+source (at most one per 50ms window); `needs_input` events always pass
+through immediately. Combined with the runner's per-task event cap, a
+verbose or adversarial CLI cannot flood task buffers or SSE subscribers.
 
 ## Checkpoint (fill at PR close)
 
