@@ -1,0 +1,6 @@
+{
+	"name": "@8gent/harness",
+	"version": "0.17.3",
+	"type": "module",
+	"main": "index.ts"
+}
