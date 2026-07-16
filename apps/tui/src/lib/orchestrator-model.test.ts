@@ -16,6 +16,8 @@ import {
 	foldStatusEvents,
 	formatElapsed,
 	formatTokens,
+	layoutColumns,
+	selectVisibleRows,
 } from "./orchestrator-model";
 
 function ev(partial: Partial<StatusEvent> & Pick<StatusEvent, "agentId" | "state">): StatusEvent {
@@ -140,6 +142,14 @@ describe("formatTokens", () => {
 	test("M over 1m", () => {
 		expect(formatTokens(2_400_000)).toBe("2.4M");
 	});
+	// #2801: k values that would display as "1000.0k" must promote to M.
+	test("k/M boundary promotes to M instead of 1000.0k", () => {
+		expect(formatTokens(999_950)).toBe("1.0M");
+		expect(formatTokens(999_999)).toBe("1.0M");
+	});
+	test("just below the promote threshold stays in k", () => {
+		expect(formatTokens(999_949)).toBe("999.9k");
+	});
 });
 
 describe("formatElapsed", () => {
@@ -154,5 +164,80 @@ describe("formatElapsed", () => {
 	});
 	test("minutes and seconds above a minute", () => {
 		expect(formatElapsed(83_000)).toBe("1m23s");
+	});
+	// #2801: a sub-minute remainder that rounds to 60 must carry into the
+	// next minute - never an invalid clock like "1m60s".
+	test("seconds remainder that rounds to 60 carries to the next minute", () => {
+		expect(formatElapsed(119_988)).toBe("2m00s");
+		expect(formatElapsed(179_988)).toBe("3m00s");
+		expect(formatElapsed(239_988)).toBe("4m00s");
+	});
+	test("just under a minute that would display 60.0s carries to 1m00s", () => {
+		expect(formatElapsed(59_988)).toBe("1m00s");
+	});
+	test("exact minute boundary", () => {
+		expect(formatElapsed(60_000)).toBe("1m00s");
+		expect(formatElapsed(120_000)).toBe("2m00s");
+	});
+});
+
+describe("layoutColumns (#2802)", () => {
+	test("wide pane keeps all six columns in display order", () => {
+		expect(layoutColumns(100).map((c) => c.label)).toEqual([
+			"AGENT",
+			"STATE",
+			"HARNESS",
+			"TOOL",
+			"TOKENS",
+			"ELAPSED",
+		]);
+	});
+	test("mid width drops to AGENT/STATE/ELAPSED", () => {
+		expect(layoutColumns(40).map((c) => c.label)).toEqual(["AGENT", "STATE", "ELAPSED"]);
+	});
+	test("very narrow pane degrades to AGENT + STATE with a shrunk id column", () => {
+		const cols = layoutColumns(24);
+		expect(cols.map((c) => c.label)).toEqual(["AGENT", "STATE"]);
+	});
+	test("columns always fit inside the pane chrome at width >= 23", () => {
+		for (let width = 23; width <= 120; width++) {
+			const cols = layoutColumns(width);
+			expect(cols.length).toBeGreaterThanOrEqual(2);
+			const content = cols.reduce((sum, c) => sum + c.width + 1, 0);
+			expect(content).toBeLessThanOrEqual(width - 4);
+		}
+	});
+});
+
+describe("selectVisibleRows (#2802)", () => {
+	const mk = (id: string, state: OrchestratorRow["state"]): OrchestratorRow => ({
+		id,
+		harness: "8gent-local",
+		state,
+		startedTs: 1000,
+		updatedTs: 1000,
+	});
+
+	test("no overflow returns all rows with hidden 0", () => {
+		const rows = [mk("a", "working"), mk("b", "queued")];
+		expect(selectVisibleRows(rows, 10)).toEqual({ visible: rows, hidden: 0 });
+	});
+	test("caps to maxRows and reports the hidden count", () => {
+		const rows = Array.from({ length: 40 }, (_, i) => mk(`hx_${i}`, "working"));
+		const { visible, hidden } = selectVisibleRows(rows, 10);
+		expect(visible).toHaveLength(10);
+		expect(hidden).toBe(30);
+	});
+	test("active rows are kept over older terminal rows, display order preserved", () => {
+		const rows = [
+			mk("done1", "done"),
+			mk("act1", "working"),
+			mk("done2", "error"),
+			mk("act2", "queued"),
+			mk("done3", "done"),
+		];
+		const { visible, hidden } = selectVisibleRows(rows, 3);
+		expect(visible.map((r) => r.id)).toEqual(["act1", "act2", "done3"]);
+		expect(hidden).toBe(2);
 	});
 });

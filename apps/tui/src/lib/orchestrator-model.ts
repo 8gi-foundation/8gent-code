@@ -83,8 +83,13 @@ function rowFromEvent(event: StatusEvent): OrchestratorRow {
 /** "-" when never reported; 950 -> "950"; 12345 -> "12.3k"; 2.4e6 -> "2.4M". */
 export function formatTokens(tokens?: number): string {
 	if (tokens === undefined) return "-";
-	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-	if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+	if (tokens >= 1_000) {
+		const thousands = tokens / 1_000;
+		// #2801: values whose k display would round to "1000.0k" belong in M.
+		// Covers everything >= 1M too, so one threshold handles the boundary.
+		if (thousands >= 999.95) return `${(tokens / 1_000_000).toFixed(1)}M`;
+		return `${thousands.toFixed(1)}k`;
+	}
 	return String(tokens);
 }
 
@@ -92,8 +97,108 @@ export function formatTokens(tokens?: number): string {
 export function formatElapsed(elapsedMs?: number): string {
 	if (elapsedMs === undefined) return "-";
 	if (elapsedMs < 1_000) return `${elapsedMs}ms`;
-	if (elapsedMs < 60_000) return `${(elapsedMs / 1_000).toFixed(1)}s`;
-	const minutes = Math.floor(elapsedMs / 60_000);
-	const seconds = Math.round((elapsedMs % 60_000) / 1_000);
-	return `${minutes}m${String(seconds).padStart(2, "0")}s`;
+	const seconds = elapsedMs / 1_000;
+	// #2801: values whose s display would round to "60.0s" belong in m/s.
+	if (seconds < 59.95) return `${seconds.toFixed(1)}s`;
+	// Round the whole value to seconds FIRST, then split - the seconds
+	// remainder can never be 60, so "1m60s" is impossible by construction.
+	const totalSeconds = Math.round(seconds);
+	const minutes = Math.floor(totalSeconds / 60);
+	const secs = totalSeconds % 60;
+	return `${minutes}m${String(secs).padStart(2, "0")}s`;
+}
+
+// ---------------------------------------------------------------------------
+// Responsive layout + row cap (#2802). Pure helpers so the pane's sizing
+// behavior is testable without a terminal.
+// ---------------------------------------------------------------------------
+
+export interface ColumnSpec {
+	key: "id" | "state" | "harness" | "tool" | "tokens" | "elapsed";
+	label: string;
+	width: number;
+}
+
+/** Full column set in display order. STATE fits " needs_input " (13). */
+const FULL_COLUMNS: readonly ColumnSpec[] = [
+	{ key: "id", label: "AGENT", width: 12 },
+	{ key: "state", label: "STATE", width: 13 },
+	{ key: "harness", label: "HARNESS", width: 13 },
+	{ key: "tool", label: "TOOL", width: 13 },
+	{ key: "tokens", label: "TOKENS", width: 7 },
+	{ key: "elapsed", label: "ELAPSED", width: 8 },
+];
+
+/** Drop order priority: id and state always survive, elapsed next. */
+const PRIORITY: ReadonlyArray<ColumnSpec["key"]> = [
+	"id",
+	"state",
+	"elapsed",
+	"harness",
+	"tool",
+	"tokens",
+];
+
+/** Border (2) + paddingX (2) of the pane box. */
+const PANE_CHROME = 4;
+const MIN_ID_WIDTH = 4;
+
+/**
+ * Pick the columns that actually fit a pane of `paneWidth` total columns.
+ * Takes the largest prefix of PRIORITY that fits (each column costs
+ * width + 1 margin), returned in display order. AGENT + STATE always
+ * survive; AGENT shrinks (down to MIN_ID_WIDTH) when even they do not fit.
+ */
+export function layoutColumns(paneWidth: number): ColumnSpec[] {
+	const available = paneWidth - PANE_CHROME;
+	const byKey = new Map(FULL_COLUMNS.map((c) => [c.key, c]));
+	const picked = new Set<ColumnSpec["key"]>();
+	let used = 0;
+	for (const key of PRIORITY) {
+		const col = byKey.get(key) as ColumnSpec;
+		if (used + col.width + 1 <= available) {
+			picked.add(key);
+			used += col.width + 1;
+		} else if (key === "id" || key === "state") {
+			// Floor: keep AGENT + STATE, shrinking AGENT to make room.
+			picked.add(key);
+			used += col.width + 1;
+		} else {
+			break; // prefix semantics - no gaps in the drop order
+		}
+	}
+	const cols = FULL_COLUMNS.filter((c) => picked.has(c.key)).map((c) => ({ ...c }));
+	if (used > available) {
+		const id = cols.find((c) => c.key === "id");
+		const state = byKey.get("state") as ColumnSpec;
+		if (id) id.width = Math.max(MIN_ID_WIDTH, available - (state.width + 1) - 1);
+	}
+	return cols;
+}
+
+/**
+ * Cap the grid at `maxRows` visible rows. Active (non-terminal) rows are
+ * kept over older done/error rows; whatever is shown keeps display order.
+ * Returns the hidden count for the honest "+N more" line.
+ */
+export function selectVisibleRows(
+	rows: readonly OrchestratorRow[],
+	maxRows: number,
+): { visible: OrchestratorRow[]; hidden: number } {
+	if (maxRows <= 0 || rows.length <= maxRows) {
+		return { visible: [...rows], hidden: 0 };
+	}
+	const indexed = rows.map((row, index) => ({ row, index }));
+	const isActive = (r: OrchestratorRow) => r.state !== "done" && r.state !== "error";
+	const active = indexed.filter(({ row }) => isActive(row));
+	const terminal = indexed.filter(({ row }) => !isActive(row));
+	const picked = active.slice(0, maxRows);
+	const remaining = maxRows - picked.length;
+	// Fill leftover slots with the most recent terminal rows.
+	if (remaining > 0) picked.push(...terminal.slice(-remaining));
+	picked.sort((a, b) => a.index - b.index);
+	return {
+		visible: picked.map(({ row }) => row),
+		hidden: rows.length - picked.length,
+	};
 }
