@@ -1,0 +1,55 @@
+# nfpm config for 8gent Code Linux packages (.deb + .rpm).
+#
+# nfpm (https://nfpm.goreleaser.com) builds both a Debian and an RPM package
+# from this single spec, no dpkg/rpmbuild toolchain required. The compiled
+# single-file binary is installed to /usr/local/bin/8gent.
+#
+# Env vars (set by scripts/package-linux.sh):
+#   EIGHT_VERSION   package version (from package.json)
+#   EIGHT_ARCH      nfpm arch: amd64 | arm64
+#
+# The compiled binary is staged to the fixed path packaging/linux/staged-8gent
+# by the packaging script before each `nfpm package` call. nfpm does not expand
+# env vars inside contents[].src (it is resolved as a glob), so the source path
+# is fixed and the script swaps the staged file per arch.
+#
+# Build:
+#   cp dist/bin/8gent-linux-x64 packaging/linux/staged-8gent
+#   EIGHT_VERSION=0.17.3 EIGHT_ARCH=amd64 \
+#     nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/installers/
+#   EIGHT_VERSION=0.17.3 EIGHT_ARCH=amd64 \
+#     nfpm package -f packaging/linux/nfpm.yaml -p rpm -t dist/installers/
+#
+# GPG signing of the .deb/.rpm is opt-in and handled by scripts/package-linux.sh
+# via nfpm's built-in signing when EIGHT_GPG_KEY_ID is set. See SIGNING.md.
+
+name: 8gent
+arch: ${EIGHT_ARCH}
+platform: linux
+version: ${EIGHT_VERSION}
+section: devel
+priority: optional
+maintainer: 8GI Foundation <hello@8gent.dev>
+description: |
+  Open source autonomous coding agent. Runs locally on local LLMs or free
+  cloud models. No API keys, no usage caps, no cloud dependency required.
+  This package ships a self-contained binary that embeds the Bun runtime.
+vendor: 8GI Foundation
+homepage: https://8gent.dev
+license: Apache-2.0
+contents:
+  - src: packaging/linux/staged-8gent
+    dst: /usr/local/bin/8gent
+    file_info:
+      mode: 0755
+  # Convenience aliases matching the npm bin names.
+  - src: /usr/local/bin/8gent
+    dst: /usr/local/bin/8gent-code
+    type: symlink
+  - src: /usr/local/bin/8gent
+    dst: /usr/local/bin/8
+    type: symlink
+deb:
+  compression: xz
+rpm:
+  compression: xz

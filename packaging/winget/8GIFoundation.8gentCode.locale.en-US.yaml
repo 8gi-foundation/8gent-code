@@ -1,0 +1,26 @@
+# winget default-locale manifest for 8gent Code.
+PackageIdentifier: 8GIFoundation.8gentCode
+PackageVersion: 0.17.3
+PackageLocale: en-US
+Publisher: 8GI Foundation
+PublisherUrl: https://8gent.world
+PackageName: 8gent Code
+PackageUrl: https://8gent.dev
+License: Apache-2.0
+LicenseUrl: https://github.com/8gi-foundation/8gent-code/blob/main/LICENSE
+ShortDescription: Open source autonomous coding agent. Runs locally. No API keys, no usage caps.
+Description: >-
+  8gent Code is the open source kernel of the 8gent ecosystem - a terminal-first
+  autonomous coding agent powered by local LLMs or free cloud models. Adaptive
+  11-provider router, deny-by-default permissions, local SQLite memory. This
+  package installs a self-contained binary that embeds the Bun runtime, so no
+  separate runtime install is required.
+Tags:
+  - ai
+  - agent
+  - cli
+  - coding-assistant
+  - local-llm
+  - developer-tools
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
