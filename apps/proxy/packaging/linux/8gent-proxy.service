@@ -1,0 +1,19 @@
+[Unit]
+Description=8gent Model Proxy - OpenAI-compatible localhost gateway
+Documentation=https://8gent.dev
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Loopback-only by default. Override port/host without editing this unit:
+#   systemctl --user edit 8gent-proxy
+# and add [Service] Environment=PROXY_PORT=... / PROXY_HOST=...
+Environment=PROXY_HOST=127.0.0.1
+Environment=PROXY_PORT=8787
+ExecStart=/usr/bin/8gent-proxy
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
