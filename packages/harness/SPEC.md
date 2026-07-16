@@ -164,6 +164,7 @@ Local-first: omitting `harness` runs `8gent-local`.
 
 ## Checkpoint (fill at PR close)
 
-- [ ] `bun test packages/harness/` green
-- [ ] `bun run typecheck` green
-- [ ] Daemon routes wired without touching existing routes
+- [x] `bun test packages/harness/` green (28 pass, 0 fail)
+- [x] `bun run typecheck` green
+- [x] Daemon routes wired without touching existing routes (gateway +8 lines, daemon suite 164 pass)
+- [x] Live transport smoke: real Bun server, GET /harnesses + POST /harness/run (202) + SSE queued -> working -> done

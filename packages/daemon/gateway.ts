@@ -7,6 +7,7 @@
 
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import { handleHarnessRoute } from "../harness/http";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
 import type {
@@ -482,6 +483,13 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			if (url.pathname === "/ops/agent-pool/status") {
 				return Response.json(config.pool.getStatus());
 			}
+
+			// Meta-harness surface (part of #2797): GET /harnesses,
+			// POST /harness/run, GET /harness/tasks (SSE). Local-first:
+			// the default backend is 8gent-local. Returns null for
+			// non-harness paths so everything below stays untouched.
+			const harnessResponse = handleHarnessRoute(req, url);
+			if (harnessResponse) return harnessResponse;
 
 			// Access audit log endpoint (DPIA G7). POST-only, metadata only.
 			if (url.pathname === "/audit/access" && req.method === "POST") {
