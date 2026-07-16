@@ -71,6 +71,8 @@ export {
 	TEXT_TOOL_ENDPOINTS,
 	resolveTextToolEndpoint,
 	buildTextToolCall,
+	extractUsage,
+	type TextToolUsage,
 	toolDefToSpec,
 	toolDefsToSpecs,
 	toolDefsToTextTools,
