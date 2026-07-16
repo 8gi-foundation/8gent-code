@@ -85,6 +85,19 @@ interface Harness {
 (with tool/token/elapsed detail as it becomes available), and terminates with
 exactly one `done` or `error` event.
 
+Input validation (#2803): an empty or whitespace-only `prompt` is rejected by
+`LocalHarness.run` itself with a single `error` event (no `queued`, no engine
+ever constructed) - a degenerate prompt must never reach the underlying model,
+which can otherwise hallucinate "facts" and persist them via memory tools.
+`HarnessRunner.start` throws on an empty prompt before minting a taskId, and
+the HTTP layer keeps its 400. All three layers guard independently.
+
+Store isolation (#2803): the default engine factory refuses to construct the
+real Agent under a test or dogfood environment (`NODE_ENV=test`, `BUN_TEST`,
+or `EIGHT_HARNESS_DOGFOOD=1`) unless `EIGHT_DATA_DIR` points at an isolated
+directory outside the real global store (`~/.8gent`). Production runs are
+unaffected. See `assertIsolatedDataDir` in `packages/harness/local.ts`.
+
 ### HarnessRegistry
 
 ```ts
@@ -124,12 +137,31 @@ Event mapping (real signals only):
 
 | Agent signal | StatusEvent |
 | --- | --- |
+| empty/whitespace prompt | single `error`, engine never constructed (#2803) |
 | run accepted | `queued` |
 | chat begins | `working` (elapsedMs) |
 | onToolStart | `working` + `tool` |
 | onStepFinish | `working` + cumulative `tokens` (usage.totalTokens) + elapsedMs |
-| chat resolves | `done` + `output` (+ tokens/elapsedMs) |
+| chat resolves with an answer | `done` + `output` (+ tokens/elapsedMs) |
+| chat resolves with only unexecuted tool_call protocol | `error` (#2804) |
 | chat throws | `error` + `output` = error message |
+
+Output hygiene (#2804): before a `done` is emitted, the final chat output is
+run through `sanitizeFinalOutput` (`packages/harness/sanitize.ts`). Unexecuted
+`tool_call` protocol blocks (canonical ```` ```tool_call ```` fences, the
+leaked bare-fence + `tool_call`-body-line variant, or a bare whole-answer
+`tool_call` line + JSON object) are stripped; when nothing remains, the turn
+ends in `error` instead of `done`. Raw protocol syntax never surfaces as a
+successful answer.
+
+Token availability (#2805): on the default local runtime (ollama / LM Studio
+via the text-tool path), `tokens` is populated from the REAL `usage` object
+the provider's OpenAI-compatible `/v1/chat/completions` response reports on
+each model round (`buildTextToolCall`'s `onUsage` ->
+`AgentEventCallbacks.onStepFinish`). When a runtime omits `usage`, `tokens`
+stays absent - it is optional and never estimated or fabricated. Native
+tool-calling providers keep reporting through the AI-SDK `onStepFinish` path
+as before.
 
 ### HarnessRunner (packages/harness/runner.ts)
 

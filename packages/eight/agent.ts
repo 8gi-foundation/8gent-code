@@ -704,12 +704,32 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// aborts the shared signal and rejects, ending the turn in bounded time
 		// instead of hanging for the full session watchdog.
 		const attemptTimeoutMs = resolveTurnTimeoutMs();
+		// #2805: the OpenAI-compatible local endpoints (ollama, LM Studio) report
+		// REAL usage on each completion. Forward it through onStepFinish so
+		// consumers (harness StatusEvent.tokens, TUI totals) see real token
+		// counts on the text-tool path too, and accumulate the turn totals for
+		// the run log + journal. Nothing fires when the endpoint omits usage -
+		// no fabricated numbers, ever.
+		let usageStepNumber = 0;
+		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		const runTurn = (provider: string, model: string) => {
 			const rawCall = buildTextToolCall({
 				provider,
 				model,
 				temperature: getRuntimeParams().temperature ?? 0.2,
 				signal,
+				onUsage: (usage) => {
+					usageTotals.promptTokens += usage.promptTokens;
+					usageTotals.completionTokens += usage.completionTokens;
+					usageTotals.totalTokens += usage.totalTokens;
+					this.events.onStepFinish?.({
+						stepNumber: usageStepNumber++,
+						finishReason: "stop",
+						text: "",
+						toolCalls: [],
+						usage,
+					});
+				},
 			});
 			const call = (msgs: Parameters<typeof rawCall>[0]) =>
 				withTurnTimeout(
@@ -791,7 +811,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				status: "ok",
 				model: this.config.model,
 				dur: durationSec,
-				tokens: 0,
+				// Real accumulated usage from the endpoint (0 only when the
+				// endpoint reported none) - see #2805.
+				tokens: usageTotals.totalTokens,
 				cost: this.totalCost,
 				tools: agentResult.toolLog.length,
 				created: Array.from(this.sessionWriter.getFilesCreated()),
@@ -823,7 +845,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				})),
 				modelOutput: {
 					content: flavoredContent,
-					tokens: { in: 0, out: 0, total: 0 },
+					// Real accumulated usage from the endpoint (zeros only when the
+					// endpoint reported none) - see #2805.
+					tokens: {
+						in: usageTotals.promptTokens,
+						out: usageTotals.completionTokens,
+						total: usageTotals.totalTokens,
+					},
 				},
 				latencyMs: Date.now() - chatStartTime,
 				status: "ok",
