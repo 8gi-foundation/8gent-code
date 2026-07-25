@@ -13,7 +13,7 @@ concurrency:
 jobs:
   validate:
     name: Validate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, spark]
 
     steps:
       - uses: actions/checkout@v4
@@ -175,7 +175,7 @@ jobs:
 
   smoke:
     name: Harness Smoke
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, spark]
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
