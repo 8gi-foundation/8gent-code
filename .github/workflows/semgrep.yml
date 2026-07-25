@@ -16,7 +16,7 @@ concurrency:
 jobs:
   semgrep:
     name: Static Analysis
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, spark]
     # NON-blocking - informational only
     continue-on-error: true
     container:
