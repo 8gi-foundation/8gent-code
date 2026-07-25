@@ -14,7 +14,7 @@ concurrency:
 jobs:
   gitleaks:
     name: Secret Detection
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, spark]
     # NON-blocking - informational only
     continue-on-error: true
     steps:
