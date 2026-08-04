@@ -332,8 +332,21 @@ async function runMentionFlow(
 	if (!posted.authorId.startsWith("human:")) return;
 
 	const handles = scanMentions(posted.content);
-	if (handles.length === 0) return;
-	const agentIds = resolveMentionedAgents(store, channelId, handles);
+	let agentIds: string[];
+	if (handles.length === 0) {
+		// DM auto-route (Slack behavior): in a private channel with exactly ONE
+		// agent member, every human message is implicitly addressed to that agent -
+		// you just type, no @mention needed. Group/open channels still require @.
+		const channel = store.getChannel(channelId);
+		if (!channel || channel.visibility !== "private") return;
+		const agents = store
+			.listMembers(channelId)
+			.filter((m: { participantId: string }) => m.participantId.startsWith("agent:"));
+		if (agents.length !== 1) return;
+		agentIds = [agents[0].participantId];
+	} else {
+		agentIds = resolveMentionedAgents(store, channelId, handles);
+	}
 
 	for (const agentId of agentIds) {
 		broadcast(channelId, { type: "agent:activity", channelId, agentId, state: "thinking" });
