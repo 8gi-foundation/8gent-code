@@ -7,6 +7,7 @@
 
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import { TableStore, installTablePolicies } from "../table/index";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
 import type {
@@ -38,6 +39,7 @@ import {
 	handleStoreMessage,
 	handleStoreOpen,
 } from "./routes/store/index";
+import { bindParticipant, handleTableFrame, isTableFrame } from "./table-routes";
 
 export interface GatewayConfig {
 	port: number;
@@ -67,10 +69,17 @@ interface ClientState {
 	isDispatchRoute?: boolean;
 	/** Marks a connection upgraded on the /store route. */
 	isStoreRoute?: boolean;
+	/** Table channels this connection is subscribed to (message:appended fan-out). */
+	subscribedChannels: Set<string>;
+	/** The participant this connection acts as for Table ("human:<handle>"). Pinned
+	 *  once via bindParticipant(); never reassigned on the same connection. */
+	participantId?: string;
+	/** Peer address captured at open, for the Table per-frame loopback guard (F1). */
+	remoteAddress?: string;
 }
 
 type InboundMessage =
-	| { type: "auth"; token: string }
+	| { type: "auth"; token: string; participantId?: string }
 	| { type: "session:create"; channel: string }
 	| { type: "session:resume"; sessionId: string }
 	| { type: "session:compact"; sessionId: string }
@@ -100,6 +109,31 @@ type OutboundMessage =
 
 const clients = new Map<any, ClientState>();
 let nextClientId = 0;
+
+/**
+ * Shared Table store, constructed lazily on first table frame. Opens the
+ * bun:sqlite DB at ~/.8gent/table/table.db and the signed Table ledger. Policies
+ * are installed once at gateway boot (installTablePolicies() in startGateway).
+ */
+let tableStore: TableStore | null = null;
+function getTableStore(): TableStore {
+	if (!tableStore) tableStore = new TableStore();
+	return tableStore;
+}
+
+/** Fan-out a Table frame to every connection subscribed to `channelId`. */
+function broadcastToChannel(channelId: string, frame: unknown): void {
+	for (const [ws, s] of clients) {
+		if (!s.authenticated) continue;
+		if (s.subscribedChannels.has(channelId)) {
+			try {
+				ws.send(JSON.stringify(frame));
+			} catch {
+				// client disconnected
+			}
+		}
+	}
+}
 
 function generateSessionId(): string {
 	return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -140,6 +174,17 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 	if (config.authToken && !state.authenticated) {
 		if (msg.type === "auth") {
 			if (msg.token === config.authToken) {
+				// F2: bind + PIN the Table participant to a verified human identity
+				// BEFORE authenticating. A bad/agent/duplicate declaration fails auth,
+				// so one connection can never post as arbitrary different participants.
+				if (msg.participantId) {
+					const r = bindParticipant(state, msg.participantId);
+					if (!r.ok) {
+						send(ws, { type: "error", message: `participant rejected: ${r.error}` });
+						send(ws, { type: "auth:fail" });
+						return;
+					}
+				}
 				state.authenticated = true;
 				send(ws, { type: "auth:ok" });
 			} else {
@@ -169,12 +214,54 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		return;
 	}
 
+	// Table channel:* / message:* frame interception (contract §3). Delegated to
+	// table-routes.ts, backed by the shared @8gent/table store. Untrusted channel
+	// text never reaches a shell tool - the @mention flow hands it to the agent
+	// as a data envelope and the only agent write is the ToolG8-gated post tool.
+	if (isTableFrame((msg as { type?: unknown }).type)) {
+		handleTableFrame(
+			{
+				store: getTableStore(),
+				pool: config.pool,
+				broadcast: broadcastToChannel,
+				sendRaw: (frame) => {
+					try {
+						ws.send(JSON.stringify(frame));
+					} catch {
+						// client disconnected
+					}
+				},
+				state,
+			},
+			msg as unknown as Record<string, unknown>,
+		);
+		return;
+	}
+
 	const pool = config.pool;
 
 	switch (msg.type) {
 		case "ping":
 			send(ws, { type: "pong" });
 			break;
+
+		case "auth": {
+			// Reached only in no-auth mode (the guarded auth handler above returns
+			// early when config.authToken is set). A loopback client may declare its
+			// Table participant without a token, but F2 still applies: only a
+			// "human:<handle>" id, pinned once. A bad/agent/re-bind attempt is refused
+			// so one connection cannot switch identity between posts.
+			if (msg.participantId) {
+				const r = bindParticipant(state, msg.participantId);
+				if (!r.ok) {
+					send(ws, { type: "error", message: `participant rejected: ${r.error}` });
+					send(ws, { type: "auth:fail" });
+					return;
+				}
+			}
+			send(ws, { type: "auth:ok" });
+			break;
+		}
 
 		case "session:create": {
 			const sessionId = generateSessionId();
@@ -372,9 +459,17 @@ async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<R
 export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
 	subscribeToBus();
 
-	// v0: the computer channel is loopback-only. We keep the global bind unchanged
-	// (other channels still listen on 0.0.0.0) and reject non-loopback peers on
-	// the /computer route. Set DAEMON_HOSTNAME=127.0.0.1 to lock everything down.
+	// Install the Table deny-by-default policy set once (idempotent). Table
+	// agents bind under the "__table__" scope; these rules block
+	// run_command/network/write_file and explicitly allow only channel_post.
+	installTablePolicies();
+
+	// v0: the /computer route and Table frames are loopback-only. We keep the
+	// global bind unchanged (other channels still listen on 0.0.0.0) and enforce
+	// loopback PER-SURFACE: the /computer route rejects non-loopback peers at
+	// upgrade, and Table channel:*/message:* frames are rejected per-frame in
+	// table-routes (isLoopbackAddress) regardless of this global bind. Set
+	// DAEMON_HOSTNAME=127.0.0.1 to lock every surface down.
 	const hostname = process.env.DAEMON_HOSTNAME || "0.0.0.0";
 
 	const server = Bun.serve({
@@ -472,18 +567,16 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				const isStore = data?.route === "store";
 				const state: ClientState = {
 					id,
-					channel: isComputer
-						? "computer"
-						: isDispatch
-							? "dispatch"
-							: isStore
-								? "store"
-								: "api",
+					channel: isComputer ? "computer" : isDispatch ? "dispatch" : isStore ? "store" : "api",
 					sessionId: null,
 					authenticated: !config.authToken,
 					isComputerRoute: isComputer,
 					isDispatchRoute: isDispatch,
 					isStoreRoute: isStore,
+					subscribedChannels: new Set<string>(),
+					// Captured for the Table per-frame loopback guard (F1). Empty when
+					// unavailable, which isLoopbackAddress() treats as non-loopback.
+					remoteAddress: (ws as unknown as { remoteAddress?: string }).remoteAddress,
 				};
 				clients.set(ws, state);
 				const tag = isComputer

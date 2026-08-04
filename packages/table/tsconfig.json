@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"composite": false,
+		"noEmit": true
+	},
+	"include": [
+		"./**/*.ts",
+		"../goal/ledger.ts",
+		"../permissions/policy-engine.ts",
+		"../permissions/toolg8.ts",
+		"../permissions/goal-state-hmac.ts",
+		"../permissions/types.ts"
+	],
+	"exclude": ["dist", "node_modules"]
+}
