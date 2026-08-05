@@ -63,8 +63,10 @@ export function loadMemory(code: string): string {
 	const logAt = raw.indexOf(LOG_HEADER);
 	const facts = logAt >= 0 ? raw.slice(0, logAt) : "";
 	const log = logAt >= 0 ? raw.slice(logAt) : raw;
-	const room = Math.max(500, INJECT_CAP - facts.length);
-	const tail = log.length > room ? `${LOG_HEADER}\n…(older exchanges compacted)…\n${log.slice(-room)}` : log;
+	const notice = `${LOG_HEADER}\n…(older exchanges compacted)…\n`;
+	// Budget the notice itself, else the return overruns INJECT_CAP by its length.
+	const room = Math.max(500, INJECT_CAP - facts.length - notice.length);
+	const tail = log.length > room ? notice + log.slice(-room) : log;
 	return facts + tail;
 }
 
@@ -79,8 +81,16 @@ export function appendExchange(
 	const p = ensureFile(code);
 	const day = new Date().toISOString().slice(0, 10);
 	const clip = (s: string, n: number) => s.replace(/\s+/g, " ").trim().slice(0, n);
-	const line = `- ${day} #${channelName} ${from}: "${clip(userText, 90)}" -> me: "${clip(replyText, 90)}"\n`;
+	// 90 chars silently truncated the very facts a human asked to be remembered
+	// ("remember this: <fact>" lost its payload mid-sentence). 240 keeps the fact.
+	const line = `- ${day} #${channelName} ${from}: "${clip(userText, 240)}" -> me: "${clip(replyText, 240)}"\n`;
 	fs.appendFileSync(p, line);
+	// An explicit "remember this" is a DURABLE fact, not a passing exchange: promote
+	// it into ## Facts so it survives compaction. appendFact had zero callers, which
+	// made the whole two-tier design a no-op in practice.
+	if (/\b(remember|note) (this|that)\b|\bfor the record\b|\bdon't forget\b/i.test(userText)) {
+		appendFact(code, `${from} asked me to remember: ${clip(userText, 240)}`);
+	}
 	compactIfNeeded(p);
 }
 

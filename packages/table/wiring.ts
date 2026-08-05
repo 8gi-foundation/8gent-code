@@ -148,8 +148,17 @@ export function resolveMentionedAgents(
 	const alias = new Map<string, string>(); // lowercase handle -> canonical code
 	for (const [code, meta] of Object.entries(OFFICERS)) {
 		alias.set(code.toLowerCase(), code);
-		const first = (meta as { name?: string }).name?.split(/\s+/)[0];
-		if (first) alias.set(first.toLowerCase(), code);
+		const name = (meta as { name?: string }).name ?? "";
+		// Alias EVERY sensible way a human writes the name. "AI James" must match
+		// "@aijames" and "@james" as well as "@8EO" - aliasing only the first token
+		// left the exec officer unreachable by anything resembling his name.
+		const tokens = name.split(/\s+/).filter(Boolean);
+		if (name) alias.set(name.replace(/\s+/g, "").toLowerCase(), code); // "aijames"
+		for (const t of tokens) {
+			const k = t.toLowerCase();
+			// Don't let a 1-2 char fragment ("ai") shadow a real officer name.
+			if (k.length >= 3 && !alias.has(k)) alias.set(k, code);
+		}
 	}
 	const out: string[] = [];
 	const seen = new Set<string>();

@@ -124,6 +124,7 @@ import {
 	needsTextTools,
 	resolveTextToolEndpoint,
 	runTextToolAgent,
+	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
 
@@ -214,7 +215,7 @@ export class Agent {
 		this.events = config.events || {};
 		this.executor = new ToolExecutor(
 			config.workingDirectory || process.cwd(),
-			"primary",
+			config.agentScope ?? "primary",
 			undefined,
 			{
 				unattended: config.unattended ?? false,
@@ -373,8 +374,16 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
 		// Initialize session persistence (v2)
 		this.sessionWriter = new SessionWriter(this.sessionId);
+		// A Table officer is a colleague in a chat channel, not the orchestrator of a
+		// coding session. Appending the orchestrator/personality blocks told every
+		// officer "You are the orchestrator, you can spawn specialists" and re-listed
+		// capabilities they do not have - drowning their own persona + honesty rules
+		// and producing rigid "PLAN: 1. 2. 3." replies with fake shell blocks. Table
+		// sessions therefore use their supplied prompt VERBATIM.
 		const systemPromptFull =
-			basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
+			this.config.agentScope === "__table__"
+				? basePrompt + languageInstruction
+				: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
 		// TurnRecord with it. Avoids re-hashing per turn for large prompts.
 		this.turnJournal = new TurnJournal(this.sessionId);
@@ -705,6 +714,10 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			const rawCall = buildTextToolCall({
 				provider,
 				model,
+				// Honour this session's pinned local endpoint (e.g. a Table officer on
+				// a specific port). Suffix-reconciled inside resolveTextToolEndpoint,
+				// so lmstudio (no /v1) and apfel (/v1) bases both land correctly.
+				baseUrl: this.config.baseUrl,
 				temperature: getRuntimeParams().temperature ?? 0.2,
 				signal,
 			});
@@ -785,7 +798,7 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			// fetch error up through the surface.
 			this.abortController = null;
 			const raw = err instanceof Error ? err.message : String(err);
-			const endpoint = resolveTextToolEndpoint(providerName);
+			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const isReachability =
 				/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|network|timed out|ETIMEDOUT|unable to connect|connection refused|failed to connect|able to access the url/i.test(
 					raw,
@@ -1004,11 +1017,20 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			this.abort();
 		}, SESSION_MAX_MS);
 
-		// Build provider config — main agent always uses its own model
+		// Build provider config — main agent always uses its own model.
+		// Thread this session's pinned baseUrl into the AI SDK native path so a
+		// per-session endpoint (e.g. an apfel Table officer on :11435/v1) is
+		// honoured instead of falling back to the provider DEFAULT_URLS (which
+		// only the APFEL_BASE_URL env lever could previously override).
+		// toOpenAiV1Base reconciles the base to the "/v1" root createModel wants,
+		// so apfel (base already ends /v1) is unchanged and a host-only lmstudio/
+		// ollama base gains its "/v1" instead of a truncated URL. Undefined
+		// baseUrl (all non-table sessions) leaves resolution exactly as before.
 		const providerConfig: ProviderConfig = {
 			name: this.config.runtime as ProviderName,
 			model: this.config.model,
 			apiKey: this.config.apiKey,
+			baseURL: this.config.baseUrl ? toOpenAiV1Base(this.config.baseUrl) : undefined,
 		};
 
 		// Build system instructions
@@ -1079,9 +1101,30 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"desktop_clipboard",
 		];
 		const localCoreTools = cuaConfigured ? [...CORE_TOOLS, ...DESKTOP_TOOLS] : CORE_TOOLS;
-		const effectiveTools = isLocalProvider
+		const providerTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
 			: allTools;
+
+		// F3 (positive scope, not a blocklist): a __table__ session only needs to
+		// COMPOSE a reply - the actual write goes through the gateway's gated
+		// post_to_channel path, not a model tool. So it gets an explicit read-only
+		// allowlist and never sees run_command / write / edit / git / term_* /
+		// desktop_* / network at all. ToolG8's __table__ block rules remain the
+		// enforcement backstop; this just stops the model from ever proposing them.
+		const TABLE_SESSION_TOOLS = new Set([
+			"read_file",
+			"list_files",
+			"get_outline",
+			"get_symbol",
+			"search_symbols",
+			"recall",
+		]);
+		const effectiveTools =
+			this.config.agentScope === "__table__"
+				? Object.fromEntries(
+						Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
+					)
+				: providerTools;
 
 		// ── Populate runtime params for self-awareness tools ──────────
 		const runtimeState = getRuntimeParams();
