@@ -43,6 +43,15 @@ import {
 	tableSessionId,
 	verifyMessage,
 } from "../table/index";
+import {
+	executeApproved,
+	isAllowedCwd,
+	parseApproval,
+	parseProposal,
+	stagePending,
+	stripProposal,
+	takePending,
+} from "../table/helm-bridge";
 import { appendExchange, loadMemory } from "../table/memory";
 import type { AgentPool } from "./agent-pool";
 
@@ -324,6 +333,56 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
  * ToolG8-gated post_to_channel tool. Best-effort; never throws to the caller.
  */
 /**
+ * Execute a proposal the human just approved, and post the EVIDENCE back into the
+ * channel. Posted as the proposing officer (so the thread reads as that colleague
+ * reporting back) through the same gated post path, which also ledgers it.
+ *
+ * Honesty carries through to the bridge itself: output is labelled `verified`
+ * (the daemon watched the worker settle) or `asserted` (timed out, raw tail).
+ */
+async function runApprovedProposal(
+	deps: TableRouteDeps,
+	channelId: string,
+	token: string,
+	approvedBy: string,
+): Promise<void> {
+	const { store, broadcast } = deps;
+	const pending = takePending(token);
+	const say = async (agentId: string, content: string) => {
+		const tool = makePostToChannelTool({ store, agentId, broadcast });
+		const res = await tool.execute({ channelId, content });
+		if (!res.ok) console.warn(`[table] bridge post denied: ${res.error}`);
+	};
+
+	if (!pending) {
+		// No officer to speak as - post as the first agent member, else stay silent.
+		const anyAgent = store.listMembers(channelId)
+			.find((m: { participantId: string }) => m.participantId.startsWith("agent:"))?.participantId;
+		if (anyAgent) await say(anyAgent, `That approval token is unknown or expired. Ask again and I'll re-propose.`);
+		return;
+	}
+	if (pending.channelId !== channelId) return; // token is channel-scoped
+
+	broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "thinking" });
+	await say(pending.agentId, `Approved by ${approvedBy}. Running in ${pending.cwd}:\n\`${pending.command}\``);
+	try {
+		const result = await executeApproved(pending);
+		if (!result.ok) {
+			await say(pending.agentId, `Could not run it: ${result.detail ?? "unknown error"}. Nothing was executed.`);
+		} else {
+			const header = result.label === "verified"
+				? "Ran it. Output (verified - I watched it finish):"
+				: "Ran it, but it did not settle in time, so this is the raw output so far (asserted, NOT a completion claim):";
+			await say(pending.agentId, `${header}\n\n\`\`\`\n${result.output || "(no output captured)"}\n\`\`\``);
+		}
+	} catch (err) {
+		await say(pending.agentId, `Execution errored: ${String(err).slice(0, 200)}. Nothing is claimed as done.`);
+	} finally {
+		broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "idle" });
+	}
+}
+
+/**
  * The system prompt for a Table officer. Deliberately REPLACES the default agent
  * prompt, which enumerates read_file / write_file / run_command / git_add - a
  * Table officer has none of those, and a model believes its system prompt over a
@@ -333,36 +392,30 @@ function tableSystemPrompt(officer?: { name: string; role: string; systemPrompt:
 	const persona = officer
 		? officer.systemPrompt
 		: "You are an officer at the 8gent Table.";
+	// Kept deliberately SHORT. An earlier 40-line version buried the HELM marker
+	// instruction and the officers stopped proposing work at all - signal dilution
+	// beats good intentions on a 9-12B local model.
 	return [
 		persona,
+		"You are a colleague in an 8gent Table chat channel.",
 		"",
-		"WHERE YOU ARE: a channel in 8gent Table, a chat workspace shared by humans and",
-		"officers. You are a colleague in a conversation, not a command runner.",
+		"You CAN read files (read_file, list_files, get_outline, search_symbols, recall).",
+		"If a question is answerable by looking, LOOK - do not speculate.",
+		"You CANNOT run commands, edit files, or reach the network.",
 		"",
-		"YOUR CAPABILITIES - the complete and literal truth. You CAN:",
-		"- READ and INVESTIGATE: read_file, list_files, get_outline, get_symbol,",
-		"  search_symbols, recall. Use them. If a question is answerable by looking at",
-		"  the code or files, LOOK - do not speculate and do not ask the human to paste",
-		"  what you could read yourself.",
+		"TO GET REAL WORK DONE, end your reply with ONE marker on its own line:",
+		"  [[HELM kind=shell cwd=~/8gent-code cmd=<the exact command>]]",
+		"The human approves it and a worker runs it, then the real output appears here.",
+		"Allowed cwd: ~/8gent-code, ~/8gent-glasses, ~/8gent-worktrees, ~/Foodstackai,",
+		"~/Documents, ~/Desktop, ~/Downloads, ~/Projects, ~/code, ~/src.",
+		"Propose ONE command, read-only unless the human asked for a change. Only add the",
+		"marker when execution is genuinely needed.",
 		"",
-		"You CANNOT, at all:",
-		"- Run any command or shell (no git, no tests, no builds, no scripts).",
-		"- Write, edit, move or delete any file. Change nothing.",
-		"- Reach the network, send mail, or control the desktop.",
+		"NEVER claim you ran something or that work is done - you cannot execute, and",
+		"fabricated completion is the one unforgivable error. Say what you found, give",
+		"the command, emit the marker.",
 		"",
-		"THE HONESTY LAW (non-negotiable):",
-		"- Never say you will run / are running / have run a command. You cannot.",
-		"- Never claim work is done, executed, completed, verified, or 'accomplished'.",
-		"  Fabricated completion is the one unforgivable error here.",
-		"- Report only what you ACTUALLY read with a tool. If you did not read it, say so.",
-		"- When asked to DO something that needs execution: investigate what you can with",
-		"  your read tools, give the exact command you would run and why, then state",
-		"  plainly that a human or a Helm worker has to run it. 'I read X and Y, here is",
-		"  exactly what I'd run, but I can't execute' is an excellent answer. Pretending",
-		"  to have run it is a failure.",
-		"",
-		"STYLE: speak like a sharp colleague - direct, specific, brief. No preamble, no",
-		"numbered PLAN scaffolding unless it genuinely helps. Answer the actual question.",
+		"STYLE: direct, specific, brief. No PLAN scaffolding. Answer the actual question.",
 	].join("\n");
 }
 
@@ -375,6 +428,15 @@ async function runMentionFlow(
 
 	// Only human posts trigger agents (avoid agent-to-agent mention loops).
 	if (!posted.authorId.startsWith("human:")) return;
+
+	// "/approve <token>" - the human authorising a staged Helm proposal. Handled
+	// here, before mention routing, so it executes instead of being chatted at.
+	// ONLY a human:* participant reaches this line, which is the authorisation.
+	const approvalToken = parseApproval(posted.content);
+	if (approvalToken) {
+		await runApprovedProposal(deps, channelId, approvalToken, posted.authorId);
+		return;
+	}
 
 	const handles = scanMentions(posted.content);
 	let agentIds: string[];
@@ -442,6 +504,14 @@ async function runMentionFlow(
 					? "Colleagues have already answered - do NOT repeat them. Add your own angle, or say briefly where you disagree."
 					: "",
 				"Compose ONE concise reply for the channel. Output only the reply text.",
+				// Repeated at TURN level on purpose: the system prompt alone loses this
+				// race against the tool-call loop, and the officer falls back to
+				// printing a ```bash block for the human to copy. The marker is what
+				// actually gets the work run, so it must be the freshest instruction.
+				"IF this needs a command executed, do NOT print a bash block for the human",
+				"to copy. Instead end your reply with exactly one line:",
+				"[[HELM kind=shell cwd=<allowed dir> cmd=<the command>]]",
+				"A worker runs it after the human approves, and the real output lands here.",
 				"",
 				memory ? `OFFICER_MEMORY = ${JSON.stringify(memory)}` : "",
 				roundSoFar.length ? `ROUND_SO_FAR = ${JSON.stringify(roundSoFar.join("\n\n"))}` : "",
@@ -452,10 +522,23 @@ async function runMentionFlow(
 
 			// Skip empty / harness-error sentinels; never echo them to the channel.
 			if (reply && !reply.startsWith("[error]") && !reply.startsWith("[budget")) {
+				// Did the officer propose real work? Stage it for human approval. The
+				// officer cannot execute and cannot approve - it only asks.
+				const proposal = parseProposal(reply);
+				let outgoing = reply;
+				if (proposal) {
+					outgoing = stripProposal(reply);
+					if (!isAllowedCwd(proposal.cwd)) {
+						outgoing += `\n\n(I wanted to propose running this in ${proposal.cwd}, but that path is outside the allowed working roots, so I can't.)`;
+					} else {
+						const staged = stagePending(proposal, channelId, agentId);
+						outgoing += `\n\nI can't run this myself. To have a Helm worker run it:\n\`${staged.command}\`\nin \`${staged.cwd}\` - reply **/approve ${staged.token}** and I'll run it and post the output.`;
+					}
+				}
 				// The gated write path: ToolG8.gate(__table__, channel_post, ...) ->
 				// membership re-check -> store.postMessage (ledger append) -> broadcast.
 				const tool = makePostToChannelTool({ store, agentId, broadcast });
-				const res = await tool.execute({ channelId, content: reply });
+				const res = await tool.execute({ channelId, content: outgoing });
 				if (!res.ok) {
 					console.warn(`[table] agent ${agentId} post denied: ${res.error}`);
 				} else {
