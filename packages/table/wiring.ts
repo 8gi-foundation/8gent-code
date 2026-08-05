@@ -28,6 +28,7 @@
 
 import { addPolicy, getPolicies } from "../permissions/policy-engine.js";
 import type { PolicyActionType, PolicyRule } from "../permissions/types.js";
+import { OFFICERS } from "./officers.js";
 import type { TableStore } from "./store.js";
 
 /** Restricted agent scope Table agents bind under (mirrors "__spawned__"). */
@@ -141,10 +142,20 @@ export function resolveMentionedAgents(
 			agentIndex.set(m.participantId, m.role);
 		}
 	}
+	// Handle aliasing: "@8TO", "@8to", "@rishi", "@Rishi" all resolve to
+	// agent:8TO. Codes and officer first names, case-insensitive - people
+	// naturally type the name, not the code.
+	const alias = new Map<string, string>(); // lowercase handle -> canonical code
+	for (const [code, meta] of Object.entries(OFFICERS)) {
+		alias.set(code.toLowerCase(), code);
+		const first = (meta as { name?: string }).name?.split(/\s+/)[0];
+		if (first) alias.set(first.toLowerCase(), code);
+	}
 	const out: string[] = [];
 	const seen = new Set<string>();
 	for (const handle of handles) {
-		const pid = `agent:${handle}`;
+		const canonical = alias.get(handle.toLowerCase()) ?? handle;
+		const pid = `agent:${canonical}`;
 		if (agentIndex.has(pid) && !seen.has(pid)) {
 			seen.add(pid);
 			out.push(pid);
