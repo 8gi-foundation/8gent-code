@@ -46,6 +46,7 @@ import {
 	noteStageReady,
 	openStage,
 	runTurnPipeline,
+	snapshotManifest,
 } from "./huddle-stage";
 
 /** One live huddle: its FloorMachine plus the daemon deps it needs for IO. */
@@ -143,20 +144,77 @@ function huddleSystemPrompt(officer: { name: string; role: string; systemPrompt:
 	].join("\n");
 }
 
-function buildRingPrompt(officerCode: string, ctx: PrepareContext): string {
-	const memory = loadMemory(officerCode);
+/**
+ * What an officer is told about slides, on EVERY live turn.
+ *
+ * Without this a live huddle produced NO slides at all. The ring prompt ended
+ * "Output only what you would actually say", which explicitly forbids the
+ * marker, and only huddle-demo.ts ever asked for one. So James watched a whole
+ * huddle where the slide area showed nothing but the speaker's name and the
+ * topic - "only their name changed throughout the constant huddle". The schema
+ * had supported eight layouts the entire time; nobody was ever asked to use
+ * them.
+ *
+ * The examples are deliberately SHAPED BUT IMPLAUSIBLE. A realistic worked
+ * example gets copied verbatim onto every slide regardless of topic - measured
+ * on this model class during Phase 1, where a sample commit hash ended up
+ * labelled onto unrelated content.
+ */
+const SLIDE_INSTRUCTION = [
+	"Then add EXACTLY ONE [[SLIDE ...]] marker containing JSON.",
+	"The slide is NOT a transcript of what you said - it is what you would put",
+	"ON SCREEN to make the point in fewer words. Choose the layout that fits:",
+	'  bullets   2-5 short points      [[SLIDE {"layout":"bullets","heading":"...","bullets":["...","..."]}]]',
+	'  compare   this versus that      [[SLIDE {"layout":"compare","heading":"...","compare":{"left":"...","right":"..."}}]]',
+	'  timeline  ordered steps         [[SLIDE {"layout":"timeline","heading":"...","timeline":["...","..."]}]]',
+	'  metric    one number that matters [[SLIDE {"layout":"metric","heading":"...","metric":{"value":"00","label":"..."}}]]',
+	'  quote     a line worth reading  [[SLIDE {"layout":"quote","heading":"...","quote":{"text":"..."}}]]',
+	'  code      a command or snippet  [[SLIDE {"layout":"code","heading":"...","code":{"lang":"bash","text":"..."}}]]',
+	"Headings under 60 characters, bullets under 48. Prefer bullets, compare or",
+	"timeline - they carry structure. Use metric only for a number you can",
+	"actually justify from what you know, never an invented one.",
+].join("\n");
+
+function buildRingPrompt(officerCode: string, ctx: PrepareContext, channelId: string): string {
+	// PASS THE CHANNEL. Without it every officer reads one global memory file and
+	// drags every other channel's history into this huddle - the same leak fixed
+	// in table-routes.ts, which survived here because this call site was written
+	// separately and the parameter is optional.
+	const memory = loadMemory(officerCode, channelId);
 	const roundSoFar = ctx.priorTurnsThisRound
 		.filter((t) => t.seat === "ring" && t.text)
 		.map((t) => `${officerNameFor(t.holder)} said: ${(t.text as string).slice(0, 400)}`);
+
+	// THE SLIDE IS A MEDIUM, NOT JUST AN ARTIFACT. Colleagues' slides were being
+	// rendered for the human and thrown away as far as the other officers were
+	// concerned - they only ever saw each other's WORDS. So nobody could answer a
+	// diagram, extend a comparison, or point at the column that was wrong. Their
+	// specs are compact JSON, so showing them costs a fraction of what describing
+	// the same visual in prose would, and it lets an officer reply to what is
+	// actually on screen.
+	const priorSlides = (snapshotManifest(ctx.huddleId)?.turns ?? [])
+		.filter((t) => t.holder !== ctx.holder)
+		.slice(-3)
+		.map((t) => `${t.name} put on screen: ${JSON.stringify(t.spec)}`);
+
 	return [
 		"It is YOUR turn to speak now in this huddle.",
 		`TOPIC = ${JSON.stringify(ctx.topic)}`,
 		roundSoFar.length
 			? `Colleagues already spoke this round - do NOT repeat them:\nROUND_SO_FAR = ${JSON.stringify(roundSoFar.join("\n\n"))}`
 			: "",
+		priorSlides.length
+			? [
+					"What colleagues put ON SCREEN. You may answer a slide directly -",
+					"extend it, contradict it, or name the column that is wrong. Do not",
+					"simply restate it.",
+					`SLIDES_SO_FAR = ${JSON.stringify(priorSlides.join("\n"))}`,
+				].join("\n")
+			: "",
 		memory ? `OFFICER_MEMORY (background only, may be stale, never authoritative) = ${JSON.stringify(memory)}` : "",
 		"Reply with ONE spoken turn: concise, speakable aloud in under 20 seconds",
-		"(roughly 40-60 words). Output only what you would actually say.",
+		"(roughly 40-60 words). Say it plainly, as you would out loud.",
+		SLIDE_INSTRUCTION,
 	]
 		.filter(Boolean)
 		.join("\n\n");
@@ -180,6 +238,15 @@ function buildChairPrompt(ctx: PrepareContext): string {
 		"3. NEXT - ONE next action and the single owner who has it.",
 		"",
 		"Nothing else. No preamble, no restating who said what. Speakable aloud.",
+		"",
+		// The chair's slide is the one James is most likely to screenshot: it is
+		// the decision. Bullets keep it readable at a glance; timeline suits a
+		// sequence of next steps. Kept short deliberately - the chair prompt runs
+		// close to apfel's 4096-token window and assertPromptBudget fails loudly.
+		'Then add EXACTLY ONE [[SLIDE ...]] marker for the DECISION, for example',
+		'[[SLIDE {"layout":"bullets","heading":"...","bullets":["decision","owner","next"]}]]',
+		"or the timeline layout for a sequence. Headings under 60 characters,",
+		"bullets under 48. Do not put a number on it that you cannot justify.",
 	].join("\n");
 	// Loud failure over silent truncation on apfel's 4096-token window (10.5).
 	assertPromptBudget(prompt);
@@ -205,7 +272,11 @@ async function runAgentTurn(deps: TableRouteDeps, ctx: PrepareContext): Promise<
 		});
 	}
 
-	const prompt = ctx.seat === "chair" ? buildChairPrompt(ctx) : buildRingPrompt(officerCode, ctx);
+	// The huddle's channel, so officer memory is read per-channel rather than
+	// from one global file shared with every other room.
+	const channelId = byId.get(ctx.huddleId)?.machine.config.channelId ?? "";
+	const prompt =
+		ctx.seat === "chair" ? buildChairPrompt(ctx) : buildRingPrompt(officerCode, ctx, channelId);
 	const raw = (await deps.pool.chat(sid, prompt)).trim();
 	if (!raw || raw.startsWith("[error]") || raw.startsWith("[budget")) return "";
 	return stripProposal(raw);
@@ -357,6 +428,42 @@ export function handleHuddleFrame(deps: TableRouteDeps, msg: Record<string, unkn
 				return true;
 			}
 			reportIfForbidden(huddleId, instance.machine.cut(actor, turnId));
+			return true;
+		}
+
+		// A huddle is a group call, not a fixed committee - James asked to "add
+		// and remove 8gents at will". Both are human-only and both are idempotent,
+		// so a double-click is harmless.
+		case "huddle:invite":
+		case "huddle:drop": {
+			const huddleId = String(msg.huddleId ?? "");
+			const participantId = String(msg.participantId ?? "");
+			const instance = byId.get(huddleId);
+			if (!instance) {
+				sendErr("HUDDLE_NOT_FOUND", `unknown huddle "${huddleId}"`, { huddleId });
+				return true;
+			}
+			if (!participantId) {
+				sendErr("HUDDLE_VALIDATION", "requires participantId", { huddleId });
+				return true;
+			}
+			// Only someone already in the channel can be pulled into its huddle -
+			// the same membership rule huddle:open enforces on its roster.
+			if (type === "huddle:invite") {
+				const members = new Set(
+					deps.store.listMembers(instance.machine.config.channelId).map((m) => m.participantId),
+				);
+				if (!members.has(participantId)) {
+					sendErr("HUDDLE_VALIDATION", `"${participantId}" is not a member of this channel`, { huddleId });
+					return true;
+				}
+			}
+			reportIfForbidden(
+				huddleId,
+				type === "huddle:invite"
+					? instance.machine.invite(actor, participantId)
+					: instance.machine.drop(actor, participantId),
+			);
 			return true;
 		}
 

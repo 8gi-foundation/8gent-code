@@ -180,6 +180,14 @@ export type HuddleOutFrame =
 			resolved: ChairResolved;
 			reason: ChairResolutionReason;
 	  }
+	// A huddle is a group call: people come and go while it is running.
+	| {
+			type: "huddle:roster";
+			huddleId: string;
+			change: "joined" | "left";
+			participantId: string;
+			ring: string[];
+	  }
 	| { type: "huddle:closed"; huddleId: string; turns: TurnRecord[] }
 	| { type: "huddle:error"; huddleId?: string; turnId?: string; code: string; message: string };
 
@@ -405,6 +413,74 @@ export class FloorMachine {
 		if (this.raiseQueue.includes(actor)) return "ok"; // dedupe
 		if (this.raiseQueue.length >= RAISE_QUEUE_MAX) return "ok"; // 9th coalesces
 		this.raiseQueue.push(actor);
+		return "ok";
+	}
+
+	/**
+	 * Bring someone into a huddle that is already running. Human only.
+	 *
+	 * A huddle is a group call, not a fixed committee: James asked to "add and
+	 * remove 8gents at will". The ring was derived once in the constructor and
+	 * never revisited, so the roster you opened with was the roster you were
+	 * stuck with.
+	 *
+	 * They join at the END of the ring, so they speak this round if it has not
+	 * reached them yet, and next round otherwise. Never inserted ahead of the
+	 * current position - that would replay a seat somebody already had.
+	 */
+	invite(actor: string, participantId: string): ActionResult {
+		if (!this.isHuman(actor)) {
+			this.forbid(actor, "huddle:invite is human-only; officers do not pick the room");
+			return "forbidden";
+		}
+		this.noteHumanFrame(actor);
+		if (this.phase === "closed" || this.phase === "closing") return "dropped";
+		if (!participantId || participantId === this.lastHumanActor) return "dropped";
+		if (this.ring.includes(participantId)) return "ok"; // already here, idempotent
+		this.ring.push(participantId);
+		this.config.roster.push(participantId);
+		this.emit({
+			type: "huddle:roster",
+			huddleId: this.config.huddleId,
+			change: "joined",
+			participantId,
+			ring: [...this.ring],
+		});
+		return "ok";
+	}
+
+	/**
+	 * Drop someone from a running huddle. Human only.
+	 *
+	 * If they hold the floor right now, their turn is released first - otherwise
+	 * the room would sit waiting on somebody who is no longer in it. Removing an
+	 * EARLIER ring member also pulls ringPos back by one, so the next grant does
+	 * not skip whoever was standing behind them.
+	 */
+	drop(actor: string, participantId: string): ActionResult {
+		if (!this.isHuman(actor)) {
+			this.forbid(actor, "huddle:drop is human-only; officers do not pick the room");
+			return "forbidden";
+		}
+		this.noteHumanFrame(actor);
+		if (this.phase === "closed" || this.phase === "closing") return "dropped";
+		const at = this.ring.indexOf(participantId);
+		if (at < 0) return "dropped"; // not in the ring, idempotent
+		this.ring.splice(at, 1);
+		this.config.roster = this.config.roster.filter((p) => p !== participantId);
+		if (at < this.ringPos) this.ringPos -= 1;
+		for (let i = this.raiseQueue.length - 1; i >= 0; i--) {
+			if (this.raiseQueue[i] === participantId) this.raiseQueue.splice(i, 1);
+		}
+		this.emit({
+			type: "huddle:roster",
+			huddleId: this.config.huddleId,
+			change: "left",
+			participantId,
+			ring: [...this.ring],
+		});
+		// Holding the floor on the way out: release it so the room moves on.
+		if (this.current?.holder === participantId) this.releaseCurrent("skipped");
 		return "ok";
 	}
 
