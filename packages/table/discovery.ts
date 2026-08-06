@@ -142,15 +142,29 @@ export interface HarnessInfo {
 	note?: string;
 }
 
-/** Agent CLIs an officer can execute through. `shell` is always available. */
-const HARNESS_CANDIDATES: Array<{ kind: string; binary: string }> = [
+/** Agent CLIs an officer can execute through. `shell` is always available.
+ *
+ *  `installed` below is EXISTENCE ONLY - it resolves the binary on the worker
+ *  PATH and says nothing about whether that binary can authenticate. A harness
+ *  whose credentials are missing or dead still reports installed:true. Where
+ *  that gap has actually cost us a working desk, the candidate carries a `note`
+ *  so the discovery output stops implying a usable seat. */
+const HARNESS_CANDIDATES: Array<{ kind: string; binary: string; note?: string }> = [
 	{ kind: "shell", binary: "bash" },
 	{ kind: "claude", binary: "claude" },
 	{ kind: "codex", binary: "codex" },
 	{ kind: "8gent-local", binary: "8gent" },
 	{ kind: "pi", binary: "pi" },
 	{ kind: "opencode", binary: "opencode" },
-	{ kind: "cursor-agent", binary: "cursor-agent" },
+	{
+		kind: "cursor-agent",
+		binary: "cursor-agent",
+		// Installed but unauthenticated on the reference machine, and its own
+		// `status` subcommand falsely reports "Login successful" - see the
+		// HarnessKind note in officers.ts. Needs CURSOR_API_KEY or a completed
+		// interactive login before any officer is bound to it again.
+		note: "installed; needs CURSOR_API_KEY or interactive login before use",
+	},
 	{ kind: "goose", binary: "goose" },
 	{ kind: "aider", binary: "aider" },
 ];
