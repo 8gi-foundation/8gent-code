@@ -228,6 +228,14 @@ export async function runTurnPipeline(
 			audioUrl: narration.audioPath ? `/huddle/${huddleId}/audio/turn-${turnId}.wav` : null,
 			durationMs: narration.durationMs,
 			skipped: narration.skipped ?? null,
+			// The WORDS, so the stage can show the story as it is being told.
+			// James asked for exactly this: "it'd be nice if they were telling the
+			// story as they're speaking, you know, with visuals". The slide is the
+			// argument; this is the narration beneath it. Without it, a viewer with
+			// the sound off, or watching a slow TTS, sees a static card and nothing
+			// else. Carries nothing private: the same text is already in the
+			// manifest and in the channel post.
+			text: speech,
 		});
 
 		state.turns.push({

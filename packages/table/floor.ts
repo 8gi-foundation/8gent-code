@@ -515,14 +515,31 @@ export class FloorMachine {
 	}
 
 	/** Human only. The current turn (if any) finishes naturally, then CLOSING. */
+	/**
+	 * Stop. Human only.
+	 *
+	 * This USED to set closeRequested and then let the current turn play out,
+	 * which meant pressing a red stop button and watching an officer keep talking
+	 * for up to twenty seconds. James: "when i hit the red button close, it
+	 * doesn't actually stop them." He was right - a stop control that visibly
+	 * does nothing for twenty seconds is broken, whatever the state machine
+	 * thinks. The graceful path was defensible for an automatic close; it was
+	 * never right for a human pressing stop.
+	 *
+	 * So the current turn is released immediately, exactly as `cut` does, and the
+	 * huddle closes on the next grant. Nothing is lost: the turn's text is
+	 * already in its TurnRecord and the bake still runs.
+	 */
 	close(actor: string): ActionResult {
 		if (!this.isHuman(actor)) {
 			this.forbid(actor, "huddle:close is human-only");
 			return "forbidden";
 		}
 		this.noteHumanFrame(actor);
+		if (this.phase === "closed" || this.phase === "closing") return "dropped";
 		this.closeRequested = true;
-		if (!this.current) this.finishClosing();
+		if (this.current) this.releaseCurrent("cut");
+		else this.finishClosing();
 		return "ok";
 	}
 
