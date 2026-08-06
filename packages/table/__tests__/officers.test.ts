@@ -8,9 +8,18 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { OFFICERS, listOfficers, resolveOfficer } from "../officers";
+import { OFFICERS, type HarnessKind, listOfficers, resolveOfficer } from "../officers";
 
 const LOCAL_PROVIDERS = new Set(["apfel", "ollama", "lmstudio"]);
+const VALID_HARNESS_KINDS: ReadonlySet<HarnessKind> = new Set<HarnessKind>([
+	"claude",
+	"codex",
+	"8gent-local",
+	"shell",
+	"pi",
+	"cursor-agent",
+	"opencode",
+]);
 
 describe("table officer roster", () => {
 	it("has all eight officer codes", () => {
@@ -37,28 +46,64 @@ describe("table officer roster", () => {
 		}
 	});
 
-	it("distributes two officers to each of the four live backends", () => {
-		// Backend identity = provider + model (lmstudio hosts two models).
+	it("spreads officers across every configured backend, none stranded", () => {
+		// This asserted a tidy 2/2/2/2 spread, which was the ORIGINAL design intent.
+		// Measurement superseded it: night-factory runs showed apfel and llama3.2
+		// producing materially weaker answers for the product and community seats,
+		// so 8PO and 8CO were deliberately moved onto gemma. Quality beat symmetry.
+		// The assertion is updated to match reality rather than degrading officers
+		// to satisfy a stale number.
+		//
+		// What still matters, and is asserted: every provider in the roster carries
+		// at least one officer (nothing stranded on a backend nobody uses), and no
+		// single backend holds ALL of them (which would remove every scrap of
+		// cross-backend parallelism).
+		//
+		// Recorded so it is not rediscovered: concurrency lanes are NOT the officer
+		// count, and not even the endpoint count - lmstudio and ollama both run
+		// Metal on the same GPU and contend, so only apfel is a truly independent
+		// substrate. See docs/8GENT-HUDDLE-SPEC.md.
 		const counts = new Map<string, number>();
 		for (const officer of listOfficers()) {
 			const key = `${officer.provider}:${officer.model}`;
 			counts.set(key, (counts.get(key) ?? 0) + 1);
 		}
-		expect([...counts.values()].sort()).toEqual([2, 2, 2, 2]);
-		expect(counts.get("apfel:apple-foundationmodel")).toBe(2);
-		expect(counts.get("ollama:llama3.2:3b")).toBe(2);
-		expect(counts.get("lmstudio:ornith-1.0-9b")).toBe(2);
-		expect(counts.get("lmstudio:gemma-4-12b-coder-fable5-composer2.5-v1")).toBe(2);
+		const total = listOfficers().length;
+		expect(counts.size).toBeGreaterThanOrEqual(3);
+		for (const [, n] of counts) expect(n).toBeGreaterThanOrEqual(1);
+		expect(Math.max(...counts.values())).toBeLessThan(total);
+		expect(new Set([...counts.keys()].map((k) => k.split(":")[0]))).toEqual(
+			new Set(["apfel", "ollama", "lmstudio"]),
+		);
+	});
+
+	it("gives every officer a non-empty, real EXECUTION harness kind (distinct from chat provider)", () => {
+		for (const officer of listOfficers()) {
+			expect(officer.harness).toBeDefined();
+			expect(officer.harness.kind.length).toBeGreaterThan(0);
+			expect(VALID_HARNESS_KINDS.has(officer.harness.kind)).toBe(true);
+			// "goose" is deliberately excluded (broken CLI on the reference machine).
+			expect(officer.harness.kind).not.toBe("goose");
+		}
 	});
 
 	it("uses the correct baseUrl convention per provider", () => {
+		// The conventions differ per client and getting one wrong yields a
+		// "undefined/chat/completions" style failure that is painful to trace, so
+		// this invariant is worth guarding. Look officers up BY PROVIDER rather
+		// than by hardcoded code: this test used to name 8CO as its ollama example
+		// and broke the day 8CO was legitimately moved to lmstudio, failing for a
+		// roster change that was never the thing under test.
+		const byProvider = (p: string) => listOfficers().find((o) => o.provider === p);
+
 		// apfel base carries /v1 (client appends /chat/completions).
-		expect(OFFICERS["8EO"].baseUrl).toBe("http://127.0.0.1:11435/v1");
+		expect(byProvider("apfel")?.baseUrl).toBe("http://127.0.0.1:11435/v1");
 		// lmstudio base has NO /v1 (client appends /v1/chat/completions).
-		expect(OFFICERS["8TO"].baseUrl).toBe("http://127.0.0.1:1234");
-		expect(OFFICERS["8TO"].baseUrl).not.toContain("/v1");
+		const lmstudio = byProvider("lmstudio");
+		expect(lmstudio?.baseUrl).toBe("http://127.0.0.1:1234");
+		expect(lmstudio?.baseUrl).not.toContain("/v1");
 		// ollama base is host only (client appends /api/chat).
-		expect(OFFICERS["8CO"].baseUrl).toBe("http://127.0.0.1:11434");
+		expect(byProvider("ollama")?.baseUrl).toBe("http://127.0.0.1:11434");
 	});
 });
 
