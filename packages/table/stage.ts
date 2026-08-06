@@ -33,6 +33,27 @@ export interface StagePageOptions {
 	/** WebSocket URL of the daemon, e.g. "ws://127.0.0.1:18789". */
 	wsUrl: string;
 	topic: string;
+	/**
+	 * The huddle's channel, when this page is talking to the real daemon.
+	 *
+	 * The daemon fans `huddle:slide` / `huddle:speak` out with
+	 * broadcastToChannel(), which reaches only connections listed in
+	 * `subscribedChannels` - and ONLY `message:subscribe` ever puts a connection
+	 * there. `huddle:subscribe` returns a snapshot and nothing more, so a page
+	 * that sent just that frame sat on "waiting for the first turn" for the whole
+	 * huddle. Measured against the live daemon before this changed: a
+	 * huddle:subscribe-only client received `huddle:state` and not one slide
+	 * across three turns and 76 seconds.
+	 *
+	 * Asking through `message:subscribe` deliberately reuses the read
+	 * authorization the store already enforces (it throws for a private channel
+	 * the actor is not a member of), so this widens no trust surface - it goes
+	 * through the front door that already has the guard on it.
+	 *
+	 * Optional because the replay harness (stage-replay.ts) pushes frames straight
+	 * down its own socket and has no channels at all.
+	 */
+	channelId?: string;
 }
 
 /**
@@ -41,7 +62,12 @@ export interface StagePageOptions {
  * that leaves the box.
  */
 export function stagePage(opts: StagePageOptions): string {
-	const cfg = JSON.stringify({ huddleId: opts.huddleId, wsUrl: opts.wsUrl, settleMs: STAGE_SETTLE_MS });
+	const cfg = JSON.stringify({
+		huddleId: opts.huddleId,
+		wsUrl: opts.wsUrl,
+		settleMs: STAGE_SETTLE_MS,
+		channelId: opts.channelId ?? "",
+	});
 	const topic = opts.topic.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 	return `<!doctype html>
@@ -55,10 +81,21 @@ export function stagePage(opts: StagePageOptions): string {
     font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
     color:#FAF7F4}
   #stage{position:relative;width:100%;height:100%}
-  .frame{position:absolute;inset:0;border:0;width:100%;height:100%;
+  /* A slide is authored at a FIXED 1920x1080 with overflow:hidden (see
+     slide-render.ts), because the bake screenshots it at exactly that size. A
+     stage viewed at any OTHER size therefore showed the top-left crop of a huge
+     canvas - which, since a slide's own padding is 112px/128px, is a rectangle of
+     empty background. It only ever looked right at full HD.
+     So the slot owns the enter/park animation and the frame owns the FIT: the
+     iframe keeps its authored 1920x1080 geometry and is scaled to letterbox into
+     whatever viewport it has. Two elements because both effects are transforms,
+     and one property cannot hold both. */
+  .slot{position:absolute;inset:0;overflow:hidden;
     transition:transform .42s cubic-bezier(.2,.7,.2,1),opacity .42s ease;
     transform:translateX(0);opacity:1}
-  .frame.parked{transform:translateX(-8%) scale(.97);opacity:0}
+  .slot.parked{transform:translateX(-8%) scale(.97);opacity:0}
+  .frame{position:absolute;top:0;left:0;border:0;width:1920px;height:1080px;
+    transform-origin:top left}
   #hud{position:absolute;left:0;right:0;bottom:0;height:76px;display:flex;align-items:center;
     gap:20px;padding:0 32px;background:linear-gradient(0deg,rgba(10,9,8,.94),rgba(10,9,8,0));
     font-size:17px;letter-spacing:.02em;pointer-events:none}
@@ -102,27 +139,56 @@ export function stagePage(opts: StagePageOptions): string {
   // Mount a slide, park the previous one, then ACK. The two rAFs plus the
   // settle are the gate: we only tell the daemon we are ready once the browser
   // has actually composited the new frame.
+  // Letterbox one 1920x1080 slide into the current viewport. Pure geometry, and
+  // it runs again on resize so the stage is correct in a 600pt app pane, a
+  // full-screen browser, and a phone alike.
+  var SLIDE_W = 1920, SLIDE_H = 1080;
+  function fit(frame){
+    var vw = stage.clientWidth, vh = stage.clientHeight;
+    if (!vw || !vh) return;
+    var s = Math.min(vw / SLIDE_W, vh / SLIDE_H);
+    var x = (vw - SLIDE_W * s) / 2, y = (vh - SLIDE_H * s) / 2;
+    frame.style.transform = "translate(" + x + "px," + y + "px) scale(" + s + ")";
+  }
+  function fitAll(){
+    var frames = stage.querySelectorAll(".frame");
+    for (var i = 0; i < frames.length; i++) fit(frames[i]);
+  }
+  window.addEventListener("resize", fitAll);
+
   function showSlide(turnId, html, name){
+    var slot = document.createElement("div");
+    slot.className = "slot";
     var frame = document.createElement("iframe");
     frame.className = "frame";
     frame.setAttribute("sandbox", "");         // no scripts, no same-origin
     frame.setAttribute("aria-label", "slide by " + (name || "officer"));
     frame.srcdoc = html;
-    stage.insertBefore(frame, hudNode());
+    slot.appendChild(frame);
+    stage.insertBefore(slot, hudNode());
+    fit(frame);
     idle.classList.add("hidden");
 
     var prev = live;
-    live = frame;
+    live = slot;
     requestAnimationFrame(function(){
       requestAnimationFrame(function(){
         if (prev){
           prev.classList.add("parked");
           prev.setAttribute("aria-hidden","true");
-          // Parked frames stay in the DOM briefly so the transition can run,
+          // Parked slots stay in the DOM briefly so the transition can run,
           // then leave - an hour-long huddle must not accumulate 200 iframes.
           setTimeout(function(){ prev.remove(); }, 600);
         }
-        setTimeout(function(){ send({ type:"huddle:stage_ready", huddleId: CFG.huddleId, turnId: turnId }); }, CFG.settleMs);
+        // Fit again now that layout has actually settled. A host that sizes its web
+        // view AFTER the first paint (an app pane laying out its window, a phone
+        // rotating) would otherwise leave the first slide scaled to a viewport that
+        // no longer exists.
+        fitAll();
+        setTimeout(function(){
+          fitAll();
+          send({ type:"huddle:stage_ready", huddleId: CFG.huddleId, turnId: turnId });
+        }, CFG.settleMs);
       });
     });
   }
@@ -132,14 +198,29 @@ export function stagePage(opts: StagePageOptions): string {
   function speak(turnId, url){
     if (!url){ return; }             // quiet hours or no TTS: slide only
     audio.src = url;
-    audio.onended = function(){ send({ type:"huddle:yield", huddleId: CFG.huddleId, turnId: turnId }); };
+    // NOTE: the stage does NOT yield when the audio ends, and must not.
+    // huddle:yield is human-only and only valid for the holder of the turn; a
+    // viewer watching an OFFICER speak holds nothing. Sending it anyway made the
+    // FloorMachine broadcast HUDDLE_FORBIDDEN to the whole channel after every
+    // single turn - which surfaced to James as a red
+    // "human:local: cannot yield a turn you do not hold" for something he had not
+    // done. The daemon's own speak timer already releases an agent turn, so there
+    // was never anything for the stage to release.
     var p = audio.play();
     if (p && p.catch) p.catch(function(){ /* autoplay refused: the daemon's timer still releases */ });
   }
 
   function connect(){
     ws = new WebSocket(CFG.wsUrl);
-    ws.onopen = function(){ send({ type:"huddle:subscribe", huddleId: CFG.huddleId }); };
+    ws.onopen = function(){
+      // The snapshot (who holds the floor right now, on a reconnect mid-huddle).
+      send({ type:"huddle:subscribe", huddleId: CFG.huddleId });
+      // The live frames. huddle:slide/huddle:speak are fanned out per CHANNEL, and
+      // message:subscribe is the only frame that enrols this connection - without
+      // it the stage receives the snapshot and then silence. seed:0 because a
+      // stage renders slides, never the channel's message backlog.
+      if (CFG.channelId) send({ type:"message:subscribe", channelId: CFG.channelId, seed: 0 });
+    };
     ws.onmessage = function(ev){
       var m; try { m = JSON.parse(ev.data); } catch(e){ return; }
       if (!m || m.huddleId !== CFG.huddleId) return;
