@@ -313,6 +313,11 @@ export class FloorMachine {
 	private openedAt = 0;
 	private closeRequested = false;
 	private lastHumanFrameAt = 0;
+	/** The human who most recently acted. The chair turn goes to THIS id, not to
+	 *  a hardcoded name, so whoever is actually at the table gets the last word.
+	 *  Defaults to the canonical id so behaviour is unchanged when that is who
+	 *  is connected. */
+	private lastHumanActor: string = CHAIR_HUMAN_ID;
 
 	private current: CurrentTurn | null = null;
 	private readonly turns: TurnRecord[] = [];
@@ -330,7 +335,25 @@ export class FloorMachine {
 			throw new Error(`chair must be "${CHAIR_HUMAN_ID}" or "${CHAIR_AGENT_ID}", got "${config.chair}"`);
 		}
 		this.config = config;
-		this.ring = deriveRing(config.roster, config.chair);
+		// The declared chair is a SEAT ("the human seat" / "the agent seat"), and
+		// CHAIR_HUMAN_ID is its canonical name. The human actually sitting in it
+		// may have a different id: the Table pins its human as "human:local"
+		// unless EIGHT_DAEMON_TOKEN is set, and it is not set on the reference
+		// machine. Resolve the seat to the real occupant at open.
+		//
+		// Two things went wrong without this, both measured live 2026-08-06:
+		// deriveRing removed the literal "human:james", so a roster containing
+		// "human:local" left the human IN THE RING - speaking FIRST, the exact
+		// opposite of the chair-last design - and the chair turn was then granted
+		// to an id no connected client answers to, so it sat unclaimed until the
+		// deadline. The seat that exists to give the human the last word was
+		// unreachable by the human.
+		this.lastHumanActor =
+			config.chair === CHAIR_HUMAN_ID && config.openedBy.startsWith("human:")
+				? config.openedBy
+				: CHAIR_HUMAN_ID;
+		const seatOccupant = config.chair === CHAIR_HUMAN_ID ? this.lastHumanActor : config.chair;
+		this.ring = deriveRing(config.roster, seatOccupant);
 		this.callbacks = callbacks;
 	}
 
@@ -441,7 +464,17 @@ export class FloorMachine {
 	}
 
 	private noteHumanFrame(actor: string): void {
-		if (this.isHuman(actor)) this.lastHumanFrameAt = Date.now();
+		if (!this.isHuman(actor)) return;
+		this.lastHumanFrameAt = Date.now();
+		// Remember WHO, not just WHEN. The chair turn used to be granted to the
+		// literal CHAIR_HUMAN_ID, but the Table pins its human as "human:local"
+		// unless EIGHT_DAEMON_TOKEN is set - and it is not set on the reference
+		// machine. So the chair seat, which exists precisely to give James the
+		// last word, was granted to an id no connected client answers to: the
+		// officers would speak, then his turn would sit unclaimed until the
+		// deadline. Presence detection was already prefix-based and correct; only
+		// the identity handed the turn was hardcoded.
+		this.lastHumanActor = actor;
 	}
 
 	private isHuman(id: string): boolean {
@@ -480,13 +513,13 @@ export class FloorMachine {
 	private resolveChair(): ChairResolution {
 		const mode = this.config.chairMode;
 		if (mode === "agent") return { chair: CHAIR_AGENT_ID, resolved: "agent", reason: "explicit" };
-		if (mode === "human") return { chair: CHAIR_HUMAN_ID, resolved: "human", reason: "explicit" };
+		if (mode === "human") return { chair: this.lastHumanActor, resolved: "human", reason: "explicit" };
 		// auto: present iff a human:* frame landed within CHAIR_PRESENCE_TIMEOUT_MS
 		// of THIS grant. huddle:stage_ready never counts (there is no stage in
 		// Phase 0 anyway) - only a real human action updates lastHumanFrameAt.
 		const present = Date.now() - this.lastHumanFrameAt <= CHAIR_PRESENCE_TIMEOUT_MS;
 		return present
-			? { chair: CHAIR_HUMAN_ID, resolved: "human", reason: "presence" }
+			? { chair: this.lastHumanActor, resolved: "human", reason: "presence" }
 			: { chair: CHAIR_AGENT_ID, resolved: "agent", reason: "absence" };
 	}
 
