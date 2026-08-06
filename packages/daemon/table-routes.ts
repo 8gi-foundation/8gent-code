@@ -44,6 +44,7 @@ import {
 	verifyMessage,
 } from "../table/index";
 import {
+	bindOfficerHarness,
 	executeApproved,
 	isAllowedCwd,
 	parseApproval,
@@ -52,7 +53,10 @@ import {
 	stripProposal,
 	takePending,
 } from "../table/helm-bridge";
+import { discoverAll, formatDiscovery } from "../table/discovery";
+import { resolveHarness } from "../table/harness-config";
 import { appendExchange, loadMemory } from "../table/memory";
+import { resolveOfficer, setOfficerField } from "../table/officer-config";
 import type { AgentPool } from "./agent-pool";
 
 /** Broadcast a frame to every connection subscribed to a channel. */
@@ -333,6 +337,90 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
  * ToolG8-gated post_to_channel tool. Best-effort; never throws to the caller.
  */
 /**
+ * Officer configuration from chat. Everything about an officer - which brain
+ * answers as them, which model, their persona, name, temperature - is settable
+ * here, and the machine tells you what it can actually reach rather than making
+ * you remember ports and model names.
+ *
+ *   /providers                      what inference + harnesses exist right now
+ *   /officers                       every officer and how they are configured
+ *   /officer 8TO model gemma        fuzzy - finds the real model and its server
+ *   /officer 8TO persona <text>     rewrite who they are
+ *   /officer 8TO name Rish          rename them
+ *   /officer 8TO temperature 0.2
+ *   /officer 8TO reset              back to built-in defaults
+ *
+ * The daemon answers directly - no model call, so it is instant and cannot be
+ * hallucinated. Posted as the channel's first officer purely so the reply has a
+ * speaker; it is the daemon talking.
+ */
+async function runConfigCommand(
+	deps: TableRouteDeps,
+	channelId: string,
+	content: string,
+): Promise<void> {
+	const { store, broadcast } = deps;
+	const speaker =
+		store.listMembers(channelId).find((m: { participantId: string }) =>
+			m.participantId.startsWith("agent:"))?.participantId ?? "agent:8EO";
+	const say = async (text: string) => {
+		const tool = makePostToChannelTool({ store, agentId: speaker, broadcast });
+		const res = await tool.execute({ channelId, content: text });
+		if (!res.ok) console.warn(`[table] config reply denied: ${res.error}`);
+	};
+
+	const parts = content.trim().split(/\s+/);
+	const cmd = parts[0].toLowerCase();
+
+	try {
+		if (cmd === "/providers") {
+			const report = await discoverAll();
+			await say(formatDiscovery(report));
+			return;
+		}
+
+		if (cmd === "/officers") {
+			const lines = ["**Officers** - `/officer <code> <field> <value>` to change one", ""];
+			for (const code of Object.keys(OFFICERS)) {
+				const o = resolveOfficer(code);
+				if (!o) continue;
+				const h = resolveHarness(code);
+				const marks = o.overridden.length ? `  (custom: ${o.overridden.join(", ")})` : "";
+				lines.push(`**${o.code}** ${o.name} - ${o.role}`);
+				lines.push(`   brain: ${o.model} via ${o.provider}${o.temperature !== undefined ? ` @ temp ${o.temperature}` : ""}`);
+				lines.push(`   hands: ${h?.kind ?? "none"}${marks}`);
+			}
+			lines.push("", "Fields: model, persona, name, role, temperature, reset.");
+			await say(lines.join("\n"));
+			return;
+		}
+
+		// /officer <code> <field> <value...>
+		const code = parts[1];
+		const field = parts[2];
+		const value = parts.slice(3).join(" ");
+		if (!code) { await say("Usage: `/officer <code> <field> <value>` - try `/officers` to see them all."); return; }
+		if (!field) {
+			const o = resolveOfficer(code);
+			if (!o) { await say(`Unknown officer "${code}".`); return; }
+			const h = resolveHarness(o.code);
+			await say([
+				`**${o.code}** ${o.name} - ${o.role}`,
+				`brain: ${o.model} via ${o.provider}${o.baseUrl ? ` (${o.baseUrl})` : ""}`,
+				`hands: ${h?.kind ?? "none"}`,
+				`persona: ${o.systemPrompt}`,
+				o.overridden.length ? `customised: ${o.overridden.join(", ")}` : "all defaults",
+			].join("\n"));
+			return;
+		}
+		const result = await setOfficerField(code, field, value);
+		await say(result.message);
+	} catch (err) {
+		await say(`Config command failed: ${String(err).slice(0, 200)}`);
+	}
+}
+
+/**
  * Execute a proposal the human just approved, and post the EVIDENCE back into the
  * channel. Posted as the proposing officer (so the thread reads as that colleague
  * reporting back) through the same gated post path, which also ledgers it.
@@ -364,7 +452,10 @@ async function runApprovedProposal(
 	if (pending.channelId !== channelId) return; // token is channel-scoped
 
 	broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "thinking" });
-	await say(pending.agentId, `Approved by ${approvedBy}. Running in ${pending.cwd}:\n\`${pending.command}\``);
+	await say(
+		pending.agentId,
+		`Approved by ${approvedBy}. Running via my ${pending.kind} harness in ${pending.cwd}:\n\`${pending.command}\``,
+	);
 	try {
 		const result = await executeApproved(pending);
 		if (!result.ok) {
@@ -405,6 +496,8 @@ function tableSystemPrompt(officer?: { name: string; role: string; systemPrompt:
 		"",
 		"TO GET REAL WORK DONE, end your reply with ONE marker on its own line:",
 		"  [[HELM kind=shell cwd=~/8gent-code cmd=<the exact command>]]",
+		"(the kind is decided automatically from your own execution harness - just",
+		" fill in cwd and cmd; the marker's kind= value itself is ignored)",
 		"The human approves it and a worker runs it, then the real output appears here.",
 		"Allowed cwd: ~/8gent-code, ~/8gent-glasses, ~/8gent-worktrees, ~/Foodstackai,",
 		"~/Documents, ~/Desktop, ~/Downloads, ~/Projects, ~/code, ~/src.",
@@ -432,6 +525,13 @@ async function runMentionFlow(
 	// "/approve <token>" - the human authorising a staged Helm proposal. Handled
 	// here, before mention routing, so it executes instead of being chatted at.
 	// ONLY a human:* participant reaches this line, which is the authorisation.
+	// Configuration commands. Handled before mention routing so they act rather
+	// than being chatted at, and answered by the daemon itself (no model call).
+	if (/^\s*\/(providers|officers|officer)\b/i.test(posted.content)) {
+		await runConfigCommand(deps, channelId, posted.content);
+		return;
+	}
+
 	const approvalToken = parseApproval(posted.content);
 	if (approvalToken) {
 		await runApprovedProposal(deps, channelId, approvalToken, posted.authorId);
@@ -472,10 +572,13 @@ async function runMentionFlow(
 				// write_file / run_command. That is why officers claimed tools they do
 				// not have: the system prompt said they had them. Table sessions get a
 				// dedicated prompt with NO tool list and the capability truth up front.
-				const officer = OFFICERS[officerCode];
+				// resolveOfficer = coded roster + any human override from
+				// ~/.8gent/table-officers.json, so retuning an officer from chat
+				// takes effect on their next session with no restart.
+				const officer = resolveOfficer(officerCode) ?? OFFICERS[officerCode];
 				pool.createSession(sid, "table", {
 					agentScope: TABLE_AGENT_SCOPE,
-					runtime: officer?.provider,
+					runtime: officer?.provider as never,
 					model: officer?.model,
 					baseUrl: officer?.baseUrl,
 					systemPrompt: tableSystemPrompt(officer),
@@ -527,6 +630,11 @@ async function runMentionFlow(
 				const proposal = parseProposal(reply);
 				let outgoing = reply;
 				if (proposal) {
+					// Deterministic override: the OFFICER's bound harness decides what
+					// runs, never the model's own (always-"shell") kind= text - "code
+					// disposes", not the local model. See bindOfficerHarness's doc
+					// comment in helm-bridge.ts for why.
+					Object.assign(proposal, bindOfficerHarness(officerCode, proposal));
 					outgoing = stripProposal(reply);
 					if (!isAllowedCwd(proposal.cwd)) {
 						outgoing += `\n\n(I wanted to propose running this in ${proposal.cwd}, but that path is outside the allowed working roots, so I can't.)`;
