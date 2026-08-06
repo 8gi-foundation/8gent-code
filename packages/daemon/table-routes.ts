@@ -871,7 +871,17 @@ async function runMentionFlow(
 			// The officer's durable memory (their "mini vessel" state): notes they
 			// accumulated across past sessions. Injected as DATA - it may quote past
 			// channel content, so it carries the same never-instructions guard.
-			const memory = loadMemory(officerCode);
+			// PASS THE CHANNEL. memory.ts has full per-channel partitioning and this
+				// caller never used it, so channelId defaulted to undefined and every
+				// officer wrote one global _shared.md carrying every channel's history
+				// into every other channel. Measured live 2026-08-06: asked in
+				// #ws-8gi--table-build "what is the single biggest risk in shipping the
+				// huddle stage today?", 8TO answered about websocket authentication -
+				// almost verbatim his own answer to a DIFFERENT question in
+				// #oq-live-round2, which was sitting in the shared file. The
+				// partitioning was built and then never wired up; the optional param
+				// was documented as temporary and the transition was never finished.
+				const memory = loadMemory(officerCode, channelId);
 			const prompt = buildTurnPrompt({ memory, roundSoFar, envelope, role: officer?.role });
 
 			const reply = stripReasoning((await pool.chat(sid, prompt)).trim());
@@ -934,7 +944,10 @@ async function runMentionFlow(
 					// notes so the NEXT session (any harness, any restart) remembers.
 					try {
 						const chanName = store.getChannel(channelId)?.name ?? channelId;
-						appendExchange(officerCode, chanName, posted.authorId, posted.content, reply);
+						// channelId is the LAST arg and is what partitions the file. Without
+							// it every officer appended to one global _shared.md, so the write
+							// side leaked across channels exactly as the read side did.
+							appendExchange(officerCode, chanName, posted.authorId, posted.content, reply, channelId);
 					} catch (err) {
 						console.warn(`[table] memory append failed for ${agentId}:`, err);
 					}
