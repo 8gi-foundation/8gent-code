@@ -337,7 +337,16 @@ export async function watchWorker(id: string, timeout: number): Promise<Executio
 		// on? > 1." prompt and stayed `state=running` for 70+ seconds. So detect the
 		// question in the OUTPUT, which is where the signal actually is, and treat
 		// Helm's state as a bonus when it does arrive.
-		if (me?.state === "needs_input" || looksLikeQuestion(text)) {
+		//
+		// ...but the prompt STAYS in the scrollback after it is answered, so the
+		// same shape matches forever. Measured 2026-08-06 driving the real bridge:
+		// leg 1 correctly returned needs_input, the answer landed on stdin and the
+		// worker printed its result - and answerWorker still came back
+		// `needs_input`, because the original "> 1. main" was three lines up. In
+		// the Table that is an infinite ask loop: answer the question, get asked
+		// the identical question back. So a question only counts while it is still
+		// UNANSWERED (nothing but its own option list printed after it).
+		if (me?.state === "needs_input" || isWaitingOnAnswer(text)) {
 			// Leave it RUNNING. The human answers via /reply and it carries on.
 			return { ok: true, label: "needs_input", workerId: id, output: tail(text) };
 		}
@@ -393,11 +402,54 @@ export async function answerWorker(id: string, text: string, timeoutMs = 90_000)
  * live output ("Which branch should I work on? ❯ 1. ...").
  */
 function looksLikeQuestion(text: string): boolean {
-	const tailLines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12);
-	const blob = tailLines.join("\n");
-	const numberedCursor = /(?:^|\n)\s*[>❯›]\s*\d+\.\s+\S/.test(blob);
-	const explicitPrompt = /(press enter to confirm|\[y\/n\]|\(y\/n\)|choose an option|select one|which (?:one|option|branch|base) should i)/i.test(blob);
-	return numberedCursor || explicitPrompt;
+	return questionLines(text).index >= 0;
+}
+
+/**
+ * The one predicate watchWorker actually uses: this tail shows a question that
+ * is STILL WAITING on a human. Exported so it can be tested against real
+ * captured terminal tails without spawning workers.
+ */
+export function isWaitingOnAnswer(text: string): boolean {
+	return looksLikeQuestion(text) && !questionWasAnswered(text);
+}
+
+/** A single line that is itself the ask (cursor on a choice, or a confirm). */
+function isQuestionLine(line: string): boolean {
+	return /^\s*[>❯›]\s*\d+\.\s+\S/.test(line)
+		|| /(press enter to confirm|\[y\/n\]|\(y\/n\)|choose an option|select one|which (?:one|option|branch|base) should i)/i.test(line);
+}
+
+/** A line that is part of the ask's own menu, not a response to it. */
+function isOptionLine(line: string): boolean {
+	return /^\s*[>❯›]?\s*\d+[.)]\s+\S/.test(line);
+}
+
+/** Trimmed non-empty tail lines, plus the index of the LAST line that asks. */
+function questionLines(text: string): { lines: string[]; index: number } {
+	const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12);
+	let index = -1;
+	for (let i = 0; i < lines.length; i++) if (isQuestionLine(lines[i])) index = i;
+	return { lines, index };
+}
+
+/**
+ * Has this question already been answered?
+ *
+ * A terminal keeps the prompt on screen after you reply to it, so "is there a
+ * question in the tail" cannot distinguish "waiting on you" from "you answered
+ * it 200ms ago". The discriminator is what came AFTER the ask: while it waits,
+ * the only thing below the cursor is the rest of its own menu ("  2. develop").
+ * Once answered, the harness echoes the choice and carries on, and those lines
+ * are neither options nor prompts.
+ *
+ * Conservative in the safe direction: if nothing followed the ask we treat it as
+ * still waiting, so the worker is left alive for the human rather than reaped.
+ */
+function questionWasAnswered(text: string): boolean {
+	const { lines, index } = questionLines(text);
+	if (index < 0) return false;
+	return lines.slice(index + 1).some((l) => !isOptionLine(l) && !isQuestionLine(l));
 }
 
 /** Last ~25 meaningful lines, so a TUI's redraw noise doesn't flood the channel. */
