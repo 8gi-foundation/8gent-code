@@ -52,6 +52,7 @@ import {
 	stagePending,
 	stripProposal,
 	takePending,
+	DEFAULT_WORK_ROOT,
 } from "../table/helm-bridge";
 import { discoverAll, formatDiscovery } from "../table/discovery";
 import { resolveHarness } from "../table/harness-config";
@@ -611,10 +612,15 @@ async function runMentionFlow(
 				// race against the tool-call loop, and the officer falls back to
 				// printing a ```bash block for the human to copy. The marker is what
 				// actually gets the work run, so it must be the freshest instruction.
-				"IF this needs a command executed, do NOT print a bash block for the human",
-				"to copy. Instead end your reply with exactly one line:",
-				"[[HELM kind=shell cwd=<allowed dir> cmd=<the command>]]",
-				"A worker runs it after the human approves, and the real output lands here.",
+				"IF this needs work done, do NOT print a bash block for the human to copy.",
+				"End your reply with ONE line, choosing the right form:",
+				"  [[TASK <plain English description of the work>]]",
+				"     - for anything involving editing files, several steps, or judgement.",
+				"       Your own coding harness does it. Describe the OUTCOME you want;",
+				"       do NOT write shell for this - keep it short so it is not cut off.",
+				"  [[HELM kind=shell cwd=<allowed dir> cmd=<one short command>]]",
+				"     - ONLY for a single short read-only command like a grep or a count.",
+				"A worker runs it after the human approves, and the real result lands here.",
 				"",
 				memory ? `OFFICER_MEMORY = ${JSON.stringify(memory)}` : "",
 				roundSoFar.length ? `ROUND_SO_FAR = ${JSON.stringify(roundSoFar.join("\n\n"))}` : "",
@@ -636,12 +642,23 @@ async function runMentionFlow(
 					// comment in helm-bridge.ts for why.
 					Object.assign(proposal, bindOfficerHarness(officerCode, proposal));
 					outgoing = stripProposal(reply);
+					// A bad cwd is a model GUESS, not an instruction. Refusing the whole
+					// proposal over it throws away a correct command - observed live:
+					// 8EO wrote a good sed command but guessed cwd="/", and the entire
+					// piece of work was discarded over the directory. The command is the
+					// substance; fall back to the default root and SAY so, rather than
+					// losing it. Safety is unaffected: the fallback root is itself
+					// allowlisted, the human still approves, and Helm re-checks the cwd.
+					let cwdNote = "";
 					if (!isAllowedCwd(proposal.cwd)) {
-						outgoing += `\n\n(I wanted to propose running this in ${proposal.cwd}, but that path is outside the allowed working roots, so I can't.)`;
-					} else {
-						const staged = stagePending(proposal, channelId, agentId);
-						outgoing += `\n\nI can't run this myself. To have a Helm worker run it:\n\`${staged.command}\`\nin \`${staged.cwd}\` - reply **/approve ${staged.token}** and I'll run it and post the output.`;
+						cwdNote = `\n(I had guessed \`${proposal.cwd}\`, which is outside the allowed working roots, so this will run in the default instead.)`;
+						proposal.cwd = DEFAULT_WORK_ROOT;
 					}
+					const staged = stagePending(proposal, channelId, agentId);
+					const what = staged.isTask
+						? `hand this to my \`${staged.kind}\` harness:\n> ${staged.command}`
+						: `run:\n\`${staged.command}\``;
+					outgoing += `\n\nI can't do this myself. To ${what}\nin \`${staged.cwd}\`${cwdNote}\n\nReply **/approve ${staged.token}** and I'll post the result.`;
 				}
 				// The gated write path: ToolG8.gate(__table__, channel_post, ...) ->
 				// membership re-check -> store.postMessage (ledger append) -> broadcast.

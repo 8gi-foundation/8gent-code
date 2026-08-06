@@ -27,6 +27,12 @@ const HELM_BASE = process.env.GLASSES_RELAY || "http://127.0.0.1:7890";
 export type HelmKind = "shell" | "claude" | "codex" | "8gent-local" | "pi" | "cursor-agent" | "opencode";
 const KINDS = new Set<HelmKind>(["shell", "claude", "codex", "8gent-local", "pi", "cursor-agent", "opencode"]);
 
+/**
+ * Where work runs when the officer's guess is unusable. Itself allowlisted, so
+ * falling back here can never escape the boundary.
+ */
+export const DEFAULT_WORK_ROOT = path.join(os.homedir(), "8gent-code");
+
 /** Mirrors the relay's own cwd allowlist (helm.py _CWD_CANDIDATES). */
 const ALLOWED_CWD_ROOTS = [
 	"8gent-glasses", "8gent-worktrees", "8gent-code", "Foodstackai",
@@ -36,7 +42,11 @@ const ALLOWED_CWD_ROOTS = [
 export interface HelmProposal {
 	kind: HelmKind;
 	cwd: string;
+	/** A shell command, OR - when isTask - natural-language work for the harness. */
 	command: string;
+	/** True when `command` is a TASK for an agentic harness rather than a shell
+	 *  line. Kept distinct so the channel can say honestly which one it is. */
+	isTask?: boolean;
 	/** Model override for the bound harness's own --model flag, when the
 	 *  officer's harness names one. Carried through to /helm/spawn. */
 	model?: string;
@@ -94,10 +104,24 @@ export function isAllowedCwd(cwd: string): boolean {
  * `cmd` runs to the end of the marker so pipes/quotes survive.
  */
 export function parseProposal(reply: string): HelmProposal | null {
+	// A TASK is natural-language work handed to the officer's own agentic harness
+	// (claude / codex / cursor-agent), which is built for multi-step editing. It
+	// exists because asking a 9-12B model to author a correct shell one-liner is
+	// the wrong job for it: observed live, 8EO truncated mid-sed AND reached for
+	// `git checkout --orphan`, which would have discarded history. Stating intent
+	// is something a small model does reliably; authoring bash is not.
+	const task = reply.match(/\[\[TASK\s+([\s\S]*?)(?:\]\]|$)/);
+	if (task) {
+		const text = task[1].replace(/\]+$/, "").trim();
+		if (text && !DESTRUCTIVE.test(text)) {
+			return { kind: "shell", cwd: DEFAULT_WORK_ROOT, command: text, isTask: true };
+		}
+	}
 	// Non-greedy up to the closing "]]", ALLOWING inner "]" - models close the
 	// bracket early ("kind=shel]cmd here]]") and a [^\]]+ class silently rejects
-	// every one of those.
-	const m = reply.match(/\[\[HELM\s+([\s\S]*?)\]\]/);
+	// every one of those. `|$` also salvages a marker the model TRUNCATED before
+	// writing "]]", which is what a long command reliably causes.
+	const m = reply.match(/\[\[HELM\s+([\s\S]*?)(?:\]\]|$)/);
 	// Fallback: officers reliably write the command in a fenced ```bash block
 	// (every model does this), but only sometimes emit the marker. Rather than
 	// demand an exotic format from a 9-12B local model, treat a short shell block
@@ -144,7 +168,10 @@ export function parseProposal(reply: string): HelmProposal | null {
 
 /** Strip the marker so the channel sees a clean human-readable reply. */
 export function stripProposal(reply: string): string {
-	return reply.replace(/\[\[HELM\s+[\s\S]*?\]\]/g, "").trim();
+	return reply
+		.replace(/\[\[HELM\s+[\s\S]*?(?:\]\]|$)/g, "")
+		.replace(/\[\[TASK\s+[\s\S]*?(?:\]\]|$)/g, "")
+		.trim();
 }
 
 /** Commands we never auto-stage from a code block - they must be asked for explicitly. */
