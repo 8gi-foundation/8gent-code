@@ -63,6 +63,7 @@ import { resolveHarness } from "../table/harness-config";
 import { appendExchange, loadMemory } from "../table/memory";
 import { resolveOfficer, setOfficerField } from "../table/officer-config";
 import type { AgentPool } from "./agent-pool";
+import { handleHuddleFrame, notifyHuddleMessagePosted } from "./huddle-routes";
 
 /** Broadcast a frame to every connection subscribed to a channel. */
 export type ChannelBroadcast = (channelId: string, frame: unknown) => void;
@@ -147,9 +148,17 @@ export interface TableRouteDeps {
 	state: TableRouteState;
 }
 
-/** The set of frame types this module owns. */
+/**
+ * The set of frame types this module owns. `huddle:*` is included (not just
+ * `channel:*` / `message:*`) so every huddle frame is routed through the SAME
+ * F1 loopback guard and F2 pinned-identity actor resolution below, with no new
+ * trust surface (docs/8GENT-HUDDLE-SPEC.md section 3.5).
+ */
 export function isTableFrame(type: unknown): boolean {
-	return typeof type === "string" && (type.startsWith("channel:") || type.startsWith("message:"));
+	return (
+		typeof type === "string" &&
+		(type.startsWith("channel:") || type.startsWith("message:") || type.startsWith("huddle:"))
+	);
 }
 
 /** Resolve the acting participant, defaulting to a local human in no-auth dev. */
@@ -185,6 +194,13 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 	}
 
 	const actor = actorOf(state);
+
+	// huddle:* is a distinct sub-protocol (packages/table/floor.ts +
+	// huddle-routes.ts), delegated here so it inherits the F1 check above and
+	// this same pinned `actor` - never re-derived, never re-trusted.
+	if (type.startsWith("huddle:")) {
+		return handleHuddleFrame(deps, msg, actor);
+	}
 
 	try {
 		switch (type) {
@@ -266,7 +282,10 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 				sendRaw({ type: "message:posted", id, message });
 				// (2) broadcast the append to every channel subscriber.
 				broadcast(channelId, { type: "message:appended", channelId, message });
-				// (3) @mention scan -> agent flow (fire-and-forget).
+				// (3) huddle presence/turn-text - a no-op unless this channel has an
+				// open huddle (spec section 10.3's presence evidence).
+				if (actor.startsWith("human:")) notifyHuddleMessagePosted(channelId, actor, content);
+				// (4) @mention scan -> agent flow (fire-and-forget).
 				void runMentionFlow(deps, channelId, message);
 				return true;
 			}
