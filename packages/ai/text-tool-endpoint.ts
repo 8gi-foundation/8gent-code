@@ -25,10 +25,57 @@ import type { TextTool } from "./text-tool-loop";
 export const TEXT_TOOL_ENDPOINTS: Record<string, string> = {
 	lmstudio: "http://localhost:1234/v1/chat/completions",
 	ollama: "http://localhost:11434/v1/chat/completions",
+	// apfel fronts Apple Foundation over an OpenAI-compatible server. The live
+	// Table roster runs it on :11435, and its base already carries "/v1" (unlike
+	// lmstudio/ollama), so the default here is the full completions URL. Without
+	// this entry apfel fell through to the lmstudio default (:1234).
+	apfel: "http://127.0.0.1:11435/v1/chat/completions",
 };
 
-/** Resolve a provider's text-tool endpoint, defaulting to LM Studio's. */
-export function resolveTextToolEndpoint(provider: string): string {
+/**
+ * Normalise ANY on-box backend base URL to its `/v1/chat/completions` endpoint,
+ * reconciling the three base conventions the local backends use so a URL is
+ * never double-suffixed:
+ *   - host only        "http://h:11434"       -> + "/v1/chat/completions"  (ollama)
+ *   - lmstudio host    "http://h:1234"         -> + "/v1/chat/completions"
+ *   - host + "/v1"     "http://h:11435/v1"     -> + "/chat/completions"     (apfel)
+ *   - already full     ".../chat/completions"  -> unchanged
+ * Pure and deterministic.
+ */
+export function toChatCompletionsEndpoint(base: string): string {
+	const trimmed = base.trim().replace(/\/+$/, "");
+	if (/\/chat\/completions$/.test(trimmed)) return trimmed;
+	if (/\/v1$/.test(trimmed)) return `${trimmed}/chat/completions`;
+	return `${trimmed}/v1/chat/completions`;
+}
+
+/**
+ * Normalise a base URL to its OpenAI-compatible `/v1` root - the shape the AI
+ * SDK's `createOpenAICompatible` wants (it appends `/chat/completions` itself).
+ * The mirror of toChatCompletionsEndpoint for the native (non-text-tool) path,
+ * so a per-session baseUrl in ANY convention reaches the AI SDK correctly:
+ *   - host only        "http://h:11434"       -> + "/v1"      (ollama, lmstudio)
+ *   - host + "/v1"     "http://h:11435/v1"     -> unchanged    (apfel)
+ *   - full completions ".../v1/chat/completions" -> "/v1"
+ * Never double-suffixes "/v1".
+ */
+export function toOpenAiV1Base(base: string): string {
+	const trimmed = base
+		.trim()
+		.replace(/\/+$/, "")
+		.replace(/\/chat\/completions$/, "");
+	if (/\/v1$/.test(trimmed)) return trimmed;
+	return `${trimmed}/v1`;
+}
+
+/**
+ * Resolve a provider's text-tool endpoint. When a per-session `baseUrl` is
+ * given (an officer pinned to a specific local port), it WINS and is normalised
+ * to its chat-completions endpoint (suffix-reconciled) regardless of provider;
+ * otherwise the per-provider default applies, falling back to LM Studio's.
+ */
+export function resolveTextToolEndpoint(provider: string, baseUrl?: string): string {
+	if (baseUrl && baseUrl.trim()) return toChatCompletionsEndpoint(baseUrl);
 	return TEXT_TOOL_ENDPOINTS[provider] || TEXT_TOOL_ENDPOINTS.lmstudio;
 }
 
@@ -53,10 +100,16 @@ export function buildTextToolCall(opts: {
 	provider: string;
 	model: string;
 	endpoint?: string;
+	/**
+	 * Per-session base URL (an officer pinned to a specific local port). When set
+	 * and no explicit `endpoint` is given, it is suffix-reconciled to the correct
+	 * `/v1/chat/completions` URL and wins over the per-provider default.
+	 */
+	baseUrl?: string;
 	temperature?: number;
 	signal?: AbortSignal;
 }): (messages: ChatMessage[]) => Promise<string> {
-	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider);
+	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
 
 	return async (messages: ChatMessage[]): Promise<string> => {
