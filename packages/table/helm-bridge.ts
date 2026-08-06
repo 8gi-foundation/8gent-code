@@ -332,7 +332,12 @@ export async function watchWorker(id: string, timeout: number): Promise<Executio
 		const out = await helm("GET", `/helm/worker/${id}/output?tail=60`);
 		const text = String(out.json?.output ?? "");
 
-		if (me?.state === "needs_input") {
+		// Helm's own needs_input never fires in practice for these harnesses -
+		// measured: a claude worker sat at an explicit "Which branch should I work
+		// on? > 1." prompt and stayed `state=running` for 70+ seconds. So detect the
+		// question in the OUTPUT, which is where the signal actually is, and treat
+		// Helm's state as a bonus when it does arrive.
+		if (me?.state === "needs_input" || looksLikeQuestion(text)) {
 			// Leave it RUNNING. The human answers via /reply and it carries on.
 			return { ok: true, label: "needs_input", workerId: id, output: tail(text) };
 		}
@@ -376,6 +381,23 @@ export async function answerWorker(id: string, text: string, timeoutMs = 90_000)
 		return { ok: false, label: "failed", workerId: id, output: "", detail: `could not send input (${res.status})` };
 	}
 	return watchWorker(id, timeoutMs);
+}
+
+/**
+ * Is this terminal tail a harness WAITING ON AN ANSWER?
+ *
+ * Deliberately conservative - a false positive stalls a run that was fine, so it
+ * requires a numbered-choice cursor ("> 1." / "❯ 1.") or an explicit
+ * confirm/select prompt in the LAST few lines. These are the shapes claude,
+ * codex and cursor-agent actually render when they stop to ask, verified against
+ * live output ("Which branch should I work on? ❯ 1. ...").
+ */
+function looksLikeQuestion(text: string): boolean {
+	const tailLines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12);
+	const blob = tailLines.join("\n");
+	const numberedCursor = /(?:^|\n)\s*[>❯›]\s*\d+\.\s+\S/.test(blob);
+	const explicitPrompt = /(press enter to confirm|\[y\/n\]|\(y\/n\)|choose an option|select one|which (?:one|option|branch|base) should i)/i.test(blob);
+	return numberedCursor || explicitPrompt;
 }
 
 /** Last ~25 meaningful lines, so a TUI's redraw noise doesn't flood the channel. */
