@@ -381,9 +381,26 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
 		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true })}`;
 
+		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
+		// the capability truth for a chat-channel colleague) and must be used
+		// verbatim. The isLocalRuntime branch below swaps in compactLocalPrompt,
+		// which silently DISCARDED config.systemPrompt for every officer on
+		// lmstudio/ollama - i.e. six of the eight. Measured 2026-08-06 with a
+		// sentinel persona: the persona never reached the model, and what did
+		// reach it was "You are 8gent, an autonomous coding agent. Use tools to
+		// read, write, edit, run commands", a tool catalog advertising
+		// write_file/run_command/web_search, and the operator's private global
+		// memories. One line, four observed pathologies: indistinguishable
+		// personas (there was no persona), officers claiming tools they do not
+		// have (they were advertised), "never claim you cannot do something"
+		// pushing them to fabricate, and private-memory leakage into an
+		// untrusted channel. Table sessions bypass it.
+		const isTableScope = config.agentScope === "__table__";
 		this.messageHistory.push({
 			role: "system",
-			content: isLocalRuntime
+			content: isTableScope
+				? basePrompt + languageInstruction
+				: isLocalRuntime
 				? compactLocalPrompt
 				: basePrompt +
 					vesselContext +
@@ -899,7 +916,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// honesty gate rewrote is NOT flavored - no celebration on a failure.
 		const content = gated.content;
 		const flavor = personalityVoice.getFlavor("complete");
-		const flavoredContent = gated.violated ? content : flavorResponse(content, flavor);
+		// Never flavor a Table reply. The officer speaking is Karen or Rishi, not
+		// 8gent, and flavorResponse staples a random COMPLETION_PHRASE ("Consider
+		// it done. Magnificently.", "As expected, excellence prevails.") onto
+		// every third reply. In a channel that reads as a fabricated completion
+		// claim - it appeared verbatim in the live corpus attached to an honest
+		// refusal, directly undercutting the sentence before it. Those taglines
+		// were previously assumed to be an emergent tic of the small local
+		// models; they are packages/personality/voice.ts, appended right here.
+		const flavoredContent =
+			gated.violated || this.config.agentScope === "__table__"
+				? content
+				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
 		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
 
@@ -1054,7 +1082,16 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// instruction that forces the model to emit a numbered plan first.
 		const PLANNING_KEYWORDS =
 			/\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
-		const needsPlanningGate = textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent);
+		// A Table officer is answering a colleague in a chat channel, not executing
+		// a multi-step build, and its turn prompt is ALWAYS over 100 chars - so
+		// this gate fired on every single officer reply and injected the literal
+		// text "PLAN: 1. ... 2. ... 3. ..." as the last user message. That is the
+		// exact source of the rigid "PLAN: 1. Identify the officer mentioned. 2.
+		// ..." scaffolding in the live corpus: not a model tic, an instruction we
+		// sent. Nobody at the Table asked for a plan.
+		const needsPlanningGate =
+			this.config.agentScope !== "__table__" &&
+			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
 
 		if (needsPlanningGate) {
 			this.messageHistory.push({
@@ -1206,6 +1243,17 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 					)
 				: providerTools;
 
+		// The SAME positive scope, for the text-tool path. Every Table officer on
+		// lmstudio/ollama goes through runTextToolChat, which was handed the raw
+		// localCoreTools list - so F3 above was applied only to the native path
+		// and bypassed entirely on the one the officers actually use. Measured
+		// 2026-08-06: the system prompt an officer received listed write_file,
+		// run_command, git_commit and web_search as available, and the loop would
+		// have executed them (ToolG8's __table__ rules were the only thing left
+		// standing). Officers "hallucinating tool names" were reading a catalog.
+		const textToolAllowlist =
+			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools;
+
 		// ── Populate runtime params for self-awareness tools ──────────
 		const runtimeState = getRuntimeParams();
 		setRuntimeParams({
@@ -1259,7 +1307,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				providerName,
 				providerModel: providerConfig.model,
 				instructions: effectiveInstructions,
-				localCoreTools,
+				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
 			});
@@ -1974,7 +2022,13 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			// Apply personality voice flavoring to the response (never on a reply
 			// the honesty gate rewrote - no celebration on a failure).
 			const flavor = personalityVoice.getFlavor("complete");
-			const flavoredContent = gatedNative.violated ? content : flavorResponse(content, flavor);
+			// Table replies are never flavored - see the same guard on the
+			// text-tool path above for why a random COMPLETION_PHRASE in a channel
+			// reads as a fabricated completion claim.
+			const flavoredContent =
+				gatedNative.violated || this.config.agentScope === "__table__"
+					? content
+					: flavorResponse(content, flavor);
 
 			this.messageHistory.push({ role: "assistant", content: flavoredContent });
 
