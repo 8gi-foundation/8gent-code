@@ -278,8 +278,14 @@ const PROVIDER_DEFAULTS: Record<ProviderName, ProviderConfig> = {
 	apfel: {
 		name: "apfel",
 		displayName: "apfel (Apple Foundation HTTP)",
-		// Default port collides with Ollama. Recommended override: 11500.
-		baseUrl: process.env.APFEL_BASE_URL || "http://localhost:11434/v1",
+		// 11434 is OLLAMA's port. Shipping it as apfel's default meant every
+		// unconfigured apfel request was answered by Ollama, which then failed on
+		// an unknown model - a confusing failure that looks like apfel being
+		// broken. The comment here used to acknowledge the collision and
+		// recommend an override rather than fix it. 11435 is where apfel actually
+		// listens (verified live against /v1/models, which returns
+		// apple-foundationmodel with a 4096 context window).
+		baseUrl: process.env.APFEL_BASE_URL || "http://127.0.0.1:11435/v1",
 		apiKeyEnv: "", // Local, no key
 		defaultModel: "apple-foundationmodel",
 		models: ["apple-foundationmodel"],
@@ -811,7 +817,13 @@ export class ProviderManager {
 		model: string,
 	): Promise<ChatResponse> {
 		const apiKey = this.getApiKey(provider.name);
-		if (!apiKey) {
+		// A keyless LOCAL provider is not a misconfiguration. apfel declares
+		// apiKeyEnv:"" because it is an on-device HTTP service with no auth, and
+		// this gate threw on it anyway - producing "No API key for apfel (Apple
+		// Foundation HTTP). Set  or use /settings", which names no env var
+		// because there is not one to name. That is why 8EO was dead on apfel.
+		// Only demand a key from a provider that actually declares one.
+		if (!apiKey && provider.apiKeyEnv) {
 			throw new Error(
 				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv} or use /settings`,
 			);
@@ -819,7 +831,10 @@ export class ProviderManager {
 
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
-			Authorization: `Bearer ${apiKey}`,
+			// Omitted entirely when there is no key, rather than sent empty: some
+			// local servers reject a malformed Authorization header outright
+			// instead of ignoring it.
+			...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
 		};
 
 		// OpenRouter needs extra headers
