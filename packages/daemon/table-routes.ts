@@ -564,19 +564,26 @@ function tableSystemPrompt(officer?: { name: string; role: string; systemPrompt:
 		"If a question is answerable by looking, LOOK - do not speculate.",
 		"You CANNOT run commands, edit files, or reach the network.",
 		"",
-		"TO GET REAL WORK DONE, end your reply with ONE marker on its own line:",
-		"  [[HELM kind=shell cwd=~/8gent-code cmd=<the exact command>]]",
-		"(the kind is decided automatically from your own execution harness - just",
-		" fill in cwd and cmd; the marker's kind= value itself is ignored)",
-		"The human approves it and a worker runs it, then the real output appears here.",
+		"You have your OWN coding harness that does work for you. You reach it with a",
+		"marker on the last line, and a worker runs it once the human approves:",
+		"",
+		"  [[TASK <plain English description of the work>]]",
+		"      for edits, several steps, or judgement. Describe the OUTCOME, not shell.",
+		"  [[HELM kind=shell cwd=~/8gent-code cmd=<one short command>]]",
+		"      only for a single short read-only command, like a grep or a count.",
+		"",
+		"Example:",
+		"  James: rename the config file to settings.json",
+		"  You: Renaming it and updating the imports that reference it.",
+		"  [[TASK rename config.json to settings.json and update all imports]]",
+		"",
 		"Allowed cwd: ~/8gent-code, ~/8gent-glasses, ~/8gent-worktrees, ~/Foodstackai,",
 		"~/Documents, ~/Desktop, ~/Downloads, ~/Projects, ~/code, ~/src.",
-		"Propose ONE command, read-only unless the human asked for a change. Only add the",
-		"marker when execution is genuinely needed.",
 		"",
-		"NEVER claim you ran something or that work is done - you cannot execute, and",
-		"fabricated completion is the one unforgivable error. Say what you found, give",
-		"the command, emit the marker.",
+		"You cannot act by SAYING you will. 'I will open the PR' opens nothing, and the",
+		"request is simply dropped. Never claim you ran something or that work is done -",
+		"fabricated completion is the one unforgivable error here. Asked to do",
+		"something: one short sentence, then the marker.",
 		"",
 		"STYLE: direct, specific, brief. No PLAN scaffolding. Answer the actual question.",
 	].join("\n");
@@ -690,18 +697,37 @@ async function runMentionFlow(
 				// race against the tool-call loop, and the officer falls back to
 				// printing a ```bash block for the human to copy. The marker is what
 				// actually gets the work run, so it must be the freshest instruction.
-				"IF this needs work done, do NOT print a bash block for the human to copy.",
-				"End your reply with ONE line, choosing the right form:",
+				"YOU CANNOT ACT BY SAYING YOU WILL. Saying 'I will open the PR' does",
+				"nothing at all - no PR is opened, and the request is simply dropped.",
+				"The ONLY way anything happens is a marker on the last line:",
 				"  [[TASK <plain English description of the work>]]",
-				"     - for anything involving editing files, several steps, or judgement.",
-				"       Your own coding harness does it. Describe the OUTCOME you want;",
-				"       do NOT write shell for this - keep it short so it is not cut off.",
+				"     - anything involving edits, several steps, or judgement. Your own",
+				"       coding harness does it. Describe the OUTCOME; do not write shell,",
+				"       and keep it short so it is not cut off mid-sentence.",
 				"  [[HELM kind=shell cwd=<allowed dir> cmd=<one short command>]]",
-				"     - ONLY for a single short read-only command like a grep or a count.",
-				"A worker runs it after the human approves, and the real result lands here.",
+				"     - ONLY a single short read-only command, like a grep or a count.",
+				"So if this message asks you to DO something, your reply must be one short",
+				"sentence of context plus the marker. Never a bash block for the human to",
+				"copy, and never a promise to do it. A worker runs it once the human",
+				"approves, and the real result lands back here.",
 				"",
-				memory ? `OFFICER_MEMORY = ${JSON.stringify(memory)}` : "",
+				// Memory is BACKGROUND, and it is explicitly demoted below the current
+				// message. Officers were parroting their own past replies as if still
+				// true: asked to open a PR, 8EO repeated a base branch name that had
+				// been wrong the first time, because its own earlier answer was sitting
+				// in memory looking authoritative. Old answers are the least reliable
+				// thing in the prompt, not the most.
+				memory
+					? [
+						"OFFICER_MEMORY below is BACKGROUND ONLY - your notes from earlier,",
+						"which may be out of date or may have been WRONG. Never repeat a plan",
+						"or a detail from it just because you said it before. Where it",
+						"disagrees with CHANNEL_MESSAGE, CHANNEL_MESSAGE always wins.",
+						`OFFICER_MEMORY = ${JSON.stringify(memory)}`,
+					].join("\n")
+					: "",
 				roundSoFar.length ? `ROUND_SO_FAR = ${JSON.stringify(roundSoFar.join("\n\n"))}` : "",
+				"CHANNEL_MESSAGE is the CURRENT request and the authority. Answer IT:",
 				`CHANNEL_MESSAGE = ${envelope}`,
 			].filter(Boolean).join("\n");
 
