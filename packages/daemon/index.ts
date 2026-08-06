@@ -43,7 +43,10 @@ import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
 import type { DaemonChannel } from "./types";
 
-const PORT = 18789;
+// EIGHT_DAEMON_PORT is a test-only override (default unchanged) so an
+// isolated instance can run alongside the shared production daemon without
+// colliding on 18789 - used for huddle Phase 0's live end-to-end proof.
+const PORT = Number(process.env.EIGHT_DAEMON_PORT) || 18789;
 const DATA_DIR = getDataDir();
 const LOG_PATH = `${DATA_DIR}/daemon.log`;
 const CONFIG_PATH = `${DATA_DIR}/config.json`;
