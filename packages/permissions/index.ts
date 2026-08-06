@@ -1203,6 +1203,33 @@ export function isInfiniteMode(): boolean {
 
 export { ToolG8 } from "./toolg8.js";
 export {
+	enforceCapability,
+	getToolManifest,
+	registerToolManifest,
+	resetToolManifests,
+	resolveManifestFsScopes,
+	DEFAULT_TOOL_MANIFESTS,
+} from "./capability-manifest.js";
+export {
+	buildSeatbeltProfile,
+	destroySessionScratch,
+	isSeatbeltAvailable,
+	seatbeltSpecForTool,
+	sensitiveCredentialPaths,
+	sessionScratchDir,
+} from "./seatbelt.js";
+export type { SeatbeltSpec } from "./seatbelt.js";
+export { detectBestIsolation, runSandboxed } from "./sandbox.js";
+export type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
+export type {
+	CapabilityRequest,
+	ExecCapability,
+	FsCapability,
+	NetworkCapability,
+	ToolCapabilityManifest,
+} from "./capability-manifest.js";
+export {
+	evaluateToolCall,
 	getAgentPolicy,
 	SPAWNED_AGENT_RESTRICTIONS,
 	SHADOW_AGENT_RESTRICTIONS,

@@ -31,6 +31,8 @@ import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type FailoverEntry, ModelFailover } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
+import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
+import { capabilityToolMode, knownContextWindow } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -59,6 +61,12 @@ import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import { buildToolCatalogSegment } from "./prompts/system-prompt";
 import { SessionSyncManager } from "./session-sync";
+import {
+	type CheckpointMeta,
+	type RestoredCheckpoint,
+	TimeTravelStore,
+	checkpointEveryFromEnv,
+} from "./timetravel/checkpoint-store";
 import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
@@ -195,6 +203,11 @@ export class Agent {
 	private compaction: ProactiveCompression;
 	private twoStageCompactor: TwoStageCompactor | null = null;
 	private twoStageCheckpoints: CheckpointEntry[] = [];
+	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
+	// Lazily constructed so sessions that never call a tool pay nothing.
+	private timeTravelStore: TimeTravelStore | null = null;
+	private timeTravelToolCallsSinceCheckpoint = 0;
+	private timeTravelTotalToolCalls = 0;
 	private recentFilePaths: string[] = [];
 	// Per-turn tool ledger: every tool call this turn with its real success
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
@@ -253,7 +266,14 @@ export class Agent {
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
-		this.compaction = new ProactiveCompression();
+		// SPEC-05 #108: feed the ACTIVE provider's detected context window into
+		// compaction instead of the hardcoded 32k. A large-context cloud model
+		// (e.g. anthropic 200k) compacts far later; a small local model compacts
+		// sooner. Falls back to the conservative floor for unknown providers.
+		const compactionContextWindow = knownContextWindow(
+			getProviderManager().getProvider(config.runtime as ProviderRegistryName),
+		);
+		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
 
 		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
 		// rather than replacing it: the legacy single-threshold engine still
@@ -352,9 +372,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
 		// no tools / no internet when it actually does. Closes #1082.
+		// Capability gate (SPEC-05 #108): the compact local prompt is for providers
+		// whose tool pathway is text-protocol or none, not a hardcoded name list.
+		// A capable cloud provider gets the full prompt; Ollama-served 8gent GGUFs
+		// stay on the compact path via their text-tool capability.
 		const runtimeName = this.config.runtime as string;
-		const isLocalRuntime =
-			runtimeName === "lmstudio" || runtimeName === "ollama" || runtimeName === "8gent";
+		const runtimeCaps = getProviderManager().getProvider(runtimeName as ProviderRegistryName);
+		const isLocalRuntime = capabilityToolMode(runtimeCaps) !== "native";
 		const compactLocalPrompt = `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.${globalMemoriesBlock}${priorSessionsBlock}\n\n${buildToolCatalogSegment({ concise: true })}`;
 
 		this.messageHistory.push({
@@ -710,6 +734,14 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 		// aborts the shared signal and rejects, ending the turn in bounded time
 		// instead of hanging for the full session watchdog.
 		const attemptTimeoutMs = resolveTurnTimeoutMs();
+		// #2805: the OpenAI-compatible local endpoints (ollama, LM Studio) report
+		// REAL usage on each completion. Forward it through onStepFinish so
+		// consumers (harness StatusEvent.tokens, TUI totals) see real token
+		// counts on the text-tool path too, and accumulate the turn totals for
+		// the run log + journal. Nothing fires when the endpoint omits usage -
+		// no fabricated numbers, ever.
+		let usageStepNumber = 0;
+		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		const runTurn = (provider: string, model: string) => {
 			const rawCall = buildTextToolCall({
 				provider,
@@ -720,6 +752,18 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				baseUrl: this.config.baseUrl,
 				temperature: getRuntimeParams().temperature ?? 0.2,
 				signal,
+				onUsage: (usage) => {
+					usageTotals.promptTokens += usage.promptTokens;
+					usageTotals.completionTokens += usage.completionTokens;
+					usageTotals.totalTokens += usage.totalTokens;
+					this.events.onStepFinish?.({
+						stepNumber: usageStepNumber++,
+						finishReason: "stop",
+						text: "",
+						toolCalls: [],
+						usage,
+					});
+				},
 			});
 			const call = (msgs: Parameters<typeof rawCall>[0]) =>
 				withTurnTimeout(
@@ -866,7 +910,9 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				status: "ok",
 				model: this.config.model,
 				dur: durationSec,
-				tokens: 0,
+				// Real accumulated usage from the endpoint (0 only when the
+				// endpoint reported none) - see #2805.
+				tokens: usageTotals.totalTokens,
 				cost: this.totalCost,
 				tools: agentResult.toolLog.length,
 				created: Array.from(this.sessionWriter.getFilesCreated()),
@@ -898,7 +944,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 				})),
 				modelOutput: {
 					content: flavoredContent,
-					tokens: { in: 0, out: 0, total: 0 },
+					// Real accumulated usage from the endpoint (zeros only when the
+					// endpoint reported none) - see #2805.
+					tokens: {
+						in: usageTotals.promptTokens,
+						out: usageTotals.completionTokens,
+						total: usageTotals.totalTokens,
+					},
 				},
 				latencyMs: Date.now() - chatStartTime,
 				status: "ok",
@@ -1086,9 +1138,13 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 			"remember",
 			"recall",
 		];
+		// Capability gate (SPEC-05 #108): a provider takes the restricted local-tool
+		// path when its tool-calling pathway is the text-tool protocol (or none),
+		// resolved from provider capability flags + the EIGHT_TEXT_TOOLS override -
+		// never a hardcoded provider-name list. Native tool-callers get all tools.
 		const providerName = providerConfig.name as string;
-		const isLocalProvider =
-			providerName === "lmstudio" || providerName === "ollama" || providerName === "8gent";
+		const providerCaps = getProviderManager().getProvider(providerName as ProviderRegistryName);
+		const isLocalProvider = capabilityToolMode(providerCaps) !== "native";
 		// Deferred registry only loads `core` upfront — make sure local providers
 		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
 		// web_search won't exist to pass through.
@@ -1377,6 +1433,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 				// Record tool call for Convex session sync
 				this.sessionSync.recordToolCall();
 
+				// Kernel trace capture (#2752 step 1): buffer this tool step for the
+				// current turn's trajectory. No-op unless training_proxy.traceCapture
+				// is opted in; scrubbing happens at finalize, before anything is written.
+				this.kernel.recordToolStep({
+					tool: event.toolName,
+					argsSummary: JSON.stringify(event.args ?? {}).slice(0, 300),
+					ok: event.success,
+					durationMs: event.durationMs,
+				});
+
 				// Track file operations
 				if (event.success) {
 					if (event.toolName === "write_file" && event.args.path) {
@@ -1575,6 +1641,9 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 				if (hasToolCalls) {
 					console.log(`\n[Step ${event.stepNumber}: executed ${event.toolCalls.length} tool(s)]`);
+					// Time-travel (#2757): checkpoint every N tool calls so
+					// "go back to before it broke things" always has a target.
+					this.recordToolCallsForTimeTravel(event.toolCalls.length);
 				}
 
 				// v2: Write step_end with full AI SDK data
@@ -1916,8 +1985,12 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 			// returns null when the kernel loop is inactive (flag off / not started),
 			// in which case we fall back to the prior neutral 0.8 default so behaviour
 			// is unchanged when the flag is OFF. Kept fully off the hot path.
-			if (this.kernel.isActive || this.kernel.isEnabled) {
-				const toolCallsSucceeded = this.sessionEvidence.filter((e) => !e.verified).length === 0;
+			// Trace capture (#2752 step 1) also routes through here: when only
+			// traceCapture is opted in, processTurn still returns null (loop off)
+			// and collectSessionTrace persists the scrubbed trajectory locally.
+			if (this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled) {
+				const toolCallsSucceeded =
+					this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
 				const promptForKernel = textForAgent;
 				const responseForKernel = flavoredContent;
@@ -1942,6 +2015,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 								model: modelForKernel,
 								toolCallsSucceeded,
 								userCorrected: false,
+								turnIndex,
 							},
 						);
 					})
@@ -1952,7 +2026,7 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 							promptForKernel,
 							responseForKernel,
 							0.8,
-							{ model: modelForKernel, toolCallsSucceeded, userCorrected: false },
+							{ model: modelForKernel, toolCallsSucceeded, userCorrected: false, turnIndex },
 						);
 					});
 			}
@@ -2374,6 +2448,83 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 		} catch {
 			return false; // No config = no sync
 		}
+	}
+
+	/**
+	 * Time-travel interval policy (#2757): count executed tool calls and cut
+	 * a content-addressed checkpoint every EIGHT_CHECKPOINT_EVERY calls
+	 * (default 8, 0 disables). Deduped blobs make repeat saves near-free.
+	 * Never throws into the agent loop: a failed checkpoint is logged and
+	 * the turn continues.
+	 */
+	private recordToolCallsForTimeTravel(count: number): void {
+		const every = checkpointEveryFromEnv();
+		if (every === 0) return;
+		this.timeTravelToolCallsSinceCheckpoint += count;
+		this.timeTravelTotalToolCalls += count;
+		if (this.timeTravelToolCallsSinceCheckpoint < every) return;
+		this.timeTravelToolCallsSinceCheckpoint = 0;
+		try {
+			if (!this.timeTravelStore) this.timeTravelStore = new TimeTravelStore();
+			const meta = this.timeTravelStore.save(this.sessionId, this.getMessageHistory(), {
+				reason: "interval",
+				toolCallCount: this.timeTravelTotalToolCalls,
+			});
+			console.log(
+				`  [TIME_TRAVEL] checkpoint ${meta.id} at ${meta.toolCallCount} tool calls (${meta.newBlobs} new blobs)`,
+			);
+		} catch (err) {
+			console.error("  [TIME_TRAVEL] checkpoint failed:", (err as Error).message);
+		}
+	}
+
+	/** Time-travel store for this session (rewind/fork verbs build on this). */
+	getTimeTravelStore(): TimeTravelStore {
+		if (!this.timeTravelStore) this.timeTravelStore = new TimeTravelStore();
+		return this.timeTravelStore;
+	}
+
+	/** The session id this agent's time-travel checkpoints are stored under. */
+	getTimeTravelSessionId(): string {
+		return this.sessionId;
+	}
+
+	/** All time-travel checkpoints for this agent's session, oldest first. */
+	listTimeTravelCheckpoints(): CheckpointMeta[] {
+		return this.getTimeTravelStore().list(this.sessionId);
+	}
+
+	/**
+	 * Time-travel rewind verb (#2757, step 2). Goes back `steps` checkpoints
+	 * from the latest (steps=0 restores the latest checkpoint itself) and
+	 * replaces the live message history with that state. Returns the restored
+	 * checkpoint, or null when the session has no checkpoint that far back.
+	 */
+	rewindTimeTravel(steps = 1): RestoredCheckpoint | null {
+		const restored = this.getTimeTravelStore().rewind(this.sessionId, steps);
+		if (!restored) return null;
+		this.restoreFromCheckpoint(restored.messages);
+		console.log(
+			`  [TIME_TRAVEL] rewound ${steps} step(s) to checkpoint ${restored.meta.id} (${restored.meta.messageCount} messages)`,
+		);
+		return restored;
+	}
+
+	/**
+	 * Time-travel fork verb (#2757, step 2). Starts this agent's lineage from
+	 * a checkpoint of another session (zero blobs copied - content-addressed)
+	 * and restores that state into the live message history. The two sessions
+	 * then diverge independently: explore two fixes from the same state.
+	 */
+	adoptTimeTravelFork(sourceSessionId: string, checkpointId: string): RestoredCheckpoint {
+		const store = this.getTimeTravelStore();
+		const meta = store.fork(sourceSessionId, checkpointId, this.sessionId);
+		const { messages } = store.load(this.sessionId, meta.id);
+		this.restoreFromCheckpoint(messages);
+		console.log(
+			`  [TIME_TRAVEL] forked from ${sourceSessionId}/${checkpointId} into ${this.sessionId} (${messages.length} messages)`,
+		);
+		return { meta, messages };
 	}
 
 	/**

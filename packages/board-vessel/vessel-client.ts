@@ -7,6 +7,7 @@
  */
 
 import type { BoardTask, PlaneToVessel, VesselStatus, VesselToPlane } from "../board-plane/types";
+import { backoffDelay } from "../tools/error-recovery";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -135,7 +136,11 @@ export class VesselClient {
 	private reconnect(): void {
 		if (this.closed) return;
 		this.reconnectAttempts++;
-		const backoff = Math.min(BASE_BACKOFF_MS * 2 ** (this.reconnectAttempts - 1), MAX_BACKOFF_MS);
+		const backoff = backoffDelay(this.reconnectAttempts, {
+			delayMs: BASE_BACKOFF_MS,
+			backoff: "exponential",
+			maxDelayMs: MAX_BACKOFF_MS,
+		});
 		console.log(`[vessel-client] Reconnecting in ${backoff}ms`);
 		setTimeout(() => this.connect(), backoff);
 	}

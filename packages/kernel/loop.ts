@@ -15,14 +15,16 @@ import {
 	getModelOrder,
 	recordResult,
 } from "../../benchmarks/autoresearch/model-router";
+import { LocalVerdict, type LocalVerdictConfig } from "../eight/verdict";
 import { type JudgeConfig, JudgeScorer, type ScoreRecord } from "./judge";
+import { LocalFirstScorer, LocalTurnScorer, type TurnScorer } from "./local-scorer";
 import { adaptPairsFile } from "./pair-adapter";
 import {
 	type BumpClass,
 	type CanarySignal,
-	evaluatePromotion,
 	type HoldOut,
 	type HumanConfirm,
+	evaluatePromotion,
 	loadPromotionPolicy,
 } from "./promotion-gate";
 import { type ProxyConfig, type ProxyStatus, TrainingProxy } from "./proxy";
@@ -30,7 +32,15 @@ import { type CheckpointInfo, type TrainingConfig, TrainingOrchestrator } from "
 
 export interface ProductionConfig {
 	proxy: Partial<ProxyConfig>;
+	/** Legacy cloud judge fallback config (issue #2750 Step 5 removes it). */
 	judge: Partial<JudgeConfig>;
+	/** Local verdict layer config (Selene over Ollama / LM Studio). */
+	localVerdict: LocalVerdictConfig;
+	/**
+	 * Scorer override, injected by tests. When omitted, the loop builds the
+	 * real local-first scorer (local judge preferred, cloud judge fallback).
+	 */
+	scorer?: TurnScorer;
 	training: Partial<TrainingConfig>;
 	/** Enable MadMax scheduling (default: true) */
 	madmaxEnabled: boolean;
@@ -84,6 +94,7 @@ export interface LoopStatus {
 const DEFAULT_PRODUCTION_CONFIG: ProductionConfig = {
 	proxy: {},
 	judge: {},
+	localVerdict: {},
 	training: {},
 	madmaxEnabled: true,
 	sleepStart: 23,
@@ -99,7 +110,7 @@ const DEFAULT_PRODUCTION_CONFIG: ProductionConfig = {
 export class ProductionLoop {
 	private config: ProductionConfig;
 	private proxy: TrainingProxy;
-	private judge: JudgeScorer;
+	private judge: TurnScorer;
 	private trainer: TrainingOrchestrator;
 	private lastActivityAt: number = Date.now();
 	private startedAt = 0;
@@ -119,7 +130,19 @@ export class ProductionLoop {
 			...this.config.proxy,
 			mode: this.config.madmaxEnabled ? "madmax" : "rl",
 		});
-		this.judge = new JudgeScorer(this.config.judge);
+		// Self-evaluation is local-first (issue #2750, Step 3): the Selene
+		// verdict layer scores every turn on-device; the cloud judge is only a
+		// fallback and is removed in Step 5.
+		this.judge =
+			this.config.scorer ??
+			new LocalFirstScorer({
+				local: new LocalTurnScorer({
+					verdict: new LocalVerdict(this.config.localVerdict),
+					historyPath: this.config.judge.historyPath,
+					criteria: this.config.judge.criteria,
+				}),
+				cloud: new JudgeScorer(this.config.judge),
+			});
 		this.trainer = new TrainingOrchestrator(this.config.training);
 	}
 
@@ -140,7 +163,9 @@ export class ProductionLoop {
 		// Phase 2: Verify judge is reachable
 		const judgeUp = await this.judge.isAvailable();
 		if (!judgeUp) {
-			console.warn("[kernel] Judge model not reachable — scoring disabled until available");
+			console.warn(
+				"[kernel] No judge reachable (local judge down, cloud fallback unreachable) — scoring disabled until available",
+			);
 		}
 
 		// Phase 4: Start the scheduling tick (check every 5 minutes)

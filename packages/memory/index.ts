@@ -120,6 +120,31 @@ export { memoryHealth, type MemoryHealth } from "./health.js";
 export { checkpoint, rollback, listCheckpoints } from "./checkpoint.js";
 // Knowledge-graph enums (VIDEO-INGESTION spec 9.4) and the video lane (#2633).
 export type { EntityType, RelationshipType } from "./graph.js";
+// Flow brain_store bridge (#2754 step 3): map the kernel KG onto Flow's owned
+// personal knowledge graph (/brain API), with idempotent ids + provenance-hash parity.
+export {
+	toBrainEntity,
+	fromBrainEntity,
+	toBrainSyncBundle,
+	deterministicEntityId,
+	brainContentHash,
+	entityContentHash,
+	KERNEL_BRAIN_SOURCE,
+	type BrainEntityPayload,
+	type BrainEdgePayload,
+	type BrainSyncBundle,
+} from "./flow-sync.js";
+// Flow brain sync client (#2754 step 3, wave 2): the network loop that walks a
+// project subgraph and POSTs it to the relay's /brain API. Local-first, fail-closed.
+export {
+	FlowBrainSyncClient,
+	isLoopbackUrl,
+	type FetchLike,
+	type FlowSyncClientOptions,
+	type SyncReport,
+	type SyncFailure,
+	type SyncFailureKind,
+} from "./flow-sync-client.js";
 export {
 	extractFromVideo,
 	fuseTimeline,

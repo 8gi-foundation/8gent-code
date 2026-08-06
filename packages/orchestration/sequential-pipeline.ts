@@ -6,6 +6,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getProviderManager } from "../providers";
+import { providerSupportsJsonMode } from "./local-model-detect";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -317,23 +319,91 @@ VERDICT: APPROVED or REJECTED
 FLAWS: <specific issues, or "None">
 FIX: <what to change in one sentence, or "N/A">`;
 
+// When the provider supports JSON mode, we additionally ask for a machine-
+// readable verdict so the approve/reject decision does not hinge on a fragile
+// substring match. The block is appended to the base prompt so string-only
+// providers still produce the human-readable VERDICT line.
+const CRITIC_JSON_SUFFIX = `
+
+Additionally, on the FINAL line, emit ONLY a compact JSON object with your verdict:
+{"verdict":"APPROVED"|"REJECTED"}`;
+
+/**
+ * Parse a machine-readable verdict from critic output. Looks for a JSON object
+ * carrying a `verdict` (or boolean `approved`) field. Returns the boolean
+ * verdict, or null when no structured verdict can be recovered (caller then
+ * degrades to the string heuristic and logs it).
+ */
+export function parseStructuredVerdict(content: string): boolean | null {
+	const matches = content.match(/\{[^{}]*"(?:verdict|approved)"[^{}]*\}/gi);
+	if (!matches) return null;
+	// Prefer the last JSON object — models often restate it after prose.
+	for (const raw of matches.reverse()) {
+		try {
+			const obj = JSON.parse(raw) as { verdict?: unknown; approved?: unknown };
+			if (typeof obj.approved === "boolean") return obj.approved;
+			if (typeof obj.verdict === "string") {
+				const v = obj.verdict.toUpperCase();
+				if (v.includes("REJECT")) return false;
+				if (v.includes("APPROV")) return true;
+			}
+		} catch {
+			// Malformed candidate — try the next one.
+		}
+	}
+	return null;
+}
+
+/**
+ * Validate stage verdict. Backs the fragile `REJECTED` substring heuristic with
+ * a structured JSON verdict when the active provider supports JSON mode. Always
+ * fails OPEN (approve) when the critic is unavailable, but LOGS every degrade
+ * so a silent fail-open never hides a broken validate stage. (SPEC-05 #108)
+ */
 export async function critiqueResponse(
 	query: string,
 	response: string,
 	ollamaHost = "http://localhost:11434",
-): Promise<{ approved: boolean; feedback: string }> {
+	opts?: { jsonMode?: boolean },
+): Promise<{ approved: boolean; feedback: string; verdictSource: "structured" | "string" | "fail-open" }> {
+	// Default JSON-mode capability from the active provider unless overridden.
+	const jsonMode =
+		opts?.jsonMode ??
+		(() => {
+			try {
+				return providerSupportsJsonMode(getProviderManager().getActiveProvider());
+			} catch {
+				return false;
+			}
+		})();
+
 	try {
 		const result = await inferenceChat(
 			"qwen3:32b",
-			CRITIC_SYSTEM,
+			jsonMode ? CRITIC_SYSTEM + CRITIC_JSON_SUFFIX : CRITIC_SYSTEM,
 			`QUERY: ${query}\n\nRESPONSE: ${response}`,
 			{ num_predict: 300, temperature: 0.3, timeout: 30000 },
 			{ inferenceMode: "ollama", ollamaHost },
 		);
+
+		if (jsonMode) {
+			const structured = parseStructuredVerdict(result.content);
+			if (structured !== null) {
+				return { approved: structured, feedback: result.content, verdictSource: "structured" };
+			}
+			console.warn(
+				"  [VALIDATE] JSON mode requested but no parseable verdict returned — degrading to REJECTED string heuristic",
+			);
+		}
+
 		const approved = !result.content.includes("REJECTED");
-		return { approved, feedback: result.content };
-	} catch {
-		// Critic unavailable — approve by default (don't block the user)
-		return { approved: true, feedback: "" };
+		return { approved, feedback: result.content, verdictSource: "string" };
+	} catch (err) {
+		// Fail open so the critic never blocks the user, but never silently:
+		// a broken validate stage must be visible in the logs.
+		console.warn(
+			`  [VALIDATE] critic unavailable — failing open (approve): ${(err as Error).message}`,
+		);
+		return { approved: true, feedback: "", verdictSource: "fail-open" };
 	}
 }

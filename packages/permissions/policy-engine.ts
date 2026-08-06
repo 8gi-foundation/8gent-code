@@ -11,7 +11,10 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type DecisionGate, logToolDecision } from "@8gent/audit";
 import { parse as parseYaml } from "yaml";
+import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
+import { scrubGoalText } from "./goal-secret-scrub.js";
 import { validatePath } from "./path-guard.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
@@ -769,6 +772,120 @@ export function evaluateCapabilities(caps: BashCapabilityLike[], agentId?: strin
 /** Quick check: is pushing to this branch allowed? */
 export function checkGitPush(branch: string): PolicyDecision {
 	return evaluatePolicy("git_push", { branch });
+}
+
+/**
+ * Capability-manifest-gated tool call evaluation (issue #2756 step 1).
+ *
+ * Order:
+ *   1. The tool's capability manifest - a tool may only use capabilities it
+ *      declared (fs scopes, network hosts, exec commands). No manifest or an
+ *      undeclared capability is a structural deny, before any rule runs.
+ *   2. The existing rule pipeline (path-guard, COPPA, workspace boundary,
+ *      shadow gate, YAML policies) via evaluatePolicy.
+ *
+ * This is the entry point tool call sites migrate to so least-capability is
+ * enforced by the engine, not by convention.
+ *
+ * Every decision - allow or deny, from either gate - is appended to the
+ * tamper-evident @8gent/audit hash chain (issue #2756 step 3) with the
+ * request detail secret-scrubbed first. A trail that cannot be written is
+ * warn-and-continue by default; under AUDIT_STRICT=1 an unauditable call is
+ * denied outright (fail closed).
+ */
+export function evaluateToolCall(
+	toolName: string,
+	request: CapabilityRequest,
+	context: PolicyContext = {},
+): PolicyDecision {
+	const workingDirectory =
+		typeof context.workingDirectory === "string" ? context.workingDirectory : undefined;
+
+	let decision: PolicyDecision;
+	let gate: DecisionGate;
+
+	const capability = enforceCapability(toolName, request, { workingDirectory });
+	if (!capability.allowed) {
+		decision = capability;
+		gate = "capability-manifest";
+	} else {
+		gate = "policy-rules";
+		switch (request.kind) {
+			case "fs_read":
+				decision = evaluatePolicy("read_file", { ...context, path: request.path });
+				break;
+			case "fs_write":
+				decision = evaluatePolicy("write_file", { ...context, path: request.path });
+				break;
+			case "network":
+				decision = evaluatePolicy("network_request", { ...context, url: request.url });
+				break;
+			case "exec":
+				decision = evaluatePolicy("run_command", { ...context, command: request.command });
+				break;
+		}
+	}
+
+	const audited = recordToolDecision(toolName, request, context, decision, gate);
+	if (!audited && process.env.AUDIT_STRICT === "1") {
+		return {
+			allowed: false,
+			reason:
+				"audit trail unavailable and AUDIT_STRICT=1: refusing to execute an unauditable tool call",
+		};
+	}
+	return decision;
+}
+
+/** Path, URL, or command of a capability request - the value worth auditing. */
+function requestDetailOf(request: CapabilityRequest): string {
+	switch (request.kind) {
+		case "fs_read":
+		case "fs_write":
+			return request.path;
+		case "network":
+			return request.url;
+		case "exec":
+			return request.command;
+	}
+}
+
+/**
+ * Append one evaluateToolCall outcome to the decision audit chain.
+ * Secrets are scrubbed out of the request detail BEFORE it is persisted so
+ * the trail never becomes a credential store. Returns false when the trail
+ * could not be written; the caller decides whether that is fatal.
+ */
+function recordToolDecision(
+	toolName: string,
+	request: CapabilityRequest,
+	context: PolicyContext,
+	decision: PolicyDecision,
+	gate: DecisionGate,
+): boolean {
+	try {
+		const { clean } = scrubGoalText(requestDetailOf(request));
+		logToolDecision({
+			tool: toolName,
+			actor:
+				typeof context.agentId === "string" && context.agentId.length > 0
+					? context.agentId
+					: "agent",
+			requestKind: request.kind,
+			requestDetail: clean,
+			decision: decision.allowed ? "allow" : "deny",
+			gate,
+			reason: decision.allowed ? "allowed" : decision.reason,
+			sessionId: typeof context.sessionId === "string" ? context.sessionId : null,
+		});
+		return true;
+	} catch (err) {
+		console.warn(
+			"[permissions] decision audit trail write failed:",
+			err instanceof Error ? err.message : String(err),
+		);
+		return false;
+	}
 }
 
 /**

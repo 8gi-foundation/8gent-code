@@ -99,7 +99,14 @@ export interface AgentEventCallbacks {
 
 export interface AgentConfig {
 	model: string;
-	runtime: "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek";
+	runtime:
+		| "ollama"
+		| "lmstudio"
+		| "openrouter"
+		| "anthropic"
+		| "apple-foundation"
+		| "apfel"
+		| "deepseek";
 	/** Channel hint for failover routing. "computer" enables the computer-use chain. */
 	channel?: "text" | "computer";
 	systemPrompt?: string;

@@ -25,11 +25,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-	ActorKind,
-	CapabilityAuditStore,
-	LogCapabilityInput,
-} from "../audit/index.js";
+import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
+import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
+import type { PolicyDecision } from "../permissions/types.js";
+import { enforceSkillScope } from "./capability-scope.js";
+import { validateSkillManifest } from "./manifest.js";
 
 // Skill compounding: learned-skills directory
 const LEARNED_DIR = path.join(os.homedir(), ".8gent", "learned-skills");
@@ -57,6 +57,18 @@ export interface Skill {
 	 * uninstalls. Empty by default for backward compatibility.
 	 */
 	grantedCapabilities: string[];
+	/** Semver of the skill (manifest, issue #2760). Undefined for unversioned skills. */
+	version?: string;
+	/** Models the skill declares it needs, e.g. "eight-1.0-q3:14b". Empty by default. */
+	modelsRequired: string[];
+	/** Slash commands / triggers that enter the skill, e.g. "/deploy". Empty by default. */
+	entryPoints: string[];
+	/** Publisher handle for registry attribution. */
+	author?: string;
+	/** SPDX license id, e.g. "Apache-2.0". */
+	license?: string;
+	/** Source or docs URL. */
+	homepage?: string;
 }
 
 export interface SkillFrontmatter {
@@ -73,6 +85,18 @@ export interface SkillFrontmatter {
 	requiredCapabilities?: string[];
 	/** Capabilities the skill grants; declared in YAML as `[a, b, c]`. */
 	grantedCapabilities?: string[];
+	/** Semver of the skill (manifest, issue #2760), e.g. "1.0.0". */
+	version?: string;
+	/** Models the skill needs; declared in YAML as `[eight-1.0-q3:14b]`. */
+	modelsRequired?: string[];
+	/** Slash commands / triggers that enter the skill; declared as `[/deploy]`. */
+	entryPoints?: string[];
+	/** Publisher handle. */
+	author?: string;
+	/** SPDX license id, e.g. "Apache-2.0". */
+	license?: string;
+	/** Source or docs URL. */
+	homepage?: string;
 }
 
 /** Outcome of installSkill / uninstallSkill. */
@@ -187,6 +211,15 @@ function normalizeCapabilities(value: unknown): string[] {
 		out.push(cap);
 	}
 	return out;
+}
+
+/**
+ * Coerce an entry-points frontmatter field to a clean string[]. Same trim/dedupe
+ * discipline as capabilities, but leading slashes are preserved so "/deploy"
+ * stays a slash command in the manifest.
+ */
+function normalizeEntryPoints(value: unknown): string[] {
+	return normalizeCapabilities(value);
 }
 
 /**
@@ -351,6 +384,24 @@ export class SkillManager {
 			filePath,
 			requiredCapabilities: normalizeCapabilities(frontmatter.requiredCapabilities),
 			grantedCapabilities: normalizeCapabilities(frontmatter.grantedCapabilities),
+			version:
+				typeof frontmatter.version === "string" && frontmatter.version.trim() !== ""
+					? frontmatter.version.trim()
+					: undefined,
+			modelsRequired: normalizeCapabilities(frontmatter.modelsRequired),
+			entryPoints: normalizeEntryPoints(frontmatter.entryPoints),
+			author:
+				typeof frontmatter.author === "string" && frontmatter.author.trim() !== ""
+					? frontmatter.author.trim()
+					: undefined,
+			license:
+				typeof frontmatter.license === "string" && frontmatter.license.trim() !== ""
+					? frontmatter.license.trim()
+					: undefined,
+			homepage:
+				typeof frontmatter.homepage === "string" && frontmatter.homepage.trim() !== ""
+					? frontmatter.homepage.trim()
+					: undefined,
 		};
 	}
 
@@ -565,6 +616,19 @@ examples:
 			return { ok: true, skill: canonical, granted: [], revoked: [] };
 		}
 
+		// Manifest gate (issue #2760): a malformed manifest blocks install before
+		// any capability is widened. Warnings never block - they are publishing
+		// recommendations. This is the "validated at install" step of the spec.
+		const validation = validateSkillManifest(skill);
+		if (!validation.ok) {
+			return {
+				ok: false,
+				skill: canonical,
+				missing: [],
+				reason: `invalid skill manifest: ${validation.errors.join("; ")}`,
+			};
+		}
+
 		const missing = skill.requiredCapabilities.filter((cap) => !this.hasCapability(cap));
 		if (missing.length > 0) {
 			return {
@@ -650,6 +714,29 @@ examples:
 	}
 
 	/**
+	 * Enforce a skill's declared capability envelope over a tool call, then defer
+	 * to the policy engine's tool-manifest gate (issue #2760, Step 2). A skill
+	 * gets what it declares, nothing more. An unknown skill is denied outright; an
+	 * unscoped skill (no declarations) passes the envelope gate and is bounded only
+	 * by the tool manifest, preserving backward compatibility.
+	 */
+	enforceSkillCapability(
+		skillName: string,
+		toolName: string,
+		request: CapabilityRequest,
+		opts: EnforceOptions = {},
+	): PolicyDecision {
+		const skill = this.getSkill(skillName);
+		if (!skill) {
+			return {
+				allowed: false,
+				reason: `[skill-scope] unknown skill "${skillName}"; ${request.kind} denied by default`,
+			};
+		}
+		return enforceSkillScope(skill, toolName, request, opts);
+	}
+
+	/**
 	 * Save a skill to disk
 	 */
 	saveSkill(skill: Skill): void {
@@ -725,6 +812,19 @@ export {
 } from "./compound.js";
 export type { CompoundInput } from "./compound.js";
 export { matchSkills, formatMatchedSkills } from "./matcher.js";
+export {
+	buildManifest,
+	validateManifest,
+	validateSkillManifest,
+	KNOWN_CAPABILITIES,
+} from "./manifest.js";
+export type { SkillManifest, ManifestValidationResult } from "./manifest.js";
+export {
+	enforceSkillScope,
+	skillEnvelope,
+	isSkillScoped,
+	capabilityForRequest,
+} from "./capability-scope.js";
 export {
 	runExperiment,
 	experimentsEnabled,

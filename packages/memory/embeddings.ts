@@ -7,6 +7,8 @@
  * Zero cloud dependencies — fully local-first.
  */
 
+import { parallelMap } from "../tools/parallel-map.js";
+
 // ── Interface ─────────────────────────────────────────────────────────
 
 export interface EmbeddingProvider {
@@ -112,27 +114,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 	 * Processes up to CONCURRENCY_LIMIT texts in parallel.
 	 */
 	async generateBatch(texts: string[]): Promise<Float32Array[]> {
-		const results: Float32Array[] = new Array(texts.length);
-		const queue = texts.map((text, index) => ({ text, index }));
-
-		const workers: Promise<void>[] = [];
-		for (let i = 0; i < Math.min(CONCURRENCY_LIMIT, queue.length); i++) {
-			workers.push(this._processQueue(queue, results));
-		}
-		await Promise.all(workers);
-
-		return results;
-	}
-
-	private async _processQueue(
-		queue: Array<{ text: string; index: number }>,
-		results: Float32Array[],
-	): Promise<void> {
-		while (queue.length > 0) {
-			const item = queue.shift();
-			if (!item) break;
-			results[item.index] = await this.generate(item.text);
-		}
+		return parallelMap(texts, (text) => this.generate(text), CONCURRENCY_LIMIT);
 	}
 }
 

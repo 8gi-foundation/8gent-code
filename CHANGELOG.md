@@ -9,6 +9,53 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added - Per-model benchmark attribution, step 4 (#2758)
+
+- `benchmarks/gate.ts`: the results TSV's `model` column now feeds a second
+  aggregate, `computeModelCategoryAverages`, tracked in `scores/ledger.json`
+  under a new `models` field (`model -> category -> {avgScore, benchmarkCount}`).
+  A router change or an `eight-1.0` checkpoint bump is now attributable to
+  the model that produced it, separate from the blended category number.
+  `--update` writes both breakdowns; `bun run benchmark:gate` prints a
+  per-model attribution table by default (`--no-by-model` to hide it).
+  Purely informational — a single model regressing never fails the gate,
+  only a category's blended average does, unchanged from step 1.
+- `scores/ledger.json`, `scores/README.md`, `benchmarks/README.md` updated
+  for the new schema field and CLI flag.
+- 13 new tests in `benchmarks/gate.test.ts` covering per-model averaging,
+  ledger merge/round-trip, comparison, and report formatting.
+
+### Added - Continuous public benchmark gate, step 1 (#2758)
+
+- `benchmarks/gate.ts`: compares fresh `benchmark:v2` category averages
+  against the checked-in `scores/ledger.json` baseline and hard-fails on
+  any regression beyond a configurable noise band (default 3 points). New
+  categories bootstrap instead of failing; `--update` seeds the ledger from
+  a trusted run.
+- `scores/ledger.json`: the public score ledger, starts empty - it is only
+  ever written by real `benchmark:v2` runs, never hand-typed.
+- `.github/workflows/benchmark-gate.yml`: runs the gate on every PR
+  touching `packages/eight`, `packages/providers`, or `packages/tools`.
+  Skips grading (never fabricates a result) when `OPENROUTER_API_KEY` isn't
+  configured on the repo.
+- Added the `benchmark:v2` script alias (`benchmarks/autoresearch/harness-v2.ts`)
+  that README.md and AGENTS.md already documented but `package.json` was
+  missing, plus `benchmark:gate` / `benchmark:gate:update`.
+
+### Fixed - Full local test suite green (#2781)
+
+- `pty-bridge.cjs` now restores the execute bit on node-pty's prebuilt
+  `spawn-helper` before the first spawn. `bun install` skips the package's
+  lifecycle scripts, so the helper landed non-executable and every
+  `pty.spawn` on macOS failed with "posix_spawnp failed." - the 5
+  PtySession test failures on any bun-installed tree.
+
+### Fixed - CI Test step green again, unblocking merges (#2741)
+
+- The research-evaluate generator emitted unbuilt-utility specs as guaranteed-fail assertions (~68 across 14 modules), turning the whole suite red. They now generate as `test.todo` - pending work, never a fake pass and never a failure.
+- `isRemoteProvider` no longer treats the hyphenated `lm-studio` as a remote provider.
+- The Marlin capability tests take an injectable home directory, so the not-installed path is exercised against empty state instead of a developer's real `~/.8gent` venv.
+
 ### Fixed - 8gent Computer voice loop and proof rail (#2722)
 
 - Added an in-panel mic toggle that stops voice capture and keeps it off across panel opens until the user explicitly resumes it.

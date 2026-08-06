@@ -72,6 +72,9 @@ export interface ExtractVideoDeps {
 	cwd?: string;
 	/** Bypass the capability gate (tests provide their own fake sidecar). */
 	skipCapabilityCheck?: boolean;
+	/** Base dir for the capability check's venv/config lookup. Default: homedir().
+	 * Tests point this at empty state to exercise the not-installed path. */
+	home?: string;
 	/** Progress sink for per-window chunk progress (spec §8). */
 	onProgress?: (msg: string) => void;
 	/**
@@ -151,7 +154,7 @@ export async function extractVideo(
 
 	// 1. Capability gate (spec §6 step 3, §11): never silently no-op.
 	if (!deps.skipCapabilityCheck) {
-		const cap = checkVideoCapability();
+		const cap = checkVideoCapability(deps.home);
 		if (!cap.installed) {
 			return {
 				ok: false,

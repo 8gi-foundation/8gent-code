@@ -5,7 +5,12 @@
 export interface AgentDef {
 	id: string;
 	role: string;
-	/** Prompt template. {{idea}} and {{blueprint}} are replaced at runtime. */
+	/**
+	 * Prompt template. {{idea}} and {{blueprint}} are filled at runtime via
+	 * packages/tools/prompt-template.ts render() - every occurrence is
+	 * substituted, and an unknown variable throws instead of leaking a
+	 * literal {{tag}} into the prompt.
+	 */
 	promptTemplate: string;
 	outputs: string[];
 	collaborates: string[];

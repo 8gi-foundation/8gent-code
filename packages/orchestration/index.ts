@@ -846,10 +846,28 @@ export {
 	defaultParams,
 	inferenceChat,
 	adaptiveSequentialPreProcess,
+	critiqueResponse,
+	parseStructuredVerdict,
 	saveCheckpoint,
 	loadCheckpoint,
 	clearCheckpoint,
 } from "./sequential-pipeline";
+
+// Provider capability resolver — single source of {tools, json, context, vision}
+export {
+	type ToolMode,
+	type ProviderCapabilities,
+	type NativeToolsProbe,
+	type ContextWindowLookup,
+	capabilityToolMode,
+	resolveCapabilities,
+	knownContextWindow,
+	providerSupportsJsonMode,
+	saveCapabilities,
+	loadCapabilities,
+	capabilitiesPath,
+	CONTEXT_WINDOW_FLOOR,
+} from "./local-model-detect";
 
 // Role Registry — role-based runner configs for orchestrator, engineer, qa
 export {

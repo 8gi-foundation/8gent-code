@@ -31,6 +31,30 @@
 
 const pty = require("node-pty");
 
+// bun install skips node-pty's lifecycle scripts and writes the prebuilt
+// `spawn-helper` binary without its execute bit, which makes every
+// pty.spawn on macOS fail with "posix_spawnp failed." (surfaced here as
+// exit 65). Self-heal: restore the bit before the first spawn. No-op when
+// the module was built from source (no prebuilds) or the bit is already set.
+(function ensureSpawnHelperExecutable() {
+	try {
+		const fs = require("node:fs");
+		const path = require("node:path");
+		const prebuilds = path.join(
+			path.dirname(require.resolve("node-pty/package.json")),
+			"prebuilds",
+		);
+		for (const dir of fs.readdirSync(prebuilds)) {
+			const helper = path.join(prebuilds, dir, "spawn-helper");
+			if (!fs.existsSync(helper)) continue;
+			const mode = fs.statSync(helper).mode;
+			if ((mode & 0o111) === 0) fs.chmodSync(helper, mode | 0o755);
+		}
+	} catch {
+		// prebuilds absent or unreadable - nothing to heal
+	}
+})();
+
 function send(msg) {
 	try {
 		process.stdout.write(`${JSON.stringify(msg)}\n`);

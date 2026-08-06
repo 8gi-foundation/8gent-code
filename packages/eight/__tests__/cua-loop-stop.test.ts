@@ -49,10 +49,14 @@ vi.mock("../perception/screenshot", () => ({
   screenshotToDataUrl: vi.fn().mockResolvedValue("data:image/png;base64,mock"),
 }));
 
-// Mock vision interpreter
+// Mock vision interpreter. Module mocks are process-global in bun test, so
+// the factory must keep the module's full export surface: agent.ts imports
+// VisionInterpreter, and later test files (e.g. packages/harness local.test)
+// import agent.ts in the same run.
 vi.mock("../vision-interpreter", () => ({
   buildVisionPrompt: vi.fn().mockReturnValue("mock vision prompt"),
   summarizePerception: vi.fn().mockReturnValue("mock summary"),
+  VisionInterpreter: class MockVisionInterpreter {},
 }));
 
 // Mock system prompt builder

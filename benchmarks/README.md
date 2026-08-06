@@ -168,6 +168,28 @@ Professional-grade systems across 15 real-world domains. This is the core of the
 bun run benchmark:v2
 ```
 
+### Regression Gate (public ledger, #2758)
+
+After a `benchmark:v2` run writes `results-v2.tsv`, grade it against the
+committed baseline in `../scores/ledger.json`:
+
+```bash
+bun run benchmark:gate            # report + exit 1 on regression beyond the noise band
+bun run benchmark:gate:update     # also write this run's averages as the new baseline
+```
+
+This is what `.github/workflows/benchmark-gate.yml` runs on every PR that
+touches `packages/eight`, `packages/providers`, or `packages/tools` - no
+regression ships, and the numbers it compares against are in the diff, not
+a dashboard only maintainers can see. See `../scores/README.md`.
+
+The report also breaks scores down per model (e.g. `eight-1.0-q3:14b` vs a
+fallback like `gemma-3:12b`), read straight from the `model` column
+`harness-v2.ts` already writes into `results-v2.tsv`. That breakdown is
+tracked in `../scores/ledger.json` under `models` and is informational
+only - a single model's regression never fails the gate, only a category's
+blended average does. Pass `--no-by-model` to hide the table.
+
 ### Autoresearch Loop (iterative improvement)
 
 ```bash

@@ -12,41 +12,6 @@
 		"maxLines": 60
 	},
 	{
-		"name": "camel-case",
-		"description": "Convert strings between camelCase, PascalCase, snake_case, kebab-case, and SCREAMING_SNAKE_CASE.",
-		"requirements": [
-			"Export toCamel, toPascal, toSnake, toKebab, toScreaming",
-			"Handle mixed input correctly (e.g. 'foo-barBaz' -> 'fooBarBaz')",
-			"Preserve consecutive uppercase acronyms (HTTP -> http)",
-			"Zero dependencies"
-		],
-		"maxLines": 80
-	},
-	{
-		"name": "pluralize",
-		"description": "English pluralization and singularization with irregular word support.",
-		"requirements": [
-			"pluralize(word, count?) returns plural or singular based on count",
-			"singularize(word) returns singular form",
-			"Built-in irregulars: person/people, child/children, etc.",
-			"Built-in uncountables: information, series, etc.",
-			"addIrregular(singular, plural) for custom words"
-		],
-		"maxLines": 120
-	},
-	{
-		"name": "template-engine",
-		"description": "Minimal template engine with variable interpolation, conditionals, and loops.",
-		"requirements": [
-			"{{ variable }} interpolation with dot-path support",
-			"{{#if condition}} ... {{/if}} blocks",
-			"{{#each array}} ... {{/each}} loops with {{this}} and {{@index}}",
-			"HTML-escape by default, {{{ raw }}} for unescaped output",
-			"Under 150 lines"
-		],
-		"maxLines": 150
-	},
-	{
 		"name": "lru-cache",
 		"description": "LRU cache with optional TTL expiry and max size eviction.",
 		"requirements": [
@@ -59,30 +24,6 @@
 		"maxLines": 100
 	},
 	{
-		"name": "priority-queue",
-		"description": "Binary heap priority queue with generic comparator support.",
-		"requirements": [
-			"push(item) and pop() returning T | undefined",
-			"peek() without removal",
-			"size property and isEmpty()",
-			"Generic type T with comparator (a: T, b: T) => number",
-			"Min-heap by default, max-heap via negated comparator"
-		],
-		"maxLines": 80
-	},
-	{
-		"name": "ring-buffer",
-		"description": "Fixed-capacity circular ring buffer with overwrite-on-full semantics.",
-		"requirements": [
-			"push(item) overwrites oldest when full",
-			"pop() removes from front",
-			"toArray() returns items in insertion order",
-			"size, capacity, isFull, isEmpty properties",
-			"Generic type parameter"
-		],
-		"maxLines": 80
-	},
-	{
 		"name": "trie-search",
 		"description": "Prefix trie for fast autocomplete and word lookups.",
 		"requirements": [
@@ -93,30 +34,6 @@
 			"count property for total words"
 		],
 		"maxLines": 120
-	},
-	{
-		"name": "bloom-filter",
-		"description": "Probabilistic Bloom filter for fast membership testing with configurable false-positive rate.",
-		"requirements": [
-			"add(item: string) and has(item: string) -> boolean",
-			"Constructor accepts capacity and falsePositiveRate",
-			"Uses multiple FNV hash functions internally",
-			"estimatedFalsePositiveRate() based on current fill",
-			"Zero external dependencies"
-		],
-		"maxLines": 120
-	},
-	{
-		"name": "debounce",
-		"description": "Debounce and throttle higher-order functions with cancellation support.",
-		"requirements": [
-			"debounce(fn, delayMs, options?) - trailing/leading edge",
-			"throttle(fn, intervalMs) - limit call rate",
-			"Both return a wrapped function with .cancel() method",
-			"debounce returns a promise resolving to the fn's return value",
-			"TypeScript generics preserve argument and return types"
-		],
-		"maxLines": 100
 	},
 	{
 		"name": "async-pool",
@@ -143,42 +60,6 @@
 		"maxLines": 100
 	},
 	{
-		"name": "timeout-wrap",
-		"description": "Wrap any promise with a timeout that rejects after a deadline.",
-		"requirements": [
-			"withTimeout(promise, ms, message?) -> Promise<T>",
-			"Cleans up the timer on resolution",
-			"Throws TimeoutError with configurable message",
-			"raceWithTimeout(promises, ms) races multiple promises",
-			"Zero dependencies"
-		],
-		"maxLines": 60
-	},
-	{
-		"name": "glob-matcher",
-		"description": "Glob pattern matching for file paths without filesystem access.",
-		"requirements": [
-			"match(pattern, path) -> boolean",
-			"Support *, **, ?, and {a,b} brace expansion",
-			"Negate patterns with ! prefix",
-			"matchAll(patterns, paths) -> string[] filtered results",
-			"Case-insensitive option"
-		],
-		"maxLines": 130
-	},
-	{
-		"name": "temp-dir",
-		"description": "Create and manage temporary directories with automatic cleanup.",
-		"requirements": [
-			"createTempDir(prefix?) -> { path: string, cleanup: () => void }",
-			"withTempDir(fn) - auto-cleans after callback",
-			"Uses OS temp directory (os.tmpdir())",
-			"Recursive directory removal on cleanup",
-			"Returns absolute path"
-		],
-		"maxLines": 60
-	},
-	{
 		"name": "url-parser",
 		"description": "Parse and build URLs with query string manipulation.",
 		"requirements": [
@@ -191,18 +72,6 @@
 		"maxLines": 120
 	},
 	{
-		"name": "hmac-sha256",
-		"description": "HMAC-SHA256 message authentication using Web Crypto API.",
-		"requirements": [
-			"sign(key: string, message: string) -> Promise<string> (hex output)",
-			"verify(key, message, signature) -> Promise<boolean>",
-			"Works in Node.js via globalThis.crypto (Node 19+) or require('crypto')",
-			"No external dependencies",
-			"Constant-time comparison for verify"
-		],
-		"maxLines": 80
-	},
-	{
 		"name": "uuid-v4",
 		"description": "RFC 4122 UUID v4 generator using crypto random bytes.",
 		"requirements": [
@@ -211,30 +80,6 @@
 			"isValid(str) -> boolean",
 			"Uses crypto.getRandomValues or crypto.randomBytes",
 			"No external dependencies"
-		],
-		"maxLines": 60
-	},
-	{
-		"name": "base32",
-		"description": "Base32 encoding and decoding (RFC 4648).",
-		"requirements": [
-			"encode(input: Uint8Array | string) -> string",
-			"decode(input: string) -> Uint8Array",
-			"Support standard alphabet (A-Z 2-7) and hex alphabet",
-			"Proper padding with '='",
-			"Throw on invalid input characters"
-		],
-		"maxLines": 100
-	},
-	{
-		"name": "hex-codec",
-		"description": "Efficient hex encoding and decoding for binary data.",
-		"requirements": [
-			"encode(input: Uint8Array | string) -> string (lowercase hex)",
-			"decode(hex: string) -> Uint8Array",
-			"toHex(num: number, padTo?: number) -> string",
-			"fromHex(hex: string) -> number",
-			"Validate input and throw descriptive errors"
 		],
 		"maxLines": 60
 	},
@@ -1847,17 +1692,6 @@
 		"maxLines": 150
 	},
 	{
-		"name": "plural-rules",
-		"description": "Pluralization rules for major languages.",
-		"requirements": [
-			"plural(count, locale) returns 'zero'|'one'|'two'|'few'|'many'|'other'",
-			"Implements CLDR plural rules for en, fr, de, es, pt, ru, ar, zh",
-			"selectForm(count, forms, locale) picks correct string from forms array",
-			"Zero dependencies"
-		],
-		"maxLines": 120
-	},
-	{
 		"name": "rtl-detect",
 		"description": "Detect RTL text direction and apply bidi logic.",
 		"requirements": [
@@ -3382,18 +3216,6 @@
 		"maxLines": 80
 	},
 	{
-		"name": "glob-expand",
-		"description": "Expand glob patterns to file path lists (pure string matching).",
-		"requirements": [
-			"match(pattern, paths[]) returns matching paths",
-			"Supports * (any chars), ** (any segments), ? (one char)",
-			"negate(pattern, paths[]) returns non-matching paths",
-			"isGlob(str) detects if string contains glob chars",
-			"Zero dependencies, no filesystem access"
-		],
-		"maxLines": 100
-	},
-	{
 		"name": "mime-from-ext",
 		"description": "Look up MIME type from file extension.",
 		"requirements": [
@@ -4694,18 +4516,6 @@
 			"balanced(pool, query, k, tagKey): ensures category balance in selection"
 		],
 		"maxLines": 120
-	},
-	{
-		"name": "prompt-template-engine",
-		"description": "Variable-driven prompt template engine with partials, conditional blocks, and escaping.",
-		"requirements": [
-			"compile(template): returns function (vars) => string",
-			"Supports {{variable}}, {{#if condition}}, {{#each list}}, {{> partial}}",
-			"register(name, template): register named partial",
-			"validate(template, vars): returns missing variable names",
-			"lint(template): detects unclosed blocks and typos"
-		],
-		"maxLines": 150
 	},
 	{
 		"name": "llm-output-parser",

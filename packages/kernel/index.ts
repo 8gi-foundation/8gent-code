@@ -9,7 +9,33 @@
  */
 
 export { TrainingProxy, type ProxyConfig, type ProxyStatus } from "./proxy";
-export { JudgeScorer, type JudgeConfig, type ScoreRecord } from "./judge";
+export {
+	JudgeScorer,
+	DEFAULT_CRITERIA_WEIGHTS,
+	type JudgeConfig,
+	type ScoreRecord,
+	type ScoringCriteria,
+} from "./judge";
+export {
+	LocalTurnScorer,
+	LocalFirstScorer,
+	LocalJudgeUnavailableError,
+	buildCriterionRubric,
+	CRITERIA_ORDER,
+	type TurnScorer,
+	type CriterionName,
+	type VerdictJudge,
+	type LocalTurnScorerConfig,
+	type LocalFirstScorerConfig,
+} from "./local-scorer";
+export {
+	loadScoreHistory,
+	appendScoreRecord,
+	scoreTrend,
+	DEFAULT_HISTORY_PATH,
+	type ScoreHistory,
+	type JudgeSource,
+} from "./score-history";
 export {
 	TrainingOrchestrator,
 	type TrainingConfig,
@@ -71,3 +97,22 @@ export {
 	type BdhExportResult,
 	type BdhCorpusRow,
 } from "./bdh-export";
+export {
+	TraceCapture,
+	type ToolStep,
+	type Trajectory,
+	type FinalizeTurnInput,
+} from "./trace-capture";
+export {
+	LessonCollector,
+	parseLiveDemoLedger,
+	parseSelfHealReport,
+	liveDemoToLessons,
+	selfHealToLessons,
+	lessonsToGrpoPairs,
+	type LiveDemoEntry,
+	type SelfHealFinding,
+	type LessonExample,
+	type LessonSources,
+	type CollectResult,
+} from "./lesson-collector";

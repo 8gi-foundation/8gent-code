@@ -73,6 +73,8 @@ export {
 	toChatCompletionsEndpoint,
 	toOpenAiV1Base,
 	buildTextToolCall,
+	extractUsage,
+	type TextToolUsage,
 	toolDefToSpec,
 	toolDefsToSpecs,
 	toolDefsToTextTools,

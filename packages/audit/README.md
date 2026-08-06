@@ -58,6 +58,45 @@ bun run packages/audit/cli.ts stats
 
 Read-only.
 
+## Tool-call decision chain (NemoClaw v2, #2756 step 3)
+
+`DecisionAuditStore` (`decision-store.ts`) is a second, tamper-evident log:
+every tool-call policy decision made by
+`packages/permissions/policy-engine.ts::evaluateToolCall` - allow or deny,
+from the capability-manifest gate or the rule pipeline - is appended to a
+SHA-256 hash chain (`entry_hash = SHA-256(prev_hash + canonical payload)`).
+
+Properties:
+
+- **Append only.** No update/delete methods; the head read + insert run in
+  one transaction so linkage cannot race.
+- **Tamper-EVIDENT.** `verifyChain()` recomputes every hash: an edited
+  entry, an interior deletion, or a reorder is reported with the first
+  broken seq. Tail truncation is only detectable against an externally
+  anchored head - `head()` exists for exactly that anchoring.
+- **Never a credential store.** The permissions package scrubs secrets from
+  the request detail (`goal-secret-scrub`) BEFORE logging. This package
+  stays dependency-free of permissions to avoid a cycle.
+- **Fail-open by default, fail-closed on demand.** An unwritable trail is
+  warn-and-continue; with `AUDIT_STRICT=1` the policy engine denies any
+  tool call it cannot audit.
+
+```ts
+import { queryToolDecisions, verifyDecisionChain } from "@8gent/audit";
+
+const denies = queryToolDecisions({ decision: "deny", limit: 50 });
+const chain = verifyDecisionChain(); // { valid, entries, headHash | brokenAtSeq }
+```
+
+Shared store opens at `$EIGHT_DATA_DIR/audit/decisions.db` (or
+`~/.8gent/audit/decisions.db`).
+
+```bash
+bun run packages/audit/cli.ts decisions --tool run_command --decision deny
+bun run packages/audit/cli.ts decisions --session s_123 --limit 100
+bun run packages/audit/cli.ts verify   # exit 2 when the chain is broken
+```
+
 ## 8gentjr integration
 
 Two paths:

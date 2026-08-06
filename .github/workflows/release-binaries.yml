@@ -1,0 +1,156 @@
+# release-binaries.yml - Build self-contained per-OS binaries and installers
+# on a v* tag, and attach them to the GitHub Release.
+#
+# BILLING GATE: this workflow is correct and ready, but the 8gi-foundation org
+# GitHub Actions billing is currently disabled, so it will NOT run in CI until
+# billing is restored. Until then, a maintainer produces the same artifacts by
+# running the scripts locally per-OS:
+#   macOS:    bun run scripts/build-binaries.ts --only=bun-darwin-arm64,bun-darwin-x64
+#   Linux:    bun run scripts/build-binaries.ts --only=bun-linux-x64,bun-linux-arm64 && scripts/package-linux.sh
+#   Windows:  bun run scripts/build-binaries.ts --only=bun-windows-x64,bun-windows-x64-baseline
+#             pwsh scripts/package-windows.ps1
+# The existing npm publish flow lives in release.yml and is unchanged.
+#
+# SIGNING: every signing step below is opt-in and skip-if-absent. The secrets
+# it reads (Apple Developer ID, Azure Trusted Signing / Windows PFX, GPG) do
+# not exist in the repo yet - see SIGNING.md for what the maintainer must
+# procure. With no secrets set, unsigned artifacts are produced (they run, but
+# trigger OS trust prompts on other machines).
+
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual trigger for maintainers to smoke-test the matrix once billing is back.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            runner: macos-latest
+            targets: bun-darwin-arm64,bun-darwin-x64
+          - name: linux
+            runner: ubuntu-latest
+            targets: bun-linux-x64,bun-linux-arm64
+          - name: windows
+            runner: windows-latest
+            targets: bun-windows-x64,bun-windows-x64-baseline
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Compile binaries
+        run: bun run scripts/build-binaries.ts --only=${{ matrix.targets }}
+        env:
+          # Opt-in macOS codesigning. Absent identity => unsigned binary.
+          EIGHT_MAC_SIGN_IDENTITY: ${{ secrets.EIGHT_MAC_SIGN_IDENTITY }}
+
+      # ----- macOS packaging: notarize the raw binaries if creds exist -----
+      - name: Notarize macOS binaries (opt-in)
+        if: matrix.name == 'macos' && env.AC_API_KEY_ID != ''
+        env:
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER: ${{ secrets.AC_API_ISSUER }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+        run: |
+          echo "Notarization creds present - submitting darwin binaries."
+          echo "$AC_API_KEY_P8" > /tmp/ac_key.p8
+          for f in dist/bin/8gent-darwin-*; do
+            ditto -c -k --keepParent "$f" "$f.zip"
+            xcrun notarytool submit "$f.zip" \
+              --key /tmp/ac_key.p8 --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER" \
+              --wait
+          done
+          rm -f /tmp/ac_key.p8
+
+      # ----- Linux packaging: .deb + .rpm + .tar.gz via nfpm -----
+      - name: Install nfpm (linux)
+        if: matrix.name == 'linux'
+        run: |
+          curl -sfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb -o /tmp/nfpm.deb
+          sudo dpkg -i /tmp/nfpm.deb
+
+      - name: Package linux (deb + rpm + tar.gz)
+        if: matrix.name == 'linux'
+        env:
+          # Opt-in GPG signing of the deb/rpm. Absent key => unsigned.
+          EIGHT_GPG_KEY_ID: ${{ secrets.EIGHT_GPG_KEY_ID }}
+          EIGHT_GPG_KEY_FILE: ${{ secrets.EIGHT_GPG_KEY_FILE }}
+        run: bash scripts/package-linux.sh amd64 arm64
+
+      # ----- Windows packaging: NSIS installer (+ Authenticode if creds) -----
+      - name: Install NSIS (windows)
+        if: matrix.name == 'windows'
+        run: choco install nsis -y
+
+      - name: Package windows (NSIS installer)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        env:
+          # Opt-in Authenticode. Absent creds => unsigned installer.
+          EIGHT_AZURE_SIGN: ${{ secrets.EIGHT_AZURE_SIGN }}
+          EIGHT_AZURE_DLIB: ${{ secrets.EIGHT_AZURE_DLIB }}
+          EIGHT_AZURE_METADATA: ${{ secrets.EIGHT_AZURE_METADATA }}
+          EIGHT_WIN_PFX: ${{ secrets.EIGHT_WIN_PFX }}
+          EIGHT_WIN_PFX_PASSWORD: ${{ secrets.EIGHT_WIN_PFX_PASSWORD }}
+        run: pwsh scripts/package-windows.ps1
+
+      # ----- Stage raw binaries into dist/installers for a single upload -----
+      - name: Stage raw binaries
+        shell: bash
+        run: |
+          mkdir -p dist/installers
+          cp dist/bin/* dist/installers/ 2>/dev/null || true
+          ls -la dist/installers/
+
+      - name: Upload artifacts to workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: 8gent-${{ matrix.name }}
+          path: dist/installers/*
+          if-no-files-found: error
+
+  release:
+    name: Attach to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten
+        run: |
+          mkdir -p upload
+          find artifacts -type f -exec cp {} upload/ \;
+          ls -la upload/
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: upload/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

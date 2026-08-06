@@ -12,38 +12,23 @@ import { describe, expect, test } from "bun:test";
 
 describe("uuid-v4", () => {
 
-  test("REQUIRES: generate______string_in_8_4_4_4_12_forma", () => {
-    // Requirement: generate() -> string in 8-4-4-4-12 format
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/uuid-v4.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: generate() -> string in 8-4-4-4-12 format
+  // NOT IMPLEMENTED - to implement: create packages/tools/uuid-v4.ts
+  test.todo("REQUIRES: generate______string_in_8_4_4_4_12_forma", () => {});
 
-  test("REQUIRES: generateShort______8_char_base62_ID", () => {
-    // Requirement: generateShort() -> 8-char base62 ID
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/uuid-v4.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: generateShort() -> 8-char base62 ID
+  // NOT IMPLEMENTED - to implement: create packages/tools/uuid-v4.ts
+  test.todo("REQUIRES: generateShort______8_char_base62_ID", () => {});
 
-  test("REQUIRES: isValid_str_____boolean", () => {
-    // Requirement: isValid(str) -> boolean
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/uuid-v4.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: isValid(str) -> boolean
+  // NOT IMPLEMENTED - to implement: create packages/tools/uuid-v4.ts
+  test.todo("REQUIRES: isValid_str_____boolean", () => {});
 
-  test("REQUIRES: Uses_crypto_getRandomValues_or_crypto_ra", () => {
-    // Requirement: Uses crypto.getRandomValues or crypto.randomBytes
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/uuid-v4.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: Uses crypto.getRandomValues or crypto.randomBytes
+  // NOT IMPLEMENTED - to implement: create packages/tools/uuid-v4.ts
+  test.todo("REQUIRES: Uses_crypto_getRandomValues_or_crypto_ra", () => {});
 
-  test("REQUIRES: No_external_dependencies", () => {
-    // Requirement: No external dependencies
-    // Status: NOT IMPLEMENTED
-    // To implement: create packages/tools/uuid-v4.ts
-    expect(true).toBe(false); // remove this line when implemented
-  });
+  // Requirement: No external dependencies
+  // NOT IMPLEMENTED - to implement: create packages/tools/uuid-v4.ts
+  test.todo("REQUIRES: No_external_dependencies", () => {});
 });

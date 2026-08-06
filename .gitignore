@@ -131,3 +131,6 @@ pipeline-output/
 benchmarks/autoresearch/arena/round-*/
 *-portfolio/
 celtic_hero_standalone.html
+
+# Linux packaging staging file (built by scripts/package-linux.sh)
+packaging/linux/staged-8gent

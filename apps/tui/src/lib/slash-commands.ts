@@ -41,6 +41,7 @@ export type SlashCommand =
 	| "pet"
 	| "export"
 	| "fork"
+	| "rewind"
 	| "branch"
 	| "cron"
 	| "deploy"
@@ -195,6 +196,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["f"],
 		description: "Fork conversation at current message",
 		usage: "/fork [label]",
+	},
+	{
+		name: "rewind",
+		aliases: ["rw"],
+		description: "Time-travel: rewind agent state to an earlier checkpoint",
+		usage: "/rewind [n|list]",
 	},
 	{
 		name: "branch",

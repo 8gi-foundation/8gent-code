@@ -70,6 +70,25 @@ export {
 	selectBestBackend,
 } from "./full-duplex-provider";
 export { MoshiMLXProvider } from "./backends/moshi-mlx";
+export {
+	type VoiceCommand,
+	type VoiceIntent,
+	parseVoiceCommand,
+	normalizeTranscript,
+	stripWakeWord,
+	VOICE_COMMAND_HELP,
+} from "./voice-grammar.js";
+export {
+	type LifecyclePhase,
+	type LifecycleEffect,
+	type LifecycleSignal,
+	type LifecycleState,
+	type LifecycleTransition,
+	initialLifecycleState,
+	reduceVoiceCommand,
+	reduceLifecycleSignal,
+	VoiceLifecycle,
+} from "./voice-lifecycle.js";
 
 /**
  * Main Voice Engine — orchestrates recording, transcription, and events.

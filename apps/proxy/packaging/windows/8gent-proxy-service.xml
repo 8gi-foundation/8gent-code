@@ -1,0 +1,25 @@
+<!--
+  WinSW service wrapper for the 8gent Model Proxy on Windows.
+  https://github.com/winsw/winsw
+
+  The release workflow downloads WinSW.exe, renames it to
+  8gent-proxy-service.exe, and places it next to this XML. Running
+  `8gent-proxy-service.exe install` registers the proxy as a Windows service
+  that starts on boot and restarts on failure. The NSIS installer does this
+  automatically when invoked with /SERVICE.
+-->
+<service>
+  <id>8gent-proxy</id>
+  <name>8gent Model Proxy</name>
+  <description>OpenAI-compatible localhost gateway over the 8gent adaptive router.</description>
+  <executable>%BASE%\8gent-proxy.exe</executable>
+  <!-- Loopback-only by default. Change here to expose on a LAN deliberately. -->
+  <env name="PROXY_HOST" value="127.0.0.1" />
+  <env name="PROXY_PORT" value="8787" />
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>4</keepFiles>
+  </log>
+  <onfailure action="restart" delay="3 sec" />
+  <startmode>Automatic</startmode>
+</service>

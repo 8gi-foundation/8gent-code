@@ -84,6 +84,39 @@ type ChatMessage = {
 	content: string;
 };
 
+/** Real token usage reported by the endpoint for one completion. */
+export type TextToolUsage = {
+	promptTokens: number;
+	completionTokens: number;
+	totalTokens: number;
+};
+
+/**
+ * Extract REAL usage from an OpenAI-compatible completion response (#2805).
+ * Both ollama and LM Studio report `usage.{prompt,completion,total}_tokens` on
+ * /v1/chat/completions. Returns null - never invented numbers - when the
+ * response omits usage or the fields are not finite numbers. When `total` is
+ * absent but both parts are real, the total is their sum (arithmetic on real
+ * numbers, not fabrication).
+ */
+export function extractUsage(data: unknown): TextToolUsage | null {
+	const u = (data as { usage?: unknown } | null)?.usage;
+	if (typeof u !== "object" || u === null) return null;
+	const rec = u as Record<string, unknown>;
+	const num = (v: unknown): number | null =>
+		typeof v === "number" && Number.isFinite(v) ? v : null;
+	const prompt = num(rec.prompt_tokens);
+	const completion = num(rec.completion_tokens);
+	const total = num(rec.total_tokens);
+	if (total !== null) {
+		return { promptTokens: prompt ?? 0, completionTokens: completion ?? 0, totalTokens: total };
+	}
+	if (prompt !== null && completion !== null) {
+		return { promptTokens: prompt, completionTokens: completion, totalTokens: prompt + completion };
+	}
+	return null;
+}
+
 /**
  * Build a `call` function for runTextToolAgent that hits a local provider's
  * OpenAI-compatible /v1/chat/completions endpoint. Sends NO `tools` field so a
@@ -108,6 +141,11 @@ export function buildTextToolCall(opts: {
 	baseUrl?: string;
 	temperature?: number;
 	signal?: AbortSignal;
+	/**
+	 * Fired once per completed call with the REAL usage the endpoint reported
+	 * (#2805). Never fired when the endpoint omits usage - no fabricated tokens.
+	 */
+	onUsage?: (usage: TextToolUsage) => void;
 }): (messages: ChatMessage[]) => Promise<string> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
@@ -132,7 +170,12 @@ export function buildTextToolCall(opts: {
 		}
 		const data = (await res.json()) as {
 			choices?: Array<{ message?: { content?: unknown } }>;
+			usage?: unknown;
 		};
+		if (opts.onUsage) {
+			const usage = extractUsage(data);
+			if (usage) opts.onUsage(usage);
+		}
 		const content = data?.choices?.[0]?.message?.content;
 		return typeof content === "string" ? content : "";
 	};

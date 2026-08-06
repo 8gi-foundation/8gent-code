@@ -4,6 +4,7 @@
 
 import { generateText } from "ai";
 import { createModel } from "../../ai/providers.ts";
+import { render } from "../../tools/prompt-template.ts";
 import { AGENT_MAP } from "./agents.ts";
 import type { AgentOutput, BuildOptions, BusinessBlueprint } from "./types.ts";
 
@@ -36,7 +37,7 @@ async function runAgent(
 
 	onProgress?.(phase ?? 0, agentId, "start");
 
-	const prompt = def.promptTemplate.replace("{{idea}}", idea).replace("{{blueprint}}", blueprint);
+	const prompt = render(def.promptTemplate, { idea, blueprint }, { onMissing: "throw" });
 
 	const { text } = await generateText({ model, prompt, maxTokens });
 

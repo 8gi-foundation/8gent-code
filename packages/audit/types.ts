@@ -74,3 +74,60 @@ export interface QueryCapabilityOptions {
 	until?: number;
 	limit?: number;
 }
+
+// ============================================
+// Tool-call decision audit (issue #2756 step 3)
+// ============================================
+
+export type DecisionOutcome = "allow" | "deny";
+
+/** Mirrors CapabilityRequest["kind"] in packages/permissions. */
+export type DecisionRequestKind = "fs_read" | "fs_write" | "network" | "exec";
+
+/** Which gate produced the final decision. */
+export type DecisionGate = "capability-manifest" | "policy-rules";
+
+export interface LogDecisionInput {
+	tool: string;
+	/** Agent id when known, otherwise a stable role like "agent". */
+	actor: string;
+	requestKind: DecisionRequestKind;
+	/** Path, URL, or command - SECRET-SCRUBBED BY THE CALLER before logging. */
+	requestDetail: string;
+	decision: DecisionOutcome;
+	gate: DecisionGate;
+	reason: string;
+	sessionId?: string | null;
+}
+
+export interface DecisionEvent {
+	/** Monotonic chain position, 1-based. */
+	seq: number;
+	createdAt: number;
+	sessionId: string | null;
+	actor: string;
+	tool: string;
+	requestKind: DecisionRequestKind;
+	requestDetail: string;
+	decision: DecisionOutcome;
+	gate: DecisionGate;
+	reason: string;
+	/** entry_hash of the previous entry (GENESIS_HASH for seq 1). */
+	prevHash: string;
+	/** SHA-256 over prevHash + the canonical payload of this entry. */
+	entryHash: string;
+}
+
+export interface QueryDecisionOptions {
+	tool?: string;
+	sessionId?: string;
+	decision?: DecisionOutcome;
+	actor?: string;
+	since?: number;
+	until?: number;
+	limit?: number;
+}
+
+export type ChainVerification =
+	| { valid: true; entries: number; headHash: string }
+	| { valid: false; entries: number; brokenAtSeq: number; reason: string };

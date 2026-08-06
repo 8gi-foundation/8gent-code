@@ -8,6 +8,7 @@
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
 import { TableStore, installTablePolicies } from "../table/index";
+import { handleHarnessRoute } from "../harness/http";
 import type { AgentPool } from "./agent-pool";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
 import type {
@@ -40,6 +41,11 @@ import {
 	handleStoreOpen,
 } from "./routes/store/index";
 import { bindParticipant, handleTableFrame, isTableFrame } from "./table-routes";
+import {
+	type TimeTravelInbound,
+	type TimeTravelOutbound,
+	handleTimeTravel,
+} from "./timetravel-verbs";
 
 export interface GatewayConfig {
 	port: number;
@@ -91,7 +97,8 @@ type InboundMessage =
 	| { type: "cron:remove"; jobId: string }
 	| { type: "health" }
 	| { type: "approval:response"; requestId: string; approved: boolean }
-	| { type: "ping" };
+	| { type: "ping" }
+	| TimeTravelInbound;
 
 type OutboundMessage =
 	| { type: "auth:ok" }
@@ -105,7 +112,8 @@ type OutboundMessage =
 	| { type: "health"; data: unknown }
 	| { type: "event"; event: EventName; payload: unknown }
 	| { type: "error"; message: string }
-	| { type: "pong" };
+	| { type: "pong" }
+	| TimeTravelOutbound;
 
 const clients = new Map<any, ClientState>();
 let nextClientId = 0;
@@ -372,6 +380,28 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			break;
 		}
 
+		case "timetravel:list":
+		case "timetravel:rewind":
+		case "timetravel:fork": {
+			// Session time-travel verbs (#2757 step 2): list checkpoints,
+			// rewind the live agent, or fork a new session from a checkpoint.
+			const out = handleTimeTravel(msg, {
+				pool,
+				activeSessionId: state.sessionId,
+				channel: state.channel,
+			});
+			if (out.type === "timetravel:forked") {
+				// Bind this client to the fork so its next prompt continues there.
+				state.sessionId = out.sessionId;
+				bus.emit("session:start", {
+					sessionId: out.sessionId,
+					channel: state.channel,
+				});
+			}
+			send(ws, out);
+			break;
+		}
+
 		case "approval:response": {
 			// Route approval decision back through the event bus
 			bus.emit("approval:required", {
@@ -548,6 +578,13 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			if (url.pathname === "/ops/agent-pool/status") {
 				return Response.json(config.pool.getStatus());
 			}
+
+			// Meta-harness surface (part of #2797): GET /harnesses,
+			// POST /harness/run, GET /harness/tasks (SSE). Local-first:
+			// the default backend is 8gent-local. Returns null for
+			// non-harness paths so everything below stays untouched.
+			const harnessResponse = handleHarnessRoute(req, url);
+			if (harnessResponse) return harnessResponse;
 
 			// Access audit log endpoint (DPIA G7). POST-only, metadata only.
 			if (url.pathname === "/audit/access" && req.method === "POST") {

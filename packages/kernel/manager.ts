@@ -7,10 +7,17 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { DEFAULT_HEDGE_CONFIG, HedgeExecutor, type HedgeConfig } from "./hedge-executor";
+import { DEFAULT_HEDGE_CONFIG, type HedgeConfig, HedgeExecutor } from "./hedge-executor";
 import type { ScoreRecord } from "./judge";
+import {
+	type CollectResult,
+	LessonCollector,
+	type LessonExample,
+	type LessonSources,
+} from "./lesson-collector";
 import { type LoopStatus, type ProductionConfig, ProductionLoop } from "./loop";
 import { type CollectorStats, PersonalCollector, type TrainingPair } from "./personal-collector";
+import { type ToolStep, TraceCapture, type Trajectory } from "./trace-capture";
 import type { CheckpointInfo } from "./training";
 
 export interface KernelConfig {
@@ -34,6 +41,24 @@ export interface KernelConfig {
 	 * candidates when `hedge.enabled` is true.
 	 */
 	hedge: Partial<HedgeConfig>;
+	/**
+	 * Capture tool-call trajectories from real sessions as training signal
+	 * (#2752 step 1). Opt-in, default OFF, local-only, PII-scrubbed at
+	 * capture. Like hedge, it is independent of the training `enabled` flag -
+	 * trajectories can accumulate locally with training fully off.
+	 */
+	traceCapture: boolean;
+	/**
+	 * Feed the LiveDemo ledger + selfheal report findings into the kernel as
+	 * labeled negative/positive examples (#2752 step 2). Opt-in, default OFF,
+	 * local-only, PII-scrubbed at collection. Like hedge and traceCapture, it
+	 * is independent of the training `enabled` flag.
+	 */
+	lessonFeeds: boolean;
+	/** Override lesson source paths (tests; defaults live under ~/.8gent) */
+	lessonSources: LessonSources;
+	/** Project root for local kernel storage (default: process.cwd()) */
+	projectRoot: string;
 }
 
 const DEFAULT_KERNEL_CONFIG: KernelConfig = {
@@ -42,6 +67,10 @@ const DEFAULT_KERNEL_CONFIG: KernelConfig = {
 	personalLoraPath: "~/.8gent/personal-lora/",
 	production: {},
 	hedge: { enabled: false },
+	traceCapture: false,
+	lessonFeeds: false,
+	lessonSources: {},
+	projectRoot: process.cwd(),
 };
 
 export class KernelManager {
@@ -50,11 +79,19 @@ export class KernelManager {
 	private userId: string | null = null;
 	private collector: PersonalCollector;
 	private hedgeExecutor: HedgeExecutor;
+	private tracer: TraceCapture;
+	private lessonCollector: LessonCollector;
 
 	constructor(config: Partial<KernelConfig> = {}) {
 		this.config = { ...DEFAULT_KERNEL_CONFIG, ...config };
 		this.collector = new PersonalCollector();
 		this.hedgeExecutor = new HedgeExecutor({ ...DEFAULT_HEDGE_CONFIG, ...this.config.hedge });
+		this.tracer = new TraceCapture(this.config.projectRoot, this.config.traceCapture);
+		this.lessonCollector = new LessonCollector(
+			this.config.projectRoot,
+			this.config.lessonFeeds,
+			this.config.lessonSources,
+		);
 	}
 
 	/**
@@ -78,6 +115,11 @@ export class KernelManager {
 				},
 				// Hedge stays OFF unless training_proxy.hedge.enabled is explicitly true.
 				hedge: { enabled: mc.hedge?.enabled === true, ...(mc.hedge ?? {}) },
+				// Trace capture stays OFF unless explicitly opted in.
+				traceCapture: mc.traceCapture === true,
+				// Lesson feeds stay OFF unless explicitly opted in.
+				lessonFeeds: mc.lessonFeeds === true,
+				projectRoot,
 			});
 		} catch {
 			return new KernelManager();
@@ -173,8 +215,21 @@ export class KernelManager {
 	}
 
 	/**
+	 * Buffer one tool step for the current turn's trajectory (#2752 step 1).
+	 * No-op unless trace capture is opted in. Cheap enough for the tool loop.
+	 */
+	recordToolStep(step: ToolStep): void {
+		this.tracer.recordToolStep(step);
+	}
+
+	/**
 	 * Collect a session trace for personal LoRA training.
 	 * Pairs are quality-filtered before storage.
+	 *
+	 * When trace capture is opted in, this also finalizes the turn's tool-call
+	 * trajectory: scrubbed (secrets redacted, PII anonymized, dropped entirely
+	 * if anything survives) and persisted to local JSONL. Runs before the
+	 * userId gate because trajectories are session-scoped, not user-scoped.
 	 */
 	collectSessionTrace(
 		sessionId: string,
@@ -185,9 +240,26 @@ export class KernelManager {
 			model?: string;
 			toolCallsSucceeded?: boolean;
 			userCorrected?: boolean;
+			turnIndex?: number;
 		},
 	): boolean {
+		const trajectory = this.tracer.finalizeTurn({
+			sessionId,
+			turnIndex: options?.turnIndex ?? 0,
+			model: options?.model || "unknown",
+			prompt,
+			response,
+			score,
+		});
+
 		if (!this.userId) return false;
+
+		// A captured trajectory is ground truth for tool success: prefer its
+		// per-step record over the caller's coarse flag.
+		const toolCallsSucceeded =
+			trajectory !== null && trajectory.toolSteps.length > 0
+				? trajectory.allToolsSucceeded
+				: (options?.toolCallsSucceeded ?? true);
 
 		return this.collector.collect({
 			userId: this.userId,
@@ -196,9 +268,32 @@ export class KernelManager {
 			response,
 			score,
 			model: options?.model || "unknown",
-			toolCallsSucceeded: options?.toolCallsSucceeded ?? true,
+			toolCallsSucceeded,
 			userCorrected: options?.userCorrected ?? false,
 		});
+	}
+
+	/**
+	 * Read captured tool-call trajectories from local storage.
+	 */
+	getTrajectories(): Trajectory[] {
+		return this.tracer.readTrajectories();
+	}
+
+	/**
+	 * Feed the LiveDemo ledger + selfheal reports into local training storage
+	 * as labeled negative/positive examples (#2752 step 2). No-op (all zeros)
+	 * unless lesson feeds are opted in.
+	 */
+	collectLessons(): CollectResult {
+		return this.lessonCollector.collect();
+	}
+
+	/**
+	 * Read collected lesson examples from local storage.
+	 */
+	getLessons(): LessonExample[] {
+		return this.lessonCollector.readLessons();
 	}
 
 	/**
@@ -244,5 +339,20 @@ export class KernelManager {
 	 */
 	get isHedgeEnabled(): boolean {
 		return this.hedgeExecutor.enabled;
+	}
+
+	/**
+	 * Whether tool-call trajectory capture is opted in. Default false.
+	 */
+	get isTraceCaptureEnabled(): boolean {
+		return this.tracer.enabled;
+	}
+
+	/**
+	 * Whether lesson feeds (LiveDemo ledger + selfheal reports) are opted in.
+	 * Default false.
+	 */
+	get isLessonFeedsEnabled(): boolean {
+		return this.lessonCollector.enabled;
 	}
 }

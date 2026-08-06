@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { slugify } from "../tools/slugify.js";
 import {
 	APP_CAPABILITIES,
 	type AppCapability,
@@ -46,15 +47,6 @@ const DEFAULT_DESCRIPTION_PREFIX = "Personal mini-app";
 
 export function defaultAppsRoot(): string {
 	return join(homedir(), ".8gent", "apps");
-}
-
-function slugify(name: string): string {
-	return name
-		.toLowerCase()
-		.trim()
-		.replace(/[^a-z0-9-]+/g, "-")
-		.replace(/-+/g, "-")
-		.replace(/^-|-$/g, "");
 }
 
 function buildManifest(input: CreateAppInput): {

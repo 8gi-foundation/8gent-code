@@ -70,3 +70,9 @@ export {
 	RateLimiter,
 	type RateLimitConfig,
 } from "./rate-limiter";
+
+// Canonical LRU cache
+export {
+	LruCache,
+	type LruCacheOptions,
+} from "./lru-cache";
