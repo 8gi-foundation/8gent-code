@@ -112,6 +112,30 @@ export const MODELS: ModelEntry[] = [
 	},
 ];
 
+/**
+ * Providers whose inference runs ON-BOX (sovereign / local). A Table session
+ * processes UNTRUSTED channel text, so it must only ever resolve to one of
+ * these — otherwise that text would egress to a cloud endpoint. Cloud
+ * providers (openrouter, deepseek, and the other opt-in API keys) are
+ * deliberately absent.
+ *
+ * Note: "8gent" is listed because the 8gent provider serves the local model
+ * over the loopback ollama server today; if it is ever pointed off-box this
+ * set is the single place to revisit.
+ */
+export const LOCAL_PROVIDERS: ReadonlySet<string> = new Set([
+	"8gent",
+	"ollama",
+	"lmstudio",
+	"apfel",
+	"apple-foundation",
+]);
+
+/** True when `name` is an on-box provider/runtime (see LOCAL_PROVIDERS). */
+export function isLocalProvider(name: string): boolean {
+	return LOCAL_PROVIDERS.has(name);
+}
+
 export function getModel(id: string): ModelEntry | undefined {
 	return MODELS.find((m) => m.id === id);
 }

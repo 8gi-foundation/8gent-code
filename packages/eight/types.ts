@@ -106,10 +106,25 @@ export interface AgentConfig {
 	maxTurns?: number;
 	workingDirectory?: string;
 	apiKey?: string;
+	/**
+	 * Optional explicit base URL for the LLM endpoint. Threaded through
+	 * `createClient()` to the HTTP clients that accept one (ollama, lmstudio,
+	 * apfel). Lets one host run several local backends on distinct ports and
+	 * pin a specific agent/officer to one of them. Ignored by clients that do
+	 * not speak HTTP (apple-foundation spawns a subprocess bridge, not a URL).
+	 */
+	baseUrl?: string;
 	/** Real-time event callbacks for UI integration */
 	events?: AgentEventCallbacks;
 	/** Load all tools upfront instead of deferred loading (default: false) */
 	allTools?: boolean;
+	/**
+	 * Restricted policy scope this agent gates tool calls under. When set, the
+	 * ToolExecutor uses it as the agentId passed to ToolG8.gate(), so any
+	 * deny-by-default rules installed for that scope (e.g. "__table__",
+	 * "__spawned__") apply to every tool call. Defaults to "primary".
+	 */
+	agentScope?: string;
 	/**
 	 * Whether this agent runs unattended (autonomous engine, infinite mode,
 	 * heartbeat/improvement loops). When true, destructive tools are gated by the

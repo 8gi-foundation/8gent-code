@@ -739,28 +739,52 @@ Maintain a tone that is sophisticated yet approachable — like a well-dressed e
 
 		// ── Law 2 (issue #2747): only tool-capable models do tool-work ──────
 		// This turn has tools in play. Verify (once, cached) that the pinned
-		// local model actually accepts a `tools` payload; a model that 400s the
-		// probe (broken jinja chat template, e.g. gemma missing
+		// local model actually accepts a NATIVE `tools` payload; a model that
+		// 400s the probe (broken jinja chat template, e.g. gemma missing
 		// format_type_argument) fabricates instead of executing, so the agentic
 		// turn is routed to a model that can act - preferring the operator's
 		// ~/.8gent/providers.json pin (ornith).
+		//
+		// Table sessions are EXEMPT from this reroute. We are already inside
+		// runTextToolChat precisely because this provider does not get the AI
+		// SDK's native tool loop (shouldUseTextTools gates on providerName ===
+		// lmstudio/ollama) - tool orchestration here is the harness's OWN
+		// text-protocol (fenced tool_call blocks parsed from plain text), which
+		// never sends a native `tools` payload at all. So probing NATIVE payload
+		// acceptance is the wrong question for this path, and silently acting on
+		// a "no" answer overrode a Table officer's explicitly configured
+		// model/persona (bound in agent-pool.createSession from
+		// packages/table/officers.ts / table-officers.json overrides) with
+		// whatever happened to be pinned in ~/.8gent/providers.json - defeating
+		// the entire point of "/officer <code> model <name>" per-officer config.
+		// Measured 2026-08-06: gemma-4-12b-coder-fable5-composer2.5-v1 (8TO/8PO/
+		// 8CO's configured model) 400s this probe every time (broken jinja
+		// template); ornith-1.0-9b (the providers.json pin) passes it - so every
+		// gemma-pinned officer was silently rerouted to ornith on its very first
+		// Table turn. A Table officer's tool surface is also a small, fixed,
+		// read-only text-tool set (read_file, list_files, get_outline,
+		// get_symbol, search_symbols, recall - see TABLE_SESSION_TOOLS above), so
+		// there is no genuine capability gap this gate protects against here.
+		const isTableSession = this.config.agentScope === "__table__";
 		let effectiveProvider = providerName;
 		let effectiveModel = providerModel;
-		try {
-			const resolution = await resolveToolCapableModel({
-				provider: providerName,
-				model: providerModel,
-				prefer: readPinnedActiveModel(),
-			});
-			if (resolution.switched) {
-				console.log(`[honesty] ${resolution.reason}`);
-				effectiveProvider = resolution.provider;
-				effectiveModel = resolution.model;
-				// Session self-correction: subsequent turns start on the capable model.
-				this.config.model = resolution.model;
+		if (!isTableSession) {
+			try {
+				const resolution = await resolveToolCapableModel({
+					provider: providerName,
+					model: providerModel,
+					prefer: readPinnedActiveModel(),
+				});
+				if (resolution.switched) {
+					console.log(`[honesty] ${resolution.reason}`);
+					effectiveProvider = resolution.provider;
+					effectiveModel = resolution.model;
+					// Session self-correction: subsequent turns start on the capable model.
+					this.config.model = resolution.model;
+				}
+			} catch {
+				// The capability gate is best-effort - it must never block a turn.
 			}
-		} catch {
-			// The capability gate is best-effort - it must never block a turn.
 		}
 
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
@@ -2237,6 +2261,16 @@ You are in a real-time voice conversation. The user is speaking to you; their wo
 
 	setModel(model: string): void {
 		this.config.model = model;
+	}
+
+	/**
+	 * The runtime/provider this agent's config is actually bound to right now.
+	 * Added alongside getModel() so callers (agent-pool telemetry) can report
+	 * the SESSION's real backend instead of the pool's default - see
+	 * agent-pool.ts chat()'s usage.recordWithAttribution call.
+	 */
+	getRuntime(): string {
+		return this.config.runtime;
 	}
 
 	getHistoryLength(): number {

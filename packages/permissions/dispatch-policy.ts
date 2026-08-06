@@ -37,6 +37,10 @@ export const CHANNEL_DEFAULT_CAPS: Record<DaemonChannel, DispatchCapability[]> =
 	discord: ["read", "write_basic"],
 	browser: ["read", "write_basic"],
 	delegation: ["read", "write_basic", "write_full"],
+	// Table is a local, in-daemon workspace channel, not a cross-surface dispatch
+	// target. It never registers as a dispatch surface, so it holds no dispatch
+	// capabilities (like `api`, scope is controlled at the Table layer itself).
+	table: [],
 };
 
 /** Capabilities that require second-factor approval on the originator. */

@@ -75,24 +75,33 @@ function runtimeForProvider(provider: ProviderName): AgentConfig["runtime"] {
  * Create the appropriate LLM client based on agent config
  */
 export function createClient(config: AgentConfig): LLMClient {
+	// `config.baseUrl` is threaded to every HTTP client that accepts one. Passing
+	// `undefined` is a no-op: each client falls back to its env/default base URL.
 	if (config.runtime === "openrouter") {
 		const apiKey = config.apiKey || process.env.OPENROUTER_API_KEY || "";
 		return new OpenRouterClient(config.model, apiKey);
 	}
 	if (config.runtime === "lmstudio") {
-		return new LMStudioClient(config.model);
+		// LMStudioClient appends "/v1/chat/completions" to baseUrl, so the base
+		// must NOT include a "/v1" suffix (e.g. "http://127.0.0.1:1234").
+		return new LMStudioClient(config.model, config.baseUrl);
 	}
 	if (config.runtime === "apple-foundation") {
+		// No baseUrl: this client spawns the apple-foundation-bridge subprocess
+		// and talks JSON-lines over stdio, not HTTP. A custom base URL cannot
+		// apply. (The 2nd arg is an optional bridge *binary path*, not a URL.)
 		return new AppleFoundationClient(config.model);
 	}
 	if (config.runtime === "apfel") {
-		return new ApfelClient(config.model);
+		// ApfelClient appends "/chat/completions", so baseUrl SHOULD include the
+		// "/v1" suffix (e.g. "http://127.0.0.1:11435/v1").
+		return new ApfelClient(config.model, config.baseUrl);
 	}
 	if (config.runtime === "deepseek") {
 		const apiKey = config.apiKey || process.env.DEEPSEEK_API_KEY || "";
 		return new DeepSeekClient(config.model, apiKey);
 	}
-	return new OllamaClient(config.model);
+	return new OllamaClient(config.model, config.baseUrl);
 }
 
 /**
