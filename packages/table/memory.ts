@@ -33,25 +33,74 @@ const KEEP_LINES = 40;
 const FACTS_HEADER = "## Facts";
 const LOG_HEADER = "## Recent exchanges";
 
-export function memoryPath(code: string): string {
-	return path.join(BASE(), `${code.toUpperCase()}.md`);
+/**
+ * Memory is partitioned per (officer, channel). A single file per officer leaked
+ * every channel's content into every other channel's prompt - an officer in a
+ * private room and in #general would carry the private room's notes into the
+ * public one. Membership is enforced on the read path, so this was the one
+ * remaining side channel; partitioning closes it.
+ *
+ * `channelId` is optional ONLY so existing callers keep compiling during the
+ * rollout; unpartitioned use falls back to a clearly-named shared file and
+ * should be migrated. Prefer always passing the channel.
+ */
+export function memoryPath(code: string, channelId?: string): string {
+	const dir = path.join(BASE(), code.toUpperCase());
+	const leaf = channelId ? `${safeLeaf(channelId)}.md` : "_shared.md";
+	return path.join(dir, leaf);
 }
 
-function ensureFile(code: string): string {
-	const p = memoryPath(code);
+/** A channel id is already opaque hex, but never let one escape its directory. */
+function safeLeaf(channelId: string): string {
+	return channelId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || "_unknown";
+}
+
+/**
+ * Move a pre-partition flat file out of the injection path. Its entries mix
+ * channels, so re-injecting it would reintroduce the leak; it is preserved on
+ * disk for forensics but never read back into a prompt.
+ */
+function migrateLegacyFlatFile(code: string): void {
+	const legacy = path.join(BASE(), `${code.toUpperCase()}.md`);
+	if (!fs.existsSync(legacy)) return;
+	try {
+		const dir = path.join(BASE(), code.toUpperCase());
+		fs.mkdirSync(dir, { recursive: true });
+		fs.renameSync(legacy, path.join(dir, "_legacy-flat-DO-NOT-INJECT.md"));
+	} catch {
+		/* best effort: a failed migration must never break a reply */
+	}
+}
+
+function ensureFile(code: string, channelId?: string): string {
+	migrateLegacyFlatFile(code);
+	const p = memoryPath(code, channelId);
 	if (!fs.existsSync(p)) {
 		fs.mkdirSync(path.dirname(p), { recursive: true });
 		fs.writeFileSync(
 			p,
-			`# ${code.toUpperCase()} memory\n\n${FACTS_HEADER}\n\n${LOG_HEADER}\n`,
+			`# ${code.toUpperCase()} memory${channelId ? ` - channel ${channelId}` : ""}\n\n${FACTS_HEADER}\n\n${LOG_HEADER}\n`,
 		);
 	}
 	return p;
 }
 
+/**
+ * Drop an officer's memory for one channel. Call when the officer is removed
+ * from that channel: leaving a room must not leave its notes behind.
+ */
+export function purgeChannelMemory(code: string, channelId: string): void {
+	try {
+		fs.rmSync(memoryPath(code, channelId), { force: true });
+	} catch {
+		/* best effort */
+	}
+}
+
 /** The officer's memory, capped for prompt injection (facts + newest log tail). */
-export function loadMemory(code: string): string {
-	const p = memoryPath(code);
+export function loadMemory(code: string, channelId?: string): string {
+	migrateLegacyFlatFile(code);
+	const p = memoryPath(code, channelId);
 	let raw: string;
 	try {
 		raw = fs.readFileSync(p, "utf8");
@@ -77,8 +126,9 @@ export function appendExchange(
 	from: string,
 	userText: string,
 	replyText: string,
+	channelId?: string,
 ): void {
-	const p = ensureFile(code);
+	const p = ensureFile(code, channelId);
 	const day = new Date().toISOString().slice(0, 10);
 	const clip = (s: string, n: number) => s.replace(/\s+/g, " ").trim().slice(0, n);
 	// 90 chars silently truncated the very facts a human asked to be remembered
@@ -89,14 +139,14 @@ export function appendExchange(
 	// it into ## Facts so it survives compaction. appendFact had zero callers, which
 	// made the whole two-tier design a no-op in practice.
 	if (/\b(remember|note) (this|that)\b|\bfor the record\b|\bdon't forget\b/i.test(userText)) {
-		appendFact(code, `${from} asked me to remember: ${clip(userText, 240)}`);
+		appendFact(code, `${from} asked me to remember: ${clip(userText, 240)}`, channelId);
 	}
 	compactIfNeeded(p);
 }
 
 /** Add a durable fact (preference, decision, standing context) to ## Facts. */
-export function appendFact(code: string, fact: string): void {
-	const p = ensureFile(code);
+export function appendFact(code: string, fact: string, channelId?: string): void {
+	const p = ensureFile(code, channelId);
 	const raw = fs.readFileSync(p, "utf8");
 	const day = new Date().toISOString().slice(0, 10);
 	const entry = `- ${day} ${fact.replace(/\s+/g, " ").trim().slice(0, 200)}\n`;
