@@ -40,6 +40,33 @@ export type OfficerProvider = "apfel" | "ollama" | "lmstudio";
  * package (ModuleNotFoundError: langfuse.decorators), not Block's Goose CLI. It
  * stays out until the real Goose CLI binary replaces it and its --help is
  * reverified per the same procedure used for pi/opencode/cursor-agent below.
+ *
+ * "cursor-agent" is STILL A SUPPORTED KIND but is deliberately NOT the default
+ * for any officer (it was 8DO's until 2026-08-06). Read this before rebinding
+ * anyone to it.
+ *
+ * The integration is fine. The AUTH is not, and that distinction is the whole
+ * point of this note. helm.py's KINDS entry, its --model flag in _KIND_OPTIONS,
+ * and the seed_arg shape were all verified against a real `cursor-agent --help`
+ * and none of that has rotted. What fails is the account: on the reference
+ * machine the binary resolves at ~/.local/bin/cursor-agent and then refuses all
+ * work with "Authentication required. Please run 'agent login' first, or set
+ * CURSOR_API_KEY environment variable." There is no CURSOR_API_KEY on the box
+ * and the login is an interactive OAuth flow, which a headless Helm worker in a
+ * detached tmux session cannot complete.
+ *
+ * THE TRAP: `cursor-agent status` prints " Login successful!" and "Logged in
+ * (unable to fetch user details)" EVEN WHEN NO WORK CAN RUN. Verified 2026-08-06
+ * - status reported success and `cursor-agent -p "..."` in the same shell,
+ * seconds later, returned the auth error above. Do not treat that status line,
+ * or discovery.ts's installed:true (which is existence-only, via shutil.which /
+ * PATH resolution and says nothing about credentials), as evidence the desk
+ * works. The only proof that counts is a real prompt returning real output.
+ *
+ * To put an officer back on it: set CURSOR_API_KEY in the worker environment or
+ * complete `cursor-agent login` as the user the relay runs as, then re-verify
+ * with an actual `cursor-agent -p` round-trip. Until then a binding here is a
+ * desk nobody can sit at.
  */
 export type HarnessKind =
 	| "claude"
@@ -209,9 +236,33 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Moira, the design officer. Guard the interaction and the feel; reduce friction, and reject anything that makes the user work harder than needed.",
-		// Cursor's agent CLI is the most interaction/UI-oriented of the installed
-		// set; fits the design officer's brief.
-		harness: { kind: "cursor-agent" },
+		// Was cursor-agent, chosen because it is the most interaction/UI-oriented
+		// CLI of the installed set. Rebound 2026-08-06: that binding was a desk
+		// nobody could sit at. cursor-agent is INSTALLED but cannot authenticate
+		// on this machine (see the HarnessKind note above), so every approved 8DO
+		// proposal died at a login gate instead of doing design work.
+		//
+		// Rebound to 8gent-local, not to the other two uninstalled-key harnesses,
+		// on measured evidence (2026-08-06, this machine):
+		//   - pi      : `pi --list-models` lists ONLY groq, and GROQ_API_KEY is
+		//               invalid (401 from api.groq.com). pi exposes no local
+		//               provider at all, and helm's _KIND_OPTIONS passes only
+		//               --model, never --provider/--api-key/a base URL, so pi
+		//               cannot be pointed at LM Studio through this binding.
+		//   - opencode: 0 stored credentials; falls back to the same invalid
+		//               GROQ key and auto-selects whisper-large-v3-turbo, a
+		//               SPEECH model, then errors "Invalid API Key".
+		//   - 8gent-local: verified working. `8gent run` returns a correct answer
+		//               driven by ~/.8gent/profile.json models.code =
+		//               lmstudio/ornith-1.0-9b at 127.0.0.1:1234.
+		//
+		// It is also the right seat for THIS officer, not merely the surviving
+		// one. Design is the highest-iteration brief on the board - Moira's job is
+		// re-running the same surface until the friction is gone - and
+		// 8gent-local is the only harness here that is free and local, so that
+		// iteration count costs nothing and leaks no product surface to a vendor.
+		// It is deliberately absent from CLOUD_BILLED_KINDS for that reason.
+		harness: { kind: "8gent-local" },
 	},
 });
 

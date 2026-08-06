@@ -87,6 +87,40 @@ describe("table officer roster", () => {
 		}
 	});
 
+	it("seats no officer on a harness that cannot authenticate on the reference machine", () => {
+		// A binding to an unauthenticated CLI is not a soft failure - it is a desk
+		// nobody can sit at, and every approved proposal for that officer dies at a
+		// login gate instead of doing work. 8DO sat on cursor-agent this way until
+		// 2026-08-06.
+		//
+		// cursor-agent remains a SUPPORTED KIND (VALID_HARNESS_KINDS still contains
+		// it, helm.py still spawns it, its --model flag is still real). The
+		// integration is fine; the credentials are the problem. So this asserts on
+		// the ROSTER, not on the union - the day a CURSOR_API_KEY exists in the
+		// worker environment, delete this test rather than weakening the union.
+		//
+		// Deliberately not a live probe: `cursor-agent status` lies (it prints
+		// "Login successful" while real prompts return "Authentication required"),
+		// so there is no cheap in-test check that would be trustworthy anyway.
+		const UNAUTHENTICATED_KINDS = new Set(["cursor-agent"]);
+		const stranded = listOfficers()
+			.filter((o) => UNAUTHENTICATED_KINDS.has(o.harness.kind))
+			.map((o) => `${o.code} -> ${o.harness.kind}`);
+		expect(stranded).toEqual([]);
+	});
+
+	it("seats the design officer on a free, local harness", () => {
+		// Design is the highest-iteration brief on the board, so 8DO's harness is
+		// the one where per-proposal cloud billing hurts most and where leaking the
+		// product surface to a vendor is least acceptable. Guard the property (free
+		// + local), not the specific kind, so a future local harness can take the
+		// seat without editing this assertion.
+		const FREE_LOCAL_KINDS = new Set(["8gent-local", "shell"]);
+		const moira = resolveOfficer("8DO");
+		expect(moira).toBeDefined();
+		expect(FREE_LOCAL_KINDS.has(moira!.harness.kind)).toBe(true);
+	});
+
 	it("uses the correct baseUrl convention per provider", () => {
 		// The conventions differ per client and getting one wrong yields a
 		// "undefined/chat/completions" style failure that is painful to trace, so
