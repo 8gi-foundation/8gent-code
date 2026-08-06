@@ -94,7 +94,10 @@ export function isAllowedCwd(cwd: string): boolean {
  * `cmd` runs to the end of the marker so pipes/quotes survive.
  */
 export function parseProposal(reply: string): HelmProposal | null {
-	const m = reply.match(/\[\[HELM\s+([^\]]+)\]\]/);
+	// Non-greedy up to the closing "]]", ALLOWING inner "]" - models close the
+	// bracket early ("kind=shel]cmd here]]") and a [^\]]+ class silently rejects
+	// every one of those.
+	const m = reply.match(/\[\[HELM\s+([\s\S]*?)\]\]/);
 	// Fallback: officers reliably write the command in a fenced ```bash block
 	// (every model does this), but only sometimes emit the marker. Rather than
 	// demand an exotic format from a 9-12B local model, treat a short shell block
@@ -102,19 +105,46 @@ export function parseProposal(reply: string): HelmProposal | null {
 	// and Helm still enforces its own boundary - the safety model is unchanged.
 	if (!m) return parseFencedCommand(reply);
 	const body = m[1];
-	const kind = (body.match(/\bkind=(\S+)/)?.[1] ?? "shell") as HelmKind;
-	const cwd = body.match(/\bcwd=(\S+)/)?.[1] ?? "~/8gent-code";
-	// Models naturally write cmd="git ..." - strip one layer of wrapping quotes.
-	const command = (body.match(/\bcmd=([\s\S]+)$/)?.[1]?.trim() ?? "")
-		.replace(/^(["'])([\s\S]*)\1$/, "$2")
-		.trim();
-	if (!KINDS.has(kind) || !command) return null;
+	// Kind is ADVISORY only: the daemon overrides it from the officer's bound
+	// harness before staging, so a truncated "kind=shel" must not reject the
+	// proposal. Observed live from gemma:
+	//     [[HELM kind=shel]cd /packages/table; grep "OFFICER" officers.ts]]
+	// - kind truncated, bracket closed early, no cmd= key at all. Rejecting that
+	// throws away a good proposal over punctuation.
+	const rawKind = body.match(/\bkind=([A-Za-z0-9-]+)/)?.[1] ?? "shell";
+	const kind = (KINDS.has(rawKind as HelmKind) ? rawKind : "shell") as HelmKind;
+	let cwd = body.match(/\bcwd=(\S+)/)?.[1] ?? "~/8gent-code";
+
+	// Command: prefer an explicit cmd=, else take whatever follows the key/value
+	// preamble - that is where these models actually put it.
+	let command = body.match(/\bcmd=([\s\S]+)$/)?.[1]?.trim() ?? "";
+	if (!command) {
+		command = body
+			.replace(/\bkind=[A-Za-z0-9-]*\]?/, "")   // eat kind, and a stray "]"
+			.replace(/\bcwd=\S+/, "")
+			.replace(/^[\s\]:;,-]+/, "")
+			.trim();
+	}
+	command = command.replace(/^(["'])([\s\S]*)\1$/, "$2").replace(/\]+$/, "").trim();
+	if (!command) return null;
+	if (DESTRUCTIVE.test(command)) return null;
+
+	// A leading "cd <dir> &&" or "cd <dir>;" is how they express the directory
+	// far more often than cwd=, so lift it. A relative path here is a model
+	// mistake, not a real location - fall back to the default root and let the
+	// allowlist judge the result.
+	const cd = command.match(/^cd\s+(\S+)\s*(?:&&|;)\s*([\s\S]+)$/);
+	if (cd) {
+		const candidate = expandHome(cd[1]);
+		if (path.isAbsolute(candidate) && isAllowedCwd(candidate)) cwd = candidate;
+		command = cd[2].trim();
+	}
 	return { kind, cwd: expandHome(cwd), command };
 }
 
 /** Strip the marker so the channel sees a clean human-readable reply. */
 export function stripProposal(reply: string): string {
-	return reply.replace(/\[\[HELM\s+[^\]]+\]\]/g, "").trim();
+	return reply.replace(/\[\[HELM\s+[\s\S]*?\]\]/g, "").trim();
 }
 
 /** Commands we never auto-stage from a code block - they must be asked for explicitly. */
