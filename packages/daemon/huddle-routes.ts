@@ -39,6 +39,14 @@ import { loadMemory } from "../table/memory";
 import { resolveOfficer } from "../table/officer-config";
 import { OFFICERS, TABLE_AGENT_SCOPE, makePostToChannelTool, tableSessionId } from "../table/index";
 import type { ChannelBroadcast, TableRouteDeps } from "./table-routes";
+import {
+	type CloseResult,
+	closeStage,
+	ingestDictation,
+	noteStageReady,
+	openStage,
+	runTurnPipeline,
+} from "./huddle-stage";
 
 /** One live huddle: its FloorMachine plus the daemon deps it needs for IO. */
 class HuddleInstance {
@@ -50,14 +58,44 @@ class HuddleInstance {
 		this.machine = new FloorMachine(config, {
 			emit: (frame) => {
 				deps.broadcast(config.channelId, frame);
-				if (frame.type === "huddle:closed") openByChannel.delete(config.channelId);
+				if (frame.type === "huddle:closed") {
+					openByChannel.delete(config.channelId);
+					// Phase 1: the huddle bakes down to something James can watch.
+					// Wrapped because a failed bake must still close the huddle.
+					try {
+						const baked = closeStage(config.huddleId);
+						if (baked) void postCloser(deps, config.channelId, baked);
+					} catch (err) {
+						console.warn(`[huddle] bake failed: ${(err as Error).message}`);
+					}
+				}
 			},
 			prepareAgentTurn: (ctx) => runAgentTurn(deps, ctx),
 			postTurnText: (ctx, text) => {
 				void postHuddleTurn(deps, ctx, text);
+				// Phase 1: slide + narration for this turn. Deliberately not awaited
+				// - the FloorMachine's own timers own the turn's lifetime, and a slow
+				// TTS must never extend or stall the floor.
+				void runTurnPipeline(ctx.huddleId, ctx.turnId, ctx.holder, text, deps.broadcast);
 			},
 		});
 	}
+}
+
+/**
+ * The channel closer (spec 7.3 item 5): one final message naming the artifact,
+ * the turn count and the slide hashes, so the huddle's provenance is in the
+ * signed ledger and not only on disk.
+ */
+async function postCloser(deps: TableRouteDeps, channelId: string, baked: CloseResult): Promise<void> {
+	const lines = [
+		baked.videoPath ? `Huddle baked: ${baked.videoPath}` : `Huddle closed, but no video was produced: ${baked.videoError}`,
+		`${baked.turnCount} turns. Transcript: ${baked.transcriptPath}`,
+		baked.hashes.length ? `Slide hashes: ${baked.hashes.map((h) => h.slice(0, 12)).join(" ")}` : "",
+	].filter(Boolean);
+	const tool = makePostToChannelTool({ store: deps.store, agentId: CHAIR_AGENT_ID, broadcast: deps.broadcast });
+	const res = await tool.execute({ channelId, content: lines.join("\n") });
+	if (!res.ok) console.warn(`[huddle] closer post denied: ${res.error}`);
 }
 
 // In-memory registry. Floor state lives ONLY in the daemon (spec 3.4.6) - this
@@ -276,6 +314,9 @@ export function handleHuddleFrame(deps: TableRouteDeps, msg: Record<string, unkn
 			const instance = new HuddleInstance(config, deps);
 			openByChannel.set(channelId, instance);
 			byId.set(huddleId, instance);
+			// Phase 1: arm the stage BEFORE open() fires the first grant, so the
+			// very first turn already has somewhere to render into.
+			openStage(huddleId, channelId, topic);
 			// open() synchronously broadcasts huddle:opened to channel subscribers
 			// and fires the first grant. The requester also gets a directly
 			// correlated (request `id`-bearing) copy, since they may not yet be
@@ -343,13 +384,43 @@ export function handleHuddleFrame(deps: TableRouteDeps, msg: Record<string, unkn
 		}
 
 		case "huddle:stage_ready": {
-			// Forward-compat no-op ack. There is no stage in Phase 0; when Phase 1
-			// adds one, this becomes the sync gate described in spec section 5.1.
+			// THE SYNC GATE (spec 5.1 step 7). The stage tells us a specific turn's
+			// slide is composited; only then does that turn's voice start. No
+			// identity check: this frame cannot move the floor, cannot change any
+			// turn's content, and only ever ends a wait the daemon armed itself.
+			noteStageReady(String(msg.huddleId ?? ""), String(msg.turnId ?? ""));
 			return true;
 		}
 
 		case "huddle:dictate": {
-			sendErr("HUDDLE_NOT_IMPLEMENTED", "zen-gen dictation is a later phase (spec section 6), not built yet");
+			// ZEN-GEN (spec section 6). James takes the floor and dictates; his own
+			// recording is the playback audio and the slides are keyed to whisper's
+			// timestamps against it. Human only - this writes turns into the record.
+			if (!actor.startsWith("human:")) {
+				sendErr("HUDDLE_FORBIDDEN", "only a human may dictate");
+				return true;
+			}
+			const huddleId = String(msg.huddleId ?? "");
+			const instance = byId.get(huddleId);
+			if (!instance) {
+				sendErr("HUDDLE_NOT_FOUND", `unknown huddle "${huddleId}"`, { huddleId });
+				return true;
+			}
+			const wavPath = String(msg.wavPath ?? "");
+			const jsonPath = String(msg.whisperJsonPath ?? `${wavPath}.json`);
+			if (!wavPath) {
+				sendErr("HUDDLE_VALIDATION", "dictate requires wavPath", { huddleId });
+				return true;
+			}
+			// Presence evidence, and it keeps the chair resolving to the human who
+			// is demonstrably in the room dictating.
+			instance.machine.noteHumanTurnText(actor, "");
+			const count = ingestDictation(huddleId, actor, wavPath, jsonPath, deps.broadcast);
+			if (count === 0) {
+				sendErr("HUDDLE_VALIDATION", `no usable transcript at "${jsonPath}"`, { huddleId });
+				return true;
+			}
+			sendRaw({ type: "huddle:dictated", id, huddleId, slides: count });
 			return true;
 		}
 

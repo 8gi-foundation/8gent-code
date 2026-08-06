@@ -40,6 +40,7 @@ import {
 	handleStoreMessage,
 	handleStoreOpen,
 } from "./routes/store/index";
+import { handleStageHttp } from "./huddle-stage";
 import { bindParticipant, handleTableFrame, isTableFrame } from "./table-routes";
 import {
 	type TimeTravelInbound,
@@ -564,6 +565,16 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			}
 
 			if (server.upgrade(req)) return undefined;
+
+			// The huddle STAGE and its assets (spec section 8): the loopback page a
+			// Flow desktop pane points a WKWebView at once and never navigates
+			// again, plus that huddle's rendered slides and synthesised narration.
+			// Anchored to /huddle/<id>/{stage,slides,audio}, so it can never shadow
+			// a control endpoint; anything else falls straight through.
+			{
+				const staged = handleStageHttp(url, `ws://127.0.0.1:${server.port}`);
+				if (staged) return staged;
+			}
 
 			// Health check endpoint
 			if (url.pathname === "/health") {
