@@ -97,12 +97,13 @@ const OLLAMA_BASE = "http://127.0.0.1:11434"; // ollama appends /api/chat
 const LMSTUDIO_BASE = "http://127.0.0.1:1234"; // lmstudio appends /v1/chat/completions
 
 /**
- * The eight officers, keyed by code. Distribution across the four live local
- * backends (two officers each):
- *   apfel  (apple-foundationmodel)  -> 8EO AI James, 8PO Samantha
- *   ollama (llama3.2:3b)            -> 8CO Luis,     8MO Zara
+ * The eight officers, keyed by code. Distribution across the three live local
+ * backends is uneven - lmstudio carries six, the other two carry one each:
+ *   lmstudio gemma-4-12b-coder      -> 8PO Samantha, 8CO Luis,
+ *                                      8TO Rishi,    8DO Moira
  *   lmstudio ornith-1.0-9b (reason) -> 8GO Solomon,  8SO Karen
- *   lmstudio gemma-4-12b-coder      -> 8TO Rishi,    8DO Moira
+ *   ollama   (llama3.2:3b)          -> 8MO Zara
+ *   apfel    (apple-foundationmodel)-> 8EO AI James
  */
 export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 	"8EO": {
