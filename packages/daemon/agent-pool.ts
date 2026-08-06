@@ -6,6 +6,7 @@
  */
 
 import { Agent } from "../eight/agent";
+import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { bus } from "./events";
@@ -51,6 +52,7 @@ export const KNOWN_CHANNELS = [
 	"delegation",
 	"computer",
 	"browser",
+	"table",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 
@@ -62,6 +64,9 @@ const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
 /** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
 const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
 	computer: 10 * 60 * 1000, // 10 minutes
+	// Table agent sessions are cheap to rebuild (deterministic sessionId) and
+	// should not linger holding a scoped agent; reap them faster than the default.
+	table: 10 * 60 * 1000, // 10 minutes
 };
 
 /** Channels that should never be evicted by the idle reaper. */
@@ -125,7 +130,31 @@ export class AgentPool {
 	createSession(
 		sessionId: string,
 		channel: string,
-		overrides?: { maxTurns?: number; tenantId?: string; clerkId?: string },
+		overrides?: {
+			maxTurns?: number;
+			tenantId?: string;
+			clerkId?: string;
+			/**
+			 * Restricted policy scope this session's agent gates tool calls under
+			 * (e.g. "__table__"). When set, every tool call routes through ToolG8
+			 * with this id as the agentId, so the deny-by-default rules installed
+			 * for that scope apply. Defaults to the standard "primary" scope.
+			 */
+			agentScope?: string;
+			/**
+			 * Per-session backend routing. Lets a caller (e.g. a Table officer
+			 * pinned to a specific local model) override the pool defaults for
+			 * this one session. `runtime` is still subject to the F4 local-only
+			 * gate for Table sessions; a cloud runtime is downgraded to the safe
+			 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
+			 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
+			 * (and, via createClient, to the LLM client) when set.
+			 */
+			runtime?: AgentConfig["runtime"];
+			model?: string;
+			baseUrl?: string;
+			systemPrompt?: string;
+		},
 	): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
@@ -170,9 +199,44 @@ export class AgentPool {
 		// Delegation sessions get more tool turns than Telegram chat
 		const maxTurns = overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns);
 
+		// F4: Table sessions must run inference on a LOCAL runtime. A Table agent
+		// processes UNTRUSTED channel text; if the runtime is cloud, that text
+		// would egress off-box. Any LOCAL provider (8gent/ollama/lmstudio/apfel/
+		// apple-foundation - see LOCAL_PROVIDERS) is kept as-is, so an officer
+		// explicitly pinned to lmstudio/apfel/apple-foundation stays there. Only a
+		// CLOUD runtime is downgraded to the safe local default ("ollama"), unless
+		// the operator sets the explicit, logged consent flag.
+		//
+		// A per-session `overrides.runtime` (e.g. an officer's backend) takes
+		// precedence over the pool default before the gate is applied.
+		const isTableSession = channel === "table" || overrides?.agentScope === "__table__";
+		let runtime: AgentConfig["runtime"] = overrides?.runtime ?? this.config.runtime;
+		if (isTableSession && !LOCAL_PROVIDERS.has(runtime)) {
+			if (process.env.EIGHT_TABLE_CONSENT_CLOUD === "1") {
+				console.warn(
+					`[agent-pool] EIGHT_TABLE_CONSENT_CLOUD=1: session ${sessionId} permitted on cloud runtime "${runtime}" (logged consent) - untrusted channel text will egress off-box`,
+				);
+			} else {
+				console.warn(
+					`[agent-pool] table session ${sessionId}: forcing LOCAL runtime "ollama" (requested runtime "${runtime}" is not on-box) so untrusted channel text stays on-box; set EIGHT_TABLE_CONSENT_CLOUD=1 to override`,
+				);
+				runtime = "ollama";
+			}
+		}
+
+		// Per-session backend routing: an override pins this session to a specific
+		// local model / endpoint / persona; otherwise the pool defaults apply.
+		const model = overrides?.model ?? this.config.model;
+
 		const agentConfig: AgentConfig = {
-			model: this.config.model,
-			runtime: this.config.runtime,
+			model,
+			runtime,
+			// Optional explicit endpoint (e.g. an officer's local backend port).
+			// createClient() ignores it for clients that don't speak HTTP.
+			baseUrl: overrides?.baseUrl,
+			// Optional per-session persona (officer character prompt). Undefined
+			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
+			systemPrompt: overrides?.systemPrompt,
 			workingDirectory: this.config.workingDirectory,
 			apiKey: this.config.apiKey,
 			maxTurns,
@@ -182,6 +246,12 @@ export class AgentPool {
 			// discover_tools hop and silently drop memory writes ("I'll remember
 			// that" with no remember call). Capability beats token thrift here.
 			allTools: channel === "delegation",
+			// Table sessions bind under a restricted deny-by-default scope. Their
+			// agent's every tool call gates through ToolG8 as "__table__", so the
+			// installTablePolicies() rules block run_command/network/write_file etc.
+			// The agent produces only a reply; the gated post_to_channel write path
+			// is driven by the gateway. Other channels keep the default scope.
+			agentScope: overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined),
 			// Delegation runs UNATTENDED (the relay autonomy engine / missions
 			// dispatch through it with no human approving each tool). Mark it so the
 			// maker-checker gate enforces at the executor: branch pushes auto-approve
@@ -208,7 +278,7 @@ export class AgentPool {
 		});
 
 		console.log(
-			`[agent-pool] created session ${sessionId} (channel=${channel}, tenant=${tenantId}, model=${this.config.model})`,
+			`[agent-pool] created session ${sessionId} (channel=${channel}, tenant=${tenantId}, runtime=${runtime}, model=${model})`,
 		);
 	}
 
@@ -259,13 +329,23 @@ export class AgentPool {
 			const completionTokens = Math.ceil(response.length / 4);
 			// Wave 4 GATE: per-tenant attribution. Mirrors local budget AND
 			// emits an `llm` event for off-box shipping via Vector + Loki.
+			//
+			// provider/model come from THIS session's agent (entry.agent), not the
+			// pool's `this.config` default. A session created with a per-session
+			// override (e.g. a Table officer pinned to their own model/runtime via
+			// createSession's `overrides`) runs inference on that override - the
+			// pool default is only ever the fallback when no override was given
+			// (see createSession above). Reporting `this.config.*` here made every
+			// session's telemetry line lie: it always echoed the pool default
+			// (~/.8gent/profile.json's models.code), regardless of which backend
+			// actually served the reply.
 			usage.recordWithAttribution({
 				tenantId: entry.tenantId,
 				clerkId: entry.clerkId,
 				sessionId,
 				channel: entry.channel,
-				provider: this.config.runtime,
-				model: this.config.model,
+				provider: entry.agent.getRuntime(),
+				model: entry.agent.getModel(),
 				promptTokens,
 				completionTokens,
 				latencyMs: Date.now() - startMs,

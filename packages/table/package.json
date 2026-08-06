@@ -1,0 +1,38 @@
+{
+	"name": "@8gent/table",
+	"version": "0.17.3",
+	"private": true,
+	"type": "module",
+	"description": "8gent Table - sovereign human+agent workspace. Channels + members + messages on bun:sqlite + FTS5, every mutation appended to the signed goal ledger, ed25519 per-participant identity, ToolG8-gated agent posting.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		},
+		"./types": {
+			"import": "./types.ts",
+			"types": "./types.ts"
+		},
+		"./store": {
+			"import": "./store.ts",
+			"types": "./store.ts"
+		},
+		"./identity": {
+			"import": "./identity.ts",
+			"types": "./identity.ts"
+		},
+		"./wiring": {
+			"import": "./wiring.ts",
+			"types": "./wiring.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}

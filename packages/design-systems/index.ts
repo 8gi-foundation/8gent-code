@@ -109,3 +109,12 @@ export {
 
 // Seeding function
 export { seedDatabase } from "./seed";
+
+// Universal design context (one resolver for every generation surface)
+export {
+	resolveDesignContext,
+	designPromptBlock,
+	DesignContextUnavailable,
+	type DesignContext,
+	type DesignHint,
+} from "./context";

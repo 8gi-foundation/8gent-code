@@ -1,0 +1,459 @@
+/**
+ * Table -> Helm bridge: the path from "an officer proposes work" to "real work ran
+ * and here is the evidence", with a human approval in the middle.
+ *
+ * The safety model is unchanged and deliberately narrow:
+ *  - The OFFICER never executes and never self-authorises. It can only emit a
+ *    proposal marker as ordinary channel text through its existing gated post path.
+ *  - Only a HUMAN participant (human:*) can approve, by replying with the token.
+ *  - The relay bearer secret is read here, daemon-side, and never leaves the
+ *    process (never posted to a channel, never handed to a model).
+ *  - cwd is checked against the same allowlist Helm itself enforces (defence in
+ *    depth: Helm re-checks and is the real boundary).
+ *  - Approvals are single-use and expire.
+ *
+ * Evidence is labelled honestly: `verified` when the daemon watched the worker's
+ * output settle, `asserted` when we hit the timeout and are showing a raw tail.
+ * The same AgenticHonesty rule the officers follow applies to the bridge itself.
+ */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { resolveHarness } from "./harness-config";
+
+const HELM_BASE = process.env.GLASSES_RELAY || "http://127.0.0.1:7890";
+
+/** Worker kinds Helm can run. Kept in lockstep with helm.py's KINDS. */
+export type HelmKind = "shell" | "claude" | "codex" | "8gent-local" | "pi" | "cursor-agent" | "opencode";
+const KINDS = new Set<HelmKind>(["shell", "claude", "codex", "8gent-local", "pi", "cursor-agent", "opencode"]);
+
+/**
+ * Where work runs when the officer's guess is unusable. Itself allowlisted, so
+ * falling back here can never escape the boundary.
+ */
+export const DEFAULT_WORK_ROOT = path.join(os.homedir(), "8gent-code");
+
+/** Mirrors the relay's own cwd allowlist (helm.py _CWD_CANDIDATES). */
+const ALLOWED_CWD_ROOTS = [
+	"8gent-glasses", "8gent-worktrees", "8gent-code", "Foodstackai",
+	"Documents", "Desktop", "Downloads", "Projects", "code", "src",
+].map((d) => path.join(os.homedir(), d));
+
+export interface HelmProposal {
+	kind: HelmKind;
+	cwd: string;
+	/** A shell command, OR - when isTask - natural-language work for the harness. */
+	command: string;
+	/** True when `command` is a TASK for an agentic harness rather than a shell
+	 *  line. Kept distinct so the channel can say honestly which one it is. */
+	isTask?: boolean;
+	/** Model override for the bound harness's own --model flag, when the
+	 *  officer's harness names one. Carried through to /helm/spawn. */
+	model?: string;
+}
+
+export interface PendingApproval extends HelmProposal {
+	token: string;
+	channelId: string;
+	agentId: string;
+	createdAt: number;
+}
+
+/**
+ * Override a freshly-parsed proposal's kind/model with the PROPOSING OFFICER's
+ * bound execution harness. Called immediately after parseProposal(), before
+ * stagePending(), in table-routes.ts runMentionFlow. The model's own `kind=`
+ * text in the marker is deliberately IGNORED here (it is always "shell" in
+ * practice - the officer is never taught to name any other kind) in favour of
+ * a deterministic, code-owned binding: "agent proposes, code disposes."
+ *
+ * An officer code the daemon doesn't recognise leaves the parsed proposal
+ * unchanged (fail open to whatever the marker already said, which is always a
+ * safe, allowlisted `HelmKind` because parseProposal already validated it).
+ */
+export function bindOfficerHarness(officerCode: string, p: HelmProposal): HelmProposal {
+	const harness = resolveHarness(officerCode);
+	if (!harness) return p;
+	return { ...p, kind: harness.kind, model: harness.model };
+}
+
+/** Bearer secret, daemon-side only. Never logged, never posted. */
+function bearer(): string | null {
+	const env = process.env.PAIRING_SECRET;
+	if (env?.trim()) return env.trim();
+	try {
+		return fs.readFileSync(path.join(os.homedir(), ".8gent", "relay-pairing-secret"), "utf8").trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+function expandHome(p: string): string {
+	return p.startsWith("~") ? path.join(os.homedir(), p.slice(1).replace(/^\//, "")) : p;
+}
+
+/** True when cwd resolves inside an allowed root (no traversal escapes). */
+export function isAllowedCwd(cwd: string): boolean {
+	const abs = path.resolve(expandHome(cwd));
+	return ALLOWED_CWD_ROOTS.some((root) => abs === root || abs.startsWith(`${root}${path.sep}`));
+}
+
+/**
+ * Parse an officer proposal marker out of a reply. Format (one line):
+ *   [[HELM kind=shell cwd=~/8gent-code cmd=git branch --no-merged main | wc -l]]
+ * `cmd` runs to the end of the marker so pipes/quotes survive.
+ */
+export function parseProposal(reply: string): HelmProposal | null {
+	// A TASK is natural-language work handed to the officer's own agentic harness
+	// (claude / codex / cursor-agent), which is built for multi-step editing. It
+	// exists because asking a 9-12B model to author a correct shell one-liner is
+	// the wrong job for it: observed live, 8EO truncated mid-sed AND reached for
+	// `git checkout --orphan`, which would have discarded history. Stating intent
+	// is something a small model does reliably; authoring bash is not.
+	const task = reply.match(/\[\[TASK\s+([\s\S]*?)(?:\]\]|$)/);
+	if (task) {
+		const text = task[1].replace(/\]+$/, "").trim();
+		if (text && !DESTRUCTIVE.test(text)) {
+			return { kind: "shell", cwd: DEFAULT_WORK_ROOT, command: text, isTask: true };
+		}
+	}
+	// Non-greedy up to the closing "]]", ALLOWING inner "]" - models close the
+	// bracket early ("kind=shel]cmd here]]") and a [^\]]+ class silently rejects
+	// every one of those. `|$` also salvages a marker the model TRUNCATED before
+	// writing "]]", which is what a long command reliably causes.
+	const m = reply.match(/\[\[HELM\s+([\s\S]*?)(?:\]\]|$)/);
+	// Fallback: officers reliably write the command in a fenced ```bash block
+	// (every model does this), but only sometimes emit the marker. Rather than
+	// demand an exotic format from a 9-12B local model, treat a short shell block
+	// as the proposal. The human still approves, the cwd allowlist still applies,
+	// and Helm still enforces its own boundary - the safety model is unchanged.
+	if (!m) return parseFencedCommand(reply);
+	const body = m[1];
+	// Kind is ADVISORY only: the daemon overrides it from the officer's bound
+	// harness before staging, so a truncated "kind=shel" must not reject the
+	// proposal. Observed live from gemma:
+	//     [[HELM kind=shel]cd /packages/table; grep "OFFICER" officers.ts]]
+	// - kind truncated, bracket closed early, no cmd= key at all. Rejecting that
+	// throws away a good proposal over punctuation.
+	const rawKind = body.match(/\bkind=([A-Za-z0-9-]+)/)?.[1] ?? "shell";
+	const kind = (KINDS.has(rawKind as HelmKind) ? rawKind : "shell") as HelmKind;
+	let cwd = body.match(/\bcwd=(\S+)/)?.[1] ?? "~/8gent-code";
+
+	// Command: prefer an explicit cmd=, else take whatever follows the key/value
+	// preamble - that is where these models actually put it.
+	let command = body.match(/\bcmd=([\s\S]+)$/)?.[1]?.trim() ?? "";
+	if (!command) {
+		command = body
+			.replace(/\bkind=[A-Za-z0-9-]*\]?/, "")   // eat kind, and a stray "]"
+			.replace(/\bcwd=\S+/, "")
+			.replace(/^[\s\]:;,-]+/, "")
+			.trim();
+	}
+	command = command.replace(/^(["'])([\s\S]*)\1$/, "$2").replace(/\]+$/, "").trim();
+	if (!command) return null;
+	if (DESTRUCTIVE.test(command)) return null;
+
+	// A leading "cd <dir> &&" or "cd <dir>;" is how they express the directory
+	// far more often than cwd=, so lift it. A relative path here is a model
+	// mistake, not a real location - fall back to the default root and let the
+	// allowlist judge the result.
+	const cd = command.match(/^cd\s+(\S+)\s*(?:&&|;)\s*([\s\S]+)$/);
+	if (cd) {
+		const candidate = expandHome(cd[1]);
+		if (path.isAbsolute(candidate) && isAllowedCwd(candidate)) cwd = candidate;
+		command = cd[2].trim();
+	}
+	return { kind, cwd: expandHome(cwd), command };
+}
+
+/** Strip the marker so the channel sees a clean human-readable reply. */
+export function stripProposal(reply: string): string {
+	return reply
+		.replace(/\[\[HELM\s+[\s\S]*?(?:\]\]|$)/g, "")
+		.replace(/\[\[TASK\s+[\s\S]*?(?:\]\]|$)/g, "")
+		.trim();
+}
+
+/** Commands we never auto-stage from a code block - they must be asked for explicitly. */
+const DESTRUCTIVE = /\b(rm\s+-|git\s+push\s+.*--force|--force-with-lease|git\s+branch\s+-D|git\s+reset\s+--hard|dd\s+if=|mkfs|shutdown|reboot|killall|chmod\s+777|curl[^|]*\|\s*(ba)?sh)\b/i;
+
+/**
+ * Turn a short fenced shell block into a proposal. Deliberately conservative:
+ * only a 1-3 line bash/sh/shell block, no destructive verbs, and a `cd <dir> &&`
+ * prefix is lifted into cwd (which is then allowlist-checked by the caller).
+ */
+function parseFencedCommand(reply: string): HelmProposal | null {
+	const fence = reply.match(/```(?:bash|sh|shell|console)?\s*\n([\s\S]*?)```/);
+	if (!fence) return null;
+	const lines = fence[1].split("\n").map((l) => l.trim())
+		.filter((l) => l.length > 0 && !l.startsWith("#"));
+	if (lines.length === 0 || lines.length > 3) return null;
+	let command = lines.join(" && ").replace(/^\$\s*/, "");
+	if (DESTRUCTIVE.test(command)) return null;
+	// Lift a leading "cd <dir> &&" into cwd so the allowlist can judge it.
+	let cwd = path.join(os.homedir(), "8gent-code");
+	const cd = command.match(/^cd\s+(\S+)\s*&&\s*([\s\S]+)$/);
+	if (cd) {
+		cwd = expandHome(cd[1]);
+		command = cd[2].trim();
+	}
+	if (!command) return null;
+	return { kind: "shell", cwd, command };
+}
+
+// ── pending approvals ────────────────────────────────────────────────────────
+
+const PENDING = new Map<string, PendingApproval>();
+const TTL_MS = 15 * 60 * 1000;
+
+function newToken(): string {
+	return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+export function stagePending(p: HelmProposal, channelId: string, agentId: string): PendingApproval {
+	for (const [k, v] of PENDING) if (Date.now() - v.createdAt > TTL_MS) PENDING.delete(k);
+	let token = newToken();
+	while (PENDING.has(token)) token = newToken();
+	const entry: PendingApproval = { ...p, token, channelId, agentId, createdAt: Date.now() };
+	PENDING.set(token, entry);
+	return entry;
+}
+
+/** Consume an approval. Single-use; expired or unknown tokens return null. */
+export function takePending(token: string): PendingApproval | null {
+	const e = PENDING.get(token.toUpperCase());
+	if (!e) return null;
+	PENDING.delete(e.token);
+	if (Date.now() - e.createdAt > TTL_MS) return null;
+	return e;
+}
+
+/** Workers currently waiting on a human answer, keyed by reply token. */
+const AWAITING = new Map<string, { workerId: string; channelId: string; agentId: string; createdAt: number }>();
+
+export function stageAwaiting(workerId: string, channelId: string, agentId: string): string {
+	for (const [k, v] of AWAITING) if (Date.now() - v.createdAt > TTL_MS) AWAITING.delete(k);
+	let token = newToken();
+	while (AWAITING.has(token)) token = newToken();
+	AWAITING.set(token, { workerId, channelId, agentId, createdAt: Date.now() });
+	return token;
+}
+
+export function takeAwaiting(token: string) {
+	const e = AWAITING.get(token.toUpperCase());
+	if (!e) return null;
+	AWAITING.delete(token.toUpperCase());
+	return Date.now() - e.createdAt > TTL_MS ? null : e;
+}
+
+/** `/reply ABC123 <answer>` from a human answering a worker's question. */
+export function parseReply(content: string): { token: string; text: string } | null {
+	const m = content.trim().match(/^\/reply\s+([A-Za-z0-9]{4,12})\s+([\s\S]+)$/);
+	return m ? { token: m[1].toUpperCase(), text: m[2].trim() } : null;
+}
+
+/** `/approve ABC123` from a human. Returns the token or null. */
+export function parseApproval(content: string): string | null {
+	return content.trim().match(/^\/approve\s+([A-Za-z0-9]{4,12})\b/)?.[1]?.toUpperCase() ?? null;
+}
+
+// ── Helm HTTP (daemon-side) ──────────────────────────────────────────────────
+
+async function helm(method: "GET" | "POST", route: string, body?: unknown): Promise<{ status: number; json: any }> {
+	const headers: Record<string, string> = { "Content-Type": "application/json" };
+	const b = bearer();
+	if (b) headers.Authorization = `Bearer ${b}`;
+	const res = await fetch(`${HELM_BASE}${route}`, {
+		method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+	});
+	let json: any = null;
+	try { json = await res.json(); } catch { /* non-json body */ }
+	return { status: res.status, json };
+}
+
+export interface ExecutionResult {
+	ok: boolean;
+	label: "verified" | "asserted" | "failed" | "needs_input";
+	workerId?: string;
+	output: string;
+	detail?: string;
+}
+
+/**
+ * Run an approved proposal: spawn the worker, watch until its output settles,
+ * return the tail. `verified` = we watched it settle; `asserted` = we timed out
+ * and are showing raw output without claiming completion.
+ */
+export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: number }): Promise<ExecutionResult> {
+	if (!isAllowedCwd(p.cwd)) {
+		return { ok: false, label: "failed", output: "", detail: `cwd not allowed: ${p.cwd}` };
+	}
+	if (!bearer()) {
+		return { ok: false, label: "failed", output: "", detail: "no relay secret available daemon-side" };
+	}
+	const spawn = await helm("POST", "/helm/spawn", {
+		kind: p.kind,
+		cwd: p.cwd,
+		prompt: p.command,
+		...(p.model ? { model: p.model } : {}),
+		// Worker->officer attribution (opaque passthrough; Helm never interprets
+		// it, only displays it - same trust level as prompt_hash in its ledger).
+		meta: { officer: p.agentId.replace(/^agent:/, "") },
+	});
+	if (spawn.status !== 200 || !spawn.json?.id) {
+		return { ok: false, label: "failed", output: "", detail: `spawn failed (${spawn.status}): ${JSON.stringify(spawn.json).slice(0, 200)}` };
+	}
+	const id = String(spawn.json.id);
+	const timeout = opts?.timeoutMs ?? 90_000;
+	const started = Date.now();
+	return watchWorker(id, timeout);
+}
+
+/**
+ * Watch a live worker until it settles, asks a question, or times out.
+ *
+ * A worker that ASKS must not be killed. Observed live: an officer's claude
+ * harness pushed a branch, found the PR base did not exist, and stopped to ask
+ * which base to use - offering two sensible options rather than inventing one.
+ * That is exactly the behaviour we want, and the old loop killed it after two
+ * quiet reads, throwing away both the question and the running session. Now the
+ * worker stays alive, the question reaches the channel, and the human answers it
+ * with /reply. Helm's own `needs_input` state is the signal - no new heuristic.
+ */
+export async function watchWorker(id: string, timeout: number): Promise<ExecutionResult> {
+	const started = Date.now();
+	let lastOut = "";
+	let stableFor = 0;
+	while (Date.now() - started < timeout) {
+		await new Promise((r) => setTimeout(r, 5_000));
+
+		const fleet = await helm("GET", "/helm/workers");
+		const me = (fleet.json?.workers ?? []).find((w: { id?: string }) => w?.id === id);
+		const out = await helm("GET", `/helm/worker/${id}/output?tail=60`);
+		const text = String(out.json?.output ?? "");
+
+		// Helm's own needs_input never fires in practice for these harnesses -
+		// measured: a claude worker sat at an explicit "Which branch should I work
+		// on? > 1." prompt and stayed `state=running` for 70+ seconds. So detect the
+		// question in the OUTPUT, which is where the signal actually is, and treat
+		// Helm's state as a bonus when it does arrive.
+		//
+		// ...but the prompt STAYS in the scrollback after it is answered, so the
+		// same shape matches forever. Measured 2026-08-06 driving the real bridge:
+		// leg 1 correctly returned needs_input, the answer landed on stdin and the
+		// worker printed its result - and answerWorker still came back
+		// `needs_input`, because the original "> 1. main" was three lines up. In
+		// the Table that is an infinite ask loop: answer the question, get asked
+		// the identical question back. So a question only counts while it is still
+		// UNANSWERED (nothing but its own option list printed after it).
+		if (me?.state === "needs_input" || isWaitingOnAnswer(text)) {
+			// Leave it RUNNING. The human answers via /reply and it carries on.
+			return { ok: true, label: "needs_input", workerId: id, output: tail(text) };
+		}
+		if (me?.state === "done" || me?.state === "failed") {
+			const exit = me?.exit_code;
+			await helm("POST", `/helm/worker/${id}/stop`, {});
+			return {
+				ok: me.state === "done",
+				label: me.state === "done" ? "verified" : "failed",
+				workerId: id,
+				output: tail(text),
+				detail: exit === undefined ? undefined : `exit ${exit}`,
+			};
+		}
+
+		if (text === lastOut && text.trim().length > 0) {
+			stableFor += 1;
+			// Two consecutive identical non-empty reads = the worker has settled.
+			if (stableFor >= 2) {
+				await helm("POST", `/helm/worker/${id}/stop`, {});
+				return { ok: true, label: "verified", workerId: id, output: tail(text) };
+			}
+		} else {
+			stableFor = 0;
+			lastOut = text;
+		}
+	}
+	// Timed out. Do NOT kill it - long agentic work legitimately outlives this
+	// window, and killing it would destroy real work in progress. Say honestly
+	// that it is still running.
+	return {
+		ok: true, label: "asserted", workerId: id, output: tail(lastOut),
+		detail: "still running past my watch window - not a completion claim",
+	};
+}
+
+/** Send the human's answer to a worker that asked, then keep watching. */
+export async function answerWorker(id: string, text: string, timeoutMs = 90_000): Promise<ExecutionResult> {
+	const res = await helm("POST", `/helm/worker/${id}/input`, { text, enter: true });
+	if (res.status !== 200) {
+		return { ok: false, label: "failed", workerId: id, output: "", detail: `could not send input (${res.status})` };
+	}
+	return watchWorker(id, timeoutMs);
+}
+
+/**
+ * Is this terminal tail a harness WAITING ON AN ANSWER?
+ *
+ * Deliberately conservative - a false positive stalls a run that was fine, so it
+ * requires a numbered-choice cursor ("> 1." / "❯ 1.") or an explicit
+ * confirm/select prompt in the LAST few lines. These are the shapes claude,
+ * codex and cursor-agent actually render when they stop to ask, verified against
+ * live output ("Which branch should I work on? ❯ 1. ...").
+ */
+function looksLikeQuestion(text: string): boolean {
+	return questionLines(text).index >= 0;
+}
+
+/**
+ * The one predicate watchWorker actually uses: this tail shows a question that
+ * is STILL WAITING on a human. Exported so it can be tested against real
+ * captured terminal tails without spawning workers.
+ */
+export function isWaitingOnAnswer(text: string): boolean {
+	return looksLikeQuestion(text) && !questionWasAnswered(text);
+}
+
+/** A single line that is itself the ask (cursor on a choice, or a confirm). */
+function isQuestionLine(line: string): boolean {
+	return /^\s*[>❯›]\s*\d+\.\s+\S/.test(line)
+		|| /(press enter to confirm|\[y\/n\]|\(y\/n\)|choose an option|select one|which (?:one|option|branch|base) should i)/i.test(line);
+}
+
+/** A line that is part of the ask's own menu, not a response to it. */
+function isOptionLine(line: string): boolean {
+	return /^\s*[>❯›]?\s*\d+[.)]\s+\S/.test(line);
+}
+
+/** Trimmed non-empty tail lines, plus the index of the LAST line that asks. */
+function questionLines(text: string): { lines: string[]; index: number } {
+	const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12);
+	let index = -1;
+	for (let i = 0; i < lines.length; i++) if (isQuestionLine(lines[i])) index = i;
+	return { lines, index };
+}
+
+/**
+ * Has this question already been answered?
+ *
+ * A terminal keeps the prompt on screen after you reply to it, so "is there a
+ * question in the tail" cannot distinguish "waiting on you" from "you answered
+ * it 200ms ago". The discriminator is what came AFTER the ask: while it waits,
+ * the only thing below the cursor is the rest of its own menu ("  2. develop").
+ * Once answered, the harness echoes the choice and carries on, and those lines
+ * are neither options nor prompts.
+ *
+ * Conservative in the safe direction: if nothing followed the ask we treat it as
+ * still waiting, so the worker is left alive for the human rather than reaped.
+ */
+function questionWasAnswered(text: string): boolean {
+	const { lines, index } = questionLines(text);
+	if (index < 0) return false;
+	return lines.slice(index + 1).some((l) => !isOptionLine(l) && !isQuestionLine(l));
+}
+
+/** Last ~25 meaningful lines, so a TUI's redraw noise doesn't flood the channel. */
+function tail(text: string): string {
+	const lines = text.split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => l.trim().length > 0);
+    return lines.slice(-25).join("\n").slice(-1800);
+}

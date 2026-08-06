@@ -41,6 +41,12 @@ interface BridgeResponse {
 
 const DEFAULT_BRIDGE_PATH = join(homedir(), ".8gent", "bin", "apple-foundation-bridge");
 
+// A healthy bridge answers a short turn in a few seconds. When Apple Intelligence
+// is toggled OFF in System Settings the Swift bridge blocks and never returns, which
+// would wedge the whole turn forever. Cap each request so a hang becomes a fast,
+// reroutable failure (model-reroute then falls over to the best other local model).
+const BRIDGE_TIMEOUT_MS = Number(process.env.APPLE_FOUNDATION_TIMEOUT_MS || 12_000);
+
 export function resolveBridgePath(override?: string): string {
 	if (override) return override;
 	if (process.env.APPLE_FOUNDATION_BRIDGE) return process.env.APPLE_FOUNDATION_BRIDGE;
@@ -126,12 +132,44 @@ export class AppleFoundationClient implements LLMClient {
 	private send(request: BridgeRequest): Promise<BridgeResponse> {
 		const proc = this.ensureProcess();
 		return new Promise((resolve, reject) => {
-			this.queue.push({ resolve, reject });
+			let timer: ReturnType<typeof setTimeout>;
+			// Wrap so a normal response / exit-failure also clears the watchdog.
+			const entry = {
+				resolve: (v: BridgeResponse) => {
+					clearTimeout(timer);
+					resolve(v);
+				},
+				reject: (e: unknown) => {
+					clearTimeout(timer);
+					reject(e);
+				},
+			};
+			timer = setTimeout(() => {
+				// Bridge stalled (Apple Intelligence off, model asset not ready).
+				// Drop this request, kill the wedged process so the next turn spawns
+				// clean, and reject with a message model-reroute treats as a provider
+				// health failure -> reroute to the best other installed model.
+				const i = this.queue.indexOf(entry);
+				if (i >= 0) this.queue.splice(i, 1);
+				try {
+					this.proc?.kill("SIGKILL");
+				} catch {
+					// already gone
+				}
+				this.proc = null;
+				reject(
+					new Error(
+						"apple-foundation: foundation model unavailable (bridge timed out; is Apple Intelligence enabled?)",
+					),
+				);
+			}, BRIDGE_TIMEOUT_MS);
+			this.queue.push(entry);
 			try {
 				proc.stdin.write(`${JSON.stringify(request)}\n`);
 			} catch (err) {
-				this.queue.pop();
-				reject(err);
+				const i = this.queue.indexOf(entry);
+				if (i >= 0) this.queue.splice(i, 1);
+				entry.reject(err);
 			}
 		});
 	}

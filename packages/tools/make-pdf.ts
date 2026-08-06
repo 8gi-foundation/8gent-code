@@ -20,6 +20,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import {
+	type DesignContext,
+	type DesignHint,
+	DesignContextUnavailable,
+	resolveDesignContext,
+} from "../design-systems/index";
+
 /** Absolute path to the creative folder the CLI writes into by default. */
 export const CREATIVE_DIR = path.join(os.homedir(), ".8gent", "creative");
 
@@ -49,6 +56,13 @@ export interface MakePdfInput {
 	 * keep every output inside the creative folder.
 	 */
 	outName?: string;
+	/**
+	 * Apply a design system to the PDF so it inherits our tokens like every other
+	 * surface. Explicit id wins; otherwise a hint selects one. Best-effort: if no
+	 * seeded design DB is reachable the PDF still renders, just unthemed.
+	 */
+	designSystemId?: string;
+	designHint?: DesignHint;
 }
 
 export interface MakePdfResult {
@@ -56,6 +70,8 @@ export interface MakePdfResult {
 	path: string;
 	/** Tool-result kind, so downstream surfaces route it as a document. */
 	kind: "document";
+	/** The design system the PDF inherited, if any (provenance stamp). */
+	designSystemId?: string;
 }
 
 /** Coerce an optional outName into a safe absolute path in the creative folder. */
@@ -63,6 +79,67 @@ function resolveOutPath(outName: string): string {
 	const base = path.basename(outName.trim());
 	const named = base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
 	return path.join(CREATIVE_DIR, named);
+}
+
+/** A <style> block from a resolved design context: the token variables plus a
+ * small base stylesheet mapping them onto document elements, so an actual PDF
+ * looks themed. The renderer CLI has no --css flag, so we inject into the HTML. */
+function designStyleBlock(ctx: DesignContext): string {
+	const { headingFont, bodyFont } = ctx.typography;
+	return [
+		"<style>",
+		ctx.cssVariables,
+		`body{background:hsl(var(--theme-background));color:hsl(var(--theme-foreground));font-family:${bodyFont};}`,
+		`h1,h2,h3,h4,h5,h6{font-family:${headingFont};color:hsl(var(--theme-foreground));}`,
+		`a{color:hsl(var(--theme-primary));}`,
+		`code,pre{background:hsl(var(--theme-muted));color:hsl(var(--theme-muted-foreground));}`,
+		`hr,table,th,td{border-color:hsl(var(--theme-border));}`,
+		"</style>",
+	].join("\n");
+}
+
+/** Inject the style block into an HTML string (before </head>, else prepend). */
+function injectDesign(html: string, ctx: DesignContext): string {
+	const style = designStyleBlock(ctx);
+	if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${style}\n</head>`);
+	return `${style}\n${html}`;
+}
+
+/** Resolve a design context (when requested) and apply it to the HTML source so
+ * the PDF inherits our tokens like every other surface. Best-effort: an
+ * unavailable DB leaves the input unthemed rather than blocking the render. */
+export function applyDesign(input: MakePdfInput): {
+	input: MakePdfInput;
+	designSystemId?: string;
+} {
+	if (input.designSystemId == null && input.designHint == null) return { input };
+	let ctx: DesignContext;
+	try {
+		ctx = resolveDesignContext({
+			systemId: input.designSystemId,
+			...(input.designHint ?? {}),
+		});
+	} catch (err) {
+		if (err instanceof DesignContextUnavailable) return { input }; // render unthemed
+		throw err;
+	}
+	if (input.html != null && input.html !== "") {
+		return {
+			input: { ...input, html: injectDesign(input.html, ctx) },
+			designSystemId: ctx.systemId,
+		};
+	}
+	if (input.htmlPath != null && input.htmlPath !== "") {
+		const raw = fs.readFileSync(path.resolve(input.htmlPath), "utf8");
+		const { htmlPath: _drop, ...rest } = input;
+		return {
+			input: { ...rest, html: injectDesign(raw, ctx) },
+			designSystemId: ctx.systemId,
+		};
+	}
+	// Markdown sources: the CLI owns markdown->HTML, so we cannot inject a <style>
+	// into raw markdown; still stamp provenance so the surface records the choice.
+	return { input, designSystemId: ctx.systemId };
 }
 
 /** Build the CLI argument vector for exactly one supplied input source. */
@@ -103,9 +180,16 @@ function buildArgs(input: MakePdfInput): string[] {
  */
 export function makePdf(input: MakePdfInput): Promise<MakePdfResult> {
 	return new Promise((resolve, reject) => {
+		let designed: { input: MakePdfInput; designSystemId?: string };
+		try {
+			designed = applyDesign(input);
+		} catch (err) {
+			reject(err);
+			return;
+		}
 		let args: string[];
 		try {
-			args = buildArgs(input);
+			args = buildArgs(designed.input);
 		} catch (err) {
 			reject(err);
 			return;
@@ -144,7 +228,7 @@ export function makePdf(input: MakePdfInput): Promise<MakePdfResult> {
 				reject(new Error("make-pdf produced no output path"));
 				return;
 			}
-			resolve({ path: outPath, kind: "document" });
+			resolve({ path: outPath, kind: "document", designSystemId: designed.designSystemId });
 		});
 	});
 }

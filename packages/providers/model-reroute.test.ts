@@ -23,9 +23,9 @@ describe("isModelNotFoundError", () => {
 	});
 
 	it("recognises native ollama 'not found' bodies", () => {
-		expect(isModelNotFoundError(new Error("model 'qwen3.6:27b' not found, try pulling it first"))).toBe(
-			true,
-		);
+		expect(
+			isModelNotFoundError(new Error("model 'qwen3.6:27b' not found, try pulling it first")),
+		).toBe(true);
 	});
 
 	it("does NOT treat a server-down / reachability error as model-not-found", () => {
@@ -149,5 +149,94 @@ describe("callLocalModelWithReroute", () => {
 describe("noModelAvailableMessage", () => {
 	it("mentions the cloud option when a cloud key is present", () => {
 		expect(noModelAvailableMessage("qwen3.6:27b", true)).toContain("cloud model");
+	});
+});
+
+// ── Law 2 (issue #2747): only tool-capable models do tool-work ──────────────
+
+import { resolveToolCapableModel } from "./model-reroute";
+
+// The incident pair: gemma (bigger, 400s on tools) and ornith (accepts tools).
+const GEMMA = "gemma-4-12b-coder-fable5-composer2.5-v1";
+const INCIDENT_INSTALLED: InstalledModel[] = [
+	{ provider: "lmstudio", model: GEMMA, score: 12 },
+	{ provider: "lmstudio", model: "ornith-1.0-9b", score: 9 },
+];
+
+function probeFor(capabilities: Record<string, "native" | "none" | "unknown">) {
+	return async (_provider: string, model: string) => capabilities[model] ?? "unknown";
+}
+
+describe("resolveToolCapableModel (Law 2)", () => {
+	it("does NOT select a model that 400s a tools request for an agentic turn", async () => {
+		const resolution = await resolveToolCapableModel({
+			provider: "lmstudio",
+			model: GEMMA,
+			probe: probeFor({ [GEMMA]: "none", "ornith-1.0-9b": "native" }),
+			detect: async () => INCIDENT_INSTALLED,
+		});
+		expect(resolution.switched).toBe(true);
+		expect(resolution.model).toBe("ornith-1.0-9b");
+		expect(resolution.model).not.toBe(GEMMA);
+	});
+
+	it("keeps a tool-capable pinned model untouched", async () => {
+		const resolution = await resolveToolCapableModel({
+			provider: "lmstudio",
+			model: "ornith-1.0-9b",
+			probe: probeFor({ "ornith-1.0-9b": "native" }),
+			detect: async () => INCIDENT_INSTALLED,
+		});
+		expect(resolution.switched).toBe(false);
+		expect(resolution.model).toBe("ornith-1.0-9b");
+	});
+
+	it("honours the operator's preferred pin when switching", async () => {
+		const installed: InstalledModel[] = [
+			...INCIDENT_INSTALLED,
+			{ provider: "ollama", model: "qwen3:14b", score: 14 },
+		];
+		const resolution = await resolveToolCapableModel({
+			provider: "lmstudio",
+			model: GEMMA,
+			prefer: ["ornith-1.0-9b"],
+			probe: probeFor({ [GEMMA]: "none", "ornith-1.0-9b": "native", "qwen3:14b": "native" }),
+			detect: async () => installed,
+		});
+		// qwen3:14b scores higher, but the operator pinned ornith.
+		expect(resolution.model).toBe("ornith-1.0-9b");
+	});
+
+	it("never demotes on an 'unknown' probe (endpoint unreachable)", async () => {
+		const resolution = await resolveToolCapableModel({
+			provider: "lmstudio",
+			model: GEMMA,
+			probe: probeFor({}),
+			detect: async () => INCIDENT_INSTALLED,
+		});
+		expect(resolution.switched).toBe(false);
+		expect(resolution.model).toBe(GEMMA);
+	});
+
+	it("keeps the pin when no other candidate is verifiably tool-capable", async () => {
+		const resolution = await resolveToolCapableModel({
+			provider: "lmstudio",
+			model: GEMMA,
+			probe: probeFor({ [GEMMA]: "none", "ornith-1.0-9b": "none" }),
+			detect: async () => INCIDENT_INSTALLED,
+		});
+		expect(resolution.switched).toBe(false);
+		expect(resolution.model).toBe(GEMMA);
+	});
+});
+
+describe("chooseRerouteModel with tool capability (Law 2)", () => {
+	it("skips a model flagged as tool-incapable even when it scores highest", () => {
+		const installed: InstalledModel[] = [
+			{ provider: "lmstudio", model: GEMMA, score: 12, toolCapable: false },
+			{ provider: "lmstudio", model: "ornith-1.0-9b", score: 9, toolCapable: true },
+		];
+		const chosen = chooseRerouteModel(installed, "qwen3.6:27b");
+		expect(chosen?.model).toBe("ornith-1.0-9b");
 	});
 });

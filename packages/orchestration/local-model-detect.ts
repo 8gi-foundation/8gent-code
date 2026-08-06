@@ -28,6 +28,14 @@ export interface DetectedModel {
 	model: string;
 	/** Heuristic capability score; higher = stronger. */
 	score: number;
+	/**
+	 * Whether the model's served chat template accepts a native `tools`
+	 * payload. `false` means a trivial tools probe returned 400 ("can't accept
+	 * tools" - broken jinja template); such a model must never be picked for
+	 * agentic (tool-requiring) work, no matter its parameter count (Law 2,
+	 * issue #2747). Undefined = not probed.
+	 */
+	toolCapable?: boolean;
 }
 
 const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
@@ -56,6 +64,130 @@ function scoreModel(provider: LocalProvider, modelId: string): number {
 	return paramHint(modelId);
 }
 
+/** Result of a native-tools probe. "unknown" = endpoint unreachable / not probeable. */
+export type ToolCapability = "native" | "none" | "unknown";
+
+/** OpenAI-compatible chat-completions endpoint per probeable local provider. */
+function chatCompletionsUrl(provider: string): string | null {
+	if (provider === "lmstudio") return `${LMSTUDIO_URL}/chat/completions`;
+	if (provider === "ollama") return `${OLLAMA_URL}/v1/chat/completions`;
+	return null; // apple-foundation has no HTTP endpoint - never probed, never demoted.
+}
+
+/**
+ * Probe whether a local model can accept a native `tools` payload (Law 2,
+ * issue #2747). Sends ONE trivial chat-completions request with a no-op tool
+ * and max_tokens: 1.
+ *
+ *   - 200                      -> "native"  (the template accepts tools)
+ *   - 400                      -> "none"    (broken jinja template, e.g. gemma
+ *                                            missing format_type_argument -
+ *                                            "can't accept tools")
+ *   - anything else / no reach -> "unknown" (do not demote on uncertainty)
+ *
+ * `fetchImpl` is injectable so tests can drive all three branches offline.
+ */
+export async function probeToolCapability(
+	provider: string,
+	model: string,
+	opts?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<ToolCapability> {
+	const url = chatCompletionsUrl(provider);
+	if (!url) return "unknown";
+	const doFetch = opts?.fetchImpl ?? fetch;
+	try {
+		const res = await doFetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				model,
+				messages: [{ role: "user", content: "ping" }],
+				tools: [
+					{
+						type: "function",
+						function: {
+							name: "noop",
+							description: "capability probe",
+							parameters: { type: "object", properties: {} },
+						},
+					},
+				],
+				max_tokens: 1,
+				stream: false,
+			}),
+			signal: AbortSignal.timeout(opts?.timeoutMs ?? 90_000),
+		});
+		if (res.ok) return "native";
+		if (res.status === 400) return "none";
+		return "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+
+const TOOL_CAPABILITY_CACHE_PATH = join(homedir(), ".8gent", "tool-capability.json");
+const TOOL_CAPABILITY_TTL_MS = Number(process.env.EIGHT_TOOL_PROBE_TTL_MS || 12 * 60 * 60 * 1000);
+const toolCapabilityMemo = new Map<string, ToolCapability>();
+
+type CapabilityCacheFile = Record<string, { capability: ToolCapability; checkedAt: number }>;
+
+function readCapabilityCache(): CapabilityCacheFile {
+	try {
+		return JSON.parse(readFileSync(TOOL_CAPABILITY_CACHE_PATH, "utf-8")) as CapabilityCacheFile;
+	} catch {
+		return {};
+	}
+}
+
+function writeCapabilityCache(cache: CapabilityCacheFile): void {
+	try {
+		mkdirSync(join(homedir(), ".8gent"), { recursive: true });
+		writeFileSync(TOOL_CAPABILITY_CACHE_PATH, JSON.stringify(cache, null, 2));
+	} catch {
+		// Cache is an optimisation; a write failure must never break a turn.
+	}
+}
+
+/**
+ * Cached tool-capability lookup: probes at most once per model per TTL
+ * (in-memory memo + `~/.8gent/tool-capability.json`), so agentic turns pay the
+ * probe once, not per turn. "unknown" results are NOT cached to disk so a
+ * temporarily-down endpoint gets re-probed next time.
+ */
+export async function getToolCapability(
+	provider: string,
+	model: string,
+	opts?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<ToolCapability> {
+	const key = `${provider}::${model}`;
+	const memo = toolCapabilityMemo.get(key);
+	if (memo) return memo;
+
+	const cache = readCapabilityCache();
+	const hit = cache[key];
+	if (hit && Date.now() - hit.checkedAt < TOOL_CAPABILITY_TTL_MS && hit.capability !== "unknown") {
+		toolCapabilityMemo.set(key, hit.capability);
+		return hit.capability;
+	}
+
+	const capability = await probeToolCapability(provider, model, opts);
+	toolCapabilityMemo.set(key, capability);
+	if (capability !== "unknown") {
+		cache[key] = { capability, checkedAt: Date.now() };
+		writeCapabilityCache(cache);
+	}
+	return capability;
+}
+
+/**
+ * Agentic score: a model that is KNOWN to reject a tools payload scores 0 for
+ * tool-requiring work regardless of parameter count. Parameter count only
+ * breaks ties among tool-capable (or unprobed) models.
+ */
+export function scoreForAgentic(m: DetectedModel): number {
+	return m.toolCapable === false ? 0 : m.score;
+}
+
 async function fetchJson(url: string): Promise<unknown | null> {
 	try {
 		const res = await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
@@ -68,9 +200,9 @@ async function fetchJson(url: string): Promise<unknown | null> {
 
 /** Probe Ollama. Returns [] if the server is down. */
 export async function detectOllama(): Promise<DetectedModel[]> {
-	const json = (await fetchJson(`${OLLAMA_URL}/api/tags`)) as
-		| { models?: { name?: string }[] }
-		| null;
+	const json = (await fetchJson(`${OLLAMA_URL}/api/tags`)) as {
+		models?: { name?: string }[];
+	} | null;
 	if (!json?.models) return [];
 	return json.models
 		.map((m) => m.name)
@@ -125,7 +257,13 @@ export async function detectLocalModels(): Promise<DetectedModel[]> {
 export function recommendRoleConfig(models: DetectedModel[]): RoleConfig | null {
 	if (models.length === 0) return null;
 
-	const ranked = [...models].sort((a, b) => b.score - a.score);
+	// Law 2 (issue #2747): the orchestrator/engineer/qa roles do tool-work, so
+	// a model KNOWN to reject a `tools` payload (toolCapable === false) is
+	// excluded from the ranking whenever any other candidate exists. Parameter
+	// count never outranks the ability to actually execute.
+	const capable = models.filter((m) => m.toolCapable !== false);
+	const pool = capable.length > 0 ? capable : models;
+	const ranked = [...pool].sort((a, b) => scoreForAgentic(b) - scoreForAgentic(a));
 	const toAssignment = (m: DetectedModel): RoleModelAssignment => ({
 		provider: m.provider,
 		model: m.model,
@@ -150,10 +288,7 @@ export function recommendRoleConfig(models: DetectedModel[]): RoleConfig | null 
  * the local models must time-share RAM rather than co-reside - a resident
  * 27B model can starve a second large model and cause inference failures.
  */
-export async function unloadOllamaModel(
-	model: string,
-	baseUrl = OLLAMA_URL,
-): Promise<void> {
+export async function unloadOllamaModel(model: string, baseUrl = OLLAMA_URL): Promise<void> {
 	try {
 		await fetch(`${baseUrl}/api/generate`, {
 			method: "POST",

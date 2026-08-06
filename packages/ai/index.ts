@@ -70,6 +70,8 @@ export {
 export {
 	TEXT_TOOL_ENDPOINTS,
 	resolveTextToolEndpoint,
+	toChatCompletionsEndpoint,
+	toOpenAiV1Base,
 	buildTextToolCall,
 	extractUsage,
 	type TextToolUsage,

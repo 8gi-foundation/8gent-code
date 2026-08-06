@@ -25,6 +25,12 @@ export interface InstalledModel {
 	model: string;
 	/** Heuristic capability score; higher = stronger. Embeddings score 0. */
 	score: number;
+	/**
+	 * Whether the model accepts a native `tools` payload. `false` = the tools
+	 * probe returned 400 (broken chat template); never reroute agentic work to
+	 * it (Law 2, issue #2747). Undefined = not probed.
+	 */
+	toolCapable?: boolean;
 }
 
 /** Cloud providers whose presence means "a model is still reachable". */
@@ -63,7 +69,9 @@ export function isModelNotFoundError(err: unknown): boolean {
 	const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
 	if (!msg) return false;
 	// Reachability failures are not model-not-found - let them fall through.
-	if (/econnrefused|enotfound|eai_again|fetch failed|unable to connect|connection refused/.test(msg)) {
+	if (
+		/econnrefused|enotfound|eai_again|fetch failed|unable to connect|connection refused/.test(msg)
+	) {
 		return false;
 	}
 	if (/model .*not found/.test(msg)) return true;
@@ -73,6 +81,39 @@ export function isModelNotFoundError(err: unknown): boolean {
 		return true;
 	}
 	return false;
+}
+
+/**
+ * Detect whether an error means the local provider itself is UNHEALTHY - the
+ * model is nominally "there" but the backend can't answer - so the turn should
+ * reroute to the best OTHER installed model rather than surface a dead brain.
+ *
+ * The load-bearing case: Apple Foundation is auto-selected on this host (the
+ * bridge binary is installed), but Apple Intelligence is toggled OFF in System
+ * Settings, so every call returns `"Apple Intelligence is not enabled"` (an
+ * error body, not a 404). That is not "model not found", so without this the
+ * agent kept the dead provider and stalled. We keep Apple Foundation ON (it is
+ * the best pick where Apple Intelligence IS enabled); we just fail OFF it here.
+ *
+ * Reachability failures (ECONNREFUSED, timeouts) stay the caller's to handle -
+ * those are "is the server up?", not "this provider can't answer right now".
+ */
+export function isProviderUnhealthyError(err: unknown): boolean {
+	const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+	if (!msg) return false;
+	if (/econnrefused|enotfound|eai_again|fetch failed|connection refused/.test(msg)) {
+		return false;
+	}
+	return (
+		/apple intelligence is not enabled/.test(msg) ||
+		/apple intelligence.*(disabled|unavailable|not available)/.test(msg) ||
+		/foundation model.*(unavailable|not available|disabled)/.test(msg) ||
+		/model is not ready|assets? (are )?not (yet )?(available|downloaded)/.test(msg) ||
+		// Apple Intelligence just enabled but the model is still downloading/warming:
+		// the bridge returns "The model is not available. Try again later." Treat it
+		// as a health failure so we fail over while it finishes, then use it once ready.
+		/model (is )?not available|model unavailable|try again later/.test(msg)
+	);
 }
 
 /**
@@ -101,7 +142,11 @@ export function chooseRerouteModel(
 	prefer: string[] = [],
 ): InstalledModel | null {
 	const missing = missingModel.trim().toLowerCase();
-	const usable = installed.filter((m) => m.score > 0 && m.model.trim().toLowerCase() !== missing);
+	// Law 2: a model KNOWN to reject a tools payload is never a reroute target
+	// for agentic work - it would fabricate instead of executing.
+	const usable = installed.filter(
+		(m) => m.score > 0 && m.toolCapable !== false && m.model.trim().toLowerCase() !== missing,
+	);
 	if (usable.length === 0) return null;
 
 	for (const name of prefer) {
@@ -120,6 +165,106 @@ export function noModelAvailableMessage(missingModel: string, hasCloudKey: boole
 		return `${head}, and no other local model is installed. Pull one with \`ollama pull <model>\`, or switch to a configured cloud model.`;
 	}
 	return `${head}. Pull one with \`ollama pull <model>\` (for example \`ollama pull llama3.2\`), or add a cloud provider key.`;
+}
+
+/** Result of resolving a tool-capable model for an agentic turn. */
+export interface AgenticModelResolution {
+	provider: string;
+	model: string;
+	/** True when the pinned model was swapped for a tool-capable one. */
+	switched: boolean;
+	reason?: string;
+}
+
+type ToolCapabilityProbe = (
+	provider: string,
+	model: string,
+) => Promise<"native" | "none" | "unknown">;
+
+async function defaultToolCapabilityProbe(
+	provider: string,
+	model: string,
+): Promise<"native" | "none" | "unknown"> {
+	const { getToolCapability } = await import("../orchestration/local-model-detect");
+	return getToolCapability(provider, model);
+}
+
+/**
+ * Law 2 (issue #2747): only tool-capable models do tool-work.
+ *
+ * Given the pinned provider/model for an agentic (tool-requiring) turn,
+ * verify the model actually accepts a `tools` payload (probed once, cached).
+ * If it does not (HTTP 400 - e.g. gemma's broken jinja template), pick the
+ * best OTHER installed model that does:
+ *   1. `prefer` entries first (the operator's pin, e.g. providers.json
+ *      activeModel), when installed and tool-capable.
+ *   2. Otherwise remaining installed models by score, probing each until one
+ *      accepts tools (at most `maxProbes` probes to bound latency).
+ * An "unknown" probe (endpoint unreachable) never demotes - the pinned model
+ * is kept and the existing reroute/failover machinery handles real failures.
+ * Disable entirely with EIGHT_TOOL_CAPABILITY_GATE=0.
+ */
+export async function resolveToolCapableModel(opts: {
+	provider: string;
+	model: string;
+	prefer?: string[];
+	probe?: ToolCapabilityProbe;
+	detect?: () => Promise<InstalledModel[]>;
+	maxProbes?: number;
+	onSwitch?: (from: string, chosen: InstalledModel) => void;
+}): Promise<AgenticModelResolution> {
+	const gate = (process.env.EIGHT_TOOL_CAPABILITY_GATE || "").trim().toLowerCase();
+	if (gate === "0" || gate === "false") {
+		return { provider: opts.provider, model: opts.model, switched: false };
+	}
+
+	const probe = opts.probe ?? defaultToolCapabilityProbe;
+	const detect = opts.detect ?? defaultDetectInstalled;
+
+	const pinned = await probe(opts.provider, opts.model).catch(() => "unknown" as const);
+	if (pinned !== "none") {
+		return { provider: opts.provider, model: opts.model, switched: false };
+	}
+
+	const installed = await detect().catch(() => [] as InstalledModel[]);
+	const missing = opts.model.trim().toLowerCase();
+	const candidates = installed.filter(
+		(m) => m.score > 0 && m.toolCapable !== false && m.model.trim().toLowerCase() !== missing,
+	);
+
+	// Operator preference first, then strength order.
+	const preferSet = (opts.prefer ?? []).map((p) => p.trim().toLowerCase());
+	candidates.sort((a, b) => {
+		const ap = preferSet.indexOf(a.model.trim().toLowerCase());
+		const bp = preferSet.indexOf(b.model.trim().toLowerCase());
+		const aRank = ap === -1 ? Number.MAX_SAFE_INTEGER : ap;
+		const bRank = bp === -1 ? Number.MAX_SAFE_INTEGER : bp;
+		if (aRank !== bRank) return aRank - bRank;
+		return b.score - a.score;
+	});
+
+	const maxProbes = opts.maxProbes ?? 4;
+	let probes = 0;
+	for (const candidate of candidates) {
+		if (probes >= maxProbes) break;
+		probes++;
+		const cap =
+			candidate.toolCapable === true
+				? ("native" as const)
+				: await probe(candidate.provider, candidate.model).catch(() => "unknown" as const);
+		if (cap === "native") {
+			opts.onSwitch?.(opts.model, candidate);
+			return {
+				provider: candidate.provider,
+				model: candidate.model,
+				switched: true,
+				reason: `"${opts.model}" rejects a tools payload (HTTP 400); routing this agentic turn to "${candidate.model}" (${candidate.provider})`,
+			};
+		}
+	}
+
+	// Nothing verifiably tool-capable found: keep the pin; failover handles errors.
+	return { provider: opts.provider, model: opts.model, switched: false };
 }
 
 /** Outcome of a rerouted local call. */
@@ -164,9 +309,13 @@ export async function callLocalModelWithReroute<T>(opts: {
 			const value = await opts.run(provider, model);
 			return { ok: true, value, usedProvider: provider, usedModel: model, rerouted };
 		} catch (err) {
-			// Only a not-found error triggers a reroute, and only once. Everything
-			// else (server down, timeout, abort) is the caller's to handle.
-			if (rerouted || !isModelNotFoundError(err)) throw err;
+			// A not-found error OR an unhealthy local provider (e.g. Apple
+			// Foundation when Apple Intelligence is off) triggers ONE reroute to
+			// the best other installed model. Reachability failures, timeouts and
+			// aborts stay the caller's to handle.
+			if (rerouted || !(isModelNotFoundError(err) || isProviderUnhealthyError(err))) {
+				throw err;
+			}
 
 			const installed = await detect().catch(() => [] as InstalledModel[]);
 			const chosen = chooseRerouteModel(installed, model, opts.prefer);

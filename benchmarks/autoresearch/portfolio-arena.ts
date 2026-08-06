@@ -21,7 +21,10 @@
  * Output: benchmarks/autoresearch/arena/<round>/8gent/index.html + run.json
  */
 
-import { Database } from "bun:sqlite";
+import {
+	DesignContextUnavailable,
+	resolveDesignContext,
+} from "../../packages/design-systems/index";
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -32,7 +35,6 @@ import { unloadOllamaModel } from "../../packages/orchestration/local-model-dete
 const ROUND = process.env.ARENA_ROUND ?? "round-2";
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 const OUT_DIR = join(import.meta.dir, "arena", ROUND, "8gent");
-const DESIGN_DB = join(REPO_ROOT, "data", "design-systems.db");
 const BRIDGE_PATH =
 	process.env.APPLE_FOUNDATION_BRIDGE ||
 	join(homedir(), ".8gent", "bin", "apple-foundation-bridge");
@@ -70,43 +72,16 @@ function log(msg: string): void {
  * system; returns a formatted token block for the prompt.
  */
 function designTokens(): { system: string; block: string } {
+	// De-duplicated: single DB read lives in the design-systems resolver.
+	// The arena prefers a stable, tasteful dark system for consistency; the
+	// resolver returns 'linear' when present and otherwise degrades sensibly.
 	try {
-		// Not readonly: bun:sqlite cannot open a WAL-mode DB read-only
-		// (it needs write access to the -shm sidecar). We only read.
-		const db = new Database(DESIGN_DB);
-		// Prefer a minimal/professional system; fall back to any system.
-		const sys = db
-			.query(
-				`SELECT id, name FROM design_systems
-			 WHERE style IN ('minimal','elegant','tech') ORDER BY
-			 CASE id WHEN 'linear' THEN 0 WHEN 'vercel' THEN 1 WHEN 'notion' THEN 2 ELSE 3 END
-			 LIMIT 1`,
-			)
-			.get() as { id: string; name: string } | null;
-		if (!sys) {
-			db.close();
-			return { system: "none", block: "(design DB returned no system)" };
-		}
-		const pal = db
-			.query("SELECT * FROM color_palettes WHERE system_id = ?")
-			.get(sys.id) as Record<string, string> | null;
-		const typo = db
-			.query("SELECT * FROM typography WHERE system_id = ?")
-			.get(sys.id) as Record<string, string> | null;
-		db.close();
-		const lines = [`Design system: ${sys.name} (from the inbuilt design-system DB)`];
-		if (pal) {
-			lines.push("Color tokens (HSL - render as a DARK theme, invert background/foreground):");
-			for (const k of ["accent_hsl", "primary_hsl", "muted_foreground_hsl", "border_hsl"]) {
-				if (pal[k]) lines.push(`  --${k.replace("_hsl", "")}: hsl(${pal[k]})`);
-			}
-		}
-		if (typo) {
-			lines.push(`Typography: body ${typo.font_family}, headings ${typo.heading_font}`);
-			if (typo.heading_sizes_json) lines.push(`  heading sizes: ${typo.heading_sizes_json}`);
-		}
-		return { system: sys.name, block: lines.join("\n") };
+		const ctx = resolveDesignContext({ systemId: "linear" });
+		return { system: ctx.name, block: ctx.promptBlock };
 	} catch (err) {
+		if (err instanceof DesignContextUnavailable) {
+			return { system: "none", block: "(design DB unavailable)" };
+		}
 		return { system: "error", block: `(design DB query failed: ${err})` };
 	}
 }

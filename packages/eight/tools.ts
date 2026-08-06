@@ -6,7 +6,9 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
 import {
 	type RepoIndex,
 	getFileOutline as astGetFileOutline,
@@ -70,12 +72,12 @@ import {
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
 import { type PermissionManager, getPermissionManager, isCommandDangerous } from "../permissions";
-import { validatePath as guardPath } from "../permissions/path-guard.js";
-import { ToolG8 } from "../permissions/toolg8.js";
 import {
 	MakerCheckerBlockedError,
 	assertMakerCheckerApproved,
 } from "../permissions/maker-checker-enforcer";
+import { validatePath as guardPath } from "../permissions/path-guard.js";
+import { ToolG8 } from "../permissions/toolg8.js";
 import type { PolicyActionType } from "../permissions/types.js";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
@@ -96,11 +98,6 @@ import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../
 import { ArtifactStore } from "./artifact-store";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
-import {
-	type ExtractVideoMode,
-	extractVideo,
-	formatExtractVideoResult,
-} from "@8gent/eyes/marlin";
 
 /**
  * Validate that a user-provided path stays within the working directory.
@@ -115,8 +112,18 @@ function safePath(userPath: string, workingDirectory: string): string {
 		throw new Error(`Path blocked by path-guard: ${guard.reason} ("${userPath}")`);
 	}
 
+	// Expand a leading `~` to the real home directory BEFORE normalizing, so a
+	// model-supplied "~/notes.txt" resolves to the actual home path instead of
+	// a literal "./~" directory (issue #2747, secondary).
+	const expanded =
+		userPath === "~"
+			? os.homedir()
+			: userPath.startsWith("~/")
+				? path.join(os.homedir(), userPath.slice(2))
+				: userPath;
+
 	// Normalize first to collapse ../ sequences before resolving
-	const normalized = path.normalize(userPath);
+	const normalized = path.normalize(expanded);
 	const absolutePath = path.isAbsolute(normalized)
 		? path.resolve(normalized)
 		: path.resolve(workingDirectory, normalized);
@@ -129,7 +136,10 @@ function safePath(userPath: string, workingDirectory: string): string {
 
 	// Must be inside the working directory
 	if (!normalizedTarget.startsWith(normalizedBase + path.sep)) {
-		throw new Error(`Path traversal blocked: "${userPath}" resolves outside working directory`);
+		throw new Error(
+			`Path traversal blocked: "${userPath}" resolves outside working directory. ` +
+				`Files can only be read or written inside ${normalizedBase} - use a path inside that directory.`,
+		);
 	}
 
 	return normalizedTarget;
@@ -226,7 +236,13 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			stderr += d.toString();
 		});
 		const timer = setTimeout(() => {
-			try { process.kill(-proc.pid!, "SIGKILL"); } catch { try { proc.kill("SIGKILL"); } catch {} }
+			try {
+				process.kill(-proc.pid!, "SIGKILL");
+			} catch {
+				try {
+					proc.kill("SIGKILL");
+				} catch {}
+			}
 			resolve(`TIMEOUT after ${TIMEOUT_MS / 1000}s: git ${args[0]}`);
 		}, TIMEOUT_MS);
 		const finish = (code: number | null) => {
@@ -234,7 +250,10 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			resolve(code === 0 ? stdout.trim() : `Error (exit ${code}): ${stderr.trim()}`);
 		};
 		proc.on("close", finish);
-		proc.on("error", (err: Error) => { clearTimeout(timer); resolve(`Error: ${err.message}`); });
+		proc.on("error", (err: Error) => {
+			clearTimeout(timer);
+			resolve(`Error: ${err.message}`);
+		});
 		proc.unref();
 	});
 }
@@ -713,8 +732,7 @@ export class ToolExecutor {
 							},
 							ingest: {
 								type: "boolean",
-								description:
-									"If true, write the result into the knowledge graph (default false)",
+								description: "If true, write the result into the knowledge graph (default false)",
 							},
 						},
 						required: ["path"],
@@ -1486,10 +1504,7 @@ export class ToolExecutor {
 			case "desktop_safe_list":
 				return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 			case "run_computer_task":
-				return this.handleRunComputerTask(
-					args.goal as string,
-					args.maxSteps as number | undefined,
-				);
+				return this.handleRunComputerTask(args.goal as string, args.maxSteps as number | undefined);
 
 			// Browser Use tools
 			case "browser_open":
@@ -3125,19 +3140,26 @@ export class ToolExecutor {
 				{ openRouterApiKey: process.env.OPENROUTER_API_KEY },
 			);
 			if (autoSelected) {
-				console.log(`[cua] auto-selected vision model: ${pinnedModel} (${visionCfg.computerUseModel} is not vision-capable)`);
+				console.log(
+					`[cua] auto-selected vision model: ${pinnedModel} (${visionCfg.computerUseModel} is not vision-capable)`,
+				);
 			}
 			const failover = new ModelFailover();
 
 			// Skip providers that lack credentials or aren't installed.
 			if (!process.env.DEEPSEEK_API_KEY) failover.markDown("deepseek-v4-flash", "deepseek");
-			if (!process.env.OPENROUTER_API_KEY) failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
+			if (!process.env.OPENROUTER_API_KEY)
+				failover.markDown("meta-llama/llama-3-8b-instruct:free", "openrouter");
 			if (!existsSync(join(homedir(), ".8gent", "bin", "apple-foundation-bridge"))) {
 				failover.markDown("apple-foundationmodel", "apfel");
 			}
 
 			// Instant AX tree placeholder — lets the model ask for desktop_windows itself.
-			const handsAdapter: import("./loops/computer-use").HandsAdapter = async (toolName, args, ctx) => {
+			const handsAdapter: import("./loops/computer-use").HandsAdapter = async (
+				toolName,
+				args,
+				ctx,
+			) => {
 				if (toolName === "desktop_accessibility_tree") {
 					return {
 						ok: true as const,
@@ -3145,7 +3167,11 @@ export class ToolExecutor {
 							pid: 0,
 							appName: "desktop",
 							windowTitle: "AX tree unavailable - call desktop_windows to list open windows",
-							root: { role: "AXDesktop", title: "Call desktop_windows to enumerate open windows.", children: [] },
+							root: {
+								role: "AXDesktop",
+								title: "Call desktop_windows to enumerate open windows.",
+								children: [],
+							},
 						},
 					};
 				}
@@ -3156,8 +3182,9 @@ export class ToolExecutor {
 
 			// Agent callers can't answer interactive y/N prompts.
 			// Auto-approve all desktop actions except quitting apps.
-			const agentApprove: import("../daemon/tools/hands").HandsToolCtx["approve"] = async ({ tool }) =>
-				tool !== "desktop_quit_app";
+			const agentApprove: import("../daemon/tools/hands").HandsToolCtx["approve"] = async ({
+				tool,
+			}) => tool !== "desktop_quit_app";
 
 			const result = await runComputerUseLoop({
 				goal: goal.trim(),
@@ -3173,8 +3200,12 @@ export class ToolExecutor {
 				`outcome: ${result.reason}`,
 				`steps: ${result.steps.length}/${steps}`,
 				result.finalMessage ?? "",
-			].filter(Boolean).join("\n");
-			return result.ok ? `Computer task complete.\n${summary}` : `Computer task failed.\n${summary}`;
+			]
+				.filter(Boolean)
+				.join("\n");
+			return result.ok
+				? `Computer task complete.\n${summary}`
+				: `Computer task failed.\n${summary}`;
 		} catch (err) {
 			return `run_computer_task error: ${err instanceof Error ? err.message : String(err)}`;
 		}
