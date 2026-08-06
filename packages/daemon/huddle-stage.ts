@@ -401,8 +401,14 @@ export function handleStageHttp(url: URL, wsUrl: string): Response | null {
 	const [, huddleId, kind, file] = m;
 
 	if (kind === "stage") {
-		const topic = stages.get(huddleId)?.topic ?? "";
-		return new Response(stagePage({ huddleId, wsUrl, topic }), {
+		// The channel comes from the daemon's OWN live state, never from the URL, so
+		// a page can only ever be told to subscribe to the channel its huddle is
+		// actually on. An unknown or already-closed huddle yields "" and the page
+		// simply does not send the subscribe.
+		const state = stages.get(huddleId);
+		const topic = state?.topic ?? "";
+		const channelId = state?.channelId ?? "";
+		return new Response(stagePage({ huddleId, wsUrl, topic, channelId }), {
 			headers: {
 				"content-type": "text/html; charset=utf-8",
 				"cache-control": "no-store",
