@@ -8,9 +8,18 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { OFFICERS, listOfficers, resolveOfficer } from "../officers";
+import { OFFICERS, type HarnessKind, listOfficers, resolveOfficer } from "../officers";
 
 const LOCAL_PROVIDERS = new Set(["apfel", "ollama", "lmstudio"]);
+const VALID_HARNESS_KINDS: ReadonlySet<HarnessKind> = new Set<HarnessKind>([
+	"claude",
+	"codex",
+	"8gent-local",
+	"shell",
+	"pi",
+	"cursor-agent",
+	"opencode",
+]);
 
 describe("table officer roster", () => {
 	it("has all eight officer codes", () => {
@@ -49,6 +58,16 @@ describe("table officer roster", () => {
 		expect(counts.get("ollama:llama3.2:3b")).toBe(2);
 		expect(counts.get("lmstudio:ornith-1.0-9b")).toBe(2);
 		expect(counts.get("lmstudio:gemma-4-12b-coder-fable5-composer2.5-v1")).toBe(2);
+	});
+
+	it("gives every officer a non-empty, real EXECUTION harness kind (distinct from chat provider)", () => {
+		for (const officer of listOfficers()) {
+			expect(officer.harness).toBeDefined();
+			expect(officer.harness.kind.length).toBeGreaterThan(0);
+			expect(VALID_HARNESS_KINDS.has(officer.harness.kind)).toBe(true);
+			// "goose" is deliberately excluded (broken CLI on the reference machine).
+			expect(officer.harness.kind).not.toBe("goose");
+		}
 	});
 
 	it("uses the correct baseUrl convention per provider", () => {

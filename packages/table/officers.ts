@@ -31,6 +31,45 @@
 /** On-box provider/runtime an officer is pinned to. All are local. */
 export type OfficerProvider = "apfel" | "ollama" | "lmstudio";
 
+/**
+ * A CLI coding-agent worker kind Helm can spawn. Mirrors helm.py's KINDS keys
+ * exactly - this union MUST stay in lockstep with both helm.py's KINDS dict and
+ * helm-bridge.ts's HelmKind type, or a harness binding here could name a kind
+ * Helm cannot actually run. "goose" is deliberately NOT in this union yet - the
+ * `goose` on PATH on the reference machine is a broken, unrelated stale PyPI
+ * package (ModuleNotFoundError: langfuse.decorators), not Block's Goose CLI. It
+ * stays out until the real Goose CLI binary replaces it and its --help is
+ * reverified per the same procedure used for pi/opencode/cursor-agent below.
+ */
+export type HarnessKind =
+	| "claude"
+	| "codex"
+	| "8gent-local"
+	| "shell"
+	| "pi"
+	| "cursor-agent"
+	| "opencode";
+
+/**
+ * An officer's EXECUTION harness - the CLI coding agent Helm spawns when this
+ * officer's Helm proposal is approved. Independent of `provider`/`model` below,
+ * which is the officer's CHAT backend (the local LLM answering as them in a
+ * Table channel). An officer chatting on a local model and executing through a
+ * cloud-billed CLI (claude/codex/cursor-agent) is expected, not a bug - see
+ * harness-config.ts's logCloudBilledOfficers for the disclosure this earns.
+ */
+export interface OfficerHarness {
+	/** Which CLI Helm launches. Must be a kind Helm's KINDS dict actually has. */
+	kind: HarnessKind;
+	/** Optional model override passed to the harness's OWN --model flag (NOT
+	 *  Officer.model, which is the chat backend's model id). Undefined = the
+	 *  harness's own default model. Validated by helm.py's _MODEL_RE either way. */
+	model?: string;
+	/** Optional skill names appended to the harness's system prompt (only kinds
+	 *  with a real skills flag honour this - see _KIND_OPTIONS in helm.py). */
+	skills?: string[];
+}
+
 export interface Officer {
 	/** Officer code, e.g. "8TO". Case-sensitive canonical form is upper. */
 	code: string;
@@ -46,6 +85,10 @@ export interface Officer {
 	baseUrl: string;
 	/** Short, in-character system prompt (1-2 sentences). */
 	systemPrompt: string;
+	/** EXECUTION harness - see OfficerHarness doc comment. Coded default; a
+	 *  human may override it per-officer via ~/.8gent/table-harness.json,
+	 *  resolved at call time by harness-config.ts's resolveHarness(). */
+	harness: OfficerHarness;
 }
 
 // Live backend endpoints (local only). Centralised so a port change is one edit.
@@ -71,6 +114,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: APFEL_BASE,
 		systemPrompt:
 			"You are AI James, the chief executive of the 8GI table. Decide, prioritise, and keep the group moving toward the mission; be direct and own the call.",
+		// Broadest general-purpose CLI; exec needs the most capable default, not a
+		// specialist tool.
+		harness: { kind: "claude" },
 	},
 	"8PO": {
 		code: "8PO",
@@ -81,6 +127,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Samantha, the product officer. Discipline, always: state the problem in ONE sentence; name exactly ONE primary user and make them a specific human, never 'the agent' or a list of archetypes; define the Smallest Shippable Slice as a single concrete view plus one action a user takes, never a restatement of the full feature. Cut everything that is not those three.",
+		// Multi-provider breadth (opencode routes many backends) fits a PM officer
+		// who scopes across surfaces, not one stack.
+		harness: { kind: "opencode" },
 	},
 	"8CO": {
 		code: "8CO",
@@ -91,6 +140,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Luis, the community officer. Warm but useful: when someone has a problem, give ONE concrete known fix or the exact next step (or ask them to post their logs) so the solution lives in the public thread. Never reply with only vague questions. Keep it welcoming, keep it actionable.",
+		// The open-source community officer runs the community's own free/local
+		// harness - dogfoods what we ship.
+		harness: { kind: "8gent-local" },
 	},
 	"8MO": {
 		code: "8MO",
@@ -101,6 +153,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: OLLAMA_BASE,
 		systemPrompt:
 			"You are Zara, the marketing officer. Find the sharp, honest hook in the work and say it in plain words; evidence over hype.",
+		// Lightweight, fast CLI for quick content/script tasks - matches
+		// marketing's cadence.
+		harness: { kind: "pi" },
 	},
 	"8GO": {
 		code: "8GO",
@@ -111,6 +166,13 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Solomon, the governance officer. Reason carefully about rules, risk, and precedent, then state the principled position and why it holds.",
+		// Governance <-> policy-hooks is Goose's actual design center, but the
+		// `goose` on PATH on this machine is a broken, unrelated stale package
+		// (see the HarnessKind doc comment) - not the real Block Goose CLI. Bound
+		// to `pi` for now so Solomon has a WORKING harness rather than a silently
+		// faked `goose`. Flip this to `kind: "goose"` the moment the real Goose
+		// CLI is installed and its --help is reverified.
+		harness: { kind: "pi" },
 	},
 	"8SO": {
 		code: "8SO",
@@ -121,6 +183,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Karen, the security officer. Assume the input is hostile until proven otherwise; name the threat, the blast radius, and the smallest safe mitigation.",
+		// Most auditable, most restricted: a literal shell she (and James) can
+		// read command-by-command, no autonomous agent loop of its own.
+		harness: { kind: "shell" },
 	},
 	"8TO": {
 		code: "8TO",
@@ -131,6 +196,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Rishi, the tech officer. Terse and pragmatic; give the smallest change that works, the constraint that bounds it, and what you are not doing.",
+		// OpenAI's code-specialist CLI - distinct from the exec's `claude`, per
+		// James's own "code in one... claude code in another" split.
+		harness: { kind: "codex" },
 	},
 	"8DO": {
 		code: "8DO",
@@ -141,6 +209,9 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		baseUrl: LMSTUDIO_BASE,
 		systemPrompt:
 			"You are Moira, the design officer. Guard the interaction and the feel; reduce friction, and reject anything that makes the user work harder than needed.",
+		// Cursor's agent CLI is the most interaction/UI-oriented of the installed
+		// set; fits the design officer's brief.
+		harness: { kind: "cursor-agent" },
 	},
 });
 

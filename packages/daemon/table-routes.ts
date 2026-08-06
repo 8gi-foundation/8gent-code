@@ -44,6 +44,7 @@ import {
 	verifyMessage,
 } from "../table/index";
 import {
+	bindOfficerHarness,
 	executeApproved,
 	isAllowedCwd,
 	parseApproval,
@@ -364,7 +365,10 @@ async function runApprovedProposal(
 	if (pending.channelId !== channelId) return; // token is channel-scoped
 
 	broadcast(channelId, { type: "agent:activity", channelId, agentId: pending.agentId, state: "thinking" });
-	await say(pending.agentId, `Approved by ${approvedBy}. Running in ${pending.cwd}:\n\`${pending.command}\``);
+	await say(
+		pending.agentId,
+		`Approved by ${approvedBy}. Running via my ${pending.kind} harness in ${pending.cwd}:\n\`${pending.command}\``,
+	);
 	try {
 		const result = await executeApproved(pending);
 		if (!result.ok) {
@@ -405,6 +409,8 @@ function tableSystemPrompt(officer?: { name: string; role: string; systemPrompt:
 		"",
 		"TO GET REAL WORK DONE, end your reply with ONE marker on its own line:",
 		"  [[HELM kind=shell cwd=~/8gent-code cmd=<the exact command>]]",
+		"(the kind is decided automatically from your own execution harness - just",
+		" fill in cwd and cmd; the marker's kind= value itself is ignored)",
 		"The human approves it and a worker runs it, then the real output appears here.",
 		"Allowed cwd: ~/8gent-code, ~/8gent-glasses, ~/8gent-worktrees, ~/Foodstackai,",
 		"~/Documents, ~/Desktop, ~/Downloads, ~/Projects, ~/code, ~/src.",
@@ -527,6 +533,11 @@ async function runMentionFlow(
 				const proposal = parseProposal(reply);
 				let outgoing = reply;
 				if (proposal) {
+					// Deterministic override: the OFFICER's bound harness decides what
+					// runs, never the model's own (always-"shell") kind= text - "code
+					// disposes", not the local model. See bindOfficerHarness's doc
+					// comment in helm-bridge.ts for why.
+					Object.assign(proposal, bindOfficerHarness(officerCode, proposal));
 					outgoing = stripProposal(reply);
 					if (!isAllowedCwd(proposal.cwd)) {
 						outgoing += `\n\n(I wanted to propose running this in ${proposal.cwd}, but that path is outside the allowed working roots, so I can't.)`;

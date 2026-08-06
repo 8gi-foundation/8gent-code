@@ -19,12 +19,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resolveHarness } from "./harness-config";
 
 const HELM_BASE = process.env.GLASSES_RELAY || "http://127.0.0.1:7890";
 
-/** Worker kinds Helm can run. */
-export type HelmKind = "shell" | "claude" | "codex" | "8gent-local";
-const KINDS = new Set<HelmKind>(["shell", "claude", "codex", "8gent-local"]);
+/** Worker kinds Helm can run. Kept in lockstep with helm.py's KINDS. */
+export type HelmKind = "shell" | "claude" | "codex" | "8gent-local" | "pi" | "cursor-agent" | "opencode";
+const KINDS = new Set<HelmKind>(["shell", "claude", "codex", "8gent-local", "pi", "cursor-agent", "opencode"]);
 
 /** Mirrors the relay's own cwd allowlist (helm.py _CWD_CANDIDATES). */
 const ALLOWED_CWD_ROOTS = [
@@ -36,6 +37,9 @@ export interface HelmProposal {
 	kind: HelmKind;
 	cwd: string;
 	command: string;
+	/** Model override for the bound harness's own --model flag, when the
+	 *  officer's harness names one. Carried through to /helm/spawn. */
+	model?: string;
 }
 
 export interface PendingApproval extends HelmProposal {
@@ -43,6 +47,24 @@ export interface PendingApproval extends HelmProposal {
 	channelId: string;
 	agentId: string;
 	createdAt: number;
+}
+
+/**
+ * Override a freshly-parsed proposal's kind/model with the PROPOSING OFFICER's
+ * bound execution harness. Called immediately after parseProposal(), before
+ * stagePending(), in table-routes.ts runMentionFlow. The model's own `kind=`
+ * text in the marker is deliberately IGNORED here (it is always "shell" in
+ * practice - the officer is never taught to name any other kind) in favour of
+ * a deterministic, code-owned binding: "agent proposes, code disposes."
+ *
+ * An officer code the daemon doesn't recognise leaves the parsed proposal
+ * unchanged (fail open to whatever the marker already said, which is always a
+ * safe, allowlisted `HelmKind` because parseProposal already validated it).
+ */
+export function bindOfficerHarness(officerCode: string, p: HelmProposal): HelmProposal {
+	const harness = resolveHarness(officerCode);
+	if (!harness) return p;
+	return { ...p, kind: harness.kind, model: harness.model };
 }
 
 /** Bearer secret, daemon-side only. Never logged, never posted. */
@@ -188,7 +210,15 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 	if (!bearer()) {
 		return { ok: false, label: "failed", output: "", detail: "no relay secret available daemon-side" };
 	}
-	const spawn = await helm("POST", "/helm/spawn", { kind: p.kind, cwd: p.cwd, prompt: p.command });
+	const spawn = await helm("POST", "/helm/spawn", {
+		kind: p.kind,
+		cwd: p.cwd,
+		prompt: p.command,
+		...(p.model ? { model: p.model } : {}),
+		// Worker->officer attribution (opaque passthrough; Helm never interprets
+		// it, only displays it - same trust level as prompt_hash in its ledger).
+		meta: { officer: p.agentId.replace(/^agent:/, "") },
+	});
 	if (spawn.status !== 200 || !spawn.json?.id) {
 		return { ok: false, label: "failed", output: "", detail: `spawn failed (${spawn.status}): ${JSON.stringify(spawn.json).slice(0, 200)}` };
 	}
