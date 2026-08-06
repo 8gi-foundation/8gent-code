@@ -97,12 +97,14 @@ const OLLAMA_BASE = "http://127.0.0.1:11434"; // ollama appends /api/chat
 const LMSTUDIO_BASE = "http://127.0.0.1:1234"; // lmstudio appends /v1/chat/completions
 
 /**
- * The eight officers, keyed by code. Distribution across the four live local
- * backends (two officers each):
- *   apfel  (apple-foundationmodel)  -> 8EO AI James, 8PO Samantha
- *   ollama (llama3.2:3b)            -> 8CO Luis,     8MO Zara
- *   lmstudio ornith-1.0-9b (reason) -> 8GO Solomon,  8SO Karen
- *   lmstudio gemma-4-12b-coder      -> 8TO Rishi,    8DO Moira
+ * The eight officers, keyed by code. Every backend still carries at least one
+ * officer (the huddle speaks a whole round in sequence, and one server holding
+ * every seat serialises it), but WITHIN a backend the model is chosen on
+ * measured reply quality for that officer's brief - see 8MO's note. Current:
+ *   apfel  (apple-foundationmodel)  -> 8EO AI James
+ *   ollama qwen2.5vl:7b             -> 8MO Zara
+ *   lmstudio ornith-1.0-9b (reason) -> 8GO Solomon, 8SO Karen
+ *   lmstudio gemma-4-12b-coder      -> 8TO Rishi, 8DO Moira, 8PO Samantha, 8CO Luis
  */
 export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 	"8EO": {
@@ -148,8 +150,23 @@ export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
 		code: "8MO",
 		name: "Zara",
 		role: "marketing",
+		// Was llama3.2:3b. Measured 2026-08-06 on the officer reply bench - same
+		// persona, same prompt, six separate runs: 3b never once answered the
+		// question. It restated it back ("what's being asked here is for me to
+		// share my opinion"), invented facts about 8gi.org, and twice reproduced
+		// its OWN memory file verbatim into the channel, PLAN scaffolding and all,
+		// because a 3B model cannot hold the "memory is background" framing
+		// against the pull of copying what it can see.
+		//
+		// Reseated WITHIN ollama rather than onto LM Studio on purpose: the spread
+		// invariant below is load-bearing for the huddle, where all eight officers
+		// speak in one round and LM Studio serialises. Of the ollama-resident
+		// models, qwen2.5vl:7b answered cleanly on both runs; minicpm5 leaked its
+		// raw <think> block instead of an answer, and Selene-8B produced corporate
+		// filler ("demonstrates our commitment to autonomy"), which is precisely
+		// what this officer's brief forbids.
 		provider: "ollama",
-		model: "llama3.2:3b",
+		model: "qwen2.5vl:7b",
 		baseUrl: OLLAMA_BASE,
 		systemPrompt:
 			"You are Zara, the marketing officer. Find the sharp, honest hook in the work and say it in plain words; evidence over hype.",
