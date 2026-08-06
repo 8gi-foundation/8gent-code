@@ -228,6 +228,30 @@ export function takePending(token: string): PendingApproval | null {
 	return e;
 }
 
+/** Workers currently waiting on a human answer, keyed by reply token. */
+const AWAITING = new Map<string, { workerId: string; channelId: string; agentId: string; createdAt: number }>();
+
+export function stageAwaiting(workerId: string, channelId: string, agentId: string): string {
+	for (const [k, v] of AWAITING) if (Date.now() - v.createdAt > TTL_MS) AWAITING.delete(k);
+	let token = newToken();
+	while (AWAITING.has(token)) token = newToken();
+	AWAITING.set(token, { workerId, channelId, agentId, createdAt: Date.now() });
+	return token;
+}
+
+export function takeAwaiting(token: string) {
+	const e = AWAITING.get(token.toUpperCase());
+	if (!e) return null;
+	AWAITING.delete(token.toUpperCase());
+	return Date.now() - e.createdAt > TTL_MS ? null : e;
+}
+
+/** `/reply ABC123 <answer>` from a human answering a worker's question. */
+export function parseReply(content: string): { token: string; text: string } | null {
+	const m = content.trim().match(/^\/reply\s+([A-Za-z0-9]{4,12})\s+([\s\S]+)$/);
+	return m ? { token: m[1].toUpperCase(), text: m[2].trim() } : null;
+}
+
 /** `/approve ABC123` from a human. Returns the token or null. */
 export function parseApproval(content: string): string | null {
 	return content.trim().match(/^\/approve\s+([A-Za-z0-9]{4,12})\b/)?.[1]?.toUpperCase() ?? null;
@@ -249,7 +273,7 @@ async function helm(method: "GET" | "POST", route: string, body?: unknown): Prom
 
 export interface ExecutionResult {
 	ok: boolean;
-	label: "verified" | "asserted" | "failed";
+	label: "verified" | "asserted" | "failed" | "needs_input";
 	workerId?: string;
 	output: string;
 	detail?: string;
@@ -282,12 +306,48 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 	const id = String(spawn.json.id);
 	const timeout = opts?.timeoutMs ?? 90_000;
 	const started = Date.now();
+	return watchWorker(id, timeout);
+}
+
+/**
+ * Watch a live worker until it settles, asks a question, or times out.
+ *
+ * A worker that ASKS must not be killed. Observed live: an officer's claude
+ * harness pushed a branch, found the PR base did not exist, and stopped to ask
+ * which base to use - offering two sensible options rather than inventing one.
+ * That is exactly the behaviour we want, and the old loop killed it after two
+ * quiet reads, throwing away both the question and the running session. Now the
+ * worker stays alive, the question reaches the channel, and the human answers it
+ * with /reply. Helm's own `needs_input` state is the signal - no new heuristic.
+ */
+export async function watchWorker(id: string, timeout: number): Promise<ExecutionResult> {
+	const started = Date.now();
 	let lastOut = "";
 	let stableFor = 0;
 	while (Date.now() - started < timeout) {
 		await new Promise((r) => setTimeout(r, 5_000));
+
+		const fleet = await helm("GET", "/helm/workers");
+		const me = (fleet.json?.workers ?? []).find((w: { id?: string }) => w?.id === id);
 		const out = await helm("GET", `/helm/worker/${id}/output?tail=60`);
 		const text = String(out.json?.output ?? "");
+
+		if (me?.state === "needs_input") {
+			// Leave it RUNNING. The human answers via /reply and it carries on.
+			return { ok: true, label: "needs_input", workerId: id, output: tail(text) };
+		}
+		if (me?.state === "done" || me?.state === "failed") {
+			const exit = me?.exit_code;
+			await helm("POST", `/helm/worker/${id}/stop`, {});
+			return {
+				ok: me.state === "done",
+				label: me.state === "done" ? "verified" : "failed",
+				workerId: id,
+				output: tail(text),
+				detail: exit === undefined ? undefined : `exit ${exit}`,
+			};
+		}
+
 		if (text === lastOut && text.trim().length > 0) {
 			stableFor += 1;
 			// Two consecutive identical non-empty reads = the worker has settled.
@@ -300,8 +360,22 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 			lastOut = text;
 		}
 	}
-	await helm("POST", `/helm/worker/${id}/stop`, {});
-	return { ok: true, label: "asserted", workerId: id, output: tail(lastOut), detail: "timed out before output settled" };
+	// Timed out. Do NOT kill it - long agentic work legitimately outlives this
+	// window, and killing it would destroy real work in progress. Say honestly
+	// that it is still running.
+	return {
+		ok: true, label: "asserted", workerId: id, output: tail(lastOut),
+		detail: "still running past my watch window - not a completion claim",
+	};
+}
+
+/** Send the human's answer to a worker that asked, then keep watching. */
+export async function answerWorker(id: string, text: string, timeoutMs = 90_000): Promise<ExecutionResult> {
+	const res = await helm("POST", `/helm/worker/${id}/input`, { text, enter: true });
+	if (res.status !== 200) {
+		return { ok: false, label: "failed", workerId: id, output: "", detail: `could not send input (${res.status})` };
+	}
+	return watchWorker(id, timeoutMs);
 }
 
 /** Last ~25 meaningful lines, so a TUI's redraw noise doesn't flood the channel. */

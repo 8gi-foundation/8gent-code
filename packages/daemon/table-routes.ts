@@ -53,6 +53,10 @@ import {
 	stripProposal,
 	takePending,
 	DEFAULT_WORK_ROOT,
+	answerWorker,
+	parseReply,
+	stageAwaiting,
+	takeAwaiting,
 } from "../table/helm-bridge";
 import { discoverAll, formatDiscovery } from "../table/discovery";
 import { resolveHarness } from "../table/harness-config";
@@ -422,6 +426,77 @@ async function runConfigCommand(
 }
 
 /**
+ * The human answered a worker that stopped to ask. Send the answer through and
+ * keep watching. A worker asking a question is the system working correctly -
+ * observed live, an officer's claude harness found a PR base that did not exist
+ * and asked which to use rather than inventing one - so the question must reach
+ * the human and the answer must reach the worker.
+ */
+async function runWorkerReply(
+	deps: TableRouteDeps,
+	channelId: string,
+	token: string,
+	text: string,
+): Promise<void> {
+	const { store, broadcast } = deps;
+	const waiting = takeAwaiting(token);
+	const speaker = waiting?.agentId
+		?? store.listMembers(channelId).find((m: { participantId: string }) =>
+			m.participantId.startsWith("agent:"))?.participantId
+		?? "agent:8EO";
+	const say = async (content: string) => {
+		const tool = makePostToChannelTool({ store, agentId: speaker, broadcast });
+		const res = await tool.execute({ channelId, content });
+		if (!res.ok) console.warn(`[table] reply post denied: ${res.error}`);
+	};
+	if (!waiting) { await say("That reply token is unknown or expired."); return; }
+	if (waiting.channelId !== channelId) return;
+
+	broadcast(channelId, { type: "agent:activity", channelId, agentId: speaker, state: "thinking" });
+	try {
+		const result = await answerWorker(waiting.workerId, text);
+		await postExecutionResult(deps, channelId, speaker, result);
+	} catch (err) {
+		await say(`Could not pass that on: ${String(err).slice(0, 200)}`);
+	} finally {
+		broadcast(channelId, { type: "agent:activity", channelId, agentId: speaker, state: "idle" });
+	}
+}
+
+/**
+ * Post an execution result honestly, and - when the worker ASKED something -
+ * keep it alive and give the human a way to answer.
+ */
+async function postExecutionResult(
+	deps: TableRouteDeps,
+	channelId: string,
+	agentId: string,
+	result: { ok: boolean; label: string; workerId?: string; output: string; detail?: string },
+): Promise<void> {
+	const { store, broadcast } = deps;
+	const say = async (content: string) => {
+		const tool = makePostToChannelTool({ store, agentId, broadcast });
+		const res = await tool.execute({ channelId, content });
+		if (!res.ok) console.warn(`[table] result post denied: ${res.error}`);
+	};
+	if (!result.ok && result.label === "failed") {
+		await say(`Could not run it: ${result.detail ?? "unknown error"}. Nothing was executed.`);
+		return;
+	}
+	if (result.label === "needs_input" && result.workerId) {
+		const t = stageAwaiting(result.workerId, channelId, agentId);
+		await say(
+			`It stopped to ask you something (still running, nothing lost):\n\n\u0060\u0060\u0060\n${result.output || "(no output captured)"}\n\u0060\u0060\u0060\n\nReply **/reply ${t} <your answer>** and I'll pass it straight through.`,
+		);
+		return;
+	}
+	const header = result.label === "verified"
+		? "Ran it. Output (verified - I watched it finish):"
+		: `Ran it, but ${result.detail ?? "it did not settle in time"}, so this is the raw output so far (asserted, NOT a completion claim):`;
+	await say(`${header}\n\n\u0060\u0060\u0060\n${result.output || "(no output captured)"}\n\u0060\u0060\u0060`);
+}
+
+/**
  * Execute a proposal the human just approved, and post the EVIDENCE back into the
  * channel. Posted as the proposing officer (so the thread reads as that colleague
  * reporting back) through the same gated post path, which also ledgers it.
@@ -458,15 +533,9 @@ async function runApprovedProposal(
 		`Approved by ${approvedBy}. Running via my ${pending.kind} harness in ${pending.cwd}:\n\`${pending.command}\``,
 	);
 	try {
-		const result = await executeApproved(pending);
-		if (!result.ok) {
-			await say(pending.agentId, `Could not run it: ${result.detail ?? "unknown error"}. Nothing was executed.`);
-		} else {
-			const header = result.label === "verified"
-				? "Ran it. Output (verified - I watched it finish):"
-				: "Ran it, but it did not settle in time, so this is the raw output so far (asserted, NOT a completion claim):";
-			await say(pending.agentId, `${header}\n\n\`\`\`\n${result.output || "(no output captured)"}\n\`\`\``);
-		}
+		// One reporting path for both approval and reply, so a worker that stops to
+		// ask is surfaced identically however the run was started.
+		await postExecutionResult(deps, channelId, pending.agentId, await executeApproved(pending));
 	} catch (err) {
 		await say(pending.agentId, `Execution errored: ${String(err).slice(0, 200)}. Nothing is claimed as done.`);
 	} finally {
@@ -530,6 +599,15 @@ async function runMentionFlow(
 	// than being chatted at, and answered by the daemon itself (no model call).
 	if (/^\s*\/(providers|officers|officer)\b/i.test(posted.content)) {
 		await runConfigCommand(deps, channelId, posted.content);
+		return;
+	}
+
+	// "/reply <token> <answer>" - the human answering a worker that stopped to
+	// ask. Without this the question died with the worker and real work in
+	// progress was thrown away.
+	const reply = parseReply(posted.content);
+	if (reply) {
+		await runWorkerReply(deps, channelId, reply.token, reply.text);
 		return;
 	}
 
