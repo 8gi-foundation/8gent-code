@@ -67,7 +67,7 @@ export {
 export { buildLayout, MAX_MEASURE_CH, MIN_TARGET_PX } from "./layout";
 export { OFFICER_DESIGN_PROMPT, parseDesignMarkers, type ParsedDesign } from "./marker";
 export { buildMotion } from "./motion";
-export { buildPalette, REQUIRED_PAIRS, secondaryHue } from "./palette";
+export { accentChroma, buildPalette, REQUIRED_PAIRS, secondaryHue } from "./palette";
 export {
 	DESIGN_LEDGER_KIND,
 	DESIGN_REFUSED_LEDGER_KIND,
@@ -86,6 +86,7 @@ export {
 	TYPE_ROLES,
 } from "./scales";
 export { hierarchyStrength, restraint, rhythmConsistency, scoreDesign } from "./score";
+export { solveLegibleHex, solveLightness } from "./solve";
 export {
 	DesignRefused,
 	type ColorRole,
