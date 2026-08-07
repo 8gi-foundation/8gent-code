@@ -537,13 +537,46 @@ function sentences(text: string): string[] {
 		.filter(Boolean);
 }
 
-/** Hard truncate at a word boundary where possible, with an ellipsis. */
+/**
+ * Normalise punctuation a local model produces but this codebase forbids.
+ *
+ * BRAND.md bans em dashes outright, and these models emit them constantly. One
+ * reached a real slide heading tonight - "The value is in the friction-seeing
+ * the messy collis..." - breaking a hard rule in the most visible place we
+ * have. Prompting against it does not hold; normalising here does, because
+ * every slide field passes through clip().
+ *
+ * Em and en dashes become a spaced hyphen, which is what the rule asks for.
+ *
+ * Ellipsis characters are deliberately LEFT ALONE. An earlier version rewrote
+ * them to three dots, which broke idempotency: clip() appends a single "…" as
+ * its truncation marker, so normalising an already-clipped string turned that
+ * marker into "..." and the value changed on every pass. Caught by the
+ * idempotency test rather than in production. Nothing bans the character, so
+ * the simplest correct behaviour is to not touch it.
+ */
+export function normalisePunctuation(text: string): string {
+	return text
+		.replace(/\s*[—–]\s*/g, " - ")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+/**
+ * Truncate at a word boundary, never mid-word.
+ *
+ * This used to fall back to a hard mid-word cut whenever the last space sat
+ * before 60% of the cap, which produced "the messy collis..." on a real slide.
+ * A heading that stops mid-word reads as broken rather than abbreviated, so a
+ * word boundary now always wins; the hard cut survives only for a single
+ * unbroken token that has no boundary at all.
+ */
 export function clip(text: string, cap: number): string {
-	const t = text.trim().replace(/\s+/g, " ");
+	const t = normalisePunctuation(text);
 	if (t.length <= cap) return t;
 	const cut = t.slice(0, cap - 1);
 	const sp = cut.lastIndexOf(" ");
-	return `${(sp > cap * 0.6 ? cut.slice(0, sp) : cut).trimEnd()}…`;
+	return `${(sp > 0 ? cut.slice(0, sp) : cut).trimEnd()}…`;
 }
 
 /**
