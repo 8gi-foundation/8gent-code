@@ -266,7 +266,7 @@ export function composeAt(coordinate: Coordinate, intent: DesignIntent): DesignS
 export function coordinateId(c: Coordinate): string {
 	const canonical = Object.keys(c)
 		.sort()
-		.map((k) => `${k}=${(c as Record<string, unknown>)[k]}`)
+		.map((k) => `${k}=${(c as unknown as Record<string, unknown>)[k]}`)
 		.join(";");
 	return fnv1a(canonical).toString(16).padStart(8, "0");
 }

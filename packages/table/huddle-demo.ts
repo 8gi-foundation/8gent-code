@@ -106,6 +106,7 @@ async function prepare(ctx: PrepareContext): Promise<string> {
 		index: index + 1,
 		total: ROSTER.length,
 		assertedFields: verified.assertedFields,
+		huddleId: HUDDLE_ID,
 	});
 	writeFileSync(join(dir, "slides", `slide-${ctx.turnId}.html`), html, "utf8");
 

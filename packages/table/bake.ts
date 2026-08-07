@@ -98,7 +98,8 @@ export function ensureHuddleDirs(huddleId: string): string {
  */
 export function writeSlide(huddleId: string, turnId: string, spec: SlideSpec, ctx: RenderContext): { path: string; sha256: string } {
 	const dir = ensureHuddleDirs(huddleId);
-	const { html, sha256 } = renderSlide(spec, ctx);
+	// The huddle id is already an argument here, so the caller cannot forget it.
+	const { html, sha256 } = renderSlide(spec, { ...ctx, huddleId });
 	const path = join(dir, "slides", `slide-${turnId}.html`);
 	writeFileSync(path, html, "utf8");
 	return { path, sha256 };
@@ -307,6 +308,9 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string): BakeResult 
 				index: turn.index + 1,
 				total: manifest.turns.length,
 				assertedFields: turn.assertedFields,
+				// Same design as the live render, because it comes from the same id.
+				// A re-bake of an old manifest reproduces the original visuals.
+				huddleId: manifest.huddleId,
 			});
 			writeFileSync(htmlPath, html, "utf8");
 		}

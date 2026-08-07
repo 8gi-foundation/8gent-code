@@ -189,6 +189,11 @@ export async function runTurnPipeline(
 			name,
 			index: index + 1,
 			assertedFields: verified.assertedFields,
+			// The huddle id IS the design: packages/design-compose composes one spec
+			// per huddle so every turn in this deliberation shares a palette, a type
+			// ramp and a spacing rhythm. Dropping it here would give each slide the
+			// default design and lose the coherence.
+			huddleId,
 		};
 		const { html, sha256 } = renderSlide(verified.spec, ctx);
 		const dir = ensureHuddleDirs(huddleId);
@@ -292,7 +297,7 @@ export function ingestDictation(
 	for (const slide of slides) {
 		const turnId = `zen_${huddleId.slice(-6)}_${slide.index}`;
 		const index = state.turns.length;
-		const ctx = { code: "HUMAN", name, index: index + 1 };
+		const ctx = { code: "HUMAN", name, index: index + 1, huddleId };
 		const { html, sha256 } = renderSlide(slide.spec, ctx);
 		writeFileSync(join(dir, "slides", `slide-${turnId}.html`), html, "utf8");
 
