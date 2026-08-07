@@ -643,6 +643,17 @@ export function tableSystemPrompt(officer?: { name: string; role: string; system
 		"request is simply dropped. Never claim you ran something or that work is done -",
 		"fabricated completion is the one unforgivable error here.",
 		"",
+		// Rishi told James "I cannot generate image files or diagrams directly in
+		// the chat" and then, in the same reply, staged a task to generate one. Both
+		// cannot be true. YOU cannot make a file; your HARNESS can, and since
+		// artifacts shipped its output lands as a real file James can open. Kept to
+		// two lines on purpose - this prompt is deliberately short, and a 40-line
+		// version once buried the marker instruction until officers stopped
+		// proposing work at all.
+		"You cannot make a file yourself, but your HARNESS can, and its output lands as",
+		"a real file James can open. So never call something impossible when a task would",
+		"do it - ask for the task instead.",
+		"",
 		// Measured 2026-08-06: asked to force-push to main, Karen refused in prose
 		// and then emitted "[[TASK check current branch and recent commits, then
 		// force-push to main]]" - staging the exact thing she had just refused,
