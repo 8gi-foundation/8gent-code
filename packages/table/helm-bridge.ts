@@ -21,6 +21,14 @@ import os from "node:os";
 import path from "node:path";
 import { resolveHarness } from "./harness-config";
 
+import {
+	type Artifact,
+	artifactInstruction,
+	collectArtifacts,
+	prepareArtifactDir,
+	writeFullLog,
+} from "./artifacts";
+
 const HELM_BASE = process.env.GLASSES_RELAY || "http://127.0.0.1:7890";
 
 /** Worker kinds Helm can run. Kept in lockstep with helm.py's KINDS. */
@@ -219,6 +227,63 @@ export function stagePending(p: HelmProposal, channelId: string, agentId: string
 	return entry;
 }
 
+/**
+ * Tasks that already RAN, so an officer cannot restage work it just did.
+ *
+ * James approved a diagram task. It ran and produced output. He said "i dont
+ * see the diagram yet" - which is FEEDBACK ON THAT RUN - and the officer replied
+ * with identical text and staged a duplicate under a new token. Nothing compared
+ * the new proposal against the one that had just completed.
+ *
+ * Keyed by channel + officer + normalised command, so the same request in a
+ * different room, or from a different officer, is still allowed.
+ */
+interface CompletedTask {
+	token: string;
+	at: number;
+	artifactDir: string;
+	artifactNames: string[];
+}
+const COMPLETED = new Map<string, CompletedTask>();
+/** Long enough to cover a follow-up conversation, short enough that genuinely
+ *  redoing the work later is never blocked. */
+const REPEAT_WINDOW_MS = 30 * 60_000;
+
+function repeatKey(channelId: string, agentId: string, command: string): string {
+	return `${channelId}|${agentId}|${command.toLowerCase().replace(/\s+/g, " ").trim()}`;
+}
+
+/** Record a finished task so a near-identical restage can be caught. */
+export function noteCompleted(p: PendingApproval, artifactDir: string, artifactNames: string[]): void {
+	for (const [k, v] of COMPLETED) if (Date.now() - v.at > REPEAT_WINDOW_MS) COMPLETED.delete(k);
+	COMPLETED.set(repeatKey(p.channelId, p.agentId, p.command), {
+		token: p.token,
+		at: Date.now(),
+		artifactDir,
+		artifactNames,
+	});
+}
+
+/**
+ * Has this exact work already run here, recently?
+ *
+ * Returns what it produced, so the officer can ANSWER the question ("it is
+ * here") instead of doing the job a second time.
+ */
+export function findRecentCompletion(
+	channelId: string,
+	agentId: string,
+	command: string,
+): CompletedTask | null {
+	const hit = COMPLETED.get(repeatKey(channelId, agentId, command));
+	if (!hit) return null;
+	if (Date.now() - hit.at > REPEAT_WINDOW_MS) {
+		COMPLETED.delete(repeatKey(channelId, agentId, command));
+		return null;
+	}
+	return hit;
+}
+
 /** Consume an approval. Single-use; expired or unknown tokens return null. */
 export function takePending(token: string): PendingApproval | null {
 	const e = PENDING.get(token.toUpperCase());
@@ -277,6 +342,10 @@ export interface ExecutionResult {
 	workerId?: string;
 	output: string;
 	detail?: string;
+	/** Files the task actually produced, renders first. */
+	artifacts?: Artifact[];
+	/** The complete worker output on disk, so the chat tail can stay short. */
+	logPath?: string;
 }
 
 /**
@@ -291,10 +360,16 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 	if (!bearer()) {
 		return { ok: false, label: "failed", output: "", detail: "no relay secret available daemon-side" };
 	}
+	// Give the task somewhere to PUT things, and tell it so in words. helm builds
+	// a fixed minimal env with no per-spawn passthrough, and an env var an LLM
+	// never reads would do nothing regardless - the instruction has to be in the
+	// prompt for the harness to act on it.
+	const artifactDir = prepareArtifactDir(p.token);
+
 	const spawn = await helm("POST", "/helm/spawn", {
 		kind: p.kind,
 		cwd: p.cwd,
-		prompt: p.command,
+		prompt: `${p.command}${artifactInstruction(artifactDir)}`,
 		...(p.model ? { model: p.model } : {}),
 		// Worker->officer attribution (opaque passthrough; Helm never interprets
 		// it, only displays it - same trust level as prompt_hash in its ledger).
@@ -305,8 +380,20 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 	}
 	const id = String(spawn.json.id);
 	const timeout = opts?.timeoutMs ?? 90_000;
-	const started = Date.now();
-	return watchWorker(id, timeout);
+	const result = await watchWorker(id, timeout);
+
+	// A worker that is still ASKING has not finished, so it has no artifacts yet
+	// and its output is not a full log. Everything else gets both.
+	if (result.label === "needs_input") return result;
+
+	return {
+		...result,
+		// The full log lands on disk BEFORE the post is built, so the channel can
+		// stay short without the remainder becoming unreachable. This is what
+		// makes truncation safe rather than lossy.
+		logPath: writeFullLog(p.token, result.output) ?? undefined,
+		artifacts: collectArtifacts(p.token),
+	};
 }
 
 /**

@@ -46,6 +46,8 @@ import {
 import {
 	bindOfficerHarness,
 	executeApproved,
+	findRecentCompletion,
+	noteCompleted,
 	isAllowedCwd,
 	parseApproval,
 	parseProposal,
@@ -60,6 +62,7 @@ import {
 } from "../table/helm-bridge";
 import { discoverAll, formatDiscovery } from "../table/discovery";
 import { resolveHarness } from "../table/harness-config";
+import { artifactDirFor, humanBytes } from "../table/artifacts";
 import { appendExchange, loadMemory } from "../table/memory";
 import { resolveOfficer, setOfficerField } from "../table/officer-config";
 import type { AgentPool } from "./agent-pool";
@@ -490,7 +493,15 @@ async function postExecutionResult(
 	deps: TableRouteDeps,
 	channelId: string,
 	agentId: string,
-	result: { ok: boolean; label: string; workerId?: string; output: string; detail?: string },
+	result: {
+		ok: boolean;
+		label: string;
+		workerId?: string;
+		output: string;
+		detail?: string;
+		artifacts?: { path: string; name: string; bytes: number; rendered: boolean; from?: string }[];
+		logPath?: string;
+	},
 ): Promise<void> {
 	const { store, broadcast } = deps;
 	const say = async (content: string) => {
@@ -512,7 +523,28 @@ async function postExecutionResult(
 	const header = result.label === "verified"
 		? "Ran it. Output (verified - I watched it finish):"
 		: `Ran it, but ${result.detail ?? "it did not settle in time"}, so this is the raw output so far (asserted, NOT a completion claim):`;
-	await say(`${header}\n\n\u0060\u0060\u0060\n${result.output || "(no output captured)"}\n\u0060\u0060\u0060`);
+
+	// ARTIFACTS LEAD. James asked Rishi for a diagram; the task ran, succeeded,
+	// and posted 1004 characters of mermaid source truncated mid-token into a
+	// chat bubble. He then asked "where is it?". The deliverable is the point and
+	// the output is the receipt, so a task that produced files names them first,
+	// as openable paths, and shows the tail underneath.
+	const artifacts = result.artifacts ?? [];
+	const parts: string[] = [];
+	if (artifacts.length > 0) {
+		parts.push(artifacts.length === 1 ? "Made you this:" : `Made you ${artifacts.length} files:`);
+		for (const a of artifacts) {
+			const note = a.rendered ? ` (rendered from ${a.from})` : "";
+			parts.push(`  \u0060${a.path}\u0060  ${humanBytes(a.bytes)}${note}`);
+		}
+		parts.push("");
+	}
+	parts.push(header);
+	parts.push(`\n\u0060\u0060\u0060\n${result.output || "(no output captured)"}\n\u0060\u0060\u0060`);
+	// The full log is ALWAYS on disk, so a truncated tail never loses the rest.
+	// That is what makes keeping the post short safe rather than lossy.
+	if (result.logPath) parts.push(`\nFull output: \u0060${result.logPath}\u0060`);
+	await say(parts.join("\n"));
 }
 
 /**
@@ -554,7 +586,13 @@ async function runApprovedProposal(
 	try {
 		// One reporting path for both approval and reply, so a worker that stops to
 		// ask is surfaced identically however the run was started.
-		await postExecutionResult(deps, channelId, pending.agentId, await executeApproved(pending));
+		const execResult = await executeApproved(pending);
+		// Remember that this exact work ran HERE, so "I don't see it" cannot make
+		// the officer do the whole job again instead of answering.
+		if (execResult.label !== "needs_input") {
+			noteCompleted(pending, artifactDirFor(pending.token), (execResult.artifacts ?? []).map((a) => a.name));
+		}
+		await postExecutionResult(deps, channelId, pending.agentId, execResult);
 	} catch (err) {
 		await say(pending.agentId, `Execution errored: ${String(err).slice(0, 200)}. Nothing is claimed as done.`);
 	} finally {
@@ -924,6 +962,20 @@ async function runMentionFlow(
 						cwdNote = `\n(I had guessed \`${proposal.cwd}\`, which is outside the allowed working roots, so this will run in the default instead.)`;
 						proposal.cwd = DEFAULT_WORK_ROOT;
 					}
+					// Already did this, here, recently? Then the human is asking WHERE it
+					// is, not asking for it again. Answer instead of restaging - the
+					// failure this closes is James saying "i dont see the diagram yet"
+					// and getting a second identical job rather than a location.
+					const already = findRecentCompletion(channelId, agentId, proposal.command);
+					if (already) {
+						const names = already.artifactNames.length
+							? already.artifactNames.map((n) => `\u0060${already.artifactDir}/${n}\u0060`).join("\n  ")
+							: "(it produced no files)";
+						outgoing = `${stripProposal(reply).trim()}\n\nI already ran this a moment ago, so I have not run it again. What it produced:\n  ${names}`;
+						proposal = null;
+					}
+				}
+				if (proposal) {
 					const staged = stagePending(proposal, channelId, agentId);
 					const what = staged.isTask
 						? `hand this to my \`${staged.kind}\` harness:\n> ${staged.command}`
