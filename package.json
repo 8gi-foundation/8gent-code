@@ -115,6 +115,7 @@
     "ink-select-input": "^6.2.0",
     "ink-spinner": "^5.0.0",
     "jsdom": "^28.1.0",
+    "mermaid": "^11.16.1",
     "miniflare": "^4.20260317.1",
     "next": "^16.1.6",
     "next-themes": "^0.4.6",
