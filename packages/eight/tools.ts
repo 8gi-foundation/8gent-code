@@ -1173,15 +1173,36 @@ export class ToolExecutor {
 		const rateLimitError = this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
 
-		// Delegate windowed-session orchestration tools to their own module
-		// so the giant switch below stays focused on "operate on this repo"
-		// rather than "operate on a fleet of CLIs in tmux".
-		if (isTermTool(toolName)) {
-			return executeTermTool(toolName, args);
-		}
-
-		// ToolG8 gate - evaluate policy before execution
-		const policyAction = ToolExecutor.TOOL_ACTION_MAP[toolName];
+		// ToolG8 gate - evaluate policy BEFORE any execution or delegation.
+		//
+		// This used to sit BELOW the term_* delegation, which returns early. So
+		// every term_* tool skipped the policy check entirely and a `__table__`
+		// agent - deny-by-default, read-only by design - could spawn a real tmux
+		// session. Verified on clean main 2026-08-07: F3's end-to-end case asked
+		// for term_spawn and got a live pane back instead of a refusal.
+		//
+		// The policy layer was correct the whole time; evaluatePolicy already
+		// denies term_orchestration for __table__. It was simply never consulted
+		// on that path. An ordering bug with the blast radius of a sandbox
+		// escape.
+		//
+		// term_* also has no TOOL_ACTION_MAP entry, so reordering alone would
+		// have left policyAction undefined and skipped the gate a SECOND way.
+		// Both holes are closed here: the family maps to the capability the
+		// policy engine already knows how to deny.
+		// Whole FAMILIES of tools reach the switch without ever appearing in
+		// TOOL_ACTION_MAP, and an unmapped tool is an ungated tool. term_* and
+		// desktop_* are both control surfaces far outside what a Table officer
+		// may touch, so each maps to the capability the policy engine already
+		// knows how to deny rather than relying on someone remembering to add
+		// every new member of the family to the map by hand.
+		const policyAction =
+			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
+			(isTermTool(toolName)
+				? "term_orchestration"
+				: toolName.startsWith("desktop_")
+					? "computer_use"
+					: undefined);
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				path: args.path as string,
@@ -1195,6 +1216,16 @@ export class ToolExecutor {
 				const alt = gateResult.alternative ? ` Alternative: ${gateResult.alternative}` : "";
 				return `[TOOLG8 BLOCKED] ${gateResult.reason}${alt}`;
 			}
+		}
+
+		// Delegate windowed-session orchestration tools to their own module so the
+		// giant switch below stays focused on "operate on this repo" rather than
+		// "operate on a fleet of CLIs in tmux".
+		//
+		// Deliberately AFTER the gate. It sat above it, and that single line of
+		// ordering was a sandbox escape.
+		if (isTermTool(toolName)) {
+			return executeTermTool(toolName, args);
 		}
 
 		switch (toolName) {
