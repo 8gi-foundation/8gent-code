@@ -43,6 +43,12 @@ export interface BridgeAdapterConfig {
 	autoAttachFiles?: boolean;
 	/** Override the editor throttle for tests. */
 	editThrottleMs?: number;
+	/**
+	 * Called once with the agent's final reply text after it has been posted.
+	 * The bridge uses this for voice mode: the text has already landed, so a
+	 * failure here must never affect the reply. Errors are swallowed.
+	 */
+	onFinalReply?: (text: string) => void | Promise<void>;
 }
 
 interface RunningTask {
@@ -60,6 +66,7 @@ export class TelegramBridgeAdapter {
 	private files: FileSender;
 	private autoAttachFiles: boolean;
 	private editThrottleMs: number;
+	private onFinalReply?: (text: string) => void | Promise<void>;
 	private current: RunningTask | null = null;
 	private offHandlers: Array<() => void> = [];
 
@@ -72,6 +79,7 @@ export class TelegramBridgeAdapter {
 			config.fileSender ?? new FileSender({ token: config.telegramToken, chatId: config.chatId });
 		this.autoAttachFiles = config.autoAttachFiles ?? true;
 		this.editThrottleMs = config.editThrottleMs ?? 1100;
+		this.onFinalReply = config.onFinalReply;
 		this.subscribe();
 	}
 
@@ -188,6 +196,14 @@ export class TelegramBridgeAdapter {
 			taskCompleteKeyboard(taskId, this.current.runner.task.attachments.length > 0),
 		);
 		this.sessions.recordMessage(this.chatId, "bot", trimmed);
+
+		if (this.onFinalReply) {
+			try {
+				await this.onFinalReply(text);
+			} catch (err) {
+				console.error("[bridge-adapter] onFinalReply failed:", err);
+			}
+		}
 
 		// If the response exceeds a single chunk, flush extras as plain messages.
 		const chunks = splitIntoChunks(text);
