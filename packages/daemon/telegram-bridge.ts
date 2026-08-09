@@ -18,7 +18,15 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
+import {
+	BOARD_ROSTER,
+	VOICE_BY_OFFICER,
+	askOfficerViaClaude,
+	askVerdictViaClaude,
+	runBoardroom,
+} from "../telegram-bot/boardroom";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { decideVoice, readVoiceState, sendVoiceNote, writeVoiceState } from "../telegram-bot/voice-mode";
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
 const MAX_MSG_LENGTH = 4000;
@@ -219,6 +227,11 @@ class TelegramDaemonBridge {
 	private adapter: TelegramBridgeAdapter | null = null;
 	private sessionStore: SessionStore | null = null;
 
+	/** Voice mode toggle, restored from disk at construction so it survives a restart. */
+	private voiceEnabled: boolean = readVoiceState().enabled;
+	/** One boardroom run at a time. */
+	private boardroomRunning = false;
+
 	constructor(config: BridgeConfig) {
 		this.config = config;
 	}
@@ -246,6 +259,7 @@ class TelegramDaemonBridge {
 					chatId: this.config.chatId,
 					daemon: this.daemonClient,
 					sessionStore: this.sessionStore,
+					onFinalReply: (text) => this.maybeSpeak(text),
 				});
 				console.log("[telegram-bridge] multi-step task adapter attached");
 			} catch (err) {
@@ -374,6 +388,7 @@ class TelegramDaemonBridge {
 						this._retryTimer = null;
 					}
 					tgSend(this.config.telegramToken, this.config.chatId, payload.chunk);
+					this.maybeSpeak(payload.chunk).catch(() => {});
 				}
 				break;
 
@@ -567,11 +582,37 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		if (text.startsWith("/voice")) {
+			await this.handleVoiceCommand(text.slice("/voice".length).trim().toLowerCase());
+			return;
+		}
+
+		if (text.startsWith("/boardroom")) {
+			await this.handleBoardroom(text.slice("/boardroom".length).trim());
+			return;
+		}
+
 		if (text === "/help") {
 			await tgSend(
 				this.config.telegramToken,
 				this.config.chatId,
-				"*Eight - Telegram Bridge*\n\nSend any message to start a multi-step task.\n\n/status - Daemon health\n/cancel - Stop the current task\n/unstick - Reset busy state\n/logs - Tail daemon logs\n/help - This message\n\nEight has full tool access: shell, git, file system, web browsing. Watch tasks stream live; use the inline buttons to cancel or retry.",
+				[
+					"*Eight - Telegram Bridge*",
+					"",
+					"Send any message, or a voice note, to start a multi-step task.",
+					"",
+					"/boardroom <topic> - all 8 officers deliberate, one message, one verdict",
+					"/voice on|off - replies also arrive as a voice note (quiet 21:00-08:30)",
+					"/voice - show the current voice setting",
+					"/status - Daemon health",
+					"/cancel - Stop the current task",
+					"/unstick - Reset busy state",
+					"/delegate, /plan, /review, /goals, /kill - chief-of-staff commands",
+					"/logs - Tail daemon logs",
+					"/help - This message",
+					"",
+					"Your standing rules from ~/.claude/CLAUDE.md load on every turn. You do not have to ask for them.",
+				].join("\n"),
 			);
 			return;
 		}
@@ -614,6 +655,134 @@ class TelegramDaemonBridge {
 
 		this.agentBusy = true;
 		this.retryPrompt(text, 1);
+	}
+
+	// ── Voice mode ───────────────────────────────────────────────────
+
+	/** `/voice`, `/voice on`, `/voice off`. Anything else prints the usage. */
+	private async handleVoiceCommand(arg: string): Promise<void> {
+		const send = (msg: string) => tgSend(this.config.telegramToken, this.config.chatId, msg);
+		if (arg === "on" || arg === "off") {
+			const state = writeVoiceState(arg === "on");
+			this.voiceEnabled = state.enabled;
+			await send(
+				state.enabled
+					? "Voice mode on. Replies come back as a voice note too, unless it is quiet hours or the answer is too long to be worth hearing."
+					: "Voice mode off. Text only.",
+			);
+			return;
+		}
+		if (arg.length === 0) {
+			const state = readVoiceState();
+			this.voiceEnabled = state.enabled;
+			await send(`Voice mode is ${state.enabled ? "on" : "off"}. Use /voice on or /voice off.`);
+			return;
+		}
+		await send("Usage: /voice on, /voice off, or /voice to see the current setting.");
+	}
+
+	/**
+	 * Speak a reply if voice mode says so. The text has already been sent, so
+	 * every path here is best-effort and silent on failure: a broken audio
+	 * stack must never cost him the answer.
+	 */
+	private async maybeSpeak(text: string, voice = VOICE_BY_OFFICER.James): Promise<void> {
+		const decision = decideVoice(text, { enabled: this.voiceEnabled });
+		if (!decision.speak) {
+			if (decision.reason !== "voice-mode-off") {
+				console.log(`[telegram-bridge] not speaking (${decision.reason})`);
+			}
+			return;
+		}
+		const result = await sendVoiceNote({
+			text: decision.text,
+			voice,
+			expectedChatId: this.config.chatId,
+		});
+		if (!result.sent) console.error(`[telegram-bridge] voice note failed: ${result.reason}`);
+	}
+
+	// ── Boardroom ────────────────────────────────────────────────────
+
+	/**
+	 * `/boardroom <topic>` - the full eight-officer fan-out.
+	 *
+	 * One message for the whole run, edited in place. He can lock the phone.
+	 * Only one run at a time: eight concurrent officer processes is already the
+	 * machine's ceiling, and two overlapping runs would fight over the same
+	 * message shape with no way to tell them apart in the chat.
+	 */
+	private async handleBoardroom(topic: string): Promise<void> {
+		const send = (msg: string) => tgSend(this.config.telegramToken, this.config.chatId, msg);
+		if (!topic) {
+			await send("Usage: /boardroom <topic>. All 8 officers report, then one verdict.");
+			return;
+		}
+		if (this.boardroomRunning) {
+			await send("A boardroom run is already in flight. Wait for the verdict.");
+			return;
+		}
+		this.boardroomRunning = true;
+		const cwd = process.cwd();
+		let messageId: number | null = null;
+
+		try {
+			const result = await runBoardroom(topic, {
+				askOfficer: askOfficerViaClaude(cwd),
+				askVerdict: askVerdictViaClaude(cwd),
+				sendMessage: async (body) => {
+					messageId = await this.sendTracked(body);
+				},
+				editMessage: async (body) => {
+					if (messageId !== null) await this.editTracked(messageId, body);
+				},
+			});
+			console.log(
+				`[telegram-bridge] boardroom done: ${result.rows.filter((r) => r.status === "done").length}/${BOARD_ROSTER.length} in ${Math.round(result.elapsedMs / 1000)}s, ${result.edits} edits`,
+			);
+			if (result.verdict) await this.maybeSpeak(`Boardroom verdict. ${result.verdict}`);
+		} catch (err) {
+			console.error("[telegram-bridge] boardroom failed:", err);
+			await send(`Boardroom failed: ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			this.boardroomRunning = false;
+		}
+	}
+
+	/** Send one message and return its id, so it can be edited in place. */
+	private async sendTracked(text: string): Promise<number | null> {
+		try {
+			const res = await fetch(`${TELEGRAM_API}${this.config.telegramToken}/sendMessage`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					chat_id: this.config.chatId,
+					text,
+					parse_mode: "Markdown",
+					disable_web_page_preview: true,
+				}),
+			});
+			const data = await res.json();
+			return data?.result?.message_id ?? null;
+		} catch (err) {
+			console.error("[telegram-bridge] sendTracked failed:", err);
+			return null;
+		}
+	}
+
+	/** Edit that one message. "not modified" is expected and not an error. */
+	private async editTracked(messageId: number, text: string): Promise<void> {
+		await fetch(`${TELEGRAM_API}${this.config.telegramToken}/editMessageText`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				chat_id: this.config.chatId,
+				message_id: messageId,
+				text,
+				parse_mode: "Markdown",
+				disable_web_page_preview: true,
+			}),
+		}).catch(() => {});
 	}
 
 	/**
