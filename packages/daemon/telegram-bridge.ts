@@ -207,6 +207,30 @@ async function tgTyping(token: string, chatId: string): Promise<void> {
 	}).catch(() => {});
 }
 
+/**
+ * The chat-id allowlist. This is the bridge's authentication boundary and the
+ * whole reason the `telegram` channel is trusted with full dispatch
+ * capabilities in `packages/permissions/dispatch-policy.ts`. It is a pure
+ * function so that boundary can be tested directly, without standing up a
+ * bridge and a websocket to ask it one question.
+ *
+ * Fails closed in both directions: an explicit allowlist is authoritative,
+ * and with no allowlist configured only the single configured chat id is
+ * accepted. There is no "empty means allow all" branch, and there must never
+ * be one.
+ */
+export function isChatAuthorized(
+	chatId: number,
+	config: { authorizedChatIds?: string[]; chatId: string },
+): boolean {
+	const incoming = String(chatId);
+	const allowlist = config.authorizedChatIds;
+	if (allowlist && allowlist.length > 0) {
+		return allowlist.includes(incoming);
+	}
+	return incoming === config.chatId;
+}
+
 // Import CoS router lazily to avoid circular deps
 const CoSRouterClass: typeof import("./cos-router").CoSRouter | null = null;
 
@@ -440,6 +464,8 @@ class TelegramDaemonBridge {
 						this.lastUpdateId = update.update_id;
 						// Drop messages from unauthorized chats before any side effect
 						// (transcription, typing indicators, agent dispatch).
+						// Note this only covers `update.message`. Callback queries carry
+						// no message and are checked in handleCallbackQuery instead.
 						const incomingChatId = update.message?.chat?.id;
 						if (
 							typeof incomingChatId === "number" &&
@@ -485,12 +511,10 @@ class TelegramDaemonBridge {
 	}
 
 	private isAuthorizedChat(chatId: number): boolean {
-		const incoming = String(chatId);
-		const allowlist = this.config.authorizedChatIds;
-		if (allowlist && allowlist.length > 0) {
-			return allowlist.includes(incoming);
-		}
-		return incoming === this.config.chatId;
+		return isChatAuthorized(chatId, {
+			authorizedChatIds: this.config.authorizedChatIds,
+			chatId: this.config.chatId,
+		});
 	}
 
 	private async handleTelegramMessage(text: string, chatId: number): Promise<void> {
@@ -899,6 +923,29 @@ class TelegramDaemonBridge {
 	private async handleCallbackQuery(
 		query: NonNullable<TelegramUpdate["callback_query"]>,
 	): Promise<void> {
+		// Inline-keyboard buttons are a control surface: approve or deny a
+		// permission prompt, cancel a running task, drop conversation context.
+		// They arrive as `callback_query` updates, which carry no
+		// `update.message`, so the poll loop's allowlist check reads
+		// `update.message?.chat?.id` as undefined and waves them through, and
+		// `handleTelegramMessage` never sees them at all. That made buttons the
+		// one inbound path with no chat-id check on it.
+		//
+		// Reaching it required the bot to have posted a keyboard into the
+		// attacker's chat, which it does not do, so this was a latent hole
+		// rather than a live one. It is closed here because the dispatch policy
+		// now cites this handler as one of the three checks that justify
+		// trusting the channel, and a cited control has to actually exist.
+		//
+		// Fails closed: a callback with no originating chat is rejected.
+		const originChatId = query.message?.chat?.id;
+		if (typeof originChatId !== "number" || !this.isAuthorizedChat(originChatId)) {
+			console.warn(
+				`[telegram-bridge] rejected callback query from unauthorized chat ${originChatId ?? "unknown"}`,
+			);
+			return;
+		}
+
 		const data = query.data || "";
 		const { prefix, payload } = parseCallbackData(data);
 		const requestId = payload || data.split(":")[1] || "";
