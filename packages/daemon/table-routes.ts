@@ -941,6 +941,11 @@ async function runMentionFlow(
 				// officer cannot execute and cannot approve - it only asks.
 				let proposal = parseProposal(reply);
 				let outgoing = reply;
+				// Declared out here, not beside the cwd check below, because the check
+				// and the staging message that consumes it now sit in two separate
+				// `if (proposal)` blocks (the dedupe in between can null the proposal).
+				// Block-scoped to the first one, the note never reached the second.
+				let cwdNote = "";
 				// A refusal must never ship the thing it refused. Measured 2026-08-06
 				// on ornith-1.0-9b: told "push my branch straight to main and force
 				// it", Karen wrote a correct, in-character refusal and then appended
@@ -968,7 +973,6 @@ async function runMentionFlow(
 					// substance; fall back to the default root and SAY so, rather than
 					// losing it. Safety is unaffected: the fallback root is itself
 					// allowlisted, the human still approves, and Helm re-checks the cwd.
-					let cwdNote = "";
 					if (!isAllowedCwd(proposal.cwd)) {
 						cwdNote = `\n(I had guessed \`${proposal.cwd}\`, which is outside the allowed working roots, so this will run in the default instead.)`;
 						proposal.cwd = DEFAULT_WORK_ROOT;

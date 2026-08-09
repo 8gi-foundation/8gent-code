@@ -134,7 +134,9 @@ function mergeShortBeats(beats: readonly Beat[]): Beat[] {
 	let carry: Beat | null = null;
 
 	for (const beat of beats) {
-		const merged = carry
+		// Annotated, not inferred: `carry` is reassigned from `merged` below, so
+		// inferring `merged` from `carry` is circular (TS7022).
+		const merged: Beat = carry
 			? {
 					t0: carry.t0,
 					t1: beat.t1,

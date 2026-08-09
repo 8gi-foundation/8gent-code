@@ -63,7 +63,15 @@ describe("resolveDesignContext", () => {
 		process.env.EIGHT_DESIGN_DB = seededDbPath;
 		const ctx = resolveDesignContext({ systemId: "vercel" });
 		expect(ctx.systemId).toBe("vercel");
-		expect(ctx.cssVariables).toBe(generateCssVariables("vercel"));
+		// generateCssVariables returns string | null (null = no such system in the
+		// DB). Narrow with a real guard rather than a cast: if the seeded DB has no
+		// "vercel" system, that is its own failure and should say so, not surface
+		// as a confusing byte-parity mismatch against null.
+		const expected = generateCssVariables("vercel");
+		if (expected === null) {
+			throw new Error("generateCssVariables('vercel') returned null - seeded DB is missing the vercel system");
+		}
+		expect(ctx.cssVariables).toBe(expected);
 	});
 
 	test("deterministic: same hint resolves to the same systemId", () => {
